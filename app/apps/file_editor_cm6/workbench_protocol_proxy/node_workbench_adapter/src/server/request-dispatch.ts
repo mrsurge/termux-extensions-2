@@ -92,7 +92,13 @@ export interface WorkbenchLike {
     params: Record<string, unknown>,
   ) => Promise<Record<string, unknown>>;
   hover: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  documentHighlights: (
+    params: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
   references: (
+    params: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
+  definitions: (
     params: Record<string, unknown>,
   ) => Promise<Record<string, unknown>>;
   implementations: (
@@ -211,6 +217,7 @@ const LANGUAGE_ACTIVATION_METHODS = new Set([
   "vscode.documentSymbols",
   "vscode.foldingRanges",
   "vscode.hover",
+  "vscode.documentHighlights",
   "vscode.definition",
   "vscode.references",
   "vscode.implementations",
@@ -606,6 +613,26 @@ export async function dispatchJsonRpcRequest(
     return success(id, result);
   }
 
+  if (method === "vscode.documentHighlights") {
+    const resolvedPath = runtime.normalizePathParam(params);
+    if (!resolvedPath) return missingPathError(id);
+    const authority = runtime.normalizeAuthorityParam(
+      params,
+      runtime.defaultRemoteAuthority,
+    );
+    return success(
+      id,
+      await runtime.wb.documentHighlights({
+        path: resolvedPath,
+        authority,
+        languageId: params.languageId,
+        lineNumber: params.lineNumber,
+        column: params.column,
+        timeoutMs: params.timeoutMs,
+      }),
+    );
+  }
+
   if (method === "vscode.references") {
     const resolvedPath = runtime.normalizePathParam(params);
     if (!resolvedPath) return missingPathError(id);
@@ -621,6 +648,7 @@ export async function dispatchJsonRpcRequest(
         languageId: params.languageId,
         lineNumber: params.lineNumber,
         column: params.column,
+        includeDeclaration: params.includeDeclaration,
         timeoutMs: params.timeoutMs,
       }),
     );

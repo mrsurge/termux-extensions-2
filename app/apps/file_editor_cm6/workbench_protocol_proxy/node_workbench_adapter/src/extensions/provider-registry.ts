@@ -9,6 +9,7 @@ export const PROVIDER_KINDS = [
   "inlineCompletions",
   "semanticTokens",
   "documentColors",
+  "documentHighlights",
   "definitions",
   "references",
   "implementations",
@@ -53,6 +54,7 @@ export interface ProviderResyncOutcome {
     documentSymbols: number;
     foldingRanges: number;
     documentColors: number;
+    documentHighlights: number;
     definitions: number;
     references: number;
     implementations: number;
@@ -258,6 +260,7 @@ export class ProviderRegistry {
       inlineCompletions: new Map<number, ProviderEntry>(),
       semanticTokens: new Map<number, ProviderEntry>(),
       documentColors: new Map<number, ProviderEntry>(),
+      documentHighlights: new Map<number, ProviderEntry>(),
       definitions: new Map<number, ProviderEntry>(),
       references: new Map<number, ProviderEntry>(),
       implementations: new Map<number, ProviderEntry>(),
@@ -308,6 +311,9 @@ export class ProviderRegistry {
     if (methodMatches(method, "$registerDocumentColorProvider")) {
       return this.registerDocumentColorProvider(args);
     }
+    if (methodMatches(method, "$registerDocumentHighlightProvider")) {
+      return this.registerNavigationProvider("documentHighlights", args);
+    }
     if (methodMatches(method, "$registerDefinitionSupport")) {
       return this.registerNavigationProvider("definitions", args);
     }
@@ -345,6 +351,7 @@ export class ProviderRegistry {
       inlineCompletions: this.list("inlineCompletions"),
       semanticTokens: this.list("semanticTokens"),
       documentColors: this.list("documentColors"),
+      documentHighlights: this.list("documentHighlights"),
       definitions: this.list("definitions"),
       references: this.list("references"),
       implementations: this.list("implementations"),
@@ -419,6 +426,13 @@ export class ProviderRegistry {
     return handles;
   }
 
+  findSemanticRangeHandlesForDocument(
+    document: ProviderDocument,
+  ): number[] {
+    return this.findAllProviderHandlesForDocument("semanticTokens", document)
+      .filter((handle) => this.providers.semanticTokens.get(handle)?.range);
+  }
+
   findSemanticFullHandles(languageId: string): number[] {
     if (!languageId) return [];
     const handles: number[] = [];
@@ -431,6 +445,13 @@ export class ProviderRegistry {
     return handles;
   }
 
+  findSemanticFullHandlesForDocument(
+    document: ProviderDocument,
+  ): number[] {
+    return this.findAllProviderHandlesForDocument("semanticTokens", document)
+      .filter((handle) => !this.providers.semanticTokens.get(handle)?.range);
+  }
+
   buildResyncEvents(): ProviderResyncOutcome {
     const replayed = {
       semanticTokens: 0,
@@ -441,6 +462,7 @@ export class ProviderRegistry {
       documentSymbols: 0,
       foldingRanges: 0,
       documentColors: 0,
+      documentHighlights: 0,
       definitions: 0,
       references: 0,
       implementations: 0,
@@ -532,6 +554,7 @@ export class ProviderRegistry {
     }
 
     for (const kind of [
+      "documentHighlights",
       "definitions",
       "references",
       "implementations",
@@ -901,7 +924,12 @@ export class ProviderRegistry {
   }
 
   private registerNavigationProvider(
-    kind: "definitions" | "references" | "implementations" | "callHierarchy",
+    kind:
+      | "documentHighlights"
+      | "definitions"
+      | "references"
+      | "implementations"
+      | "callHierarchy",
     args: unknown[],
   ): ProviderRegistrationOutcome {
     const outcome = emptyOutcome(true);

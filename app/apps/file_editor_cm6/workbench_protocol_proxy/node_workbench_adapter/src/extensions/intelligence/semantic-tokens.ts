@@ -3,6 +3,7 @@ import {
   type SemanticProjectionDocument,
   type SemanticProjectionFullResult,
 } from "./semantic-token-projections.mjs";
+import type { ProviderDocument } from "../provider-registry";
 
 export interface SemanticPendingOptions {
   timeoutMs: number;
@@ -22,14 +23,15 @@ export interface SemanticRuntime {
   ensureConnected: () => void;
   languageFeaturesRpcId: number;
   defaultAuthority: () => string;
+  documentScheme: () => string;
   languageIdFromPath: (filePath: string) => string;
   didChange: (
     params: Record<string, unknown>,
     opts: { waitForAck: true; timeoutMs: number },
   ) => Promise<unknown> | unknown;
   findAllProviderHandles: (kind: "semanticTokens", languageId: string) => number[];
-  findSemanticFullHandles: (languageId: string) => number[];
-  findSemanticRangeHandles: (languageId: string) => number[];
+  findSemanticFullHandles: (document: ProviderDocument) => number[];
+  findSemanticRangeHandles: (document: ProviderDocument) => number[];
   getProjectionDocument: (path: string) => SemanticProjectionDocument | null;
   getProjection: (
     path: string,
@@ -369,6 +371,12 @@ export async function provideSemanticTokens(runtime: SemanticRuntime, params: un
   const path = String(input.path ?? "");
   const timeoutMs = Number(input.timeoutMs ?? 10000);
   const languageId = String(input.languageId || "") || runtime.languageIdFromPath(path) || "plaintext";
+  const document: ProviderDocument = {
+    languageId,
+    scheme: runtime.documentScheme(),
+    authority,
+    path,
+  };
   const previousResultId = String(input.previousResultId ?? "0");
   const prewarm = input.prewarm === true;
   const requestedFingerprint =
@@ -403,13 +411,13 @@ export async function provideSemanticTokens(runtime: SemanticRuntime, params: un
     });
   }
 
-  let handles = runtime.findSemanticFullHandles(languageId);
+  let handles = runtime.findSemanticFullHandles(document);
   if (handles.length === 0) {
     await runtime.waitFor(
-      () => runtime.findSemanticFullHandles(languageId).length > 0,
+      () => runtime.findSemanticFullHandles(document).length > 0,
       { timeoutMs: Math.min(timeoutMs, 5000), intervalMs: 50 },
     );
-    handles = runtime.findSemanticFullHandles(languageId);
+    handles = runtime.findSemanticFullHandles(document);
   }
   if (handles.length === 0) return { ok: false, error: `no semanticTokens provider for language '${languageId}'` };
 
@@ -518,6 +526,12 @@ export async function provideSemanticTokensRange(runtime: SemanticRuntime, param
   const path = String(input.path ?? "");
   const timeoutMs = Number(input.timeoutMs ?? 10000);
   const languageId = String(input.languageId || "") || runtime.languageIdFromPath(path) || "plaintext";
+  const document: ProviderDocument = {
+    languageId,
+    scheme: runtime.documentScheme(),
+    authority,
+    path,
+  };
   const range = isRecord(input.range) ? input.range : null;
 
   if (!range) return { ok: false, error: "range is required for semanticTokensRange" };
@@ -527,13 +541,13 @@ export async function provideSemanticTokensRange(runtime: SemanticRuntime, param
   const syncError = await syncTextIfProvided(runtime, input, path, languageId, authority, timeoutMs, "semanticTokensRange");
   if (syncError) return syncError;
 
-  let handles = runtime.findSemanticRangeHandles(languageId);
+  let handles = runtime.findSemanticRangeHandles(document);
   if (handles.length === 0) {
     await runtime.waitFor(
-      () => runtime.findSemanticRangeHandles(languageId).length > 0,
+      () => runtime.findSemanticRangeHandles(document).length > 0,
       { timeoutMs: Math.min(timeoutMs, 5000), intervalMs: 50 },
     );
-    handles = runtime.findSemanticRangeHandles(languageId);
+    handles = runtime.findSemanticRangeHandles(document);
   }
   if (handles.length === 0) return { ok: false, error: `no semanticTokensRange provider for language '${languageId}'` };
 

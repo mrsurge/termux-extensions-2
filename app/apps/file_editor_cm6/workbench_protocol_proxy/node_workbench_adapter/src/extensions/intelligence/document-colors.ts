@@ -1,3 +1,5 @@
+import type { ProviderDocument } from "../provider-registry";
+
 export interface DocumentColorPendingOptions {
   timeoutMs: number;
   timeoutMessage: string;
@@ -12,6 +14,7 @@ export interface DocumentColorRuntime {
   ensureConnected: () => void;
   languageFeaturesRpcId: number;
   defaultAuthority: () => string;
+  documentScheme: () => string;
   languageIdFromPath: (filePath: string) => string;
   didChange: (
     params: Record<string, unknown>,
@@ -19,7 +22,7 @@ export interface DocumentColorRuntime {
   ) => Promise<unknown> | unknown;
   findAllProviderHandles: (
     kind: "documentColors",
-    languageId: string,
+    document: ProviderDocument,
   ) => number[];
   waitFor: (
     condition: () => boolean,
@@ -236,20 +239,20 @@ function normalizeColorPresentation(
 async function documentColorHandles(
   runtime: DocumentColorRuntime,
   input: Record<string, unknown>,
-  languageId: string,
+  document: ProviderDocument,
   timeoutMs: number,
 ): Promise<number[]> {
   const providerHandle = optionalProviderHandle(input.providerHandle);
   if (providerHandle !== null) return [providerHandle];
-  let handles = runtime.findAllProviderHandles("documentColors", languageId);
+  let handles = runtime.findAllProviderHandles("documentColors", document);
   if (handles.length === 0) {
     await runtime.waitFor(
       () =>
-        runtime.findAllProviderHandles("documentColors", languageId).length >
+        runtime.findAllProviderHandles("documentColors", document).length >
         0,
       { timeoutMs: Math.min(timeoutMs, 5000), intervalMs: 50 },
     );
-    handles = runtime.findAllProviderHandles("documentColors", languageId);
+    handles = runtime.findAllProviderHandles("documentColors", document);
   }
   return handles;
 }
@@ -267,6 +270,12 @@ export async function provideDocumentColors(
     String(input.languageId || "") ||
     runtime.languageIdFromPath(path) ||
     "plaintext";
+  const document: ProviderDocument = {
+    languageId,
+    scheme: runtime.documentScheme(),
+    authority,
+    path,
+  };
 
   if (input.text != null && path) {
     try {
@@ -293,7 +302,7 @@ export async function provideDocumentColors(
   const handles = await documentColorHandles(
     runtime,
     input,
-    languageId,
+    document,
     timeoutMs,
   );
   if (handles.length === 0) {

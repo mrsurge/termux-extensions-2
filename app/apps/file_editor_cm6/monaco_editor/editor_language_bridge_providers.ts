@@ -34,6 +34,10 @@ interface LanguageBridgeState {
   registeredHover: Set<string>;
   registeredSymbols: Set<string>;
   registeredFolding: Set<string>;
+  registeredDocumentHighlights: Set<string>;
+  registeredDefinitions: Set<string>;
+  registeredReferences: Set<string>;
+  registeredImplementations: Set<string>;
   registeredSemanticTokens: Set<string>;
   semanticTokensProviderKeysByLanguage: Record<string, Set<string>>;
   semanticTokensProviderModeByLanguage: Record<string, "full" | "range">;
@@ -227,6 +231,47 @@ interface MonacoLanguagesLike {
       ): unknown;
     },
   ) => unknown;
+  registerDocumentHighlightProvider?: (
+    selector: unknown,
+    provider: {
+      provideDocumentHighlights(
+        model: MonacoModelLike,
+        pos: MonacoPositionLike,
+        token: MonacoCancellationTokenLike,
+      ): unknown;
+    },
+  ) => unknown;
+  registerDefinitionProvider?: (
+    selector: unknown,
+    provider: {
+      provideDefinition(
+        model: MonacoModelLike,
+        pos: MonacoPositionLike,
+        token: MonacoCancellationTokenLike,
+      ): unknown;
+    },
+  ) => unknown;
+  registerReferenceProvider?: (
+    selector: unknown,
+    provider: {
+      provideReferences(
+        model: MonacoModelLike,
+        pos: MonacoPositionLike,
+        context: Record<string, unknown>,
+        token: MonacoCancellationTokenLike,
+      ): unknown;
+    },
+  ) => unknown;
+  registerImplementationProvider?: (
+    selector: unknown,
+    provider: {
+      provideImplementation(
+        model: MonacoModelLike,
+        pos: MonacoPositionLike,
+        token: MonacoCancellationTokenLike,
+      ): unknown;
+    },
+  ) => unknown;
   registerCompletionItemProvider?: (
     selector: unknown,
     provider: {
@@ -332,19 +377,12 @@ interface MonacoLike {
     endLineNumber: number,
     endColumn: number,
   ) => unknown;
-  editor?: {
-    getEditors?: () => unknown[];
+  Uri?: {
+    parse?(value: string): unknown;
+    file?(value: string): unknown;
   };
   languages: MonacoLanguagesLike;
 }
-
-interface MonacoLanguageFeatureRegistryLike extends Record<string, unknown> {
-  _entries?: unknown[];
-  _lastCandidate?: unknown;
-}
-
-const prunedNativeCompletionLanguages = new Set<string>();
-const prunedNativeColorLanguages = new Set<string>();
 
 interface CreateEditorLanguageBridgeProvidersDeps {
   getMonaco(): MonacoLike | null;
@@ -525,6 +563,183 @@ function extractWorkbenchPayload(
   return inner || record;
 }
 
+type LanguagePositionProviderKind =
+  | "documentHighlights"
+  | "definitions"
+  | "references"
+  | "implementations";
+
+function languagePositionProviderSet(
+  state: LanguageBridgeState,
+  kind: LanguagePositionProviderKind,
+): Set<string> {
+  if (kind === "documentHighlights") return state.registeredDocumentHighlights;
+  if (kind === "definitions") return state.registeredDefinitions;
+  if (kind === "references") return state.registeredReferences;
+  return state.registeredImplementations;
+}
+
+function modelMatchesContext(
+  model: MonacoModelLike,
+  context: LanguageContext | null,
+): context is LanguageContext {
+  return !!(
+    context &&
+    model &&
+    model.uri &&
+    String(model.uri.toString()) === String(context.uri)
+  );
+}
+
+function workbenchResultArray(result: unknown): unknown[] {
+  const payload = extractWorkbenchPayload(result);
+  if (!payload || payload.ok === false) return [];
+  return asArray(payload.result) || [];
+}
+
+function monacoUriFromLocation(
+  deps: CreateEditorLanguageBridgeProvidersDeps,
+  location: Record<string, unknown>,
+): unknown | null {
+  const monacoRef = deps.getMonaco();
+  const rawUri = typeof location.uri === "string" ? location.uri : "";
+  if (rawUri && monacoRef?.Uri?.parse) {
+    try {
+      return monacoRef.Uri.parse(rawUri);
+    } catch (_) {}
+  }
+  const path = typeof location.path === "string" ? location.path : "";
+  if (path && monacoRef?.Uri?.file) {
+    try {
+      return monacoRef.Uri.file(path);
+    } catch (_) {}
+  }
+  return null;
+}
+
+function normalizeMonacoLocations(
+  deps: CreateEditorLanguageBridgeProvidersDeps,
+  result: unknown,
+): Record<string, unknown>[] {
+  const locations: Record<string, unknown>[] = [];
+  for (const rawLocation of workbenchResultArray(result)) {
+    const location = asRecord(rawLocation);
+    if (!location) continue;
+    const uri = monacoUriFromLocation(deps, location);
+    const range = deps.monacoRangeFromProtoRange(
+      location.selectionRange ?? location.range,
+    );
+    if (!uri || !range) continue;
+    locations.push({ uri, range });
+  }
+  return locations;
+}
+
+function registerLanguagePositionProvider(
+  deps: CreateEditorLanguageBridgeProvidersDeps,
+  kind: LanguagePositionProviderKind,
+  langId: string,
+): void {
+  if (!langId || deps.getLanguageWorkersEnabled()) return;
+  const registered = languagePositionProviderSet(deps.languageBridge, kind);
+  if (registered.has(langId)) return;
+  const monacoRef = deps.getMonaco();
+  if (!monacoRef?.languages) return;
+
+  const call = (
+    method: string,
+    model: MonacoModelLike,
+    position: MonacoPositionLike,
+    token: MonacoCancellationTokenLike,
+    extra: Record<string, unknown> = {},
+  ): Promise<unknown> => {
+    if (token?.isCancellationRequested) return Promise.resolve([]);
+    const context = deps.getCurrentLanguageContext();
+    if (!modelMatchesContext(model, context)) return Promise.resolve([]);
+    deps.flushMirrorDebounce();
+    return deps.editorWorkbenchCall(
+      method,
+      {
+        uri: context.uri,
+        path: context.path,
+        languageId: context.languageId,
+        lineNumber: Number(position?.lineNumber || 1),
+        column: Number(position?.column || 1),
+        timeoutMs: 8000,
+        ...extra,
+      },
+      { timeoutMs: 10000 },
+    );
+  };
+
+  if (
+    kind === "documentHighlights" &&
+    monacoRef.languages.registerDocumentHighlightProvider
+  ) {
+    monacoRef.languages.registerDocumentHighlightProvider(langId, {
+      provideDocumentHighlights(model, position, token) {
+        return call("document_highlights", model, position, token)
+          .then((result) =>
+            workbenchResultArray(result)
+              .map((rawHighlight) => {
+                const highlight = asRecord(rawHighlight);
+                const range = deps.monacoRangeFromProtoRange(highlight?.range);
+                if (!highlight || !range) return null;
+                return {
+                  range,
+                  kind: Number.isFinite(Number(highlight.kind))
+                    ? Number(highlight.kind)
+                    : 0,
+                };
+              })
+              .filter((item) => item !== null),
+          )
+          .catch(() => []);
+      },
+    });
+  } else if (
+    kind === "definitions" &&
+    monacoRef.languages.registerDefinitionProvider
+  ) {
+    monacoRef.languages.registerDefinitionProvider(langId, {
+      provideDefinition(model, position, token) {
+        return call("definition", model, position, token)
+          .then((result) => normalizeMonacoLocations(deps, result))
+          .catch(() => []);
+      },
+    });
+  } else if (
+    kind === "references" &&
+    monacoRef.languages.registerReferenceProvider
+  ) {
+    monacoRef.languages.registerReferenceProvider(langId, {
+      provideReferences(model, position, context, token) {
+        return call("references", model, position, token, {
+          includeDeclaration: context?.includeDeclaration !== false,
+        })
+          .then((result) => normalizeMonacoLocations(deps, result))
+          .catch(() => []);
+      },
+    });
+  } else if (
+    kind === "implementations" &&
+    monacoRef.languages.registerImplementationProvider
+  ) {
+    monacoRef.languages.registerImplementationProvider(langId, {
+      provideImplementation(model, position, token) {
+        return call("implementations", model, position, token)
+          .then((result) => normalizeMonacoLocations(deps, result))
+          .catch(() => []);
+      },
+    });
+  } else {
+    return;
+  }
+
+  registered.add(langId);
+  console.log(`[providers] registered WBA ${kind} bridge for lang=${langId}`);
+}
+
 function completionPropertyKind(
   deps: CreateEditorLanguageBridgeProvidersDeps,
 ): number {
@@ -537,176 +752,12 @@ function completionPropertyKind(
     : 9;
 }
 
-function iterablePairs(value: unknown): Iterable<[unknown, unknown]> | null {
-  const candidate = value as { [Symbol.iterator]?: unknown } | null | undefined;
-  return candidate && typeof candidate[Symbol.iterator] === "function"
-    ? (candidate as Iterable<[unknown, unknown]>)
-    : null;
-}
-
-function completionRegistryFromActiveEditor(
-  deps: CreateEditorLanguageBridgeProvidersDeps,
-): MonacoLanguageFeatureRegistryLike | null {
-  const monacoRef = deps.getMonaco();
-  const editors =
-    monacoRef &&
-    monacoRef.editor &&
-    typeof monacoRef.editor.getEditors === "function"
-      ? monacoRef.editor.getEditors()
-      : [];
-  for (const editor of editors) {
-    const editorRecord = asRecord(editor);
-    let service = asRecord(editorRecord && editorRecord._instantiationService);
-    while (service) {
-      const parent = asRecord(service._parent);
-      if (!parent) break;
-      service = parent;
-    }
-
-    const services = asRecord(service && service._services);
-    const serviceEntries = iterablePairs(services && services._entries);
-    if (!serviceEntries) continue;
-    for (const [key, value] of serviceEntries) {
-      if (String(key) !== "ILanguageFeaturesService") continue;
-      const languageFeatures = asRecord(value);
-      const completionProvider = asRecord(
-        languageFeatures && languageFeatures.completionProvider,
-      ) as MonacoLanguageFeatureRegistryLike | null;
-      if (completionProvider && Array.isArray(completionProvider._entries))
-        return completionProvider;
-    }
-  }
-  return null;
-}
-
-function colorRegistryFromActiveEditor(
-  deps: CreateEditorLanguageBridgeProvidersDeps,
-): MonacoLanguageFeatureRegistryLike | null {
-  const monacoRef = deps.getMonaco();
-  const editors =
-    monacoRef &&
-    monacoRef.editor &&
-    typeof monacoRef.editor.getEditors === "function"
-      ? monacoRef.editor.getEditors()
-      : [];
-  for (const editor of editors) {
-    const editorRecord = asRecord(editor);
-    let service = asRecord(editorRecord && editorRecord._instantiationService);
-    while (service) {
-      const parent = asRecord(service._parent);
-      if (!parent) break;
-      service = parent;
-    }
-
-    const services = asRecord(service && service._services);
-    const serviceEntries = iterablePairs(services && services._entries);
-    if (!serviceEntries) continue;
-    for (const [key, value] of serviceEntries) {
-      if (String(key) !== "ILanguageFeaturesService") continue;
-      const languageFeatures = asRecord(value);
-      const colorProvider = asRecord(
-        languageFeatures && languageFeatures.colorProvider,
-      ) as MonacoLanguageFeatureRegistryLike | null;
-      if (colorProvider && Array.isArray(colorProvider._entries))
-        return colorProvider;
-    }
-  }
-  return null;
-}
-
-function selectorMatchesLanguage(selector: unknown, langId: string): boolean {
-  if (Array.isArray(selector)) {
-    return selector.some((item) => selectorMatchesLanguage(item, langId));
-  }
-  if (typeof selector === "string") return selector === langId;
-  const selectorRecord = asRecord(selector);
-  return !!selectorRecord && selectorRecord.language === langId;
-}
-
 function documentColorProviderSelector(
   deps: CreateEditorLanguageBridgeProvidersDeps,
   langId: string,
 ): unknown {
   if (deps.getLanguageWorkersEnabled()) return langId;
   return { language: langId, scheme: "file", exclusive: true };
-}
-
-function pruneNativeWorkerCompletionProviders(
-  deps: CreateEditorLanguageBridgeProvidersDeps,
-  langId: string,
-): number {
-  if (deps.getLanguageWorkersEnabled()) return 0;
-  const registry = completionRegistryFromActiveEditor(deps);
-  if (!registry || !Array.isArray(registry._entries)) return 0;
-  const entries = registry._entries;
-
-  let removed = 0;
-  for (let i = entries.length - 1; i >= 0; i -= 1) {
-    const entry = asRecord(entries[i]);
-    const provider = asRecord(entry && entry.provider);
-    if (
-      entry &&
-      provider &&
-      Object.prototype.hasOwnProperty.call(provider, "_worker") &&
-      selectorMatchesLanguage(entry.selector, langId)
-    ) {
-      entries.splice(i, 1);
-      removed += 1;
-    }
-  }
-
-  if (removed > 0) {
-    registry._lastCandidate = undefined;
-    if (!prunedNativeCompletionLanguages.has(langId)) {
-      prunedNativeCompletionLanguages.add(langId);
-      console.log(
-        "[completions] pruned native Monaco worker completion provider for lang=" +
-          langId +
-          " count=" +
-          removed,
-      );
-    }
-  }
-  return removed;
-}
-
-function pruneNativeWorkerColorProviders(
-  deps: CreateEditorLanguageBridgeProvidersDeps,
-  langId: string,
-): number {
-  if (deps.getLanguageWorkersEnabled()) return 0;
-  const registry = colorRegistryFromActiveEditor(deps);
-  if (!registry || !Array.isArray(registry._entries)) return 0;
-  const entries = registry._entries;
-
-  let removed = 0;
-  for (let i = entries.length - 1; i >= 0; i -= 1) {
-    const entry = asRecord(entries[i]);
-    const provider = asRecord(entry && entry.provider);
-    if (
-      entry &&
-      provider &&
-      Object.prototype.hasOwnProperty.call(provider, "_worker") &&
-      selectorMatchesLanguage(entry.selector, langId)
-    ) {
-      entries.splice(i, 1);
-      removed += 1;
-    }
-  }
-
-  if (removed > 0) {
-    registry._lastCandidate = undefined;
-    if (!prunedNativeColorLanguages.has(langId)) {
-      prunedNativeColorLanguages.add(langId);
-      console.log(
-        "[documentColors] pruned native Monaco worker color provider for lang=" +
-          langId +
-          " count=" +
-          removed,
-      );
-    }
-  }
-  return removed;
 }
 
 export function createEditorLanguageBridgeProviders(
@@ -728,6 +779,14 @@ export function createEditorLanguageBridgeProviders(
     langId: string,
     registration: InlineCompletionProviderRegistrationLike,
   ): void;
+  cacheLanguageProviderRegistration(
+    kind:
+      | "documentHighlights"
+      | "definitions"
+      | "references"
+      | "implementations",
+    langId: string,
+  ): void;
   registerSemanticTokensWithLegend(
     langId: string,
     legend: SemanticTokensLegendLike,
@@ -740,6 +799,10 @@ export function createEditorLanguageBridgeProviders(
   hydrateProviderSnapshot(snapshot: unknown): {
     completions: number;
     documentColors: number;
+    documentHighlights: number;
+    definitions: number;
+    references: number;
+    implementations: number;
     inlayHints: number;
     inlineCompletions: number;
     semanticTokens: number;
@@ -859,11 +922,14 @@ export function createEditorLanguageBridgeProviders(
     const seen = new Set<string>();
     const out: string[] = [];
     for (const rawSelector of selectorList) {
+      const directLanguage =
+        typeof rawSelector === "string" ? rawSelector.trim() : "";
       const selector = asRecord(rawSelector);
       const langId =
-        selector && typeof selector.language === "string"
+        directLanguage ||
+        (selector && typeof selector.language === "string"
           ? selector.language
-          : "";
+          : "");
       if (!langId || seen.has(langId)) continue;
       seen.add(langId);
       out.push(langId);
@@ -1013,7 +1079,6 @@ export function createEditorLanguageBridgeProviders(
         : null;
     deps.languageBridge.completionProviderSignatureByLanguage[langId] =
       nextSignature;
-    pruneNativeWorkerCompletionProviders(deps, langId);
     console.log(
       "[completions] registered aggregated provider bridge for lang=" +
         langId +
@@ -1026,7 +1091,6 @@ export function createEditorLanguageBridgeProviders(
 
   function ensureCompletionProvidersRegistered(langId: string): void {
     ensureCompletionProviderRegistered(langId);
-    pruneNativeWorkerCompletionProviders(deps, langId);
   }
 
   function cacheCompletionProviderRegistration(
@@ -1299,7 +1363,6 @@ export function createEditorLanguageBridgeProviders(
         : null;
     deps.languageBridge.documentColorProviderSignatureByLanguage[langId] =
       nextSignature;
-    pruneNativeWorkerColorProviders(deps, langId);
     console.log(
       "[documentColors] registered aggregated provider bridge for lang=" +
         langId +
@@ -1310,7 +1373,6 @@ export function createEditorLanguageBridgeProviders(
 
   function ensureDocumentColorProvidersRegistered(langId: string): void {
     ensureDocumentColorProviderRegistered(langId);
-    pruneNativeWorkerColorProviders(deps, langId);
   }
 
   function cacheDocumentColorProviderRegistration(
@@ -1708,9 +1770,20 @@ export function createEditorLanguageBridgeProviders(
     ensureInlineCompletionProvidersRegistered(langId);
   }
 
+  function cacheLanguageProviderRegistration(
+    kind: LanguagePositionProviderKind,
+    langId: string,
+  ): void {
+    registerLanguagePositionProvider(deps, kind, String(langId || ""));
+  }
+
   function hydrateProviderSnapshot(snapshot: unknown): {
     completions: number;
     documentColors: number;
+    documentHighlights: number;
+    definitions: number;
+    references: number;
+    implementations: number;
     inlayHints: number;
     inlineCompletions: number;
     semanticTokens: number;
@@ -1719,6 +1792,10 @@ export function createEditorLanguageBridgeProviders(
     const disableSemanticTokens = deps.getDisableSemanticTokens();
     let completionCount = 0;
     let documentColorCount = 0;
+    let documentHighlightCount = 0;
+    let definitionCount = 0;
+    let referenceCount = 0;
+    let implementationCount = 0;
     let inlayHintsCount = 0;
     let inlineCompletionCount = 0;
     let semanticTokensCount = 0;
@@ -1726,6 +1803,30 @@ export function createEditorLanguageBridgeProviders(
       asArray(snapshotRecord ? snapshotRecord.completions : null) || [];
     const documentColorEntries =
       asArray(snapshotRecord ? snapshotRecord.documentColors : null) || [];
+    const languagePositionEntries: Array<{
+      kind: LanguagePositionProviderKind;
+      entries: unknown[];
+    }> = [
+      {
+        kind: "documentHighlights",
+        entries:
+          asArray(snapshotRecord ? snapshotRecord.documentHighlights : null) ||
+          [],
+      },
+      {
+        kind: "definitions",
+        entries: asArray(snapshotRecord ? snapshotRecord.definitions : null) || [],
+      },
+      {
+        kind: "references",
+        entries: asArray(snapshotRecord ? snapshotRecord.references : null) || [],
+      },
+      {
+        kind: "implementations",
+        entries:
+          asArray(snapshotRecord ? snapshotRecord.implementations : null) || [],
+      },
+    ];
     const inlayHintsEntries =
       asArray(snapshotRecord ? snapshotRecord.inlayHints : null) || [];
     const inlineCompletionEntries =
@@ -1789,6 +1890,19 @@ export function createEditorLanguageBridgeProviders(
       )) {
         cacheDocumentColorProviderRegistration(langId, { handle });
         documentColorCount += 1;
+      }
+    }
+
+    for (const group of languagePositionEntries) {
+      for (const rawEntry of group.entries) {
+        const entry = asRecord(rawEntry);
+        for (const langId of selectorLanguagesFromSnapshot(entry?.selector)) {
+          cacheLanguageProviderRegistration(group.kind, langId);
+          if (group.kind === "documentHighlights") documentHighlightCount += 1;
+          else if (group.kind === "definitions") definitionCount += 1;
+          else if (group.kind === "references") referenceCount += 1;
+          else implementationCount += 1;
+        }
       }
     }
 
@@ -1875,6 +1989,10 @@ export function createEditorLanguageBridgeProviders(
     return {
       completions: completionCount,
       documentColors: documentColorCount,
+      documentHighlights: documentHighlightCount,
+      definitions: definitionCount,
+      references: referenceCount,
+      implementations: implementationCount,
       inlayHints: inlayHintsCount,
       inlineCompletions: inlineCompletionCount,
       semanticTokens: semanticTokensCount,
@@ -2372,6 +2490,7 @@ export function createEditorLanguageBridgeProviders(
     cacheDocumentColorProviderRegistration,
     cacheInlayHintsProviderRegistration,
     cacheInlineCompletionProviderRegistration,
+    cacheLanguageProviderRegistration,
     registerSemanticTokensWithLegend,
     fireSemanticTokensChanged,
     resetDynamicProviderCaches,

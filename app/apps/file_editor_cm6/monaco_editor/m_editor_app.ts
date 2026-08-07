@@ -247,6 +247,10 @@ interface LanguageBridgeStateLike {
   registeredHover: Set<string>;
   registeredSymbols: Set<string>;
   registeredFolding: Set<string>;
+  registeredDocumentHighlights: Set<string>;
+  registeredDefinitions: Set<string>;
+  registeredReferences: Set<string>;
+  registeredImplementations: Set<string>;
   registeredSemanticTokens: Set<string>;
   semanticTokensProviderKeysByLanguage: Record<string, Set<string>>;
   semanticTokensProviderModeByLanguage: Record<string, "full" | "range">;
@@ -358,7 +362,7 @@ interface MonacoBootWindowLike extends Window {
   const initialBootSnapshot = bootWindow.__te2InlineMonacoBootSnapshot || null;
 
   // Debug (draft diff hunks): default ON for now to diagnose incorrect ranges.
-  // You can disable at runtime in the iframe console with:
+  // You can disable at runtime in the inline editor console with:
   //   window.__debugDraftDiffs = false
   try {
     if (typeof window.__debugDraftDiffs === "undefined") {
@@ -933,6 +937,10 @@ interface MonacoBootWindowLike extends Window {
     registeredHover: new Set<string>(),
     registeredSymbols: new Set<string>(),
     registeredFolding: new Set<string>(),
+    registeredDocumentHighlights: new Set<string>(),
+    registeredDefinitions: new Set<string>(),
+    registeredReferences: new Set<string>(),
+    registeredImplementations: new Set<string>(),
     registeredSemanticTokens: new Set<string>(),
     semanticTokensProviderKeysByLanguage: {},
     semanticTokensProviderModeByLanguage: {},
@@ -1231,12 +1239,14 @@ interface MonacoBootWindowLike extends Window {
   }
 
   function installWorkbenchLanguageBridgeProviders() {
+    if (_languageWorkersEnabled()) return;
     languageBridgeProviders.installWorkbenchLanguageBridgeProviders();
   }
 
   let providerSnapshotHydratePromise: Promise<void> | null = null;
 
   function hydrateWorkbenchProviderSnapshot(reason: string): Promise<void> {
+    if (_languageWorkersEnabled()) return Promise.resolve();
     if (providerSnapshotHydratePromise) return providerSnapshotHydratePromise;
     providerSnapshotHydratePromise = editorWorkbenchCall(
       "providers",
@@ -1253,6 +1263,14 @@ interface MonacoBootWindowLike extends Window {
             counts.completions +
             " colors=" +
             counts.documentColors +
+            " highlights=" +
+            counts.documentHighlights +
+            " definitions=" +
+            counts.definitions +
+            " references=" +
+            counts.references +
+            " implementations=" +
+            counts.implementations +
             " inlay=" +
             counts.inlayHints +
             " inline=" +
@@ -1556,6 +1574,7 @@ interface MonacoBootWindowLike extends Window {
     vscodeThemeToMonacoTheme: _vscodeThemeToMonacoTheme,
     resolveMonacoThemeId: resolveMonacoThemeId,
     applyThemeToTextmateRegistry: _applyThemeToTextmateRegistry,
+    getLanguageWorkersEnabled: _languageWorkersEnabled,
     normalizeLanguage: normalizeLanguage,
     languageFromPath: languageFromPath,
     ensureWorkbenchLanguageCatalogInstalled: function () {
@@ -1569,6 +1588,7 @@ interface MonacoBootWindowLike extends Window {
   });
 
   async function ensureWorkbenchLanguageCatalogInstalled(): Promise<boolean> {
+    if (_languageWorkersEnabled()) return false;
     return workbenchLanguageCatalogRuntime
       ? workbenchLanguageCatalogRuntime.ensureWorkbenchLanguageCatalogInstalled()
       : false;
@@ -1626,19 +1646,21 @@ interface MonacoBootWindowLike extends Window {
         request_id: payload.request_id ? String(payload.request_id) : "",
         source: payload.source ? String(payload.source) : "",
       });
-      void workbenchRuntime
-        .wbFlushActiveModelOpen("model_ready")
-        .catch((error) => {
-          console.warn("[model_ready] WBA open flush failed", error);
-        })
-        .then((result) => {
-          const record =
-            result && typeof result === "object"
-              ? (result as Record<string, unknown>)
-              : {};
-          if (record.deferred === true) return;
-          void hydrateWorkbenchProviderSnapshot("model_ready");
-        });
+      if (!_languageWorkersEnabled()) {
+        void workbenchRuntime
+          .wbFlushActiveModelOpen("model_ready")
+          .catch((error) => {
+            console.warn("[model_ready] WBA open flush failed", error);
+          })
+          .then((result) => {
+            const record =
+              result && typeof result === "object"
+                ? (result as Record<string, unknown>)
+                : {};
+            if (record.deferred === true) return;
+            void hydrateWorkbenchProviderSnapshot("model_ready");
+          });
+      }
       console.log("[model_ready] emit", {
         path: String(payload.path),
         generation,
@@ -2012,14 +2034,16 @@ interface MonacoBootWindowLike extends Window {
         query: fileEditorSocketQuery(),
         auth: { rpcCodec: RPC_CODEC_MSGPACK_V1 },
       }) as EditorSocketLike;
-      wbaRpcSocket = window.io(SOCKET_IO_NAMESPACES.wba, {
-        path: SOCKET_IO_PATHS.wba,
-        transports: ["websocket"],
-        query: fileEditorSocketQuery(),
-        auth: { rpcCodec: RPC_CODEC_MSGPACK_V1 },
-      }) as EditorSocketLike;
+      if (!_languageWorkersEnabled()) {
+        wbaRpcSocket = window.io(SOCKET_IO_NAMESPACES.wba, {
+          path: SOCKET_IO_PATHS.wba,
+          transports: ["websocket"],
+          query: fileEditorSocketQuery(),
+          auth: { rpcCodec: RPC_CODEC_MSGPACK_V1 },
+        }) as EditorSocketLike;
+      }
       editorRpcTransport.attachSocket(editorRpcSocket);
-      editorWbaRpcTransport.attachSocket(wbaRpcSocket);
+      if (wbaRpcSocket) editorWbaRpcTransport.attachSocket(wbaRpcSocket);
       registerEditorSocketConnectionHandlers(
         editorRpcSocket as Parameters<
           typeof registerEditorSocketConnectionHandlers
@@ -2296,6 +2320,8 @@ interface MonacoBootWindowLike extends Window {
           languageBridgeProviders.cacheInlayHintsProviderRegistration,
         cacheInlineCompletionProviderRegistration:
           languageBridgeProviders.cacheInlineCompletionProviderRegistration,
+        cacheLanguageProviderRegistration:
+          languageBridgeProviders.cacheLanguageProviderRegistration,
         resetDynamicProviderCaches:
           languageBridgeProviders.resetDynamicProviderCaches,
         onWorkspaceSwitchedAck: function (event) {
@@ -2322,11 +2348,6 @@ interface MonacoBootWindowLike extends Window {
         },
       });
 
-      if (editorRpcSocket && typeof editorRpcSocket.on === "function") {
-        editorRpcSocket.on("connect", () => {
-          void hydrateWorkbenchProviderSnapshot("editor_socket_connect");
-        });
-      }
       if (wbaRpcSocket && typeof wbaRpcSocket.on === "function") {
         wbaRpcSocket.on("connect", () => {
           console.log("[wba] socket connected");

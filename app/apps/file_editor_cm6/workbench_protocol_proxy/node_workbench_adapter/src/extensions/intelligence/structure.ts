@@ -1,3 +1,5 @@
+import type { ProviderDocument } from "../provider-registry";
+
 export interface StructurePendingOptions {
   timeoutMs: number;
   timeoutMessage: string;
@@ -12,6 +14,7 @@ export interface StructureRuntime {
   ensureConnected: () => void;
   languageFeaturesRpcId: number;
   defaultAuthority: () => string;
+  documentScheme: () => string;
   languageIdFromPath: (filePath: string) => string;
   getDocumentVersion: (path: string) => number | null;
   getOpenGeneration: (path: string) => unknown;
@@ -19,7 +22,7 @@ export interface StructureRuntime {
   selectorGroupsSummary: (kind: "documentSymbols" | "foldingRanges") => string;
   findAllProviderHandles: (
     kind: "documentSymbols" | "foldingRanges",
-    languageId: string,
+    document: ProviderDocument,
   ) => number[];
   waitFor: (
     condition: () => boolean,
@@ -87,6 +90,20 @@ function coerceLanguageId(runtime: StructureRuntime, input: Record<string, unkno
   return String(input.languageId || "") || runtime.languageIdFromPath(path) || "plaintext";
 }
 
+function providerDocument(
+  runtime: StructureRuntime,
+  path: string,
+  authority: string,
+  languageId: string,
+): ProviderDocument {
+  return {
+    languageId,
+    scheme: runtime.documentScheme(),
+    authority,
+    path,
+  };
+}
+
 function documentOpenError(runtime: StructureRuntime, path: string, input: Record<string, unknown>): Record<string, unknown> | null {
   if (runtime.getDocumentVersion(path) == null) {
     return { ok: false, error: "document_not_open" };
@@ -111,6 +128,7 @@ export async function provideDocumentSymbols(runtime: StructureRuntime, params: 
   const authority = coerceAuthority(runtime, input);
   const timeoutMs = Number(input.timeoutMs ?? 8000);
   const languageId = coerceLanguageId(runtime, input, path);
+  const document = providerDocument(runtime, path, authority, languageId);
 
   const openError = documentOpenError(runtime, path, input);
   if (openError) return openError;
@@ -128,14 +146,14 @@ export async function provideDocumentSymbols(runtime: StructureRuntime, params: 
     });
   }
 
-  let handles = runtime.findAllProviderHandles("documentSymbols", languageId);
+  let handles = runtime.findAllProviderHandles("documentSymbols", document);
   if (handles.length === 0) {
     runtime.log(`[symbols] no provider yet for '${languageId}', waiting up to ${timeoutMs}ms...`);
     await runtime.waitFor(
-      () => runtime.findAllProviderHandles("documentSymbols", languageId).length > 0,
+      () => runtime.findAllProviderHandles("documentSymbols", document).length > 0,
       { timeoutMs, intervalMs: 50 },
     );
-    handles = runtime.findAllProviderHandles("documentSymbols", languageId);
+    handles = runtime.findAllProviderHandles("documentSymbols", document);
   }
   if (handles.length === 0) {
     runtime.log(`[symbols] STILL no provider for '${languageId}' after timeout`);
@@ -227,6 +245,7 @@ export async function provideFoldingRanges(runtime: StructureRuntime, params: un
   const authority = coerceAuthority(runtime, input);
   const timeoutMs = Number(input.timeoutMs ?? 8000);
   const languageId = coerceLanguageId(runtime, input, path);
+  const document = providerDocument(runtime, path, authority, languageId);
   const context =
     isRecord(input.context) ? input.context : {};
 
@@ -247,7 +266,7 @@ export async function provideFoldingRanges(runtime: StructureRuntime, params: un
     });
   }
 
-  let handles = runtime.findAllProviderHandles("foldingRanges", languageId);
+  let handles = runtime.findAllProviderHandles("foldingRanges", document);
   if (handles.length === 0) {
     runtime.log(`[folding] no provider for '${languageId}', fast-fail`);
     return { ok: true, result: null };

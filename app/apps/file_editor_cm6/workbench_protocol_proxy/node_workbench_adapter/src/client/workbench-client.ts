@@ -122,6 +122,7 @@ import { ExtensionLanguageResolver } from "../extensions/language-resolver.mjs";
 import {
   CallHierarchySessionStore,
   prepareCallHierarchy,
+  provideDocumentHighlights,
   provideDefinitions,
   provideImplementations,
   provideIncomingCalls,
@@ -179,6 +180,7 @@ import {
 } from "../workspace/lifecycle.mjs";
 import { WorkbenchDocumentRegistry } from "../workspace/document-registry.mjs";
 import { checkWorkspaceContains } from "../workspace/workspace-contains.mjs";
+import { searchWorkspaceFiles } from "../workspace/file-search.mjs";
 
 type WorkbenchEventSink = (payload: Record<string, unknown>) => void;
 type MgmtIpcLike = NonNullable<ManagementRuntime["refs"]["mgmtIpc"]>;
@@ -237,6 +239,7 @@ const PARSE_ARGS_ONLY_METHODS = new Set<string>([
   "$registerDocumentSemanticTokensProvider",
   "$registerDocumentRangeSemanticTokensProvider",
   "$registerDocumentColorProvider",
+  "$registerDocumentHighlightProvider",
   "$emitDocumentSemanticTokensEvent",
   "$emitDocumentRangeSemanticTokensEvent",
   "$registerDocumentLinkProvider",
@@ -257,6 +260,7 @@ const PARSE_ARGS_ONLY_METHODS = new Set<string>([
 
   "$getInitialState",
   "$checkExists",
+  "$startFileSearch",
   "$requestWorkspaceTrust",
   "$initializeExtensionStorage",
   "$registerLogger",
@@ -943,10 +947,14 @@ export class WorkbenchClient {
       languageFeaturesRpcId: _rpcIds.ExtHostLanguageFeatures,
       authority: this._authority,
       defaultRemoteAuthority: DEFAULT_REMOTE_AUTHORITY,
+      useRemote: this._useRemote,
       languageIdFromPath: (filePath) => _languageIdFromPath(filePath),
       didChange: (params, opts) => this.didChange(params, opts),
-      findAllProviderHandles: (kind, languageId) =>
-        this._findAllProviderHandles(kind, languageId),
+      findAllProviderHandles: (kind, document) =>
+        this._providerRegistry.findAllProviderHandlesForDocument(
+          kind,
+          document,
+        ),
       waitFor: (condition, options) => waitFor(condition, options),
       uriForPath: (filePath, authority) =>
         this._uriForPath(filePath, authority),
@@ -963,10 +971,14 @@ export class WorkbenchClient {
       languageFeaturesRpcId: _rpcIds.ExtHostLanguageFeatures,
       authority: this._authority,
       defaultRemoteAuthority: DEFAULT_REMOTE_AUTHORITY,
+      useRemote: this._useRemote,
       languageIdFromPath: (filePath) => _languageIdFromPath(filePath),
       didChange: (params, opts) => this.didChange(params, opts),
-      findAllProviderHandles: (kind, languageId) =>
-        this._findAllProviderHandles(kind, languageId),
+      findAllProviderHandles: (kind, document) =>
+        this._providerRegistry.findAllProviderHandlesForDocument(
+          kind,
+          document,
+        ),
       waitFor: (condition, options) => waitFor(condition, options),
       uriForPath: (filePath, authority) =>
         this._uriForPath(filePath, authority),
@@ -1044,14 +1056,15 @@ export class WorkbenchClient {
       languageFeaturesRpcId: _rpcIds.ExtHostLanguageFeatures,
       authority: this._authority,
       defaultRemoteAuthority: DEFAULT_REMOTE_AUTHORITY,
+      useRemote: this._useRemote,
       languageIdFromPath: (filePath) => _languageIdFromPath(filePath),
       didChange: (params, opts) => this.didChange(params, opts),
       findAllProviderHandles: (kind, languageId) =>
         this._findAllProviderHandles(kind, languageId),
-      findSemanticFullHandles: (languageId) =>
-        this._providerRegistry.findSemanticFullHandles(languageId),
-      findSemanticRangeHandles: (languageId) =>
-        this._providerRegistry.findSemanticRangeHandles(languageId),
+      findSemanticFullHandles: (document) =>
+        this._providerRegistry.findSemanticFullHandlesForDocument(document),
+      findSemanticRangeHandles: (document) =>
+        this._providerRegistry.findSemanticRangeHandlesForDocument(document),
       getProjectionDocument: (documentPath) =>
         this._semanticProjectionDocument(documentPath),
       getProjection: (documentPath, languageId, textFingerprint) =>
@@ -1101,11 +1114,20 @@ export class WorkbenchClient {
 
   async _prewarmSemanticTokens(documentPath: string): Promise<void> {
     const entry = this._documentRegistry.getByPath(documentPath);
+    const document = entry
+      ? {
+          languageId: entry.languageId,
+          scheme: this._useRemote ? "vscode-remote" : "file",
+          authority: this._authority,
+          path: entry.path,
+        }
+      : null;
     if (
       !entry ||
+      !document ||
       entry.role === "active" ||
-      this._providerRegistry.findSemanticFullHandles(entry.languageId).length ===
-        0
+      this._providerRegistry.findSemanticFullHandlesForDocument(document)
+        .length === 0
     ) {
       return;
     }
@@ -1139,6 +1161,7 @@ export class WorkbenchClient {
       languageFeaturesRpcId: _rpcIds.ExtHostLanguageFeatures,
       authority: this._authority,
       defaultRemoteAuthority: DEFAULT_REMOTE_AUTHORITY,
+      useRemote: this._useRemote,
       languageIdFromPath: (filePath) => _languageIdFromPath(filePath),
       getDocumentVersion: (path) =>
         this._documentRegistry.getVersion(path),
@@ -1149,8 +1172,11 @@ export class WorkbenchClient {
       updateActiveDocument: () => {},
       selectorGroupsSummary: (kind) =>
         this._providerRegistry.selectorGroupsSummary(kind),
-      findAllProviderHandles: (kind, languageId) =>
-        this._findAllProviderHandles(kind, languageId),
+      findAllProviderHandles: (kind, document) =>
+        this._providerRegistry.findAllProviderHandlesForDocument(
+          kind,
+          document,
+        ),
       waitFor: (condition, options) => waitFor(condition, options),
       uriForPath: (filePath, authority) =>
         this._uriForPath(filePath, authority),
@@ -1646,6 +1672,17 @@ export class WorkbenchClient {
         checkWorkspaceContains(folders, includes, {
           log: (...args) => console.log(...args),
         }),
+      startFileSearch: (includeFolder, options) =>
+        searchWorkspaceFiles(
+          {
+            workspaceRoot: () => this.state.workspaceFolder,
+            fsPathFromUri: (uri) => this._fsPathFromUri(uri),
+            uriForPath: (filePath) => this._uriForPath(filePath),
+            log: (...args) => console.log(...args),
+          },
+          includeFolder,
+          options,
+        ),
       tryOpenDocument: (uri, options) =>
         this._tryOpenDocument(uri, isRecord(options) ? options : {}),
       provideTextDocumentContent: (handle, uri) =>
@@ -2060,6 +2097,12 @@ export class WorkbenchClient {
 
   async hover(params: unknown = {}): Promise<Record<string, unknown>> {
     return provideHover(this._documentFeatureRuntime(), params);
+  }
+
+  async documentHighlights(
+    params: unknown = {},
+  ): Promise<Record<string, unknown>> {
+    return provideDocumentHighlights(this._codeNavigationRuntime(), params);
   }
 
   async references(params: unknown = {}): Promise<Record<string, unknown>> {

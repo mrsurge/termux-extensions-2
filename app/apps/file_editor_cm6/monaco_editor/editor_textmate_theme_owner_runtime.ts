@@ -26,6 +26,7 @@ interface EditorTextmateThemeOwnerDeps {
   vscodeThemeToMonacoTheme(themeId: string, vscodeJson: unknown): unknown;
   resolveMonacoThemeId(themeKey: string, cache: Record<string, unknown>): string;
   applyThemeToTextmateRegistry(vscodeThemeJson: unknown): void;
+  getLanguageWorkersEnabled(): boolean;
   normalizeLanguage(languageId: unknown): string;
   languageFromPath(path: string): string;
   ensureWorkbenchLanguageCatalogInstalled(): Promise<boolean>;
@@ -103,7 +104,8 @@ export function createEditorTextmateThemeOwnerRuntime(
         setJsonCacheFn(cache: Record<string, unknown>) {
           themeLoadState.jsonCache = cache || {};
         },
-        applyThemeToTextmateRegistryFn: isTextmateDisabled(deps.getWindow())
+        applyThemeToTextmateRegistryFn:
+          deps.getLanguageWorkersEnabled() || isTextmateDisabled(deps.getWindow())
           ? undefined
           : deps.applyThemeToTextmateRegistry,
       });
@@ -125,6 +127,7 @@ export function createEditorTextmateThemeOwnerRuntime(
     if (!lang) lang = 'plaintext';
 
     setModelLanguage(model, lang);
+    if (deps.getLanguageWorkersEnabled()) return;
 
     const applyKey = (filePath || '') + '::' + lang;
     const inflight = languageApplyInflight[applyKey];

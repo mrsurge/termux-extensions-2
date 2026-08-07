@@ -15,7 +15,11 @@ export interface CodeNavigationRuntime {
   findAllProviderHandles: (
     kind: Extract<
       ProviderKind,
-      "definitions" | "references" | "implementations" | "callHierarchy"
+      | "documentHighlights"
+      | "definitions"
+      | "references"
+      | "implementations"
+      | "callHierarchy"
     >,
     document: {
       languageId: string;
@@ -394,7 +398,12 @@ function providerDocument(
 
 async function findProviders(
   runtime: CodeNavigationRuntime,
-  kind: "definitions" | "references" | "implementations" | "callHierarchy",
+  kind:
+    | "documentHighlights"
+    | "definitions"
+    | "references"
+    | "implementations"
+    | "callHierarchy",
   request: NavigationRequest,
 ): Promise<number[]> {
   const document = providerDocument(runtime, request);
@@ -488,10 +497,11 @@ export function provideReferences(
   runtime: CodeNavigationRuntime,
   params: unknown = {},
 ): Promise<Record<string, unknown>> {
+  const input = isRecord(params) ? params : {};
   return provideLocations(runtime, params, {
     kind: "references",
     method: "$provideReferences",
-    extraArgs: [{ includeDeclaration: true }],
+    extraArgs: [{ includeDeclaration: input.includeDeclaration !== false }],
   });
 }
 
@@ -504,6 +514,72 @@ export function provideImplementations(
     method: "$provideImplementation",
     extraArgs: [],
   });
+}
+
+export async function provideDocumentHighlights(
+  runtime: CodeNavigationRuntime,
+  params: unknown = {},
+): Promise<Record<string, unknown>> {
+  runtime.ensureConnected();
+  const request = navigationRequest(runtime, params);
+  const handles = await findProviders(runtime, "documentHighlights", request);
+  if (!handles.length) {
+    return { ok: true, result: [], unsupported: true };
+  }
+
+  const uri = runtime.uriForPath(request.path, request.authority);
+  const replies = await Promise.all(
+    handles.map((handle) => {
+      const { promise } = runtime.sendExtPending(
+        runtime.languageFeaturesRpcId,
+        "$provideDocumentHighlights",
+        [
+          handle,
+          uri,
+          { lineNumber: request.lineNumber, column: request.column },
+        ],
+        true,
+        {
+          timeoutMs: request.timeoutMs,
+          timeoutMessage: "timed out waiting for document highlights",
+          timeoutResult: { type: 7 },
+        },
+      );
+      return promise.catch((error: unknown) => ({ type: 11, error }));
+    }),
+  );
+
+  const highlights = new Map<string, Record<string, unknown>>();
+  let lastError: unknown = null;
+  for (const reply of replies) {
+    if (replyType(reply) === 11) {
+      lastError = replyError(reply);
+      continue;
+    }
+    if (replyType(reply) !== 9 || !Array.isArray(replyResult(reply))) continue;
+    for (const rawHighlight of replyResult(reply) as unknown[]) {
+      if (!isRecord(rawHighlight)) continue;
+      const range = normalizeRange(rawHighlight.range);
+      if (!range) continue;
+      const kind = finiteNumber(rawHighlight.kind, 0);
+      highlights.set(
+        [
+          range.startLineNumber,
+          range.startColumn,
+          range.endLineNumber,
+          range.endColumn,
+          kind,
+        ].join(":"),
+        { range, kind },
+      );
+    }
+  }
+  if (!highlights.size && lastError) return { ok: false, error: lastError };
+  return {
+    ok: true,
+    result: Array.from(highlights.values()),
+    providerHandles: handles,
+  };
 }
 
 function normalizeCallHierarchyItem(value: unknown): Record<string, unknown> | null {

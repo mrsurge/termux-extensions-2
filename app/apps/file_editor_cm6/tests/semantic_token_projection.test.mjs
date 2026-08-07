@@ -184,6 +184,7 @@ test("full requests can return a projection without syncing or invoking a provid
     ensureConnected() {},
     languageFeaturesRpcId: 1,
     defaultAuthority: () => "",
+    documentScheme: () => "file",
     languageIdFromPath: () => "rust",
     didChange() {
       throw new Error("didChange should not run on a projection hit");
@@ -242,6 +243,7 @@ test("multi-provider full requests release non-winning provider results", async 
     ensureConnected() {},
     languageFeaturesRpcId: 1,
     defaultAuthority: () => "",
+    documentScheme: () => "file",
     languageIdFromPath: () => "rust",
     didChange() {
       throw new Error("no text was supplied");
@@ -301,6 +303,7 @@ test("range requests remain live provider calls and never touch projections", as
     ensureConnected() {},
     languageFeaturesRpcId: 1,
     defaultAuthority: () => "",
+    documentScheme: () => "file",
     languageIdFromPath: () => "rust",
     didChange() {
       throw new Error("no text was supplied");

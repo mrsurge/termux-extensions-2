@@ -283,35 +283,10 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
         scopes.add(scopeName);
       }
 
-      const pickPreferred = (lang: string, scopes: string[]): string | null => {
-        let prefer: string[] = [];
-        if (lang === 'javascript') prefer = ['source.js', 'source.jsx', 'source.js.jsx'];
-        else if (lang === 'typescript') prefer = ['source.ts', 'source.tsx'];
-        else if (lang === 'python') prefer = ['source.python'];
-        else if (lang === 'json') prefer = ['source.json', 'source.json.comments'];
-        else if (lang === 'html') prefer = ['text.html.basic'];
-        else if (lang === 'css') prefer = ['source.css'];
-        else if (lang === 'markdown') prefer = ['text.html.markdown'];
-        else if (lang === 'shell') prefer = ['source.shell'];
-        else if (lang === 'c') prefer = ['source.c'];
-        else if (lang === 'cpp') prefer = ['source.cpp'];
-        else if (lang === 'java') prefer = ['source.java'];
-        else if (lang === 'rust') prefer = ['source.rust'];
-        else if (lang === 'kotlin') prefer = ['source.kotlin'];
-        else if (lang === 'yaml') prefer = ['source.yaml', 'source.yaml.1.2'];
-        else if (lang === 'toml') prefer = ['source.toml'];
-        for (const candidate of prefer) {
-          if (scopes.includes(candidate)) return candidate;
-        }
-        const fallback = `source.${lang}`;
-        if (scopes.includes(fallback)) return fallback;
-        return scopes.length ? scopes[0] : null;
-      };
-
       for (const lang of Object.keys(byLangScopes)) {
-        const scopes = Array.from(byLangScopes[lang]).sort();
+        const scopes = Array.from(byLangScopes[lang]);
         idx.byLanguage[lang] = {
-          preferred: pickPreferred(lang, scopes),
+          preferred: scopes[0] || null,
           scopes,
         };
       }
@@ -349,15 +324,6 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
       if (!index) return '';
       const entry = index.byLanguage[lang];
       if (entry) {
-        if (path) {
-          if (lang === 'javascript' && /\.jsx$/i.test(path)) {
-            if (entry.scopes.includes('source.js.jsx')) return 'source.js.jsx';
-            if (entry.scopes.includes('source.jsx')) return 'source.jsx';
-          }
-          if (lang === 'typescript' && /\.tsx$/i.test(path) && entry.scopes.includes('source.tsx')) {
-            return 'source.tsx';
-          }
-        }
         if (entry.preferred) return entry.preferred;
       }
     } catch (_) {}

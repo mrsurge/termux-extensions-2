@@ -5,6 +5,7 @@ import type { TransportRuntime, SentRequestOwnerLike, TransportPendingOptions } 
 import type { ConfigurationRuntime } from "./configuration";
 import type { ExtHostDispatchRuntime } from "../protocol/ext-host-dispatch";
 import type { ExtensionCatalogRuntime } from "../extensions/catalog";
+import type { ProviderDocument } from "../extensions/provider-registry";
 import type { CompletionRuntime } from "../extensions/intelligence/completions";
 import type { CodeNavigationRuntime } from "../extensions/intelligence/code-navigation";
 import type { DocumentColorRuntime } from "../extensions/intelligence/document-colors";
@@ -39,9 +40,13 @@ export interface CompletionRuntimeDeps {
   languageFeaturesRpcId: number;
   authority: string;
   defaultRemoteAuthority: string;
+  useRemote: boolean;
   languageIdFromPath: (filePath: string) => string;
   didChange: (params: Record<string, unknown>, opts: { waitForAck: true; timeoutMs: number }) => Promise<unknown> | unknown;
-  findAllProviderHandles: (kind: "completions", languageId: string) => number[];
+  findAllProviderHandles: (
+    kind: "completions",
+    document: ProviderDocument,
+  ) => number[];
   waitFor: (condition: () => boolean, options: { timeoutMs: number; intervalMs: number }) => Promise<boolean>;
   uriForPath: (filePath: string, authority: string) => unknown;
   sendExtPending: (
@@ -60,12 +65,16 @@ export interface DocumentColorRuntimeDeps {
   languageFeaturesRpcId: number;
   authority: string;
   defaultRemoteAuthority: string;
+  useRemote: boolean;
   languageIdFromPath: (filePath: string) => string;
   didChange: (
     params: Record<string, unknown>,
     opts: { waitForAck: true; timeoutMs: number },
   ) => Promise<unknown> | unknown;
-  findAllProviderHandles: (kind: "documentColors", languageId: string) => number[];
+  findAllProviderHandles: (
+    kind: "documentColors",
+    document: ProviderDocument,
+  ) => number[];
   waitFor: (condition: () => boolean, options: { timeoutMs: number; intervalMs: number }) => Promise<boolean>;
   uriForPath: (filePath: string, authority: string) => unknown;
   sendExtPending: (
@@ -138,6 +147,7 @@ export interface SemanticTokensRuntimeDeps {
   languageFeaturesRpcId: number;
   authority: string;
   defaultRemoteAuthority: string;
+  useRemote: boolean;
   languageIdFromPath: (filePath: string) => string;
   didChange: (
     params: Record<string, unknown>,
@@ -145,7 +155,7 @@ export interface SemanticTokensRuntimeDeps {
   ) => Promise<unknown> | unknown;
   findAllProviderHandles: (kind: "semanticTokens", languageId: string) => number[];
   findSemanticFullHandles: SemanticRuntime["findSemanticFullHandles"];
-  findSemanticRangeHandles: (languageId: string) => number[];
+  findSemanticRangeHandles: SemanticRuntime["findSemanticRangeHandles"];
   getProjectionDocument: SemanticRuntime["getProjectionDocument"];
   getProjection: SemanticRuntime["getProjection"];
   getProjectionGeneration: SemanticRuntime["getProjectionGeneration"];
@@ -171,12 +181,16 @@ export interface DocumentFeatureRuntimeDeps {
   languageFeaturesRpcId: number;
   authority: string;
   defaultRemoteAuthority: string;
+  useRemote: boolean;
   languageIdFromPath: (filePath: string) => string;
   getDocumentVersion: (path: string) => number | null;
   getOpenGeneration: (path: string) => number | string | null | undefined;
   updateActiveDocument: (path: string, uriObj: unknown, languageId: string) => void;
   selectorGroupsSummary: (kind: "documentSymbols" | "foldingRanges" | "hover") => string;
-  findAllProviderHandles: (kind: "documentSymbols" | "foldingRanges" | "hover", languageId: string) => number[];
+  findAllProviderHandles: (
+    kind: "documentSymbols" | "foldingRanges" | "hover",
+    document: ProviderDocument,
+  ) => number[];
   waitFor: (condition: () => boolean, options: { timeoutMs: number; intervalMs: number }) => Promise<boolean>;
   uriForPath: (filePath: string, authority: string) => unknown;
   sendExtPending: (
@@ -370,6 +384,7 @@ export interface ExtHostDispatchRuntimeDeps {
   sendPayload: (payload: Uint8Array) => void;
   sendExt: (rpcId: number, method: string, args: unknown[], cancellable?: boolean) => unknown;
   checkWorkspaceExists: (folders: unknown, includes: unknown) => Promise<boolean>;
+  startFileSearch: (includeFolder: unknown, options: unknown) => Promise<Record<string, unknown>[]>;
   tryOpenDocument: (uri: unknown, options: unknown) => Promise<unknown>;
   provideTextDocumentContent: (handle: number, uri: unknown) => Promise<string | null>;
   readVirtualVscodeUriBuffer: (uri: unknown) => Uint8Array | null;
@@ -433,9 +448,10 @@ export function createCompletionRuntime(deps: CompletionRuntimeDeps): Completion
     ensureConnected: () => ensureConnected(deps.extProtocol),
     languageFeaturesRpcId: deps.languageFeaturesRpcId,
     defaultAuthority: () => String(deps.authority ?? deps.defaultRemoteAuthority),
+    documentScheme: () => deps.useRemote ? "vscode-remote" : "file",
     languageIdFromPath: (filePath: string) => deps.languageIdFromPath(filePath),
     didChange: (params: Record<string, unknown>, opts: { waitForAck: true; timeoutMs: number }) => deps.didChange(params, opts),
-    findAllProviderHandles: (kind: "completions", languageId: string) => deps.findAllProviderHandles(kind, languageId),
+    findAllProviderHandles: (kind: "completions", document: ProviderDocument) => deps.findAllProviderHandles(kind, document),
     waitFor: (condition: () => boolean, options: { timeoutMs: number; intervalMs: number }) => deps.waitFor(condition, options),
     uriForPath: (filePath: string, authority: string) => deps.uriForPath(filePath, authority),
     sendExtPending: (rpcId: number, method: string, args: unknown[], cancellable: boolean, pendingOptions: TransportPendingOptions) =>
@@ -450,9 +466,10 @@ export function createDocumentColorRuntime(deps: DocumentColorRuntimeDeps): Docu
     ensureConnected: () => ensureConnected(deps.extProtocol),
     languageFeaturesRpcId: deps.languageFeaturesRpcId,
     defaultAuthority: () => String(deps.authority ?? deps.defaultRemoteAuthority),
+    documentScheme: () => deps.useRemote ? "vscode-remote" : "file",
     languageIdFromPath: (filePath: string) => deps.languageIdFromPath(filePath),
     didChange: (params: Record<string, unknown>, opts: { waitForAck: true; timeoutMs: number }) => deps.didChange(params, opts),
-    findAllProviderHandles: (kind: "documentColors", languageId: string) => deps.findAllProviderHandles(kind, languageId),
+    findAllProviderHandles: (kind: "documentColors", document: ProviderDocument) => deps.findAllProviderHandles(kind, document),
     waitFor: (condition: () => boolean, options: { timeoutMs: number; intervalMs: number }) => deps.waitFor(condition, options),
     uriForPath: (filePath: string, authority: string) => deps.uriForPath(filePath, authority),
     sendExtPending: (rpcId: number, method: string, args: unknown[], cancellable: boolean, pendingOptions: TransportPendingOptions) =>
@@ -500,11 +517,12 @@ export function createSemanticTokensRuntime(deps: SemanticTokensRuntimeDeps): Se
     ensureConnected: () => ensureConnected(deps.extProtocol),
     languageFeaturesRpcId: deps.languageFeaturesRpcId,
     defaultAuthority: () => String(deps.authority ?? deps.defaultRemoteAuthority),
+    documentScheme: () => deps.useRemote ? "vscode-remote" : "file",
     languageIdFromPath: (filePath: string) => deps.languageIdFromPath(filePath),
     didChange: (params: Record<string, unknown>, opts: { waitForAck: true; timeoutMs: number }) => deps.didChange(params, opts),
     findAllProviderHandles: (kind: "semanticTokens", languageId: string) => deps.findAllProviderHandles(kind, languageId),
-    findSemanticFullHandles: (languageId: string) => deps.findSemanticFullHandles(languageId),
-    findSemanticRangeHandles: (languageId: string) => deps.findSemanticRangeHandles(languageId),
+    findSemanticFullHandles: (document: ProviderDocument) => deps.findSemanticFullHandles(document),
+    findSemanticRangeHandles: (document: ProviderDocument) => deps.findSemanticRangeHandles(document),
     getProjectionDocument: (path: string) => deps.getProjectionDocument(path),
     getProjection: (path: string, languageId: string, textFingerprint?: string | null) =>
       deps.getProjection(path, languageId, textFingerprint),
@@ -529,12 +547,13 @@ export function createDocumentFeatureRuntime(deps: DocumentFeatureRuntimeDeps): 
     ensureConnected: () => ensureConnected(deps.extProtocol),
     languageFeaturesRpcId: deps.languageFeaturesRpcId,
     defaultAuthority: () => String(deps.authority ?? deps.defaultRemoteAuthority),
+    documentScheme: () => deps.useRemote ? "vscode-remote" : "file",
     languageIdFromPath: (filePath: string) => deps.languageIdFromPath(filePath),
     getDocumentVersion: (path: string) => deps.getDocumentVersion(path),
     getOpenGeneration: (path: string) => deps.getOpenGeneration(path),
     updateActiveDocument: (path: string, uriObj: unknown, languageId: string) => deps.updateActiveDocument(path, uriObj, languageId),
     selectorGroupsSummary: (kind: "documentSymbols" | "foldingRanges" | "hover") => deps.selectorGroupsSummary(kind),
-    findAllProviderHandles: (kind: "documentSymbols" | "foldingRanges" | "hover", languageId: string) => deps.findAllProviderHandles(kind, languageId),
+    findAllProviderHandles: (kind: "documentSymbols" | "foldingRanges" | "hover", document: ProviderDocument) => deps.findAllProviderHandles(kind, document),
     waitFor: (condition: () => boolean, options: { timeoutMs: number; intervalMs: number }) => deps.waitFor(condition, options),
     uriForPath: (filePath: string, authority: string) => deps.uriForPath(filePath, authority),
     sendExtPending: (rpcId: number, method: string, args: unknown[], cancellable: boolean, pendingOptions: TransportPendingOptions) =>
@@ -796,6 +815,7 @@ export function createExtHostDispatchRuntime(deps: ExtHostDispatchRuntimeDeps): 
     sendPayload: (payload: Uint8Array) => deps.sendPayload(payload),
     sendExt: (rpcId: number, method: string, args: unknown[], cancellable = false) => deps.sendExt(rpcId, method, args, cancellable),
     checkWorkspaceExists: (folders: unknown, includes: unknown) => deps.checkWorkspaceExists(folders, includes),
+    startFileSearch: (includeFolder: unknown, options: unknown) => deps.startFileSearch(includeFolder, options),
     tryOpenDocument: (uri: unknown, options: unknown) => deps.tryOpenDocument(uri, options),
     provideTextDocumentContent: (handle: number, uri: unknown) => deps.provideTextDocumentContent(handle, uri),
     readVirtualVscodeUriBuffer: (uri: unknown) => deps.readVirtualVscodeUriBuffer(uri),

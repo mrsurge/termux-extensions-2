@@ -1,3 +1,5 @@
+import type { ProviderDocument } from "../provider-registry";
+
 export interface CompletionPendingOptions {
   timeoutMs: number;
   timeoutMessage: string;
@@ -12,12 +14,16 @@ export interface CompletionRuntime {
   ensureConnected: () => void;
   languageFeaturesRpcId: number;
   defaultAuthority: () => string;
+  documentScheme: () => string;
   languageIdFromPath: (filePath: string) => string;
   didChange: (
     params: Record<string, unknown>,
     opts: { waitForAck: true; timeoutMs: number },
   ) => Promise<unknown> | unknown;
-  findAllProviderHandles: (kind: "completions", languageId: string) => number[];
+  findAllProviderHandles: (
+    kind: "completions",
+    document: ProviderDocument,
+  ) => number[];
   waitFor: (condition: () => boolean, options: { timeoutMs: number; intervalMs: number }) => Promise<boolean>;
   uriForPath: (filePath: string, authority: string) => unknown;
   sendExtPending: (
@@ -203,6 +209,12 @@ export async function provideCompletions(runtime: CompletionRuntime, params: unk
   const languageId = String(input.languageId || "") || runtime.languageIdFromPath(path) || "plaintext";
   const triggerKind = Number(input.triggerKind ?? 0);
   const triggerCharacter = input.triggerCharacter ?? undefined;
+  const document: ProviderDocument = {
+    languageId,
+    scheme: runtime.documentScheme(),
+    authority,
+    path,
+  };
 
   runtime.log(`[completions] path=${path} lang=${languageId} line=${lineNumber} col=${column} trigger=${triggerKind}`);
 
@@ -240,13 +252,13 @@ export async function provideCompletions(runtime: CompletionRuntime, params: unk
     });
   }
 
-  let handles = runtime.findAllProviderHandles("completions", languageId);
+  let handles = runtime.findAllProviderHandles("completions", document);
   if (handles.length === 0) {
     await runtime.waitFor(
-      () => runtime.findAllProviderHandles("completions", languageId).length > 0,
+      () => runtime.findAllProviderHandles("completions", document).length > 0,
       { timeoutMs: Math.min(timeoutMs, 5000), intervalMs: 50 },
     );
-    handles = runtime.findAllProviderHandles("completions", languageId);
+    handles = runtime.findAllProviderHandles("completions", document);
   }
   if (handles.length === 0) return { ok: false, error: `no completions provider for language '${languageId}'` };
 

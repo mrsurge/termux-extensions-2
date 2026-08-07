@@ -9,25 +9,6 @@ type WindowWithMonacoBoot = Window & {
   _loadedMonacoBundle?: string;
 };
 
-interface MonacoTypeScriptDefaultsLike {
-  modeConfiguration?: Record<string, unknown>;
-  setDiagnosticsOptions?(options: Record<string, unknown>): void;
-  setModeConfiguration?(options: Record<string, unknown>): void;
-}
-
-interface MonacoTypeScriptNamespaceLike {
-  typescriptDefaults?: MonacoTypeScriptDefaultsLike;
-  javascriptDefaults?: MonacoTypeScriptDefaultsLike;
-}
-
-interface MonacoLanguagesLike {
-  typescript?: MonacoTypeScriptNamespaceLike;
-}
-
-interface MonacoLike {
-  languages?: MonacoLanguagesLike;
-}
-
 interface EditorMonacoBootRuntimeDeps {
   getWindow(): WindowWithMonacoBoot;
   getApiBase(): string;
@@ -50,12 +31,6 @@ interface EditorMonacoBootRuntimeDeps {
   connectEditorHostActions(): void;
   emitToHost(eventName: string, payload: Record<string, unknown>): void;
   updateDebug(extra: string): void;
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
 }
 
 function isGeckoRuntime(win: WindowWithMonacoBoot): boolean {
@@ -126,8 +101,9 @@ function configureMonacoEnvironment(
       const workersEnabled = deps.languageWorkersEnabled();
 
       if (isLangWorker && !workersEnabled) {
-        const noop = new BlobRef(['self.onmessage=function(){}'], { type: 'application/javascript' });
-        return new WorkerRef(URLRef.createObjectURL(noop));
+        throw new Error(
+          `[MonacoWorker] ${label} requested while Code Server owns language intelligence`,
+        );
       }
 
       const url = isLangWorker
@@ -158,60 +134,6 @@ function configureMonacoEnvironment(
   };
 }
 
-const DEFAULT_TS_MODE_CONFIGURATION: Record<string, boolean> = {
-  completionItems: true,
-  hovers: true,
-  documentSymbols: true,
-  definitions: true,
-  references: true,
-  documentHighlights: true,
-  rename: true,
-  diagnostics: true,
-  documentRangeFormattingEdits: true,
-  signatureHelp: true,
-  onTypeFormattingEdits: true,
-  codeActions: true,
-  inlayHints: true,
-};
-
-function configureTypeScriptWorkerDefaults(monacoNs: unknown, workersEnabled: boolean): void {
-  try {
-    const monacoRef = monacoNs as MonacoLike;
-    const tsLang = monacoRef.languages && monacoRef.languages.typescript;
-    if (!tsLang) return;
-    if (workersEnabled) {
-      console.log('[Monaco] TS/JS worker defaults left enabled by webWorkersEnabled');
-      return;
-    }
-
-    const configureDefaults = (defaults: MonacoTypeScriptDefaultsLike | undefined): void => {
-      if (!defaults) return;
-      if (typeof defaults.setDiagnosticsOptions === 'function') {
-        defaults.setDiagnosticsOptions({
-          noSemanticValidation: true,
-          noSyntaxValidation: true,
-        });
-      }
-      if (typeof defaults.setModeConfiguration === 'function') {
-        defaults.setModeConfiguration({
-          ...DEFAULT_TS_MODE_CONFIGURATION,
-          ...(asRecord(defaults.modeConfiguration) || {}),
-          completionItems: false,
-        });
-      }
-    };
-
-    configureDefaults(tsLang.typescriptDefaults);
-    configureDefaults(tsLang.javascriptDefaults);
-
-    if (tsLang.typescriptDefaults || tsLang.javascriptDefaults) {
-      console.log('[Monaco] TS/JS worker diagnostics disabled; worker completions disabled');
-    }
-  } catch (error) {
-    console.warn('[Monaco] TS/JS worker defaults config failed', error);
-  }
-}
-
 export async function bootMonacoRuntime(
   deps: EditorMonacoBootRuntimeDeps,
 ): Promise<void> {
@@ -232,13 +154,15 @@ export async function bootMonacoRuntime(
       }
     } catch (_) {}
 
-    const monacoNs = await loadBundledMonaco();
+    const languageWorkersEnabled = deps.languageWorkersEnabled();
+    const monacoNs = await loadBundledMonaco({ languageWorkersEnabled });
     win._loadedMonacoBundle = 'host.js';
-    console.log('[Monaco] loaded from host.js');
+    console.log(
+      `[Monaco] loaded from host.js mode=${languageWorkersEnabled ? 'web-workers' : 'code-server'}`,
+    );
 
     win.monaco = monacoNs || undefined;
     deps.ensureTe2DiffTheme();
-    configureTypeScriptWorkerDefaults(monacoNs, deps.languageWorkersEnabled());
 
     try { await deps.applyMonacoTheme('github-dark-default'); } catch (_) {}
 
@@ -248,8 +172,10 @@ export async function bootMonacoRuntime(
     // adapter state; Rust can deliver that replay faster than Python did.
     deps.connectEditorHostActions();
     await Promise.resolve(deps.connectEditorSocket());
-    try { await deps.ensureWorkbenchLanguageCatalogInstalled(); } catch (_) {}
-    try { deps.installWorkbenchLanguageBridgeProviders(); } catch (_) {}
+    if (!languageWorkersEnabled) {
+      try { await deps.ensureWorkbenchLanguageCatalogInstalled(); } catch (_) {}
+      try { deps.installWorkbenchLanguageBridgeProviders(); } catch (_) {}
+    }
 
     try {
       deps.applyActiveModelLanguage();

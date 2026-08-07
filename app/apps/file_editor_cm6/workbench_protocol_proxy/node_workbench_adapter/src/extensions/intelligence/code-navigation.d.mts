@@ -46,6 +46,11 @@ export declare function provideImplementations(
   params?: unknown,
 ): Promise<Record<string, unknown>>;
 
+export declare function provideDocumentHighlights(
+  runtime: unknown,
+  params?: unknown,
+): Promise<Record<string, unknown>>;
+
 export declare function prepareCallHierarchy(
   runtime: unknown,
   params?: unknown,

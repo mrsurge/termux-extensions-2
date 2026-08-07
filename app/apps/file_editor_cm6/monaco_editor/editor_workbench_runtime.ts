@@ -177,6 +177,8 @@ export function createEditorWorkbenchRuntime(
     switch (method) {
       case 'completions':
       case 'hover':
+      case 'document_highlights':
+      case 'definition':
       case 'references':
       case 'implementations':
       case 'call_hierarchy_prepare':
@@ -198,6 +200,8 @@ export function createEditorWorkbenchRuntime(
     switch (method) {
       case 'completions':
       case 'hover':
+      case 'document_highlights':
+      case 'definition':
       case 'references':
       case 'implementations':
       case 'call_hierarchy_prepare':
@@ -546,6 +550,7 @@ export function createEditorWorkbenchRuntime(
   }
 
   function emitDidChange(payload: WorkbenchPendingDidChangePayload): boolean {
+    if (deps.languageWorkersEnabled()) return false;
     const wbaMethod = editorWorkbenchMethodToWbaMethod('did_change');
     if (!wbaMethod) return false;
     if (!deps.isWbaRpcConnected()) {
@@ -635,6 +640,7 @@ export function createEditorWorkbenchRuntime(
   }
 
   function publishDidChange(path: string, text: string, languageId: string, generation: number): boolean {
+    if (deps.languageWorkersEnabled()) return false;
     return wbPublishDidChange(
       wbFlow,
       path,
@@ -649,6 +655,11 @@ export function createEditorWorkbenchRuntime(
   }
 
   function rawEditorWorkbenchCall(method: string, params?: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<unknown> {
+    if (deps.languageWorkersEnabled()) {
+      return Promise.reject(
+        new Error('WBA language intelligence is disabled while Monaco web workers are enabled'),
+      );
+    }
     const wbaMethod = editorWorkbenchMethodToWbaMethod(method);
     if (!wbaMethod) {
       return Promise.reject(new Error('unsupported direct WBA workbench method: ' + method));
@@ -657,6 +668,11 @@ export function createEditorWorkbenchRuntime(
   }
 
   async function editorWorkbenchCall(method: string, params?: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<unknown> {
+    if (deps.languageWorkersEnabled()) {
+      throw new Error(
+        'WBA language intelligence is disabled while Monaco web workers are enabled',
+      );
+    }
     const normalizedParams = params || {};
     const timeoutMs = opts && Number(opts.timeoutMs) ? Number(opts.timeoutMs) : 5000;
     if (isIntelligenceWorkbenchMethod(method) && isProjectSwitchInProgress()) {
@@ -756,6 +772,7 @@ export function createEditorWorkbenchRuntime(
   }
 
   function queueActiveModelOpen(reason: string): WorkbenchPendingOpenFilePayload | null {
+    if (deps.languageWorkersEnabled()) return null;
     const currentPath = deps.getCurrentPath();
     const editor = deps.getEditor();
     if (isProjectSwitchInProgress()) return null;
@@ -786,6 +803,9 @@ export function createEditorWorkbenchRuntime(
   }
 
   function flushActiveModelOpen(reason: string = 'flush'): Promise<unknown> {
+    if (deps.languageWorkersEnabled()) {
+      return Promise.resolve({ ok: false, disabled: true });
+    }
     let pending = wbFlow.pendingOpenFile;
     const inFlight = wbFlow.openAckPromise;
     if (!pending) {
@@ -822,6 +842,9 @@ export function createEditorWorkbenchRuntime(
   }
 
   function openFileFlow(opts: Record<string, unknown>): Promise<unknown> {
+    if (deps.languageWorkersEnabled()) {
+      return Promise.resolve({ ok: false, disabled: true });
+    }
     const payload = normalizeOpenFilePayload(opts);
     if (!payload) return Promise.resolve({ ok: false, deferred: true });
     wbQueueOpenFile(wbFlow, payload, currentGeneration);
@@ -829,6 +852,9 @@ export function createEditorWorkbenchRuntime(
   }
 
   function replayOpenFileAfterBaton(): Promise<unknown> {
+    if (deps.languageWorkersEnabled()) {
+      return Promise.resolve({ ok: false, disabled: true });
+    }
     console.log('[readiness] baton arrived, flushing active model open');
     return flushActiveModelOpen('baton').catch((error) => {
       console.warn('[readiness] baton replay open_file failed', error);

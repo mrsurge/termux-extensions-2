@@ -874,61 +874,70 @@ The current transition is not a NiceGUI migration; it is a consolidation around 
 
 ---
 
-## 11) Monaco language bundles + workers (recent learnings)
+## 11) Monaco language backend modes and ownership
 
-### Invariants (must hold)
-- Syntax highlighting must work (non-plaintext languages set correctly).
-- Syntax checking + autocomplete must work (Monaco language services).
+### Mode boundary
 
-### Symptoms we hit
-- `monaco.languages.getLanguages()` returned only `['plaintext']`.
-- `model.getLanguageId()` stayed `plaintext` even for `.py`/`.js`.
-- Console showed:
-  - `Failed to load language bundles`
-  - `Import Map ... monaco-editor-core ... blocked by a null value`
-  - 404 for `/api/app/file_editor_cm6/ui/monaco_vscode/lang/basic-languages/monaco.contribution.js`
+Code TE2 has two mutually exclusive language backends selected by the persisted
+`webWorkersEnabled` preference:
 
-### Root cause
-Language bundles were bundling a **second** Monaco instance, so contributions attached to a different registry.
+- **Code Server mode** (the default) loads Monaco editor core without Monaco's
+  basic/rich language contributions. It opens the direct strict-MessagePack
+  `/wba` lane, obtains language and grammar metadata from the WBA, installs
+  client-side TextMate tokenization from the contributed grammars, and registers
+  WBA-backed Monaco providers.
+- **Web Worker mode** lazy-loads Monaco's basic/rich language contributions and
+  language workers. It does not open or probe the WBA, install the WBA language
+  catalog, or register WBA-backed providers.
 
-### Fix (what actually works)
-1) **Language bundles must keep `monaco-editor-core` external**
-   - `scripts/build_monaco_language_workers.mjs`
-   - Add: `external: ['monaco-editor-core']` for the **contrib build**
-   - Do **not** resolve `monaco-editor-core` to `editor.api.js` in the contrib build plugin.
+The modes must not be blended. Code Server mode must not register Monaco worker
+providers and then remove them through private Monaco registries. Worker mode
+must not quietly fall back to Code Server.
 
-2) **Inline host must point to the worker-served Monaco API**
-   - `app/apps/file_editor_cm6/monaco_editor/inline_host.ts`
-   - Use an absolute path:
-     - `"monaco-editor-core": "/api/app/file_editor_cm6/ui/monaco_vscode/esm/vs/editor/editor.api.js"`
+### Generic WBA language path
 
-3) **Force-load language bundles and re-apply model language**
-   - `app/apps/file_editor_cm6/monaco_editor/m_editor_app.ts`
-   - Import language bundles from `/ui/monaco_vscode/lang/...`
-   - On failure, retry with cache-bust query
-   - After `ensureEditorWithPrefs()`, call:
-     - `monaco.editor.setModelLanguage(model, languageFromPath(currentPath))`
+The Code Server path is data-driven:
 
-### Build command (language bundles + workers)
+1. The WBA publishes language, language-configuration, grammar, theme, and
+   provider-registration metadata from the installed built-in and user
+   extensions.
+2. The inline editor registers the contributed language IDs and applies the
+   contributed language configuration.
+3. `editor_textmate_runtime.ts` selects the first grammar contribution for the
+   language in WBA catalog order, loads the raw grammar through
+   `grammars_load`, and installs it in Monaco using the vendored TextMate and
+   Oniguruma runtimes.
+4. Provider registration events and reconnect snapshots install one stable
+   Monaco bridge per advertised language and feature. There are no JavaScript,
+   HTML, CSS, or other language-specific routing branches.
+
+Document highlights use `$provideDocumentHighlights` and back Monaco's
+cursor-occurrence highlighting. Definitions, references, and implementations
+use their public Monaco provider APIs. Call hierarchy remains on the existing
+Code Inspector path because Monaco's public `languages` API does not expose a
+call-hierarchy registration surface.
+
+### Bootstrap and validation
+
+`scripts/build_monaco_bootstrap_bundle.mjs` builds the shared Monaco bootstrap.
+Its contribution imports are lazy and execute only for Web Worker mode. The
+inline editor itself remains part of the single `static/dist/host.js` bundle;
+it has no separate editor document or frontend bundle.
+
+For Code TE2 frontend changes, run:
+
+```bash
+cd app/apps/file_editor_cm6
+npm run typecheck
+node build.mjs
+node --test tests/*.test.mjs
 ```
-/data/data/com.termux/files/usr/opt/nodejs-22/bin/node scripts/build_monaco_language_workers.mjs
+
+When the Monaco bootstrap source changes, also run:
+
+```bash
+node scripts/build_monaco_bootstrap_bundle.mjs
 ```
-
-### Validation (after worker restart + hard refresh)
-```
-monaco.languages.getLanguages().map(l => l.id)
-monaco.editor.getModels()[0].getLanguageId()
-```
-Expected: language list includes python/js/etc, model language matches file extension.
-
-If still `plaintext`, check:
-- 404s under `/api/app/file_editor_cm6/ui/monaco_vscode/lang/...`
-- `[Monaco] Failed to load language bundles` warnings
-
-### Why this avoids regressions
-Keeping `monaco-editor-core` external guarantees all contributions attach to the **same** Monaco registry used by the main editor ESM import. This prevents the “works once, then breaks” behavior caused by duplicate registries.
-
----
 
 ## 12) Draft deletion widgets ordering (Git diff + Draft diff together)
 
@@ -1544,6 +1553,7 @@ Per-document tracking maps (in `workbench_client.mjs`):
 - Controlled via env: `TE2_INCLUDE_BUILTIN_EXTS=0` reverts to user-extensions-only mode.
 
 #### Extension host RPC reply requirements
+
 Not all ext host requests can be answered with `ReplyOkEmpty`. Key methods that need typed replies:
 - `$initializeExtensionStorage` → `ReplyOkJson("{}")` (JSON string — ext host calls `JSON.parse()` on the deserialized result, then `safeParseValue` calls `JSON.parse("{}")` → `{}`)
 - `$getTools` → `ReplyOkJson([])` (empty tools array)
@@ -1551,7 +1561,7 @@ Not all ext host requests can be answered with `ReplyOkEmpty`. Key methods that 
 - `$checkExists` → `ReplyOkJson(false)`
 - `$requestWorkspaceTrust` → `ReplyOkJson(true)` (followed by `$onDidGrantWorkspaceTrust`)
 - `$register` (rpcId 29, MainThreadOutputService) → `ReplyOkJson("<channelId>")` (string — clangd blocks waiting for this; returns a synthetic channel ID like `"te2-output-<req>"`)
-- `$startFileSearch` → `ReplyOkJson([])`
+- `$startFileSearch` → `ReplyOkJson(UriComponents[])` after WBA's bounded workspace glob search; an unconditional empty array prevents workspace-scanning extensions from functioning.
 - `$startTextSearch` → `ReplyOkJson(null)`
 - `$executeCommand` → `ReplyOkEmpty`
 
@@ -2212,9 +2222,8 @@ rm -rf "$VENDOR_DIR/esm" && mkdir -p "$VENDOR_DIR/esm"
 cd out-monaco-editor-core/esm
 find . \( -name "*.js" -o -name "*.css" -o -name "*.ttf" \) \
   -exec sh -c 'mkdir -p "'"$VENDOR_DIR"'/esm/$(dirname "$1")" && cp "$1" "'"$VENDOR_DIR"'/esm/$1"' _ {} \;
-# Rebuild the editor bootstrap bundle
-# Historical note: the helper script name still says "iframe" even though the editor now mounts inline.
-cd ../.. && node ../../scripts/build_monaco_iframe_bootstrap_bundle.mjs
+# Rebuild the inline editor bootstrap bundle
+cd ../.. && node ../../scripts/build_monaco_bootstrap_bundle.mjs
 ```
 
 ### Key files
@@ -3008,6 +3017,17 @@ When the user switches files (`openPathFromBackend`):
 
 ## 34) Multi-Provider Pipeline — Systemic Fix (Hover, Completions, Symbols, Semantic Tokens)
 
+This section records the original multi-provider failure and its evolution.
+The current frontend hot path is direct strict-MessagePack `/wba`, not
+`editor_ws.py`. Provider registrations arrive as WBA events plus a reconnect
+snapshot and are projected through public Monaco provider APIs.
+
+The same generic bridge now covers hover, completions, document symbols, folding,
+document colors, inlay hints, inline completions, semantic tokens, document
+highlights, definitions, references, and implementations. Document highlights
+are what supply cursor-position occurrence highlighting. The bridge is driven by
+advertised provider selectors and contains no per-language routing cases.
+
 ### Problem: Single-provider selection (systemic)
 
 `_findProviderHandle(type, languageId)` returned only the **first** matching handle for every provider type. Extensions routinely register **multiple** providers per language — e.g. `typescript-language-features` registers 3 completion providers for JavaScript (main completions, directive comment completions like `@ts-check`, and snippet/refactoring completions). Only the first one was ever called; the rest were silently dropped.
@@ -3020,7 +3040,10 @@ Example: For JS completions, the directive comment provider (`@ts-check`, `@ts-n
 
 ### Fix: Parallel multi-provider calling (VS Code approach)
 
-Added `_findAllProviderHandles(type, languageId)` — returns an array of **all** matching provider handles. **Every** provider method now fires its RPC to all matching handles simultaneously and merges/picks results:
+The provider registry matches the exact document tuple — language, scheme,
+authority, and path — and returns **all** matching provider handles. Every
+document-scoped provider method now fires its RPC to all matching handles
+simultaneously and merges or selects results:
 
 | Method | RPC | Merge Strategy |
 |--------|-----|----------------|
@@ -3033,7 +3056,8 @@ Added `_findAllProviderHandles(type, languageId)` — returns an array of **all*
 
 ```
 completions(params)
-  → _findAllProviderHandles("completions", languageId)  → [handle_A, handle_B, handle_C]
+  → findAllProviderHandlesForDocument("completions", document)
+      → [handle_A, handle_B, handle_C]
   → Promise.all(handles.map(h → $provideCompletionItems(h, uri, position, context)))
   → merge: concat items, OR isIncomplete, keep first cacheId
   → return merged completions
@@ -3041,7 +3065,10 @@ completions(params)
 
 Each method has a `_*Single()` helper (e.g. `_completionsSingle()`, `_hoverSingle()`, `_symbolsSingle()`, `_semanticTokensSingle()`) that preserves the old single-provider path for callers that pin a specific `providerHandle`.
 
-**Rule: `_findProviderHandle()` (single) MUST NOT be used in new code. Always use `_findAllProviderHandles()`.**
+Language-only matching is insufficient: extensions may register selectors with
+only `scheme` and `pattern`. New document-scoped code must use
+`findAllProviderHandlesForDocument()` (or the semantic-token full/range
+equivalent), not `_findProviderHandle()` or `_findAllProviderHandles()`.
 
 ### Problem 2: Cold boot hover registration timing
 
@@ -3120,10 +3147,12 @@ t+20s    user hovers → provideHover fires → editorWorkbenchCall('hover')
 
 | File | Role |
 |------|------|
-| `workbench_client.mjs` | `hover()`, `completions()`, `symbols()`, `semanticTokens()`, `semanticTokensRange()`, `getSemanticTokensLegend()` — all multi-provider via `_findAllProviderHandles()`. Single-provider helpers: `_hoverSingle()`, `_completionsSingle()`, `_symbolsSingle()`, `_semanticTokensSingle()`. Shared: `_parseSemanticTokensReply()`, `encodeExtReplyError()`, `encodeExtReplyOkVSBuffer()`, `$readFile`/`$stat` handlers, `_sanitizeExtensionForInit()` contributes default |
-| `m_editor_app.ts` | `installVscodeApiLanguageBridgeProviders()` (bridge registration), `applyLanguageToModel()` (re-runs bridge after async language set), `ensureTextmateTokenization()` (language registration guard), `provideHover` callback (URI guard + API call) |
-| `server.mjs` | HTTP/WS route: `editor_workbench_hover` → `client.hover()` |
-| `editor_ws.py` | `on_editor_workbench_hover` → `adapter_rpc("vscode.hover", ...)` |
+| `monaco_editor/editor_language_bridge_providers.ts` | Generic event/snapshot-driven Monaco provider projection, including document highlights and navigation providers. |
+| `monaco_editor/editor_wba_runtime_handlers.ts` | Consumes WBA provider-registration events. |
+| `monaco_editor/editor_wba_rpc_transport.ts` | Maps editor bridge calls to direct WBA JSON-RPC methods. |
+| `workbench_protocol_proxy/node_workbench_adapter/src/extensions/provider-registry.ts` | Tracks every matching extension-host provider and publishes registration state. |
+| `workbench_protocol_proxy/node_workbench_adapter/src/extensions/intelligence/code-navigation.ts` | Multi-provider document highlights, definitions, references, implementations, and call hierarchy. |
+| `workbench_protocol_proxy/node_workbench_adapter/src/server/request-dispatch.ts` | Dispatches the direct `vscode.*` WBA request surface. |
 
 ## 35) Android / GeckoView IME and Monaco Text Input
 
@@ -3662,7 +3691,21 @@ WBA extension activation is extension-agnostic:
 - `extensions/activation-events.ts` derives declared activation events and Code OSS implicit activation events from each executable extension manifest's `contributes` map.
 - Missing or `plaintext` document language IDs are resolved from extension-contributed filenames, extensions, filename patterns, and first-line expressions.
 - File open starts non-blocking language activation.
-- Language-provider RPCs await both `onLanguage:<id>` and generic `onLanguage` before dispatch.
+- Language-provider RPCs await both `onLanguage:<id>` and generic `onLanguage`
+  before dispatch. Code Server activates every matching extension for those
+  events; WBA does not choose one activation candidate.
+- Provider selection is a separate document-scoped step. WBA matches every
+  registered selector against the exact language, scheme, authority, and path,
+  then aggregates all matching providers. This includes valid pattern-only
+  selectors without a `language` field, such as HTML-to-CSS completion
+  providers registered for `**/*.{css,scss,less,sass,styl}`.
+- Extension-host `workspace.findFiles` calls are handled generically through
+  `$startFileSearch`. WBA searches the requested relative root or active
+  workspace, honors explicit include/exclude glob patterns and `maxResults`,
+  and returns remote-workspace URI components. This scan is part of provider
+  initialization for extensions that derive completion state from other files;
+  returning a fabricated empty result activates the extension but leaves its
+  provider semantically empty.
 - Missing background documents must be published before `onLanguage` activation so newly-started language clients discover the complete open set.
 
 The visible frontend open path does not wait for WBA background hydration. `editor.openComplete.publish` is the control-plane acknowledgement that visible open completed; WBA and agent hydration remain outside that critical path.

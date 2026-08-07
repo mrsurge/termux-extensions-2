@@ -1,3 +1,5 @@
+import type { ProviderDocument } from "../provider-registry";
+
 export interface HoverPendingOptions {
   timeoutMs: number;
   timeoutMessage: string;
@@ -12,9 +14,13 @@ export interface HoverRuntime {
   ensureConnected: () => void;
   languageFeaturesRpcId: number;
   defaultAuthority: () => string;
+  documentScheme: () => string;
   languageIdFromPath: (filePath: string) => string;
   updateActiveDocument: (path: string, uriObj: unknown, languageId: string) => void;
-  findAllProviderHandles: (kind: "hover", languageId: string) => number[];
+  findAllProviderHandles: (
+    kind: "hover",
+    document: ProviderDocument,
+  ) => number[];
   waitFor: (
     condition: () => boolean,
     options: { timeoutMs: number; intervalMs: number },
@@ -84,6 +90,12 @@ export async function provideHover(runtime: HoverRuntime, params: unknown = {}):
   const column = Number(input.column ?? 1);
   const timeoutMs = Number(input.timeoutMs ?? 8000);
   const languageId = String(input.languageId || "") || runtime.languageIdFromPath(path) || "plaintext";
+  const document: ProviderDocument = {
+    languageId,
+    scheme: runtime.documentScheme(),
+    authority,
+    path,
+  };
 
   if (input.providerHandle != null) {
     return provideHoverSingle(runtime, {
@@ -95,13 +107,13 @@ export async function provideHover(runtime: HoverRuntime, params: unknown = {}):
     });
   }
 
-  let handles = runtime.findAllProviderHandles("hover", languageId);
+  let handles = runtime.findAllProviderHandles("hover", document);
   if (handles.length === 0) {
     await runtime.waitFor(
-      () => runtime.findAllProviderHandles("hover", languageId).length > 0,
+      () => runtime.findAllProviderHandles("hover", document).length > 0,
       { timeoutMs, intervalMs: 50 },
     );
-    handles = runtime.findAllProviderHandles("hover", languageId);
+    handles = runtime.findAllProviderHandles("hover", document);
   }
   if (handles.length === 0) return { ok: false, error: `no hover provider for language '${languageId}'` };
 

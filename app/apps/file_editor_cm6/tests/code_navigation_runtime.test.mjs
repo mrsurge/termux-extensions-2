@@ -5,6 +5,7 @@ import {
   CallHierarchySessionStore,
   prepareCallHierarchy,
   provideDefinitions,
+  provideDocumentHighlights,
   provideImplementations,
   provideIncomingCalls,
   provideOutgoingCalls,
@@ -89,6 +90,10 @@ test("registers exact navigation methods and filters document selectors", () => 
     23,
     [{ language: "rust", scheme: "vscode-remote" }],
   ]);
+  registry.registerFromRequest("$registerDocumentHighlightProvider", [
+    25,
+    [{ language: "rust", scheme: "file" }],
+  ]);
   registry.registerFromRequest("$registerReferenceSupport", [
     24,
     [{
@@ -105,6 +110,15 @@ test("registers exact navigation methods and filters document selectors", () => 
     [{ language: "rust", scheme: "file", isBuiltin: true }],
   ]);
 
+  assert.deepEqual(
+    registry.findAllProviderHandlesForDocument("documentHighlights", {
+      languageId: "rust",
+      scheme: "file",
+      authority: "",
+      path: "/workspace/src/main.rs",
+    }),
+    [25],
+  );
   assert.deepEqual(
     registry.findAllProviderHandlesForDocument("definitions", {
       languageId: "rust",
@@ -150,6 +164,38 @@ test("registers exact navigation methods and filters document selectors", () => 
     }),
     [21, 26],
   );
+});
+
+test("merges and deduplicates document highlights from matching providers", async () => {
+  const calls = [];
+  const range = {
+    startLineNumber: 4,
+    startColumn: 3,
+    endLineNumber: 4,
+    endColumn: 7,
+  };
+  const runtime = createRuntime(
+    [
+      { type: 9, result: [{ range, kind: 2 }] },
+      { type: 9, result: [{ range, kind: 2 }] },
+    ],
+    calls,
+  );
+
+  const result = await provideDocumentHighlights(runtime, {
+    path: "/workspace/main.rs",
+    languageId: "rust",
+    lineNumber: 4,
+    column: 3,
+  });
+
+  assert.deepEqual(result.result, [{ range, kind: 2 }]);
+  assert.equal(calls.length, 2);
+  for (const call of calls) {
+    assert.equal(call.method, "$provideDocumentHighlights");
+    assert.equal(call.cancellable, true);
+    assert.equal(call.args.length, 3);
+  }
 });
 
 test("resolves definitions without reading source previews", async () => {

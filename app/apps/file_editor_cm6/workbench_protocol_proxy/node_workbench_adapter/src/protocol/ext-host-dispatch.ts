@@ -76,6 +76,7 @@ export interface ExtHostDispatchRuntime {
   sendPayload: (payload: Uint8Array) => void;
   sendExt: (rpcId: number, method: string, args: unknown[], cancellable?: boolean) => void;
   checkWorkspaceExists: (folders: unknown, includes: unknown) => Promise<boolean>;
+  startFileSearch: (includeFolder: unknown, options: unknown) => Promise<Record<string, unknown>[]>;
   tryOpenDocument: (uri: unknown, options: unknown) => Promise<unknown>;
   provideTextDocumentContent: (handle: number, uri: unknown) => Promise<string | null>;
   readVirtualVscodeUriBuffer: (uri: unknown) => Uint8Array | null;
@@ -366,7 +367,6 @@ function requestReplyPayload(
   }
   if (method === "$getTools") return encodeExtReplyOkJson(req, []);
   if (method === "$initializeExtensionStorage") return encodeExtReplyOkJson(req, "{}");
-  if (method === "$startFileSearch") return encodeExtReplyOkJson(req, []);
   if (method === "$resolveProxy") return encodeExtReplyOkJson(req, null);
   if (method === "$getPassword") return encodeExtReplyOkJson(req, null);
   if (method === "$executeCommand") return encodeExtReplyOkEmpty(req);
@@ -401,6 +401,26 @@ function handleCheckExists(runtime: ExtHostDispatchRuntime, msg: DecodedExtHostR
   }).catch((error) => {
     runtime.log(`[ext_reply] $checkExists error: ${error instanceof Error ? error.message : String(error)}`);
     sendReplyPayload(runtime, req, msg.method, encodeExtReplyOkJson(req, false));
+  });
+}
+
+function handleStartFileSearch(runtime: ExtHostDispatchRuntime, msg: DecodedExtHostRpc): void {
+  const req = Number(msg.req ?? 0);
+  const includeFolder = Array.isArray(msg.args) ? msg.args[0] : null;
+  const options = Array.isArray(msg.args) ? msg.args[1] : {};
+  runtime.startFileSearch(includeFolder, options).then((results) => {
+    sendReplyPayload(runtime, req, msg.method, encodeExtReplyOkJson(req, results));
+  }).catch((error) => {
+    runtime.log(`[ext_reply] $startFileSearch error: ${error instanceof Error ? error.message : String(error)}`);
+    sendReplyPayload(
+      runtime,
+      req,
+      msg.method,
+      encodeExtReplyError(req, {
+        message: `TE2: workspace file search failed: ${error instanceof Error ? error.message : String(error)}`,
+        code: "FileSearchFailed",
+      }),
+    );
   });
 }
 
@@ -514,6 +534,10 @@ export function handleExtHostRequest(runtime: ExtHostDispatchRuntime, msg: Decod
 
   if (msg.method === "$checkExists") {
     handleCheckExists(runtime, msg);
+    return true;
+  }
+  if (msg.method === "$startFileSearch") {
+    handleStartFileSearch(runtime, msg);
     return true;
   }
   if (msg.method === "$tryOpenDocument") {

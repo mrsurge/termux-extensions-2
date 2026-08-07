@@ -74,6 +74,14 @@ interface EditorWbaRuntimeHandlerDeps {
       eventHandle?: number | null;
     },
   ): void;
+  cacheLanguageProviderRegistration(
+    kind:
+      | "documentHighlights"
+      | "definitions"
+      | "references"
+      | "implementations",
+    lang: string,
+  ): void;
   resetDynamicProviderCaches?(reason?: string): void;
   onWorkspaceSwitchedAck?(event: Record<string, unknown>): void;
 }
@@ -171,6 +179,25 @@ export function registerEditorWbaRuntimeHandlers(
         handleInlineCompletionProviderRegistered(
           event,
           deps.cacheInlineCompletionProviderRegistration,
+        );
+        return;
+      }
+
+      const positionProviderKind = {
+        "provider/documentHighlights": "documentHighlights",
+        "provider/definitions": "definitions",
+        "provider/references": "references",
+        "provider/implementations": "implementations",
+      }[type] as
+        | "documentHighlights"
+        | "definitions"
+        | "references"
+        | "implementations"
+        | undefined;
+      if (positionProviderKind && typeof event.language === "string") {
+        deps.cacheLanguageProviderRegistration(
+          positionProviderKind,
+          event.language,
         );
       }
     } catch (_) {}
