@@ -22,12 +22,14 @@ grep-matcher.workspace = true
 grep-regex.workspace = true
 grep-searcher.workspace = true
 ignore.workspace = true
+ipnet.workspace = true
 regex.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
 socketioxide.workspace = true
+socket2.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
 tokio-tungstenite.workspace = true
@@ -36,3 +38,6 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 url.workspace = true
 zip.workspace = true
+
+[dev-dependencies]
+tower.workspace = true

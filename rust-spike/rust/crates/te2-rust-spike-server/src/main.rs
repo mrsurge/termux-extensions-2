@@ -5,6 +5,7 @@ mod apps_lifecycle;
 mod framework_services;
 mod frontend_assets;
 mod launcher;
+mod network_exposure;
 mod proxy_shell;
 mod proxy_transport;
 mod registry;
@@ -18,20 +19,30 @@ use axum::{
     body::Body,
     extract::State,
     http::{StatusCode, header},
+    middleware,
     response::{IntoResponse, Response},
     routing::get,
 };
 #[cfg(feature = "ferrous-framework-native")]
 use ferrous_framework::{FerrousNativeHost, FerrousNativeHostConfig, FerrousNativeManager};
 use launcher::LaunchStore;
+use network_exposure::{NetworkConnectionInfo, NetworkExposurePolicy};
 use registry::{AppRegistry, AppRoot};
 use serde::Serialize;
 use serde_json::{Map as JsonMap, Value, json};
 use sio_proxy::SioRouteIndex;
+use socket2::{Domain, Protocol, Socket, Type};
 use socketioxide::SocketIo;
-use std::{collections::HashMap, env, net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{
+    collections::HashMap,
+    env,
+    net::{IpAddr, SocketAddr},
+    path::PathBuf,
+    sync::Arc,
+};
 use tokio::{
     sync::{Notify, RwLock, broadcast},
+    task::JoinSet,
     time::{Duration, timeout},
 };
 use tower_http::trace::TraceLayer;
@@ -129,6 +140,9 @@ struct Te2RuntimeBridgeConfig {
 #[derive(Debug)]
 struct ServerConfig {
     host: String,
+    bind_hosts: Vec<IpAddr>,
+    internal_host: IpAddr,
+    network_policy: NetworkExposurePolicy,
     port: u16,
     project_root: String,
     app_roots: Vec<AppRoot>,
@@ -148,6 +162,10 @@ struct HealthResponse {
     #[serde(rename = "instanceId")]
     instance_id: String,
     host: String,
+    #[serde(rename = "bindHosts")]
+    bind_hosts: Vec<String>,
+    #[serde(rename = "frameworkUrl")]
+    framework_url: String,
     port: u16,
     project_root: String,
 }
@@ -166,8 +184,9 @@ async fn main() -> Result<()> {
     // server lifetime. The shared Python framework process is not managed here.
     let config = Arc::new(ServerConfig::from_env()?);
     let public_framework_url = config.framework_url();
+    let bind_addrs = config.socket_addrs();
+    let listeners = bind_tcp_listeners(&bind_addrs)?;
     let fws_bridge_runtime = start_fws_bridge(&config, &public_framework_url)?;
-    let addr = config.socket_addr()?;
     let http_client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()
@@ -213,30 +232,45 @@ async fn main() -> Result<()> {
             .map(FerrousNativeHost::manager),
     );
     let app = build_router(state);
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .with_context(|| format!("failed to bind {addr}"))?;
     let shutdown_notify = Arc::new(Notify::new());
-    let server_shutdown = shutdown_notify.clone();
+    let mut servers = JoinSet::new();
 
-    info!(%addr, "starting TE2 Rust framework spike");
-    let server = tokio::spawn(async move {
-        axum::serve(listener, app)
+    info!(bind_addresses = ?bind_addrs, internal_framework_url = %public_framework_url, "starting TE2 Rust framework spike");
+    for listener in listeners {
+        let server_shutdown = shutdown_notify.clone();
+        let listener_app = app.clone();
+        servers.spawn(async move {
+            axum::serve(
+                listener,
+                listener_app.into_make_service_with_connect_info::<NetworkConnectionInfo>(),
+            )
             .with_graceful_shutdown(async move {
                 server_shutdown.notified().await;
             })
             .await
-    });
+        });
+    }
 
     wait_for_shutdown_signal().await;
     info!("TE2 Rust framework spike shutdown signal received");
     shutdown_fws_tree(&fws_bridge_runtime).await;
     shutdown_notify.notify_waiters();
-    match timeout(Duration::from_secs(10), server).await {
-        Ok(Ok(Ok(()))) => {}
-        Ok(Ok(Err(error))) => return Err(error.into()),
-        Ok(Err(error)) => warn!(%error, "server task failed during shutdown"),
-        Err(_) => warn!("HTTP server graceful shutdown timed out"),
+    match timeout(Duration::from_secs(10), async {
+        while let Some(result) = servers.join_next().await {
+            match result {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => warn!(%error, "HTTP server failed during shutdown"),
+                Err(error) => warn!(%error, "HTTP server task failed during shutdown"),
+            }
+        }
+    })
+    .await
+    {
+        Ok(()) => {}
+        Err(_) => {
+            servers.abort_all();
+            warn!("HTTP server graceful shutdown timed out");
+        }
     }
     close_fws_bridge(fws_bridge_runtime).await;
     Ok(())
@@ -245,6 +279,7 @@ async fn main() -> Result<()> {
 fn build_router(state: AppState) -> Router {
     let (socket_layer, io) = SocketIo::builder().with_state(state.clone()).build_layer();
     register_socket_namespaces(&io);
+    let network_policy = state.config.network_policy.clone();
 
     let router = Router::new()
         // Host/frontend compatibility surface.
@@ -259,6 +294,10 @@ fn build_router(state: AppState) -> Router {
     app_proxy::register_sio_proxy_routes(router, state.sio_routes())
         .with_state(state)
         .layer(socket_layer)
+        .layer(middleware::from_fn_with_state(
+            network_policy,
+            network_exposure::enforce_network_exposure,
+        ))
         .layer(TraceLayer::new_for_http())
 }
 
@@ -282,6 +321,13 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
         version: env!("CARGO_PKG_VERSION"),
         instance_id: state.instance_id().to_owned(),
         host: state.config.host.clone(),
+        bind_hosts: state
+            .config
+            .bind_hosts
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
+        framework_url: state.config.framework_url(),
         port: state.config.port,
         project_root: state.config.project_root.clone(),
     })
@@ -311,6 +357,9 @@ impl ServerConfig {
         // Environment names mirror the Python bootstrap contract so this spike
         // can run side-by-side with the existing framework during development.
         let host = env::var("TE2_RUST_SPIKE_HOST").unwrap_or_else(|_| "127.0.0.1".to_owned());
+        let bind_hosts = bind_hosts_from_env(&host)?;
+        let internal_host = internal_host_from_env(&bind_hosts)?;
+        let network_policy = NetworkExposurePolicy::from_env()?;
         let port = env::var("TE2_RUST_SPIKE_PORT")
             .unwrap_or_else(|_| env::var("TE_PORT").unwrap_or_else(|_| "8089".to_owned()))
             .parse::<u16>()
@@ -324,21 +373,103 @@ impl ServerConfig {
         let app_roots = app_roots_from_env(&project_root);
         Ok(Self {
             host,
+            bind_hosts,
+            internal_host,
+            network_policy,
             port,
             project_root,
             app_roots,
         })
     }
 
-    fn socket_addr(&self) -> Result<SocketAddr> {
-        format!("{}:{}", self.host, self.port)
-            .parse()
-            .context("failed to parse socket address")
+    fn socket_addrs(&self) -> Vec<SocketAddr> {
+        self.bind_hosts
+            .iter()
+            .copied()
+            .map(|host| SocketAddr::new(host, self.port))
+            .collect()
     }
 
     fn framework_url(&self) -> String {
-        format!("http://{}:{}", self.host, self.port)
+        format_http_url(self.internal_host, self.port)
     }
+}
+
+fn bind_hosts_from_env(fallback_host: &str) -> Result<Vec<IpAddr>> {
+    let raw_hosts = match env::var("TE2_RUST_SPIKE_BIND_HOSTS") {
+        Ok(raw) => serde_json::from_str::<Vec<String>>(&raw)
+            .context("TE2_RUST_SPIKE_BIND_HOSTS must be a JSON string array")?,
+        Err(env::VarError::NotPresent) => vec![fallback_host.to_owned()],
+        Err(error) => return Err(error).context("failed to read TE2_RUST_SPIKE_BIND_HOSTS"),
+    };
+    if raw_hosts.is_empty() {
+        anyhow::bail!("TE2_RUST_SPIKE_BIND_HOSTS must contain at least one address");
+    }
+    let mut hosts = Vec::with_capacity(raw_hosts.len());
+    for raw in raw_hosts {
+        let host = raw
+            .parse::<IpAddr>()
+            .with_context(|| format!("invalid bind address in TE2_RUST_SPIKE_BIND_HOSTS: {raw}"))?;
+        if !hosts.contains(&host) {
+            hosts.push(host);
+        }
+    }
+    Ok(hosts)
+}
+
+fn internal_host_from_env(bind_hosts: &[IpAddr]) -> Result<IpAddr> {
+    if let Ok(raw) = env::var("TE2_RUST_SPIKE_INTERNAL_HOST") {
+        return raw
+            .parse::<IpAddr>()
+            .context("TE2_RUST_SPIKE_INTERNAL_HOST must be an exact IP address");
+    }
+    if bind_hosts.iter().any(
+        |host| matches!(host, IpAddr::V4(value) if value.is_unspecified() || value.is_loopback()),
+    ) {
+        return Ok(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
+    }
+    if bind_hosts.iter().any(
+        |host| matches!(host, IpAddr::V6(value) if value.is_unspecified() || value.is_loopback()),
+    ) {
+        return Ok(IpAddr::V6(std::net::Ipv6Addr::LOCALHOST));
+    }
+    Ok(bind_hosts[0])
+}
+
+fn format_http_url(host: IpAddr, port: u16) -> String {
+    match host {
+        IpAddr::V4(host) => format!("http://{host}:{port}"),
+        IpAddr::V6(host) => format!("http://[{host}]:{port}"),
+    }
+}
+
+fn bind_tcp_listeners(addrs: &[SocketAddr]) -> Result<Vec<tokio::net::TcpListener>> {
+    addrs.iter().copied().map(bind_tcp_listener).collect()
+}
+
+fn bind_tcp_listener(addr: SocketAddr) -> Result<tokio::net::TcpListener> {
+    let socket = Socket::new(Domain::for_address(addr), Type::STREAM, Some(Protocol::TCP))
+        .with_context(|| format!("failed to create listener socket for {addr}"))?;
+    socket
+        .set_reuse_address(true)
+        .with_context(|| format!("failed to configure listener socket for {addr}"))?;
+    if addr.is_ipv6() {
+        socket
+            .set_only_v6(true)
+            .with_context(|| format!("failed to isolate IPv6 listener {addr}"))?;
+    }
+    socket
+        .bind(&addr.into())
+        .with_context(|| format!("failed to bind {addr}"))?;
+    socket
+        .listen(1024)
+        .with_context(|| format!("failed to listen on {addr}"))?;
+    socket
+        .set_nonblocking(true)
+        .with_context(|| format!("failed to make listener nonblocking for {addr}"))?;
+    let listener: std::net::TcpListener = socket.into();
+    tokio::net::TcpListener::from_std(listener)
+        .with_context(|| format!("failed to register listener with Tokio for {addr}"))
 }
 
 fn app_roots_from_env(project_root: &str) -> Vec<AppRoot> {

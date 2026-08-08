@@ -303,6 +303,22 @@ Exit criteria:
 - a named interface does not expose unrelated interfaces;
 - internal services still connect through a stable loopback origin.
 
+Implementation result:
+
+- the Python bootstrap enumerates Linux/Android interfaces through libc
+  `getifaddrs`, prints a stable JSON inventory, and resolves CLI selectors once
+  into bind hosts plus a serialized immutable policy;
+- exact IP and CIDR selectors match the accepted connection's peer address;
+- interface-name selectors match the accepted socket's local destination
+  address, which restricts exposure to that interface without breaking `/32`
+  VPN interfaces such as Tailscale;
+- Rust opens distinct IPv4 and IPv6 sockets with the IPv6 listener explicitly
+  v6-only, captures peer and local addresses through Axum connect metadata, and
+  applies one outer middleware before Socket.IO and every routed protocol;
+- wildcard/public listeners are independent from the internal framework
+  origin, which remains a usable loopback URL for app workers, Framework-Shells,
+  console, and MCP.
+
 ### Phase 3 — Canonical XDG roots and state migration
 
 This phase is split so the highest-risk durable state does not move in the same

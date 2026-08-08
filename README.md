@@ -90,8 +90,35 @@ te2
 ```
 
 Open `http://127.0.0.1:8089`. TE2 binds to localhost by default. Use
-`te2 --broadcast all` (or a narrower supported broadcast target) when network
-access is intentional.
+`te2 --broadcast all` only when unrestricted network access is intentional.
+Prefer a narrower source or interface policy:
+
+```bash
+# Machine-readable names, addresses, prefixes, and networks.
+te2 --list-interfaces
+
+# Admit traffic whose destination is an address owned by this interface.
+# This works for ordinary LAN adapters and /32 VPN adapters such as Tailscale.
+te2 --broadcast tailscale0
+
+# Admit only one client address or a client subnet.
+te2 --broadcast 100.91.80.45
+te2 --broadcast 100.64.0.0/10
+
+# Mixed IPv4/IPv6 selectors are supported.
+te2 --broadcast 192.168.1.0/24 fd7a:115c:a1e0::/48
+```
+
+Every filtered mode continues to admit loopback. The launcher resolves the
+selectors once, opens only the required IPv4/IPv6 wildcard listeners, and
+enforces the same policy before HTTP, SSE, raw WebSocket, or Socket.IO routing.
+Framework-owned subprocesses continue to receive a loopback
+`TE_FRAMEWORK_URL`, even when public listeners use wildcard addresses.
+
+`--host <exact-ip>` remains an advanced bind override. A non-loopback exact
+host binds that address plus a private same-family loopback listener; wildcard
+host overrides allow all clients. Invalid selectors and interfaces without a
+usable IP address fail before the framework binds any socket.
 
 The first launch builds a fingerprinted Rust binary and caches Cargo/build
 artifacts under the TE2 cache directory. Later launches reuse that binary until

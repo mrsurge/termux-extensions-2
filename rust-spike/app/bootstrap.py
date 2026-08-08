@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import hashlib
 import importlib
+import json
 import os
 import secrets
 import signal
@@ -13,9 +15,10 @@ import sys
 import time
 from collections.abc import Callable, MutableMapping, Sequence
 from dataclasses import dataclass
+from ipaddress import IPv4Address, IPv6Address, ip_address, ip_network
 from pathlib import Path
 from types import FrameType
-from typing import cast
+from typing import Any, cast
 
 APP_ID = "te2-rust-spike"
 DEFAULT_HOST = "127.0.0.1"
@@ -40,6 +43,7 @@ class BootstrapArgs:
     print_command: bool
     no_ferrous_framework: bool
     broadcast: list[str] | None
+    list_interfaces: bool
     framework_shells_base_dir: str | None
     framework_shells_secret: str | None
     framework_shells_repo_fingerprint: str | None
@@ -54,8 +58,46 @@ class ServerCommand:
     build_already_done: bool = False
 
 
+@dataclass(frozen=True)
+class InterfaceAddress:
+    name: str
+    address: str
+    prefix_length: int
+
+    @property
+    def ip(self) -> IPv4Address | IPv6Address:
+        return ip_address(self.address)
+
+    @property
+    def network(self) -> str:
+        return ip_network(f"{self.address}/{self.prefix_length}", strict=False).with_prefixlen
+
+
+@dataclass(frozen=True)
+class NetworkExposureConfig:
+    bind_hosts: tuple[str, ...]
+    internal_host: str
+    allow_all: bool
+    source_networks: tuple[str, ...]
+    local_addresses: tuple[str, ...]
+
+    def policy_json(self) -> str:
+        return json.dumps(
+            {
+                "allowAll": self.allow_all,
+                "sourceNetworks": list(self.source_networks),
+                "localAddresses": list(self.local_addresses),
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(argv)
+    if args.list_interfaces:
+        print(json.dumps(_interface_inventory(), indent=2, sort_keys=True))
+        return 0
     env = _build_env(args)
     command = _server_command(args, env, build=not args.print_command)
     if args.print_command:
@@ -109,7 +151,12 @@ def _parse_args(argv: Sequence[str] | None) -> BootstrapArgs:
         "--broadcast",
         nargs="+",
         metavar="IP_SUBNET_OR_IFACE",
-        help='Enable broadcasting. Requires args: "all", IPs, subnets, or interfaces',
+        help='Expose TE2 through "all", exact client IPs, CIDR subnets, or interface names.',
+    )
+    parser.add_argument(
+        "--list-interfaces",
+        action="store_true",
+        help="Print structured interface/address information as JSON and exit.",
     )
     parser.add_argument(
         "--no-ferrous-framework",
@@ -146,6 +193,7 @@ def _parse_args(argv: Sequence[str] | None) -> BootstrapArgs:
         build_only=cast(bool, raw.build_only),
         print_command=cast(bool, raw.print_command),
         no_ferrous_framework=cast(bool, raw.no_ferrous_framework),
+        list_interfaces=cast(bool, raw.list_interfaces),
         framework_shells_base_dir=cast(str | None, raw.framework_shells_base_dir),
         framework_shells_secret=cast(str | None, raw.framework_shells_secret),
         framework_shells_repo_fingerprint=cast(str | None, raw.framework_shells_repo_fingerprint),
@@ -165,19 +213,22 @@ def _build_env(args: BootstrapArgs) -> dict[str, str]:
         Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))) / "te2" / "apps",
     ]
 
-    listen_host = _resolve_listen_host(args)
-    env["TE2_RUST_SPIKE_HOST"] = listen_host
+    exposure = _resolve_network_exposure(args)
+    env["TE2_RUST_SPIKE_HOST"] = exposure.bind_hosts[0]
+    env["TE2_RUST_SPIKE_BIND_HOSTS"] = json.dumps(list(exposure.bind_hosts), separators=(",", ":"))
+    env["TE2_RUST_SPIKE_INTERNAL_HOST"] = exposure.internal_host
+    env["TE2_RUST_SPIKE_NETWORK_POLICY"] = exposure.policy_json()
     env["TE2_RUST_SPIKE_PORT"] = str(args.port)
     env["TE2_RUST_SPIKE_PROJECT_ROOT"] = str(project_root)
     env["TE2_RUST_SPIKE_APP_ROOTS"] = os.pathsep.join(str(root) for root in app_roots)
     env["TE_PORT"] = str(args.port)
-    env["TE_FRAMEWORK_URL"] = f"http://{listen_host}:{args.port}"
+    env["TE_FRAMEWORK_URL"] = _http_url(exposure.internal_host, args.port)
     runtime_bridge_host = env.get("TE2_RUST_SPIKE_RUNTIME_BRIDGE_HOST", DEFAULT_RUNTIME_BRIDGE_HOST)
     runtime_bridge_port = env.get("TE2_RUST_SPIKE_RUNTIME_BRIDGE_PORT") or str(_reserve_local_port(runtime_bridge_host))
     env["TE2_RUST_SPIKE_RUNTIME_BRIDGE_HOST"] = runtime_bridge_host
     env["TE2_RUST_SPIKE_RUNTIME_BRIDGE_PORT"] = runtime_bridge_port
     env["TE2_RUST_SPIKE_RUNTIME_BRIDGE_URL"] = f"http://{runtime_bridge_host}:{runtime_bridge_port}"
-    env.setdefault("FRAMEWORK_SHELLS_FWS_SOCKETIO_URL", env["TE_FRAMEWORK_URL"])
+    env["FRAMEWORK_SHELLS_FWS_SOCKETIO_URL"] = env["TE_FRAMEWORK_URL"]
     pythonpath_parts = [part for part in env.get("PYTHONPATH", "").split(os.pathsep) if part]
     prepend_paths = [str(project_root)]
     if framework_shells_root.exists():
@@ -202,10 +253,12 @@ def _normalize_broadcast_arg(raw_broadcast: Sequence[str] | None) -> list[str] |
         return None
 
     broadcast = [str(item).strip() for item in raw_broadcast]
+    if not broadcast or any(not item for item in broadcast):
+        raise SystemExit("--broadcast requires non-empty selectors")
     if "all" in broadcast:
         return ["all"]
 
-    return broadcast
+    return list(dict.fromkeys(broadcast))
 
 
 def _server_command(
@@ -291,11 +344,216 @@ def _cached_server_command(
     return ServerCommand([str(cached_binary)], build_already_done=True)
 
 
-def _resolve_listen_host(args: BootstrapArgs) -> str:
-    if args.broadcast and "all" in args.broadcast:
-        return "0.0.0.0"
+def _resolve_network_exposure(
+    args: BootstrapArgs,
+    interface_addresses: Sequence[InterfaceAddress] | None = None,
+) -> NetworkExposureConfig:
+    try:
+        requested_host = ip_address(str(args.host).strip())
+    except ValueError as exc:
+        raise SystemExit(f"--host must be an exact IPv4 or IPv6 address: {args.host!r}") from exc
 
-    return args.host
+    if args.broadcast is None:
+        host = str(requested_host)
+        if requested_host.is_loopback:
+            return NetworkExposureConfig((host,), host, False, (), ())
+        if requested_host.is_unspecified:
+            return NetworkExposureConfig((host,), _loopback_for(requested_host), True, (), ())
+        loopback = _loopback_for(requested_host)
+        return NetworkExposureConfig((host, loopback), loopback, True, (), ())
+
+    if args.broadcast == ["all"]:
+        return NetworkExposureConfig(("0.0.0.0", "::"), "127.0.0.1", True, (), ())
+
+    addresses_by_name: dict[str, list[InterfaceAddress]] | None = None
+    source_networks: set[str] = set()
+    local_addresses: set[str] = set()
+    families: set[int] = set()
+
+    for selector in args.broadcast:
+        if "/" in selector:
+            try:
+                network = ip_network(selector, strict=False)
+            except ValueError as exc:
+                raise SystemExit(f"invalid --broadcast CIDR selector {selector!r}: {exc}") from exc
+            source_networks.add(network.with_prefixlen)
+            families.add(network.version)
+            continue
+
+        try:
+            address = ip_address(selector)
+        except ValueError:
+            if addresses_by_name is None:
+                discovered = list(interface_addresses) if interface_addresses is not None else _interface_addresses()
+                addresses_by_name = {}
+                for item in discovered:
+                    addresses_by_name.setdefault(item.name, []).append(item)
+            selected = addresses_by_name.get(selector)
+            if not selected:
+                raise SystemExit(
+                    f"--broadcast interface {selector!r} does not exist or has no usable IP addresses"
+                )
+            for item in selected:
+                local_addresses.add(str(item.ip))
+                families.add(item.ip.version)
+            continue
+
+        prefix = 32 if address.version == 4 else 128
+        source_networks.add(ip_network(f"{address}/{prefix}", strict=False).with_prefixlen)
+        families.add(address.version)
+
+    if not families:
+        raise SystemExit("--broadcast selectors resolved to no usable IPv4 or IPv6 exposure")
+
+    bind_hosts: list[str] = []
+    if 4 in families:
+        bind_hosts.append("0.0.0.0")
+    if 6 in families:
+        bind_hosts.append("::")
+    if 4 not in families:
+        bind_hosts.append("127.0.0.1")
+
+    return NetworkExposureConfig(
+        tuple(bind_hosts),
+        "127.0.0.1",
+        False,
+        tuple(sorted(source_networks)),
+        tuple(sorted(local_addresses, key=lambda value: (ip_address(value).version, ip_address(value).packed))),
+    )
+
+
+def _loopback_for(address: IPv4Address | IPv6Address) -> str:
+    return "127.0.0.1" if address.version == 4 else "::1"
+
+
+def _http_url(host: str, port: str | int) -> str:
+    parsed = ip_address(host)
+    formatted = f"[{parsed}]" if parsed.version == 6 else str(parsed)
+    return f"http://{formatted}:{port}"
+
+
+def _interface_inventory(
+    interface_addresses: Sequence[InterfaceAddress] | None = None,
+) -> dict[str, list[dict[str, object]]]:
+    discovered = list(interface_addresses) if interface_addresses is not None else _interface_addresses()
+    grouped: dict[str, list[InterfaceAddress]] = {}
+    for item in discovered:
+        grouped.setdefault(item.name, []).append(item)
+    interfaces: list[dict[str, object]] = []
+    for name in sorted(set(grouped) | {item[1] for item in socket.if_nameindex()}):
+        addresses = sorted(grouped.get(name, []), key=lambda item: (item.ip.version, item.ip.packed))
+        interfaces.append(
+            {
+                "name": name,
+                "index": socket.if_nametoindex(name),
+                "addresses": [
+                    {
+                        "family": "ipv4" if item.ip.version == 4 else "ipv6",
+                        "address": str(item.ip),
+                        "prefixLength": item.prefix_length,
+                        "network": item.network,
+                    }
+                    for item in addresses
+                ],
+            }
+        )
+    return {"interfaces": interfaces}
+
+
+class _SockAddr(ctypes.Structure):
+    _fields_ = [("sa_family", ctypes.c_ushort), ("sa_data", ctypes.c_ubyte * 14)]
+
+
+class _SockAddrIn(ctypes.Structure):
+    _fields_ = [
+        ("sin_family", ctypes.c_ushort),
+        ("sin_port", ctypes.c_ushort),
+        ("sin_addr", ctypes.c_ubyte * 4),
+        ("sin_zero", ctypes.c_ubyte * 8),
+    ]
+
+
+class _SockAddrIn6(ctypes.Structure):
+    _fields_ = [
+        ("sin6_family", ctypes.c_ushort),
+        ("sin6_port", ctypes.c_ushort),
+        ("sin6_flowinfo", ctypes.c_uint32),
+        ("sin6_addr", ctypes.c_ubyte * 16),
+        ("sin6_scope_id", ctypes.c_uint32),
+    ]
+
+
+class _IfAddrs(ctypes.Structure):
+    pass
+
+
+_IfAddrsPointer = ctypes.POINTER(_IfAddrs)
+_IfAddrs._fields_ = [
+    ("ifa_next", _IfAddrsPointer),
+    ("ifa_name", ctypes.c_char_p),
+    ("ifa_flags", ctypes.c_uint),
+    ("ifa_addr", ctypes.POINTER(_SockAddr)),
+    ("ifa_netmask", ctypes.POINTER(_SockAddr)),
+    ("ifa_ifu", ctypes.POINTER(_SockAddr)),
+    ("ifa_data", ctypes.c_void_p),
+]
+
+
+def _interface_addresses() -> list[InterfaceAddress]:
+    libc = ctypes.CDLL(None, use_errno=True)
+    getifaddrs = libc.getifaddrs
+    freeifaddrs = libc.freeifaddrs
+    getifaddrs.argtypes = [ctypes.POINTER(_IfAddrsPointer)]
+    getifaddrs.restype = ctypes.c_int
+    freeifaddrs.argtypes = [_IfAddrsPointer]
+    freeifaddrs.restype = None
+
+    head = _IfAddrsPointer()
+    if getifaddrs(ctypes.byref(head)) != 0:
+        errno_value = ctypes.get_errno()
+        raise SystemExit(f"failed to enumerate network interfaces: {os.strerror(errno_value)}")
+
+    discovered: dict[tuple[str, str, int], InterfaceAddress] = {}
+    try:
+        current = head
+        while current:
+            entry = current.contents
+            if entry.ifa_name and entry.ifa_addr:
+                family = int(entry.ifa_addr.contents.sa_family)
+                if family in (socket.AF_INET, socket.AF_INET6):
+                    raw_address = _sockaddr_bytes(entry.ifa_addr, family)
+                    address = ip_address(socket.inet_ntop(family, raw_address))
+                    if not address.is_unspecified and not address.is_multicast:
+                        prefix_length = _netmask_prefix_length(entry.ifa_netmask, family)
+                        if prefix_length is not None:
+                            name = entry.ifa_name.decode("utf-8", "surrogateescape")
+                            item = InterfaceAddress(name, str(address), prefix_length)
+                            discovered[(item.name, item.address, item.prefix_length)] = item
+            current = entry.ifa_next
+    finally:
+        freeifaddrs(head)
+
+    return sorted(
+        discovered.values(),
+        key=lambda item: (item.name, item.ip.version, item.ip.packed, item.prefix_length),
+    )
+
+
+def _sockaddr_bytes(pointer: Any, family: int) -> bytes:
+    if family == socket.AF_INET:
+        value = ctypes.cast(pointer, ctypes.POINTER(_SockAddrIn)).contents.sin_addr
+    else:
+        value = ctypes.cast(pointer, ctypes.POINTER(_SockAddrIn6)).contents.sin6_addr
+    return bytes(value)
+
+
+def _netmask_prefix_length(pointer: Any | None, family: int) -> int | None:
+    if not pointer:
+        return None
+    bits = "".join(f"{byte:08b}" for byte in _sockaddr_bytes(pointer, family))
+    if "01" in bits:
+        return None
+    return bits.count("1")
 
 
 def _ferrous_framework_enabled(args: BootstrapArgs) -> bool:
@@ -453,7 +711,8 @@ def _rust_source_fingerprint(manifest: Path, *, profile: str, features: Sequence
     hasher.update(b"\0")
     hasher.update(sys.platform.encode("utf-8"))
     hasher.update(b"\0")
-    hasher.update(getattr(os, "uname", lambda: None)().machine.encode("utf-8") if hasattr(os, "uname") else b"")
+    uname_result = os.uname() if hasattr(os, "uname") else None
+    hasher.update(uname_result.machine.encode("utf-8") if uname_result is not None else b"")
     for path in _rust_fingerprint_paths(workspace):
         rel = path.relative_to(workspace).as_posix()
         hasher.update(b"\0path:")

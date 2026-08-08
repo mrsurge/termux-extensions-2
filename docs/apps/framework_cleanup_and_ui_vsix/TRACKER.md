@@ -8,7 +8,7 @@ Last updated: 2026-08-08
 |---|---|---|
 | Phase 0: documentation and inventory | Complete | Planning documents plus the required repo-memory pointer only |
 | Phase 1: generic WBA hover fidelity | Implemented; remaining live language checks pending | Approved, including generic fenced-language tokenizer preload |
-| Phase 2: interface-scoped framework exposure | Not started | Requires implementation approval and separate live-runtime approval |
+| Phase 2: interface-scoped framework exposure | Implemented and active-framework validated on Linux; Termux check pending | Implementation and live-runtime restart approved |
 | Phase 3A: shared paths and rebuildable caches | Not started | Requires implementation approval |
 | Phase 3B: framework durable stores | Not started | Requires implementation and migration approval |
 | Phase 3C: Code TE2 durable state | Not started | Requires implementation and migration approval |
@@ -87,23 +87,25 @@ prove current ownership; current source is the authority.
 
 ## Phase 2 checklist — network interface exposure
 
-- [ ] Define typed listener/internal-origin/exposure-policy configuration.
-- [ ] Restore `--list-interfaces`.
-- [ ] Resolve `all`.
-- [ ] Resolve exact IPv4 and IPv6 selectors.
-- [ ] Resolve IPv4 and IPv6 CIDR selectors.
-- [ ] Resolve interface-name selectors on Linux and Termux/Android.
-- [ ] Reject invalid or empty selectors before binding.
-- [ ] Preserve loopback-only default.
-- [ ] Keep internal framework URL on a usable loopback origin.
-- [ ] Enforce policy on ordinary HTTP.
-- [ ] Enforce policy on SSE.
-- [ ] Enforce policy on raw WebSocket upgrades.
-- [ ] Enforce policy on Socket.IO upgrades.
-- [ ] Add parser, resolver, and allowlist unit tests.
-- [ ] Add allowed/blocked integration tests.
-- [ ] Update CLI help and README examples.
-- [ ] Request explicit approval before restarting the shared framework for live validation.
+- [x] Define typed listener/internal-origin/exposure-policy configuration.
+- [x] Restore `--list-interfaces`.
+- [x] Resolve `all`.
+- [x] Resolve exact IPv4 and IPv6 selectors.
+- [x] Resolve IPv4 and IPv6 CIDR selectors.
+- [x] Resolve interface-name selectors through Linux/Android `getifaddrs`.
+- [x] Reject invalid or empty selectors before binding.
+- [x] Preserve loopback-only default.
+- [x] Keep internal framework URL on a usable loopback origin.
+- [x] Enforce policy on ordinary HTTP.
+- [x] Enforce policy on SSE.
+- [x] Enforce policy on raw WebSocket upgrades.
+- [x] Enforce policy on Socket.IO upgrades.
+- [x] Add parser, resolver, and allowlist unit tests.
+- [x] Add allowed/blocked real-socket integration tests.
+- [x] Update CLI help and README examples.
+- [x] Obtain explicit approval before restarting the shared framework for live validation.
+- [ ] Run `te2 --list-interfaces` in a live Termux environment.
+- [x] Restart the active framework with the rebuilt binary and validate its normal runtime surfaces.
 
 ## Phase 3 checklist — XDG consolidation and migration
 
@@ -204,3 +206,6 @@ each phase executes. Do not mark a phase complete from implementation alone.
 | 2026-08-07 | 0 | Read-only CLI/source/path/hover/UI-foundation investigation | Passed; plan and tracker created |
 | 2026-08-08 | 1 | Focused hover/alias/provider-order tests; TypeScript; full frontend suite; host build | Passed; 169 tests, 0 failures |
 | 2026-08-08 | 1 | Server-served JavaScript hover before/after tokenizer and rendered-DOM probe | Passed; TypeScript fence advanced from empty tokens to TextMate scopes and multiple themed `mtk` classes |
+| 2026-08-08 | 2 | Bootstrap parser/resolver/native interface tests; full Rust suite; Rust formatting/check; Python static analysis | Passed; 14 bootstrap tests, 59 Rust tests, 4 ignored benchmarks, 0 failures; basedpyright 0 errors |
+| 2026-08-08 | 2 | Isolated dual-stack server with Tailscale interface destination policy | Passed; loopback and selected interface accepted HTTP/SSE/WebSocket/Socket.IO, unselected interface rejected all four with 403 |
+| 2026-08-08 | 2 | Release/Ferrous active-framework restart using `--broadcast tailscale0` | Passed; native IPv4/IPv6 listeners replaced `socat`, Electron/console reconnected, Terminal and File Explorer reached ready, and worker `TE_FRAMEWORK_URL`/FWS URL remained loopback |
