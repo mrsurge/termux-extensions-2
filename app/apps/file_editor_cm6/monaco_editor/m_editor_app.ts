@@ -15,7 +15,7 @@ import { deriveApiBase } from "./editor_api_base_utils.ts";
 import { absPathFromVscodeUri } from "./editor_vscode_uri_utils.ts";
 import {
   monacoRangeFromProtoRange,
-  toMonacoHoverContents,
+  projectMonacoHoverContents,
   isLanguageContextCurrent,
 } from "./editor_bridge_utils.ts";
 import {
@@ -1076,7 +1076,8 @@ interface MonacoBootWindowLike extends Window {
     monacoRangeFromProtoRange: function (range: unknown) {
       return monacoRangeFromProtoRange(window.monaco, range);
     },
-    toMonacoHoverContents: toMonacoHoverContents,
+    projectMonacoHoverContents: projectMonacoHoverContents,
+    ensureTextmateTokenization: ensureTextmateTokenization,
     flushMirrorDebounce: _flushMirrorDebounce,
     ensureWorkbenchLanguageCatalogInstalled: function () {
       return ensureWorkbenchLanguageCatalogInstalled().then(function () {});

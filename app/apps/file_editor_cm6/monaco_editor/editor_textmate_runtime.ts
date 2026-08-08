@@ -8,6 +8,7 @@
 import { URI } from '../../../static/vendor/monaco-editor-core/esm/vs/base/common/uri.js';
 import * as vscodeTextmate from '../vendor/vscode-textmate';
 import * as vscodeOniguruma from '../vendor/vscode-oniguruma';
+import { resolveMonacoLanguageId } from './editor_language_utils.ts';
 import { TMGrammarFactory, missingTMGrammarErrorMessage } from './vscode_workbench_textmate_vendor/TMGrammarFactory.js';
 import {
   IValidEmbeddedLanguagesMap,
@@ -31,7 +32,7 @@ interface WindowTextmateLike extends Window {
     };
     languages?: {
       setColorMap?(colorMap: string[]): void;
-      getLanguages?(): Array<{ id?: string }>;
+      getLanguages?(): Array<{ id?: string; aliases?: string[] }>;
       register?(desc: Record<string, unknown>): void;
       setTokensProvider?(languageId: string, provider: Record<string, unknown>): void;
       getEncodedLanguageId?(languageId: string): number;
@@ -456,7 +457,10 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
       const monacoLanguages = win.monaco?.languages;
       if (!monacoLanguages || typeof monacoLanguages.setTokensProvider !== 'function') return false;
 
-      const lang = deps.normalizeLanguage(languageId);
+      const knownLangs = typeof monacoLanguages.getLanguages === 'function'
+        ? monacoLanguages.getLanguages()
+        : [];
+      const lang = resolveMonacoLanguageId(languageId, knownLangs);
       if (!lang) return false;
       if (tmInstalled[lang]) return true;
       const inflight = tmInstallInflight[lang];
@@ -469,7 +473,6 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
           return false;
         }
 
-        const knownLangs = typeof monacoLanguages.getLanguages === 'function' ? monacoLanguages.getLanguages() : [];
         if (!knownLangs.some((entry) => entry && entry.id === lang) && typeof monacoLanguages.register === 'function') {
           monacoLanguages.register({ id: lang });
         }

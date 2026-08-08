@@ -23,6 +23,23 @@ async function loadProvidersModule() {
   return import(url);
 }
 
+async function loadBridgeUtils() {
+  const result = await build({
+    entryPoints: [
+      path.join(appRoot, "monaco_editor/editor_bridge_utils.ts"),
+    ],
+    bundle: true,
+    format: "esm",
+    platform: "node",
+    target: "es2022",
+    write: false,
+  });
+  const url = `data:text/javascript;base64,${Buffer.from(
+    result.outputFiles[0].text,
+  ).toString("base64")}#${Date.now()}`;
+  return import(url);
+}
+
 function languageBridgeState() {
   return {
     registeredHover: new Set(),
@@ -56,11 +73,20 @@ function languageBridgeState() {
   };
 }
 
-function createHarness(createEditorLanguageBridgeProviders, workersEnabled) {
+function createHarness(
+  createEditorLanguageBridgeProviders,
+  workersEnabled,
+  options = {},
+) {
   const registrations = {};
   const calls = [];
+  const tokenizationCalls = [];
   const languageBridge = languageBridgeState();
   const languages = {
+    registerHoverProvider(language, provider) {
+      registrations.hover = { language, provider };
+      return { dispose() {} };
+    },
     registerDocumentHighlightProvider(language, provider) {
       registrations.documentHighlights = { language, provider };
       return { dispose() {} };
@@ -140,11 +166,44 @@ function createHarness(createEditorLanguageBridgeProviders, workersEnabled) {
         ],
       };
     },
+    callWorkbenchProviderGuarded: async (kind, method, params) => {
+      calls.push({ kind, method, params });
+      return {
+        ok: true,
+        result: {
+          range: {
+            startLineNumber: 1,
+            startColumn: 1,
+            endLineNumber: 1,
+            endColumn: 4,
+          },
+          contents: [
+            {
+              value: "\n```typescript\nconst value: number\n```\n",
+            },
+          ],
+        },
+      };
+    },
+    projectMonacoHoverContents: options.projectMonacoHoverContents,
+    ensureTextmateTokenization: async (languageId, filePath) => {
+      tokenizationCalls.push({ languageId, filePath });
+      if (options.tokenizationGate) await options.tokenizationGate;
+      return true;
+    },
+    ensureWorkbenchLanguageCatalogInstalled: async () => {},
+    getWorkbenchLanguageIds: () => [context.languageId],
     monacoRangeFromProtoRange: (range) => range,
     flushMirrorDebounce() {},
     languageBridge,
   });
-  return { providers, registrations, calls, context };
+  return {
+    providers,
+    registrations,
+    calls,
+    context,
+    tokenizationCalls,
+  };
 }
 
 test("WBA position providers register identically for any advertised language", async () => {
@@ -201,4 +260,42 @@ test("Monaco Web Worker mode does not register WBA language providers", async ()
     "example-language",
   );
   assert.deepEqual(harness.registrations, {});
+});
+
+test("hover waits for every fenced language tokenizer before returning", async () => {
+  const [{ createEditorLanguageBridgeProviders }, { projectMonacoHoverContents }] =
+    await Promise.all([loadProvidersModule(), loadBridgeUtils()]);
+  let releaseTokenization;
+  const tokenizationGate = new Promise((resolve) => {
+    releaseTokenization = resolve;
+  });
+  const harness = createHarness(createEditorLanguageBridgeProviders, false, {
+    projectMonacoHoverContents,
+    tokenizationGate,
+  });
+  harness.providers.installWorkbenchLanguageBridgeProviders();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const model = { uri: { toString: () => harness.context.uri } };
+  let settled = false;
+  const hoverPromise = harness.registrations.hover.provider
+    .provideHover(model, { lineNumber: 1, column: 2 }, {})
+    .then((value) => {
+      settled = true;
+      return value;
+    });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(settled, false);
+  assert.deepEqual(harness.tokenizationCalls, [
+    {
+      languageId: "typescript",
+      filePath: harness.context.path,
+    },
+  ]);
+
+  releaseTokenization(true);
+  const hover = await hoverPromise;
+  assert.equal(settled, true);
+  assert.equal(hover.contents[0].value.includes("```typescript"), true);
 });

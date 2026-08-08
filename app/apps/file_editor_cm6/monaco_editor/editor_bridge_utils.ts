@@ -29,6 +29,39 @@ interface CompletionEditRangeLike {
 interface HoverContentObjectLike {
   value?: unknown;
   language?: unknown;
+  isTrusted?: unknown;
+  supportThemeIcons?: unknown;
+  supportHtml?: unknown;
+  supportAlertSyntax?: unknown;
+  baseUri?: unknown;
+  uris?: unknown;
+}
+
+interface MonacoUriComponentsLike {
+  scheme: string;
+  authority?: string;
+  path?: string;
+  query?: string;
+  fragment?: string;
+}
+
+interface MonacoMarkdownTrustedOptionsLike {
+  enabledCommands: string[];
+}
+
+export interface MonacoHoverContentLike {
+  value: string;
+  isTrusted?: boolean | MonacoMarkdownTrustedOptionsLike;
+  supportThemeIcons?: boolean;
+  supportHtml?: boolean;
+  supportAlertSyntax?: boolean;
+  baseUri?: MonacoUriComponentsLike;
+  uris?: Record<string, MonacoUriComponentsLike>;
+}
+
+export interface MonacoHoverProjectionLike {
+  contents: MonacoHoverContentLike[];
+  codeLanguages: string[];
 }
 
 interface LanguageContextLike {
@@ -53,22 +86,97 @@ export function monacoRangeFromProtoRange(
   }
 }
 
-export function toMonacoHoverContents(raw: unknown): Array<{ value: string }> {
-  const out: Array<{ value: string }> = [];
-  if (!Array.isArray(raw)) return out;
-  for (const content of raw) {
-    if (typeof content === 'string') {
-      out.push({ value: content });
-    } else if (content && typeof content === 'object') {
-      const hoverContent = content as HoverContentObjectLike;
-      if (typeof hoverContent.value === 'string') {
-        out.push({ value: hoverContent.value });
-      } else if (typeof hoverContent.language === 'string' && typeof hoverContent.value === 'string') {
-        out.push({ value: `\`\`\`${hoverContent.language}\n${hoverContent.value}\n\`\`\`` });
-      }
-    }
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizeUriComponents(value: unknown): MonacoUriComponentsLike | undefined {
+  if (!isRecord(value) || typeof value.scheme !== 'string') return undefined;
+  const out: MonacoUriComponentsLike = { scheme: value.scheme };
+  for (const key of ['authority', 'path', 'query', 'fragment'] as const) {
+    const part = value[key];
+    if (typeof part === 'string') out[key] = part;
   }
   return out;
+}
+
+function normalizeTrusted(value: unknown): boolean | MonacoMarkdownTrustedOptionsLike | undefined {
+  if (typeof value === 'boolean') return value;
+  if (!isRecord(value) || !Array.isArray(value.enabledCommands)) return undefined;
+  if (!value.enabledCommands.every((command) => typeof command === 'string')) return undefined;
+  return { enabledCommands: value.enabledCommands.slice() };
+}
+
+function normalizeMarkdownHoverContent(content: HoverContentObjectLike): MonacoHoverContentLike | null {
+  if (typeof content.value !== 'string') return null;
+  const out: MonacoHoverContentLike = { value: content.value };
+
+  const isTrusted = normalizeTrusted(content.isTrusted);
+  if (isTrusted !== undefined) out.isTrusted = isTrusted;
+
+  for (const key of ['supportThemeIcons', 'supportHtml', 'supportAlertSyntax'] as const) {
+    const flag = content[key];
+    if (typeof flag === 'boolean') out[key] = flag;
+  }
+
+  const baseUri = normalizeUriComponents(content.baseUri);
+  if (baseUri) out.baseUri = baseUri;
+
+  if (isRecord(content.uris)) {
+    const uris: Record<string, MonacoUriComponentsLike> = {};
+    for (const [href, value] of Object.entries(content.uris)) {
+      const uri = normalizeUriComponents(value);
+      if (uri) uris[href] = uri;
+    }
+    out.uris = uris;
+  }
+
+  return out;
+}
+
+function fencedCodeLanguages(value: string): string[] {
+  const out: string[] = [];
+  const opener = /^[ \t]{0,3}(?:`{3,}|~{3,})[ \t]*([^\s`~]+)[^\r\n]*$/gm;
+  for (const match of value.matchAll(opener)) {
+    const language = String(match[1] || '').trim();
+    if (language) out.push(language);
+  }
+  return out;
+}
+
+export function projectMonacoHoverContents(raw: unknown): MonacoHoverProjectionLike {
+  const out: MonacoHoverContentLike[] = [];
+  const codeLanguages: string[] = [];
+  const seenCodeLanguages = new Set<string>();
+  if (!Array.isArray(raw)) return { contents: out, codeLanguages };
+  for (const content of raw) {
+    let normalized: MonacoHoverContentLike | null = null;
+    if (typeof content === 'string') {
+      normalized = { value: content };
+    } else if (isRecord(content)) {
+      const hoverContent = content as HoverContentObjectLike;
+      if (Object.prototype.hasOwnProperty.call(hoverContent, 'language')) {
+        if (typeof hoverContent.language === 'string' && typeof hoverContent.value === 'string') {
+          normalized = { value: `\`\`\`${hoverContent.language}\n${hoverContent.value}\n\`\`\`\n` };
+        }
+      } else {
+        normalized = normalizeMarkdownHoverContent(hoverContent);
+      }
+    }
+    if (!normalized) continue;
+    out.push(normalized);
+    for (const language of fencedCodeLanguages(normalized.value)) {
+      const key = language.toLowerCase();
+      if (seenCodeLanguages.has(key)) continue;
+      seenCodeLanguages.add(key);
+      codeLanguages.push(language);
+    }
+  }
+  return { contents: out, codeLanguages };
+}
+
+export function toMonacoHoverContents(raw: unknown): MonacoHoverContentLike[] {
+  return projectMonacoHoverContents(raw).contents;
 }
 
 export function isLanguageContextCurrent(

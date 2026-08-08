@@ -408,7 +408,11 @@ interface CreateEditorLanguageBridgeProvidersDeps {
   ): Promise<unknown>;
   absPathFromVscodeUri(raw: string): string | null;
   monacoRangeFromProtoRange(range: unknown): unknown;
-  toMonacoHoverContents(raw: unknown): unknown[];
+  projectMonacoHoverContents(raw: unknown): {
+    contents: unknown[];
+    codeLanguages: string[];
+  };
+  ensureTextmateTokenization(languageId: unknown, filePath: unknown): Promise<boolean>;
   flushMirrorDebounce(): void;
   ensureWorkbenchLanguageCatalogInstalled(): Promise<void>;
   getWorkbenchLanguageIds(): Iterable<string>;
@@ -2251,7 +2255,7 @@ export function createEditorLanguageBridgeProviders(
                         ctx,
                         { timeoutMs: 5000, cancelToken: token },
                       )
-                      .then((out) => {
+                      .then(async (out) => {
                         const payload = out.ok
                           ? extractGuardedPayload(out)
                           : null;
@@ -2264,10 +2268,30 @@ export function createEditorLanguageBridgeProviders(
                         const range = deps.monacoRangeFromProtoRange(
                           hoverPayload.range,
                         );
-                        const contents = deps.toMonacoHoverContents(
+                        const projection = deps.projectMonacoHoverContents(
                           hoverPayload.contents,
                         );
+                        const contents = projection.contents;
                         if (!contents.length) return null;
+                        if (projection.codeLanguages.length) {
+                          await Promise.all(
+                            projection.codeLanguages.map((languageId) =>
+                              deps.ensureTextmateTokenization(
+                                languageId,
+                                ctx.path,
+                              ),
+                            ),
+                          );
+                        }
+                        const currentCtx = deps.getCurrentLanguageContext();
+                        if (
+                          token?.isCancellationRequested ||
+                          !currentCtx ||
+                          String(currentCtx.uri) !== String(ctx.uri) ||
+                          Number(currentCtx.version) !== Number(ctx.version)
+                        ) {
+                          return null;
+                        }
                         return { range: range || undefined, contents };
                       });
                   } catch (_) {

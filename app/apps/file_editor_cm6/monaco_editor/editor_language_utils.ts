@@ -6,6 +6,11 @@ interface MonacoUriContainerLike {
   Uri?: MonacoUriNamespaceLike;
 }
 
+interface MonacoLanguageDescriptorLike {
+  id?: unknown;
+  aliases?: unknown;
+}
+
 export function normalizeLanguageId(lang: unknown): string {
   if (!lang) return 'plaintext';
   const value = String(lang).toLowerCase();
@@ -13,6 +18,28 @@ export function normalizeLanguageId(lang: unknown): string {
   if (value === 'shell') return 'shell';
   if (value === 'cpp') return 'cpp';
   return value;
+}
+
+export function resolveMonacoLanguageId(
+  language: unknown,
+  registeredLanguages: readonly MonacoLanguageDescriptorLike[] | null | undefined,
+): string {
+  const requested = String(language || '').trim().toLowerCase();
+  if (!requested) return '';
+  for (const descriptor of registeredLanguages || []) {
+    const id = typeof descriptor.id === 'string' ? descriptor.id.trim() : '';
+    if (!id) continue;
+    if (id.toLowerCase() === requested) return id;
+    if (
+      Array.isArray(descriptor.aliases) &&
+      descriptor.aliases.some(
+        (alias) => typeof alias === 'string' && alias.trim().toLowerCase() === requested,
+      )
+    ) {
+      return id;
+    }
+  }
+  return normalizeLanguageId(requested);
 }
 
 export function languageIdFromPath(

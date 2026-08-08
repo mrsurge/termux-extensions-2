@@ -3154,6 +3154,17 @@ t+20s    user hovers → provideHover fires → editorWorkbenchCall('hover')
 | `workbench_protocol_proxy/node_workbench_adapter/src/extensions/intelligence/code-navigation.ts` | Multi-provider document highlights, definitions, references, implementations, and call hierarchy. |
 | `workbench_protocol_proxy/node_workbench_adapter/src/server/request-dispatch.ts` | Dispatches the direct `vscode.*` WBA request surface. |
 
+### Hover content projection
+
+The WBA continues to aggregate every selector-matched hover provider in provider order. The editor frontend normalizes that merged `contents` array generically before returning it through Monaco's public hover-provider API:
+
+- plain strings become Markdown `value` records;
+- legacy `{ language, value }` marked-code records are recognized before generic Markdown and become fenced code blocks using the supplied language identifier;
+- Code OSS `IMarkdownString` fields are allowlisted and type-checked, including trust, HTML/theme/alert flags, base URI, and extracted URI components;
+- malformed entries and malformed optional metadata are dropped deterministically.
+
+Before returning a non-empty hover, the frontend extracts every fenced-code language from the normalized Markdown, resolves each tag through Monaco's contributed language IDs and aliases, and awaits the existing WBA TextMate tokenizer for that language. This covers signatures whose fence language differs from the active document language—for example, a JavaScript provider returning a TypeScript signature—without adding a JavaScript, TypeScript, HTML, CSS, or other language-specific routing branch. Cancellation or a document-version change after grammar loading discards the stale hover.
+
 ## 35) Android / GeckoView IME and Monaco Text Input
 
 ### Problem
