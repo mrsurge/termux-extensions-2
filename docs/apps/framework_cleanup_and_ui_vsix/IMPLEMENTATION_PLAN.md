@@ -1,6 +1,6 @@
 # Framework Cleanup And UI VSIX Implementation Plan
 
-Status: source investigation complete; implementation phases require separate
+Status: Phases 1, 2, and 3A are implemented; remaining phases require separate
 approval.
 
 This plan coordinates four framework-readiness fixes and leaves UI VSIX
@@ -9,7 +9,7 @@ extensions as a deliberately rough later milestone:
 1. preserve WBA hover content faithfully so fenced code is tokenized;
 2. restore the network-interface/IP/subnet behavior advertised by `te2 --help`;
 3. consolidate TE2-owned cache, data, configuration, and runtime paths under
-   canonical XDG `te2` roots;
+   canonical TE2 roots with XDG and Termux-safe resolution;
 4. remove current-product `spike`, `cm6`, and other historical names where they
    are no longer truthful; and
 5. investigate UI VSIX surfaces only after the framework work is stable.
@@ -69,6 +69,14 @@ Current source actively owns several incompatible roots:
   `$HOME/.cache/aria_downloader`; and
 - old scripts still mention `.cache/te`, `.cache/te_framework`, and a
   `.local/run/te` fallback.
+
+The build bootstrap has a separate retention problem. It currently defaults to
+debug unless `--release` is supplied, copies every successful server build to
+`bin/<source-fingerprint>/<profile>/`, and never locks or prunes that final
+binary cache. On the 2026-08-08 Linux inspection host, ten obsolete release
+binaries occupied 206.6 MiB even though the reusable Cargo target accounted for
+the actual incremental build state. Final launch binaries and incremental
+compiler artifacts need separate retention policies.
 
 The repository already has the beginning of the correct shape:
 
@@ -145,16 +153,37 @@ made.
 
 ## 2. Canonical naming and storage contract
 
-### 2.1 Canonical roots
+### 2.1 Canonical roots and platform resolution
 
 New TE2-owned paths must be descendants of one of these roots:
 
 | Purpose | Canonical root | Contents |
 |---|---|---|
-| Rebuildable/cache | `${XDG_CACHE_HOME:-~/.cache}/te2` | build outputs, downloads, generated probes, logs with bounded retention |
-| Durable data | `${XDG_DATA_HOME:-~/.local/share}/te2` | apps, managed runtimes, editor drafts/history, installed assets |
-| User config | `${XDG_CONFIG_HOME:-~/.config}/te2` | framework, desktop, and Code TE2 user configuration |
-| Process runtime | `${XDG_RUNTIME_DIR:-<safe user fallback>}/te2` | sockets, pid-scoped files, ephemeral coordination |
+| Rebuildable/cache | `$TE2_CACHE_HOME`, otherwise `${XDG_CACHE_HOME:-$HOME/.cache}/te2` | build outputs, downloads, generated probes, logs with bounded retention |
+| Durable data | `$TE2_DATA_HOME`, otherwise `${XDG_DATA_HOME:-$HOME/.local/share}/te2` | apps, managed runtimes, editor drafts/history, installed assets |
+| User config | `$TE2_CONFIG_HOME`, otherwise `${XDG_CONFIG_HOME:-$HOME/.config}/te2` | framework, desktop, and Code TE2 user configuration |
+| Process runtime | `$TE2_RUNTIME_HOME`, otherwise `$XDG_RUNTIME_DIR/te2` or a protected platform temporary root | sockets, pid-scoped files, ephemeral coordination |
+
+The `TE2_*_HOME` values name the final TE2 root; `/te2` is not appended to an
+explicit override. Resolution order is strict and shared across languages:
+
+1. use a non-empty absolute `TE2_*_HOME` override;
+2. otherwise use the corresponding non-empty absolute XDG base plus `/te2`;
+3. otherwise use the documented `$HOME` fallback for cache, data, and config;
+4. for runtime state, use an absolute writable `$TMPDIR`, then Termux
+   `$PREFIX/tmp`, then the platform temporary directory, with a `te2-$UID`
+   directory created as mode `0700` and checked for correct ownership.
+
+Termux does not need to opt into XDG. Its normal `$HOME`, `$PREFIX`, and
+`$TMPDIR` values produce the same TE2 subtree contract without depending on
+desktop session variables. Native Android clients remain outside this resolver
+and continue to use Android application-private `filesDir`, `cacheDir`, and
+`noBackupFilesDir` storage.
+
+The framework bootstrap resolves the four roots once and exports them to the
+Rust server and every app worker. Standalone TE2 processes such as the Electron
+client use the same algorithm. Relative override paths are configuration errors,
+not paths to reinterpret against the current working directory.
 
 Feature code must request a named subtree through a shared path helper or an
 explicit runtime context. It must not construct a new top-level TE2-adjacent
@@ -194,22 +223,37 @@ Rust package/crate names remain idiomatic kebab-case. Environment variables use
 uppercase `TE2_*`. Display names use `TE2` or the feature's current product
 name and never include `spike`.
 
-### 2.2 Migration invariants
+### 2.2 No runtime compatibility and explicit legacy migration
 
-Every state-bearing move must follow these rules:
+Ordinary TE2 startup reads and writes only canonical roots. It must not probe,
+import, merge, alias, or fall back to a legacy framework root, and it must not
+invoke migration code automatically. Missing canonical state means fresh state.
+This is an intentional pre-release cutover rather than a compatibility period.
 
-1. Acquire a migration lock before any writer opens the old or new store.
-2. Detect old and new roots independently; never assume only one exists.
-3. Prefer an atomic rename on the same filesystem.
-4. When a merge is required, accept exact-identical files, copy missing files,
+Legacy recovery is provided only by a separate `te2 migrate-legacy-roots`
+command. The command is dry-run by default and requires an explicit `--apply`
+to mutate the filesystem. It is never imported or called by the normal
+bootstrap. Its state-bearing moves follow these rules:
+
+1. Refuse to apply while a TE2 framework or writer process is active.
+2. Acquire a migration lock in the canonical runtime root.
+3. Inspect only a versioned allowlist of source-owned legacy paths; never infer
+   ownership from a directory name.
+4. Detect source and destination independently and print the complete action
+   plan before changing either.
+5. Prefer an atomic rename on the same filesystem.
+6. When a merge is required, accept exact-identical files, copy missing files,
    and stop with a conflict report instead of overwriting divergent data.
-5. `fsync` durable files and their parent directory before declaring success.
-6. Record a small versioned migration receipt in the canonical root.
-7. Start normal services only after the canonical store validates.
-8. Remove an old directory only after it is empty and the canonical copy has
-   been verified.
-9. Do not keep an indefinite read/write fallback to both roots.
-10. Never delete unowned roots merely because their names resemble TE2.
+7. `fsync` durable files and their parent directories before declaring success.
+8. Validate every known schema and cross-file reference at the destination.
+9. Remove a migrated source only after the canonical copy validates.
+10. Write a versioned one-time receipt and refuse a second apply for that
+    migration version.
+
+Recognized durable/configuration data is moved. Rebuildable caches may be
+relocated when useful, but obsolete fingerprinted launch binaries are discarded
+instead of imported; incremental Cargo artifacts remain eligible for reuse.
+Unknown or externally owned roots are always reported and left untouched.
 
 Editor drafts, preferences, history, bookmarks, installed extensions, managed
 runtimes, and desktop assets are data. Build trees, downloaded archives,
@@ -319,34 +363,79 @@ Implementation result:
   origin, which remains a usable loopback URL for app workers, Framework-Shells,
   console, and MCP.
 
-### Phase 3 — Canonical XDG roots and state migration
+### Phase 3 — Canonical TE2 roots and explicit migration
 
 This phase is split so the highest-risk durable state does not move in the same
 change as rebuildable caches.
 
 #### Phase 3A — Shared path contract and rebuildable caches
 
-- add language-appropriate path helpers backed by the same documented XDG
-  contract;
+- add language-appropriate path helpers backed by the same documented
+  TE2/XDG/Termux resolution contract;
+- resolve the canonical roots once in the bootstrap and propagate them to the
+  Rust server and app workers;
 - move the Rust build cache beneath `te2/framework/build`;
 - move TE2 console and TE2-owned Framework-Shells cache paths beneath `te2`;
 - normalize code-server download/probe and desktop build caches;
+- make release the default build profile and make `--debug` the explicit
+  opt-in selector across cached, uncached, and build-only paths;
+- lock final-binary publication, atomically install the selected binary, and
+  prune every other fingerprinted final binary only after validation while
+  retaining the Cargo incremental target;
 - stop new writes to feature-specific cache roots;
-- add path-resolution and environment-override tests.
+- add path-resolution, Termux fallback, environment-override, profile-default,
+  concurrent-build, and stale-final-binary pruning tests.
+
+Implementation result:
+
+- Python, Rust, and Electron now resolve the same explicit-final-root,
+  XDG-base, `$HOME`, and Termux runtime fallback contract; the bootstrap exports
+  all four resolved roots to the Rust server and app workers;
+- framework builds, Framework-Shells state, console logs, code-server
+  downloads/probes, desktop build artifacts, managed code-server, terminal
+  Node runtime, desktop assets, and Electron configuration use canonical named
+  subtrees without probing their former rebuildable-cache locations;
+- framework builds default to release across cached and direct Cargo modes,
+  with `--debug` as the mutually exclusive opt-in;
+- one cross-process cache lock protects build, validation, atomic publication,
+  and final-binary pruning; Cargo's incremental target is retained while every
+  non-selected final fingerprint/profile is removed; and
+- this slice intentionally leaves the durable `termux_extensions`,
+  `cm6_editor`, `termux-extensions-2`, and shared code-server user-state roots
+  for Phases 3B and 3C.
 
 #### Phase 3B — Framework settings, state, jobs, and bookmarks
 
-- move durable framework stores out of `termux_extensions` cache;
+- cut durable framework stores directly over to canonical config/data roots;
 - preserve schema and API behavior;
-- migrate atomically under a versioned lock;
+- do not read or import `termux_extensions` during framework startup;
 - reconcile Python jobs with the Rust-owned framework path contract.
+
+Implementation result:
+
+- framework settings resolve only to
+  `$TE2_CONFIG_HOME/framework/settings.json`;
+- generic state, bookmarks, and Python job records resolve only beneath
+  `$TE2_DATA_HOME/framework/` as `state_store.json`, `bookmarks.json`, and
+  `jobs.json`;
+- state mutations are serialized across their complete read/modify/write
+  transaction, while every Rust JSON store publishes through a unique
+  same-directory temporary file;
+- store tests preserve the existing object, bookmark-array, template-expansion,
+  shallow-merge, deletion, interrupted-job, and malformed-file behavior;
+- `app.libs.jobs.jobs_bp` is not mounted by the Rust framework. Phase 3B does
+  not resurrect that retired global route; it only removes the module's legacy
+  persistence probe while the remaining app-worker imports await a separate
+  functional disposition; and
+- the old `termux_extensions` tree is not read, moved, or deleted. Its explicit
+  recovery remains Phase 3D migration-tool work.
 
 #### Phase 3C — Code TE2 drafts, history, preferences, and runtime files
 
-- migrate `cm6_editor/projects` first and verify every draft index/sidecar pair;
-- migrate history, preferences, icons, and active Code TE2 data from
-  `termux-extensions-2` into `te2/code_te2`;
-- remove or migrate the unused `cm6_sessions` sidecar path only after proving
+- cut project sidecars, drafts, history, preferences, and icons directly over
+  to `te2/code_te2` and verify every new draft index/sidecar pair;
+- do not probe `cm6_editor` or `termux-extensions-2` during app startup;
+- remove the unused `cm6_sessions` helper path only after proving
   its helper methods have no live callers;
 - move the Sidebar backchannel socket to the runtime root;
 - decide whether TE2's managed code-server should receive a private
@@ -356,26 +445,31 @@ change as rebuildable caches.
 
 - move TE2-owned per-app state beneath `te2/apps/<app_id>`;
 - retain Electron configuration under the canonical TE2 config root;
+- implement the standalone, dry-run-first `te2 migrate-legacy-roots` command
+  after every canonical destination and schema validator exists;
 - classify and clean old Electrobun/CEF and Android-install scratch roots only
-  with explicit filesystem-deletion approval;
+  through an explicit migration/cleanup invocation;
 - leave external/unknown caches untouched and report them.
 
 Validation:
 
-- migration tests with old-only, new-only, identical-both, divergent-both, and
-  interrupted-migration fixtures;
+- proof that ordinary startup never stats or opens a legacy root;
+- opt-in migration-command tests with old-only, new-only, identical-both,
+  divergent-both, already-receipted, active-writer, and interrupted fixtures;
 - permission and atomicity tests;
 - Code TE2 draft recovery test using real sidecar content;
 - framework settings/state/bookmark/job persistence tests;
 - desktop settings/assets and Framework-Shells restart-reuse tests;
-- post-migration scan proving current source no longer writes legacy roots.
+- post-cutover scan proving current source no longer reads or writes legacy
+  roots.
 
 Exit criteria:
 
 - active TE2 writes occur only under canonical roots;
 - durable state is present and validated at the canonical destination;
-- legacy roots are either removed when empty or explicitly reported with a
-  reason they remain.
+- ordinary runtime behavior is independent of every legacy root; and
+- the separate migration command either moves a recognized legacy root after
+  explicit invocation or reports exactly why it remains.
 
 ### Phase 4 — Current-product naming cleanup
 
@@ -487,8 +581,8 @@ This program is complete when:
 
 1. hover code blocks retain language-aware syntax coloring generically;
 2. `te2 --help` network selectors are implemented and fail closed;
-3. TE2-owned state is consolidated beneath canonical XDG `te2` roots without
-   losing drafts, settings, extensions, or runtime assets;
+3. TE2-owned state is consolidated beneath canonical TE2 roots with
+   XDG/Termux-safe resolution, and any legacy import is deliberate and opt-in;
 4. supported framework and desktop source/package names no longer say `spike`;
 5. public legacy identifiers are either migrated or explicitly retained for a
    documented compatibility reason; and

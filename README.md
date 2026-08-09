@@ -120,20 +120,30 @@ host binds that address plus a private same-family loopback listener; wildcard
 host overrides allow all clients. Invalid selectors and interfaces without a
 usable IP address fail before the framework binds any socket.
 
-The first launch builds a fingerprinted Rust binary and caches Cargo/build
-artifacts under the TE2 cache directory. Later launches reuse that binary until
-the Rust source fingerprint changes.
+The launcher builds an optimized release server by default; pass `--debug` only
+for an unoptimized development server. Cargo incremental artifacts live under
+`$TE2_CACHE_HOME/framework/build/cargo-target`, where `$TE2_CACHE_HOME` means
+the resolved canonical root described below. Final-binary publication is
+locked and atomic, and only the selected validated fingerprint is retained.
+
+TE2 path overrides (`TE2_CACHE_HOME`, `TE2_DATA_HOME`, `TE2_CONFIG_HOME`, and
+`TE2_RUNTIME_HOME`) name final TE2 roots. Without them, TE2 uses XDG bases when
+available, normal `$HOME` fallbacks for cache/data/config, and a protected
+runtime directory under `$TMPDIR` or Termux `$PREFIX/tmp`. Normal startup never
+uses an old root as a fallback for these migrated caches. Durable framework and
+Code TE2 store cutovers are tracked separately.
 
 The first standalone Terminal launch installs its locked production Node
-dependencies under `$XDG_DATA_HOME/te2/node_runtime/terminal` (normally
-`~/.local/share/te2/node_runtime/terminal`). The runtime is keyed by the lockfile,
-platform, architecture, and Node ABI, so Python package installs do not depend
-on a source-checkout `node_modules` tree.
+dependencies under `$TE2_DATA_HOME/node_runtime/terminal` (normally
+`~/.local/share/te2/node_runtime/terminal` after root resolution). The runtime
+is keyed by the lockfile, platform, architecture, and Node ABI, so Python
+package installs do not depend on a source-checkout `node_modules` tree.
 
 Useful launcher commands:
 
 ```bash
 te2 --build-only
+te2 --debug
 te2 --print-command
 te2 console list-workers
 ```
@@ -143,7 +153,7 @@ is a source-checkout helper that also invokes the Rust launcher directly.
 
 Code TE2 does not use a system, `PATH`, NVM, or environment-selected
 code-server. Its Code Server mode always uses the pinned private runtime under
-`$XDG_DATA_HOME/te2/code_server/4.130.0` and routes process launch, VSIX/Open
+`$TE2_DATA_HOME/code_server/4.130.0` and routes process launch, VSIX/Open
 VSX management, builtin-extension discovery, and WBA nid extraction through
 that exact tree. The Languages & Extensions settings can switch the app to
 Monaco language web workers instead; doing so stops the private runtime and

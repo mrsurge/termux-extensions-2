@@ -13,10 +13,13 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 from fastapi import APIRouter, Request, HTTPException, Response, Body, Query
 from sse_starlette.sse import EventSourceResponse
 
+from app.te2_paths import te2_data_home
+
 __all__ = ["jobs_bp", "register_job_handler", "JobCancelled"]
 
-_JOBS_DIR = Path.home() / ".cache" / "termux_extensions"
-_JOBS_FILE = _JOBS_DIR / "jobs.json"
+
+def jobs_state_file() -> Path:
+    return te2_data_home() / "framework" / "jobs.json"
 
 jobs_bp = APIRouter(prefix="/api")
 
@@ -183,7 +186,8 @@ def register_job_handler(job_type: str) -> Callable[[JobHandler], JobHandler]:
 
 
 class JobManager:
-    def __init__(self) -> None:
+    def __init__(self, state_file: Path | None = None) -> None:
+        self._state_file: Path = state_file or jobs_state_file()
         self._jobs: Dict[str, Job] = {}
         self._lock = threading.RLock()
         self._save_lock = threading.Lock()
@@ -192,12 +196,12 @@ class JobManager:
 
     # --- persistence -------------------------------------------------------
     def _load_state(self) -> None:
-        if not _JOBS_FILE.exists():
+        if not self._state_file.exists():
             return
         try:
-            data = json.loads(_JOBS_FILE.read_text())
+            data = json.loads(self._state_file.read_text())
         except Exception:
-            _JOBS_FILE.unlink(missing_ok=True)
+            self._state_file.unlink(missing_ok=True)
             return
         now = time.time()
         for job_id, record in data.items():
@@ -214,11 +218,11 @@ class JobManager:
 
     def _save_state(self) -> None:
         with self._save_lock:
-            _JOBS_DIR.mkdir(parents=True, exist_ok=True)
+            self._state_file.parent.mkdir(parents=True, exist_ok=True)
             snapshot = {job_id: job.to_state_dict() for job_id, job in self._jobs.items()}
-            tmp = _JOBS_FILE.with_suffix(".tmp")
+            tmp = self._state_file.with_suffix(".tmp")
             tmp.write_text(json.dumps(snapshot, indent=2))
-            tmp.replace(_JOBS_FILE)
+            tmp.replace(self._state_file)
 
     # --- listeners ---------------------------------------------------------
     def add_listener(self, queue: Queue, job_ids: Optional[Iterable[str]] = None) -> Tuple[Queue, Optional[Set[str]]]:

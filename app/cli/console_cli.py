@@ -5,13 +5,14 @@ import json
 import os
 import sys
 import time
-from pathlib import Path
 from typing import Any
+
+from app.te2_paths import te2_cache_home
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = "8089"
 DEFAULT_TIMEOUT = 20.0
-LOG_PATH = Path.home() / ".cache" / "app_server" / "te2_console_log.jsonl"
+LOG_PATH = te2_cache_home() / "console" / "te2_console_log.jsonl"
 
 
 def main(argv: list[str] | None = None) -> int:

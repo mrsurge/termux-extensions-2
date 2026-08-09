@@ -1,11 +1,11 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 import type {
   ElectronSidebarPresentationMode,
   ElectronSidebarPresentationState,
 } from "../shared/app-view-contracts";
+import { te2ConfigHome } from "./te2-paths";
 
 const PRESENTATION_MODES = new Set<ElectronSidebarPresentationMode>([
   "embedded",
@@ -92,12 +92,7 @@ export function validateDesktopSidebarPresentationState(
 export function desktopSidebarPresentationPath(
   environment = process.env,
 ): string {
-  const configHome = environment.XDG_CONFIG_HOME?.trim();
-  return join(
-    configHome || join(homedir(), ".config"),
-    "te2",
-    "sidebar-presentation.json",
-  );
+  return join(te2ConfigHome(environment), "sidebar-presentation.json");
 }
 
 export async function readDesktopSidebarPresentationState(

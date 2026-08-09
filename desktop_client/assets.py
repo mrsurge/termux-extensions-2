@@ -20,18 +20,16 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import unquote, urlsplit
 from urllib.request import Request, urlopen
 
+from app.te2_paths import te2_cache_home, te2_data_home
+
 
 ASSET_VERSION_PATH = "/api/editor_version"
 ASSET_BUNDLE_PATH = "/api/editor_assets_bundle"
 ASSET_CONNECT_TIMEOUT_SECONDS = 3
 ASSET_DOWNLOAD_TIMEOUT_SECONDS = 120
 
-DATA_HOME = Path(
-    os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")
-)
-CACHE_HOME = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
-ASSET_ROOT = DATA_HOME / "te2" / "desktop_assets"
-BUILD_CACHE_ROOT = CACHE_HOME / "te2" / "desktop_shell" / "web_extensions"
+ASSET_ROOT = te2_data_home() / "desktop_assets"
+BUILD_CACHE_ROOT = te2_cache_home() / "desktop" / "build" / "web_extensions"
 WEB_EXTENSION_SOURCE = (
     Path(__file__).parent / "web_process_extension" / "asset_redirect.c"
 )

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import importlib.util
+import os
+import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from types import ModuleType
@@ -41,6 +44,37 @@ class RustSpikeBootstrapTests(unittest.TestCase):
             self.assertTrue(command.argv[0].endswith(self.bootstrap._server_binary_name()))
             self.assertNotIn("CARGO_TARGET_DIR", env)
 
+    def test_default_build_cache_uses_explicit_te2_cache_root(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            cache_home = Path(raw_tmp) / "te2-cache"
+            args = self.bootstrap._parse_args([])
+            environment = {"TE2_CACHE_HOME": str(cache_home)}
+
+            command = self.bootstrap._server_command(args, environment, build=False)
+
+            self.assertTrue(
+                command.argv[0].startswith(str(cache_home / "framework" / "build" / "bin"))
+            )
+
+    def test_framework_shells_default_uses_explicit_te2_cache_root(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            cache_home = Path(raw_tmp) / "te2-cache"
+
+            base_dir = self.bootstrap._default_framework_shells_base_dir(
+                {"TE2_CACHE_HOME": str(cache_home)}
+            )
+
+            self.assertEqual(base_dir, cache_home / "framework_shells")
+
+    def test_release_is_default_and_debug_is_explicit(self) -> None:
+        release_args = self.bootstrap._parse_args([])
+        debug_args = self.bootstrap._parse_args(["--debug"])
+
+        self.assertTrue(release_args.release)
+        self.assertFalse(debug_args.release)
+        with self.assertRaises(SystemExit):
+            self.bootstrap._parse_args(["--release", "--debug"])
+
     def test_explicit_cargo_manifest_keeps_direct_cargo_run_mode(self) -> None:
         args = self.bootstrap._parse_args(
             [
@@ -54,7 +88,93 @@ class RustSpikeBootstrapTests(unittest.TestCase):
         command = self.bootstrap._server_command(args, env, build=False)
 
         self.assertEqual(command.argv[:4], ["cargo", "run", "--manifest-path", "/example/rust/Cargo.toml"])
+        self.assertIn("--release", command.argv)
         self.assertNotIn("CARGO_TARGET_DIR", env)
+
+    def test_debug_direct_cargo_mode_omits_release(self) -> None:
+        args = self.bootstrap._parse_args(
+            [
+                "--cargo-manifest",
+                "/example/rust/Cargo.toml",
+                "--no-ferrous-framework",
+                "--debug",
+            ]
+        )
+
+        command = self.bootstrap._server_command(args, {}, build=False)
+
+        self.assertNotIn("--release", command.argv)
+
+    def test_successful_cached_build_prunes_stale_final_binaries_only(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            root = Path(raw_tmp)
+            cache_dir = root / "cache"
+            workspace = root / "rust"
+            manifest = workspace / "Cargo.toml"
+            _write(manifest, "[workspace]\n")
+            stale = cache_dir / "bin" / "stale" / "release" / self.bootstrap._server_binary_name()
+            _write(stale, "old")
+            stale.chmod(0o755)
+            incremental = cache_dir / "cargo-target" / "incremental" / "keep"
+            _write(incremental, "incremental")
+
+            args = self.bootstrap._parse_args(
+                ["--cache-dir", str(cache_dir), "--cargo-manifest", str(manifest)]
+            )
+            environment: dict[str, str] = {}
+
+            def fake_build(*_args, **kwargs):
+                build_env = kwargs["env"]
+                built = Path(build_env["CARGO_TARGET_DIR"]) / "release" / self.bootstrap._server_binary_name()
+                _write(built, "new-binary")
+                built.chmod(0o755)
+                return subprocess.CompletedProcess([], 0)
+
+            with mock.patch.object(self.bootstrap, "_rust_source_fingerprint", return_value="selected"), mock.patch.object(
+                self.bootstrap.subprocess,
+                "run",
+                side_effect=fake_build,
+            ):
+                command = self.bootstrap._cached_server_command(
+                    args,
+                    environment,
+                    manifest,
+                    build=True,
+                )
+
+            selected = cache_dir / "bin" / "selected" / "release" / self.bootstrap._server_binary_name()
+            self.assertEqual(command.argv, [str(selected)])
+            self.assertTrue(self.bootstrap._cached_binary_is_usable(selected))
+            self.assertFalse(stale.exists())
+            self.assertEqual(incremental.read_text(encoding="utf-8"), "incremental")
+
+    def test_build_cache_lock_serializes_independent_processes(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            cache_dir = Path(raw_tmp) / "cache"
+            acquired = Path(raw_tmp) / "child-acquired"
+            script = "\n".join(
+                [
+                    "import fcntl",
+                    "import pathlib",
+                    "import sys",
+                    "lock_path = pathlib.Path(sys.argv[1])",
+                    "lock_path.parent.mkdir(parents=True, exist_ok=True)",
+                    "with lock_path.open('a+b') as lock_file:",
+                    "    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)",
+                    "    pathlib.Path(sys.argv[2]).write_text('acquired', encoding='utf-8')",
+                ]
+            )
+
+            with self.bootstrap._exclusive_build_cache_lock(cache_dir):
+                child = subprocess.Popen(
+                    [sys.executable, "-c", script, str(cache_dir / ".build.lock"), str(acquired)]
+                )
+                time.sleep(0.15)
+                self.assertIsNone(child.poll())
+                self.assertFalse(acquired.exists())
+
+            self.assertEqual(child.wait(timeout=5), 0)
+            self.assertEqual(acquired.read_text(encoding="utf-8"), "acquired")
 
     def test_runtime_env_strips_generic_cargo_target_dir(self) -> None:
         env = {"CARGO_TARGET_DIR": "/shared/cargo-target"}
@@ -81,7 +201,7 @@ class RustSpikeBootstrapTests(unittest.TestCase):
             self.assertNotEqual(first, second)
 
     def test_default_exposure_is_loopback_only(self) -> None:
-        args = self.bootstrap._parse_args([])
+        args = self.bootstrap._parse_args(["--host", self.bootstrap.DEFAULT_HOST])
 
         exposure = self.bootstrap._resolve_network_exposure(args)
 
@@ -192,19 +312,34 @@ class RustSpikeBootstrapTests(unittest.TestCase):
         )
 
     def test_build_env_publishes_loopback_internal_url_and_serialized_policy(self) -> None:
-        args = self.bootstrap._parse_args(["--broadcast", "all", "--port", "8123"])
-        with mock.patch.object(self.bootstrap, "_reserve_local_port", return_value=49123), mock.patch.object(
-            self.bootstrap, "_ensure_framework_shells_env"
-        ):
-            env = self.bootstrap._build_env(args)
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            root = Path(raw_tmp)
+            explicit_roots = {
+                "TE2_CACHE_HOME": str(root / "cache"),
+                "TE2_DATA_HOME": str(root / "data"),
+                "TE2_CONFIG_HOME": str(root / "config"),
+                "TE2_RUNTIME_HOME": str(root / "runtime"),
+            }
+            args = self.bootstrap._parse_args(["--broadcast", "all", "--port", "8123"])
+            with mock.patch.dict(os.environ, explicit_roots), mock.patch.object(
+                self.bootstrap, "_reserve_local_port", return_value=49123
+            ), mock.patch.object(self.bootstrap, "_ensure_framework_shells_env"):
+                env = self.bootstrap._build_env(args)
 
-        self.assertEqual(env["TE_FRAMEWORK_URL"], "http://127.0.0.1:8123")
-        self.assertEqual(env["FRAMEWORK_SHELLS_FWS_SOCKETIO_URL"], env["TE_FRAMEWORK_URL"])
-        self.assertEqual(env["TE2_RUST_SPIKE_BIND_HOSTS"], '["0.0.0.0","::"]')
-        self.assertEqual(
-            env["TE2_RUST_SPIKE_NETWORK_POLICY"],
-            '{"allowAll":true,"localAddresses":[],"sourceNetworks":[]}',
-        )
+            self.assertEqual(env["TE_FRAMEWORK_URL"], "http://127.0.0.1:8123")
+            self.assertEqual(env["FRAMEWORK_SHELLS_FWS_SOCKETIO_URL"], env["TE_FRAMEWORK_URL"])
+            self.assertEqual(env["TE2_RUST_SPIKE_BIND_HOSTS"], '["0.0.0.0","::"]')
+            self.assertEqual(
+                env["TE2_RUST_SPIKE_NETWORK_POLICY"],
+                '{"allowAll":true,"localAddresses":[],"sourceNetworks":[]}',
+            )
+            for key, value in explicit_roots.items():
+                self.assertEqual(env[key], value)
+            self.assertEqual(
+                env["TE2_RUST_SPIKE_APP_ROOTS"].split(os.pathsep)[-1],
+                str(root / "data" / "apps"),
+            )
+            self.assertEqual((root / "runtime").stat().st_mode & 0o777, 0o700)
 
     def test_native_interface_discovery_returns_loopback_on_linux_or_android(self) -> None:
         addresses = self.bootstrap._interface_addresses()

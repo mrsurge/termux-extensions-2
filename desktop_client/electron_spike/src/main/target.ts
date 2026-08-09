@@ -1,5 +1,4 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 import {
@@ -7,6 +6,7 @@ import {
   MIN_ZOOM_LEVEL,
   type DesktopShellSettings,
 } from "../shared/contracts";
+import { te2ConfigHome } from "./te2-paths";
 
 export const DEFAULT_HOST = "127.0.0.1";
 export const DEFAULT_PORT = 8089;
@@ -26,8 +26,7 @@ export function validZoom(value: unknown): number {
 }
 
 export function desktopSettingsPath(environment = process.env): string {
-  const configHome = environment.XDG_CONFIG_HOME?.trim();
-  return join(configHome || join(homedir(), ".config"), "te2", "desktop-shell.json");
+  return join(te2ConfigHome(environment), "desktop-shell.json");
 }
 
 export async function readDesktopSettings(

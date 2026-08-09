@@ -32,7 +32,7 @@ class TerminalNodeRuntimeTests(unittest.TestCase):
         data_home = self.root / "data"
         with patch.dict(
             os.environ,
-            {"XDG_DATA_HOME": str(data_home)},
+            {"XDG_DATA_HOME": str(data_home), "TE2_DATA_HOME": ""},
             clear=False,
         ):
             os.environ.pop("TE2_TERMINAL_NODE_RUNTIME_DIR", None)

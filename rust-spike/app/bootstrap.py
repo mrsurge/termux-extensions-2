@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import fcntl
 import hashlib
 import importlib
 import json
@@ -13,12 +14,15 @@ import socket
 import subprocess
 import sys
 import time
-from collections.abc import Callable, MutableMapping, Sequence
+from collections.abc import Callable, Generator, MutableMapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv6Address, ip_address, ip_network
 from pathlib import Path
 from types import FrameType
 from typing import Any, cast
+
+from app.te2_paths import ensure_runtime_home, resolve_te2_paths
 
 APP_ID = "te2-rust-spike"
 DEFAULT_HOST = "127.0.0.1"
@@ -132,7 +136,20 @@ def _parse_args(argv: Sequence[str] | None) -> BootstrapArgs:
         default=os.environ.get("TE2_RUST_SPIKE_CARGO_MANIFEST"),
         help="Path to rust/Cargo.toml for development launches.",
     )
-    parser.add_argument("--release", action="store_true", default=_env_flag("TE2_RUST_SPIKE_RELEASE"))
+    profile_group = parser.add_mutually_exclusive_group()
+    profile_group.add_argument(
+        "--release",
+        dest="release",
+        action="store_true",
+        help="Build the optimized release server (default).",
+    )
+    profile_group.add_argument(
+        "--debug",
+        dest="release",
+        action="store_false",
+        help="Build the unoptimized debug server.",
+    )
+    parser.set_defaults(release=not _env_flag("TE2_RUST_SPIKE_DEBUG"))
     parser.add_argument(
         "--force-build",
         action="store_true",
@@ -206,11 +223,14 @@ def _parse_args(argv: Sequence[str] | None) -> BootstrapArgs:
 def _build_env(args: BootstrapArgs) -> dict[str, str]:
     env = os.environ.copy()
     _sanitize_runtime_env(env)
+    paths = resolve_te2_paths(env)
+    ensure_runtime_home(paths.runtime_home)
+    paths.export(env)
     project_root = _project_root()
     framework_shells_root = project_root / "worktrees" / "framework-shells"
     app_roots = [
         project_root / "app" / "apps",
-        Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))) / "te2" / "apps",
+        paths.data_home / "apps",
     ]
 
     exposure = _resolve_network_exposure(args)
@@ -301,7 +321,7 @@ def _cached_server_command(
     *,
     build: bool,
 ) -> ServerCommand:
-    cache_dir = Path(args.cache_dir) if args.cache_dir else _default_cache_dir()
+    cache_dir = Path(args.cache_dir) if args.cache_dir else _default_cache_dir(env)
     profile = "release" if args.release else "debug"
     features = ["ferrous-framework-native"] if _ferrous_framework_enabled(args) else []
     fingerprint = _rust_source_fingerprint(manifest, profile=profile, features=features)
@@ -309,39 +329,112 @@ def _cached_server_command(
     cached_binary = cache_dir / "bin" / fingerprint / profile / binary_name
 
     cargo_target_dir = Path(env.get("TE2_RUST_SPIKE_CARGO_TARGET_DIR", cache_dir / "cargo-target"))
-    if cached_binary.is_file() and not args.force_build:
-        return ServerCommand([str(cached_binary)], build_already_done=True)
     if not build:
-        return ServerCommand([str(cached_binary)], build_already_done=False)
+        return ServerCommand(
+            [str(cached_binary)],
+            build_already_done=_cached_binary_is_usable(cached_binary) and not args.force_build,
+        )
 
-    build_command = [
-        "cargo",
-        "build",
-        "--manifest-path",
-        str(manifest),
-        "-p",
-        SERVER_PACKAGE,
-    ]
-    if args.release:
-        build_command.append("--release")
-    if features:
-        build_command.extend(["--features", ",".join(features)])
-    build_env = dict(env)
-    build_env["CARGO_TARGET_DIR"] = str(cargo_target_dir)
-    result = subprocess.run(build_command, env=build_env, check=False)
-    if result.returncode != 0:
-        raise SystemExit(result.returncode)
+    with _exclusive_build_cache_lock(cache_dir):
+        if _cached_binary_is_usable(cached_binary) and not args.force_build:
+            _prune_final_binary_cache(cache_dir / "bin", cached_binary)
+            return ServerCommand([str(cached_binary)], build_already_done=True)
 
-    built_binary = cargo_target_dir / profile / binary_name
-    if not built_binary.is_file():
-        raise SystemExit(f"Rust server build finished but binary is missing: {built_binary}")
-    cached_binary.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(built_binary, cached_binary)
-    try:
-        cached_binary.chmod(cached_binary.stat().st_mode | 0o755)
-    except OSError:
-        pass
+        build_command = [
+            "cargo",
+            "build",
+            "--manifest-path",
+            str(manifest),
+            "-p",
+            SERVER_PACKAGE,
+        ]
+        if args.release:
+            build_command.append("--release")
+        if features:
+            build_command.extend(["--features", ",".join(features)])
+        build_env = dict(env)
+        build_env["CARGO_TARGET_DIR"] = str(cargo_target_dir)
+        result = subprocess.run(build_command, env=build_env, check=False)
+        if result.returncode != 0:
+            raise SystemExit(result.returncode)
+
+        built_binary = cargo_target_dir / profile / binary_name
+        if not _cached_binary_is_usable(built_binary):
+            raise SystemExit(f"Rust server build finished but binary is missing or unusable: {built_binary}")
+        _publish_cached_binary(built_binary, cached_binary)
+        _prune_final_binary_cache(cache_dir / "bin", cached_binary)
     return ServerCommand([str(cached_binary)], build_already_done=True)
+
+
+@contextmanager
+def _exclusive_build_cache_lock(cache_dir: Path) -> Generator[None, None, None]:
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = cache_dir / ".build.lock"
+    with lock_path.open("a+b") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def _cached_binary_is_usable(path: Path) -> bool:
+    try:
+        return path.is_file() and path.stat().st_size > 0 and os.access(path, os.X_OK)
+    except OSError:
+        return False
+
+
+def _publish_cached_binary(source: Path, destination: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(f".{destination.name}.tmp-{os.getpid()}")
+    try:
+        shutil.copy2(source, temporary)
+        temporary.chmod(temporary.stat().st_mode | 0o755)
+        with temporary.open("rb") as file_handle:
+            os.fsync(file_handle.fileno())
+        if not _cached_binary_is_usable(temporary):
+            raise RuntimeError(f"published Rust server binary is unusable: {temporary}")
+        os.replace(temporary, destination)
+        _fsync_directory(destination.parent)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _prune_final_binary_cache(bin_root: Path, selected_binary: Path) -> None:
+    if not _cached_binary_is_usable(selected_binary):
+        raise RuntimeError(f"refusing to prune before the selected binary validates: {selected_binary}")
+
+    selected_profile_dir = selected_binary.parent
+    selected_fingerprint_dir = selected_profile_dir.parent
+    if selected_fingerprint_dir.parent != bin_root:
+        raise RuntimeError(f"selected binary is outside the final binary cache: {selected_binary}")
+
+    for fingerprint_entry in tuple(bin_root.iterdir()):
+        if fingerprint_entry != selected_fingerprint_dir:
+            _remove_cache_entry(fingerprint_entry)
+    for profile_entry in tuple(selected_fingerprint_dir.iterdir()):
+        if profile_entry != selected_profile_dir:
+            _remove_cache_entry(profile_entry)
+    for binary_entry in tuple(selected_profile_dir.iterdir()):
+        if binary_entry != selected_binary:
+            _remove_cache_entry(binary_entry)
+    _fsync_directory(bin_root)
+
+
+def _remove_cache_entry(path: Path) -> None:
+    if path.is_symlink() or path.is_file():
+        path.unlink(missing_ok=True)
+    elif path.exists():
+        shutil.rmtree(path)
+
+
+def _fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def _resolve_network_exposure(
@@ -582,7 +675,7 @@ def _ensure_framework_shells_env(env: dict[str, str], args: BootstrapArgs) -> No
     env["FRAMEWORK_SHELLS_REPO_FINGERPRINT"] = fingerprint
     env.setdefault("FRAMEWORK_SHELLS_SECRET_FINGERPRINT", fingerprint)
 
-    base_dir = Path(env.get("FRAMEWORK_SHELLS_BASE_DIR") or _default_framework_shells_base_dir())
+    base_dir = Path(env.get("FRAMEWORK_SHELLS_BASE_DIR") or _default_framework_shells_base_dir(env))
     secret_dir = base_dir / "runtimes" / fingerprint
     secret_file = secret_dir / "secret"
     if secret_file.is_file():
@@ -611,8 +704,10 @@ def _framework_shells_fingerprint() -> str:
     return hashlib.sha256(root.encode("utf-8")).hexdigest()[:16]
 
 
-def _default_framework_shells_base_dir() -> Path:
-    return Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / "framework_shells"
+def _default_framework_shells_base_dir(environ: MutableMapping[str, str] | None = None) -> Path:
+    source = environ if environ is not None else os.environ
+    paths = resolve_te2_paths(source)
+    return paths.cache_home / "framework_shells"
 
 
 def _prime_framework_shells_import(env: dict[str, str]) -> None:
@@ -690,8 +785,10 @@ def _default_rust_manifest() -> Path:
     return _project_root() / "rust-spike" / "rust" / "Cargo.toml"
 
 
-def _default_cache_dir() -> Path:
-    return Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / APP_ID
+def _default_cache_dir(environ: MutableMapping[str, str] | None = None) -> Path:
+    source = environ if environ is not None else os.environ
+    paths = resolve_te2_paths(source)
+    return paths.cache_home / "framework" / "build"
 
 
 def _server_binary_name() -> str:

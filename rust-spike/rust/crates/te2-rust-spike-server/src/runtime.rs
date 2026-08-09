@@ -7,6 +7,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use crate::te2_paths;
+
 #[derive(Clone, Debug, Serialize)]
 pub struct RunningApp {
     pub app_id: String,
@@ -34,7 +36,7 @@ impl FwsDiscovery {
     pub fn from_env() -> Self {
         let base_dir = env::var_os("FRAMEWORK_SHELLS_BASE_DIR")
             .map(PathBuf::from)
-            .unwrap_or_else(|| home_dir().join(".cache").join("framework_shells"));
+            .unwrap_or_else(|| te2_paths::cache_home().join("framework_shells"));
         let fingerprint = env::var("FRAMEWORK_SHELLS_REPO_FINGERPRINT")
             .ok()
             .map(|value| value.trim().to_owned())
@@ -302,10 +304,4 @@ fn now_seconds() -> f64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs_f64())
         .unwrap_or_default()
-}
-
-fn home_dir() -> PathBuf {
-    env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
 }

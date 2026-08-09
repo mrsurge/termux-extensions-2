@@ -21,6 +21,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Final, TypeAlias, cast
 
+from app.te2_paths import te2_cache_home, te2_data_home
+
 JsonValue: TypeAlias = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
 JsonObject: TypeAlias = dict[str, JsonValue]
 ExtensionEntry: TypeAlias = dict[str, object]
@@ -35,7 +37,7 @@ _CODE_SERVER_DATA_DIR = Path.home() / ".config" / "code-server"
 _EXTENSIONS_DIR = _CODE_SERVER_DATA_DIR / "extensions"
 _USER_SETTINGS_PATH = _CODE_SERVER_DATA_DIR / "User" / "settings.json"
 _REGISTRY_PATH = _CODE_SERVER_DATA_DIR / "te2_extension_registry.json"
-_RPC_CONFIG_PATH = _CODE_SERVER_DATA_DIR / "te2_rpc_config.json"
+_RPC_CONFIG_PATH = te2_cache_home() / "code_server" / "probes" / "te2_rpc_config.json"
 PINNED_CODE_SERVER_VERSION: Final = "4.130.0"
 
 
@@ -195,10 +197,7 @@ def code_server_installation_from_executable(
 
 
 def te2_managed_code_server_root() -> Path:
-    data_home = Path(
-        os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))
-    ).expanduser()
-    return (data_home / "te2" / "code_server").resolve()
+    return (te2_data_home() / "code_server").resolve()
 
 
 def te2_managed_code_server_installation(

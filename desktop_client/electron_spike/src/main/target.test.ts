@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { frameworkOrigin, projectFrameworkUrl } from "./target";
+import { desktopSettingsPath, frameworkOrigin, projectFrameworkUrl } from "./target";
+
+test("desktop settings honor the explicit TE2 config root", () => {
+  assert.equal(
+    desktopSettingsPath({ HOME: "/home/test", TE2_CONFIG_HOME: "/custom/te2-config" }),
+    "/custom/te2-config/desktop-shell.json",
+  );
+});
 
 test("frameworkOrigin normalizes HTTP and HTTPS hosts", () => {
   assert.equal(

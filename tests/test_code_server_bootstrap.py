@@ -44,6 +44,18 @@ class CodeServerBootstrapTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
+    def test_bootstrap_download_cache_uses_explicit_te2_cache_root(self) -> None:
+        cache_home = self.root / "te2-cache"
+        with patch.dict(
+            os.environ,
+            {"TE2_CACHE_HOME": str(cache_home)},
+            clear=False,
+        ):
+            self.assertEqual(
+                code_server_bootstrap.code_server_bootstrap_cache_dir(),
+                cache_home / "code_server" / "downloads",
+            )
+
     def test_managed_installation_is_ready_without_command_version_gate(self) -> None:
         managed = _installation(self.root / "managed", source="te2-managed")
         with (

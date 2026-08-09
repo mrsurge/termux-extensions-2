@@ -1,4 +1,5 @@
-use super::common::{write_json_atomic, xdg_cache_home};
+use super::common::write_json_atomic;
+use crate::te2_paths;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value};
 use std::{
@@ -62,16 +63,23 @@ impl From<serde_json::Error> for BookmarkError {
 impl BookmarkStore {
     pub(crate) fn from_project_root(project_root: &str) -> Self {
         Self {
-            bookmarks_file: xdg_cache_home()
-                .join("termux_extensions")
-                .join("file_explorer")
-                .join("bookmarks")
+            bookmarks_file: te2_paths::data_home()
+                .join("framework")
                 .join("bookmarks.json"),
             template_file: PathBuf::from(project_root)
                 .join("app")
                 .join("static")
                 .join("bookmarks.json"),
             prefix: env::var("PREFIX").unwrap_or_default(),
+        }
+    }
+
+    #[cfg(test)]
+    fn from_parts(bookmarks_file: PathBuf, template_file: PathBuf, prefix: String) -> Self {
+        Self {
+            bookmarks_file,
+            template_file,
+            prefix,
         }
     }
 }
@@ -157,4 +165,63 @@ fn load_template_bookmarks(
         text = text.replace("$PREFIX", prefix);
     }
     Ok(serde_json::from_str::<Vec<Bookmark>>(&text)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn missing_bookmark_store_seeds_the_template_and_expands_prefix() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let template = root.path().join("bookmarks-template.json");
+        fs::write(
+            &template,
+            r#"[{"name":"Home","path":"$PREFIX/home","icon":"house"}]"#,
+        )
+        .expect("write template");
+        let store = BookmarkStore::from_parts(
+            root.path().join("framework/bookmarks.json"),
+            template,
+            "/termux/usr".to_owned(),
+        );
+
+        let bookmarks = list_bookmarks(&store).expect("list");
+        assert_eq!(bookmarks.len(), 1);
+        assert_eq!(bookmarks[0].path, "/termux/usr/home");
+        assert_eq!(bookmarks[0].extra.get("icon"), Some(&json!("house")));
+    }
+
+    #[test]
+    fn bookmark_add_and_replace_preserve_extra_fields() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let template = root.path().join("bookmarks-template.json");
+        fs::write(&template, "[]").expect("write template");
+        let store = BookmarkStore::from_parts(
+            root.path().join("framework/bookmarks.json"),
+            template,
+            String::new(),
+        );
+
+        let added = add_bookmark(
+            &store,
+            AddBookmarkRequest {
+                name: Some("Project".to_owned()),
+                path: Some("/project".to_owned()),
+            },
+        )
+        .expect("add");
+        assert_eq!(added.len(), 1);
+
+        let replacement = Bookmark {
+            name: "Downloads".to_owned(),
+            path: "/downloads".to_owned(),
+            extra: serde_json::from_value(json!({"pinned": true})).expect("extra map"),
+        };
+        replace_bookmarks(&store, vec![replacement]).expect("replace");
+        let persisted = list_bookmarks(&store).expect("reload");
+        assert_eq!(persisted.len(), 1);
+        assert_eq!(persisted[0].extra.get("pinned"), Some(&json!(true)));
+    }
 }

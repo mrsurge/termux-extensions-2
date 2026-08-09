@@ -1,7 +1,14 @@
-use super::common::{write_json_atomic, xdg_cache_home};
+use super::common::write_json_atomic;
+use crate::te2_paths;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value};
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::PathBuf,
+    sync::{Mutex, OnceLock},
+};
+
+static STATE_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct StateReadRequest {
@@ -48,10 +55,15 @@ impl From<std::io::Error> for StateError {
 impl StateStore {
     pub(crate) fn default() -> Self {
         Self {
-            path: xdg_cache_home()
-                .join("termux_extensions")
+            path: te2_paths::data_home()
+                .join("framework")
                 .join("state_store.json"),
         }
+    }
+
+    #[cfg(test)]
+    fn from_path(path: PathBuf) -> Self {
+        Self { path }
     }
 }
 
@@ -78,15 +90,17 @@ pub(crate) fn set_state(
     if request.key.trim().is_empty() {
         return Err(StateError::EmptyKey);
     }
-    let mut store_data = load_value_map(&store.path);
-    let value = if request.merge {
-        merge_state_value(store_data.get(&request.key), request.value)
-    } else {
-        request.value
-    };
-    store_data.insert(request.key.clone(), value);
-    save_value_map(&store.path, &store_data)?;
-    Ok(store_data.get(&request.key).cloned().unwrap_or(Value::Null))
+    with_state_write_lock(|| {
+        let mut store_data = load_value_map(&store.path);
+        let value = if request.merge {
+            merge_state_value(store_data.get(&request.key), request.value)
+        } else {
+            request.value
+        };
+        store_data.insert(request.key.clone(), value);
+        save_value_map(&store.path, &store_data)?;
+        Ok(store_data.get(&request.key).cloned().unwrap_or(Value::Null))
+    })
 }
 
 pub(crate) fn delete_state(
@@ -96,15 +110,27 @@ pub(crate) fn delete_state(
     if request.keys.is_empty() {
         return Err(StateError::MissingKey);
     }
-    let mut store_data = load_value_map(&store.path);
-    let mut removed = 0_u64;
-    for key in request.keys {
-        if store_data.remove(&key).is_some() {
-            removed += 1;
+    with_state_write_lock(|| {
+        let mut store_data = load_value_map(&store.path);
+        let mut removed = 0_u64;
+        for key in request.keys {
+            if store_data.remove(&key).is_some() {
+                removed += 1;
+            }
         }
-    }
-    save_value_map(&store.path, &store_data)?;
-    Ok(StateDeleteData { removed })
+        save_value_map(&store.path, &store_data)?;
+        Ok(StateDeleteData { removed })
+    })
+}
+
+fn with_state_write_lock<T>(
+    operation: impl FnOnce() -> Result<T, StateError>,
+) -> Result<T, StateError> {
+    let _guard = STATE_WRITE_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .map_err(|_| StateError::Io(std::io::Error::other("State store lock poisoned")))?;
+    operation()
 }
 
 fn merge_state_value(existing: Option<&Value>, next: Value) -> Value {
@@ -131,4 +157,86 @@ fn load_value_map(path: &PathBuf) -> JsonMap<String, Value> {
 
 fn save_value_map(path: &PathBuf, data: &JsonMap<String, Value>) -> Result<(), std::io::Error> {
     write_json_atomic(path, &Value::Object(data.clone()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn state_round_trip_merge_and_delete_preserve_the_object_schema() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let store = StateStore::from_path(root.path().join("framework/state_store.json"));
+
+        set_state(
+            &store,
+            StateWriteRequest {
+                key: "app_state:test".to_owned(),
+                value: json!({"first": 1, "keep": true}),
+                merge: false,
+            },
+        )
+        .expect("initial write");
+        let merged = set_state(
+            &store,
+            StateWriteRequest {
+                key: "app_state:test".to_owned(),
+                value: json!({"first": 2, "second": 3}),
+                merge: true,
+            },
+        )
+        .expect("merge");
+        assert_eq!(merged, json!({"first": 2, "keep": true, "second": 3}));
+
+        let read = get_state(
+            &store,
+            StateReadRequest {
+                keys: vec!["app_state:test".to_owned(), "missing".to_owned()],
+            },
+        )
+        .expect("read");
+        assert_eq!(read.get("app_state:test"), Some(&merged));
+        assert_eq!(read.get("missing"), Some(&Value::Null));
+
+        let deleted = delete_state(
+            &store,
+            StateDeleteRequest {
+                keys: vec!["app_state:test".to_owned()],
+            },
+        )
+        .expect("delete");
+        assert_eq!(deleted.removed, 1);
+    }
+
+    #[test]
+    fn concurrent_state_updates_do_not_drop_independent_keys() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let store = StateStore::from_path(root.path().join("framework/state_store.json"));
+        let handles = (0..12)
+            .map(|index| {
+                let store = store.clone();
+                std::thread::spawn(move || {
+                    set_state(
+                        &store,
+                        StateWriteRequest {
+                            key: format!("key-{index}"),
+                            value: json!(index),
+                            merge: false,
+                        },
+                    )
+                    .expect("concurrent write");
+                })
+            })
+            .collect::<Vec<_>>();
+        for handle in handles {
+            handle.join().expect("join writer");
+        }
+
+        let persisted = load_value_map(&store.path);
+        assert_eq!(persisted.len(), 12);
+        for index in 0..12 {
+            assert_eq!(persisted.get(&format!("key-{index}")), Some(&json!(index)));
+        }
+    }
 }

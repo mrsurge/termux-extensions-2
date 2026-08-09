@@ -12,6 +12,7 @@ mod registry;
 mod runtime;
 mod runtime_bridge;
 mod sio_proxy;
+mod te2_paths;
 
 use anyhow::{Context, Result};
 use axum::{
@@ -480,7 +481,7 @@ fn app_roots_from_env(project_root: &str) -> Vec<AppRoot> {
         .unwrap_or_else(|| {
             vec![
                 PathBuf::from(project_root).join("app").join("apps"),
-                xdg_data_home().join("te2").join("apps"),
+                te2_paths::data_home().join("apps"),
             ]
         });
     raw_paths
@@ -495,18 +496,6 @@ fn app_roots_from_env(project_root: &str) -> Vec<AppRoot> {
             path,
         })
         .collect()
-}
-
-fn xdg_data_home() -> PathBuf {
-    env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            env::var_os("HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join(".local")
-                .join("share")
-        })
 }
 
 fn load_te2_runtime_bridge_config() -> Te2RuntimeBridgeConfig {

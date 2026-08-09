@@ -187,7 +187,7 @@ For `file_editor_cm6`, we intentionally separate responsibilities:
 
 Current deterministic runtime endpoints:
 - `code-server`
-  - resolved only from TE2's pinned private runtime at `$XDG_DATA_HOME/te2/code_server/4.130.0`
+  - resolved only from TE2's pinned private runtime at `$TE2_DATA_HOME/code_server/4.130.0` after canonical root resolution
   - launched with `--socket` and `--socket-mode 0600`
   - stdout piped to Python for readiness detection
 - workbench adapter
@@ -2389,7 +2389,7 @@ The old worker-owned `/ui_ipc` console relay has been removed from the live sour
 main_page bridge --console:log--> framework TE2 console --console:log/replay/eval--> Console drawer / MCP
                                       |
                                       v
-                         ~/.cache/app_server/te2_console_log.jsonl
+                         $TE2_CACHE_HOME/console/te2_console_log.jsonl
 ```
 
 ### Files
@@ -2412,7 +2412,7 @@ main_page bridge --console:log--> framework TE2 console --console:log/replay/eva
 | `console:eval` | drawer/MCP -> server -> worker | `{ targetWorkerId, reqId, code, timeoutSeconds }` | Routed only to `console:<workerId>`. |
 | `console:evalCancel` | server -> worker | `{ reqId, targetWorkerId }` | Sent when Python-side eval times out so the Code TE2 bridge can reject the pending Promise. |
 | `console:evalResult` | worker -> server -> drawers/MCP waiter | `{ workerId, reqId, ok, value|error, errorType? }` | Resolves pending evals and fans out to drawers. |
-| `console:replay` | drawer -> server | `{ tail_lines? }` | Replays transcript entries from `~/.cache/app_server/te2_console_log.jsonl`. |
+| `console:replay` | drawer -> server | `{ tail_lines? }` | Replays transcript entries from `$TE2_CACHE_HOME/console/te2_console_log.jsonl` after canonical root resolution. |
 | `console:clear` | drawer -> server -> drawers | `{}` | Clears transcript and drawer state. |
 
 ### CLI
@@ -3575,7 +3575,7 @@ Electron binds one dynamically allocated `127.0.0.1` HTTP origin for each config
 - retargets the existing listener when the framework target changes, closing active connections without restarting Electron;
 - appends `gv_native=1` to app URLs so the PWA Service Worker cannot mask the desktop asset layer.
 
-Shared desktop assets reuse `/api/editor_version` and `/api/editor_assets_bundle`. They install under `$XDG_DATA_HOME/te2/desktop_assets` through monotonic staged validation, backup, atomic rename, and rollback. The desktop asset inventory is `desktop_client/desktop_asset_inventory.json`; Android's `android-shell/` launcher is intentionally omitted because desktop owns a separate launcher and Settings surface.
+Shared desktop assets reuse `/api/editor_version` and `/api/editor_assets_bundle`. They install under `$TE2_DATA_HOME/desktop_assets` after canonical root resolution through monotonic staged validation, backup, atomic rename, and rollback. The desktop asset inventory is `desktop_client/desktop_asset_inventory.json`; Android's `android-shell/` launcher is intentionally omitted because desktop owns a separate launcher and Settings surface.
 
 Successful asset installs clear the `persist:te2-framework` HTTP cache and generated V8 code cache, then reload an active app view with cache bypass. Forced same-version updates must activate without requiring an Electron restart.
 

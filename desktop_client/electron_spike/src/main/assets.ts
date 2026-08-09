@@ -7,7 +7,6 @@ import {
   rm,
   stat,
 } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, extname, join, normalize, relative, resolve, sep } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -16,6 +15,7 @@ import yauzl, { type Entry, type ZipFile } from "yauzl";
 
 import inventoryData from "../../../desktop_asset_inventory.json";
 import type { AssetStatus, AssetUpdateResult } from "../shared/contracts";
+import { te2DataHome } from "./te2-paths";
 
 const ASSET_VERSION_PATH = "/api/editor_version";
 const ASSET_BUNDLE_PATH = "/api/editor_assets_bundle";
@@ -51,12 +51,8 @@ export const MIME_TYPES: Record<string, string> = {
   ".woff2": "font/woff2",
 };
 
-function dataHome(environment = process.env): string {
-  return environment.XDG_DATA_HOME?.trim() || join(homedir(), ".local", "share");
-}
-
 export function desktopAssetRoot(environment = process.env): string {
-  return join(dataHome(environment), "te2", "desktop_assets");
+  return join(te2DataHome(environment), "desktop_assets");
 }
 
 export function compareAssetVersions(left: string, right: string): number {

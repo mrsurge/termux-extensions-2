@@ -14,6 +14,8 @@ from typing import BinaryIO, Final, Literal, TypedDict, cast
 from urllib.request import Request, urlopen
 import uuid
 
+from app.te2_paths import te2_cache_home
+
 from .extension_registry import (
     CodeServerInstallation,
     PINNED_CODE_SERVER_VERSION,
@@ -97,10 +99,7 @@ class CodeServerBootstrapError(RuntimeError):
 
 
 def code_server_bootstrap_cache_dir() -> Path:
-    cache_home = Path(
-        os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))
-    ).expanduser()
-    return (cache_home / "te2" / "code_server").resolve()
+    return (te2_cache_home() / "code_server" / "downloads").resolve()
 
 
 def code_server_install_prefix() -> Path:

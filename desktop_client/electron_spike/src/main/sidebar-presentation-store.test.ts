@@ -25,7 +25,7 @@ const sampleState = {
 
 test("Sidebar presentation state is stored atomically under the TE2 config boundary", async () => {
   const configHome = await mkdtemp(join(tmpdir(), "te2-electron-presentation-"));
-  const environment = { ...process.env, XDG_CONFIG_HOME: configHome };
+  const environment = { ...process.env, TE2_CONFIG_HOME: "", XDG_CONFIG_HOME: configHome };
 
   const written = await writeDesktopSidebarPresentationState(
     sampleState,
@@ -60,6 +60,7 @@ test("missing or corrupt presentation state resolves to an empty versioned state
   const configHome = await mkdtemp(join(tmpdir(), "te2-electron-presentation-"));
   const loaded = await readDesktopSidebarPresentationState({
     ...process.env,
+    TE2_CONFIG_HOME: "",
     XDG_CONFIG_HOME: configHome,
   });
 
