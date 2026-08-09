@@ -203,6 +203,7 @@ cache/te2/
 
 share/te2/
   apps/
+  app_state/<app_id>/
   templates/
   code_server/
   node_runtime/
@@ -241,13 +242,16 @@ bootstrap. Its state-bearing moves follow these rules:
    ownership from a directory name.
 4. Detect source and destination independently and print the complete action
    plan before changing either.
-5. Prefer an atomic rename on the same filesystem.
-6. When a merge is required, accept exact-identical files, copy missing files,
-   and stop with a conflict report instead of overwriting divergent data.
+5. Stage replacements on the destination filesystem and publish them with an
+   atomic rename.
+6. Treat the allowlisted legacy source as authoritative: overwrite a matching
+   canonical file, including divergent content and its mode. Directory overlays
+   retain canonical-only files while the legacy tree wins every matching path.
 7. `fsync` durable files and their parent directories before declaring success.
 8. Validate every known schema and cross-file reference at the destination.
 9. Remove a migrated source only after the canonical copy validates.
-10. Write a versioned one-time receipt and refuse a second apply for that
+10. Write a versioned one-time receipt recording the destructive collision
+    policy and refuse a second apply for that
     migration version.
 
 Recognized durable/configuration data is moved. Rebuildable caches may be
@@ -441,9 +445,31 @@ Implementation result:
 - decide whether TE2's managed code-server should receive a private
   TE2-owned user-data/extensions root instead of sharing `~/.config/code-server`.
 
+Implementation result:
+
+- `code_te2_paths.py` derives one Code TE2 partition from the canonical TE2
+  roots: sidecars, history, icons, and private code-server state use data;
+  preferences use config; the Sidebar and code-server sockets use runtime; and
+  the remaining browser-console/probe records use cache;
+- project sidecars and draft indexes now live only beneath
+  `$TE2_DATA_HOME/code_te2/projects`; the real-shape version-2 sidecar fixture
+  verifies draft content, recent-file state, index rebuild, and reload recovery;
+- the dead `cm6_sessions` directory creation and all of its uncalled helper
+  methods are removed;
+- TE2's managed code-server executable remains separately versioned beneath
+  `$TE2_DATA_HOME/code_server`, while its User data, extensions, registry, and
+  settings are private to `$TE2_DATA_HOME/code_te2/code_server` and its Unix
+  socket is runtime state;
+- WBA receives exact private extension/settings/RPC paths and has no
+  `~/.config/code-server` path fallback; extension CLI operations receive both
+  private code-server directories; and
+- ordinary startup does not inspect, import, move, or delete legacy Code TE2
+  roots. Their recovery remains an explicit Phase 3D operation.
+
 #### Phase 3D — App-local and client-local paths
 
-- move TE2-owned per-app state beneath `te2/apps/<app_id>`;
+- move TE2-owned per-app state beneath `te2/app_state/<app_id>`, separate from
+  installable app source beneath `te2/apps/<app_id>`;
 - retain Electron configuration under the canonical TE2 config root;
 - implement the standalone, dry-run-first `te2 migrate-legacy-roots` command
   after every canonical destination and schema validator exists;
@@ -455,7 +481,8 @@ Validation:
 
 - proof that ordinary startup never stats or opens a legacy root;
 - opt-in migration-command tests with old-only, new-only, identical-both,
-  divergent-both, already-receipted, active-writer, and interrupted fixtures;
+  source-overwrites-divergent-both, already-receipted, active-writer, and
+  interrupted fixtures;
 - permission and atomicity tests;
 - Code TE2 draft recovery test using real sidecar content;
 - framework settings/state/bookmark/job persistence tests;
@@ -470,6 +497,28 @@ Exit criteria:
 - ordinary runtime behavior is independent of every legacy root; and
 - the separate migration command either moves a recognized legacy root after
   explicit invocation or reports exactly why it remains.
+
+Implementation result:
+
+- app state now resolves through `te2_app_data_home()` beneath
+  `$TE2_DATA_HOME/app_state/<app_id>`; Aria Downloader uses that partition and
+  the app registry resolves its source catalog only beneath
+  `$TE2_DATA_HOME/apps`;
+- `te2 migrate-legacy-roots` is a bootstrap-independent, dry-run-first command;
+  `--apply` takes an exclusive framework-lifetime guard plus a migration lock,
+  validates every allowlisted source and destination before mutation, checks
+  free space, publishes staged replacements atomically, and writes a versioned
+  one-time receipt;
+- collisions are intentionally destructive and source-authoritative: a legacy
+  file replaces a matching canonical file and mode, while directory entries
+  found only at the canonical destination survive the overlay;
+- recognized framework, Code TE2, code-server, Aria, Framework-Shells, Cargo,
+  and console paths are migrated; explicitly rebuildable legacy outputs are
+  deleted; unknown Kotlin LSP state and unrecognized app-server/code-server
+  content are report-only; and
+- the obsolete Python-framework/dtach helper scripts were removed. Real
+  workstation state has only been inventoried and dry-run; no apply or cleanup
+  was performed as part of implementation.
 
 ### Phase 4 — Current-product naming cleanup
 

@@ -32,6 +32,7 @@ from .worker_services import git_service as worker_git_service
 from .core_read import push_save_ack, emit_diff_changed, subscribe, unsubscribe
 from .core_write import FileMeta, write_full, BaseMismatchError
 from .project_sidecar import ProjectSidecar, cleanup_orphaned_sidecars
+from .code_te2_paths import code_te2_paths
 from .main_page.backend.state_payload import (
     StatePayloadDeps,
     build_diff_base_payload,
@@ -61,7 +62,8 @@ IGNORE_PATTERNS = [
     '*.egg-info', '.DS_Store'
 ]
 
-AGENT_ICON_DIR = Path.home() / ".local" / "share" / "termux-extensions-2" / "agent_icons"
+_CODE_TE2_PATHS = code_te2_paths()
+AGENT_ICON_DIR = _CODE_TE2_PATHS.agent_icons_dir
 JsonDict = dict[str, object]
 APP_ID = str(os.environ.get("TE_APP_ID") or "file_editor_cm6").strip() or "file_editor_cm6"
 
@@ -1212,11 +1214,11 @@ async def edit_tracker_ws(websocket: WebSocket):
 # =============================================================================
 # Debug Console WebSocket
 # =============================================================================
-_debug_log_path = Path(os.path.expanduser('~/.tmp/browser_console.log'))
+_debug_log_path = _CODE_TE2_PATHS.browser_console_log_path
 
 @file_editor_cm6_bp.websocket('/ws/debug_console')
 async def debug_console_ws(websocket: WebSocket):
-    """WebSocket endpoint for browser console log forwarding. Writes to ~/.tmp/browser_console.log."""
+    """WebSocket endpoint for browser console log forwarding."""
     await websocket.accept()
     # Ensure directory exists
     _debug_log_path.parent.mkdir(parents=True, exist_ok=True)

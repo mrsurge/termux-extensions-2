@@ -9,6 +9,8 @@ from pathlib import Path
 from collections.abc import Awaitable, Callable
 from typing import Protocol, cast
 
+from ..code_te2_paths import code_te2_paths
+
 JsonObject = dict[str, object]
 
 
@@ -75,9 +77,7 @@ def _resolve_socket_path() -> Path:
     configured = (os.getenv("TE_BACKCHANNEL_SOCKET") or "").strip()
     if configured:
         return Path(configured).expanduser().resolve(strict=False)
-    return (Path.home() / ".local" / "share" / "termux-extensions-2" / "runtime" / "te2_sidebar_backchannel.sock").resolve(
-        strict=False
-    )
+    return code_te2_paths().sidebar_backchannel_socket_path.resolve(strict=False)
 
 
 def _prepare_socket_dir(socket_path: Path) -> None:

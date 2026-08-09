@@ -8,7 +8,6 @@ import os
 import time
 import urllib.error
 import urllib.request
-from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import quote
 
@@ -16,6 +15,8 @@ from fastapi import APIRouter, HTTPException, Body, Query
 
 from framework_shells import FrameworkShellManager
 from framework_shells import get_manager as get_framework_shell_manager
+
+from app.te2_paths import te2_app_data_home
 
 aria_downloader_bp = APIRouter()
 APP_ID = str(os.environ.get('TE_APP_ID') or 'aria_downloader').strip() or 'aria_downloader'
@@ -36,7 +37,7 @@ DEFAULT_ARIA2_COMMAND = [
 DEFAULT_ARIA2_LABEL = 'aria2'
 DEFAULT_SHELL_CWD = '~/services/aria2'
 DEFAULT_LOG_TAIL_LINES = 200
-STATE_DIR = Path(os.path.expanduser('~/.cache/aria_downloader'))
+STATE_DIR = te2_app_data_home(APP_ID)
 STATE_FILE = STATE_DIR / 'framework_shell.json'
 
 

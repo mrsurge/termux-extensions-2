@@ -11,6 +11,7 @@ from framework_shells import get_manager
 from framework_shells.orchestrator import Orchestrator
 from framework_shells.record import ShellRecord
 
+from .code_te2_paths import code_te2_paths
 from .diagnostics_latency_metrics import (
     diagnostics_latency_metrics_enabled,
     elapsed_ms,
@@ -601,6 +602,7 @@ async def ensure_workbench_adapter_shell(
     if not code_server_socket_path:
         raise RuntimeError("code-server UDS socket path is required")
     remote_authority = "localhost"
+    paths = code_te2_paths()
 
     _set_adapter_state("starting", project=project_root)
     await _publish_adapter_state_fact()
@@ -619,6 +621,13 @@ async def ensure_workbench_adapter_shell(
                 "WORKBENCH_ADAPTER_ENTRY": str(adapter_entry),
                 "CODE_SERVER_HTTP": str(code_server_http),
                 "CODE_SERVER_SOCKET": str(code_server_socket_path or ""),
+                "CODE_SERVER_EXTENSIONS_JSON": str(
+                    paths.code_server_extensions_manifest_path
+                ),
+                "CODE_SERVER_USER_SETTINGS": str(
+                    paths.code_server_user_settings_path
+                ),
+                "CODE_SERVER_RPC_CONFIG": str(paths.code_server_rpc_config_path),
                 "REMOTE_AUTHORITY": remote_authority,
             },
             label=label,

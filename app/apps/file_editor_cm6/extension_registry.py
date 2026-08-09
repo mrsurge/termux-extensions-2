@@ -5,7 +5,7 @@ Scans builtin + user-installed extensions, parses package.json contributes,
 builds a unified registry with language slot mapping, and generates the
 settings.json gate for code-server.
 
-Registry is persisted at ~/.config/code-server/te2_extension_registry.json.
+Registry is persisted in Code TE2's private canonical data root.
 The registry retains one user-owned global settings map, which is materialized
 with TE2's generated language gates into code-server User/settings.json.
 """
@@ -21,7 +21,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Final, TypeAlias, cast
 
-from app.te2_paths import te2_cache_home, te2_data_home
+from app.te2_paths import te2_data_home
+
+from .code_te2_paths import code_te2_paths
 
 JsonValue: TypeAlias = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
 JsonObject: TypeAlias = dict[str, JsonValue]
@@ -33,11 +35,12 @@ Registry: TypeAlias = dict[str, object]
 
 # ── Paths ─────────────────────────────────────────────────────────────
 
-_CODE_SERVER_DATA_DIR = Path.home() / ".config" / "code-server"
-_EXTENSIONS_DIR = _CODE_SERVER_DATA_DIR / "extensions"
-_USER_SETTINGS_PATH = _CODE_SERVER_DATA_DIR / "User" / "settings.json"
-_REGISTRY_PATH = _CODE_SERVER_DATA_DIR / "te2_extension_registry.json"
-_RPC_CONFIG_PATH = te2_cache_home() / "code_server" / "probes" / "te2_rpc_config.json"
+_CODE_TE2_PATHS = code_te2_paths()
+_CODE_SERVER_DATA_DIR = _CODE_TE2_PATHS.code_server_data_dir
+_EXTENSIONS_DIR = _CODE_TE2_PATHS.code_server_extensions_dir
+_USER_SETTINGS_PATH = _CODE_TE2_PATHS.code_server_user_settings_path
+_REGISTRY_PATH = _CODE_TE2_PATHS.code_server_registry_path
+_RPC_CONFIG_PATH = _CODE_TE2_PATHS.code_server_rpc_config_path
 PINNED_CODE_SERVER_VERSION: Final = "4.130.0"
 
 
@@ -1202,6 +1205,7 @@ def _run_code_server_extension_install(extension_spec: str) -> None:
     cmd = [
         str(installation.executable),
         "--install-extension", extension_spec,
+        "--user-data-dir", str(_CODE_SERVER_DATA_DIR),
         "--extensions-dir", str(_EXTENSIONS_DIR),
         "--force",
     ]
@@ -1331,6 +1335,7 @@ def uninstall_extension(ext_id: str) -> dict[str, object]:
     cmd = [
         str(installation.executable),
         "--uninstall-extension", ext_id,
+        "--user-data-dir", str(_CODE_SERVER_DATA_DIR),
         "--extensions-dir", str(_EXTENSIONS_DIR),
     ]
 

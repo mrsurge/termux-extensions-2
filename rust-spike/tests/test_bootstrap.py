@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import fcntl
 import os
 import subprocess
 import sys
@@ -175,6 +176,60 @@ class RustSpikeBootstrapTests(unittest.TestCase):
 
             self.assertEqual(child.wait(timeout=5), 0)
             self.assertEqual(acquired.read_text(encoding="utf-8"), "acquired")
+
+    def test_framework_lifetime_holds_shared_migration_guard(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            root = Path(raw_tmp)
+            environment = {
+                "HOME": str(root / "home"),
+                "TE2_CACHE_HOME": str(root / "cache"),
+                "TE2_DATA_HOME": str(root / "data"),
+                "TE2_CONFIG_HOME": str(root / "config"),
+                "TE2_RUNTIME_HOME": str(root / "runtime"),
+            }
+
+            with self.bootstrap._framework_migration_guard(environment):
+                guard_path = root / "runtime" / "framework" / "migration.guard"
+                with guard_path.open("a+b") as competing_guard:
+                    with self.assertRaises(BlockingIOError):
+                        fcntl.flock(
+                            competing_guard.fileno(),
+                            fcntl.LOCK_EX | fcntl.LOCK_NB,
+                        )
+
+            self.assertEqual(0o700, (root / "runtime" / "framework").stat().st_mode & 0o777)
+
+    def test_build_resolution_holds_shared_migration_guard(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            root = Path(raw_tmp)
+            environment = {
+                "HOME": str(root / "home"),
+                "TE2_CACHE_HOME": str(root / "cache"),
+                "TE2_DATA_HOME": str(root / "data"),
+                "TE2_CONFIG_HOME": str(root / "config"),
+                "TE2_RUNTIME_HOME": str(root / "runtime"),
+            }
+            args = self.bootstrap._parse_args(["--build-only"])
+
+            def inspect_guard(_args: object, _env: object, *, build: bool) -> object:
+                self.assertTrue(build)
+                guard_path = root / "runtime" / "framework" / "migration.guard"
+                with guard_path.open("a+b") as competing_guard:
+                    with self.assertRaises(BlockingIOError):
+                        fcntl.flock(
+                            competing_guard.fileno(),
+                            fcntl.LOCK_EX | fcntl.LOCK_NB,
+                        )
+                return self.bootstrap.ServerCommand(["unused"], build_already_done=True)
+
+            with (
+                mock.patch.object(self.bootstrap, "_parse_args", return_value=args),
+                mock.patch.object(self.bootstrap, "_build_env", return_value=environment),
+                mock.patch.object(self.bootstrap, "_server_command", side_effect=inspect_guard),
+            ):
+                result = self.bootstrap.main([])
+
+            self.assertEqual(0, result)
 
     def test_runtime_env_strips_generic_cargo_target_dir(self) -> None:
         env = {"CARGO_TARGET_DIR": "/shared/cargo-target"}

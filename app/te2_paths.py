@@ -48,6 +48,23 @@ def te2_data_home(
     )
 
 
+def te2_app_data_home(
+    app_id: str,
+    environ: Mapping[str, str] | None = None,
+    *,
+    home: Path | None = None,
+) -> Path:
+    """Return the durable state root for one TE2 app."""
+    normalized = str(app_id or "").strip()
+    if (
+        not normalized
+        or normalized in {".", ".."}
+        or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_." for char in normalized)
+    ):
+        raise ValueError(f"invalid TE2 app id: {app_id!r}")
+    return te2_data_home(environ, home=home) / "app_state" / normalized
+
+
 def te2_config_home(
     environ: Mapping[str, str] | None = None,
     *,

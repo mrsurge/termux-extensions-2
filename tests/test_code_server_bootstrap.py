@@ -114,7 +114,14 @@ class CodeServerBootstrapTests(unittest.TestCase):
     def test_remove_managed_runtime_preserves_sibling_extension_data(self) -> None:
         self.install_prefix.mkdir(parents=True)
         (self.install_prefix / "runtime.txt").write_text("runtime", encoding="utf-8")
-        extensions = self.root / "config" / "code-server" / "extensions"
+        extensions = (
+            self.root
+            / "data"
+            / "te2"
+            / "code_te2"
+            / "code_server"
+            / "extensions"
+        )
         extensions.mkdir(parents=True)
         (extensions / "keep.txt").write_text("extension", encoding="utf-8")
 

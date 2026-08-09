@@ -314,7 +314,7 @@ Remaining high-value decomposition targets:
 - `app/apps/file_editor_cm6/stores.py`
   - Singleton store instances: `_history_store`, `_preferences_store`
 - `app/apps/file_editor_cm6/project_sidecar.py`
-  - Disk-backed "session_cache" (draft cache entries) at `~/.cache/cm6_editor/projects/{hash}.json`
+  - Disk-backed "session_cache" (draft cache entries) at `$TE2_DATA_HOME/code_te2/projects/{hash}.json`
   - `_instances`: per-process ClassVar cache (not shared across processes)
   - `reload()`: re-reads from disk to pick up cross-process writes
 - `app/apps/file_editor_cm6/draft_index_sidecar.py`
@@ -329,7 +329,13 @@ Remaining high-value decomposition targets:
   - `list_reviews(project, lightweight)`: queries drafts, optionally computes diff hunks
   - `discard_reviews(project, files)`: clears drafts, reverts active editor if file is open
 - `app/apps/file_editor_cm6/preferences_store.py`
-  - Disk-backed preferences (editor settings)
+  - Disk-backed preferences at `$TE2_CONFIG_HOME/code_te2/preferences.json`
+
+The companion global history ledger is stored at
+`$TE2_DATA_HOME/code_te2/history.json`. Code TE2 startup does not probe or
+import the former `cm6_editor`, `cm6_sessions`, or `termux-extensions-2`
+roots. Recovery from those roots is reserved for the explicit opt-in migration
+command.
 
 ---
 
@@ -3781,6 +3787,23 @@ Termux uses a TE2-published package instead of the official installer:
 - Resolver discovery recognizes that launcher's adjacent `lib/code-server/lib/vscode` tree directly rather than evaluating its shell-local `$ROOT`; existing managed prefixes do not require reinstallation.
 
 The bootstrap does not register the Code Server package with `apt` and does not vendor the 709 MiB Code Server tree in the repository.
+
+The managed executable and its mutable user state have separate ownership:
+
+- the pinned executable remains under `$TE2_DATA_HOME/code_server/4.130.0`;
+- Code TE2 owns private code-server user data, installed extensions, extension
+  registry, and generated User settings beneath
+  `$TE2_DATA_HOME/code_te2/code_server`;
+- the code-server Unix socket is
+  `$TE2_RUNTIME_HOME/code_te2/code_server.sock`;
+- WBA receives the exact extension manifest, User settings, and generated RPC
+  configuration paths through its Framework-Shell environment; it never probes
+  the user's global `~/.config/code-server`; and
+- generated probe records stay beneath `$TE2_CACHE_HOME/code_server/probes`.
+
+Extension install and uninstall commands receive both the private
+`--user-data-dir` and `--extensions-dir`. Existing global code-server data is
+left untouched and is not imported during startup.
 
 ---
 

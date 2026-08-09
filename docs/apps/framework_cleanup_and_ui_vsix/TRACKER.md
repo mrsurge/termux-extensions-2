@@ -11,8 +11,8 @@ Last updated: 2026-08-08
 | Phase 2: interface-scoped framework exposure | Implemented and active-framework validated on Linux; Termux check pending | Implementation and live-runtime restart approved |
 | Phase 3A: shared paths and rebuildable caches | Implemented and automated-validated; live restart and Termux acceptance pending | Implementation approved; live shared-runtime restart still requires approval |
 | Phase 3B: framework durable stores | Implemented and automated-validated; live framework acceptance pending | Implementation approved; live shared-runtime restart still requires approval |
-| Phase 3C: Code TE2 durable state | Not started | Requires canonical-store implementation approval |
-| Phase 3D: app/client paths and opt-in legacy migration/cleanup | Not started | Tool implementation and every real apply are separate approval boundaries |
+| Phase 3C: Code TE2 durable state | Implemented and automated-validated; live app/WBA restart acceptance pending | Implementation approved; shared-runtime restart remains separate |
+| Phase 3D: app/client paths and opt-in legacy migration/cleanup | Implemented and fixture-validated; real apply pending separate approval | Tool implementation and every real apply are separate approval boundaries |
 | Phase 4A: internal/package naming | Not started | Requires packaging-aware rename approval |
 | Phase 4B: public app identifiers | Deferred | Requires an explicit compatibility decision |
 | Phase 5: UI VSIX rough-draft milestone | Deferred | Begins only after framework phases are stable |
@@ -28,7 +28,7 @@ Last updated: 2026-08-08
 | Hover language/value code path is unreachable | Generic `value` branch precedes the `language + value` branch | Confirmed |
 | WBA hover dispatch itself is generic and multi-provider | WBA finds all selector-matched hover handles and merges ordered contents | Confirmed |
 | Code TE2 drafts live in a cache-labeled root | `project_sidecar.py` uses `~/.cache/cm6_editor/projects` | Confirmed; high migration risk |
-| `cm6_sessions` helpers appear dead | Path is created; private read/write/delete helpers have no callers | Confirmed in current source; validate before removal |
+| `cm6_sessions` helpers appear dead | Path was created; private read/write/delete helpers had no callers | Resolved in 3C; helpers and eager directory creation removed |
 | `rust-spike` names are active product names | Source root, package data, crate, CLI, cache id, env variables, and logs use them | Confirmed |
 | Electron still uses an experimental source-directory name | Active client is `desktop_client/electron_spike` | Confirmed |
 | UI extension support is intentionally absent | Explorer marketplace displays the unsupported notice | Confirmed |
@@ -48,22 +48,22 @@ prove current ownership; current source is the authority.
 | `$XDG_CACHE_HOME/te2` | Several current TE2 components | Canonical cache root | Keep; normalize named subtrees | Active |
 | `$XDG_CACHE_HOME/te2-rust-spike` | No current writer after Phase 3A | Rebuildable cache | New builds use `te2/framework/build`; report old tree to the later opt-in cleanup tool | Cut over; old disk tree remains untouched |
 | `$XDG_CACHE_HOME/termux_extensions` | No current reader after Phase 3B | Legacy settings/state/bookmarks/jobs data | Move recognized data only through the later opt-in command | Cut over; old disk tree remains untouched |
-| `$HOME/.cache/cm6_editor` | Code TE2 project/draft sidecars | Durable editor recovery data | Cut runtime to `$TE2_DATA_HOME/code_te2/projects`; move old data only through opt-in command | Active; highest risk |
-| `$HOME/.cache/cm6_sessions` | Uncalled HistoryStore helpers | Intended session data | Remove dead helpers if no caller exists; otherwise define a canonical destination without runtime fallback | Apparently unused |
-| `$XDG_DATA_HOME/termux-extensions-2` | Code TE2 history, preferences, icons, legacy runtime socket | Durable data/runtime | Cut runtime to canonical Code TE2 data/runtime roots; move old data only through opt-in command | Active |
+| `$HOME/.cache/cm6_editor` | No current reader after Phase 3C | Legacy editor recovery data | Move recognized sidecars only through the later opt-in command | Cut over; old disk tree remains untouched |
+| `$HOME/.cache/cm6_sessions` | No current owner after Phase 3C | Empty obsolete session path | Report through the later cleanup tool; no runtime fallback | Dead helpers removed |
+| `$XDG_DATA_HOME/termux-extensions-2` | No current Code TE2 reader after Phase 3C | Legacy history/preferences/icons/runtime | Move recognized data only through the later opt-in command | Cut over; old disk tree remains untouched |
 | `$HOME/.cache/app_server` | No current console writer after Phase 3A | Bounded logs/generated console assets | Console runtime and CLI use `$TE2_CACHE_HOME/console`; no runtime fallback | Cut over; old disk tree remains untouched |
 | `$XDG_CACHE_HOME/framework_shells` | No current bootstrap default after Phase 3A | Process/log/cache state | Bootstrap exports `$TE2_CACHE_HOME/framework_shells` to Framework-Shells | Cut over in source; live restart pending |
-| `$HOME/.cache/aria_downloader` | Aria Downloader app | App state | Canonical `te2/apps/aria_downloader` data/cache subtree | Active app-specific root |
+| `$HOME/.cache/aria_downloader` | No current writer after Phase 3D | App state | `$TE2_DATA_HOME/app_state/aria_downloader` through explicit migration | Cut over; old disk tree remains untouched |
 | `$XDG_CONFIG_HOME/te2` | Electron settings/presentation | Canonical configuration | Keep; normalize desktop subtree if needed | Active canonical root |
 | `$TE2_CONFIG_HOME/framework` | Rust framework settings | Canonical configuration | Keep as the exclusive settings destination | Active canonical root |
 | `$TE2_DATA_HOME/framework` | Rust state/bookmarks and Python job records | Canonical durable data | Keep as the exclusive framework-store destination | Active canonical root |
-| `$HOME/.config/code-server` | Code TE2 extension registry, extensions, WBA settings, bridge | Durable managed/user data | Decide private TE2 managed code-server root in Phase 3C | Active; compatibility decision |
+| `$HOME/.config/code-server` | No current Code TE2 reader after Phase 3C | External/global code-server data | Leave untouched; any recognized import is explicit opt-in migration work | Code TE2 cut over to a private data root |
 | `$XDG_DATA_HOME/te2` | Apps, managed code-server, Node runtime, desktop assets | Canonical durable root | Keep and organize | Active canonical root |
 | `$XDG_CACHE_HOME/te2-android-install` | No current in-repo writer found | Build/install scratch | Report and delete only with explicit approval | Cleanup candidate |
 | `$XDG_CACHE_HOME/dev.te2.desktop*` | No current Electron writer found | Old Electrobun/CEF cache | Report and delete only with explicit approval | Cleanup candidate |
 | `$XDG_CACHE_HOME/te2_kotlin_lsp` | No current in-repo writer found | Unknown/external LSP state | Do not adopt or delete until producer is identified | Unowned/unknown |
-| `$HOME/.cache/te_framework` | Legacy scripts | Old framework runtime state | Audit scripts, then retire path | Legacy candidate |
-| `$HOME/.cache/te` and fallback `.local/run/te` | Legacy session scripts | Old session/runtime state | Audit scripts, then retire or move under runtime root | Legacy references |
+| `$HOME/.cache/te_framework` | No current owner after Phase 3D | Old framework runtime state | Delete only through explicit migration apply | Retired helper scripts removed; old disk tree remains untouched |
+| `$HOME/.cache/te` and fallback `.local/run/te` | No current owner after Phase 3D | Old session/runtime state | Delete only through explicit migration apply | Retired helper scripts removed; old disk trees remain untouched |
 
 ## Phase 1 checklist — WBA hover fidelity
 
@@ -127,6 +127,9 @@ Target architecture decisions:
 - native Android clients continue using application-private Android storage;
 - legacy movement exists only in a standalone `te2 migrate-legacy-roots`
   command that is dry-run by default and mutates only with `--apply`;
+- allowlisted legacy source files are authoritative during apply and
+  destructively replace matching canonical files; destination-only directory
+  entries remain in place;
 - release is the default framework build profile; `--debug` is opt-in; and
 - the Cargo incremental target is retained, but only the selected validated
   final launch binary survives fingerprint-cache pruning.
@@ -163,23 +166,25 @@ Target architecture decisions:
 
 ### 3C: Code TE2 durable state
 
-- [ ] Freeze a fixture containing real draft/project sidecar shapes.
-- [ ] Cut project sidecars and draft indexes directly to canonical data paths.
-- [ ] Cut history, preferences, icons, and runtime socket directly to canonical roots.
-- [ ] Prove or disprove live use of `cm6_sessions` helpers.
-- [ ] Decide private managed code-server user-data/extensions ownership.
-- [ ] Validate drafts, recent projects/files, settings, extensions, WBA launch, and restart recovery.
+- [x] Freeze a fixture containing real draft/project sidecar shapes.
+- [x] Cut project sidecars and draft indexes directly to canonical data paths.
+- [x] Cut history, preferences, icons, and runtime socket directly to canonical roots.
+- [x] Prove `cm6_sessions` helpers have no callers and remove them.
+- [x] Give managed code-server a private TE2-owned user-data/extensions root.
+- [x] Validate path resolution, draft/index reload recovery, history/preferences persistence, extension commands, and WBA path handoff with automated tests.
+- [ ] Live-validate recent projects/files, settings, installed extensions, WBA launch, and restart recovery after an approved app/framework restart.
 
 ### 3D: apps, clients, and cleanup
 
-- [ ] Move TE2-owned app-specific roots under canonical app subtrees.
-- [ ] Implement `te2 migrate-legacy-roots` as a standalone dry-run-first command.
-- [ ] Require `--apply`, an inactive framework, a migration lock, schema validation, and a one-time receipt.
-- [ ] Test old-only/new-only/identical/conflicting/interrupted/already-receipted migration cases.
-- [ ] Inventory old desktop/Electrobun/CEF cache roots.
-- [ ] Inventory Android install scratch roots.
-- [ ] Identify the producer of `te2_kotlin_lsp` or classify it as external.
-- [ ] Produce a dry-run legacy-root cleanup report.
+- [x] Move TE2-owned app state under `$TE2_DATA_HOME/app_state/<app_id>`, separate from installable app source.
+- [x] Implement `te2 migrate-legacy-roots` as a standalone dry-run-first command.
+- [x] Require `--apply`, an inactive framework, a migration lock, schema validation, free-space preflight, and a one-time receipt.
+- [x] Make allowlisted legacy files source-authoritative over matching canonical files while preserving destination-only tree entries.
+- [x] Test old-only/new-only/identical/source-overwrite/interrupted/already-receipted/active-writer cases plus permissions and symlink refusal.
+- [x] Inventory old desktop/Electrobun/CEF cache roots.
+- [x] Inventory Android install scratch roots.
+- [x] Classify `te2_kotlin_lsp` as unowned/unknown and report-only until its producer is proven.
+- [x] Produce a write-free dry-run legacy-root cleanup report.
 - [ ] Obtain explicit approval before deleting workstation files.
 - [ ] Remove only verified-empty or explicitly approved stale roots.
 
@@ -224,7 +229,6 @@ Target architecture decisions:
 |---|---|
 | Rename `file_editor_cm6` to `code_te2` | Public ID touches URLs, native clients, assets, IPC, and persisted state |
 | Retire `te2-rust` CLI alias | Installed-user compatibility must be measured after package rename |
-| Move all code-server state out of `~/.config/code-server` | WBA compatibility and user extension migration need an isolated acceptance pass |
 | Delete `te2_kotlin_lsp` | Current repository does not prove ownership |
 | Detailed UI VSIX architecture | Must be based on the cleaned framework and a selected real extension |
 
@@ -243,3 +247,4 @@ each phase executes. Do not mark a phase complete from implementation alone.
 | 2026-08-08 | 2 | Release/Ferrous active-framework restart using `--broadcast tailscale0` | Passed; native IPv4/IPv6 listeners replaced `socat`, Electron/console reconnected, Terminal and File Explorer reached ready, and worker `TE_FRAMEWORK_URL`/FWS URL remained loopback |
 | 2026-08-08 | 3A planning | Read-only active-writer, platform-fallback, profile-selection, and build-cache retention investigation | Confirmed canonical/fallback gaps, debug-by-default behavior, no build lock/pruning, and 10 stale final release binaries totaling 206.6 MiB |
 | 2026-08-08 | 3A | Python path/bootstrap/cache/console/runtime suites; Electron full suite/typecheck/compile; Rust full feature suite/format/check; isolated CLI profile smoke | Passed; 72 Python tests, 61 Electron tests, 63 Rust tests plus 4 ignored benchmarks, release/debug paths resolved correctly, 0 failures |
+| 2026-08-08 | 3D | Migration/path/bootstrap fixture suite; current legacy sidecar schema probe; real-root JSON dry-run; static checks | Passed; destructive source-overwrite, destination-only retention, one-time receipt, active-writer guard, interrupted recovery, permissions, and report-only boundaries validated; no real apply performed |

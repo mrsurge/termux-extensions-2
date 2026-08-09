@@ -14,7 +14,7 @@ import socket
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Generator, MutableMapping, Sequence
+from collections.abc import Callable, Generator, Mapping, MutableMapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv6Address, ip_address, ip_network
@@ -103,21 +103,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(_interface_inventory(), indent=2, sort_keys=True))
         return 0
     env = _build_env(args)
-    command = _server_command(args, env, build=not args.print_command)
     if args.print_command:
+        command = _server_command(args, env, build=False)
         print(" ".join(command.argv))
         return 0
-    if args.build_only:
-        if command.build_already_done:
-            return 0
-        return subprocess.run(command.argv, env=env, check=False).returncode
-    return _run_child(command.argv, env)
+    with _framework_migration_guard(env):
+        command = _server_command(args, env, build=True)
+        if args.build_only:
+            if command.build_already_done:
+                return 0
+            return subprocess.run(command.argv, env=env, check=False).returncode
+        return _run_child(command.argv, env)
 
 
 def _parse_args(argv: Sequence[str] | None) -> BootstrapArgs:
     parser = argparse.ArgumentParser(
         prog="te2-rust-spike",
         description="Build and launch the TE2 Rust framework.",
+        epilog=(
+            "Standalone commands: te2 console <command>; "
+            "te2 migrate-legacy-roots [--apply] [--json]"
+        ),
     )
     parser.add_argument("--host", default=os.environ.get("TE2_RUST_SPIKE_HOST", DEFAULT_HOST))
     parser.add_argument("--port", default=os.environ.get("TE2_RUST_SPIKE_PORT", os.environ.get("TE_PORT", DEFAULT_PORT)))
@@ -376,6 +382,20 @@ def _exclusive_build_cache_lock(cache_dir: Path) -> Generator[None, None, None]:
             yield
         finally:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+@contextmanager
+def _framework_migration_guard(env: Mapping[str, str]) -> Generator[None, None, None]:
+    """Hold a shared writer guard for the complete framework lifetime."""
+    paths = resolve_te2_paths(env)
+    guard_dir = ensure_runtime_home(paths.runtime_home / "framework")
+    guard_path = guard_dir / "migration.guard"
+    with guard_path.open("a+b") as guard_file:
+        fcntl.flock(guard_file.fileno(), fcntl.LOCK_SH)
+        try:
+            yield
+        finally:
+            fcntl.flock(guard_file.fileno(), fcntl.LOCK_UN)
 
 
 def _cached_binary_is_usable(path: Path) -> bool:

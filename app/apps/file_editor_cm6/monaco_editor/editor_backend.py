@@ -15,6 +15,7 @@ from starlette.responses import FileResponse
 # --- Local Imports ---
 from app.apps.file_editor_cm6.stores import get_history_store, get_preferences_store
 from app.apps.file_editor_cm6.preferences_store import ALLOWED_FONT_SCALES
+from app.apps.file_editor_cm6.code_te2_paths import code_te2_paths
 # Import helpers
 from app.apps.file_editor_cm6.explorer.services.file_ops import get_project_root, mark_git_cache_dirty
 from app.apps.file_editor_cm6.core_read import push_save_ack, emit_diff_changed, subscribe, unsubscribe
@@ -1077,7 +1078,7 @@ export default href;
             return Response("not found", status_code=404, media_type="text/plain")
         return FileResponse(str(target), media_type="application/json")
 
-    cs_ext_themes = Path.home() / ".config" / "code-server" / "extensions"
+    cs_ext_themes = code_te2_paths().code_server_extensions_dir
 
     @fastapi_app.get(mount_path + "/monaco_editor/cs_themes/{ext_id}/{theme_file:path}", include_in_schema=False)
     async def _serve_cs_extension_theme(ext_id: str, theme_file: str):

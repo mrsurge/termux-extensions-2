@@ -215,9 +215,8 @@ export function buildExtensionsSnapshot(scannedExtensions: unknown[], options: E
 }
 
 export async function scanExtensionsFromDisk(runtime: ExtensionCatalogRuntime, authority: string | null): Promise<Record<string, unknown>[]> {
-  const home = runtime.env.HOME || runtime.env.USERPROFILE || "";
-  const jsonPath = runtime.env.TE2_EXTENSIONS_JSON || (home ? runtime.joinPath(home, ".config/code-server/extensions/extensions.json") : null);
-  if (!jsonPath) throw new Error("No HOME for extensions.json");
+  const jsonPath = String(runtime.env.TE2_EXTENSIONS_JSON ?? "").trim();
+  if (!jsonPath) throw new Error("TE2_EXTENSIONS_JSON is required");
   const raw = await runtime.readTextFile(jsonPath);
   const entries = JSON.parse(raw);
   if (!Array.isArray(entries)) return [];

@@ -6,6 +6,8 @@ import threading
 from pathlib import Path
 from typing import TypeAlias, cast
 
+from .code_te2_paths import code_te2_paths
+
 JsonDict: TypeAlias = dict[str, object]
 
 
@@ -88,9 +90,7 @@ class PreferencesStore:
     """Disk-backed store for Code OSS editor/UI preferences - always reads from disk."""
 
     def __init__(self, storage_path: Path | None = None) -> None:
-        default_root = Path.home() / ".local" / "share" / "termux-extensions-2"
-        default_root.mkdir(parents=True, exist_ok=True)
-        self._path = storage_path or (default_root / "code_oss_prefs.json")
+        self._path = storage_path or code_te2_paths().preferences_path
         _ensure_dir(self._path)
         self._lock = threading.Lock()
         # NO in-memory cache - file is always authority

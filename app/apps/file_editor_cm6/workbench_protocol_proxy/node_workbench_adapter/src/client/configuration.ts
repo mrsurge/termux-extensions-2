@@ -307,16 +307,14 @@ export function buildConfigurationInitData(runtime: ConfigurationRuntime, folder
   const defaults = { contents: { ...extracted.contents }, overrides: [], keys: [...extracted.keys] };
 
   let userRemote = { contents: {}, overrides: [], keys: [] } as { contents: Record<string, unknown>; overrides: unknown[]; keys: string[] };
-  const home = runtime.env.HOME || runtime.env.USERPROFILE || "";
-  const settingsPath = runtime.env.TE2_USER_SETTINGS_PATH || (home ? runtime.joinPath(home, ".config/code-server/User/settings.json") : "");
-  if (settingsPath) {
-    try {
-      const parsed = JSON.parse(runtime.readTextFileSync(settingsPath));
-      userRemote = parseSettingsObject(parsed);
-      runtime.log(`[config] loaded ${userRemote.keys.length} user settings from ${settingsPath}`);
-    } catch (e) {
-      runtime.log(`[config] could not read user settings (${settingsPath}): ${e instanceof Error ? e.message : String(e)}`);
-    }
+  const settingsPath = String(runtime.env.TE2_USER_SETTINGS_PATH ?? "").trim();
+  if (!settingsPath) throw new Error("TE2_USER_SETTINGS_PATH is required");
+  try {
+    const parsed = JSON.parse(runtime.readTextFileSync(settingsPath));
+    userRemote = parseSettingsObject(parsed);
+    runtime.log(`[config] loaded ${userRemote.keys.length} user settings from ${settingsPath}`);
+  } catch (e) {
+    runtime.log(`[config] could not read user settings (${settingsPath}): ${e instanceof Error ? e.message : String(e)}`);
   }
 
   let workspaceConfig = { contents: {}, overrides: [], keys: [] } as { contents: Record<string, unknown>; overrides: unknown[]; keys: string[] };

@@ -25,9 +25,7 @@ export type RpcIds = Record<RpcIdName, number>;
 
 export interface LoadRpcIdsOptions {
   env?: Record<string, string | undefined>;
-  homeDir?: string;
   readText?: (filePath: string) => string;
-  joinPath?: (...parts: string[]) => string;
   log?: (message: string) => void;
 }
 
@@ -37,10 +35,6 @@ export interface LoadedRpcIds {
   configPath: string;
 }
 
-function defaultJoinPath(...parts: string[]): string {
-  return parts.filter(Boolean).join("/").replace(/\/+/g, "/");
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
@@ -48,11 +42,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function loadRpcIds(options: LoadRpcIdsOptions = {}): LoadedRpcIds {
   const env = options.env ?? {};
   const readText = options.readText;
-  const joinPath = options.joinPath ?? defaultJoinPath;
   const log = options.log ?? (() => undefined);
-  const configPath = env.TE2_RPC_CONFIG_PATH || joinPath(options.homeDir || env.HOME || "", ".config/code-server/te2_rpc_config.json");
+  const configPath = String(env.TE2_RPC_CONFIG_PATH ?? "").trim();
   const ids: RpcIds = { ...RPC_DEFAULTS };
   let source = "hardcoded-defaults";
+
+  if (!configPath) {
+    log("[rpc-config] TE2_RPC_CONFIG_PATH is unset, using hardcoded defaults");
+    return { ids, source, configPath };
+  }
 
   if (!readText) {
     log("[rpc-config] no readText callback, using hardcoded defaults");

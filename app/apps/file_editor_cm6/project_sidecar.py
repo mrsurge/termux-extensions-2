@@ -10,6 +10,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import ClassVar, TypeAlias, cast
 
+from .code_te2_paths import code_te2_paths
+
 JsonDict: TypeAlias = dict[str, object]
 StringDict: TypeAlias = dict[str, str]
 DraftEntry: TypeAlias = dict[str, object]
@@ -96,14 +98,14 @@ def _as_int(value: object, default: int = 0) -> int:
 
 def _sidecar_root() -> Path:
     """Return root directory for per-project sidecars."""
-    root = Path.home() / ".cache" / "cm6_editor" / "projects"
+    root = code_te2_paths().project_sidecars_dir
     _ensure_dir(root)
     return root
 
 
 @dataclass
 class ProjectSidecar:
-    """Per-project state sidecar persisted under ~/.cache/cm6_editor/projects/.
+    """Per-project state sidecar persisted under the canonical Code TE2 data root.
 
     This encapsulates editor state that must be scoped to a single project path:
     - session_count: detects fresh starts after project switches

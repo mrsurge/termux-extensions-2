@@ -13,11 +13,12 @@ from ..context import ExplorerPrefsHandlerContext
 from ..services.state_facts import publish_preferences_changed
 from ...preferences_store import DEFAULT_UI_PREFS
 from ...stores import get_preferences_store
+from ...code_te2_paths import code_te2_paths
 
 JsonObject = dict[str, object]
 PreferenceValue = bool | str | list[JsonObject]
 
-AGENT_ICON_DIR = Path.home() / ".local" / "share" / "termux-extensions-2" / "agent_icons"
+AGENT_ICON_DIR = code_te2_paths().agent_icons_dir
 PREFERENCES_STORE = get_preferences_store()
 
 

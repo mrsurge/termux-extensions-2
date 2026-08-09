@@ -77,7 +77,7 @@ WebSocket-driven file tree with real-time updates, search, git status badges, an
 ### 6. **Multi-Project Session Management**
 Two-tier state architecture ensures complete project isolation with seamless multi-device convergence.
 
-- **HistoryStore + ProjectSidecar:** Global ledger (HistoryStore) delegates per-project data to isolated JSON sidecars (`~/.cache/cm6_editor/projects/<sha1>.json`).
+- **HistoryStore + ProjectSidecar:** Global ledger (HistoryStore) delegates per-project data to isolated JSON sidecars (`$TE2_DATA_HOME/code_te2/projects/<sha1>.json`).
 - **Per-Project Isolation:** Each project maintains its own recent files, scroll positions, diff base, and unsaved drafts—completely independent from other projects.
 - **Draft Retention on Switch:** Switching projects does NOT clear drafts. Each project's unsaved work persists in its sidecar until explicitly discarded.
 - **Scroll Position Persistence:** Per-file scroll positions are stored in the sidecar's `recent_files` entries and restored when reopening files.
@@ -159,7 +159,8 @@ Code CM6 relies on **Framework Shells** - the platform's unified process managem
 **For Terminal Drawer:**
 - Spawns bash/zsh as PTY shell (type="shell", uses_pty=True)
 - WebSocket streams PTY output to xterm.js
-- Logs all terminal output to `~/.cache/te_framework/logs/`
+- Stores Framework-Shells process records and logs beneath the canonical
+  `$TE2_CACHE_HOME/framework_shells` subtree
 - Graceful shutdown on app exit, orphan adoption on restart
 
 **For AI Agent (MCP Server):**

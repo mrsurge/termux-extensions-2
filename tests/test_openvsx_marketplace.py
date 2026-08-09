@@ -260,6 +260,8 @@ class MarketplaceInstallCommandTests(unittest.TestCase):
                 "/opt/code-server/bin/code-server",
                 "--install-extension",
                 "ms-python.python@2026.4.0",
+                "--user-data-dir",
+                str(extension_registry._CODE_SERVER_DATA_DIR),
                 "--extensions-dir",
                 str(extension_registry._EXTENSIONS_DIR),
                 "--force",

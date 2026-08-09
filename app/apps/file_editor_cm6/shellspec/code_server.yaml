@@ -29,7 +29,7 @@ shells:
       TE_INSTANCE_ID: ${ctx:INSTANCE_ID}
       TE2_EXT_ROOT: ${env:TE2_EXT_ROOT}
       TE2_WORKER_API_BASE: ${env:TE2_WORKER_API_BASE}
-      TE2_PROBE_OUT: ${ctx:CODE_SERVER_DATA_DIR}/te2-probe.jsonl
+      TE2_PROBE_OUT: ${ctx:CODE_SERVER_PROBE_OUT}
     subgroups:
       - ${ctx:APP_ID}
       - code_server

@@ -146,7 +146,16 @@ te2 --build-only
 te2 --debug
 te2 --print-command
 te2 console list-workers
+te2 migrate-legacy-roots          # write-free report
+te2 migrate-legacy-roots --json   # write-free structured report
 ```
+
+Legacy-root recovery is deliberately opt-in. After reviewing the dry-run,
+`te2 migrate-legacy-roots --apply` performs the versioned one-time migration
+only while the framework is stopped. The allowlisted legacy source is
+authoritative: matching canonical files are overwritten, while files that
+exist only in a canonical destination tree are retained. Unknown or externally
+owned content is reported and left untouched.
 
 `te2-rust` is an alias for the same Rust launcher. `scripts/run_framework.sh`
 is a source-checkout helper that also invokes the Rust launcher directly.

@@ -11,6 +11,10 @@ from importlib import import_module
 from pathlib import Path
 from typing import Awaitable, Protocol, cast
 
+from app.te2_paths import ensure_runtime_home
+
+from .code_te2_paths import code_te2_paths
+
 JsonObject = dict[str, object]
 
 
@@ -133,10 +137,12 @@ def _label() -> str:
 
 _BRIDGE_EXT_ID = "te2-extension-api-bridge"
 _BRIDGE_EXT_SRC = Path(__file__).parent / "vendor" / _BRIDGE_EXT_ID
-_CODE_SERVER_DATA_DIR = Path.home() / ".config" / "code-server"
-_CODE_SERVER_SOCKET_PATH = _CODE_SERVER_DATA_DIR / "code-server.sock"
-_EXTENSIONS_DIR = _CODE_SERVER_DATA_DIR / "extensions"
-_USER_SETTINGS_PATH = _CODE_SERVER_DATA_DIR / "User" / "settings.json"
+_CODE_TE2_PATHS = code_te2_paths()
+_CODE_SERVER_DATA_DIR = _CODE_TE2_PATHS.code_server_data_dir
+_CODE_SERVER_SOCKET_PATH = _CODE_TE2_PATHS.code_server_socket_path
+_CODE_SERVER_PROBE_OUTPUT_PATH = _CODE_TE2_PATHS.code_server_probe_output_path
+_EXTENSIONS_DIR = _CODE_TE2_PATHS.code_server_extensions_dir
+_USER_SETTINGS_PATH = _CODE_TE2_PATHS.code_server_user_settings_path
 
 
 # ── VS Code watcher settings sync ────────────────────────────────────
@@ -422,6 +428,8 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
         repo_root = Path(project_root).resolve(strict=False)
         data_dir = _CODE_SERVER_DATA_DIR
         data_dir.mkdir(parents=True, exist_ok=True)
+        _ = ensure_runtime_home(_CODE_SERVER_SOCKET_PATH.parent)
+        _CODE_SERVER_PROBE_OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
         print(f"[code_server] executable resolved: {code_server_bin}", flush=True)
 
         # Ensure bridge extension is installed before code-server starts
@@ -463,6 +471,7 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
                 "CODE_SERVER_BIN_DIR": str(Path(code_server_bin).parent),
                 "CODE_SERVER_DATA_DIR": str(data_dir),
                 "CODE_SERVER_SOCKET": _expected_socket_path(),
+                "CODE_SERVER_PROBE_OUT": str(_CODE_SERVER_PROBE_OUTPUT_PATH),
             },
             label=label,
             record_spec_id=f"service:{APP_ID}:code_server",

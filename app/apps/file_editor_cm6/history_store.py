@@ -5,13 +5,13 @@ import threading
 import os
 import sys
 import hashlib
-import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TypeAlias, cast
 
 from .project_sidecar import ProjectSidecar
 from .draft_index_sidecar import DraftIndexSidecar
+from .code_te2_paths import code_te2_paths
 
 MAX_RECENT_PROJECTS = 12
 MAX_RECENT_FILES = 12
@@ -106,11 +106,7 @@ class HistoryStore:
     """Persist recent project/file history and editor session cache."""
 
     def __init__(self, storage_path: Path | None = None) -> None:
-        default_root = Path.home() / ".local" / "share" / "termux-extensions-2"
-        default_root.mkdir(parents=True, exist_ok=True)
-        self._path = storage_path or (default_root / "code_oss_history.json")
-        self._session_cache_dir = Path.home() / ".cache" / "cm6_sessions"
-        self._session_cache_dir.mkdir(parents=True, exist_ok=True)
+        self._path = storage_path or code_te2_paths().history_path
 
         _ensure_dir(self._path)
         self._lock = threading.Lock()
@@ -124,6 +120,11 @@ class HistoryStore:
             "terminal_shell_id": None,
         }
         self._load()
+
+    @property
+    def path(self) -> Path:
+        """Absolute path to the backing history file."""
+        return self._path
 
     # ----- persistence helpers -------------------------------------------------
 
@@ -360,62 +361,6 @@ class HistoryStore:
             return str(Path(file_path).expanduser().resolve(strict=False))
         except Exception:
             return file_path
-
-    # ----- session cache helpers (new) ---------------------------------------
-
-    def _normalize_cache_key(self, project_path: str, file_path: str) -> str:
-        """Generate normalized cache key for session storage."""
-        try:
-            norm_project = str(Path(project_path).expanduser().resolve(strict=False))
-            norm_file = str(Path(file_path).expanduser().resolve(strict=False))
-            combined = f"{norm_project}::{norm_file}"
-            return hashlib.sha1(combined.encode('utf-8')).hexdigest()
-        except Exception:
-            combined = f"{project_path}::{file_path}"
-            return hashlib.sha1(combined.encode('utf-8')).hexdigest()
-
-    def _get_sidecar_path(self, cache_key: str) -> Path:
-        return self._session_cache_dir / f"{cache_key}.json"
-
-    def _write_sidecar(self, cache_key: str, entry: JsonDict) -> None:
-        """Atomically write a session cache entry to a sidecar file."""
-        final_path = self._get_sidecar_path(cache_key)
-        tmp_path: Path | None = None
-        try:
-            with tempfile.NamedTemporaryFile(
-                mode='w',
-                encoding='utf-8',
-                dir=self._session_cache_dir,
-                delete=False,
-                prefix=f"{cache_key}.",
-                suffix=".tmp"
-            ) as tmp_file:
-                tmp_path = Path(tmp_file.name)
-                json.dump(entry, tmp_file, ensure_ascii=False, indent=2)
-                tmp_file.flush()
-                os.fsync(tmp_file.fileno())
-            
-            os.replace(tmp_path, final_path)
-        finally:
-            if tmp_path is not None and tmp_path.exists():
-                tmp_path.unlink(missing_ok=True)
-
-    def _read_sidecar(self, cache_key: str) -> JsonDict | None:
-        """Read a session cache entry from its sidecar file."""
-        sidecar_path = self._get_sidecar_path(cache_key)
-        if not sidecar_path.exists():
-            return None
-        try:
-            content = sidecar_path.read_text(encoding='utf-8')
-            decoded = cast(object, json.loads(content))
-            return _as_dict(decoded)
-        except Exception:
-            return None
-
-    def _delete_sidecar(self, cache_key: str) -> None:
-        """Delete a session cache sidecar file."""
-        sidecar_path = self._get_sidecar_path(cache_key)
-        sidecar_path.unlink(missing_ok=True)
 
     # ----- public API ----------------------------------------------------------
 
