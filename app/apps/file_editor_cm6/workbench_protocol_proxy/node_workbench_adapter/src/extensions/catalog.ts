@@ -57,6 +57,41 @@ function arrayOfStrings(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String) : [];
 }
 
+function mergeStringLists(primary: unknown, secondary: unknown): string[] {
+  return Array.from(new Set([...arrayOfStrings(primary), ...arrayOfStrings(secondary)]));
+}
+
+function hasConfigurationRaw(language: Record<string, unknown>): boolean {
+  return typeof language.configuration_raw === "string" && language.configuration_raw.length > 0;
+}
+
+function mergeLanguageContributions(
+  existing: Record<string, unknown>,
+  incoming: Record<string, unknown>,
+): Record<string, unknown> {
+  const incomingWins = Number(incoming._priority || 0) >= Number(existing._priority || 0);
+  const primary = incomingWins ? incoming : existing;
+  const secondary = incomingWins ? existing : incoming;
+  const merged: Record<string, unknown> = { ...secondary, ...primary };
+
+  for (const key of ["aliases", "extensions", "filenames", "mimetypes"]) {
+    merged[key] = mergeStringLists(primary[key], secondary[key]);
+  }
+
+  const configurationOwner = hasConfigurationRaw(primary)
+    ? primary
+    : hasConfigurationRaw(secondary)
+      ? secondary
+      : null;
+  if (configurationOwner) {
+    merged.configuration = configurationOwner.configuration;
+    merged.configuration_raw = configurationOwner.configuration_raw;
+  } else {
+    delete merged.configuration_raw;
+  }
+  return merged;
+}
+
 function declaredActivationEventsFrom(
   ext: unknown,
   manifest: Record<string, unknown>,
@@ -397,18 +432,11 @@ export async function buildLanguageCatalog(
       };
 
       const existing = mergedById.get(id);
-      if (!existing || priority >= Number(existing._priority || 0)) {
+      if (!existing) {
         mergedById.set(id, normalized);
         continue;
       }
-
-      for (const key of ["aliases", "extensions", "filenames", "mimetypes"]) {
-        if (!Array.isArray(existing[key]) || !existing[key].length) existing[key] = normalized[key];
-      }
-      if (!existing.configuration_raw && normalized.configuration_raw) {
-        existing.configuration = normalized.configuration;
-        existing.configuration_raw = normalized.configuration_raw;
-      }
+      mergedById.set(id, mergeLanguageContributions(existing, normalized));
     }
   }
 

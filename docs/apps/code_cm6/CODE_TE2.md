@@ -906,7 +906,12 @@ The Code Server path is data-driven:
 
 1. The WBA publishes language, language-configuration, grammar, theme, and
    provider-registration metadata from the installed built-in and user
-   extensions.
+   extensions. Contributions with the same language ID are composed rather
+   than replaced: file-association arrays are unioned, higher-priority user
+   metadata wins where it is present, and language configuration changes owner
+   only when that contribution supplied readable configuration content. A
+   partial user declaration therefore cannot erase the built-in bracket,
+   auto-closing, or indentation rules.
 2. The inline editor registers the contributed language IDs and applies the
    contributed language configuration.
 3. `editor_textmate_runtime.ts` selects the first grammar contribution for the
