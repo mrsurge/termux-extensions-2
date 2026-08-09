@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from typing import override
 
-from app.apps.file_editor_cm6 import extension_registry
+from app.apps.code_te2 import extension_registry
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -102,6 +102,57 @@ class CodeServerResolutionTests(unittest.TestCase):
         self.assertEqual(vscode_root, installation.vscode_root)
         self.assertEqual("te2-managed", installation.source)
 
+    def test_managed_linux_launcher_uses_its_private_versioned_vscode_tree(self) -> None:
+        install_root = (
+            Path(os.environ["XDG_DATA_HOME"])
+            / "te2"
+            / "code_server"
+            / extension_registry.PINNED_CODE_SERVER_VERSION
+        )
+        package_root = (
+            install_root
+            / "lib"
+            / f"code-server-{extension_registry.PINNED_CODE_SERVER_VERSION}"
+        )
+        payload = _make_executable(package_root / "bin" / "code-server")
+        launcher = install_root / "bin" / "code-server"
+        launcher.parent.mkdir(parents=True)
+        launcher.symlink_to(os.path.relpath(payload, start=launcher.parent))
+        vscode_root = _make_vscode_root(package_root)
+
+        installation = extension_registry.resolve_code_server_installation()
+
+        self.assertIsNotNone(installation)
+        assert installation is not None
+        self.assertEqual(launcher, installation.executable)
+        self.assertEqual(vscode_root, installation.vscode_root)
+        self.assertEqual("te2-managed", installation.source)
+
+    def test_managed_vscode_tree_cannot_escape_the_private_prefix(self) -> None:
+        install_root = (
+            Path(os.environ["XDG_DATA_HOME"])
+            / "te2"
+            / "code_server"
+            / extension_registry.PINNED_CODE_SERVER_VERSION
+        )
+        _make_executable(install_root / "bin" / "code-server")
+        external_vscode = _make_vscode_root(self.root / "external-code-server")
+        linked_vscode = (
+            install_root
+            / "lib"
+            / f"code-server-{extension_registry.PINNED_CODE_SERVER_VERSION}"
+            / "lib"
+            / "vscode"
+        )
+        linked_vscode.parent.mkdir(parents=True)
+        linked_vscode.symlink_to(external_vscode, target_is_directory=True)
+
+        installation = extension_registry.resolve_code_server_installation()
+
+        self.assertIsNotNone(installation)
+        assert installation is not None
+        self.assertIsNone(installation.vscode_root)
+
     def test_external_installations_and_overrides_are_ignored(self) -> None:
         external = _make_executable(self.root / "external" / "bin" / "code-server")
         _make_vscode_root(self.root / "external")
@@ -157,7 +208,7 @@ class CodeServerResolutionTests(unittest.TestCase):
 
     def test_shellspec_uses_resolved_binary_and_prepends_its_bin_directory(self) -> None:
         shellspec = (
-            REPO_ROOT / "app/apps/file_editor_cm6/shellspec/code_server.yaml"
+            REPO_ROOT / "app/apps/code_te2/shellspec/code_server.yaml"
         ).read_text(encoding="utf-8")
         self.assertIn('"${ctx:CODE_SERVER_BIN}"', shellspec)
         self.assertIn("      - -c\n", shellspec)

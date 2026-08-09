@@ -1,5 +1,5 @@
 {
-  "version_file": "app/apps/file_editor_cm6/static/version.txt",
+  "version_file": "app/apps/code_te2/static/version.txt",
   "exclude_extensions": [".map", ".bak", ".bak2", ".pyc"],
   "exclude_dirs": ["__pycache__", "node_modules"],
   "entries": [
@@ -74,83 +74,83 @@
     },
     {
       "kind": "file",
-      "src": "app/apps/file_editor_cm6/static/dist/host.js",
-      "dest": "apps/file_editor_cm6/static/dist/host.js"
+      "src": "app/apps/code_te2/static/dist/host.js",
+      "dest": "apps/code_te2/static/dist/host.js"
     },
     {
       "kind": "file",
-      "src": "app/apps/file_editor_cm6/static/dist/host.css",
-      "dest": "apps/file_editor_cm6/static/dist/host.css"
+      "src": "app/apps/code_te2/static/dist/host.css",
+      "dest": "apps/code_te2/static/dist/host.css"
     },
     {
       "kind": "file",
-      "src": "app/apps/file_editor_cm6/static/dist/explorer.css",
-      "dest": "apps/file_editor_cm6/static/dist/explorer.css"
+      "src": "app/apps/code_te2/static/dist/explorer.css",
+      "dest": "apps/code_te2/static/dist/explorer.css"
     },
     {
       "kind": "file",
-      "src": "app/apps/file_editor_cm6/static/dist/explorer-highlight-github.css",
-      "dest": "apps/file_editor_cm6/static/dist/explorer-highlight-github.css"
+      "src": "app/apps/code_te2/static/dist/explorer-highlight-github.css",
+      "dest": "apps/code_te2/static/dist/explorer-highlight-github.css"
     },
     {
       "kind": "file",
-      "src": "app/apps/file_editor_cm6/static/dist/explorer-search-widget.css",
-      "dest": "apps/file_editor_cm6/static/dist/explorer-search-widget.css"
+      "src": "app/apps/code_te2/static/dist/explorer-search-widget.css",
+      "dest": "apps/code_te2/static/dist/explorer-search-widget.css"
     },
     {
       "kind": "file",
-      "src": "app/apps/file_editor_cm6/static/version.txt",
-      "dest": "apps/file_editor_cm6/static/version.txt"
+      "src": "app/apps/code_te2/static/version.txt",
+      "dest": "apps/code_te2/static/version.txt"
     },
     {
       "kind": "tree",
-      "src": "app/apps/file_editor_cm6/static/icons",
-      "dest": "apps/file_editor_cm6/static/icons"
+      "src": "app/apps/code_te2/static/icons",
+      "dest": "apps/code_te2/static/icons"
     },
     {
       "kind": "tree",
-      "src": "app/apps/file_editor_cm6/static/vendor/monaco-touch-selection",
-      "dest": "apps/file_editor_cm6/static/vendor/monaco-touch-selection"
+      "src": "app/apps/code_te2/static/vendor/monaco-touch-selection",
+      "dest": "apps/code_te2/static/vendor/monaco-touch-selection"
     },
     {
       "kind": "file",
-      "src": "app/apps/file_editor_cm6/static/vendor/vconsole/vconsole.min.js",
-      "dest": "apps/file_editor_cm6/static/vendor/vconsole/vconsole.min.js"
+      "src": "app/apps/code_te2/static/vendor/vconsole/vconsole.min.js",
+      "dest": "apps/code_te2/static/vendor/vconsole/vconsole.min.js"
     },
     {
       "kind": "tree",
-      "src": "app/apps/file_editor_cm6/vendor/android-terminalapp-assets-js",
-      "dest": "apps/file_editor_cm6/vendor/android-terminalapp-assets-js"
+      "src": "app/apps/code_te2/vendor/android-terminalapp-assets-js",
+      "dest": "apps/code_te2/vendor/android-terminalapp-assets-js"
     },
     {
       "kind": "tree",
-      "src": "app/apps/file_editor_cm6/monaco_editor/textmate",
-      "dest": "api/app/file_editor_cm6/ui/monaco_editor/textmate"
+      "src": "app/apps/code_te2/monaco_editor/textmate",
+      "dest": "api/app/code_te2/ui/monaco_editor/textmate"
     },
     {
       "kind": "tree",
-      "src": "app/apps/file_editor_cm6/monaco_editor/themes",
-      "dest": "api/app/file_editor_cm6/ui/monaco_editor/themes"
+      "src": "app/apps/code_te2/monaco_editor/themes",
+      "dest": "api/app/code_te2/ui/monaco_editor/themes"
     },
     {
       "kind": "file",
-      "src": "app/apps/file_editor_cm6/monaco_editor/vscode_build_src/out/breadcrumbsWidget.css",
-      "dest": "api/app/file_editor_cm6/ui/monaco_editor/vscode_build_src/out/breadcrumbsWidget.css"
+      "src": "app/apps/code_te2/monaco_editor/vscode_build_src/out/breadcrumbsWidget.css",
+      "dest": "api/app/code_te2/ui/monaco_editor/vscode_build_src/out/breadcrumbsWidget.css"
     },
     {
       "kind": "file",
-      "src": "app/apps/file_editor_cm6/monaco_editor/vscode_chat_editing_vendor/upstream/media/chatEditorController.css",
-      "dest": "apps/file_editor_cm6/monaco_editor/vscode_chat_editing_vendor/upstream/media/chatEditorController.css"
+      "src": "app/apps/code_te2/monaco_editor/vscode_chat_editing_vendor/upstream/media/chatEditorController.css",
+      "dest": "apps/code_te2/monaco_editor/vscode_chat_editing_vendor/upstream/media/chatEditorController.css"
     },
     {
       "kind": "file",
-      "src": "app/apps/file_editor_cm6/monaco_editor/vscode_chat_editing_vendor/upstream/media/chatEditingEditorOverlay.css",
-      "dest": "apps/file_editor_cm6/monaco_editor/vscode_chat_editing_vendor/upstream/media/chatEditingEditorOverlay.css"
+      "src": "app/apps/code_te2/monaco_editor/vscode_chat_editing_vendor/upstream/media/chatEditingEditorOverlay.css",
+      "dest": "apps/code_te2/monaco_editor/vscode_chat_editing_vendor/upstream/media/chatEditingEditorOverlay.css"
     },
     {
       "kind": "file",
-      "src": "app/apps/file_editor_cm6/template.html",
-      "dest": "apps/file_editor_cm6/template.html"
+      "src": "app/apps/code_te2/template.html",
+      "dest": "apps/code_te2/template.html"
     },
     {
       "kind": "file",
@@ -176,9 +176,9 @@
     {
       "kind": "template",
       "src": "app/templates/app_shell.html",
-      "dest": "app_shell_file_editor_cm6.html",
+      "dest": "app_shell_code_te2.html",
       "replacements": {
-        "{{ app_id|tojson }}": "\"file_editor_cm6\"",
+        "{{ app_id|tojson }}": "\"code_te2\"",
         "{{ url_for('static', filename='js/ws_port.js') }}": "/static/js/ws_port.js"
       }
     },

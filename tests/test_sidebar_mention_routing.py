@@ -5,10 +5,10 @@ import unittest
 from typing import Any
 from unittest.mock import patch
 
-from app.apps.file_editor_cm6.ui_ipc.sidebar_mention_routing import (
+from app.apps.code_te2.ui_ipc.sidebar_mention_routing import (
     resolve_targeted_sidebar_mention,
 )
-from app.apps.file_editor_cm6.ui_ipc import sidebar_ws
+from app.apps.code_te2.ui_ipc import sidebar_ws
 
 
 def _state(
@@ -209,11 +209,11 @@ class SidebarMentionEmissionTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch(
-                "app.apps.file_editor_cm6.ui_ipc.sidebar_window_state.get_sidebar_window_state",
+                "app.apps.code_te2.ui_ipc.sidebar_window_state.get_sidebar_window_state",
                 return_value=_state(),
             ),
             patch(
-                "app.apps.file_editor_cm6.ui_ipc.ui_ipc_socketio.UI_IPC_SIO",
+                "app.apps.code_te2.ui_ipc.ui_ipc_socketio.UI_IPC_SIO",
                 new=fake_server,
             ),
         ):
@@ -230,7 +230,7 @@ class SidebarMentionEmissionTests(unittest.IsolatedAsyncioTestCase):
         sidebar_ws._registered_hosts.add("host-sid")
         sidebar_ws._client_ids_by_sid["host-sid"] = "client-a"
         with patch(
-            "app.apps.file_editor_cm6.ui_ipc.sidebar_window_state.activate_sidebar_window",
+            "app.apps.code_te2.ui_ipc.sidebar_window_state.activate_sidebar_window",
             return_value={"ok": True},
         ) as activate:
             registered = (

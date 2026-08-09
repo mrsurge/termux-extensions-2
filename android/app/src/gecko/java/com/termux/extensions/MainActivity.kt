@@ -153,6 +153,13 @@ class MainActivity : AppCompatActivity() {
             val serialized = preferences.getString(PREF_SESSION_STATE, null)
             if (serialized.isNullOrBlank()) return null
             val rawLastUrl = preferences.getString(PREF_LAST_URL, null)
+            if (
+                containsLegacyCodeTe2AppPath(serialized) ||
+                containsLegacyCodeTe2AppPath(rawLastUrl)
+            ) {
+                preferences.edit().remove(PREF_SESSION_STATE).apply()
+                return null
+            }
             val previousFrameworkOrigin =
                 preferences.getString(PREF_SESSION_FRAMEWORK_ORIGIN, null)
                     ?: androidSavedAppOrigin(rawLastUrl)
@@ -205,13 +212,18 @@ class MainActivity : AppCompatActivity() {
             val previousFrameworkOrigin =
                 preferences.getString(PREF_SESSION_FRAMEWORK_ORIGIN, null)
                     ?: androidSavedAppOrigin(saved)
-            rewriteAndroidSavedSessionPayload(
+            val rewritten = rewriteAndroidSavedSessionPayload(
                 serializedState = saved,
                 previousFrameworkOrigin = previousFrameworkOrigin,
                 currentFrameworkOrigin = browserFrameworkBaseUrl(),
                 previousLauncherOrigin = null,
                 currentLauncherOrigin = null,
             )
+            val canonical = canonicalizeCodeTe2AppPath(rewritten)
+            if (canonical != saved) {
+                preferences.edit().putString(PREF_LAST_URL, canonical).apply()
+            }
+            canonical
         } catch (_: Exception) {
             null
         }
@@ -2248,6 +2260,6 @@ class MainActivity : AppCompatActivity() {
         private const val APP_HEALTH_INTERVAL_MS = 2_000L
         private const val APP_HEALTH_FAILURE_LIMIT = 3
         private const val IPC_SLEEP_BASE_URL = "http://127.0.0.1:9100"
-        private const val DEFAULT_APP_ID = "file_editor_cm6"
+        private const val DEFAULT_APP_ID = CODE_TE2_APP_ID
     }
 }

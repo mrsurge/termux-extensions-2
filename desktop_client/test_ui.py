@@ -8,8 +8,8 @@ from desktop_client.ui import app_id_from_uri
 class DesktopUiTests(unittest.TestCase):
     def test_app_id_is_resolved_from_framework_app_path(self) -> None:
         self.assertEqual(
-            app_id_from_uri("http://127.0.0.1:8089/app/file_editor_cm6"),
-            "file_editor_cm6",
+            app_id_from_uri("http://127.0.0.1:8089/app/code_te2"),
+            "code_te2",
         )
 
     def test_app_id_is_resolved_from_legacy_query_shape(self) -> None:

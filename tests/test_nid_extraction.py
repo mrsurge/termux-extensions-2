@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from app.apps.file_editor_cm6.extension_registry import (
+from app.apps.code_te2.extension_registry import (
     NidExtractionError,
     _extract_nids_from_bundle_result,
     _extract_nids_from_protocol_source_result,

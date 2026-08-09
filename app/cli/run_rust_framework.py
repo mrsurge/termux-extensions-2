@@ -28,7 +28,7 @@ def main() -> int:
 def _load_bootstrap_module() -> ModuleType:
     for candidate in _bootstrap_candidates():
         if candidate.is_file():
-            spec = importlib.util.spec_from_file_location("te2_rust_spike_bootstrap", candidate)
+            spec = importlib.util.spec_from_file_location("te2_framework_bootstrap", candidate)
             if spec is None or spec.loader is None:
                 break
             module = importlib.util.module_from_spec(spec)
@@ -43,11 +43,11 @@ def _bootstrap_candidates() -> list[Path]:
     package_root = Path(app_pkg.__file__).resolve().parents[1]
     data_root = Path(sysconfig.get_path("data"))
     candidates = [
-        package_root / "rust-spike" / "app" / "bootstrap.py",
-        package_root / "te2" / "rust-spike" / "app" / "bootstrap.py",
+        package_root / "framework" / "bootstrap" / "bootstrap.py",
+        package_root / "te2" / "framework" / "bootstrap" / "bootstrap.py",
         *(_distribution_bootstrap_candidates()),
-        data_root / "te2" / "rust-spike" / "app" / "bootstrap.py",
-        Path(site.USER_BASE) / "te2" / "rust-spike" / "app" / "bootstrap.py",
+        data_root / "te2" / "framework" / "bootstrap" / "bootstrap.py",
+        Path(site.USER_BASE) / "te2" / "framework" / "bootstrap" / "bootstrap.py",
     ]
     return _dedupe_paths(candidates)
 
@@ -61,7 +61,9 @@ def _distribution_bootstrap_candidates() -> list[Path]:
     candidates: list[Path] = []
     for file in distribution.files or ():
         file_text = file.as_posix()
-        if file_text.endswith("te2/rust-spike/app/bootstrap.py") or file_text.endswith("rust-spike/app/bootstrap.py"):
+        if file_text.endswith("te2/framework/bootstrap/bootstrap.py") or file_text.endswith(
+            "framework/bootstrap/bootstrap.py"
+        ):
             candidates.append(Path(distribution.locate_file(file)))
     return candidates
 

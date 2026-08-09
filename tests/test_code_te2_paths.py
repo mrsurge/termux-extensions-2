@@ -11,17 +11,17 @@ from types import SimpleNamespace
 from typing import cast, override
 from unittest.mock import AsyncMock, patch
 
-from app.apps.file_editor_cm6 import code_server_shell_manager, extension_registry
-from app.apps.file_editor_cm6 import workbench_adapter_shell_manager
-from app.apps.file_editor_cm6.code_te2_paths import (
+from app.apps.code_te2 import code_server_shell_manager, extension_registry
+from app.apps.code_te2 import workbench_adapter_shell_manager
+from app.apps.code_te2.code_te2_paths import (
     code_te2_paths,
     resolve_code_te2_paths,
 )
-from app.apps.file_editor_cm6.draft_index_sidecar import DraftIndexSidecar
-from app.apps.file_editor_cm6.history_store import HistoryStore
-from app.apps.file_editor_cm6.preferences_store import PreferencesStore
-from app.apps.file_editor_cm6.project_sidecar import ProjectSidecar
-from app.apps.file_editor_cm6.services import sidebar_backchannel_uds
+from app.apps.code_te2.draft_index_sidecar import DraftIndexSidecar
+from app.apps.code_te2.history_store import HistoryStore
+from app.apps.code_te2.preferences_store import PreferencesStore
+from app.apps.code_te2.project_sidecar import ProjectSidecar
+from app.apps.code_te2.services import sidebar_backchannel_uds
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -193,7 +193,7 @@ class CodeTe2PathTests(unittest.TestCase):
             REPO_ROOT
             / "app"
             / "apps"
-            / "file_editor_cm6"
+            / "code_te2"
             / "shellspec"
             / "workbench_adapter.yaml"
         ).read_text("utf-8")
@@ -234,7 +234,7 @@ class CodeTe2PathTests(unittest.TestCase):
             "workbench_protocol_proxy/node_workbench_adapter/src/client/configuration.ts",
             "workbench_protocol_proxy/node_workbench_adapter/src/protocol/rpc-ids.ts",
         )
-        app_root = REPO_ROOT / "app" / "apps" / "file_editor_cm6"
+        app_root = REPO_ROOT / "app" / "apps" / "code_te2"
         forbidden = (
             ".cache/cm6_editor",
             ".cache/cm6_sessions",
@@ -277,7 +277,7 @@ class CodeTe2WorkbenchPathHandoffTests(unittest.IsolatedAsyncioTestCase):
     async def test_workbench_launch_receives_exact_canonical_paths(self) -> None:
         shell = SimpleNamespace(
             id="wba-test",
-            label="workbench_adapter:file_editor_cm6:global",
+            label="workbench_adapter:code_te2:global",
             pid=42,
             status="running",
             env_overrides={},

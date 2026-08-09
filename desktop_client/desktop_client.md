@@ -1,9 +1,9 @@
 # TE2 Desktop Client
 
 The active desktop client is the Electron shell under
-`desktop_client/electron_spike/`. It uses Electron's native Chromium/Wayland
+`desktop_client/electron/`. It uses Electron's native Chromium/Wayland
 path while retaining the launcher, Settings, asset updates, and app-scoped
-lifecycle behavior established by the earlier desktop spikes.
+lifecycle behavior established by the earlier desktop prototypes.
 
 The GTK 4/WebKitGTK 6 implementation in `desktop_client/ui.py` remains a
 behavioral reference. It is not the current desktop runtime.
@@ -13,7 +13,7 @@ behavioral reference. It is not the current desktop runtime.
 Node 22.12 or newer is required:
 
 ```bash
-cd desktop_client/electron_spike
+cd desktop_client/electron
 npm install
 npm run dev
 ```
@@ -84,7 +84,7 @@ desktop asset layer.
 node --check desktop_client/android_shell/host.js
 node --check desktop_client/android_shell/settings.js
 
-cd desktop_client/electron_spike
+cd desktop_client/electron
 npm run typecheck
 npm test
 npm run build

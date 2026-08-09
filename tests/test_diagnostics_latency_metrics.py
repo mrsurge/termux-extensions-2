@@ -5,7 +5,7 @@ import unittest
 from contextlib import redirect_stdout
 from io import StringIO
 
-from app.apps.file_editor_cm6.diagnostics_latency_metrics import (
+from app.apps.code_te2.diagnostics_latency_metrics import (
     DiagnosticsLatencyMetrics,
     sample_engineio_queues,
 )

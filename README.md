@@ -27,13 +27,12 @@ te2
        -> per-app Python/Node/native workers
 ```
 
-The current Rust source still lives under `rust-spike/` for historical reasons.
-That directory is the supported framework implementation.
+The supported Rust framework source lives under `framework/`.
 
 Important roots:
 
-- `rust-spike/rust/` — Rust framework workspace
-- `rust-spike/app/bootstrap.py` — cached build and launch bootstrap
+- `framework/rust/` — Rust framework workspace
+- `framework/bootstrap/bootstrap.py` — cached build and launch bootstrap
 - `app/apps/` — built-in TE2 apps
 - `app/static/` and `app/templates/` — framework-served assets
 - `app/te2_mcp/` and `app/te2_console_runtime.py` — runtime observability bridge
@@ -41,7 +40,7 @@ Important roots:
 
 ## Included Apps
 
-- `file_editor_cm6` — Code TE2, the primary workspace/editor app
+- `code_te2` — Code TE2, the primary workspace/editor app
 - `terminal` — standalone Node PTY terminal with reconnect checkpoints
 - `file_explorer` — standalone file browser
 - `archive_manager` — archive browsing and extraction
@@ -126,6 +125,18 @@ for an unoptimized development server. Cargo incremental artifacts live under
 the resolved canonical root described below. Final-binary publication is
 locked and atomic, and only the selected validated fingerprint is retained.
 
+Launcher overrides use the canonical `TE2_SERVER_*` namespace:
+`TE2_SERVER_HOST`, `TE2_SERVER_PORT`, `TE2_SERVER_CACHE_DIR`,
+`TE2_SERVER_BIN`, `TE2_SERVER_CARGO_MANIFEST`, `TE2_SERVER_DEBUG`,
+`TE2_SERVER_FORCE_BUILD`, `TE2_SERVER_NO_BUILD_CACHE`, and
+`TE2_SERVER_DISABLE_FERROUS_FRAMEWORK`. Bootstrap-to-server values use the same
+namespace for bind hosts, internal host, network policy, project/app roots, and
+Cargo target selection. The private Python sidecar uses
+`TE2_RUNTIME_BRIDGE_HOST`, `TE2_RUNTIME_BRIDGE_PORT`, and
+`TE2_RUNTIME_BRIDGE_URL`. Experimental-name environment variables are not read
+as compatibility aliases. `TE_PORT` and `TE_FRAMEWORK_URL` remain the stable
+cross-component framework contracts.
+
 TE2 path overrides (`TE2_CACHE_HOME`, `TE2_DATA_HOME`, `TE2_CONFIG_HOME`, and
 `TE2_RUNTIME_HOME`) name final TE2 roots. Without them, TE2 uses XDG bases when
 available, normal `$HOME` fallbacks for cache/data/config, and a protected
@@ -174,7 +185,7 @@ Code TE2 serves generated bundles from `static/dist/`. After changing its
 frontend source:
 
 ```bash
-cd app/apps/file_editor_cm6
+cd app/apps/code_te2
 npm install
 npm run typecheck
 npm run build

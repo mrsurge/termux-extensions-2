@@ -106,13 +106,13 @@ const LOCAL_PREFIXES = [
   "/static/fonts/",
   "/static/js/",
   "/extensions/",
-  "/apps/file_editor_cm6/static/icons/",
-  "/apps/file_editor_cm6/static/vendor/monaco-touch-selection/",
-  "/apps/file_editor_cm6/vendor/android-terminalapp-assets-js/",
-  "/api/app/file_editor_cm6/static/vendor/monaco-touch-selection/",
-  "/api/app/file_editor_cm6/ui/monaco_editor/textmate/",
-  "/api/app/file_editor_cm6/ui/monaco_editor/themes/",
-  "/api/app/file_editor_cm6/ui/monaco_vscode/lang/workers/"
+  "/apps/code_te2/static/icons/",
+  "/apps/code_te2/static/vendor/monaco-touch-selection/",
+  "/apps/code_te2/vendor/android-terminalapp-assets-js/",
+  "/api/app/code_te2/static/vendor/monaco-touch-selection/",
+  "/api/app/code_te2/ui/monaco_editor/textmate/",
+  "/api/app/code_te2/ui/monaco_editor/themes/",
+  "/api/app/code_te2/ui/monaco_vscode/lang/workers/"
 ];
 
 const LOCAL_FILES = new Set([
@@ -124,43 +124,43 @@ const LOCAL_FILES = new Set([
   "/static/vendor/monaco-editor-core/te2-lang/bootstrap/monaco.bootstrap.bundle.css",
   "/static/vendor/monaco-editor-core/te2-lang/bootstrap/codicon-LN6W7LCM.ttf",
   "/static/vendor/monaco-editor-core/esm/vs/editor/common/services/editorWebWorkerMain.bundle.js",
-  "/apps/file_editor_cm6/template.html",
-  "/apps/by-id/file_editor_cm6/template.html",
-  "/apps/file_editor_cm6/static/dist/host.js",
-  "/apps/by-id/file_editor_cm6/static/dist/host.js",
-  "/apps/file_editor_cm6/static/dist/host.css",
-  "/apps/file_editor_cm6/static/dist/explorer.css",
-  "/apps/file_editor_cm6/static/dist/explorer-highlight-github.css",
-  "/apps/file_editor_cm6/static/dist/explorer-search-widget.css",
-  "/apps/file_editor_cm6/static/vendor/vconsole/vconsole.min.js",
-  "/api/app/file_editor_cm6/ui/monaco_vscode/lang/bootstrap/monaco.bootstrap.bundle.css",
-  "/api/app/file_editor_cm6/ui/monaco_vscode/esm/vs/editor/common/services/editorWebWorkerMain.bundle.js",
-  "/apps/file_editor_cm6/monaco_editor/vscode_build_src/out/breadcrumbsWidget.css",
-  "/apps/file_editor_cm6/monaco_editor/vscode_chat_editing_vendor/upstream/media/chatEditorController.css",
-  "/apps/file_editor_cm6/monaco_editor/vscode_chat_editing_vendor/upstream/media/chatEditingEditorOverlay.css"
+  "/apps/code_te2/template.html",
+  "/apps/by-id/code_te2/template.html",
+  "/apps/code_te2/static/dist/host.js",
+  "/apps/by-id/code_te2/static/dist/host.js",
+  "/apps/code_te2/static/dist/host.css",
+  "/apps/code_te2/static/dist/explorer.css",
+  "/apps/code_te2/static/dist/explorer-highlight-github.css",
+  "/apps/code_te2/static/dist/explorer-search-widget.css",
+  "/apps/code_te2/static/vendor/vconsole/vconsole.min.js",
+  "/api/app/code_te2/ui/monaco_vscode/lang/bootstrap/monaco.bootstrap.bundle.css",
+  "/api/app/code_te2/ui/monaco_vscode/esm/vs/editor/common/services/editorWebWorkerMain.bundle.js",
+  "/apps/code_te2/monaco_editor/vscode_build_src/out/breadcrumbsWidget.css",
+  "/apps/code_te2/monaco_editor/vscode_chat_editing_vendor/upstream/media/chatEditorController.css",
+  "/apps/code_te2/monaco_editor/vscode_chat_editing_vendor/upstream/media/chatEditingEditorOverlay.css"
 ]);
 
 function localPathFor(urlPath) {
   if (!LOCAL_FILES.has(urlPath) && !LOCAL_PREFIXES.some((prefix) => urlPath.startsWith(prefix))) {
     return null;
   }
-  if (urlPath === "/apps/by-id/file_editor_cm6/template.html") {
-    return "/apps/file_editor_cm6/template.html";
+  if (urlPath === "/apps/by-id/code_te2/template.html") {
+    return "/apps/code_te2/template.html";
   }
-  if (urlPath.startsWith("/apps/by-id/file_editor_cm6/static/")) {
-    return "/apps/file_editor_cm6/static/" + urlPath.slice("/apps/by-id/file_editor_cm6/static/".length);
+  if (urlPath.startsWith("/apps/by-id/code_te2/static/")) {
+    return "/apps/code_te2/static/" + urlPath.slice("/apps/by-id/code_te2/static/".length);
   }
-  if (urlPath.startsWith("/api/app/file_editor_cm6/static/")) {
-    return "/apps/file_editor_cm6/static/" + urlPath.slice("/api/app/file_editor_cm6/static/".length);
+  if (urlPath.startsWith("/api/app/code_te2/static/")) {
+    return "/apps/code_te2/static/" + urlPath.slice("/api/app/code_te2/static/".length);
   }
-  if (urlPath.startsWith("/api/app/file_editor_cm6/ui/monaco_vscode/lang/")) {
-    return "/static/vendor/monaco-editor-core/te2-lang/" + urlPath.slice("/api/app/file_editor_cm6/ui/monaco_vscode/lang/".length);
+  if (urlPath.startsWith("/api/app/code_te2/ui/monaco_vscode/lang/")) {
+    return "/static/vendor/monaco-editor-core/te2-lang/" + urlPath.slice("/api/app/code_te2/ui/monaco_vscode/lang/".length);
   }
-  if (urlPath.startsWith("/api/app/file_editor_cm6/ui/monaco_vscode/esm/")) {
-    return "/static/vendor/monaco-editor-core/esm/" + urlPath.slice("/api/app/file_editor_cm6/ui/monaco_vscode/esm/".length);
+  if (urlPath.startsWith("/api/app/code_te2/ui/monaco_vscode/esm/")) {
+    return "/static/vendor/monaco-editor-core/esm/" + urlPath.slice("/api/app/code_te2/ui/monaco_vscode/esm/".length);
   }
-  if (urlPath.startsWith("/apps/file_editor_cm6/monaco_editor/vscode_build_src/")) {
-    return "/api/app/file_editor_cm6/ui/monaco_editor/vscode_build_src/" + urlPath.slice("/apps/file_editor_cm6/monaco_editor/vscode_build_src/".length);
+  if (urlPath.startsWith("/apps/code_te2/monaco_editor/vscode_build_src/")) {
+    return "/api/app/code_te2/ui/monaco_editor/vscode_build_src/" + urlPath.slice("/apps/code_te2/monaco_editor/vscode_build_src/".length);
   }
   return urlPath;
 }

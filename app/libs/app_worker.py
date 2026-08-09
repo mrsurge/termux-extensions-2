@@ -28,6 +28,7 @@ from app.libs.pipe_protocol import PipeEnvelope
 
 JsonObject = dict[str, object]
 PipeDispatcher = Callable[[PipeEnvelope], object]
+EXPLICIT_APP_ROUTER_EXPORT = "TE2_APP_ROUTER"
 
 
 class PipeReader(Protocol):
@@ -160,6 +161,48 @@ def _optional_int_arg(value: object) -> int | None:
     if isinstance(value, bool):
         return None
     return value if isinstance(value, int) else None
+
+
+def _legacy_backend_module_name(app_id: str, backend_module: str) -> str:
+    return f"app.apps.{app_id}.{Path(backend_module).stem}"
+
+
+def _backend_module_name(
+    app_id: str,
+    backend_module: str,
+    package_root: Path,
+) -> str:
+    """Resolve built-in backends from their source package, not public app id."""
+    backend_path = Path(backend_module).resolve(strict=False)
+    try:
+        relative_path = backend_path.relative_to(package_root.resolve(strict=False))
+    except ValueError:
+        return _legacy_backend_module_name(app_id, backend_module)
+
+    if relative_path.suffix != ".py":
+        return _legacy_backend_module_name(app_id, backend_module)
+    module_parts = relative_path.with_suffix("").parts
+    if not module_parts or any(not part.isidentifier() for part in module_parts):
+        return _legacy_backend_module_name(app_id, backend_module)
+    return ".".join(module_parts)
+
+
+def _main_router_from_module(module: ModuleType, app_id: str) -> tuple[str, APIRouter]:
+    if EXPLICIT_APP_ROUTER_EXPORT in module.__dict__:
+        explicit_router = cast(object, module.__dict__[EXPLICIT_APP_ROUTER_EXPORT])
+        if not isinstance(explicit_router, APIRouter):
+            raise RuntimeError(
+                f"Backend module for {app_id} exports {EXPLICIT_APP_ROUTER_EXPORT}, but it is not a FastAPI APIRouter"
+            )
+        return EXPLICIT_APP_ROUTER_EXPORT, explicit_router
+
+    expected_router_name = f"{app_id}_bp"
+    candidate = module.__dict__.get(expected_router_name)
+    if isinstance(candidate, APIRouter):
+        return expected_router_name, candidate
+    raise RuntimeError(
+        f"Backend module for {app_id} must export {EXPLICIT_APP_ROUTER_EXPORT} or a FastAPI APIRouter named '{expected_router_name}'"
+    )
 
 
 def _raw_frame_has_content(raw: bytes | str) -> bool:
@@ -324,12 +367,21 @@ def main() -> None:
         project_root = Path(__file__).resolve().parents[2]
         sys.path.insert(0, str(project_root))
 
-        module_name = f"app.apps.{args.app_id}.{Path(args.backend_module).stem}"
+        module_name = _backend_module_name(args.app_id, args.backend_module, project_root)
         spec = importlib.util.spec_from_file_location(module_name, args.backend_module)
         if spec is None or spec.loader is None:
             raise ImportError(f"Could not create spec for module {module_name} at {args.backend_module}")
         module: ModuleType = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        previous_module = sys.modules.get(module_name)
+        sys.modules[module_name] = module
+        try:
+            spec.loader.exec_module(module)
+        except BaseException:
+            if previous_module is None:
+                _ = sys.modules.pop(module_name, None)
+            else:
+                sys.modules[module_name] = previous_module
+            raise
 
         if args.pipe:
             from app.libs import pipe_runtime
@@ -350,33 +402,17 @@ def main() -> None:
             _run_pipe_worker(args.app_id, module, protocol_stdout)
             return
 
-        # Look for the main router with app_id in the name (e.g., file_editor_cm6_bp)
-        # This ensures we get the main router, not sub-routers that are included in it
-        expected_router_name = f"{args.app_id}_bp"
-        router_found = False
-        
-        print(f"DEBUG: Looking for main router '{expected_router_name}' in module", file=sys.stderr)
-        
-        for obj_name in dir(module):
-            obj = cast(object, object.__getattribute__(module, obj_name))
-            if isinstance(obj, APIRouter):
-                print(f"DEBUG: Found APIRouter '{obj_name}' with {len(obj.routes)} routes", file=sys.stderr)
-                
-                # Prioritize exact match with expected name
-                if obj_name == expected_router_name:
-                    print(f"DEBUG: Using main router '{obj_name}' (exact match)", file=sys.stderr)
-                    for route in list(obj.routes)[:10]:
-                        route_path = getattr(route, 'path', 'NO_PATH')
-                        print(f"  - {route_path}", file=sys.stderr)
-                    if len(obj.routes) > 10:
-                        print(f"  ... and {len(obj.routes) - 10} more routes", file=sys.stderr)
-                    
-                    app.include_router(obj)
-                    router_found = True
-                    break
-        
-        if not router_found:
-            raise RuntimeError(f"No FastAPI APIRouter named '{expected_router_name}' found in {args.backend_module}")
+        router_name, main_router = _main_router_from_module(module, args.app_id)
+        print(
+            f"DEBUG: Using main router '{router_name}' with {len(main_router.routes)} routes",
+            file=sys.stderr,
+        )
+        for route in list(main_router.routes)[:10]:
+            route_path = getattr(route, "path", "NO_PATH")
+            print(f"  - {route_path}", file=sys.stderr)
+        if len(main_router.routes) > 10:
+            print(f"  ... and {len(main_router.routes) - 10} more routes", file=sys.stderr)
+        app.include_router(main_router)
         
         # Mount optional sub-apps if the backend module provides them (fallback)
         subapps = _module_subapps(module)

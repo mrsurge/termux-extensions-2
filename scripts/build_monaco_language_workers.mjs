@@ -29,7 +29,7 @@ const outWorkersRoot = path.resolve(outLangRoot, 'workers');
 
 const shimMonacoCore = path.resolve(
   repoRoot,
-  'app/apps/file_editor_cm6/monaco_editor/build_shims/monaco_editor_core_worker_shim.ts',
+  'app/apps/code_te2/monaco_editor/build_shims/monaco_editor_core_worker_shim.ts',
 );
 
 const workerStart = path.resolve(

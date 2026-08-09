@@ -207,7 +207,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun restoreOrLoadLauncher() {
-        val savedPath = prefs().getString(KEY_LAST_PATH, null)
+        val rawSavedPath = prefs().getString(KEY_LAST_PATH, null)
+        val savedPath = rawSavedPath?.let(::canonicalizeCodeTe2AppPath)
+        if (savedPath != null && savedPath != rawSavedPath) {
+            prefs().edit().putString(KEY_LAST_PATH, savedPath).apply()
+        }
         if (!savedPath.isNullOrBlank() && isAppPath(savedPath)) {
             browser.loadUrl(relay.url(savedPath))
         } else {
@@ -662,7 +666,7 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "CefriumMainActivity"
         private const val LAUNCHER_PATH = "/android-shell/index.html"
-        private const val DEFAULT_APP_ID = "file_editor_cm6"
+        private const val DEFAULT_APP_ID = CODE_TE2_APP_ID
         private const val KEY_LAST_PATH = "last_path"
         private const val CONSOLE_TAIL_LINES = 500
         private const val CONTEXT_MENU_CANCEL = -1

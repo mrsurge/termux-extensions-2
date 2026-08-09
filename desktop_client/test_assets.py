@@ -53,13 +53,13 @@ class DesktopAssetTests(unittest.TestCase):
     def test_static_mapping_never_claims_dynamic_routes(self) -> None:
         self.assertEqual(
             map_local_asset_path(
-                "/apps/by-id/file_editor_cm6/static/dist/host.js"
+                "/apps/by-id/code_te2/static/dist/host.js"
             ),
-            "/apps/file_editor_cm6/static/dist/host.js",
+            "/apps/code_te2/static/dist/host.js",
         )
         self.assertEqual(
             map_local_asset_path(
-                "/api/app/file_editor_cm6/ui/monaco_vscode/lang/workers/json.worker.js"
+                "/api/app/code_te2/ui/monaco_vscode/lang/workers/json.worker.js"
             ),
             "/static/vendor/monaco-editor-core/te2-lang/workers/json.worker.js",
         )

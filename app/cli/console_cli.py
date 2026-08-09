@@ -42,8 +42,8 @@ def _framework_url() -> str:
     env_url = os.environ.get("TE_FRAMEWORK_URL", "").strip()
     if env_url:
         return env_url.rstrip("/")
-    host = os.environ.get("TE2_RUST_SPIKE_HOST", DEFAULT_HOST)
-    port = os.environ.get("TE_PORT", DEFAULT_PORT)
+    host = os.environ.get("TE2_SERVER_HOST", DEFAULT_HOST)
+    port = os.environ.get("TE2_SERVER_PORT", os.environ.get("TE_PORT", DEFAULT_PORT))
     return f"http://{host}:{port}"
 
 

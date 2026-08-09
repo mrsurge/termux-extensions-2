@@ -18,7 +18,7 @@ Normal Explorer search must stay production-clean. Benchmark collection must onl
 
 ## Compatibility With Current Work
 
-This plan is compatible with the current dirty `rust-spike/rust/crates/te2-rust-spike-server/src/framework_services` benchmark/test changes.
+This plan is compatible with the current dirty `framework/rust/crates/te2-server/src/framework_services` benchmark/test changes.
 
 Those changes are useful as the Rust-only test baseline because they already prove:
 
@@ -441,10 +441,10 @@ Likely frontend scope:
 
 Likely Rust scope:
 
-- `rust-spike/rust/crates/te2-rust-spike-server/src/framework_services/search_ops.rs`
-- `rust-spike/rust/crates/te2-rust-spike-server/src/framework_services/pipe/search_pipe_ops.rs`
-- `rust-spike/rust/crates/te2-rust-spike-server/src/framework_services/scheduler.rs`
-- optional new `rust-spike/rust/crates/te2-rust-spike-server/src/framework_services/search_benchmark.rs`
+- `framework/rust/crates/te2-server/src/framework_services/search_ops.rs`
+- `framework/rust/crates/te2-server/src/framework_services/pipe/search_pipe_ops.rs`
+- `framework/rust/crates/te2-server/src/framework_services/scheduler.rs`
+- optional new `framework/rust/crates/te2-server/src/framework_services/search_benchmark.rs`
 
 Planning/docs scope:
 

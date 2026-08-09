@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "routes": [
+    {
+      "id": "app_worker",
+      "description": "Raw Socket.IO proxy to the code_te2 app worker. The worker owns /rpc/editor, /rpc/explorer, /ui_ipc, /sidebar_ipc, and /terminal.",
+      "target": "app_worker",
+      "public_path": "/api/app/code_te2/socket.io",
+      "upstream_path": "/socket.io/",
+      "aliases": [
+        "/api/app/file_editor_cm6/socket.io",
+        "/editor_ws/socket.io",
+        "/explorer_ws/socket.io",
+        "/ui_ipc_ws/socket.io",
+        "/terminal_ws/socket.io"
+      ]
+    },
+    {
+      "id": "wba",
+      "description": "Raw Socket.IO proxy to the adapter-owned WBA service. The Node adapter owns /wba.",
+      "target": "static",
+      "host": "127.0.0.1",
+      "port": 18181,
+      "public_path": "/api/app/code_te2/services/wba/socket.io",
+      "upstream_path": "/wba_ws/socket.io/",
+      "aliases": [
+        "/api/app/file_editor_cm6/services/wba/socket.io",
+        "/wba_ws/socket.io"
+      ]
+    }
+  ]
+}

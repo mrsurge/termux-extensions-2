@@ -23,7 +23,7 @@ const esbuildCandidates = [
   path.resolve(repoRoot, "node_modules/esbuild/lib/main.js"),
   path.resolve(
     repoRoot,
-    "app/apps/file_editor_cm6/node_modules/esbuild/lib/main.js",
+    "app/apps/code_te2/node_modules/esbuild/lib/main.js",
   ),
 ];
 const esbuildEntry = esbuildCandidates.find((candidate) => fs.existsSync(candidate));

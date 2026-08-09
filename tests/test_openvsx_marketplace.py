@@ -7,14 +7,14 @@ from unittest.mock import patch
 
 import httpx
 
-from app.apps.file_editor_cm6 import extension_registry
-from app.apps.file_editor_cm6.explorer.contracts.extensions import (
+from app.apps.code_te2 import extension_registry
+from app.apps.code_te2.explorer.contracts.extensions import (
     ExplorerExtensionsContractError,
     parse_marketplace_detail_params,
     parse_marketplace_install_params,
     parse_marketplace_search_params,
 )
-from app.apps.file_editor_cm6.explorer.services.openvsx_marketplace import (
+from app.apps.code_te2.explorer.services.openvsx_marketplace import (
     OpenVsxMarketplaceError,
     get_openvsx_detail,
     search_openvsx,

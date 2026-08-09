@@ -13,7 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 class ManifestSupportTests(unittest.TestCase):
     def test_builtin_catalog_loads_current_apps(self) -> None:
         app_ids = {app.app_id for app in AppRegistry().reload()}
-        self.assertIn("file_editor_cm6", app_ids)
+        self.assertIn("code_te2", app_ids)
         self.assertIn("terminal", app_ids)
         self.assertNotIn("codex_agent", app_ids)
 

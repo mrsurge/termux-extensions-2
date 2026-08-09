@@ -1,20 +1,20 @@
 # Framework Cleanup And UI VSIX Tracker
 
-Last updated: 2026-08-08
+Last updated: 2026-08-09
 
 ## Program status
 
 | Phase | Status | Approval boundary |
 |---|---|---|
 | Phase 0: documentation and inventory | Complete | Planning documents plus the required repo-memory pointer only |
-| Phase 1: generic WBA hover fidelity | Implemented; remaining live language checks pending | Approved, including generic fenced-language tokenizer preload |
-| Phase 2: interface-scoped framework exposure | Implemented and active-framework validated on Linux; Termux check pending | Implementation and live-runtime restart approved |
-| Phase 3A: shared paths and rebuildable caches | Implemented and automated-validated; live restart and Termux acceptance pending | Implementation approved; live shared-runtime restart still requires approval |
-| Phase 3B: framework durable stores | Implemented and automated-validated; live framework acceptance pending | Implementation approved; live shared-runtime restart still requires approval |
-| Phase 3C: Code TE2 durable state | Implemented and automated-validated; live app/WBA restart acceptance pending | Implementation approved; shared-runtime restart remains separate |
+| Phase 1: generic WBA hover fidelity | Complete; live language comparisons passed | Approved and validated, including generic fenced-language tokenizer preload |
+| Phase 2: interface-scoped framework exposure | Complete; Linux and Termux acceptance passed | Implementation and live-runtime restart approved and validated |
+| Phase 3A: shared paths and rebuildable caches | Complete; Linux restart and Termux no-XDG fallback passed | Implemented and live-validated |
+| Phase 3B: framework durable stores | Complete; live framework-store acceptance passed | Implemented and live-validated |
+| Phase 3C: Code TE2 durable state | Complete; live app/WBA restart acceptance passed | Implemented and live-validated |
 | Phase 3D: app/client paths and opt-in legacy migration/cleanup | Implemented and fixture-validated; real apply pending separate approval | Tool implementation and every real apply are separate approval boundaries |
-| Phase 4A: internal/package naming | Not started | Requires packaging-aware rename approval |
-| Phase 4B: public app identifiers | Deferred | Requires an explicit compatibility decision |
+| Phase 4A: internal/package naming | Complete; package, build, isolated launch, and Electron validation passed | Hard-cutover implementation approved and validated; shared framework was not restarted |
+| Phase 4B: public app identifiers | Implemented and full-suite/package validated; live cutover pending | Approved hard cutover; shared runtime restart and live client acceptance remain separate |
 | Phase 5: UI VSIX rough-draft milestone | Deferred | Begins only after framework phases are stable |
 
 ## Source findings tracker
@@ -29,8 +29,8 @@ Last updated: 2026-08-08
 | WBA hover dispatch itself is generic and multi-provider | WBA finds all selector-matched hover handles and merges ordered contents | Confirmed |
 | Code TE2 drafts live in a cache-labeled root | `project_sidecar.py` uses `~/.cache/cm6_editor/projects` | Confirmed; high migration risk |
 | `cm6_sessions` helpers appear dead | Path was created; private read/write/delete helpers had no callers | Resolved in 3C; helpers and eager directory creation removed |
-| `rust-spike` names are active product names | Source root, package data, crate, CLI, cache id, env variables, and logs use them | Confirmed |
-| Electron still uses an experimental source-directory name | Active client is `desktop_client/electron_spike` | Confirmed |
+| `rust-spike` names were active product names | Source root, package data, crate, CLI, cache id, env variables, and logs used them | Resolved in 4A; active framework source/package/runtime names are canonical |
+| Electron used an experimental source-directory name | Active client lived at `desktop_client/electron_spike` | Resolved in 4A; active source is `desktop_client/electron` |
 | UI extension support is intentionally absent | Explorer marketplace displays the unsupported notice | Confirmed |
 | Sidebar presentation foundation is reusable | Run Profile presentation and exact-client routing phases are implemented | Confirmed |
 | XDG variables are not consistently present | Existing Python, Rust, and TypeScript code already falls back to `$HOME`; Termux also provides `$PREFIX`/`$TMPDIR` for runtime state | Confirmed; canonical resolver must be platform-aware |
@@ -86,9 +86,9 @@ prove current ownership; current source is the authority.
 - [x] Build `static/dist/host.js`.
 - [x] Run focused and complete frontend tests.
 - [x] Live-validate JavaScript hover coloring.
-- [ ] Live-validate HTML hover coloring.
-- [ ] Live-validate CSS hover coloring.
-- [ ] Live-validate one comparison language.
+- [x] Live-validate HTML hover coloring.
+- [x] Live-validate CSS hover coloring.
+- [x] Live-validate one comparison language.
 - [x] Update current Code TE2 docs and repo memory with the verified contract.
 
 ## Phase 2 checklist — network interface exposure
@@ -110,7 +110,7 @@ prove current ownership; current source is the authority.
 - [x] Add allowed/blocked real-socket integration tests.
 - [x] Update CLI help and README examples.
 - [x] Obtain explicit approval before restarting the shared framework for live validation.
-- [ ] Run `te2 --list-interfaces` in a live Termux environment.
+- [x] Run `te2 --list-interfaces` in a live Termux environment.
 - [x] Restart the active framework with the rebuilt binary and validate its normal runtime surfaces.
 
 ## Phase 3 checklist — canonical roots and explicit migration
@@ -151,8 +151,8 @@ Target architecture decisions:
 - [x] Publish the selected final binary atomically and validate it before pruning.
 - [x] Prune every non-selected fingerprinted final binary without deleting the Cargo incremental target.
 - [x] Prove no new rebuildable cache uses a TE2-adjacent top-level root.
-- [ ] Live-validate a canonical-root framework restart on Linux.
-- [ ] Live-validate the fallback contract in Termux without XDG variables.
+- [x] Live-validate a canonical-root framework restart on Linux.
+- [x] Live-validate the fallback contract in Termux without XDG variables.
 
 ### 3B: framework durable stores
 
@@ -162,7 +162,7 @@ Target architecture decisions:
 - [x] Add canonical-store schema and persistence tests without legacy fixtures.
 - [x] Serialize state read/modify/write transactions and publish JSON through unique same-directory temporary files.
 - [x] Confirm ordinary source no longer reads or writes `termux_extensions`.
-- [ ] Live-verify framework settings/state/bookmark APIs against canonical data after an approved framework restart.
+- [x] Live-verify framework settings/state/bookmark APIs against canonical data after an approved framework restart.
 
 ### 3C: Code TE2 durable state
 
@@ -172,7 +172,7 @@ Target architecture decisions:
 - [x] Prove `cm6_sessions` helpers have no callers and remove them.
 - [x] Give managed code-server a private TE2-owned user-data/extensions root.
 - [x] Validate path resolution, draft/index reload recovery, history/preferences persistence, extension commands, and WBA path handoff with automated tests.
-- [ ] Live-validate recent projects/files, settings, installed extensions, WBA launch, and restart recovery after an approved app/framework restart.
+- [x] Live-validate recent projects/files, settings, installed extensions, WBA launch, and restart recovery after an approved app/framework restart.
 
 ### 3D: apps, clients, and cleanup
 
@@ -192,24 +192,37 @@ Target architecture decisions:
 
 ### 4A: supported internal names
 
-- [ ] Finalize target `framework/` source layout.
-- [ ] Rename `rust-spike` package-data and bootstrap discovery paths.
-- [ ] Rename crate/package to `te2-server`.
-- [ ] Rename bootstrap app/prog/log/cache identifiers.
-- [ ] Introduce canonical `TE2_*` env names.
-- [ ] Bound and document any legacy env read aliases.
-- [ ] Rename `desktop_client/electron_spike` to `desktop_client/electron`.
-- [ ] Update build/package scripts and active docs.
-- [ ] Validate editable install, wheel/sdist install, cached build, and launch.
-- [ ] Decide retirement timing for the `te2-rust` command alias.
+- [x] Finalize target `framework/` source layout.
+- [x] Rename the former experimental package-data and bootstrap discovery paths.
+- [x] Rename crate/package to `te2-server`.
+- [x] Rename bootstrap app/prog/log/cache identifiers.
+- [x] Introduce canonical `TE2_*` env names.
+- [x] Apply and document a hard environment cutover with no legacy read aliases.
+- [x] Rename the active desktop source directory to `desktop_client/electron`.
+- [x] Update build/package scripts and active docs.
+- [x] Validate editable install, wheel/sdist install, cached build, isolated launch, and Electron package.
+- [x] Retain `te2-rust` unchanged and defer its retirement to a separate compatibility decision.
 
 ### 4B: public identifiers
 
-- [ ] Inventory every `file_editor_cm6` manifest, route, asset, client, and persisted-state dependency.
-- [ ] Separate real CodeMirror 6 component names from obsolete product names.
-- [ ] Decide whether the canonical app id becomes `code_te2`.
-- [ ] If approved, define route/app-id aliases and persisted-state migration.
-- [ ] Do not run a mechanical global replacement.
+- [x] Inventory every `file_editor_cm6` manifest, route, asset, client, and persisted-state dependency.
+- [x] Separate real CodeMirror 6 component names from obsolete product names.
+- [x] Approve `code_te2` as the canonical source, package, app, and runtime identity.
+- [x] Define the cutover as staged canonicalization rather than a global rename.
+- [x] Decouple built-in backend package loading from public app id.
+- [x] Export and consume Code TE2's explicit `TE2_APP_ROUTER` contract.
+- [x] Move the source package to `app/apps/code_te2` while retaining the old public id temporarily.
+- [x] Update Python imports, package metadata, build scripts, source consumers, tests, and current docs.
+- [x] Add the exact `file_editor_cm6 -> code_te2` canonical public-id alias without a second catalog/worker/FWS identity.
+- [x] Cut Rust lifecycle/proxy/state, Socket.IO, frontend, Run Profile, Android, Electron, Terminal, Service Worker, and asset-inventory contracts to `code_te2`.
+- [ ] Stop old Code TE2 workers and Run Profile shells at the public-id cutover boundary.
+- [x] Migrate the exact framework state key, Android saved URL/session state, layout key, and any exact Sidebar slot/restore URL.
+- [x] Rename product-level `cm6:*`, `window.__cm6*`, `FILE_EDITOR_CM6_*`, layout, project-path, and current documentation names.
+- [x] Remove the unused `explorer.cm6.mirror` contract.
+- [x] Preserve legitimate `cm6-json-*` and CodeMirror vendor/component names.
+- [x] Rebuild generated Code TE2/WBA output from renamed source.
+- [x] Keep Android inventory/APK and Electron package changes inside the explicitly approved Phase 4B publication boundary.
+- [x] Keep replacements scoped; preserve the explicitly categorized public-id migrations and real CodeMirror 6 names.
 
 ## Phase 5 placeholder — UI VSIX
 
@@ -227,7 +240,6 @@ Target architecture decisions:
 
 | Decision | Why deferred |
 |---|---|
-| Rename `file_editor_cm6` to `code_te2` | Public ID touches URLs, native clients, assets, IPC, and persisted state |
 | Retire `te2-rust` CLI alias | Installed-user compatibility must be measured after package rename |
 | Delete `te2_kotlin_lsp` | Current repository does not prove ownership |
 | Detailed UI VSIX architecture | Must be based on the cleaned framework and a selected real extension |
@@ -248,3 +260,8 @@ each phase executes. Do not mark a phase complete from implementation alone.
 | 2026-08-08 | 3A planning | Read-only active-writer, platform-fallback, profile-selection, and build-cache retention investigation | Confirmed canonical/fallback gaps, debug-by-default behavior, no build lock/pruning, and 10 stale final release binaries totaling 206.6 MiB |
 | 2026-08-08 | 3A | Python path/bootstrap/cache/console/runtime suites; Electron full suite/typecheck/compile; Rust full feature suite/format/check; isolated CLI profile smoke | Passed; 72 Python tests, 61 Electron tests, 63 Rust tests plus 4 ignored benchmarks, release/debug paths resolved correctly, 0 failures |
 | 2026-08-08 | 3D | Migration/path/bootstrap fixture suite; current legacy sidecar schema probe; real-root JSON dry-run; static checks | Passed; destructive source-overwrite, destination-only retention, one-time receipt, active-writer guard, interrupted recovery, permissions, and report-only boundaries validated; no real apply performed |
+| 2026-08-09 | 4B.1 | App-worker module/router unit tests, renamed-package subprocess smoke, existing pipe-worker integration, compileall, focused basedpyright | Passed; 7 tests, 0 failures; focused static analysis reported 0 errors |
+| 2026-08-09 | 4B.2 | Source-package stale scan; Code TE2 import smoke; Python, frontend, Rust, Electron, and clean wheel/sdist validation | Passed; 203 Python, 171 frontend, 66 Rust plus 4 ignored, and 61 Electron tests; TypeScript/build/compile passed; clean archives contain only `app/apps/code_te2` |
+| 2026-08-09 | 1–3C acceptance | Downstream-checkout live validation of remaining hover comparisons, Termux interface/no-XDG behavior, Linux canonical-root restart, framework stores, and Code TE2 state/WBA restart recovery | Passed; user-confirmed downstream acceptance complete |
+| 2026-08-09 | 4A | Python discovery/path/migration suites; wheel/sdist archive and isolated install checks; Rust format/check/full tests and optimized cache build; isolated server health/shutdown smoke; Electron typecheck/tests/compile/package | Passed; 48 Python tests, 69 Rust tests plus 4 ignored benchmarks, 61 Electron tests, canonical package contents and health identity, 0 failures |
+| 2026-08-09 | 4B implementation | Canonical-id/alias and state-move Rust tests; full Python, Code TE2, Rust, Electron, Gecko, and Cefrium suites; WBA/host rebuild; Gecko/Cefrium APK assembly; Electron package; wheel/sdist path audit; stale-name classification | Passed; 204 Python, 172 frontend, 70 Rust plus 4 ignored, and 62 Electron tests; both Android unit suites and APK builds passed; package archives contain only `app/apps/code_te2`; live shared-runtime cutover remains pending |

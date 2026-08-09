@@ -5,7 +5,7 @@ import unittest
 from typing import cast, override
 from unittest.mock import AsyncMock, patch
 
-from app.apps.file_editor_cm6 import code_inspector_backend, code_inspector_projection
+from app.apps.code_te2 import code_inspector_backend, code_inspector_projection
 
 
 def projection(

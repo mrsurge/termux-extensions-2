@@ -1,7 +1,8 @@
 # Framework Cleanup And UI VSIX Implementation Plan
 
-Status: Phases 1, 2, and 3A are implemented; remaining phases require separate
-approval.
+Status: Phases 1 through 3 and Phase 4A are implemented and validated. Real
+legacy-root migration applies, filesystem deletion, Phase 4B public identifiers,
+and UI VSIX work remain separate approval boundaries.
 
 This plan coordinates four framework-readiness fixes and leaves UI VSIX
 extensions as a deliberately rough later milestone:
@@ -18,7 +19,11 @@ The phases are intentionally independent. A phase is not authorization to
 start the next phase, delete a legacy directory, restart the shared framework,
 publish Android assets, bump versions, or rename a public app identifier.
 
-## 1. Source-backed findings
+## 1. Initial source-backed findings
+
+This section records the source state that justified the phased work. Later
+implementation-result blocks and the tracker are authoritative for the current
+state.
 
 ### 1.1 The narrow `--broadcast` forms are advertised but ignored
 
@@ -29,7 +34,7 @@ The installed `te2 --help` currently advertises:
 ```
 
 and describes `all`, IP addresses, subnets, and interface names as valid
-targets. `rust-spike/app/bootstrap.py` parses and retains every target, but
+targets. The original framework bootstrap parsed and retained every target, but
 `_resolve_listen_host()` implements only one case:
 
 - `--broadcast all` becomes `0.0.0.0`;
@@ -55,7 +60,7 @@ network-exposure contract, not restore the retired Python framework.
 
 ### 1.2 TE2 storage is fragmented and some durable state is mislabeled as cache
 
-Current source actively owns several incompatible roots:
+At inventory time, source actively owned several incompatible roots:
 
 - the Rust build bootstrap defaults to `$XDG_CACHE_HOME/te2-rust-spike`;
 - Rust settings, state, bookmarks, and Python jobs use
@@ -95,12 +100,12 @@ cleanup candidates, not migration sources. `te2_kotlin_lsp` also has no current
 in-repository owner and may be third-party or historical state; TE2 must not
 claim or delete it until its producer is proven.
 
-### 1.3 Current-product source names still say `spike`
+### 1.3 Supported-product source names still said `spike`
 
-The supported framework is still rooted at `rust-spike/`, packaged under
+At inventory time, the supported framework was rooted at `rust-spike/`, packaged under
 `te2/rust-spike`, compiled as `te2-rust-spike-server`, launched with
 `prog="te2-rust-spike"`, cached under `te2-rust-spike`, and configured through
-`TE2_RUST_SPIKE_*` variables. The active desktop client similarly lives under
+`TE2_RUST_SPIKE_*` variables. The active desktop client similarly lived under
 `desktop_client/electron_spike/`.
 
 These are no longer experiments. The names now obscure the supported product
@@ -302,7 +307,7 @@ Validation:
 - unit cases for string, Markdown value, language/value, mixed multi-provider,
   malformed, metadata-bearing contents, contributed language aliases, and the
   tokenizer-await barrier;
-- `npm run typecheck` and `node build.mjs` in `file_editor_cm6`;
+- `npm run typecheck` and `node build.mjs` in `app/apps/code_te2`;
 - complete Code TE2 frontend test suite;
 - live hover acceptance in at least JavaScript, HTML, CSS, and one already
   working comparison language.
@@ -529,6 +534,7 @@ Proposed target shape:
 ```text
 framework/
   bootstrap/
+  tests/
   rust/
     crates/te2-server/
 
@@ -544,37 +550,139 @@ Rename and update as one packaging-aware slice:
 - canonical `TE2_*` framework environment variables;
 - `desktop_client/electron_spike/` and corresponding docs/build paths.
 
-Compatibility aliases may read old environment variables for one documented
-transition window, but canonical writes and logs must use only the new names.
-The `te2` command is canonical; retirement of `te2-rust` is a separately
-tracked compatibility decision.
+The environment-variable rename is a hard cutover: bootstrap, server, runtime
+bridge, console, tests, and Electron read and write only the canonical names.
+`TE_PORT`, `TE_FRAMEWORK_URL`, and `FRAMEWORK_SHELLS_*` remain established
+cross-component contracts rather than legacy aliases. The `te2` command is
+canonical; the retained `te2-rust` command alias is unchanged and its eventual
+retirement remains a separate compatibility decision.
+
+Implementation result:
+
+- supported framework source now lives under `framework/`, its crate/package/
+  binary is `te2-server`, and source plus installed-package bootstrap discovery
+  resolves `framework/bootstrap/bootstrap.py`;
+- bootstrap/server identity is `te2`, while logs, errors, build-fingerprint
+  namespace, and test temporary paths use framework/server terminology;
+- launcher inputs and bootstrap-to-server values use `TE2_SERVER_*`, the Python
+  sidecar uses `TE2_RUNTIME_BRIDGE_*`, and Electron smoke controls use
+  `TE2_DESKTOP_*`; no experimental-name read aliases remain;
+- the active desktop source is `desktop_client/electron/`; moving the parent
+  tree retained the ignored Rust target, Electron dependency, and package-build
+  caches in place; and
+- active docs and package metadata use canonical paths. Old names remain only
+  where the opt-in legacy-root migrator must recognize old disk state or where
+  historical planning records describe the original migration.
+
+Validation result:
+
+- 48 focused Python bootstrap/path/migration/discovery tests passed;
+- wheel and sdist archives contained `te2/framework/...`, contained no old
+  package path, and both isolated-wheel and editable installs resolved
+  `te2 --print-command` to a release `te2-server` binary;
+- Rust format/check passed and the full suite passed with 69 tests plus four
+  intentionally ignored benchmarks;
+- the optimized fingerprinted build completed, and an isolated port-18089
+  launch returned canonical `/api/health` identity before clean SIGINT/Ferrous
+  shutdown; and
+- Electron passed typecheck, 61 tests, compilation, and Linux packaging from
+  `desktop_client/electron/` after the required disk-space preflight.
 
 #### Phase 4B — Public identifiers and truthful `cm6` names
 
-Audit before changing:
+The read-only audit confirmed that `file_editor_cm6` is not an isolated
+manifest value. The generic Python app worker currently derives the backend
+module package and required router symbol from the public app id. The same id
+also owns Rust lifecycle/proxy/state routes, Socket.IO mounts, Framework-Shell
+labels, Android and Electron native contracts, standalone Terminal UI IPC,
+asset inventories, and saved Android navigation. A manifest-only rename would
+therefore fail during backend import before any frontend could load.
 
-- `file_editor_cm6` app id and URL/Socket.IO routes;
-- manifests, asset inventories, Android interception, Electron contracts, and
-  persisted sidebar/run-profile state;
-- CSS/DOM/storage keys; and
-- names that still correctly describe an embedded CodeMirror 6 component.
+Apply the cutover in reviewable, independently validated slices:
 
-If the public app id is renamed, provide an explicit alias and persisted-state
-migration. Do not mechanically replace every `cm6` occurrence.
+1. Decouple built-in backend source identity from public app identity. Derive
+   the importable Python module name from the backend file's package path and
+   allow the module to export its authoritative `TE2_APP_ROUTER`. Retain the
+   existing named-router contract for third-party apps that do not yet export
+   the explicit router; Code TE2 must use the explicit contract before its
+   source directory moves.
+2. Move `app/apps/file_editor_cm6` to `app/apps/code_te2` and update Python
+   imports, package metadata, build scripts, source consumers, tests, and
+   current documentation while temporarily retaining the public
+   `file_editor_cm6` manifest id and URLs. Keep the physical move separate from
+   the public network cutover so Git can preserve directory-rename history and
+   downstream branches can resolve against a clear boundary.
+3. Add one exact public-id canonicalization rule,
+   `file_editor_cm6 -> code_te2`. The alias must never appear as a second
+   catalog entry, launch a second worker, create a second Framework-Shell
+   identity, or retain a second state authority. Old `/app`, `/api/app`,
+   `/apps/by-id`, lifecycle/readiness, WebSocket, and Socket.IO requests must
+   resolve to the canonical `code_te2` definition during the bounded native
+   rollout window; newly generated URLs expose only `code_te2`.
+4. Cut the manifest id and every active client contract to `code_te2` together:
+   Rust routes and the Code TE2 proxy policy, Socket.IO service paths, frontend
+   constants, Framework-Shell/run-profile labels, Android Gecko/Cefrium
+   interception and UI IPC, Electron UI IPC/runtime injection, standalone
+   Terminal integration, Service Worker paths, and Android/desktop asset
+   inventories. Stop old Code TE2 workers and run profiles at this boundary;
+   live `file_editor_cm6` shells are not migrated into a second identity.
+5. Perform bounded one-time state migration. Move the exact framework state key
+   `app_state:file_editor_cm6` to `app_state:code_te2` only when needed; rewrite
+   saved Android `/app/file_editor_cm6` navigation; invalidate serialized Gecko
+   session history whose security principals cannot survive the path change;
+   migrate the Code TE2 layout-storage key; and canonicalize any exact Sidebar
+   slot or restore URL containing the former id. Ordinary startup must not
+   continually probe old keys.
+6. Rename product-level internal contracts in a separate slice: `cm6:*`
+   browser events, `window.__cm6*` globals, `FILE_EDITOR_CM6_*` operational
+   names, the `code_cm6_layout_prefs` key, and `.code_cm6/diagnostics`. Remove
+   the uncalled `explorer.cm6.mirror` RPC rather than renaming it. Keep names
+   that truthfully identify the embedded CodeMirror 6 JSON component, including
+   `cm6-json-*` source/CSS identifiers and CodeMirror vendor paths.
+7. Rebuild generated Code TE2 and WBA outputs only from their renamed source.
+   Android OTA assets and packaged Electron assets remain explicit publication
+   boundaries rather than hand-edited source.
+
+Before the physical directory move, merge or rebase active Code TE2 feature
+work onto the Phase 4B branch. Keep worker decoupling, the filesystem move,
+mechanical import/path updates, public-id canonicalization, client/asset
+cutover, state migration, internal namespace cleanup, and generated output as
+separate commits wherever the runnable boundaries allow it. Do not mechanically
+replace every `cm6` occurrence.
 
 Validation:
 
-- editable and installed-package launch tests;
-- wheel/sdist contents and bootstrap discovery tests;
-- Rust workspace build/test after crate/path rename;
-- Electron typecheck/build/package after source-directory rename;
-- stale-name scan categorized into active compatibility aliases and historical
-  documentation only.
+- focused app-worker tests proving that the public id may differ from the
+  backend package and explicit router name;
+- editable and installed-package Code TE2 launch tests after the source move;
+- wheel/sdist contents and import-path checks for `app.apps.code_te2`;
+- Rust route/lifecycle/state tests proving that the old id canonicalizes to one
+  running `code_te2` identity;
+- Code TE2 frontend typecheck, focused/full tests, and host build;
+- Electron typecheck/tests/build/package after source and public-id changes;
+- Android disk preflight, Gecko tests/build, Cefrium comparison tests, saved-URL
+  migration tests, and asset-inventory audit when Android scope is approved;
+- cold and warm native-client acceptance with no old Code TE2 worker or Run
+  Profile shell alive at the cutover boundary; and
+- stale-name scan categorized into the exact bounded public alias, legitimate
+  CodeMirror 6 names, and historical documentation only.
 
 Exit criteria:
 
-- no supported component identifies itself as a spike;
-- remaining historical names are intentional and documented.
+- the canonical app/source/package/runtime identity is `code_te2`;
+- `file_editor_cm6` remains only in the explicitly bounded public-id migration
+  contract or historical documentation;
+- Code TE2 no longer uses CM6 product-level events, globals, storage keys, or
+  project paths; and
+- real CodeMirror 6 component names remain intact and documented.
+
+Implementation status (2026-08-09): the source, public ID, routes, clients,
+state migrations, current documentation tree, and generated/package outputs
+have completed the hard cutover and passed the recorded full validation matrix.
+The shared runtime was intentionally not restarted during implementation. The
+remaining cutover action is to stop any old Code TE2 workers and Run Profile
+shells before the first live `code_te2` acceptance run; no live shell is
+migrated across identities.
 
 ### Phase 5 — UI VSIX rough-draft milestone
 

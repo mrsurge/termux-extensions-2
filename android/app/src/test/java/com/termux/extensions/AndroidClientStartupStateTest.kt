@@ -59,7 +59,7 @@ class AndroidClientStartupStateTest {
         state.markFrameworkRelayReady(generation)
         state.recordRestoreHealth(generation, AndroidRemoteAppHealth.HEALTHY)
 
-        val url = "http://127.0.0.1:41047/app/file_editor_cm6?gv_native=1"
+        val url = "http://127.0.0.1:41047/app/code_te2?gv_native=1"
         assertTrue(state.gateAppNavigation(url))
         state.markProjectionReceived(generation)
         assertEquals(AndroidClientStartupAction.Navigate(url), state.markProjectionReady(generation))
@@ -74,7 +74,7 @@ class AndroidClientStartupStateTest {
         assertEquals("ROUTE_SNAPSHOT_PENDING", state.phaseName())
         assertFalse(
             state.gateAppNavigation(
-                "http://127.0.0.1:41047/app/file_editor_cm6?gv_native=1",
+                "http://127.0.0.1:41047/app/code_te2?gv_native=1",
             ),
         )
     }
@@ -125,13 +125,13 @@ class AndroidClientStartupStateTest {
         val serialized = """{
             "history":[
                 {"url":"http:\/\/127.0.0.1:37821\/android-shell\/index.html"},
-                {"url":"http:\/\/127.0.0.1:41047\/app\/file_editor_cm6?gv_native=1"}
+                {"url":"http:\/\/127.0.0.1:41047\/app\/code_te2?gv_native=1"}
             ]
         }""".trimIndent()
 
         assertEquals(
             "http://127.0.0.1:41047",
-            androidSavedAppOrigin("http://127.0.0.1:41047/app/file_editor_cm6?gv_native=1"),
+            androidSavedAppOrigin("http://127.0.0.1:41047/app/code_te2?gv_native=1"),
         )
         assertEquals("http://127.0.0.1:37821", androidSavedLauncherOrigin(serialized))
         val rewritten = rewriteAndroidSavedSessionPayload(
@@ -141,7 +141,7 @@ class AndroidClientStartupStateTest {
             previousLauncherOrigin = "http://127.0.0.1:37821",
             currentLauncherOrigin = "http://127.0.0.1:43000",
         )
-        assertTrue(rewritten.contains("""http:\/\/127.0.0.1:42000\/app\/file_editor_cm6"""))
+        assertTrue(rewritten.contains("""http:\/\/127.0.0.1:42000\/app\/code_te2"""))
         assertTrue(rewritten.contains("""http:\/\/127.0.0.1:43000\/android-shell\/index.html"""))
     }
 
@@ -161,6 +161,29 @@ class AndroidClientStartupStateTest {
                 currentFrameworkOrigin = "http://127.0.0.1:41047",
                 previousLauncherOrigin = "http://127.0.0.1:37821",
                 currentLauncherOrigin = "http://127.0.0.1:37821",
+            ),
+        )
+    }
+
+    @Test
+    fun legacyCodeTe2SavedNavigationIsCanonicalizedWithoutBroadPathRewriting() {
+        assertEquals(
+            "http://127.0.0.1:41047/app/code_te2?gv_native=1#editor",
+            canonicalizeCodeTe2AppPath(
+                "http://127.0.0.1:41047/app/file_editor_cm6?gv_native=1#editor",
+            ),
+        )
+        assertEquals(
+            "/app/code_te2/",
+            canonicalizeCodeTe2AppPath("/app/file_editor_cm6/"),
+        )
+        assertEquals(
+            "/app/file_editor_cm6-extra",
+            canonicalizeCodeTe2AppPath("/app/file_editor_cm6-extra"),
+        )
+        assertTrue(
+            containsLegacyCodeTe2AppPath(
+                """{\"url\":\"http:\/\/127.0.0.1:41047\/app\/file_editor_cm6?gv_native=1\"}""",
             ),
         )
     }
