@@ -56,6 +56,10 @@ class CodeTe2Paths:
         return self.code_server_data_dir / "User" / "settings.json"
 
     @property
+    def code_server_extension_storage_dir(self) -> Path:
+        return self.code_server_data_dir / "User" / "te2-extension-storage"
+
+    @property
     def code_server_registry_path(self) -> Path:
         return self.code_server_data_dir / "te2_extension_registry.json"
 

@@ -627,6 +627,9 @@ async def ensure_workbench_adapter_shell(
                 "CODE_SERVER_USER_SETTINGS": str(
                     paths.code_server_user_settings_path
                 ),
+                "CODE_SERVER_EXTENSION_STORAGE": str(
+                    paths.code_server_extension_storage_dir
+                ),
                 "CODE_SERVER_RPC_CONFIG": str(paths.code_server_rpc_config_path),
                 "REMOTE_AUTHORITY": remote_authority,
             },

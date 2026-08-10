@@ -118,6 +118,7 @@ import {
 import { ProviderRegistry } from "../extensions/provider-registry.mjs";
 import { ExtensionActivityRuntime } from "../extensions/activity-runtime.mjs";
 import { ExtensionActivationRuntime } from "../extensions/activation-runtime.mjs";
+import { ExtensionMementoStore } from "../extensions/extension-storage.mjs";
 import { ExtensionLanguageResolver } from "../extensions/language-resolver.mjs";
 import { WebviewRuntime } from "../extensions/webview-runtime.mjs";
 import {
@@ -275,6 +276,8 @@ const PARSE_ARGS_ONLY_METHODS = new Set<string>([
   "$startFileSearch",
   "$requestWorkspaceTrust",
   "$initializeExtensionStorage",
+  "$setValue",
+  "$registerExtensionStorageKeysToSync",
   "$registerLogger",
   "$deregisterLogger",
   "$setVisibility",
@@ -686,6 +689,7 @@ export class WorkbenchClient {
   _extensions: unknown[];
   _extensionActivity: ExtensionActivityRuntime;
   _extensionActivation: ExtensionActivationRuntime;
+  _extensionStorage: ExtensionMementoStore;
   _webviews: WebviewRuntime;
   _languageResolver: ExtensionLanguageResolver;
   _providerRegistry: ProviderRegistry;
@@ -707,10 +711,12 @@ export class WorkbenchClient {
   constructor({
     onEvent,
     onNotification,
+    extensionStoragePath,
   }: {
     onEvent?: WorkbenchEventSink;
     onNotification?: (method: string, params: unknown) => void;
-  } = {}) {
+    extensionStoragePath: string;
+  }) {
     this.onEvent = typeof onEvent === "function" ? onEvent : () => {};
     this.onNotification = typeof onNotification === "function"
       ? onNotification
@@ -838,6 +844,10 @@ export class WorkbenchClient {
       docSymbolsProviderHandle: null,
       hoverProviderHandle: null,
     };
+    this._extensionStorage = new ExtensionMementoStore({
+      rootPath: extensionStoragePath,
+      workspacePath: () => this.state.workspaceFolder,
+    });
     this._webviews = new WebviewRuntime({
       rpcIds: {
         MainThreadWebviews: _rpcIds.MainThreadWebviews,
@@ -1692,8 +1702,13 @@ export class WorkbenchClient {
       mainThreadLoggerRpcId: _rpcIds.MainThreadLogger,
       mainThreadOutputServiceRpcId: _rpcIds.MainThreadOutputService,
       mainThreadStatusBarRpcId: _rpcIds.MainThreadStatusBar,
+      mainThreadStorageRpcId: _rpcIds.MainThreadStorage,
       extHostWorkspaceRpcId: _rpcIds.ExtHostWorkspace,
       extensionActivity: this._extensionActivity,
+      initializeExtensionStorage: (shared, extensionId) =>
+        this._extensionStorage.initialize(shared, extensionId),
+      setExtensionStorageValue: (shared, extensionId, value) =>
+        this._extensionStorage.setValue(shared, extensionId, value),
       handleWebviewRequest: (message) =>
         this._webviews.handleMainThreadRequest(message),
       debugExtReqSeen: this._debugExtReqSeen,

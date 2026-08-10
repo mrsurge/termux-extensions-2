@@ -721,6 +721,13 @@ VS Code chat-session contribution points.
 - WBA's existing workspace switch is the project-scope boundary. UI state must
   not introduce another current-project cache or a client-selected extension
   host cwd.
+- VS Code extension `globalState` and `workspaceState` use WBA's
+  `MainThreadStorage` actor. TE2 injects one exact private storage root beneath
+  the managed Code Server User data directory; global Mementos are keyed by
+  extension id, while workspace Mementos are additionally keyed by the stable
+  active-workspace identity. Writes are serialized and atomically replaced.
+  Settings Sync registration remains an explicit local-only no-op; it must not
+  turn Memento state into settings or webview presentation state.
 - The first implementation owns one logical provider instance and one stable
   surface per `(workspace, contributed view id)`. Independent simultaneous
   provider instances per browser/client are deferred because the current

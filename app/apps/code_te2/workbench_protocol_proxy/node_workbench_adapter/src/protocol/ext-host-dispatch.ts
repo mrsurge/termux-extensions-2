@@ -56,6 +56,7 @@ export interface ExtHostDispatchRuntime {
     MainThreadLogger: number;
     MainThreadOutputService: number;
     MainThreadStatusBar: number;
+    MainThreadStorage: number;
     ExtHostWorkspace: number;
   };
   extensionActivity: {
@@ -69,6 +70,15 @@ export interface ExtHostDispatchRuntime {
       replyResult?: unknown;
     };
   };
+  initializeExtensionStorage: (
+    shared: boolean,
+    extensionId: string,
+  ) => Promise<string | undefined>;
+  setExtensionStorageValue: (
+    shared: boolean,
+    extensionId: string,
+    value: unknown,
+  ) => Promise<void>;
   handleWebviewRequest: (message: DecodedExtHostRpc) => {
     handled: boolean;
     replyResult?: unknown;
@@ -371,11 +381,106 @@ function requestReplyPayload(
     return encodeExtReplyOkJson(req, true);
   }
   if (method === "$getTools") return encodeExtReplyOkJson(req, []);
-  if (method === "$initializeExtensionStorage") return encodeExtReplyOkJson(req, "{}");
   if (method === "$resolveProxy") return encodeExtReplyOkJson(req, null);
   if (method === "$getPassword") return encodeExtReplyOkJson(req, null);
   if (method === "$executeCommand") return encodeExtReplyOkEmpty(req);
   return encodeExtReplyOkEmpty(req);
+}
+
+const MAIN_THREAD_STORAGE_METHODS = new Set([
+  "$initializeExtensionStorage",
+  "$setValue",
+  "$registerExtensionStorageKeysToSync",
+]);
+
+function storageRequestArguments(
+  msg: DecodedExtHostRpc,
+): { shared: boolean; extensionId: string; value?: unknown } {
+  const args = Array.isArray(msg.args) ? msg.args : [];
+  const shared = args[0];
+  const extensionId = args[1];
+  if (typeof shared !== "boolean") {
+    throw new TypeError(`${msg.method ?? "storage request"}: shared must be boolean`);
+  }
+  if (typeof extensionId !== "string" || !extensionId.trim()) {
+    throw new TypeError(`${msg.method ?? "storage request"}: extension id must be a non-empty string`);
+  }
+  return { shared, extensionId, value: args[2] };
+}
+
+function sendStorageError(
+  runtime: ExtHostDispatchRuntime,
+  msg: DecodedExtHostRpc,
+  error: unknown,
+): void {
+  const message = error instanceof Error ? error.message : String(error);
+  runtime.log(`[extension-storage] ${msg.method ?? "request"} failed: ${message}`);
+  sendReplyPayload(
+    runtime,
+    Number(msg.req ?? 0),
+    msg.method,
+    encodeExtReplyError(Number(msg.req ?? 0), {
+      message: `TE2 extension storage: ${message}`,
+    }),
+  );
+}
+
+function handleMainThreadStorageRequest(
+  runtime: ExtHostDispatchRuntime,
+  msg: DecodedExtHostRpc,
+): boolean {
+  const method = msg.method ?? "";
+  if (!MAIN_THREAD_STORAGE_METHODS.has(method)) return false;
+  if (msg.rpcId !== runtime.rpcIds.MainThreadStorage) {
+    sendStorageError(
+      runtime,
+      msg,
+      new Error(`${method} arrived on rpcId ${String(msg.rpcId)}; expected MainThreadStorage ${runtime.rpcIds.MainThreadStorage}`),
+    );
+    return true;
+  }
+
+  if (method === "$registerExtensionStorageKeysToSync") {
+    sendReplyPayload(
+      runtime,
+      Number(msg.req ?? 0),
+      msg.method,
+      encodeExtReplyOkEmpty(Number(msg.req ?? 0)),
+    );
+    return true;
+  }
+
+  let request: { shared: boolean; extensionId: string; value?: unknown };
+  try {
+    request = storageRequestArguments(msg);
+  } catch (error) {
+    sendStorageError(runtime, msg, error);
+    return true;
+  }
+
+  if (method === "$initializeExtensionStorage") {
+    runtime.initializeExtensionStorage(request.shared, request.extensionId).then((raw) => {
+      const payload = raw === undefined
+        ? encodeExtReplyOkEmpty(Number(msg.req ?? 0))
+        : encodeExtReplyOkJson(Number(msg.req ?? 0), raw);
+      sendReplyPayload(runtime, Number(msg.req ?? 0), msg.method, payload);
+    }).catch((error) => sendStorageError(runtime, msg, error));
+    return true;
+  }
+
+  runtime.setExtensionStorageValue(
+    request.shared,
+    request.extensionId,
+    request.value,
+  ).then(() => {
+    sendReplyPayload(
+      runtime,
+      Number(msg.req ?? 0),
+      msg.method,
+      encodeExtReplyOkEmpty(Number(msg.req ?? 0)),
+    );
+  }).catch((error) => sendStorageError(runtime, msg, error));
+  return true;
 }
 
 function handleTryOpenDocument(runtime: ExtHostDispatchRuntime, msg: DecodedExtHostRpc): void {
@@ -563,6 +668,8 @@ export function handleExtHostRequest(runtime: ExtHostDispatchRuntime, msg: Decod
     }
     return true;
   }
+
+  if (handleMainThreadStorageRequest(runtime, msg)) return true;
 
   applyProviderRegistration(runtime, msg);
   if (msg.method === "$changeMany") logDiagnosticsChange(runtime, msg);

@@ -3,6 +3,7 @@ export const RPC_DEFAULTS = {
   MainThreadLogger: 27,
   MainThreadOutputService: 29,
   MainThreadStatusBar: 33,
+  MainThreadStorage: 38,
   MainThreadWebviews: 43,
   MainThreadWebviewViews: 45,
   MainThreadExtensionService: 50,

@@ -82,6 +82,12 @@ const DEFAULT_CODE_SERVER_HTTP =
   process.env.TE2_CODE_SERVER_HTTP ?? "http://localhost";
 const DEFAULT_REMOTE_AUTHORITY =
   process.env.TE2_REMOTE_AUTHORITY ?? "localhost";
+const EXTENSION_STORAGE_PATH = String(
+  process.env.TE2_EXTENSION_STORAGE_PATH ?? "",
+).trim();
+if (!EXTENSION_STORAGE_PATH) {
+  throw new Error("TE2_EXTENSION_STORAGE_PATH is required");
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -499,6 +505,7 @@ const workbenchEventHandler = (ev: unknown): void =>
 wb = new WorkbenchClient({
   onEvent: workbenchEventHandler,
   onNotification: wsBroadcastNotification,
+  extensionStoragePath: EXTENSION_STORAGE_PATH,
 }) as unknown as RuntimeWorkbench;
 
 installSyncTrace();

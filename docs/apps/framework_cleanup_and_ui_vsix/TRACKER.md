@@ -242,6 +242,7 @@ Target architecture decisions:
 - [x] Define workspace switch, provider unregister, resolve failure, WBA reset, and stale-snapshot teardown.
 - [x] Select `openai.chatgpt_26.5803.41515.vsix` and `chatgpt.sidebarView` as the first acceptance fixture.
 - [x] Live-prove resource loading, origin-validating bidirectional messaging, opaque-sandbox storage, and OpenAI application readiness.
+- [x] Persist generic extension-host `globalState` and workspace-isolated `workspaceState` across WBA/code-server cold restarts.
 - [x] Refine the implementation plan and tracker with the source-backed architecture.
 - [x] Live-accept the primary OpenAI view in the inline Sidebar.
 - [ ] Live-accept Electron detach, attach, message continuity, and close behavior.
@@ -278,6 +279,7 @@ each phase executes. Do not mark a phase complete from implementation alone.
 | 2026-08-08 | 3A planning | Read-only active-writer, platform-fallback, profile-selection, and build-cache retention investigation | Confirmed canonical/fallback gaps, debug-by-default behavior, no build lock/pruning, and 10 stale final release binaries totaling 206.6 MiB |
 | 2026-08-08 | 3A | Python path/bootstrap/cache/console/runtime suites; Electron full suite/typecheck/compile; Rust full feature suite/format/check; isolated CLI profile smoke | Passed; 72 Python tests, 61 Electron tests, 63 Rust tests plus 4 ignored benchmarks, release/debug paths resolved correctly, 0 failures |
 | 2026-08-08 | 3D | Migration/path/bootstrap fixture suite; current legacy sidecar schema probe; real-root JSON dry-run; static checks | Passed; destructive source-overwrite, destination-only retention, one-time receipt, active-writer guard, interrupted recovery, permissions, and report-only boundaries validated; no real apply performed |
+| 2026-08-10 | 5 | WBA `MainThreadStorage` persistence/isolation/dispatch tests; canonical path handoff suite; TypeScript; WBA build; webview and activation regressions | Passed; global and workspace Mementos survive cold runtime reconstruction, workspace state remains isolated, generated named nid is used, 13 focused Node tests and 10 Python path tests passed |
 | 2026-08-09 | 4B.1 | App-worker module/router unit tests, renamed-package subprocess smoke, existing pipe-worker integration, compileall, focused basedpyright | Passed; 7 tests, 0 failures; focused static analysis reported 0 errors |
 | 2026-08-09 | 4B.2 | Source-package stale scan; Code TE2 import smoke; Python, frontend, Rust, Electron, and clean wheel/sdist validation | Passed; 203 Python, 171 frontend, 66 Rust plus 4 ignored, and 61 Electron tests; TypeScript/build/compile passed; clean archives contain only `app/apps/code_te2` |
 | 2026-08-09 | 5 implementation | Webview RPC framing/runtime tests; Sidebar DTO/projection tests; 177-test frontend suite; canonical Code TE2 typecheck/build; focused Python static analysis; WBA server compile path; diff hygiene | Passed locally with 177 frontend and 7 Python tests; live OpenAI view and Electron detach/attach acceptance remain pending |
