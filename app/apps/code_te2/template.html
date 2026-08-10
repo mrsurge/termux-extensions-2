@@ -509,6 +509,11 @@
   #menu-branch { order: 5; margin-left: auto; }
   .fe-toolbar-issues { order: 6; }
   .fe-toolbar-actions { order: 7; display: flex; gap: 0.35rem; align-items: center; }
+  #fe-extension-editor-actions { display: inline-flex; gap: 0.2rem; align-items: center; }
+  #fe-extension-editor-actions[hidden] { display: none; }
+  .fe-extension-editor-action { width: 28px; height: 28px; padding: 4px; display: inline-flex; align-items: center; justify-content: center; }
+  .fe-extension-editor-action img,
+  .fe-extension-context-icon img { display: block; width: 18px; height: 18px; object-fit: contain; }
   .fe-status { order: 8; }
   .fe-issues { display: inline-flex; align-items: center; gap: 6px; }
   .fe-issues-badge {
@@ -2447,6 +2452,7 @@
 
     <div class="fe-menu fe-toolbar-actions">
       <span id="fe-file-draft-badge" class="fe-file-draft-indicator" style="margin-right: 4px;"></span>
+      <span id="fe-extension-editor-actions" hidden></span>
       <button id="run-active-file-btn" class="fe-btn fe-icon-btn" title="Run active file in terminal" aria-label="Run active file" disabled>▶</button>
       <button id="stop-run-profiles-btn" class="fe-btn fe-icon-btn" title="Stop running profile" aria-label="Stop running profile" hidden>■</button>
       <span id="fe-lsp-spinner" class="fe-lsp-status--error" title="Adapter not started" aria-label="Adapter status"></span>

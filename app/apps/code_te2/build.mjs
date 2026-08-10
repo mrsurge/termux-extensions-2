@@ -62,6 +62,7 @@ const workbenchAdapterConfig = {
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/activation-runtime.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/catalog.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/activity-runtime.ts',
+    'workbench_protocol_proxy/node_workbench_adapter/src/extensions/command-runtime.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/extension-storage.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/language-resolver.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/provider-registry.ts',

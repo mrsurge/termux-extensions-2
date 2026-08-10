@@ -12,7 +12,13 @@ import {
 import type { MarkerLike } from './vscode_document_intelligence_vendor/markers.ts';
 
 interface MonacoUriLike {
+  path?: string;
+  scheme?: string;
   toString(): string;
+}
+
+interface MonacoUriNamespaceLike {
+  parse?(value: string): MonacoUriLike;
 }
 
 interface MonacoModelLike {
@@ -42,6 +48,7 @@ interface MonacoMarkerSeverityLike {
 interface MonacoLike {
   editor?: MonacoEditorNamespaceLike;
   MarkerSeverity?: MonacoMarkerSeverityLike;
+  Uri?: MonacoUriNamespaceLike;
 }
 
 interface EditorContributionLike {
@@ -90,6 +97,46 @@ interface WorkbenchRuntimeDeps {
 
 function asString(value: unknown): string {
   return typeof value === 'string' ? value : '';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function reviveMonacoMarkerUri(monacoRef: MonacoLike, value: unknown): MonacoUriLike | null {
+  const serialized = uriObjToString(value);
+  if (!serialized || typeof monacoRef.Uri?.parse !== 'function') return null;
+  try {
+    return monacoRef.Uri.parse(serialized);
+  } catch (_) {
+    return null;
+  }
+}
+
+function projectMarkerCode(monacoRef: MonacoLike, value: unknown): unknown {
+  if (typeof value === 'string') return value;
+  if (!isRecord(value) || typeof value.value !== 'string') return undefined;
+  const target = reviveMonacoMarkerUri(monacoRef, value.target);
+  return target ? { value: value.value, target } : undefined;
+}
+
+function projectRelatedInformation(monacoRef: MonacoLike, value: unknown): unknown[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const projected: unknown[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) continue;
+    const resource = reviveMonacoMarkerUri(monacoRef, item.resource);
+    if (!resource) continue;
+    projected.push({
+      resource,
+      message: typeof item.message === 'string' ? item.message : '',
+      startLineNumber: item.startLineNumber,
+      startColumn: item.startColumn,
+      endLineNumber: item.endLineNumber,
+      endColumn: item.endColumn,
+    });
+  }
+  return projected.length ? projected : undefined;
 }
 
 export function createEditorWorkbenchRuntime(
@@ -407,7 +454,7 @@ export function createEditorWorkbenchRuntime(
         const owner = asString(marker.owner) || 'unknown';
         const bucket = byOwner.get(owner) || [];
         bucket.push({
-          code: marker.code,
+          code: projectMarkerCode(monacoRef, marker.code),
           severity: marker.severity,
           message: marker.message,
           source: marker.source,
@@ -416,7 +463,7 @@ export function createEditorWorkbenchRuntime(
           endLineNumber: marker.endLineNumber,
           endColumn: marker.endColumn,
           modelVersionId: marker.modelVersionId,
-          relatedInformation: marker.relatedInformation,
+          relatedInformation: projectRelatedInformation(monacoRef, marker.relatedInformation),
           tags: marker.tags,
           origin: marker.origin,
         });

@@ -273,6 +273,7 @@ async def _handle_webview_snapshot(ev: JsonObject) -> None:
         extension_id = str(raw_surface.get("extensionId") or "").strip()
         view_id = str(raw_surface.get("viewId") or "").strip()
         workspace_id = str(raw_surface.get("workspaceId") or "").strip()
+        surface_kind = str(raw_surface.get("surfaceKind") or "view").strip()
         url = str(raw_surface.get("url") or "").strip()
         if not all(
             (
@@ -300,7 +301,13 @@ async def _handle_webview_snapshot(ev: JsonObject) -> None:
             "projectPath": normalized_project,
             "extensionId": extension_id,
             "viewId": view_id,
+            "surfaceKind": surface_kind if surface_kind in {"view", "panel"} else "view",
             "url": url,
+            "iconUrl": str(raw_surface.get("iconUrl") or "").strip(),
+            "retainContextWhenHidden": bool(
+                raw_surface.get("retainContextWhenHidden")
+            ),
+            "viewColumn": _int_value(raw_surface.get("viewColumn"), 0),
         }
 
     state = _json_object(get_sidebar_window_state())
@@ -333,6 +340,8 @@ async def _handle_webview_snapshot(ev: JsonObject) -> None:
             continue
         title = str(raw_surface.get("title") or raw_surface.get("viewId") or "Extension")
         url = str(surface["url"])
+        icon_url = str(surface.get("iconUrl") or "").strip()
+        extension_id = str(surface.get("extensionId") or "Extension")
         _ = await handle_ui_sidebar_window_create_request(
             {
                 "kind": "url",
@@ -347,7 +356,11 @@ async def _handle_webview_snapshot(ev: JsonObject) -> None:
                 "client_id": "main_page",
                 "source": "wba_event_bridge:webview_snapshot",
                 "version": str(raw_surface.get("htmlRevision") or 0),
-                "icon": {"kind": "emoji", "emoji": "🧩"},
+                "icon": (
+                    {"kind": "image", "src": icon_url}
+                    if icon_url
+                    else {"kind": "text", "text": extension_id[:2].upper()}
+                ),
                 "webviewSurface": surface,
             }
         )

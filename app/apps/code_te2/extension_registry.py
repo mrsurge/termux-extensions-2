@@ -253,13 +253,17 @@ def _find_builtin_extensions_dir() -> str:
 
 _ADAPTER_REQUIRED_NIDS = frozenset({
     "MainThreadConsole",
+    "MainThreadCommands",
     "MainThreadLogger",
+    "MainThreadMessageService",
     "MainThreadOutputService",
     "MainThreadStatusBar",
     "MainThreadWebviews",
+    "MainThreadWebviewPanels",
     "MainThreadWebviewViews",
     "MainThreadExtensionService",
     "ExtHostConfiguration",
+    "ExtHostCommands",
     "ExtHostDocumentsAndEditors",
     "ExtHostDocuments",
     "ExtHostEditors",
@@ -272,6 +276,7 @@ _ADAPTER_REQUIRED_NIDS = frozenset({
     "ExtHostEditorTabs",
     "ExtHostOutputService",
     "ExtHostWebviews",
+    "ExtHostWebviewPanels",
     "ExtHostWebviewViews",
 })
 

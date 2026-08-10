@@ -804,6 +804,284 @@ remain outside this slice.
   view is live-accepted in both an inline host and Electron detach/attach. Later
   contribution points require a new approved slice.
 
+#### 5.6 Source-backed follow-on architecture
+
+The follow-on investigation found that the next work is not one large generic
+"UI extension" feature. It is a dependency-ordered set of Code OSS actors and
+Code TE2 presentation contracts. The activity-bar provider remains one logical
+surface per `(workspace, view id)`; additional Codex conversations come from
+custom editors and webview panels, not cloned instances of that provider.
+
+##### 5.6A Contribution membership, hiding, and the app drawer
+
+The current close actions for URL and dock slots both call
+`ui.sidebar.window.close`, whose backend removes the slot from the authoritative
+Sidebar ledger. That is correct for a user-created URL slot, but it permanently
+evicts a WBA-contributed extension view and its icon even though the provider is
+still registered. The client presentation model already admits `hidden`, but
+the Sidebar runtime does not currently use that mode as a user action.
+
+For extension-backed slots:
+
+- Close/undock must destroy only the current iframe or detached presentation,
+  set that client's presentation mode to `hidden`, clear its local foreground
+  and transient presentation identity, and leave backend membership intact.
+- The app drawer gains an Extension Views section built from current Sidebar
+  membership, including hidden extension surfaces. Choosing an entry changes
+  that client's mode back to `embedded`, recreates/focuses the inline
+  presentation, or focuses the existing detached Electron presentation.
+- Provider unregister, workspace switch, failed resolve, WBA reset, or a newer
+  complete WBA snapshot that omits the surface remains the only path that
+  removes extension membership and therefore removes the drawer entry.
+- User-created URL slots retain their existing destructive close behavior.
+
+This keeps lifecycle authority in WBA/Python while order, foreground, and
+hidden/embedded/detached state remain client-local. It also fixes the concrete
+failure where closing the dock slot permanently loses the only way to reopen
+the extension.
+
+##### 5.6B Extension identity and icons
+
+WBA already reads `contributes.viewsContainers.activitybar`, but it currently
+projects each resolved view through Python as a generic URL slot with a hard
+coded puzzle glyph. Extend the surface/Sidebar projection with bounded display
+metadata:
+
+- use the contributed view/container title for drawer, dock, and detached
+  window identity;
+- prefer the activity-bar container icon, fall back to the extension manifest's
+  root icon, and use the existing generic glyph only when neither is usable;
+- resolve icon paths beneath the extension install root and serve them through
+  the existing realpath-contained WBA resource route, which already supports
+  extension-local SVG/PNG resources; and
+- keep the icon URL independent of a live iframe so a hidden surface remains
+  identifiable in the app drawer.
+
+##### 5.6C Workspace-scoped command and context registry
+
+The generated Code Server 4.130 nid catalog already contains the required
+actors, but WBA does not load or implement `MainThreadCommands`,
+`ExtHostCommands`, `MainThreadMessageService`, `MainThreadTextEditors`,
+`MainThreadWebviewPanels`, `ExtHostWebviewPanels`, or
+`MainThreadCustomEditors`; unknown main-thread calls currently receive empty
+success responses. The next protocol slice must load the named nids and fail
+unsupported calls explicitly instead of silently reporting success. The exact
+Code Server 4.130 generated values remain discovery output, not hard-coded
+protocol constants.
+
+Build one workspace-generation-scoped registry that composes:
+
+- `contributes.commands` metadata, including title, category, short title,
+  enablement, and light/dark or theme icons;
+- `contributes.menus` placement, alternate command, group/order, and `when`;
+- live command registration/unregistration from `MainThreadCommands`; and
+- the extension-defined context keys updated through `setContext`, plus the
+  current Code TE2 resource/editor context needed by menu predicates.
+
+WBA owns context-expression parsing and eligibility. Each client surface sends
+only its bounded ephemeral context through its own RPC lane: the editor sends
+the active URI/path, language, selection, and focus facts; Explorer sends the
+clicked and selected resources; and an extension view sends its surface
+identity. WBA merges those facts with extension `setContext` state and resolves
+the requested menu on an active-document/menu-open event. There is no context
+or selection polling and frontends do not grow separate VS Code `when`-clause
+evaluators.
+
+Command execution follows the initiating surface's own RPC lane into a shared
+Python backend action, then `adapter_rpc` into WBA. WBA first fires the implicit
+`onCommand:<id>` activation event, synchronizes the extension host's active
+editor selection when the request is editor-scoped, and invokes the exact
+registered command through `ExtHostCommands`. Match Code Server's resource
+arguments: editor title/context receives the active model URI; Explorer receives
+the clicked URI plus the selected-resource array. No Explorer, editor, or
+Sidebar frontend calls the WBA socket directly.
+
+The existing `workspaceContains` implementation must also use Code OSS-compatible
+glob semantics. Json Crack declares `workspaceContains:**/*.{json}`, while the
+current hand-written matcher escapes brace expressions and therefore misses
+that cold activation event. Reuse the already-vendored `picomatch` path instead
+of adding another matcher. Implement `MainThreadMessageService` against the
+existing shared toast/dialog UI so extension information, warning, and error
+messages do not disappear into a successful empty RPC response.
+
+Workspace switch and WBA reset replace the whole command/menu/context
+projection; stale registrations must not survive into another project.
+Unsupported context-expression forms fail closed rather than making commands
+visible unconditionally.
+
+###### Json Crack command/menu fixture
+
+`AykutSarac.jsoncrack-vscode` 5.1.0 is the first concrete fixture. The installed
+runtime payload and downloaded VSIX runtime payload are byte-identical. Its
+manifest contributes:
+
+- `jsoncrack-vscode.start` to `editor/title`, group `navigation`, with distinct
+  light/dark SVG icons and the predicate
+  `resourceExtname == .json || editorLangId == json`;
+- `jsoncrack-vscode.start.selected` to `editor/context`, group `navigation`,
+  with `editorHasSelection`; and
+- `jsoncrack-vscode.start.specific` as the argument-driven command used by
+  other callers.
+
+Code Server turns the `editor/title` navigation group into a primary inline
+editor action and supplies the active resource URI. Its editor context menu
+supplies the model URI. Json Crack then reads `window.activeTextEditor`, and
+the selection command reads `activeTextEditor.selection`; WBA's current editor
+projection hard-codes that selection to line 1, column 1. Correct command
+visibility alone is therefore insufficient: the invocation transaction must
+push the exact current Monaco selection through
+`ExtHostEditors.$acceptEditorPropertiesChanged` before activating and running
+the command. The existing document-change projection already supplies the
+whole-document updates Json Crack observes after panel creation.
+
+##### 5.6D Extension-requested file navigation
+
+Code OSS has two relevant paths:
+
+- `window.showTextDocument` uses `MainThreadTextEditors.$tryShowTextDocument`
+  and expects a real extension-host editor id; and
+- `vscode.open` is routed through `MainThreadCommands.$executeCommand` as the
+  internal `_workbench.open` command.
+
+WBA already owns logical document/editor ids, while Code TE2 already owns the
+canonical project-contained file-open action in the host backend. The new actor
+must therefore synchronize/admit the WBA document, request the canonical
+backend open through a correlated WBA-push/Python-ack transaction, and return
+the valid WBA editor id only after the request is accepted. Ordinary file opens
+must not bypass path admission, active-file sidecar mutation, or the existing
+editor-open completion contract.
+
+##### 5.6E Generic diff surfaces
+
+`vscode.diff` arrives as `_workbench.diff(leftUri, rightUri, title, options)`.
+Code TE2's current Monaco diff machinery is coupled to Git/draft baselines and
+is not a generic two-resource extension API. Add a separate backend-owned diff
+request/surface contract that validates both resources, materializes their
+documents through the normal open/WBA rules, and presents a bounded read-only
+diff without changing active-file authority accidentally. Do not disguise an
+arbitrary extension diff as a Git or draft diff.
+
+##### 5.6F Webview panels and custom editors
+
+Json Crack is the smaller first webview-panel fixture. Every one of its three
+commands calls `window.createWebviewPanel("liveHTMLPreviewer", title,
+ViewColumn.Beside, options)`, sets a dynamic PNG panel icon and document title,
+enables scripts, retains context when hidden, admits only its `build/webview`
+and `assets` roots, and disposes its document/message subscriptions with the
+panel. Its webview uses `acquireVsCodeApi`, sends a `ready` message, consumes
+host `postMessage` updates, and reads `data-vscode-theme-kind`; those document
+behaviors already fit the current trusted wrapper.
+
+The current WBA `WebviewRuntime` can be factored rather than duplicated: its
+opaque document sandbox, resource containment, MessagePack transport, Web
+Storage, theme injection, and wrapper routes are shared webview-document
+infrastructure. Its creation, visibility, and disposal paths are currently
+specific to `MainThreadWebviewViews` and activity-bar contributions. A panel
+layer must add `MainThreadWebviewPanels`/`ExtHostWebviewPanels` while preserving
+that shared core and giving panels their own handle/type/title/icon/view-column,
+reveal, view-state, serializer, and disposal lifecycle.
+
+The OpenAI fixture also uses both `window.createWebviewPanel` and
+`vscode.openWith(..., "chatgpt.conversationEditor", ...)`, and registers the
+`chatgpt.conversationEditor` custom editor. This is the real path to multiple
+Codex conversation windows. Implement `MainThreadWebviewPanels` before
+`MainThreadCustomEditors`, then layer custom-document resolve/save/revert/
+backup lifetime over it.
+
+- Reuse the existing trusted-wrapper, opaque sandbox, resource admission,
+  MessagePack, storage, theme, and Electron detach machinery.
+- Give panels/custom editors their own stable surface identities and explicit
+  dispose/reveal/title/icon lifecycle instead of cloning the activity-bar view.
+- Project a temporary panel/custom-editor surface into Sidebar or an editor-like
+  presentation according to its contribution lifetime; closing it is a true
+  disposal, unlike hiding the persistent activity-bar contribution.
+- Map `ViewColumn.Beside` to the existing embedded Sidebar presentation.
+  `retainContextWhenHidden` keeps the same panel document/iframe alive while a
+  different Sidebar item is foreground; it does not create a second backend
+  surface.
+- Keep WBA/Python authoritative for shared panel count and disposal, while each
+  client retains its existing local order and foreground. Panel creation caused
+  by a client command emits shared membership plus a targeted initial reveal to
+  that initiating client; it must not steal focus in every connected client.
+  `preserveFocus` and subsequent reveal calls update only the targeted
+  presentation intent.
+- Preserve `supportsMultipleEditorsPerDocument` and serializer/restore semantics
+  before treating simultaneous conversations as accepted.
+
+##### 5.6G Menu projection into existing Code TE2 surfaces
+
+Code TE2 already owns custom menu surfaces: `.fe-toolbar`, the Explorer's typed
+card-menu controller, and the Monaco touch-selection menu. Monaco's built-in
+context menu is intentionally disabled. Project only eligible commands into
+those existing owners:
+
+- `editor/title` group `navigation` with a usable contributed icon -> a primary
+  inline button in `.fe-toolbar-actions`, matching Code Server's top-right
+  editor action and the Json Crack UX;
+- other `editor/title` groups and iconless commands -> an Extension Actions
+  overflow group in `.fe-toolbar`;
+- `editor/context` and `editor/title/context` -> an Extension Context submenu
+  in the editor's pointer/touch command surface;
+- `explorer/context` -> an Extension Context submenu in the Explorer card menu,
+  evaluated against the selected file/directory resource; and
+- `view/title` -> controls in the inline/detached extension-surface header.
+
+The mobile implementation extends the touch-selection runtime's existing
+injected tool rows/submenu contract; it does not restore Monaco's native menu or
+create a second mobile-only command authority. Browser and GeckoView render the
+shared projection inline. Electron handles only its established detached-window
+presentation and forwards command intent through the same backend contract.
+Menu eligibility is refreshed event-wise when the active document changes or a
+menu is opened so selection-dependent commands are current without background
+polling.
+
+##### 5.6H Recommended implementation order
+
+1. Fix hide/reopen semantics and add contributed identity/icons to the drawer.
+2. Implement the workspace-scoped command/context registry, Code OSS-compatible
+   `workspaceContains`, editor-selection synchronization, message service, and
+   command invocation path.
+3. Project Json Crack's bounded editor-title and editor-context commands.
+4. Add `MainThreadWebviewPanels` on the shared secure webview core and live-
+   accept Json Crack's beside-editor visualization lifecycle.
+5. Implement `showTextDocument`/`vscode.open` through canonical backend open and
+   extend the bounded editor/Explorer/view menus.
+6. Add the generic diff surface.
+7. Add custom editors and multiple Codex conversations.
+
+Each slice must preserve the current activity-bar acceptance and test Browser,
+GeckoView, and Electron behavior proportionally. Android source remains outside
+scope unless a shared-web implementation proves insufficient and a separate
+approved native change is required.
+
+##### 5.6I Local implementation checkpoint
+
+The first combined follow-on implementation now covers steps 1–4 above without
+adding native-client authority:
+
+- activity-view Close is a client-local `hidden` presentation transition;
+  authoritative provider membership and its contributed icon remain available
+  in the new Extension Views app-drawer section;
+- manifest commands and `editor/title`/`editor/context` menu entries resolve in
+  WBA, with bounded fail-closed `when` handling, contributed icons, implicit
+  `onCommand` activation, exact Monaco selection synchronization, and execution
+  through `ExtHostCommands` on the existing strict MessagePack editor/WBA lane;
+- `workspaceContains` uses the vendored `picomatch` implementation, including
+  the singleton-brace form used by Json Crack, and `MainThreadMessageService`
+  emits extension messages into the existing editor notification path; and
+- `MainThreadWebviewPanels` and `ExtHostWebviewPanels` reuse the established
+  opaque-sandbox document, resource containment, storage, theme, and transport
+  runtime. Panels project as temporary Sidebar membership and Close performs a
+  WBA/extension-host disposal instead of a local hide.
+
+This checkpoint intentionally does not claim the remaining general menu API.
+Extension-defined `setContext`, enablement/alternate commands, Explorer and
+view-title placements, targeted initial panel reveal, extension-requested file
+navigation, generic diffs, custom editors, and multiple Codex conversations
+remain later slices. Json Crack and Browser/GeckoView/Electron presentation
+behavior require live acceptance before the corresponding acceptance items are
+closed.
+
 ## 4. Cross-phase validation rules
 
 - Preserve user changes and untracked files.

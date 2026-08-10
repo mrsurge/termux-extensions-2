@@ -19,6 +19,7 @@ const moduleConfig = {
     "src/extensions/activation-runtime.ts",
     "src/extensions/catalog.ts",
     "src/extensions/activity-runtime.ts",
+    "src/extensions/command-runtime.ts",
     "src/extensions/extension-storage.ts",
     "src/extensions/language-resolver.ts",
     "src/extensions/provider-registry.ts",

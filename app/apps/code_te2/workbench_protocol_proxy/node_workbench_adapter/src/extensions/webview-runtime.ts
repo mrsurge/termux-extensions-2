@@ -21,6 +21,7 @@ interface WebviewContribution {
   extensionLocation: UriRecord | null;
   viewType: string;
   title: string;
+  icon: UriRecord | null;
 }
 
 interface UriRecord extends JsonObject {
@@ -39,6 +40,7 @@ export interface ExtensionWebviewSurface extends JsonObject {
   projectPath: string;
   extensionId: string;
   viewId: string;
+  surfaceKind: "view" | "panel";
   title: string;
   description: string;
   badge: unknown;
@@ -50,6 +52,10 @@ export interface ExtensionWebviewSurface extends JsonObject {
   extensionLocation: UriRecord | null;
   serializeBuffersForPostMessage: boolean;
   visible: boolean;
+  retainContextWhenHidden: boolean;
+  viewColumn: number;
+  iconUrl: string;
+  iconResource: UriRecord | null;
 }
 
 export interface WebviewResource {
@@ -60,8 +66,10 @@ export interface WebviewResource {
 export interface WebviewRuntimeOptions {
   rpcIds: {
     MainThreadWebviews: number;
+    MainThreadWebviewPanels: number;
     MainThreadWebviewViews: number;
     ExtHostWebviews: number;
+    ExtHostWebviewPanels: number;
     ExtHostWebviewViews: number;
   };
   getExtensions(): unknown[];
@@ -192,6 +200,10 @@ function uriRecord(value: unknown): UriRecord | null {
 
 function extensionIdentifier(extension: JsonObject): string {
   if (typeof extension.id === "string") return extension.id;
+  if (isRecord(extension.id)) {
+    const id = stringValue(extension.id.value ?? extension.id.id);
+    if (id) return id;
+  }
   if (typeof extension.extensionId === "string") return extension.extensionId;
   if (isRecord(extension.identifier)) {
     return stringValue(extension.identifier.value ?? extension.identifier.id);
@@ -199,8 +211,27 @@ function extensionIdentifier(extension: JsonObject): string {
   return "";
 }
 
+function panelViewColumn(value: unknown, fallback = 0): number {
+  const numeric = Number(value);
+  return Number.isInteger(numeric) && numeric >= 0 ? numeric : fallback;
+}
+
 function extensionLocation(extension: JsonObject): UriRecord | null {
   return uriRecord(extension.extensionLocation ?? extension.location);
+}
+
+function extensionResourceUri(location: UriRecord | null, relativePath: unknown): UriRecord | null {
+  const relative = stringValue(relativePath);
+  const rootPath = stringValue(location?.path);
+  if (!location || !relative || !rootPath) return null;
+  const resolvedRoot = path.resolve(rootPath);
+  const resolvedPath = path.resolve(resolvedRoot, relative);
+  if (!pathWithin(resolvedPath, resolvedRoot)) return null;
+  return {
+    scheme: stringValue(location.scheme),
+    authority: stringValue(location.authority),
+    path: resolvedPath,
+  };
 }
 
 function stableHash(value: string, length = 16): string {
@@ -243,6 +274,14 @@ function encodePathSegments(value: string): string {
     .map((segment) => encodeURIComponent(segment))
     .join("/");
   return `${leading}${encoded}${trailing}`;
+}
+
+function resourceUrl(surfaceId: string, resource: UriRecord | null): string {
+  if (!resource) return "";
+  const scheme = encodeURIComponent(stringValue(resource.scheme));
+  const authority = encodeURIComponent(stringValue(resource.authority) || "_");
+  const resourcePath = encodePathSegments(stringValue(resource.path) || "/");
+  return `${PUBLIC_WEBVIEW_BASE}/${encodeURIComponent(surfaceId)}/resource/${scheme}/${authority}${resourcePath}`;
 }
 
 function decodeWebviewAuthority(value: string): string {
@@ -322,13 +361,27 @@ window.addEventListener('message',function(event){
 post('ready',null);
 })();</script>`;
 
-function transformWebviewHtml(surfaceId: string, html: string): string {
+function webviewResourceOrigin(value: unknown): string {
+  const raw = stringValue(value);
+  if (!raw) throw new Error("extension webview resource origin is required");
+  const parsed = new URL(raw);
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("extension webview resource origin must use HTTP or HTTPS");
+  }
+  return parsed.origin;
+}
+
+function transformWebviewHtml(surfaceId: string, html: string, resourceOrigin: string): string {
   let transformed = rewriteResourceUrls(surfaceId, html || "");
   transformed = transformed.replace(
     /https:\/\/\*\.vscode-cdn\.net/gi,
     "__TE2_WEBVIEW_RESOURCE_ORIGIN__",
   );
   transformed = decorateWebviewBody(transformed);
+  transformed = transformed.replaceAll(
+    "__TE2_WEBVIEW_RESOURCE_ORIGIN__",
+    webviewResourceOrigin(resourceOrigin),
+  );
   const bootstrap = `${webviewThemeStyle()}${INNER_BRIDGE}`;
   if (/<head(?:\s[^>]*)?>/i.test(transformed)) {
     return transformed.replace(/<head(?:\s[^>]*)?>/i, (head) => `${head}${bootstrap}`);
@@ -366,7 +419,7 @@ function writeWebviewStorage(value){
 function serialize(value){if(!serializeBuffers)return {jsonMessage:JSON.stringify(value)??'null',buffers:[]};const buffers=[];const seen=new WeakSet();const jsonMessage=JSON.stringify(value,(_key,item)=>{if(item&&typeof item==='object'){if(seen.has(item))throw new TypeError('Cannot serialize cyclic webview message');seen.add(item);if(item instanceof ArrayBuffer){const index=buffers.push(new Uint8Array(item))-1;return {$$vscode_array_buffer_reference$$:true,index};}if(ArrayBuffer.isView(item)){const index=buffers.push(new Uint8Array(item.buffer))-1;return {$$vscode_array_buffer_reference$$:true,index,view:{type:item.constructor.name,byteLength:item.byteLength,byteOffset:item.byteOffset}};}}return item;})??'null';return {jsonMessage,buffers};}
 function deserialize(jsonMessage,buffers){const arrays=(buffers||[]).map(bytes=>{const copy=new Uint8Array(bytes).slice();return copy.buffer;});return JSON.parse(jsonMessage,(_key,item)=>{if(!item||item.$$vscode_array_buffer_reference$$!==true)return item;const buffer=arrays[item.index];if(!item.view)return buffer;const ctor=globalThis[item.view.type];return typeof ctor==='function'?new ctor(buffer,item.view.byteOffset,item.view.byteLength/ctor.BYTES_PER_ELEMENT):buffer;});}
 function deliver(kind,value){if(!ready){queued.push([kind,value]);return;}frame.contentWindow.postMessage({__te2ExtensionWebviewHost:true,kind,value},'*');}
-async function load(snapshot){const currentLoad=++loadRevision;ready=false;serializeBuffers=snapshot.serializeBuffersForPostMessage===true;const sandbox=[snapshot.options?.enableScripts?'allow-scripts':'',snapshot.options?.enableForms?'allow-forms':'','allow-downloads','allow-popups','allow-popups-to-escape-sandbox'].filter(Boolean).join(' ');frame.setAttribute('sandbox',sandbox);const response=await fetch('./'+encodeURIComponent(surfaceId)+'/document?revision='+encodeURIComponent(snapshot.htmlRevision||0),{cache:'no-store'});if(!response.ok)throw new Error('Extension document request failed: '+response.status);const documentHtml=(await response.text()).replaceAll('__TE2_WEBVIEW_RESOURCE_ORIGIN__',window.location.origin);if(currentLoad!==loadRevision)return;frame.__te2State=snapshot.state;frame.srcdoc=documentHtml;frame.hidden=false;status.hidden=true;}
+async function load(snapshot){const currentLoad=++loadRevision;ready=false;serializeBuffers=snapshot.serializeBuffersForPostMessage===true;const sandbox=[snapshot.options?.enableScripts?'allow-scripts':'',snapshot.options?.enableForms?'allow-forms':'','allow-downloads','allow-popups','allow-popups-to-escape-sandbox'].filter(Boolean).join(' ');frame.setAttribute('sandbox',sandbox);const documentUrl=new URL('./'+encodeURIComponent(surfaceId)+'/document',window.location.href);documentUrl.searchParams.set('revision',String(snapshot.htmlRevision||0));documentUrl.searchParams.set('resourceOrigin',window.location.origin);if(currentLoad!==loadRevision)return;frame.__te2State=snapshot.state;frame.src=documentUrl.href;frame.hidden=false;status.hidden=true;}
 socket.on('connect',async()=>{try{const result=await rpc('vscode.webview.attach',{surfaceId});await load(result);}catch(error){status.textContent=String(error?.message||error);}});
 socket.on('disconnect',()=>{status.hidden=false;status.textContent='Extension host disconnected';});
 socket.on('rpc',payload=>{const message=decodeWbaRpcMessage(payload);const messages=Array.isArray(message)?message:[message];for(const item of messages){if(item&&item.id!=null&&pending.has(item.id)){const waiter=pending.get(item.id);pending.delete(item.id);item.error?waiter.reject(new Error(item.error.message||'RPC failed')):waiter.resolve(item.result);continue;}if(item?.method!=='vscode.webview.event'||item.params?.surfaceId!==surfaceId)continue;const event=item.params;if(event.event==='message')deliver('message',deserialize(event.jsonMessage,event.buffers));else if(event.event==='reload')void load(event.surface).catch(error=>{status.hidden=false;status.textContent=String(error?.message||error);});else if(event.event==='dispose'){status.hidden=false;status.textContent='Extension view closed';frame.remove();}}});
@@ -413,6 +466,9 @@ export class WebviewRuntime {
       if (rpcId === this.runtime.rpcIds.MainThreadWebviewViews) {
         return this.handleViewRequest(method, args);
       }
+      if (rpcId === this.runtime.rpcIds.MainThreadWebviewPanels) {
+        return this.handlePanelRequest(method, args);
+      }
       if (rpcId === this.runtime.rpcIds.MainThreadWebviews) {
         return this.handleWebviewRequest(method, args);
       }
@@ -446,8 +502,12 @@ export class WebviewRuntime {
     for (const surface of [...this.surfaces.values()]) {
       try {
         this.runtime.sendExt(
-          this.runtime.rpcIds.ExtHostWebviewViews,
-          "$disposeWebviewView",
+          surface.surfaceKind === "panel"
+            ? this.runtime.rpcIds.ExtHostWebviewPanels
+            : this.runtime.rpcIds.ExtHostWebviewViews,
+          surface.surfaceKind === "panel"
+            ? "$onDidDisposeWebviewPanel"
+            : "$disposeWebviewView",
           [surface.handle],
           false,
         );
@@ -503,12 +563,16 @@ export class WebviewRuntime {
     const visible = params.visible !== false;
     if (surface.visible !== visible) {
       surface.visible = visible;
-      this.runtime.sendExt(
-        this.runtime.rpcIds.ExtHostWebviewViews,
-        "$onDidChangeWebviewViewVisibility",
-        [surface.handle, visible],
-        false,
-      );
+      if (surface.surfaceKind === "panel") {
+        this.sendPanelViewState(surface, visible);
+      } else {
+        this.runtime.sendExt(
+          this.runtime.rpcIds.ExtHostWebviewViews,
+          "$onDidChangeWebviewViewVisibility",
+          [surface.handle, visible],
+          false,
+        );
+      }
     }
     return { ok: true, visible };
   }
@@ -518,8 +582,12 @@ export class WebviewRuntime {
     return wrapperHtml(surfaceId);
   }
 
-  document(surfaceId: string): string {
-    return transformWebviewHtml(surfaceId, this.requiredSurface(surfaceId).html);
+  document(surfaceId: string, resourceOrigin: string): string {
+    return transformWebviewHtml(
+      surfaceId,
+      this.requiredSurface(surfaceId).html,
+      resourceOrigin,
+    );
   }
 
   async resource(
@@ -634,6 +702,88 @@ export class WebviewRuntime {
     return { handled: false };
   }
 
+  private handlePanelRequest(method: string, args: unknown[]): WebviewMainThreadResult {
+    if (method === "$createWebviewPanel") {
+      const extension = isRecord(args[0]) ? args[0] : {};
+      const handle = stringValue(args[1]);
+      const viewType = stringValue(args[2]);
+      const initData = isRecord(args[3]) ? args[3] : {};
+      const showOptions = isRecord(args[4]) ? args[4] : {};
+      if (!handle || !viewType) throw new Error("webview panel handle and viewType are required");
+      if (this.surfaceForHandle(handle)) throw new Error(`webview panel handle already exists: ${handle}`);
+      const projectPath = this.workspaceFolder();
+      if (!projectPath) throw new Error("webview panel requires an active workspace");
+      const workspaceId = stableHash(projectPath);
+      const surfaceId = `vsix-panel:${workspaceId}:${stableHash(handle)}`;
+      const panelOptions = isRecord(initData.panelOptions) ? initData.panelOptions : {};
+      const surface: ExtensionWebviewSurface = {
+        dto: "ExtensionWebviewSurface",
+        version: 1,
+        surfaceId,
+        handle,
+        hostId: `vsix-webview:${surfaceId}`,
+        workspaceId,
+        projectPath,
+        extensionId: extensionIdentifier(extension),
+        viewId: viewType,
+        surfaceKind: "panel",
+        title: stringValue(initData.title) || viewType,
+        description: "",
+        badge: null,
+        url: `${PUBLIC_WEBVIEW_BASE}/${encodeURIComponent(surfaceId)}`,
+        html: "",
+        htmlRevision: 0,
+        options: isRecord(initData.webviewOptions) ? { ...initData.webviewOptions } : {},
+        state: null,
+        extensionLocation: uriRecord(extension.location),
+        serializeBuffersForPostMessage: initData.serializeBuffersForPostMessage === true,
+        visible: true,
+        retainContextWhenHidden: panelOptions.retainContextWhenHidden === true,
+        viewColumn: panelViewColumn(showOptions.viewColumn),
+        iconUrl: "",
+        iconResource: null,
+      };
+      this.surfaces.set(surfaceId, surface);
+      this.surfaceIdByHandle.set(handle, surfaceId);
+      this.sendPanelViewState(surface, true);
+      this.emitSnapshot();
+      return { handled: true };
+    }
+    if (method === "$registerSerializer" || method === "$unregisterSerializer") {
+      return { handled: true };
+    }
+    const surface = this.surfaceForHandle(args[0]);
+    if (!surface || surface.surfaceKind !== "panel") return { handled: false };
+    if (method === "$disposeWebview") {
+      this.disposeSurface(surface, "panel_disposed", true);
+      return { handled: true };
+    }
+    if (method === "$setTitle") {
+      surface.title = stringValue(args[1]) || surface.viewId;
+      this.emitSnapshot();
+      return { handled: true };
+    }
+    if (method === "$setIconPath") {
+      const icon = isRecord(args[1])
+        ? uriRecord(args[1].dark) ?? uriRecord(args[1].light) ?? uriRecord(args[1])
+        : null;
+      surface.iconResource = icon;
+      surface.iconUrl = resourceUrl(surface.surfaceId, icon);
+      this.emitSnapshot();
+      return { handled: true };
+    }
+    if (method === "$reveal") {
+      const showOptions = isRecord(args[1]) ? args[1] : {};
+      surface.visible = true;
+      surface.viewColumn = panelViewColumn(showOptions.viewColumn, surface.viewColumn);
+      this.sendPanelViewState(surface, true);
+      this.notify(surface, "show", { preserveFocus: showOptions.preserveFocus === true });
+      this.emitSnapshot();
+      return { handled: true };
+    }
+    return { handled: false };
+  }
+
   private primaryContributions(): WebviewContribution[] {
     const result: WebviewContribution[] = [];
     for (const rawExtension of this.runtime.getExtensions()) {
@@ -649,6 +799,8 @@ export class WebviewRuntime {
       for (const rawContainer of containers) {
         if (!isRecord(rawContainer)) continue;
         const containerId = stringValue(rawContainer.id);
+        const contributionLocation = extensionLocation(rawExtension);
+        const icon = extensionResourceUri(contributionLocation, rawContainer.icon);
         const descriptors = Array.isArray(views[containerId]) ? views[containerId] : [];
         for (const rawDescriptor of descriptors) {
           if (!isRecord(rawDescriptor) || stringValue(rawDescriptor.type) !== "webview") continue;
@@ -659,6 +811,7 @@ export class WebviewRuntime {
             extensionLocation: extensionLocation(rawExtension),
             viewType,
             title: stringValue(rawDescriptor.name) || viewType,
+            icon,
           });
         }
       }
@@ -684,6 +837,7 @@ export class WebviewRuntime {
       projectPath,
       extensionId: provider.extensionId || contribution.extensionId,
       viewId: contribution.viewType,
+      surfaceKind: "view",
       title: contribution.title,
       description: "",
       badge: null,
@@ -695,6 +849,10 @@ export class WebviewRuntime {
       extensionLocation: provider.extensionLocation ?? contribution.extensionLocation,
       serializeBuffersForPostMessage: provider.serializeBuffersForPostMessage,
       visible: true,
+      retainContextWhenHidden: provider.retainContextWhenHidden,
+      viewColumn: 0,
+      iconUrl: resourceUrl(surfaceId, contribution.icon),
+      iconResource: contribution.icon,
     };
     this.surfaces.set(surfaceId, surface);
     this.surfaceIdByHandle.set(handle, surfaceId);
@@ -751,11 +909,56 @@ export class WebviewRuntime {
     return surface;
   }
 
-  private disposeSurface(surface: ExtensionWebviewSurface, reason: string): void {
+  dispose(params: JsonObject): JsonObject {
+    const surface = this.requiredSurface(params.surfaceId);
+    this.disposeSurface(surface, "client_closed", true);
+    return { ok: true };
+  }
+
+  private disposeSurface(
+    surface: ExtensionWebviewSurface,
+    reason: string,
+    notifyExtensionHost = false,
+  ): void {
     this.surfaces.delete(surface.surfaceId);
     this.surfaceIdByHandle.delete(surface.handle);
     this.notify(surface, "dispose", { reason });
+    if (notifyExtensionHost) {
+      if (surface.surfaceKind === "panel") {
+        this.runtime.sendExt(
+          this.runtime.rpcIds.ExtHostWebviewPanels,
+          "$onDidDisposeWebviewPanel",
+          [surface.handle],
+          false,
+        );
+      } else {
+        this.runtime.sendExt(
+          this.runtime.rpcIds.ExtHostWebviewViews,
+          "$disposeWebviewView",
+          [surface.handle],
+          false,
+        );
+      }
+    }
     this.emitSnapshot(surface.projectPath);
+  }
+
+  private sendPanelViewState(
+    surface: ExtensionWebviewSurface,
+    visible: boolean,
+  ): void {
+    this.runtime.sendExt(
+      this.runtime.rpcIds.ExtHostWebviewPanels,
+      "$onDidChangeWebviewPanelViewStates",
+      [{
+        [surface.handle]: {
+          active: visible,
+          visible,
+          position: surface.viewColumn,
+        },
+      }],
+      false,
+    );
   }
 
   private workspaceFolder(): string {
@@ -766,8 +969,9 @@ export class WebviewRuntime {
     const configured = Array.isArray(surface.options.localResourceRoots)
       ? surface.options.localResourceRoots.map(uriRecord).filter((value): value is UriRecord => !!value)
       : [];
-    if (configured.length) return configured;
-    const roots: UriRecord[] = [];
+    const roots: UriRecord[] = [...configured];
+    if (surface.iconResource) roots.push(surface.iconResource);
+    if (configured.length) return roots;
     if (surface.extensionLocation) roots.push(surface.extensionLocation);
     const projectPath = stringValue(surface.projectPath);
     if (projectPath) {
@@ -790,6 +994,7 @@ export class WebviewRuntime {
       projectPath: surface.projectPath,
       extensionId: surface.extensionId,
       viewId: surface.viewId,
+      surfaceKind: surface.surfaceKind,
       title: surface.title,
       description: surface.description,
       badge: surface.badge,
@@ -799,6 +1004,9 @@ export class WebviewRuntime {
       state: surface.state,
       serializeBuffersForPostMessage: surface.serializeBuffersForPostMessage,
       visible: surface.visible,
+      retainContextWhenHidden: surface.retainContextWhenHidden,
+      viewColumn: surface.viewColumn,
+      iconUrl: surface.iconUrl,
     };
   }
 

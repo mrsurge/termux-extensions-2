@@ -1,7 +1,22 @@
 import { existsSync } from "node:fs";
 import type { Dirent } from "node:fs";
 import fs from "node:fs/promises";
+import { createRequire } from "node:module";
 import path from "node:path";
+
+interface PicomatchOptions {
+  dot?: boolean;
+}
+
+type Picomatch = (
+  pattern: string,
+  options?: PicomatchOptions,
+) => (value: string) => boolean;
+
+const require = createRequire(import.meta.url);
+const picomatch = require(
+  "../../../../vendor/picomatch/index.js",
+) as Picomatch;
 
 const DEFAULT_WORKSPACE_CONTAINS_MAX_ENTRIES = 25000;
 const DEFAULT_WORKSPACE_CONTAINS_SKIP_DIRS = new Set([
@@ -41,38 +56,15 @@ function workspaceContainsPatterns(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value
     .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
-    .map((item) => item.replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+/g, "/"));
+    .map((item) => item
+      .replace(/\\/g, "/")
+      .replace(/^\/+/, "")
+      .replace(/\/+/g, "/")
+      .replace(/\{([^,{}]+)\}/g, "$1"));
 }
 
 function hasGlobMagic(pattern: string): boolean {
-  return pattern.includes("*") || pattern.includes("?");
-}
-
-function escapeRegExpChar(char: string): string {
-  return /[\\^$+?.()|[\]{}]/.test(char) ? `\\${char}` : char;
-}
-
-function globPatternToRegExp(pattern: string): RegExp {
-  let source = "^";
-  for (let i = 0; i < pattern.length; i += 1) {
-    const char = pattern[i] ?? "";
-    if (char === "*") {
-      if (pattern[i + 1] === "*") {
-        source += ".*";
-        i += 1;
-      } else {
-        source += "[^/]*";
-      }
-      continue;
-    }
-    if (char === "?") {
-      source += "[^/]";
-      continue;
-    }
-    source += escapeRegExpChar(char);
-  }
-  source += "$";
-  return new RegExp(source);
+  return /[*?{}()[\]!+@]/.test(pattern);
 }
 
 function maxDepthForGlob(pattern: string): number {
@@ -86,7 +78,7 @@ async function workspaceGlobExists(
   maxEntries: number,
   skipDirs: ReadonlySet<string>,
 ): Promise<boolean> {
-  const regex = globPatternToRegExp(pattern);
+  const matches = picomatch(pattern, { dot: true });
   const maxDepth = maxDepthForGlob(pattern);
   let visited = 0;
 
@@ -102,7 +94,7 @@ async function workspaceGlobExists(
       visited += 1;
       if (visited > maxEntries) return false;
       const rel = relParent ? `${relParent}/${entry.name}` : entry.name;
-      if (regex.test(rel)) return true;
+      if (matches(rel)) return true;
       if (!entry.isDirectory()) continue;
       if (skipDirs.has(entry.name)) continue;
       if (pattern.includes("**") || depth + 1 < maxDepth) {

@@ -84,6 +84,12 @@ export interface ExtHostDispatchRuntime {
     replyResult?: unknown;
     error?: unknown;
   };
+  handleCommandRequest?: (message: DecodedExtHostRpc) => {
+    handled: boolean;
+    replyResult?: unknown;
+    pending?: Promise<unknown>;
+    error?: unknown;
+  };
   debug: ExtHostDispatchDebugRuntime;
   nowMs: () => number;
   timeLabel: () => string;
@@ -483,6 +489,43 @@ function handleMainThreadStorageRequest(
   return true;
 }
 
+function handleMainThreadCommandRequest(
+  runtime: ExtHostDispatchRuntime,
+  msg: DecodedExtHostRpc,
+): boolean {
+  const handler = runtime.handleCommandRequest;
+  if (!handler) return false;
+  const result = handler(msg);
+  if (!result.handled) return false;
+  const req = Number(msg.req ?? 0);
+  const sendResult = (value: unknown): void => {
+    const payload = value === undefined
+      ? encodeExtReplyOkEmpty(req)
+      : encodeExtReplyOkJson(req, value);
+    sendReplyPayload(runtime, req, msg.method, payload);
+  };
+  const sendError = (error: unknown): void => {
+    sendReplyPayload(
+      runtime,
+      req,
+      msg.method,
+      encodeExtReplyError(req, {
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    );
+  };
+  if (result.error) {
+    sendError(result.error);
+  } else if (result.pending) {
+    result.pending.then(sendResult).catch(sendError);
+  } else if (Object.prototype.hasOwnProperty.call(result, "replyResult")) {
+    sendResult(result.replyResult);
+  } else {
+    sendResult(undefined);
+  }
+  return true;
+}
+
 function handleTryOpenDocument(runtime: ExtHostDispatchRuntime, msg: DecodedExtHostRpc): void {
   const req = Number(msg.req ?? 0);
   const uri = Array.isArray(msg.args) ? msg.args[0] : undefined;
@@ -668,6 +711,8 @@ export function handleExtHostRequest(runtime: ExtHostDispatchRuntime, msg: Decod
     }
     return true;
   }
+
+  if (handleMainThreadCommandRequest(runtime, msg)) return true;
 
   if (handleMainThreadStorageRequest(runtime, msg)) return true;
 

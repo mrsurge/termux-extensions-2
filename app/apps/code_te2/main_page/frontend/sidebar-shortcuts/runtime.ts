@@ -951,6 +951,8 @@ export function initSidebarShortcuts(
           win.run_profile_surface || win.runProfileSurface,
         runProfileSurface:
           win.run_profile_surface || win.runProfileSurface,
+        webview_surface: win.webview_surface || win.webviewSurface,
+        webviewSurface: win.webview_surface || win.webviewSurface,
       };
     }
     if (!appId) return null;
@@ -1006,7 +1008,10 @@ export function initSidebarShortcuts(
   }
 
   function _collectVisibleShortcuts(uiPrefs: UnknownRecord): SidebarShortcut[] {
-    const appDockEntries = _collectAppDockEntries();
+    const appDockEntries = _collectAppDockEntries().filter((shortcut) => {
+      const hostId = _normStr(shortcut.host_id);
+      return !hostId || _presentationModeForHost(hostId) !== "hidden";
+    });
     const activeUrlId = _normStr(_clientActiveShortcutId);
     if (!activeUrlId) return appDockEntries;
     const activeUrlEntry = _collectUrlEntries(uiPrefs).filter((sc) =>
@@ -1049,6 +1054,22 @@ export function initSidebarShortcuts(
     );
   }
 
+  function _extensionWebviewSurface(
+    sc: SidebarShortcut | SidebarShortcutPreference | null,
+  ): UnknownRecord {
+    if (!sc) return {};
+    return asRecord(
+      (sc as SidebarShortcut).webview_surface ||
+        (sc as SidebarShortcut).webviewSurface,
+    );
+  }
+
+  function _isExtensionWebviewEntry(
+    sc: SidebarShortcut | SidebarShortcutPreference | null,
+  ): boolean {
+    return _normStr(_extensionWebviewSurface(sc).dto) === "ExtensionWebviewSurface";
+  }
+
   function _appReadinessStatus(appId: unknown): string {
     const id = _normStr(appId);
     if (!id || !Array.isArray(_appsCache)) return "";
@@ -1083,7 +1104,10 @@ export function initSidebarShortcuts(
     shortcuts: SidebarShortcut[] | null = null,
   ) {
     const activeWindow = _findAppDockSlot(_clientActiveWindowHostId);
-    if (activeWindow) {
+    if (
+      activeWindow &&
+      _presentationModeForHost(_windowHostId(activeWindow)) !== "hidden"
+    ) {
       const entry = _appDockSlotToEntry(activeWindow);
       if (entry) return entry;
     }
@@ -1099,7 +1123,7 @@ export function initSidebarShortcuts(
     }
     const persistedActiveId = _normStr(uiPrefs?.[UI_PREF_KEY_ACTIVE]);
     if (persistedActiveId) {
-      const dockActive = _collectAppDockEntries().find((sc) =>
+      const dockActive = list.find((sc) =>
         _shortcutMatchesValue(sc, persistedActiveId),
       );
       if (dockActive) return dockActive;
@@ -1121,7 +1145,10 @@ export function initSidebarShortcuts(
     shortcuts: SidebarShortcut[] | null,
   ) {
     const activeWindow = _findAppDockSlot(_clientActiveWindowHostId);
-    if (activeWindow) {
+    if (
+      activeWindow &&
+      _presentationModeForHost(_windowHostId(activeWindow)) !== "hidden"
+    ) {
       const entry = _appDockSlotToEntry(activeWindow);
       if (entry) return { active: entry, activeId: entry.key };
     }
@@ -1133,7 +1160,7 @@ export function initSidebarShortcuts(
       const activeId = active.id || active.url || active.key || "";
       return { active, activeId };
     }
-    const appDockDefault = _pickMruShortcut(_collectAppDockEntries());
+    const appDockDefault = _pickMruShortcut(list.filter(_isAppDockEntry));
     if (appDockDefault) {
       const activeId =
         appDockDefault.id || appDockDefault.url || appDockDefault.key || "";
@@ -1419,7 +1446,12 @@ export function initSidebarShortcuts(
   }
 
   function _surfaceIdForShortcut(sc: SidebarShortcut): string {
-    const surface = asRecord(sc.run_profile_surface || sc.runProfileSurface);
+    const surface = asRecord(
+      sc.run_profile_surface ||
+        sc.runProfileSurface ||
+        sc.webview_surface ||
+        sc.webviewSurface,
+    );
     const hostId = _normStr(sc.host_id) || sc.key;
     return _normStr(surface.surfaceId) || `sidebar:${hostId}`;
   }
@@ -1545,6 +1577,10 @@ export function initSidebarShortcuts(
       return;
     }
     _detachedPresentationIds.delete(event.hostId);
+    if (_presentationModeForHost(event.hostId) === "hidden") {
+      _publishPresentationIdentity(event.hostId, "");
+      return;
+    }
     _commitPresentationState(
       setSidebarPresentationMode(_presentationState, event.hostId, "embedded"),
     );
@@ -1555,6 +1591,42 @@ export function initSidebarShortcuts(
       normalized,
       ensured.active,
     );
+  }
+
+  function _refreshAfterPresentationChange(): void {
+    const normalized = _collectVisibleShortcuts(_latestUiPrefs || {});
+    const ensured = _ensureActiveSelection(_latestUiPrefs || {}, normalized);
+    _applyHeaderLabelAndIcon(_latestUiPrefs || {}, normalized, ensured.active);
+    _renderHeaderIconGrid(_latestUiPrefs || {}, normalized, ensured.active);
+    void _syncIframesAndActivate(
+      _latestUiPrefs || {},
+      normalized,
+      ensured.active,
+    );
+  }
+
+  function _hideExtensionWebview(sc: SidebarShortcut): void {
+    const hostId = _normStr(sc.host_id);
+    if (!hostId) return;
+    let next = setSidebarPresentationMode(_presentationState, hostId, "hidden");
+    if (next.foregroundHostId === hostId) {
+      next = clearSidebarPresentationForeground(next);
+    }
+    _commitPresentationState(next);
+    _publishPresentationIdentity(hostId, "");
+    const entry = _iframeMap.get(sc.key);
+    if (entry) {
+      entry.iframe.remove();
+      _iframeMap.delete(sc.key);
+    }
+    const presentationId = _detachedPresentationIds.get(hostId);
+    _detachedPresentationIds.delete(hostId);
+    const bridge = _electronSurfaceBridge();
+    if (presentationId && bridge) {
+      void bridge.closeSidebarSurface(_surfaceIdForShortcut(sc), presentationId);
+    }
+    _clientActiveWindowHostId = "";
+    _refreshAfterPresentationChange();
   }
 
   function _handleElectronSurfaceEvent(event: ElectronSidebarSurfaceEvent): void {
@@ -1772,8 +1844,14 @@ export function initSidebarShortcuts(
       const hostId = _windowHostId(activeWindow);
       const prevWindowId = _clientActiveWindowHostId;
       if (_presentationStateLoaded) {
+        const currentMode = _presentationModeForHost(hostId);
+        const visibleState = setSidebarPresentationMode(
+          _presentationState,
+          hostId,
+          currentMode === "hidden" ? "embedded" : currentMode,
+        );
         _commitPresentationState(
-          activateSidebarPresentation(_presentationState, hostId, {
+          activateSidebarPresentation(visibleState, hostId, {
             agent: _slotIsAgent(activeWindow),
             presentationId: _presentationIdForHost(hostId),
           }),
@@ -2130,6 +2208,8 @@ export function initSidebarShortcuts(
       (sc as SidebarShortcut).run_profile_surface ||
         (sc as SidebarShortcut).runProfileSurface,
     );
+    const extensionSurface = _extensionWebviewSurface(sc);
+    const extensionSurfaceKind = _normStr(extensionSurface.surfaceKind) || "view";
     const presentationHostId = _normStr((sc as SidebarShortcut).host_id);
     const electronBridge = _electronSurfaceBridge();
     if (presentationHostId && electronBridge) {
@@ -2189,7 +2269,29 @@ export function initSidebarShortcuts(
     }
 
     addSeparator();
-    if (isUrlSlot) {
+    if (isUrlSlot && _isExtensionWebviewEntry(sc)) {
+      const extensionAction = document.createElement("div");
+      extensionAction.className = "fe-dd-item";
+      extensionAction.textContent = extensionSurfaceKind === "panel"
+        ? "Close extension panel"
+        : "Hide extension view";
+      extensionAction.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        _closeHeaderIconMenu();
+        if (extensionSurfaceKind === "panel") {
+          _requestSidebarControl(
+            UI_IPC_RPC_METHODS.hostExtensionWebviewDispose,
+            {
+              surfaceId: _normStr(extensionSurface.surfaceId),
+              source: "header_icon_menu",
+            },
+          );
+        } else {
+          _hideExtensionWebview(sc as SidebarShortcut);
+        }
+      });
+      menu.appendChild(extensionAction);
+    } else if (isUrlSlot) {
       const urlHostId = _normStr((sc as SidebarShortcut).host_id);
       const runProfileId = _normStr(runProfileSurface.profileId);
       const runProfileProject = _normStr(runProfileSurface.projectPath);
@@ -2403,6 +2505,68 @@ export function initSidebarShortcuts(
       });
       menu.appendChild(item);
     });
+
+    const extensionViews = _collectAppDockEntries()
+      .filter((shortcut) => _isExtensionWebviewEntry(shortcut))
+      .sort((left, right) => left.label.localeCompare(right.label, undefined, {
+        sensitivity: "base",
+        numeric: true,
+      }));
+    if (extensionViews.length) {
+      const extensionSeparator = document.createElement("div");
+      extensionSeparator.className = "fe-dd-separator";
+      extensionSeparator.style.margin = "4px 0";
+      menu.appendChild(extensionSeparator);
+
+      const extensionTitle = document.createElement("div");
+      extensionTitle.className = "fe-dd-item";
+      extensionTitle.style.opacity = "0.72";
+      extensionTitle.style.cursor = "default";
+      extensionTitle.textContent = "Extension views";
+      menu.appendChild(extensionTitle);
+
+      extensionViews.forEach((shortcut) => {
+        const hostId = _normStr(shortcut.host_id);
+        if (!hostId) return;
+        const item = document.createElement("div");
+        item.className = "fe-dd-item";
+        item.style.display = "flex";
+        item.style.gap = "8px";
+        item.style.alignItems = "center";
+        item.style.justifyContent = "space-between";
+        const labelWrap = document.createElement("span");
+        labelWrap.style.display = "inline-flex";
+        labelWrap.style.alignItems = "center";
+        labelWrap.style.gap = "8px";
+        const icon = _renderIconNode(
+          _effectiveShortcutIcon(shortcut),
+          16,
+          _firstGrapheme(shortcut.label),
+        );
+        if (icon) labelWrap.appendChild(icon);
+        const text = document.createElement("span");
+        text.textContent = shortcut.label;
+        labelWrap.appendChild(text);
+        item.appendChild(labelWrap);
+        const badge = document.createElement("span");
+        badge.style.fontSize = "0.72rem";
+        badge.style.opacity = "0.62";
+        badge.textContent = _presentationModeForHost(hostId) === "hidden"
+          ? "hidden"
+          : "open";
+        item.appendChild(badge);
+        item.addEventListener("click", (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          _closeHeaderIconMenu();
+          _setClientActiveShortcut(hostId, {
+            emit: true,
+            source: "extension_app_drawer",
+          });
+        });
+        menu.appendChild(item);
+      });
+    }
 
     const sep = document.createElement("div");
     sep.className = "fe-dd-separator";

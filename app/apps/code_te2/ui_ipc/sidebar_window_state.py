@@ -475,6 +475,7 @@ def _normalize_extension_webview_surface(
     project_path = _norm(raw.get("projectPath") or raw.get("project_path"))
     extension_id = _norm(raw.get("extensionId") or raw.get("extension_id"))
     view_id = _norm(raw.get("viewId") or raw.get("view_id"))
+    surface_kind = _norm(raw.get("surfaceKind") or raw.get("surface_kind")) or "view"
     url = _validate_url_slot_url(_norm(raw.get("url")))
     if not all(
         (
@@ -489,6 +490,8 @@ def _normalize_extension_webview_surface(
         raise ValueError("webviewSurface identity is incomplete")
     if url != canonical_url:
         raise ValueError("webviewSurface URL must match the Sidebar URL")
+    if surface_kind not in {"view", "panel"}:
+        raise ValueError("webviewSurface kind is invalid")
     return {
         "dto": "ExtensionWebviewSurface",
         "version": 1,
@@ -498,7 +501,17 @@ def _normalize_extension_webview_surface(
         "projectPath": project_path,
         "extensionId": extension_id,
         "viewId": view_id,
+        "surfaceKind": surface_kind,
         "url": url,
+        "iconUrl": _norm(raw.get("iconUrl") or raw.get("icon_url")),
+        "retainContextWhenHidden": _as_bool(
+            raw.get("retainContextWhenHidden")
+            or raw.get("retain_context_when_hidden")
+        ),
+        "viewColumn": max(
+            0,
+            _as_int(raw.get("viewColumn") or raw.get("view_column")),
+        ),
     }
 
 

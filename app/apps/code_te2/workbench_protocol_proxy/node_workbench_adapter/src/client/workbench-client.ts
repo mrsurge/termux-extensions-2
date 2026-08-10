@@ -118,6 +118,7 @@ import {
 import { ProviderRegistry } from "../extensions/provider-registry.mjs";
 import { ExtensionActivityRuntime } from "../extensions/activity-runtime.mjs";
 import { ExtensionActivationRuntime } from "../extensions/activation-runtime.mjs";
+import { ExtensionCommandRuntime } from "../extensions/command-runtime.mjs";
 import { ExtensionMementoStore } from "../extensions/extension-storage.mjs";
 import { ExtensionLanguageResolver } from "../extensions/language-resolver.mjs";
 import { WebviewRuntime } from "../extensions/webview-runtime.mjs";
@@ -270,6 +271,19 @@ const PARSE_ARGS_ONLY_METHODS = new Set<string>([
   "$setHtml",
   "$setOptions",
   "$postMessage",
+
+  // Extension commands, messages, and webview panels.
+  "$registerCommand",
+  "$unregisterCommand",
+  "$fireCommandActivationEvent",
+  "$getCommands",
+  "$showMessage",
+  "$createWebviewPanel",
+  "$disposeWebview",
+  "$setTitle",
+  "$setIconPath",
+  "$registerSerializer",
+  "$unregisterSerializer",
 
   "$getInitialState",
   "$checkExists",
@@ -689,6 +703,7 @@ export class WorkbenchClient {
   _extensions: unknown[];
   _extensionActivity: ExtensionActivityRuntime;
   _extensionActivation: ExtensionActivationRuntime;
+  _extensionCommands: ExtensionCommandRuntime;
   _extensionStorage: ExtensionMementoStore;
   _webviews: WebviewRuntime;
   _languageResolver: ExtensionLanguageResolver;
@@ -811,6 +826,20 @@ export class WorkbenchClient {
       onEvent: (payload) => this.onEvent(payload),
       log: (...args) => console.log(...args),
     });
+    this._extensionCommands = new ExtensionCommandRuntime({
+      rpcIds: {
+        MainThreadCommands: _rpcIds.MainThreadCommands,
+        MainThreadMessageService: _rpcIds.MainThreadMessageService,
+        ExtHostCommands: _rpcIds.ExtHostCommands,
+      },
+      activateByEvent: (event) => this.activateByEvent(event),
+      sendExtAwaitTerminalReply: (rpcId, method, args, cancellable, timeoutMs) =>
+        this._sendExtAwaitTerminalReply(rpcId, method, args, cancellable, timeoutMs),
+      uriForPath: (filePath) => this._uriForPath(filePath),
+      syncSelection: (params) => this._syncExtensionCommandSelection(params),
+      onEvent: (payload) => this.onEvent(payload),
+      log: (...args) => console.log(...args),
+    });
     this._providerRegistry = new ProviderRegistry();
     this._callHierarchySessions = new CallHierarchySessionStore();
     this._useRemote = true;
@@ -851,8 +880,10 @@ export class WorkbenchClient {
     this._webviews = new WebviewRuntime({
       rpcIds: {
         MainThreadWebviews: _rpcIds.MainThreadWebviews,
+        MainThreadWebviewPanels: _rpcIds.MainThreadWebviewPanels,
         MainThreadWebviewViews: _rpcIds.MainThreadWebviewViews,
         ExtHostWebviews: _rpcIds.ExtHostWebviews,
+        ExtHostWebviewPanels: _rpcIds.ExtHostWebviewPanels,
         ExtHostWebviewViews: _rpcIds.ExtHostWebviewViews,
       },
       getExtensions: () => this._extensions,
@@ -1555,6 +1586,7 @@ export class WorkbenchClient {
         this._languageResolver.setExtensions(value);
         this._languageCatalogCache = null;
         this._extensionActivity.setExtensions(value);
+        this._extensionCommands.setExtensions(value);
       },
       state: this.state,
       defaults: {
@@ -1607,6 +1639,7 @@ export class WorkbenchClient {
       connectionTypes: {
         ExtensionHost: ConnectionType.ExtensionHost,
         ExtHostConfiguration: _rpcIds.ExtHostConfiguration,
+        ExtHostCommands: _rpcIds.ExtHostCommands,
         ExtHostFileSystemInfo: _rpcIds.ExtHostFileSystemInfo,
         ExtHostLanguageFeatures: _rpcIds.ExtHostLanguageFeatures,
         ExtHostLanguages: _rpcIds.ExtHostLanguages,
@@ -1711,6 +1744,8 @@ export class WorkbenchClient {
         this._extensionStorage.setValue(shared, extensionId, value),
       handleWebviewRequest: (message) =>
         this._webviews.handleMainThreadRequest(message),
+      handleCommandRequest: (message) =>
+        this._extensionCommands.handleMainThreadRequest(message),
       debugExtReqSeen: this._debugExtReqSeen,
       setDebugExtReqSeen: (value) => {
         this._debugExtReqSeen = value;
@@ -1866,6 +1901,7 @@ export class WorkbenchClient {
     this._providerRegistry.clear();
     this._webviews.clear(reason || "session_reset");
     this._extensionActivation.reset(reason);
+    this._extensionCommands.reset();
     this._extensionActivity.reset(reason);
     this._extensions = [];
     this._languageResolver.clear();
@@ -2443,6 +2479,63 @@ export class WorkbenchClient {
     return this._extensionActivity.selectLog(channelId);
   }
 
+  _syncExtensionCommandSelection(params: Record<string, unknown>): void {
+    const filePath = typeof params.path === "string" ? params.path.trim() : "";
+    if (!filePath || filePath !== this.state.activePath || !this._activeEditorId) {
+      throw new Error("Extension command target is not the active editor");
+    }
+    const raw = isRecord(params.selection) ? params.selection : {};
+    const line = (value: unknown, fallback: number): number => {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? Math.max(1, Math.trunc(numeric)) : fallback;
+    };
+    const startLineNumber = line(raw.startLineNumber, 1);
+    const startColumn = line(raw.startColumn, 1);
+    const endLineNumber = line(raw.endLineNumber, startLineNumber);
+    const endColumn = line(raw.endColumn, startColumn);
+    const selectionStartLineNumber = line(raw.selectionStartLineNumber, startLineNumber);
+    const selectionStartColumn = line(raw.selectionStartColumn, startColumn);
+    const positionLineNumber = line(raw.positionLineNumber, endLineNumber);
+    const positionColumn = line(raw.positionColumn, endColumn);
+    this._sendExt(
+      _rpcIds.ExtHostEditors,
+      "$acceptEditorPropertiesChanged",
+      [
+        this._activeEditorId,
+        {
+          options: null,
+          selections: {
+            selections: [{
+              startLineNumber,
+              startColumn,
+              endLineNumber,
+              endColumn,
+              selectionStartLineNumber,
+              selectionStartColumn,
+              positionLineNumber,
+              positionColumn,
+            }],
+            source: "api",
+          },
+          visibleRanges: null,
+        },
+      ],
+      false,
+    );
+  }
+
+  extensionMenuResolve(
+    params: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    return this._extensionCommands.resolveMenu(params);
+  }
+
+  extensionCommandExecute(
+    params: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    return this._extensionCommands.execute(params);
+  }
+
   /** Find provider handle matching a languageId by scanning selector arrays. */
   _findProviderHandle(type: ProviderKind, languageId: string): number | null {
     try {
@@ -2512,12 +2605,16 @@ export class WorkbenchClient {
     return this._webviews.setVisibility(params);
   }
 
+  webviewDispose(params: Record<string, unknown>): Record<string, unknown> {
+    return this._webviews.dispose(params);
+  }
+
   webviewWrapperHtml(surfaceId: string): string {
     return this._webviews.wrapper(surfaceId);
   }
 
-  webviewDocumentHtml(surfaceId: string): string {
-    return this._webviews.document(surfaceId);
+  webviewDocumentHtml(surfaceId: string, resourceOrigin: string): string {
+    return this._webviews.document(surfaceId, resourceOrigin);
   }
 
   webviewResource(

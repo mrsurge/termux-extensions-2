@@ -60,6 +60,12 @@ export interface WorkbenchLike {
   selectExtensionLog: (
     params: Record<string, unknown>,
   ) => Promise<Record<string, unknown>>;
+  extensionMenuResolve: (
+    params: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
+  extensionCommandExecute: (
+    params: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
   resolveLanguageId: (
     path: string,
     text: string,
@@ -157,6 +163,7 @@ export interface WorkbenchLike {
   webviewMessage: (params: Record<string, unknown>) => Record<string, unknown>;
   webviewState: (params: Record<string, unknown>) => Record<string, unknown>;
   webviewVisibility: (params: Record<string, unknown>) => Record<string, unknown>;
+  webviewDispose: (params: Record<string, unknown>) => Record<string, unknown>;
 }
 
 export interface ServerDispatchRuntime {
@@ -296,6 +303,10 @@ export async function dispatchJsonRpcRequest(
 
   if (method === "vscode.webview.visibility") {
     return success(id, runtime.wb.webviewVisibility(params));
+  }
+
+  if (method === "vscode.webview.dispose") {
+    return success(id, runtime.wb.webviewDispose(params));
   }
 
   if (method === "te2.status" || method === "adapter.status") {
@@ -466,6 +477,22 @@ export async function dispatchJsonRpcRequest(
       return success(id, await runtime.wb.selectExtensionLog(params));
     } catch (error) {
       return failure(id, -32602, error);
+    }
+  }
+
+  if (method === "vscode.extensionMenus.resolve") {
+    try {
+      return success(id, await runtime.wb.extensionMenuResolve(params));
+    } catch (error) {
+      return failure(id, -32602, error);
+    }
+  }
+
+  if (method === "vscode.extensionCommands.execute") {
+    try {
+      return success(id, await runtime.wb.extensionCommandExecute(params));
+    } catch (error) {
+      return failure(id, -32000, error);
     }
   }
 

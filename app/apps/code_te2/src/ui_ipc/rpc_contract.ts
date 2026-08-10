@@ -14,6 +14,7 @@ export const UI_IPC_RPC_METHODS = {
   hostRunProfilesSave: 'ui.host.runProfiles.save',
   hostRunProfileStateGet: 'ui.host.runProfile.state.get',
   hostRunProfileStop: 'ui.host.runProfile.stop',
+  hostExtensionWebviewDispose: 'ui.host.extensionWebview.dispose',
   hostBootSnapshotGet: 'ui.host.bootSnapshot.get',
   hostLanguageBackendSet: 'ui.host.languageBackend.set',
   hostEditorJumpToLine: 'ui.host.editor.jumpToLine',

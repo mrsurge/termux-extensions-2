@@ -18,6 +18,7 @@ interface EditorUiEditorRuntimeDeps {
   sendEditorMentionRequest(payload: Record<string, unknown>): boolean;
   goToDefinition?(): void;
   inspectCode?(mode: CodeInspectorMode): void;
+  getExtensionNavigationTools?(): MonacoTouchSelectionTool[];
   updateDebug(extra?: string): void;
 }
 
@@ -122,6 +123,7 @@ export function createEditorUiEditorRuntime(deps: EditorUiEditorRuntimeDeps) {
       sendEditorMentionRequest: deps.sendEditorMentionRequest,
       goToDefinition: deps.goToDefinition,
       inspectCode: (mode) => deps.inspectCode?.(mode),
+      getExtensionNavigationTools: deps.getExtensionNavigationTools,
       updateDebug: deps.updateDebug,
     });
   }

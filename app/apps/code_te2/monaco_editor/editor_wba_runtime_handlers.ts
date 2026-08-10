@@ -84,6 +84,7 @@ interface EditorWbaRuntimeHandlerDeps {
   ): void;
   resetDynamicProviderCaches?(reason?: string): void;
   onWorkspaceSwitchedAck?(event: Record<string, unknown>): void;
+  notifyExtensionMessage?(event: Record<string, unknown>): void;
 }
 
 function eventType(event: Record<string, unknown>): string {
@@ -97,6 +98,10 @@ export function registerEditorWbaRuntimeHandlers(
   transport.onNotification("te2.event", (event: Record<string, unknown>) => {
     try {
       const type = eventType(event);
+      if (type === "extension/message") {
+        deps.notifyExtensionMessage?.(event);
+        return;
+      }
       if (type.startsWith("extension/")) {
         emitExtensionActivityEvent(event);
         return;

@@ -398,6 +398,90 @@ test('rapid WBA model opens run single-flight and retain only the latest documen
   assert.equal(latestSettled, true);
 });
 
+test('diagnostic links are revived as Monaco URIs before marker projection', async () => {
+  const { createEditorWorkbenchRuntime } = await importTypeScript(
+    'monaco_editor/editor_workbench_runtime.ts',
+  );
+  const currentPath = '/workspace/package.json';
+  const model = {
+    uri: { toString: () => `file://${currentPath}` },
+    getLanguageId: () => 'json',
+    getVersionId: () => 1,
+    getValue: () => '{}',
+  };
+  const markerBatches = [];
+  const parseUri = (value) => {
+    const parsed = new URL(value);
+    return {
+      scheme: parsed.protocol.slice(0, -1),
+      authority: parsed.host,
+      path: parsed.pathname,
+      toString: () => value,
+    };
+  };
+  const runtime = createEditorWorkbenchRuntime({
+    getWindow: () => ({ __te2AdapterReady: true }),
+    getMonaco: () => ({
+      Uri: { parse: parseUri },
+      MarkerSeverity: { Error: 8, Warning: 4, Info: 2, Hint: 1 },
+      editor: {
+        getModelMarkers: () => [],
+        setModelMarkers: (_model, owner, markers) => markerBatches.push({ owner, markers }),
+      },
+    }),
+    getEditor: () => ({ getModel: () => model }),
+    getModel: () => model,
+    getCurrentPath: () => currentPath,
+    emitToHost: () => {},
+    absPathFromVscodeUri: (uri) => String(uri).replace(/^file:\/\//, ''),
+    languageFromPath: () => 'json',
+    isLanguageContextCurrent: () => true,
+    getLanguageBridge: () => ({ hoverSeq: 0 }),
+    setDebugDiag: () => {},
+    requestBreadcrumbSymbols: () => {},
+    languageWorkersEnabled: () => false,
+    isWbaRpcConnected: () => true,
+    wbaRpcCall: async () => ({ ok: true }),
+    wbaRpcNotify: () => true,
+    clearTimeoutFn: clearTimeout,
+    setTimeoutFn: setTimeout,
+  });
+
+  runtime.applyDiagnosticsUpdate({
+    type: 'diagnostics/changeMany',
+    args: ['json', [[
+      { scheme: 'file', authority: '', path: currentPath },
+      [{
+        message: 'Unable to load schema',
+        severity: 4,
+        startLineNumber: 1,
+        startColumn: 1,
+        endLineNumber: 1,
+        endColumn: 2,
+        code: {
+          value: 'schema',
+          target: { scheme: 'https', authority: 'example.test', path: '/schema' },
+        },
+        relatedInformation: [{
+          resource: { scheme: 'vscode', authority: 'schemas', path: '/vscode-extensions' },
+          message: 'Schema source',
+          startLineNumber: 1,
+          startColumn: 1,
+          endLineNumber: 1,
+          endColumn: 1,
+        }],
+      }],
+    ]]],
+  });
+
+  assert.equal(markerBatches.length, 1);
+  const marker = markerBatches[0].markers[0];
+  assert.equal(marker.relatedInformation[0].resource.path, '/vscode-extensions');
+  assert.equal(marker.relatedInformation[0].resource.scheme, 'vscode');
+  assert.equal(marker.code.target.path, '/schema');
+  assert.equal(marker.code.target.scheme, 'https');
+});
+
 test('editor scroll state publishes the top visible line separately from the cursor', async () => {
   const { buildScrollStatePayload } = await importTypeScript(
     'monaco_editor/editor_scroll_publisher_payload_utils.ts',

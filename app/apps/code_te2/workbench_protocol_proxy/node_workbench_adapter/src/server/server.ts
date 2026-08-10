@@ -53,7 +53,7 @@ type RuntimeWorkbench = Omit<WorkbenchLike, "state"> & {
   status: () => Record<string, unknown>;
   getExtensions?: () => unknown[];
   webviewWrapperHtml: (surfaceId: string) => string;
-  webviewDocumentHtml: (surfaceId: string) => string;
+  webviewDocumentHtml: (surfaceId: string, resourceOrigin: string) => string;
   webviewResource: (
     surfaceId: string,
     scheme: string,
@@ -327,6 +327,19 @@ function bodyResponse(
     ...extraHeaders,
   });
   res.end(payload);
+}
+
+function httpOrigin(value: unknown): string {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (typeof raw !== "string" || !raw.trim()) return "";
+  try {
+    const parsed = new URL(raw);
+    return parsed.protocol === "http:" || parsed.protocol === "https:"
+      ? parsed.origin
+      : "";
+  } catch {
+    return "";
+  }
 }
 
 async function readJson(
@@ -725,10 +738,19 @@ const server = http.createServer(async (req, res) => {
         );
       }
       if (segments.length === 3 && segments[2] === "document") {
+        const requestedOrigin = httpOrigin(url.searchParams.get("resourceOrigin"));
+        const wrapperOrigin = httpOrigin(req.headers.referer);
+        if (!requestedOrigin || requestedOrigin !== wrapperOrigin) {
+          return textResponse(
+            res,
+            400,
+            "Extension document resource origin did not match its wrapper.",
+          );
+        }
         return bodyResponse(
           res,
           200,
-          wb.webviewDocumentHtml(surfaceId),
+          wb.webviewDocumentHtml(surfaceId, requestedOrigin),
           "text/html; charset=utf-8",
         );
       }

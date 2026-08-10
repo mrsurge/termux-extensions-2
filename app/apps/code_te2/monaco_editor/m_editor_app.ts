@@ -130,6 +130,7 @@ import {
 import { registerEditorWbaRuntimeHandlers } from "./editor_wba_runtime_handlers.ts";
 import { createEditorDebugRuntime } from "./editor_debug_runtime.ts";
 import { createEditorUiEditorRuntime } from "./editor_ui_editor_runtime.ts";
+import { createEditorExtensionMenuRuntime } from "./editor_extension_menu_runtime.ts";
 import {
   createEditorCodeInspectorRuntime,
   type CodeInspectorRuntime,
@@ -188,6 +189,9 @@ interface MonacoRuntimeEditorLike {
   getDomNode?(): HTMLElement | null;
   onDidChangeConfiguration?(listener: () => void): void;
   onDidChangeModelContent(listener: () => void): { dispose(): void };
+  onDidChangeCursorSelection?(listener: () => void): { dispose(): void };
+  onDidChangeModel?(listener: () => void): { dispose(): void };
+  getSelection?(): Record<string, unknown> | null;
   getScrollTop?(): number;
   setScrollTop?(value: number): void;
   getModel?(): MonacoRuntimeModelLike | null;
@@ -413,6 +417,9 @@ interface MonacoBootWindowLike extends Window {
   let scrollPublisherRuntime: EditorScrollPublisherRuntime | null = null;
   let diffThemeInstalled = false;
   let codeInspectorRuntime: CodeInspectorRuntime | null = null;
+  let extensionEditorMenuRuntime: ReturnType<
+    typeof createEditorExtensionMenuRuntime
+  > | null = null;
   var debugRuntime = createEditorDebugRuntime({
     getDocument: function () {
       return document;
@@ -468,6 +475,9 @@ interface MonacoBootWindowLike extends Window {
     },
     inspectCode: function (mode) {
       codeInspectorRuntime?.start(mode);
+    },
+    getExtensionNavigationTools: function () {
+      return extensionEditorMenuRuntime?.navigationTools() ?? [];
     },
     updateDebug: function (extra) {
       return debugRuntime.updateDebug(extra);
@@ -688,6 +698,22 @@ interface MonacoBootWindowLike extends Window {
     },
   });
   bindExtensionActivityTransport(editorWbaRpcTransport);
+  extensionEditorMenuRuntime = createEditorExtensionMenuRuntime({
+    getDocument: function () {
+      return document;
+    },
+    getCurrentPath: function () {
+      return currentPath;
+    },
+    rpcCall: editorWbaRpcCall,
+    notify: function (message) {
+      if (!editorRpcNotify(EDITOR_RPC_METHODS.notifyPublish, { message })) {
+        console.warn("[extension-menus]", message);
+      }
+    },
+    setTimeoutFn: _setTimeoutBound,
+    clearTimeoutFn: _clearTimeoutBound,
+  });
 
   var textmateRuntime = createEditorTextmateRuntime({
     getWindow: function () {
@@ -1049,6 +1075,7 @@ interface MonacoBootWindowLike extends Window {
     "pagehide",
     function () {
       codeInspectorRuntime?.dispose();
+      extensionEditorMenuRuntime?.dispose();
     },
     { once: true },
   );
@@ -1449,6 +1476,7 @@ interface MonacoBootWindowLike extends Window {
     },
     setEditor: function (value: MonacoRuntimeEditorLike | null) {
       editor = value;
+      extensionEditorMenuRuntime?.attach(value);
     },
     getDiffEditor: function () {
       return diffEditor;
@@ -2347,12 +2375,22 @@ interface MonacoBootWindowLike extends Window {
             } catch (_) {}
           }
         },
+        notifyExtensionMessage: function (event) {
+          const message =
+            typeof event.message === "string"
+              ? event.message
+              : "Extension message";
+          if (!editorRpcNotify(EDITOR_RPC_METHODS.notifyPublish, { message })) {
+            console.warn("[extension-message]", message);
+          }
+        },
       });
 
       if (wbaRpcSocket && typeof wbaRpcSocket.on === "function") {
         wbaRpcSocket.on("connect", () => {
           console.log("[wba] socket connected");
           notifyExtensionActivityBridgeReady();
+          void extensionEditorMenuRuntime?.refresh("wba_connect");
           handleWbaSocketReadyForEditor("wba_socket_connect");
         });
         wbaRpcSocket.on("disconnect", () => {
