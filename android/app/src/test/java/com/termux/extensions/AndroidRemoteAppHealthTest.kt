@@ -9,15 +9,15 @@ class AndroidRemoteAppHealthTest {
         assertEquals(
             AndroidRemoteAppHealth.HEALTHY,
             evaluateRunningAppsPayload(
-                """{"ok":true,"data":[{"app_id":"file_editor_cm6","readiness":{"status":"ready"}}]}""",
-                "file_editor_cm6",
+                """{"ok":true,"data":[{"app_id":"code_te2","readiness":{"status":"ready"}}]}""",
+                "code_te2",
             ),
         )
         assertEquals(
             AndroidRemoteAppHealth.HEALTHY,
             evaluateRunningAppsPayload(
-                """{"ok":true,"data":[{"app_id":"file_editor_cm6","readiness":{"status":"starting"}}]}""",
-                "file_editor_cm6",
+                """{"ok":true,"data":[{"app_id":"code_te2","readiness":{"status":"starting"}}]}""",
+                "code_te2",
             ),
         )
     }
@@ -26,13 +26,13 @@ class AndroidRemoteAppHealthTest {
     fun missingAndTerminalAppsAreUnhealthy() {
         assertEquals(
             AndroidRemoteAppHealth.UNHEALTHY,
-            evaluateRunningAppsPayload("""{"ok":true,"data":[]}""", "file_editor_cm6"),
+            evaluateRunningAppsPayload("""{"ok":true,"data":[]}""", "code_te2"),
         )
         assertEquals(
             AndroidRemoteAppHealth.UNHEALTHY,
             evaluateRunningAppsPayload(
-                """{"ok":true,"data":[{"app_id":"file_editor_cm6","readiness":{"status":"error"}}]}""",
-                "file_editor_cm6",
+                """{"ok":true,"data":[{"app_id":"code_te2","readiness":{"status":"error"}}]}""",
+                "code_te2",
             ),
         )
     }
@@ -41,11 +41,11 @@ class AndroidRemoteAppHealthTest {
     fun invalidProjectionIsUnreachable() {
         assertEquals(
             AndroidRemoteAppHealth.UNREACHABLE,
-            evaluateRunningAppsPayload("not-json", "file_editor_cm6"),
+            evaluateRunningAppsPayload("not-json", "code_te2"),
         )
         assertEquals(
             AndroidRemoteAppHealth.UNREACHABLE,
-            evaluateRunningAppsPayload("""{"ok":false,"data":[]}""", "file_editor_cm6"),
+            evaluateRunningAppsPayload("""{"ok":false,"data":[]}""", "code_te2"),
         )
     }
 }

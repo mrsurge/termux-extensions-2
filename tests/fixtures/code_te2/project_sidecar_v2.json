@@ -1,0 +1,83 @@
+{
+  "version": 2,
+  "project_path": "/workspace/example",
+  "session_count": 3,
+  "created_at": "2026-08-08T12:00:00Z",
+  "last_boot_at": "2026-08-08T12:05:00Z",
+  "diff_base": {
+    "ref": "HEAD",
+    "commit_sha": null
+  },
+  "session_cache": {
+    "099bba5dd638237e613eeee7d1a1de48c062f083": {
+      "project_path": "/workspace/example",
+      "file_path": "/workspace/example/src/main.py",
+      "content": "print(\"draft\")\n",
+      "content_length": 15,
+      "content_sha256": "cb8528bf643270f9519bc7b51157db7e6efc04131ea3434735a70d8369e614e6",
+      "base_sha256": "4e6e7e9757488fc1586bfe193f972e4e54b7b6ca29e7d9ff9432748fe16d18dd",
+      "unsaved": true,
+      "run_id": "fixture-run",
+      "shell_id": "fixture-shell",
+      "shell_run_id": "fixture-shell-run",
+      "launcher_pid": 101,
+      "worker_pid": 202,
+      "updated_at": "2026-08-08T12:06:00Z"
+    }
+  },
+  "tracked_jobs": [],
+  "recent_files": [
+    {
+      "path": "/workspace/example/src/main.py",
+      "label": "main.py",
+      "opened_at": "2026-08-08T12:06:00Z",
+      "scroll_line": 17.0
+    }
+  ],
+  "last_file": "/workspace/example/src/main.py",
+  "open_state_revision": 7,
+  "open_directories": [
+    "src"
+  ],
+  "terminal_shell_id": null,
+  "terminal_shell_ids": [
+    "terminal-fixture"
+  ],
+  "active_terminal_shell_id": "terminal-fixture",
+  "terminal_shell_cap": 5,
+  "terminal_shell_titles": {
+    "terminal-fixture": "dev"
+  },
+  "lsp": {
+    "enabled": true,
+    "servers": {
+      "pyright": true,
+      "typescript": false,
+      "clangd": false,
+      "kotlin": false
+    }
+  },
+  "diagnostics_cache": {
+    "pyright": {
+      "summaryByRel": {
+        "src/main.py": {
+          "errors": 0,
+          "warnings": 1
+        }
+      },
+      "updatedAt": "2026-08-08T12:06:00Z",
+      "effectiveRoot": "/workspace/example",
+      "repoFingerprint": "fixture"
+    }
+  },
+  "workbench_extensions": {
+    "enabled_extensions": [
+      "ms-python.python"
+    ]
+  },
+  "watcher": {
+    "mode": "ipc",
+    "storage_type": "ssd",
+    "poll_interval_ms": 1500
+  }
+}

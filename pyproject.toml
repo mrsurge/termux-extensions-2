@@ -26,48 +26,48 @@ include-package-data = true
     "extensions/**/*",
     "apps/**/*",
 ]
-"app.apps.file_editor_cm6" = [
+"app.apps.code_te2" = [
     "vendor/node_socketio/**/*",
 ]
 
 [tool.setuptools.exclude-package-data]
 "app" = [
-    "apps/file_editor_cm6/node_modules",
-    "apps/file_editor_cm6/node_modules/**/*",
+    "apps/code_te2/node_modules",
+    "apps/code_te2/node_modules/**/*",
     "apps/terminal/node_modules",
     "apps/terminal/node_modules/**/*",
 ]
 
 [tool.setuptools.data-files]
-"te2/rust-spike/app" = [
-    "rust-spike/app/*.py",
+"te2/framework/bootstrap" = [
+    "framework/bootstrap/*.py",
 ]
-"te2/rust-spike/rust" = [
-    "rust-spike/rust/Cargo.lock",
-    "rust-spike/rust/Cargo.toml",
+"te2/framework/rust" = [
+    "framework/rust/Cargo.lock",
+    "framework/rust/Cargo.toml",
 ]
-"te2/rust-spike/rust/crates/te2-rust-spike-server" = [
-    "rust-spike/rust/crates/te2-rust-spike-server/Cargo.toml",
+"te2/framework/rust/crates/te2-server" = [
+    "framework/rust/crates/te2-server/Cargo.toml",
 ]
-"te2/rust-spike/rust/crates/te2-rust-spike-server/src" = [
-    "rust-spike/rust/crates/te2-rust-spike-server/src/*.rs",
+"te2/framework/rust/crates/te2-server/src" = [
+    "framework/rust/crates/te2-server/src/*.rs",
 ]
-"te2/rust-spike/rust/crates/te2-rust-spike-server/src/framework_services" = [
-    "rust-spike/rust/crates/te2-rust-spike-server/src/framework_services/*.rs",
+"te2/framework/rust/crates/te2-server/src/framework_services" = [
+    "framework/rust/crates/te2-server/src/framework_services/*.rs",
 ]
-"te2/rust-spike/rust/crates/te2-rust-spike-server/src/framework_services/net" = [
-    "rust-spike/rust/crates/te2-rust-spike-server/src/framework_services/net/*.rs",
+"te2/framework/rust/crates/te2-server/src/framework_services/net" = [
+    "framework/rust/crates/te2-server/src/framework_services/net/*.rs",
 ]
-"te2/rust-spike/rust/crates/te2-rust-spike-server/src/framework_services/pipe" = [
-    "rust-spike/rust/crates/te2-rust-spike-server/src/framework_services/pipe/*.rs",
+"te2/framework/rust/crates/te2-server/src/framework_services/pipe" = [
+    "framework/rust/crates/te2-server/src/framework_services/pipe/*.rs",
 ]
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["app*"]
 exclude = [
-    "app.apps.file_editor_cm6.node_modules",
-    "app.apps.file_editor_cm6.node_modules.*",
+    "app.apps.code_te2.node_modules",
+    "app.apps.code_te2.node_modules.*",
     "app.apps.terminal.node_modules",
     "app.apps.terminal.node_modules.*",
 ]

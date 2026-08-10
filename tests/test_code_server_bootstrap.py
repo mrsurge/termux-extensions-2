@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import override
 from unittest.mock import patch
 
-from app.apps.file_editor_cm6 import code_server_bootstrap
-from app.apps.file_editor_cm6.extension_registry import CodeServerInstallation
+from app.apps.code_te2 import code_server_bootstrap
+from app.apps.code_te2.extension_registry import CodeServerInstallation
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -43,6 +43,18 @@ class CodeServerBootstrapTests(unittest.TestCase):
     @override
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
+
+    def test_bootstrap_download_cache_uses_explicit_te2_cache_root(self) -> None:
+        cache_home = self.root / "te2-cache"
+        with patch.dict(
+            os.environ,
+            {"TE2_CACHE_HOME": str(cache_home)},
+            clear=False,
+        ):
+            self.assertEqual(
+                code_server_bootstrap.code_server_bootstrap_cache_dir(),
+                cache_home / "code_server" / "downloads",
+            )
 
     def test_managed_installation_is_ready_without_command_version_gate(self) -> None:
         managed = _installation(self.root / "managed", source="te2-managed")
@@ -102,7 +114,14 @@ class CodeServerBootstrapTests(unittest.TestCase):
     def test_remove_managed_runtime_preserves_sibling_extension_data(self) -> None:
         self.install_prefix.mkdir(parents=True)
         (self.install_prefix / "runtime.txt").write_text("runtime", encoding="utf-8")
-        extensions = self.root / "config" / "code-server" / "extensions"
+        extensions = (
+            self.root
+            / "data"
+            / "te2"
+            / "code_te2"
+            / "code_server"
+            / "extensions"
+        )
         extensions.mkdir(parents=True)
         (extensions / "keep.txt").write_text("extension", encoding="utf-8")
 

@@ -14,7 +14,7 @@
     "rootDir": ".",
     "baseUrl": ".",
     "paths": {
-      "te2-console-bridge": ["../file_editor_cm6/static/js/console_bridge.js"]
+      "te2-console-bridge": ["../code_te2/static/js/console_bridge.js"]
     }
   },
   "include": [

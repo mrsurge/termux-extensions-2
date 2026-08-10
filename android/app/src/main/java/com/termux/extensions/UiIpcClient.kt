@@ -59,7 +59,7 @@ class UiIpcClient(
                 path = "/ui_ipc_ws/socket.io"
                 transports = arrayOf("websocket")
                 upgrade = false
-                query = "app_id=file_editor_cm6&source=android_native&client_id=" +
+                query = "app_id=code_te2&source=android_native&client_id=" +
                     URLEncoder.encode(clientId, StandardCharsets.UTF_8.name())
                 auth = mapOf("rpcCodec" to UI_IPC_RPC_CODEC)
                 reconnection = true
@@ -111,7 +111,7 @@ class UiIpcClient(
                 path = "/te2_console_ws/socket.io"
                 transports = arrayOf("websocket")
                 upgrade = false
-                query = "app_id=file_editor_cm6&source=android_console"
+                query = "app_id=code_te2&source=android_console"
                 reconnection = true
                 reconnectionDelay = 2000
                 reconnectionDelayMax = 10000

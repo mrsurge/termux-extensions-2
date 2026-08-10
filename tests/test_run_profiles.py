@@ -11,19 +11,19 @@ from types import SimpleNamespace
 from typing import cast, override
 from unittest.mock import AsyncMock, patch
 
-from app.apps.file_editor_cm6 import runner_profiles
-from app.apps.file_editor_cm6 import (
+from app.apps.code_te2 import runner_profiles
+from app.apps.code_te2 import (
     run_profile_events,
     run_profile_state,
     run_profile_surfaces,
 )
-from app.apps.file_editor_cm6.monaco_editor.editor_backend_services import save_service
-from app.apps.file_editor_cm6.host import terminal_actions_backend
-from app.apps.file_editor_cm6.host import runner_profiles_backend
-from app.apps.file_editor_cm6.host import run_profiles_config_backend
-from app.apps.file_editor_cm6.host import run_target_service
-from app.apps.file_editor_cm6.ui_ipc import sidebar_window_state
-from app.apps.file_editor_cm6.worker_services import run_profile_fws_bridge
+from app.apps.code_te2.monaco_editor.editor_backend_services import save_service
+from app.apps.code_te2.host import terminal_actions_backend
+from app.apps.code_te2.host import runner_profiles_backend
+from app.apps.code_te2.host import run_profiles_config_backend
+from app.apps.code_te2.host import run_target_service
+from app.apps.code_te2.ui_ipc import sidebar_window_state
+from app.apps.code_te2.worker_services import run_profile_fws_bridge
 
 
 class _FakeHistoryStore:
@@ -1092,7 +1092,7 @@ class RunProfileProcessStateTests(unittest.IsolatedAsyncioTestCase):
             match = self._match(Path(temp_dir).resolve())
             shell = SimpleNamespace(
                 shell_id="shell-4173",
-                label="runner-profile:file_editor_cm6:project:web",
+                label="runner-profile:code_te2:project:web",
                 reused=False,
                 command_preview="npm run dev",
             )
@@ -1300,7 +1300,7 @@ class RunProfileProcessStateTests(unittest.IsolatedAsyncioTestCase):
             match = self._match(Path(temp_dir).resolve())
             stopped = SimpleNamespace(
                 shell_id="shell-4173",
-                label="runner-profile:file_editor_cm6:project:web",
+                label="runner-profile:code_te2:project:web",
                 running=False,
             )
             stop = AsyncMock(return_value=stopped)
@@ -1369,7 +1369,7 @@ class RunProfileProjectionTests(unittest.IsolatedAsyncioTestCase):
             match = RunProfileProcessStateTests()._match(root)
             shell_state = SimpleNamespace(
                 shell_id="shell-4173",
-                label="runner-profile:file_editor_cm6:project:web",
+                label="runner-profile:code_te2:project:web",
                 running=True,
             )
             with (
@@ -1520,7 +1520,7 @@ class RunProfileProjectionTests(unittest.IsolatedAsyncioTestCase):
             "profileId": "python",
             "runner": "python",
             "shellId": "shell-python",
-            "label": "runner-profile:file_editor_cm6:project:python",
+            "label": "runner-profile:code_te2:project:python",
         }
         publish = AsyncMock()
         run_profile_events._last_projection_signature = None
@@ -1552,7 +1552,7 @@ class RunProfileProjectionTests(unittest.IsolatedAsyncioTestCase):
             "params": {
                 "shell": {
                     "id": "run-shell",
-                    "label": "runner-profile:file_editor_cm6:project:python",
+                    "label": "runner-profile:code_te2:project:python",
                 }
             },
         }
@@ -1575,12 +1575,12 @@ class RunProfileProjectionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(refresh.await_count, 2)
         release.assert_awaited_once_with(
-            owner_id="runner-profile:file_editor_cm6:project:python",
+            owner_id="runner-profile:code_te2:project:python",
             shell_id="run-shell",
         )
         close_surface.assert_awaited_once_with(
             shell_id="run-shell",
-            shell_label="runner-profile:file_editor_cm6:project:python",
+            shell_label="runner-profile:code_te2:project:python",
             source="fws.shell.removed",
         )
         self.assertEqual(
@@ -1598,12 +1598,12 @@ class RunProfileProjectionTests(unittest.IsolatedAsyncioTestCase):
                             "shells": [
                                 {
                                     "id": "running-profile",
-                                    "label": "runner-profile:file_editor_cm6:project:python",
+                                    "label": "runner-profile:code_te2:project:python",
                                     "status": "running",
                                 },
                                 {
                                     "id": "exited-profile",
-                                    "label": "runner-profile:file_editor_cm6:project:web",
+                                    "label": "runner-profile:code_te2:project:web",
                                     "status": "exited",
                                 },
                                 {
@@ -1620,7 +1620,7 @@ class RunProfileProjectionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 run_profile_fws_bridge._relevant_shell_labels,
                 {
-                    "running-profile": "runner-profile:file_editor_cm6:project:python",
+                    "running-profile": "runner-profile:code_te2:project:python",
                 },
             )
         finally:

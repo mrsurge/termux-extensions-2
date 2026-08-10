@@ -29,7 +29,7 @@ ESM_DIR = MONACO_VENDOR / "esm"
 LANG_DIR = MONACO_VENDOR / "te2-lang"
 CODICONS_DIR = REPO / "app" / "static" / "vendor" / "codicons"
 FONTS_DIR = REPO / "app" / "static" / "fonts"
-TOUCH_DIR = REPO / "app" / "apps" / "file_editor_cm6" / "static" / "vendor" / "monaco-touch-selection"
+TOUCH_DIR = REPO / "app" / "apps" / "code_te2" / "static" / "vendor" / "monaco-touch-selection"
 
 SAMPLE_JS_ORIGINAL = textwrap.dedent("""\
     // Sample file for touch-tap testing

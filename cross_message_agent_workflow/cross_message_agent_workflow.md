@@ -41,7 +41,7 @@ Key paths:
 - `app/apps/file_editor_cm6/core_read.py`
 - `app/apps/file_editor_cm6/core_write.py`
 - `app/apps/file_editor_cm6/history_store/` (if present; history + sidecar logic)
-- `docs/apps/code_cm6/TECHNICAL.md`
+- `docs/apps/code_te2/TECHNICAL.md`
 
 ## When to enlist the specialist
 
@@ -83,4 +83,3 @@ Use `functions.mcp__agent-pty-blocks__agent_send_message_await` to send the mess
 If coordinating multiple agents, use:
 - `functions.mcp__agent-pty-blocks__agent_log_inbox` (quick preview)
 - `functions.mcp__agent-pty-blocks__agent_log_read` (full text for recent messages)
-

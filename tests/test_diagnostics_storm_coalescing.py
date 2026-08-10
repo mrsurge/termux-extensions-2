@@ -5,9 +5,9 @@ from contextlib import redirect_stdout
 from io import StringIO
 from unittest.mock import AsyncMock, patch
 
-from app.apps.file_editor_cm6 import diagnostics_bridge
-from app.apps.file_editor_cm6 import wba_event_bridge
-from app.apps.file_editor_cm6 import workbench_adapter_shell_manager as adapter_manager
+from app.apps.code_te2 import diagnostics_bridge
+from app.apps.code_te2 import wba_event_bridge
+from app.apps.code_te2 import workbench_adapter_shell_manager as adapter_manager
 
 
 def _push(event: dict[str, object]) -> dict[str, object]:

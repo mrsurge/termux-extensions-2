@@ -1,0 +1,46 @@
+version: "1"
+
+shells:
+  app-worker:
+    backend: pipe
+    pipe:
+      mode: native_pipe_testing
+    cwd: ${ctx:PROJECT_ROOT}
+    ui:
+      subgroup_styles:
+        lsp:
+          bg: rgba(68, 45, 47, 0.80)
+          border: rgba(168, 85, 247, 0.60)
+        project:*:
+          bg: rgba(0, 0, 0, 0.88)
+          border: rgba(29, 70, 126, 0.88)
+    command:
+      - python
+      - -m
+      - app.libs.app_worker
+      - --app-id
+      - ${ctx:APP_ID}
+      - --port
+      - ${free_port}
+      - --backend-module
+      - ${ctx:BACKEND_MODULE_PATH}
+      - --pipe
+    env:
+      PYTHONPATH: ${env:PYTHONPATH}:${ctx:PROJECT_ROOT}
+      TE_APP_ID: ${ctx:APP_ID}
+      TE_APP_WORKER_PORT: ${free_port}
+      TE_PIPE_NAME: service.fs
+      TE_PIPE_NID: "2100"
+      CODE_TE2_EXPLORER_FS_ORIGIN: pipe
+      CODE_TE2_EVENT_METRICS: "0"
+      CODE_TE2_RPC_CODEC_METRICS: "0"
+      CODE_TE2_DIAGNOSTICS_LATENCY_METRICS: ${env:CODE_TE2_DIAGNOSTICS_LATENCY_METRICS}
+    subgroups:
+      - ${ctx:APP_ID}
+      - app-worker
+      - service.fs
+    readiness:
+      type: tcp_port
+      host: 127.0.0.1
+      port: ${free_port}
+      timeout: 10

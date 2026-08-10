@@ -61,14 +61,14 @@ The supported framework is Rust-first:
 ```text
 te2 / te2-rust
   -> app/cli/run_rust_framework.py
-  -> rust-spike/app/bootstrap.py
-  -> Rust server under rust-spike/rust/
+  -> framework/bootstrap/bootstrap.py
+  -> Rust server under framework/rust/
        + Python runtime bridge for TE2 console/MCP
        + Python app workers launched through Framework-Shells/Ferrous
 ```
 
-`rust-spike/` is a historical directory name. Its server is the current TE2
-framework implementation, not an optional Python-framework experiment.
+The server under `framework/` is the current TE2 framework implementation, not
+an optional experiment or a Python-framework compatibility path.
 
 Python remains intentionally in these roles:
 
@@ -94,24 +94,24 @@ Framework and packaging:
 - `pyproject.toml` — Python package metadata and `te2` entrypoints
 - `requirements.txt` — Python runtime dependencies
 - `app/cli/run_rust_framework.py` — installed CLI/bootstrap locator
-- `rust-spike/app/bootstrap.py` — cached Rust build and launch orchestration
-- `rust-spike/app/runtime_bridge.py` — Python console/MCP sidecar
-- `rust-spike/rust/crates/te2-rust-spike-server/src/` — framework source
+- `framework/bootstrap/bootstrap.py` — cached Rust build and launch orchestration
+- `framework/bootstrap/runtime_bridge.py` — Python console/MCP sidecar
+- `framework/rust/crates/te2-server/src/` — framework source
 - `app/templates/` and `app/static/` — framework-served frontend assets
 - `app/apps/` — built-in apps and app workers
 
 Code TE2:
 
-- `app/apps/file_editor_cm6/main.py` — app-worker assembly
-- `app/apps/file_editor_cm6/main.ts` — host frontend entrypoint
-- `app/apps/file_editor_cm6/main_page/frontend/` — host/main-page source
-- `app/apps/file_editor_cm6/monaco_editor/m_editor_app.ts` — editor entrypoint
-- `app/apps/file_editor_cm6/monaco_editor/` — editor UI and backend services
-- `app/apps/file_editor_cm6/src/explorer/` — Explorer frontend
-- `app/apps/file_editor_cm6/explorer/` — Explorer backend and RPC transport
-- `app/apps/file_editor_cm6/ui_ipc/` — host/sidebar IPC backend
-- `app/apps/file_editor_cm6/host/` — host-owned backend actions
-- `app/apps/file_editor_cm6/workbench_protocol_proxy/` — WBA/code-server bridge
+- `app/apps/code_te2/main.py` — app-worker assembly
+- `app/apps/code_te2/main.ts` — host frontend entrypoint
+- `app/apps/code_te2/main_page/frontend/` — host/main-page source
+- `app/apps/code_te2/monaco_editor/m_editor_app.ts` — editor entrypoint
+- `app/apps/code_te2/monaco_editor/` — editor UI and backend services
+- `app/apps/code_te2/src/explorer/` — Explorer frontend
+- `app/apps/code_te2/explorer/` — Explorer backend and RPC transport
+- `app/apps/code_te2/ui_ipc/` — host/sidebar IPC backend
+- `app/apps/code_te2/host/` — host-owned backend actions
+- `app/apps/code_te2/workbench_protocol_proxy/` — WBA/code-server bridge
 
 Open-file authority is backend-owned through `ProjectSidecar.last_file`,
 `open_state_backend.py`, and editor open services. Frontend `currentPath` values
@@ -192,7 +192,7 @@ development fallback; installed Python packages must not depend on it.
 For Code TE2 frontend source changes:
 
 ```bash
-cd app/apps/file_editor_cm6
+cd app/apps/code_te2
 npm run typecheck
 node build.mjs
 ```
@@ -211,7 +211,7 @@ build. Validate the new module with `:cefrium:testDebugUnitTest` and
 `:app:assembleGeckoDebug` as the primary-renderer comparison.
 
 For Rust framework work, preserve the target cache and validate proportionally
-with Cargo formatting/check/tests. Do not delete `rust-spike/rust/target/` as a
+with Cargo formatting/check/tests. Do not delete `framework/rust/target/` as a
 routine cleanup step.
 
 Smoke tests must begin as their own command. Do not prepend setup with `&&` to a

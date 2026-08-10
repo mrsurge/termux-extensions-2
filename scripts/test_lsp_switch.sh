@@ -2,7 +2,7 @@
 # Dex • 2025-12-08 — quick LSP switch smoke test
 
 API_BASE=${API_BASE:-http://localhost:8088}
-PATH_PREFIX=${PATH_PREFIX:-/api/app/file_editor_cm6}
+PATH_PREFIX=${PATH_PREFIX:-/api/app/code_te2}
 PROJECT_ROOT=${PROJECT_ROOT:-/data/data/com.termux/files/home/mrselect5}
 LOG_FILE=${LOG_FILE:-$HOME/.tmp/test.log}
 

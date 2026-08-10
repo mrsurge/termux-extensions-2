@@ -1,0 +1,1788 @@
+/* app/apps/code_te2/main_page/frontend/explorer.css */
+
+/* explorer.css - File Explorer Drawer Styles */
+
+@import "./explorer-highlight-github.css";
+@import "./explorer-search-widget.css";
+
+:root {
+  --drawer-width: 100vw; /* Change from 75vw to 100vw for full width */
+  --explorer-bg: #0b1220;
+  --explorer-card-bg: #111827;
+  --explorer-card-border: #1f2937;
+  --explorer-card-hover: #1c2540;
+  --explorer-header-z: 1050;
+  --explorer-header-menu-z: 1100;
+  --explorer-active-file-accent: #facc15;
+}
+
+/* Drawer container - positioned off-screen by default */
+.fe-drawer {
+  position: fixed;
+  top: 0;
+  left: calc(
+    -1 * var(--drawer-width)
+  ); /* Position off-screen by its own width */
+  width: var(--drawer-width);
+  bottom: 0;
+  background: var(--explorer-bg);
+  backdrop-filter: none;
+  transform: translateX(0); /* Initial transform */
+  transition: transform 0.3s ease;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Show drawer by sliding it in when root has drawer-open class */
+.fe-root.drawer-open .fe-drawer {
+  transform: translateX(var(--drawer-width)); /* Slide in by its own width */
+}
+
+/* Backdrop overlay */
+.fe-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+  z-index: 99;
+}
+
+.fe-root.drawer-open .fe-drawer-backdrop {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Drawer header */
+.fe-drawer-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 0;
+  background: var(--card, #0b0f1a);
+  border-bottom: 1px solid var(--borde #333);
+  box-shadow: 0 10px 18px rgba(0, 0, 0, 0.45);
+  position: sticky;
+  top: 0;
+  z-index: var(--explorer-header-z);
+}
+
+#fe-project-menu-dd,
+#fe-explorer-menu-dd {
+  left: auto;
+  right: 0;
+  z-index: var(--explorer-header-menu-z);
+}
+
+.fe-label-missing {
+  color: #f87171;
+}
+
+.drawer-action {
+  padding: 6px 12px;
+  border: 1px solid var(--explorer-card-border);
+  border-radius: 6px;
+  background: var(--explorer-card-bg);
+  color: #3b82f6;
+  cursor: pointer;
+  font-size: calc(0.85rem * var(--chrome-font-scale));
+  transition: all 0.2s;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .drawer-action:hover {
+    background: var(--explorer-card-bg);
+    border-color: var(--explorer-card-border);
+  }
+}
+
+.drawer-close {
+  padding: 4px 8px;
+  border: 1px solid var(--explorer-card-border);
+  border-radius: 4px;
+  background: var(--explorer-card-bg);
+  color: #e5e7eb;
+  cursor: pointer;
+  font-size: calc(1.2rem * var(--chrome-font-scale));
+  line-height: 1;
+  transition: all 0.2s;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .drawer-close:hover {
+    background: var(--explorer-card-bg);
+    border-color: var(--explorer-card-border);
+  }
+}
+
+/* Drawer body */
+.fe-drawer-body {
+  position: relative; /* ← This one line fixes it */
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-x: visible;
+  overflow-y: hidden;
+  background: var(--explorer-bg);
+}
+
+/* File tree */
+.fe-tree {
+  list-style: none;
+  margin: 0;
+  padding: 8px 12px 8px 7px;
+  overflow-y: auto;
+  overflow-x: visible;
+  flex: 1;
+}
+
+/* Explorer "sticky scopes" (Monaco-ish docked folders) */
+.fe-sticky-scopes {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 0;
+  z-index: 9; /* below search overlay (10) */
+  pointer-events: none; /* pass scroll/taps through, except menu buttons */
+  overflow: hidden;
+  background: transparent;
+}
+
+.fe-sticky-scope-slot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+  flex: none;
+}
+
+.fe-sticky-scope-slot.fe-sticky-scope-slot-bottom {
+  /* Subtle separation between the sticky stack and the scrolling tree below. */
+  box-shadow: 0 6px 10px -10px rgba(0, 0, 0, 0.85);
+}
+
+.fe-sticky-scope-underlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 0;
+  background: var(--explorer-bg);
+  pointer-events: none;
+}
+
+.fe-tree li.fe-sticky-scope {
+  cursor: default;
+  user-select: none;
+  box-sizing: border-box;
+  border-bottom: none;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.fe-sticky-scopes .fe-card-menu-btn {
+  pointer-events: auto;
+}
+
+.fe-tree li {
+  display: grid;
+  grid-template-columns: 20px 1fr auto; /* icon, text, menu (twisty removed) */
+  gap: 8px;
+  padding: 6px 1px 6px 10px;
+  cursor: pointer;
+  border-radius: 8px 1px 1px 8px;
+  transition: none;
+  color: #e5e7eb;
+  font-size: calc(0.8rem * var(--chrome-font-scale));
+  border-left: 3px solid transparent;
+  border: 1px solid var(--explorer-card-border);
+  background: var(--explorer-card-bg);
+  margin-left: 0;
+  align-items: center;
+  position: relative; /* For ::after pseudo-element positioning */
+}
+
+.fe-tree-node.fe-active-file[data-kind="file"] {
+  /* Use an inset shadow instead of ::before so ::before can be reserved for other overlays. */
+  box-shadow: inset 0 -2px 0 var(--explorer-active-file-accent);
+}
+
+/* Make nested ul span the full width */
+.fe-tree li > ul {
+  grid-column: 1 / -1; /* Span both grid columns */
+  margin: 0;
+  padding: 0;
+}
+
+.fe-tree-twisty {
+  display: none; /* Hidden - directories expand/collapse by clicking anywhere on the row */
+  width: 0; /* Takes no space */
+  padding: 0;
+  margin: 0;
+}
+
+.fe-tree-text {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  overflow: hidden;
+  min-width: 0; /* Add this if not present - critical for ellipsis to
+    work */
+}
+
+.fe-tree-label-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fe-sticky-scope-path {
+  gap: 0;
+}
+
+.fe-sticky-scope-segment {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.fe-sticky-scope-segment:hover,
+.fe-sticky-scope-segment:focus-visible {
+  color: #7dd3fc;
+  text-decoration: underline;
+  outline: none;
+}
+
+.fe-sticky-scope-separator {
+  flex: none;
+  margin: 0 2px;
+  opacity: 0.5;
+}
+
+/* Nested tree indentation */
+.fe-tree .fe-tree {
+  width: 100%;
+}
+
+.fe-tree li > ul {
+  grid-column: 1 / -1;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+/* ACTUAL CARD DIMENSIONS */
+.fe-tree li > ul > li {
+  margin: 4px 2px 4px 4px;
+  width: auto;
+  box-sizing: border-box;
+}
+
+.fe-dd-item-missing {
+  opacity: 0.65;
+  font-style: italic;
+}
+
+.fe-tree-empty {
+  padding: 12px;
+  color: rgba(229, 231, 235, 0.6);
+  font-style: italic;
+}
+
+.fe-search-content-widget-host {
+  box-sizing: border-box;
+  display: none;
+  padding: 8px 10px 10px;
+  background: var(--explorer-bg);
+}
+
+.fe-search-content-widget.search-view {
+  box-sizing: border-box;
+  height: auto;
+  width: 100%;
+}
+
+.fe-search-content-widget .search-widgets-container {
+  margin: 0;
+  padding: 0;
+}
+
+.fe-search-content-widget .search-widget .search-container,
+.fe-search-content-widget .search-widget .replace-container,
+.fe-search-content-widget .query-details {
+  margin-left: 0;
+}
+
+.fe-search-content-widget .search-widget .search-container,
+.fe-search-content-widget .search-widget .monaco-findInput,
+.fe-search-content-widget .search-widget .monaco-scrollable-element,
+.fe-search-content-widget .search-widget .monaco-inputbox,
+.fe-search-content-widget .search-widget .monaco-inputbox > .ibwrapper {
+  min-height: 28px !important;
+}
+
+.fe-search-content-widget
+  .search-widget
+  .monaco-inputbox
+  > .ibwrapper
+  > textarea.input {
+  min-height: 22px !important;
+}
+
+.fe-search-content-widget .query-details {
+  margin-top: 8px;
+}
+
+.fe-search-content-widget .query-details h4 {
+  color: rgba(229, 231, 235, 0.8);
+}
+
+.fe-search-content-widget .query-details .file-types {
+  display: block;
+}
+
+.fe-search-content-widget .query-details .file-types > .monaco-findInput {
+  width: 100%;
+}
+
+.fe-search-content-widget .monaco-inputbox.synthetic-focus {
+  border-color: var(--primary) !important;
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.35);
+}
+
+.fe-search-content-widget .monaco-inputbox > .ibwrapper > .input:focus {
+  outline: none;
+}
+
+.fe-search-content-widget .fe-search-pattern-row {
+  margin-bottom: 8px;
+}
+
+.fe-tree-label {
+  transition: color 0.15s ease;
+}
+
+.fe-entry-dir {
+  color: #60a5fa;
+  font-weight: 600;
+}
+
+.fe-entry-exec {
+  color: #34d399;
+  font-weight: 600;
+}
+
+.fe-entry-file {
+  color: rgba(229, 231, 235, 0.88);
+}
+
+.fe-entry-symlink::after {
+  content: " ↗";
+  font-size: calc(0.75em * var(--chrome-font-scale));
+  opacity: 0.7;
+}
+
+.fe-entry-icon {
+  width: 15px;
+  height: 15px;
+  text-align: center;
+  color: var(--muted, #9ca3af);
+}
+
+.fe-entry-icon svg {
+  width: 15px;
+  height: 15px;
+  fill: currentColor;
+  display: block;
+}
+
+/* Make file Seti icons slightly larger without changing layout columns. */
+.fe-entry-icon-file svg {
+  transform: scale(2);
+  transform-origin: center;
+}
+
+.fe-entry-icon-dir::before {
+  content: "📁";
+}
+
+/* Files get Seti SVGs injected via JS; keep CSS fallback empty. */
+.fe-entry-icon-file::before {
+  content: "";
+}
+
+.fe-card-menu-btn {
+  background: none;
+  border: none;
+  color: var(--muted, #9ca3af);
+  cursor: pointer;
+  padding: 0px 8px 0px 0px;
+  margin: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .fe-card-menu-btn:hover {
+    background: none;
+  }
+}
+
+.fe-card-menu {
+  position: absolute;
+  min-width: 180px;
+  background: var(--explorer-card-bg);
+  border: 1px solid var(--explorer-card-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  display: none;
+  z-index: 160;
+}
+
+.fe-card-menu.show {
+  display: block;
+}
+
+.fe-card-menu .fe-dd-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  font-size: calc(0.85rem * var(--chrome-font-scale));
+  cursor: pointer;
+}
+
+.fe-card-menu .fe-dd-item[data-destructive="true"] {
+  color: #f87171;
+}
+
+.fe-card-menu .fe-dd-divider {
+  height: 1px;
+  background: var(--explorer-card-border);
+  margin: 4px 0;
+}
+
+.fe-tree-node.fe-git-modified {
+  border-left-color: #f97316;
+}
+
+.fe-tree-node.fe-git-staged {
+  border-left-color: #34d399;
+}
+
+.fe-tree-node.fe-git-staged_modified {
+  border-left-color: #22d3ee;
+}
+
+.fe-tree-node.fe-git-added {
+  border-left-color: #34d399;
+}
+
+.fe-tree-node.fe-git-deleted {
+  border-left-color: #f87171;
+}
+
+.fe-tree-node.fe-git-renamed {
+  border-left-color: #facc15;
+}
+
+.fe-tree-node.fe-git-untracked {
+  border-left-color: #00aaff;
+}
+
+.fe-tree-node.fe-git-ignored {
+  border-left-color: #6b7280;
+}
+
+.fe-tree-node.fe-git-conflict {
+  border-left-color: #ef4444;
+}
+
+.fe-tree-node[data-kind="dir"] {
+  border-color: rgba(96, 165, 250, 0.35);
+}
+
+/*
+ * Clean expanded scopes alternate by stable tree depth. Git-decorated
+ * directories keep their existing visual language, while drafts and
+ * diagnostics continue to layer over this neutral structural cue.
+ */
+.fe-tree-node[data-kind="dir"][data-open="true"][data-depth-parity="odd"]:not(
+    [data-git-flags]
+  ):where(:not([data-git-status]), [data-git-status="clean"]) {
+  background: color-mix(
+    in srgb,
+    var(--explorer-card-bg) 96%,
+    currentColor 4%
+  );
+}
+
+/* Preserve legacy directory styling based directly on gitStatus so
+   collapsed parents still show the orange/blue cues from the backend. */
+
+/* Modified directories: orange border */
+.fe-tree-node.fe-git-modified[data-kind="dir"] {
+  border-color: rgba(249, 115, 22, 0.8);
+}
+
+/* Untracked directories: blue background and border */
+.fe-tree-node.fe-git-untracked[data-kind="dir"] {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+/* Directory-level aggregated flags (has descendants with these states).
+   These are purely frontend classes (fe-dir-has-*) layered on top of the
+   precise per-node fe-git-* classes. */
+
+.fe-tree-node[data-kind="dir"].fe-dir-has-modified {
+  border-color: rgb(149, 72, 17); /* strong orange border */
+}
+
+.fe-tree-node[data-kind="dir"].fe-dir-has-conflict {
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.8);
+}
+
+/* Untracked descendants: solid blue background (when no staged). */
+.fe-tree-node[data-kind="dir"].fe-dir-has-untracked:not(.fe-dir-has-staged) {
+  background: rgb(13, 35, 84);
+}
+
+/* Staged descendants: solid green background (when no untracked). */
+.fe-tree-node[data-kind="dir"].fe-dir-has-staged:not(.fe-dir-has-untracked) {
+  background: rgb(0, 58, 43);
+}
+
+/* Both untracked + staged descendants: smooth diagonal blue→green gradient. */
+.fe-tree-node[data-kind="dir"].fe-dir-has-untracked.fe-dir-has-staged {
+  background: linear-gradient(
+    135deg,
+    rgba(15, 49, 101, 1) 0%,
+    rgba(10, 52, 89, 1) 40%,
+    rgba(5, 55, 57, 1) 60%,
+    rgba(0, 58, 43, 1) 100%
+  );
+}
+
+/* Modified files: orange background (keeps the old motif). */
+.fe-tree-node.fe-git-modified[data-kind="file"] {
+  background: rgba(155, 90, 22, 0.75);
+}
+
+/* Untracked files: blue background. */
+.fe-tree-node.fe-git-untracked[data-kind="file"] {
+  background: rgb(19, 61, 128);
+}
+
+/* Staged files: green background. */
+.fe-tree-node.fe-git-staged[data-kind="file"],
+.fe-tree-node.fe-git-added[data-kind="file"] {
+  background: rgba(32, 111, 82, 0.7);
+}
+
+/* Staged+modified files: keep orange (modified takes priority visually). */
+.fe-tree-node.fe-git-staged_modified[data-kind="file"] {
+  background: rgba(249, 115, 22, 0.15);
+}
+
+.fe-git-footer {
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--explorer-bg);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: relative;
+  min-width: 0;
+}
+
+.fe-git-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.fe-git-meta {
+  justify-content: space-between;
+  position: relative;
+}
+
+.fe-git-summary {
+  font-size: calc(0.75rem * var(--chrome-font-scale));
+  color: rgba(229, 231, 235, 0.7);
+  min-height: 1.2em;
+}
+
+.fe-git-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.fe-git-actions .fe-btn {
+  flex: 0 0 auto;
+  font-size: calc(0.8rem * var(--chrome-font-scale));
+  padding: 5px 10px;
+  max-width: 100%;
+}
+
+.fe-git-status-btn {
+  margin-left: auto;
+  font-size: calc(0.8rem * var(--chrome-font-scale));
+  white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fe-git-actions .fe-git-status-btn {
+  flex: 1 1 auto;
+}
+
+#fe-git-base-dd,
+#fe-search-base-dd {
+  right: 0;
+  left: auto;
+  z-index: 260;
+  min-width: 240px;
+  max-width: calc(100vw - 40px);
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+#fe-search-base-dd {
+  right: 12px;
+}
+
+.fe-git-footer #fe-git-base-dd {
+  bottom: calc(100% + 4px);
+  top: auto;
+}
+
+.fe-git-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.3em;
+  height: 1.3em;
+  margin-left: 6px;
+  font-size: calc(0.75em * var(--chrome-font-scale));
+  font-weight: 300; /* Thin weight */
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; /* Thin sans-serif */
+  border-radius: 50%; /* Makes it circular */
+  line-height: 1;
+  background: transparent; /* No background fill */
+}
+
+.fe-git-badge-modified {
+  border: 1.5px solid #c2410c; /* Dark orange thin border */
+  color: #ea580c; /* Orange-ish letter */
+}
+
+.fe-git-badge-untracked {
+  border: 1.5px solid #1e40af; /* Dark blue thin border */
+  color: #2563eb; /* Blue-ish letter */
+}
+
+/* --- Select Mode --- */
+.fe-entry-checkbox {
+  margin: 0;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--primary);
+  justify-self: center;
+  flex-shrink: 0;
+}
+
+.fe-tree.fe-tree-select-mode > li.fe-tree-node {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Disabled menu items */
+.fe-dd-item-disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* --- Mobile Tap Behavior --- */
+.fe-tree li,
+.fe-tree-twisty,
+.fe-card-menu-btn,
+.fe-card-menu .fe-dd-item {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+/* Search overlay */
+.fe-search-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--bg);
+  z-index: 10;
+  display: none;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.fe-marketplace-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 11;
+  display: none;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--explorer-bg);
+  color: var(--fg);
+}
+
+.fe-marketplace-header,
+.fe-marketplace-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--card, #0b0f1a);
+}
+
+.fe-marketplace-heading {
+  margin: 0;
+  font-size: 15px;
+}
+
+.fe-marketplace-close {
+  border: 0;
+  padding: 4px 7px;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 18px;
+}
+
+.fe-marketplace-note {
+  padding: 7px 10px;
+  border-bottom: 1px solid rgba(250, 204, 21, 0.25);
+  background: rgba(133, 77, 14, 0.16);
+  color: #fde68a;
+  font-size: 12px;
+}
+
+.fe-marketplace-search-row {
+  display: flex;
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.fe-marketplace-search-input {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  outline: none;
+  background: var(--card);
+  color: var(--fg);
+  font: inherit;
+}
+
+.fe-marketplace-search-input:focus {
+  border-color: #3b82f6;
+}
+
+.fe-marketplace-status {
+  min-height: 30px;
+  padding: 7px 10px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.fe-marketplace-status.is-loading {
+  color: #bfdbfe;
+}
+
+.fe-marketplace-status.is-error,
+.fe-marketplace-detail-message.is-error,
+.fe-marketplace-action-error {
+  color: #fca5a5;
+}
+
+.fe-marketplace-results {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.fe-marketplace-result {
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+  gap: 9px;
+  padding: 9px 10px;
+  border: 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 0;
+  background: var(--explorer-bg);
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+}
+
+.fe-marketplace-result:hover,
+.fe-marketplace-result:focus-visible {
+  background: var(--explorer-card-hover);
+  outline: none;
+}
+
+.fe-marketplace-result-glyph {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  place-items: center;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.fe-marketplace-icon-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.fe-marketplace-result-text {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fe-marketplace-result-title {
+  overflow: hidden;
+  color: var(--fg);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fe-marketplace-verified {
+  margin-left: 5px;
+  color: #60a5fa;
+}
+
+.fe-marketplace-result-id,
+.fe-marketplace-result-meta {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fe-marketplace-result-description {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #cbd5e1;
+  font-size: 12px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.fe-marketplace-more {
+  flex: 0 0 auto;
+  margin: 8px 10px;
+}
+
+.fe-marketplace-detail {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--explorer-bg);
+  transform: translateX(100%);
+  transition: transform 180ms ease;
+  pointer-events: none;
+}
+
+.fe-marketplace-detail.is-open {
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fe-marketplace-detail {
+    transition: none;
+  }
+}
+
+.fe-marketplace-detail-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+}
+
+.fe-marketplace-detail-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.fe-marketplace-detail-heading-text {
+  min-width: 0;
+}
+
+.fe-marketplace-detail-icon {
+  width: 52px;
+  height: 52px;
+  font-size: 24px;
+}
+
+.fe-marketplace-detail-title {
+  margin: 0 0 2px;
+  font-size: 18px;
+}
+
+.fe-marketplace-detail-id {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.fe-marketplace-detail-description {
+  margin: 0 0 14px;
+  color: #dbe4f0;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.fe-marketplace-detail-field {
+  display: grid;
+  grid-template-columns: minmax(82px, auto) minmax(0, 1fr);
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  font-size: 12px;
+}
+
+.fe-marketplace-detail-key {
+  color: var(--muted);
+}
+
+.fe-marketplace-detail-value,
+.fe-marketplace-detail-link {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.fe-marketplace-detail-link {
+  color: #93c5fd;
+}
+
+.fe-marketplace-support {
+  margin-top: 14px;
+  padding: 8px;
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  border-radius: 3px;
+  color: #bbf7d0;
+  font-size: 12px;
+}
+
+.fe-marketplace-support.is-unsupported {
+  border-color: rgba(250, 204, 21, 0.4);
+  color: #fde68a;
+}
+
+.fe-marketplace-detail-message,
+.fe-marketplace-action-error {
+  padding: 14px 2px;
+}
+
+.fe-marketplace-detail-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.fe-marketplace-danger {
+  border-color: rgba(239, 68, 68, 0.55);
+  color: #fca5a5;
+}
+
+.fe-marketplace-action-progress {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.fe-search-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.fe-search-header h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.fe-search-close {
+  background: none;
+  border: none;
+  color: var(--fg);
+  font-size: 20px;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.fe-search-mode {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+  margin-right: 8px;
+}
+
+.fe-search-mode button {
+  padding: 4px 12px;
+  border: 1px solid #555;
+  background: transparent;
+  color: var(--fg);
+  border-radius: 4px;
+  cursor: pointer;
+  transition:
+    box-shadow 0.2s ease,
+    border-color 0.2s ease;
+}
+
+.fe-search-mode button.active {
+  background: transparent;
+  color: var(--fg);
+  border-color: #22c55e;
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+}
+
+.fe-search-input-container {
+  padding: 12px;
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.fe-search-input-container input {
+  flex: 1;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--card);
+  color: var(--fg);
+  font-size: 14px;
+}
+
+.fe-search-clear {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0 8px;
+}
+
+.fe-search-results {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0; /* Removed all padding */
+}
+
+.fe-search-changes-toolbar {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--explorer-bg);
+  position: relative;
+}
+
+.fe-search-changes-label {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.fe-search-head-btn {
+  border: 1px solid #555;
+  background: transparent;
+  color: var(--fg);
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+#fe-search-base-dd {
+  right: 12px;
+  left: auto;
+  z-index: 250;
+}
+
+.fe-search-head-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.fe-search-changes-note {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.fe-search-loading,
+.fe-search-error,
+.fe-search-empty,
+.fe-search-hint {
+  padding: 24px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.fe-search-error {
+  color: #ef4444;
+}
+
+.fe-search-error-inline {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid rgba(239, 68, 68, 0.35);
+  background: rgba(127, 29, 29, 0.18);
+}
+
+.fe-search-status {
+  padding: 7px 12px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  color: #94a3b8;
+  background: rgba(15, 23, 42, 0.82);
+  font-size: 12px;
+}
+
+.fe-search-status-running,
+.fe-search-status-loadingMore {
+  color: #bfdbfe;
+}
+
+.fe-search-status-error {
+  color: #fca5a5;
+}
+
+.fe-search-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.fe-search-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 0;
+  cursor: pointer;
+  background: var(--explorer-bg);
+  border-bottom: 1px solid #333;
+}
+
+.fe-search-icon {
+  font-size: 16px;
+  width: 15px;
+  height: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted, #9ca3af);
+}
+
+.fe-search-icon svg {
+  width: 15px;
+  height: 15px;
+  fill: currentColor;
+  display: block;
+  transform: scale(2);
+  transform-origin: center;
+}
+
+.fe-search-name {
+  flex: 1;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fe-search-file-group {
+  margin-bottom: 0;
+  border-bottom: 1px solid rgba(51, 65, 85, 0.75);
+}
+
+.fe-search-file-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--explorer-bg);
+  border-radius: 0;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 0;
+}
+
+.fe-search-file-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fe-search-path-label {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.fe-search-path-parent {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  unicode-bidi: plaintext;
+  color: #94a3b8;
+}
+
+.fe-search-path-name {
+  flex: 0 0 auto;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fe-search-file-meta {
+  flex: none;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.fe-search-match {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  border-radius: 0;
+  margin-left: 0;
+  background: #333;
+}
+
+.fe-search-line-num {
+  font-size: 12px;
+  color: var(--muted);
+  min-width: 40px;
+  text-align: right;
+  line-height: 1.45;
+}
+
+.fe-search-snippet {
+  flex: 1;
+  display: block;
+  font-size: 12px;
+  font-family: monospace;
+  line-height: 1.45;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.fe-search-changes {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.fe-search-change-group {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+}
+
+.fe-search-change-group:last-child {
+  border-bottom: none;
+}
+
+.fe-search-change-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.fe-search-change-path {
+  flex: 1;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fe-search-change-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.fe-search-change-status-text {
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #fb923c;
+}
+
+.fe-search-change-status-text.is-added {
+  color: #4ade80;
+}
+
+.fe-search-change-status-text.is-deleted,
+.fe-search-change-status-text.is-renamed {
+  color: #f87171;
+}
+
+.fe-search-change-status-text.is-untracked {
+  color: #c084fc;
+}
+
+.fe-search-change-status-text.is-conflict {
+  color: #facc15;
+}
+
+.fe-search-change-status-text.is-copied {
+  color: #38bdf8;
+}
+
+.fe-search-change-status-text.is-ignored {
+  color: #94a3b8;
+}
+
+.fe-search-change-summary {
+  color: var(--muted);
+}
+
+.fe-search-change-error {
+  font-size: 12px;
+  color: #f87171;
+  padding: 8px 12px;
+}
+
+.fe-search-change-hunks {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background: #0a1120;
+}
+
+.fe-search-hunk {
+  margin-bottom: 8px;
+}
+
+.fe-search-hunk:last-child {
+  margin-bottom: 0;
+}
+
+.fe-search-hunk-header {
+  font-size: 12px;
+  font-family: monospace;
+  padding: 4px 12px;
+  background: rgba(148, 163, 184, 0.18); /* hunk-header */
+  color: #e5e7eb;
+}
+
+.fe-search-diff-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.fe-search-diff-row {
+  display: flex;
+  gap: 2px; /* Reduced gap */
+  padding: 2px 2px 2px 4px;
+  font-family: monospace;
+  font-size: 12px;
+  background: rgba(15, 23, 42, 0.85);
+}
+
+.fe-search-diff-row.is-add {
+  background: rgba(34, 197, 94, 0.18);
+  color: #d1fae5;
+}
+
+.fe-search-diff-row.is-del {
+  background: rgba(248, 113, 113, 0.18);
+  color: #fee2e2;
+}
+
+.fe-search-diff-row.is-context {
+  color: #cbd5f5;
+}
+
+.fe-search-diff-line-num {
+  width: 36px; /* Reduced width */
+  text-align: right;
+  color: var(--muted);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.fe-search-diff-sign {
+  width: 16px;
+  text-align: center;
+  font-weight: 600;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.fe-search-diff-text {
+  flex: 1;
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.fe-search-code-surface.hljs {
+  display: block;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  border-radius: 0;
+}
+
+.fe-search-snippet.fe-search-code-surface.hljs {
+  overflow: hidden;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.fe-search-snippet-token {
+  white-space: pre;
+}
+
+.fe-search-snippet-ellipsis {
+  color: #94a3b8;
+  white-space: pre;
+}
+
+.fe-search-hit {
+  background: rgba(250, 204, 21, 0.18);
+  border: 1px solid rgba(234, 179, 8, 0.9);
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(250, 204, 21, 0.22);
+  color: inherit;
+  margin: 0 1px;
+  padding: 0 1px;
+  white-space: pre;
+}
+
+.fe-search-diff-text.fe-search-code-surface.hljs {
+  overflow: hidden;
+  white-space: pre-wrap;
+}
+
+.fe-search-diff-token {
+  border-radius: 2px;
+}
+
+.fe-search-diff-token.is-added {
+  background: rgba(34, 197, 94, 0.22);
+}
+
+.fe-search-diff-token.is-removed {
+  background: rgba(248, 113, 113, 0.24);
+}
+
+.fe-search-diff-more {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 6px 12px;
+  font-style: italic;
+}
+
+.fe-highlight-text {
+  background: rgba(48, 63, 84); /*highlight*/
+  color: #ffffff;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.fe-highlight-file {
+  background: #e2e8f0;
+  color: #0f172a;
+  border-radius: 2px;
+  padding: 0 1px;
+  font-weight: 600;
+}
+
+.fe-search-change-empty-hunk {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.fe-search-notice {
+  padding: 8px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+}
+
+.fe-search-summary {
+  padding: 8px 12px;
+  color: #94a3b8;
+  font-size: 12px;
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.72);
+}
+
+.fe-search-more-row,
+.fe-search-more-global {
+  display: flex;
+  justify-content: center;
+  padding: 8px 12px;
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.fe-search-more-row {
+  justify-content: flex-start;
+  padding-left: 60px;
+}
+
+.fe-search-more-btn {
+  border: 1px solid rgba(96, 165, 250, 0.45);
+  background: rgba(30, 41, 59, 0.9);
+  color: #bfdbfe;
+  border-radius: 4px;
+  padding: 5px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.fe-search-more-btn:hover:not(:disabled) {
+  border-color: rgba(147, 197, 253, 0.75);
+  background: rgba(51, 65, 85, 0.95);
+}
+
+.fe-search-more-btn:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.fe-changes-filter-container {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  width: 100%;
+  flex-wrap: wrap;
+}
+
+.fe-changes-filter-label {
+  font-size: 12px;
+  color: var(--fg);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.fe-changes-filter-input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  flex: 1;
+  min-width: 120px;
+}
+
+.fe-changes-filter-input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+/* Review Panel Styles */
+.fe-review-toolbar {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--explorer-bg);
+  gap: 8px;
+}
+
+.fe-review-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.fe-review-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  gap: 12px;
+}
+
+.fe-review-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.fe-review-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.fe-review-path {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 2px;
+}
+
+.fe-card-draft {
+  position: relative;
+  overflow: hidden;
+}
+
+.fe-card-draft::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 4px;
+  background-color: #facc15;
+  opacity: 0.8;
+}
+
+.fe-btn-sm {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.fe-btn-primary {
+  border-color: #3b82f6;
+  color: #3b82f6;
+}
+
+.fe-btn-danger {
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+/* Tree Highlights - Draft styling */
+/* Use ::after pseudo-element so draft indicator layers ON TOP of git status border */
+.fe-tree-node.fe-draft[data-kind="file"]::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 3px;
+  background: #facc15;
+  pointer-events: none;
+}
+
+.fe-tree-node.fe-dir-has-draft::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 2px;
+  background: rgba(250, 204, 21, 0.5);
+  pointer-events: none;
+}
+
+.fe-tree-node .fe-diag-mark {
+  display: none;
+  flex: 0 0 auto;
+  width: 0.45em;
+  height: 0.45em;
+  margin-left: 4px;
+  border-radius: 50%;
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+.fe-tree-node.fe-diag-warning > .fe-tree-text > .fe-diag-mark,
+.fe-tree-node.fe-dir-has-diag-warning > .fe-tree-text > .fe-diag-mark {
+  display: inline-block;
+  background: #facc15;
+}
+
+.fe-tree-node.fe-diag-error > .fe-tree-text > .fe-diag-mark,
+.fe-tree-node.fe-dir-has-diag-error > .fe-tree-text > .fe-diag-mark {
+  display: inline-block;
+  background: #ef4444;
+}
+
+/* Review Diff Styles */
+.fe-search-diff-row.is-add-draft {
+  background: rgba(59, 130, 246, 0.18);
+  color: #bfdbfe;
+}
+
+.fe-search-diff-row.is-del-draft {
+  background: rgba(250, 204, 21, 0.18);
+  color: #fef08a;
+}

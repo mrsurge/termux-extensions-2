@@ -1,0 +1,50 @@
+version: "1"
+
+shells:
+  code-server:
+    backend: pipe
+    cwd: ${ctx:PROJECT_ROOT}
+    command:
+      - sh
+      - -c
+      - >-
+        "${ctx:CODE_SERVER_BIN}"
+        --socket "${ctx:CODE_SERVER_SOCKET}"
+        --socket-mode 0600
+        --auth none
+        --config /dev/null
+        --disable-telemetry
+        --disable-update-check
+        --disable-workspace-trust
+        --user-data-dir "${ctx:CODE_SERVER_DATA_DIR}"
+        --extensions-dir "${ctx:CODE_SERVER_DATA_DIR}/extensions"
+        "${ctx:PROJECT_ROOT}"
+        2>&1
+    env:
+      PATH: ${ctx:CODE_SERVER_BIN_DIR}:${env:PATH}
+      TE_APP_ID: ${ctx:APP_ID}
+      TE_CODE_SERVER_BIN: ${ctx:CODE_SERVER_BIN}
+      TE_CODE_SERVER_SOCKET: ${ctx:CODE_SERVER_SOCKET}
+      PROJECT_ROOT: ${ctx:PROJECT_ROOT}
+      TE_INSTANCE_ID: ${ctx:INSTANCE_ID}
+      TE2_EXT_ROOT: ${env:TE2_EXT_ROOT}
+      TE2_WORKER_API_BASE: ${env:TE2_WORKER_API_BASE}
+      TE2_PROBE_OUT: ${ctx:CODE_SERVER_PROBE_OUT}
+    subgroups:
+      - ${ctx:APP_ID}
+      - code_server
+      - "project:${ctx:PROJECT_HASH}"
+    ui:
+      subgroup_styles:
+        code_server:
+          bg: rgba(18, 23, 40, 0.92)
+          border: rgba(90, 200, 250, 0.70)
+        project:*:
+          bg: rgba(0, 0, 0, 0.88)
+          border: rgba(29, 70, 126, 0.88)
+    readiness:
+      type: output_match
+      pattern: "HTTP server listening"
+      timeout: 60
+      # NOTE: readiness is handled in code_server_shell_manager.py via
+      # subscribed live stdout chunks from the pipe backend.

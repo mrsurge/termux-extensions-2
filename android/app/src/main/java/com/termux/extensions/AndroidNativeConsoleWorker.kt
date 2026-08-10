@@ -93,7 +93,7 @@ internal class AndroidNativeConsoleWorker(
                 path = "/te2_console_ws/socket.io"
                 transports = arrayOf("websocket")
                 upgrade = false
-                query = "app_id=file_editor_cm6&source=android_native_debug"
+                query = "app_id=code_te2&source=android_native_debug"
                 reconnection = true
                 reconnectionDelay = 2_000
                 reconnectionDelayMax = 10_000

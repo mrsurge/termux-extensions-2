@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import override
 from unittest.mock import patch
 
-from app.apps.file_editor_cm6 import extension_registry
+from app.apps.code_te2 import extension_registry
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

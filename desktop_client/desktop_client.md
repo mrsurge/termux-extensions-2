@@ -1,9 +1,9 @@
 # TE2 Desktop Client
 
 The active desktop client is the Electron shell under
-`desktop_client/electron_spike/`. It uses Electron's native Chromium/Wayland
+`desktop_client/electron/`. It uses Electron's native Chromium/Wayland
 path while retaining the launcher, Settings, asset updates, and app-scoped
-lifecycle behavior established by the earlier desktop spikes.
+lifecycle behavior established by the earlier desktop prototypes.
 
 The GTK 4/WebKitGTK 6 implementation in `desktop_client/ui.py` remains a
 behavioral reference. It is not the current desktop runtime.
@@ -13,7 +13,7 @@ behavioral reference. It is not the current desktop runtime.
 Node 22.12 or newer is required:
 
 ```bash
-cd desktop_client/electron_spike
+cd desktop_client/electron
 npm install
 npm run dev
 ```
@@ -37,11 +37,12 @@ The client reuses the framework's Android OTA contract:
 - `/api/editor_version`
 - `/api/editor_assets_bundle`
 
-The shared framework/editor files are installed under
-`$XDG_DATA_HOME/te2/desktop_assets` (normally
-`~/.local/share/te2/desktop_assets`). Android's `android-shell/` launcher and
-Settings files are deliberately omitted because `desktop_client/android_shell/`
-owns the desktop launcher.
+The shared framework/editor files are installed under the canonical TE2 data
+root: `TE2_DATA_HOME/desktop_assets` when that explicit final-root override is
+set, otherwise `$XDG_DATA_HOME/te2/desktop_assets`, with
+`~/.local/share/te2/desktop_assets` as the no-XDG fallback. Android's
+`android-shell/` launcher and Settings files are deliberately omitted because
+`desktop_client/android_shell/` owns the desktop launcher.
 
 Updates are monotonic and replace the complete installed tree through staging,
 validation, backup, atomic rename, and rollback. The desktop Settings page shows
@@ -83,7 +84,7 @@ desktop asset layer.
 node --check desktop_client/android_shell/host.js
 node --check desktop_client/android_shell/settings.js
 
-cd desktop_client/electron_spike
+cd desktop_client/electron
 npm run typecheck
 npm test
 npm run build

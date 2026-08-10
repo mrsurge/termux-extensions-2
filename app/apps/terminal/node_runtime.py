@@ -11,6 +11,8 @@ import subprocess
 from typing import Final
 import uuid
 
+from app.te2_paths import te2_data_home
+
 
 APP_ROOT: Final = Path(__file__).resolve().parent
 PACKAGE_JSON: Final = APP_ROOT / "package.json"
@@ -46,10 +48,7 @@ def terminal_node_runtime_base() -> Path:
     explicit = str(os.environ.get("TE2_TERMINAL_NODE_RUNTIME_DIR") or "").strip()
     if explicit:
         return Path(explicit).expanduser().resolve()
-    data_home = Path(
-        os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))
-    ).expanduser()
-    return (data_home / "te2" / "node_runtime" / "terminal").resolve()
+    return (te2_data_home() / "node_runtime" / "terminal").resolve()
 
 
 def _absolute_executable(raw: str | Path) -> Path:

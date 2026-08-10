@@ -446,7 +446,7 @@ async function ensureUiIpcSocket(): Promise<SocketIoSocketLike | null> {
       path: '/ui_ipc_ws/socket.io',
       transports: ['websocket'],
       query: {
-        app_id: 'file_editor_cm6',
+        app_id: 'code_te2',
         source: 'terminal_app',
       },
       auth: { rpcCodec: UI_IPC_RPC_CODEC },

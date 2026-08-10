@@ -2,8 +2,8 @@
 
 The shared `/api/state` service is implemented by the Rust framework in:
 
-- `rust-spike/rust/crates/te2-rust-spike-server/src/framework_services/state_ops.rs`
-- `rust-spike/rust/crates/te2-rust-spike-server/src/framework_services/net/state_net_ops.rs`
+- `framework/rust/crates/te2-server/src/framework_services/state_ops.rs`
+- `framework/rust/crates/te2-server/src/framework_services/net/state_net_ops.rs`
 
 State is stored in
 `$XDG_CACHE_HOME/termux_extensions/state_store.json` (or the equivalent

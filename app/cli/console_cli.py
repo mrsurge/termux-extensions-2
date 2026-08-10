@@ -5,13 +5,14 @@ import json
 import os
 import sys
 import time
-from pathlib import Path
 from typing import Any
+
+from app.te2_paths import te2_cache_home
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = "8089"
 DEFAULT_TIMEOUT = 20.0
-LOG_PATH = Path.home() / ".cache" / "app_server" / "te2_console_log.jsonl"
+LOG_PATH = te2_cache_home() / "console" / "te2_console_log.jsonl"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -41,8 +42,8 @@ def _framework_url() -> str:
     env_url = os.environ.get("TE_FRAMEWORK_URL", "").strip()
     if env_url:
         return env_url.rstrip("/")
-    host = os.environ.get("TE2_RUST_SPIKE_HOST", DEFAULT_HOST)
-    port = os.environ.get("TE_PORT", DEFAULT_PORT)
+    host = os.environ.get("TE2_SERVER_HOST", DEFAULT_HOST)
+    port = os.environ.get("TE2_SERVER_PORT", os.environ.get("TE_PORT", DEFAULT_PORT))
     return f"http://{host}:{port}"
 
 

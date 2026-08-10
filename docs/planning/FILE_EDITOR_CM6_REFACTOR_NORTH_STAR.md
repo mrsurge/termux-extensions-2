@@ -124,8 +124,8 @@ These constraints do not change during the refactor:
 - HTML preview is queued behind this refactor track, not mixed into it.
 
 Cross references:
-- `docs/apps/code_cm6/CODE_TE2.md`
-- `docs/apps/code_cm6/SIDEBAR_IPC_RPC_CONTRACT.md`
+- `docs/apps/code_te2/CODE_TE2.md`
+- `docs/apps/code_te2/SIDEBAR_IPC_RPC_CONTRACT.md`
 - `docs/planning/FILE_EDITOR_CM6_OWNERSHIP_BOUNDARY_CONTRACT.md`
 - `docs/planning/FILE_EDITOR_CM6_HTML_PREVIEW_ENGINE_PLAN.md`
 - `docs/planning/FILE_EDITOR_CM6_SOCKETIO_CONSOLIDATION_PLAN.md`

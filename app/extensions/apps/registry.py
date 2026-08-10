@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
 import app as app_pkg
+from app.te2_paths import te2_data_home
 
 
 def _builtin_apps_root() -> Path:
@@ -20,7 +20,7 @@ def builtin_templates_root() -> Path:
 
 
 def te2_data_root() -> Path:
-    return Path.home() / ".local" / "share" / "te2"
+    return te2_data_home()
 
 
 def te2_apps_root() -> Path:

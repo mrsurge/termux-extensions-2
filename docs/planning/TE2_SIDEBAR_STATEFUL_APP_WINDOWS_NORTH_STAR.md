@@ -36,7 +36,7 @@ This document is the progress tracker. Update this section whenever a slice land
 - [x] Mint fresh `host_id` / concrete console-worker identity for new stateful same-app slots so the dock can track multiple states of the same app simultaneously.
 - [x] Preserve existing concrete console worker identity when a state update targets an existing `host_id` but omits `console_worker_id`.
 - [x] Bump served `file_editor_cm6` version surfaces to `0.2.257` so the rebuilt host bundle is fetched.
-- [x] Add app-author usage guide at `docs/apps/code_cm6/STATEFUL_SIDEBAR_APPS.md`.
+- [x] Add app-author usage guide at `docs/apps/code_te2/STATEFUL_SIDEBAR_APPS.md`.
 - [x] Bump served `file_editor_cm6` version surfaces to `0.2.260` for the commit-ready slice.
 - [x] Document that `sidebar_state` makes an app stateful-capable only; normal `/app/<app_id>` access, including normal deep-link query params, does not enter sidebar-stateful behavior unless TE2 slot identity such as `te2_host_id` is present.
 - [x] Move backend-readiness waiting to the framework `/app/{app_id}` shell; Code TE2 sidebar no longer blocks iframe display on stateful slot readiness.

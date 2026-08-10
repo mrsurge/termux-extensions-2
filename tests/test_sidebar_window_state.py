@@ -6,7 +6,7 @@ import unittest
 from typing import cast
 from unittest.mock import patch
 
-from app.apps.file_editor_cm6.ui_ipc import sidebar_window_state
+from app.apps.code_te2.ui_ipc import sidebar_window_state
 
 
 class _FakePreferencesStore:
@@ -47,7 +47,51 @@ def _url_slot(host_id: str) -> dict[str, object]:
     }
 
 
+def _legacy_code_te2_slot() -> dict[str, object]:
+    return {
+        "kind": "app",
+        "app_id": "file_editor_cm6",
+        "host_id": "slot:file_editor_cm6:primary",
+        "base_url": "/app/file_editor_cm6",
+        "url": "/app/file_editor_cm6?embed=1",
+        "restore_url": "/app/file_editor_cm6?embed=1#editor",
+        "token_id": "file_editor_cm6",
+        "console_worker_id": "file_editor_cm6:primary",
+        "console_worker_prefix": "file_editor_cm6",
+        "stateful": True,
+        "readiness": {"status": "ready"},
+    }
+
+
 class SidebarWindowLedgerTests(unittest.TestCase):
+    def test_legacy_code_te2_slot_identity_is_migrated_once(self) -> None:
+        store = _FakePreferencesStore(
+            {
+                "version": 2,
+                "slots": {
+                    "slot:file_editor_cm6:primary": _legacy_code_te2_slot(),
+                },
+            }
+        )
+        with patch.object(
+            sidebar_window_state,
+            "get_preferences_store",
+            return_value=store,
+        ):
+            first = sidebar_window_state._load_pref_state()
+            second = sidebar_window_state._load_pref_state()
+
+        slots = cast(dict[str, object], first["slots"])
+        self.assertEqual({"slot:code_te2:primary"}, set(slots))
+        slot = cast(dict[str, object], slots["slot:code_te2:primary"])
+        self.assertEqual("code_te2", slot["app_id"])
+        self.assertEqual("/app/code_te2", slot["base_url"])
+        self.assertEqual("/app/code_te2?embed=1", slot["url"])
+        self.assertEqual("/app/code_te2?embed=1#editor", slot["restore_url"])
+        self.assertEqual(first["slots"], second["slots"])
+        self.assertEqual(1, store.update_count)
+        self.assertNotIn("file_editor_cm6", repr(store.data))
+
     def test_legacy_presentation_fields_are_not_projected_or_resaved(self) -> None:
         store = _FakePreferencesStore(
             {

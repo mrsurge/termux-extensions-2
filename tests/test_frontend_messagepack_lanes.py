@@ -7,29 +7,29 @@ from unittest.mock import AsyncMock, patch
 
 from socketio.exceptions import ConnectionRefusedError
 
-from app.apps.file_editor_cm6.frontend_rpc_codec import (
+from app.apps.code_te2.frontend_rpc_codec import (
     RPC_CODEC_AUTH_FIELD,
     RPC_CODEC_MSGPACK_V1,
     decode_frontend_rpc_message,
     encode_frontend_rpc_message,
 )
-from app.apps.file_editor_cm6.monaco_editor.editor_rpc_contract import (
+from app.apps.code_te2.monaco_editor.editor_rpc_contract import (
     EDITOR_RPC_NOTIFICATION_READY,
 )
-from app.apps.file_editor_cm6.monaco_editor.editor_rpc_emit import (
+from app.apps.code_te2.monaco_editor.editor_rpc_emit import (
     emit_editor_rpc_notification,
 )
-from app.apps.file_editor_cm6.monaco_editor.editor_rpc_socketio import (
+from app.apps.code_te2.monaco_editor.editor_rpc_socketio import (
     EditorRpcSocketIONamespace,
 )
-from app.apps.file_editor_cm6.host.run_target_service import (
+from app.apps.code_te2.host.run_target_service import (
     emit_run_target_routes_snapshot,
 )
-from app.apps.file_editor_cm6.ui_ipc.rpc_contract import (
+from app.apps.code_te2.ui_ipc.rpc_contract import (
     UI_IPC_RPC_METHOD_HOST_BOOT_SNAPSHOT_GET,
     UI_IPC_RPC_NOTIFICATION_RUN_TARGET_ROUTES_CHANGED,
 )
-from app.apps.file_editor_cm6.ui_ipc.ui_ipc_ws import UIIPCNamespace
+from app.apps.code_te2.ui_ipc.ui_ipc_ws import UIIPCNamespace
 
 
 class EditorMessagePackTests(unittest.IsolatedAsyncioTestCase):
@@ -97,7 +97,7 @@ class UiIpcMessagePackTests(unittest.IsolatedAsyncioTestCase):
         }
 
         with patch(
-            "app.apps.file_editor_cm6.ui_ipc.ui_ipc_ws.dispatch_ui_ipc_rpc_request",
+            "app.apps.code_te2.ui_ipc.ui_ipc_ws.dispatch_ui_ipc_rpc_request",
             new=AsyncMock(return_value={"ok": True}),
         ):
             response = await namespace.on_rpc(
@@ -161,8 +161,8 @@ class UiIpcMessagePackTests(unittest.IsolatedAsyncioTestCase):
         namespace.enter_room = enter_room  # type: ignore[method-assign]
         namespace.emit = emit  # type: ignore[method-assign]
         with (
-            patch("app.apps.file_editor_cm6.ui_ipc.ui_ipc_ws.get_history_store") as history,
-            patch("app.apps.file_editor_cm6.ui_ipc.ui_ipc_ws.get_project_root", return_value=""),
+            patch("app.apps.code_te2.ui_ipc.ui_ipc_ws.get_history_store") as history,
+            patch("app.apps.code_te2.ui_ipc.ui_ipc_ws.get_project_root", return_value=""),
         ):
             history.return_value.get_active_project.return_value = ""
             await namespace.on_connect(
@@ -202,10 +202,10 @@ class UiIpcMessagePackTests(unittest.IsolatedAsyncioTestCase):
         namespace.save_session = save_session  # type: ignore[method-assign]
         namespace.emit = emit  # type: ignore[method-assign]
         with (
-            patch("app.apps.file_editor_cm6.ui_ipc.ui_ipc_ws.get_history_store") as history,
-            patch("app.apps.file_editor_cm6.ui_ipc.ui_ipc_ws.get_project_root", return_value=""),
+            patch("app.apps.code_te2.ui_ipc.ui_ipc_ws.get_history_store") as history,
+            patch("app.apps.code_te2.ui_ipc.ui_ipc_ws.get_project_root", return_value=""),
             patch(
-                "app.apps.file_editor_cm6.host.run_target_service.list_run_target_routes",
+                "app.apps.code_te2.host.run_target_service.list_run_target_routes",
                 new=AsyncMock(return_value=projection),
             ),
         ):
@@ -214,7 +214,7 @@ class UiIpcMessagePackTests(unittest.IsolatedAsyncioTestCase):
                 "native-sid",
                 {
                     "QUERY_STRING": (
-                        "app_id=file_editor_cm6&source=android_native&client_id=android%3Agecko"
+                        "app_id=code_te2&source=android_native&client_id=android%3Agecko"
                     )
                 },
                 {RPC_CODEC_AUTH_FIELD: RPC_CODEC_MSGPACK_V1},
@@ -247,7 +247,7 @@ class UiIpcMessagePackTests(unittest.IsolatedAsyncioTestCase):
         namespace.enter_room = enter_room  # type: ignore[method-assign]
         namespace.save_session = AsyncMock()  # type: ignore[method-assign]
         with patch(
-            "app.apps.file_editor_cm6.host.run_target_service.list_run_target_routes",
+            "app.apps.code_te2.host.run_target_service.list_run_target_routes",
             new=AsyncMock(side_effect=RuntimeError("pipe unavailable")),
         ):
             with self.assertRaisesRegex(
@@ -258,7 +258,7 @@ class UiIpcMessagePackTests(unittest.IsolatedAsyncioTestCase):
                     "native-sid",
                     {
                         "QUERY_STRING": (
-                            "app_id=file_editor_cm6&source=android_native&client_id=android%3Agecko"
+                            "app_id=code_te2&source=android_native&client_id=android%3Agecko"
                         )
                     },
                     {RPC_CODEC_AUTH_FIELD: RPC_CODEC_MSGPACK_V1},
@@ -293,7 +293,7 @@ class UiIpcMessagePackTests(unittest.IsolatedAsyncioTestCase):
             emitted.append(cast(int, projection["testSequence"]))
 
         with patch(
-            "app.apps.file_editor_cm6.host.run_target_service.list_run_target_routes",
+            "app.apps.code_te2.host.run_target_service.list_run_target_routes",
             new=list_routes,
         ):
             first = asyncio.create_task(emit_run_target_routes_snapshot(emit))

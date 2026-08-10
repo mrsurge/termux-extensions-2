@@ -21,5 +21,5 @@ expecting automatic framework discovery; either import it from an app worker or
 implement a framework service in Rust.
 
 See `app/libs/README.md` for the concise module inventory and
-`rust-spike/rust/crates/te2-rust-spike-server/src/framework_services/` for
+`framework/rust/crates/te2-server/src/framework_services/` for
 framework-owned service implementations.

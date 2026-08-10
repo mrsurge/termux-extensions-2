@@ -1,17 +1,17 @@
 # Framework-Shells Integration
 
 This document describes the current TE2 integration boundary. The supported
-framework is the Rust/Axum server under `rust-spike/rust/`; the deleted Python
+framework is the Rust/Axum server under `framework/rust/`; the deleted Python
 framework, supervisor, and IPC process registry are not compatibility paths.
 
 ## Ownership
 
 - Rust creates and owns the native Ferrous Framework-Shells manager.
-- `rust-spike/rust/crates/te2-rust-spike-server/src/launcher.rs` renders
+- `framework/rust/crates/te2-server/src/launcher.rs` renders
   manifest shellspecs and starts app workers through that native manager.
-- `rust-spike/rust/crates/te2-rust-spike-server/src/apps_lifecycle.rs` owns app
+- `framework/rust/crates/te2-server/src/apps_lifecycle.rs` owns app
   start, open, quit, readiness, and lifecycle event publication.
-- `rust-spike/rust/crates/te2-rust-spike-server/src/runtime_bridge.rs` exposes
+- `framework/rust/crates/te2-server/src/runtime_bridge.rs` exposes
   the FWS dashboard, Socket.IO, WebSocket, and `/api/framework_shells` surfaces
   through the Rust server.
 
@@ -20,7 +20,7 @@ shutdown. Framework termination and app-group shutdown are Rust/Ferrous-owned.
 
 ## Launch Flow
 
-1. `app.cli.run_rust_framework` loads `rust-spike/app/bootstrap.py`.
+1. `app.cli.run_rust_framework` loads `framework/bootstrap/bootstrap.py`.
 2. The bootstrap prepares Framework-Shells environment and secret material,
    builds or reuses the fingerprinted Rust binary, and launches it.
 3. The Rust server initializes its native Ferrous manager.
@@ -57,9 +57,9 @@ development host.
 
 ## Source References
 
-- `rust-spike/app/bootstrap.py`
-- `rust-spike/rust/crates/te2-rust-spike-server/src/main.rs`
-- `rust-spike/rust/crates/te2-rust-spike-server/src/launcher.rs`
-- `rust-spike/rust/crates/te2-rust-spike-server/src/apps_lifecycle.rs`
-- `rust-spike/rust/crates/te2-rust-spike-server/src/runtime_bridge.rs`
+- `framework/bootstrap/bootstrap.py`
+- `framework/rust/crates/te2-server/src/main.rs`
+- `framework/rust/crates/te2-server/src/launcher.rs`
+- `framework/rust/crates/te2-server/src/apps_lifecycle.rs`
+- `framework/rust/crates/te2-server/src/runtime_bridge.rs`
 - `app/libs/app_worker.py`

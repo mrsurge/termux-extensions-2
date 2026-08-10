@@ -5,12 +5,12 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import AsyncMock, patch
 
-from app.apps.file_editor_cm6 import boot_snapshot_backend
-from app.apps.file_editor_cm6 import code_server_shell_manager
-from app.apps.file_editor_cm6 import workbench_adapter_shell_manager
-from app.apps.file_editor_cm6.extension_registry import CodeServerInstallation
-from app.apps.file_editor_cm6.host import code_server_backend
-from app.apps.file_editor_cm6.monaco_editor.editor_backend_services.contracts import JsonMap
+from app.apps.code_te2 import boot_snapshot_backend
+from app.apps.code_te2 import code_server_shell_manager
+from app.apps.code_te2 import workbench_adapter_shell_manager
+from app.apps.code_te2.extension_registry import CodeServerInstallation
+from app.apps.code_te2.host import code_server_backend
+from app.apps.code_te2.monaco_editor.editor_backend_services.contracts import JsonMap
 
 
 def _installation() -> CodeServerInstallation:
@@ -80,7 +80,7 @@ class CodeServerLanguageBackendTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(response["ok"])
         persist.assert_not_awaited()
 
-    async def test_worker_mode_stops_runtime_removes_managed_tree_then_persists(self) -> None:
+    async def test_worker_mode_stops_runtime_preserves_managed_tree_then_persists(self) -> None:
         persist = AsyncMock(return_value={"webWorkersEnabled": True})
         cancel = AsyncMock()
         stop_adapter = AsyncMock(return_value=True)
@@ -101,11 +101,6 @@ class CodeServerLanguageBackendTests(unittest.IsolatedAsyncioTestCase):
                 "terminate_code_server_shell",
                 stop_code_server,
             ),
-            patch.object(
-                code_server_backend,
-                "remove_code_server_installation",
-                return_value=True,
-            ),
             patch.object(code_server_backend, "_persist_mode", persist),
             patch.object(
                 code_server_backend,
@@ -124,7 +119,7 @@ class CodeServerLanguageBackendTests(unittest.IsolatedAsyncioTestCase):
         stop_code_server.assert_awaited_once()
         persist.assert_awaited_once_with(web_workers_enabled=True)
         data = cast(JsonMap, response["data"])
-        self.assertTrue(data["managedRuntimeRemoved"])
+        self.assertTrue(data["managedRuntimePreserved"])
 
     async def test_backend_boot_prime_is_skipped_in_worker_mode(self) -> None:
         prime = AsyncMock()

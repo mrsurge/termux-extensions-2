@@ -5,14 +5,15 @@ import json
 import time
 import uuid
 from collections.abc import Awaitable
-from pathlib import Path
 from typing import Any, TextIO
 
 import socketio
 
+from app.te2_paths import te2_cache_home
+
 TE2_CONSOLE_NAMESPACE = "/te2_console"
 TE2_CONSOLE_SOCKET_PATH = "/te2_console_ws/socket.io"
-TE2_CONSOLE_LOG_DIR = Path.home() / ".cache" / "app_server"
+TE2_CONSOLE_LOG_DIR = te2_cache_home() / "console"
 TE2_CONSOLE_LOG_PATH = TE2_CONSOLE_LOG_DIR / "te2_console_log.jsonl"
 
 _REPLAY_MAX_BYTES = 6 * 1024 * 1024

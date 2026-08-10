@@ -49,8 +49,8 @@ pipe boundary.
 ## Current References
 
 - `AGENTS.md` for the complete ownership and RPC contract.
-- `docs/apps/code_cm6/CODE_TE2.md` for detailed wiring.
-- `docs/apps/code_cm6/STATEFUL_SIDEBAR_APPS.md` for sidebar integration.
+- `docs/apps/code_te2/CODE_TE2.md` for detailed wiring.
+- `docs/apps/code_te2/STATEFUL_SIDEBAR_APPS.md` for sidebar integration.
 - `docs/planning/FILE_EDITOR_CM6_OWNERSHIP_BOUNDARY_CONTRACT.md` for ownership
   reference material.
 - `docs/planning/FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md` for direction.

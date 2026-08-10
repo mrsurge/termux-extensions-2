@@ -171,7 +171,7 @@ TE2's global console transcript can include internal and dev-environment workers
 If the target includes a browser or frontend surface, install the TE2 console bridge as part of the normal integration flow.
 
 Use the cached bridge file at:
-- `~/.cache/app_server/te2_console_bridge.js`
+- `app/static/js/te2_console_bridge.js`
 
 Inject it at the app's real frontend entry point, based on the stack:
 - for SPA or bundler apps, wire it into the main browser bootstrap entry such as `src/main.js`, `src/main.ts`, `src/index.js`, or `src/index.tsx`
@@ -189,11 +189,11 @@ After wiring the bridge:
 Treat `main_page` and `editor_iframe` as internal TE2 workers unless you are specifically debugging TE2 itself.
 
 The default TE2 console bridge for hosted frontends lives at:
-- `app/apps/file_editor_cm6/main_page/frontend/console_bridge.js`
+- `app/apps/code_te2/main_page/frontend/console_bridge.js`
 
 The internal TE2 host wires that bridge from:
-- `app/apps/file_editor_cm6/main_page/frontend/connections/ui-ipc.ts`
-- `app/apps/file_editor_cm6/main.ts`
+- `app/apps/code_te2/main_page/frontend/connections/ui-ipc.ts`
+- `app/apps/code_te2/main.ts`
 
 The live console transport is framework-owned at namespace `/te2_console` on
 path `/te2_console_ws/socket.io`, backed by `app/te2_console_runtime.py`.
@@ -262,7 +262,7 @@ Use TE2 MCP for structured runtime inspection, console access, and framework-she
 
 Treat TE2 console data as frontend/runtime observability, not shell stdin/stdout. Treat framework-shell data as process/runtime observability. Do not claim per-line timestamps for raw framework-shell logs unless they are explicitly provided by the runtime surface.
 
-If the target includes a browser or frontend surface, install the TE2 console bridge from `~/.cache/app_server/te2_console_bridge.js` at the app's real browser entry point. For app debugging, first identify the correct worker with `te2_console_workers_live` or `te2_console_workers`, then inspect or evaluate against that worker specifically.
+If the target includes a browser or frontend surface, install the TE2 console bridge from `app/static/js/te2_console_bridge.js` at the app's real browser entry point. For app debugging, first identify the correct worker with `te2_console_workers_live` or `te2_console_workers`, then inspect or evaluate against that worker specifically.
 
 Do not invent alternate transports or TE2-only product dependencies when existing TE2 control surfaces already solve the task.
 ```

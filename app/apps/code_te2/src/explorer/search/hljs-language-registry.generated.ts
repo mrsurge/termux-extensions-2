@@ -1,0 +1,394 @@
+// Generated from app/apps/code_te2/vendor/highlightjs/lib/languages primary modules.
+// Keep this registry broad so search/changes/review snippets cover the editor language set.
+
+export type HljsLanguageFactory = (hljs: unknown) => unknown;
+
+import hljs_lang_1cModule from "../../../vendor/highlightjs/lib/languages/1c.js";
+import hljs_abnfModule from "../../../vendor/highlightjs/lib/languages/abnf.js";
+import hljs_accesslogModule from "../../../vendor/highlightjs/lib/languages/accesslog.js";
+import hljs_actionscriptModule from "../../../vendor/highlightjs/lib/languages/actionscript.js";
+import hljs_adaModule from "../../../vendor/highlightjs/lib/languages/ada.js";
+import hljs_angelscriptModule from "../../../vendor/highlightjs/lib/languages/angelscript.js";
+import hljs_apacheModule from "../../../vendor/highlightjs/lib/languages/apache.js";
+import hljs_applescriptModule from "../../../vendor/highlightjs/lib/languages/applescript.js";
+import hljs_arcadeModule from "../../../vendor/highlightjs/lib/languages/arcade.js";
+import hljs_arduinoModule from "../../../vendor/highlightjs/lib/languages/arduino.js";
+import hljs_armasmModule from "../../../vendor/highlightjs/lib/languages/armasm.js";
+import hljs_asciidocModule from "../../../vendor/highlightjs/lib/languages/asciidoc.js";
+import hljs_aspectjModule from "../../../vendor/highlightjs/lib/languages/aspectj.js";
+import hljs_autohotkeyModule from "../../../vendor/highlightjs/lib/languages/autohotkey.js";
+import hljs_autoitModule from "../../../vendor/highlightjs/lib/languages/autoit.js";
+import hljs_avrasmModule from "../../../vendor/highlightjs/lib/languages/avrasm.js";
+import hljs_awkModule from "../../../vendor/highlightjs/lib/languages/awk.js";
+import hljs_axaptaModule from "../../../vendor/highlightjs/lib/languages/axapta.js";
+import hljs_bashModule from "../../../vendor/highlightjs/lib/languages/bash.js";
+import hljs_basicModule from "../../../vendor/highlightjs/lib/languages/basic.js";
+import hljs_bnfModule from "../../../vendor/highlightjs/lib/languages/bnf.js";
+import hljs_brainfuckModule from "../../../vendor/highlightjs/lib/languages/brainfuck.js";
+import hljs_cModule from "../../../vendor/highlightjs/lib/languages/c.js";
+import hljs_calModule from "../../../vendor/highlightjs/lib/languages/cal.js";
+import hljs_capnprotoModule from "../../../vendor/highlightjs/lib/languages/capnproto.js";
+import hljs_ceylonModule from "../../../vendor/highlightjs/lib/languages/ceylon.js";
+import hljs_cleanModule from "../../../vendor/highlightjs/lib/languages/clean.js";
+import hljs_clojureModule from "../../../vendor/highlightjs/lib/languages/clojure.js";
+import hljs_clojure_replModule from "../../../vendor/highlightjs/lib/languages/clojure-repl.js";
+import hljs_cmakeModule from "../../../vendor/highlightjs/lib/languages/cmake.js";
+import hljs_coffeescriptModule from "../../../vendor/highlightjs/lib/languages/coffeescript.js";
+import hljs_coqModule from "../../../vendor/highlightjs/lib/languages/coq.js";
+import hljs_cosModule from "../../../vendor/highlightjs/lib/languages/cos.js";
+import hljs_cppModule from "../../../vendor/highlightjs/lib/languages/cpp.js";
+import hljs_crmshModule from "../../../vendor/highlightjs/lib/languages/crmsh.js";
+import hljs_crystalModule from "../../../vendor/highlightjs/lib/languages/crystal.js";
+import hljs_csharpModule from "../../../vendor/highlightjs/lib/languages/csharp.js";
+import hljs_cspModule from "../../../vendor/highlightjs/lib/languages/csp.js";
+import hljs_cssModule from "../../../vendor/highlightjs/lib/languages/css.js";
+import hljs_dModule from "../../../vendor/highlightjs/lib/languages/d.js";
+import hljs_dartModule from "../../../vendor/highlightjs/lib/languages/dart.js";
+import hljs_delphiModule from "../../../vendor/highlightjs/lib/languages/delphi.js";
+import hljs_diffModule from "../../../vendor/highlightjs/lib/languages/diff.js";
+import hljs_djangoModule from "../../../vendor/highlightjs/lib/languages/django.js";
+import hljs_dnsModule from "../../../vendor/highlightjs/lib/languages/dns.js";
+import hljs_dockerfileModule from "../../../vendor/highlightjs/lib/languages/dockerfile.js";
+import hljs_dosModule from "../../../vendor/highlightjs/lib/languages/dos.js";
+import hljs_dsconfigModule from "../../../vendor/highlightjs/lib/languages/dsconfig.js";
+import hljs_dtsModule from "../../../vendor/highlightjs/lib/languages/dts.js";
+import hljs_dustModule from "../../../vendor/highlightjs/lib/languages/dust.js";
+import hljs_ebnfModule from "../../../vendor/highlightjs/lib/languages/ebnf.js";
+import hljs_elixirModule from "../../../vendor/highlightjs/lib/languages/elixir.js";
+import hljs_elmModule from "../../../vendor/highlightjs/lib/languages/elm.js";
+import hljs_erbModule from "../../../vendor/highlightjs/lib/languages/erb.js";
+import hljs_erlangModule from "../../../vendor/highlightjs/lib/languages/erlang.js";
+import hljs_erlang_replModule from "../../../vendor/highlightjs/lib/languages/erlang-repl.js";
+import hljs_excelModule from "../../../vendor/highlightjs/lib/languages/excel.js";
+import hljs_fixModule from "../../../vendor/highlightjs/lib/languages/fix.js";
+import hljs_flixModule from "../../../vendor/highlightjs/lib/languages/flix.js";
+import hljs_fortranModule from "../../../vendor/highlightjs/lib/languages/fortran.js";
+import hljs_fsharpModule from "../../../vendor/highlightjs/lib/languages/fsharp.js";
+import hljs_gamsModule from "../../../vendor/highlightjs/lib/languages/gams.js";
+import hljs_gaussModule from "../../../vendor/highlightjs/lib/languages/gauss.js";
+import hljs_gcodeModule from "../../../vendor/highlightjs/lib/languages/gcode.js";
+import hljs_gherkinModule from "../../../vendor/highlightjs/lib/languages/gherkin.js";
+import hljs_glslModule from "../../../vendor/highlightjs/lib/languages/glsl.js";
+import hljs_gmlModule from "../../../vendor/highlightjs/lib/languages/gml.js";
+import hljs_goModule from "../../../vendor/highlightjs/lib/languages/go.js";
+import hljs_goloModule from "../../../vendor/highlightjs/lib/languages/golo.js";
+import hljs_gradleModule from "../../../vendor/highlightjs/lib/languages/gradle.js";
+import hljs_graphqlModule from "../../../vendor/highlightjs/lib/languages/graphql.js";
+import hljs_groovyModule from "../../../vendor/highlightjs/lib/languages/groovy.js";
+import hljs_hamlModule from "../../../vendor/highlightjs/lib/languages/haml.js";
+import hljs_handlebarsModule from "../../../vendor/highlightjs/lib/languages/handlebars.js";
+import hljs_haskellModule from "../../../vendor/highlightjs/lib/languages/haskell.js";
+import hljs_haxeModule from "../../../vendor/highlightjs/lib/languages/haxe.js";
+import hljs_hspModule from "../../../vendor/highlightjs/lib/languages/hsp.js";
+import hljs_httpModule from "../../../vendor/highlightjs/lib/languages/http.js";
+import hljs_hyModule from "../../../vendor/highlightjs/lib/languages/hy.js";
+import hljs_inform7Module from "../../../vendor/highlightjs/lib/languages/inform7.js";
+import hljs_iniModule from "../../../vendor/highlightjs/lib/languages/ini.js";
+import hljs_irpf90Module from "../../../vendor/highlightjs/lib/languages/irpf90.js";
+import hljs_isblModule from "../../../vendor/highlightjs/lib/languages/isbl.js";
+import hljs_javaModule from "../../../vendor/highlightjs/lib/languages/java.js";
+import hljs_javascriptModule from "../../../vendor/highlightjs/lib/languages/javascript.js";
+import hljs_jboss_cliModule from "../../../vendor/highlightjs/lib/languages/jboss-cli.js";
+import hljs_jsonModule from "../../../vendor/highlightjs/lib/languages/json.js";
+import hljs_juliaModule from "../../../vendor/highlightjs/lib/languages/julia.js";
+import hljs_julia_replModule from "../../../vendor/highlightjs/lib/languages/julia-repl.js";
+import hljs_kotlinModule from "../../../vendor/highlightjs/lib/languages/kotlin.js";
+import hljs_lassoModule from "../../../vendor/highlightjs/lib/languages/lasso.js";
+import hljs_latexModule from "../../../vendor/highlightjs/lib/languages/latex.js";
+import hljs_ldifModule from "../../../vendor/highlightjs/lib/languages/ldif.js";
+import hljs_leafModule from "../../../vendor/highlightjs/lib/languages/leaf.js";
+import hljs_lessModule from "../../../vendor/highlightjs/lib/languages/less.js";
+import hljs_lispModule from "../../../vendor/highlightjs/lib/languages/lisp.js";
+import hljs_livecodeserverModule from "../../../vendor/highlightjs/lib/languages/livecodeserver.js";
+import hljs_livescriptModule from "../../../vendor/highlightjs/lib/languages/livescript.js";
+import hljs_llvmModule from "../../../vendor/highlightjs/lib/languages/llvm.js";
+import hljs_lslModule from "../../../vendor/highlightjs/lib/languages/lsl.js";
+import hljs_luaModule from "../../../vendor/highlightjs/lib/languages/lua.js";
+import hljs_makefileModule from "../../../vendor/highlightjs/lib/languages/makefile.js";
+import hljs_markdownModule from "../../../vendor/highlightjs/lib/languages/markdown.js";
+import hljs_mathematicaModule from "../../../vendor/highlightjs/lib/languages/mathematica.js";
+import hljs_matlabModule from "../../../vendor/highlightjs/lib/languages/matlab.js";
+import hljs_maximaModule from "../../../vendor/highlightjs/lib/languages/maxima.js";
+import hljs_melModule from "../../../vendor/highlightjs/lib/languages/mel.js";
+import hljs_mercuryModule from "../../../vendor/highlightjs/lib/languages/mercury.js";
+import hljs_mipsasmModule from "../../../vendor/highlightjs/lib/languages/mipsasm.js";
+import hljs_mizarModule from "../../../vendor/highlightjs/lib/languages/mizar.js";
+import hljs_mojoliciousModule from "../../../vendor/highlightjs/lib/languages/mojolicious.js";
+import hljs_monkeyModule from "../../../vendor/highlightjs/lib/languages/monkey.js";
+import hljs_moonscriptModule from "../../../vendor/highlightjs/lib/languages/moonscript.js";
+import hljs_n1qlModule from "../../../vendor/highlightjs/lib/languages/n1ql.js";
+import hljs_nestedtextModule from "../../../vendor/highlightjs/lib/languages/nestedtext.js";
+import hljs_nginxModule from "../../../vendor/highlightjs/lib/languages/nginx.js";
+import hljs_nimModule from "../../../vendor/highlightjs/lib/languages/nim.js";
+import hljs_nixModule from "../../../vendor/highlightjs/lib/languages/nix.js";
+import hljs_node_replModule from "../../../vendor/highlightjs/lib/languages/node-repl.js";
+import hljs_nsisModule from "../../../vendor/highlightjs/lib/languages/nsis.js";
+import hljs_objectivecModule from "../../../vendor/highlightjs/lib/languages/objectivec.js";
+import hljs_ocamlModule from "../../../vendor/highlightjs/lib/languages/ocaml.js";
+import hljs_openscadModule from "../../../vendor/highlightjs/lib/languages/openscad.js";
+import hljs_oxygeneModule from "../../../vendor/highlightjs/lib/languages/oxygene.js";
+import hljs_parser3Module from "../../../vendor/highlightjs/lib/languages/parser3.js";
+import hljs_perlModule from "../../../vendor/highlightjs/lib/languages/perl.js";
+import hljs_pfModule from "../../../vendor/highlightjs/lib/languages/pf.js";
+import hljs_pgsqlModule from "../../../vendor/highlightjs/lib/languages/pgsql.js";
+import hljs_phpModule from "../../../vendor/highlightjs/lib/languages/php.js";
+import hljs_php_templateModule from "../../../vendor/highlightjs/lib/languages/php-template.js";
+import hljs_plaintextModule from "../../../vendor/highlightjs/lib/languages/plaintext.js";
+import hljs_ponyModule from "../../../vendor/highlightjs/lib/languages/pony.js";
+import hljs_powershellModule from "../../../vendor/highlightjs/lib/languages/powershell.js";
+import hljs_processingModule from "../../../vendor/highlightjs/lib/languages/processing.js";
+import hljs_profileModule from "../../../vendor/highlightjs/lib/languages/profile.js";
+import hljs_prologModule from "../../../vendor/highlightjs/lib/languages/prolog.js";
+import hljs_propertiesModule from "../../../vendor/highlightjs/lib/languages/properties.js";
+import hljs_protobufModule from "../../../vendor/highlightjs/lib/languages/protobuf.js";
+import hljs_puppetModule from "../../../vendor/highlightjs/lib/languages/puppet.js";
+import hljs_purebasicModule from "../../../vendor/highlightjs/lib/languages/purebasic.js";
+import hljs_pythonModule from "../../../vendor/highlightjs/lib/languages/python.js";
+import hljs_python_replModule from "../../../vendor/highlightjs/lib/languages/python-repl.js";
+import hljs_qModule from "../../../vendor/highlightjs/lib/languages/q.js";
+import hljs_qmlModule from "../../../vendor/highlightjs/lib/languages/qml.js";
+import hljs_rModule from "../../../vendor/highlightjs/lib/languages/r.js";
+import hljs_reasonmlModule from "../../../vendor/highlightjs/lib/languages/reasonml.js";
+import hljs_ribModule from "../../../vendor/highlightjs/lib/languages/rib.js";
+import hljs_roboconfModule from "../../../vendor/highlightjs/lib/languages/roboconf.js";
+import hljs_routerosModule from "../../../vendor/highlightjs/lib/languages/routeros.js";
+import hljs_rslModule from "../../../vendor/highlightjs/lib/languages/rsl.js";
+import hljs_rubyModule from "../../../vendor/highlightjs/lib/languages/ruby.js";
+import hljs_ruleslanguageModule from "../../../vendor/highlightjs/lib/languages/ruleslanguage.js";
+import hljs_rustModule from "../../../vendor/highlightjs/lib/languages/rust.js";
+import hljs_sasModule from "../../../vendor/highlightjs/lib/languages/sas.js";
+import hljs_scalaModule from "../../../vendor/highlightjs/lib/languages/scala.js";
+import hljs_schemeModule from "../../../vendor/highlightjs/lib/languages/scheme.js";
+import hljs_scilabModule from "../../../vendor/highlightjs/lib/languages/scilab.js";
+import hljs_scssModule from "../../../vendor/highlightjs/lib/languages/scss.js";
+import hljs_shellModule from "../../../vendor/highlightjs/lib/languages/shell.js";
+import hljs_smaliModule from "../../../vendor/highlightjs/lib/languages/smali.js";
+import hljs_smalltalkModule from "../../../vendor/highlightjs/lib/languages/smalltalk.js";
+import hljs_smlModule from "../../../vendor/highlightjs/lib/languages/sml.js";
+import hljs_sqfModule from "../../../vendor/highlightjs/lib/languages/sqf.js";
+import hljs_sqlModule from "../../../vendor/highlightjs/lib/languages/sql.js";
+import hljs_stanModule from "../../../vendor/highlightjs/lib/languages/stan.js";
+import hljs_stataModule from "../../../vendor/highlightjs/lib/languages/stata.js";
+import hljs_step21Module from "../../../vendor/highlightjs/lib/languages/step21.js";
+import hljs_stylusModule from "../../../vendor/highlightjs/lib/languages/stylus.js";
+import hljs_subunitModule from "../../../vendor/highlightjs/lib/languages/subunit.js";
+import hljs_swiftModule from "../../../vendor/highlightjs/lib/languages/swift.js";
+import hljs_taggerscriptModule from "../../../vendor/highlightjs/lib/languages/taggerscript.js";
+import hljs_tapModule from "../../../vendor/highlightjs/lib/languages/tap.js";
+import hljs_tclModule from "../../../vendor/highlightjs/lib/languages/tcl.js";
+import hljs_thriftModule from "../../../vendor/highlightjs/lib/languages/thrift.js";
+import hljs_tpModule from "../../../vendor/highlightjs/lib/languages/tp.js";
+import hljs_twigModule from "../../../vendor/highlightjs/lib/languages/twig.js";
+import hljs_typescriptModule from "../../../vendor/highlightjs/lib/languages/typescript.js";
+import hljs_valaModule from "../../../vendor/highlightjs/lib/languages/vala.js";
+import hljs_vbnetModule from "../../../vendor/highlightjs/lib/languages/vbnet.js";
+import hljs_vbscriptModule from "../../../vendor/highlightjs/lib/languages/vbscript.js";
+import hljs_vbscript_htmlModule from "../../../vendor/highlightjs/lib/languages/vbscript-html.js";
+import hljs_verilogModule from "../../../vendor/highlightjs/lib/languages/verilog.js";
+import hljs_vhdlModule from "../../../vendor/highlightjs/lib/languages/vhdl.js";
+import hljs_vimModule from "../../../vendor/highlightjs/lib/languages/vim.js";
+import hljs_wasmModule from "../../../vendor/highlightjs/lib/languages/wasm.js";
+import hljs_wrenModule from "../../../vendor/highlightjs/lib/languages/wren.js";
+import hljs_x86asmModule from "../../../vendor/highlightjs/lib/languages/x86asm.js";
+import hljs_xlModule from "../../../vendor/highlightjs/lib/languages/xl.js";
+import hljs_xmlModule from "../../../vendor/highlightjs/lib/languages/xml.js";
+import hljs_xqueryModule from "../../../vendor/highlightjs/lib/languages/xquery.js";
+import hljs_yamlModule from "../../../vendor/highlightjs/lib/languages/yaml.js";
+import hljs_zephirModule from "../../../vendor/highlightjs/lib/languages/zephir.js";
+
+export const HIGHLIGHT_LANGUAGE_FACTORIES: ReadonlyArray<
+  readonly [string, HljsLanguageFactory]
+> = [
+  ["1c", hljs_lang_1cModule as HljsLanguageFactory],
+  ["abnf", hljs_abnfModule as HljsLanguageFactory],
+  ["accesslog", hljs_accesslogModule as HljsLanguageFactory],
+  ["actionscript", hljs_actionscriptModule as HljsLanguageFactory],
+  ["ada", hljs_adaModule as HljsLanguageFactory],
+  ["angelscript", hljs_angelscriptModule as HljsLanguageFactory],
+  ["apache", hljs_apacheModule as HljsLanguageFactory],
+  ["applescript", hljs_applescriptModule as HljsLanguageFactory],
+  ["arcade", hljs_arcadeModule as HljsLanguageFactory],
+  ["arduino", hljs_arduinoModule as HljsLanguageFactory],
+  ["armasm", hljs_armasmModule as HljsLanguageFactory],
+  ["asciidoc", hljs_asciidocModule as HljsLanguageFactory],
+  ["aspectj", hljs_aspectjModule as HljsLanguageFactory],
+  ["autohotkey", hljs_autohotkeyModule as HljsLanguageFactory],
+  ["autoit", hljs_autoitModule as HljsLanguageFactory],
+  ["avrasm", hljs_avrasmModule as HljsLanguageFactory],
+  ["awk", hljs_awkModule as HljsLanguageFactory],
+  ["axapta", hljs_axaptaModule as HljsLanguageFactory],
+  ["bash", hljs_bashModule as HljsLanguageFactory],
+  ["basic", hljs_basicModule as HljsLanguageFactory],
+  ["bnf", hljs_bnfModule as HljsLanguageFactory],
+  ["brainfuck", hljs_brainfuckModule as HljsLanguageFactory],
+  ["c", hljs_cModule as HljsLanguageFactory],
+  ["cal", hljs_calModule as HljsLanguageFactory],
+  ["capnproto", hljs_capnprotoModule as HljsLanguageFactory],
+  ["ceylon", hljs_ceylonModule as HljsLanguageFactory],
+  ["clean", hljs_cleanModule as HljsLanguageFactory],
+  ["clojure", hljs_clojureModule as HljsLanguageFactory],
+  ["clojure-repl", hljs_clojure_replModule as HljsLanguageFactory],
+  ["cmake", hljs_cmakeModule as HljsLanguageFactory],
+  ["coffeescript", hljs_coffeescriptModule as HljsLanguageFactory],
+  ["coq", hljs_coqModule as HljsLanguageFactory],
+  ["cos", hljs_cosModule as HljsLanguageFactory],
+  ["cpp", hljs_cppModule as HljsLanguageFactory],
+  ["crmsh", hljs_crmshModule as HljsLanguageFactory],
+  ["crystal", hljs_crystalModule as HljsLanguageFactory],
+  ["csharp", hljs_csharpModule as HljsLanguageFactory],
+  ["csp", hljs_cspModule as HljsLanguageFactory],
+  ["css", hljs_cssModule as HljsLanguageFactory],
+  ["d", hljs_dModule as HljsLanguageFactory],
+  ["dart", hljs_dartModule as HljsLanguageFactory],
+  ["delphi", hljs_delphiModule as HljsLanguageFactory],
+  ["diff", hljs_diffModule as HljsLanguageFactory],
+  ["django", hljs_djangoModule as HljsLanguageFactory],
+  ["dns", hljs_dnsModule as HljsLanguageFactory],
+  ["dockerfile", hljs_dockerfileModule as HljsLanguageFactory],
+  ["dos", hljs_dosModule as HljsLanguageFactory],
+  ["dsconfig", hljs_dsconfigModule as HljsLanguageFactory],
+  ["dts", hljs_dtsModule as HljsLanguageFactory],
+  ["dust", hljs_dustModule as HljsLanguageFactory],
+  ["ebnf", hljs_ebnfModule as HljsLanguageFactory],
+  ["elixir", hljs_elixirModule as HljsLanguageFactory],
+  ["elm", hljs_elmModule as HljsLanguageFactory],
+  ["erb", hljs_erbModule as HljsLanguageFactory],
+  ["erlang", hljs_erlangModule as HljsLanguageFactory],
+  ["erlang-repl", hljs_erlang_replModule as HljsLanguageFactory],
+  ["excel", hljs_excelModule as HljsLanguageFactory],
+  ["fix", hljs_fixModule as HljsLanguageFactory],
+  ["flix", hljs_flixModule as HljsLanguageFactory],
+  ["fortran", hljs_fortranModule as HljsLanguageFactory],
+  ["fsharp", hljs_fsharpModule as HljsLanguageFactory],
+  ["gams", hljs_gamsModule as HljsLanguageFactory],
+  ["gauss", hljs_gaussModule as HljsLanguageFactory],
+  ["gcode", hljs_gcodeModule as HljsLanguageFactory],
+  ["gherkin", hljs_gherkinModule as HljsLanguageFactory],
+  ["glsl", hljs_glslModule as HljsLanguageFactory],
+  ["gml", hljs_gmlModule as HljsLanguageFactory],
+  ["go", hljs_goModule as HljsLanguageFactory],
+  ["golo", hljs_goloModule as HljsLanguageFactory],
+  ["gradle", hljs_gradleModule as HljsLanguageFactory],
+  ["graphql", hljs_graphqlModule as HljsLanguageFactory],
+  ["groovy", hljs_groovyModule as HljsLanguageFactory],
+  ["haml", hljs_hamlModule as HljsLanguageFactory],
+  ["handlebars", hljs_handlebarsModule as HljsLanguageFactory],
+  ["haskell", hljs_haskellModule as HljsLanguageFactory],
+  ["haxe", hljs_haxeModule as HljsLanguageFactory],
+  ["hsp", hljs_hspModule as HljsLanguageFactory],
+  ["http", hljs_httpModule as HljsLanguageFactory],
+  ["hy", hljs_hyModule as HljsLanguageFactory],
+  ["inform7", hljs_inform7Module as HljsLanguageFactory],
+  ["ini", hljs_iniModule as HljsLanguageFactory],
+  ["irpf90", hljs_irpf90Module as HljsLanguageFactory],
+  ["isbl", hljs_isblModule as HljsLanguageFactory],
+  ["java", hljs_javaModule as HljsLanguageFactory],
+  ["javascript", hljs_javascriptModule as HljsLanguageFactory],
+  ["jboss-cli", hljs_jboss_cliModule as HljsLanguageFactory],
+  ["json", hljs_jsonModule as HljsLanguageFactory],
+  ["julia", hljs_juliaModule as HljsLanguageFactory],
+  ["julia-repl", hljs_julia_replModule as HljsLanguageFactory],
+  ["kotlin", hljs_kotlinModule as HljsLanguageFactory],
+  ["lasso", hljs_lassoModule as HljsLanguageFactory],
+  ["latex", hljs_latexModule as HljsLanguageFactory],
+  ["ldif", hljs_ldifModule as HljsLanguageFactory],
+  ["leaf", hljs_leafModule as HljsLanguageFactory],
+  ["less", hljs_lessModule as HljsLanguageFactory],
+  ["lisp", hljs_lispModule as HljsLanguageFactory],
+  ["livecodeserver", hljs_livecodeserverModule as HljsLanguageFactory],
+  ["livescript", hljs_livescriptModule as HljsLanguageFactory],
+  ["llvm", hljs_llvmModule as HljsLanguageFactory],
+  ["lsl", hljs_lslModule as HljsLanguageFactory],
+  ["lua", hljs_luaModule as HljsLanguageFactory],
+  ["makefile", hljs_makefileModule as HljsLanguageFactory],
+  ["markdown", hljs_markdownModule as HljsLanguageFactory],
+  ["mathematica", hljs_mathematicaModule as HljsLanguageFactory],
+  ["matlab", hljs_matlabModule as HljsLanguageFactory],
+  ["maxima", hljs_maximaModule as HljsLanguageFactory],
+  ["mel", hljs_melModule as HljsLanguageFactory],
+  ["mercury", hljs_mercuryModule as HljsLanguageFactory],
+  ["mipsasm", hljs_mipsasmModule as HljsLanguageFactory],
+  ["mizar", hljs_mizarModule as HljsLanguageFactory],
+  ["mojolicious", hljs_mojoliciousModule as HljsLanguageFactory],
+  ["monkey", hljs_monkeyModule as HljsLanguageFactory],
+  ["moonscript", hljs_moonscriptModule as HljsLanguageFactory],
+  ["n1ql", hljs_n1qlModule as HljsLanguageFactory],
+  ["nestedtext", hljs_nestedtextModule as HljsLanguageFactory],
+  ["nginx", hljs_nginxModule as HljsLanguageFactory],
+  ["nim", hljs_nimModule as HljsLanguageFactory],
+  ["nix", hljs_nixModule as HljsLanguageFactory],
+  ["node-repl", hljs_node_replModule as HljsLanguageFactory],
+  ["nsis", hljs_nsisModule as HljsLanguageFactory],
+  ["objectivec", hljs_objectivecModule as HljsLanguageFactory],
+  ["ocaml", hljs_ocamlModule as HljsLanguageFactory],
+  ["openscad", hljs_openscadModule as HljsLanguageFactory],
+  ["oxygene", hljs_oxygeneModule as HljsLanguageFactory],
+  ["parser3", hljs_parser3Module as HljsLanguageFactory],
+  ["perl", hljs_perlModule as HljsLanguageFactory],
+  ["pf", hljs_pfModule as HljsLanguageFactory],
+  ["pgsql", hljs_pgsqlModule as HljsLanguageFactory],
+  ["php", hljs_phpModule as HljsLanguageFactory],
+  ["php-template", hljs_php_templateModule as HljsLanguageFactory],
+  ["plaintext", hljs_plaintextModule as HljsLanguageFactory],
+  ["pony", hljs_ponyModule as HljsLanguageFactory],
+  ["powershell", hljs_powershellModule as HljsLanguageFactory],
+  ["processing", hljs_processingModule as HljsLanguageFactory],
+  ["profile", hljs_profileModule as HljsLanguageFactory],
+  ["prolog", hljs_prologModule as HljsLanguageFactory],
+  ["properties", hljs_propertiesModule as HljsLanguageFactory],
+  ["protobuf", hljs_protobufModule as HljsLanguageFactory],
+  ["puppet", hljs_puppetModule as HljsLanguageFactory],
+  ["purebasic", hljs_purebasicModule as HljsLanguageFactory],
+  ["python", hljs_pythonModule as HljsLanguageFactory],
+  ["python-repl", hljs_python_replModule as HljsLanguageFactory],
+  ["q", hljs_qModule as HljsLanguageFactory],
+  ["qml", hljs_qmlModule as HljsLanguageFactory],
+  ["r", hljs_rModule as HljsLanguageFactory],
+  ["reasonml", hljs_reasonmlModule as HljsLanguageFactory],
+  ["rib", hljs_ribModule as HljsLanguageFactory],
+  ["roboconf", hljs_roboconfModule as HljsLanguageFactory],
+  ["routeros", hljs_routerosModule as HljsLanguageFactory],
+  ["rsl", hljs_rslModule as HljsLanguageFactory],
+  ["ruby", hljs_rubyModule as HljsLanguageFactory],
+  ["ruleslanguage", hljs_ruleslanguageModule as HljsLanguageFactory],
+  ["rust", hljs_rustModule as HljsLanguageFactory],
+  ["sas", hljs_sasModule as HljsLanguageFactory],
+  ["scala", hljs_scalaModule as HljsLanguageFactory],
+  ["scheme", hljs_schemeModule as HljsLanguageFactory],
+  ["scilab", hljs_scilabModule as HljsLanguageFactory],
+  ["scss", hljs_scssModule as HljsLanguageFactory],
+  ["shell", hljs_shellModule as HljsLanguageFactory],
+  ["smali", hljs_smaliModule as HljsLanguageFactory],
+  ["smalltalk", hljs_smalltalkModule as HljsLanguageFactory],
+  ["sml", hljs_smlModule as HljsLanguageFactory],
+  ["sqf", hljs_sqfModule as HljsLanguageFactory],
+  ["sql", hljs_sqlModule as HljsLanguageFactory],
+  ["stan", hljs_stanModule as HljsLanguageFactory],
+  ["stata", hljs_stataModule as HljsLanguageFactory],
+  ["step21", hljs_step21Module as HljsLanguageFactory],
+  ["stylus", hljs_stylusModule as HljsLanguageFactory],
+  ["subunit", hljs_subunitModule as HljsLanguageFactory],
+  ["swift", hljs_swiftModule as HljsLanguageFactory],
+  ["taggerscript", hljs_taggerscriptModule as HljsLanguageFactory],
+  ["tap", hljs_tapModule as HljsLanguageFactory],
+  ["tcl", hljs_tclModule as HljsLanguageFactory],
+  ["thrift", hljs_thriftModule as HljsLanguageFactory],
+  ["tp", hljs_tpModule as HljsLanguageFactory],
+  ["twig", hljs_twigModule as HljsLanguageFactory],
+  ["typescript", hljs_typescriptModule as HljsLanguageFactory],
+  ["vala", hljs_valaModule as HljsLanguageFactory],
+  ["vbnet", hljs_vbnetModule as HljsLanguageFactory],
+  ["vbscript", hljs_vbscriptModule as HljsLanguageFactory],
+  ["vbscript-html", hljs_vbscript_htmlModule as HljsLanguageFactory],
+  ["verilog", hljs_verilogModule as HljsLanguageFactory],
+  ["vhdl", hljs_vhdlModule as HljsLanguageFactory],
+  ["vim", hljs_vimModule as HljsLanguageFactory],
+  ["wasm", hljs_wasmModule as HljsLanguageFactory],
+  ["wren", hljs_wrenModule as HljsLanguageFactory],
+  ["x86asm", hljs_x86asmModule as HljsLanguageFactory],
+  ["xl", hljs_xlModule as HljsLanguageFactory],
+  ["xml", hljs_xmlModule as HljsLanguageFactory],
+  ["xquery", hljs_xqueryModule as HljsLanguageFactory],
+  ["yaml", hljs_yamlModule as HljsLanguageFactory],
+  ["zephir", hljs_zephirModule as HljsLanguageFactory],
+];

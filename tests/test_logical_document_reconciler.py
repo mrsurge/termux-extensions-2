@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import cast, override
 from unittest.mock import patch
 
-from app.apps.file_editor_cm6 import logical_document_reconciler as reconciler_module
-from app.apps.file_editor_cm6.logical_document_reconciler import (
+from app.apps.code_te2 import logical_document_reconciler as reconciler_module
+from app.apps.code_te2.logical_document_reconciler import (
     LogicalDocumentDescriptor,
     LogicalDocumentReconciler,
     LogicalDocumentSnapshot,
@@ -17,8 +17,8 @@ from app.apps.file_editor_cm6.logical_document_reconciler import (
     build_logical_document_snapshot,
     materialize_logical_document_hydration,
 )
-from app.apps.file_editor_cm6.open_state_backend import SidecarOpenStatePayload
-from app.apps.file_editor_cm6.worker_services.event_bus import JsonObject, WorkerEvent
+from app.apps.code_te2.open_state_backend import SidecarOpenStatePayload
+from app.apps.code_te2.worker_services.event_bus import JsonObject, WorkerEvent
 
 
 class _FakeSidecar:

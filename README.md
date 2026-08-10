@@ -27,13 +27,12 @@ te2
        -> per-app Python/Node/native workers
 ```
 
-The current Rust source still lives under `rust-spike/` for historical reasons.
-That directory is the supported framework implementation.
+The supported Rust framework source lives under `framework/`.
 
 Important roots:
 
-- `rust-spike/rust/` — Rust framework workspace
-- `rust-spike/app/bootstrap.py` — cached build and launch bootstrap
+- `framework/rust/` — Rust framework workspace
+- `framework/bootstrap/bootstrap.py` — cached build and launch bootstrap
 - `app/apps/` — built-in TE2 apps
 - `app/static/` and `app/templates/` — framework-served assets
 - `app/te2_mcp/` and `app/te2_console_runtime.py` — runtime observability bridge
@@ -41,7 +40,7 @@ Important roots:
 
 ## Included Apps
 
-- `file_editor_cm6` — Code TE2, the primary workspace/editor app
+- `code_te2` — Code TE2, the primary workspace/editor app
 - `terminal` — standalone Node PTY terminal with reconnect checkpoints
 - `file_explorer` — standalone file browser
 - `archive_manager` — archive browsing and extraction
@@ -90,33 +89,91 @@ te2
 ```
 
 Open `http://127.0.0.1:8089`. TE2 binds to localhost by default. Use
-`te2 --broadcast all` (or a narrower supported broadcast target) when network
-access is intentional.
+`te2 --broadcast all` only when unrestricted network access is intentional.
+Prefer a narrower source or interface policy:
 
-The first launch builds a fingerprinted Rust binary and caches Cargo/build
-artifacts under the TE2 cache directory. Later launches reuse that binary until
-the Rust source fingerprint changes.
+```bash
+# Machine-readable names, addresses, prefixes, and networks.
+te2 --list-interfaces
+
+# Admit traffic whose destination is an address owned by this interface.
+# This works for ordinary LAN adapters and /32 VPN adapters such as Tailscale.
+te2 --broadcast tailscale0
+
+# Admit only one client address or a client subnet.
+te2 --broadcast 100.91.80.45
+te2 --broadcast 100.64.0.0/10
+
+# Mixed IPv4/IPv6 selectors are supported.
+te2 --broadcast 192.168.1.0/24 fd7a:115c:a1e0::/48
+```
+
+Every filtered mode continues to admit loopback. The launcher resolves the
+selectors once, opens only the required IPv4/IPv6 wildcard listeners, and
+enforces the same policy before HTTP, SSE, raw WebSocket, or Socket.IO routing.
+Framework-owned subprocesses continue to receive a loopback
+`TE_FRAMEWORK_URL`, even when public listeners use wildcard addresses.
+
+`--host <exact-ip>` remains an advanced bind override. A non-loopback exact
+host binds that address plus a private same-family loopback listener; wildcard
+host overrides allow all clients. Invalid selectors and interfaces without a
+usable IP address fail before the framework binds any socket.
+
+The launcher builds an optimized release server by default; pass `--debug` only
+for an unoptimized development server. Cargo incremental artifacts live under
+`$TE2_CACHE_HOME/framework/build/cargo-target`, where `$TE2_CACHE_HOME` means
+the resolved canonical root described below. Final-binary publication is
+locked and atomic, and only the selected validated fingerprint is retained.
+
+Launcher overrides use the canonical `TE2_SERVER_*` namespace:
+`TE2_SERVER_HOST`, `TE2_SERVER_PORT`, `TE2_SERVER_CACHE_DIR`,
+`TE2_SERVER_BIN`, `TE2_SERVER_CARGO_MANIFEST`, `TE2_SERVER_DEBUG`,
+`TE2_SERVER_FORCE_BUILD`, `TE2_SERVER_NO_BUILD_CACHE`, and
+`TE2_SERVER_DISABLE_FERROUS_FRAMEWORK`. Bootstrap-to-server values use the same
+namespace for bind hosts, internal host, network policy, project/app roots, and
+Cargo target selection. The private Python sidecar uses
+`TE2_RUNTIME_BRIDGE_HOST`, `TE2_RUNTIME_BRIDGE_PORT`, and
+`TE2_RUNTIME_BRIDGE_URL`. Experimental-name environment variables are not read
+as compatibility aliases. `TE_PORT` and `TE_FRAMEWORK_URL` remain the stable
+cross-component framework contracts.
+
+TE2 path overrides (`TE2_CACHE_HOME`, `TE2_DATA_HOME`, `TE2_CONFIG_HOME`, and
+`TE2_RUNTIME_HOME`) name final TE2 roots. Without them, TE2 uses XDG bases when
+available, normal `$HOME` fallbacks for cache/data/config, and a protected
+runtime directory under `$TMPDIR` or Termux `$PREFIX/tmp`. Normal startup never
+uses an old root as a fallback for these migrated caches. Durable framework and
+Code TE2 store cutovers are tracked separately.
 
 The first standalone Terminal launch installs its locked production Node
-dependencies under `$XDG_DATA_HOME/te2/node_runtime/terminal` (normally
-`~/.local/share/te2/node_runtime/terminal`). The runtime is keyed by the lockfile,
-platform, architecture, and Node ABI, so Python package installs do not depend
-on a source-checkout `node_modules` tree.
+dependencies under `$TE2_DATA_HOME/node_runtime/terminal` (normally
+`~/.local/share/te2/node_runtime/terminal` after root resolution). The runtime
+is keyed by the lockfile, platform, architecture, and Node ABI, so Python
+package installs do not depend on a source-checkout `node_modules` tree.
 
 Useful launcher commands:
 
 ```bash
 te2 --build-only
+te2 --debug
 te2 --print-command
 te2 console list-workers
+te2 migrate-legacy-roots          # write-free report
+te2 migrate-legacy-roots --json   # write-free structured report
 ```
+
+Legacy-root recovery is deliberately opt-in. After reviewing the dry-run,
+`te2 migrate-legacy-roots --apply` performs the versioned one-time migration
+only while the framework is stopped. The allowlisted legacy source is
+authoritative: matching canonical files are overwritten, while files that
+exist only in a canonical destination tree are retained. Unknown or externally
+owned content is reported and left untouched.
 
 `te2-rust` is an alias for the same Rust launcher. `scripts/run_framework.sh`
 is a source-checkout helper that also invokes the Rust launcher directly.
 
 Code TE2 does not use a system, `PATH`, NVM, or environment-selected
 code-server. Its Code Server mode always uses the pinned private runtime under
-`$XDG_DATA_HOME/te2/code_server/4.130.0` and routes process launch, VSIX/Open
+`$TE2_DATA_HOME/code_server/4.130.0` and routes process launch, VSIX/Open
 VSX management, builtin-extension discovery, and WBA nid extraction through
 that exact tree. The Languages & Extensions settings can switch the app to
 Monaco language web workers instead; doing so stops the private runtime and
@@ -128,7 +185,7 @@ Code TE2 serves generated bundles from `static/dist/`. After changing its
 frontend source:
 
 ```bash
-cd app/apps/file_editor_cm6
+cd app/apps/code_te2
 npm install
 npm run typecheck
 npm run build

@@ -10,22 +10,22 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from app.apps.file_editor_cm6.monaco_editor import editor_ws
-from app.apps.file_editor_cm6.monaco_editor.editor_backend_services.contracts import (
+from app.apps.code_te2.monaco_editor import editor_ws
+from app.apps.code_te2.monaco_editor.editor_backend_services.contracts import (
     EditorOpenPayload,
 )
-from app.apps.file_editor_cm6.monaco_editor.editor_backend_services.document_materialization_service import (
+from app.apps.code_te2.monaco_editor.editor_backend_services.document_materialization_service import (
     materialize_document_payload,
     materialize_document_payload_async,
 )
-from app.apps.file_editor_cm6.monaco_editor.editor_backend_services.document_open_policy import (
+from app.apps.code_te2.monaco_editor.editor_backend_services.document_open_policy import (
     DocumentOpenRejectedError,
     MAX_EDITOR_DOCUMENT_BYTES,
 )
-from app.apps.file_editor_cm6.monaco_editor.editor_backend_services.open_service import (
+from app.apps.code_te2.monaco_editor.editor_backend_services.open_service import (
     emit_editor_open_from_backend,
 )
-from app.apps.file_editor_cm6.open_state_backend import SidecarOpenStatePayload
+from app.apps.code_te2.open_state_backend import SidecarOpenStatePayload
 
 
 class _HistoryStore:

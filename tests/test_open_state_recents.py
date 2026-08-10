@@ -6,11 +6,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from app.apps.file_editor_cm6 import project_sidecar
-from app.apps.file_editor_cm6.file_tabs_projection import (
+from app.apps.code_te2 import project_sidecar
+from app.apps.code_te2.file_tabs_projection import (
     build_file_tabs_projection,
 )
-from app.apps.file_editor_cm6.open_state_backend import (
+from app.apps.code_te2.open_state_backend import (
     read_sidecar_open_state,
     remove_sidecar_recent_file,
     write_sidecar_open_file,

@@ -4,8 +4,8 @@ import unittest
 from typing import cast
 from unittest.mock import patch
 
-from app.apps.file_editor_cm6 import frontend_rpc_codec
-from app.apps.file_editor_cm6.frontend_rpc_codec import (
+from app.apps.code_te2 import frontend_rpc_codec
+from app.apps.code_te2.frontend_rpc_codec import (
     RPC_CODEC_AUTH_FIELD,
     RPC_CODEC_MSGPACK_V1,
     FrontendRpcCodecError,
@@ -13,11 +13,11 @@ from app.apps.file_editor_cm6.frontend_rpc_codec import (
     encode_frontend_rpc_message,
     require_msgpack_v1_auth,
 )
-from app.apps.file_editor_cm6.explorer.transport.rpc_contract import (
+from app.apps.code_te2.explorer.transport.rpc_contract import (
     JsonRpcErrorEnvelope,
     JsonRpcSuccessEnvelope,
 )
-from app.apps.file_editor_cm6.explorer.transport.rpc_socketio import (
+from app.apps.code_te2.explorer.transport.rpc_socketio import (
     ExplorerRpcSocketShim,
     ExplorerRpcSocketIONamespace,
 )

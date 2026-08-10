@@ -58,7 +58,7 @@
     window.eval(`${readScript(socketUrl)}\n//# sourceURL=${socketUrl}`);
     window.eval(`${stripModuleExports(readScript(bridgeUrl))}\n//# sourceURL=${bridgeUrl}`);
     window.eval(`globalThis.__te2RunProfileConsoleBridge = initConsoleBridge(${JSON.stringify({
-      appId: "file_editor_cm6",
+      appId: "code_te2",
       baseUrl: origin,
       workerLabel: String(config.workerLabel || marker.surfaceId),
       workerIdPrefix: `${String(config.workerIdBase || "rp-prof")}-gkvw`,
