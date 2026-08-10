@@ -1,6 +1,6 @@
 # Framework Cleanup And UI VSIX Tracker
 
-Last updated: 2026-08-09
+Last updated: 2026-08-10
 
 ## Program status
 
@@ -15,7 +15,7 @@ Last updated: 2026-08-09
 | Phase 3D: app/client paths and opt-in legacy migration/cleanup | Implemented and fixture-validated; real apply pending separate approval | Tool implementation and every real apply are separate approval boundaries |
 | Phase 4A: internal/package naming | Complete; package, build, isolated launch, and Electron validation passed | Hard-cutover implementation approved and validated; shared framework was not restarted |
 | Phase 4B: public app identifiers | Implemented and full-suite/package validated; live cutover pending | Approved hard cutover; shared runtime restart and live client acceptance remain separate |
-| Phase 5: first UI VSIX activity-bar webview | Live OpenAI UI reached; gray visual overlay and Electron detach/attach acceptance pending | Approved subset only; no Android changes, custom editors, panels, secondary Sidebar, commands, or per-client provider instances |
+| Phase 5: first UI VSIX activity-bar webview | Inline OpenAI view accepted; Electron detach/attach acceptance pending | Approved subset only; no Android changes, custom editors, panels, secondary Sidebar, commands, or per-client provider instances |
 
 ## Source findings tracker
 
@@ -243,7 +243,7 @@ Target architecture decisions:
 - [x] Select `openai.chatgpt_26.5803.41515.vsix` and `chatgpt.sidebarView` as the first acceptance fixture.
 - [x] Live-prove resource loading, origin-validating bidirectional messaging, opaque-sandbox storage, and OpenAI application readiness.
 - [x] Refine the implementation plan and tracker with the source-backed architecture.
-- [ ] Live-accept the primary OpenAI view in the inline Sidebar.
+- [x] Live-accept the primary OpenAI view in the inline Sidebar.
 - [ ] Live-accept Electron detach, attach, message continuity, and close behavior.
 - [ ] Keep the marketplace unsupported notice until live acceptance passes.
 
@@ -286,3 +286,4 @@ each phase executes. Do not mark a phase complete from implementation alone.
 | 2026-08-09 | 4B implementation | Canonical-id/alias and state-move Rust tests; full Python, Code TE2, Rust, Electron, Gecko, and Cefrium suites; WBA/host rebuild; Gecko/Cefrium APK assembly; Electron package; wheel/sdist path audit; stale-name classification | Passed; 204 Python, 172 frontend, 70 Rust plus 4 ignored, and 62 Electron tests; both Android unit suites and APK builds passed; package archives contain only `app/apps/code_te2`; live shared-runtime cutover remains pending |
 | 2026-08-09 | Phase 5 prerequisites | Code TE2 typecheck/build and five focused WBA tests; isolated wheel extraction/import; full TE2 and ALS-RS Rust suites; non-default framework-port regression | Passed; TE2 74 tests plus 4 ignored, ALS-RS 139 tests in both library and binary targets, installed WBA matcher resolved without `node_modules`; TE2 `main` and `feature/ui-vsix-extensions` synchronized at `7cd923fc`, ALS-RS fix published at `15fb9af` |
 | 2026-08-09 | Phase 5 live checkpoint | Electron inline OpenAI view through the public Rust WBA mount; encoded webview authority resources; Cap'n Proto handshake and MCP/fetch traffic; opaque-sandbox Web Storage adapter; wrapper loading-mask computed style | OpenAI logged `app routes mounted` and `ready provider mounted`; UI is functional, while a gray visual overlay and detach/attach acceptance remain open |
+| 2026-08-10 | Phase 5 inline acceptance | Required vendored GitHub Dark Default payload; Code Server-compatible `--vscode-*` projection; pre-script `vscode-dark` body metadata; live wrapper/document inspection | Passed; inline OpenAI view accepted and the gray overlay is resolved; Electron detach/attach acceptance remains open |

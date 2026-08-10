@@ -21,6 +21,7 @@ const moduleConfig = {
     "src/extensions/activity-runtime.ts",
     "src/extensions/language-resolver.ts",
     "src/extensions/provider-registry.ts",
+    "src/extensions/webview-runtime.ts",
     "src/extensions/intelligence/completions.ts",
     "src/extensions/intelligence/code-navigation.ts",
     "src/extensions/intelligence/document-colors.ts",

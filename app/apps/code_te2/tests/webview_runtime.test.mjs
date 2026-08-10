@@ -151,6 +151,7 @@ test('activity-bar webview contribution resolves through one workspace surface',
   assert.doesNotMatch(wrapper, /from '\.\.\/runtime\/messagepack-codec\.mjs'/);
   assert.match(wrapper, /frame\.srcdoc/);
   assert.match(wrapper, /#te2-status\[hidden\]\{display:none\}/);
+  assert.match(wrapper, /background:#010409/);
   assert.match(wrapper, /te2\.extension-webview\.storage\.v1/);
   assert.match(wrapper, /window\.location\.origin/);
   const document = runtime.document(surface.surfaceId);
@@ -158,6 +159,13 @@ test('activity-bar webview contribution resolves through one workspace surface',
   assert.match(document, /createStorage/);
   assert.match(document, /Object\.defineProperty\(window,'localStorage'/);
   assert.match(document, /Object\.defineProperty\(window,'sessionStorage'/);
+  assert.match(document, /data-te2-webview-theme/);
+  assert.match(document, /--vscode-sideBar-background:#010409/);
+  assert.match(document, /--vscode-editor-foreground:#e6edf3/);
+  assert.match(document, /class="vscode-dark"/);
+  assert.match(document, /data-vscode-theme-kind="vscode-dark"/);
+  assert.match(document, /data-vscode-theme-name="GitHub Dark Default"/);
+  assert.match(document, /data-vscode-theme-id="github-dark-default"/);
   assert.match(document, /origin:window\.location\.origin/);
   assert.match(document, /source:window/);
   assert.match(document, /\/services\/wba\/webview\/vsix%3A.*\/resource\/vscode-remote\/localhost/);

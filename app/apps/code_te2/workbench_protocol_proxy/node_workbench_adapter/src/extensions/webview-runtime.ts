@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { readFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -96,6 +97,85 @@ function isRecord(value: unknown): value is JsonObject {
 
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+interface BuiltInWebviewTheme {
+  activeTheme: "vscode-dark";
+  themeLabel: string;
+  themeId: string;
+  styles: Readonly<Record<string, string>>;
+}
+
+function loadBuiltInWebviewTheme(): BuiltInWebviewTheme {
+  const themeUrl = new URL(
+    "../../../../monaco_editor/themes/vendored/github/dark-default.json",
+    import.meta.url,
+  );
+  const theme = JSON.parse(readFileSync(themeUrl, "utf8")) as unknown;
+  if (!isRecord(theme) || theme.name !== "GitHub Dark Default" || !isRecord(theme.colors)) {
+    throw new Error(`Invalid built-in extension webview theme: ${themeUrl.pathname}`);
+  }
+
+  const styles: Record<string, string> = {
+    "vscode-font-family": '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    "vscode-font-weight": "normal",
+    "vscode-font-size": "13px",
+    "vscode-editor-font-family": '"JetBrains Mono Nerd", "JetBrains Mono", monospace',
+    "vscode-editor-font-weight": "normal",
+    "vscode-editor-font-size": "14px",
+    "vscode-editor-font-feature-settings": '"liga" 1, "calt" 1',
+    "text-link-decoration": "none",
+  };
+  for (const [colorId, color] of Object.entries(theme.colors)) {
+    if (typeof color !== "string" || !/^[A-Za-z0-9.-]+$/.test(colorId)) continue;
+    styles[`vscode-${colorId.replace(/\./g, "-")}`] = color;
+  }
+  if (
+    styles["vscode-sideBar-background"] !== "#010409" ||
+    styles["vscode-editor-foreground"] !== "#e6edf3"
+  ) {
+    throw new Error(`Unexpected built-in extension webview theme payload: ${themeUrl.pathname}`);
+  }
+  return Object.freeze({
+    activeTheme: "vscode-dark",
+    themeLabel: "GitHub Dark Default",
+    themeId: "github-dark-default",
+    styles: Object.freeze(styles),
+  });
+}
+
+const BUILT_IN_WEBVIEW_THEME = loadBuiltInWebviewTheme();
+
+function webviewThemeStyle(): string {
+  const declarations = Object.entries(BUILT_IN_WEBVIEW_THEME.styles)
+    .map(([name, value]) => `--${name}:${value}`)
+    .join(";");
+  return `<style data-te2-webview-theme>:root{color-scheme:dark;${declarations}}html{background:${BUILT_IN_WEBVIEW_THEME.styles["vscode-sideBar-background"]}}body{color:var(--vscode-editor-foreground);font-family:var(--vscode-font-family);font-size:var(--vscode-font-size);font-weight:var(--vscode-font-weight)}</style>`;
+}
+
+function decorateWebviewBody(html: string): string {
+  return html.replace(/<body(?:\s[^>]*)?>/i, (bodyTag) => {
+    const classPattern = /\sclass\s*=\s*(["'])(.*?)\1/i;
+    const classMatch = classPattern.exec(bodyTag);
+    const existingClasses = classMatch?.[2]
+      ?.split(/\s+/)
+      .filter((name) => name && !/^vscode-(?:light|dark|high-contrast(?:-light)?)$/.test(name)) ?? [];
+    const classValue = [...existingClasses, BUILT_IN_WEBVIEW_THEME.activeTheme].join(" ");
+    let themedTag = classMatch
+      ? bodyTag.replace(classPattern, ` class="${classValue}"`)
+      : bodyTag.replace(/^<body/i, `<body class="${classValue}"`);
+    for (const [name, value] of [
+      ["data-vscode-theme-kind", BUILT_IN_WEBVIEW_THEME.activeTheme],
+      ["data-vscode-theme-name", BUILT_IN_WEBVIEW_THEME.themeLabel],
+      ["data-vscode-theme-id", BUILT_IN_WEBVIEW_THEME.themeId],
+    ]) {
+      const attributePattern = new RegExp(`\\s${name}\\s*=\\s*(["'])[^"']*\\1`, "i");
+      themedTag = attributePattern.test(themedTag)
+        ? themedTag.replace(attributePattern, ` ${name}="${value}"`)
+        : themedTag.replace(/^<body/i, `<body ${name}="${value}"`);
+    }
+    return themedTag;
+  });
 }
 
 function uriRecord(value: unknown): UriRecord | null {
@@ -248,17 +328,19 @@ function transformWebviewHtml(surfaceId: string, html: string): string {
     /https:\/\/\*\.vscode-cdn\.net/gi,
     "__TE2_WEBVIEW_RESOURCE_ORIGIN__",
   );
+  transformed = decorateWebviewBody(transformed);
+  const bootstrap = `${webviewThemeStyle()}${INNER_BRIDGE}`;
   if (/<head(?:\s[^>]*)?>/i.test(transformed)) {
-    return transformed.replace(/<head(?:\s[^>]*)?>/i, (head) => `${head}${INNER_BRIDGE}`);
+    return transformed.replace(/<head(?:\s[^>]*)?>/i, (head) => `${head}${bootstrap}`);
   }
-  return `${INNER_BRIDGE}${transformed}`;
+  return `${bootstrap}${transformed}`;
 }
 
 function wrapperHtml(surfaceId: string): string {
   const safeSurfaceId = JSON.stringify(surfaceId);
   return `<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<style>html,body,#te2-webview{width:100%;height:100%;margin:0;border:0;overflow:hidden;background:var(--vscode-sideBar-background,#1e1e1e)}#te2-status{position:absolute;inset:0;display:grid;place-items:center;color:#aaa;font:13px system-ui}#te2-status[hidden]{display:none}</style></head>
+<style>html,body,#te2-webview{width:100%;height:100%;margin:0;border:0;overflow:hidden;background:#010409}#te2-status{position:absolute;inset:0;display:grid;place-items:center;color:#7d8590;font:13px system-ui}#te2-status[hidden]{display:none}</style></head>
 <body><div id="te2-status">Loading extension view…</div><iframe id="te2-webview" title="Extension view" hidden></iframe>
 <script src="/static/vendor/socket.io.min.js"></script>
 <script type="module">
