@@ -119,6 +119,7 @@ import { ProviderRegistry } from "../extensions/provider-registry.mjs";
 import { ExtensionActivityRuntime } from "../extensions/activity-runtime.mjs";
 import { ExtensionActivationRuntime } from "../extensions/activation-runtime.mjs";
 import { ExtensionLanguageResolver } from "../extensions/language-resolver.mjs";
+import { WebviewRuntime } from "../extensions/webview-runtime.mjs";
 import {
   CallHierarchySessionStore,
   prepareCallHierarchy,
@@ -257,6 +258,17 @@ const PARSE_ARGS_ONLY_METHODS = new Set<string>([
   "$registerDocumentFormattingSupport",
   "$registerDocumentRangeFormattingSupport",
   "$registerOnTypeFormattingSupport",
+
+  // Webview view registration, content, and presentation contract.
+  "$registerWebviewViewProvider",
+  "$unregisterWebviewViewProvider",
+  "$setWebviewViewTitle",
+  "$setWebviewViewDescription",
+  "$setWebviewViewBadge",
+  "$show",
+  "$setHtml",
+  "$setOptions",
+  "$postMessage",
 
   "$getInitialState",
   "$checkExists",
@@ -674,6 +686,7 @@ export class WorkbenchClient {
   _extensions: unknown[];
   _extensionActivity: ExtensionActivityRuntime;
   _extensionActivation: ExtensionActivationRuntime;
+  _webviews: WebviewRuntime;
   _languageResolver: ExtensionLanguageResolver;
   _providerRegistry: ProviderRegistry;
   _semanticTokenProjections: SemanticTokenProjectionManager;
@@ -689,8 +702,19 @@ export class WorkbenchClient {
   _languageCatalogCache: Record<string, unknown> | null;
   state: RuntimeBuilderState;
 
-  constructor({ onEvent }: { onEvent?: WorkbenchEventSink } = {}) {
+  onNotification: (method: string, params: unknown) => void;
+
+  constructor({
+    onEvent,
+    onNotification,
+  }: {
+    onEvent?: WorkbenchEventSink;
+    onNotification?: (method: string, params: unknown) => void;
+  } = {}) {
     this.onEvent = typeof onEvent === "function" ? onEvent : () => {};
+    this.onNotification = typeof onNotification === "function"
+      ? onNotification
+      : () => {};
     this.mgmt = null; // { protocol }
     this.ext = null; // { protocol }
     this._mgmtIpc = null;
@@ -814,6 +838,33 @@ export class WorkbenchClient {
       docSymbolsProviderHandle: null,
       hoverProviderHandle: null,
     };
+    this._webviews = new WebviewRuntime({
+      rpcIds: {
+        MainThreadWebviews: _rpcIds.MainThreadWebviews,
+        MainThreadWebviewViews: _rpcIds.MainThreadWebviewViews,
+        ExtHostWebviews: _rpcIds.ExtHostWebviews,
+        ExtHostWebviewViews: _rpcIds.ExtHostWebviewViews,
+      },
+      getExtensions: () => this._extensions,
+      getWorkspaceFolder: () => this.state.workspaceFolder,
+      activateByEvent: (event) => this.activateByEvent(event),
+      sendExtAwaitTerminalReply: (rpcId, method, args, cancellable, timeoutMs) =>
+        this._sendExtAwaitTerminalReply(
+          rpcId,
+          method,
+          args,
+          cancellable,
+          timeoutMs,
+        ),
+      sendExt: (rpcId, method, args, cancellable = false) =>
+        this._sendExt(rpcId, method, args, cancellable),
+      sendExtMixed: (rpcId, method, args, cancellable = false) =>
+        this._sendExtMixed(rpcId, method, args, cancellable),
+      onLifecycleEvent: (payload) => this.onEvent(payload),
+      onClientNotification: (method, params) =>
+        this.onNotification(method, params),
+      log: (...args) => console.log(...args),
+    });
     this._semanticTokenProjections = new SemanticTokenProjectionManager({
       getDocument: (documentPath) =>
         this._semanticProjectionDocument(documentPath),
@@ -1643,6 +1694,8 @@ export class WorkbenchClient {
       mainThreadStatusBarRpcId: _rpcIds.MainThreadStatusBar,
       extHostWorkspaceRpcId: _rpcIds.ExtHostWorkspace,
       extensionActivity: this._extensionActivity,
+      handleWebviewRequest: (message) =>
+        this._webviews.handleMainThreadRequest(message),
       debugExtReqSeen: this._debugExtReqSeen,
       setDebugExtReqSeen: (value) => {
         this._debugExtReqSeen = value;
@@ -1796,6 +1849,7 @@ export class WorkbenchClient {
     this._semanticTokenProjections.clear(reason || "session_reset");
     this._documentRegistry.clearLocal();
     this._providerRegistry.clear();
+    this._webviews.clear(reason || "session_reset");
     this._extensionActivation.reset(reason);
     this._extensionActivity.reset(reason);
     this._extensions = [];
@@ -1939,10 +1993,12 @@ export class WorkbenchClient {
         this._managementRuntime(),
         params,
       );
-      return await connectExtensionHostSession(
+      const result = await connectExtensionHostSession(
         this._extensionHostRuntime(),
         management,
       );
+      await this._webviews.activatePrimaryViews();
+      return result;
     } finally {
       this._connecting = false;
     }
@@ -2297,12 +2353,15 @@ export class WorkbenchClient {
    * their analysis to the new project.  Also re-subscribes the file watcher.
    */
   async _switchWorkspace(newFolder: string): Promise<Record<string, unknown>> {
-    return {
+    this._webviews.clear("workspace_switch", false);
+    const result = {
       ...(await switchWorkbenchWorkspace(
         this._workspaceLifecycleRuntime(),
         newFolder,
       )),
     } as Record<string, unknown>;
+    await this._webviews.activatePrimaryViews();
+    return result;
   }
 
   _clearProjectScopedSwitchState(reason: string): {
@@ -2415,9 +2474,43 @@ export class WorkbenchClient {
     for (const event of events) {
       this.onEvent({ ...event, ts_ms: Date.now() });
     }
+    this.onEvent(this._webviews.snapshot());
     console.error(
       `[resync] replayed providers: cmp=${replayed.completions} inlay=${replayed.inlayHints} inline=${replayed.inlineCompletions} semTok=${replayed.semanticTokens} folding=${replayed.foldingRanges} colors=${replayed.documentColors}`,
     );
     return { ok: true, ts_ms: Date.now(), replayed };
+  }
+
+  webviewAttach(params: Record<string, unknown>): Record<string, unknown> {
+    return this._webviews.attach(params);
+  }
+
+  webviewMessage(params: Record<string, unknown>): Record<string, unknown> {
+    return this._webviews.receiveBrowserMessage(params);
+  }
+
+  webviewState(params: Record<string, unknown>): Record<string, unknown> {
+    return this._webviews.setBrowserState(params);
+  }
+
+  webviewVisibility(params: Record<string, unknown>): Record<string, unknown> {
+    return this._webviews.setVisibility(params);
+  }
+
+  webviewWrapperHtml(surfaceId: string): string {
+    return this._webviews.wrapper(surfaceId);
+  }
+
+  webviewDocumentHtml(surfaceId: string): string {
+    return this._webviews.document(surfaceId);
+  }
+
+  webviewResource(
+    surfaceId: string,
+    scheme: string,
+    authority: string,
+    resourcePath: string,
+  ) {
+    return this._webviews.resource(surfaceId, scheme, authority, resourcePath);
   }
 }

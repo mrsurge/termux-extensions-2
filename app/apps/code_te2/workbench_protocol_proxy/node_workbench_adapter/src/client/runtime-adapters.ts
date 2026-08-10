@@ -374,6 +374,7 @@ export interface ExtHostDispatchRuntimeDeps {
   mainThreadStatusBarRpcId: number;
   extHostWorkspaceRpcId: number;
   extensionActivity: ExtHostDispatchRuntime["extensionActivity"];
+  handleWebviewRequest: ExtHostDispatchRuntime["handleWebviewRequest"];
   debugExtReqSeen: number;
   setDebugExtReqSeen: (value: number) => void;
   debugExtReplySeen: number;
@@ -789,6 +790,7 @@ export function createExtHostDispatchRuntime(deps: ExtHostDispatchRuntimeDeps): 
       ExtHostWorkspace: deps.extHostWorkspaceRpcId,
     },
     extensionActivity: deps.extensionActivity,
+    handleWebviewRequest: (message) => deps.handleWebviewRequest(message),
     debug: {
       shouldEmitExtRequestEvent: () => currentDebugExtReqSeen < 200,
       markExtRequestEvent: () => {

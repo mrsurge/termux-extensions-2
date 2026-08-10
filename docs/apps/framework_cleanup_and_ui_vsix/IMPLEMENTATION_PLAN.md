@@ -1,10 +1,12 @@
 # Framework Cleanup And UI VSIX Implementation Plan
 
-Status: Phases 1 through 3 and Phase 4A are implemented and validated. Phase 4B
-is implemented and package-validated. Real legacy-root migration applies,
-filesystem deletion, live public-identifier acceptance, and UI VSIX work remain
-separate approval boundaries. Post-4B WBA packaging and Sidebar peer transport
-prerequisites are complete on TE2 commit `7cd923fc`.
+Status: Phases 1 through 4 are implemented and validated. Phase 5's first
+activity-bar webview slice is implemented locally; its OpenAI acceptance fixture
+now reaches the live application UI, with final visual and detach/attach
+acceptance still pending.
+Real legacy-root migration applies, filesystem deletion, and later UI VSIX
+contribution points remain separate approval boundaries. Post-4B WBA packaging
+and Sidebar peer transport prerequisites are complete on TE2 commit `7cd923fc`.
 
 This plan coordinates four framework-readiness fixes and leaves UI VSIX
 extensions as a deliberately rough later milestone:
@@ -702,39 +704,98 @@ remaining cutover action is to stop any old Code TE2 workers and Run Profile
 shells before the first live `code_te2` acceptance run; no live shell is
 migrated across identities.
 
-### Phase 5 — UI VSIX rough-draft milestone
+### Phase 5 — First UI VSIX activity-bar webview
 
-This phase is a placeholder, not an implementation plan.
+This approved slice proves one real extension-owned UI without inventing a
+second settings, project, or presentation system. It intentionally stops before
+custom editors, webview panels, secondary-sidebar views, commands, menus, and
+VS Code chat-session contribution points.
 
-Questions to investigate after Phases 1-4:
+#### 5.1 Project and extension authority
 
-- which contribution points are required for the first supported UI extension
-  (`viewsContainers`, `views`, commands, menus, webview views, or a smaller
-  subset);
-- how the WBA extension host registers and disposes one UI surface;
-- how extension messages cross the backend boundary without a frontend-to-WBA
-  side channel;
-- how extension resources receive a stable origin, CSP, and bounded access;
-- how server-owned surface membership maps onto browser/Gecko inline and
-  Electron detachable presentations;
-- how reload, extension disable/uninstall, WBA restart, client reconnect, and
-  shell exit destroy stale presentations; and
-- which small real extension is the acceptance fixture.
+- The existing Code TE2 extension registry remains install/enablement authority.
+- Its existing User and Workspace settings projections remain configuration
+  authority. Workspace configuration continues to come from the active
+  project's `.vscode/settings.json` through WBA's `workspace` and `folders[0]`
+  tiers.
+- WBA's existing workspace switch is the project-scope boundary. UI state must
+  not introduce another current-project cache or a client-selected extension
+  host cwd.
+- The first implementation owns one logical provider instance and one stable
+  surface per `(workspace, contributed view id)`. Independent simultaneous
+  provider instances per browser/client are deferred because the current
+  extension host is workspace-scoped and shared.
 
-Initial invariants:
+#### 5.2 Supported contribution subset
 
-- WBA remains extension-host authority;
-- the backend owns durable membership/lifecycle facts;
-- each client owns presentation and foreground state;
-- GeckoView remains compatible and inline;
-- Electron may detach using its existing presentation registry;
-- UI extensions do not inherit Run Profile process ownership merely because
-  they reuse presentation machinery; and
-- the Explorer marketplace continues to say UI extensions are unsupported
-  until an end-to-end contribution is accepted.
+WBA discovers `contributes.viewsContainers.activitybar` and the matching
+`contributes.views` entries whose exact type is `webview`. It activates the
+normal generated `onView:<viewId>` event and implements the current Code Server
+4.130 RPC contract for:
 
-Expected deliverable for this phase is a separate source-backed UI VSIX plan
-and tracker. No UI VSIX runtime code is authorized by this document.
+- `MainThreadWebviewViews` / `ExtHostWebviewViews` provider registration,
+  resolve, visibility, title, description, badge, show, disposal;
+- `MainThreadWebviews` / `ExtHostWebviews` HTML, content options, state, and
+  binary-safe bidirectional `postMessage`; and
+- exact protocol ids discovered from the managed Code Server build rather than
+  treating unknown calls as successful empty stubs.
+
+The first live acceptance fixture is
+`openai.chatgpt_26.5803.41515.vsix`, specifically its activity-bar
+`chatgpt.sidebarView`. Its secondary Sidebar view and custom conversation editor
+remain outside this slice.
+
+#### 5.3 Document, resource, and message bridge
+
+- WBA serves a trusted outer wrapper under the existing WBA service route. The
+  extension HTML runs in a sandboxed inner iframe so the wrapper can own
+  transport and state without giving extension content the TE2 host DOM.
+- The wrapper supplies the standard one-shot `acquireVsCodeApi()` contract,
+  including `postMessage`, `setState`, and `getState`.
+- Host messages are re-emitted inside the opaque iframe with the document's own
+  origin so origin-validating extension runtimes receive the same event shape as
+  a native VS Code webview. The wrapper also supplies client-local
+  `localStorage`/`sessionStorage` adapters without granting `allow-same-origin`;
+  durable local storage is namespaced by the stable workspace/view surface.
+- Browser-to-WBA RPC remains strict MessagePack on the existing WBA Socket.IO
+  lane. The extension-host mixed-argument codec preserves ArrayBuffer and typed
+  array payloads rather than converting them to JSON/base64.
+- `vscode-resource.vscode-cdn.net` URLs are rewritten to a stable WBA HTTP
+  resource route. Files are admitted only after realpath resolution proves
+  containment beneath the extension's declared `localResourceRoots`; the
+  extension location and workspace are the normal defaults when the extension
+  does not provide roots.
+- Script execution and form submission follow the extension's webview content
+  options. The extension's own CSP remains authoritative inside the document;
+  the wrapper has its own restrictive CSP.
+
+#### 5.4 Sidebar projection and native-client compatibility
+
+- WBA publishes complete workspace-scoped `ExtensionWebviewSurface` snapshots
+  over its existing backend event pipe. Python validates those DTOs and projects
+  membership into the existing Sidebar ledger as URL slots.
+- The backend owns membership and teardown. Each client continues to own order,
+  foreground, hidden/embedded/detached presentation, and mention targeting.
+- Browser and GeckoView use the existing inline Sidebar URL presentation.
+  Electron uses its existing stable-surface detach/attach machinery; no new
+  Electron-only webview transport is introduced.
+- This phase makes no Android source or asset changes. Gecko compatibility is a
+  consequence of using the shared Sidebar/browser surface and existing WBA
+  route.
+
+#### 5.5 Lifecycle and acceptance boundary
+
+- Workspace switch disposes the old logical views before resolving the new
+  workspace's views. Provider registrations survive a WBA workspace switch
+  because the extension host itself survives; a full WBA reset clears both.
+- Provider unregister, failed resolve, extension-host reset, and empty/stale
+  snapshots remove the corresponding Sidebar membership deterministically.
+- Disconnecting one browser presentation does not dispose the shared logical
+  provider. Multi-client independent view instances require a later explicit
+  architecture change.
+- The marketplace's unsupported notice remains until the OpenAI activity-bar
+  view is live-accepted in both an inline host and Electron detach/attach. Later
+  contribution points require a new approved slice.
 
 ## 4. Cross-phase validation rules
 

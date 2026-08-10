@@ -3,6 +3,8 @@ export const RPC_DEFAULTS = {
   MainThreadLogger: 27,
   MainThreadOutputService: 29,
   MainThreadStatusBar: 33,
+  MainThreadWebviews: 43,
+  MainThreadWebviewViews: 45,
   MainThreadExtensionService: 50,
   MainThreadDocumentContentProviders: 18,
   ExtHostConfiguration: 80,
@@ -18,6 +20,8 @@ export const RPC_DEFAULTS = {
   ExtHostWorkspace: 106,
   ExtHostEditorTabs: 113,
   ExtHostOutputService: 122,
+  ExtHostWebviews: 118,
+  ExtHostWebviewViews: 121,
 } as const;
 
 export type RpcIdName = keyof typeof RPC_DEFAULTS;

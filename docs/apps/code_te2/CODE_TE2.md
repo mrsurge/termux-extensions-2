@@ -3952,3 +3952,33 @@ match; otherwise it loads the saved `/app/<id>` URL through the current relay.
 There is no route polling; iframe refresh performs no
 proxy request. Configured-framework changes and Activity destruction tear down
 all groups.
+
+## 44) UI VSIX Activity-Bar Webviews
+
+The first supported UI-extension slice is a workspace-scoped activity-bar webview. The existing extension registry remains install/enablement authority, and the existing User/Workspace configuration projection remains settings authority. In particular, the active project's `.vscode/settings.json` continues to populate WBA's `workspace` and `folders[0]` configuration tiers; webview presentation does not add another settings store or project selector.
+
+WBA discovers `contributes.viewsContainers.activitybar` and matching `contributes.views` records whose type is `webview`. It activates `onView:<viewId>`, retains one logical surface per workspace/view, and implements the current Code Server 4.130 `MainThreadWebviews`, `MainThreadWebviewViews`, `ExtHostWebviews`, and `ExtHostWebviewViews` actors. Supported operations cover provider registration/resolve/dispose, view metadata and visibility, HTML/options/state, and binary-safe bidirectional `postMessage`.
+
+The browser shape is:
+
+```text
+extension host
+  <-> WBA Code OSS RPC
+  <-> WBA-owned surface
+       |- strict MessagePack /wba browser control
+       |- trusted outer wrapper
+       |- sandboxed extension-document iframe
+       `- bounded local-resource HTTP route
+  <-> backend ExtensionWebviewSurface snapshot
+  <-> existing Sidebar URL slot
+```
+
+The outer wrapper supplies one-shot `acquireVsCodeApi()` with `postMessage`, `setState`, and `getState`. Extension HTML retains its own CSP inside the iframe. WBA rewrites `vscode-resource.vscode-cdn.net` URLs to the service route and serves a file only when realpath containment succeeds beneath the declared `localResourceRoots`; extension location and workspace are the normal defaults. Script and form capabilities follow the webview content options.
+
+WBA publishes complete workspace-scoped `ExtensionWebviewSurface` snapshots over its existing Framework-Shell event pipe. Python validates them and projects membership into the Sidebar ledger. Browser and GeckoView use the existing inline URL presentation; Electron uses the existing detachable stable-surface window machinery. No Android source or asset change is required.
+
+Workspace switch disposes old views before resolving the new workspace. Provider registrations survive that switch because the extension host survives; full WBA reset, provider unregister, failed resolve, or a stale/empty snapshot removes the surface. A browser presentation disconnect does not dispose the shared provider. Independent simultaneous provider instances per client, secondary-Sidebar views, custom editors, panels, commands, menus, and chat-session APIs are deferred.
+
+The first acceptance fixture is `openai.chatgpt_26.5803.41515.vsix`, using `chatgpt.sidebarView`.
+
+The inner document intentionally keeps an opaque sandbox origin. Host messages are re-emitted with `window.location.origin` so origin-validating extension runtimes receive the native webview event shape. Because opaque origins cannot access browser Web Storage, the injected API supplies synchronous `localStorage` and `sessionStorage` adapters; the trusted wrapper persists local storage per stable workspace/view surface without adding `allow-same-origin` or exposing the framework DOM.

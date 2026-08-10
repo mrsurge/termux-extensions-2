@@ -15,7 +15,7 @@ Last updated: 2026-08-09
 | Phase 3D: app/client paths and opt-in legacy migration/cleanup | Implemented and fixture-validated; real apply pending separate approval | Tool implementation and every real apply are separate approval boundaries |
 | Phase 4A: internal/package naming | Complete; package, build, isolated launch, and Electron validation passed | Hard-cutover implementation approved and validated; shared framework was not restarted |
 | Phase 4B: public app identifiers | Implemented and full-suite/package validated; live cutover pending | Approved hard cutover; shared runtime restart and live client acceptance remain separate |
-| Phase 5: UI VSIX rough-draft milestone | Deferred; WBA packaging and exact Sidebar-peer transport prerequisites are complete | Begins only after framework phases are stable; UI contribution work still requires separate approval |
+| Phase 5: first UI VSIX activity-bar webview | Live OpenAI UI reached; gray visual overlay and Electron detach/attach acceptance pending | Approved subset only; no Android changes, custom editors, panels, secondary Sidebar, commands, or per-client provider instances |
 
 ## Source findings tracker
 
@@ -226,21 +226,33 @@ Target architecture decisions:
 - [x] Keep Android inventory/APK and Electron package changes inside the explicitly approved Phase 4B publication boundary.
 - [x] Keep replacements scoped; preserve the explicitly categorized public-id migrations and real CodeMirror 6 names.
 
-## Phase 5 placeholder — UI VSIX
+## Phase 5 checklist — first UI VSIX activity-bar webview
 
 - [x] Package WBA production dependencies independently of source `node_modules`.
 - [x] Validate the generated WBA provider registry from an isolated installed-wheel layout.
 - [x] Preserve explicit framework URL/port identity through the app-worker launch boundary.
 - [x] Re-establish the exact ALS-RS Sidebar peer after non-default-port startup and transport reconnect.
-- [ ] Re-investigate contribution points after framework cleanup lands.
-- [ ] Select the smallest first UI contribution subset.
-- [ ] Define WBA-to-backend registration/disposal facts.
-- [ ] Define CSP, resource-origin, and message-routing boundaries.
-- [ ] Map UI surfaces onto browser/Gecko inline and Electron detachable presentations.
-- [ ] Define disable/uninstall/restart/reconnect teardown.
-- [ ] Select one real extension as an acceptance fixture.
-- [ ] Create a separate detailed UI VSIX plan and tracker.
+- [x] Re-investigate contribution points against Code Server 4.130 and the installed OpenAI extension.
+- [x] Select activity-bar `type: webview` views as the smallest first contribution subset.
+- [x] Preserve the existing extension registry and `.vscode/settings.json` as project/configuration authority.
+- [x] Implement the four current Code OSS webview RPC actors and exact mixed-argument framing.
+- [x] Define and implement complete WBA-to-backend registration/disposal snapshots.
+- [x] Define and implement sandbox, CSP, bounded realpath resource access, and strict MessagePack messaging.
+- [x] Map logical webview surfaces onto browser/Gecko inline and Electron's existing detachable presentation.
+- [x] Define workspace switch, provider unregister, resolve failure, WBA reset, and stale-snapshot teardown.
+- [x] Select `openai.chatgpt_26.5803.41515.vsix` and `chatgpt.sidebarView` as the first acceptance fixture.
+- [x] Live-prove resource loading, origin-validating bidirectional messaging, opaque-sandbox storage, and OpenAI application readiness.
+- [x] Refine the implementation plan and tracker with the source-backed architecture.
+- [ ] Live-accept the primary OpenAI view in the inline Sidebar.
+- [ ] Live-accept Electron detach, attach, message continuity, and close behavior.
 - [ ] Keep the marketplace unsupported notice until live acceptance passes.
+
+Deferred from the first slice:
+
+- custom editors and ordinary webview panels;
+- secondary-Sidebar contribution projection;
+- commands, menus, view welcome content, and chat-session APIs; and
+- independent extension-host webview provider instances for simultaneous clients.
 
 ## Deferred decisions
 
@@ -248,7 +260,7 @@ Target architecture decisions:
 |---|---|
 | Retire `te2-rust` CLI alias | Installed-user compatibility must be measured after package rename |
 | Delete `te2_kotlin_lsp` | Current repository does not prove ownership |
-| Detailed UI VSIX architecture | Must be based on the cleaned framework and a selected real extension |
+| Per-client UI VSIX provider instances | The current extension host is workspace-scoped and shared; independent simultaneous instances need a separate lifecycle design |
 
 ## Validation record
 
@@ -268,7 +280,9 @@ each phase executes. Do not mark a phase complete from implementation alone.
 | 2026-08-08 | 3D | Migration/path/bootstrap fixture suite; current legacy sidecar schema probe; real-root JSON dry-run; static checks | Passed; destructive source-overwrite, destination-only retention, one-time receipt, active-writer guard, interrupted recovery, permissions, and report-only boundaries validated; no real apply performed |
 | 2026-08-09 | 4B.1 | App-worker module/router unit tests, renamed-package subprocess smoke, existing pipe-worker integration, compileall, focused basedpyright | Passed; 7 tests, 0 failures; focused static analysis reported 0 errors |
 | 2026-08-09 | 4B.2 | Source-package stale scan; Code TE2 import smoke; Python, frontend, Rust, Electron, and clean wheel/sdist validation | Passed; 203 Python, 171 frontend, 66 Rust plus 4 ignored, and 61 Electron tests; TypeScript/build/compile passed; clean archives contain only `app/apps/code_te2` |
+| 2026-08-09 | 5 implementation | Webview RPC framing/runtime tests; Sidebar DTO/projection tests; 177-test frontend suite; canonical Code TE2 typecheck/build; focused Python static analysis; WBA server compile path; diff hygiene | Passed locally with 177 frontend and 7 Python tests; live OpenAI view and Electron detach/attach acceptance remain pending |
 | 2026-08-09 | 1–3C acceptance | Downstream-checkout live validation of remaining hover comparisons, Termux interface/no-XDG behavior, Linux canonical-root restart, framework stores, and Code TE2 state/WBA restart recovery | Passed; user-confirmed downstream acceptance complete |
 | 2026-08-09 | 4A | Python discovery/path/migration suites; wheel/sdist archive and isolated install checks; Rust format/check/full tests and optimized cache build; isolated server health/shutdown smoke; Electron typecheck/tests/compile/package | Passed; 48 Python tests, 69 Rust tests plus 4 ignored benchmarks, 61 Electron tests, canonical package contents and health identity, 0 failures |
 | 2026-08-09 | 4B implementation | Canonical-id/alias and state-move Rust tests; full Python, Code TE2, Rust, Electron, Gecko, and Cefrium suites; WBA/host rebuild; Gecko/Cefrium APK assembly; Electron package; wheel/sdist path audit; stale-name classification | Passed; 204 Python, 172 frontend, 70 Rust plus 4 ignored, and 62 Electron tests; both Android unit suites and APK builds passed; package archives contain only `app/apps/code_te2`; live shared-runtime cutover remains pending |
 | 2026-08-09 | Phase 5 prerequisites | Code TE2 typecheck/build and five focused WBA tests; isolated wheel extraction/import; full TE2 and ALS-RS Rust suites; non-default framework-port regression | Passed; TE2 74 tests plus 4 ignored, ALS-RS 139 tests in both library and binary targets, installed WBA matcher resolved without `node_modules`; TE2 `main` and `feature/ui-vsix-extensions` synchronized at `7cd923fc`, ALS-RS fix published at `15fb9af` |
+| 2026-08-09 | Phase 5 live checkpoint | Electron inline OpenAI view through the public Rust WBA mount; encoded webview authority resources; Cap'n Proto handshake and MCP/fetch traffic; opaque-sandbox Web Storage adapter; wrapper loading-mask computed style | OpenAI logged `app routes mounted` and `ready provider mounted`; UI is functional, while a gray visual overlay and detach/attach acceptance remain open |

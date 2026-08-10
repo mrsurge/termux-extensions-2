@@ -165,6 +165,40 @@ class SidebarWindowLedgerTests(unittest.TestCase):
         self.assertNotIn("activeHostId", state)
         self.assertNotIn("order", state)
 
+    def test_extension_webview_surface_round_trips_as_url_slot(self) -> None:
+        url = "/api/app/code_te2/services/wba/webview/vsix%3Aworkspace%3Aview"
+        host_id = "vsix-webview:vsix:workspace:view"
+        store = _FakePreferencesStore({"version": 2, "slots": {}})
+        payload: dict[str, object] = {
+            "kind": "url",
+            "host_id": host_id,
+            "title": "Extension View",
+            "url": url,
+            "icon": {"kind": "emoji", "emoji": "🧩"},
+            "webviewSurface": {
+                "dto": "ExtensionWebviewSurface",
+                "version": 1,
+                "surfaceId": "vsix:workspace:view",
+                "hostId": host_id,
+                "workspaceId": "workspace",
+                "projectPath": "/workspace/project",
+                "extensionId": "example.webview",
+                "viewId": "example.view",
+                "url": url,
+            },
+        }
+        with (
+            patch.object(sidebar_window_state, "get_preferences_store", return_value=store),
+            patch.object(sidebar_window_state, "list_launcher_apps", return_value=[]),
+        ):
+            result = sidebar_window_state.create_sidebar_window(payload)
+
+        window = cast(dict[str, object], result["window"])
+        self.assertEqual({"kind": "emoji", "emoji": "🧩"}, window["icon"])
+        surface = cast(dict[str, object], window["webviewSurface"])
+        self.assertEqual("ExtensionWebviewSurface", surface["dto"])
+        self.assertEqual("example.view", surface["viewId"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -69,6 +69,11 @@ export interface ExtHostDispatchRuntime {
       replyResult?: unknown;
     };
   };
+  handleWebviewRequest: (message: DecodedExtHostRpc) => {
+    handled: boolean;
+    replyResult?: unknown;
+    error?: unknown;
+  };
   debug: ExtHostDispatchDebugRuntime;
   nowMs: () => number;
   timeLabel: () => string;
@@ -526,6 +531,37 @@ export function handleExtHostRequest(runtime: ExtHostDispatchRuntime, msg: Decod
     runtime.sendPayload(encodeExtAck(msg.req));
   } catch {
     // Preserve current behavior: continue best-effort even if the ACK send fails.
+  }
+
+  const webviewResult = runtime.handleWebviewRequest(msg);
+  if (webviewResult.handled) {
+    if (webviewResult.error) {
+      sendReplyPayload(
+        runtime,
+        msg.req,
+        msg.method,
+        encodeExtReplyError(msg.req, {
+          message: webviewResult.error instanceof Error
+            ? webviewResult.error.message
+            : String(webviewResult.error),
+        }),
+      );
+    } else if (Object.prototype.hasOwnProperty.call(webviewResult, "replyResult")) {
+      sendReplyPayload(
+        runtime,
+        msg.req,
+        msg.method,
+        encodeExtReplyOkJson(msg.req, webviewResult.replyResult),
+      );
+    } else {
+      sendReplyPayload(
+        runtime,
+        msg.req,
+        msg.method,
+        encodeExtReplyOkEmpty(msg.req),
+      );
+    }
+    return true;
   }
 
   applyProviderRegistration(runtime, msg);

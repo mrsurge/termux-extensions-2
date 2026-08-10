@@ -153,6 +153,10 @@ export interface WorkbenchLike {
   didChange: (
     params: Record<string, unknown>,
   ) => Record<string, unknown> | Promise<Record<string, unknown>>;
+  webviewAttach: (params: Record<string, unknown>) => Record<string, unknown>;
+  webviewMessage: (params: Record<string, unknown>) => Record<string, unknown>;
+  webviewState: (params: Record<string, unknown>) => Record<string, unknown>;
+  webviewVisibility: (params: Record<string, unknown>) => Record<string, unknown>;
 }
 
 export interface ServerDispatchRuntime {
@@ -276,6 +280,22 @@ export async function dispatchJsonRpcRequest(
 
   if (method === "te2.language_catalog") {
     return success(id, await runtime.wb.languageCatalog());
+  }
+
+  if (method === "vscode.webview.attach") {
+    return success(id, runtime.wb.webviewAttach(params));
+  }
+
+  if (method === "vscode.webview.message") {
+    return success(id, runtime.wb.webviewMessage(params));
+  }
+
+  if (method === "vscode.webview.state") {
+    return success(id, runtime.wb.webviewState(params));
+  }
+
+  if (method === "vscode.webview.visibility") {
+    return success(id, runtime.wb.webviewVisibility(params));
   }
 
   if (method === "te2.status" || method === "adapter.status") {

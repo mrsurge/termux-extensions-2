@@ -11,6 +11,31 @@ export interface ExtRequestEncodeInput {
   cancellable?: boolean;
 }
 
+export interface SerializableBuffersArgument {
+  readonly __te2SerializableBuffers: true;
+  readonly value: unknown;
+  readonly buffers: readonly Uint8Array[];
+}
+
+export function serializableBuffersArgument(
+  value: unknown,
+  buffers: readonly Uint8Array[],
+): SerializableBuffersArgument {
+  return {
+    __te2SerializableBuffers: true,
+    value,
+    buffers,
+  };
+}
+
+function isSerializableBuffersArgument(
+  value: unknown,
+): value is SerializableBuffersArgument {
+  return !!value && typeof value === "object"
+    && (value as { __te2SerializableBuffers?: unknown }).__te2SerializableBuffers === true
+    && Array.isArray((value as { buffers?: unknown }).buffers);
+}
+
 export interface DecodedExtHostRpc {
   kind: "ext";
   type?: number;
@@ -145,20 +170,27 @@ export function encodeExtRequestMixedArgs(input: ExtRequestEncodeInput): Uint8Ar
     byte(input.rpcId),
     byte(methodBytes.length),
     methodBytes,
-    u32be(args.length),
+    byte(args.length),
   ];
   for (const value of args) {
     if (value === null || value === undefined) {
       parts.push(byte(4));
       continue;
     }
-    if (typeof value === "string") {
-      const raw = bytesFromString(value);
-      parts.push(byte(1), u32be(raw.length), raw);
+    if (value instanceof Uint8Array) {
+      parts.push(byte(2), u32be(value.length), value);
+      continue;
+    }
+    if (isSerializableBuffersArgument(value)) {
+      const raw = jsonBytes(value.value);
+      parts.push(byte(3), u32be(value.buffers.length), u32be(raw.length), raw);
+      for (const buffer of value.buffers) {
+        parts.push(u32be(buffer.length), buffer);
+      }
       continue;
     }
     const raw = jsonBytes(value);
-    parts.push(byte(2), u32be(raw.length), raw);
+    parts.push(byte(1), u32be(raw.length), raw);
   }
   return concatBytes(parts);
 }

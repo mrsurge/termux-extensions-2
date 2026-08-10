@@ -256,6 +256,8 @@ _ADAPTER_REQUIRED_NIDS = frozenset({
     "MainThreadLogger",
     "MainThreadOutputService",
     "MainThreadStatusBar",
+    "MainThreadWebviews",
+    "MainThreadWebviewViews",
     "MainThreadExtensionService",
     "ExtHostConfiguration",
     "ExtHostDocumentsAndEditors",
@@ -269,6 +271,8 @@ _ADAPTER_REQUIRED_NIDS = frozenset({
     "ExtHostWorkspace",
     "ExtHostEditorTabs",
     "ExtHostOutputService",
+    "ExtHostWebviews",
+    "ExtHostWebviewViews",
 })
 
 _JS_IDENTIFIER = r"[A-Za-z_$][A-Za-z0-9_$]*"

@@ -64,6 +64,7 @@ const workbenchAdapterConfig = {
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/activity-runtime.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/language-resolver.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/provider-registry.ts',
+    'workbench_protocol_proxy/node_workbench_adapter/src/extensions/webview-runtime.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/intelligence/completions.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/intelligence/code-navigation.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/intelligence/document-colors.ts',

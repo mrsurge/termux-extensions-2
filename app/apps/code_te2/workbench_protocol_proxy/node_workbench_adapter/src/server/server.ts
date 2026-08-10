@@ -52,6 +52,14 @@ type RuntimeWorkbench = Omit<WorkbenchLike, "state"> & {
   state?: Record<string, unknown>;
   status: () => Record<string, unknown>;
   getExtensions?: () => unknown[];
+  webviewWrapperHtml: (surfaceId: string) => string;
+  webviewDocumentHtml: (surfaceId: string) => string;
+  webviewResource: (
+    surfaceId: string,
+    scheme: string,
+    authority: string,
+    resourcePath: string,
+  ) => Promise<{ body: Uint8Array; contentType: string }>;
 };
 type JsonRpcReply = Record<string, unknown>;
 type JsonRpcEnvelope = Record<string, unknown> & {
@@ -297,6 +305,24 @@ function textResponse(res: ServerResponse, code: number, text: string): void {
   res.end(text);
 }
 
+function bodyResponse(
+  res: ServerResponse,
+  code: number,
+  body: string | Uint8Array,
+  contentType: string,
+  extraHeaders: Record<string, string> = {},
+): void {
+  const payload = typeof body === "string" ? Buffer.from(body, "utf8") : Buffer.from(body);
+  res.writeHead(code, {
+    "content-type": contentType,
+    "content-length": payload.byteLength,
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    ...extraHeaders,
+  });
+  res.end(payload);
+}
+
 async function readJson(
   req: IncomingMessage,
   maxBytes = 2 * 1024 * 1024,
@@ -472,6 +498,7 @@ const workbenchEventHandler = (ev: unknown): void =>
   createWorkbenchEventHandler(bridgeRuntime())(ev);
 wb = new WorkbenchClient({
   onEvent: workbenchEventHandler,
+  onNotification: wsBroadcastNotification,
 }) as unknown as RuntimeWorkbench;
 
 installSyncTrace();
@@ -641,6 +668,57 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && url.pathname === "/health") {
       return jsonResponse(res, 200, { ok: true, ts_ms: nowMs() });
+    }
+
+    if (
+      req.method === "GET" &&
+      url.pathname === "/webview/runtime/messagepack-codec.mjs"
+    ) {
+      const codec = await fs.readFile(
+        new URL("../protocol/messagepack-codec.mjs", import.meta.url),
+      );
+      return bodyResponse(
+        res,
+        200,
+        codec,
+        "text/javascript; charset=utf-8",
+      );
+    }
+
+    if (req.method === "GET" && url.pathname.startsWith("/webview/")) {
+      const segments = url.pathname.split("/").filter(Boolean);
+      const surfaceId = decodeURIComponent(segments[1] ?? "");
+      if (segments.length === 2) {
+        return bodyResponse(
+          res,
+          200,
+          wb.webviewWrapperHtml(surfaceId),
+          "text/html; charset=utf-8",
+          {
+            "content-security-policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; frame-src 'self'",
+          },
+        );
+      }
+      if (segments.length === 3 && segments[2] === "document") {
+        return bodyResponse(
+          res,
+          200,
+          wb.webviewDocumentHtml(surfaceId),
+          "text/html; charset=utf-8",
+        );
+      }
+      if (segments.length >= 6 && segments[2] === "resource") {
+        const resource = await wb.webviewResource(
+          surfaceId,
+          segments[3] ?? "",
+          segments[4] ?? "",
+          segments.slice(5).join("/"),
+        );
+        return bodyResponse(res, 200, resource.body, resource.contentType, {
+          "access-control-allow-origin": "*",
+          "cross-origin-resource-policy": "cross-origin",
+        });
+      }
     }
 
     if (req.method === "POST" && url.pathname === "/cmd") {
