@@ -342,7 +342,7 @@ function wrapperHtml(surfaceId: string): string {
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>html,body,#te2-webview{width:100%;height:100%;margin:0;border:0;overflow:hidden;background:#010409}#te2-status{position:absolute;inset:0;display:grid;place-items:center;color:#7d8590;font:13px system-ui}#te2-status[hidden]{display:none}</style></head>
 <body><div id="te2-status">Loading extension view…</div><iframe id="te2-webview" title="Extension view" hidden></iframe>
-<script src="/static/vendor/socket.io.min.js"></script>
+<script src="./runtime/socket.io.min.js"></script>
 <script type="module">
 import {encodeWbaRpcMessage,decodeWbaRpcMessage} from './runtime/messagepack-codec.mjs';
 const surfaceId=${safeSurfaceId};

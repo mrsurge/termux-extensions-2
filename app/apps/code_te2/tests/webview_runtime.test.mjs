@@ -147,6 +147,8 @@ test('activity-bar webview contribution resolves through one workspace surface',
   assert.equal(attached.htmlRevision, 2);
   const wrapper = runtime.wrapper(surface.surfaceId);
   assert.match(wrapper, /msgpack-v1/);
+  assert.match(wrapper, /src="\.\/runtime\/socket\.io\.min\.js"/);
+  assert.doesNotMatch(wrapper, /\/static\/vendor\/socket\.io\.min\.js/);
   assert.match(wrapper, /from '\.\/runtime\/messagepack-codec\.mjs'/);
   assert.doesNotMatch(wrapper, /from '\.\.\/runtime\/messagepack-codec\.mjs'/);
   assert.match(wrapper, /frame\.srcdoc/);

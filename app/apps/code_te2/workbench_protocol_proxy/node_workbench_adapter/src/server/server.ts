@@ -685,6 +685,24 @@ const server = http.createServer(async (req, res) => {
       );
     }
 
+    if (
+      req.method === "GET" &&
+      url.pathname === "/webview/runtime/socket.io.min.js"
+    ) {
+      const socketIoClient = await fs.readFile(
+        new URL(
+          "../../../../vendor/node_socketio/node_modules/socket.io/client-dist/socket.io.min.js",
+          import.meta.url,
+        ),
+      );
+      return bodyResponse(
+        res,
+        200,
+        socketIoClient,
+        "application/javascript; charset=utf-8",
+      );
+    }
+
     if (req.method === "GET" && url.pathname.startsWith("/webview/")) {
       const segments = url.pathname.split("/").filter(Boolean);
       const surfaceId = decodeURIComponent(segments[1] ?? "");
