@@ -1,4 +1,18 @@
-import picomatch from "picomatch";
+import { createRequire } from "node:module";
+
+interface PicomatchOptions {
+  dot?: boolean;
+}
+
+type Picomatch = (
+  pattern: string,
+  options?: PicomatchOptions,
+) => (value: string) => boolean;
+
+const require = createRequire(import.meta.url);
+const picomatch = require(
+  "../../../../vendor/picomatch/index.js",
+) as Picomatch;
 
 export const PROVIDER_KINDS = [
   "hover",

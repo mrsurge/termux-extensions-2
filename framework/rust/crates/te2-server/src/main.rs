@@ -87,6 +87,10 @@ impl AppState {
         self.config.framework_url()
     }
 
+    pub(crate) fn framework_port(&self) -> u16 {
+        self.config.port
+    }
+
     pub(crate) fn http_client(&self) -> &reqwest::Client {
         &self.http_client
     }

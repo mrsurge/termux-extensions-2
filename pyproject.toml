@@ -28,6 +28,7 @@ include-package-data = true
 ]
 "app.apps.code_te2" = [
     "vendor/node_socketio/**/*",
+    "vendor/picomatch/**/*",
 ]
 
 [tool.setuptools.exclude-package-data]

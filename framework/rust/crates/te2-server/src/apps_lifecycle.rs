@@ -185,6 +185,7 @@ async fn start_app_inner(state: &AppState, app_id: &str) -> Result<(String, Valu
 
     let project_root = PathBuf::from(state.project_root());
     let framework_url = state.framework_url();
+    let framework_port = state.framework_port();
     let framework_shells_env = state.fws_child_env().clone();
     let launch_store = state.launch_store().clone();
     let launch_result = match tokio::task::spawn_blocking(move || {
@@ -193,6 +194,7 @@ async fn start_app_inner(state: &AppState, app_id: &str) -> Result<(String, Valu
             &app,
             &project_root,
             &framework_url,
+            framework_port,
             &framework_shells_env,
         )
     })

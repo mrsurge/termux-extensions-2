@@ -63,6 +63,7 @@ pub fn launch_app(
     app: &AppDefinition,
     project_root: &Path,
     framework_url: &str,
+    framework_port: u16,
     framework_shells_env: &std::collections::HashMap<String, String>,
 ) -> Result<LaunchResult> {
     #[cfg(not(feature = "ferrous-framework-native"))]
@@ -72,6 +73,7 @@ pub fn launch_app(
             app,
             project_root,
             framework_url,
+            framework_port,
             framework_shells_env,
         );
         bail!("TE2 server was built without the ferrous-framework-native feature")
@@ -100,8 +102,12 @@ pub fn launch_app(
 
             let mut launch_env_overrides = HashMap::new();
             merge_shell_env_overrides(&mut launch_env_overrides, shell);
-            launch_env_overrides.insert("TE_APP_ID".to_owned(), app.app_id.clone());
-            launch_env_overrides.insert("TE_FRAMEWORK_URL".to_owned(), framework_url.to_owned());
+            apply_framework_launch_env(
+                &mut launch_env_overrides,
+                &app.app_id,
+                framework_url,
+                framework_port,
+            );
             let mut render_env = framework_shells_env.clone();
             render_env.extend(launch_env_overrides.clone());
 
@@ -279,6 +285,18 @@ fn merge_shell_env_overrides(target: &mut HashMap<String, String>, shell: &AppSh
 }
 
 #[cfg(feature = "ferrous-framework-native")]
+fn apply_framework_launch_env(
+    target: &mut HashMap<String, String>,
+    app_id: &str,
+    framework_url: &str,
+    framework_port: u16,
+) {
+    target.insert("TE_APP_ID".to_owned(), app_id.to_owned());
+    target.insert("TE_FRAMEWORK_URL".to_owned(), framework_url.to_owned());
+    target.insert("TE_PORT".to_owned(), framework_port.to_string());
+}
+
+#[cfg(feature = "ferrous-framework-native")]
 fn shellspec_launch_target(
     app: &AppDefinition,
     shell: &AppShell,
@@ -347,6 +365,7 @@ mod tests {
     fn app(readiness_support: bool) -> AppDefinition {
         AppDefinition {
             app_id: "example".to_owned(),
+            id_aliases: Vec::new(),
             name: "Example".to_owned(),
             description: String::new(),
             dir_name: "example".to_owned(),
@@ -394,5 +413,22 @@ mod tests {
             &app(true),
             &shell("service.worker")
         ));
+    }
+
+    #[test]
+    fn framework_identity_is_an_explicit_launch_override() {
+        let mut overrides = HashMap::new();
+        overrides.insert("TE_PORT".to_owned(), "8089".to_owned());
+        apply_framework_launch_env(&mut overrides, "example", "http://127.0.0.1:8081", 8081);
+
+        assert_eq!(
+            overrides.get("TE_APP_ID").map(String::as_str),
+            Some("example")
+        );
+        assert_eq!(
+            overrides.get("TE_FRAMEWORK_URL").map(String::as_str),
+            Some("http://127.0.0.1:8081")
+        );
+        assert_eq!(overrides.get("TE_PORT").map(String::as_str), Some("8081"));
     }
 }
