@@ -1,8 +1,10 @@
 # Framework Cleanup And UI VSIX Implementation Plan
 
-Status: Phases 1 through 3 and Phase 4A are implemented and validated. Real
-legacy-root migration applies, filesystem deletion, Phase 4B public identifiers,
-and UI VSIX work remain separate approval boundaries.
+Status: Phases 1 through 3 and Phase 4A are implemented and validated. Phase 4B
+is implemented and package-validated. Real legacy-root migration applies,
+filesystem deletion, live public-identifier acceptance, and UI VSIX work remain
+separate approval boundaries. Post-4B WBA packaging and Sidebar peer transport
+prerequisites are complete on TE2 commit `7cd923fc`.
 
 This plan coordinates four framework-readiness fixes and leaves UI VSIX
 extensions as a deliberately rough later milestone:
@@ -155,6 +157,22 @@ Removing that statement before a real UI contribution contract exists would be
 misleading. This plan reserves the later work without pretending the webview,
 CSP, resource-origin, contribution-point, and lifecycle decisions are already
 made.
+
+Two implementation prerequisites were hardened without changing the deferred
+UI VSIX architecture:
+
+- WBA's production selector matcher is packaged beneath Code TE2's vendor tree,
+  and an isolated installed-wheel test proves the generated adapter does not
+  resolve it from source `node_modules`.
+- TE2 app workers explicitly receive matching `TE_FRAMEWORK_URL` and `TE_PORT`
+  values. ALS-RS keeps its own HTTP listener on `12459`, directs its outbound
+  Sidebar IPC client to the injected framework origin, and re-registers its
+  exact app peer after event-driven reconnects. The non-default framework-port
+  regression was reproduced with `8081` and covered in ALS-RS commit
+  `15fb9af`.
+
+These close infrastructure prerequisites only. They do not select UI
+contribution points, define an extension DOM contract, or begin Phase 5.
 
 ## 2. Canonical naming and storage contract
 

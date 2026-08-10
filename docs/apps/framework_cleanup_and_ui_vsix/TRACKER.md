@@ -15,7 +15,7 @@ Last updated: 2026-08-09
 | Phase 3D: app/client paths and opt-in legacy migration/cleanup | Implemented and fixture-validated; real apply pending separate approval | Tool implementation and every real apply are separate approval boundaries |
 | Phase 4A: internal/package naming | Complete; package, build, isolated launch, and Electron validation passed | Hard-cutover implementation approved and validated; shared framework was not restarted |
 | Phase 4B: public app identifiers | Implemented and full-suite/package validated; live cutover pending | Approved hard cutover; shared runtime restart and live client acceptance remain separate |
-| Phase 5: UI VSIX rough-draft milestone | Deferred | Begins only after framework phases are stable |
+| Phase 5: UI VSIX rough-draft milestone | Deferred; WBA packaging and exact Sidebar-peer transport prerequisites are complete | Begins only after framework phases are stable; UI contribution work still requires separate approval |
 
 ## Source findings tracker
 
@@ -33,6 +33,8 @@ Last updated: 2026-08-09
 | Electron used an experimental source-directory name | Active client lived at `desktop_client/electron_spike` | Resolved in 4A; active source is `desktop_client/electron` |
 | UI extension support is intentionally absent | Explorer marketplace displays the unsupported notice | Confirmed |
 | Sidebar presentation foundation is reusable | Run Profile presentation and exact-client routing phases are implemented | Confirmed |
+| Installed WBA used a source-only matcher dependency | Generated provider registry imported `picomatch`, while package rules prune `node_modules` | Resolved; matcher is packaged under Code TE2's vendor tree and exercised from an isolated wheel layout |
+| ALS-RS Sidebar routing assumed framework port `8089` | ALS-RS owns HTTP port `12459`, but its outbound Sidebar client ignored injected framework identity and fell back to `8089` | Resolved; app workers receive explicit URL/port identity and ALS-RS reconnects and re-registers against that origin, including framework port `8081` |
 | XDG variables are not consistently present | Existing Python, Rust, and TypeScript code already falls back to `$HOME`; Termux also provides `$PREFIX`/`$TMPDIR` for runtime state | Confirmed; canonical resolver must be platform-aware |
 | Rust final-binary fingerprints were never pruned | Pre-3A bootstrap copied to `bin/<fingerprint>/<profile>` without a lock or cleanup path | Resolved in 3A; 10 historical release binaries used 206.6 MiB on the inspection host |
 | Debug was the implicit framework build default | Pre-3A `--release` was a lone `store_true` flag and every Cargo path omitted `--release` otherwise | Resolved in 3A; release is default and `--debug` is explicit |
@@ -226,6 +228,10 @@ Target architecture decisions:
 
 ## Phase 5 placeholder — UI VSIX
 
+- [x] Package WBA production dependencies independently of source `node_modules`.
+- [x] Validate the generated WBA provider registry from an isolated installed-wheel layout.
+- [x] Preserve explicit framework URL/port identity through the app-worker launch boundary.
+- [x] Re-establish the exact ALS-RS Sidebar peer after non-default-port startup and transport reconnect.
 - [ ] Re-investigate contribution points after framework cleanup lands.
 - [ ] Select the smallest first UI contribution subset.
 - [ ] Define WBA-to-backend registration/disposal facts.
@@ -265,3 +271,4 @@ each phase executes. Do not mark a phase complete from implementation alone.
 | 2026-08-09 | 1–3C acceptance | Downstream-checkout live validation of remaining hover comparisons, Termux interface/no-XDG behavior, Linux canonical-root restart, framework stores, and Code TE2 state/WBA restart recovery | Passed; user-confirmed downstream acceptance complete |
 | 2026-08-09 | 4A | Python discovery/path/migration suites; wheel/sdist archive and isolated install checks; Rust format/check/full tests and optimized cache build; isolated server health/shutdown smoke; Electron typecheck/tests/compile/package | Passed; 48 Python tests, 69 Rust tests plus 4 ignored benchmarks, 61 Electron tests, canonical package contents and health identity, 0 failures |
 | 2026-08-09 | 4B implementation | Canonical-id/alias and state-move Rust tests; full Python, Code TE2, Rust, Electron, Gecko, and Cefrium suites; WBA/host rebuild; Gecko/Cefrium APK assembly; Electron package; wheel/sdist path audit; stale-name classification | Passed; 204 Python, 172 frontend, 70 Rust plus 4 ignored, and 62 Electron tests; both Android unit suites and APK builds passed; package archives contain only `app/apps/code_te2`; live shared-runtime cutover remains pending |
+| 2026-08-09 | Phase 5 prerequisites | Code TE2 typecheck/build and five focused WBA tests; isolated wheel extraction/import; full TE2 and ALS-RS Rust suites; non-default framework-port regression | Passed; TE2 74 tests plus 4 ignored, ALS-RS 139 tests in both library and binary targets, installed WBA matcher resolved without `node_modules`; TE2 `main` and `feature/ui-vsix-extensions` synchronized at `7cd923fc`, ALS-RS fix published at `15fb9af` |
