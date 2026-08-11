@@ -91,6 +91,7 @@ interface WorkbenchRuntimeDeps {
   isWbaRpcConnected(): boolean;
   wbaRpcCall(method: string, params: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<unknown>;
   wbaRpcNotify(method: string, params: Record<string, unknown>): boolean;
+  onActiveEditorOpenAck?(path: string): void;
   clearTimeoutFn(timer: ReturnType<typeof setTimeout>): void;
   setTimeoutFn(callback: () => void, delayMs: number): ReturnType<typeof setTimeout>;
 }
@@ -786,6 +787,7 @@ export function createEditorWorkbenchRuntime(
         return { ok: false, stale: true };
       }
       setOpenAck(payload.path, payload.generation);
+      deps.onActiveEditorOpenAck?.(payload.path);
       flushPendingAfterOpen();
       schedulePostReadyStructureRefresh(payload.path, payload.generation, payload.source);
       return result;

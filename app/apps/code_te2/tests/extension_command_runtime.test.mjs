@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { ExtensionCommandRuntime } from "../workbench_protocol_proxy/node_workbench_adapter/dist/extensions/command-runtime.mjs";
+import { WorkbenchClient } from "../workbench_protocol_proxy/node_workbench_adapter/dist/client/workbench-client.mjs";
 import { checkWorkspaceContains } from "../workbench_protocol_proxy/node_workbench_adapter/dist/workspace/workspace-contains.mjs";
 
 const RPC_IDS = {
@@ -147,6 +148,65 @@ test("propagates the extension host's missing-command error", async () => {
     runtime.execute({ command: "sample.missing" }),
     /Contributed command 'sample\.missing' does not exist\./,
   );
+});
+
+test("projects active Monaco selections through ExtHostEditors", () => {
+  const calls = [];
+  const client = Object.create(WorkbenchClient.prototype);
+  client.state = { activePath: "/workspace/app.js" };
+  client._activeEditorId = "editor-1";
+  client._sendExt = (...args) => calls.push(args);
+
+  assert.deepEqual(
+    client.extensionEditorStateUpdate({
+      path: "/workspace/app.js",
+      source: "keyboard",
+      selection: {
+        startLineNumber: 4,
+        startColumn: 2,
+        endLineNumber: 4,
+        endColumn: 8,
+        selectionStartLineNumber: 4,
+        selectionStartColumn: 2,
+        positionLineNumber: 4,
+        positionColumn: 8,
+      },
+    }),
+    { ok: true, activePath: "/workspace/app.js" },
+  );
+  assert.equal(calls.length, 1);
+  assert.equal(typeof calls[0][0], "number");
+  assert.equal(calls[0][1], "$acceptEditorPropertiesChanged");
+  assert.deepEqual(calls[0].slice(2), [[
+    "editor-1",
+    {
+      options: null,
+      selections: {
+        selections: [{
+          startLineNumber: 4,
+          startColumn: 2,
+          endLineNumber: 4,
+          endColumn: 8,
+          selectionStartLineNumber: 4,
+          selectionStartColumn: 2,
+          positionLineNumber: 4,
+          positionColumn: 8,
+        }],
+        source: "keyboard",
+      },
+      visibleRanges: null,
+    },
+  ], false]);
+
+  assert.deepEqual(
+    client.extensionEditorStateUpdate({
+      path: "/workspace/other.js",
+      source: "not-valid",
+      selection: {},
+    }),
+    { ok: false, activePath: "/workspace/app.js" },
+  );
+  assert.equal(calls.length, 1);
 });
 
 test("workspaceContains supports brace expansion through vendored picomatch", async () => {

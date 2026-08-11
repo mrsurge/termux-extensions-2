@@ -2479,10 +2479,10 @@ export class WorkbenchClient {
     return this._extensionActivity.selectLog(channelId);
   }
 
-  _syncExtensionCommandSelection(params: Record<string, unknown>): void {
+  _syncActiveEditorSelection(params: Record<string, unknown>): boolean {
     const filePath = typeof params.path === "string" ? params.path.trim() : "";
     if (!filePath || filePath !== this.state.activePath || !this._activeEditorId) {
-      throw new Error("Extension command target is not the active editor");
+      return false;
     }
     const raw = isRecord(params.selection) ? params.selection : {};
     const line = (value: unknown, fallback: number): number => {
@@ -2497,6 +2497,13 @@ export class WorkbenchClient {
     const selectionStartColumn = line(raw.selectionStartColumn, startColumn);
     const positionLineNumber = line(raw.positionLineNumber, endLineNumber);
     const positionColumn = line(raw.positionColumn, endColumn);
+    const requestedSource = typeof params.source === "string"
+      ? params.source
+      : "";
+    const source = requestedSource === "mouse" || requestedSource === "keyboard"
+        || requestedSource === "code.navigation" || requestedSource === "code.jump"
+      ? requestedSource
+      : "api";
     this._sendExt(
       _rpcIds.ExtHostEditors,
       "$acceptEditorPropertiesChanged",
@@ -2515,13 +2522,29 @@ export class WorkbenchClient {
               positionLineNumber,
               positionColumn,
             }],
-            source: "api",
+            source,
           },
           visibleRanges: null,
         },
       ],
       false,
     );
+    return true;
+  }
+
+  _syncExtensionCommandSelection(params: Record<string, unknown>): void {
+    if (!this._syncActiveEditorSelection(params)) {
+      throw new Error("Extension command target is not the active editor");
+    }
+  }
+
+  extensionEditorStateUpdate(
+    params: Record<string, unknown>,
+  ): Record<string, unknown> {
+    return {
+      ok: this._syncActiveEditorSelection(params),
+      activePath: this.state.activePath,
+    };
   }
 
   extensionMenuResolve(

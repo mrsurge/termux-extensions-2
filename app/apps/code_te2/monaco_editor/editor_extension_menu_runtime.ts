@@ -1,3 +1,8 @@
+import {
+  buildExtensionEditorSelection,
+  type ExtensionEditorLike,
+} from "./editor_extension_state_runtime.ts";
+
 interface ExtensionMenuAction extends Record<string, unknown> {
   command: string;
   title: string;
@@ -11,27 +16,12 @@ interface DisposableLike {
   dispose?(): void;
 }
 
-interface SelectionLike extends Record<string, unknown> {
-  startLineNumber?: number;
-  startColumn?: number;
-  endLineNumber?: number;
-  endColumn?: number;
-  selectionStartLineNumber?: number;
-  selectionStartColumn?: number;
-  positionLineNumber?: number;
-  positionColumn?: number;
-}
-
 interface ModelLike {
   getLanguageId?(): string;
 }
 
-interface EditorLike {
+interface EditorLike extends ExtensionEditorLike {
   getModel?(): ModelLike | null;
-  getSelection?(): SelectionLike | null;
-  getPosition?(): { lineNumber?: number; column?: number } | null;
-  onDidChangeCursorSelection?(listener: () => void): DisposableLike;
-  onDidChangeModel?(listener: () => void): DisposableLike;
 }
 
 interface ExtensionEditorMenuRuntimeDeps {
@@ -77,29 +67,6 @@ function parseActions(value: unknown): ExtensionMenuAction[] {
   return actions;
 }
 
-function selectionPayload(editor: EditorLike | null): Record<string, number> {
-  const raw = editor?.getSelection?.() ?? null;
-  const position = editor?.getPosition?.() ?? null;
-  const number = (value: unknown, fallback: number): number => {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? Math.max(1, Math.trunc(parsed)) : fallback;
-  };
-  const startLineNumber = number(raw?.startLineNumber, number(position?.lineNumber, 1));
-  const startColumn = number(raw?.startColumn, number(position?.column, 1));
-  const endLineNumber = number(raw?.endLineNumber, startLineNumber);
-  const endColumn = number(raw?.endColumn, startColumn);
-  return {
-    startLineNumber,
-    startColumn,
-    endLineNumber,
-    endColumn,
-    selectionStartLineNumber: number(raw?.selectionStartLineNumber, startLineNumber),
-    selectionStartColumn: number(raw?.selectionStartColumn, startColumn),
-    positionLineNumber: number(raw?.positionLineNumber, endLineNumber),
-    positionColumn: number(raw?.positionColumn, endColumn),
-  };
-}
-
 function actionLabel(action: ExtensionMenuAction): string {
   return action.category ? `${action.category}: ${action.title}` : action.title;
 }
@@ -136,7 +103,7 @@ export function createEditorExtensionMenuRuntime(
     return {
       path,
       languageId: activeModel.getLanguageId?.() ?? "plaintext",
-      selection: selectionPayload(editor),
+      selection: buildExtensionEditorSelection(editor),
     };
   }
 

@@ -66,6 +66,9 @@ export interface WorkbenchLike {
   extensionCommandExecute: (
     params: Record<string, unknown>,
   ) => Promise<Record<string, unknown>>;
+  extensionEditorStateUpdate: (
+    params: Record<string, unknown>,
+  ) => Record<string, unknown>;
   resolveLanguageId: (
     path: string,
     text: string,
@@ -494,6 +497,10 @@ export async function dispatchJsonRpcRequest(
     } catch (error) {
       return failure(id, -32000, error);
     }
+  }
+
+  if (method === "vscode.editorState.update") {
+    return success(id, runtime.wb.extensionEditorStateUpdate(params));
   }
 
   if (method === "extensions.activateByEvent") {

@@ -327,6 +327,7 @@ test('rapid WBA model opens run single-flight and retain only the latest documen
     getValue: () => '',
   };
   const calls = [];
+  const openAcks = [];
   const runtime = createEditorWorkbenchRuntime({
     getWindow: () => ({ __te2AdapterReady: true }),
     getMonaco: () => null,
@@ -348,6 +349,7 @@ test('rapid WBA model opens run single-flight and retain only the latest documen
       return call.promise;
     },
     wbaRpcNotify: () => true,
+    onActiveEditorOpenAck: (path) => openAcks.push(path),
     clearTimeoutFn: clearTimeout,
     setTimeoutFn: setTimeout,
   });
@@ -389,6 +391,7 @@ test('rapid WBA model opens run single-flight and retain only the latest documen
   calls[0].call.resolve({ ok: true });
   await firstOpen;
   await settlePromises();
+  assert.deepEqual(openAcks, []);
   assert.equal(calls.length, 2);
   assert.equal(calls[1].params.path, '/workspace/latest.rs');
 
@@ -396,6 +399,7 @@ test('rapid WBA model opens run single-flight and retain only the latest documen
   await latestOpen;
   await settlePromises();
   assert.equal(latestSettled, true);
+  assert.deepEqual(openAcks, ["/workspace/latest.rs"]);
 });
 
 test('diagnostic links are revived as Monaco URIs before marker projection', async () => {

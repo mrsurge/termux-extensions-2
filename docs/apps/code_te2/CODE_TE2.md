@@ -3987,6 +3987,20 @@ Ordinary extension webview panels use the same secure document runtime but have 
 
 The bounded contributed-command slice reads `contributes.commands` plus `editor/title` and `editor/context` menus. WBA evaluates the implemented `when` forms, serves contained command icons as data URLs, activates `onCommand:<id>`, synchronizes the exact current Monaco selection through `ExtHostEditors`, and invokes the registered command through `ExtHostCommands`. The editor resolves and executes these commands over its existing strict MessagePack WBA lane: icon-bearing navigation commands render in `.fe-toolbar`, while selection-gated context commands render in the existing touch Extension Context menu. Resolution is event-driven on model, selection, and WBA reconnect; there is no selection polling. `MainThreadMessageService` maps extension information/warning/error requests to the existing editor notification UI. WBA's `workspaceContains` activation matching uses the vendored `picomatch` implementation, including brace expressions.
 
+Active Monaco cursor and selection state is also an event-driven extension-host
+projection independent of command invocation. The editor coalesces rapid
+selection changes to at most one direct strict-MessagePack WBA notification per
+16 ms. WBA accepts only the current active path/editor and forwards the exact
+selection plus Code OSS source kind through
+`ExtHostEditors.$acceptEditorPropertiesChanged`; this updates
+`window.activeTextEditor.selection` and fires
+`window.onDidChangeTextEditorSelection` in extensions such as Code Visualizer.
+Notifications are volatile while disconnected. The authoritative recovery is
+one exact resynchronization after WBA acknowledges opening the active document;
+there is no polling or reconnect-era notification replay. Command invocation
+still performs its own exact selection synchronization as the final execution
+barrier.
+
 The current command surface is deliberately smaller than the complete Code OSS menu service. Extension `setContext`, enablement and alternate-command composition, Explorer and view-title placements, targeted initial panel reveal, extension-requested file navigation, generic diff surfaces, and custom editors remain deferred.
 
 The first acceptance fixture is `openai.chatgpt_26.5803.41515.vsix`, using `chatgpt.sidebarView`.

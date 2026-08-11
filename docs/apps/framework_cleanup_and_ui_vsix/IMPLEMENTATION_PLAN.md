@@ -887,14 +887,26 @@ the requested menu on an active-document/menu-open event. There is no context
 or selection polling and frontends do not grow separate VS Code `when`-clause
 evaluators.
 
-Command execution follows the initiating surface's own RPC lane into a shared
-Python backend action, then `adapter_rpc` into WBA. WBA first fires the implicit
-`onCommand:<id>` activation event, synchronizes the extension host's active
-editor selection when the request is editor-scoped, and invokes the exact
-registered command through `ExtHostCommands`. Match Code Server's resource
-arguments: editor title/context receives the active model URI; Explorer receives
-the clicked URI plus the selected-resource array. No Explorer, editor, or
-Sidebar frontend calls the WBA socket directly.
+Implemented editor command execution follows the editor's existing direct
+strict-MessagePack WBA lane. WBA first fires the implicit `onCommand:<id>`
+activation event, synchronizes the extension host's active editor selection,
+and invokes the exact registered command through `ExtHostCommands`. Match Code
+Server's resource arguments: editor title/context receives the active model URI.
+Later Explorer and Sidebar contribution placements must continue to originate
+through those surfaces' own backend lanes rather than adding a second direct
+WBA client.
+
+Extensions can also observe selection independently of command execution through
+`window.onDidChangeTextEditorSelection`. The active Monaco editor therefore
+projects its latest exact selection over the existing direct strict-MessagePack
+WBA lane on cursor/selection events. The frontend coalesces a burst to at most
+one update per 16 ms without polling, WBA rejects a path that is not its active
+editor, and the accepted update passes through
+`ExtHostEditors.$acceptEditorPropertiesChanged` so both
+`activeTextEditor.selection` and the extension event advance together.
+Disconnected notifications are dropped; after the WBA acknowledges the current
+active-document open, the editor sends one authoritative selection snapshot.
+The command-time synchronization remains the final execution barrier.
 
 The existing `workspaceContains` implementation must also use Code OSS-compatible
 glob semantics. Json Crack declares `workspaceContains:**/*.{json}`, while the
@@ -1066,6 +1078,10 @@ adding native-client authority:
   WBA, with bounded fail-closed `when` handling, contributed icons, implicit
   `onCommand` activation, exact Monaco selection synchronization, and execution
   through `ExtHostCommands` on the existing strict MessagePack editor/WBA lane;
+- active Monaco cursor/selection changes are coalesced event-wise into
+  `ExtHostEditors`, with an exact post-open-ack resynchronization and no
+  disconnected replay or polling, so extensions can consume both current
+  `activeTextEditor.selection` and `onDidChangeTextEditorSelection`;
 - `workspaceContains` uses the vendored `picomatch` implementation, including
   the singleton-brace form used by Json Crack, and `MainThreadMessageService`
   emits extension messages into the existing editor notification path; and

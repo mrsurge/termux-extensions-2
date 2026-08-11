@@ -270,6 +270,7 @@ Investigation and planning:
 - [x] Trace Json Crack's `editor/title` navigation icon, selection-gated `editor/context` command, active-editor use, and beside-editor webview-panel lifecycle through Code Server 4.130.
 - [x] Confirm WBA's current hard-coded extension-host selection and incomplete `workspaceContains` brace matching are concrete Json Crack blockers.
 - [x] Confirm the existing WBA secure webview document/transport core is reusable while activity-view and panel lifecycles must remain distinct.
+- [x] Trace Code Visualizer's active-editor offset calculation and `onDidChangeTextEditorSelection` listener; confirm command-time-only selection synchronization cannot drive its AST focus.
 - [x] Refine the implementation plan into dependency-ordered slices 5.6A–5.6H.
 
 5.6A–B — contribution presentation and identity:
@@ -290,6 +291,7 @@ Investigation and planning:
 - [ ] Keep the fail-closed context-expression evaluator in WBA and merge bounded event-driven editor, Explorer, and extension-view context snapshots from each surface's own RPC lane.
 - [x] Replace WBA's hand-written `workspaceContains` matcher with the already-vendored Code OSS-compatible `picomatch` path, including brace expressions.
 - [x] Synchronize the exact active Monaco selection into `ExtHostEditors` before an editor-scoped command is activated and invoked; do not poll selection.
+- [x] Project active Monaco cursor/selection changes event-wise through the direct strict MessagePack WBA lane into `ExtHostEditors`, coalescing bursts and resynchronizing only after the active-document open acknowledgement.
 - [x] Route editor command resolution/invocation through the existing strict MessagePack editor-to-WBA lane, implicit `onCommand:<id>` activation, and `ExtHostCommands`.
 - [x] Forward the active editor resource URI for the implemented editor command placements.
 - [x] Project extension information/warning/error requests through `MainThreadMessageService` into the existing editor notification UI.
@@ -321,6 +323,7 @@ Acceptance fixtures:
 - [ ] Opening a JSON document displays Json Crack's contributed SVG icon as a primary editor action; changing language/resource removes or restores it event-wise.
 - [ ] Json Crack opens one beside-editor panel from the whole document and refreshes it on document change through the existing WBA document projection.
 - [ ] Json Crack's selection command receives the exact Monaco selection, while an empty selection hides the context action and extension messages still render correctly.
+- [ ] Code Visualizer follows the current Monaco caret through `activeTextEditor.selection` and `onDidChangeTextEditorSelection` without polling or reopening its view.
 - [ ] Hiding/foreground-switching a retained Json Crack panel preserves its live webview; closing it disposes the shared panel and its subscriptions.
 - [ ] Json Crack panel creation reveals only in the invoking client initially, while shared membership remains available to other connected clients.
 - [ ] OpenAI `setContext` changes command/menu visibility without a restart or workspace leakage.
@@ -364,3 +367,4 @@ each phase executes. Do not mark a phase complete from implementation alone.
 | 2026-08-09 | Phase 5 live checkpoint | Electron inline OpenAI view through the public Rust WBA mount; encoded webview authority resources; Cap'n Proto handshake and MCP/fetch traffic; opaque-sandbox Web Storage adapter; wrapper loading-mask computed style | OpenAI logged `app routes mounted` and `ready provider mounted`; UI is functional, while a gray visual overlay and detach/attach acceptance remain open |
 | 2026-08-10 | Phase 5 inline acceptance | Required vendored GitHub Dark Default payload; Code Server-compatible `--vscode-*` projection; pre-script `vscode-dark` body metadata; live wrapper/document inspection | Passed; inline OpenAI view accepted and the gray overlay is resolved; Electron detach/attach acceptance remains open |
 | 2026-08-10 | Phase 5.6 implementation checkpoint | Code TE2 typecheck/build; complete 175-test frontend suite; focused command, brace-glob, activity-webview, panel-webview, workspace-search, Sidebar projection, and UI IPC contract tests; focused Python static analysis; diff hygiene | Passed locally; contributed icons, local hide/reopen, editor commands, exact selection sync, message projection, and shared-core webview panels are implemented but Json Crack and cross-client behavior still require live acceptance |
+| 2026-08-10 | Phase 5.6 cursor projection | Code TE2 typecheck/build; 36 focused transport, WBA dispatch, ExtHostEditors, coalescing, and post-open-ack tests; complete 181-test frontend suite | Passed locally; Code Visualizer live caret/AST-following behavior remains for user acceptance |

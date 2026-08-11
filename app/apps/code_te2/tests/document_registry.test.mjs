@@ -848,3 +848,43 @@ test("logical document DTOs round-trip through the existing JSON-RPC dispatcher"
     ["reconcile", "hydrate"],
   );
 });
+
+test("active editor selection updates use the existing WBA dispatcher", async () => {
+  const calls = [];
+  const params = {
+    path: "/workspace/app.js",
+    source: "keyboard",
+    selection: {
+      startLineNumber: 4,
+      startColumn: 2,
+      endLineNumber: 4,
+      endColumn: 8,
+      selectionStartLineNumber: 4,
+      selectionStartColumn: 2,
+      positionLineNumber: 4,
+      positionColumn: 8,
+    },
+  };
+  const runtime = {
+    wb: {
+      extensionEditorStateUpdate(value) {
+        calls.push(value);
+        return { ok: true, activePath: value.path };
+      },
+    },
+  };
+
+  assert.deepEqual(
+    await dispatchJsonRpcRequest(runtime, {
+      id: null,
+      method: "vscode.editorState.update",
+      params,
+    }),
+    {
+      jsonrpc: "2.0",
+      id: null,
+      result: { ok: true, activePath: "/workspace/app.js" },
+    },
+  );
+  assert.deepEqual(calls, [params]);
+});

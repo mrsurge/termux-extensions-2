@@ -131,6 +131,7 @@ import { registerEditorWbaRuntimeHandlers } from "./editor_wba_runtime_handlers.
 import { createEditorDebugRuntime } from "./editor_debug_runtime.ts";
 import { createEditorUiEditorRuntime } from "./editor_ui_editor_runtime.ts";
 import { createEditorExtensionMenuRuntime } from "./editor_extension_menu_runtime.ts";
+import { createEditorExtensionStateRuntime } from "./editor_extension_state_runtime.ts";
 import {
   createEditorCodeInspectorRuntime,
   type CodeInspectorRuntime,
@@ -189,7 +190,9 @@ interface MonacoRuntimeEditorLike {
   getDomNode?(): HTMLElement | null;
   onDidChangeConfiguration?(listener: () => void): void;
   onDidChangeModelContent(listener: () => void): { dispose(): void };
-  onDidChangeCursorSelection?(listener: () => void): { dispose(): void };
+  onDidChangeCursorSelection?(
+    listener: (event: { source?: string }) => void,
+  ): { dispose(): void };
   onDidChangeModel?(listener: () => void): { dispose(): void };
   getSelection?(): Record<string, unknown> | null;
   getScrollTop?(): number;
@@ -419,6 +422,9 @@ interface MonacoBootWindowLike extends Window {
   let codeInspectorRuntime: CodeInspectorRuntime | null = null;
   let extensionEditorMenuRuntime: ReturnType<
     typeof createEditorExtensionMenuRuntime
+  > | null = null;
+  let extensionEditorStateRuntime: ReturnType<
+    typeof createEditorExtensionStateRuntime
   > | null = null;
   var debugRuntime = createEditorDebugRuntime({
     getDocument: function () {
@@ -711,6 +717,14 @@ interface MonacoBootWindowLike extends Window {
         console.warn("[extension-menus]", message);
       }
     },
+    setTimeoutFn: _setTimeoutBound,
+    clearTimeoutFn: _clearTimeoutBound,
+  });
+  extensionEditorStateRuntime = createEditorExtensionStateRuntime({
+    getCurrentPath: function () {
+      return currentPath;
+    },
+    notify: editorWbaRpcNotify,
     setTimeoutFn: _setTimeoutBound,
     clearTimeoutFn: _clearTimeoutBound,
   });
@@ -1022,6 +1036,11 @@ interface MonacoBootWindowLike extends Window {
     isWbaRpcConnected: isEditorWbaRpcConnected,
     wbaRpcCall: editorWbaRpcCall,
     wbaRpcNotify: editorWbaRpcNotify,
+    onActiveEditorOpenAck: function (path) {
+      if (path === currentPath) {
+        extensionEditorStateRuntime?.resync("open_ack");
+      }
+    },
     clearTimeoutFn: _clearTimeoutBound,
     setTimeoutFn: _setTimeoutBound,
   } as Parameters<typeof createEditorWorkbenchRuntime>[0]);
@@ -1076,6 +1095,7 @@ interface MonacoBootWindowLike extends Window {
     function () {
       codeInspectorRuntime?.dispose();
       extensionEditorMenuRuntime?.dispose();
+      extensionEditorStateRuntime?.dispose();
     },
     { once: true },
   );
@@ -1477,6 +1497,7 @@ interface MonacoBootWindowLike extends Window {
     setEditor: function (value: MonacoRuntimeEditorLike | null) {
       editor = value;
       extensionEditorMenuRuntime?.attach(value);
+      extensionEditorStateRuntime?.attach(value);
     },
     getDiffEditor: function () {
       return diffEditor;
