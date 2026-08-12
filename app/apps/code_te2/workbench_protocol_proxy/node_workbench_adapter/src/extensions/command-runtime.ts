@@ -122,7 +122,11 @@ function splitExpression(expression: string, operator: "||" | "&&"): string[] {
   return parts;
 }
 
-function contextValue(raw: string, context: Record<string, unknown>): unknown {
+function operandValue(
+  raw: string,
+  context: Record<string, unknown>,
+  missingAsLiteral: boolean,
+): unknown {
   const value = raw.trim();
   if ((value.startsWith("'") && value.endsWith("'")) || (value.startsWith('"') && value.endsWith('"'))) {
     return value.slice(1, -1);
@@ -132,7 +136,7 @@ function contextValue(raw: string, context: Record<string, unknown>): unknown {
   if (value === "null") return null;
   if (/^-?\d+(?:\.\d+)?$/.test(value)) return Number(value);
   if (Object.prototype.hasOwnProperty.call(context, value)) return context[value];
-  return value;
+  return missingAsLiteral ? value : undefined;
 }
 
 function evaluateAtom(expression: string, context: Record<string, unknown>): boolean {
@@ -147,7 +151,7 @@ function evaluateAtom(expression: string, context: Record<string, unknown>): boo
   if (regexMatch) {
     try {
       return new RegExp(regexMatch[2] ?? "", regexMatch[3] ?? "").test(
-        String(contextValue(regexMatch[1] ?? "", context) ?? ""),
+        String(operandValue(regexMatch[1] ?? "", context, false) ?? ""),
       );
     } catch {
       return false;
@@ -155,13 +159,13 @@ function evaluateAtom(expression: string, context: Record<string, unknown>): boo
   }
   const comparison = atom.match(/^(.+?)\s*(===|!==|==|!=)\s*(.+)$/);
   if (comparison) {
-    const left = contextValue(comparison[1] ?? "", context);
-    const right = contextValue(comparison[3] ?? "", context);
+    const left = operandValue(comparison[1] ?? "", context, false);
+    const right = operandValue(comparison[3] ?? "", context, true);
     return comparison[2] === "==" || comparison[2] === "==="
       ? left === right
       : left !== right;
   }
-  return Boolean(contextValue(atom, context));
+  return Boolean(operandValue(atom, context, false));
 }
 
 export function evaluateWhenClause(

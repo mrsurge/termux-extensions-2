@@ -95,6 +95,8 @@ export function createEditorExtensionMenuRuntime(
   let refreshSequence = 0;
   let titleActions: ExtensionMenuAction[] = [];
   let contextActions: ExtensionMenuAction[] = [];
+  let toolbarScrollRoot: HTMLElement | null = null;
+  let toolbarWheelListener: ((event: WheelEvent) => void) | null = null;
 
   function context(): Record<string, unknown> | null {
     const path = deps.getCurrentPath();
@@ -111,7 +113,29 @@ export function createEditorExtensionMenuRuntime(
     return deps.getDocument().getElementById("fe-extension-editor-actions");
   }
 
+  function installToolbarScroll(): void {
+    const root = toolbarRoot();
+    if (root === toolbarScrollRoot) return;
+    if (toolbarScrollRoot && toolbarWheelListener) {
+      toolbarScrollRoot.removeEventListener("wheel", toolbarWheelListener);
+    }
+    toolbarScrollRoot = root;
+    toolbarWheelListener = null;
+    if (!root) return;
+    toolbarWheelListener = (event) => {
+      const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY)
+        ? event.deltaX
+        : event.deltaY;
+      if (!delta || root.scrollWidth <= root.clientWidth) return;
+      const previous = root.scrollLeft;
+      root.scrollLeft += delta;
+      if (root.scrollLeft !== previous) event.preventDefault();
+    };
+    root.addEventListener("wheel", toolbarWheelListener, { passive: false });
+  }
+
   function renderTitleActions(): void {
+    installToolbarScroll();
     const root = toolbarRoot();
     if (!root) return;
     root.replaceChildren();
@@ -205,6 +229,7 @@ export function createEditorExtensionMenuRuntime(
     for (const disposable of editorDisposables) disposable.dispose?.();
     editorDisposables = [];
     editor = nextEditor;
+    installToolbarScroll();
     if (editor?.onDidChangeCursorSelection) {
       editorDisposables.push(editor.onDidChangeCursorSelection(scheduleSelectionRefresh));
     }
@@ -232,6 +257,11 @@ export function createEditorExtensionMenuRuntime(
     titleActions = [];
     contextActions = [];
     renderTitleActions();
+    if (toolbarScrollRoot && toolbarWheelListener) {
+      toolbarScrollRoot.removeEventListener("wheel", toolbarWheelListener);
+    }
+    toolbarScrollRoot = null;
+    toolbarWheelListener = null;
   }
 
   return {

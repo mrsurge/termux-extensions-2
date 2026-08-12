@@ -311,6 +311,8 @@ Investigation and planning:
 - [ ] Implement `MainThreadCustomEditors`/`ExtHostCustomEditors` document, save/revert/backup, serializer, and disposal lifecycle.
 - [ ] Project multiple Codex conversations through custom-editor/panel identities while keeping one activity-bar provider surface.
 - [x] Project icon-bearing `editor/title` navigation actions into `.fe-toolbar`.
+- [x] Keep absent positive context keys ineligible without breaking unquoted comparison literals; suppress Debug Pretty Print and Copilot accept/reject until their real context and editor semantics are supported.
+- [x] Make the inline extension-action group a horizontal touch/wheel viewport while preserving fixed toolbar controls.
 - [x] Project `editor/context` actions into the shared editor Extension Context touch menu.
 - [ ] Project `explorer/context` into the Explorer card-menu Extension Context submenu.
 - [ ] Project `view/title` actions into inline and Electron-detached extension headers.
@@ -327,6 +329,7 @@ Acceptance fixtures:
 - [ ] Hiding/foreground-switching a retained Json Crack panel preserves its live webview; closing it disposes the shared panel and its subscriptions.
 - [ ] Json Crack panel creation reveals only in the invoking client initially, while shared membership remains available to other connected clients.
 - [ ] OpenAI `setContext` changes command/menu visibility without a restart or workspace leakage.
+- [ ] Adding enough eligible editor-title actions to overflow the toolbar keeps every action reachable by touch and mouse wheel without moving Run/Stop/status controls.
 - [ ] OpenAI file navigation reaches the canonical Code TE2 editor state.
 - [ ] A contributed diff opens the requested pair without mutating Git/draft baseline authority.
 - [ ] `chatgpt.conversationEditor` opens, restores, and disposes correctly, including multiple allowed conversation surfaces.

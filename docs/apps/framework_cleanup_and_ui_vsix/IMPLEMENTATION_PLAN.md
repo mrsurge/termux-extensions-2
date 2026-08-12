@@ -887,6 +887,13 @@ the requested menu on an active-document/menu-open event. There is no context
 or selection polling and frontends do not grow separate VS Code `when`-clause
 evaluators.
 
+Context operands and comparison literals remain distinct. An absent positive
+context key evaluates false, while an unquoted right-hand literal such as
+`.json` remains a literal rather than being mistaken for a missing key. This
+keeps unprojected Debug Pretty Print and Copilot active-diff actions hidden
+until their real context/state and editor semantics exist, without maintaining
+a command-id or title blacklist.
+
 Implemented editor command execution follows the editor's existing direct
 strict-MessagePack WBA lane. WBA first fires the implicit `onCommand:<id>`
 activation event, synchronizes the extension host's active editor selection,
@@ -1047,6 +1054,11 @@ Menu eligibility is refreshed event-wise when the active document changes or a
 menu is opened so selection-dependent commands are current without background
 polling.
 
+The primary extension-action group is a shrinkable horizontal viewport inside
+`.fe-toolbar-actions`. It preserves fixed Run/Stop/status controls while native
+touch panning and mouse-wheel translation expose additional contributed icons
+when the eligible action set outgrows the available toolbar width.
+
 ##### 5.6H Recommended implementation order
 
 1. Fix hide/reopen semantics and add contributed identity/icons to the drawer.
@@ -1082,6 +1094,11 @@ adding native-client authority:
   `ExtHostEditors`, with an exact post-open-ack resynchronization and no
   disconnected replay or polling, so extensions can consume both current
   `activeTextEditor.selection` and `onDidChangeTextEditorSelection`;
+- absent positive context keys now remain ineligible while unquoted comparison
+  literals remain valid, so unsupported built-in Debug Pretty Print and Copilot
+  diff actions are suppressed without hard-coded command filtering;
+- the inline extension-action group scrolls horizontally by touch or wheel when
+  its eligible icon set exceeds the available toolbar width;
 - `workspaceContains` uses the vendored `picomatch` implementation, including
   the singleton-brace form used by Json Crack, and `MainThreadMessageService`
   emits extension messages into the existing editor notification path; and

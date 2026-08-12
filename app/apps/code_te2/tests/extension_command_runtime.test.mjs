@@ -4,7 +4,10 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { ExtensionCommandRuntime } from "../workbench_protocol_proxy/node_workbench_adapter/dist/extensions/command-runtime.mjs";
+import {
+  evaluateWhenClause,
+  ExtensionCommandRuntime,
+} from "../workbench_protocol_proxy/node_workbench_adapter/dist/extensions/command-runtime.mjs";
 import { WorkbenchClient } from "../workbench_protocol_proxy/node_workbench_adapter/dist/client/workbench-client.mjs";
 import { checkWorkspaceContains } from "../workbench_protocol_proxy/node_workbench_adapter/dist/workspace/workspace-contains.mjs";
 
@@ -13,6 +16,18 @@ const RPC_IDS = {
   MainThreadMessageService: 29,
   ExtHostCommands: 89,
 };
+
+test("unprojected positive context keys do not expose editor actions", () => {
+  assert.equal(evaluateWhenClause("jsDebugCanPrettyPrint", {}), false);
+  assert.equal(
+    evaluateWhenClause("github.copilot.chat.copilotCLI.hasActiveDiff", {}),
+    false,
+  );
+  assert.equal(
+    evaluateWhenClause("resourceExtname == .json", { resourceExtname: ".json" }),
+    true,
+  );
+});
 
 test("resolves contributed editor actions and executes through ExtHostCommands", async () => {
   const activations = [];
