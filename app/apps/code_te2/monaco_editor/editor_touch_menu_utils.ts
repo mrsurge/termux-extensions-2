@@ -21,7 +21,9 @@ interface MentionRequestDeps {
   sendEditorMentionRequest(payload: Record<string, unknown>): boolean;
   goToDefinition?(): void;
   inspectCode?(mode: CodeInspectorMode): void;
-  getExtensionNavigationTools?(): MonacoTouchSelectionTool[];
+  getExtensionNavigationTools?(controls: {
+    closeMenu(): void;
+  }): MonacoTouchSelectionTool[];
   updateDebug(extra?: string): void;
 }
 
@@ -170,13 +172,7 @@ export function ensureTouchSelection(reason: string, deps: MentionRequestDeps): 
                   deps.inspectCode?.('implementations');
                 },
               },
-              ...(deps.getExtensionNavigationTools?.().map((tool) => ({
-                ...tool,
-                action: async () => {
-                  closeMenu();
-                  await tool.action();
-                },
-              })) ?? []),
+              ...(deps.getExtensionNavigationTools?.({ closeMenu }) ?? []),
             ]
           : undefined,
       });

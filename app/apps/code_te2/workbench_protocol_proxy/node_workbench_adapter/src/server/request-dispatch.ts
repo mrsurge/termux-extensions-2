@@ -66,6 +66,12 @@ export interface WorkbenchLike {
   extensionCommandExecute: (
     params: Record<string, unknown>,
   ) => Promise<Record<string, unknown>>;
+  extensionNavigationComplete: (
+    params: Record<string, unknown>,
+  ) => Record<string, unknown>;
+  extensionEditorOperationComplete: (
+    params: Record<string, unknown>,
+  ) => Record<string, unknown>;
   extensionEditorStateUpdate: (
     params: Record<string, unknown>,
   ) => Record<string, unknown>;
@@ -503,6 +509,22 @@ export async function dispatchJsonRpcRequest(
       return success(id, await runtime.wb.extensionCommandExecute(params));
     } catch (error) {
       return failure(id, -32000, error);
+    }
+  }
+
+  if (method === "vscode.extensionNavigation.complete") {
+    try {
+      return success(id, runtime.wb.extensionNavigationComplete(params));
+    } catch (error) {
+      return failure(id, -32602, error);
+    }
+  }
+
+  if (method === "vscode.editorOperation.complete") {
+    try {
+      return success(id, runtime.wb.extensionEditorOperationComplete(params));
+    } catch (error) {
+      return failure(id, -32602, error);
     }
   }
 

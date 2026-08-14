@@ -128,6 +128,7 @@ import {
   fileEditorSocketQuery,
 } from "../src/rpc/socketio-topology.ts";
 import { registerEditorWbaRuntimeHandlers } from "./editor_wba_runtime_handlers.ts";
+import { createEditorExtensionNavigationRuntime } from "./editor_extension_navigation_runtime.ts";
 import { createEditorDebugRuntime } from "./editor_debug_runtime.ts";
 import { createEditorUiEditorRuntime } from "./editor_ui_editor_runtime.ts";
 import { createEditorExtensionMenuRuntime } from "./editor_extension_menu_runtime.ts";
@@ -195,6 +196,12 @@ interface MonacoRuntimeEditorLike {
   ): { dispose(): void };
   onDidChangeModel?(listener: () => void): { dispose(): void };
   getSelection?(): Record<string, unknown> | null;
+  setSelections?(selections: Record<string, number>[]): void;
+  focus?(): void;
+  revealRange?(range: Record<string, number>): void;
+  revealRangeInCenter?(range: Record<string, number>): void;
+  revealRangeInCenterIfOutsideViewport?(range: Record<string, number>): void;
+  revealRangeAtTop?(range: Record<string, number>): void;
   getScrollTop?(): number;
   setScrollTop?(value: number): void;
   getModel?(): MonacoRuntimeModelLike | null;
@@ -482,8 +489,8 @@ interface MonacoBootWindowLike extends Window {
     inspectCode: function (mode) {
       codeInspectorRuntime?.start(mode);
     },
-    getExtensionNavigationTools: function () {
-      return extensionEditorMenuRuntime?.navigationTools() ?? [];
+    getExtensionNavigationTools: function (controls) {
+      return extensionEditorMenuRuntime?.navigationTools(controls) ?? [];
     },
     updateDebug: function (extra) {
       return debugRuntime.updateDebug(extra);
@@ -937,6 +944,16 @@ interface MonacoBootWindowLike extends Window {
   ): boolean {
     return editorWbaRpcTransport.notify(method, params || {});
   }
+
+  const extensionNavigationRuntime = createEditorExtensionNavigationRuntime({
+    getCurrentPath: function () {
+      return currentPath;
+    },
+    getEditor: function () {
+      return editor;
+    },
+    rpcCall: editorWbaRpcCall,
+  });
 
   function isEditorWbaRpcConnected(): boolean {
     return editorWbaRpcTransport.isConnected();
@@ -2404,6 +2421,9 @@ interface MonacoBootWindowLike extends Window {
           if (!editorRpcNotify(EDITOR_RPC_METHODS.notifyPublish, { message })) {
             console.warn("[extension-message]", message);
           }
+        },
+        handleEditorOperation: function (event) {
+          void extensionNavigationRuntime.handle(event);
         },
       });
 

@@ -4005,31 +4005,43 @@ groups; Activity recreation and ordinary backgrounding do not.
 
 The first supported UI-extension slice is a workspace-scoped activity-bar webview. The existing extension registry remains install/enablement authority, and the existing User/Workspace configuration projection remains settings authority. In particular, the active project's `.vscode/settings.json` continues to populate WBA's `workspace` and `folders[0]` configuration tiers; webview presentation does not add another settings store or project selector.
 
-WBA discovers `contributes.viewsContainers.activitybar` and matching `contributes.views` records whose type is `webview`. It activates `onView:<viewId>`, retains one logical surface per workspace/view, and implements the current Code Server 4.130 `MainThreadWebviews`, `MainThreadWebviewViews`, `ExtHostWebviews`, and `ExtHostWebviewViews` actors. Supported operations cover provider registration/resolve/dispose, view metadata and visibility, HTML/options/state, and binary-safe bidirectional `postMessage`.
+WBA discovers `contributes.viewsContainers.activitybar` and matching `contributes.views` records whose type is `webview`. It activates `onView:<viewId>`, retains one logical Sidebar-membership surface per workspace/view, and implements the current Code Server 4.130 `MainThreadWebviews`, `MainThreadWebviewViews`, `ExtHostWebviews`, and `ExtHostWebviewViews` actors. The logical surface is not an extension-host webview instance. WBA resolves one lazy runtime per `(surfaceId, clientInstanceId)`, each with its own Code OSS handle, HTML/options/state, resource capability, transport generation, event journal, and binary-safe bidirectional `postMessage` path.
 
 The browser shape is:
 
 ```text
 extension host
   <-> WBA Code OSS RPC
-  <-> WBA-owned surface
-       |- strict MessagePack /wba browser control
-       |- trusted outer wrapper
-       |- sandboxed extension-document iframe
-       `- bounded local-resource HTTP route
+  <-> shared logical membership surface
+       `- client-scoped runtime handle
+          |- strict MessagePack /wba browser control
+          |- trusted outer wrapper
+          |- sandboxed extension-document iframe
+          `- shared capability-scoped local-resource HTTP route
   <-> backend ExtensionWebviewSurface snapshot
   <-> existing Sidebar URL slot
 ```
 
-The outer wrapper supplies one-shot `acquireVsCodeApi()` with `postMessage`, `setState`, and `getState`. Extension HTML retains its own CSP inside the iframe. WBA rewrites `vscode-resource.vscode-cdn.net` URLs to the service route and serves a file only when realpath containment succeeds beneath the declared `localResourceRoots`; extension location and workspace are the normal defaults. Script and form capabilities follow the webview content options.
+The outer wrapper supplies one-shot `acquireVsCodeApi()` with `postMessage`, `setState`, and `getState`. Extension HTML retains its own CSP inside the iframe. WBA rewrites `vscode-resource.vscode-cdn.net` URLs to an unguessable WBA-epoch resource scope keyed by extension identity, workspace, extension location, and normalized `localResourceRoots`. Identical activity-view and panel roots reuse that URL and browser cache, but their document, message, state, visibility, and disposal lifecycles remain separate. The scope is reference-counted by live runtimes and serves a file only while realpath containment succeeds beneath its exact roots; extension location and workspace are the normal defaults. Extension-install resources use private immutable caching bounded by the epoch token, while mutable admitted roots retain weak ETag/Last-Modified revalidation. Text, JavaScript, JSON, and SVG resources use asynchronous Brotli/gzip negotiation so large remote extension bundles do not repeatedly traverse the network uncompressed. The Rust app proxy retains `Content-Encoding` with those unchanged encoded bytes; its reqwest transport does not decode them. Script and form capabilities follow the webview content options.
 
 WBA publishes complete workspace-scoped `ExtensionWebviewSurface` snapshots over its existing Framework-Shell event pipe. Python validates them and projects membership into the Sidebar ledger. Browser and GeckoView use the existing inline URL presentation; Electron uses the existing detachable stable-surface window machinery. Activity-view Close changes only that client's presentation to `hidden`; WBA membership survives, and the contributed extension icon remains in the Extension Views app-drawer section for reopening. Provider/workspace/WBA lifecycle removal remains authoritative. Ordinary user URL slots retain destructive close behavior.
 
-Workspace switch disposes old views before resolving the new workspace. Provider registrations survive that switch because the extension host survives; full WBA reset, provider unregister, failed resolve, or a stale/empty snapshot removes the surface. A browser presentation disconnect does not dispose the shared provider. Independent simultaneous provider instances per client, secondary-Sidebar views, custom editors, and chat-session APIs remain deferred.
+Provider activation and shared membership discovery do not call `$resolveWebviewView`. The first attach from a stable client creates that client's runtime and only then asks the provider to resolve it, so an extension's startup watchdog cannot begin while no renderer exists. A resolve failure disposes only that client runtime and cannot replace another client's HTML with its error page or remove the shared launcher membership. Events carry the exact `clientInstanceId`, and wrappers ignore events for other clients. A presentation reconnect reuses its warm runtime for the WBA/workspace lifetime.
+
+Workspace switch disposes every old client runtime before creating membership for the new workspace. Provider registrations survive that switch because the extension host survives; full WBA reset, provider unregister, and stale/empty snapshots remove membership and every associated runtime. A browser presentation disconnect does not dispose its provider runtime. Secondary-Sidebar views, custom editors, and chat-session APIs remain deferred. Multiple Codex conversations still require the extension's panel/custom-editor identities; multiple client handles for the single activity view do not manufacture conversation surfaces.
 
 Ordinary extension webview panels use the same secure document runtime but have a distinct lifecycle. WBA implements the Code Server 4.130 `MainThreadWebviewPanels` and `ExtHostWebviewPanels` actors, retains panel title/icon/column/context-retention metadata, publishes each panel as temporary Sidebar membership, and reports view-state changes to the extension host. Panel Close crosses the host UI IPC lane into WBA and truly disposes the extension-host panel; it never reuses the activity-view hidden state.
 
-The bounded contributed-command slice reads `contributes.commands` plus `editor/title` and `editor/context` menus. WBA evaluates the implemented `when` forms, serves contained command icons as data URLs, activates `onCommand:<id>`, synchronizes the exact current Monaco selection through `ExtHostEditors`, and invokes the registered command through `ExtHostCommands`. Unprojected positive context keys evaluate false rather than becoming truthy string literals; unquoted right-hand comparison literals such as `.json` remain supported. This suppresses built-in Debug Pretty Print and Copilot accept/reject editor-title actions until TE2 projects their real debug or active-diff context and supports the corresponding editor semantics. The suppression is eligibility-based, not a command-id/title blacklist. The editor resolves and executes eligible commands over its existing strict MessagePack WBA lane: icon-bearing navigation commands render in the horizontally scrollable `.fe-toolbar` extension-action strip, while selection-gated context commands render in the existing touch Extension Context menu. The strip uses native horizontal touch panning and maps mouse-wheel input to horizontal movement without moving its fixed Run/Stop/status siblings. Resolution is event-driven on model, selection, and WBA reconnect; there is no selection polling. `MainThreadMessageService` maps extension information/warning/error requests to the existing editor notification UI. WBA's `workspaceContains` activation matching uses the vendored `picomatch` implementation, including brace expressions.
+Code Server's management scan remains extension-admission authority, but its
+DTOs are not assumed to retain every manifest contribution. WBA overlays
+manifest-owned fields from the canonical private `extensions.json` package only
+for matching, already-admitted non-builtin extension ids. Management-owned
+runtime identity/location data wins, and disk-only or management-rejected
+extensions are not added. This prevents a partial scan DTO from silently
+dropping commands such as Codex's `chatgpt.addToThread` while preserving Code
+Server's enablement and compatibility decisions.
+
+The bounded contributed-command slice reads `contributes.commands` plus `editor/title`, `editor/context`, `editor/title/context`, `explorer/context`, and `webview/context` menus. WBA retains command icons, group/order, enablement, alternate-command, and extension-defined `setContext` state, evaluates the implemented `when` forms, activates `onCommand:<id>`, and invokes the registered command through `ExtHostCommands`. Unprojected positive context keys evaluate false rather than becoming truthy string literals; unquoted right-hand comparison literals such as `.json` remain supported. This suppresses built-in Debug Pretty Print and Copilot accept/reject editor-title actions until TE2 projects their real debug or active-diff context and supports the corresponding editor semantics. The suppression is eligibility-based, not a command-id/title blacklist. The editor resolves and executes eligible commands over its existing strict MessagePack WBA lane: icon-bearing navigation commands render in the horizontally scrollable `.fe-toolbar` extension-action strip. The touch surface installs one stable Extension Context launcher synchronously, then resolves `editor/title/context` and `editor/context` from the current file and selection each time it opens; asynchronous WBA results are never frozen at Monaco construction time. The Explorer resolves and executes its Extension Context submenu only through `/rpc/explorer` and Python; the backend verifies the clicked and selected resources against the active project before WBA evaluates or invokes the contribution. For `webview/context`, the inner opaque document forwards only bounded primitive `data-vscode-context` values and pointer metadata to the trusted wrapper. The wrapper supplies the authoritative surface `webviewId`, resolves the menu over strict MessagePack, renders the popup above the sandbox, and invokes the command without pretending it is an editor-selection action. The strip uses native horizontal touch panning and maps mouse-wheel input to horizontal movement without moving its fixed Run/Stop/status siblings. Resolution is event-driven on model, menu open, and WBA reconnect; there is no selection polling. `MainThreadMessageService` maps extension information/warning/error requests to the existing editor notification UI. WBA's `workspaceContains` activation matching uses the vendored `picomatch` implementation, including brace expressions.
 
 Active Monaco cursor and selection state is also an event-driven extension-host
 projection independent of command invocation. The editor coalesces rapid
@@ -4045,7 +4057,21 @@ there is no polling or reconnect-era notification replay. Command invocation
 still performs its own exact selection synchronization as the final execution
 barrier.
 
-The current command surface is deliberately smaller than the complete Code OSS menu service. Extension `setContext`, enablement and alternate-command composition, Explorer and view-title placements, targeted initial panel reveal, extension-requested file navigation, generic diff surfaces, and custom editors remain deferred.
+Extension-requested navigation uses the bounded Code Server 4.130
+`MainThreadTextEditors` actor and the internal `_workbench.open` command. WBA
+emits one correlated backend request; Python routes it through Code TE2's
+canonical project-contained open action and waits for Monaco's existing
+`editor.openComplete.publish` acknowledgement before WBA returns the logical
+editor id. Supported follow-up selection, reveal, and focus operations cross
+the direct strict-MessagePack editor/WBA lane and use public Monaco APIs.
+Unsupported editor mutation and hide calls fail explicitly rather than
+reporting empty success. Workspace replacement cancels pending navigation and
+clears extension context state; no part of this protocol polls.
+
+The current command surface remains smaller than the complete Code OSS menu
+service. Extension-view context and `view/title` placement, targeted initial
+panel reveal, generic diff surfaces, custom editors, and arbitrary editor
+mutation remain deferred.
 
 The first acceptance fixture is `openai.chatgpt_26.5803.41515.vsix`, using `chatgpt.sidebarView`.
 
@@ -4076,9 +4102,10 @@ metadata, not persistence keys. There is no state polling or `allow-same-origin`
 fallback.
 
 Extension-document lifetime is independent of the wrapper's WBA Socket.IO
-connection. The WBA process owns a random epoch, each logical surface owns a
-generation and monotonically increasing event sequence, and each HTML/options
-replacement advances `htmlRevision`. After the initial token-backed load, the
+connection. The WBA process owns a random epoch, each client-scoped activity
+runtime owns a generation and monotonically increasing event sequence, and each
+HTML/options replacement advances that runtime's `htmlRevision`. After the
+initial token-backed load, the
 wrapper reports those four facts plus its last applied event sequence on every
 reconnect. WBA answers with an explicit `resume`, bounded `replay`, or `reload`
 decision. A valid resume or replay leaves the existing iframe, DOM, JavaScript

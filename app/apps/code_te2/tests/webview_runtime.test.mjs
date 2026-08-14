@@ -75,7 +75,7 @@ test("mixed extension-host request uses the Code OSS one-byte argument count", (
   assert.deepEqual(decoded.args[2], [{ $$ref$$: 0 }]);
 });
 
-test("activity-bar webview contribution resolves through one workspace surface", async (t) => {
+test("activity-bar webview contribution resolves lazily per client behind one workspace surface", async (t) => {
   const projectPath = process.cwd();
   const lifecycle = [];
   const notifications = [];
@@ -198,12 +198,11 @@ test("activity-bar webview contribution resolves through one workspace surface",
   assert.equal(surface.serializeBuffersForPostMessage, true);
   assert.match(surface.url, /^\/api\/app\/code_te2\/services\/wba\/webview\//);
 
-  const resolve = extSends.find(
-    (entry) => entry.method === "$resolveWebviewView",
+  assert.equal(
+    extSends.find((entry) => entry.method === "$resolveWebviewView"),
+    undefined,
+    "activity view must not start its extension watchdog before a client attaches",
   );
-  assert.equal(resolve.rpcId, RPC.ExtHostWebviewViews);
-  assert.equal(resolve.cancellable, true);
-  assert.equal(resolve.args.length, 4);
 
   const attached = await runtime.attach({
     surfaceId: surface.surfaceId,
@@ -211,6 +210,13 @@ test("activity-bar webview contribution resolves through one workspace surface",
     windowId: "window_browseridentity0001",
     presentationId: "presentation_inline0001",
   });
+  const resolve = extSends.find(
+    (entry) => entry.method === "$resolveWebviewView",
+  );
+  assert.equal(resolve.rpcId, RPC.ExtHostWebviewViews);
+  assert.equal(resolve.cancellable, true);
+  assert.equal(resolve.args.length, 4);
+
   assert.equal(attached.htmlRevision, 2);
   const wrapper = runtime.wrapper(surface.surfaceId);
   assert.match(wrapper, /msgpack-v1/);
@@ -221,7 +227,7 @@ test("activity-bar webview contribution resolves through one workspace surface",
   assert.match(wrapper, /frame\.src=documentUrl\.href/);
   assert.doesNotMatch(wrapper, /frame\.srcdoc/);
   assert.match(wrapper, /resourceOrigin/);
-  assert.match(wrapper, /#te2-status\[hidden\]\{display:none\}/);
+  assert.match(wrapper, /#te2-status\[hidden\],#te2-context-menu\[hidden\]\{display:none\}/);
   assert.match(wrapper, /background:#010409/);
   assert.match(wrapper, /te2\.extension-webview\.window\.v1/);
   assert.match(wrapper, /clientInstanceId=requiredIdentity/);
@@ -250,13 +256,117 @@ test("activity-bar webview contribution resolves through one workspace surface",
   assert.match(document, /source:window/);
   assert.match(
     document,
-    /\/services\/wba\/webview\/vsix%3A.*\/resource\/vscode-remote\/localhost/,
+    /\/services\/wba\/webview\/resource\/[0-9a-f-]+\/vscode-remote\/localhost/,
   );
-  assert.match(document, /\/resource\/vscode-remote\/remote%2Bauthority/);
+  assert.match(
+    document,
+    /\/webview\/resource\/[0-9a-f-]+\/vscode-remote\/remote%2Bauthority/,
+  );
   assert.doesNotMatch(document, /__TE2_WEBVIEW_RESOURCE_ORIGIN__/);
   assert.match(document, /http:\/\/127\.0\.0\.1:8089/);
   assert.doesNotMatch(document, /icon\.svg%3Frevision/);
   assert.doesNotMatch(document, /https:\/\/\*\.vscode-cdn\.net/);
+  const activityScopeToken = /\/webview\/resource\/([^/]+)\//.exec(
+    document,
+  )?.[1];
+  assert.ok(activityScopeToken);
+  assert.deepEqual(
+    runtime.handleMainThreadRequest({
+      kind: "ext",
+      type: 1,
+      req: 30,
+      rpcId: RPC.MainThreadWebviewPanels,
+      method: "$createWebviewPanel",
+      args: [
+        {
+          id: { value: "example.webview" },
+          location: {
+            scheme: "vscode-remote",
+            authority: "localhost",
+            path: projectPath,
+          },
+        },
+        "shared-resource-panel",
+        "example.panel",
+        {
+          title: "Shared Resources",
+          panelOptions: { retainContextWhenHidden: true },
+          webviewOptions: {
+            enableScripts: true,
+            localResourceRoots: [
+              {
+                scheme: "vscode-remote",
+                authority: "localhost",
+                path: projectPath,
+              },
+            ],
+          },
+        },
+        { viewColumn: 0 },
+      ],
+    }),
+    { handled: true },
+  );
+  assert.deepEqual(
+    runtime.handleMainThreadRequest({
+      kind: "ext",
+      type: 1,
+      req: 31,
+      rpcId: RPC.MainThreadWebviews,
+      method: "$setHtml",
+      args: [
+        "shared-resource-panel",
+        `<img src="https://vscode-remote%2Blocalhost.vscode-resource.vscode-cdn.net${projectPath}/package.json">`,
+      ],
+    }),
+    { handled: true },
+  );
+  const panel = runtime
+    .snapshot()
+    .surfaces.find((candidate) => candidate.surfaceKind === "panel");
+  const panelAttachment = await runtime.attach({
+    surfaceId: panel.surfaceId,
+    clientInstanceId: "client_browseridentity0001",
+    windowId: "window_sharedresources001",
+    presentationId: "presentation_sharedresource1",
+  });
+  const panelDocument = runtime.document(
+    panel.surfaceId,
+    "http://127.0.0.1:8089",
+    panelAttachment.bootstrapToken,
+  );
+  const panelScopeToken = /\/webview\/resource\/([^/]+)\//.exec(
+    panelDocument,
+  )?.[1];
+  assert.equal(
+    panelScopeToken,
+    activityScopeToken,
+    "identical extension roots must reuse one browser-cacheable resource scope",
+  );
+  const sharedResource = await runtime.resource(
+    "",
+    activityScopeToken,
+    "vscode-remote",
+    "localhost",
+    path.join(projectPath, "package.json").replace(/^\//, ""),
+  );
+  assert.equal(
+    sharedResource.cacheControl,
+    "private, max-age=31536000, immutable",
+  );
+  runtime.dispose({ surfaceId: panel.surfaceId });
+  assert.ok(
+    (
+      await runtime.resource(
+        "",
+        activityScopeToken,
+        "vscode-remote",
+        "localhost",
+        path.join(projectPath, "package.json").replace(/^\//, ""),
+      )
+    ).body.byteLength > 0,
+    "disposing one surface must retain its shared scope for the live activity view",
+  );
   assert.throws(
     () =>
       runtime.document(
@@ -309,6 +419,11 @@ test("activity-bar webview contribution resolves through one workspace surface",
   });
   assert.equal(independentClient.reconstruction.vscodeState, null);
   assert.deepEqual(independentClient.reconstruction.localStorage, []);
+  const clientResolves = extSends.filter(
+    (entry) => entry.method === "$resolveWebviewView",
+  );
+  assert.equal(clientResolves.length, 2);
+  assert.notEqual(clientResolves[0].args[0], clientResolves[1].args[0]);
   const restoredDocument = runtime.document(
     surface.surfaceId,
     "http://127.0.0.1:8089",
@@ -334,6 +449,7 @@ test("activity-bar webview contribution resolves through one workspace surface",
 
   const resource = await runtime.resource(
     surface.surfaceId,
+    "",
     "vscode-remote",
     "localhost",
     path.join(projectPath, "package.json").replace(/^\//, ""),
@@ -343,6 +459,7 @@ test("activity-bar webview contribution resolves through one workspace surface",
 
   runtime.receiveBrowserMessage({
     surfaceId: surface.surfaceId,
+    clientInstanceId: "client_browseridentity0001",
     jsonMessage: '{"hello":"world"}',
     buffers: [new Uint8Array([1, 2, 3])],
   });
@@ -350,6 +467,17 @@ test("activity-bar webview contribution resolves through one workspace surface",
   assert.equal(browserMessage.rpcId, RPC.ExtHostWebviews);
   assert.equal(browserMessage.method, "$onMessage");
   assert.equal(browserMessage.mixed, true);
+  assert.equal(browserMessage.args[0], clientResolves[0].args[0]);
+
+  runtime.receiveBrowserMessage({
+    surfaceId: surface.surfaceId,
+    clientInstanceId: "client_independent000001",
+    jsonMessage: '{"client":2}',
+    buffers: [],
+  });
+  const independentBrowserMessage = extSends.at(-1);
+  assert.equal(independentBrowserMessage.method, "$onMessage");
+  assert.equal(independentBrowserMessage.args[0], clientResolves[1].args[0]);
 
   const handle = resolve.args[0];
   const postResult = runtime.handleMainThreadRequest({
@@ -362,6 +490,10 @@ test("activity-bar webview contribution resolves through one workspace surface",
   });
   assert.deepEqual(postResult, { handled: true, replyResult: true });
   assert.equal(notifications.at(-1).params.event, "message");
+  assert.equal(
+    notifications.at(-1).params.clientInstanceId,
+    "client_browseridentity0001",
+  );
   assert.ok(lifecycle.some((event) => event.type === "webview/snapshot"));
 });
 
@@ -371,6 +503,7 @@ test("wrapper preserves its live document across transport resume and reloads on
   const attachResults = [];
   const browserRpcRequests = [];
   const stateWrites = [];
+  const webviewContextExecutions = [];
   const heldMethods = new Set();
   let socket = null;
   const runtime = new WebviewRuntime({
@@ -454,6 +587,7 @@ test("wrapper preserves its live document across transport resume and reloads on
   window.document.body.innerHTML = [
     '<div id="te2-status">Loading extension view…</div>',
     '<iframe id="te2-webview" title="Extension view" hidden></iframe>',
+    '<div id="te2-context-menu" role="menu" hidden></div>',
   ].join("");
 
   const handlers = new Map();
@@ -470,13 +604,30 @@ test("wrapper preserves its live document across transport resume and reloads on
           let result;
           if (request.method === "vscode.webview.attach") {
             attachRequests.push(structuredClone(request.params));
-            result = await runtime.attach(request.params);
+            result = {
+              ...(await runtime.attach(request.params)),
+              webviewContextMenuContributed: true,
+            };
             attachResults.push(structuredClone(result));
           } else if (request.method === "vscode.webview.state") {
             stateWrites.push(structuredClone(request.params));
             result = await runtime.setBrowserState(request.params);
           } else if (request.method === "vscode.webview.message") {
             result = runtime.receiveBrowserMessage(request.params);
+          } else if (request.method === "vscode.extensionMenus.resolve") {
+            assert.equal(request.params.menu, "webview/context");
+            assert.equal(request.params.context.webviewId, "example.resume");
+            result = {
+              actions: [{
+                command: "example.newChat",
+                title: "New Chat",
+                category: "Example",
+                enabled: true,
+              }],
+            };
+          } else if (request.method === "vscode.extensionCommands.execute") {
+            webviewContextExecutions.push(structuredClone(request.params));
+            result = { ok: true };
           } else {
             throw new Error(`unexpected wrapper RPC: ${request.method}`);
           }
@@ -541,6 +692,33 @@ test("wrapper preserves its live document across transport resume and reloads on
     );
   };
   dispatchFrameMessage("ready", null);
+  dispatchFrameMessage("contextmenu", {
+    x: 12,
+    y: 14,
+    context: { contributedValue: "safe", nested: { ignored: true } },
+  });
+  await waitFor(
+    () =>
+      !window.document.getElementById("te2-context-menu").hidden &&
+      window.document.querySelector("#te2-context-menu button")?.textContent ===
+        "Example: New Chat",
+    "webview contribution context menu did not render",
+  );
+  window.document.querySelector("#te2-context-menu button").click();
+  await waitFor(
+    () => webviewContextExecutions.length === 1,
+    "webview context action did not execute",
+  );
+  assert.deepEqual(webviewContextExecutions[0], {
+    command: "example.newChat",
+    surface: "webview",
+    context: {
+      contributedValue: "safe",
+      webviewId: "example.resume",
+      webviewHasSelection: false,
+      webviewInputFocus: false,
+    },
+  });
   heldMethods.add("vscode.webview.message");
   dispatchFrameMessage("message", { interactive: "do-not-replay" });
   await waitFor(
@@ -580,13 +758,24 @@ test("wrapper preserves its live document across transport resume and reloads on
   assert.equal(attachResults[1].replayEvents.length, 1);
   assert.equal(attachResults[1].replayEvents[0].event, "message");
   assert.equal(attachResults[1].bootstrapToken, undefined);
-  assert.deepEqual(JSON.parse(JSON.stringify(deliveredToDocument)), [
-    {
-      __te2ExtensionWebviewHost: true,
-      kind: "message",
-      value: { replayed: true },
-    },
-  ]);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(deliveredToDocument)).filter(
+      (entry) => entry.kind === "message",
+    ),
+    [
+      {
+        __te2ExtensionWebviewHost: true,
+        kind: "message",
+        value: { replayed: true },
+      },
+    ],
+  );
+  assert.ok(
+    deliveredToDocument.some(
+      (entry) =>
+        entry.kind === "contextMenuPolicy" && entry.value.enabled === true,
+    ),
+  );
   assert.equal(frame.src, initialDocumentUrl);
   assert.equal(window.document.getElementById("te2-webview"), frame);
   assert.equal(frame.contentWindow, initialFrameWindow);

@@ -6,6 +6,7 @@ import {
   IMPLICIT_ACTIVATION_EXTENSION_POINTS,
 } from "../workbench_protocol_proxy/node_workbench_adapter/dist/extensions/activation-events.mjs";
 import { ExtensionActivationRuntime } from "../workbench_protocol_proxy/node_workbench_adapter/dist/extensions/activation-runtime.mjs";
+import { mergeInstalledExtensionManifests } from "../workbench_protocol_proxy/node_workbench_adapter/dist/client/management.mjs";
 import {
   buildLanguageCatalog,
   buildExtensionsSnapshot,
@@ -62,6 +63,75 @@ const EXPECTED_IMPLICIT_EVENTS = [
   "onView:sample.view",
   "onWalkthrough:walkthrough",
 ];
+
+test("enriches admitted user extensions from canonical disk manifests", () => {
+  const managementExtension = {
+    identifier: { value: "openai.chatgpt" },
+    isBuiltin: false,
+    targetPlatform: "linux-x64",
+    extensionLocation: {
+      scheme: "vscode-remote",
+      authority: "localhost",
+      path: "/extensions/openai.chatgpt",
+    },
+    activationEvents: ["onView:chatgpt.sidebarView"],
+    contributes: {
+      views: {
+        chatgpt: [{ id: "chatgpt.sidebarView", type: "webview" }],
+      },
+    },
+  };
+  const diskExtension = {
+    identifier: { value: "openai.chatgpt" },
+    isBuiltin: false,
+    targetPlatform: "universal",
+    extensionLocation: {
+      scheme: "vscode-remote",
+      authority: "localhost",
+      path: "/extensions/openai.chatgpt",
+    },
+    activationEvents: ["onStartupFinished", "onUri:openai.chatgpt"],
+    contributes: {
+      commands: [{
+        command: "chatgpt.addToThread",
+        title: "Add to Codex Thread",
+        category: "Codex",
+      }],
+      menus: {
+        "editor/context": [{
+          command: "chatgpt.addToThread",
+          group: "codex",
+          when: "resourceScheme == file",
+        }],
+      },
+      views: {
+        chatgpt: [{ id: "chatgpt.sidebarView", type: "webview" }],
+      },
+    },
+  };
+  const diskOnlyExtension = {
+    identifier: { value: "sample.not-admitted" },
+    isBuiltin: false,
+    contributes: { commands: [{ command: "sample.run", title: "Run" }] },
+  };
+
+  const merged = mergeInstalledExtensionManifests(
+    [managementExtension],
+    [diskExtension, diskOnlyExtension],
+    (extension) => extension?.identifier?.value ?? null,
+  );
+
+  assert.deepEqual(merged.enrichedIds, ["openai.chatgpt"]);
+  assert.equal(merged.extensions.length, 1, "disk-only extensions are not admitted");
+  assert.equal(merged.extensions[0].targetPlatform, "linux-x64");
+  assert.equal(
+    merged.extensions[0].extensionLocation,
+    managementExtension.extensionLocation,
+    "management scan retains runtime location authority",
+  );
+  assert.deepEqual(merged.extensions[0].activationEvents, diskExtension.activationEvents);
+  assert.deepEqual(merged.extensions[0].contributes, diskExtension.contributes);
+});
 
 test("generates every implicit activation family registered by Code OSS", () => {
   assert.deepEqual(

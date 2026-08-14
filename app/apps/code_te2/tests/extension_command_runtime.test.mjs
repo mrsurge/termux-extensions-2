@@ -29,6 +29,56 @@ test("unprojected positive context keys do not expose editor actions", () => {
   );
 });
 
+test("resolves the Codex editor context contribution from a complete manifest", async () => {
+  const runtime = new ExtensionCommandRuntime({
+    rpcIds: RPC_IDS,
+    activateByEvent: async () => {},
+    sendExtAwaitTerminalReply: () => ({ req: 1, promise: Promise.resolve({}) }),
+    uriForPath: (filePath) => ({ scheme: "vscode-remote", path: filePath }),
+    openWorkbenchResource: async () => undefined,
+    syncSelection() {},
+    onEvent() {},
+    log() {},
+  });
+  runtime.setExtensions([{
+    id: "openai.chatgpt",
+    extensionLocation: { path: "/extensions/openai.chatgpt" },
+    contributes: {
+      commands: [{
+        command: "chatgpt.addToThread",
+        title: "Add to Codex Thread",
+        category: "Codex",
+      }],
+      menus: {
+        "editor/context": [{
+          command: "chatgpt.addToThread",
+          group: "codex",
+          when: "resourceScheme == file",
+        }],
+      },
+    },
+  }]);
+
+  const menu = await runtime.resolveMenu({
+    menu: "editor/context",
+    surface: "editor",
+    path: "/workspace/example.ts",
+    languageId: "typescript",
+    selection: {
+      startLineNumber: 1,
+      startColumn: 1,
+      endLineNumber: 1,
+      endColumn: 4,
+    },
+  });
+
+  assert.equal(menu.context.resourceScheme, "file");
+  assert.deepEqual(
+    menu.actions.map((action) => action.command),
+    ["chatgpt.addToThread"],
+  );
+});
+
 test("resolves contributed editor actions and executes through ExtHostCommands", async () => {
   const activations = [];
   const selections = [];
@@ -51,6 +101,7 @@ test("resolves contributed editor actions and executes through ExtHostCommands",
       return { req: 7, promise: Promise.resolve({ type: 9, result: "done" }) };
     },
     uriForPath: (filePath) => ({ scheme: "vscode-remote", path: filePath }),
+    openWorkbenchResource: async () => undefined,
     syncSelection: (params) => selections.push(params.selection),
     onEvent() {},
     log() {},
@@ -114,6 +165,7 @@ test("delegates command registration authority to the extension host after activ
       return { req: 8, promise: Promise.resolve({ type: 7 }) };
     },
     uriForPath: (filePath) => ({ scheme: "vscode-remote", path: filePath }),
+    openWorkbenchResource: async () => undefined,
     syncSelection() {},
     onEvent() {},
     log() {},
@@ -148,6 +200,7 @@ test("propagates the extension host's missing-command error", async () => {
       };
     },
     uriForPath: (filePath) => ({ scheme: "vscode-remote", path: filePath }),
+    openWorkbenchResource: async () => undefined,
     syncSelection() {},
     onEvent() {},
     log() {},
@@ -163,6 +216,158 @@ test("propagates the extension host's missing-command error", async () => {
     runtime.execute({ command: "sample.missing" }),
     /Contributed command 'sample\.missing' does not exist\./,
   );
+});
+
+test("setContext gates actions and Explorer commands receive clicked and selected URIs", async () => {
+  const requests = [];
+  let selectionSyncs = 0;
+  const runtime = new ExtensionCommandRuntime({
+    rpcIds: RPC_IDS,
+    activateByEvent: async () => {},
+    sendExtAwaitTerminalReply(rpcId, method, args) {
+      requests.push({ rpcId, method, args });
+      return { req: 11, promise: Promise.resolve({ type: 9 }) };
+    },
+    uriForPath: (filePath) => ({ scheme: "vscode-remote", path: filePath }),
+    openWorkbenchResource: async () => undefined,
+    syncSelection() {
+      selectionSyncs += 1;
+    },
+    onEvent() {},
+    log() {},
+  });
+  runtime.setExtensions([{
+    id: "sample.extension",
+    contributes: {
+      commands: [
+        {
+          command: "sample.inspect",
+          title: "Inspect",
+          enablement: "sample.ready",
+        },
+        {
+          command: "sample.inspectAlternate",
+          title: "Inspect Alternate",
+        },
+      ],
+      menus: {
+        "explorer/context": [{
+          command: "sample.inspect",
+          when: "explorerResourceIsFolder",
+          group: "navigation@2",
+          alt: "sample.inspectAlternate",
+        }],
+      },
+    },
+  }]);
+
+  runtime.handleMainThreadRequest({
+    kind: "ext",
+    rpcId: RPC_IDS.MainThreadCommands,
+    method: "$executeCommand",
+    args: ["setContext", ["sample.ready", true]],
+  });
+  const menu = await runtime.resolveMenu({
+    menu: "explorer/context",
+    path: "/workspace/src",
+    surface: "explorer",
+    context: { explorerResourceIsFolder: true },
+  });
+  assert.equal(menu.actions[0].enabled, true);
+  assert.equal(menu.actions[0].alternate.command, "sample.inspectAlternate");
+
+  runtime.resetContext();
+  const resetMenu = await runtime.resolveMenu({
+    menu: "explorer/context",
+    path: "/workspace/src",
+    surface: "explorer",
+    context: { explorerResourceIsFolder: true },
+  });
+  assert.equal(resetMenu.actions[0].enabled, false);
+
+  runtime.handleMainThreadRequest({
+    kind: "ext",
+    rpcId: RPC_IDS.MainThreadCommands,
+    method: "$executeCommand",
+    args: ["setContext", ["sample.ready", true]],
+  });
+
+  await runtime.execute({
+    command: "sample.inspect",
+    path: "/workspace/src",
+    selectedPaths: ["/workspace/src", "/workspace/test"],
+    surface: "explorer",
+  });
+  assert.equal(selectionSyncs, 0);
+  assert.deepEqual(requests[0].args, [
+    "sample.inspect",
+    { scheme: "vscode-remote", path: "/workspace/src" },
+    [
+      { scheme: "vscode-remote", path: "/workspace/src" },
+      { scheme: "vscode-remote", path: "/workspace/test" },
+    ],
+  ]);
+});
+
+test("webview context actions use the authoritative view id without editor selection sync", async () => {
+  const requests = [];
+  let selectionSyncs = 0;
+  const runtime = new ExtensionCommandRuntime({
+    rpcIds: RPC_IDS,
+    activateByEvent: async () => undefined,
+    sendExtAwaitTerminalReply(rpcId, method, args) {
+      requests.push({ rpcId, method, args });
+      return { req: 17, promise: Promise.resolve({ type: 7 }) };
+    },
+    uriForPath: (filePath) => ({ scheme: "vscode-remote", path: filePath }),
+    openWorkbenchResource: async () => undefined,
+    syncSelection() {
+      selectionSyncs += 1;
+    },
+    onEvent() {},
+    log() {},
+  });
+  runtime.setExtensions([{
+    id: "openai.chatgpt",
+    contributes: {
+      commands: [{ command: "chatgpt.newChat", title: "New Chat" }],
+      menus: {
+        "webview/context": [{
+          command: "chatgpt.newChat",
+          when: "webviewId == 'chatgpt.sidebarView' && chatgpt.supportsNewChatMenu",
+        }],
+      },
+    },
+  }]);
+  assert.equal(runtime.hasMenu("webview/context"), true);
+  runtime.handleMainThreadRequest({
+    kind: "ext",
+    rpcId: RPC_IDS.MainThreadCommands,
+    method: "$executeCommand",
+    args: ["setContext", ["chatgpt.supportsNewChatMenu", true]],
+  });
+
+  const menu = await runtime.resolveMenu({
+    menu: "webview/context",
+    surface: "webview",
+    context: { webviewId: "chatgpt.sidebarView" },
+  });
+  assert.equal(menu.actions.length, 1);
+  assert.equal(menu.actions[0].command, "chatgpt.newChat");
+  assert.equal(menu.context.editorTextFocus, false);
+  assert.equal(menu.context.resourceScheme, "");
+
+  await runtime.execute({
+    command: "chatgpt.newChat",
+    surface: "webview",
+    context: { webviewId: "chatgpt.sidebarView" },
+  });
+  assert.equal(selectionSyncs, 0);
+  assert.deepEqual(requests[0], {
+    rpcId: RPC_IDS.ExtHostCommands,
+    method: "$executeContributedCommand",
+    args: ["chatgpt.newChat"],
+  });
 });
 
 test("projects active Monaco selections through ExtHostEditors", () => {

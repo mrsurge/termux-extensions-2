@@ -14,6 +14,7 @@ import type {
   WorkbenchLike,
 } from "./request-dispatch";
 import { formatErrorMessage } from "./error-format.mjs";
+import { sendWebviewResourceResponse } from "./webview-resource-response.mjs";
 
 const { WorkbenchClient } = await import("../client/workbench-client.mjs");
 const bridgeMod = await import("./event-bridge.mjs");
@@ -60,10 +61,16 @@ type RuntimeWorkbench = Omit<WorkbenchLike, "state"> & {
   ) => string;
   webviewResource: (
     surfaceId: string,
+    resourceToken: string,
     scheme: string,
     authority: string,
     resourcePath: string,
-  ) => Promise<{ body: Uint8Array; contentType: string }>;
+  ) => Promise<{
+    body: Uint8Array;
+    contentType: string;
+    etag: string;
+    lastModified: string;
+  }>;
 };
 type JsonRpcReply = Record<string, unknown>;
 type JsonRpcEnvelope = Record<string, unknown> & {
@@ -736,6 +743,16 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && url.pathname.startsWith("/webview/")) {
       const segments = url.pathname.split("/").filter(Boolean);
+      if (segments.length >= 6 && segments[1] === "resource") {
+        const resource = await wb.webviewResource(
+          "",
+          segments[2] ?? "",
+          segments[3] ?? "",
+          segments[4] ?? "",
+          segments.slice(5).join("/"),
+        );
+        return await sendWebviewResourceResponse(req, res, resource);
+      }
       const surfaceId = decodeURIComponent(segments[1] ?? "");
       if (segments.length === 2) {
         return bodyResponse(
@@ -772,14 +789,12 @@ const server = http.createServer(async (req, res) => {
       if (segments.length >= 6 && segments[2] === "resource") {
         const resource = await wb.webviewResource(
           surfaceId,
+          "",
           segments[3] ?? "",
           segments[4] ?? "",
           segments.slice(5).join("/"),
         );
-        return bodyResponse(res, 200, resource.body, resource.contentType, {
-          "access-control-allow-origin": "*",
-          "cross-origin-resource-policy": "cross-origin",
-        });
+        return await sendWebviewResourceResponse(req, res, resource);
       }
     }
 

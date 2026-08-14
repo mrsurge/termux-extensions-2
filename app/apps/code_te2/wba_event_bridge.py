@@ -55,6 +55,12 @@ def reset_wba_project_event_state() -> None:
         reset_diagnostics_projection()
     except Exception:
         pass
+    try:
+        from .extension_navigation_backend import reset_extension_navigation
+
+        reset_extension_navigation("WBA project event state reset")
+    except Exception:
+        pass
 
 
 async def _handle_watcher_enospc(ev: JsonObject) -> None:
@@ -169,6 +175,11 @@ async def _dispatch_wba_event(ev: JsonObject) -> None:
         from .diagnostics_bridge import handle_wba_diagnostics_update
 
         await handle_wba_diagnostics_update(ev)
+        return
+    if ev_type == "extension/editorOpenRequested":
+        from .extension_navigation_backend import schedule_extension_open
+
+        schedule_extension_open(ev)
         return
     if ev_type == "webview/snapshot":
         await _handle_webview_snapshot(ev)

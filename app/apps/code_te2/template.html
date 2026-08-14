@@ -530,6 +530,36 @@
   .fe-extension-editor-action { flex: 0 0 28px; width: 28px; height: 28px; padding: 4px; display: inline-flex; align-items: center; justify-content: center; }
   .fe-extension-editor-action img,
   .fe-extension-context-icon img { display: block; width: 18px; height: 18px; object-fit: contain; }
+  .fe-extension-editor-context-menu {
+    position: fixed;
+    z-index: 360;
+    min-width: 210px;
+    max-width: min(360px, calc(100vw - 16px));
+    max-height: min(420px, calc(100vh - 16px));
+    overflow: auto;
+    padding: 4px;
+    background: var(--explorer-card-bg, #161b22);
+    border: 1px solid var(--explorer-card-border, #30363d);
+    border-radius: 4px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  }
+  .fe-extension-editor-context-menu button {
+    display: block;
+    width: 100%;
+    padding: 7px 10px;
+    border: 0;
+    border-radius: 2px;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    font: inherit;
+  }
+  .fe-extension-editor-context-menu button:hover:not(:disabled),
+  .fe-extension-editor-context-menu button:focus-visible {
+    background: var(--accent, #1f6feb);
+    outline: 0;
+  }
+  .fe-extension-editor-context-menu button:disabled { opacity: 0.5; }
   .fe-status { order: 8; }
   .fe-issues { display: inline-flex; align-items: center; gap: 6px; }
   .fe-issues-badge {

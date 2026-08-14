@@ -18,7 +18,9 @@ interface EditorUiEditorRuntimeDeps {
   sendEditorMentionRequest(payload: Record<string, unknown>): boolean;
   goToDefinition?(): void;
   inspectCode?(mode: CodeInspectorMode): void;
-  getExtensionNavigationTools?(): MonacoTouchSelectionTool[];
+  getExtensionNavigationTools?(controls: {
+    closeMenu(): void;
+  }): MonacoTouchSelectionTool[];
   updateDebug(extra?: string): void;
 }
 

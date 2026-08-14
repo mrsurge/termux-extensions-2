@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import time
 from collections.abc import Awaitable, Callable
-from typing import cast
-
 from .editor_host_actions_backend import handle_editor_host_action
 from ..diagnostics_latency_metrics import (
     finish_open_trace,
@@ -117,7 +115,7 @@ async def dispatch_editor_rpc_request(
             read_file_payload=read_file_payload,
             update_session_state=update_session_state,
             set_last_file=set_last_file,
-            emit_editor_open=lambda open_payload: emit_to_room("editor:open", cast(dict[str, object], open_payload)),
+            emit_editor_open=lambda open_payload: emit_to_room("editor:open", dict(open_payload)),
             record_sidecar_open_file=record_sidecar_open_file,
             emit_open_state_changed=emit_open_state_changed,
         )
@@ -204,6 +202,9 @@ async def dispatch_editor_rpc_request(
     if method == EDITOR_RPC_METHOD_OPEN_COMPLETE_PUBLISH:
         request_id = str(params.get("request_id") or params.get("requestId") or "")
         record_open_stage(request_id, "backend_open_complete_received")
+        from ..extension_navigation_backend import resolve_extension_open_complete
+
+        _ = resolve_extension_open_complete(params)
         await emit_to_room("editor:open_complete", _payload_with_source(params, source_client))
         finish_open_trace(request_id, "backend_open_complete_published")
         return {"ok": True}

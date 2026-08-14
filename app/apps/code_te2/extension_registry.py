@@ -258,6 +258,7 @@ _ADAPTER_REQUIRED_NIDS = frozenset({
     "MainThreadMessageService",
     "MainThreadOutputService",
     "MainThreadStatusBar",
+    "MainThreadTextEditors",
     "MainThreadWebviews",
     "MainThreadWebviewPanels",
     "MainThreadWebviewViews",

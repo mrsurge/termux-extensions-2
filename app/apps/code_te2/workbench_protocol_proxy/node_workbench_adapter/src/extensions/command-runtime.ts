@@ -20,6 +20,7 @@ interface CommandRuntimeOptions {
     timeoutMs: number,
   ): { req: number; promise: Promise<unknown> };
   uriForPath(filePath: string): Record<string, unknown>;
+  openWorkbenchResource(uri: unknown, options: unknown): Promise<unknown>;
   syncSelection(params: ExtensionCommandContext): void;
   onEvent(payload: Record<string, unknown>): void;
   log(...args: unknown[]): void;
@@ -27,6 +28,7 @@ interface CommandRuntimeOptions {
 
 export interface ExtensionCommandContext extends Record<string, unknown> {
   path?: string;
+  selectedPaths?: string[];
   languageId?: string;
   selection?: Record<string, unknown> | null;
 }
@@ -38,6 +40,11 @@ export interface ExtensionCommandAction extends Record<string, unknown> {
   extensionId: string;
   group: string | null;
   icon: string | null;
+  enabled: boolean;
+  alternate: {
+    command: string;
+    title: string;
+  } | null;
 }
 
 export interface MainThreadCommandResult {
@@ -54,6 +61,8 @@ interface CommandDefinition {
   extensionId: string;
   extensionRoot: string | null;
   icon: unknown;
+  shortTitle: string | null;
+  enablement: string | null;
 }
 
 interface MenuDefinition {
@@ -61,6 +70,8 @@ interface MenuDefinition {
   command: string;
   when: string | null;
   group: string | null;
+  alt: string | null;
+  order: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -181,21 +192,33 @@ export function evaluateWhenClause(
 
 function menuContext(params: ExtensionCommandContext): Record<string, unknown> {
   const filePath = stringValue(params.path) ?? "";
+  const surface = stringValue(params.surface) ?? "editor";
+  const editorSurface = surface === "editor";
   const selection = isRecord(params.selection) ? params.selection : null;
   const startLine = Number(selection?.startLineNumber ?? 0);
   const startColumn = Number(selection?.startColumn ?? 0);
   const endLine = Number(selection?.endLineNumber ?? startLine);
   const endColumn = Number(selection?.endColumn ?? startColumn);
   const hasSelection = !!selection && (startLine !== endLine || startColumn !== endColumn);
+  const explicit = isRecord(params.context) ? params.context : {};
   return {
-    resourceExtname: path.extname(filePath),
-    resourceFilename: path.basename(filePath),
-    resourceDirname: path.dirname(filePath),
-    resourceScheme: "file",
-    editorLangId: stringValue(params.languageId) ?? "",
-    editorHasSelection: hasSelection,
-    editorTextFocus: true,
+    resourceExtname: filePath ? path.extname(filePath) : "",
+    resourceFilename: filePath ? path.basename(filePath) : "",
+    resourceDirname: filePath ? path.dirname(filePath) : "",
+    resourceScheme: filePath ? "file" : "",
+    editorLangId: editorSurface ? (stringValue(params.languageId) ?? "") : "",
+    editorHasSelection: editorSurface && hasSelection,
+    editorTextFocus: editorSurface,
+    ...explicit,
   };
+}
+
+function menuOrder(group: string | null): number {
+  if (!group) return 0;
+  const separator = group.lastIndexOf("@");
+  if (separator < 0) return 0;
+  const numeric = Number(group.slice(separator + 1));
+  return Number.isFinite(numeric) ? numeric : 0;
 }
 
 function iconPath(icon: unknown): string | null {
@@ -242,11 +265,21 @@ export class ExtensionCommandRuntime {
   private readonly commands = new Map<string, CommandDefinition>();
   private readonly menus = new Map<string, MenuDefinition[]>();
   private readonly registeredCommands = new Set<string>();
+  private readonly contextValues = new Map<string, unknown>();
 
   constructor(private readonly options: CommandRuntimeOptions) {}
 
   reset(): void {
     this.registeredCommands.clear();
+    this.contextValues.clear();
+  }
+
+  resetContext(): void {
+    this.contextValues.clear();
+  }
+
+  hasMenu(location: string): boolean {
+    return (this.menus.get(location)?.length ?? 0) > 0;
   }
 
   setExtensions(extensions: unknown[]): void {
@@ -271,6 +304,8 @@ export class ExtensionCommandRuntime {
           extensionId,
           extensionRoot,
           icon: rawCommand.icon,
+          shortTitle: stringValue(rawCommand.shortTitle),
+          enablement: stringValue(rawCommand.enablement),
         });
       }
       const rawMenus = isRecord(contributes.menus) ? contributes.menus : null;
@@ -282,11 +317,14 @@ export class ExtensionCommandRuntime {
           if (!isRecord(rawEntry)) continue;
           const command = stringValue(rawEntry.command);
           if (!command) continue;
+          const group = stringValue(rawEntry.group);
           entries.push({
             location,
             command,
             when: stringValue(rawEntry.when),
-            group: stringValue(rawEntry.group),
+            group,
+            alt: stringValue(rawEntry.alt),
+            order: menuOrder(group),
           });
         }
         this.menus.set(location, entries);
@@ -313,6 +351,32 @@ export class ExtensionCommandRuntime {
           };
         case "$getCommands":
           return { handled: true, replyResult: [...this.registeredCommands] };
+        case "$executeCommand": {
+          const commandArgs = Array.isArray(message.args?.[1]) ? message.args?.[1] : [];
+          if (command === "setContext") {
+            const key = stringValue(commandArgs?.[0]);
+            if (!key) {
+              return { handled: true, error: new Error("setContext requires a key") };
+            }
+            const value = commandArgs?.[1];
+            if (value === undefined) this.contextValues.delete(key);
+            else this.contextValues.set(key, value);
+            return { handled: true, replyResult: undefined };
+          }
+          if (command === "_workbench.open") {
+            return {
+              handled: true,
+              pending: this.options.openWorkbenchResource(
+                commandArgs?.[0],
+                commandArgs?.[1],
+              ),
+            };
+          }
+          return {
+            handled: true,
+            error: new Error(`Unsupported workbench command: ${String(command)}`),
+          };
+        }
         default:
           return {
             handled: true,
@@ -346,22 +410,38 @@ export class ExtensionCommandRuntime {
   async resolveMenu(params: ExtensionCommandContext): Promise<Record<string, unknown>> {
     const location = stringValue(params.menu) ?? "";
     if (!location) throw new Error("Missing required param: menu");
-    const context = menuContext(params);
+    const context = {
+      ...Object.fromEntries(this.contextValues),
+      ...menuContext(params),
+    };
     const actions: ExtensionCommandAction[] = [];
     for (const entry of this.menus.get(location) ?? []) {
       if (!evaluateWhenClause(entry.when, context)) continue;
       const command = this.commands.get(entry.command);
       if (!command) continue;
+      const alternateCommand = entry.alt ? this.commands.get(entry.alt) : null;
       actions.push({
         command: command.command,
-        title: command.title,
+        title: command.shortTitle ?? command.title,
         category: command.category,
         extensionId: command.extensionId,
         group: entry.group,
         icon: await commandIconDataUrl(command),
+        enabled: evaluateWhenClause(command.enablement, context),
+        alternate: alternateCommand
+          ? {
+              command: alternateCommand.command,
+              title: alternateCommand.shortTitle ?? alternateCommand.title,
+            }
+          : null,
+        order: entry.order,
       });
     }
-    actions.sort((left, right) => String(left.group ?? "").localeCompare(String(right.group ?? "")));
+    actions.sort((left, right) => {
+      const leftGroup = String(left.group ?? "").split("@", 1)[0];
+      const rightGroup = String(right.group ?? "").split("@", 1)[0];
+      return leftGroup.localeCompare(rightGroup) || Number(left.order ?? 0) - Number(right.order ?? 0);
+    });
     return { ok: true, menu: location, context, actions };
   }
 
@@ -371,10 +451,28 @@ export class ExtensionCommandRuntime {
     const definition = this.commands.get(commandId);
     if (!definition) throw new Error(`Unknown extension command: ${commandId}`);
     const filePath = stringValue(params.path);
-    this.options.syncSelection(params);
+    if (params.surface !== "explorer" && params.surface !== "webview") {
+      this.options.syncSelection(params);
+    }
     await this.options.activateByEvent(`onCommand:${commandId}`);
     const explicitArguments = Array.isArray(params.arguments) ? params.arguments : null;
-    const commandArguments = explicitArguments ?? (filePath ? [this.options.uriForPath(filePath)] : []);
+    const selectedPaths = Array.isArray(params.selectedPaths)
+      ? params.selectedPaths
+          .map(stringValue)
+          .filter((item): item is string => item != null)
+      : [];
+    const explorerArguments = filePath
+      ? [
+          this.options.uriForPath(filePath),
+          selectedPaths.map((selectedPath) => this.options.uriForPath(selectedPath)),
+        ]
+      : [];
+    const commandArguments = explicitArguments
+      ?? (params.surface === "explorer"
+        ? explorerArguments
+        : filePath
+          ? [this.options.uriForPath(filePath)]
+          : []);
     const pending = this.options.sendExtAwaitTerminalReply(
       this.options.rpcIds.ExtHostCommands,
       "$executeContributedCommand",

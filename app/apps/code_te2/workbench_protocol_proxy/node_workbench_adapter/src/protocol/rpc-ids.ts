@@ -6,6 +6,7 @@ export const RPC_DEFAULTS = {
   MainThreadOutputService: 30,
   MainThreadStatusBar: 36,
   MainThreadStorage: 38,
+  MainThreadTextEditors: 20,
   MainThreadWebviews: 44,
   MainThreadWebviewPanels: 45,
   MainThreadWebviewViews: 46,

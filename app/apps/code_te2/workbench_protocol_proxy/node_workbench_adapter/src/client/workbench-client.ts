@@ -119,6 +119,7 @@ import { ProviderRegistry } from "../extensions/provider-registry.mjs";
 import { ExtensionActivityRuntime } from "../extensions/activity-runtime.mjs";
 import { ExtensionActivationRuntime } from "../extensions/activation-runtime.mjs";
 import { ExtensionCommandRuntime } from "../extensions/command-runtime.mjs";
+import { ExtensionEditorNavigationRuntime } from "../extensions/editor-navigation-runtime.mjs";
 import { ExtensionMementoStore } from "../extensions/extension-storage.mjs";
 import { ExtensionLanguageResolver } from "../extensions/language-resolver.mjs";
 import { WebviewRuntime } from "../extensions/webview-runtime.mjs";
@@ -277,6 +278,7 @@ const PARSE_ARGS_ONLY_METHODS = new Set<string>([
   "$unregisterCommand",
   "$fireCommandActivationEvent",
   "$getCommands",
+  "$executeCommand",
   "$showMessage",
   "$createWebviewPanel",
   "$disposeWebview",
@@ -284,6 +286,12 @@ const PARSE_ARGS_ONLY_METHODS = new Set<string>([
   "$setIconPath",
   "$registerSerializer",
   "$unregisterSerializer",
+
+  // Supported MainThreadTextEditors navigation and cursor contract.
+  "$tryShowTextDocument",
+  "$tryShowEditor",
+  "$tryRevealRange",
+  "$trySetSelections",
 
   "$getInitialState",
   "$checkExists",
@@ -704,6 +712,7 @@ export class WorkbenchClient {
   _extensionActivity: ExtensionActivityRuntime;
   _extensionActivation: ExtensionActivationRuntime;
   _extensionCommands: ExtensionCommandRuntime;
+  _extensionEditorNavigation: ExtensionEditorNavigationRuntime;
   _extensionStorage: ExtensionMementoStore;
   _webviews: WebviewRuntime;
   _languageResolver: ExtensionLanguageResolver;
@@ -828,6 +837,18 @@ export class WorkbenchClient {
       onEvent: (payload) => this.onEvent(payload),
       log: (...args) => console.log(...args),
     });
+    this._extensionEditorNavigation = new ExtensionEditorNavigationRuntime({
+      rpcIds: {
+        MainThreadTextEditors: _rpcIds.MainThreadTextEditors,
+      },
+      fsPathFromUri: (uri) => this._fsPathFromUri(uri),
+      activePath: () => this.state.activePath,
+      activeEditorId: () => this._activeEditorId,
+      emitBackendEvent: (payload) => this.onEvent(payload),
+      notifyEditor: (method, params) => this.onNotification(method, params),
+      createId: () => crypto.randomUUID(),
+      log: (...args) => console.log(...args),
+    });
     this._extensionCommands = new ExtensionCommandRuntime({
       rpcIds: {
         MainThreadCommands: _rpcIds.MainThreadCommands,
@@ -838,6 +859,8 @@ export class WorkbenchClient {
       sendExtAwaitTerminalReply: (rpcId, method, args, cancellable, timeoutMs) =>
         this._sendExtAwaitTerminalReply(rpcId, method, args, cancellable, timeoutMs),
       uriForPath: (filePath) => this._uriForPath(filePath),
+      openWorkbenchResource: (uri, options) =>
+        this._extensionEditorNavigation.openFromWorkbenchCommand(uri, options),
       syncSelection: (params) => this._syncExtensionCommandSelection(params),
       onEvent: (payload) => this.onEvent(payload),
       log: (...args) => console.log(...args),
@@ -1363,7 +1386,10 @@ export class WorkbenchClient {
       spanTrace: (name, fn) => spanTrace(name, fn),
       spanTraceAsync: (name, fn) => spanTraceAsync(name, fn),
       logMetrics: (type, data) => logMetrics(type, data),
-      onEvent: (payload) => this.onEvent(payload),
+      onEvent: (payload) => {
+        this._handleWorkbenchEvent(payload);
+        this.onEvent(payload);
+      },
       clearProjectScopedSwitchState: (reason) =>
         this._clearProjectScopedSwitchState(reason),
       sha1Short: (text) =>
@@ -1747,8 +1773,12 @@ export class WorkbenchClient {
         this._extensionStorage.setValue(shared, extensionId, value),
       handleWebviewRequest: (message) =>
         this._webviews.handleMainThreadRequest(message),
-      handleCommandRequest: (message) =>
-        this._extensionCommands.handleMainThreadRequest(message),
+      handleCommandRequest: (message) => {
+        const navigation = this._extensionEditorNavigation.handleMainThreadRequest(message);
+        return navigation.handled
+          ? navigation
+          : this._extensionCommands.handleMainThreadRequest(message);
+      },
       debugExtReqSeen: this._debugExtReqSeen,
       setDebugExtReqSeen: (value) => {
         this._debugExtReqSeen = value;
@@ -1803,6 +1833,9 @@ export class WorkbenchClient {
   }
 
   _handleWorkbenchEvent(payload: Record<string, unknown>): void {
+    if (payload.type === "document/activeChanged" && typeof payload.path === "string") {
+      this._extensionEditorNavigation.activeEditorChanged(payload.path);
+    }
     if (payload.type === "provider/semanticTokens") {
       const handle = Number(payload.handle);
       const mode = payload.range === true ? "range" : "full";
@@ -1903,6 +1936,7 @@ export class WorkbenchClient {
     this._documentRegistry.clearLocal();
     this._providerRegistry.clear();
     this._webviews.clear(reason || "session_reset");
+    this._extensionEditorNavigation.reset(reason || "session_reset");
     this._extensionActivation.reset(reason);
     this._extensionCommands.reset();
     this._extensionActivity.reset(reason);
@@ -2425,6 +2459,8 @@ export class WorkbenchClient {
     const clearedBackgroundDocuments =
       this._documentRegistry.countBackground();
     this._semanticTokenProjections.clear(reason || "workspace_switch");
+    this._extensionEditorNavigation.reset(reason || "workspace_switch");
+    this._extensionCommands.resetContext();
     const rejectedPendingRequests = this._extRequests.rejectAll(
       new Error(reason || "workspace_switch"),
     );
@@ -2562,6 +2598,18 @@ export class WorkbenchClient {
     return this._extensionCommands.execute(params);
   }
 
+  extensionNavigationComplete(
+    params: Record<string, unknown>,
+  ): Record<string, unknown> {
+    return this._extensionEditorNavigation.completeBackendOpen(params);
+  }
+
+  extensionEditorOperationComplete(
+    params: Record<string, unknown>,
+  ): Record<string, unknown> {
+    return this._extensionEditorNavigation.completeEditorOperation(params);
+  }
+
   /** Find provider handle matching a languageId by scanning selector arrays. */
   _findProviderHandle(type: ProviderKind, languageId: string): number | null {
     try {
@@ -2615,8 +2663,13 @@ export class WorkbenchClient {
     return { ok: true, ts_ms: Date.now(), replayed };
   }
 
-  webviewAttach(params: Record<string, unknown>): Promise<Record<string, unknown>> {
-    return this._webviews.attach(params);
+  async webviewAttach(params: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return {
+      ...(await this._webviews.attach(params)),
+      webviewContextMenuContributed: this._extensionCommands.hasMenu(
+        "webview/context",
+      ),
+    };
   }
 
   webviewMessage(params: Record<string, unknown>): Record<string, unknown> {
@@ -2653,10 +2706,17 @@ export class WorkbenchClient {
 
   webviewResource(
     surfaceId: string,
+    resourceToken: string,
     scheme: string,
     authority: string,
     resourcePath: string,
   ) {
-    return this._webviews.resource(surfaceId, scheme, authority, resourcePath);
+    return this._webviews.resource(
+      surfaceId,
+      resourceToken,
+      scheme,
+      authority,
+      resourcePath,
+    );
   }
 }

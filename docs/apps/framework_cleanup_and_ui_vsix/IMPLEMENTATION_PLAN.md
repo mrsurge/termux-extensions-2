@@ -728,10 +728,13 @@ VS Code chat-session contribution points.
   active-workspace identity. Writes are serialized and atomically replaced.
   Settings Sync registration remains an explicit local-only no-op; it must not
   turn Memento state into settings or webview presentation state.
-- The first implementation owns one logical provider instance and one stable
-  surface per `(workspace, contributed view id)`. Independent simultaneous
-  provider instances per browser/client are deferred because the current
-  extension host is workspace-scoped and shared.
+- The extension host owns one logical provider registration and Sidebar
+  membership surface per `(workspace, contributed view id)`. That membership
+  is not itself a resolved webview. WBA lazily creates one Code OSS webview
+  runtime per `(surfaceId, clientInstanceId)` on the first client attach, so
+  each client has an independent handle, HTML/options/state stream, transport
+  journal, and resource capability while the provider and workspace stay
+  shared.
 
 #### 5.2 Supported contribution subset
 
@@ -767,11 +770,21 @@ remain outside this slice.
 - Browser-to-WBA RPC remains strict MessagePack on the existing WBA Socket.IO
   lane. The extension-host mixed-argument codec preserves ArrayBuffer and typed
   array payloads rather than converting them to JSON/base64.
-- `vscode-resource.vscode-cdn.net` URLs are rewritten to a stable WBA HTTP
-  resource route. Files are admitted only after realpath resolution proves
-  containment beneath the extension's declared `localResourceRoots`; the
-  extension location and workspace are the normal defaults when the extension
-  does not provide roots.
+- `vscode-resource.vscode-cdn.net` URLs are rewritten to a WBA-epoch resource
+  scope keyed by extension identity, workspace, extension location, and the
+  normalized `localResourceRoots`. Activity views and panels with the same
+  scope receive the same unguessable URL, so a second Codex panel can reuse the
+  extension bundle already loaded by the activity view without sharing either
+  document or extension-host lifecycle. The scope is reference-counted by live
+  runtimes. Files are admitted only when the scope exists and realpath
+  resolution proves containment beneath its exact roots; extension location
+  and workspace are the normal defaults when the extension provides no roots.
+  Extension-install assets use a private immutable cache lifetime bounded by
+  the WBA-epoch scope token. Mutable workspace resources retain ETag/
+  Last-Modified revalidation. Compressible resources use asynchronous Brotli/
+  gzip negotiation. The Rust app proxy preserves end-to-end
+  `Content-Encoding` because its reqwest transport does not decode response
+  bodies.
 - Script execution and form submission follow the extension's webview content
   options. The extension's own CSP remains authoritative inside the document;
   the wrapper has its own restrictive CSP.
@@ -792,14 +805,16 @@ remain outside this slice.
 
 #### 5.5 Lifecycle and acceptance boundary
 
-- Workspace switch disposes the old logical views before resolving the new
-  workspace's views. Provider registrations survive a WBA workspace switch
-  because the extension host itself survives; a full WBA reset clears both.
-- Provider unregister, failed resolve, extension-host reset, and empty/stale
-  snapshots remove the corresponding Sidebar membership deterministically.
-- Disconnecting one browser presentation does not dispose the shared logical
-  provider. Multi-client independent view instances require a later explicit
-  architecture change.
+- Workspace switch disposes all old client runtimes and membership before
+  discovering the new workspace's views. Provider registrations survive a WBA
+  workspace switch because the extension host itself survives; a full WBA
+  reset clears both.
+- Provider unregister, extension-host reset, and empty/stale snapshots remove
+  the corresponding Sidebar membership and all associated client runtimes.
+  A resolve failure removes only the requesting client's runtime.
+- Disconnecting one browser presentation does not dispose its warm client
+  runtime or the shared logical provider. Reattach resumes that exact client
+  runtime for the WBA/workspace lifetime.
 - The marketplace's unsupported notice remains until the OpenAI activity-bar
   view is live-accepted in both an inline host and Electron detach/attach. Later
   contribution points require a new approved slice.
@@ -877,6 +892,16 @@ Build one workspace-generation-scoped registry that composes:
 - live command registration/unregistration from `MainThreadCommands`; and
 - the extension-defined context keys updated through `setContext`, plus the
   current Code TE2 resource/editor context needed by menu predicates.
+
+Code Server's management scan remains authoritative for which extensions are
+admitted to the extension host, but its returned DTO is not a complete manifest
+authority: live validation found an admitted Codex extension whose view
+contributions survived while `commands` and `menus` were absent. For each
+already-admitted non-builtin extension, WBA therefore enriches manifest-owned
+fields from the canonical package registered by the existing private
+`extensions.json`. The disk catalog must never admit a management-rejected
+extension, replace management-owned runtime identity/location metadata, or
+alter builtin membership.
 
 WBA owns context-expression parsing and eligibility. Each client surface sends
 only its bounded ephemeral context through its own RPC lane: the editor sends
@@ -1043,6 +1068,9 @@ those existing owners:
   in the editor's pointer/touch command surface;
 - `explorer/context` -> an Extension Context submenu in the Explorer card menu,
   evaluated against the selected file/directory resource; and
+- `webview/context` -> a trusted-wrapper popup above the opaque extension
+  iframe, resolved with the authoritative `webviewId` plus bounded primitive
+  `data-vscode-context` values from the clicked element; and
 - `view/title` -> controls in the inline/detached extension-surface header.
 
 The mobile implementation extends the touch-selection runtime's existing
@@ -1052,7 +1080,10 @@ shared projection inline. Electron handles only its established detached-window
 presentation and forwards command intent through the same backend contract.
 Menu eligibility is refreshed event-wise when the active document changes or a
 menu is opened so selection-dependent commands are current without background
-polling.
+polling. The Monaco touch runtime installs one stable Extension Context
+launcher synchronously and resolves `editor/context` plus
+`editor/title/context` only when that launcher is opened; it never snapshots
+asynchronous WBA results into the vendor menu at editor construction time.
 
 The primary extension-action group is a shrinkable horizontal viewport inside
 `.fe-toolbar-actions`. It preserves fixed Run/Stop/status controls while native
@@ -1107,13 +1138,31 @@ adding native-client authority:
   runtime. Panels project as temporary Sidebar membership and Close performs a
   WBA/extension-host disposal instead of a local hide.
 
-This checkpoint intentionally does not claim the remaining general menu API.
-Extension-defined `setContext`, enablement/alternate commands, Explorer and
-view-title placements, targeted initial panel reveal, extension-requested file
-navigation, generic diffs, custom editors, and multiple Codex conversations
-remain later slices. Json Crack and Browser/GeckoView/Electron presentation
-behavior require live acceptance before the corresponding acceptance items are
-closed.
+The follow-on command/navigation slice extends this checkpoint through the
+bounded parts of step 5 without adding another frontend authority:
+
+- WBA now retains extension-defined `setContext`, command enablement,
+  alternate-command, icon, and group/order state and resets that state with the
+  workspace generation;
+- `MainThreadTextEditors.$tryShowTextDocument`/`$tryShowEditor` and internal
+  `_workbench.open` requests use one correlated WBA-to-Python transaction. The
+  Python side invokes the canonical project-contained backend open and waits
+  for the existing Monaco `editor.openComplete.publish` acknowledgement before
+  WBA returns its logical editor id;
+- supported selection and reveal requests project through the direct editor/WBA
+  lane and use Monaco's public selection, reveal, and focus APIs. Unsupported
+  editor mutation calls fail explicitly;
+- Explorer resolves and executes `explorer/context` contributions only through
+  its `/rpc/explorer` lane and Python backend, which verifies the clicked and
+  selected project resources before asking WBA to evaluate or execute them; and
+- workspace switch/reset cancels pending navigation and clears extension
+  context. All of these paths are request/event based; none polls.
+
+The complete Code OSS menu/editor API is still larger. Extension-view context
+and `view/title` placement, targeted initial panel reveal, generic diffs, custom
+editors, and multiple Codex conversations remain later slices. OpenAI file
+navigation and `setContext`, plus Browser/GeckoView/Electron presentation,
+still require live acceptance before their acceptance items are closed.
 
 #### 5.6J Per-client webview reconstruction continuity
 
@@ -1196,10 +1245,11 @@ Restore ordering is strict and event-driven:
    from the destroyed iframe.
 
 The opaque sandbox remains intact; `allow-same-origin`, polling, a second
-provider instance, and direct extension-to-native messaging are not part of the
-solution. `retainContextWhenHidden` may preserve a still-live document, but
-serialized reconstruction remains the portable Browser/GeckoView/Electron
-contract whenever a renderer is destroyed.
+provider registration, and direct extension-to-native messaging are not part
+of the solution. The shared provider may resolve distinct client-scoped
+webview handles through WBA. `retainContextWhenHidden` may preserve a still-live
+document, but serialized reconstruction remains the portable Browser/
+GeckoView/Electron contract whenever a renderer is destroyed.
 
 Acceptance requires refresh, detach, detached refresh, reattach, native-client
 cold restart, two simultaneous windows, two independent remote clients, reset,
@@ -1234,6 +1284,42 @@ fresh complete projection arrives. Reconciliation failures still reject the
 prerequisite with their real collision/error rather than loading a broken Code
 TE2 surface. The browser and GeckoView paths do not expose this Electron-only
 hook and continue using the ordinary shared readiness contract.
+
+#### 5.6L Client-scoped activity-view runtime and encoded-resource transport
+
+Live multi-client testing exposed that a logical Sidebar surface could not also
+be the one resolved Code OSS activity-view instance. Eager provider resolution
+started extension watchdogs before any renderer existed, and the singleton
+handle let one client's resolution/error HTML, transport sequence, and browser
+messages overwrite another client's state.
+
+The corrected runtime keeps shared membership while making presentation state
+client-specific:
+
+1. workspace/provider discovery publishes the stable logical surface without
+   calling `$resolveWebviewView`;
+2. the first attach for a stable `clientInstanceId` creates one runtime handle
+   and resolves it exactly once;
+3. HTML, options, messages, replay/generation state, resource capability, and
+   resolve failure are routed only to that client runtime; and
+4. workspace/provider/WBA teardown disposes all runtimes, while transport
+   disconnect preserves them for warm reconnect.
+
+Activity views use this shared-membership/per-client-runtime split. Ordinary
+webview panels remain extension-created lifecycle objects and are not cloned
+per client. Identical activity/panel resource roots share one WBA-epoch
+capability URL, while their HTML, messages, state, visibility, and disposal
+remain independent. Large text, JavaScript, JSON, and SVG resources negotiate
+Brotli or gzip. Immutable extension-install assets use the scope token as their
+cache identity; mutable admitted roots retain ETag/Last-Modified revalidation.
+The Rust proxy must preserve the upstream `Content-Encoding` header with the
+encoded bytes; stripping that header makes every browser parse compressed
+JavaScript as source and fails even on localhost.
+
+Acceptance covers two client ids receiving distinct handles, exact-client
+message/event routing, client-local failure isolation, encoded resource
+delivery through the Rust proxy, warm reconnect, and live Browser/Electron/
+Gecko presentation.
 
 #### 5.7 GeckoView transient framework failure tolerance
 
