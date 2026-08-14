@@ -4085,6 +4085,15 @@ decision. A valid resume or replay leaves the existing iframe, DOM, JavaScript
 heap, and scroll/selection state alive; only an epoch/generation/revision change,
 event-journal gap, or authoritative reload/dispose crosses the reconstruction
 boundary. Per-surface event retention is bounded to 256 events and 2 MiB.
+The generic Sidebar shortcut version never treats an `ExtensionWebviewSurface`
+HTML revision as an outer-wrapper reload request: the trusted wrapper remains
+stable while WBA reconstructs only its sandboxed extension document. Ordinary
+URL slots retain their version-triggered wrapper reload.
+Within the current WBA epoch and surface generation, the wrapper discards a
+buffered event whose sequence is already covered by the latest attach before
+comparing its HTML revision. A temporary loading document followed immediately
+by final HTML therefore causes one final reconstruction rather than repeatedly
+reconciling the stale temporary revision.
 
 Interactive browser RPCs are never a reconnect queue. A disconnect rejects all
 pending calls and clears Socket.IO's client send buffer, so a message that may

@@ -648,6 +648,20 @@ test("wrapper preserves its live document across transport resume and reloads on
       method: "$setHtml",
       args: [
         "resume-panel-handle",
+        "<!doctype html><html><body>generating</body></html>",
+      ],
+    }),
+    { handled: true },
+  );
+  assert.deepEqual(
+    runtime.handleMainThreadRequest({
+      kind: "ext",
+      type: 1,
+      req: 5,
+      rpcId: RPC.MainThreadWebviews,
+      method: "$setHtml",
+      args: [
+        "resume-panel-handle",
         "<!doctype html><html><body>second</body></html>",
       ],
     }),
@@ -655,12 +669,23 @@ test("wrapper preserves its live document across transport resume and reloads on
   );
   await waitFor(
     () => attachResults.length === 4 && frame.src !== initialDocumentUrl,
-    "authoritative HTML change did not reload the extension document",
+    "authoritative HTML burst did not reload the final extension document",
+  );
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(
+    attachResults.length,
+    4,
+    "a stale buffered HTML revision started another attach",
   );
   const revisedDocumentUrl = frame.src;
   assert.equal(attachResults[3].action, "reload");
   assert.equal(attachResults[3].reason, "html_revision_changed");
+  assert.equal(
+    attachResults[3].htmlRevision,
+    runtime.snapshot().surfaces[0].htmlRevision,
+  );
   assert.ok(attachResults[3].bootstrapToken);
+  assert.equal(window.document.getElementById("te2-status").hidden, true);
 
   socket.connected = false;
   socket.trigger("disconnect");
@@ -668,7 +693,7 @@ test("wrapper preserves its live document across transport resume and reloads on
     runtime.handleMainThreadRequest({
       kind: "ext",
       type: 3,
-      req: 5 + index,
+      req: 6 + index,
       rpcId: RPC.MainThreadWebviews,
       method: "$postMessage",
       args: ["resume-panel-handle", JSON.stringify({ index })],

@@ -1277,6 +1277,18 @@ Transport lifetime and document lifetime must become separate state machines:
 - a transport disconnect alone never assigns `frame.src`, disposes the
   provider, or changes Sidebar membership.
 
+The generic Sidebar URL-slot version is not an extension-document revision
+authority. `ExtensionWebviewSurface` snapshot updates keep the trusted outer
+wrapper alive; WBA alone applies `htmlRevision` changes to the sandboxed inner
+document. Ordinary URL slots retain their version-triggered outer reload.
+
+Buffered wrapper events are sequence-fenced before revision reconciliation
+within the current WBA epoch and surface generation. An attach response's
+`eventSequence` covers every earlier HTML revision, so an older buffered event
+at or below that sequence is discarded instead of starting another attach.
+This is required for extensions that publish a temporary loading document and
+their final document in one burst.
+
 WBA will expose a bounded resume handshake carrying the stable
 `clientInstanceId`, `windowId`, `presentationId`, `surfaceId`, current WBA
 epoch, loaded HTML revision, and the last applied server event sequence. WBA

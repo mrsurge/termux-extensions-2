@@ -332,6 +332,8 @@ Investigation and planning:
 - [x] Reject pending RPCs, clear implicit Socket.IO buffering, and never replay disconnected interactive messages.
 - [x] Renew the writer lease and flush one coalesced newer client reconstruction snapshot without allowing a stale presentation to reclaim authority.
 - [x] Add focused initial-load, reconnect-without-reload, replay, gap, WBA-restart, pending-RPC, renewed-lease, and stale-writer tests.
+- [x] Keep the trusted outer Sidebar wrapper stable across WBA `htmlRevision` updates; only the wrapper may reconstruct the sandboxed extension document.
+- [x] Discard current-generation buffered events already covered by an attach sequence before comparing HTML revisions, preventing temporary/final HTML bursts from entering an attach loop.
 - [ ] Live-accept Browser, Electron inline/detached, and GeckoView under brief outage, high latency, and a frontend-blocking file open.
 - [ ] Consider a dedicated raw MessagePack WebSocket only if the proven protocol remains nondeterministic on Socket.IO; do not migrate Monaco's WBA lane speculatively.
 

@@ -3505,7 +3505,12 @@ export function initSidebarShortcuts(
       entry.url = loadUrl;
       entry.devToolsName = _configureShortcutIframeElement(entry.iframe, sc);
 
-      if (entry.loaded && versionChanged) {
+      // WBA owns extension HTML revisions inside its stable trusted wrapper.
+      if (
+        entry.loaded &&
+        versionChanged &&
+        !_isExtensionWebviewEntry(sc)
+      ) {
         void _ensureIframeLoadedForShortcut(sc, entry, { forceReload: true });
       } else if (entry.loaded && prevUrl && prevUrl !== loadUrl) {
         void _ensureIframeLoadedForShortcut(sc, entry, { forceReload: true });
