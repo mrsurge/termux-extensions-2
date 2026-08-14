@@ -60,6 +60,15 @@ const electronBridge: ElectronAppViewBridge = Object.freeze({
   home(): Promise<{ ok: true }> {
     return invokeElectron("home");
   },
+  readClientIdentity(): Promise<{ clientInstanceId: string }> {
+    return invokeElectron("read_client_identity");
+  },
+  resetClientIdentity(): Promise<{ clientInstanceId: string }> {
+    return invokeElectron("reset_client_identity");
+  },
+  waitForAppPrerequisites(appId: string): Promise<{ ok: true }> {
+    return invokeElectron("wait_for_app_prerequisites", { appId });
+  },
   forceAssetUpdate(): Promise<AssetUpdateResult> {
     return invokeElectron("force_asset_update");
   },

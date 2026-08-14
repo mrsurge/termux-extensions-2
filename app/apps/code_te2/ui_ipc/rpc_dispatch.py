@@ -24,6 +24,7 @@ from .rpc_contract import (
     UI_IPC_RPC_METHOD_HOST_RUN_PROFILE_STATE_GET,
     UI_IPC_RPC_METHOD_HOST_RUN_PROFILE_STOP,
     UI_IPC_RPC_METHOD_HOST_EXTENSION_WEBVIEW_DISPOSE,
+    UI_IPC_RPC_METHOD_HOST_EXTENSION_WEBVIEW_CLIENT_STATE_RESET,
     UI_IPC_RPC_METHOD_HOST_GIT_BRANCH_CHECKOUT,
     UI_IPC_RPC_METHOD_HOST_GIT_BRANCH_CREATE,
     UI_IPC_RPC_METHOD_HOST_GIT_BRANCHES_LIST,
@@ -51,6 +52,7 @@ from ..host.editor_actions_backend import (
 from ..host.editor_preferences_backend import handle_host_editor_preference_request
 from ..host.file_ops_backend import handle_host_open_request, handle_host_save_request
 from ..host.extension_webview_backend import (
+    handle_host_extension_webview_client_state_reset_request,
     handle_host_extension_webview_dispose_request,
 )
 from ..host.git_backend import (
@@ -148,6 +150,12 @@ async def dispatch_ui_ipc_rpc_request(
 
     if method == UI_IPC_RPC_METHOD_HOST_EXTENSION_WEBVIEW_DISPOSE:
         return await handle_host_extension_webview_dispose_request(
+            params,
+            source_name=source_name,
+        )
+
+    if method == UI_IPC_RPC_METHOD_HOST_EXTENSION_WEBVIEW_CLIENT_STATE_RESET:
+        return await handle_host_extension_webview_client_state_reset_request(
             params,
             source_name=source_name,
         )

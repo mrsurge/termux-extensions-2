@@ -255,6 +255,8 @@ export function initSidebarShortcuts(
       : null;
   const getClientId =
     typeof options.getClientId === "function" ? options.getClientId : () => "";
+  const getWindowId =
+    typeof options.getWindowId === "function" ? options.getWindowId : () => "";
   const setMenuChecked =
     typeof options.setMenuChecked === "function"
       ? options.setMenuChecked
@@ -1456,6 +1458,28 @@ export function initSidebarShortcuts(
     return _normStr(surface.surfaceId) || `sidebar:${hostId}`;
   }
 
+  function _extensionWebviewPresentationUrl(
+    sc: SidebarShortcut,
+    rawUrl: string,
+    presentationId: string,
+    includeWindowId: boolean,
+  ): string {
+    const surface = _extensionWebviewSurface(sc);
+    if (_normStr(surface.dto) !== "ExtensionWebviewSurface") return rawUrl;
+    const clientInstanceId = _normStr(getClientId());
+    const normalizedPresentationId = _normStr(presentationId);
+    if (!clientInstanceId || !normalizedPresentationId) {
+      throw new Error("Extension webview presentation identity is incomplete");
+    }
+    const parsed = new URL(rawUrl, window.location.href);
+    parsed.searchParams.set("clientInstanceId", clientInstanceId);
+    parsed.searchParams.set("presentationId", normalizedPresentationId);
+    const windowId = includeWindowId ? _normStr(getWindowId()) : "";
+    if (windowId) parsed.searchParams.set("windowId", windowId);
+    else parsed.searchParams.delete("windowId");
+    return parsed.href;
+  }
+
   function _presentationModeForHost(hostId: string) {
     return _presentationState.presentations[hostId] || "embedded";
   }
@@ -1530,15 +1554,20 @@ export function initSidebarShortcuts(
       const entry = _iframeMap.get(sc.key) || null;
       const fallbackUrl = _shortcutFrameUrl(sc, entry);
       if (!fallbackUrl) return false;
-      const runtime = runProfileRuntimeMetadata(sc);
-      const loadUrl = await prepareRunTargetUrl(
-        sc.run_target_route || sc.runTargetRoute,
-        fallbackUrl,
-        runtime,
-      );
       const presentationId =
         _detachedPresentationIds.get(hostId) ||
         _newDetachedPresentationId(hostId);
+      const runtime = runProfileRuntimeMetadata(sc);
+      const loadUrl = await prepareRunTargetUrl(
+        sc.run_target_route || sc.runTargetRoute,
+        _extensionWebviewPresentationUrl(
+          sc,
+          fallbackUrl,
+          presentationId,
+          false,
+        ),
+        runtime,
+      );
       const result = await bridge.detachSidebarSurface(
         _detachedSurfaceDescriptor(sc, loadUrl, presentationId),
         { focus },
@@ -3199,7 +3228,12 @@ export function initSidebarShortcuts(
     const url = _shortcutFrameUrl(sc, entry, options);
     if (!url) return false;
     const forceReload = !!options.forceReload;
-    let loadUrl = url;
+    let loadUrl = _extensionWebviewPresentationUrl(
+      sc,
+      url,
+      entry.presentationId,
+      true,
+    );
     const runtimeMetadata = runProfileRuntimeMetadata(sc);
     if (
       sc.kind === SHORTCUT_KIND_URL &&

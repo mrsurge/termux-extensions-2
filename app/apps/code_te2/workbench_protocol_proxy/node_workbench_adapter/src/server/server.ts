@@ -53,7 +53,11 @@ type RuntimeWorkbench = Omit<WorkbenchLike, "state"> & {
   status: () => Record<string, unknown>;
   getExtensions?: () => unknown[];
   webviewWrapperHtml: (surfaceId: string) => string;
-  webviewDocumentHtml: (surfaceId: string, resourceOrigin: string) => string;
+  webviewDocumentHtml: (
+    surfaceId: string,
+    resourceOrigin: string,
+    bootstrapToken: string,
+  ) => string;
   webviewResource: (
     surfaceId: string,
     scheme: string,
@@ -87,6 +91,12 @@ const EXTENSION_STORAGE_PATH = String(
 ).trim();
 if (!EXTENSION_STORAGE_PATH) {
   throw new Error("TE2_EXTENSION_STORAGE_PATH is required");
+}
+const WEBVIEW_RECONSTRUCTION_STORAGE_PATH = String(
+  process.env.TE2_WEBVIEW_RECONSTRUCTION_STORAGE_PATH ?? "",
+).trim();
+if (!WEBVIEW_RECONSTRUCTION_STORAGE_PATH) {
+  throw new Error("TE2_WEBVIEW_RECONSTRUCTION_STORAGE_PATH is required");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -519,6 +529,7 @@ wb = new WorkbenchClient({
   onEvent: workbenchEventHandler,
   onNotification: wsBroadcastNotification,
   extensionStoragePath: EXTENSION_STORAGE_PATH,
+  webviewReconstructionStoragePath: WEBVIEW_RECONSTRUCTION_STORAGE_PATH,
 }) as unknown as RuntimeWorkbench;
 
 installSyncTrace();
@@ -750,7 +761,11 @@ const server = http.createServer(async (req, res) => {
         return bodyResponse(
           res,
           200,
-          wb.webviewDocumentHtml(surfaceId, requestedOrigin),
+          wb.webviewDocumentHtml(
+            surfaceId,
+            requestedOrigin,
+            String(url.searchParams.get("bootstrapToken") ?? "").trim(),
+          ),
           "text/html; charset=utf-8",
         );
       }

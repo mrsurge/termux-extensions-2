@@ -46,8 +46,7 @@ internal fun parseAndroidNativeConsoleCommand(code: String): AndroidNativeConsol
     }
 }
 
-internal fun androidNativeConsoleWorkerId(context: Context, renderer: String): String {
-    require(renderer.matches(Regex("[a-z0-9_-]+"))) { "invalid renderer name" }
+internal fun androidInstallationId(context: Context): String {
     val preferences = context.getSharedPreferences(
         "android_native_console",
         Context.MODE_PRIVATE,
@@ -57,6 +56,24 @@ internal fun androidNativeConsoleWorkerId(context: Context, renderer: String): S
         ?: UUID.randomUUID().toString().replace("-", "").take(12).also {
             preferences.edit().putString("installation_id", it).apply()
         }
+    return installationId
+}
+
+internal fun resetAndroidInstallationId(context: Context): String {
+    val installationId = UUID.randomUUID().toString().replace("-", "").take(12)
+    context.getSharedPreferences("android_native_console", Context.MODE_PRIVATE)
+        .edit()
+        .putString("installation_id", installationId)
+        .commit()
+    return installationId
+}
+
+internal fun androidClientInstanceId(context: Context): String =
+    "client_${androidInstallationId(context)}"
+
+internal fun androidNativeConsoleWorkerId(context: Context, renderer: String): String {
+    require(renderer.matches(Regex("[a-z0-9_-]+"))) { "invalid renderer name" }
+    val installationId = androidInstallationId(context)
     return "android:$renderer:$installationId"
 }
 

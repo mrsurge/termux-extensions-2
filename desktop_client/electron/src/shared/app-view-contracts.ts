@@ -13,6 +13,9 @@ export const ELECTRON_APP_VIEW_COMMANDS = [
   "inspect",
   "reload",
   "home",
+  "read_client_identity",
+  "reset_client_identity",
+  "wait_for_app_prerequisites",
   "force_asset_update",
   "register_run_target_surface",
   "release_run_target_surface",
@@ -154,6 +157,9 @@ export type ElectronAppViewBridge = {
   inspect(): Promise<ElectronAppViewInspection>;
   reload(): Promise<{ ok: true }>;
   home(): Promise<{ ok: true }>;
+  readClientIdentity(): Promise<{ clientInstanceId: string }>;
+  resetClientIdentity(): Promise<{ clientInstanceId: string }>;
+  waitForAppPrerequisites(appId: string): Promise<{ ok: true }>;
   forceAssetUpdate(): Promise<AssetUpdateResult>;
   registerRunTargetSurface(
     runtime: ElectronRunProfileRuntimeMetadata,

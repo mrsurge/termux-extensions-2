@@ -64,6 +64,7 @@ import { createHostSidebarRuntime } from './main_page/frontend/host-sidebar-runt
 import { captureHostElements } from './main_page/frontend/host-elements.ts';
 import { createHostUiPrefsRuntime } from './main_page/frontend/host-ui-prefs-runtime.ts';
 import { createHostBootRuntime } from './main_page/frontend/host-boot-runtime.ts';
+import { resolveCodeTe2ClientIdentity } from './main_page/frontend/client-identity.ts';
 import { initResizeManager, loadLayoutPreferences } from './main_page/frontend/host-resize-manager.ts';
 import type { ProblemsPanelController } from './src/diagnostics/problems-panel.ts';
 import type { OpenFileOptions } from './main_page/frontend/file-ops/open-flow.ts';
@@ -150,6 +151,8 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
   window.__feAppContext = appContext;
   window.host = host;
   window.api = api;
+  const clientIdentity = await resolveCodeTe2ClientIdentity();
+  const clientId = clientIdentity.clientInstanceId;
   let problemsPanel: ProblemsPanelController = {
     show() {},
     hide() {},
@@ -183,8 +186,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
       window.__fePendingCacheIndicator = info;
     } catch (_) {}
   };
-  let clientId = `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
   function dispatchHostOpenStateProjection(state: UnknownRecord, source: string): void {
     const openState = asUnknownRecord(state.openState);
     const openFile = typeof openState.openFile === 'string' && openState.openFile ? openState.openFile : typeof state.currentPath === 'string' && state.currentPath ? state.currentPath : typeof state.lastFile === 'string' && state.lastFile ? state.lastFile : null;
@@ -219,6 +220,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     ensureSocketIoLoaded,
     initConsoleBridge,
     getClientId: () => clientId,
+    getConsoleWorkerId: () => clientIdentity.consoleWorkerId,
     onHostStateResync: async () => {
       const state = await editorStateController.syncEditorState(true);
       if (state) dispatchHostOpenStateProjection(state, 'ui_ipc_host_state_resync');
@@ -436,6 +438,9 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
       settingsModal: editorSettingsModal,
       settingsClose: editorSettingsClose,
       settingsConsoleWorkerId: editorSettingsConsoleWorkerId,
+      settingsClientIdentity: hostElements.editorSettingsClientIdentity,
+      settingsClientCopy: hostElements.editorSettingsClientCopy,
+      settingsClientReset: hostElements.editorSettingsClientReset,
       menuEditorSettings: miEditorSettings,
       extManagerModal: editorExtManagerModal,
       extManagerClose: editorExtManagerClose,
@@ -474,6 +479,16 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     getConsoleWorkerId: () => {
       const status = getConsoleBridgeStatus();
       return typeof status.workerId === 'string' ? status.workerId : null;
+    },
+    getClientIdentity: () => clientIdentity,
+    resetClientIdentity: async () => {
+      await uiIpcConnections.requestUiIpc(
+        UI_IPC_RPC_METHODS.hostExtensionWebviewClientStateReset,
+        { clientInstanceId: clientIdentity.clientInstanceId },
+        10_000,
+      );
+      await resolveCodeTe2ClientIdentity({ reset: true });
+      window.location.reload();
     },
     toast: (msg: string, ms?: number) => host.toast(msg, ms),
     requestLanguageBackendSet: (mode: 'code-server' | 'web-workers') =>
@@ -1023,6 +1038,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
       uiIpcConnections.emitSidebarRpcRequest(method, asUnknownRecord(payload));
     },
     getClientId: () => clientId,
+    getWindowId: () => clientIdentity.windowId,
   });
 
   drainPendingWatcherEvents();

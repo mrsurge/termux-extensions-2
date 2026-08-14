@@ -727,10 +727,12 @@ export class WorkbenchClient {
     onEvent,
     onNotification,
     extensionStoragePath,
+    webviewReconstructionStoragePath,
   }: {
     onEvent?: WorkbenchEventSink;
     onNotification?: (method: string, params: unknown) => void;
     extensionStoragePath: string;
+    webviewReconstructionStoragePath: string;
   }) {
     this.onEvent = typeof onEvent === "function" ? onEvent : () => {};
     this.onNotification = typeof onNotification === "function"
@@ -878,6 +880,7 @@ export class WorkbenchClient {
       workspacePath: () => this.state.workspaceFolder,
     });
     this._webviews = new WebviewRuntime({
+      reconstructionStoragePath: webviewReconstructionStoragePath,
       rpcIds: {
         MainThreadWebviews: _rpcIds.MainThreadWebviews,
         MainThreadWebviewPanels: _rpcIds.MainThreadWebviewPanels,
@@ -2612,7 +2615,7 @@ export class WorkbenchClient {
     return { ok: true, ts_ms: Date.now(), replayed };
   }
 
-  webviewAttach(params: Record<string, unknown>): Record<string, unknown> {
+  webviewAttach(params: Record<string, unknown>): Promise<Record<string, unknown>> {
     return this._webviews.attach(params);
   }
 
@@ -2620,8 +2623,12 @@ export class WorkbenchClient {
     return this._webviews.receiveBrowserMessage(params);
   }
 
-  webviewState(params: Record<string, unknown>): Record<string, unknown> {
+  webviewState(params: Record<string, unknown>): Promise<Record<string, unknown>> {
     return this._webviews.setBrowserState(params);
+  }
+
+  webviewClientStateReset(params: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this._webviews.resetClientState(params);
   }
 
   webviewVisibility(params: Record<string, unknown>): Record<string, unknown> {
@@ -2636,8 +2643,12 @@ export class WorkbenchClient {
     return this._webviews.wrapper(surfaceId);
   }
 
-  webviewDocumentHtml(surfaceId: string, resourceOrigin: string): string {
-    return this._webviews.document(surfaceId, resourceOrigin);
+  webviewDocumentHtml(
+    surfaceId: string,
+    resourceOrigin: string,
+    bootstrapToken: string,
+  ): string {
+    return this._webviews.document(surfaceId, resourceOrigin, bootstrapToken);
   }
 
   webviewResource(

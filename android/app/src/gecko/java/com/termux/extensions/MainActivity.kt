@@ -1734,6 +1734,29 @@ class MainActivity : AppCompatActivity() {
                                             "Asset interceptor acknowledged local port $assetPort",
                                         )
                                         completeReady()
+                                    } else if (
+                                        payload.optString("type") == "client_identity_reset"
+                                    ) {
+                                        val requestId = payload.optString("requestId").trim()
+                                        if (requestId.isEmpty()) return
+                                        runOnUiThread {
+                                            resetAndroidInstallationId(this@MainActivity)
+                                            nativeConsoleWorker?.disconnect()
+                                            nativeConsoleWorker = null
+                                            uiIpcClient?.disconnect()
+                                            uiIpcClient = null
+                                            val settings = androidSettingsStore.load()
+                                            connectUiIpc(settings, frameworkBaseUrl)
+                                            connectNativeConsoleWorker(frameworkBaseUrl)
+                                            source.postMessage(JSONObject().apply {
+                                                put("type", "client_identity_result")
+                                                put("requestId", requestId)
+                                                put(
+                                                    "clientInstanceId",
+                                                    androidClientInstanceId(this@MainActivity),
+                                                )
+                                            })
+                                        }
                                     }
                                 }
 
@@ -1747,6 +1770,10 @@ class MainActivity : AppCompatActivity() {
                                 put("type", "set_asset_port")
                                 put("port", assetPort)
                                 put("frameworkBaseUrl", browserFrameworkBaseUrl())
+                                put(
+                                    "clientInstanceId",
+                                    androidClientInstanceId(this@MainActivity),
+                                )
                             }
                             port.postMessage(msg)
                             Log.i("MainActivity", "Sent asset port $assetPort to extension")
@@ -1822,6 +1849,10 @@ class MainActivity : AppCompatActivity() {
                 put("type", "set_asset_port")
                 put("port", localAssetServer?.port ?: 0)
                 put("frameworkBaseUrl", browserFrameworkBaseUrl())
+                put(
+                    "clientInstanceId",
+                    androidClientInstanceId(this@MainActivity),
+                )
             })
         }
         persistentNetworkNotificationEnabled = settings.persistentNetworkNotification
@@ -1899,7 +1930,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun restoreSavedRemoteSession(health: AndroidRemoteAppHealth) {
         val appId = savedRemoteAppId()
-        if (health != AndroidRemoteAppHealth.HEALTHY || appId == null) {
+        if (health == AndroidRemoteAppHealth.UNHEALTHY || appId == null) {
             preservePersistedSessionUntilStartupReady = false
             loadHome()
             return
@@ -1999,17 +2030,25 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 appHealthProbeInFlight.set(false)
                 if (!activityResumed || !inAppShell || currentAppId != appId) return@runOnUiThread
-                if (health == AndroidRemoteAppHealth.HEALTHY) {
-                    appHealthFailureCount = 0
-                } else {
-                    appHealthFailureCount += 1
+                val fallback = evaluateRemoteAppFallback(
+                    health,
+                    appHealthFailureCount,
+                    APP_HEALTH_FAILURE_LIMIT,
+                )
+                appHealthFailureCount = fallback.consecutiveUnhealthyCount
+                if (health == AndroidRemoteAppHealth.UNHEALTHY) {
                     Log.w(
                         "MainActivity",
-                        "Remote app health failure $appHealthFailureCount/" +
+                        "Remote app authoritative health failure $appHealthFailureCount/" +
                             "$APP_HEALTH_FAILURE_LIMIT app=$appId state=$health",
                     )
+                } else if (health == AndroidRemoteAppHealth.UNREACHABLE) {
+                    Log.w(
+                        "MainActivity",
+                        "Remote app health transport unavailable; preserving app=$appId",
+                    )
                 }
-                if (appHealthFailureCount >= APP_HEALTH_FAILURE_LIMIT) {
+                if (fallback.loadHome) {
                     loadHome()
                 } else {
                     updateAppHealthMonitoring()

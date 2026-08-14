@@ -2,6 +2,8 @@
 const RUN_TARGET_REGISTER = "te2.runTarget.register.request";
 const RUN_TARGET_REGISTER_RESPONSE = "te2.runTarget.register.response";
 const RUN_TARGET_RELEASE = "te2.runTarget.release.request";
+const CLIENT_IDENTITY_REQUEST = "te2.clientIdentity.request";
+const CLIENT_IDENTITY_RESPONSE = "te2.clientIdentity.response";
 
 function markBridgeAvailable() {
   if (document.documentElement) {
@@ -48,4 +50,26 @@ window.addEventListener("message", (event) => {
     surfaceId,
     pageOrigin: window.location.origin,
   });
+});
+
+window.addEventListener("message", async (event) => {
+  if (event.source !== window || !event.data || event.data.channel !== CLIENT_IDENTITY_REQUEST) return;
+  const requestId = String(event.data.requestId || "");
+  if (!requestId) return;
+  let result;
+  try {
+    result = await browser.runtime.sendMessage({
+      type: "client_identity_get",
+      requestId,
+      reset: event.data.reset === true,
+      pageOrigin: window.location.origin,
+    });
+  } catch (error) {
+    result = { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+  window.postMessage({
+    channel: CLIENT_IDENTITY_RESPONSE,
+    requestId,
+    result: result || { ok: false, error: "Native client identity returned no response" },
+  }, window.location.origin);
 });

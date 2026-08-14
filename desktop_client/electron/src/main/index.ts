@@ -1,5 +1,4 @@
 import { readFile, stat } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
 import { extname, relative, resolve } from "node:path";
 
 import {
@@ -35,6 +34,11 @@ import {
   writeDesktopSidebarPresentationState,
 } from "./sidebar-presentation-store";
 import { ElectronUiIpcClient } from "./ui-ipc-client";
+import {
+  readDesktopClientIdentity,
+  resetDesktopClientIdentity,
+  type ElectronClientIdentity,
+} from "./client-identity-store";
 import {
   ELECTRON_APP_VIEW_IDENTITY,
   ELECTRON_FRAMEWORK_PARTITION,
@@ -103,6 +107,7 @@ let uiIpcClient: ElectronUiIpcClient | null = null;
 let runProfileRuntime: ElectronRunProfileRuntime | null = null;
 let detachedSurfaceRegistry: DetachedSidebarSurfaceRegistry | null = null;
 let dialogHost: DesktopDialogHost | null = null;
+let electronClientIdentity: ElectronClientIdentity;
 const surfaceWindows = new Set<BrowserWindow>();
 const trustedFrameworkContents = new Set<WebContents>();
 const assets = new DesktopAssetManager();
@@ -339,6 +344,24 @@ async function handleAppViewControl(
     // Keep this renderer alive long enough to return the install result. The
     // paired reload hook activates the already-invalidated asset snapshot.
     return updateDesktopAssets(true, false);
+  }
+  if (command === "read_client_identity") {
+    return { clientInstanceId: electronClientIdentity.clientInstanceId };
+  }
+  if (command === "reset_client_identity") {
+    electronClientIdentity = await resetDesktopClientIdentity();
+    connectElectronUiIpc();
+    return { clientInstanceId: electronClientIdentity.clientInstanceId };
+  }
+  if (command === "wait_for_app_prerequisites") {
+    const appId = payload && typeof payload === "object"
+      ? String((payload as Record<string, unknown>).appId || "").trim()
+      : "";
+    if (appId === "code_te2") {
+      if (!runTargetRelays) throw new Error("Run target relay is not initialized");
+      await runTargetRelays.waitUntilProjectionReady(null);
+    }
+    return { ok: true };
   }
   if (command === "release_run_target_surface") {
     runProfileRuntime?.release(String(payload || ""));
@@ -615,14 +638,26 @@ async function navigateApp(rawUrl: string): Promise<{ url: string }> {
     throw new Error("Framework app navigation must use the desktop relay origin");
   }
   target.searchParams.set("gv_native", "1");
-  if (!runTargetRelays) throw new Error("Run target relay is not initialized");
-  await runTargetRelays.waitUntilProjectionReady();
   closeAppView();
   appView = createAppView();
   mainWindow?.contentView.addChildView(appView);
   resizeAppView();
   await appView.webContents.loadURL(target.href);
   return { url: target.href };
+}
+
+function connectElectronUiIpc(): void {
+  uiIpcClient?.disconnect();
+  uiIpcClient = new ElectronUiIpcClient(
+    `electron:${electronClientIdentity.clientInstanceId}`,
+    (projection) => {
+      void runTargetRelays?.updateRouteProjection(projection).catch((error) => {
+        console.warn(`[te2-run-target] route projection rejected: ${errorMessage(error)}`);
+      });
+    },
+    () => runTargetRelays?.suspendRouteProjection(),
+  );
+  uiIpcClient.connect(configuredFrameworkOrigin);
 }
 
 async function saveConnection(params: Record<string, unknown>): Promise<{
@@ -796,19 +831,11 @@ async function main(): Promise<void> {
   await protocol.handle(SHELL_SCHEME, localShellResponse);
 
   settings = await readDesktopSettings();
+  electronClientIdentity = await readDesktopClientIdentity();
   configuredFrameworkOrigin = frameworkOrigin(settings);
   relay = await startFrameworkRelay(configuredFrameworkOrigin, assets);
   runTargetRelays = new RunTargetRelayManager(() => configuredFrameworkOrigin);
-  uiIpcClient = new ElectronUiIpcClient(
-    `electron:${randomUUID()}`,
-    (projection) => {
-      void runTargetRelays?.updateRouteProjection(projection).catch((error) => {
-        console.warn(`[te2-run-target] route projection rejected: ${errorMessage(error)}`);
-      });
-    },
-    () => runTargetRelays?.suspendRouteProjection(),
-  );
-  uiIpcClient.connect(configuredFrameworkOrigin);
+  connectElectronUiIpc();
   runProfileRuntime = new ElectronRunProfileRuntime(
     session.fromPartition(ELECTRON_FRAMEWORK_PARTITION),
     () => relay.browserOrigin,

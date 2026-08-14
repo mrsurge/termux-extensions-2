@@ -632,6 +632,12 @@
             });
         }
 
+        async function waitForNativeAppPrerequisites(targetAppId) {
+            const bridge = window.te2Electron;
+            if (!bridge || typeof bridge.waitForAppPrerequisites !== 'function') return;
+            await bridge.waitForAppPrerequisites(targetAppId);
+        }
+
         function appLifecycleEndpoint(targetAppId, action) {
             return `/api/apps/${encodeURIComponent(String(targetAppId || '').trim())}/${action}`;
         }
@@ -1013,6 +1019,7 @@
                 if (!appId) throw new Error('App ID not available for app shell');
                 const sidebarVersion = sidebarShortcutVersion();
                 const appDef = await waitForAppLifecycle();
+                await waitForNativeAppPrerequisites(appId);
                 const assetBaseUrl = typeof appDef.asset_base_url === 'string' ? appDef.asset_base_url.trim() : '';
                 const templatePath = assetBaseUrl
                     ? `${assetBaseUrl.replace(/\/+$/, '')}/${appDef.entrypoints.frontend_template.replace(/^\/+/, '')}`

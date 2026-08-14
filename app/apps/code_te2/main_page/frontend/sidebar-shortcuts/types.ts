@@ -225,6 +225,7 @@ export interface SidebarShortcutsOptions {
     payload?: UnknownRecord,
   ) => void;
   getClientId?: () => string;
+  getWindowId?: () => string;
   setMenuChecked?: (el: HTMLElement | null, checked: boolean) => void;
 }
 

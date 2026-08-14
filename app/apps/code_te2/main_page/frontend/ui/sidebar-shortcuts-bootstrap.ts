@@ -18,6 +18,7 @@ export interface SidebarShortcutsBootstrapDeps {
   emitSidebarUiRequest?: (method: UiIpcRpcMethod, payload?: UnknownRecord) => void;
   emitSidebarRpcRequest?: (method: SidebarIpcRpcMethod, payload?: UnknownRecord) => void;
   getClientId: () => string;
+  getWindowId: () => string;
 }
 
 export function initSidebarShortcutsSafe(deps: SidebarShortcutsBootstrapDeps): SidebarShortcutsRuntime | null {
@@ -32,6 +33,7 @@ export function initSidebarShortcutsSafe(deps: SidebarShortcutsBootstrapDeps): S
       emitSidebarUiRequest: deps.emitSidebarUiRequest,
       emitSidebarRpcRequest: deps.emitSidebarRpcRequest,
       getClientId: deps.getClientId,
+      getWindowId: deps.getWindowId,
     });
     // init() is deferred — called after runBootSequence completes
     // so sidebar loading doesn't compete with core editor boot.

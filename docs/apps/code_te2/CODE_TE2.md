@@ -3614,6 +3614,9 @@ Allowed app-view commands are:
 | `inspect` | Return current URL, relay origin, configured framework origin, cache size, Electron/Chromium versions, and asset status. |
 | `reload` | Reload the exact app view. |
 | `home` | Return to the desktop launcher. |
+| `read_client_identity` | Read the stable Electron installation identity stored beneath `$TE2_CONFIG_HOME`. |
+| `reset_client_identity` | Atomically replace that identity after Code TE2 has removed the old identity's reconstruction records. |
+| `wait_for_app_prerequisites` | Await the first current Code TE2 Run Target projection after backend readiness; all other apps are a no-op. |
 | `force_asset_update` | Run the desktop asset updater. |
 | `register_run_target_surface` | Register exact-frame `devRuntime` instrumentation metadata; it does not create a proxy. |
 | `release_run_target_surface` | Release exact-frame instrumentation metadata; it does not tear down a running shell's proxy. |
@@ -3625,8 +3628,9 @@ Allowed app-view commands are:
 The command allowlist is exact-view and origin validated in Electron main. The
 preload also delivers bounded detached-surface events only to that exact app
 view. Code TE2 console workers in Electron app views register as
-`electron:main_page:<suffix>`; browser and Android retain generic `main_page`
-labels.
+`main_page:<clientInstanceId>:<windowId>` with the existing
+`electron:main_page` label. Browser and GeckoView use the same exact worker-id
+shape with their own stable client identity providers.
 
 ### Detached Sidebar presentations
 
@@ -3654,12 +3658,15 @@ and is applied before either embedded or detached navigation.
 
 Run-target listeners are owned by Electron main, not the renderer. Electron main
 also owns a direct strict-MessagePack Code TE2 UI IPC client which receives the
-authoritative owner/shell route projection. Electron reconciles listeners from
-that projection and gates app navigation on the first ready projection event;
-the preload exposes no Run Target resolve operation. App-view navigation does
-not tear down a still-running shell's group. Electron closes all relay listeners
-and active streams when the framework connection changes or the desktop process
-exits.
+authoritative owner/shell route projection. Electron app navigation loads the
+shared app shell immediately, so the framework-owned lifecycle/readiness SSE
+remains visible and authoritative. After backend readiness and before Code TE2's
+frontend template is injected, the shared shell asks the exact-view preload to
+await one current Run Target projection event; other apps have no native
+prerequisite. The preload exposes no Run Target resolve operation, and neither
+readiness layer polls. App-view navigation does not tear down a still-running
+shell's group. Electron closes all relay listeners and active streams when the
+framework connection changes or the desktop process exits.
 
 ### Desktop shell behavior
 
@@ -3953,6 +3960,13 @@ activates the Kotlin replacement header. Cold app restoration occurs only after
 the first fresh native route snapshot has reconciled. Gecko restores complete
 serialized session state only when the saved random loopback origins still
 match; otherwise it loads the saved `/app/<id>` URL through the current relay.
+Remote-app health distinguishes transport availability from authoritative app
+lifecycle. An unreachable or invalid running-app projection preserves the
+current/saved remote app and clears the consecutive authoritative-failure
+count; it never sends the user to the launcher. Only a successful projection
+that omits the app or reports terminal readiness advances the count, and three
+consecutive authoritative failures return home. This policy reuses the existing
+health path and adds no retry poller.
 There is no route polling; iframe refresh performs no
 proxy request. Configured-framework changes and Activity destruction tear down
 all groups.
@@ -3979,7 +3993,7 @@ extension host
 
 The outer wrapper supplies one-shot `acquireVsCodeApi()` with `postMessage`, `setState`, and `getState`. Extension HTML retains its own CSP inside the iframe. WBA rewrites `vscode-resource.vscode-cdn.net` URLs to the service route and serves a file only when realpath containment succeeds beneath the declared `localResourceRoots`; extension location and workspace are the normal defaults. Script and form capabilities follow the webview content options.
 
-WBA publishes complete workspace-scoped `ExtensionWebviewSurface` snapshots over its existing Framework-Shell event pipe. Python validates them and projects membership into the Sidebar ledger. Browser and GeckoView use the existing inline URL presentation; Electron uses the existing detachable stable-surface window machinery. No Android source or asset change is required. Activity-view Close changes only that client's presentation to `hidden`; WBA membership survives, and the contributed extension icon remains in the Extension Views app-drawer section for reopening. Provider/workspace/WBA lifecycle removal remains authoritative. Ordinary user URL slots retain destructive close behavior.
+WBA publishes complete workspace-scoped `ExtensionWebviewSurface` snapshots over its existing Framework-Shell event pipe. Python validates them and projects membership into the Sidebar ledger. Browser and GeckoView use the existing inline URL presentation; Electron uses the existing detachable stable-surface window machinery. Activity-view Close changes only that client's presentation to `hidden`; WBA membership survives, and the contributed extension icon remains in the Extension Views app-drawer section for reopening. Provider/workspace/WBA lifecycle removal remains authoritative. Ordinary user URL slots retain destructive close behavior.
 
 Workspace switch disposes old views before resolving the new workspace. Provider registrations survive that switch because the extension host survives; full WBA reset, provider unregister, failed resolve, or a stale/empty snapshot removes the surface. A browser presentation disconnect does not dispose the shared provider. Independent simultaneous provider instances per client, secondary-Sidebar views, custom editors, and chat-session APIs remain deferred.
 
@@ -4005,7 +4019,52 @@ The current command surface is deliberately smaller than the complete Code OSS m
 
 The first acceptance fixture is `openai.chatgpt_26.5803.41515.vsix`, using `chatgpt.sidebarView`.
 
-The inner document intentionally keeps an opaque sandbox origin. Host messages are re-emitted with `window.location.origin` so origin-validating extension runtimes receive the native webview event shape. Because opaque origins cannot access browser Web Storage, the injected API supplies synchronous `localStorage` and `sessionStorage` adapters; the trusted wrapper persists local storage per stable workspace/view surface without adding `allow-same-origin` or exposing the framework DOM.
+The inner document intentionally keeps an opaque sandbox origin. Host messages are re-emitted with `window.location.origin` so origin-validating extension runtimes receive the native webview event shape. Because opaque origins cannot access browser Web Storage, the injected API supplies synchronous `localStorage` and `sessionStorage` adapters without adding `allow-same-origin` or exposing the framework DOM.
+
+Destroyed webview documents reconstruct from a client-partitioned opaque record,
+not from shared Sidebar membership or extension content state. The stable
+`surfaceId` remains WBA's logical workspace/view identity. The main page adds a
+stable `clientInstanceId`, a reload-stable per-window `windowId`, and a transient
+inline/detached `presentationId`. Browser profiles store the client identity in
+`localStorage`; Electron stores it beneath `$TE2_CONFIG_HOME`; GeckoView projects
+its existing application-private installation id through the always-on
+asset-intercept WebExtension. Editor Settings displays and copies the identity;
+reset is confirmation-gated and removes only that client's records before the
+native/browser identity changes and the page reloads.
+
+WBA stores bounded reconstruction records beneath
+`$TE2_DATA_HOME/code_te2/code_server/User/te2-webview-reconstruction`, keyed by
+the hashes of `(clientInstanceId, surfaceId)`. Each attach atomically issues a
+new writer lease and a one-time document bootstrap token. The trusted wrapper
+uses that token to inject the last accepted `acquireVsCodeApi()` state and
+persistent Web Storage entries before the first extension-authored script can
+run. Writes require the current lease and a strictly newer revision, so a
+destroyed inline or detached renderer cannot overwrite its replacement. Other
+clients remain isolated while the extension host's semantic workspace/content
+state stays shared. `windowId` and `presentationId` are routing/observability
+metadata, not persistence keys. There is no state polling or `allow-same-origin`
+fallback.
+
+Extension-document lifetime is independent of the wrapper's WBA Socket.IO
+connection. The WBA process owns a random epoch, each logical surface owns a
+generation and monotonically increasing event sequence, and each HTML/options
+replacement advances `htmlRevision`. After the initial token-backed load, the
+wrapper reports those four facts plus its last applied event sequence on every
+reconnect. WBA answers with an explicit `resume`, bounded `replay`, or `reload`
+decision. A valid resume or replay leaves the existing iframe, DOM, JavaScript
+heap, and scroll/selection state alive; only an epoch/generation/revision change,
+event-journal gap, or authoritative reload/dispose crosses the reconstruction
+boundary. Per-surface event retention is bounded to 256 events and 2 MiB.
+
+Interactive browser RPCs are never a reconnect queue. A disconnect rejects all
+pending calls and clears Socket.IO's client send buffer, so a message that may
+already have executed is not replayed. Reconstruction state is deliberately
+different: the wrapper retains the newest local VS Code API/Web Storage
+projection, renews its writer lease during resume, and coalesces one newer write
+after reconnect. The lease/revision fence rejects the replaced presentation.
+The protocol remains strict MessagePack and fully event-driven; raw WebSocket is
+deferred unless live Socket.IO acceptance proves its heartbeat or delivery
+behavior nondeterministic.
 
 Extension-context Mementos are a separate WBA main-thread contract. WBA implements Code Server 4.130's `MainThreadStorage` actor: `$initializeExtensionStorage` returns the last persisted raw JSON value and `$setValue` serializes an atomic replacement beneath `$TE2_DATA_HOME/code_te2/code_server/User/te2-extension-storage`. Global state is keyed by canonical extension id; workspace state is additionally partitioned by the resolved active-workspace identity. The exact root is resolved by Python and passed through the Framework-Shell environment, so Node does not independently resolve TE2/XDG roots. `$registerExtensionStorageKeysToSync` intentionally retains data locally because TE2 does not currently implement VS Code Settings Sync. This store is neither extension settings authority nor webview presentation state.
 

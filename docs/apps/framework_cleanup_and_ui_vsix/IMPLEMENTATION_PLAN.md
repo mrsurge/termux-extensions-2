@@ -1,9 +1,9 @@
 # Framework Cleanup And UI VSIX Implementation Plan
 
 Status: Phases 1 through 4 are implemented and validated. Phase 5's first
-activity-bar webview slice is implemented locally; its OpenAI acceptance fixture
-now reaches the live application UI, with final visual and detach/attach
-acceptance still pending.
+activity-bar webview slice and its first command/panel follow-ons are implemented
+and live-accepted. Per-client state continuity and Electron readiness ordering
+are implemented and locally validated; live continuity acceptance remains open.
 Real legacy-root migration applies, filesystem deletion, and later UI VSIX
 contribution points remain separate approval boundaries. Post-4B WBA packaging
 and Sidebar peer transport prerequisites are complete on TE2 commit `7cd923fc`.
@@ -1114,6 +1114,278 @@ navigation, generic diffs, custom editors, and multiple Codex conversations
 remain later slices. Json Crack and Browser/GeckoView/Electron presentation
 behavior require live acceptance before the corresponding acceptance items are
 closed.
+
+#### 5.6J Per-client webview reconstruction continuity
+
+The detach acceptance exposed an ownership problem rather than a missing
+extension-content store. Extension `globalState`, workspace-isolated
+`workspaceState`, conversations, documents, and other semantic data remain
+extension-host/backend state. Webview `acquireVsCodeApi().setState()`, the
+opaque document's Web Storage adapters, scroll/selection state, and detached
+window placement are client presentation state used to reconstruct a destroyed
+document.
+
+The current runtime has two concrete continuity defects:
+
+- the host `clientId` is regenerated on every main-page boot, while the console
+  bridge's per-window worker id lives only in `sessionStorage`; and
+- WBA stores one shared `surface.state` and sends it to the document only after
+  the extension script can already call `getState()`. That is both a
+  cross-client last-writer-wins scope and an initialization race.
+
+The next implementation uses four separate identities:
+
+| Identity | Lifetime and purpose |
+|---|---|
+| `surfaceId` | Stable logical `(workspace, extension, view/panel)` identity owned by WBA |
+| `clientInstanceId` | Stable browser profile or native application-installation identity |
+| `windowId` | Per-window/tab identity retained across reload through `sessionStorage` |
+| `presentationId` | Transient embedded/detached renderer incarnation correlated with a WBA-issued writer lease |
+
+Persisted reconstruction state is keyed by `(clientInstanceId, surfaceId)`,
+never by `windowId` or `presentationId`. The main-page console worker consumes
+the same identity as `main_page:<clientInstanceId>:<windowId>`; console identity
+is an observability projection, not the state authority.
+
+Identity resolution is client-owned and platform-specific behind one shared
+frontend contract:
+
+- ordinary browsers create a pseudorandom `clientInstanceId` once in
+  `localStorage`;
+- Electron persists it through the existing preload/main native bridge beneath
+  `$TE2_CONFIG_HOME`, independent of the random browser-relay origin; and
+- GeckoView reuses its existing application-private installation id, projects
+  it through the always-on asset-intercept WebExtension/native messaging path,
+  and delivers it to the top-level document at `document_start`. It must not
+  depend on the random localhost relay origin's Web Storage.
+
+The editor settings surface displays a human-readable client label and a
+copyable identifier. Reset is an explicit confirmation-gated action that
+regenerates the identity and removes that client's extension reconstruction
+snapshots. Arbitrary identifier editing is not supported because accidental
+collisions would merge independent clients. The identifier partitions state;
+it is not an authentication credential.
+
+Every WBA wrapper attach carries `clientInstanceId`, `windowId`,
+`presentationId`, and `surfaceId`. The client remains the conceptual owner of
+the snapshot, while an opaque backend projection may durably retain:
+
+```text
+clientInstanceId + surfaceId + revision + writerLease
+  -> vscodeState + localStorage entries + updatedAt
+```
+
+The projection never interprets, merges, or broadcasts the payload. Different
+clients receive different reconstruction snapshots while continuing to share
+the extension host's semantic workspace/content state. Cross-device roaming is
+a separate opt-in feature, not an accidental consequence of collaboration.
+WBA validates and persists the bounded opaque record beneath the existing Code
+TE2 data partition. Python must not add webview state to the membership-only
+Sidebar ledger or become extension-content authority.
+
+Restore ordering is strict and event-driven:
+
+1. Resolve the durable client identity.
+2. Attach the exact client/window/presentation/surface tuple and obtain its
+   latest accepted revision.
+3. Make `getState()` and persistent Web Storage available synchronously before
+   the first extension-authored script executes.
+4. Accept later `setState()`/storage writes only from the current writer lease
+   with a monotonically newer revision.
+5. On detach/reattach, mint a new presentation/lease and reject late writes
+   from the destroyed iframe.
+
+The opaque sandbox remains intact; `allow-same-origin`, polling, a second
+provider instance, and direct extension-to-native messaging are not part of the
+solution. `retainContextWhenHidden` may preserve a still-live document, but
+serialized reconstruction remains the portable Browser/GeckoView/Electron
+contract whenever a renderer is destroyed.
+
+Acceptance requires refresh, detach, detached refresh, reattach, native-client
+cold restart, two simultaneous windows, two independent remote clients, reset,
+late-writer rejection, and WBA/provider teardown tests. An extension that never
+calls `setState()` or uses a durable extension store is not promised arbitrary
+JavaScript-heap restoration.
+
+#### 5.6K Electron readiness ordering
+
+Electron previously awaited Run Target projection readiness in `navigateApp()`
+before it created the app view or loaded the shared app shell. That placed a
+Code TE2-specific native prerequisite ahead of the framework's ordinary app
+lifecycle/readiness contract. A delayed UI IPC snapshot could therefore reject
+or stall navigation before the readiness splash and SSE endpoint existed,
+including for unrelated apps whose manifests declare `readiness_support`.
+
+The corrected ordering preserves the shared app shell as the visible readiness
+authority:
+
+1. Electron creates the app view and immediately loads the relayed `/app/<id>`
+   shell.
+2. The shell performs its existing backend lifecycle/readiness SSE gate.
+3. After the backend is ready and before frontend template injection, the shell
+   invokes an optional exact-view native prerequisite.
+4. Electron treats that prerequisite as a no-op for every app except
+   `code_te2`; Code TE2 awaits the first current Run Target projection event so
+   remote listeners exist before its restored Sidebar surfaces load.
+
+The native prerequisite has no independent timeout or polling loop. A transient
+UI IPC disconnect preserves existing listeners and the waiter survives until a
+fresh complete projection arrives. Reconciliation failures still reject the
+prerequisite with their real collision/error rather than loading a broken Code
+TE2 surface. The browser and GeckoView paths do not expose this Electron-only
+hook and continue using the ordinary shared readiness contract.
+
+#### 5.7 GeckoView transient framework failure tolerance
+
+Gecko's saved-session and active-app health paths distinguish an authoritative
+framework response from transport failure. `UNHEALTHY` means a successful
+running-app projection omitted the worker or reported terminal readiness; only
+three consecutive authoritative failures may return the user to the local
+launcher. `UNREACHABLE` means the framework request failed or returned an
+invalid projection; it preserves the current/saved app presentation, clears the
+consecutive authoritative-failure count, and lets the existing sockets and
+projection streams reconnect. Cold restoration remains gated behind framework
+relay setup and a fresh Run Target projection. This policy adds no retry poller
+or alternate connection path.
+
+#### 5.8 UI VSIX transport-resume continuity
+
+The first connection-robustness slice keeps the current strict-MessagePack
+Socket.IO WBA lane. Replacing Socket.IO with a raw WebSocket is not required to
+correct the current lifetime bug and is explicitly deferred until the bounded
+resume protocol has been proven on the existing transport.
+
+The concrete defect is in the trusted extension-webview wrapper: every
+Socket.IO `connect` currently performs a fresh attach followed by an
+unconditional iframe `src` assignment. A transient transport reconnect is
+therefore treated as destruction and reconstruction of the extension document,
+even when the WBA process, logical surface, HTML revision, and live iframe are
+all unchanged. Socket.IO connection recovery is disabled because WBA owns
+explicit resynchronization, but the extension-webview path does not yet
+implement that resynchronization boundary.
+
+Transport lifetime and document lifetime must become separate state machines:
+
+- the first successful attach loads the opaque iframe through the existing
+  one-time bootstrap token and reconstruction record;
+- a reconnect to the same WBA epoch, surface generation, and `htmlRevision`
+  preserves the existing iframe, DOM, JavaScript heap, and scroll/selection
+  state;
+- an authoritative HTML revision change, surface replacement/disposal, WBA
+  epoch change, or unrecoverable event-sequence gap deliberately reconstructs
+  the document from the existing client-partitioned state store; and
+- a transport disconnect alone never assigns `frame.src`, disposes the
+  provider, or changes Sidebar membership.
+
+WBA will expose a bounded resume handshake carrying the stable
+`clientInstanceId`, `windowId`, `presentationId`, `surfaceId`, current WBA
+epoch, loaded HTML revision, and the last applied server event sequence. WBA
+returns an explicit `resume`, `replay`, or `reload` decision. Events from an
+extension to its webview receive monotonic per-surface sequence numbers and a
+bounded byte/count journal. A connected wrapper applies events in order; after a
+reconnect WBA replays only the retained suffix. Falling outside the retained
+range is an explicit reconstruction boundary rather than an unbounded queue.
+
+Browser-to-extension interactions use stricter failure semantics. All pending
+RPC promises reject immediately when the socket disconnects, Socket.IO's client
+send buffer is cleared, and disconnected interactive messages are not replayed
+because the server may already have applied them. Client reconstruction state
+is different: the wrapper retains the latest local `vscodeState` and persistent
+Web Storage projection, obtains a new writer lease during resume, and coalesces
+one newer snapshot after reconnect. The existing lease/revision fencing remains
+authoritative, so a replaced presentation cannot reclaim writer authority.
+
+The disconnected indicator may cover or disable interaction, but it must not
+destroy the iframe underneath it. Resume remains fully event-driven: there is
+no connection poller, document-readiness poller beyond the existing bounded
+page readiness contracts, or periodic state flush. Actual WBA `reload` and
+`dispose` events retain their present authoritative meanings.
+
+Validation must include:
+
+1. initial attach loads exactly once;
+2. a transient disconnect/reconnect preserves the exact iframe and live DOM;
+3. retained ordered events replay exactly once after reconnect;
+4. an event-journal gap, WBA restart, or HTML revision change reconstructs
+   exactly once from the latest accepted client state;
+5. pending/interactive RPCs fail without implicit replay while a newer local
+   state snapshot survives and flushes under the renewed lease;
+6. stale presentations remain unable to write after detach/reattach; and
+7. Browser, Electron inline/detached, and GeckoView pass live high-latency,
+   brief-outage, and frontend-blocking acceptance.
+
+Only if the proven resume protocol still cannot obtain deterministic heartbeat,
+buffering, and replay behavior from Socket.IO should the extension-webview
+delivery path move to a dedicated raw binary MessagePack WebSocket. That would
+be a transport substitution for this protocol, not a redesign of its state
+authority, and it would not imply migrating Monaco's working WBA intelligence
+lane.
+
+#### 5.9 Android persistent client-runtime ownership
+
+The second robustness slice addresses Android process ownership after the WBA
+resume boundary is working. The current `PersistentNetworkService` is a
+notification-only `START_STICKY` foreground service. The Activity still owns
+the framework relay, Run Target projection stream and listener manager, UI IPC,
+native console connection, and Gecko session; `onPause()` explicitly marks the
+Gecko session inactive. Live device inspection confirmed that the foreground
+service was running while the process held no wake lock and was not exempt from
+device-idle restrictions. This is an ownership problem, not primarily a
+Kotlin-versus-NDK problem.
+
+The replacement is one started-and-bound Android client-runtime service shared
+by the Gecko and Cefrium applications. It owns the native control plane:
+
+- configured upstream framework identity;
+- the stable localhost `AndroidFrameworkRelay` and retarget lifecycle;
+- the authoritative Run Target SSE projection and
+  `RunTargetRelayManager` listeners;
+- the persistent native UI IPC transport, with bound Activity observers for
+  IME and console presentation; and
+- service reconstruction from Android settings followed by fresh authoritative
+  framework/Run Target snapshots.
+
+The Activity remains the renderer and UI owner. It binds to the service,
+subscribes to current connection/projection state, and attaches or detaches UI
+callbacks without closing the service-owned transports. Activity recreation,
+configuration changes, and ordinary backgrounding must not change the local
+framework relay origin or tear down Run Target listeners. A full service
+restart may read the configured framework target, but it must never restore
+cached Run Target routes as authority; it reconnects to the framework relay
+first and consumes a fresh complete projection before remote app restoration.
+
+When the user has explicitly enabled persistent remote-app operation, an app
+shell that is merely backgrounded remains an active but unfocused Gecko session
+instead of being unconditionally marked inactive. Without that opt-in, the
+normal inactive-session battery policy remains available. This renderer policy
+complements rather than replaces the WBA resume protocol: Android may still
+suspend or lose a connection, and every client must recover without replacing a
+healthy extension document.
+
+Power policy must be visible and bounded. Persistent mode may hold a partial CPU
+wake lock and, for Wi-Fi transport, a high-performance Wi-Fi lock only while a
+user-visible remote app session requires them. Settings report battery
+optimization status and link the user to the system configuration; TE2 does not
+silently grant itself an exemption. Locks release on explicit persistent-mode
+disable, app-shell exit, framework retarget where no remote app remains, or
+service shutdown.
+
+The present `dataSync` foreground-service classification is not accepted as a
+permanent solution: Android applies a six-hour-in-24-hours background limit to
+that type for apps targeting Android 15 or newer. Before this slice raises the
+target SDK, the implementation must select and document the applicable
+long-lived type (`connectedDevice` when the remote-host relationship satisfies
+that contract, otherwise a reviewed `specialUse` declaration) and add its exact
+permissions/Play disclosure. The service must implement appropriate timeout and
+shutdown handling even while the project still targets API 34.
+
+Android acceptance requires focused service/controller tests plus real-device
+validation for background/foreground, screen-off, forced Doze and recovery,
+notification denial, Activity destruction/recreation, process/service restart,
+Wi-Fi/mobile/Tailscale handoff, delayed remote framework recovery, and active
+Run Target listener reconstruction. Tests must prove there is no route polling,
+no stale-route cache authority, no listener collision, and no unexpected
+launcher redirect.
 
 ## 4. Cross-phase validation rules
 

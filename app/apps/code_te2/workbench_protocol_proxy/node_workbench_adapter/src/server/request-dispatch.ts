@@ -162,9 +162,12 @@ export interface WorkbenchLike {
   didChange: (
     params: Record<string, unknown>,
   ) => Record<string, unknown> | Promise<Record<string, unknown>>;
-  webviewAttach: (params: Record<string, unknown>) => Record<string, unknown>;
+  webviewAttach: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
   webviewMessage: (params: Record<string, unknown>) => Record<string, unknown>;
-  webviewState: (params: Record<string, unknown>) => Record<string, unknown>;
+  webviewState: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  webviewClientStateReset: (
+    params: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
   webviewVisibility: (params: Record<string, unknown>) => Record<string, unknown>;
   webviewDispose: (params: Record<string, unknown>) => Record<string, unknown>;
 }
@@ -293,7 +296,7 @@ export async function dispatchJsonRpcRequest(
   }
 
   if (method === "vscode.webview.attach") {
-    return success(id, runtime.wb.webviewAttach(params));
+    return success(id, await runtime.wb.webviewAttach(params));
   }
 
   if (method === "vscode.webview.message") {
@@ -301,7 +304,11 @@ export async function dispatchJsonRpcRequest(
   }
 
   if (method === "vscode.webview.state") {
-    return success(id, runtime.wb.webviewState(params));
+    return success(id, await runtime.wb.webviewState(params));
+  }
+
+  if (method === "vscode.webview.clientState.reset") {
+    return success(id, await runtime.wb.webviewClientStateReset(params));
   }
 
   if (method === "vscode.webview.visibility") {

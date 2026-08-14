@@ -2723,6 +2723,17 @@
       <button class="fe-btn" id="editor-settings-close" aria-label="Close">✕</button>
     </div>
     <div class="fe-modal-body">
+      <div style="display:flex; align-items:center; gap:10px; padding:10px 12px; border:1px solid var(--border, #333); border-radius:4px;">
+        <div style="flex:1; min-width:0;">
+          <div style="font-weight:600;">Client identity</div>
+          <div id="editor-settings-client-identity" style="font-size:12px; opacity:0.72; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Loading…</div>
+        </div>
+        <button class="fe-btn" id="editor-settings-client-copy" type="button">Copy</button>
+        <button class="fe-btn" id="editor-settings-client-reset" type="button">Reset</button>
+      </div>
+
+      <div class="fe-dd-separator" style="margin: 12px 0;"></div>
+
       <div id="editor-settings-theme-strip" style="display:flex; align-items:center; gap:10px; padding:10px 12px; border:1px solid var(--border, #333); border-radius:10px; cursor:pointer;">
         <div style="flex:1;">
           <div style="font-weight:600;">Color Themes</div>
