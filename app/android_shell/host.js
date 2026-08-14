@@ -40,5 +40,6 @@ export const androidShellHost = {
   }),
   getFrameworkStatus: () => request("/framework/status"),
   getFwsStatus: () => request("/fws/status"),
+  openBatterySettings: () => request("/power/settings", { method: "POST" }),
   toast,
 };

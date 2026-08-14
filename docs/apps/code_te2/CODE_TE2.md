@@ -3250,13 +3250,20 @@ Publication runs `editor-distro`, overlays scoped ESM/CSS into `app/static/vendo
 
 ### Problem
 
-The GeckoView app fetches all static editor assets over HTTP from the Python server on every load. This adds latency on first load and makes the app dependent on the server being immediately responsive.
+Without the native asset seed, GeckoView would fetch every static editor asset
+from the remote framework server on each load. That adds first-load latency and
+makes rendering unnecessarily sensitive to the remote connection.
 
 ### Architecture
 
 **Two-tier storage:**
-- **APK `assets/editor_static/`** — Read-only seed, ships with build (~52MB uncompressed, ~20MB compressed in APK)
+- **APK `assets/editor_static/`** — Read-only, manifest-generated seed (currently 205 files / ~39 MiB unpacked)
 - **`filesDir/editor_static/`** — Runtime source of truth, seeded from APK on first boot
+
+`app/android_editor_assets_bundle.json` is the only bundle inventory. The
+publication script renders that inventory into a temporary tree and atomically
+replaces the APK seed, so renamed app identities and removed assets cannot
+survive as stale files.
 
 **Request interception via WebExtension:**
 - `asset_intercept` extension uses `webRequest.onBeforeRequest` to redirect matching static asset URLs to a local HTTP file server
@@ -3265,25 +3272,23 @@ The GeckoView app fetches all static editor assets over HTTP from the Python ser
 
 ### What gets bundled
 
-**INCLUDED (~28MB uncompressed):**
-- Monaco bootstrap bundle (JS+CSS) — 8.6MB
-- Monaco chunks, basic-languages, language contributions — 1.2MB
-- Monaco ESM modules — 16MB
-- TE2 editor libs (m_editor_app.ts, editor_*_utils.js, textmate UMDs)
-- code_te2/static/ (dist, icons, js, vendor)
-- app/static/ non-vendor (fonts, js, icon.png)
-- Vendor: codicons, seti-icons, socket.io, es-module-shims, xterm, ws
+The manifest currently includes the framework shell assets, canonical
+`code_te2` host build and icons, TextMate grammars/themes, the selected Monaco
+bootstrap and worker assets, Android launcher/settings assets, and the app
+catalog support files needed by the native shell.
 
-**EXCLUDED (server-fetched):**
-- Workers (`te2-lang/workers/` — 33MB)
-- nicegui, codemirror, lsp_servers
-- All Python-rendered pages (dynamic)
+Anything not declared in the manifest is excluded. Tree entries additionally
+exclude source maps, backup files, Python bytecode/cache directories, and
+`node_modules`. Server-rendered application content remains dynamic.
 
 ### Asset versioning
 
-- **`0.0.x`** — Asset-only updates (re-run bundle script, rebuild APK)
-- **`0.x.x`** — New GeckoView APK release (code + asset changes)
-- Version stored in `editor_static/version.txt`
+- The canonical version comes from the manifest's `version_file`, currently
+  `app/apps/code_te2/static/version.txt`.
+- The script rejects a supplied version that differs from that source version.
+- Publication writes the same value to `editor_static/version.txt`; APK
+  `versionCode`/`versionName` are advanced to identify the native package that
+  carries that seed.
 - `EditorAssetManager.seedFromApk()` compares bundled vs local version; skips copy if matching
 
 ### URL pattern interception
@@ -3306,10 +3311,11 @@ The WebExtension intercepts these URL patterns (redirecting to local server):
 
 ```bash
 # Re-bundle assets (from repo root):
-./scripts/bundle_gecko_assets.sh 0.0.2
+./scripts/bundle_gecko_assets.sh "$(<app/apps/code_te2/static/version.txt)"
 
-# Then rebuild APK:
-cd android && ./gradlew :app:assembleGeckoDebug
+# Then rebuild the native clients:
+cd android
+./linux-sdk-env.sh ./gradlew :app:assembleGeckoDebug :cefrium:assembleDebug
 ```
 
 ### Boot sequence
@@ -3324,7 +3330,8 @@ cd android && ./gradlew :app:assembleGeckoDebug
 
 | File | Role |
 |------|------|
-| `scripts/bundle_gecko_assets.sh` | Copies qualifying files from `app/` to APK assets dir |
+| `app/android_editor_assets_bundle.json` | Canonical, explicit Android asset inventory and version source |
+| `scripts/bundle_gecko_assets.sh` | Validates, stages, and atomically publishes the manifest inventory into the APK seed |
 | `android/.../EditorAssetManager.kt` | APK→filesDir seeding, version comparison |
 | `android/.../LocalAssetServer.kt` | Lightweight HTTP file server for local assets |
 | `android/.../assets/asset_intercept/manifest.json` | WebExtension manifest |
@@ -3466,9 +3473,10 @@ registration or release. Code TE2 also publishes
 `ui.runTarget.routes.changed` over strict MessagePack UI IPC for Electron and
 sends Electron a current snapshot when its native client reconnects.
 
-GeckoView reconciles the framework SSE projection after its process-local
-framework relay is ready; Electron reconciles its direct UI IPC projection.
-Both determine locality once from the configured framework origin:
+Android's started-and-bound client-runtime service reconciles the framework SSE
+projection after its stable process-local framework relay is ready; Electron
+reconciles its direct UI IPC projection. Both determine locality once from the
+configured framework origin:
 `localhost`, `127.0.0.1`, and `::1` are local, while every other configured host
 is remote. No DNS, loopback-port, or framework-identity probe participates. A
 configured local framework needs no Run Target listeners. A remote framework binds the primary
@@ -3484,21 +3492,42 @@ tunnels. The projection event itself creates, reuses, and removes listener
 groups; no page, iframe, preload, or WebExtension request participates. A route
 feed interruption preserves existing listeners, and the reconnect snapshot
 reconciles them. Electron gates new app navigation while its UI IPC authority is
-unavailable; Gecko gates only an actual pending cold-session restore. A fully restarted native client
-reconstructs every required listener from its first snapshot before restoring
-the app. Projection snapshots are serialized with route registration and
-release publications, preventing a connect-time snapshot from overwriting a
-newer lifecycle event. Gecko cold start retargets its framework relay, opens the
+unavailable; Android gates only an actual pending cold-session restore. A fully
+restarted Android service reconstructs every required listener from its first
+fresh snapshot before a bound Gecko or Cefrium Activity restores the app.
+Projection snapshots are serialized with route registration and release
+publications, preventing a connect-time snapshot from overwriting a newer
+lifecycle event. Android cold start retargets its framework relay, opens the
 framework projection stream, reconciles the first snapshot, and only then
-restores the remote app. A complete serialized `GeckoSession` is restored only
-when both random loopback origins still match; otherwise Gecko loads the saved
-app URL rebased through the current framework relay. Warm background return preserves the
-live Gecko session without reloading it. Exact Framework-Shell removal immediately closes that generation's
-owned listeners; same-owner relaunch replaces its old generation. Framework
-retarget and native process/Activity destruction retain whole-client cleanup.
+allows remote-app restoration. A complete serialized `GeckoSession` is restored
+only when both random loopback origins still match; otherwise Gecko loads the
+saved app URL rebased through the current framework relay. Cefrium applies the
+same fresh-projection restore gate without a serialized Gecko session. Warm
+background return preserves the live renderer without reloading it. Exact
+Framework-Shell removal immediately closes that generation's owned listeners;
+same-owner relaunch replaces its old generation. Framework retarget, service
+shutdown, and process death retain whole-client cleanup.
 
 There is no route/proxy polling. The only retry loop in this flow is the bounded
 backend HTTP page-readiness check before initial surface publication.
+
+`PersistentNetworkService` owns Android's configured upstream identity, stable
+`AndroidFrameworkRelay`, Run Target SSE client/listener manager, UI IPC socket,
+and native-console socket. Gecko and Cefrium Activities bind only to observe
+projection/connection state and receive IME, console, or native-command
+callbacks; Activity recreation and ordinary backgrounding do not close those
+service-owned transports. A service process restart reads only Android settings,
+starts the framework relay first, and then reconnects for a fresh complete Run
+Target projection. Route sets are never persisted as restart authority.
+
+Persistent remote runtime is an explicit Settings opt-in. While a non-loopback
+remote app is active, the service uses the `connectedDevice` foreground-service
+type and holds a partial CPU wake lock plus a high-performance Wi-Fi lock only
+while an Internet-capable Wi-Fi network is present. Exiting the app shell,
+disabling persistence, task removal, timeout, or service shutdown releases this
+power policy. Settings show the current battery-optimization exemption and link
+to Android's system panel; TE2 does not grant itself an exemption. Notification
+permission denial does not disable the runtime.
 
 Native negotiation never changes URL paths, queries, or fragments, never dynamically remaps ports, and never exposes an arbitrary framework-host TCP destination.
 
@@ -3551,8 +3580,9 @@ releases runtime/cache policy, console injection, Inspector registration, and
 presentation state. It does not own relay listener lifetime. Native listeners
 are owned by exact Run Target `ownerId + shellId` generations and reconcile from
 the client's authoritative projection feed. A shell removed during an asynchronous
-resolve cannot bind or resurrect a listener afterward. Framework retarget and
-native process/Activity teardown retain whole-client relay cleanup.
+resolve cannot bind or resurrect a listener afterward. Framework retarget,
+service shutdown, and process death retain whole-client relay cleanup; Activity
+recreation and ordinary backgrounding do not.
 The separate `devTools` option still controls only GeckoView's full Chobitsu
 Inspector target runtime. Ordinary browsers keep refresh behavior but cannot
 receive native cross-origin header mutation or bridge injection.
@@ -3967,9 +3997,9 @@ count; it never sends the user to the launcher. Only a successful projection
 that omits the app or reports terminal readiness advances the count, and three
 consecutive authoritative failures return home. This policy reuses the existing
 health path and adds no retry poller.
-There is no route polling; iframe refresh performs no
-proxy request. Configured-framework changes and Activity destruction tear down
-all groups.
+There is no route polling; iframe refresh performs no proxy request.
+Configured-framework changes and client-runtime service shutdown tear down all
+groups; Activity recreation and ordinary backgrounding do not.
 
 ## 44) UI VSIX Webviews And Editor Contributions
 

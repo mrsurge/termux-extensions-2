@@ -18,13 +18,15 @@ class AndroidShellGateway(
     private val onSettingsChanged: (AndroidAppSettings) -> Unit,
     private val diagnosticsProvider: () -> JSONObject,
     private val appUrlRewriter: (String) -> String,
+    private val settingsRuntimeProvider: () -> JSONObject = { JSONObject() },
+    private val onOpenBatterySettings: () -> Unit = {},
 ) {
     fun handle(request: LocalHttpRequest): LocalHttpResponse? {
         if (!request.path.startsWith(API_PREFIX)) return null
         return try {
             when {
                 request.method == "GET" && request.path == "$API_PREFIX/settings" -> {
-                    jsonResponse(200, settingsStore.load().toJson())
+                    jsonResponse(200, settingsResponse(settingsStore.load()))
                 }
 
                 request.method == "GET" && request.path == "$API_PREFIX/debug" -> {
@@ -35,7 +37,13 @@ class AndroidShellGateway(
                     val payload = JSONObject(request.body.toString(StandardCharsets.UTF_8))
                     val settings = settingsStore.update(payload)
                     onSettingsChanged(settings)
-                    jsonResponse(200, settings.toJson())
+                    jsonResponse(200, settingsResponse(settings))
+                }
+
+                request.method == "POST" &&
+                    request.path == "$API_PREFIX/power/settings" -> {
+                    onOpenBatterySettings()
+                    jsonResponse(200, JSONObject().put("opened", true))
                 }
 
                 request.method == "GET" && request.path == "$API_PREFIX/apps" -> {
@@ -222,6 +230,11 @@ class AndroidShellGateway(
         put("local", true)
         put("running", true)
     }
+
+    private fun settingsResponse(settings: AndroidAppSettings): JSONObject =
+        settings.toJson().apply {
+            put("runtime", settingsRuntimeProvider())
+        }
 
     private fun absoluteFrameworkUrl(frameworkBaseUrl: String, raw: String): String {
         if (raw.startsWith("http://") || raw.startsWith("https://")) return raw

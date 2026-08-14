@@ -33,10 +33,10 @@ const CACHE_PREFIXES = [
   '/static/vendor/monaco-editor-core/esm/',
   '/static/fonts/',
   '/static/js/',
-  '/apps/file_editor_cm6/static/',
-  '/api/app/file_editor_cm6/ui/monaco_editor/',
-  '/api/app/file_editor_cm6/ui/monaco_vscode/lang/',
-  '/api/app/file_editor_cm6/ui/monaco_vscode/esm/',
+  '/apps/code_te2/static/',
+  '/api/app/code_te2/ui/monaco_editor/',
+  '/api/app/code_te2/ui/monaco_vscode/lang/',
+  '/api/app/code_te2/ui/monaco_vscode/esm/',
 ];
 
 // Workers stay network-only (large, rarely change independently)

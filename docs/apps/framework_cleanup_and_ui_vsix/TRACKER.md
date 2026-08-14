@@ -340,14 +340,14 @@ Investigation and planning:
 - [x] Confirm the current foreground service owns only its notification while `MainActivity` owns every relay/socket and deactivates Gecko from `onPause()`.
 - [x] Confirm on the live device that the foreground service can be running with zero held wake locks and without TE2 on the device-idle exemption list.
 - [x] Confirm Termux's relevant advantage is service-owned session/process lifetime plus optional CPU/Wi-Fi locks, not Java/Kotlin versus native code alone.
-- [ ] Replace the notification-only service with one started-and-bound native client-runtime service shared by Gecko and Cefrium.
-- [ ] Move framework-relay identity/lifetime, Run Target projection/listeners, and native UI IPC transport ownership out of the Activity.
-- [ ] Let bound Activities subscribe/unsubscribe IME, console, projection, and connection observers without tearing down service-owned transports.
-- [ ] Reconstruct a restarted service from configured framework identity followed by fresh authoritative projections; never cache Run Target routes as authority.
-- [ ] Keep a persistent-mode remote app session active but unfocused while backgrounded; retain ordinary inactive-session behavior when persistent mode is disabled.
-- [ ] Add explicit, scoped partial CPU/Wi-Fi lock ownership and battery-optimization status/settings UX.
-- [ ] Replace or formally justify the `dataSync` foreground-service type before a target-SDK 35+ release, including exact permissions, timeout handling, and Play disclosure.
-- [ ] Add focused service/controller/reconstruction tests without polling or stale-route fallback.
+- [x] Replace the notification-only service with one started-and-bound native client-runtime service shared by Gecko and Cefrium.
+- [x] Move framework-relay identity/lifetime, Run Target projection/listeners, and native UI IPC transport ownership out of the Activity.
+- [x] Let bound Activities subscribe/unsubscribe IME, console, projection, and connection observers without tearing down service-owned transports.
+- [x] Reconstruct a restarted service from configured framework identity followed by fresh authoritative projections; never cache Run Target routes as authority.
+- [x] Keep a persistent-mode remote app session active but unfocused while backgrounded; retain ordinary inactive-session behavior when persistent mode is disabled.
+- [x] Add explicit, scoped partial CPU/Wi-Fi lock ownership and battery-optimization status/settings UX.
+- [x] Replace `dataSync` with the justified `connectedDevice` foreground-service type, exact permissions, timeout/shutdown handling, and documented Play-disclosure requirement.
+- [x] Add focused service/controller/reconstruction tests without route polling or stale-route fallback.
 - [ ] Live-accept background/foreground, screen-off, forced Doze recovery, notification denial, Activity/process restart, network handoff, framework outage, and active Run Target reconstruction.
 
 5.6C–D — commands, context, Json Crack, and file navigation:
@@ -446,3 +446,5 @@ each phase executes. Do not mark a phase complete from implementation alone.
 | 2026-08-13 | Phase 5.8/5.9 investigation | WBA wrapper/socket lifecycle trace; Android Activity/service/relay ownership trace; live foreground-service, wake-lock, and device-idle inspection; Termux and Agent Log Server comparison | Confirmed compound failure: Android deactivates an Activity-owned browser/control plane while its foreground service owns no transport, then the UI VSIX wrapper converts a routine WBA reconnect into iframe destruction; implementation order fixed as WBA resume continuity followed by Android service ownership |
 | 2026-08-13 | Phase 5.8 implementation | Wrapper-level Happy DOM/fake-Socket.IO reconnect exercise; WBA epoch/generation/revision/sequence and bounded-journal decisions; pending-RPC, coalesced reconstruction, renewed-lease, stale-writer, reload/dispose coverage; Code TE2 typecheck/build and complete frontend suite | Passed locally; 186 frontend tests, 0 failures. Initial load, retained replay, current resume, HTML revision, WBA epoch, replay gap, pending interactive drop, state flush, stale writer, and authoritative dispose are covered. Browser/Electron/Gecko live outage and high-latency acceptance remains open. |
 | 2026-08-13 | Phase 5.8 GeckoView remote acceptance | Live remote GeckoView connection with the new UI VSIX resume and reconstruction path | Passed; the remote GeckoView connection remained functional. The broader cross-client outage, high-latency, and frontend-blocking acceptance matrix remains open. |
+| 2026-08-14 | Phase 5.9 implementation | Started-and-bound Android runtime ownership; fresh projection generation fencing; transient route preservation; persistent-renderer/power policy; Gecko and Cefrium unit suites; 2 GB disk preflights and both APK assemblies | Passed locally; 65 Gecko tests and 8 Cefrium tests, 0 failures. `:app:assembleGeckoDebug` and `:cefrium:assembleDebug` succeeded. The real-device lifecycle/network acceptance matrix remains open. |
+| 2026-08-14 | Android 0.2.329 publication | Manifest-driven seed publication; deterministic republish; Rust manifest/OTA tests; Gecko/Cefrium unit suites and disk-guarded APK builds; package metadata, embedded inventory, Code TE2 identity, host hash, ZIP alignment, and Gecko arm64 ELF audit | Passed locally. Both APKs use version code `20329`, embed all 205 version `0.2.329` files, contain no retired `file_editor_cm6` asset paths, and match the canonical Code TE2 host. Both APKs pass 16 KiB ZIP alignment; all 12 Gecko arm64 shared objects use `0x4000` `PT_LOAD` alignment. |

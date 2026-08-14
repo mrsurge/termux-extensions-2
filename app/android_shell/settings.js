@@ -8,6 +8,8 @@ const devToolsInspectorToggle = document.querySelector("#devtools-inspector-enab
 const saveButton = document.querySelector("#save-settings");
 const testButton = document.querySelector("#test-framework");
 const settingsStatus = document.querySelector("#settings-status");
+const powerPolicyStatus = document.querySelector("#power-policy-status");
+const openPowerSettingsButton = document.querySelector("#open-power-settings");
 const fwsStatus = document.querySelector("#fws-status");
 const fwsFrame = document.querySelector("#fws-frame");
 const fwsUnavailable = document.querySelector("#fws-unavailable");
@@ -25,6 +27,14 @@ async function loadSettings() {
   persistentToggle.checked = !!settings.persistentNetworkNotification;
   imeContextSwitchingToggle.checked = settings.imeContextSwitchingEnabled !== false;
   devToolsInspectorToggle.checked = !!settings.devToolsInspectorEnabled;
+  const runtime = settings.runtime || {};
+  setStatus(
+    powerPolicyStatus,
+    runtime.batteryOptimizationExempt ? "online" : "offline",
+    runtime.batteryOptimizationExempt
+      ? "Battery optimization exemption enabled"
+      : "Android may suspend the remote runtime during idle",
+  );
   setStatus(settingsStatus, "online", "Android settings loaded");
 }
 
@@ -122,6 +132,16 @@ saveButton?.addEventListener("click", async () => {
 
 testButton?.addEventListener("click", () => void testFramework());
 document.querySelector("#refresh-fws")?.addEventListener("click", () => void refreshFrameworkShells());
+openPowerSettingsButton?.addEventListener("click", async () => {
+  openPowerSettingsButton.disabled = true;
+  try {
+    await androidShellHost.openBatterySettings();
+  } catch (error) {
+    androidShellHost.toast(error?.message || "Unable to open battery settings");
+  } finally {
+    openPowerSettingsButton.disabled = false;
+  }
+});
 
 try {
   await loadSettings();

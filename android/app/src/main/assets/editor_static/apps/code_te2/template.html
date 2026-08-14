@@ -1,10 +1,10 @@
-<!-- /data/data/com.termux/files/home/mrselect/app/apps/file_editor_cm6/template.html -->
+<!-- /data/data/com.termux/files/home/mrselect/app/apps/code_te2/template.html -->
  
 <!DOCTYPE html>
 <meta charset="utf-8" />
 <title>Code TE2</title>
-<link rel="stylesheet" href="/apps/file_editor_cm6/static/dist/explorer.css" />
-<link rel="stylesheet" href="/apps/file_editor_cm6/static/dist/host.css" />
+<link rel="stylesheet" href="/apps/code_te2/static/dist/explorer.css" />
+<link rel="stylesheet" href="/apps/code_te2/static/dist/host.css" />
 <link rel="stylesheet" href="/static/vendor/codicons/codicon.css" />
 <link rel="preload" href="/static/fonts/jetbrains/webfonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin />
 <style>
@@ -113,13 +113,13 @@
   .layout-desktop .fe-toolbar {
     grid-column: 2;
     grid-row: 1;
+    z-index: 40;
   }
 
-  /* Menubar stays with the editor column; side rails own columns 1 and 3. */
-  .layout-desktop .fe-menubar {
+  /* Recent-file tabs stay with the editor column; side rails own columns 1 and 3. */
+  .layout-desktop .fe-file-tabs {
     grid-column: 2;
     grid-row: 2;
-    z-index: 60; /* Higher than the sidebar drawer so dropdowns can overlay */
   }
 
   /* Explorer becomes left sidebar - extends from row 2 to bottom */
@@ -275,9 +275,11 @@
   .layout-mobile .fe-toolbar {
     grid-column: 1;
     grid-row: 1;
+    flex-wrap: wrap;
+    row-gap: 2px;
   }
 
-  .layout-mobile .fe-menubar {
+  .layout-mobile .fe-file-tabs {
     grid-column: 1;
     grid-row: 2;
   }
@@ -307,6 +309,10 @@
     border-top: 2px solid var(--border);
     transition: opacity 0.2s ease, visibility 0.2s ease, height 0.2s ease;
     z-index: 50;
+  }
+
+  .layout-mobile .terminal-drawer:not(.fullscreen) {
+    max-height: 397px;
   }
 
   /* When terminal is "closed" (open class NOT present) */
@@ -366,14 +372,16 @@
   .terminal-drawer.terminal-drawer--collapsed .terminal-header,
   .terminal-drawer.terminal-drawer--collapsed .console-header,
   .terminal-drawer.terminal-drawer--collapsed .problems-header,
-  .terminal-drawer.terminal-drawer--collapsed .extension-log-header {
+  .terminal-drawer.terminal-drawer--collapsed .extension-log-header,
+  .terminal-drawer.terminal-drawer--collapsed .code-inspector-header {
     display: none !important;
   }
 
   .terminal-drawer.terminal-drawer--collapsed #terminal-container,
   .terminal-drawer.terminal-drawer--collapsed #console-container,
   .terminal-drawer.terminal-drawer--collapsed #problems-container,
-  .terminal-drawer.terminal-drawer--collapsed #extension-log-container {
+  .terminal-drawer.terminal-drawer--collapsed #extension-log-container,
+  .terminal-drawer.terminal-drawer--collapsed #code-inspector-container {
     height: 1px;
     min-height: 1px;
     max-height: 1px;
@@ -409,12 +417,12 @@
   /* Explorer resize handle (vertical, desktop only) */
   .layout-desktop .resize-handle--explorer {
     display: block;
-    width: 10px;
+    width: 6px;
     cursor: col-resize;
     grid-column: 1;
     grid-row: 1 / 5;
     justify-self: end;
-    margin-left: -10px;
+    transform: translateX(100%);
     z-index: 260;
     touch-action: none;
   }
@@ -426,12 +434,12 @@
   /* Agent resize handle (vertical, desktop only) */
   .layout-desktop .resize-handle--agent {
     display: block;
-    width: 10px;
+    width: 6px;
     cursor: col-resize;
     grid-column: 3;
     grid-row: 1 / 5;
     justify-self: start;
-    margin-right: -10px;
+    transform: translateX(-100%);
     z-index: 220;
     touch-action: none;
   }
@@ -478,50 +486,72 @@
     display: none;
   }
 
-  .fe-toolbar { display: flex; flex-wrap: nowrap; gap: 10px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); min-width: 0; overflow-x: hidden; }
+  .fe-toolbar { display: flex; flex-wrap: nowrap; gap: 6px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); min-width: 0; overflow: visible; position: relative; z-index: 60; }
   #fe-drawer-open,
   .fe-toolbar > .fe-menu { flex: 0 0 auto; }
-  .fe-file-name { display: flex; align-items: center; gap: 10px; }
+  #fe-drawer-open {
+    order: 0;
+  }
+  .fe-panel-toggle-icon {
+    display: block;
+    width: 2.2rem;
+    height: 2.2rem;
+    object-fit: contain;
+    pointer-events: none;
+  }
+  .fe-panel-toggle-icon--right {
+    transform: scaleX(-1);
+  }
+  #menu-file { order: 1; }
+  #menu-edit { order: 2; }
+  #menu-editor { order: 3; }
+  #menu-view { order: 4; }
+  #menu-branch { order: 5; margin-left: auto; }
+  .fe-toolbar-issues { order: 6; }
+  .fe-toolbar-actions { order: 7; display: flex; gap: 0.35rem; align-items: center; }
+  .fe-toolbar > .fe-toolbar-actions { flex: 0 1 auto; min-width: 0; }
+  .fe-toolbar-actions > :not(#fe-extension-editor-actions) { flex: 0 0 auto; }
+  #fe-extension-editor-actions {
+    display: inline-flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    gap: 0.2rem;
+    align-items: center;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x;
+    overscroll-behavior-x: contain;
+  }
+  #fe-extension-editor-actions::-webkit-scrollbar { display: none; width: 0; height: 0; }
+  #fe-extension-editor-actions[hidden] { display: none; }
+  .fe-extension-editor-action { flex: 0 0 28px; width: 28px; height: 28px; padding: 4px; display: inline-flex; align-items: center; justify-content: center; }
+  .fe-extension-editor-action img,
+  .fe-extension-context-icon img { display: block; width: 18px; height: 18px; object-fit: contain; }
+  .fe-status { order: 8; }
   .fe-issues { display: inline-flex; align-items: center; gap: 6px; }
-  .fe-issues-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; opacity: 0.9; }
+  .fe-issues-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 30px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 12px;
+    opacity: 0.9;
+    cursor: pointer;
+  }
+  .fe-issues-badge:disabled { cursor: default; }
   .fe-issues-dot { display: inline-flex; min-width: 16px; padding: 2px 6px; border-radius: 999px; font-weight: 700; line-height: 1; border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.06); }
   .fe-issues-dot.error { color: #ef4444; border-color: rgba(239,68,68,0.45); }
   .fe-issues-dot.warning { color: #eab308; border-color: rgba(234,179,8,0.40); }
   .fe-btn.fe-icon-btn[disabled] { opacity: 0.45; }
-  .fe-title-block { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
-  .fe-file-name { font-size: 0.70rem; font-weight: 600; color: var(--foreground, #e5e7eb); white-space: nowrap; display: flex; align-items: center; gap: 0.35rem; width: 100%; min-width: 0; }
-  .fe-file-name-scroll {
-    display: block;
-    flex: 1 1 auto;
-    min-width: 0;
-    max-width: 100%;
-    overflow: hidden;
-  }
-  #fe-file-name { display: block; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .layout-mobile .fe-file-name-scroll {
-    overflow-x: auto;
-    overflow-y: hidden;
-    -webkit-overflow-scrolling: touch;
-    touch-action: pan-x;
-    scrollbar-width: none;
-    cursor: grab;
-  }
-  .layout-mobile .fe-file-name-scroll::-webkit-scrollbar { display: none; }
-  .layout-mobile .fe-file-name-scroll.is-dragging {
-    cursor: grabbing;
-    user-select: none;
-    -webkit-user-select: none;
-  }
-  .layout-mobile #fe-file-name {
-    display: inline-block;
-    min-width: 100%;
-    max-width: none;
-    width: max-content;
-    overflow: visible;
-    text-overflow: clip;
-  }
   #fe-file-draft-badge { flex: 0 0 auto; }
-  .fe-file-name.fe-unsaved::after { content: ' *'; color: var(--primary, #3b82f6); }
   .fe-file-draft-indicator { font-size: 0.75rem; font-weight: 600; min-width: 0.85rem; text-align: center; }
   .fe-file-draft-indicator[data-state='cached'] { color: #facc15; }
   .fe-file-draft-indicator[data-state='crashed'] { color: #f87171; }
@@ -532,20 +562,19 @@
 	  .fe-btn-danger { border-color: #ef4444; color: #ef4444; }
 	  #run-active-file-btn { width: 28px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 0.75rem; line-height: 1; }
 	  #run-active-file-btn[disabled] { opacity: 0.45; cursor: not-allowed; }
-	  #recent-files-btn { font-size: 0.85rem; padding: 4px 8px; white-space: nowrap; }
 	  .fe-btn:hover { border-color: var(--primary, #3b82f6); }
   .fe-status { font-size: calc(0.85rem * var(--chrome-font-scale)); color: var(--muted-foreground, #9ca3af); white-space: nowrap; margin-left: auto; padding-left: 4px; flex-shrink: 0; align-self: center; }
-  .fe-menubar { display: flex; gap: 12px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border, #333); border-left: 1px solid var(--border, #333); border-right: 1px solid var(--border, #333); background: var(--card, #0b0f1a); font-size: var(--chrome-base-font); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5); position: sticky; top: 0; z-index: 20; }
   .fe-menu { position: relative; }
   .fe-menu-btn { background: transparent; border: none; color: var(--foreground, #e5e7eb); cursor: pointer; padding: 6px 8px; border-radius: 6px; font-size: var(--chrome-base-font); }
+  .fe-menu-btn--icon { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; padding: 0; }
   .fe-menu-btn:hover { background: rgba(255,255,255,0.05); }
   .fe-dropdown { position: absolute; top: calc(100% + 4px); left: 0; min-width: 180px; background: var(--card, #0b0f1a); border: 1px solid var(--border, #333); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); display: none; z-index: 400 !important; }
   .fe-dropdown.show { display: block; }
   /* Dropdowns inside modals need to stack above modal content. */
   .fe-dropdown--modal { z-index: 500; }
-  #recent-files-dd { left: auto; right: 0; }
-  #menu-branch-dd { left: auto; right: 0; max-height: calc(80vh - 60px); overflow-y: auto; }
-  #menu-branch-btn { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #menu-branch-dd { left: auto; right: -45px; max-height: calc(80vh - 60px); overflow-y: auto; }
+  #menu-branch-btn { overflow: hidden; white-space: nowrap; }
+  .fe-visually-hidden { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
   .fe-dd-item { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; cursor: pointer; font-size: calc(0.9rem * var(--chrome-font-scale)); align-items: center; }
   .fe-dd-item[data-checkable="true"] { position: relative; padding-left: 32px; }
   .fe-dd-item[data-checkable="true"]::before { content: ''; position: absolute; left: 12px; width: 1em; text-align: center; color: var(--primary, #3b82f6); }
@@ -553,6 +582,134 @@
   .fe-dd-item.fe-menu-item-checked { color: var(--primary, #3b82f6); }
   .fe-dd-item:hover { background: rgba(255,255,255,0.06); }
   .fe-kbd { opacity: .6; font-size: 12px; }
+
+  .fe-file-tabs {
+    display: block;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    background: var(--card, #0b0f1a);
+    border-bottom: 1px solid var(--border, #333);
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x;
+    overscroll-behavior-x: contain;
+    z-index: 30;
+  }
+  .fe-file-tabs::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+  .fe-file-tabs.is-reordering {
+    overflow-x: hidden;
+    touch-action: none;
+  }
+  .fe-file-tabs-track {
+    display: flex;
+    align-items: stretch;
+    width: max-content;
+    min-width: 100%;
+    height: 36px;
+  }
+  .fe-file-tabs-empty {
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    color: var(--muted-foreground, #9ca3af);
+    font-size: calc(0.78rem * var(--chrome-font-scale));
+  }
+  .fe-file-tab {
+    position: relative;
+    display: grid;
+    grid-template-columns: 18px minmax(46px, 1fr) auto 30px;
+    align-items: stretch;
+    min-width: 108px;
+    max-width: 210px;
+    height: 36px;
+    color: var(--foreground, #e5e7eb);
+    background: var(--explorer-card-bg, #111827);
+    border: 1px solid var(--explorer-card-border, #30363d);
+    border-top: 0;
+    border-radius: 0;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .fe-file-tab + .fe-file-tab { border-left: 0; }
+  .fe-file-tab:hover { background: rgba(255, 255, 255, 0.06); }
+  .fe-file-tab.active {
+    box-shadow: inset 0 -2px 0 var(--explorer-active-file-accent, #60a5fa);
+    background: rgba(59, 130, 246, 0.12);
+  }
+  .fe-file-tab.is-reordering {
+    opacity: 0.78;
+    z-index: 2;
+    cursor: grabbing;
+  }
+  .fe-file-tab--missing {
+    opacity: 0.55;
+    text-decoration: line-through;
+  }
+  .fe-file-tab-icon {
+    align-self: center;
+    justify-self: center;
+    width: 16px;
+    height: 16px;
+    line-height: 16px;
+    overflow: hidden;
+  }
+  .fe-file-tab-icon svg {
+    display: block;
+    width: 16px;
+    height: 16px;
+    fill: currentColor;
+  }
+  .fe-file-tab-label {
+    align-self: center;
+    min-width: 0;
+    overflow: hidden;
+    padding: 0 5px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: calc(0.78rem * var(--chrome-font-scale));
+  }
+  .fe-file-tab-diagnostic {
+    align-self: center;
+    font-size: 0.52rem;
+    line-height: 1;
+    pointer-events: none;
+  }
+  .fe-file-tab-close {
+    align-self: stretch;
+    width: 30px;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    border-left: 1px solid rgba(255,255,255,0.08);
+    border-radius: 0;
+    color: inherit;
+    background: transparent;
+    cursor: pointer;
+  }
+  .fe-file-tab-close:hover { background: rgba(239, 68, 68, 0.22); color: #fecaca; }
+  .fe-file-tab.fe-draft .fe-file-tab-label::before {
+    content: "*";
+    margin-right: 3px;
+    color: #ef4444;
+    font-weight: 700;
+    pointer-events: none;
+  }
+  .fe-file-tab.fe-git-modified { border-left: 3px solid #f97316; background: rgba(155, 90, 22, 0.75); }
+  .fe-file-tab.fe-git-staged,
+  .fe-file-tab.fe-git-added { border-left: 3px solid #34d399; background: rgba(32, 111, 82, 0.7); }
+  .fe-file-tab.fe-git-staged_modified { border-left: 3px solid #22d3ee; background: rgba(249, 115, 22, 0.15); }
+  .fe-file-tab.fe-git-deleted { border-left: 3px solid #f87171; }
+  .fe-file-tab.fe-git-renamed { border-left: 3px solid #facc15; }
+  .fe-file-tab.fe-git-untracked { border-left: 3px solid #00aaff; background: rgb(19, 61, 128); }
+  .fe-file-tab.fe-git-ignored { border-left: 3px solid #6b7280; }
+  .fe-file-tab.fe-git-conflict { border-left: 3px solid #ef4444; }
   .fe-modal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.5); z-index: 1000; }
   .fe-modal.show { display: flex; }
   .fe-modal-card { width: min(800px, 92vw); max-height: 80vh; background: var(--card, #0b0f1a); color: var(--foreground, #e5e7eb); border: 1px solid var(--border, #333); border-radius: 10px; display: flex; flex-direction: column; overflow: hidden; }
@@ -564,7 +721,12 @@
   .declarative-field-row { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
   .declarative-field-label { font-size: 0.88rem; font-weight: 600; }
   .declarative-field-description { font-size: 12px; opacity: 0.65; line-height: 1.35; }
+  .declarative-checkbox { align-self: flex-start; margin: 2px 0 0; }
   .declarative-input { width: 100%; max-width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border, #333); background: rgba(0, 0, 0, 0.25); color: var(--foreground, #e5e7eb); font-size: 0.82rem; }
+  .declarative-labeled-port-list, .declarative-labeled-port-rows { display: flex; flex-direction: column; gap: 7px; }
+  .declarative-labeled-port-row { display: grid; grid-template-columns: minmax(86px, 0.35fr) minmax(130px, 1fr) auto; gap: 7px; align-items: stretch; }
+  .declarative-labeled-port-add { align-self: flex-start; }
+  .declarative-labeled-port-remove { min-width: 72px; }
   .declarative-select { width: 100%; }
   .declarative-select-button { display: flex; align-items: center; justify-content: space-between; min-height: 30px; text-align: left; cursor: pointer; }
   .declarative-select-button::after { content: ""; width: 0; height: 0; margin-left: 10px; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid var(--muted, #8b949e); }
@@ -591,6 +753,8 @@
   .run-profiles-json { width: 100%; min-height: 180px; font-family: "SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace; font-size: 12px; }
   .run-profiles-actions { display: flex; gap: 8px; flex-wrap: wrap; }
   @media (max-width: 720px) {
+    .declarative-labeled-port-row { grid-template-columns: minmax(74px, 0.42fr) minmax(0, 1fr); }
+    .declarative-labeled-port-remove { grid-column: 1 / -1; justify-self: end; }
     .run-profiles-layout { grid-template-columns: 1fr; }
   }
   .settings-console-worker-id {
@@ -655,7 +819,16 @@
   }
 
 .fe-drawer-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--border #333); background: var(--card, #0b0f1a); box-shadow: none; }
-  #fe-project-label { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+  #fe-branch-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-weight: 700;
+    color: #67d8ef;
+    letter-spacing: 0.01em;
+  }
 
   /* CM6-specific styles - eliminate all gaps around iframe */
   .fe-root, .fe-grid, .fe-editor-row, .fe-editor-container {
@@ -880,6 +1053,7 @@
   /* Drawer tab bar (Terminal | Console) */
   .drawer-tab-bar {
     display: flex;
+    align-items: stretch;
     gap: 0;
     background: var(--bg, #0b0f1a);
     border-bottom: 1px solid var(--border, #333);
@@ -900,6 +1074,27 @@
   .drawer-tab.active {
     color: var(--fg, #e6edf3);
     border-bottom-color: var(--accent, #58a6ff);
+  }
+  .drawer-tab-actions {
+    display: flex;
+    align-items: center;
+    margin-left: auto;
+    padding: 2px 6px;
+  }
+  .drawer-tab-actions button {
+    width: 28px;
+    min-width: 28px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 2px;
+    background: transparent;
+    color: var(--fg-dim, #6e7681);
+    cursor: pointer;
+  }
+  .drawer-tab-actions button:hover {
+    color: var(--fg, #e6edf3);
+    background: rgba(255, 255, 255, 0.06);
   }
 
   /* Console container */
@@ -1068,7 +1263,8 @@
     outline: 1px solid var(--accent, #58a6ff);
     outline-offset: -1px;
   }
-  .extension-log-header .console-clear-btn {
+  .extension-log-header .console-clear-btn,
+  .code-inspector-header .console-clear-btn {
     background: transparent;
     border: 1px solid var(--border, #333);
     color: var(--fg-dim, #6e7681);
@@ -1076,6 +1272,11 @@
     padding: 2px 8px;
     font-size: 11px;
     cursor: pointer;
+  }
+  .extension-log-header .console-clear-btn:hover,
+  .code-inspector-header .console-clear-btn:hover {
+    color: var(--fg, #e6edf3);
+    border-color: var(--fg-dim, #6e7681);
   }
   .extension-log-header .extension-log-spacer {
     flex: 1;
@@ -1089,6 +1290,149 @@
     color: var(--fg, #e6edf3);
     font-family: var(--font-mono, 'JetBrains Mono Nerd', monospace);
     font-size: 12px;
+  }
+  .code-inspector-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 30px;
+    padding: 4px 8px;
+    background: var(--bg, #0b0f1a);
+    border-bottom: 1px solid var(--border, #333);
+    color: var(--fg, #e6edf3);
+    font-size: 12px;
+  }
+  .code-inspector-target {
+    display: flex;
+    align-items: center;
+    flex: 1 1 auto;
+    min-width: 0;
+    gap: 6px;
+    font-family: var(--font-mono, 'JetBrains Mono Nerd', monospace);
+  }
+  .code-inspector-target-symbol,
+  .code-inspector-target-separator {
+    flex: 0 0 auto;
+  }
+  .code-inspector-target-symbol {
+    max-width: 34%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .code-inspector-target-separator {
+    color: var(--fg-dim, #8b949e);
+  }
+  .code-inspector-direction {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--fg-dim, #8b949e);
+    font: inherit;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .code-inspector-direction[hidden] {
+    display: none;
+  }
+  .code-inspector-direction:hover,
+  .code-inspector-direction:focus-visible {
+    border-color: var(--border, #333);
+    color: var(--fg, #e6edf3);
+    outline: none;
+  }
+  .code-inspector-direction:disabled {
+    cursor: progress;
+    opacity: 0.55;
+  }
+  .code-inspector-path {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    direction: rtl;
+    text-align: left;
+  }
+  .code-inspector-target > .code-inspector-path {
+    flex: 1 1 auto;
+  }
+  .code-inspector-summary {
+    margin-left: auto;
+    color: var(--fg-dim, #8b949e);
+    white-space: nowrap;
+  }
+  #code-inspector-container {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    background:
+      linear-gradient(90deg, color-mix(in srgb, var(--accent, #58a6ff) 5%, transparent), transparent 28%),
+      var(--bg, #0b0f1a);
+    color: var(--fg, #e6edf3);
+    font-family: var(--font-mono, 'JetBrains Mono Nerd', monospace);
+    font-size: 12px;
+  }
+  #code-inspector-tree {
+    padding: 5px 0 12px;
+  }
+  .code-inspector-node {
+    min-width: 0;
+  }
+  .code-inspector-row {
+    display: grid;
+    grid-template-columns: 14px 18px minmax(0, auto) minmax(0, 1fr);
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    min-height: 25px;
+    padding: 2px 10px 2px calc(8px + var(--code-inspector-depth, 0) * 16px);
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .code-inspector-row:hover,
+  .code-inspector-row:focus-visible {
+    background: color-mix(in srgb, var(--accent, #58a6ff) 16%, transparent);
+    outline: none;
+  }
+  .code-inspector-twisty,
+  .code-inspector-icon {
+    color: var(--fg-dim, #8b949e);
+    text-align: center;
+  }
+  .code-inspector-label,
+  .code-inspector-description {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .code-inspector-description {
+    color: var(--fg-dim, #8b949e);
+  }
+  .code-inspector-description.code-inspector-path {
+    width: 100%;
+  }
+  .code-inspector-branch-state,
+  #code-inspector-empty {
+    padding: 10px 14px;
+    color: var(--fg-dim, #8b949e);
+  }
+  .code-inspector-branch-state {
+    padding-left: calc(30px + var(--code-inspector-depth, 0) * 16px);
+  }
+  .code-inspector-branch-state.is-error {
+    color: var(--danger, #f85149);
   }
   #extension-activity-list,
   #extension-log-output {
@@ -1616,11 +1960,7 @@
     height: 1.35rem;
     line-height: 0;
   }
-  .fe-agent-toggle .fe-agent-icon img {
-    width: 2.2rem;
-    height: 2.2rem;
-    display: block;
-  }
+  .fe-agent-toggle .fe-agent-icon img { display: block; }
   .fe-git-actions .fe-btn {
     flex: 0 0 auto;
     font-size: 0.8rem;
@@ -2052,7 +2392,7 @@
   <aside id="fe-drawer" class="fe-drawer">
     <header class="fe-drawer-head">
       <button id="fe-drawer-close" class="fe-btn" title="Close Explorer" aria-label="Close Explorer">✕</button>
-      <span id="fe-project-label"></span>
+      <span id="fe-branch-label"></span>
       <div id="fe-project-menu" class="fe-menu">
 	        <button id="fe-project-menu-btn" class="fe-btn" title="Project actions" aria-haspopup="menu" aria-expanded="false">Project…</button>
 	        <div id="fe-project-menu-dd" class="fe-dropdown" role="menu">
@@ -2079,8 +2419,9 @@
 	            <span>experimental sticky headers</span>
 	          </div>
 	        </div>
-	      </div>
+      </div>
       <button id="fe-search-btn" class="fe-btn" title="Search">🔍</button>
+      <button id="fe-extension-marketplace-btn" class="fe-btn" type="button" title="Extensions" aria-label="Open Extension Marketplace" aria-expanded="false">🧩</button>
     </header>
     <div class="fe-drawer-body">
       <div id="fe-watcher-refresh-bar" style="display:none;padding:4px 8px;text-align:center;background:var(--bg2,#1a1a1a);border-bottom:1px solid var(--border,#333);">
@@ -2089,6 +2430,7 @@
       </div>
       <ul id="fe-file-tree" class="fe-tree" data-project=""></ul>
       <div id="fe-search-overlay" class="fe-search-overlay"></div>
+      <div id="fe-extension-marketplace-overlay" class="fe-marketplace-overlay" aria-hidden="true"></div>
       <footer class="fe-git-footer">
         <div class="fe-git-row fe-git-meta">
           <div id="fe-git-summary" class="fe-git-summary">Git status unavailable.</div>
@@ -2115,33 +2457,31 @@
   <div class="resize-handle resize-handle--explorer" data-panel="explorer"></div>
 
   <div class="fe-toolbar">
-	    <button id="fe-drawer-open" class="fe-btn fe-icon-btn" title="Open Explorer">☰</button>
-	    <div class="fe-title-block">
-	      <div class="fe-file-name">
-          <div id="fe-file-name-scroll" class="fe-file-name-scroll">
-            <span id="fe-file-name" title="Current file">No file</span>
-          </div>
-	        <span class="fe-issues">
-	          <button id="fe-issues-toggle" class="fe-btn fe-icon-btn" title="Next issue (Alt+F8)" aria-label="Next issue" disabled>💡</button>
-	          <span id="fe-issues-badges" class="fe-issues-badge" aria-live="polite"></span>
-	        </span>
-	      </div>
-	    </div>
+	    <button id="fe-drawer-open" class="fe-menu-btn fe-agent-toggle" title="Open Explorer" aria-label="Open Explorer">
+        <span class="fe-agent-icon">
+          <img class="fe-panel-toggle-icon" src="/apps/code_te2/static/icons/show.png" alt="" aria-hidden="true">
+        </span>
+      </button>
+      <span class="fe-issues fe-toolbar-issues">
+        <button id="fe-issues-badges" class="fe-issues-badge" type="button" title="Next issue (Alt+F8)" aria-label="Next issue" aria-live="polite" disabled></button>
+      </span>
 
-    <div class="fe-menu" style="position: relative; margin-left: auto; display: flex; gap: 0.35rem; align-items: center;">
+    <div class="fe-menu fe-toolbar-actions">
       <span id="fe-file-draft-badge" class="fe-file-draft-indicator" style="margin-right: 4px;"></span>
+      <span id="fe-extension-editor-actions" hidden></span>
       <button id="run-active-file-btn" class="fe-btn fe-icon-btn" title="Run active file in terminal" aria-label="Run active file" disabled>▶</button>
+      <button id="stop-run-profiles-btn" class="fe-btn fe-icon-btn" title="Stop running profile" aria-label="Stop running profile" hidden>■</button>
       <span id="fe-lsp-spinner" class="fe-lsp-status--error" title="Adapter not started" aria-label="Adapter status"></span>
       <div id="fe-adapter-dd" class="fe-dropdown" style="right: 0; left: auto;"></div>
       <button class="fe-menu-btn fe-agent-toggle" id="fe-agent-toggle" title="Sidebar drawer">
-        <span class="fe-agent-icon" data-default-icon=""></span>
+        <span class="fe-agent-icon">
+          <img class="fe-panel-toggle-icon fe-panel-toggle-icon--right" src="/apps/code_te2/static/icons/show.png" alt="" aria-hidden="true">
+        </span>
       </button>
       <div id="fe-agent-dd" class="fe-dropdown"></div>
     </div>
     <span id="fe-status" class="fe-status" style="display: none;"></span>
-  </div>
 
-  <div class="fe-menubar">
     <div class="fe-menu" id="menu-file">
       <button class="fe-menu-btn" id="menu-file-btn">File</button>
       <div class="fe-dropdown" id="menu-file-dd">
@@ -2175,6 +2515,7 @@
         <div class="fe-dd-item" id="mi-toggle-syntax" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Syntax Highlighting</span></div>
         <div class="fe-dd-item" id="mi-toggle-closebrackets" data-checkable="true" role="menuitemcheckbox" aria-checked="true" tabindex="0"><span>Auto Close Brackets</span></div>
         <div class="fe-dd-item" id="mi-toggle-autocomplete" data-checkable="true" role="menuitemcheckbox" aria-checked="true" tabindex="0"><span>Autocompletion</span></div>
+        <div class="fe-dd-item" id="mi-toggle-inlay-hints" data-checkable="true" role="menuitemcheckbox" aria-checked="true" tabindex="0"><span>Inlay Hints</span></div>
         <div class="fe-dd-separator"></div>
         <div class="fe-dd-item" id="mi-toggle-autosave" role="menuitem" tabindex="0"><span>Auto Save</span></div>
 
@@ -2216,14 +2557,17 @@
         <div class="fe-dd-item" id="mi-goto"><span>Go To Line…</span><span class="fe-kbd">Ctrl/Cmd+G</span></div>
       </div>
     </div>
-    <div class="fe-menu" id="menu-branch" style="margin-left: auto;">
-      <button class="fe-menu-btn" id="menu-branch-btn">Branch ▾</button>
+    <div class="fe-menu" id="menu-branch">
+      <button class="fe-menu-btn fe-menu-btn--icon" id="menu-branch-btn" aria-label="Git branches" title="Git branches">
+        <span class="codicon codicon-git-branch" aria-hidden="true"></span>
+        <span id="menu-branch-label" class="fe-visually-hidden">Branch</span>
+      </button>
       <div class="fe-dropdown" id="menu-branch-dd"></div>
     </div>
-    <div style="position: relative;">
-      <button id="recent-files-btn" class="fe-menu-btn" style="margin: 0;" disabled>Recents ▾</button>
-      <div id="recent-files-dd" class="fe-dropdown"></div>
-    </div>
+  </div>
+
+  <div id="recent-file-tabs" class="fe-file-tabs" role="tablist" aria-label="Recent files">
+    <div id="recent-file-tabs-track" class="fe-file-tabs-track"></div>
   </div>
 
 	  <div class="fe-editor-container" id="editor-container">
@@ -2240,6 +2584,10 @@
       <button class="drawer-tab" data-tab="console">Console</button>
       <button class="drawer-tab" data-tab="problems">Problems</button>
       <button class="drawer-tab" data-tab="extensions">Extensions</button>
+      <button class="drawer-tab" data-tab="code-inspector">Code Inspector</button>
+      <span class="drawer-tab-actions">
+        <button id="terminal-fullscreen" title="Toggle drawer fullscreen" aria-label="Toggle drawer fullscreen">⛶</button>
+      </span>
     </div>
     <div class="terminal-header" data-drawer-panel="terminal">
       <div class="terminal-shell-dropdown">
@@ -2249,7 +2597,6 @@
       <button id="terminal-zoom-out" title="Zoom out" aria-label="Zoom out">A−</button>
       <button id="terminal-zoom-in" title="Zoom in" aria-label="Zoom in">A+</button>
       <button id="terminal-copy" title="Copy selection" aria-label="Copy selection" disabled>📋</button>
-      <button id="terminal-fullscreen" title="Toggle fullscreen" aria-label="Fullscreen">⛶</button>
       <button id="terminal-collapse" title="Collapse terminal" aria-label="Collapse">▼</button>
       <button id="terminal-new" title="New terminal" aria-label="New terminal">＋</button>
     </div>
@@ -2291,6 +2638,20 @@
       <div id="extension-activity-list"></div>
       <pre id="extension-log-output" hidden></pre>
       <div id="extension-log-empty">No extension activity yet.</div>
+    </div>
+    <div id="code-inspector-header" class="code-inspector-header" data-drawer-panel="code-inspector" style="display:none;">
+      <span id="code-inspector-target" class="code-inspector-target">
+        <span id="code-inspector-target-symbol" class="code-inspector-target-symbol">No active inspection</span>
+        <button id="code-inspector-direction" class="code-inspector-direction" type="button" aria-label="Switch call hierarchy direction" hidden>☎</button>
+        <span id="code-inspector-target-separator" class="code-inspector-target-separator" hidden>·</span>
+        <span id="code-inspector-target-path" class="code-inspector-path"></span>
+      </span>
+      <span id="code-inspector-summary" class="code-inspector-summary"></span>
+      <button class="console-clear-btn" id="code-inspector-collapse" type="button" title="Collapse Code Inspector" aria-label="Collapse Code Inspector">▼</button>
+    </div>
+    <div id="code-inspector-container" data-drawer-panel="code-inspector" style="display:none;">
+      <div id="code-inspector-tree" role="tree" aria-label="Code navigation results"></div>
+      <div id="code-inspector-empty" role="status" aria-live="polite">Choose a code navigation action from the editor context menu.</div>
     </div>
   </div>
 
@@ -2362,6 +2723,17 @@
       <button class="fe-btn" id="editor-settings-close" aria-label="Close">✕</button>
     </div>
     <div class="fe-modal-body">
+      <div style="display:flex; align-items:center; gap:10px; padding:10px 12px; border:1px solid var(--border, #333); border-radius:4px;">
+        <div style="flex:1; min-width:0;">
+          <div style="font-weight:600;">Client identity</div>
+          <div id="editor-settings-client-identity" style="font-size:12px; opacity:0.72; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Loading…</div>
+        </div>
+        <button class="fe-btn" id="editor-settings-client-copy" type="button">Copy</button>
+        <button class="fe-btn" id="editor-settings-client-reset" type="button">Reset</button>
+      </div>
+
+      <div class="fe-dd-separator" style="margin: 12px 0;"></div>
+
       <div id="editor-settings-theme-strip" style="display:flex; align-items:center; gap:10px; padding:10px 12px; border:1px solid var(--border, #333); border-radius:10px; cursor:pointer;">
         <div style="flex:1;">
           <div style="font-weight:600;">Color Themes</div>
@@ -2474,14 +2846,12 @@
 
       <hr style="border:0; border-top:1px solid var(--fe-border, #333); margin:14px 0 10px;" />
 
-      <div style="font-weight: 600; margin-bottom: 6px;">Monaco Web Workers</div>
-      <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.88rem;">
-        <input type="checkbox" id="editor-settings-webworkers" />
-        <span>Enable language web workers <span style="opacity:0.55; font-size:0.82rem;">(requires reload)</span></span>
-      </label>
-      <div style="font-size:0.78rem; opacity:0.5; margin-top:4px; line-height:1.4;">
-        JSON, CSS, HTML &amp; TypeScript built-in language services.<br/>
-        Usually redundant — the extension host provides the same features.
+      <div style="font-weight: 600; margin-bottom: 6px;">Language Intelligence Backend</div>
+      <div id="editor-settings-language-backend-summary" style="font-size:0.82rem; opacity:0.72; margin-bottom:8px; line-height:1.4;"></div>
+      <button class="fe-btn" id="editor-settings-language-backend-action" type="button"></button>
+      <div style="font-size:0.78rem; opacity:0.5; margin-top:6px; line-height:1.4;">
+        Code Server uses TE2's pinned private runtime and enables VS Code extensions.
+        Monaco workers provide the built-in JSON, CSS, HTML &amp; TypeScript language services without Code Server.
       </div>
     </div>
   </div>
@@ -2553,7 +2923,7 @@
       <div id="editor-ext-manager-list"></div>
       <hr style="border-color: var(--fe-border); margin: 16px 0 12px;">
       <details id="editor-ext-custom-settings-section" open>
-        <summary style="cursor:pointer; font-weight:600; font-size:0.9rem;">⚙ Custom Settings (JSON)</summary>
+        <summary style="cursor:pointer; font-weight:600; font-size:0.9rem;">⚙ User Settings (JSON)</summary>
         <div id="settings-scope-user">
           <p style="font-size:12px; opacity:0.6; margin:6px 0 8px;">
             Global user settings merged into code-server User/settings.json.

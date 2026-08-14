@@ -236,7 +236,7 @@ const INLINE_STYLE = `
 .te-dialog-field{min-width:0;display:flex;flex-direction:column;gap:6px}.te-dialog-field-label{font-weight:600}.te-dialog-field-description{opacity:.74;font-size:.88em;line-height:1.4}
 .te-dialog-input,.te-dialog-textarea,.te-dialog-select-button{box-sizing:border-box;width:100%;min-width:0;max-width:100%;min-height:38px;padding:8px 10px;border:1px solid var(--border,#3b4652);border-radius:2px;background:var(--input,var(--secondary,#0e141b));color:inherit;font:inherit;line-height:1.35}.te-dialog-textarea{resize:vertical;overflow:auto}.te-dialog-input:focus,.te-dialog-textarea:focus,.te-dialog-select-button:focus{outline:2px solid var(--primary,#5b8dff);outline-offset:1px}
 .te-dialog-checkbox-row{display:flex;align-items:center;gap:9px;min-height:38px}.te-dialog-checkbox-row input{width:18px;height:18px;accent-color:var(--primary,#5b8dff)}
-.te-dialog-select{position:relative;min-width:0}.te-dialog-select-button{text-align:left;cursor:pointer}.te-dialog-select-menu{position:absolute;z-index:2;left:0;right:0;top:calc(100% + 4px);max-height:220px;overflow:auto;padding:5px;border:1px solid var(--border,#3b4652);border-radius:2px;background:var(--card,#111820);box-shadow:0 14px 30px rgba(0,0,0,.45)}.te-dialog-select-menu[hidden]{display:none}.te-dialog-select-option{display:block;width:100%;padding:8px 10px;border:0;border-radius:2px;background:transparent;color:inherit;text-align:left;cursor:pointer}.te-dialog-select-option:hover,.te-dialog-select-option[aria-selected="true"]{background:rgba(91,141,255,.18)}
+.te-dialog-select{position:relative;min-width:0}.te-dialog-select-button{text-align:left;cursor:pointer}.te-dialog-select-menu{position:fixed;z-index:10001;max-height:220px;overflow:auto;padding:5px;border:1px solid var(--border,#3b4652);border-radius:2px;background:var(--card,#111820);color:var(--card-foreground,var(--foreground,#edf2f7));box-shadow:0 14px 30px rgba(0,0,0,.45);font:13px system-ui,sans-serif}.te-dialog-select-menu[hidden]{display:none}.te-dialog-select-option{display:block;width:100%;padding:8px 10px;border:0;border-radius:2px;background:transparent;color:inherit;text-align:left;cursor:pointer}.te-dialog-select-option:hover,.te-dialog-select-option[aria-selected="true"]{background:rgba(91,141,255,.18)}
 .te-dialog-error{min-height:1.2em;color:var(--destructive,#ef4444);font-size:.88em}.te-dialog-actions{display:flex;justify-content:flex-end;gap:8px;padding:11px 14px;border-top:1px solid var(--border,#343b44)}.te-dialog-action{min-height:36px;padding:7px 14px;border:1px solid var(--border,#3b4652);border-radius:2px;background:var(--secondary,#1b2530);color:inherit;font:inherit;cursor:pointer}.te-dialog-action:hover{filter:brightness(1.12)}.te-dialog-action[data-primary="true"]{border-color:var(--primary,#5b8dff);background:var(--primary,#5b8dff);color:var(--primary-foreground,#fff)}.te-dialog-action[data-role="destructive"]{border-color:var(--destructive,#b91c1c);background:var(--destructive,#b91c1c);color:#fff}
 @media(max-width:560px){.te-dialog-layer{align-items:flex-end;padding:10px}.te-dialog-card,.te-dialog-card[data-width]{width:100%;max-height:88vh}.te-dialog-action{min-height:44px}.te-dialog-input,.te-dialog-textarea,.te-dialog-select-button{min-height:44px}}
 `;
@@ -507,7 +507,50 @@ export function createSurfaceRegistry(targetWindow, options = {}) {
   };
 }
 
-function createFieldControl(document, field) {
+function positionSelectPopup(button, menu) {
+  const targetWindow = button.ownerDocument.defaultView || globalThis;
+  const viewport = targetWindow.visualViewport;
+  const viewportLeft = viewport?.offsetLeft || 0;
+  const viewportTop = viewport?.offsetTop || 0;
+  const viewportWidth = viewport?.width || targetWindow.innerWidth || 0;
+  const viewportHeight = viewport?.height || targetWindow.innerHeight || 0;
+  const edge = 8;
+  const gap = 4;
+  const maxPopupHeight = 220;
+  const rect = button.getBoundingClientRect();
+  const leftEdge = viewportLeft + edge;
+  const rightEdge = viewportLeft + viewportWidth - edge;
+  const topEdge = viewportTop + edge;
+  const bottomEdge = viewportTop + viewportHeight - edge;
+  const width = Math.max(0, Math.min(rect.width, rightEdge - leftEdge));
+  const left = Math.max(leftEdge, Math.min(rect.left, rightEdge - width));
+
+  menu.style.width = `${width}px`;
+  menu.style.left = `${left}px`;
+  menu.style.maxHeight = `${maxPopupHeight}px`;
+
+  const naturalHeight = Math.min(
+    maxPopupHeight,
+    Math.max(menu.scrollHeight, menu.getBoundingClientRect().height),
+  );
+  const roomBelow = Math.max(0, bottomEdge - rect.bottom - gap);
+  const roomAbove = Math.max(0, rect.top - topEdge - gap);
+  const opensAbove = naturalHeight > roomBelow && roomAbove > roomBelow;
+  const availableHeight = opensAbove ? roomAbove : roomBelow;
+  const popupHeight = Math.max(48, Math.min(maxPopupHeight, availableHeight));
+  menu.style.maxHeight = `${popupHeight}px`;
+
+  const renderedHeight = Math.min(
+    popupHeight,
+    Math.max(menu.scrollHeight, menu.getBoundingClientRect().height),
+  );
+  const top = opensAbove
+    ? Math.max(topEdge, rect.top - gap - renderedHeight)
+    : Math.min(rect.bottom + gap, bottomEdge - renderedHeight);
+  menu.style.top = `${Math.max(topEdge, top)}px`;
+}
+
+function createFieldControl(document, field, popupHost) {
   const wrapper = document.createElement("div");
   wrapper.className = "te-dialog-field";
   let focusElement = null;
@@ -563,6 +606,7 @@ function createFieldControl(document, field) {
         return textarea.value;
       };
     } else if (field.kind === "select") {
+      const targetWindow = document.defaultView || globalThis;
       const root = document.createElement("div");
       root.className = "te-dialog-select";
       const button = document.createElement("button");
@@ -575,14 +619,60 @@ function createFieldControl(document, field) {
       menu.className = "te-dialog-select-menu";
       menu.setAttribute("role", "listbox");
       menu.hidden = true;
+      let popupOpen = false;
       let selected = field.value ?? field.options[0]?.value;
       const update = () => {
         const option = field.options.find((item) => sameValue(item.value, selected));
         button.textContent = option?.label || "";
       };
       const close = () => {
+        if (!popupOpen) return;
+        popupOpen = false;
         menu.hidden = true;
+        menu.remove();
         button.setAttribute("aria-expanded", "false");
+        document.removeEventListener("pointerdown", closeOnPointerDown, true);
+        document.removeEventListener("keydown", closeOnKeyDown, true);
+        targetWindow.removeEventListener?.("resize", closeOnViewportChange, true);
+        targetWindow.removeEventListener?.("scroll", closeOnScroll, true);
+        targetWindow.visualViewport?.removeEventListener?.("resize", closeOnViewportChange);
+        targetWindow.visualViewport?.removeEventListener?.("scroll", closeOnViewportChange);
+      };
+      const closeOnPointerDown = (event) => {
+        const target = event.target;
+        if (
+          target instanceof targetWindow.Node
+          && (root.contains(target) || menu.contains(target))
+        ) return;
+        close();
+      };
+      const closeOnKeyDown = (event) => {
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        event.stopPropagation();
+        close();
+        button.focus();
+      };
+      const closeOnViewportChange = () => close();
+      const closeOnScroll = (event) => {
+        if (event.target === menu || menu.contains(event.target)) return;
+        close();
+      };
+      const open = () => {
+        if (popupOpen || !field.options.length) return;
+        popupOpen = true;
+        menu.hidden = false;
+        menu.style.visibility = "hidden";
+        popupHost.appendChild(menu);
+        positionSelectPopup(button, menu);
+        menu.style.visibility = "";
+        button.setAttribute("aria-expanded", "true");
+        document.addEventListener("pointerdown", closeOnPointerDown, true);
+        document.addEventListener("keydown", closeOnKeyDown, true);
+        targetWindow.addEventListener?.("resize", closeOnViewportChange, true);
+        targetWindow.addEventListener?.("scroll", closeOnScroll, true);
+        targetWindow.visualViewport?.addEventListener?.("resize", closeOnViewportChange);
+        targetWindow.visualViewport?.addEventListener?.("scroll", closeOnViewportChange);
       };
       for (const item of field.options) {
         const option = document.createElement("button");
@@ -602,10 +692,10 @@ function createFieldControl(document, field) {
         menu.appendChild(option);
       }
       button.addEventListener("click", () => {
-        menu.hidden = !menu.hidden;
-        button.setAttribute("aria-expanded", menu.hidden ? "false" : "true");
+        if (popupOpen) close();
+        else open();
       });
-      root.append(button, menu);
+      root.appendChild(button);
       wrapper.appendChild(root);
       focusElement = button;
       getValue = () => clonePortable(selected, `Dialog field ${field.key}`);
@@ -708,7 +798,7 @@ export function createInlineDialogPresenter(targetWindow) {
 
       const controls = new Map();
       for (const field of request.fields) {
-        const control = createFieldControl(document, field);
+        const control = createFieldControl(document, field, layer);
         controls.set(field.key, { field, ...control });
         body.appendChild(control.wrapper);
       }

@@ -15,8 +15,10 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.net.URI
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -179,6 +181,7 @@ internal class RunTargetRelayManager(
         val sockets: MutableSet<Socket> = ConcurrentHashMap.newKeySet(),
         val websockets: MutableSet<WebSocket> = ConcurrentHashMap.newKeySet(),
         val running: AtomicBoolean = AtomicBoolean(true),
+        val acceptStopped: CountDownLatch = CountDownLatch(1),
     )
 
     private val lock = Any()
@@ -336,18 +339,22 @@ internal class RunTargetRelayManager(
     }
 
     private fun acceptLoop(entry: Entry) {
-        while (entry.running.get()) {
-            val socket = try {
-                entry.server.accept()
-            } catch (_: Exception) {
-                break
+        try {
+            while (entry.running.get()) {
+                val socket = try {
+                    entry.server.accept()
+                } catch (_: Exception) {
+                    break
+                }
+                if (!entry.running.get()) {
+                    socket.close()
+                    break
+                }
+                entry.sockets.add(socket)
+                executor.execute { bridge(entry, socket) }
             }
-            if (!entry.running.get()) {
-                socket.close()
-                break
-            }
-            entry.sockets.add(socket)
-            executor.execute { bridge(entry, socket) }
+        } finally {
+            entry.acceptStopped.countDown()
         }
     }
 
@@ -469,6 +476,7 @@ internal class RunTargetRelayManager(
         }
         entry.running.set(false)
         runCatching { entry.server.close() }
+        runCatching { entry.acceptStopped.await(1, TimeUnit.SECONDS) }
         entry.sockets.toList().forEach { runCatching { it.close() } }
         entry.sockets.clear()
         entry.websockets.toList().forEach { it.cancel() }

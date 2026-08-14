@@ -22,11 +22,15 @@
       </header>
       <label class="toggle-row" for="persistent-network-notification">
         <span>
-          <strong>Persistent network notification</strong>
-          <small>Keep the Android transport process in the foreground while an app is open.</small>
+          <strong>Persistent remote runtime</strong>
+          <small>Keep remote framework, extension, and Run Target connections active while an app is backgrounded.</small>
         </span>
         <input id="persistent-network-notification" type="checkbox">
       </label>
+      <div class="section-actions">
+        <span id="power-policy-status" class="status-line" data-state="loading">Checking power policy</span>
+        <button id="open-power-settings" class="secondary-button" type="button">Battery settings</button>
+      </div>
     </section>
 
     <section class="settings-section">

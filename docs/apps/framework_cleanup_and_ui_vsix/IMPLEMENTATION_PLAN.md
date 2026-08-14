@@ -1324,14 +1324,14 @@ lane.
 #### 5.9 Android persistent client-runtime ownership
 
 The second robustness slice addresses Android process ownership after the WBA
-resume boundary is working. The current `PersistentNetworkService` is a
-notification-only `START_STICKY` foreground service. The Activity still owns
-the framework relay, Run Target projection stream and listener manager, UI IPC,
-native console connection, and Gecko session; `onPause()` explicitly marks the
-Gecko session inactive. Live device inspection confirmed that the foreground
-service was running while the process held no wake lock and was not exempt from
-device-idle restrictions. This is an ownership problem, not primarily a
-Kotlin-versus-NDK problem.
+resume boundary is working. Before implementation, `PersistentNetworkService`
+was a notification-only `START_STICKY` foreground service. The Activity still
+owned the framework relay, Run Target projection stream and listener manager,
+UI IPC, native console connection, and Gecko session; `onPause()` explicitly
+marked the Gecko session inactive. Live device inspection confirmed that the
+foreground service was running while the process held no wake lock and was not
+exempt from device-idle restrictions. This was an ownership problem, not
+primarily a Kotlin-versus-NDK problem.
 
 The replacement is one started-and-bound Android client-runtime service shared
 by the Gecko and Cefrium applications. It owns the native control plane:
@@ -1370,14 +1370,17 @@ silently grant itself an exemption. Locks release on explicit persistent-mode
 disable, app-shell exit, framework retarget where no remote app remains, or
 service shutdown.
 
-The present `dataSync` foreground-service classification is not accepted as a
-permanent solution: Android applies a six-hour-in-24-hours background limit to
-that type for apps targeting Android 15 or newer. Before this slice raises the
-target SDK, the implementation must select and document the applicable
-long-lived type (`connectedDevice` when the remote-host relationship satisfies
-that contract, otherwise a reviewed `specialUse` declaration) and add its exact
-permissions/Play disclosure. The service must implement appropriate timeout and
-shutdown handling even while the project still targets API 34.
+The former `dataSync` classification is replaced with `connectedDevice`. The
+service continuously exchanges data with the user-configured remote framework
+device and declares `FOREGROUND_SERVICE_CONNECTED_DEVICE`; the existing
+network-control responsibility is made explicit with `CHANGE_NETWORK_STATE`,
+which satisfies that service type's runtime prerequisite. A future Play release
+must describe that remote-device connection in its foreground-service
+declaration. The service handles system timeout, task removal, and shutdown by
+clearing persistent-session ownership and releasing its notification, CPU lock,
+Wi-Fi lock, sockets, and listeners. `POST_NOTIFICATIONS` denial does not disable
+the service or persistent mode; it only changes notification visibility under
+Android's notification-permission policy.
 
 Android acceptance requires focused service/controller tests plus real-device
 validation for background/foreground, screen-off, forced Doze and recovery,

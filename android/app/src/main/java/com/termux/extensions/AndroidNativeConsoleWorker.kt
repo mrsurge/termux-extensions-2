@@ -87,6 +87,7 @@ internal fun androidNativeConsoleWorkerId(context: Context, renderer: String): S
 internal class AndroidNativeConsoleWorker(
     private val workerId: String,
     private val workerLabel: String,
+    private val onConnectionStateChanged: ((Boolean) -> Unit)? = null,
     private val commandHandler: (
         AndroidNativeConsoleCommand,
         (Result<JSONObject>) -> Unit,
@@ -123,6 +124,7 @@ internal class AndroidNativeConsoleWorker(
             )
             socket = nativeSocket
             nativeSocket.on(Socket.EVENT_CONNECT) {
+                onConnectionStateChanged?.invoke(true)
                 nativeSocket.emit(
                     "console:register",
                     JSONObject().apply {
@@ -134,9 +136,11 @@ internal class AndroidNativeConsoleWorker(
                 Log.i(TAG, "Registered native console worker $workerId")
             }
             nativeSocket.on(Socket.EVENT_DISCONNECT) {
+                onConnectionStateChanged?.invoke(false)
                 Log.i(TAG, "Native console worker disconnected")
             }
             nativeSocket.on(Socket.EVENT_CONNECT_ERROR) { args ->
+                onConnectionStateChanged?.invoke(false)
                 Log.w(TAG, "Native console worker connect error: ${args.firstOrNull()}")
             }
             nativeSocket.on("console:eval") { args ->
@@ -224,6 +228,7 @@ internal class AndroidNativeConsoleWorker(
         } finally {
             socket = null
             serverBaseUrl = null
+            onConnectionStateChanged?.invoke(false)
         }
     }
 

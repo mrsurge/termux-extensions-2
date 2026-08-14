@@ -83,7 +83,11 @@ class RunTargetRelayTest {
 
     private fun assertPortFree(port: Int) {
         ServerSocket().use { free ->
-            free.reuseAddress = false
+            // Production listeners deliberately use SO_REUSEADDR so an exact
+            // shell replacement can reclaim its loopback port immediately.
+            // Exercise that same contract instead of depending on kernel
+            // timing after the just-closed test listener.
+            free.reuseAddress = true
             free.bind(InetSocketAddress(InetAddress.getByName("127.0.0.1"), port))
         }
     }
@@ -174,10 +178,11 @@ class RunTargetRelayTest {
 
     @Test
     fun occupiedAuxiliaryPortFailsProjectionAndRollsBackPrimaryListener() {
-        val primaryPort = availablePorts(1).single()
+        val ports = availablePorts(2)
+        val primaryPort = ports[0]
         val occupied = ServerSocket().apply {
             reuseAddress = false
-            bind(InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0))
+            bind(InetSocketAddress(InetAddress.getByName("127.0.0.1"), ports[1]))
         }
         val manager = RunTargetRelayManager(OkHttpClient())
         try {
