@@ -1174,7 +1174,7 @@ opaque document's Web Storage adapters, scroll/selection state, and detached
 window placement are client presentation state used to reconstruct a destroyed
 document.
 
-The current runtime has two concrete continuity defects:
+The original runtime had two concrete continuity defects:
 
 - the host `clientId` is regenerated on every main-page boot, while the console
   bridge's per-window worker id lives only in `sessionStorage`; and
@@ -1189,7 +1189,7 @@ The next implementation uses four separate identities:
 | `surfaceId` | Stable logical `(workspace, extension, view/panel)` identity owned by WBA |
 | `clientInstanceId` | Stable browser profile or native application-installation identity |
 | `windowId` | Per-window/tab identity retained across reload through `sessionStorage` |
-| `presentationId` | Transient embedded/detached renderer incarnation correlated with a WBA-issued writer lease |
+| `presentationId` | Renderer incarnation correlated with a WBA-issued writer lease; transient when Browser/Gecko reconstruct, deterministic across Electron native reparenting |
 
 Persisted reconstruction state is keyed by `(clientInstanceId, surfaceId)`,
 never by `windowId` or `presentationId`. The main-page console worker consumes
@@ -1241,8 +1241,10 @@ Restore ordering is strict and event-driven:
    the first extension-authored script executes.
 4. Accept later `setState()`/storage writes only from the current writer lease
    with a monotonically newer revision.
-5. On detach/reattach, mint a new presentation/lease and reject late writes
-   from the destroyed iframe.
+5. When Browser or Gecko destroys a presentation, mint a new presentation and
+   lease and reject late writes from the old iframe. Electron instead keeps the
+   same deterministic presentation, wrapper, lease, and renderer while moving
+   its `WebContentsView` between embedded and detached parents.
 
 The opaque sandbox remains intact; `allow-same-origin`, polling, a second
 provider registration, and direct extension-to-native messaging are not part
@@ -1255,7 +1257,11 @@ Acceptance requires refresh, detach, detached refresh, reattach, native-client
 cold restart, two simultaneous windows, two independent remote clients, reset,
 late-writer rejection, and WBA/provider teardown tests. An extension that never
 calls `setState()` or uses a durable extension store is not promised arbitrary
-JavaScript-heap restoration.
+JavaScript-heap restoration after a real renderer destruction. Electron detach
+is stronger: extension surfaces use a dedicated `WebContentsView` from their
+first presentation and reparent that exact renderer, preserving one-time route
+messages and live heap state such as a Codex auxiliary diff view. Ordinary URL
+and Run Profile surfaces retain reconstruction semantics.
 
 #### 5.6K Electron readiness ordering
 
@@ -1353,7 +1359,11 @@ implement that resynchronization boundary.
 Transport lifetime and document lifetime must become separate state machines:
 
 - the first successful attach loads the opaque iframe through the existing
-  one-time bootstrap token and reconstruction record;
+  one-time bootstrap token and reconstruction record, then applies the bounded
+  current-revision message suffix retained after the last authoritative reload
+  boundary. The wrapper queues that suffix until the inner document is ready;
+  a missing boundary is an incomplete bootstrap, never an arbitrary partial
+  replay;
 - a reconnect to the same WBA epoch, surface generation, and `htmlRevision`
   preserves the existing iframe, DOM, JavaScript heap, and scroll/selection
   state;
@@ -1411,6 +1421,19 @@ Validation must include:
 6. stale presentations remain unable to write after detach/reattach; and
 7. Browser, Electron inline/detached, and GeckoView pass live high-latency,
    brief-outage, and frontend-blocking acceptance.
+
+Electron extension detach validation additionally proves that the native
+registry creates its `WebContentsView` during the first embedded presentation
+and only reparents that exact view on detach/attach: there is no second
+`loadURL`, wrapper attach, document bootstrap, or JavaScript heap. Generic URL
+and Run Profile detach validation continues to exercise the reconstruction
+path.
+
+Because a sibling native view always composites above the host page's DOM,
+Electron intercepts only the Sidebar dock's icon/action, refresh, and app-drawer
+menus. The exact-view preload sends a bounded declarative menu model to Electron
+main, which presents an OS-native menu and returns the selected action id. Code
+TE2 remains action authority. Browser/Gecko and non-Sidebar menus are unchanged.
 
 Only if the proven resume protocol still cannot obtain deterministic heartbeat,
 buffering, and replay behavior from Socket.IO should the extension-webview

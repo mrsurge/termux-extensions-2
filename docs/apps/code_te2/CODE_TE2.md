@@ -3650,10 +3650,13 @@ Allowed app-view commands are:
 | `force_asset_update` | Run the desktop asset updater. |
 | `register_run_target_surface` | Register exact-frame `devRuntime` instrumentation metadata; it does not create a proxy. |
 | `release_run_target_surface` | Release exact-frame instrumentation metadata; it does not tear down a running shell's proxy. |
-| `detach_sidebar_surface` | Reconstruct one validated Sidebar surface in an Electron-main-owned floating window and wait for it to become ready. |
+| `open_sidebar_menu` | Present one bounded OS-native Sidebar dock menu and return only the selected action id. |
+| `place_sidebar_surface` | Create or reposition one persistent extension renderer over its DOM-owned embedded placeholder. |
+| `detach_sidebar_surface` | Move a persistent extension renderer into an Electron-main-owned floating window, or reconstruct an ordinary URL surface there. |
 | `focus_sidebar_surface` | Focus the exact detached surface presentation. |
 | `close_sidebar_surface` | Close the exact detached presentation and request inline reattachment. |
 | `reconcile_sidebar_surfaces` | Close native presentations absent from the current authoritative Sidebar ledger. |
+| `refresh_sidebar_surface` | Explicitly reload the exact native Sidebar renderer. |
 
 The command allowlist is exact-view and origin validated in Electron main. The
 preload also delivers bounded detached-surface events only to that exact app
@@ -3665,20 +3668,37 @@ shape with their own stable client identity providers.
 ### Detached Sidebar presentations
 
 Detachment changes only the requesting Electron client's presentation. The
-backend ledger and stable `surfaceId` remain lifecycle authority, while Electron
-main maps that identity to one normal floating `BrowserWindow`, its trusted
-local header renderer, and a framework-partition `WebContentsView`. The target
-frame starts at `about:blank`, receives the complete namespaced `window.name`
-marker, then navigates to the final URL. Code TE2 removes the inline iframe only
-after Electron reports the detached page ready.
+backend ledger and stable `surfaceId` remain lifecycle authority. For an
+extension surface, Electron main creates one framework-partition
+`WebContentsView` at the first embedded presentation, while Code TE2 owns a DOM
+placeholder that reports its bounds and visibility. Hidden presentation makes
+that view invisible without destroying it. Detach moves the exact same view
+from the main window into a normal floating `BrowserWindow` with trusted local
+header chrome; Attach moves it back over the placeholder. Neither transition
+navigates the view, reconnects the trusted wrapper, or replaces the extension
+document's JavaScript heap. A main-page reload temporarily hides the retained
+view until the reconstructed host reports its current placement.
+
+Ordinary user URL and Run Profile surfaces keep the prior reconstruction path:
+their detached frame starts at `about:blank`, receives the complete namespaced
+`window.name` marker, and then navigates to the final URL.
+
+The Electron Sidebar dock's icon/action, refresh, and app-drawer menus use the
+exact-view native bridge instead of DOM dropdowns that cannot composite above a
+sibling `WebContentsView`. The request is declarative and bounded to labels,
+separators, enabled action ids, and coordinates. Electron returns only the
+selected id; Code TE2 executes the existing action, so Electron never becomes
+Sidebar lifecycle authority. Browser and Gecko retain the DOM menus.
 
 The trusted header exposes Attach, Refresh, Console, DevTools, exact Stop, and
-Close. Attach or user Close publishes an exact reattach event so Code TE2
-recreates the inline iframe with a new transient presentation id. Stop travels
-back through the existing project/profile/shell backend action and never kills
-Framework-Shells directly from Electron. Backend ledger removal, app-view loss,
-main navigation, renderer loss, framework retarget, and process exit close the
-native presentation without recreating stale inline state.
+Close. Attach or user Close publishes an exact reattach event. Extension
+surfaces retain their deterministic client/surface presentation identity and
+live renderer; ordinary URL surfaces recreate an inline iframe with a new
+transient presentation id. Stop travels back through the existing
+project/profile/shell backend action and never kills Framework-Shells directly
+from Electron. Backend ledger removal, app-view loss, renderer loss, framework
+retarget, and process exit close the native presentation without recreating
+stale inline state.
 
 Detached window lifetime remains independent from Run Target listener lifetime.
 The exact `ownerId + shellId` framework projection owns primary and auxiliary
@@ -4024,7 +4044,7 @@ extension host
 
 The outer wrapper supplies one-shot `acquireVsCodeApi()` with `postMessage`, `setState`, and `getState`. Extension HTML retains its own CSP inside the iframe. WBA rewrites `vscode-resource.vscode-cdn.net` URLs to an unguessable WBA-epoch resource scope keyed by extension identity, workspace, extension location, and normalized `localResourceRoots`. Identical activity-view and panel roots reuse that URL and browser cache, but their document, message, state, visibility, and disposal lifecycles remain separate. The scope is reference-counted by live runtimes and serves a file only while realpath containment succeeds beneath its exact roots; extension location and workspace are the normal defaults. Extension-install resources use private immutable caching bounded by the epoch token, while mutable admitted roots retain weak ETag/Last-Modified revalidation. Text, JavaScript, JSON, and SVG resources use asynchronous Brotli/gzip negotiation so large remote extension bundles do not repeatedly traverse the network uncompressed. The Rust app proxy retains `Content-Encoding` with those unchanged encoded bytes; its reqwest transport does not decode them. Script and form capabilities follow the webview content options.
 
-WBA publishes complete workspace-scoped `ExtensionWebviewSurface` snapshots over its existing Framework-Shell event pipe. Python validates them and projects membership into the Sidebar ledger. Browser and GeckoView use the existing inline URL presentation; Electron uses the existing detachable stable-surface window machinery. Activity-view Close changes only that client's presentation to `hidden`; WBA membership survives, and the contributed extension icon remains in the Extension Views app-drawer section for reopening. Provider/workspace/WBA lifecycle removal remains authoritative. Ordinary user URL slots retain destructive close behavior.
+WBA publishes complete workspace-scoped `ExtensionWebviewSurface` snapshots over its existing Framework-Shell event pipe. Python validates them and projects membership into the Sidebar ledger. Browser and GeckoView use the existing inline URL presentation. Electron creates one framework-partition `WebContentsView` from the extension surface's first embedded presentation, positions it over a DOM-owned Sidebar placeholder, and retains that renderer while the surface is embedded, hidden, or detached. Activity-view Close changes only that client's presentation to `hidden`; WBA membership survives, and the contributed extension icon remains in the Extension Views app-drawer section for reopening. Provider/workspace/WBA lifecycle removal remains authoritative. Ordinary user URL slots retain destructive close behavior and the existing URL-reconstruction detach path.
 
 Provider activation and shared membership discovery do not call `$resolveWebviewView`. The first attach from a stable client creates that client's runtime and only then asks the provider to resolve it, so an extension's startup watchdog cannot begin while no renderer exists. A resolve failure disposes only that client runtime and cannot replace another client's HTML with its error page or remove the shared launcher membership. Events carry the exact `clientInstanceId`, and wrappers ignore events for other clients. A presentation reconnect reuses its warm runtime for the WBA/workspace lifetime.
 
@@ -4080,8 +4100,8 @@ The inner document intentionally keeps an opaque sandbox origin. Host messages a
 Destroyed webview documents reconstruct from a client-partitioned opaque record,
 not from shared Sidebar membership or extension content state. The stable
 `surfaceId` remains WBA's logical workspace/view identity. The main page adds a
-stable `clientInstanceId`, a reload-stable per-window `windowId`, and a transient
-inline/detached `presentationId`. Browser profiles store the client identity in
+stable `clientInstanceId`, a reload-stable per-window `windowId`, and a renderer
+`presentationId`. Browser profiles store the client identity in
 `localStorage`; Electron stores it beneath `$TE2_CONFIG_HOME`; GeckoView projects
 its existing application-private installation id through the always-on
 asset-intercept WebExtension. Editor Settings displays and copies the identity;
@@ -4098,14 +4118,21 @@ run. Writes require the current lease and a strictly newer revision, so a
 destroyed inline or detached renderer cannot overwrite its replacement. Other
 clients remain isolated while the extension host's semantic workspace/content
 state stays shared. `windowId` and `presentationId` are routing/observability
-metadata, not persistence keys. There is no state polling or `allow-same-origin`
+metadata, not persistence keys. Electron extension surfaces keep one deterministic
+client/surface presentation id while their live `WebContentsView` moves between
+embedded and detached parents; Browser and Gecko presentations remain transient
+when their renderer is reconstructed. There is no state polling or `allow-same-origin`
 fallback.
 
 Extension-document lifetime is independent of the wrapper's WBA Socket.IO
 connection. The WBA process owns a random epoch, each client-scoped activity
 runtime owns a generation and monotonically increasing event sequence, and each
-HTML/options replacement advances that runtime's `htmlRevision`. After the
-initial token-backed load, the
+HTML/options replacement advances that runtime's `htmlRevision`. On the first
+token-backed load, WBA also returns the retained `message` suffix after the
+current HTML revision's last authoritative reload event. The wrapper queues
+that bounded startup suffix until the inner document reports ready; if the
+revision boundary has fallen out of the journal, it reports an incomplete
+bootstrap instead of replaying an arbitrary partial suffix. After the initial load, the
 wrapper reports those four facts plus its last applied event sequence on every
 reconnect. WBA answers with an explicit `resume`, bounded `replay`, or `reload`
 decision. A valid resume or replay leaves the existing iframe, DOM, JavaScript

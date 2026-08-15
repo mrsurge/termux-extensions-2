@@ -563,7 +563,7 @@ async function load(snapshot){const currentLoad=++loadRevision;const token=Strin
 function bufferServerEvent(event){bufferedEvents.push(event);if(bufferedEvents.length>512)bufferedEvents=bufferedEvents.slice(-512);}
 function applyServerEvent(event,fromResume=false){if(disposed||!event||event.surfaceId!==surfaceId)return;if(event.clientInstanceId&&event.clientInstanceId!==clientInstanceId)return;if(reconciling&&!fromResume){bufferServerEvent(event);return;}const epoch=String(event.serverEpoch||'');const generation=String(event.surfaceGeneration||'');const revision=Number(event.htmlRevision);const sequence=Number(event.sequence);if(!Number.isSafeInteger(sequence))return;if(transport.loaded&&epoch===transport.serverEpoch&&generation===transport.surfaceGeneration&&sequence<=transport.lastServerSequence)return;if(!transport.loaded||epoch!==transport.serverEpoch||generation!==transport.surfaceGeneration||revision!==transport.htmlRevision){bufferServerEvent(event);void reconcileTransport();return;}if(sequence!==transport.lastServerSequence+1){bufferServerEvent(event);void reconcileTransport();return;}transport.lastServerSequence=sequence;if(event.event==='message')deliver('message',deserialize(event.jsonMessage,event.buffers));else if(event.event==='reload')void reconcileTransport();else if(event.event==='dispose'){disposed=true;status.hidden=false;status.textContent='Extension view closed';frame.remove();rejectPending(new Error('Extension view closed'));}}
 function drainBufferedEvents(){const events=bufferedEvents.splice(0).sort((left,right)=>Number(left?.sequence||0)-Number(right?.sequence||0));for(const event of events)applyServerEvent(event);}
-async function reconcileTransport(){if(disposed||reconciling||!socket.connected)return;reconciling=true;const currentReconcile=++reconcileRevision;status.hidden=false;status.textContent=transport.loaded?'Reconnecting extension view…':'Loading extension view…';try{const result=await attach();if(currentReconcile!==reconcileRevision||!socket.connected)return;webviewId=String(result.viewId||webviewId);webviewContextMenuContributed=result.webviewContextMenuContributed===true;const action=String(result.action||'reload');const eventSequence=Number(result.eventSequence||0);const priorSequence=transport.lastServerSequence;if(action==='reload'){transport.serverEpoch=String(result.serverEpoch||'');transport.surfaceGeneration=String(result.surfaceGeneration||'');transport.htmlRevision=Number(result.htmlRevision||0);transport.lastServerSequence=eventSequence;await load(result);transport.loaded=true;}else{if(!transport.loaded)throw new Error('WBA attempted to resume an unloaded extension document');adoptReconstruction(result,true);transport.serverEpoch=String(result.serverEpoch||'');transport.surfaceGeneration=String(result.surfaceGeneration||'');transport.htmlRevision=Number(result.htmlRevision||0);transport.lastServerSequence=priorSequence;if(action==='replay'){for(const event of Array.isArray(result.replayEvents)?result.replayEvents:[])applyServerEvent(event,true);}else if(action!=='resume'){throw new Error('Unsupported WBA resume action: '+action);}if(transport.lastServerSequence!==eventSequence)throw new Error('WBA resume sequence did not converge');}deliver('contextMenuPolicy',{enabled:webviewContextMenuContributed});status.hidden=true;if(reconstructionDirty)void flushReconstruction().catch(error=>console.error('[extension-webview] reconnect state relay failed',error));}catch(error){if(currentReconcile===reconcileRevision){status.hidden=false;status.textContent=errorMessage(error);}}finally{if(currentReconcile===reconcileRevision){reconciling=false;drainBufferedEvents();}}}
+async function reconcileTransport(){if(disposed||reconciling||!socket.connected)return;reconciling=true;const currentReconcile=++reconcileRevision;status.hidden=false;status.textContent=transport.loaded?'Reconnecting extension view…':'Loading extension view…';try{const result=await attach();if(currentReconcile!==reconcileRevision||!socket.connected)return;webviewId=String(result.viewId||webviewId);webviewContextMenuContributed=result.webviewContextMenuContributed===true;const action=String(result.action||'reload');const eventSequence=Number(result.eventSequence||0);const priorSequence=transport.lastServerSequence;if(action==='reload'){transport.serverEpoch=String(result.serverEpoch||'');transport.surfaceGeneration=String(result.surfaceGeneration||'');transport.htmlRevision=Number(result.htmlRevision||0);transport.lastServerSequence=eventSequence;await load(result);transport.loaded=true;if(result.bootstrapReplayComplete===false)console.warn('[extension-webview] current document startup event journal is incomplete');for(const event of Array.isArray(result.bootstrapEvents)?result.bootstrapEvents:[]){if(event?.event==='message')deliver('message',deserialize(event.jsonMessage,event.buffers));}}else{if(!transport.loaded)throw new Error('WBA attempted to resume an unloaded extension document');adoptReconstruction(result,true);transport.serverEpoch=String(result.serverEpoch||'');transport.surfaceGeneration=String(result.surfaceGeneration||'');transport.htmlRevision=Number(result.htmlRevision||0);transport.lastServerSequence=priorSequence;if(action==='replay'){for(const event of Array.isArray(result.replayEvents)?result.replayEvents:[])applyServerEvent(event,true);}else if(action!=='resume'){throw new Error('Unsupported WBA resume action: '+action);}if(transport.lastServerSequence!==eventSequence)throw new Error('WBA resume sequence did not converge');}deliver('contextMenuPolicy',{enabled:webviewContextMenuContributed});status.hidden=true;if(reconstructionDirty)void flushReconstruction().catch(error=>console.error('[extension-webview] reconnect state relay failed',error));}catch(error){if(currentReconcile===reconcileRevision){status.hidden=false;status.textContent=errorMessage(error);}}finally{if(currentReconcile===reconcileRevision){reconciling=false;drainBufferedEvents();}}}
 socket.on('connect',()=>{void reconcileTransport();});
 socket.on('disconnect',()=>{reconcileRevision+=1;reconciling=false;bufferedEvents=[];rejectPending(new Error('WBA transport disconnected'));if(Array.isArray(socket.sendBuffer))socket.sendBuffer.length=0;status.hidden=false;status.textContent='Extension host disconnected';});
 socket.on('connect_error',error=>{status.hidden=false;status.textContent=errorMessage(error);});
@@ -772,7 +772,33 @@ export class WebviewRuntime {
       }
     }
     let bootstrapToken: string | undefined;
+    let bootstrapReplayComplete = true;
+    let bootstrapEvents: WebviewClientEvent[] = [];
     if (action === "reload") {
+      if (transport.sequence > 0) {
+        let revisionStart = -1;
+        for (let index = transport.journal.length - 1; index >= 0; index -= 1) {
+          const event = transport.journal[index];
+          if (
+            event.event === "reload" &&
+            event.htmlRevision === runtimeSurface.htmlRevision
+          ) {
+            revisionStart = index;
+            break;
+          }
+        }
+        bootstrapReplayComplete = revisionStart >= 0;
+        if (revisionStart >= 0) {
+          bootstrapEvents = transport.journal
+            .slice(revisionStart + 1)
+            .filter(
+              (event) =>
+                event.htmlRevision === runtimeSurface.htmlRevision &&
+                event.event === "message",
+            )
+            .map((event) => structuredClone(event));
+        }
+      }
       bootstrapToken = crypto.randomUUID();
       this.bootstrapTokens.set(bootstrapToken, {
         surfaceId: surface.surfaceId,
@@ -790,6 +816,8 @@ export class WebviewRuntime {
       surfaceGeneration: transport.surfaceGeneration,
       eventSequence: transport.sequence,
       replayEvents,
+      bootstrapReplayComplete,
+      bootstrapEvents,
       bootstrapToken,
       reconstruction: {
         revision: record.revision,

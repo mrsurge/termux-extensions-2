@@ -42,6 +42,11 @@ import {
   shouldRecreateDevToolsTargetFrame,
 } from "./devtools-target.ts";
 import {
+  hasElectronSidebarMenu,
+  openElectronSidebarMenu,
+  type ElectronSidebarMenuItem,
+} from "./electron-sidebar-menu.ts";
+import {
   deriveAppIdFromShellEvent as _deriveAppIdFromShellEvent,
   frameworkEventsUrl as _frameworkEventsUrl,
   parseShellEvent,
@@ -141,7 +146,8 @@ type ElectronSidebarSurfaceAction =
   | "stop";
 
 interface ElectronSidebarSurfaceDescriptor {
-  version: 1;
+  version: 2;
+  renderer: "url" | "persistent-extension";
   hostId: string;
   surfaceId: string;
   presentationId: string;
@@ -157,6 +163,22 @@ interface ElectronSidebarSurfaceDescriptor {
   consoleWorkerId: string;
 }
 
+interface ElectronSidebarSurfaceBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+interface ElectronNativeSurfaceEntry {
+  placeholder: HTMLDivElement;
+  url: string;
+  loaded: boolean;
+  presentationId: string;
+  version: string;
+  placePromise: Promise<boolean> | null;
+}
+
 interface ElectronSidebarSurfaceEvent {
   type: "closed" | "action";
   hostId: string;
@@ -166,6 +188,11 @@ interface ElectronSidebarSurfaceEvent {
 }
 
 interface ElectronSidebarSurfaceBridge {
+  placeSidebarSurface(
+    descriptor: ElectronSidebarSurfaceDescriptor,
+    bounds: ElectronSidebarSurfaceBounds,
+    visible: boolean,
+  ): Promise<{ ok: true; presentationId: string }>;
   detachSidebarSurface(
     descriptor: ElectronSidebarSurfaceDescriptor,
     options?: { focus?: boolean },
@@ -178,6 +205,10 @@ interface ElectronSidebarSurfaceBridge {
     surfaceId: string,
     presentationId?: string,
   ): Promise<{ ok: true }>;
+  refreshSidebarSurface(
+    surfaceId: string,
+    presentationId?: string,
+  ): Promise<{ ok: boolean }>;
   reconcileSidebarSurfaces(surfaceIds: string[]): Promise<{ ok: true }>;
   onSidebarSurfaceEvent(
     listener: (event: ElectronSidebarSurfaceEvent) => void,
@@ -350,6 +381,10 @@ export function initSidebarShortcuts(
   let _lastShortcutUsageStamp = 0;
 
   let _iframeMap = new Map<string, IframeEntry>(); // key -> {iframe,url,loaded}
+  let _electronNativeSurfaceMap = new Map<string, ElectronNativeSurfaceEntry>();
+  let _nativePlacementFrame = 0;
+  let _nativeSurfaceResizeObserver: ResizeObserver | null = null;
+  let _nativeSurfaceMutationObserver: MutationObserver | null = null;
   let _activateSeq = 0;
 
   let _extensionManifestIcon: ShortcutIcon = {
@@ -1440,11 +1475,26 @@ export function initSidebarShortcuts(
     return `detached:${hostId}:${randomId}`;
   }
 
+  function _electronNativePresentationId(sc: SidebarShortcut): string {
+    return `electron-native:${_normStr(getClientId())}:${_surfaceIdForShortcut(sc)}`;
+  }
+
   function _electronSurfaceBridge(): ElectronSidebarSurfaceBridge | null {
     const bridge = (window as ElectronSidebarSurfaceWindow).te2Electron;
     return bridge && typeof bridge.detachSidebarSurface === "function"
       ? bridge
       : null;
+  }
+
+  function _usesElectronPersistentSurface(
+    sc: SidebarShortcut | SidebarShortcutPreference | null,
+  ): boolean {
+    const bridge = _electronSurfaceBridge();
+    return !!(
+      bridge &&
+      typeof bridge.placeSidebarSurface === "function" &&
+      _isExtensionWebviewEntry(sc)
+    );
   }
 
   function _surfaceIdForShortcut(sc: SidebarShortcut): string {
@@ -1504,7 +1554,10 @@ export function initSidebarShortcuts(
     const readiness = asRecord(slot?.readiness);
     const runtime = runProfileRuntimeMetadata(sc);
     return {
-      version: 1,
+      version: 2,
+      renderer: _usesElectronPersistentSurface(sc)
+        ? "persistent-extension"
+        : "url",
       hostId,
       surfaceId: _surfaceIdForShortcut(sc),
       presentationId,
@@ -1524,6 +1577,95 @@ export function initSidebarShortcuts(
           readiness.consoleWorkerId,
       ),
     };
+  }
+
+  function _nativeSurfaceBounds(
+    entry: ElectronNativeSurfaceEntry,
+  ): ElectronSidebarSurfaceBounds {
+    if (!entry.placeholder.isConnected) {
+      return { x: 0, y: 0, width: 0, height: 0 };
+    }
+    const rect = entry.placeholder.getBoundingClientRect();
+    return {
+      x: rect.left,
+      y: rect.top,
+      width: rect.width,
+      height: rect.height,
+    };
+  }
+
+  function _nativeSurfaceVisible(
+    sc: SidebarShortcut,
+    activeKey: string,
+  ): boolean {
+    const drawer = document.getElementById("agent-drawer");
+    return !!(
+      sc.key === activeKey &&
+      _presentationModeForHost(_normStr(sc.host_id)) === "embedded" &&
+      drawer?.classList.contains("open") &&
+      document.visibilityState === "visible" &&
+      !document.querySelector('.fe-modal[aria-hidden="false"]') &&
+      !document.querySelector("#fe-agent-dd.show")
+    );
+  }
+
+  async function _placeElectronNativeSurface(
+    sc: SidebarShortcut,
+    entry: ElectronNativeSurfaceEntry,
+    visible: boolean,
+  ): Promise<boolean> {
+    const bridge = _electronSurfaceBridge();
+    if (!bridge || !_usesElectronPersistentSurface(sc)) return false;
+    if (entry.placePromise) return await entry.placePromise;
+    const pending = (async () => {
+      if (!entry.url) {
+        const rawUrl = _shortcutFrameUrl(sc, null);
+        if (!rawUrl) return false;
+        entry.url = _extensionWebviewPresentationUrl(
+          sc,
+          rawUrl,
+          entry.presentationId,
+          true,
+        );
+      }
+      const result = await bridge.placeSidebarSurface(
+        _detachedSurfaceDescriptor(sc, entry.url, entry.presentationId),
+        _nativeSurfaceBounds(entry),
+        visible,
+      );
+      if (result.ok !== true || result.presentationId !== entry.presentationId) {
+        throw new Error("Electron native surface returned a stale presentation");
+      }
+      entry.loaded = true;
+      return true;
+    })()
+      .catch((error: unknown) => {
+        toast(errorMessage(error, "Failed to place extension surface"));
+        return false;
+      })
+      .finally(() => {
+        entry.placePromise = null;
+      });
+    entry.placePromise = pending;
+    return await pending;
+  }
+
+  function _scheduleElectronNativeSurfacePlacement(): void {
+    if (_nativePlacementFrame) return;
+    _nativePlacementFrame = requestAnimationFrame(() => {
+      _nativePlacementFrame = 0;
+      const shortcuts = _collectVisibleShortcuts(_latestUiPrefs || {});
+      const activeKey = _resolveActive(_latestUiPrefs || {}, shortcuts)?.key || "";
+      for (const sc of shortcuts) {
+        const entry = _electronNativeSurfaceMap.get(sc.key);
+        if (!entry?.loaded) continue;
+        void _placeElectronNativeSurface(
+          sc,
+          entry,
+          _nativeSurfaceVisible(sc, activeKey),
+        );
+      }
+    });
   }
 
   async function _ensureDetachedShortcut(
@@ -1552,20 +1694,32 @@ export function initSidebarShortcuts(
         return false;
       }
       const entry = _iframeMap.get(sc.key) || null;
-      const fallbackUrl = _shortcutFrameUrl(sc, entry);
+      const nativeEntry = _electronNativeSurfaceMap.get(sc.key) || null;
+      const fallbackUrl = nativeEntry?.url || _shortcutFrameUrl(sc, entry);
       if (!fallbackUrl) return false;
       const presentationId =
+        nativeEntry?.presentationId ||
         _detachedPresentationIds.get(hostId) ||
         _newDetachedPresentationId(hostId);
+      if (
+        nativeEntry &&
+        !nativeEntry.loaded &&
+        !(await _placeElectronNativeSurface(sc, nativeEntry, false))
+      ) {
+        return false;
+      }
       const runtime = runProfileRuntimeMetadata(sc);
+      const presentationUrl = nativeEntry
+        ? nativeEntry.url
+        : _extensionWebviewPresentationUrl(
+            sc,
+            fallbackUrl,
+            presentationId,
+            false,
+          );
       const loadUrl = await prepareRunTargetUrl(
         sc.run_target_route || sc.runTargetRoute,
-        _extensionWebviewPresentationUrl(
-          sc,
-          fallbackUrl,
-          presentationId,
-          false,
-        ),
+        presentationUrl,
         runtime,
       );
       const result = await bridge.detachSidebarSurface(
@@ -1587,6 +1741,8 @@ export function initSidebarShortcuts(
         } catch (_) {}
         _iframeMap.delete(sc.key);
       }
+      nativeEntry?.placeholder.classList.remove("is-active");
+      _scheduleElectronNativeSurfacePlacement();
       return true;
     })()
       .catch((error: unknown) => {
@@ -1648,6 +1804,11 @@ export function initSidebarShortcuts(
       entry.iframe.remove();
       _iframeMap.delete(sc.key);
     }
+    const nativeEntry = _electronNativeSurfaceMap.get(sc.key);
+    if (nativeEntry) {
+      nativeEntry.placeholder.classList.remove("is-active");
+      void _placeElectronNativeSurface(sc, nativeEntry, false);
+    }
     const presentationId = _detachedPresentationIds.get(hostId);
     _detachedPresentationIds.delete(hostId);
     const bridge = _electronSurfaceBridge();
@@ -1655,6 +1816,7 @@ export function initSidebarShortcuts(
       void bridge.closeSidebarSurface(_surfaceIdForShortcut(sc), presentationId);
     }
     _clientActiveWindowHostId = "";
+    _scheduleElectronNativeSurfacePlacement();
     _refreshAfterPresentationChange();
   }
 
@@ -1697,6 +1859,7 @@ export function initSidebarShortcuts(
       .filter((sc): sc is SidebarShortcut => !!sc)
       .filter(
         (sc) =>
+          _usesElectronPersistentSurface(sc) ||
           _presentationModeForHost(_normStr(sc.host_id)) === "detached",
       )
       .map((sc) => _surfaceIdForShortcut(sc));
@@ -1708,6 +1871,7 @@ export function initSidebarShortcuts(
   function _presentationIdForHost(hostId: string): string {
     return (
       _detachedPresentationIds.get(hostId) ||
+      _electronNativeSurfaceMap.get(`dock:${hostId}`)?.presentationId ||
       _iframeMap.get(`dock:${hostId}`)?.presentationId ||
       ""
     );
@@ -1732,6 +1896,10 @@ export function initSidebarShortcuts(
 
   function publishPresentationIdentities(): void {
     _iframeMap.forEach((entry, key) => {
+      if (!key.startsWith("dock:")) return;
+      _publishPresentationIdentity(key.slice("dock:".length), entry.presentationId);
+    });
+    _electronNativeSurfaceMap.forEach((entry, key) => {
       if (!key.startsWith("dock:")) return;
       _publishPresentationIdentity(key.slice("dock:".length), entry.presentationId);
     });
@@ -1971,6 +2139,39 @@ export function initSidebarShortcuts(
 
     const uiPrefs = _latestUiPrefs || {};
     const active = _resolveActive(uiPrefs, _collectVisibleShortcuts(uiPrefs));
+    if (hasElectronSidebarMenu()) {
+      const items: ElectronSidebarMenuItem[] = [
+        {
+          type: "item",
+          id: "flush",
+          label: "Flush active item cache",
+          enabled: true,
+        },
+      ];
+      if (
+        active?.kind === SHORTCUT_KIND_FRAMEWORK_APP &&
+        _normStr(active.app_id)
+      ) {
+        items.push({
+          type: "item",
+          id: "restart",
+          label: "Restart app",
+          enabled: true,
+        });
+      }
+      void openElectronSidebarMenu(anchorEl, items)
+        .then(async (selected) => {
+          if (selected === "flush") {
+            await _refreshActiveShortcut({ flushCache: true });
+          } else if (selected === "restart") {
+            await _restartActiveFrameworkShortcut();
+          }
+        })
+        .catch((error) => {
+          toast(errorMessage(error, "Failed to open Sidebar refresh menu"));
+        });
+      return;
+    }
     const menu = sidebarRefreshMenuEl;
     const flush = document.createElement("div");
     flush.className = "fe-dd-item";
@@ -2189,11 +2390,198 @@ export function initSidebarShortcuts(
     }
   }
 
+  async function _runHeaderIconMenuAction(
+    sc: SidebarShortcut | SidebarShortcutPreference,
+    action: string,
+  ): Promise<void> {
+    const shortcut = sc as SidebarShortcut;
+    const appId = _normStr(
+      sc.kind === SHORTCUT_KIND_FRAMEWORK_APP ? sc.app_id : "",
+    );
+    const hostId = _normStr(shortcut.host_id);
+    const surface = _extensionWebviewSurface(sc);
+    const surfaceKind = _normStr(surface.surfaceKind) || "view";
+    const runProfile = asRecord(
+      shortcut.run_profile_surface || shortcut.runProfileSurface,
+    );
+    if (action === "surface") {
+      const bridge = _electronSurfaceBridge();
+      if (!hostId || !bridge) return;
+      if (_presentationModeForHost(hostId) !== "detached") {
+        const detached = await _ensureDetachedShortcut(shortcut, true);
+        if (detached) {
+          const normalized = _collectVisibleShortcuts(_latestUiPrefs || {});
+          const ensured = _ensureActiveSelection(
+            _latestUiPrefs || {},
+            normalized,
+          );
+          await _syncIframesAndActivate(
+            _latestUiPrefs || {},
+            normalized,
+            ensured.active,
+          );
+        }
+        return;
+      }
+      const presentationId = _detachedPresentationIds.get(hostId) || "";
+      await bridge.closeSidebarSurface(
+        _surfaceIdForShortcut(shortcut),
+        presentationId,
+      );
+      _reattachDetachedShortcut({
+        type: "closed",
+        hostId,
+        surfaceId: _surfaceIdForShortcut(shortcut),
+        presentationId,
+      });
+      return;
+    }
+    if (action === "kill-app") {
+      await _quitFrameworkApp(appId);
+      return;
+    }
+    if (action === "extension-close") {
+      if (surfaceKind === "panel") {
+        _requestSidebarControl(UI_IPC_RPC_METHODS.hostExtensionWebviewDispose, {
+          surfaceId: _normStr(surface.surfaceId),
+          source: "header_icon_menu",
+        });
+      } else {
+        _hideExtensionWebview(shortcut);
+      }
+      return;
+    }
+    if (action === "stop-profile") {
+      _requestSidebarControl(UI_IPC_RPC_METHODS.hostRunProfileStop, {
+        projectPath: _normStr(runProfile.projectPath),
+        profileId: _normStr(runProfile.profileId),
+        shellId: _normStr(runProfile.shellId),
+        source: "sidebar_run_profile_surface",
+      });
+      return;
+    }
+    if (action === "change-url") {
+      _openUrlDialog(sc);
+      return;
+    }
+    if (action === "close-url") {
+      if (hostId) {
+        _requestSidebarControl(UI_IPC_RPC_METHODS.sidebarWindowClose, {
+          hostId,
+          host_id: hostId,
+          source: "header_icon_menu",
+        });
+      } else {
+        _removeShortcut(sc, { activateDefault: false });
+      }
+      return;
+    }
+    if (action === "close-window") {
+      _requestSidebarControl(UI_IPC_RPC_METHODS.sidebarWindowClose, {
+        hostId,
+        host_id: hostId,
+        source: "header_icon_menu",
+      });
+      return;
+    }
+    if (action === "remove") _removeShortcut(sc);
+  }
+
+  async function _openNativeHeaderIconMenu(
+    anchorEl: HTMLElement,
+    sc: SidebarShortcut | SidebarShortcutPreference,
+  ): Promise<void> {
+    const shortcut = sc as SidebarShortcut;
+    const label =
+      _normStr(sc.label) ||
+      _normStr(sc.app_id) ||
+      _normStr(sc.url) ||
+      "Sidebar entry";
+    const appId = _normStr(
+      sc.kind === SHORTCUT_KIND_FRAMEWORK_APP ? sc.app_id : "",
+    );
+    const hostId = _normStr(shortcut.host_id);
+    const isUrlSlot = _isUrlSlotEntry(sc);
+    const runProfile = asRecord(
+      shortcut.run_profile_surface || shortcut.runProfileSurface,
+    );
+    const extensionSurface = _extensionWebviewSurface(sc);
+    const surfaceKind = _normStr(extensionSurface.surfaceKind) || "view";
+    const items: ElectronSidebarMenuItem[] = [{ type: "label", label }];
+    const separator = () => items.push({ type: "separator" });
+    if (hostId) {
+      separator();
+      items.push({
+        type: "item",
+        id: "surface",
+        label: _presentationModeForHost(hostId) === "detached"
+          ? "Attach"
+          : "Detach",
+        enabled: true,
+      });
+    }
+    if (appId) {
+      separator();
+      items.push({
+        type: "item",
+        id: "kill-app",
+        label: "Kill app",
+        enabled: true,
+      });
+    }
+    separator();
+    if (isUrlSlot && _isExtensionWebviewEntry(sc)) {
+      items.push({
+        type: "item",
+        id: "extension-close",
+        label: surfaceKind === "panel"
+          ? "Close extension panel"
+          : "Hide extension view",
+        enabled: true,
+      });
+    } else if (isUrlSlot) {
+      if (_normStr(runProfile.profileId) && _normStr(runProfile.projectPath)) {
+        items.push({
+          type: "item",
+          id: "stop-profile",
+          label: `Stop ${_normStr(runProfile.profileId)}`,
+          enabled: true,
+        });
+      }
+      items.push(
+        { type: "item", id: "change-url", label: "Change URL", enabled: true },
+        { type: "item", id: "close-url", label: "Close URL slot", enabled: true },
+      );
+    } else if (_isAppDockEntry(sc) && hostId) {
+      items.push({
+        type: "item",
+        id: "close-window",
+        label: "Close dock slot",
+        enabled: true,
+      });
+    } else {
+      items.push({
+        type: "item",
+        id: "remove",
+        label: "Remove entry",
+        enabled: true,
+      });
+    }
+    const selected = await openElectronSidebarMenu(anchorEl, items);
+    if (selected) await _runHeaderIconMenuAction(sc, selected);
+  }
+
   function _openHeaderIconMenu(
     anchorEl: HTMLElement | null,
     sc: SidebarShortcut | SidebarShortcutPreference | null,
   ) {
     if (!sidebarHeaderIconMenuEl || !anchorEl || !sc) return;
+    if (hasElectronSidebarMenu()) {
+      void _openNativeHeaderIconMenu(anchorEl, sc).catch((error) => {
+        toast(errorMessage(error, "Failed to open Sidebar menu"));
+      });
+      return;
+    }
     try {
       if (closeAllMenus) closeAllMenus();
     } catch (_) {}
@@ -2430,6 +2818,97 @@ export function initSidebarShortcuts(
     _closeAgentDropdown();
     _closeRefreshMenu();
     _closeHeaderIconMenu();
+
+    if (hasElectronSidebarMenu()) {
+      try {
+        const apps = (await _ensureAppsCache(true))
+          .filter((app) => {
+            const id = _normStr(app?.id);
+            return !!id && id !== SIDEBAR_SELF_APP_ID;
+          })
+          .sort((a, b) => {
+            const an = _normStr(a?.name) || _normStr(a?.id);
+            const bn = _normStr(b?.name) || _normStr(b?.id);
+            return an.localeCompare(bn, undefined, {
+              sensitivity: "base",
+              numeric: true,
+            });
+          });
+        const items: ElectronSidebarMenuItem[] = [
+          { type: "label", label: "App drawer" },
+        ];
+        if (!apps.length) {
+          items.push({ type: "label", label: "No launcher apps" });
+        } else {
+          apps.forEach((app) => {
+            const id = _normStr(app.id);
+            if (!id) return;
+            const name = _normStr(app.name) || id;
+            const kind = _appManifestIsStateful(app) ? "state" : "base";
+            items.push({
+              type: "item",
+              id: `app:${id}`,
+              label: `${name} — ${kind}`,
+              enabled: true,
+            });
+          });
+        }
+        const extensionViews = _collectAppDockEntries()
+          .filter((shortcut) => _isExtensionWebviewEntry(shortcut))
+          .sort((left, right) =>
+            left.label.localeCompare(right.label, undefined, {
+              sensitivity: "base",
+              numeric: true,
+            }),
+          );
+        if (extensionViews.length) {
+          items.push(
+            { type: "separator" },
+            { type: "label", label: "Extension views" },
+          );
+          extensionViews.forEach((shortcut) => {
+            const hostId = _normStr(shortcut.host_id);
+            if (!hostId) return;
+            const mode = _presentationModeForHost(hostId) === "hidden"
+              ? "hidden"
+              : "open";
+            items.push({
+              type: "item",
+              id: `extension:${hostId}`,
+              label: `${shortcut.label} — ${mode}`,
+              enabled: true,
+            });
+          });
+        }
+        items.push(
+          { type: "separator" },
+          { type: "item", id: "url", label: "URL", enabled: true },
+        );
+        const selected = await openElectronSidebarMenu(anchorEl, items);
+        if (selected?.startsWith("app:")) {
+          const appId = selected.slice("app:".length);
+          _requestSidebarControl(UI_IPC_RPC_METHODS.sidebarWindowCreate, {
+            appId,
+            app_id: appId,
+            source: "sidebar_launcher",
+            activate: true,
+          });
+        } else if (selected?.startsWith("extension:")) {
+          _setClientActiveShortcut(selected.slice("extension:".length), {
+            emit: true,
+            source: "extension_app_drawer",
+          });
+        } else if (selected === "url") {
+          _openUrlDialog({
+            kind: SHORTCUT_KIND_URL,
+            load: SHORTCUT_LOAD_LAZY,
+          });
+        }
+      } catch (error) {
+        toast(errorMessage(error, "Failed to open app drawer"));
+      }
+      return;
+    }
 
     const menu = sidebarHeaderIconMenuEl;
     const title = document.createElement("div");
@@ -3074,6 +3553,7 @@ export function initSidebarShortcuts(
       "aria-hidden",
       hasActive ? "false" : "true",
     );
+    _scheduleElectronNativeSurfacePlacement();
   }
 
   async function _ensureFrameworkAppRunning(appId: unknown) {
@@ -3342,6 +3822,27 @@ export function initSidebarShortcuts(
       return false;
     }
 
+    let nativeEntry = _electronNativeSurfaceMap.get(active.key);
+    if (!nativeEntry) {
+      await _syncIframesAndActivate(uiPrefs, shortcuts, active);
+      nativeEntry = _electronNativeSurfaceMap.get(active.key);
+    }
+    if (nativeEntry) {
+      if (!nativeEntry.loaded) {
+        const placed = await _placeElectronNativeSurface(
+          active,
+          nativeEntry,
+          _nativeSurfaceVisible(active, active.key),
+        );
+        if (!placed) return false;
+      }
+      const result = await _electronSurfaceBridge()?.refreshSidebarSurface(
+        _surfaceIdForShortcut(active),
+        nativeEntry.presentationId,
+      );
+      return result?.ok === true;
+    }
+
     let entry = _iframeMap.get(active.key);
     if (!entry) {
       await _syncIframesAndActivate(uiPrefs, shortcuts, active);
@@ -3420,12 +3921,21 @@ export function initSidebarShortcuts(
       ? shortcuts
       : _collectVisibleShortcuts(uiPrefs);
     const desiredKeys = new Set(resolvedShortcuts.map((sc) => sc.key));
+    const persistentKeys = new Set(
+      resolvedShortcuts
+        .filter(_usesElectronPersistentSurface)
+        .map((sc) => sc.key),
+    );
     const detachedKeys = new Set(
       resolvedShortcuts.filter(_isDetachedShortcut).map((sc) => sc.key),
     );
 
     _iframeMap.forEach((entry, key) => {
-      if (!desiredKeys.has(key) || detachedKeys.has(key)) {
+      if (
+        !desiredKeys.has(key) ||
+        detachedKeys.has(key) ||
+        persistentKeys.has(key)
+      ) {
         if (!detachedKeys.has(key) && key.startsWith("dock:")) {
           _publishPresentationIdentity(key.slice("dock:".length), "");
         }
@@ -3439,11 +3949,52 @@ export function initSidebarShortcuts(
       }
     });
 
+    _electronNativeSurfaceMap.forEach((entry, key) => {
+      if (desiredKeys.has(key) && persistentKeys.has(key)) return;
+      try {
+        entry.placeholder.remove();
+      } catch (_) {}
+      _electronNativeSurfaceMap.delete(key);
+    });
+
     // Ensure app metadata is available for default icons (best-effort).
     void _ensureAppsCache(false);
 
     // Create iframes for app dock slots and active URL slots.
     resolvedShortcuts.forEach((sc) => {
+      if (persistentKeys.has(sc.key)) {
+        let nativeEntry = _electronNativeSurfaceMap.get(sc.key);
+        if (!nativeEntry) {
+          const placeholder = document.createElement("div");
+          placeholder.className = "sidebar-iframe sidebar-native-surface";
+          placeholder.setAttribute("data-shortcut-id", sc.key);
+          stack.appendChild(placeholder);
+          nativeEntry = {
+            placeholder,
+            url: "",
+            loaded: false,
+            presentationId: _electronNativePresentationId(sc),
+            version: shortcutVersion(sc.version),
+            placePromise: null,
+          };
+          _electronNativeSurfaceMap.set(sc.key, nativeEntry);
+          if (_isAppDockEntry(sc)) {
+            _publishPresentationIdentity(
+              _normStr(sc.host_id),
+              nativeEntry.presentationId,
+            );
+            _bindAgentPresentationIfCurrent(
+              _normStr(sc.host_id),
+              nativeEntry.presentationId,
+            );
+          }
+        }
+        nativeEntry.version = shortcutVersion(sc.version);
+        if (detachedKeys.has(sc.key)) {
+          void _ensureDetachedShortcut(sc, false);
+        }
+        return;
+      }
       if (detachedKeys.has(sc.key)) {
         void _ensureDetachedShortcut(sc, false);
         return;
@@ -3528,6 +4079,11 @@ export function initSidebarShortcuts(
         !detachedKeys.has(sc.key),
     );
     for (const sc of eager) {
+      const nativeEntry = _electronNativeSurfaceMap.get(sc.key);
+      if (nativeEntry) {
+        void _placeElectronNativeSurface(sc, nativeEntry, false);
+        continue;
+      }
       const entry = _iframeMap.get(sc.key);
       if (!entry) continue;
       void _ensureIframeLoadedForShortcut(sc, entry);
@@ -3542,11 +4098,25 @@ export function initSidebarShortcuts(
       entry.iframe.classList.toggle("is-active", isActive);
       if (isActive) hasActive = true;
     });
+    _electronNativeSurfaceMap.forEach((entry, key) => {
+      const isActive = !!(activeKey && key === activeKey);
+      entry.placeholder.classList.toggle("is-active", isActive);
+      if (isActive) hasActive = true;
+    });
 
     let activeReady = false;
     if (resolvedActive && detachedKeys.has(resolvedActive.key)) {
       activeReady = true;
     } else if (hasActive && resolvedActive) {
+      const nativeEntry = _electronNativeSurfaceMap.get(resolvedActive.key);
+      if (nativeEntry) {
+        activeReady = await _placeElectronNativeSurface(
+          resolvedActive,
+          nativeEntry,
+          _nativeSurfaceVisible(resolvedActive, activeKey),
+        );
+        if (seq !== _activateSeq) return;
+      } else {
       const entry = _iframeMap.get(resolvedActive.key);
       if (entry) {
         if (
@@ -3574,6 +4144,7 @@ export function initSidebarShortcuts(
         if (seq !== _activateSeq) return;
         activeReady = !!ok && !!entry.loaded;
       }
+      }
     }
 
     _updateSetupPlaceholder(
@@ -3582,6 +4153,7 @@ export function initSidebarShortcuts(
       "setup",
       resolvedActive || null,
     );
+    _scheduleElectronNativeSurfacePlacement();
   }
 
   // --- Shortcut editor UI ---
@@ -4622,6 +5194,51 @@ export function initSidebarShortcuts(
     sidebarSetupHintEl =
       sidebarSetupPlaceholder?.querySelector(".sidebar-setup__hint") || null;
     sidebarIframeStack = document.getElementById("sidebar-iframe-stack");
+    if (electronBridge && sidebarIframeStack) {
+      _nativeSurfaceResizeObserver?.disconnect();
+      _nativeSurfaceResizeObserver = new ResizeObserver(
+        _scheduleElectronNativeSurfacePlacement,
+      );
+      _nativeSurfaceResizeObserver.observe(sidebarIframeStack);
+      const drawer = document.getElementById("agent-drawer");
+      if (drawer) _nativeSurfaceResizeObserver.observe(drawer);
+      _nativeSurfaceMutationObserver?.disconnect();
+      _nativeSurfaceMutationObserver = new MutationObserver(
+        _scheduleElectronNativeSurfacePlacement,
+      );
+      if (drawer) {
+        _nativeSurfaceMutationObserver.observe(drawer, {
+          attributes: true,
+          attributeFilter: ["class", "aria-hidden"],
+        });
+      }
+      [document.getElementById("fe-agent-dd")].forEach((menu) => {
+        if (!menu) return;
+        _nativeSurfaceMutationObserver?.observe(menu, {
+          attributes: true,
+          attributeFilter: ["class"],
+        });
+      });
+      document.querySelectorAll<HTMLElement>(".fe-modal").forEach((modal) => {
+        _nativeSurfaceMutationObserver?.observe(modal, {
+          attributes: true,
+          attributeFilter: ["class", "aria-hidden"],
+        });
+      });
+      window.addEventListener("resize", _scheduleElectronNativeSurfacePlacement);
+      document.addEventListener(
+        "visibilitychange",
+        _scheduleElectronNativeSurfacePlacement,
+      );
+      window.addEventListener(
+        "beforeunload",
+        () => {
+          _nativeSurfaceResizeObserver?.disconnect();
+          _nativeSurfaceMutationObserver?.disconnect();
+        },
+        { once: true },
+      );
+    }
 
     editorSettingsModalEl = document.getElementById("editor-settings-modal");
     shortcutsModal = document.getElementById("agent-shortcuts-modal");

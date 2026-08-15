@@ -21,8 +21,11 @@ export const ELECTRON_APP_VIEW_COMMANDS = [
   "release_run_target_surface",
   "read_sidebar_presentation_state",
   "write_sidebar_presentation_state",
+  "open_sidebar_menu",
+  "place_sidebar_surface",
   "detach_sidebar_surface",
   "focus_sidebar_surface",
+  "refresh_sidebar_surface",
   "close_sidebar_surface",
   "reconcile_sidebar_surfaces",
 ] as const;
@@ -96,10 +99,22 @@ export type ElectronSidebarPresentationState = {
   presentations: Record<string, ElectronSidebarPresentationMode>;
 };
 
-export const ELECTRON_SIDEBAR_SURFACE_DESCRIPTOR_VERSION = 1 as const;
+export const ELECTRON_SIDEBAR_SURFACE_DESCRIPTOR_VERSION = 2 as const;
+
+export type ElectronSidebarSurfaceRenderer =
+  | "url"
+  | "persistent-extension";
+
+export type ElectronSidebarSurfaceBounds = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
 
 export type ElectronSidebarSurfaceDescriptor = {
   version: typeof ELECTRON_SIDEBAR_SURFACE_DESCRIPTOR_VERSION;
+  renderer: ElectronSidebarSurfaceRenderer;
   hostId: string;
   surfaceId: string;
   presentationId: string;
@@ -113,6 +128,23 @@ export type ElectronSidebarSurfaceDescriptor = {
   devRuntime: boolean;
   devTools: boolean;
   consoleWorkerId: string;
+};
+
+export type ElectronSidebarSurfacePlaceRequest = {
+  descriptor: ElectronSidebarSurfaceDescriptor;
+  bounds: ElectronSidebarSurfaceBounds;
+  visible: boolean;
+};
+
+export type ElectronSidebarMenuItem =
+  | { type: "label"; label: string }
+  | { type: "separator" }
+  | { type: "item"; id: string; label: string; enabled: boolean };
+
+export type ElectronSidebarMenuRequest = {
+  x: number;
+  y: number;
+  items: ElectronSidebarMenuItem[];
 };
 
 export type ElectronSidebarSurfaceAction =
@@ -171,11 +203,23 @@ export type ElectronAppViewBridge = {
   writeSidebarPresentationState(
     state: ElectronSidebarPresentationState,
   ): Promise<{ ok: true }>;
+  openSidebarMenu(
+    request: ElectronSidebarMenuRequest,
+  ): Promise<{ selectedId: string | null }>;
+  placeSidebarSurface(
+    descriptor: ElectronSidebarSurfaceDescriptor,
+    bounds: ElectronSidebarSurfaceBounds,
+    visible: boolean,
+  ): Promise<{ ok: true; presentationId: string }>;
   detachSidebarSurface(
     descriptor: ElectronSidebarSurfaceDescriptor,
     options?: { focus?: boolean },
   ): Promise<{ ok: true; presentationId: string }>;
   focusSidebarSurface(
+    surfaceId: string,
+    presentationId?: string,
+  ): Promise<{ ok: boolean }>;
+  refreshSidebarSurface(
     surfaceId: string,
     presentationId?: string,
   ): Promise<{ ok: boolean }>;

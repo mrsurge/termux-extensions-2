@@ -247,6 +247,10 @@ Target architecture decisions:
 - [x] Persist generic extension-host `globalState` and workspace-isolated `workspaceState` across WBA/code-server cold restarts.
 - [x] Refine the implementation plan and tracker with the source-backed architecture.
 - [x] Live-accept the primary OpenAI view in the inline Sidebar.
+- [x] Create extension `WebContentsView` renderers at their first Electron presentation and reparent the exact renderer for detach/attach.
+- [x] Retain a deterministic Electron client/surface presentation identity and project embedded bounds/visibility through the native bridge.
+- [x] Replay the bounded current-revision message suffix during a genuinely new extension-document bootstrap.
+- [x] Replace only Electron's Sidebar dock icon/action, refresh, and app-drawer DOM dropdowns with a bounded OS-native menu bridge.
 - [ ] Live-accept Electron detach, attach, message continuity, and close behavior.
 - [ ] Keep the marketplace unsupported notice until live acceptance passes.
 
@@ -283,7 +287,8 @@ Investigation and planning:
 - [x] Remove drawer entries only on provider/workspace/WBA lifecycle removal.
 - [x] Project container/view titles and activity-bar/root extension icons through the bounded WBA resource route.
 - [x] Verify close/reopen, icon persistence, inline focus, and WBA-driven final removal.
-- [ ] Verify Electron detach/focus/attach and message continuity; the current live acceptance fails continuity after detach.
+- [x] Replace Electron extension detach reconstruction with exact `WebContentsView` reparenting; ordinary URL/Run Profile slots retain reconstruction.
+- [ ] Verify Electron detach/focus/attach and message continuity; the previous live acceptance exposed the reconstruction defect and the replacement requires a fresh packaged-client run.
 
 5.6J — per-client reconstruction state:
 
@@ -299,6 +304,7 @@ Investigation and planning:
 - [x] Fence writes by monotonic revision and a current WBA-issued lease so destroyed inline/detached renderers cannot overwrite newer state.
 - [x] Add confirmation-gated identity/state reset and a copyable client identifier in editor settings.
 - [x] Add focused tests for browser/Electron/Gecko identity selection, independent clients, reset, synchronous reconstruction, one-time bootstrap, and stale-writer rejection.
+- [x] Keep the Electron extension renderer, wrapper connection, presentation identity, writer lease, and JavaScript heap intact across detach/attach.
 - [ ] Live-validate refresh, detach, detached refresh, reattach, native cold restart, and simultaneous windows.
 - [ ] Live-accept Electron detached continuity and Gecko/browser warm reconnect restoration.
 
@@ -469,3 +475,4 @@ each phase executes. Do not mark a phase complete from implementation alone.
 | 2026-08-14 | Phase 5.6L implementation | Lazy client-scoped activity runtime, exact-client routing/failure isolation, encoded resource response tests, Rust streaming-proxy regression, Code TE2 typecheck/build/full frontend suite, focused Python unit/static checks, Rust format/full feature suite | Passed locally; 201 frontend tests, 3 focused Python tests, and 77 Rust tests plus 4 ignored benchmarks, 0 failures. Live diagnosis proved the old Rust proxy forwarded Brotli bytes while stripping `Content-Encoding`; the corrected framework binary still requires live restart/acceptance. |
 | 2026-08-14 | Phase 5.6 resource/menu continuation | Shared WBA-epoch webview resource scopes, live Monaco touch Extension Context resolution, contributed `webview/context` wrapper actions, TypeScript, host build, and complete frontend suite | Passed locally; 195 frontend tests, 0 failures. Live remote Codex diff and context-menu acceptance remains pending. |
 | 2026-08-14 | Phase 5.6 manifest-overlay correction | Live WBA `/cmd` comparison, partial-management/full-disk manifest regression, exact Codex `resourceScheme == file` menu regression, TypeScript, host/WBA rebuild, focused tests, and complete frontend suite | Passed locally; 197 frontend tests, 0 failures. The running WBA was intentionally not restarted, so live Codex context-menu acceptance remains pending. |
+| 2026-08-14 | Phase 5.6 Electron persistent extension renderer | First-presentation native `WebContentsView`, embedded bounds/visibility bridge, exact detach/attach reparenting, OS-native Sidebar dock menus, current-revision bootstrap message suffix, Code TE2 and Electron typechecks/builds, complete frontend/Electron suites, and focused WBA runtime tests | Passed locally; 197 frontend tests, 67 Electron tests, and 4 focused WBA tests, 0 failures. The live Electron process was not restarted; Codex auxiliary-panel continuity and native Sidebar menus require user acceptance with the rebuilt client. |

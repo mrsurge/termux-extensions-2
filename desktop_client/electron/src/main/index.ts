@@ -12,6 +12,7 @@ import {
   WebContentsView,
   type IpcMainEvent,
   type IpcMainInvokeEvent,
+  type MenuItemConstructorOptions,
   type WebContents,
 } from "electron";
 
@@ -47,7 +48,9 @@ import {
 } from "../shared/app-view-contracts";
 import {
   validateElectronSidebarSurfaceAction,
+  validateElectronSidebarMenuRequest,
   validateElectronSidebarSurfaceDetachRequest,
+  validateElectronSidebarSurfacePlaceRequest,
   validateElectronSidebarSurfaceReconcileRequest,
   validateElectronSidebarSurfaceReference,
 } from "../shared/sidebar-surface-contracts";
@@ -254,6 +257,7 @@ function appViewBounds(): Electron.Rectangle {
 
 function resizeAppView(): void {
   appView?.setBounds(appViewBounds());
+  detachedSurfaceRegistry?.layoutEmbedded();
 }
 
 function closeSurfaceWindows(): void {
@@ -390,6 +394,59 @@ async function handleAppViewControl(
     await writeDesktopSidebarPresentationState(payload);
     return { ok: true };
   }
+  if (command === "open_sidebar_menu") {
+    const request = validateElectronSidebarMenuRequest(payload);
+    const window = mainWindow;
+    if (!window || window.isDestroyed()) {
+      throw new Error("Sidebar menu host is unavailable");
+    }
+    const bounds = appViewBounds();
+    const zoom = Math.max(0.25, appView?.webContents.getZoomFactor() || 1);
+    const x = Math.max(
+      bounds.x,
+      Math.min(bounds.x + bounds.width, bounds.x + Math.round(request.x * zoom)),
+    );
+    const y = Math.max(
+      bounds.y,
+      Math.min(bounds.y + bounds.height, bounds.y + Math.round(request.y * zoom)),
+    );
+    return await new Promise<{ selectedId: string | null }>((resolveMenu) => {
+      let settled = false;
+      const settle = (selectedId: string | null) => {
+        if (settled) return;
+        settled = true;
+        resolveMenu({ selectedId });
+      };
+      const template: MenuItemConstructorOptions[] = request.items.map((item) => {
+        if (item.type === "separator") return { type: "separator" };
+        if (item.type === "label") {
+          return { label: item.label, enabled: false };
+        }
+        return {
+          label: item.label,
+          enabled: item.enabled,
+          click: () => settle(item.id),
+        };
+      });
+      Menu.buildFromTemplate(template).popup({
+        window,
+        x,
+        y,
+        callback: () => settle(null),
+      });
+    });
+  }
+  if (command === "place_sidebar_surface") {
+    const request = validateElectronSidebarSurfacePlaceRequest(payload);
+    if (!detachedSurfaceRegistry) {
+      throw new Error("Sidebar surface host is unavailable");
+    }
+    return await detachedSurfaceRegistry.place(
+      request.descriptor,
+      request.bounds,
+      request.visible,
+    );
+  }
   if (command === "detach_sidebar_surface") {
     const request = validateElectronSidebarSurfaceDetachRequest(payload);
     if (!detachedSurfaceRegistry) {
@@ -401,6 +458,15 @@ async function handleAppViewControl(
     const reference = validateElectronSidebarSurfaceReference(payload);
     return {
       ok: detachedSurfaceRegistry?.focus(
+        reference.surfaceId,
+        reference.presentationId,
+      ) || false,
+    };
+  }
+  if (command === "refresh_sidebar_surface") {
+    const reference = validateElectronSidebarSurfaceReference(payload);
+    return {
+      ok: detachedSurfaceRegistry?.refresh(
         reference.surfaceId,
         reference.presentationId,
       ) || false,
@@ -440,7 +506,7 @@ async function handleAppViewControl(
 
 function installContextMenu(
   contents: WebContents,
-  explicitOwnerWindow?: BrowserWindow,
+  explicitOwnerWindow?: BrowserWindow | (() => BrowserWindow | null),
 ): void {
   contents.on("context-menu", (event, params) => {
     event.preventDefault();
@@ -461,8 +527,11 @@ function installContextMenu(
         click: () => contents.paste(),
       },
     ]);
+    const configuredOwner = typeof explicitOwnerWindow === "function"
+      ? explicitOwnerWindow()
+      : explicitOwnerWindow;
     const ownerWindow =
-      explicitOwnerWindow || BrowserWindow.fromWebContents(contents) || mainWindow;
+      configuredOwner || BrowserWindow.fromWebContents(contents) || mainWindow;
     if (ownerWindow && !ownerWindow.isDestroyed()) {
       menu.popup({ window: ownerWindow });
     }
@@ -495,7 +564,7 @@ function createAppView(): WebContentsView {
 
   const notify = () => sendNavigation(view.webContents);
   view.webContents.on("will-navigate", () => {
-    detachedSurfaceRegistry?.closeAll(false);
+    detachedSurfaceRegistry?.suspendEmbedded();
     closeSurfaceWindows();
     dialogHost?.closeForOwner(view.webContents);
   });
@@ -529,7 +598,7 @@ function createAppView(): WebContentsView {
     }
   });
   view.webContents.on("render-process-gone", (_event, details) => {
-    detachedSurfaceRegistry?.closeAll(false);
+    detachedSurfaceRegistry?.suspendEmbedded();
     closeSurfaceWindows();
     dialogHost?.closeForOwner(view.webContents);
     console.error(`[te2-desktop] App renderer exited: ${details.reason}`);
@@ -846,6 +915,9 @@ async function main(): Promise<void> {
   detachedSurfaceRegistry = new DetachedSidebarSurfaceRegistry({
     getAppPath: () => app.getAppPath(),
     getAppContents: () => appView?.webContents || null,
+    getMainWindow: () => mainWindow,
+    getAppViewBounds: appViewBounds,
+    getAppZoomFactor: () => appView?.webContents.getZoomFactor() || 1,
     getRelayOrigin: () => relay.browserOrigin,
     shellUrl: `${SHELL_SCHEME}://${SHELL_HOST}/surface/index.html`,
     frameworkPartition: ELECTRON_FRAMEWORK_PARTITION,

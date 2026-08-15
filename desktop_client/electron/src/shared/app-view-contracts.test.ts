@@ -41,6 +41,10 @@ test("Electron app-view commands are strictly allowlisted", () => {
     "write_sidebar_presentation_state",
   );
   assert.equal(
+    validateElectronAppViewCommand("open_sidebar_menu"),
+    "open_sidebar_menu",
+  );
+  assert.equal(
     validateElectronAppViewCommand("detach_sidebar_surface"),
     "detach_sidebar_surface",
   );

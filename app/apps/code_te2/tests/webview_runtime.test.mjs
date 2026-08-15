@@ -578,6 +578,17 @@ test("wrapper preserves its live document across transport resume and reloads on
     }),
     { handled: true },
   );
+  assert.deepEqual(
+    runtime.handleMainThreadRequest({
+      kind: "ext",
+      type: 1,
+      req: 3,
+      rpcId: RPC.MainThreadWebviews,
+      method: "$postMessage",
+      args: ["resume-panel-handle", '{"bootstrap":true}'],
+    }),
+    { handled: true, replyResult: true },
+  );
 
   const surface = runtime.snapshot().surfaces[0];
   const window = new Window({
@@ -680,6 +691,8 @@ test("wrapper preserves its live document across transport resume and reloads on
     deliveredToDocument.push(message);
   assert.equal(attachResults[0].action, "reload");
   assert.equal(attachResults[0].reason, "initial_attach");
+  assert.equal(attachResults[0].bootstrapReplayComplete, true);
+  assert.equal(attachResults[0].bootstrapEvents.length, 1);
   assert.ok(attachResults[0].bootstrapToken);
   assert.equal(attachRequests[0].serverEpoch, undefined);
 
@@ -692,6 +705,16 @@ test("wrapper preserves its live document across transport resume and reloads on
     );
   };
   dispatchFrameMessage("ready", null);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(deliveredToDocument)).filter(
+      (entry) => entry.kind === "message",
+    ),
+    [{
+      __te2ExtensionWebviewHost: true,
+      kind: "message",
+      value: { bootstrap: true },
+    }],
+  );
   dispatchFrameMessage("contextmenu", {
     x: 12,
     y: 14,
@@ -763,6 +786,11 @@ test("wrapper preserves its live document across transport resume and reloads on
       (entry) => entry.kind === "message",
     ),
     [
+      {
+        __te2ExtensionWebviewHost: true,
+        kind: "message",
+        value: { bootstrap: true },
+      },
       {
         __te2ExtensionWebviewHost: true,
         kind: "message",
