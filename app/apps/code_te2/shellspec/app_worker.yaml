@@ -15,7 +15,7 @@ shells:
           bg: rgba(0, 0, 0, 0.88)
           border: rgba(29, 70, 126, 0.88)
     command:
-      - /home/mrsurge/knowhere/termux-extensions-2/.venv/bin/python3.14t
+      - python3
       - -m
       - app.libs.app_worker
       - --app-id
