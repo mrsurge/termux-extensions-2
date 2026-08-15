@@ -13,6 +13,9 @@ import { createSettingsModalsController } from './settings-modals.ts';
  *     settingsModal: HTMLElement,
  *     settingsClose: HTMLElement,
  *     settingsConsoleWorkerId: HTMLElement,
+ *     settingsClientIdentity: HTMLElement,
+ *     settingsClientCopy: HTMLButtonElement,
+ *     settingsClientReset: HTMLButtonElement,
  *     menuEditorSettings: HTMLElement,
  *     extManagerModal: HTMLElement,
  *     extManagerClose: HTMLElement,
@@ -47,6 +50,8 @@ import { createSettingsModalsController } from './settings-modals.ts';
  *   requestLanguageBackendSet: (mode: "code-server" | "web-workers") => Promise<any>,
  *   reloadEditorFrame: () => void,
  *   getConsoleWorkerId: () => string | null,
+ *   getClientIdentity: () => {clientInstanceId: string, provider: string, label: string},
+ *   resetClientIdentity: () => Promise<void>,
  *   toast: (msg: string, ms?: number) => void,
  * }} deps
  */
@@ -91,6 +96,9 @@ export function createSettingsBootstrap(deps: any) {
     settingsModalEl: deps.els.settingsModal,
     settingsCloseEl: deps.els.settingsClose,
     settingsConsoleWorkerIdEl: deps.els.settingsConsoleWorkerId,
+    settingsClientIdentityEl: deps.els.settingsClientIdentity,
+    settingsClientCopyEl: deps.els.settingsClientCopy,
+    settingsClientResetEl: deps.els.settingsClientReset,
     menuEditorSettingsEl: deps.els.menuEditorSettings,
     extManagerModalEl: deps.els.extManagerModal,
     extManagerCloseEl: deps.els.extManagerClose,
@@ -100,6 +108,9 @@ export function createSettingsBootstrap(deps: any) {
     refreshEditorExtManagerModal: () => refreshEditorExtManagerModal(),
     loadCustomSettings: () => loadCustomSettings(),
     getConsoleWorkerId: deps.getConsoleWorkerId,
+    getClientIdentity: deps.getClientIdentity,
+    resetClientIdentity: deps.resetClientIdentity,
+    toast: deps.toast,
   });
   settingsModalsController.install();
 

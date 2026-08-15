@@ -5,6 +5,9 @@
  *   settingsModalEl: HTMLElement,
  *   settingsCloseEl: HTMLElement,
  *   settingsConsoleWorkerIdEl: HTMLElement,
+ *   settingsClientIdentityEl: HTMLElement,
+ *   settingsClientCopyEl: HTMLButtonElement,
+ *   settingsClientResetEl: HTMLButtonElement,
  *   menuEditorSettingsEl: HTMLElement,
  *   extManagerModalEl: HTMLElement,
  *   extManagerCloseEl: HTMLElement,
@@ -14,9 +17,20 @@
  *   refreshEditorExtManagerModal: () => Promise<any> | void,
  *   loadCustomSettings: () => Promise<any> | void,
  *   getConsoleWorkerId: () => string | null,
+ *   getClientIdentity: () => {clientInstanceId: string, provider: string, label: string},
+ *   resetClientIdentity: () => Promise<void>,
+ *   toast: (message: string, timeoutMs?: number) => void,
  * }} deps
  */
 export function createSettingsModalsController(deps: any) {
+  let identityResetPending = false;
+
+  function refreshClientIdentity() {
+    const identity = deps.getClientIdentity();
+    deps.settingsClientIdentityEl.textContent = `${identity.label}: ${identity.clientInstanceId}`;
+    deps.settingsClientIdentityEl.title = `${identity.provider} client identity: ${identity.clientInstanceId}`;
+  }
+
   function refreshConsoleWorkerId() {
     const el = deps.settingsConsoleWorkerIdEl;
     if (!el) return;
@@ -37,6 +51,7 @@ export function createSettingsModalsController(deps: any) {
     deps.settingsModalEl.classList.add('show');
     deps.settingsModalEl.setAttribute('aria-hidden', 'false');
     refreshConsoleWorkerId();
+    refreshClientIdentity();
     void deps.refreshEditorSettingsModal();
   }
 
@@ -75,7 +90,31 @@ export function createSettingsModalsController(deps: any) {
       openEditorExtManagerModal();
     });
     window.addEventListener('te2:console-bridge-status', refreshConsoleWorkerId);
+    deps.settingsClientCopyEl.addEventListener('click', () => {
+      const identity = deps.getClientIdentity();
+      void navigator.clipboard.writeText(identity.clientInstanceId)
+        .then(() => deps.toast('Client identity copied', 1800))
+        .catch((error: unknown) => deps.toast(`Copy failed: ${error instanceof Error ? error.message : String(error)}`, 3500));
+    });
+    deps.settingsClientResetEl.addEventListener('click', () => {
+      if (identityResetPending) return;
+      void window.teUI.dialog.confirm(
+        'Reset this client identity and delete its saved extension-view reconstruction state? The editor will reload.',
+      ).then(async (confirmed: boolean) => {
+        if (!confirmed || identityResetPending) return;
+        identityResetPending = true;
+        deps.settingsClientResetEl.disabled = true;
+        try {
+          await deps.resetClientIdentity();
+        } catch (error) {
+          identityResetPending = false;
+          deps.settingsClientResetEl.disabled = false;
+          deps.toast(`Client identity reset failed: ${error instanceof Error ? error.message : String(error)}`, 5000);
+        }
+      });
+    });
     refreshConsoleWorkerId();
+    refreshClientIdentity();
   }
 
   return {

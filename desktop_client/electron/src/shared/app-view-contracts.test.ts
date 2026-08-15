@@ -18,6 +18,12 @@ test("Electron app-view identity is explicit and console-visible", () => {
 test("Electron app-view commands are strictly allowlisted", () => {
   assert.equal(validateElectronAppViewCommand("inspect"), "inspect");
   assert.equal(validateElectronAppViewCommand("force_asset_update"), "force_asset_update");
+  assert.equal(validateElectronAppViewCommand("read_client_identity"), "read_client_identity");
+  assert.equal(validateElectronAppViewCommand("reset_client_identity"), "reset_client_identity");
+  assert.equal(
+    validateElectronAppViewCommand("wait_for_app_prerequisites"),
+    "wait_for_app_prerequisites",
+  );
   assert.equal(
     validateElectronAppViewCommand("register_run_target_surface"),
     "register_run_target_surface",
@@ -33,6 +39,10 @@ test("Electron app-view commands are strictly allowlisted", () => {
   assert.equal(
     validateElectronAppViewCommand("write_sidebar_presentation_state"),
     "write_sidebar_presentation_state",
+  );
+  assert.equal(
+    validateElectronAppViewCommand("open_sidebar_menu"),
+    "open_sidebar_menu",
   );
   assert.equal(
     validateElectronAppViewCommand("detach_sidebar_surface"),

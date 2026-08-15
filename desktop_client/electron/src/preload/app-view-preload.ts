@@ -7,8 +7,10 @@ import {
   type ElectronAppViewInspection,
   type ElectronRunTargetDescriptor,
   type ElectronRunProfileRuntimeMetadata,
+  type ElectronSidebarSurfaceBounds,
   type ElectronSidebarSurfaceDescriptor,
   type ElectronSidebarSurfaceEvent,
+  type ElectronSidebarMenuRequest,
   type ElectronSidebarPresentationState,
 } from "../shared/app-view-contracts";
 import type { AssetUpdateResult } from "../shared/contracts";
@@ -60,6 +62,15 @@ const electronBridge: ElectronAppViewBridge = Object.freeze({
   home(): Promise<{ ok: true }> {
     return invokeElectron("home");
   },
+  readClientIdentity(): Promise<{ clientInstanceId: string }> {
+    return invokeElectron("read_client_identity");
+  },
+  resetClientIdentity(): Promise<{ clientInstanceId: string }> {
+    return invokeElectron("reset_client_identity");
+  },
+  waitForAppPrerequisites(appId: string): Promise<{ ok: true }> {
+    return invokeElectron("wait_for_app_prerequisites", { appId });
+  },
   forceAssetUpdate(): Promise<AssetUpdateResult> {
     return invokeElectron("force_asset_update");
   },
@@ -81,6 +92,22 @@ const electronBridge: ElectronAppViewBridge = Object.freeze({
   ): Promise<{ ok: true }> {
     return invokeElectron("write_sidebar_presentation_state", state);
   },
+  openSidebarMenu(
+    request: ElectronSidebarMenuRequest,
+  ): Promise<{ selectedId: string | null }> {
+    return invokeElectron("open_sidebar_menu", request);
+  },
+  placeSidebarSurface(
+    descriptor: ElectronSidebarSurfaceDescriptor,
+    bounds: ElectronSidebarSurfaceBounds,
+    visible: boolean,
+  ): Promise<{ ok: true; presentationId: string }> {
+    return invokeElectron("place_sidebar_surface", {
+      descriptor,
+      bounds,
+      visible,
+    });
+  },
   detachSidebarSurface(
     descriptor: ElectronSidebarSurfaceDescriptor,
     options: { focus?: boolean } = {},
@@ -95,6 +122,15 @@ const electronBridge: ElectronAppViewBridge = Object.freeze({
     presentationId?: string,
   ): Promise<{ ok: boolean }> {
     return invokeElectron("focus_sidebar_surface", {
+      surfaceId,
+      presentationId,
+    });
+  },
+  refreshSidebarSurface(
+    surfaceId: string,
+    presentationId?: string,
+  ): Promise<{ ok: boolean }> {
+    return invokeElectron("refresh_sidebar_surface", {
       surfaceId,
       presentationId,
     });

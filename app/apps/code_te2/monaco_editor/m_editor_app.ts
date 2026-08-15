@@ -128,8 +128,11 @@ import {
   fileEditorSocketQuery,
 } from "../src/rpc/socketio-topology.ts";
 import { registerEditorWbaRuntimeHandlers } from "./editor_wba_runtime_handlers.ts";
+import { createEditorExtensionNavigationRuntime } from "./editor_extension_navigation_runtime.ts";
 import { createEditorDebugRuntime } from "./editor_debug_runtime.ts";
 import { createEditorUiEditorRuntime } from "./editor_ui_editor_runtime.ts";
+import { createEditorExtensionMenuRuntime } from "./editor_extension_menu_runtime.ts";
+import { createEditorExtensionStateRuntime } from "./editor_extension_state_runtime.ts";
 import {
   createEditorCodeInspectorRuntime,
   type CodeInspectorRuntime,
@@ -188,6 +191,17 @@ interface MonacoRuntimeEditorLike {
   getDomNode?(): HTMLElement | null;
   onDidChangeConfiguration?(listener: () => void): void;
   onDidChangeModelContent(listener: () => void): { dispose(): void };
+  onDidChangeCursorSelection?(
+    listener: (event: { source?: string }) => void,
+  ): { dispose(): void };
+  onDidChangeModel?(listener: () => void): { dispose(): void };
+  getSelection?(): Record<string, unknown> | null;
+  setSelections?(selections: Record<string, number>[]): void;
+  focus?(): void;
+  revealRange?(range: Record<string, number>): void;
+  revealRangeInCenter?(range: Record<string, number>): void;
+  revealRangeInCenterIfOutsideViewport?(range: Record<string, number>): void;
+  revealRangeAtTop?(range: Record<string, number>): void;
   getScrollTop?(): number;
   setScrollTop?(value: number): void;
   getModel?(): MonacoRuntimeModelLike | null;
@@ -413,6 +427,12 @@ interface MonacoBootWindowLike extends Window {
   let scrollPublisherRuntime: EditorScrollPublisherRuntime | null = null;
   let diffThemeInstalled = false;
   let codeInspectorRuntime: CodeInspectorRuntime | null = null;
+  let extensionEditorMenuRuntime: ReturnType<
+    typeof createEditorExtensionMenuRuntime
+  > | null = null;
+  let extensionEditorStateRuntime: ReturnType<
+    typeof createEditorExtensionStateRuntime
+  > | null = null;
   var debugRuntime = createEditorDebugRuntime({
     getDocument: function () {
       return document;
@@ -468,6 +488,9 @@ interface MonacoBootWindowLike extends Window {
     },
     inspectCode: function (mode) {
       codeInspectorRuntime?.start(mode);
+    },
+    getExtensionNavigationTools: function (controls) {
+      return extensionEditorMenuRuntime?.navigationTools(controls) ?? [];
     },
     updateDebug: function (extra) {
       return debugRuntime.updateDebug(extra);
@@ -688,6 +711,30 @@ interface MonacoBootWindowLike extends Window {
     },
   });
   bindExtensionActivityTransport(editorWbaRpcTransport);
+  extensionEditorMenuRuntime = createEditorExtensionMenuRuntime({
+    getDocument: function () {
+      return document;
+    },
+    getCurrentPath: function () {
+      return currentPath;
+    },
+    rpcCall: editorWbaRpcCall,
+    notify: function (message) {
+      if (!editorRpcNotify(EDITOR_RPC_METHODS.notifyPublish, { message })) {
+        console.warn("[extension-menus]", message);
+      }
+    },
+    setTimeoutFn: _setTimeoutBound,
+    clearTimeoutFn: _clearTimeoutBound,
+  });
+  extensionEditorStateRuntime = createEditorExtensionStateRuntime({
+    getCurrentPath: function () {
+      return currentPath;
+    },
+    notify: editorWbaRpcNotify,
+    setTimeoutFn: _setTimeoutBound,
+    clearTimeoutFn: _clearTimeoutBound,
+  });
 
   var textmateRuntime = createEditorTextmateRuntime({
     getWindow: function () {
@@ -898,6 +945,16 @@ interface MonacoBootWindowLike extends Window {
     return editorWbaRpcTransport.notify(method, params || {});
   }
 
+  const extensionNavigationRuntime = createEditorExtensionNavigationRuntime({
+    getCurrentPath: function () {
+      return currentPath;
+    },
+    getEditor: function () {
+      return editor;
+    },
+    rpcCall: editorWbaRpcCall,
+  });
+
   function isEditorWbaRpcConnected(): boolean {
     return editorWbaRpcTransport.isConnected();
   }
@@ -996,6 +1053,11 @@ interface MonacoBootWindowLike extends Window {
     isWbaRpcConnected: isEditorWbaRpcConnected,
     wbaRpcCall: editorWbaRpcCall,
     wbaRpcNotify: editorWbaRpcNotify,
+    onActiveEditorOpenAck: function (path) {
+      if (path === currentPath) {
+        extensionEditorStateRuntime?.resync("open_ack");
+      }
+    },
     clearTimeoutFn: _clearTimeoutBound,
     setTimeoutFn: _setTimeoutBound,
   } as Parameters<typeof createEditorWorkbenchRuntime>[0]);
@@ -1049,6 +1111,8 @@ interface MonacoBootWindowLike extends Window {
     "pagehide",
     function () {
       codeInspectorRuntime?.dispose();
+      extensionEditorMenuRuntime?.dispose();
+      extensionEditorStateRuntime?.dispose();
     },
     { once: true },
   );
@@ -1449,6 +1513,8 @@ interface MonacoBootWindowLike extends Window {
     },
     setEditor: function (value: MonacoRuntimeEditorLike | null) {
       editor = value;
+      extensionEditorMenuRuntime?.attach(value);
+      extensionEditorStateRuntime?.attach(value);
     },
     getDiffEditor: function () {
       return diffEditor;
@@ -2347,12 +2413,25 @@ interface MonacoBootWindowLike extends Window {
             } catch (_) {}
           }
         },
+        notifyExtensionMessage: function (event) {
+          const message =
+            typeof event.message === "string"
+              ? event.message
+              : "Extension message";
+          if (!editorRpcNotify(EDITOR_RPC_METHODS.notifyPublish, { message })) {
+            console.warn("[extension-message]", message);
+          }
+        },
+        handleEditorOperation: function (event) {
+          void extensionNavigationRuntime.handle(event);
+        },
       });
 
       if (wbaRpcSocket && typeof wbaRpcSocket.on === "function") {
         wbaRpcSocket.on("connect", () => {
           console.log("[wba] socket connected");
           notifyExtensionActivityBridgeReady();
+          void extensionEditorMenuRuntime?.refresh("wba_connect");
           handleWbaSocketReadyForEditor("wba_socket_connect");
         });
         wbaRpcSocket.on("disconnect", () => {

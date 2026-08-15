@@ -1,14 +1,17 @@
 package com.termux.extensions
 
 import android.Manifest
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Bundle
 import android.os.Handler
 import android.util.Log
 import android.os.Looper
+import android.os.IBinder
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
@@ -66,9 +69,11 @@ class MainActivity : AppCompatActivity() {
 
     private val editorInputFilter = EditorInputFilter()
     private val composeConsoleState = ComposeConsoleState()
-    private var uiIpcClient: UiIpcClient? = null
-    private var runTargetProjectionClient: RunTargetProjectionClient? = null
-    private var nativeConsoleWorker: AndroidNativeConsoleWorker? = null
+    private var clientRuntimeService: PersistentNetworkService? = null
+    private var clientRuntimeBound = false
+    private var clientRuntimeInitializationStarted = false
+    private var pendingRuntimeGeneration: Long? = null
+    private var pendingStartupGeneration: Long? = null
     private var devToolsInspector: GeckoDevToolsInspector? = null
     private var devToolsInspectorEnabled = false
     private var devToolsInspectorStatus = "disabled"
@@ -81,7 +86,6 @@ class MainActivity : AppCompatActivity() {
 
     private var editorAssetManager: EditorAssetManager? = null
     private var localAssetServer: LocalAssetServer? = null
-    private var frameworkRelay: AndroidFrameworkRelay? = null
     private lateinit var androidSettingsStore: AndroidAppSettingsStore
     private lateinit var androidDiagnostics: AndroidDiagnostics
     @Volatile private var lastStartupFailure: String? = null
@@ -93,7 +97,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnConsoleStart: Button
 
     private val httpClient = OkHttpClient()
-    private val runTargetRelays = RunTargetRelayManager(httpClient)
     private val appHealthHttpClient = OkHttpClient.Builder()
         .connectTimeout(2, TimeUnit.SECONDS)
         .readTimeout(2, TimeUnit.SECONDS)
@@ -115,12 +118,121 @@ class MainActivity : AppCompatActivity() {
 
     private var canNavigateBack = false
 
-    private var inAppShell: Boolean = true
+    private var inAppShell: Boolean = false
     private var persistentNetworkNotificationEnabled: Boolean = false
     private var pendingSurfaceRecover: Boolean = false
     private var notificationPermissionRequestInFlight: Boolean = false
     private var persistentNetworkPermissionDenied: Boolean = false
     private var persistentNetworkStartFailed: Boolean = false
+
+    private val clientRuntimeObserver = object : AndroidClientRuntimeObserver {
+        override fun onRuntimeStateChanged(snapshot: AndroidClientRuntimeSnapshot) {
+            runOnUiThread {
+                frameworkBaseUrl = snapshot.frameworkBaseUrl
+                lastRunTargetError = snapshot.lastError
+                val expectedRuntime = pendingRuntimeGeneration
+                val startupGeneration = pendingStartupGeneration
+                if (
+                    expectedRuntime != null &&
+                    startupGeneration != null &&
+                    snapshot.generation == expectedRuntime &&
+                    snapshot.projectionReady
+                ) {
+                    clientStartupState.markProjectionReceived(startupGeneration)
+                    onRunTargetProjectionReady(startupGeneration)
+                }
+            }
+        }
+
+        override fun onImeContextChanged(active: Boolean) {
+            runOnUiThread {
+                editorInputFilter.isActive = active
+                val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
+                if (active) {
+                    geckoView.requestFocus()
+                    imm?.restartInput(geckoView)
+                    imm?.showSoftInput(geckoView, 0)
+                } else {
+                    imm?.restartInput(geckoView)
+                }
+            }
+        }
+
+        override fun onConsoleEvent(eventName: String, data: JSONObject) {
+            composeConsoleState.onConsoleEvent(eventName, data)
+        }
+
+        override fun onNativeConsoleCommand(
+            command: AndroidNativeConsoleCommand,
+            completion: (Result<JSONObject>) -> Unit,
+        ): Boolean {
+            when (command) {
+                AndroidNativeConsoleCommand.FORCE_UPDATE_AND_RELOAD ->
+                    forceUpdateAssetsAndReload(showFeedback = false, completion = completion)
+                AndroidNativeConsoleCommand.DEVTOOLS_STATE_GET -> runOnUiThread {
+                    val snapshot = devToolsInspector?.debugSnapshot()
+                        ?: JSONObject().put("available", false)
+                    snapshot
+                        .put("available", devToolsInspector != null)
+                        .put("configuredEnabled", devToolsInspectorEnabled)
+                        .put("status", devToolsInspectorStatus)
+                    completion(Result.success(snapshot))
+                }
+                AndroidNativeConsoleCommand.DEVTOOLS_TELEMETRY_CLEAR -> runOnUiThread {
+                    val snapshot = devToolsInspector?.clearDebugTelemetry()
+                        ?: JSONObject().put("available", false)
+                    snapshot
+                        .put("available", devToolsInspector != null)
+                        .put("configuredEnabled", devToolsInspectorEnabled)
+                        .put("status", devToolsInspectorStatus)
+                    completion(Result.success(snapshot))
+                }
+            }
+            return true
+        }
+    }
+
+    private val clientRuntimeConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+            val service = (binder as? PersistentNetworkService.LocalBinder)?.service ?: return
+            clientRuntimeService = service
+            clientRuntimeBound = true
+            service.addObserver(clientRuntimeObserver)
+            service.configure(androidSettingsStore.load())
+            service.setConsoleDrawerEnabled(
+                ::consoleOverlay.isInitialized &&
+                    consoleOverlay.visibility == View.VISIBLE &&
+                    toolsSelectedTab == NativeToolsTab.CONSOLE,
+                CONSOLE_TAIL_LINES,
+            )
+            if (!clientRuntimeInitializationStarted) {
+                clientRuntimeInitializationStarted = true
+                initEditorAssets { ready ->
+                    runOnUiThread {
+                        if (!ready) {
+                            Log.e(
+                                "MainActivity",
+                                "Local asset interceptor failed; Gecko navigation blocked",
+                            )
+                            showFatalStartupToast(
+                                "Local editor assets unavailable; navigation blocked",
+                            )
+                            return@runOnUiThread
+                        }
+                        devToolsInspector?.configure(devToolsInspectorEnabled) {
+                            runOnUiThread { unlockGeckoNavigation() }
+                        }
+                    }
+                }
+            }
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            clientRuntimeBound = false
+            clientRuntimeService = null
+            pendingRuntimeGeneration = null
+        }
+    }
 
     private fun prefs() = getSharedPreferences("gecko_session_state", Context.MODE_PRIVATE)
 
@@ -230,7 +342,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun currentFrameworkRelayOrigin(): String? =
-        frameworkRelay?.port?.takeIf { it > 0 }?.let { frameworkRelay?.browserOrigin }
+        clientRuntimeService?.browserFrameworkBaseUrl()
 
     private fun currentLauncherOrigin(): String? =
         localAssetServer?.port?.takeIf { it > 0 }?.let {
@@ -238,7 +350,7 @@ class MainActivity : AppCompatActivity() {
         }
 
     private fun browserFrameworkBaseUrl(): String =
-        frameworkRelay?.browserOrigin ?: frameworkBaseUrl
+        clientRuntimeService?.browserFrameworkBaseUrl() ?: frameworkBaseUrl
 
     private fun appIdFromRemoteAppUri(uri: Uri): String? {
         if (!isFrameworkOrigin(uri)) return null
@@ -601,22 +713,27 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updatePersistentNetworkService() {
-        if (!persistentNetworkNotificationEnabled || !inAppShell) {
-            stopPersistentNetworkServiceLocally()
-            persistentNetworkStartFailed = false
-            return
-        }
-
         if (persistentNetworkStartFailed) return
 
-        if (android.os.Build.VERSION.SDK_INT >= 33) {
+        if (
+            persistentNetworkNotificationEnabled &&
+            inAppShell &&
+            android.os.Build.VERSION.SDK_INT >= 33
+        ) {
             val granted = ContextCompat.checkSelfPermission(
                 this,
                 Manifest.permission.POST_NOTIFICATIONS
             ) == PackageManager.PERMISSION_GRANTED
             if (!granted) {
-                if (!persistentNetworkPermissionDenied && !notificationPermissionRequestInFlight) {
+                if (
+                    !persistentNetworkPermissionDenied &&
+                    !notificationPermissionRequestInFlight &&
+                    !prefs().getBoolean(PREF_NOTIFICATION_PERMISSION_REQUESTED, false)
+                ) {
                     notificationPermissionRequestInFlight = true
+                    prefs().edit()
+                        .putBoolean(PREF_NOTIFICATION_PERMISSION_REQUESTED, true)
+                        .apply()
                     ActivityCompat.requestPermissions(
                         this,
                         arrayOf(Manifest.permission.POST_NOTIFICATIONS),
@@ -627,8 +744,18 @@ class MainActivity : AppCompatActivity() {
         }
 
         try {
-            val intent = Intent(this, PersistentNetworkService::class.java)
-            if (android.os.Build.VERSION.SDK_INT >= 26) {
+            val settings = androidSettingsStore.load()
+            clientRuntimeService?.configure(settings)
+            clientRuntimeService?.setPersistentSessionActive(inAppShell)
+            val intent = PersistentNetworkService.runtimeIntent(this, inAppShell)
+            if (
+                shouldKeepAndroidRendererActive(
+                    persistentNetworkNotificationEnabled,
+                    inAppShell,
+                    frameworkBaseUrl,
+                ) &&
+                android.os.Build.VERSION.SDK_INT >= 26
+            ) {
                 ContextCompat.startForegroundService(this, intent)
             } else {
                 startService(intent)
@@ -641,7 +768,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopPersistentNetworkServiceLocally() {
         notificationPermissionRequestInFlight = false
-        stopService(Intent(this, PersistentNetworkService::class.java))
+        clientRuntimeService?.setPersistentSessionActive(false)
+        runCatching {
+            startService(PersistentNetworkService.runtimeIntent(this, false))
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -676,10 +806,10 @@ class MainActivity : AppCompatActivity() {
         composeConsoleState.bind(
             composeConsoleContainer,
             onSendEval = { code, target ->
-                uiIpcClient?.sendConsoleEval(code, target)
+                clientRuntimeService?.sendConsoleEval(code, target)
             },
             onRequestClear = {
-                uiIpcClient?.sendConsoleClear()
+                clientRuntimeService?.sendConsoleClear()
             },
         )
 
@@ -952,18 +1082,12 @@ class MainActivity : AppCompatActivity() {
         geckoSession.open(runtime)
         geckoView.setSession(geckoSession)
 
-        initEditorAssets { ready ->
-            runOnUiThread {
-                if (!ready) {
-                    Log.e("MainActivity", "Local asset interceptor failed; Gecko navigation blocked")
-                    showFatalStartupToast("Local editor assets unavailable; navigation blocked")
-                    return@runOnUiThread
-                }
-                devToolsInspector?.configure(devToolsInspectorEnabled) {
-                    runOnUiThread { unlockGeckoNavigation() }
-                }
-            }
-        }
+        startService(PersistentNetworkService.runtimeIntent(this))
+        bindService(
+            Intent(this, PersistentNetworkService::class.java),
+            clientRuntimeConnection,
+            Context.BIND_AUTO_CREATE,
+        )
     }
 
     private fun unlockGeckoNavigation() {
@@ -976,7 +1100,6 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         activityResumed = true
-        persistentNetworkPermissionDenied = false
         persistentNetworkStartFailed = false
         try {
             if (::geckoSession.isInitialized) geckoSession.setActive(true)
@@ -1011,9 +1134,16 @@ class MainActivity : AppCompatActivity() {
         activityResumed = false
         uiHandler.removeCallbacks(appHealthCheckRunnable)
         try { processesSession?.setActive(false) } catch (_: Exception) {}
-        try {
-            if (::geckoSession.isInitialized) geckoSession.setActive(false)
-        } catch (_: Exception) {
+        if (!shouldKeepAndroidRendererActive(
+                persistentNetworkNotificationEnabled,
+                inAppShell,
+                frameworkBaseUrl,
+            )
+        ) {
+            try {
+                if (::geckoSession.isInitialized) geckoSession.setActive(false)
+            } catch (_: Exception) {
+            }
         }
         super.onPause()
     }
@@ -1175,44 +1305,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun connectNativeConsoleWorker(frameworkUrl: String) {
-        val worker = nativeConsoleWorker ?: AndroidNativeConsoleWorker(
-            workerId = androidNativeConsoleWorkerId(this, "gecko"),
-            workerLabel = "android-gecko",
-        ) { command, completion ->
-            when (command) {
-                AndroidNativeConsoleCommand.FORCE_UPDATE_AND_RELOAD ->
-                    forceUpdateAssetsAndReload(
-                        showFeedback = false,
-                        completion = completion,
-                    )
-                AndroidNativeConsoleCommand.DEVTOOLS_STATE_GET ->
-                    runOnUiThread {
-                        val snapshot = devToolsInspector?.debugSnapshot()
-                            ?: JSONObject().put("available", false)
-                        snapshot
-                            .put("available", devToolsInspector != null)
-                            .put("configuredEnabled", devToolsInspectorEnabled)
-                            .put("status", devToolsInspectorStatus)
-                        completion(Result.success(snapshot))
-                    }
-                AndroidNativeConsoleCommand.DEVTOOLS_TELEMETRY_CLEAR ->
-                    runOnUiThread {
-                        val snapshot = devToolsInspector?.clearDebugTelemetry()
-                            ?: JSONObject().put("available", false)
-                        snapshot
-                            .put("available", devToolsInspector != null)
-                            .put("configuredEnabled", devToolsInspectorEnabled)
-                            .put("status", devToolsInspectorStatus)
-                        completion(Result.success(snapshot))
-                    }
-            }
-        }.also {
-            nativeConsoleWorker = it
-        }
-        worker.connect(frameworkUrl)
-    }
-
     private fun loadHome() {
         if (!::geckoSession.isInitialized) return
         if (!requireAssetInterceptor("home navigation")) return
@@ -1359,7 +1451,7 @@ class MainActivity : AppCompatActivity() {
         persistToolsState(overlayVisible = false)
         devToolsInspector?.setVisible(false)
         try { processesSession?.setActive(false) } catch (_: Exception) {}
-        uiIpcClient?.setConsoleDrawerEnabled(false)
+        clientRuntimeService?.setConsoleDrawerEnabled(false)
     }
 
     private fun toggleConsoleOverlay() {
@@ -1392,7 +1484,7 @@ class MainActivity : AppCompatActivity() {
         btnToolsInspector.isEnabled = !inspectorSelected
         btnToolsProcesses.isEnabled = !processesSelected
 
-        uiIpcClient?.setConsoleDrawerEnabled(
+        clientRuntimeService?.setConsoleDrawerEnabled(
             consoleOverlay.visibility == View.VISIBLE && consoleSelected,
             CONSOLE_TAIL_LINES,
         )
@@ -1433,7 +1525,7 @@ class MainActivity : AppCompatActivity() {
         if (!toolsState.overlayVisible) {
             devToolsInspector?.setVisible(false)
             try { processesSession?.setActive(false) } catch (_: Exception) {}
-            uiIpcClient?.setConsoleDrawerEnabled(false)
+            clientRuntimeService?.setConsoleDrawerEnabled(false)
         }
     }
 
@@ -1593,8 +1685,10 @@ class MainActivity : AppCompatActivity() {
         put("frameworkBaseUrl", frameworkBaseUrl)
         put("browserFrameworkBaseUrl", browserFrameworkBaseUrl())
         put("localAssetServerPort", localAssetServer?.port ?: 0)
-        put("frameworkRelayPort", frameworkRelay?.port ?: 0)
-        put("runTargets", runTargetRelays.debugSnapshot())
+        put(
+            "clientRuntime",
+            clientRuntimeService?.snapshot()?.toJson() ?: JSONObject.NULL,
+        )
         put("clientStartupPhase", clientStartupState.phaseName())
         put("assetRootExists", editorAssetManager?.getAssetRoot()?.exists() == true)
         put("localAssetVersion", editorAssetManager?.getLocalVersion() ?: JSONObject.NULL)
@@ -1636,13 +1730,12 @@ class MainActivity : AppCompatActivity() {
                 return
             }
 
-            // Start local file server
-            val relay = AndroidFrameworkRelay()
-            relay.start(frameworkBaseUrl)
-            frameworkRelay = relay
+            val runtimeService = clientRuntimeService
+                ?: throw IllegalStateException("Android client runtime is not bound")
             Log.i(
                 "MainActivity",
-                "Framework browser relay ${relay.browserOrigin} -> $frameworkBaseUrl",
+                "Framework browser relay ${runtimeService.browserFrameworkBaseUrl()} -> " +
+                    frameworkBaseUrl,
             )
 
             val gateway = AndroidShellGateway(
@@ -1654,7 +1747,11 @@ class MainActivity : AppCompatActivity() {
                 diagnosticsProvider = {
                     androidDiagnostics.snapshot(androidDiagnosticRuntimeState())
                 },
-                appUrlRewriter = relay::rewriteFrameworkUrl,
+                appUrlRewriter = runtimeService::rewriteFrameworkUrl,
+                settingsRuntimeProvider = {
+                    runtimeService.snapshot().toJson()
+                },
+                onOpenBatterySettings = runtimeService::openBatteryOptimizationSettings,
             )
             val server = LocalAssetServer(mgr.getAssetRoot(), gateway::handle)
             server.start()
@@ -1734,6 +1831,23 @@ class MainActivity : AppCompatActivity() {
                                             "Asset interceptor acknowledged local port $assetPort",
                                         )
                                         completeReady()
+                                    } else if (
+                                        payload.optString("type") == "client_identity_reset"
+                                    ) {
+                                        val requestId = payload.optString("requestId").trim()
+                                        if (requestId.isEmpty()) return
+                                        runOnUiThread {
+                                            clientRuntimeService?.resetClientIdentity()
+                                                ?: resetAndroidInstallationId(this@MainActivity)
+                                            source.postMessage(JSONObject().apply {
+                                                put("type", "client_identity_result")
+                                                put("requestId", requestId)
+                                                put(
+                                                    "clientInstanceId",
+                                                    androidClientInstanceId(this@MainActivity),
+                                                )
+                                            })
+                                        }
                                     }
                                 }
 
@@ -1747,6 +1861,10 @@ class MainActivity : AppCompatActivity() {
                                 put("type", "set_asset_port")
                                 put("port", assetPort)
                                 put("frameworkBaseUrl", browserFrameworkBaseUrl())
+                                put(
+                                    "clientInstanceId",
+                                    androidClientInstanceId(this@MainActivity),
+                                )
                             }
                             port.postMessage(msg)
                             Log.i("MainActivity", "Sent asset port $assetPort to extension")
@@ -1813,15 +1931,16 @@ class MainActivity : AppCompatActivity() {
         val frameworkChanged = frameworkBaseUrl != settings.frameworkBaseUrl
         frameworkBaseUrl = settings.frameworkBaseUrl
         if (frameworkChanged) {
-            runTargetProjectionClient?.disconnect()
-            runTargetProjectionClient = null
-            runTargetRelays.stopAll()
             lastRunTargetError = null
-            frameworkRelay?.retarget(frameworkBaseUrl)
+            clientRuntimeService?.configure(settings)
             assetExtensionPort?.postMessage(JSONObject().apply {
                 put("type", "set_asset_port")
                 put("port", localAssetServer?.port ?: 0)
                 put("frameworkBaseUrl", browserFrameworkBaseUrl())
+                put(
+                    "clientInstanceId",
+                    androidClientInstanceId(this@MainActivity),
+                )
             })
         }
         persistentNetworkNotificationEnabled = settings.persistentNetworkNotification
@@ -1833,10 +1952,7 @@ class MainActivity : AppCompatActivity() {
             reloadProcessesSessionForSettings()
             updateAppHealthMonitoring(immediate = true)
         }
-        uiIpcClient?.setImeContextSwitchingEnabled(settings.imeContextSwitchingEnabled)
-        uiIpcClient?.disconnect()
-        uiIpcClient = null
-        nativeConsoleWorker?.disconnect()
+        clientRuntimeService?.configure(settings)
         if (devToolsSettingChanged) {
             runOnUiThread {
                 updateDevToolsInspectorStatus(
@@ -1899,7 +2015,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun restoreSavedRemoteSession(health: AndroidRemoteAppHealth) {
         val appId = savedRemoteAppId()
-        if (health != AndroidRemoteAppHealth.HEALTHY || appId == null) {
+        if (health == AndroidRemoteAppHealth.UNHEALTHY || appId == null) {
             preservePersistedSessionUntilStartupReady = false
             loadHome()
             return
@@ -1948,21 +2064,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun onRunTargetProjectionReady(generation: Long) {
-        if (!clientStartupState.isCurrent(generation) || !runTargetRelays.isProjectionReady()) {
-            return
-        }
-        lastRunTargetError = null
-        dispatchClientStartupAction(clientStartupState.markProjectionReady(generation))
-    }
-
-    private fun onRunTargetProjectionFailed(generation: Long, error: Throwable) {
         if (!clientStartupState.isCurrent(generation)) return
-        clientStartupState.markProjectionFailed(generation)
-        val message = error.message ?: "Run target relay reconciliation failed"
-        Log.w("MainActivity", message, error)
-        if (lastRunTargetError == message) return
-        lastRunTargetError = message
-        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+        lastRunTargetError = null
+        pendingStartupGeneration = null
+        pendingRuntimeGeneration = null
+        dispatchClientStartupAction(clientStartupState.markProjectionReady(generation))
     }
 
     private fun startSavedRemoteSessionHealthCheck(
@@ -1999,97 +2105,31 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 appHealthProbeInFlight.set(false)
                 if (!activityResumed || !inAppShell || currentAppId != appId) return@runOnUiThread
-                if (health == AndroidRemoteAppHealth.HEALTHY) {
-                    appHealthFailureCount = 0
-                } else {
-                    appHealthFailureCount += 1
+                val fallback = evaluateRemoteAppFallback(
+                    health,
+                    appHealthFailureCount,
+                    APP_HEALTH_FAILURE_LIMIT,
+                )
+                appHealthFailureCount = fallback.consecutiveUnhealthyCount
+                if (health == AndroidRemoteAppHealth.UNHEALTHY) {
                     Log.w(
                         "MainActivity",
-                        "Remote app health failure $appHealthFailureCount/" +
+                        "Remote app authoritative health failure $appHealthFailureCount/" +
                             "$APP_HEALTH_FAILURE_LIMIT app=$appId state=$health",
                     )
+                } else if (health == AndroidRemoteAppHealth.UNREACHABLE) {
+                    Log.w(
+                        "MainActivity",
+                        "Remote app health transport unavailable; preserving app=$appId",
+                    )
                 }
-                if (appHealthFailureCount >= APP_HEALTH_FAILURE_LIMIT) {
+                if (fallback.loadHome) {
                     loadHome()
                 } else {
                     updateAppHealthMonitoring()
                 }
             }
         }.start()
-    }
-
-    private fun connectUiIpc(
-        settings: AndroidAppSettings,
-        frameworkUrl: String,
-    ) {
-        uiIpcClient?.disconnect()
-        val client = UiIpcClient(
-            filter = editorInputFilter,
-            clientId = androidNativeConsoleWorkerId(this, "gecko"),
-            imeContextSwitchingEnabled = settings.imeContextSwitchingEnabled,
-        ) { active ->
-            runOnUiThread {
-                val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
-                if (active) {
-                    geckoView.requestFocus()
-                    imm?.restartInput(geckoView)
-                    imm?.showSoftInput(geckoView, 0)
-                } else {
-                    imm?.restartInput(geckoView)
-                }
-            }
-        }
-        client.onConsoleEvent = { eventName, data ->
-            composeConsoleState.onConsoleEvent(eventName, data)
-        }
-        uiIpcClient = client
-        client.connect(frameworkUrl)
-        if (
-            consoleOverlay.visibility == View.VISIBLE &&
-            toolsSelectedTab == NativeToolsTab.CONSOLE
-        ) {
-            client.setConsoleDrawerEnabled(true, CONSOLE_TAIL_LINES)
-        }
-    }
-
-    private fun connectRunTargetProjection(
-        generation: Long,
-        frameworkUrl: String,
-    ) {
-        if (!clientStartupState.isCurrent(generation)) return
-        runTargetProjectionClient?.disconnect()
-        val client = RunTargetProjectionClient(httpClient)
-        client.onProjection = projection@{ projection ->
-            if (!clientStartupState.markProjectionReceived(generation)) return@projection
-            runCatching {
-                runTargetRelays.updateRouteProjection(
-                    projection,
-                    frameworkUrl,
-                ) { result ->
-                    runOnUiThread {
-                        result.fold(
-                            onSuccess = { onRunTargetProjectionReady(generation) },
-                            onFailure = { error ->
-                                onRunTargetProjectionFailed(generation, error)
-                            },
-                        )
-                    }
-                }
-            }.onFailure { error ->
-                runOnUiThread { onRunTargetProjectionFailed(generation, error) }
-            }
-        }
-        client.onTransportUnavailable = unavailable@{ error ->
-            if (!clientStartupState.isCurrent(generation)) return@unavailable
-            clientStartupState.markAuthorityUnavailable(generation)
-            Log.w(
-                "MainActivity",
-                "Authoritative Run Target stream unavailable; retaining current listeners",
-                error,
-            )
-        }
-        runTargetProjectionClient = client
-        client.connect(frameworkUrl)
     }
 
     private fun wakeFrameworkAndLoad(
@@ -2128,11 +2168,12 @@ class MainActivity : AppCompatActivity() {
 
             if (!clientStartupState.isCurrent(generation)) return@Thread
             frameworkBaseUrl = frameworkUrl
-            val relayError = runCatching {
-                val relay = frameworkRelay
-                    ?: throw IllegalStateException("Android framework relay is not running")
-                relay.retarget(frameworkUrl)
-            }.exceptionOrNull()
+            val runtimeSnapshot = runCatching {
+                val runtimeService = clientRuntimeService
+                    ?: throw IllegalStateException("Android client runtime is not bound")
+                runtimeService.configure(settings)
+            }
+            val relayError = runtimeSnapshot.exceptionOrNull()
             if (relayError != null) {
                 Log.e("MainActivity", "Framework relay startup gate failed", relayError)
                 runOnUiThread {
@@ -2145,18 +2186,19 @@ class MainActivity : AppCompatActivity() {
                 return@Thread
             }
             if (!clientStartupState.markFrameworkRelayReady(generation)) return@Thread
+            val snapshot = runtimeSnapshot.getOrThrow()
+            pendingRuntimeGeneration = snapshot.generation
+            pendingStartupGeneration = generation
 
             // The configured framework relay is authoritative and must exist
             // before any remote Run Target request, app-health probe, or page
             // restoration. The projection stream always starts with a fresh,
             // no-store snapshot from the remote Rust registry.
-            runOnUiThread {
-                if (!clientStartupState.isCurrent(generation)) return@runOnUiThread
-                try {
-                    connectRunTargetProjection(generation, frameworkUrl)
-                    connectUiIpc(settings, frameworkUrl)
-                } catch (error: Exception) {
-                    onRunTargetProjectionFailed(generation, error)
+            if (snapshot.projectionReady) {
+                runOnUiThread {
+                    if (!clientStartupState.isCurrent(generation)) return@runOnUiThread
+                    clientStartupState.markProjectionReceived(generation)
+                    onRunTargetProjectionReady(generation)
                 }
             }
             if (hasSavedRemoteSession) {
@@ -2194,7 +2236,6 @@ class MainActivity : AppCompatActivity() {
                 android.util.Log.w("MainActivity", "Asset server check failed", e)
             }
 
-            connectNativeConsoleWorker(frameworkUrl)
             if (!hasSavedRemoteSession && !shouldLoadHome) {
                 runOnUiThread {
                     try {
@@ -2226,13 +2267,16 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         uiHandler.removeCallbacks(appHealthCheckRunnable)
-        runTargetProjectionClient?.disconnect()
-        runTargetProjectionClient = null
-        uiIpcClient?.disconnect()
-        uiIpcClient = null
-        nativeConsoleWorker?.disconnect()
-        nativeConsoleWorker = null
-        runTargetRelays.close()
+        if (isFinishing && !isChangingConfigurations) {
+            clientRuntimeService?.setPersistentSessionActive(false)
+            stopService(PersistentNetworkService.runtimeIntent(this))
+        }
+        clientRuntimeService?.removeObserver(clientRuntimeObserver)
+        if (clientRuntimeBound) {
+            unbindService(clientRuntimeConnection)
+            clientRuntimeBound = false
+        }
+        clientRuntimeService = null
         devToolsInspector?.release()
         devToolsInspector = null
         try { processesGeckoView.releaseSession() } catch (_: Exception) {}
@@ -2241,8 +2285,6 @@ class MainActivity : AppCompatActivity() {
         releaseAssetInterceptor()
         localAssetServer?.stop()
         localAssetServer = null
-        frameworkRelay?.stop()
-        frameworkRelay = null
         if (::geckoSession.isInitialized) {
             geckoSession.close()
         }
@@ -2255,6 +2297,8 @@ class MainActivity : AppCompatActivity() {
         private const val PREF_LAST_URL = "last_url"
         private const val PREF_SESSION_FRAMEWORK_ORIGIN = "session_framework_origin"
         private const val PREF_SESSION_LAUNCHER_ORIGIN = "session_launcher_origin"
+        private const val PREF_NOTIFICATION_PERMISSION_REQUESTED =
+            "notification_permission_requested"
         private const val DEFAULT_FRAMEWORK_URL = "http://127.0.0.1:8089"
         private const val ASSET_INTERCEPT_READY_TIMEOUT_MS = 10_000L
         private const val APP_HEALTH_INTERVAL_MS = 2_000L

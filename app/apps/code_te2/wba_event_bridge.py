@@ -55,6 +55,12 @@ def reset_wba_project_event_state() -> None:
         reset_diagnostics_projection()
     except Exception:
         pass
+    try:
+        from .extension_navigation_backend import reset_extension_navigation
+
+        reset_extension_navigation("WBA project event state reset")
+    except Exception:
+        pass
 
 
 async def _handle_watcher_enospc(ev: JsonObject) -> None:
@@ -169,6 +175,14 @@ async def _dispatch_wba_event(ev: JsonObject) -> None:
         from .diagnostics_bridge import handle_wba_diagnostics_update
 
         await handle_wba_diagnostics_update(ev)
+        return
+    if ev_type == "extension/editorOpenRequested":
+        from .extension_navigation_backend import schedule_extension_open
+
+        schedule_extension_open(ev)
+        return
+    if ev_type == "webview/snapshot":
+        await _handle_webview_snapshot(ev)
 
 
 async def dispatch_wba_pipe_event(ev: JsonObject) -> None:
@@ -241,6 +255,126 @@ async def _handle_workspace_switched(ev: JsonObject) -> None:
         )
     except Exception as exc:
         print(f"[wba_event_bridge] workspace/switched handling failed: {exc}", flush=True)
+
+
+async def _handle_webview_snapshot(ev: JsonObject) -> None:
+    from pathlib import Path
+
+    from .ui_ipc.sidebar_window_state import get_sidebar_window_state
+    from .ui_ipc.sidebar_ws import (
+        handle_ui_sidebar_window_close_request,
+        handle_ui_sidebar_window_create_request,
+    )
+
+    raw_root = ev.get("workspaceFolder")
+    if not isinstance(raw_root, str) or not raw_root.strip():
+        return
+    project_root = str(Path(raw_root).expanduser().resolve(strict=False))
+    backend_root = _event_workspace_root({})
+    surfaces = _json_object_list(ev.get("surfaces", []))
+    admitted: dict[str, JsonObject] = {}
+    for raw_surface in surfaces:
+        if str(raw_surface.get("dto") or "") != "ExtensionWebviewSurface":
+            continue
+        if _int_value(raw_surface.get("version"), 0) != 1:
+            continue
+        surface_project = str(raw_surface.get("projectPath") or "").strip()
+        host_id = str(raw_surface.get("hostId") or "").strip()
+        surface_id = str(raw_surface.get("surfaceId") or "").strip()
+        extension_id = str(raw_surface.get("extensionId") or "").strip()
+        view_id = str(raw_surface.get("viewId") or "").strip()
+        workspace_id = str(raw_surface.get("workspaceId") or "").strip()
+        surface_kind = str(raw_surface.get("surfaceKind") or "view").strip()
+        url = str(raw_surface.get("url") or "").strip()
+        if not all(
+            (
+                surface_project,
+                host_id,
+                surface_id,
+                extension_id,
+                view_id,
+                workspace_id,
+                url,
+            )
+        ):
+            continue
+        normalized_project = str(
+            Path(surface_project).expanduser().resolve(strict=False)
+        )
+        if normalized_project != project_root:
+            continue
+        admitted[host_id] = {
+            "dto": "ExtensionWebviewSurface",
+            "version": 1,
+            "surfaceId": surface_id,
+            "hostId": host_id,
+            "workspaceId": workspace_id,
+            "projectPath": normalized_project,
+            "extensionId": extension_id,
+            "viewId": view_id,
+            "surfaceKind": surface_kind if surface_kind in {"view", "panel"} else "view",
+            "url": url,
+            "iconUrl": str(raw_surface.get("iconUrl") or "").strip(),
+            "retainContextWhenHidden": bool(
+                raw_surface.get("retainContextWhenHidden")
+            ),
+            "viewColumn": _int_value(raw_surface.get("viewColumn"), 0),
+        }
+
+    state = _json_object(get_sidebar_window_state())
+    slots = _json_object(state.get("slots", {}))
+    for host_id, raw_slot in slots.items():
+        slot = _json_object(raw_slot)
+        surface = _json_object(
+            slot.get("webviewSurface") or slot.get("webview_surface")
+        )
+        if not surface:
+            continue
+        slot_project = str(surface.get("projectPath") or "").strip()
+        if slot_project != project_root or host_id in admitted:
+            continue
+        _ = await handle_ui_sidebar_window_close_request(
+            {
+                "host_id": host_id,
+                "hostId": host_id,
+                "client_id": "main_page",
+                "source": "wba_event_bridge:webview_snapshot",
+            }
+        )
+
+    if backend_root != project_root:
+        return
+    for raw_surface in surfaces:
+        host_id = str(raw_surface.get("hostId") or "").strip()
+        surface = admitted.get(host_id)
+        if surface is None:
+            continue
+        title = str(raw_surface.get("title") or raw_surface.get("viewId") or "Extension")
+        url = str(surface["url"])
+        icon_url = str(surface.get("iconUrl") or "").strip()
+        extension_id = str(surface.get("extensionId") or "Extension")
+        _ = await handle_ui_sidebar_window_create_request(
+            {
+                "kind": "url",
+                "host_id": host_id,
+                "hostId": host_id,
+                "title": title,
+                "label": title,
+                "url": url,
+                "restore_url": url,
+                "load": "eager",
+                "activate": False,
+                "client_id": "main_page",
+                "source": "wba_event_bridge:webview_snapshot",
+                "version": str(raw_surface.get("htmlRevision") or 0),
+                "icon": (
+                    {"kind": "image", "src": icon_url}
+                    if icon_url
+                    else {"kind": "text", "text": extension_id[:2].upper()}
+                ),
+                "webviewSurface": surface,
+            }
+        )
 
 
 def _event_workspace_root(ev: JsonObject) -> str | None:

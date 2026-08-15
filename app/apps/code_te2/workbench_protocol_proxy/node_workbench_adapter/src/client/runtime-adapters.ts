@@ -372,8 +372,12 @@ export interface ExtHostDispatchRuntimeDeps {
   mainThreadLoggerRpcId: number;
   mainThreadOutputServiceRpcId: number;
   mainThreadStatusBarRpcId: number;
+  mainThreadStorageRpcId: number;
   extHostWorkspaceRpcId: number;
   extensionActivity: ExtHostDispatchRuntime["extensionActivity"];
+  initializeExtensionStorage: ExtHostDispatchRuntime["initializeExtensionStorage"];
+  setExtensionStorageValue: ExtHostDispatchRuntime["setExtensionStorageValue"];
+  handleWebviewRequest: ExtHostDispatchRuntime["handleWebviewRequest"];
   debugExtReqSeen: number;
   setDebugExtReqSeen: (value: number) => void;
   debugExtReplySeen: number;
@@ -786,9 +790,13 @@ export function createExtHostDispatchRuntime(deps: ExtHostDispatchRuntimeDeps): 
       MainThreadLogger: deps.mainThreadLoggerRpcId,
       MainThreadOutputService: deps.mainThreadOutputServiceRpcId,
       MainThreadStatusBar: deps.mainThreadStatusBarRpcId,
+      MainThreadStorage: deps.mainThreadStorageRpcId,
       ExtHostWorkspace: deps.extHostWorkspaceRpcId,
     },
     extensionActivity: deps.extensionActivity,
+    initializeExtensionStorage: (shared, extensionId) => deps.initializeExtensionStorage(shared, extensionId),
+    setExtensionStorageValue: (shared, extensionId, value) => deps.setExtensionStorageValue(shared, extensionId, value),
+    handleWebviewRequest: (message) => deps.handleWebviewRequest(message),
     debug: {
       shouldEmitExtRequestEvent: () => currentDebugExtReqSeen < 200,
       markExtRequestEvent: () => {

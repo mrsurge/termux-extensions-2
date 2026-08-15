@@ -308,9 +308,12 @@ pub(crate) fn should_forward_request_header(name: &str) -> bool {
 }
 
 pub(crate) fn should_forward_response_header(name: &str) -> bool {
-    !is_hop_by_hop_header(name)
-        && !name.eq_ignore_ascii_case("content-length")
-        && !name.eq_ignore_ascii_case("content-encoding")
+    // reqwest is built without response-decompression features, so encoded
+    // upstream bodies remain byte-for-byte encoded. Preserve Content-Encoding
+    // or browsers will try to parse compressed bytes as the declared media
+    // type. Content-Length is still omitted because Axum owns downstream body
+    // framing for both buffered and streamed responses.
+    !is_hop_by_hop_header(name) && !name.eq_ignore_ascii_case("content-length")
 }
 
 fn is_hop_by_hop_header(name: &str) -> bool {
@@ -322,4 +325,77 @@ fn is_hop_by_hop_header(name: &str) -> bool {
         || name.eq_ignore_ascii_case("trailer")
         || name.eq_ignore_ascii_case("transfer-encoding")
         || name.eq_ignore_ascii_case("upgrade")
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::{
+        body::{Bytes, to_bytes},
+        http::{HeaderMap, HeaderValue, Method, header},
+    };
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    use super::{proxy_streaming_http_request, should_forward_response_header};
+
+    #[test]
+    fn response_header_filter_preserves_content_encoding() {
+        assert!(should_forward_response_header("content-encoding"));
+        assert!(should_forward_response_header("Content-Encoding"));
+        assert!(!should_forward_response_header("content-length"));
+        assert!(!should_forward_response_header("transfer-encoding"));
+    }
+
+    #[tokio::test]
+    async fn streaming_proxy_preserves_encoded_body_contract() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test upstream");
+        let address = listener.local_addr().expect("test upstream address");
+        let encoded_body = Bytes::from_static(b"not-decoded-brotli-bytes");
+        let expected_body = encoded_body.clone();
+
+        let upstream = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("accept proxy request");
+            let mut request = vec![0_u8; 4096];
+            let read = socket.read(&mut request).await.expect("read proxy request");
+            let request = String::from_utf8_lossy(&request[..read]).to_ascii_lowercase();
+            assert!(request.contains("accept-encoding: br"));
+
+            let headers = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/javascript\r\nContent-Encoding: br\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                encoded_body.len()
+            );
+            socket
+                .write_all(headers.as_bytes())
+                .await
+                .expect("write upstream headers");
+            socket
+                .write_all(&encoded_body)
+                .await
+                .expect("write encoded upstream body");
+        });
+
+        let mut request_headers = HeaderMap::new();
+        request_headers.insert(header::ACCEPT_ENCODING, HeaderValue::from_static("br"));
+        let response = proxy_streaming_http_request(
+            &reqwest::Client::new(),
+            Method::GET,
+            request_headers,
+            Bytes::new(),
+            format!("http://{address}/extension.js"),
+            Vec::new(),
+        )
+        .await;
+
+        assert_eq!(response.status(), 200);
+        assert_eq!(
+            response.headers().get(header::CONTENT_ENCODING),
+            Some(&HeaderValue::from_static("br"))
+        );
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("read proxied body");
+        assert_eq!(body, expected_body);
+        upstream.await.expect("test upstream task");
+    }
 }

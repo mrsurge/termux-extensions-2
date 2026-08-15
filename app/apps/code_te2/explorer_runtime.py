@@ -122,7 +122,7 @@ class ExplorerDispatcher:
 
     async def cleanup(self) -> None:
         if self._bootstrap_task is not None:
-            self._bootstrap_task.cancel()
+            _ = self._bootstrap_task.cancel()
             try:
                 await self._bootstrap_task
             except asyncio.CancelledError:
@@ -1183,6 +1183,48 @@ class ExplorerDispatcher:
         await handle_pulse_alive(self._build_integration_context(), params, msg_id)
 
     # ── Extension registry handlers ───────────────────────────────────
+
+    async def handle_ext_menu_resolve(
+        self,
+        payload: JsonObject,
+        msg_id: str | None,
+    ) -> None:
+        from .explorer.contracts.extension_menus import (
+            ExplorerExtensionMenuContractError,
+            parse_extension_menu_resolve_params,
+        )
+        from .explorer.handlers.extension_menus import handle_extension_menu_resolve
+
+        try:
+            params = parse_extension_menu_resolve_params(payload)
+        except ExplorerExtensionMenuContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+        await handle_extension_menu_resolve(
+            self._build_extension_context(),
+            params,
+            msg_id,
+        )
+
+    async def handle_ext_command_execute(
+        self,
+        payload: JsonObject,
+        msg_id: str | None,
+    ) -> None:
+        from .explorer.contracts.extension_menus import (
+            ExplorerExtensionMenuContractError,
+            parse_extension_command_params,
+        )
+        from .explorer.handlers.extension_menus import handle_extension_command_execute
+
+        try:
+            params = parse_extension_command_params(payload)
+        except ExplorerExtensionMenuContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+        await handle_extension_command_execute(
+            self._build_extension_context(),
+            params,
+            msg_id,
+        )
 
     async def handle_ext_list(self, payload: JsonObject, msg_id: str | None) -> None:
         from .explorer.contracts.extensions import (

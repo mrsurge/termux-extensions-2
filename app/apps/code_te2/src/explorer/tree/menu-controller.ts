@@ -24,6 +24,11 @@ interface ExplorerTreeMenuControllerDeps {
   getProjectPath(): string | null;
   hasExplorerRpc(): boolean;
   notifyExplorer(method: ExplorerRpcMethod, payload: JsonObject): void;
+  requestExplorer(
+    method: ExplorerRpcMethod,
+    payload: JsonObject,
+    timeoutMs?: number,
+  ): Promise<JsonObject>;
   buildSidebarMentionPayload(payload: JsonObject): JsonObject;
   toast(message: string): void;
   isInSelectMode(rel: string | null): boolean;
@@ -39,6 +44,14 @@ interface ExplorerTreeMenuControllerDeps {
 }
 
 type ExplorerFilePicker = NonNullable<Window['teFilePicker']>;
+
+interface ExplorerExtensionMenuAction {
+  command: string;
+  title: string;
+  category: string | null;
+  enabled: boolean;
+  alternate: { command: string; title: string } | null;
+}
 
 function hasPathChoice(
   value: unknown,
@@ -103,6 +116,7 @@ export function createExplorerTreeMenuController(
   let cardMenu: HTMLElement | null =
     document.querySelector<HTMLElement>('.fe-card-menu');
   let currentMenuButton: HTMLElement | null = null;
+  let menuSequence = 0;
 
   function ensureCardMenu(): HTMLElement {
     if (cardMenu) {
@@ -121,6 +135,123 @@ export function createExplorerTreeMenuController(
     }
     cardMenu.classList.remove('show');
     currentMenuButton = null;
+    menuSequence += 1;
+  }
+
+  function parseExtensionActions(value: unknown): ExplorerExtensionMenuAction[] {
+    if (!value || typeof value !== 'object') return [];
+    const rawActions = (value as { actions?: unknown }).actions;
+    if (!Array.isArray(rawActions)) return [];
+    const actions: ExplorerExtensionMenuAction[] = [];
+    for (const raw of rawActions) {
+      if (!raw || typeof raw !== 'object') continue;
+      const record = raw as Record<string, unknown>;
+      const command = typeof record.command === 'string' ? record.command : '';
+      const title = typeof record.title === 'string' ? record.title : '';
+      if (!command || !title) continue;
+      const alternateRaw = record.alternate;
+      const alternate = alternateRaw && typeof alternateRaw === 'object'
+        && typeof (alternateRaw as Record<string, unknown>).command === 'string'
+        && typeof (alternateRaw as Record<string, unknown>).title === 'string'
+        ? {
+            command: String((alternateRaw as Record<string, unknown>).command),
+            title: String((alternateRaw as Record<string, unknown>).title),
+          }
+        : null;
+      actions.push({
+        command,
+        title,
+        category: typeof record.category === 'string' ? record.category : null,
+        enabled: record.enabled !== false,
+        alternate,
+      });
+    }
+    return actions;
+  }
+
+  function positionCardMenu(menu: HTMLElement, anchorEl: HTMLElement): void {
+    const rect = anchorEl.getBoundingClientRect();
+    const menuWidth = menu.offsetWidth || 200;
+    const menuHeight = menu.offsetHeight || 200;
+    const viewportWidth = document.documentElement.clientWidth;
+    const viewportHeight = document.documentElement.clientHeight;
+    let left = rect.right - menuWidth;
+    if (left < 8) left = 8;
+    if (left + menuWidth > viewportWidth - 8) {
+      left = Math.max(8, viewportWidth - menuWidth - 8);
+    }
+    let top = rect.bottom;
+    if (top + menuHeight > viewportHeight - 8) {
+      top = Math.max(8, rect.top - menuHeight);
+    }
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+  }
+
+  async function executeExtensionAction(
+    entry: ExplorerTreeMenuEntry,
+    action: ExplorerExtensionMenuAction,
+    useAlternate: boolean,
+  ): Promise<void> {
+    if (!action.enabled) return;
+    const selected = getSelectedPaths();
+    const selectedRels = selected.includes(entry.rel) ? selected : [entry.rel];
+    const command = useAlternate && action.alternate
+      ? action.alternate.command
+      : action.command;
+    closeCardMenu();
+    try {
+      await deps.requestExplorer(
+        EXPLORER_RPC_METHODS.extensionsCommandExecute,
+        { rel: entry.rel, selected_rels: selectedRels, command },
+        45000,
+      );
+    } catch (error) {
+      deps.toast(deps.getErrorMessage(error, 'Extension command failed'));
+    }
+  }
+
+  function appendExtensionSubmenu(
+    menu: HTMLElement,
+    entry: ExplorerTreeMenuEntry,
+    actions: ExplorerExtensionMenuAction[],
+  ): void {
+    if (!actions.length) return;
+    const divider = document.createElement('div');
+    divider.className = 'fe-dd-divider';
+    menu.appendChild(divider);
+    const trigger = document.createElement('div');
+    trigger.className = 'fe-dd-item fe-extension-context-trigger';
+    const label = document.createElement('span');
+    label.textContent = 'Extension Context';
+    const arrow = document.createElement('span');
+    arrow.textContent = '›';
+    arrow.setAttribute('aria-hidden', 'true');
+    trigger.append(label, arrow);
+    const submenu = document.createElement('div');
+    submenu.className = 'fe-extension-context-submenu';
+    for (const action of actions) {
+      const item = document.createElement('div');
+      item.className = 'fe-dd-item';
+      item.textContent = action.category
+        ? `${action.category}: ${action.title}`
+        : action.title;
+      if (!action.enabled) item.classList.add('fe-dd-item-disabled');
+      item.addEventListener('click', (event) => {
+        event.stopPropagation();
+        void executeExtensionAction(entry, action, event.altKey);
+      });
+      submenu.appendChild(item);
+    }
+    trigger.appendChild(submenu);
+    trigger.addEventListener('click', (event) => {
+      if (event.target instanceof Element && event.target.closest('.fe-extension-context-submenu')) {
+        return;
+      }
+      event.stopPropagation();
+      trigger.classList.toggle('open');
+    });
+    menu.appendChild(trigger);
   }
 
   function getSelectedPaths(): string[] {
@@ -815,33 +946,30 @@ export function createExplorerTreeMenuController(
     }
 
     currentMenuButton = anchorEl;
+    const sequence = ++menuSequence;
     menu.innerHTML = '';
     menu.classList.add('show');
 
     const items = getMenuItems(entry);
     items.forEach((item) => appendMenuItem(menu, entry, item));
-
-    const rect = anchorEl.getBoundingClientRect();
-    const menuWidth = menu.offsetWidth || 200;
-    const menuHeight = menu.offsetHeight || 200;
-    const viewportWidth = document.documentElement.clientWidth;
-    const viewportHeight = document.documentElement.clientHeight;
-
-    let left = rect.right - menuWidth;
-    if (left < 8) {
-      left = 8;
+    positionCardMenu(menu, anchorEl);
+    if (deps.hasExplorerRpc()) {
+      void deps.requestExplorer(
+        EXPLORER_RPC_METHODS.extensionsMenuResolve,
+        { rel: entry.rel },
+        15000,
+      ).then((result) => {
+        if (
+          sequence !== menuSequence
+          || currentMenuButton !== anchorEl
+          || !menu.classList.contains('show')
+        ) return;
+        appendExtensionSubmenu(menu, entry, parseExtensionActions(result));
+        positionCardMenu(menu, anchorEl);
+      }).catch((error) => {
+        console.warn('[explorer-extension-menu] resolve failed', error);
+      });
     }
-    if (left + menuWidth > viewportWidth - 8) {
-      left = Math.max(8, viewportWidth - menuWidth - 8);
-    }
-
-    let top = rect.bottom;
-    if (top + menuHeight > viewportHeight - 8) {
-      top = Math.max(8, rect.top - menuHeight);
-    }
-
-    menu.style.left = `${left}px`;
-    menu.style.top = `${top}px`;
   }
 
   return {

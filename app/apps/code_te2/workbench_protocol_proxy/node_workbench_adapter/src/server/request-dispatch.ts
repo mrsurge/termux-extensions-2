@@ -60,6 +60,21 @@ export interface WorkbenchLike {
   selectExtensionLog: (
     params: Record<string, unknown>,
   ) => Promise<Record<string, unknown>>;
+  extensionMenuResolve: (
+    params: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
+  extensionCommandExecute: (
+    params: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
+  extensionNavigationComplete: (
+    params: Record<string, unknown>,
+  ) => Record<string, unknown>;
+  extensionEditorOperationComplete: (
+    params: Record<string, unknown>,
+  ) => Record<string, unknown>;
+  extensionEditorStateUpdate: (
+    params: Record<string, unknown>,
+  ) => Record<string, unknown>;
   resolveLanguageId: (
     path: string,
     text: string,
@@ -153,6 +168,14 @@ export interface WorkbenchLike {
   didChange: (
     params: Record<string, unknown>,
   ) => Record<string, unknown> | Promise<Record<string, unknown>>;
+  webviewAttach: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  webviewMessage: (params: Record<string, unknown>) => Record<string, unknown>;
+  webviewState: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  webviewClientStateReset: (
+    params: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
+  webviewVisibility: (params: Record<string, unknown>) => Record<string, unknown>;
+  webviewDispose: (params: Record<string, unknown>) => Record<string, unknown>;
 }
 
 export interface ServerDispatchRuntime {
@@ -276,6 +299,30 @@ export async function dispatchJsonRpcRequest(
 
   if (method === "te2.language_catalog") {
     return success(id, await runtime.wb.languageCatalog());
+  }
+
+  if (method === "vscode.webview.attach") {
+    return success(id, await runtime.wb.webviewAttach(params));
+  }
+
+  if (method === "vscode.webview.message") {
+    return success(id, runtime.wb.webviewMessage(params));
+  }
+
+  if (method === "vscode.webview.state") {
+    return success(id, await runtime.wb.webviewState(params));
+  }
+
+  if (method === "vscode.webview.clientState.reset") {
+    return success(id, await runtime.wb.webviewClientStateReset(params));
+  }
+
+  if (method === "vscode.webview.visibility") {
+    return success(id, runtime.wb.webviewVisibility(params));
+  }
+
+  if (method === "vscode.webview.dispose") {
+    return success(id, runtime.wb.webviewDispose(params));
   }
 
   if (method === "te2.status" || method === "adapter.status") {
@@ -447,6 +494,42 @@ export async function dispatchJsonRpcRequest(
     } catch (error) {
       return failure(id, -32602, error);
     }
+  }
+
+  if (method === "vscode.extensionMenus.resolve") {
+    try {
+      return success(id, await runtime.wb.extensionMenuResolve(params));
+    } catch (error) {
+      return failure(id, -32602, error);
+    }
+  }
+
+  if (method === "vscode.extensionCommands.execute") {
+    try {
+      return success(id, await runtime.wb.extensionCommandExecute(params));
+    } catch (error) {
+      return failure(id, -32000, error);
+    }
+  }
+
+  if (method === "vscode.extensionNavigation.complete") {
+    try {
+      return success(id, runtime.wb.extensionNavigationComplete(params));
+    } catch (error) {
+      return failure(id, -32602, error);
+    }
+  }
+
+  if (method === "vscode.editorOperation.complete") {
+    try {
+      return success(id, runtime.wb.extensionEditorOperationComplete(params));
+    } catch (error) {
+      return failure(id, -32602, error);
+    }
+  }
+
+  if (method === "vscode.editorState.update") {
+    return success(id, runtime.wb.extensionEditorStateUpdate(params));
   }
 
   if (method === "extensions.activateByEvent") {

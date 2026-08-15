@@ -78,6 +78,17 @@ class CodeTe2PathTests(unittest.TestCase):
             paths.code_server_extensions_dir,
         )
         self.assertEqual(
+            paths.data_root / "code_server" / "User" / "te2-extension-storage",
+            paths.code_server_extension_storage_dir,
+        )
+        self.assertEqual(
+            paths.data_root
+            / "code_server"
+            / "User"
+            / "te2-webview-reconstruction",
+            paths.code_server_webview_reconstruction_dir,
+        )
+        self.assertEqual(
             paths.runtime_root / "code_server.sock",
             paths.code_server_socket_path,
         )
@@ -206,6 +217,14 @@ class CodeTe2PathTests(unittest.TestCase):
             shellspec,
         )
         self.assertIn(
+            "TE2_EXTENSION_STORAGE_PATH: ${ctx:CODE_SERVER_EXTENSION_STORAGE}",
+            shellspec,
+        )
+        self.assertIn(
+            "TE2_WEBVIEW_RECONSTRUCTION_STORAGE_PATH: ${ctx:CODE_SERVER_WEBVIEW_RECONSTRUCTION}",
+            shellspec,
+        )
+        self.assertIn(
             "TE2_RPC_CONFIG_PATH: ${ctx:CODE_SERVER_RPC_CONFIG}",
             shellspec,
         )
@@ -328,6 +347,14 @@ class CodeTe2WorkbenchPathHandoffTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             str(paths.code_server_user_settings_path),
             ctx["CODE_SERVER_USER_SETTINGS"],
+        )
+        self.assertEqual(
+            str(paths.code_server_extension_storage_dir),
+            ctx["CODE_SERVER_EXTENSION_STORAGE"],
+        )
+        self.assertEqual(
+            str(paths.code_server_webview_reconstruction_dir),
+            ctx["CODE_SERVER_WEBVIEW_RECONSTRUCTION"],
         )
         self.assertEqual(
             str(paths.code_server_rpc_config_path),

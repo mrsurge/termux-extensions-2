@@ -28,10 +28,19 @@ import java.util.concurrent.atomic.AtomicReference
  * streamed byte-for-byte to the configured TE2 origin.
  */
 class AndroidFrameworkRelay(
-    private val assetRoot: File? = null,
-    private val assetPathResolver: ((String) -> String?)? = null,
-    private val requestHandler: ((LocalHttpRequest) -> LocalHttpResponse?)? = null,
+    assetRoot: File? = null,
+    assetPathResolver: ((String) -> String?)? = null,
+    requestHandler: ((LocalHttpRequest) -> LocalHttpResponse?)? = null,
 ) {
+    private data class LocalRouting(
+        val assetRoot: File?,
+        val assetPathResolver: ((String) -> String?)?,
+        val requestHandler: ((LocalHttpRequest) -> LocalHttpResponse?)?,
+    )
+
+    @Volatile
+    private var localRouting = LocalRouting(assetRoot, assetPathResolver, requestHandler)
+
     @Volatile
     var port: Int = 0
         private set
@@ -153,6 +162,14 @@ class AndroidFrameworkRelay(
         }
     }
 
+    fun configureLocalRouting(
+        assetRoot: File?,
+        assetPathResolver: ((String) -> String?)?,
+        requestHandler: ((LocalHttpRequest) -> LocalHttpResponse?)?,
+    ) {
+        localRouting = LocalRouting(assetRoot, assetPathResolver, requestHandler)
+    }
+
     fun stop() {
         if (!running) return
         running = false
@@ -172,12 +189,13 @@ class AndroidFrameworkRelay(
             val input = BufferedInputStream(client.getInputStream())
             val request = readRequest(input) ?: return
             val path = request.target.substringBefore('?')
+            val routing = localRouting
             if (request.isChunked && (
-                    (requestHandler != null && (
+                    (routing.requestHandler != null && (
                         path.startsWith(ANDROID_SHELL_PREFIX) ||
                             path.startsWith(ANDROID_API_PREFIX)
                         )) ||
-                        assetPathResolver?.invoke(path) != null
+                        routing.assetPathResolver?.invoke(path) != null
                     )
             ) {
                 sendLocalResponse(
@@ -193,7 +211,7 @@ class AndroidFrameworkRelay(
                 ByteArray(0)
             }
 
-            requestHandler?.invoke(
+            routing.requestHandler?.invoke(
                 LocalHttpRequest(
                     method = request.method,
                     path = path,
@@ -205,11 +223,11 @@ class AndroidFrameworkRelay(
             }
 
             val localPath = when {
-                assetRoot != null && path.startsWith(ANDROID_SHELL_PREFIX) -> path
-                else -> assetPathResolver?.invoke(path)
+                routing.assetRoot != null && path.startsWith(ANDROID_SHELL_PREFIX) -> path
+                else -> routing.assetPathResolver?.invoke(path)
             }
             if (localPath != null) {
-                serveLocalAsset(client, request.method, localPath)
+                serveLocalAsset(client, request.method, localPath, routing.assetRoot)
                 return
             }
 
@@ -378,7 +396,12 @@ class AndroidFrameworkRelay(
         }
     }
 
-    private fun serveLocalAsset(client: Socket, method: String, requestPath: String) {
+    private fun serveLocalAsset(
+        client: Socket,
+        method: String,
+        requestPath: String,
+        assetRoot: File?,
+    ) {
         if (method != "GET" && method != "HEAD") {
             sendLocalResponse(
                 client,

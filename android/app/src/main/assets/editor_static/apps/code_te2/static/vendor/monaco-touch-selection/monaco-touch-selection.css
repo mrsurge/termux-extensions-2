@@ -40,7 +40,9 @@ html.hc-light, html.hc-light body {
 .monaco-editor-touch-selections > .selector > .text-cursor,
 .monaco-editor-touch-selections > .selector > .bottom-cursor,
 .monaco-editor-touch-selector-menu-stack,
-.monaco-editor-touch-selector-menu-stack > .selection-adjustment-row,
+.monaco-editor-touch-selector-menu-stack > .utility-row,
+.monaco-editor-touch-selector-menu-stack > .utility-row > .leading-row,
+.monaco-editor-touch-selector-menu-stack > .utility-row > .navigation-row,
 .monaco-editor-touch-selector-menu,
 .monaco-editor-touch-selector-menu > .menu-item {
   box-sizing: border-box;
@@ -120,16 +122,50 @@ html.hc-light, html.hc-light body {
   display: flex;
 }
 
-.monaco-editor-touch-selector-menu-stack > .selection-adjustment-row {
+.monaco-editor-touch-selector-menu-stack.scroll-repositioning {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.monaco-editor-touch-selector-menu-stack > .utility-row {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  margin-bottom: -1px;
+}
+
+.monaco-editor-touch-selector-menu-stack > .utility-row > .leading-row {
   display: none;
+}
+
+.monaco-editor-touch-selector-menu-stack > .utility-row > .navigation-row {
+  display: flex;
   align-items: center;
   justify-content: center;
   gap: 0.4rem;
 }
 
-.monaco-editor-touch-selector-menu-stack.touch-mode > .selection-adjustment-row {
+.monaco-editor-touch-selector-menu-stack > .utility-row > .navigation-row:empty,
+.monaco-editor-touch-selector-menu-stack > .utility-row > .leading-row:empty {
+  display: none;
+}
+
+.monaco-editor-touch-selector-menu-stack.touch-mode > .utility-row {
   display: flex;
-  margin-bottom: -1px;
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;
+  gap: 2px;
+}
+
+.monaco-editor-touch-selector-menu-stack.mobile-mode.touch-mode {
+  max-width: calc(100vw - 8px);
+}
+
+.monaco-editor-touch-selector-menu-stack.mobile-mode.touch-mode > .utility-row > .leading-row {
+  display: flex;
 }
 
 .monaco-editor-touch-selector-menu {

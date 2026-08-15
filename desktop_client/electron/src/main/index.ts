@@ -1,5 +1,4 @@
 import { readFile, stat } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
 import { extname, relative, resolve } from "node:path";
 
 import {
@@ -13,6 +12,7 @@ import {
   WebContentsView,
   type IpcMainEvent,
   type IpcMainInvokeEvent,
+  type MenuItemConstructorOptions,
   type WebContents,
 } from "electron";
 
@@ -36,6 +36,11 @@ import {
 } from "./sidebar-presentation-store";
 import { ElectronUiIpcClient } from "./ui-ipc-client";
 import {
+  readDesktopClientIdentity,
+  resetDesktopClientIdentity,
+  type ElectronClientIdentity,
+} from "./client-identity-store";
+import {
   ELECTRON_APP_VIEW_IDENTITY,
   ELECTRON_FRAMEWORK_PARTITION,
   validateElectronAppViewCommand,
@@ -43,7 +48,9 @@ import {
 } from "../shared/app-view-contracts";
 import {
   validateElectronSidebarSurfaceAction,
+  validateElectronSidebarMenuRequest,
   validateElectronSidebarSurfaceDetachRequest,
+  validateElectronSidebarSurfacePlaceRequest,
   validateElectronSidebarSurfaceReconcileRequest,
   validateElectronSidebarSurfaceReference,
 } from "../shared/sidebar-surface-contracts";
@@ -103,6 +110,7 @@ let uiIpcClient: ElectronUiIpcClient | null = null;
 let runProfileRuntime: ElectronRunProfileRuntime | null = null;
 let detachedSurfaceRegistry: DetachedSidebarSurfaceRegistry | null = null;
 let dialogHost: DesktopDialogHost | null = null;
+let electronClientIdentity: ElectronClientIdentity;
 const surfaceWindows = new Set<BrowserWindow>();
 const trustedFrameworkContents = new Set<WebContents>();
 const assets = new DesktopAssetManager();
@@ -249,6 +257,7 @@ function appViewBounds(): Electron.Rectangle {
 
 function resizeAppView(): void {
   appView?.setBounds(appViewBounds());
+  detachedSurfaceRegistry?.layoutEmbedded();
 }
 
 function closeSurfaceWindows(): void {
@@ -340,6 +349,24 @@ async function handleAppViewControl(
     // paired reload hook activates the already-invalidated asset snapshot.
     return updateDesktopAssets(true, false);
   }
+  if (command === "read_client_identity") {
+    return { clientInstanceId: electronClientIdentity.clientInstanceId };
+  }
+  if (command === "reset_client_identity") {
+    electronClientIdentity = await resetDesktopClientIdentity();
+    connectElectronUiIpc();
+    return { clientInstanceId: electronClientIdentity.clientInstanceId };
+  }
+  if (command === "wait_for_app_prerequisites") {
+    const appId = payload && typeof payload === "object"
+      ? String((payload as Record<string, unknown>).appId || "").trim()
+      : "";
+    if (appId === "code_te2") {
+      if (!runTargetRelays) throw new Error("Run target relay is not initialized");
+      await runTargetRelays.waitUntilProjectionReady(null);
+    }
+    return { ok: true };
+  }
   if (command === "release_run_target_surface") {
     runProfileRuntime?.release(String(payload || ""));
     return { ok: true };
@@ -367,6 +394,59 @@ async function handleAppViewControl(
     await writeDesktopSidebarPresentationState(payload);
     return { ok: true };
   }
+  if (command === "open_sidebar_menu") {
+    const request = validateElectronSidebarMenuRequest(payload);
+    const window = mainWindow;
+    if (!window || window.isDestroyed()) {
+      throw new Error("Sidebar menu host is unavailable");
+    }
+    const bounds = appViewBounds();
+    const zoom = Math.max(0.25, appView?.webContents.getZoomFactor() || 1);
+    const x = Math.max(
+      bounds.x,
+      Math.min(bounds.x + bounds.width, bounds.x + Math.round(request.x * zoom)),
+    );
+    const y = Math.max(
+      bounds.y,
+      Math.min(bounds.y + bounds.height, bounds.y + Math.round(request.y * zoom)),
+    );
+    return await new Promise<{ selectedId: string | null }>((resolveMenu) => {
+      let settled = false;
+      const settle = (selectedId: string | null) => {
+        if (settled) return;
+        settled = true;
+        resolveMenu({ selectedId });
+      };
+      const template: MenuItemConstructorOptions[] = request.items.map((item) => {
+        if (item.type === "separator") return { type: "separator" };
+        if (item.type === "label") {
+          return { label: item.label, enabled: false };
+        }
+        return {
+          label: item.label,
+          enabled: item.enabled,
+          click: () => settle(item.id),
+        };
+      });
+      Menu.buildFromTemplate(template).popup({
+        window,
+        x,
+        y,
+        callback: () => settle(null),
+      });
+    });
+  }
+  if (command === "place_sidebar_surface") {
+    const request = validateElectronSidebarSurfacePlaceRequest(payload);
+    if (!detachedSurfaceRegistry) {
+      throw new Error("Sidebar surface host is unavailable");
+    }
+    return await detachedSurfaceRegistry.place(
+      request.descriptor,
+      request.bounds,
+      request.visible,
+    );
+  }
   if (command === "detach_sidebar_surface") {
     const request = validateElectronSidebarSurfaceDetachRequest(payload);
     if (!detachedSurfaceRegistry) {
@@ -378,6 +458,15 @@ async function handleAppViewControl(
     const reference = validateElectronSidebarSurfaceReference(payload);
     return {
       ok: detachedSurfaceRegistry?.focus(
+        reference.surfaceId,
+        reference.presentationId,
+      ) || false,
+    };
+  }
+  if (command === "refresh_sidebar_surface") {
+    const reference = validateElectronSidebarSurfaceReference(payload);
+    return {
+      ok: detachedSurfaceRegistry?.refresh(
         reference.surfaceId,
         reference.presentationId,
       ) || false,
@@ -417,7 +506,7 @@ async function handleAppViewControl(
 
 function installContextMenu(
   contents: WebContents,
-  explicitOwnerWindow?: BrowserWindow,
+  explicitOwnerWindow?: BrowserWindow | (() => BrowserWindow | null),
 ): void {
   contents.on("context-menu", (event, params) => {
     event.preventDefault();
@@ -438,8 +527,11 @@ function installContextMenu(
         click: () => contents.paste(),
       },
     ]);
+    const configuredOwner = typeof explicitOwnerWindow === "function"
+      ? explicitOwnerWindow()
+      : explicitOwnerWindow;
     const ownerWindow =
-      explicitOwnerWindow || BrowserWindow.fromWebContents(contents) || mainWindow;
+      configuredOwner || BrowserWindow.fromWebContents(contents) || mainWindow;
     if (ownerWindow && !ownerWindow.isDestroyed()) {
       menu.popup({ window: ownerWindow });
     }
@@ -472,7 +564,7 @@ function createAppView(): WebContentsView {
 
   const notify = () => sendNavigation(view.webContents);
   view.webContents.on("will-navigate", () => {
-    detachedSurfaceRegistry?.closeAll(false);
+    detachedSurfaceRegistry?.suspendEmbedded();
     closeSurfaceWindows();
     dialogHost?.closeForOwner(view.webContents);
   });
@@ -506,7 +598,7 @@ function createAppView(): WebContentsView {
     }
   });
   view.webContents.on("render-process-gone", (_event, details) => {
-    detachedSurfaceRegistry?.closeAll(false);
+    detachedSurfaceRegistry?.suspendEmbedded();
     closeSurfaceWindows();
     dialogHost?.closeForOwner(view.webContents);
     console.error(`[te2-desktop] App renderer exited: ${details.reason}`);
@@ -615,14 +707,26 @@ async function navigateApp(rawUrl: string): Promise<{ url: string }> {
     throw new Error("Framework app navigation must use the desktop relay origin");
   }
   target.searchParams.set("gv_native", "1");
-  if (!runTargetRelays) throw new Error("Run target relay is not initialized");
-  await runTargetRelays.waitUntilProjectionReady();
   closeAppView();
   appView = createAppView();
   mainWindow?.contentView.addChildView(appView);
   resizeAppView();
   await appView.webContents.loadURL(target.href);
   return { url: target.href };
+}
+
+function connectElectronUiIpc(): void {
+  uiIpcClient?.disconnect();
+  uiIpcClient = new ElectronUiIpcClient(
+    `electron:${electronClientIdentity.clientInstanceId}`,
+    (projection) => {
+      void runTargetRelays?.updateRouteProjection(projection).catch((error) => {
+        console.warn(`[te2-run-target] route projection rejected: ${errorMessage(error)}`);
+      });
+    },
+    () => runTargetRelays?.suspendRouteProjection(),
+  );
+  uiIpcClient.connect(configuredFrameworkOrigin);
 }
 
 async function saveConnection(params: Record<string, unknown>): Promise<{
@@ -796,19 +900,11 @@ async function main(): Promise<void> {
   await protocol.handle(SHELL_SCHEME, localShellResponse);
 
   settings = await readDesktopSettings();
+  electronClientIdentity = await readDesktopClientIdentity();
   configuredFrameworkOrigin = frameworkOrigin(settings);
   relay = await startFrameworkRelay(configuredFrameworkOrigin, assets);
   runTargetRelays = new RunTargetRelayManager(() => configuredFrameworkOrigin);
-  uiIpcClient = new ElectronUiIpcClient(
-    `electron:${randomUUID()}`,
-    (projection) => {
-      void runTargetRelays?.updateRouteProjection(projection).catch((error) => {
-        console.warn(`[te2-run-target] route projection rejected: ${errorMessage(error)}`);
-      });
-    },
-    () => runTargetRelays?.suspendRouteProjection(),
-  );
-  uiIpcClient.connect(configuredFrameworkOrigin);
+  connectElectronUiIpc();
   runProfileRuntime = new ElectronRunProfileRuntime(
     session.fromPartition(ELECTRON_FRAMEWORK_PARTITION),
     () => relay.browserOrigin,
@@ -819,6 +915,9 @@ async function main(): Promise<void> {
   detachedSurfaceRegistry = new DetachedSidebarSurfaceRegistry({
     getAppPath: () => app.getAppPath(),
     getAppContents: () => appView?.webContents || null,
+    getMainWindow: () => mainWindow,
+    getAppViewBounds: appViewBounds,
+    getAppZoomFactor: () => appView?.webContents.getZoomFactor() || 1,
     getRelayOrigin: () => relay.browserOrigin,
     shellUrl: `${SHELL_SCHEME}://${SHELL_HOST}/surface/index.html`,
     frameworkPartition: ELECTRON_FRAMEWORK_PARTITION,

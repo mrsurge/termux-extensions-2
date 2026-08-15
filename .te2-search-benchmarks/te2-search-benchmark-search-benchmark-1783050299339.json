@@ -1,0 +1,1455 @@
+{
+  "cases": [
+    {
+      "caseId": "raw-import",
+      "excludePatterns": [],
+      "includePatterns": [],
+      "lane": "rustOnly",
+      "query": "import",
+      "rates": {
+        "durationMs": 1206,
+        "filesMatchedPerSecond": 1450.25,
+        "filesScannedPerSecond": 2845.77,
+        "matchesPerSecond": 14680.76,
+        "resultsPerSecond": 1450.25
+      },
+      "rust": {
+        "cancellationReason": null,
+        "cancelled": false,
+        "droppedOptionalEvents": 0,
+        "durationMs": 1206,
+        "filesMatched": 1749,
+        "filesScanned": 3432,
+        "firstResultMs": 11,
+        "matchesFound": 17705,
+        "rates": {
+          "durationMs": 1206,
+          "filesMatchedPerSecond": 1450.25,
+          "filesScannedPerSecond": 2845.77,
+          "matchesPerSecond": 14680.76,
+          "resultsPerSecond": 1450.25
+        },
+        "requiredEventFailures": 0,
+        "resultBatches": 1749,
+        "searchThreads": 5,
+        "truncatedReason": null
+      },
+      "status": "ok"
+    },
+    {
+      "caseId": "include-py",
+      "excludePatterns": [],
+      "includePatterns": [
+        "*.py"
+      ],
+      "lane": "rustOnly",
+      "query": "import",
+      "rates": {
+        "durationMs": 50,
+        "filesMatchedPerSecond": 3840.0,
+        "filesScannedPerSecond": 4160.0,
+        "matchesPerSecond": 39460.0,
+        "resultsPerSecond": 3840.0
+      },
+      "rust": {
+        "cancellationReason": null,
+        "cancelled": false,
+        "droppedOptionalEvents": 0,
+        "durationMs": 50,
+        "filesMatched": 192,
+        "filesScanned": 208,
+        "firstResultMs": 7,
+        "matchesFound": 1973,
+        "rates": {
+          "durationMs": 50,
+          "filesMatchedPerSecond": 3840.0,
+          "filesScannedPerSecond": 4160.0,
+          "matchesPerSecond": 39460.0,
+          "resultsPerSecond": 3840.0
+        },
+        "requiredEventFailures": 0,
+        "resultBatches": 192,
+        "searchThreads": 5,
+        "truncatedReason": null
+      },
+      "status": "ok"
+    },
+    {
+      "caseId": "exclude-ts",
+      "excludePatterns": [
+        "*.ts"
+      ],
+      "includePatterns": [],
+      "lane": "rustOnly",
+      "query": "import",
+      "rates": {
+        "durationMs": 1208,
+        "filesMatchedPerSecond": 1284.77,
+        "filesScannedPerSecond": 2513.25,
+        "matchesPerSecond": 13755.79,
+        "resultsPerSecond": 1284.77
+      },
+      "rust": {
+        "cancellationReason": null,
+        "cancelled": false,
+        "droppedOptionalEvents": 0,
+        "durationMs": 1208,
+        "filesMatched": 1552,
+        "filesScanned": 3036,
+        "firstResultMs": 7,
+        "matchesFound": 16617,
+        "rates": {
+          "durationMs": 1208,
+          "filesMatchedPerSecond": 1284.77,
+          "filesScannedPerSecond": 2513.25,
+          "matchesPerSecond": 13755.79,
+          "resultsPerSecond": 1284.77
+        },
+        "requiredEventFailures": 0,
+        "resultBatches": 1552,
+        "searchThreads": 5,
+        "truncatedReason": null
+      },
+      "status": "ok"
+    },
+    {
+      "caseId": "include-under-exclude-ts",
+      "excludePatterns": [
+        "*.ts"
+      ],
+      "includePatterns": [
+        "*_*"
+      ],
+      "lane": "rustOnly",
+      "query": "import",
+      "rates": {
+        "durationMs": 575,
+        "filesMatchedPerSecond": 1001.74,
+        "filesScannedPerSecond": 2820.87,
+        "matchesPerSecond": 8406.96,
+        "resultsPerSecond": 1001.74
+      },
+      "rust": {
+        "cancellationReason": null,
+        "cancelled": false,
+        "droppedOptionalEvents": 0,
+        "durationMs": 575,
+        "filesMatched": 576,
+        "filesScanned": 1622,
+        "firstResultMs": 7,
+        "matchesFound": 4834,
+        "rates": {
+          "durationMs": 575,
+          "filesMatchedPerSecond": 1001.74,
+          "filesScannedPerSecond": 2820.87,
+          "matchesPerSecond": 8406.96,
+          "resultsPerSecond": 1001.74
+        },
+        "requiredEventFailures": 0,
+        "resultBatches": 576,
+        "searchThreads": 5,
+        "truncatedReason": null
+      },
+      "status": "ok"
+    },
+    {
+      "caseId": "te2-search-canary",
+      "excludePatterns": [],
+      "includePatterns": [],
+      "lane": "rustOnly",
+      "query": "te2_search_canary",
+      "rates": {
+        "durationMs": 1450,
+        "filesMatchedPerSecond": 4.83,
+        "filesScannedPerSecond": 2366.9,
+        "matchesPerSecond": 5.52,
+        "resultsPerSecond": 4.83
+      },
+      "rust": {
+        "cancellationReason": null,
+        "cancelled": false,
+        "droppedOptionalEvents": 0,
+        "durationMs": 1450,
+        "filesMatched": 7,
+        "filesScanned": 3432,
+        "firstResultMs": 18,
+        "matchesFound": 8,
+        "rates": {
+          "durationMs": 1450,
+          "filesMatchedPerSecond": 4.83,
+          "filesScannedPerSecond": 2366.9,
+          "matchesPerSecond": 5.52,
+          "resultsPerSecond": 4.83
+        },
+        "requiredEventFailures": 0,
+        "resultBatches": 7,
+        "searchThreads": 5,
+        "truncatedReason": null
+      },
+      "status": "ok"
+    },
+    {
+      "caseId": "raw-import",
+      "error": null,
+      "excludePatterns": [],
+      "includePatterns": [],
+      "lane": "pythonBridge",
+      "python": {
+        "authoritative": {
+          "filesMatched": 1749,
+          "filesScanned": 3432,
+          "matchesFound": 17705,
+          "resultBatches": 1749,
+          "source": "done"
+        },
+        "cacheInsertMs": 0,
+        "completion": {
+          "complete": true,
+          "doneFiles": 1749,
+          "doneMatches": 17705,
+          "extraFiles": 0,
+          "extraMatches": 0,
+          "missingFiles": 0,
+          "missingMatches": 0,
+          "reason": "complete",
+          "receivedFiles": 1749,
+          "receivedMatches": 17705
+        },
+        "done": {
+          "cancellationReason": "",
+          "cancelled": false,
+          "filesMatched": 1749,
+          "filesScanned": 3432,
+          "matchesFound": 17705,
+          "optionalEventsDropped": 4,
+          "requiredEventBackpressureCount": 796,
+          "requiredEventBackpressureMs": 19248,
+          "requiredEventFailures": 0,
+          "sequence": 1760,
+          "status": "done"
+        },
+        "emittedEvents": 0,
+        "firstPipeResultMs": 9,
+        "lastProgress": {
+          "filesMatched": 870,
+          "filesScanned": 2304,
+          "matchesFound": 10600,
+          "message": "Content search running",
+          "status": "running"
+        },
+        "pipeRequestMs": 0,
+        "projectionMs": 0,
+        "rates": {
+          "durationMs": 4936,
+          "filesMatchedPerSecond": 354.34,
+          "filesScannedPerSecond": 695.3,
+          "matchesPerSecond": 3586.91,
+          "resultsPerSecond": 354.34
+        },
+        "receivedFiles": 1749,
+        "receivedMatches": 17705,
+        "resultBatches": 1749,
+        "totalRunMs": 4936
+      },
+      "query": "import",
+      "rates": {
+        "durationMs": 4936,
+        "filesMatchedPerSecond": 354.34,
+        "filesScannedPerSecond": 695.3,
+        "matchesPerSecond": 3586.91,
+        "resultsPerSecond": 354.34
+      },
+      "status": "ok"
+    },
+    {
+      "caseId": "include-py",
+      "error": null,
+      "excludePatterns": [],
+      "includePatterns": [
+        "*.py"
+      ],
+      "lane": "pythonBridge",
+      "python": {
+        "authoritative": {
+          "filesMatched": 192,
+          "filesScanned": 208,
+          "matchesFound": 1973,
+          "resultBatches": 192,
+          "source": "done"
+        },
+        "cacheInsertMs": 0,
+        "completion": {
+          "complete": true,
+          "doneFiles": 192,
+          "doneMatches": 1973,
+          "extraFiles": 0,
+          "extraMatches": 0,
+          "missingFiles": 0,
+          "missingMatches": 0,
+          "reason": "complete",
+          "receivedFiles": 192,
+          "receivedMatches": 1973
+        },
+        "done": {
+          "cancellationReason": "",
+          "cancelled": false,
+          "filesMatched": 192,
+          "filesScanned": 208,
+          "matchesFound": 1973,
+          "optionalEventsDropped": 0,
+          "requiredEventBackpressureCount": 0,
+          "requiredEventBackpressureMs": 0,
+          "requiredEventFailures": 0,
+          "sequence": 194,
+          "status": "done"
+        },
+        "emittedEvents": 0,
+        "firstPipeResultMs": 10,
+        "lastProgress": {
+          "filesMatched": 0,
+          "filesScanned": 0,
+          "matchesFound": 0,
+          "message": "Content search queued",
+          "status": "running"
+        },
+        "pipeRequestMs": 0,
+        "projectionMs": 0,
+        "rates": {
+          "durationMs": 119,
+          "filesMatchedPerSecond": 1613.45,
+          "filesScannedPerSecond": 1747.9,
+          "matchesPerSecond": 16579.83,
+          "resultsPerSecond": 1613.45
+        },
+        "receivedFiles": 192,
+        "receivedMatches": 1973,
+        "resultBatches": 192,
+        "totalRunMs": 119
+      },
+      "query": "import",
+      "rates": {
+        "durationMs": 119,
+        "filesMatchedPerSecond": 1613.45,
+        "filesScannedPerSecond": 1747.9,
+        "matchesPerSecond": 16579.83,
+        "resultsPerSecond": 1613.45
+      },
+      "status": "ok"
+    },
+    {
+      "caseId": "exclude-ts",
+      "error": null,
+      "excludePatterns": [
+        "*.ts"
+      ],
+      "includePatterns": [],
+      "lane": "pythonBridge",
+      "python": {
+        "authoritative": {
+          "filesMatched": 1552,
+          "filesScanned": 3036,
+          "matchesFound": 16617,
+          "resultBatches": 1552,
+          "source": "done"
+        },
+        "cacheInsertMs": 0,
+        "completion": {
+          "complete": true,
+          "doneFiles": 1552,
+          "doneMatches": 16617,
+          "extraFiles": 0,
+          "extraMatches": 0,
+          "missingFiles": 0,
+          "missingMatches": 0,
+          "reason": "complete",
+          "receivedFiles": 1552,
+          "receivedMatches": 16617
+        },
+        "done": {
+          "cancellationReason": "",
+          "cancelled": false,
+          "filesMatched": 1552,
+          "filesScanned": 3036,
+          "matchesFound": 16617,
+          "optionalEventsDropped": 5,
+          "requiredEventBackpressureCount": 594,
+          "requiredEventBackpressureMs": 18776,
+          "requiredEventFailures": 0,
+          "sequence": 1560,
+          "status": "done"
+        },
+        "emittedEvents": 0,
+        "firstPipeResultMs": 8,
+        "lastProgress": {
+          "filesMatched": 518,
+          "filesScanned": 1536,
+          "matchesFound": 3756,
+          "message": "Content search running",
+          "status": "running"
+        },
+        "pipeRequestMs": 0,
+        "projectionMs": 0,
+        "rates": {
+          "durationMs": 4828,
+          "filesMatchedPerSecond": 321.46,
+          "filesScannedPerSecond": 628.83,
+          "matchesPerSecond": 3441.8,
+          "resultsPerSecond": 321.46
+        },
+        "receivedFiles": 1552,
+        "receivedMatches": 16617,
+        "resultBatches": 1552,
+        "totalRunMs": 4828
+      },
+      "query": "import",
+      "rates": {
+        "durationMs": 4828,
+        "filesMatchedPerSecond": 321.46,
+        "filesScannedPerSecond": 628.83,
+        "matchesPerSecond": 3441.8,
+        "resultsPerSecond": 321.46
+      },
+      "status": "ok"
+    },
+    {
+      "caseId": "include-under-exclude-ts",
+      "error": null,
+      "excludePatterns": [
+        "*.ts"
+      ],
+      "includePatterns": [
+        "*_*"
+      ],
+      "lane": "pythonBridge",
+      "python": {
+        "authoritative": {
+          "filesMatched": 576,
+          "filesScanned": 1622,
+          "matchesFound": 4834,
+          "resultBatches": 576,
+          "source": "done"
+        },
+        "cacheInsertMs": 0,
+        "completion": {
+          "complete": true,
+          "doneFiles": 576,
+          "doneMatches": 4834,
+          "extraFiles": 0,
+          "extraMatches": 0,
+          "missingFiles": 0,
+          "missingMatches": 0,
+          "reason": "complete",
+          "receivedFiles": 576,
+          "receivedMatches": 4834
+        },
+        "done": {
+          "cancellationReason": "",
+          "cancelled": false,
+          "filesMatched": 576,
+          "filesScanned": 1622,
+          "matchesFound": 4834,
+          "optionalEventsDropped": 0,
+          "requiredEventBackpressureCount": 0,
+          "requiredEventBackpressureMs": 0,
+          "requiredEventFailures": 0,
+          "sequence": 584,
+          "status": "done"
+        },
+        "emittedEvents": 0,
+        "firstPipeResultMs": 14,
+        "lastProgress": {
+          "filesMatched": 546,
+          "filesScanned": 1536,
+          "matchesFound": 4262,
+          "message": "Content search running",
+          "status": "running"
+        },
+        "pipeRequestMs": 0,
+        "projectionMs": 0,
+        "rates": {
+          "durationMs": 2299,
+          "filesMatchedPerSecond": 250.54,
+          "filesScannedPerSecond": 705.52,
+          "matchesPerSecond": 2102.65,
+          "resultsPerSecond": 250.54
+        },
+        "receivedFiles": 576,
+        "receivedMatches": 4834,
+        "resultBatches": 576,
+        "totalRunMs": 2299
+      },
+      "query": "import",
+      "rates": {
+        "durationMs": 2299,
+        "filesMatchedPerSecond": 250.54,
+        "filesScannedPerSecond": 705.52,
+        "matchesPerSecond": 2102.65,
+        "resultsPerSecond": 250.54
+      },
+      "status": "ok"
+    },
+    {
+      "caseId": "te2-search-canary",
+      "error": null,
+      "excludePatterns": [],
+      "includePatterns": [],
+      "lane": "pythonBridge",
+      "python": {
+        "authoritative": {
+          "filesMatched": 7,
+          "filesScanned": 3432,
+          "matchesFound": 8,
+          "resultBatches": 7,
+          "source": "done"
+        },
+        "cacheInsertMs": 0,
+        "completion": {
+          "complete": true,
+          "doneFiles": 7,
+          "doneMatches": 8,
+          "extraFiles": 0,
+          "extraMatches": 0,
+          "missingFiles": 0,
+          "missingMatches": 0,
+          "reason": "complete",
+          "receivedFiles": 7,
+          "receivedMatches": 8
+        },
+        "done": {
+          "cancellationReason": "",
+          "cancelled": false,
+          "filesMatched": 7,
+          "filesScanned": 3432,
+          "matchesFound": 8,
+          "optionalEventsDropped": 0,
+          "requiredEventBackpressureCount": 0,
+          "requiredEventBackpressureMs": 0,
+          "requiredEventFailures": 0,
+          "sequence": 22,
+          "status": "done"
+        },
+        "emittedEvents": 0,
+        "firstPipeResultMs": 25,
+        "lastProgress": {
+          "filesMatched": 7,
+          "filesScanned": 3328,
+          "matchesFound": 8,
+          "message": "Content search running",
+          "status": "running"
+        },
+        "pipeRequestMs": 0,
+        "projectionMs": 0,
+        "rates": {
+          "durationMs": 1537,
+          "filesMatchedPerSecond": 4.55,
+          "filesScannedPerSecond": 2232.92,
+          "matchesPerSecond": 5.2,
+          "resultsPerSecond": 4.55
+        },
+        "receivedFiles": 7,
+        "receivedMatches": 8,
+        "resultBatches": 7,
+        "totalRunMs": 1537
+      },
+      "query": "te2_search_canary",
+      "rates": {
+        "durationMs": 1537,
+        "filesMatchedPerSecond": 4.55,
+        "filesScannedPerSecond": 2232.92,
+        "matchesPerSecond": 5.2,
+        "resultsPerSecond": 4.55
+      },
+      "status": "ok"
+    },
+    {
+      "caseId": "raw-import",
+      "dto": "SearchBenchmarkCaseResult",
+      "error": null,
+      "frontend": {
+        "authoritative": {
+          "filesMatched": 102,
+          "filesScanned": 259,
+          "matchesFound": 700,
+          "resultBatches": 10
+        },
+        "completion": {
+          "authoritativeSearchComplete": true,
+          "complete": true,
+          "extraFullFiles": 0,
+          "extraFullMatches": 0,
+          "missingFullFiles": 93,
+          "missingFullMatches": 650,
+          "missingVisibleMatches": 0,
+          "reason": "visibleWindowComplete",
+          "visibleWindowComplete": true
+        },
+        "controllerProcessingMs": 116.1,
+        "doneFrames": 1,
+        "doneReceivedMs": 234,
+        "errorFrames": 0,
+        "firstResultReceivedMs": 83,
+        "progressFrames": 2,
+        "rates": {
+          "durationMs": 234,
+          "filesMatchedPerSecond": 435.9,
+          "filesScannedPerSecond": 1106.84,
+          "matchesPerSecond": 2991.45,
+          "resultsPerSecond": 42.74
+        },
+        "receivedFiles": 9,
+        "receivedMatches": 50,
+        "renderFrames": 13,
+        "resultFrames": 10,
+        "scanRates": {
+          "durationMs": 234,
+          "filesMatchedPerSecond": 435.9,
+          "filesScannedPerSecond": 1106.84,
+          "matchesPerSecond": 2991.45,
+          "resultsPerSecond": 42.74
+        },
+        "totalRunMs": 234,
+        "visibleWindow": {
+          "cap": 50,
+          "complete": true,
+          "deliveredMatches": 50,
+          "deliveryMs": 73,
+          "expectedMatches": 50,
+          "filesAtFill": 9,
+          "filledMs": 156,
+          "firstResultReceivedMs": 83,
+          "lastResultReceivedMs": 224,
+          "matchesAtFill": 50,
+          "rates": {
+            "deliveryMatchesPerSecond": 684.93,
+            "matchesPerSecond": 320.51
+          },
+          "receivedMatches": 50
+        }
+      },
+      "lane": "fullStack",
+      "query": "import",
+      "rates": {
+        "durationMs": 234,
+        "filesMatchedPerSecond": 435.9,
+        "filesScannedPerSecond": 1106.84,
+        "matchesPerSecond": 2991.45,
+        "resultsPerSecond": 42.74
+      },
+      "scanRates": {
+        "durationMs": 234,
+        "filesMatchedPerSecond": 435.9,
+        "filesScannedPerSecond": 1106.84,
+        "matchesPerSecond": 2991.45,
+        "resultsPerSecond": 42.74
+      },
+      "status": "ok",
+      "version": 1,
+      "visibleWindowRates": {
+        "deliveryMatchesPerSecond": 684.93,
+        "matchesPerSecond": 320.51
+      }
+    },
+    {
+      "caseId": "include-py",
+      "dto": "SearchBenchmarkCaseResult",
+      "error": null,
+      "frontend": {
+        "authoritative": {
+          "filesMatched": 75,
+          "filesScanned": 81,
+          "matchesFound": 700,
+          "resultBatches": 8
+        },
+        "completion": {
+          "authoritativeSearchComplete": true,
+          "complete": true,
+          "extraFullFiles": 0,
+          "extraFullMatches": 0,
+          "missingFullFiles": 68,
+          "missingFullMatches": 650,
+          "missingVisibleMatches": 0,
+          "reason": "visibleWindowComplete",
+          "visibleWindowComplete": true
+        },
+        "controllerProcessingMs": 39.5,
+        "doneFrames": 1,
+        "doneReceivedMs": 162,
+        "errorFrames": 0,
+        "firstResultReceivedMs": 41,
+        "progressFrames": 1,
+        "rates": {
+          "durationMs": 162,
+          "filesMatchedPerSecond": 462.96,
+          "filesScannedPerSecond": 500.0,
+          "matchesPerSecond": 4320.99,
+          "resultsPerSecond": 49.38
+        },
+        "receivedFiles": 7,
+        "receivedMatches": 50,
+        "renderFrames": 10,
+        "resultFrames": 8,
+        "scanRates": {
+          "durationMs": 162,
+          "filesMatchedPerSecond": 462.96,
+          "filesScannedPerSecond": 500.0,
+          "matchesPerSecond": 4320.99,
+          "resultsPerSecond": 49.38
+        },
+        "totalRunMs": 162,
+        "visibleWindow": {
+          "cap": 50,
+          "complete": true,
+          "deliveredMatches": 50,
+          "deliveryMs": 60,
+          "expectedMatches": 50,
+          "filesAtFill": 7,
+          "filledMs": 101,
+          "firstResultReceivedMs": 41,
+          "lastResultReceivedMs": 157,
+          "matchesAtFill": 50,
+          "rates": {
+            "deliveryMatchesPerSecond": 833.33,
+            "matchesPerSecond": 495.05
+          },
+          "receivedMatches": 50
+        }
+      },
+      "lane": "fullStack",
+      "query": "import",
+      "rates": {
+        "durationMs": 162,
+        "filesMatchedPerSecond": 462.96,
+        "filesScannedPerSecond": 500.0,
+        "matchesPerSecond": 4320.99,
+        "resultsPerSecond": 49.38
+      },
+      "scanRates": {
+        "durationMs": 162,
+        "filesMatchedPerSecond": 462.96,
+        "filesScannedPerSecond": 500.0,
+        "matchesPerSecond": 4320.99,
+        "resultsPerSecond": 49.38
+      },
+      "status": "ok",
+      "version": 1,
+      "visibleWindowRates": {
+        "deliveryMatchesPerSecond": 833.33,
+        "matchesPerSecond": 495.05
+      }
+    },
+    {
+      "caseId": "exclude-ts",
+      "dto": "SearchBenchmarkCaseResult",
+      "error": null,
+      "frontend": {
+        "authoritative": {
+          "filesMatched": 104,
+          "filesScanned": 269,
+          "matchesFound": 700,
+          "resultBatches": 18
+        },
+        "completion": {
+          "authoritativeSearchComplete": true,
+          "complete": true,
+          "extraFullFiles": 0,
+          "extraFullMatches": 0,
+          "missingFullFiles": 87,
+          "missingFullMatches": 650,
+          "missingVisibleMatches": 0,
+          "reason": "visibleWindowComplete",
+          "visibleWindowComplete": true
+        },
+        "controllerProcessingMs": 149.5,
+        "doneFrames": 1,
+        "doneReceivedMs": 261,
+        "errorFrames": 0,
+        "firstResultReceivedMs": 53,
+        "progressFrames": 2,
+        "rates": {
+          "durationMs": 261,
+          "filesMatchedPerSecond": 398.47,
+          "filesScannedPerSecond": 1030.65,
+          "matchesPerSecond": 2681.99,
+          "resultsPerSecond": 68.97
+        },
+        "receivedFiles": 17,
+        "receivedMatches": 50,
+        "renderFrames": 21,
+        "resultFrames": 18,
+        "scanRates": {
+          "durationMs": 261,
+          "filesMatchedPerSecond": 398.47,
+          "filesScannedPerSecond": 1030.65,
+          "matchesPerSecond": 2681.99,
+          "resultsPerSecond": 68.97
+        },
+        "totalRunMs": 261,
+        "visibleWindow": {
+          "cap": 50,
+          "complete": true,
+          "deliveredMatches": 50,
+          "deliveryMs": 184,
+          "expectedMatches": 50,
+          "filesAtFill": 17,
+          "filledMs": 237,
+          "firstResultReceivedMs": 53,
+          "lastResultReceivedMs": 255,
+          "matchesAtFill": 50,
+          "rates": {
+            "deliveryMatchesPerSecond": 271.74,
+            "matchesPerSecond": 210.97
+          },
+          "receivedMatches": 50
+        }
+      },
+      "lane": "fullStack",
+      "query": "import",
+      "rates": {
+        "durationMs": 261,
+        "filesMatchedPerSecond": 398.47,
+        "filesScannedPerSecond": 1030.65,
+        "matchesPerSecond": 2681.99,
+        "resultsPerSecond": 68.97
+      },
+      "scanRates": {
+        "durationMs": 261,
+        "filesMatchedPerSecond": 398.47,
+        "filesScannedPerSecond": 1030.65,
+        "matchesPerSecond": 2681.99,
+        "resultsPerSecond": 68.97
+      },
+      "status": "ok",
+      "version": 1,
+      "visibleWindowRates": {
+        "deliveryMatchesPerSecond": 271.74,
+        "matchesPerSecond": 210.97
+      }
+    },
+    {
+      "caseId": "include-under-exclude-ts",
+      "dto": "SearchBenchmarkCaseResult",
+      "error": null,
+      "frontend": {
+        "authoritative": {
+          "filesMatched": 106,
+          "filesScanned": 238,
+          "matchesFound": 700,
+          "resultBatches": 8
+        },
+        "completion": {
+          "authoritativeSearchComplete": true,
+          "complete": true,
+          "extraFullFiles": 0,
+          "extraFullMatches": 0,
+          "missingFullFiles": 99,
+          "missingFullMatches": 650,
+          "missingVisibleMatches": 0,
+          "reason": "visibleWindowComplete",
+          "visibleWindowComplete": true
+        },
+        "controllerProcessingMs": 50.3,
+        "doneFrames": 1,
+        "doneReceivedMs": 588,
+        "errorFrames": 0,
+        "firstResultReceivedMs": 59,
+        "progressFrames": 1,
+        "rates": {
+          "durationMs": 588,
+          "filesMatchedPerSecond": 180.27,
+          "filesScannedPerSecond": 404.76,
+          "matchesPerSecond": 1190.48,
+          "resultsPerSecond": 13.61
+        },
+        "receivedFiles": 7,
+        "receivedMatches": 50,
+        "renderFrames": 10,
+        "resultFrames": 8,
+        "scanRates": {
+          "durationMs": 588,
+          "filesMatchedPerSecond": 180.27,
+          "filesScannedPerSecond": 404.76,
+          "matchesPerSecond": 1190.48,
+          "resultsPerSecond": 13.61
+        },
+        "totalRunMs": 588,
+        "visibleWindow": {
+          "cap": 50,
+          "complete": true,
+          "deliveredMatches": 50,
+          "deliveryMs": 39,
+          "expectedMatches": 50,
+          "filesAtFill": 7,
+          "filledMs": 98,
+          "firstResultReceivedMs": 59,
+          "lastResultReceivedMs": 582,
+          "matchesAtFill": 50,
+          "rates": {
+            "deliveryMatchesPerSecond": 1282.05,
+            "matchesPerSecond": 510.2
+          },
+          "receivedMatches": 50
+        }
+      },
+      "lane": "fullStack",
+      "query": "import",
+      "rates": {
+        "durationMs": 588,
+        "filesMatchedPerSecond": 180.27,
+        "filesScannedPerSecond": 404.76,
+        "matchesPerSecond": 1190.48,
+        "resultsPerSecond": 13.61
+      },
+      "scanRates": {
+        "durationMs": 588,
+        "filesMatchedPerSecond": 180.27,
+        "filesScannedPerSecond": 404.76,
+        "matchesPerSecond": 1190.48,
+        "resultsPerSecond": 13.61
+      },
+      "status": "ok",
+      "version": 1,
+      "visibleWindowRates": {
+        "deliveryMatchesPerSecond": 1282.05,
+        "matchesPerSecond": 510.2
+      }
+    },
+    {
+      "caseId": "te2-search-canary",
+      "dto": "SearchBenchmarkCaseResult",
+      "error": null,
+      "frontend": {
+        "authoritative": {
+          "filesMatched": 7,
+          "filesScanned": 3432,
+          "matchesFound": 8,
+          "resultBatches": 8
+        },
+        "completion": {
+          "authoritativeSearchComplete": true,
+          "complete": true,
+          "extraFullFiles": 0,
+          "extraFullMatches": 0,
+          "missingFullFiles": 0,
+          "missingFullMatches": 0,
+          "missingVisibleMatches": 0,
+          "reason": "visibleWindowComplete",
+          "visibleWindowComplete": true
+        },
+        "controllerProcessingMs": 59.2,
+        "doneFrames": 1,
+        "doneReceivedMs": 1636,
+        "errorFrames": 0,
+        "firstResultReceivedMs": 51,
+        "progressFrames": 14,
+        "rates": {
+          "durationMs": 1636,
+          "filesMatchedPerSecond": 4.28,
+          "filesScannedPerSecond": 2097.8,
+          "matchesPerSecond": 4.89,
+          "resultsPerSecond": 4.89
+        },
+        "receivedFiles": 7,
+        "receivedMatches": 8,
+        "renderFrames": 23,
+        "resultFrames": 8,
+        "scanRates": {
+          "durationMs": 1636,
+          "filesMatchedPerSecond": 4.28,
+          "filesScannedPerSecond": 2097.8,
+          "matchesPerSecond": 4.89,
+          "resultsPerSecond": 4.89
+        },
+        "totalRunMs": 1636,
+        "visibleWindow": {
+          "cap": 50,
+          "complete": true,
+          "deliveredMatches": 8,
+          "deliveryMs": 1573,
+          "expectedMatches": 8,
+          "filesAtFill": 7,
+          "filledMs": 1624,
+          "firstResultReceivedMs": 51,
+          "lastResultReceivedMs": 1624,
+          "matchesAtFill": 8,
+          "rates": {
+            "deliveryMatchesPerSecond": 5.09,
+            "matchesPerSecond": 4.93
+          },
+          "receivedMatches": 8
+        }
+      },
+      "lane": "fullStack",
+      "query": "te2_search_canary",
+      "rates": {
+        "durationMs": 1636,
+        "filesMatchedPerSecond": 4.28,
+        "filesScannedPerSecond": 2097.8,
+        "matchesPerSecond": 4.89,
+        "resultsPerSecond": 4.89
+      },
+      "scanRates": {
+        "durationMs": 1636,
+        "filesMatchedPerSecond": 4.28,
+        "filesScannedPerSecond": 2097.8,
+        "matchesPerSecond": 4.89,
+        "resultsPerSecond": 4.89
+      },
+      "status": "ok",
+      "version": 1,
+      "visibleWindowRates": {
+        "deliveryMatchesPerSecond": 5.09,
+        "matchesPerSecond": 4.93
+      }
+    }
+  ],
+  "dto": "SearchBenchmarkSuiteResult",
+  "finishedAtMs": 1783050317572,
+  "frontendFinishedAtMs": 1783050320460,
+  "frontendResults": [
+    {
+      "accumulatedFiles": 0,
+      "accumulatedMatches": 0,
+      "cancellationReason": null,
+      "cases": [
+        {
+          "caseId": "raw-import",
+          "dto": "SearchBenchmarkCaseResult",
+          "error": null,
+          "frontend": {
+            "authoritative": {
+              "filesMatched": 102,
+              "filesScanned": 259,
+              "matchesFound": 700,
+              "resultBatches": 10
+            },
+            "completion": {
+              "authoritativeSearchComplete": true,
+              "complete": true,
+              "extraFullFiles": 0,
+              "extraFullMatches": 0,
+              "missingFullFiles": 93,
+              "missingFullMatches": 650,
+              "missingVisibleMatches": 0,
+              "reason": "visibleWindowComplete",
+              "visibleWindowComplete": true
+            },
+            "controllerProcessingMs": 116.1,
+            "doneFrames": 1,
+            "doneReceivedMs": 234,
+            "errorFrames": 0,
+            "firstResultReceivedMs": 83,
+            "progressFrames": 2,
+            "rates": {
+              "durationMs": 234,
+              "filesPerSecond": 435.9,
+              "filesScannedPerSecond": 1106.84,
+              "matchesPerSecond": 2991.45,
+              "resultsPerSecond": 42.74
+            },
+            "receivedFiles": 9,
+            "receivedMatches": 50,
+            "renderFrames": 13,
+            "resultFrames": 10,
+            "totalRunMs": 234,
+            "visibleWindow": {
+              "cap": 50,
+              "complete": true,
+              "deliveredMatches": 50,
+              "deliveryMs": 73,
+              "expectedMatches": 50,
+              "filesAtFill": 9,
+              "filledMs": 156,
+              "firstResultReceivedMs": 83,
+              "lastResultReceivedMs": 224,
+              "matchesAtFill": 50,
+              "rates": {
+                "deliveryMatchesPerSecond": 684.93,
+                "matchesPerSecond": 320.51
+              },
+              "receivedMatches": 50
+            }
+          },
+          "lane": "fullStack",
+          "query": "import",
+          "status": "ok",
+          "version": 1
+        },
+        {
+          "caseId": "include-py",
+          "dto": "SearchBenchmarkCaseResult",
+          "error": null,
+          "frontend": {
+            "authoritative": {
+              "filesMatched": 75,
+              "filesScanned": 81,
+              "matchesFound": 700,
+              "resultBatches": 8
+            },
+            "completion": {
+              "authoritativeSearchComplete": true,
+              "complete": true,
+              "extraFullFiles": 0,
+              "extraFullMatches": 0,
+              "missingFullFiles": 68,
+              "missingFullMatches": 650,
+              "missingVisibleMatches": 0,
+              "reason": "visibleWindowComplete",
+              "visibleWindowComplete": true
+            },
+            "controllerProcessingMs": 39.5,
+            "doneFrames": 1,
+            "doneReceivedMs": 162,
+            "errorFrames": 0,
+            "firstResultReceivedMs": 41,
+            "progressFrames": 1,
+            "rates": {
+              "durationMs": 162,
+              "filesPerSecond": 462.96,
+              "filesScannedPerSecond": 500,
+              "matchesPerSecond": 4320.99,
+              "resultsPerSecond": 49.38
+            },
+            "receivedFiles": 7,
+            "receivedMatches": 50,
+            "renderFrames": 10,
+            "resultFrames": 8,
+            "totalRunMs": 162,
+            "visibleWindow": {
+              "cap": 50,
+              "complete": true,
+              "deliveredMatches": 50,
+              "deliveryMs": 60,
+              "expectedMatches": 50,
+              "filesAtFill": 7,
+              "filledMs": 101,
+              "firstResultReceivedMs": 41,
+              "lastResultReceivedMs": 157,
+              "matchesAtFill": 50,
+              "rates": {
+                "deliveryMatchesPerSecond": 833.33,
+                "matchesPerSecond": 495.05
+              },
+              "receivedMatches": 50
+            }
+          },
+          "lane": "fullStack",
+          "query": "import",
+          "status": "ok",
+          "version": 1
+        },
+        {
+          "caseId": "exclude-ts",
+          "dto": "SearchBenchmarkCaseResult",
+          "error": null,
+          "frontend": {
+            "authoritative": {
+              "filesMatched": 104,
+              "filesScanned": 269,
+              "matchesFound": 700,
+              "resultBatches": 18
+            },
+            "completion": {
+              "authoritativeSearchComplete": true,
+              "complete": true,
+              "extraFullFiles": 0,
+              "extraFullMatches": 0,
+              "missingFullFiles": 87,
+              "missingFullMatches": 650,
+              "missingVisibleMatches": 0,
+              "reason": "visibleWindowComplete",
+              "visibleWindowComplete": true
+            },
+            "controllerProcessingMs": 149.5,
+            "doneFrames": 1,
+            "doneReceivedMs": 261,
+            "errorFrames": 0,
+            "firstResultReceivedMs": 53,
+            "progressFrames": 2,
+            "rates": {
+              "durationMs": 261,
+              "filesPerSecond": 398.47,
+              "filesScannedPerSecond": 1030.65,
+              "matchesPerSecond": 2681.99,
+              "resultsPerSecond": 68.97
+            },
+            "receivedFiles": 17,
+            "receivedMatches": 50,
+            "renderFrames": 21,
+            "resultFrames": 18,
+            "totalRunMs": 261,
+            "visibleWindow": {
+              "cap": 50,
+              "complete": true,
+              "deliveredMatches": 50,
+              "deliveryMs": 184,
+              "expectedMatches": 50,
+              "filesAtFill": 17,
+              "filledMs": 237,
+              "firstResultReceivedMs": 53,
+              "lastResultReceivedMs": 255,
+              "matchesAtFill": 50,
+              "rates": {
+                "deliveryMatchesPerSecond": 271.74,
+                "matchesPerSecond": 210.97
+              },
+              "receivedMatches": 50
+            }
+          },
+          "lane": "fullStack",
+          "query": "import",
+          "status": "ok",
+          "version": 1
+        },
+        {
+          "caseId": "include-under-exclude-ts",
+          "dto": "SearchBenchmarkCaseResult",
+          "error": null,
+          "frontend": {
+            "authoritative": {
+              "filesMatched": 106,
+              "filesScanned": 238,
+              "matchesFound": 700,
+              "resultBatches": 8
+            },
+            "completion": {
+              "authoritativeSearchComplete": true,
+              "complete": true,
+              "extraFullFiles": 0,
+              "extraFullMatches": 0,
+              "missingFullFiles": 99,
+              "missingFullMatches": 650,
+              "missingVisibleMatches": 0,
+              "reason": "visibleWindowComplete",
+              "visibleWindowComplete": true
+            },
+            "controllerProcessingMs": 50.3,
+            "doneFrames": 1,
+            "doneReceivedMs": 588,
+            "errorFrames": 0,
+            "firstResultReceivedMs": 59,
+            "progressFrames": 1,
+            "rates": {
+              "durationMs": 588,
+              "filesPerSecond": 180.27,
+              "filesScannedPerSecond": 404.76,
+              "matchesPerSecond": 1190.48,
+              "resultsPerSecond": 13.61
+            },
+            "receivedFiles": 7,
+            "receivedMatches": 50,
+            "renderFrames": 10,
+            "resultFrames": 8,
+            "totalRunMs": 588,
+            "visibleWindow": {
+              "cap": 50,
+              "complete": true,
+              "deliveredMatches": 50,
+              "deliveryMs": 39,
+              "expectedMatches": 50,
+              "filesAtFill": 7,
+              "filledMs": 98,
+              "firstResultReceivedMs": 59,
+              "lastResultReceivedMs": 582,
+              "matchesAtFill": 50,
+              "rates": {
+                "deliveryMatchesPerSecond": 1282.05,
+                "matchesPerSecond": 510.2
+              },
+              "receivedMatches": 50
+            }
+          },
+          "lane": "fullStack",
+          "query": "import",
+          "status": "ok",
+          "version": 1
+        },
+        {
+          "caseId": "te2-search-canary",
+          "dto": "SearchBenchmarkCaseResult",
+          "error": null,
+          "frontend": {
+            "authoritative": {
+              "filesMatched": 7,
+              "filesScanned": 3432,
+              "matchesFound": 8,
+              "resultBatches": 8
+            },
+            "completion": {
+              "authoritativeSearchComplete": true,
+              "complete": true,
+              "extraFullFiles": 0,
+              "extraFullMatches": 0,
+              "missingFullFiles": 0,
+              "missingFullMatches": 0,
+              "missingVisibleMatches": 0,
+              "reason": "visibleWindowComplete",
+              "visibleWindowComplete": true
+            },
+            "controllerProcessingMs": 59.2,
+            "doneFrames": 1,
+            "doneReceivedMs": 1636,
+            "errorFrames": 0,
+            "firstResultReceivedMs": 51,
+            "progressFrames": 14,
+            "rates": {
+              "durationMs": 1636,
+              "filesPerSecond": 4.28,
+              "filesScannedPerSecond": 2097.8,
+              "matchesPerSecond": 4.89,
+              "resultsPerSecond": 4.89
+            },
+            "receivedFiles": 7,
+            "receivedMatches": 8,
+            "renderFrames": 23,
+            "resultFrames": 8,
+            "totalRunMs": 1636,
+            "visibleWindow": {
+              "cap": 50,
+              "complete": true,
+              "deliveredMatches": 8,
+              "deliveryMs": 1573,
+              "expectedMatches": 8,
+              "filesAtFill": 7,
+              "filledMs": 1624,
+              "firstResultReceivedMs": 51,
+              "lastResultReceivedMs": 1624,
+              "matchesAtFill": 8,
+              "rates": {
+                "deliveryMatchesPerSecond": 5.09,
+                "matchesPerSecond": 4.93
+              },
+              "receivedMatches": 8
+            }
+          },
+          "lane": "fullStack",
+          "query": "te2_search_canary",
+          "status": "ok",
+          "version": 1
+        }
+      ],
+      "completion": {
+        "complete": false,
+        "extraFiles": null,
+        "extraMatches": null,
+        "missingFiles": null,
+        "missingMatches": null
+      },
+      "doneCancelled": false,
+      "doneFiles": null,
+      "doneFilesScanned": null,
+      "doneFrames": 0,
+      "doneMatches": null,
+      "doneReceivedMs": null,
+      "errorFrames": 0,
+      "errors": [],
+      "firstResultReceivedMs": null,
+      "notificationProcessingMs": 0,
+      "optionalEventsDropped": 0,
+      "progressFrames": 0,
+      "projectPath": "/home/mrsurge/knowhere/termux-extensions-2",
+      "rates": {
+        "durationMs": 21118,
+        "filesPerSecond": 0,
+        "filesScannedPerSecond": 0,
+        "matchesPerSecond": 0,
+        "resultsPerSecond": 0
+      },
+      "receivedFiles": 0,
+      "receivedMatches": 0,
+      "requiredEventBackpressureCount": 0,
+      "requiredEventBackpressureMs": 0,
+      "requiredEventFailures": 0,
+      "resultFrames": 0,
+      "suiteId": "search-benchmark-1783050299339",
+      "totalRunMs": 21118
+    }
+  ],
+  "mode": "genericSuite",
+  "outputPath": "/home/mrsurge/knowhere/termux-extensions-2/.te2-search-benchmarks/te2-search-benchmark-search-benchmark-1783050299339.json",
+  "startedAtMs": 1783050299349,
+  "status": "ok",
+  "suiteId": "search-benchmark-1783050299339",
+  "summary": {
+    "lanes": {
+      "fullStack": {
+        "caseCount": 5,
+        "durationMs": 2881,
+        "filesMatched": 394,
+        "filesScanned": 4279,
+        "matchesFound": 2808,
+        "rates": {
+          "durationMs": 2881,
+          "filesMatchedPerSecond": 136.76,
+          "filesScannedPerSecond": 1485.25,
+          "matchesPerSecond": 974.66,
+          "resultsPerSecond": 18.05
+        },
+        "resultBatches": 52,
+        "statusCounts": {
+          "ok": 5
+        },
+        "visibleWindowCaseCount": 5,
+        "visibleWindowCompleteCount": 5,
+        "visibleWindowDeliveredMatches": 208,
+        "visibleWindowDeliveryMs": 1929,
+        "visibleWindowDurationMs": 2216,
+        "visibleWindowExpectedMatches": 208,
+        "visibleWindowRates": {
+          "deliveryMatchesPerSecond": 107.83,
+          "deliveryMs": 1929,
+          "durationMs": 2216,
+          "matchesPerSecond": 93.86
+        }
+      },
+      "pythonBridge": {
+        "caseCount": 5,
+        "durationMs": 13719,
+        "filesMatched": 4076,
+        "filesScanned": 11730,
+        "matchesFound": 41137,
+        "rates": {
+          "durationMs": 13719,
+          "filesMatchedPerSecond": 297.11,
+          "filesScannedPerSecond": 855.02,
+          "matchesPerSecond": 2998.54,
+          "resultsPerSecond": 297.11
+        },
+        "resultBatches": 4076,
+        "statusCounts": {
+          "ok": 5
+        },
+        "visibleWindowCaseCount": 0,
+        "visibleWindowCompleteCount": 0,
+        "visibleWindowDeliveredMatches": 0,
+        "visibleWindowDeliveryMs": 0,
+        "visibleWindowDurationMs": 0,
+        "visibleWindowExpectedMatches": 0
+      },
+      "rustOnly": {
+        "caseCount": 5,
+        "durationMs": 4489,
+        "filesMatched": 4076,
+        "filesScanned": 11730,
+        "matchesFound": 41137,
+        "rates": {
+          "durationMs": 4489,
+          "filesMatchedPerSecond": 908.0,
+          "filesScannedPerSecond": 2613.05,
+          "matchesPerSecond": 9163.96,
+          "resultsPerSecond": 908.0
+        },
+        "resultBatches": 4076,
+        "statusCounts": {
+          "ok": 5
+        },
+        "visibleWindowCaseCount": 0,
+        "visibleWindowCompleteCount": 0,
+        "visibleWindowDeliveredMatches": 0,
+        "visibleWindowDeliveryMs": 0,
+        "visibleWindowDurationMs": 0,
+        "visibleWindowExpectedMatches": 0
+      }
+    }
+  },
+  "version": 1
+}

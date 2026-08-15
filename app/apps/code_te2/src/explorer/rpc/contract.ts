@@ -28,6 +28,8 @@ export const EXPLORER_RPC_METHODS = {
   extensionsMarketplaceDetail: "explorer.extensions.marketplace.detail",
   extensionsMarketplaceInstall: "explorer.extensions.marketplace.install",
   extensionsMarketplaceSearch: "explorer.extensions.marketplace.search",
+  extensionsMenuResolve: "explorer.extensions.menu.resolve",
+  extensionsCommandExecute: "explorer.extensions.command.execute",
   extensionsToggle: "explorer.extensions.toggle",
   extensionsUninstall: "explorer.extensions.uninstall",
   extensionsWorkspaceSettingsGet: "explorer.extensions.workspaceSettings.get",

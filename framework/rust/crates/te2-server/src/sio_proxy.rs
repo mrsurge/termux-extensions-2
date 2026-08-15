@@ -271,3 +271,55 @@ fn coerce_port(value: Option<&Value>, field_name: &str) -> Result<u16> {
         _ => bail!("{field_name} must be an integer"),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn webview_route_index() -> SioRouteIndex {
+        let route = SioProxyRoute {
+            app_id: "code_te2".to_owned(),
+            route_id: "wba_webview".to_owned(),
+            target: SioTarget::Static,
+            public_path: "/api/app/code_te2/services/wba/webview".to_owned(),
+            upstream_path: "/webview".to_owned(),
+            aliases: Vec::new(),
+            host: "127.0.0.1".to_owned(),
+            port: Some(18181),
+        };
+        SioRouteIndex {
+            routes: vec![route],
+            mounts: vec![("/api/app/code_te2/services/wba/webview".to_owned(), 0)],
+        }
+    }
+
+    #[test]
+    fn webview_mount_matches_wrapper_document_and_resource_paths() {
+        let routes = webview_route_index();
+        let cases = [
+            ("vsix:surface", "/webview/vsix:surface"),
+            ("vsix:surface/document", "/webview/vsix:surface/document"),
+            (
+                "vsix:surface/resource/file/local/path.js",
+                "/webview/vsix:surface/resource/file/local/path.js",
+            ),
+        ];
+
+        for (rest, expected_upstream) in cases {
+            let public = format!("/api/app/code_te2/services/wba/webview/{rest}");
+            let matched = routes.match_path(&public).expect("webview route");
+            assert_eq!(matched.route.route_id, "wba_webview");
+            assert_eq!(matched.rest, rest);
+            assert_eq!(
+                join_upstream_path(&matched.route.upstream_path, &matched.rest),
+                expected_upstream
+            );
+        }
+
+        assert!(
+            routes
+                .match_path("/api/app/code_te2/services/wba/webviews/vsix:surface")
+                .is_none()
+        );
+    }
+}

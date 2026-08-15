@@ -3,6 +3,9 @@ import {
   type ElectronSidebarSurfaceAction,
   type ElectronSidebarSurfaceDescriptor,
   type ElectronSidebarSurfaceDetachRequest,
+  type ElectronSidebarMenuItem,
+  type ElectronSidebarMenuRequest,
+  type ElectronSidebarSurfacePlaceRequest,
   type ElectronSidebarSurfaceReconcileRequest,
   type ElectronSidebarSurfaceReference,
 } from "./app-view-contracts";
@@ -13,6 +16,7 @@ const MAX_PATH_LENGTH = 4096;
 const MAX_URL_LENGTH = 8192;
 const MAX_WINDOW_NAME_LENGTH = 8192;
 const MAX_RECONCILE_SURFACES = 256;
+const MAX_MENU_ITEMS = 128;
 const APP_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
 const WINDOW_NAME_PREFIXES = ["te2-devtools:", "te2-run-profile:"];
 const SURFACE_ACTIONS = new Set<ElectronSidebarSurfaceAction>([
@@ -22,6 +26,7 @@ const SURFACE_ACTIONS = new Set<ElectronSidebarSurfaceAction>([
   "refresh",
   "stop",
 ]);
+const SURFACE_RENDERERS = new Set(["url", "persistent-extension"]);
 
 function record(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -45,6 +50,13 @@ function boundedString(
 
 function strictBoolean(value: unknown, label: string): boolean {
   if (typeof value !== "boolean") throw new TypeError(`${label} must be boolean`);
+  return value;
+}
+
+function finiteNumber(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new TypeError(`${label} must be a finite number`);
+  }
   return value;
 }
 
@@ -85,6 +97,18 @@ export function validateElectronSidebarSurfaceDescriptor(
   }
   return {
     version: ELECTRON_SIDEBAR_SURFACE_DESCRIPTOR_VERSION,
+    renderer: (() => {
+      const renderer = boundedString(
+        raw.renderer,
+        "Sidebar surface renderer",
+        MAX_ID_LENGTH,
+        true,
+      );
+      if (!SURFACE_RENDERERS.has(renderer)) {
+        throw new TypeError("Unsupported Sidebar surface renderer");
+      }
+      return renderer as ElectronSidebarSurfaceDescriptor["renderer"];
+    })(),
     hostId: boundedString(raw.hostId, "Sidebar surface host id", MAX_ID_LENGTH, true),
     surfaceId: boundedString(
       raw.surfaceId,
@@ -119,6 +143,32 @@ export function validateElectronSidebarSurfaceDescriptor(
   };
 }
 
+export function validateElectronSidebarSurfacePlaceRequest(
+  value: unknown,
+): ElectronSidebarSurfacePlaceRequest {
+  const raw = record(value, "Sidebar surface placement request");
+  const bounds = record(raw.bounds, "Sidebar surface bounds");
+  const result = {
+    descriptor: validateElectronSidebarSurfaceDescriptor(raw.descriptor),
+    bounds: {
+      x: finiteNumber(bounds.x, "Sidebar surface bounds x"),
+      y: finiteNumber(bounds.y, "Sidebar surface bounds y"),
+      width: finiteNumber(bounds.width, "Sidebar surface bounds width"),
+      height: finiteNumber(bounds.height, "Sidebar surface bounds height"),
+    },
+    visible: strictBoolean(raw.visible, "Sidebar surface visibility"),
+  };
+  if (result.bounds.width < 0 || result.bounds.height < 0) {
+    throw new TypeError("Sidebar surface bounds dimensions must not be negative");
+  }
+  if (result.descriptor.renderer !== "persistent-extension") {
+    throw new TypeError(
+      "Only persistent extension surfaces support embedded placement",
+    );
+  }
+  return result;
+}
+
 export function validateElectronSidebarSurfaceDetachRequest(
   value: unknown,
 ): ElectronSidebarSurfaceDetachRequest {
@@ -126,6 +176,67 @@ export function validateElectronSidebarSurfaceDetachRequest(
   return {
     descriptor: validateElectronSidebarSurfaceDescriptor(raw.descriptor),
     focus: strictBoolean(raw.focus, "Sidebar surface focus"),
+  };
+}
+
+export function validateElectronSidebarMenuRequest(
+  value: unknown,
+): ElectronSidebarMenuRequest {
+  const raw = record(value, "Sidebar menu request");
+  if (
+    !Array.isArray(raw.items) ||
+    raw.items.length === 0 ||
+    raw.items.length > MAX_MENU_ITEMS
+  ) {
+    throw new TypeError("Sidebar menu items are invalid");
+  }
+  const items: ElectronSidebarMenuItem[] = raw.items.map((value, index) => {
+    const item = record(value, `Sidebar menu item ${index}`);
+    const type = boundedString(
+      item.type,
+      `Sidebar menu item ${index} type`,
+      16,
+      true,
+    );
+    if (type === "separator") return { type };
+    if (type === "label") {
+      return {
+        type,
+        label: boundedString(
+          item.label,
+          `Sidebar menu item ${index} label`,
+          MAX_LABEL_LENGTH,
+          true,
+        ),
+      };
+    }
+    if (type === "item") {
+      return {
+        type,
+        id: boundedString(
+          item.id,
+          `Sidebar menu item ${index} id`,
+          MAX_ID_LENGTH,
+          true,
+        ),
+        label: boundedString(
+          item.label,
+          `Sidebar menu item ${index} label`,
+          MAX_LABEL_LENGTH,
+          true,
+        ),
+        enabled: strictBoolean(
+          item.enabled,
+          `Sidebar menu item ${index} enabled`,
+        ),
+      };
+    }
+    throw new TypeError(`Unsupported Sidebar menu item type: ${type}`);
+  });
+  return {
+    x: finiteNumber(raw.x, "Sidebar menu x"),
+    y: finiteNumber(raw.y, "Sidebar menu y"),
+    items,
   };
 }
 

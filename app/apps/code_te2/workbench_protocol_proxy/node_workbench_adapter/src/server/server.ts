@@ -14,6 +14,7 @@ import type {
   WorkbenchLike,
 } from "./request-dispatch";
 import { formatErrorMessage } from "./error-format.mjs";
+import { sendWebviewResourceResponse } from "./webview-resource-response.mjs";
 
 const { WorkbenchClient } = await import("../client/workbench-client.mjs");
 const bridgeMod = await import("./event-bridge.mjs");
@@ -52,6 +53,24 @@ type RuntimeWorkbench = Omit<WorkbenchLike, "state"> & {
   state?: Record<string, unknown>;
   status: () => Record<string, unknown>;
   getExtensions?: () => unknown[];
+  webviewWrapperHtml: (surfaceId: string) => string;
+  webviewDocumentHtml: (
+    surfaceId: string,
+    resourceOrigin: string,
+    bootstrapToken: string,
+  ) => string;
+  webviewResource: (
+    surfaceId: string,
+    resourceToken: string,
+    scheme: string,
+    authority: string,
+    resourcePath: string,
+  ) => Promise<{
+    body: Uint8Array;
+    contentType: string;
+    etag: string;
+    lastModified: string;
+  }>;
 };
 type JsonRpcReply = Record<string, unknown>;
 type JsonRpcEnvelope = Record<string, unknown> & {
@@ -74,6 +93,18 @@ const DEFAULT_CODE_SERVER_HTTP =
   process.env.TE2_CODE_SERVER_HTTP ?? "http://localhost";
 const DEFAULT_REMOTE_AUTHORITY =
   process.env.TE2_REMOTE_AUTHORITY ?? "localhost";
+const EXTENSION_STORAGE_PATH = String(
+  process.env.TE2_EXTENSION_STORAGE_PATH ?? "",
+).trim();
+if (!EXTENSION_STORAGE_PATH) {
+  throw new Error("TE2_EXTENSION_STORAGE_PATH is required");
+}
+const WEBVIEW_RECONSTRUCTION_STORAGE_PATH = String(
+  process.env.TE2_WEBVIEW_RECONSTRUCTION_STORAGE_PATH ?? "",
+).trim();
+if (!WEBVIEW_RECONSTRUCTION_STORAGE_PATH) {
+  throw new Error("TE2_WEBVIEW_RECONSTRUCTION_STORAGE_PATH is required");
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -297,6 +328,37 @@ function textResponse(res: ServerResponse, code: number, text: string): void {
   res.end(text);
 }
 
+function bodyResponse(
+  res: ServerResponse,
+  code: number,
+  body: string | Uint8Array,
+  contentType: string,
+  extraHeaders: Record<string, string> = {},
+): void {
+  const payload = typeof body === "string" ? Buffer.from(body, "utf8") : Buffer.from(body);
+  res.writeHead(code, {
+    "content-type": contentType,
+    "content-length": payload.byteLength,
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    ...extraHeaders,
+  });
+  res.end(payload);
+}
+
+function httpOrigin(value: unknown): string {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (typeof raw !== "string" || !raw.trim()) return "";
+  try {
+    const parsed = new URL(raw);
+    return parsed.protocol === "http:" || parsed.protocol === "https:"
+      ? parsed.origin
+      : "";
+  } catch {
+    return "";
+  }
+}
+
 async function readJson(
   req: IncomingMessage,
   maxBytes = 2 * 1024 * 1024,
@@ -472,6 +534,9 @@ const workbenchEventHandler = (ev: unknown): void =>
   createWorkbenchEventHandler(bridgeRuntime())(ev);
 wb = new WorkbenchClient({
   onEvent: workbenchEventHandler,
+  onNotification: wsBroadcastNotification,
+  extensionStoragePath: EXTENSION_STORAGE_PATH,
+  webviewReconstructionStoragePath: WEBVIEW_RECONSTRUCTION_STORAGE_PATH,
 }) as unknown as RuntimeWorkbench;
 
 installSyncTrace();
@@ -641,6 +706,96 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && url.pathname === "/health") {
       return jsonResponse(res, 200, { ok: true, ts_ms: nowMs() });
+    }
+
+    if (
+      req.method === "GET" &&
+      url.pathname === "/webview/runtime/messagepack-codec.mjs"
+    ) {
+      const codec = await fs.readFile(
+        new URL("../protocol/messagepack-codec.mjs", import.meta.url),
+      );
+      return bodyResponse(
+        res,
+        200,
+        codec,
+        "text/javascript; charset=utf-8",
+      );
+    }
+
+    if (
+      req.method === "GET" &&
+      url.pathname === "/webview/runtime/socket.io.min.js"
+    ) {
+      const socketIoClient = await fs.readFile(
+        new URL(
+          "../../../../vendor/node_socketio/node_modules/socket.io/client-dist/socket.io.min.js",
+          import.meta.url,
+        ),
+      );
+      return bodyResponse(
+        res,
+        200,
+        socketIoClient,
+        "application/javascript; charset=utf-8",
+      );
+    }
+
+    if (req.method === "GET" && url.pathname.startsWith("/webview/")) {
+      const segments = url.pathname.split("/").filter(Boolean);
+      if (segments.length >= 6 && segments[1] === "resource") {
+        const resource = await wb.webviewResource(
+          "",
+          segments[2] ?? "",
+          segments[3] ?? "",
+          segments[4] ?? "",
+          segments.slice(5).join("/"),
+        );
+        return await sendWebviewResourceResponse(req, res, resource);
+      }
+      const surfaceId = decodeURIComponent(segments[1] ?? "");
+      if (segments.length === 2) {
+        return bodyResponse(
+          res,
+          200,
+          wb.webviewWrapperHtml(surfaceId),
+          "text/html; charset=utf-8",
+          {
+            "content-security-policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; frame-src 'self'",
+          },
+        );
+      }
+      if (segments.length === 3 && segments[2] === "document") {
+        const requestedOrigin = httpOrigin(url.searchParams.get("resourceOrigin"));
+        const wrapperOrigin = httpOrigin(req.headers.referer);
+        if (!requestedOrigin || requestedOrigin !== wrapperOrigin) {
+          return textResponse(
+            res,
+            400,
+            "Extension document resource origin did not match its wrapper.",
+          );
+        }
+        return bodyResponse(
+          res,
+          200,
+          wb.webviewDocumentHtml(
+            surfaceId,
+            requestedOrigin,
+            String(url.searchParams.get("bootstrapToken") ?? "").trim(),
+          ),
+          "text/html; charset=utf-8",
+        );
+      }
+      if (segments.length >= 6 && segments[2] === "resource") {
+        const resource = await wb.webviewResource(
+          surfaceId,
+          "",
+          segments[3] ?? "",
+          segments[4] ?? "",
+          segments.slice(5).join("/"),
+        );
+        return await sendWebviewResourceResponse(req, res, resource);
+      }
     }
 
     if (req.method === "POST" && url.pathname === "/cmd") {

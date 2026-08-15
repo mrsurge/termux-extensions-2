@@ -204,7 +204,7 @@ export class RunTargetRelayManager {
   readonly #readyWaiters = new Set<{
     resolve: () => void;
     reject: (error: Error) => void;
-    timeout: ReturnType<typeof setTimeout>;
+    timeout: ReturnType<typeof setTimeout> | null;
   }>();
   #mutationQueue: Promise<void> = Promise.resolve();
 
@@ -250,7 +250,7 @@ export class RunTargetRelayManager {
     this.#projectionGeneration += 1;
   }
 
-  waitUntilProjectionReady(timeoutMs = 10_000): Promise<void> {
+  waitUntilProjectionReady(timeoutMs: number | null = 10_000): Promise<void> {
     if (this.#hasAuthoritativeProjection && this.#projectionReady) {
       return Promise.resolve();
     }
@@ -258,11 +258,14 @@ export class RunTargetRelayManager {
       const waiter = {
         resolve,
         reject,
-        timeout: setTimeout(() => {
+        timeout: null as ReturnType<typeof setTimeout> | null,
+      };
+      if (timeoutMs != null) {
+        waiter.timeout = setTimeout(() => {
           this.#readyWaiters.delete(waiter);
           reject(new Error("Run target route authority did not become ready"));
-        }, timeoutMs),
-      };
+        }, timeoutMs);
+      }
       this.#readyWaiters.add(waiter);
     });
   }
@@ -423,7 +426,7 @@ export class RunTargetRelayManager {
 
   #resolveReadyWaiters(): void {
     for (const waiter of this.#readyWaiters) {
-      clearTimeout(waiter.timeout);
+      if (waiter.timeout) clearTimeout(waiter.timeout);
       waiter.resolve();
     }
     this.#readyWaiters.clear();
@@ -431,7 +434,7 @@ export class RunTargetRelayManager {
 
   #rejectReadyWaiters(error: Error): void {
     for (const waiter of this.#readyWaiters) {
-      clearTimeout(waiter.timeout);
+      if (waiter.timeout) clearTimeout(waiter.timeout);
       waiter.reject(error);
     }
     this.#readyWaiters.clear();

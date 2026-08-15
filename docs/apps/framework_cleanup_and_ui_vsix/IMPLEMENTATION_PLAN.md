@@ -1,8 +1,12 @@
 # Framework Cleanup And UI VSIX Implementation Plan
 
-Status: Phases 1 through 3 and Phase 4A are implemented and validated. Real
-legacy-root migration applies, filesystem deletion, Phase 4B public identifiers,
-and UI VSIX work remain separate approval boundaries.
+Status: Phases 1 through 4 are implemented and validated. Phase 5's first
+activity-bar webview slice and its first command/panel follow-ons are implemented
+and live-accepted. Per-client state continuity and Electron readiness ordering
+are implemented and locally validated; live continuity acceptance remains open.
+Real legacy-root migration applies, filesystem deletion, and later UI VSIX
+contribution points remain separate approval boundaries. Post-4B WBA packaging
+and Sidebar peer transport prerequisites are complete on TE2 commit `7cd923fc`.
 
 This plan coordinates four framework-readiness fixes and leaves UI VSIX
 extensions as a deliberately rough later milestone:
@@ -155,6 +159,22 @@ Removing that statement before a real UI contribution contract exists would be
 misleading. This plan reserves the later work without pretending the webview,
 CSP, resource-origin, contribution-point, and lifecycle decisions are already
 made.
+
+Two implementation prerequisites were hardened without changing the deferred
+UI VSIX architecture:
+
+- WBA's production selector matcher is packaged beneath Code TE2's vendor tree,
+  and an isolated installed-wheel test proves the generated adapter does not
+  resolve it from source `node_modules`.
+- TE2 app workers explicitly receive matching `TE_FRAMEWORK_URL` and `TE_PORT`
+  values. ALS-RS keeps its own HTTP listener on `12459`, directs its outbound
+  Sidebar IPC client to the injected framework origin, and re-registers its
+  exact app peer after event-driven reconnects. The non-default framework-port
+  regression was reproduced with `8081` and covered in ALS-RS commit
+  `15fb9af`.
+
+These close infrastructure prerequisites only. They do not select UI
+contribution points, define an extension DOM contract, or begin Phase 5.
 
 ## 2. Canonical naming and storage contract
 
@@ -684,39 +704,812 @@ remaining cutover action is to stop any old Code TE2 workers and Run Profile
 shells before the first live `code_te2` acceptance run; no live shell is
 migrated across identities.
 
-### Phase 5 — UI VSIX rough-draft milestone
+### Phase 5 — First UI VSIX activity-bar webview
 
-This phase is a placeholder, not an implementation plan.
+This approved slice proves one real extension-owned UI without inventing a
+second settings, project, or presentation system. It intentionally stops before
+custom editors, webview panels, secondary-sidebar views, commands, menus, and
+VS Code chat-session contribution points.
 
-Questions to investigate after Phases 1-4:
+#### 5.1 Project and extension authority
 
-- which contribution points are required for the first supported UI extension
-  (`viewsContainers`, `views`, commands, menus, webview views, or a smaller
-  subset);
-- how the WBA extension host registers and disposes one UI surface;
-- how extension messages cross the backend boundary without a frontend-to-WBA
-  side channel;
-- how extension resources receive a stable origin, CSP, and bounded access;
-- how server-owned surface membership maps onto browser/Gecko inline and
-  Electron detachable presentations;
-- how reload, extension disable/uninstall, WBA restart, client reconnect, and
-  shell exit destroy stale presentations; and
-- which small real extension is the acceptance fixture.
+- The existing Code TE2 extension registry remains install/enablement authority.
+- Its existing User and Workspace settings projections remain configuration
+  authority. Workspace configuration continues to come from the active
+  project's `.vscode/settings.json` through WBA's `workspace` and `folders[0]`
+  tiers.
+- WBA's existing workspace switch is the project-scope boundary. UI state must
+  not introduce another current-project cache or a client-selected extension
+  host cwd.
+- VS Code extension `globalState` and `workspaceState` use WBA's
+  `MainThreadStorage` actor. TE2 injects one exact private storage root beneath
+  the managed Code Server User data directory; global Mementos are keyed by
+  extension id, while workspace Mementos are additionally keyed by the stable
+  active-workspace identity. Writes are serialized and atomically replaced.
+  Settings Sync registration remains an explicit local-only no-op; it must not
+  turn Memento state into settings or webview presentation state.
+- The extension host owns one logical provider registration and Sidebar
+  membership surface per `(workspace, contributed view id)`. That membership
+  is not itself a resolved webview. WBA lazily creates one Code OSS webview
+  runtime per `(surfaceId, clientInstanceId)` on the first client attach, so
+  each client has an independent handle, HTML/options/state stream, transport
+  journal, and resource capability while the provider and workspace stay
+  shared.
 
-Initial invariants:
+#### 5.2 Supported contribution subset
 
-- WBA remains extension-host authority;
-- the backend owns durable membership/lifecycle facts;
-- each client owns presentation and foreground state;
-- GeckoView remains compatible and inline;
-- Electron may detach using its existing presentation registry;
-- UI extensions do not inherit Run Profile process ownership merely because
-  they reuse presentation machinery; and
-- the Explorer marketplace continues to say UI extensions are unsupported
-  until an end-to-end contribution is accepted.
+WBA discovers `contributes.viewsContainers.activitybar` and the matching
+`contributes.views` entries whose exact type is `webview`. It activates the
+normal generated `onView:<viewId>` event and implements the current Code Server
+4.130 RPC contract for:
 
-Expected deliverable for this phase is a separate source-backed UI VSIX plan
-and tracker. No UI VSIX runtime code is authorized by this document.
+- `MainThreadWebviewViews` / `ExtHostWebviewViews` provider registration,
+  resolve, visibility, title, description, badge, show, disposal;
+- `MainThreadWebviews` / `ExtHostWebviews` HTML, content options, state, and
+  binary-safe bidirectional `postMessage`; and
+- exact protocol ids discovered from the managed Code Server build rather than
+  treating unknown calls as successful empty stubs.
+
+The first live acceptance fixture is
+`openai.chatgpt_26.5803.41515.vsix`, specifically its activity-bar
+`chatgpt.sidebarView`. Its secondary Sidebar view and custom conversation editor
+remain outside this slice.
+
+#### 5.3 Document, resource, and message bridge
+
+- WBA serves a trusted outer wrapper under the existing WBA service route. The
+  extension HTML runs in a sandboxed inner iframe so the wrapper can own
+  transport and state without giving extension content the TE2 host DOM.
+- The wrapper supplies the standard one-shot `acquireVsCodeApi()` contract,
+  including `postMessage`, `setState`, and `getState`.
+- Host messages are re-emitted inside the opaque iframe with the document's own
+  origin so origin-validating extension runtimes receive the same event shape as
+  a native VS Code webview. The wrapper also supplies client-local
+  `localStorage`/`sessionStorage` adapters without granting `allow-same-origin`;
+  durable local storage is namespaced by the stable workspace/view surface.
+- Browser-to-WBA RPC remains strict MessagePack on the existing WBA Socket.IO
+  lane. The extension-host mixed-argument codec preserves ArrayBuffer and typed
+  array payloads rather than converting them to JSON/base64.
+- `vscode-resource.vscode-cdn.net` URLs are rewritten to a WBA-epoch resource
+  scope keyed by extension identity, workspace, extension location, and the
+  normalized `localResourceRoots`. Activity views and panels with the same
+  scope receive the same unguessable URL, so a second Codex panel can reuse the
+  extension bundle already loaded by the activity view without sharing either
+  document or extension-host lifecycle. The scope is reference-counted by live
+  runtimes. Files are admitted only when the scope exists and realpath
+  resolution proves containment beneath its exact roots; extension location
+  and workspace are the normal defaults when the extension provides no roots.
+  Extension-install assets use a private immutable cache lifetime bounded by
+  the WBA-epoch scope token. Mutable workspace resources retain ETag/
+  Last-Modified revalidation. Compressible resources use asynchronous Brotli/
+  gzip negotiation. The Rust app proxy preserves end-to-end
+  `Content-Encoding` because its reqwest transport does not decode response
+  bodies.
+- Script execution and form submission follow the extension's webview content
+  options. The extension's own CSP remains authoritative inside the document;
+  the wrapper has its own restrictive CSP.
+
+#### 5.4 Sidebar projection and native-client compatibility
+
+- WBA publishes complete workspace-scoped `ExtensionWebviewSurface` snapshots
+  over its existing backend event pipe. Python validates those DTOs and projects
+  membership into the existing Sidebar ledger as URL slots.
+- The backend owns membership and teardown. Each client continues to own order,
+  foreground, hidden/embedded/detached presentation, and mention targeting.
+- Browser and GeckoView use the existing inline Sidebar URL presentation.
+  Electron uses its existing stable-surface detach/attach machinery; no new
+  Electron-only webview transport is introduced.
+- This phase makes no Android source or asset changes. Gecko compatibility is a
+  consequence of using the shared Sidebar/browser surface and existing WBA
+  route.
+
+#### 5.5 Lifecycle and acceptance boundary
+
+- Workspace switch disposes all old client runtimes and membership before
+  discovering the new workspace's views. Provider registrations survive a WBA
+  workspace switch because the extension host itself survives; a full WBA
+  reset clears both.
+- Provider unregister, extension-host reset, and empty/stale snapshots remove
+  the corresponding Sidebar membership and all associated client runtimes.
+  A resolve failure removes only the requesting client's runtime.
+- Disconnecting one browser presentation does not dispose its warm client
+  runtime or the shared logical provider. Reattach resumes that exact client
+  runtime for the WBA/workspace lifetime.
+- The marketplace's unsupported notice remains until the OpenAI activity-bar
+  view is live-accepted in both an inline host and Electron detach/attach. Later
+  contribution points require a new approved slice.
+
+#### 5.6 Source-backed follow-on architecture
+
+The follow-on investigation found that the next work is not one large generic
+"UI extension" feature. It is a dependency-ordered set of Code OSS actors and
+Code TE2 presentation contracts. The activity-bar provider remains one logical
+surface per `(workspace, view id)`; additional Codex conversations come from
+custom editors and webview panels, not cloned instances of that provider.
+
+##### 5.6A Contribution membership, hiding, and the app drawer
+
+The current close actions for URL and dock slots both call
+`ui.sidebar.window.close`, whose backend removes the slot from the authoritative
+Sidebar ledger. That is correct for a user-created URL slot, but it permanently
+evicts a WBA-contributed extension view and its icon even though the provider is
+still registered. The client presentation model already admits `hidden`, but
+the Sidebar runtime does not currently use that mode as a user action.
+
+For extension-backed slots:
+
+- Close/undock must destroy only the current iframe or detached presentation,
+  set that client's presentation mode to `hidden`, clear its local foreground
+  and transient presentation identity, and leave backend membership intact.
+- The app drawer gains an Extension Views section built from current Sidebar
+  membership, including hidden extension surfaces. Choosing an entry changes
+  that client's mode back to `embedded`, recreates/focuses the inline
+  presentation, or focuses the existing detached Electron presentation.
+- Provider unregister, workspace switch, failed resolve, WBA reset, or a newer
+  complete WBA snapshot that omits the surface remains the only path that
+  removes extension membership and therefore removes the drawer entry.
+- User-created URL slots retain their existing destructive close behavior.
+
+This keeps lifecycle authority in WBA/Python while order, foreground, and
+hidden/embedded/detached state remain client-local. It also fixes the concrete
+failure where closing the dock slot permanently loses the only way to reopen
+the extension.
+
+##### 5.6B Extension identity and icons
+
+WBA already reads `contributes.viewsContainers.activitybar`, but it currently
+projects each resolved view through Python as a generic URL slot with a hard
+coded puzzle glyph. Extend the surface/Sidebar projection with bounded display
+metadata:
+
+- use the contributed view/container title for drawer, dock, and detached
+  window identity;
+- prefer the activity-bar container icon, fall back to the extension manifest's
+  root icon, and use the existing generic glyph only when neither is usable;
+- resolve icon paths beneath the extension install root and serve them through
+  the existing realpath-contained WBA resource route, which already supports
+  extension-local SVG/PNG resources; and
+- keep the icon URL independent of a live iframe so a hidden surface remains
+  identifiable in the app drawer.
+
+##### 5.6C Workspace-scoped command and context registry
+
+The generated Code Server 4.130 nid catalog already contains the required
+actors, but WBA does not load or implement `MainThreadCommands`,
+`ExtHostCommands`, `MainThreadMessageService`, `MainThreadTextEditors`,
+`MainThreadWebviewPanels`, `ExtHostWebviewPanels`, or
+`MainThreadCustomEditors`; unknown main-thread calls currently receive empty
+success responses. The next protocol slice must load the named nids and fail
+unsupported calls explicitly instead of silently reporting success. The exact
+Code Server 4.130 generated values remain discovery output, not hard-coded
+protocol constants.
+
+Build one workspace-generation-scoped registry that composes:
+
+- `contributes.commands` metadata, including title, category, short title,
+  enablement, and light/dark or theme icons;
+- `contributes.menus` placement, alternate command, group/order, and `when`;
+- live command registration/unregistration from `MainThreadCommands`; and
+- the extension-defined context keys updated through `setContext`, plus the
+  current Code TE2 resource/editor context needed by menu predicates.
+
+Code Server's management scan remains authoritative for which extensions are
+admitted to the extension host, but its returned DTO is not a complete manifest
+authority: live validation found an admitted Codex extension whose view
+contributions survived while `commands` and `menus` were absent. For each
+already-admitted non-builtin extension, WBA therefore enriches manifest-owned
+fields from the canonical package registered by the existing private
+`extensions.json`. The disk catalog must never admit a management-rejected
+extension, replace management-owned runtime identity/location metadata, or
+alter builtin membership.
+
+WBA owns context-expression parsing and eligibility. Each client surface sends
+only its bounded ephemeral context through its own RPC lane: the editor sends
+the active URI/path, language, selection, and focus facts; Explorer sends the
+clicked and selected resources; and an extension view sends its surface
+identity. WBA merges those facts with extension `setContext` state and resolves
+the requested menu on an active-document/menu-open event. There is no context
+or selection polling and frontends do not grow separate VS Code `when`-clause
+evaluators.
+
+Context operands and comparison literals remain distinct. An absent positive
+context key evaluates false, while an unquoted right-hand literal such as
+`.json` remains a literal rather than being mistaken for a missing key. This
+keeps unprojected Debug Pretty Print and Copilot active-diff actions hidden
+until their real context/state and editor semantics exist, without maintaining
+a command-id or title blacklist.
+
+Implemented editor command execution follows the editor's existing direct
+strict-MessagePack WBA lane. WBA first fires the implicit `onCommand:<id>`
+activation event, synchronizes the extension host's active editor selection,
+and invokes the exact registered command through `ExtHostCommands`. Match Code
+Server's resource arguments: editor title/context receives the active model URI.
+Later Explorer and Sidebar contribution placements must continue to originate
+through those surfaces' own backend lanes rather than adding a second direct
+WBA client.
+
+Extensions can also observe selection independently of command execution through
+`window.onDidChangeTextEditorSelection`. The active Monaco editor therefore
+projects its latest exact selection over the existing direct strict-MessagePack
+WBA lane on cursor/selection events. The frontend coalesces a burst to at most
+one update per 16 ms without polling, WBA rejects a path that is not its active
+editor, and the accepted update passes through
+`ExtHostEditors.$acceptEditorPropertiesChanged` so both
+`activeTextEditor.selection` and the extension event advance together.
+Disconnected notifications are dropped; after the WBA acknowledges the current
+active-document open, the editor sends one authoritative selection snapshot.
+The command-time synchronization remains the final execution barrier.
+
+The existing `workspaceContains` implementation must also use Code OSS-compatible
+glob semantics. Json Crack declares `workspaceContains:**/*.{json}`, while the
+current hand-written matcher escapes brace expressions and therefore misses
+that cold activation event. Reuse the already-vendored `picomatch` path instead
+of adding another matcher. Implement `MainThreadMessageService` against the
+existing shared toast/dialog UI so extension information, warning, and error
+messages do not disappear into a successful empty RPC response.
+
+Workspace switch and WBA reset replace the whole command/menu/context
+projection; stale registrations must not survive into another project.
+Unsupported context-expression forms fail closed rather than making commands
+visible unconditionally.
+
+###### Json Crack command/menu fixture
+
+`AykutSarac.jsoncrack-vscode` 5.1.0 is the first concrete fixture. The installed
+runtime payload and downloaded VSIX runtime payload are byte-identical. Its
+manifest contributes:
+
+- `jsoncrack-vscode.start` to `editor/title`, group `navigation`, with distinct
+  light/dark SVG icons and the predicate
+  `resourceExtname == .json || editorLangId == json`;
+- `jsoncrack-vscode.start.selected` to `editor/context`, group `navigation`,
+  with `editorHasSelection`; and
+- `jsoncrack-vscode.start.specific` as the argument-driven command used by
+  other callers.
+
+Code Server turns the `editor/title` navigation group into a primary inline
+editor action and supplies the active resource URI. Its editor context menu
+supplies the model URI. Json Crack then reads `window.activeTextEditor`, and
+the selection command reads `activeTextEditor.selection`; WBA's current editor
+projection hard-codes that selection to line 1, column 1. Correct command
+visibility alone is therefore insufficient: the invocation transaction must
+push the exact current Monaco selection through
+`ExtHostEditors.$acceptEditorPropertiesChanged` before activating and running
+the command. The existing document-change projection already supplies the
+whole-document updates Json Crack observes after panel creation.
+
+##### 5.6D Extension-requested file navigation
+
+Code OSS has two relevant paths:
+
+- `window.showTextDocument` uses `MainThreadTextEditors.$tryShowTextDocument`
+  and expects a real extension-host editor id; and
+- `vscode.open` is routed through `MainThreadCommands.$executeCommand` as the
+  internal `_workbench.open` command.
+
+WBA already owns logical document/editor ids, while Code TE2 already owns the
+canonical project-contained file-open action in the host backend. The new actor
+must therefore synchronize/admit the WBA document, request the canonical
+backend open through a correlated WBA-push/Python-ack transaction, and return
+the valid WBA editor id only after the request is accepted. Ordinary file opens
+must not bypass path admission, active-file sidecar mutation, or the existing
+editor-open completion contract.
+
+##### 5.6E Generic diff surfaces
+
+`vscode.diff` arrives as `_workbench.diff(leftUri, rightUri, title, options)`.
+Code TE2's current Monaco diff machinery is coupled to Git/draft baselines and
+is not a generic two-resource extension API. Add a separate backend-owned diff
+request/surface contract that validates both resources, materializes their
+documents through the normal open/WBA rules, and presents a bounded read-only
+diff without changing active-file authority accidentally. Do not disguise an
+arbitrary extension diff as a Git or draft diff.
+
+##### 5.6F Webview panels and custom editors
+
+Json Crack is the smaller first webview-panel fixture. Every one of its three
+commands calls `window.createWebviewPanel("liveHTMLPreviewer", title,
+ViewColumn.Beside, options)`, sets a dynamic PNG panel icon and document title,
+enables scripts, retains context when hidden, admits only its `build/webview`
+and `assets` roots, and disposes its document/message subscriptions with the
+panel. Its webview uses `acquireVsCodeApi`, sends a `ready` message, consumes
+host `postMessage` updates, and reads `data-vscode-theme-kind`; those document
+behaviors already fit the current trusted wrapper.
+
+The current WBA `WebviewRuntime` can be factored rather than duplicated: its
+opaque document sandbox, resource containment, MessagePack transport, Web
+Storage, theme injection, and wrapper routes are shared webview-document
+infrastructure. Its creation, visibility, and disposal paths are currently
+specific to `MainThreadWebviewViews` and activity-bar contributions. A panel
+layer must add `MainThreadWebviewPanels`/`ExtHostWebviewPanels` while preserving
+that shared core and giving panels their own handle/type/title/icon/view-column,
+reveal, view-state, serializer, and disposal lifecycle.
+
+The OpenAI fixture also uses both `window.createWebviewPanel` and
+`vscode.openWith(..., "chatgpt.conversationEditor", ...)`, and registers the
+`chatgpt.conversationEditor` custom editor. This is the real path to multiple
+Codex conversation windows. Implement `MainThreadWebviewPanels` before
+`MainThreadCustomEditors`, then layer custom-document resolve/save/revert/
+backup lifetime over it.
+
+- Reuse the existing trusted-wrapper, opaque sandbox, resource admission,
+  MessagePack, storage, theme, and Electron detach machinery.
+- Give panels/custom editors their own stable surface identities and explicit
+  dispose/reveal/title/icon lifecycle instead of cloning the activity-bar view.
+- Project a temporary panel/custom-editor surface into Sidebar or an editor-like
+  presentation according to its contribution lifetime; closing it is a true
+  disposal, unlike hiding the persistent activity-bar contribution.
+- Map `ViewColumn.Beside` to the existing embedded Sidebar presentation.
+  `retainContextWhenHidden` keeps the same panel document/iframe alive while a
+  different Sidebar item is foreground; it does not create a second backend
+  surface.
+- Keep WBA/Python authoritative for shared panel count and disposal, while each
+  client retains its existing local order and foreground. Panel creation caused
+  by a client command emits shared membership plus a targeted initial reveal to
+  that initiating client; it must not steal focus in every connected client.
+  `preserveFocus` and subsequent reveal calls update only the targeted
+  presentation intent.
+- Preserve `supportsMultipleEditorsPerDocument` and serializer/restore semantics
+  before treating simultaneous conversations as accepted.
+
+##### 5.6G Menu projection into existing Code TE2 surfaces
+
+Code TE2 already owns custom menu surfaces: `.fe-toolbar`, the Explorer's typed
+card-menu controller, and the Monaco touch-selection menu. Monaco's built-in
+context menu is intentionally disabled. Project only eligible commands into
+those existing owners:
+
+- `editor/title` group `navigation` with a usable contributed icon -> a primary
+  inline button in `.fe-toolbar-actions`, matching Code Server's top-right
+  editor action and the Json Crack UX;
+- other `editor/title` groups and iconless commands -> an Extension Actions
+  overflow group in `.fe-toolbar`;
+- `editor/context` and `editor/title/context` -> an Extension Context submenu
+  in the editor's pointer/touch command surface;
+- `explorer/context` -> an Extension Context submenu in the Explorer card menu,
+  evaluated against the selected file/directory resource; and
+- `webview/context` -> a trusted-wrapper popup above the opaque extension
+  iframe, resolved with the authoritative `webviewId` plus bounded primitive
+  `data-vscode-context` values from the clicked element; and
+- `view/title` -> controls in the inline/detached extension-surface header.
+
+The mobile implementation extends the touch-selection runtime's existing
+injected tool rows/submenu contract; it does not restore Monaco's native menu or
+create a second mobile-only command authority. Browser and GeckoView render the
+shared projection inline. Electron handles only its established detached-window
+presentation and forwards command intent through the same backend contract.
+Menu eligibility is refreshed event-wise when the active document changes or a
+menu is opened so selection-dependent commands are current without background
+polling. The Monaco touch runtime installs one stable Extension Context
+launcher synchronously and resolves `editor/context` plus
+`editor/title/context` only when that launcher is opened; it never snapshots
+asynchronous WBA results into the vendor menu at editor construction time.
+
+The primary extension-action group is a shrinkable horizontal viewport inside
+`.fe-toolbar-actions`. It preserves fixed Run/Stop/status controls while native
+touch panning and mouse-wheel translation expose additional contributed icons
+when the eligible action set outgrows the available toolbar width.
+
+##### 5.6H Recommended implementation order
+
+1. Fix hide/reopen semantics and add contributed identity/icons to the drawer.
+2. Implement the workspace-scoped command/context registry, Code OSS-compatible
+   `workspaceContains`, editor-selection synchronization, message service, and
+   command invocation path.
+3. Project Json Crack's bounded editor-title and editor-context commands.
+4. Add `MainThreadWebviewPanels` on the shared secure webview core and live-
+   accept Json Crack's beside-editor visualization lifecycle.
+5. Implement `showTextDocument`/`vscode.open` through canonical backend open and
+   extend the bounded editor/Explorer/view menus.
+6. Add the generic diff surface.
+7. Add custom editors and multiple Codex conversations.
+
+Each slice must preserve the current activity-bar acceptance and test Browser,
+GeckoView, and Electron behavior proportionally. Android source remains outside
+scope unless a shared-web implementation proves insufficient and a separate
+approved native change is required.
+
+##### 5.6I Local implementation checkpoint
+
+The first combined follow-on implementation now covers steps 1–4 above without
+adding native-client authority:
+
+- activity-view Close is a client-local `hidden` presentation transition;
+  authoritative provider membership and its contributed icon remain available
+  in the new Extension Views app-drawer section;
+- manifest commands and `editor/title`/`editor/context` menu entries resolve in
+  WBA, with bounded fail-closed `when` handling, contributed icons, implicit
+  `onCommand` activation, exact Monaco selection synchronization, and execution
+  through `ExtHostCommands` on the existing strict MessagePack editor/WBA lane;
+- active Monaco cursor/selection changes are coalesced event-wise into
+  `ExtHostEditors`, with an exact post-open-ack resynchronization and no
+  disconnected replay or polling, so extensions can consume both current
+  `activeTextEditor.selection` and `onDidChangeTextEditorSelection`;
+- absent positive context keys now remain ineligible while unquoted comparison
+  literals remain valid, so unsupported built-in Debug Pretty Print and Copilot
+  diff actions are suppressed without hard-coded command filtering;
+- the inline extension-action group scrolls horizontally by touch or wheel when
+  its eligible icon set exceeds the available toolbar width;
+- `workspaceContains` uses the vendored `picomatch` implementation, including
+  the singleton-brace form used by Json Crack, and `MainThreadMessageService`
+  emits extension messages into the existing editor notification path; and
+- `MainThreadWebviewPanels` and `ExtHostWebviewPanels` reuse the established
+  opaque-sandbox document, resource containment, storage, theme, and transport
+  runtime. Panels project as temporary Sidebar membership and Close performs a
+  WBA/extension-host disposal instead of a local hide.
+
+The follow-on command/navigation slice extends this checkpoint through the
+bounded parts of step 5 without adding another frontend authority:
+
+- WBA now retains extension-defined `setContext`, command enablement,
+  alternate-command, icon, and group/order state and resets that state with the
+  workspace generation;
+- `MainThreadTextEditors.$tryShowTextDocument`/`$tryShowEditor` and internal
+  `_workbench.open` requests use one correlated WBA-to-Python transaction. The
+  Python side invokes the canonical project-contained backend open and waits
+  for the existing Monaco `editor.openComplete.publish` acknowledgement before
+  WBA returns its logical editor id;
+- supported selection and reveal requests project through the direct editor/WBA
+  lane and use Monaco's public selection, reveal, and focus APIs. Unsupported
+  editor mutation calls fail explicitly;
+- Explorer resolves and executes `explorer/context` contributions only through
+  its `/rpc/explorer` lane and Python backend, which verifies the clicked and
+  selected project resources before asking WBA to evaluate or execute them; and
+- workspace switch/reset cancels pending navigation and clears extension
+  context. All of these paths are request/event based; none polls.
+
+The complete Code OSS menu/editor API is still larger. Extension-view context
+and `view/title` placement, targeted initial panel reveal, generic diffs, custom
+editors, and multiple Codex conversations remain later slices. OpenAI file
+navigation and `setContext`, plus Browser/GeckoView/Electron presentation,
+still require live acceptance before their acceptance items are closed.
+
+#### 5.6J Per-client webview reconstruction continuity
+
+The detach acceptance exposed an ownership problem rather than a missing
+extension-content store. Extension `globalState`, workspace-isolated
+`workspaceState`, conversations, documents, and other semantic data remain
+extension-host/backend state. Webview `acquireVsCodeApi().setState()`, the
+opaque document's Web Storage adapters, scroll/selection state, and detached
+window placement are client presentation state used to reconstruct a destroyed
+document.
+
+The original runtime had two concrete continuity defects:
+
+- the host `clientId` is regenerated on every main-page boot, while the console
+  bridge's per-window worker id lives only in `sessionStorage`; and
+- WBA stores one shared `surface.state` and sends it to the document only after
+  the extension script can already call `getState()`. That is both a
+  cross-client last-writer-wins scope and an initialization race.
+
+The next implementation uses four separate identities:
+
+| Identity | Lifetime and purpose |
+|---|---|
+| `surfaceId` | Stable logical `(workspace, extension, view/panel)` identity owned by WBA |
+| `clientInstanceId` | Stable browser profile or native application-installation identity |
+| `windowId` | Per-window/tab identity retained across reload through `sessionStorage` |
+| `presentationId` | Renderer incarnation correlated with a WBA-issued writer lease; transient when Browser/Gecko reconstruct, deterministic across Electron native reparenting |
+
+Persisted reconstruction state is keyed by `(clientInstanceId, surfaceId)`,
+never by `windowId` or `presentationId`. The main-page console worker consumes
+the same identity as `main_page:<clientInstanceId>:<windowId>`; console identity
+is an observability projection, not the state authority.
+
+Identity resolution is client-owned and platform-specific behind one shared
+frontend contract:
+
+- ordinary browsers create a pseudorandom `clientInstanceId` once in
+  `localStorage`;
+- Electron persists it through the existing preload/main native bridge beneath
+  `$TE2_CONFIG_HOME`, independent of the random browser-relay origin; and
+- GeckoView reuses its existing application-private installation id, projects
+  it through the always-on asset-intercept WebExtension/native messaging path,
+  and delivers it to the top-level document at `document_start`. It must not
+  depend on the random localhost relay origin's Web Storage.
+
+The editor settings surface displays a human-readable client label and a
+copyable identifier. Reset is an explicit confirmation-gated action that
+regenerates the identity and removes that client's extension reconstruction
+snapshots. Arbitrary identifier editing is not supported because accidental
+collisions would merge independent clients. The identifier partitions state;
+it is not an authentication credential.
+
+Every WBA wrapper attach carries `clientInstanceId`, `windowId`,
+`presentationId`, and `surfaceId`. The client remains the conceptual owner of
+the snapshot, while an opaque backend projection may durably retain:
+
+```text
+clientInstanceId + surfaceId + revision + writerLease
+  -> vscodeState + localStorage entries + updatedAt
+```
+
+The projection never interprets, merges, or broadcasts the payload. Different
+clients receive different reconstruction snapshots while continuing to share
+the extension host's semantic workspace/content state. Cross-device roaming is
+a separate opt-in feature, not an accidental consequence of collaboration.
+WBA validates and persists the bounded opaque record beneath the existing Code
+TE2 data partition. Python must not add webview state to the membership-only
+Sidebar ledger or become extension-content authority.
+
+Restore ordering is strict and event-driven:
+
+1. Resolve the durable client identity.
+2. Attach the exact client/window/presentation/surface tuple and obtain its
+   latest accepted revision.
+3. Make `getState()` and persistent Web Storage available synchronously before
+   the first extension-authored script executes.
+4. Accept later `setState()`/storage writes only from the current writer lease
+   with a monotonically newer revision.
+5. When Browser or Gecko destroys a presentation, mint a new presentation and
+   lease and reject late writes from the old iframe. Electron instead keeps the
+   same deterministic presentation, wrapper, lease, and renderer while moving
+   its `WebContentsView` between embedded and detached parents.
+
+The opaque sandbox remains intact; `allow-same-origin`, polling, a second
+provider registration, and direct extension-to-native messaging are not part
+of the solution. The shared provider may resolve distinct client-scoped
+webview handles through WBA. `retainContextWhenHidden` may preserve a still-live
+document, but serialized reconstruction remains the portable Browser/
+GeckoView/Electron contract whenever a renderer is destroyed.
+
+Acceptance requires refresh, detach, detached refresh, reattach, native-client
+cold restart, two simultaneous windows, two independent remote clients, reset,
+late-writer rejection, and WBA/provider teardown tests. An extension that never
+calls `setState()` or uses a durable extension store is not promised arbitrary
+JavaScript-heap restoration after a real renderer destruction. Electron detach
+is stronger: extension surfaces use a dedicated `WebContentsView` from their
+first presentation and reparent that exact renderer, preserving one-time route
+messages and live heap state such as a Codex auxiliary diff view. Ordinary URL
+and Run Profile surfaces retain reconstruction semantics.
+
+#### 5.6K Electron readiness ordering
+
+Electron previously awaited Run Target projection readiness in `navigateApp()`
+before it created the app view or loaded the shared app shell. That placed a
+Code TE2-specific native prerequisite ahead of the framework's ordinary app
+lifecycle/readiness contract. A delayed UI IPC snapshot could therefore reject
+or stall navigation before the readiness splash and SSE endpoint existed,
+including for unrelated apps whose manifests declare `readiness_support`.
+
+The corrected ordering preserves the shared app shell as the visible readiness
+authority:
+
+1. Electron creates the app view and immediately loads the relayed `/app/<id>`
+   shell.
+2. The shell performs its existing backend lifecycle/readiness SSE gate.
+3. After the backend is ready and before frontend template injection, the shell
+   invokes an optional exact-view native prerequisite.
+4. Electron treats that prerequisite as a no-op for every app except
+   `code_te2`; Code TE2 awaits the first current Run Target projection event so
+   remote listeners exist before its restored Sidebar surfaces load.
+
+The native prerequisite has no independent timeout or polling loop. A transient
+UI IPC disconnect preserves existing listeners and the waiter survives until a
+fresh complete projection arrives. Reconciliation failures still reject the
+prerequisite with their real collision/error rather than loading a broken Code
+TE2 surface. The browser and GeckoView paths do not expose this Electron-only
+hook and continue using the ordinary shared readiness contract.
+
+#### 5.6L Client-scoped activity-view runtime and encoded-resource transport
+
+Live multi-client testing exposed that a logical Sidebar surface could not also
+be the one resolved Code OSS activity-view instance. Eager provider resolution
+started extension watchdogs before any renderer existed, and the singleton
+handle let one client's resolution/error HTML, transport sequence, and browser
+messages overwrite another client's state.
+
+The corrected runtime keeps shared membership while making presentation state
+client-specific:
+
+1. workspace/provider discovery publishes the stable logical surface without
+   calling `$resolveWebviewView`;
+2. the first attach for a stable `clientInstanceId` creates one runtime handle
+   and resolves it exactly once;
+3. HTML, options, messages, replay/generation state, resource capability, and
+   resolve failure are routed only to that client runtime; and
+4. workspace/provider/WBA teardown disposes all runtimes, while transport
+   disconnect preserves them for warm reconnect.
+
+Activity views use this shared-membership/per-client-runtime split. Ordinary
+webview panels remain extension-created lifecycle objects and are not cloned
+per client. Identical activity/panel resource roots share one WBA-epoch
+capability URL, while their HTML, messages, state, visibility, and disposal
+remain independent. Large text, JavaScript, JSON, and SVG resources negotiate
+Brotli or gzip. Immutable extension-install assets use the scope token as their
+cache identity; mutable admitted roots retain ETag/Last-Modified revalidation.
+The Rust proxy must preserve the upstream `Content-Encoding` header with the
+encoded bytes; stripping that header makes every browser parse compressed
+JavaScript as source and fails even on localhost.
+
+Acceptance covers two client ids receiving distinct handles, exact-client
+message/event routing, client-local failure isolation, encoded resource
+delivery through the Rust proxy, warm reconnect, and live Browser/Electron/
+Gecko presentation.
+
+#### 5.7 GeckoView transient framework failure tolerance
+
+Gecko's saved-session and active-app health paths distinguish an authoritative
+framework response from transport failure. `UNHEALTHY` means a successful
+running-app projection omitted the worker or reported terminal readiness; only
+three consecutive authoritative failures may return the user to the local
+launcher. `UNREACHABLE` means the framework request failed or returned an
+invalid projection; it preserves the current/saved app presentation, clears the
+consecutive authoritative-failure count, and lets the existing sockets and
+projection streams reconnect. Cold restoration remains gated behind framework
+relay setup and a fresh Run Target projection. This policy adds no retry poller
+or alternate connection path.
+
+#### 5.8 UI VSIX transport-resume continuity
+
+The first connection-robustness slice keeps the current strict-MessagePack
+Socket.IO WBA lane. Replacing Socket.IO with a raw WebSocket is not required to
+correct the current lifetime bug and is explicitly deferred until the bounded
+resume protocol has been proven on the existing transport.
+
+The concrete defect is in the trusted extension-webview wrapper: every
+Socket.IO `connect` currently performs a fresh attach followed by an
+unconditional iframe `src` assignment. A transient transport reconnect is
+therefore treated as destruction and reconstruction of the extension document,
+even when the WBA process, logical surface, HTML revision, and live iframe are
+all unchanged. Socket.IO connection recovery is disabled because WBA owns
+explicit resynchronization, but the extension-webview path does not yet
+implement that resynchronization boundary.
+
+Transport lifetime and document lifetime must become separate state machines:
+
+- the first successful attach loads the opaque iframe through the existing
+  one-time bootstrap token and reconstruction record, then applies the bounded
+  current-revision message suffix retained after the last authoritative reload
+  boundary. The wrapper queues that suffix until the inner document is ready;
+  a missing boundary is an incomplete bootstrap, never an arbitrary partial
+  replay;
+- a reconnect to the same WBA epoch, surface generation, and `htmlRevision`
+  preserves the existing iframe, DOM, JavaScript heap, and scroll/selection
+  state;
+- an authoritative HTML revision change, surface replacement/disposal, WBA
+  epoch change, or unrecoverable event-sequence gap deliberately reconstructs
+  the document from the existing client-partitioned state store; and
+- a transport disconnect alone never assigns `frame.src`, disposes the
+  provider, or changes Sidebar membership.
+
+The generic Sidebar URL-slot version is not an extension-document revision
+authority. `ExtensionWebviewSurface` snapshot updates keep the trusted outer
+wrapper alive; WBA alone applies `htmlRevision` changes to the sandboxed inner
+document. Ordinary URL slots retain their version-triggered outer reload.
+
+Buffered wrapper events are sequence-fenced before revision reconciliation
+within the current WBA epoch and surface generation. An attach response's
+`eventSequence` covers every earlier HTML revision, so an older buffered event
+at or below that sequence is discarded instead of starting another attach.
+This is required for extensions that publish a temporary loading document and
+their final document in one burst.
+
+WBA will expose a bounded resume handshake carrying the stable
+`clientInstanceId`, `windowId`, `presentationId`, `surfaceId`, current WBA
+epoch, loaded HTML revision, and the last applied server event sequence. WBA
+returns an explicit `resume`, `replay`, or `reload` decision. Events from an
+extension to its webview receive monotonic per-surface sequence numbers and a
+bounded byte/count journal. A connected wrapper applies events in order; after a
+reconnect WBA replays only the retained suffix. Falling outside the retained
+range is an explicit reconstruction boundary rather than an unbounded queue.
+
+Browser-to-extension interactions use stricter failure semantics. All pending
+RPC promises reject immediately when the socket disconnects, Socket.IO's client
+send buffer is cleared, and disconnected interactive messages are not replayed
+because the server may already have applied them. Client reconstruction state
+is different: the wrapper retains the latest local `vscodeState` and persistent
+Web Storage projection, obtains a new writer lease during resume, and coalesces
+one newer snapshot after reconnect. The existing lease/revision fencing remains
+authoritative, so a replaced presentation cannot reclaim writer authority.
+
+The disconnected indicator may cover or disable interaction, but it must not
+destroy the iframe underneath it. Resume remains fully event-driven: there is
+no connection poller, document-readiness poller beyond the existing bounded
+page readiness contracts, or periodic state flush. Actual WBA `reload` and
+`dispose` events retain their present authoritative meanings.
+
+Validation must include:
+
+1. initial attach loads exactly once;
+2. a transient disconnect/reconnect preserves the exact iframe and live DOM;
+3. retained ordered events replay exactly once after reconnect;
+4. an event-journal gap, WBA restart, or HTML revision change reconstructs
+   exactly once from the latest accepted client state;
+5. pending/interactive RPCs fail without implicit replay while a newer local
+   state snapshot survives and flushes under the renewed lease;
+6. stale presentations remain unable to write after detach/reattach; and
+7. Browser, Electron inline/detached, and GeckoView pass live high-latency,
+   brief-outage, and frontend-blocking acceptance.
+
+Electron extension detach validation additionally proves that the native
+registry creates its `WebContentsView` during the first embedded presentation
+and only reparents that exact view on detach/attach: there is no second
+`loadURL`, wrapper attach, document bootstrap, or JavaScript heap. Generic URL
+and Run Profile detach validation continues to exercise the reconstruction
+path.
+
+Because a sibling native view always composites above the host page's DOM,
+Electron intercepts only the Sidebar dock's icon/action, refresh, and app-drawer
+menus. The exact-view preload sends a bounded declarative menu model to Electron
+main, which presents an OS-native menu and returns the selected action id. Code
+TE2 remains action authority. Browser/Gecko and non-Sidebar menus are unchanged.
+
+Only if the proven resume protocol still cannot obtain deterministic heartbeat,
+buffering, and replay behavior from Socket.IO should the extension-webview
+delivery path move to a dedicated raw binary MessagePack WebSocket. That would
+be a transport substitution for this protocol, not a redesign of its state
+authority, and it would not imply migrating Monaco's working WBA intelligence
+lane.
+
+#### 5.9 Android persistent client-runtime ownership
+
+The second robustness slice addresses Android process ownership after the WBA
+resume boundary is working. Before implementation, `PersistentNetworkService`
+was a notification-only `START_STICKY` foreground service. The Activity still
+owned the framework relay, Run Target projection stream and listener manager,
+UI IPC, native console connection, and Gecko session; `onPause()` explicitly
+marked the Gecko session inactive. Live device inspection confirmed that the
+foreground service was running while the process held no wake lock and was not
+exempt from device-idle restrictions. This was an ownership problem, not
+primarily a Kotlin-versus-NDK problem.
+
+The replacement is one started-and-bound Android client-runtime service shared
+by the Gecko and Cefrium applications. It owns the native control plane:
+
+- configured upstream framework identity;
+- the stable localhost `AndroidFrameworkRelay` and retarget lifecycle;
+- the authoritative Run Target SSE projection and
+  `RunTargetRelayManager` listeners;
+- the persistent native UI IPC transport, with bound Activity observers for
+  IME and console presentation; and
+- service reconstruction from Android settings followed by fresh authoritative
+  framework/Run Target snapshots.
+
+The Activity remains the renderer and UI owner. It binds to the service,
+subscribes to current connection/projection state, and attaches or detaches UI
+callbacks without closing the service-owned transports. Activity recreation,
+configuration changes, and ordinary backgrounding must not change the local
+framework relay origin or tear down Run Target listeners. A full service
+restart may read the configured framework target, but it must never restore
+cached Run Target routes as authority; it reconnects to the framework relay
+first and consumes a fresh complete projection before remote app restoration.
+
+When the user has explicitly enabled persistent remote-app operation, an app
+shell that is merely backgrounded remains an active but unfocused Gecko session
+instead of being unconditionally marked inactive. Without that opt-in, the
+normal inactive-session battery policy remains available. This renderer policy
+complements rather than replaces the WBA resume protocol: Android may still
+suspend or lose a connection, and every client must recover without replacing a
+healthy extension document.
+
+Power policy must be visible and bounded. Persistent mode may hold a partial CPU
+wake lock and, for Wi-Fi transport, a high-performance Wi-Fi lock only while a
+user-visible remote app session requires them. Settings report battery
+optimization status and link the user to the system configuration; TE2 does not
+silently grant itself an exemption. Locks release on explicit persistent-mode
+disable, app-shell exit, framework retarget where no remote app remains, or
+service shutdown.
+
+The former `dataSync` classification is replaced with `connectedDevice`. The
+service continuously exchanges data with the user-configured remote framework
+device and declares `FOREGROUND_SERVICE_CONNECTED_DEVICE`; the existing
+network-control responsibility is made explicit with `CHANGE_NETWORK_STATE`,
+which satisfies that service type's runtime prerequisite. A future Play release
+must describe that remote-device connection in its foreground-service
+declaration. The service handles system timeout, task removal, and shutdown by
+clearing persistent-session ownership and releasing its notification, CPU lock,
+Wi-Fi lock, sockets, and listeners. `POST_NOTIFICATIONS` denial does not disable
+the service or persistent mode; it only changes notification visibility under
+Android's notification-permission policy.
+
+Android acceptance requires focused service/controller tests plus real-device
+validation for background/foreground, screen-off, forced Doze and recovery,
+notification denial, Activity destruction/recreation, process/service restart,
+Wi-Fi/mobile/Tailscale handoff, delayed remote framework recovery, and active
+Run Target listener reconstruction. Tests must prove there is no route polling,
+no stale-route cache authority, no listener collision, and no unexpected
+launcher redirect.
 
 ## 4. Cross-phase validation rules
 

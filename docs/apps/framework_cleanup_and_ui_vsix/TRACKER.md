@@ -1,6 +1,6 @@
 # Framework Cleanup And UI VSIX Tracker
 
-Last updated: 2026-08-09
+Last updated: 2026-08-14
 
 ## Program status
 
@@ -15,7 +15,9 @@ Last updated: 2026-08-09
 | Phase 3D: app/client paths and opt-in legacy migration/cleanup | Implemented and fixture-validated; real apply pending separate approval | Tool implementation and every real apply are separate approval boundaries |
 | Phase 4A: internal/package naming | Complete; package, build, isolated launch, and Electron validation passed | Hard-cutover implementation approved and validated; shared framework was not restarted |
 | Phase 4B: public app identifiers | Implemented and full-suite/package validated; live cutover pending | Approved hard cutover; shared runtime restart and live client acceptance remain separate |
-| Phase 5: UI VSIX rough-draft milestone | Deferred | Begins only after framework phases are stable |
+| Phase 5: first UI VSIX activity-bar webview | Inline OpenAI view, shared hide/reopen, Json Crack, and Code Visualizer accepted; per-client reconstruction and client-scoped activity runtimes are implemented and locally validated | Live Browser/Electron/Gecko client isolation and continuity acceptance plus remaining deferred APIs stay open |
+| Electron app readiness ordering | Implemented and locally validated | Shared app shell loads first; Code TE2 alone awaits the native Run Target projection after backend readiness |
+| Gecko transient framework failure hotfix | Implemented and unit/build validated; live outage acceptance pending | Preserve remote app on transport failure; launcher fallback remains authoritative-health-only |
 
 ## Source findings tracker
 
@@ -33,6 +35,8 @@ Last updated: 2026-08-09
 | Electron used an experimental source-directory name | Active client lived at `desktop_client/electron_spike` | Resolved in 4A; active source is `desktop_client/electron` |
 | UI extension support is intentionally absent | Explorer marketplace displays the unsupported notice | Confirmed |
 | Sidebar presentation foundation is reusable | Run Profile presentation and exact-client routing phases are implemented | Confirmed |
+| Installed WBA used a source-only matcher dependency | Generated provider registry imported `picomatch`, while package rules prune `node_modules` | Resolved; matcher is packaged under Code TE2's vendor tree and exercised from an isolated wheel layout |
+| ALS-RS Sidebar routing assumed framework port `8089` | ALS-RS owns HTTP port `12459`, but its outbound Sidebar client ignored injected framework identity and fell back to `8089` | Resolved; app workers receive explicit URL/port identity and ALS-RS reconnects and re-registers against that origin, including framework port `8081` |
 | XDG variables are not consistently present | Existing Python, Rust, and TypeScript code already falls back to `$HOME`; Termux also provides `$PREFIX`/`$TMPDIR` for runtime state | Confirmed; canonical resolver must be platform-aware |
 | Rust final-binary fingerprints were never pruned | Pre-3A bootstrap copied to `bin/<fingerprint>/<profile>` without a lock or cleanup path | Resolved in 3A; 10 historical release binaries used 206.6 MiB on the inspection host |
 | Debug was the implicit framework build default | Pre-3A `--release` was a lone `store_true` flag and every Cargo path omitted `--release` otherwise | Resolved in 3A; release is default and `--debug` is explicit |
@@ -224,17 +228,203 @@ Target architecture decisions:
 - [x] Keep Android inventory/APK and Electron package changes inside the explicitly approved Phase 4B publication boundary.
 - [x] Keep replacements scoped; preserve the explicitly categorized public-id migrations and real CodeMirror 6 names.
 
-## Phase 5 placeholder — UI VSIX
+## Phase 5 checklist — first UI VSIX activity-bar webview
 
-- [ ] Re-investigate contribution points after framework cleanup lands.
-- [ ] Select the smallest first UI contribution subset.
-- [ ] Define WBA-to-backend registration/disposal facts.
-- [ ] Define CSP, resource-origin, and message-routing boundaries.
-- [ ] Map UI surfaces onto browser/Gecko inline and Electron detachable presentations.
-- [ ] Define disable/uninstall/restart/reconnect teardown.
-- [ ] Select one real extension as an acceptance fixture.
-- [ ] Create a separate detailed UI VSIX plan and tracker.
+- [x] Package WBA production dependencies independently of source `node_modules`.
+- [x] Validate the generated WBA provider registry from an isolated installed-wheel layout.
+- [x] Preserve explicit framework URL/port identity through the app-worker launch boundary.
+- [x] Re-establish the exact ALS-RS Sidebar peer after non-default-port startup and transport reconnect.
+- [x] Re-investigate contribution points against Code Server 4.130 and the installed OpenAI extension.
+- [x] Select activity-bar `type: webview` views as the smallest first contribution subset.
+- [x] Preserve the existing extension registry and `.vscode/settings.json` as project/configuration authority.
+- [x] Implement the four current Code OSS webview RPC actors and exact mixed-argument framing.
+- [x] Define and implement complete WBA-to-backend registration/disposal snapshots.
+- [x] Define and implement sandbox, CSP, bounded realpath resource access, and strict MessagePack messaging.
+- [x] Map logical webview surfaces onto browser/Gecko inline and Electron's existing detachable presentation.
+- [x] Define workspace switch, provider unregister, resolve failure, WBA reset, and stale-snapshot teardown.
+- [x] Select `openai.chatgpt_26.5803.41515.vsix` and `chatgpt.sidebarView` as the first acceptance fixture.
+- [x] Live-prove resource loading, origin-validating bidirectional messaging, opaque-sandbox storage, and OpenAI application readiness.
+- [x] Persist generic extension-host `globalState` and workspace-isolated `workspaceState` across WBA/code-server cold restarts.
+- [x] Refine the implementation plan and tracker with the source-backed architecture.
+- [x] Live-accept the primary OpenAI view in the inline Sidebar.
+- [x] Create extension `WebContentsView` renderers at their first Electron presentation and reparent the exact renderer for detach/attach.
+- [x] Retain a deterministic Electron client/surface presentation identity and project embedded bounds/visibility through the native bridge.
+- [x] Replay the bounded current-revision message suffix during a genuinely new extension-document bootstrap.
+- [x] Replace only Electron's Sidebar dock icon/action, refresh, and app-drawer DOM dropdowns with a bounded OS-native menu bridge.
+- [ ] Live-accept Electron detach, attach, message continuity, and close behavior.
 - [ ] Keep the marketplace unsupported notice until live acceptance passes.
+
+Deferred from the first slice:
+
+- custom editors and ordinary webview panels;
+- secondary-Sidebar contribution projection;
+- commands, menus, view welcome content, and chat-session APIs; and
+- independent extension-host webview provider instances for simultaneous clients.
+
+### Phase 5 follow-on — ergonomics and broader contributions
+
+Investigation and planning:
+
+- [x] Trace URL/dock close through `ui.sidebar.window.close` to authoritative ledger deletion.
+- [x] Confirm the existing client presentation model already supports `hidden` but does not expose it as the extension close/reopen path.
+- [x] Trace current generic URL naming/icon projection and identify the existing WBA realpath-contained resource route as the icon transport.
+- [x] Map the named Code Server 4.130 command, text-editor, webview-panel, custom-editor, and window actor contracts.
+- [x] Inspect the OpenAI fixture's real use of `showTextDocument`, `vscode.open`, `vscode.openWith`, `createWebviewPanel`, `setContext`, commands, menus, and custom editors.
+- [x] Confirm additional Codex conversations are custom-editor/webview-panel surfaces rather than cloned activity-bar providers.
+- [x] Map Code TE2's canonical backend file-open action, Git/draft-specific diff limitation, Explorer card menu, `.fe-toolbar`, and Monaco touch-selection menu.
+- [x] Extract and compare `AykutSarac.jsoncrack-vscode` 5.1.0 against the managed installed extension; confirm its runtime bundles are byte-identical.
+- [x] Trace Json Crack's `editor/title` navigation icon, selection-gated `editor/context` command, active-editor use, and beside-editor webview-panel lifecycle through Code Server 4.130.
+- [x] Confirm WBA's current hard-coded extension-host selection and incomplete `workspaceContains` brace matching are concrete Json Crack blockers.
+- [x] Confirm the existing WBA secure webview document/transport core is reusable while activity-view and panel lifecycles must remain distinct.
+- [x] Trace Code Visualizer's active-editor offset calculation and `onDidChangeTextEditorSelection` listener; confirm command-time-only selection synchronization cannot drive its AST focus.
+- [x] Refine the implementation plan into dependency-ordered slices 5.6A–5.6H.
+
+5.6A–B — contribution presentation and identity:
+
+- [x] Make extension Close/undock set client presentation to `hidden` without deleting backend membership.
+- [x] Preserve destructive close for ordinary user-created URL slots.
+- [x] Add an Extension Views app-drawer section that includes hidden registered surfaces and restores/focuses them.
+- [x] Remove drawer entries only on provider/workspace/WBA lifecycle removal.
+- [x] Project container/view titles and activity-bar/root extension icons through the bounded WBA resource route.
+- [x] Verify close/reopen, icon persistence, inline focus, and WBA-driven final removal.
+- [x] Replace Electron extension detach reconstruction with exact `WebContentsView` reparenting; ordinary URL/Run Profile slots retain reconstruction.
+- [ ] Verify Electron detach/focus/attach and message continuity; the previous live acceptance exposed the reconstruction defect and the replacement requires a fresh packaged-client run.
+
+5.6J — per-client reconstruction state:
+
+- [x] Confirm `surfaceId` is already a stable logical workspace/view identity.
+- [x] Confirm current WBA `surface.state` is shared and restored asynchronously after extension scripts may call `getState()`.
+- [x] Separate semantic extension/backend state from client-owned webview reconstruction and window placement state.
+- [x] Define stable `clientInstanceId`, per-window `windowId`, transient `presentationId`, and stable `surfaceId` roles.
+- [x] Add one shared main-page identity resolver with browser `localStorage`, Electron native/XDG, and Gecko native/WebExtension providers.
+- [x] Reuse Gecko's existing application-private installation id; do not create a second Android client identity.
+- [x] Derive console worker identity from durable client plus per-window identity without making console registration the state authority.
+- [x] Key bounded opaque state by `(clientInstanceId, surfaceId)` and keep it outside the membership-only Sidebar ledger.
+- [x] Inject `getState()` and persistent Web Storage synchronously before extension-authored scripts execute.
+- [x] Fence writes by monotonic revision and a current WBA-issued lease so destroyed inline/detached renderers cannot overwrite newer state.
+- [x] Add confirmation-gated identity/state reset and a copyable client identifier in editor settings.
+- [x] Add focused tests for browser/Electron/Gecko identity selection, independent clients, reset, synchronous reconstruction, one-time bootstrap, and stale-writer rejection.
+- [x] Keep the Electron extension renderer, wrapper connection, presentation identity, writer lease, and JavaScript heap intact across detach/attach.
+- [ ] Live-validate refresh, detach, detached refresh, reattach, native cold restart, and simultaneous windows.
+- [ ] Live-accept Electron detached continuity and Gecko/browser warm reconnect restoration.
+
+5.6K — Electron readiness ordering:
+
+- [x] Confirm `navigateApp()` blocked before loading the shared app shell on an unrelated Run Target projection wait.
+- [x] Load the relayed app shell immediately so manifest readiness and its SSE endpoint remain visible and authoritative.
+- [x] Invoke the optional native prerequisite only after backend readiness and before frontend template injection.
+- [x] Make the prerequisite a no-op outside Code TE2 and await Code TE2's projection event without polling or an independent timeout.
+- [x] Add source-order, allowlist, unbounded-event-wait, Electron compile, and full Electron-suite coverage.
+- [ ] Live-accept repeated Electron launches of Code TE2 and another `readiness_support` app during delayed UI IPC startup.
+
+5.6L — client-scoped activity-view runtime and resources:
+
+- [x] Keep one logical Sidebar membership surface per workspace/view while deferring `$resolveWebviewView` until a stable client attaches.
+- [x] Create one activity-view runtime handle per `(surfaceId, clientInstanceId)` with exact-client HTML/options/state, messages, transport generation/journal, and resource capability.
+- [x] Route browser messages and WBA document events only through the requesting client's runtime; wrappers reject mismatched client events.
+- [x] Isolate resolve failure to one client runtime while preserving shared membership and other clients.
+- [x] Dispose every client runtime on provider/workspace/WBA teardown while preserving warm runtimes across transport disconnect.
+- [x] Add asynchronous Brotli/gzip delivery plus ETag/Last-Modified revalidation for compressible extension resources.
+- [x] Preserve `Content-Encoding` with encoded response bytes through the Rust app proxy and cover the streaming transport regression.
+- [ ] Live-accept simultaneous Browser/Electron/Gecko clients, warm reconnect, and client-local failure isolation after rebuilding the Rust framework binary.
+
+5.7 — Gecko transient framework failure tolerance:
+
+- [x] Trace cold restore and active-app launcher fallback through `AndroidRemoteAppHealth`.
+- [x] Distinguish authoritative `UNHEALTHY` from transport `UNREACHABLE` in the approved policy.
+- [x] Preserve the current/saved remote app and reset consecutive failures on `UNREACHABLE`.
+- [x] Return home only after three consecutive authoritative `UNHEALTHY` projections.
+- [x] Add focused health-policy tests and run the Gecko unit/build validation after the 2 GB disk preflight.
+- [ ] Live-accept a transient remote framework outage and recovery without launcher redirection.
+
+5.8 — UI VSIX transport-resume continuity:
+
+- [x] Trace the wrapper reconnect path and confirm every Socket.IO `connect` currently reassigns the extension iframe `src`.
+- [x] Confirm WBA uses strict MessagePack over websocket-only Socket.IO with connection-state recovery intentionally disabled.
+- [x] Separate transient WBA transport loss from extension document, provider, and Sidebar-membership lifetime in the approved architecture.
+- [x] Add a WBA epoch, surface generation/HTML revision, and per-surface server-event sequence to the resume contract.
+- [x] Add bounded byte/count event retention and explicit `resume`, `replay`, or `reload` decisions.
+- [x] Preserve the live iframe and DOM when epoch, surface, revision, and replay range remain valid.
+- [x] Reconstruct exactly once on authoritative reload/dispose, WBA epoch replacement, HTML revision change, or replay gap.
+- [x] Reject pending RPCs, clear implicit Socket.IO buffering, and never replay disconnected interactive messages.
+- [x] Renew the writer lease and flush one coalesced newer client reconstruction snapshot without allowing a stale presentation to reclaim authority.
+- [x] Add focused initial-load, reconnect-without-reload, replay, gap, WBA-restart, pending-RPC, renewed-lease, and stale-writer tests.
+- [x] Keep the trusted outer Sidebar wrapper stable across WBA `htmlRevision` updates; only the wrapper may reconstruct the sandboxed extension document.
+- [x] Discard current-generation buffered events already covered by an attach sequence before comparing HTML revisions, preventing temporary/final HTML bursts from entering an attach loop.
+- [ ] Live-accept Browser, Electron inline/detached, and GeckoView under brief outage, high latency, and a frontend-blocking file open.
+- [ ] Consider a dedicated raw MessagePack WebSocket only if the proven protocol remains nondeterministic on Socket.IO; do not migrate Monaco's WBA lane speculatively.
+
+5.9 — Android persistent client-runtime ownership:
+
+- [x] Confirm the current foreground service owns only its notification while `MainActivity` owns every relay/socket and deactivates Gecko from `onPause()`.
+- [x] Confirm on the live device that the foreground service can be running with zero held wake locks and without TE2 on the device-idle exemption list.
+- [x] Confirm Termux's relevant advantage is service-owned session/process lifetime plus optional CPU/Wi-Fi locks, not Java/Kotlin versus native code alone.
+- [x] Replace the notification-only service with one started-and-bound native client-runtime service shared by Gecko and Cefrium.
+- [x] Move framework-relay identity/lifetime, Run Target projection/listeners, and native UI IPC transport ownership out of the Activity.
+- [x] Let bound Activities subscribe/unsubscribe IME, console, projection, and connection observers without tearing down service-owned transports.
+- [x] Reconstruct a restarted service from configured framework identity followed by fresh authoritative projections; never cache Run Target routes as authority.
+- [x] Keep a persistent-mode remote app session active but unfocused while backgrounded; retain ordinary inactive-session behavior when persistent mode is disabled.
+- [x] Add explicit, scoped partial CPU/Wi-Fi lock ownership and battery-optimization status/settings UX.
+- [x] Replace `dataSync` with the justified `connectedDevice` foreground-service type, exact permissions, timeout/shutdown handling, and documented Play-disclosure requirement.
+- [x] Add focused service/controller/reconstruction tests without route polling or stale-route fallback.
+- [ ] Live-accept background/foreground, screen-off, forced Doze recovery, notification denial, Activity/process restart, network handoff, framework outage, and active Run Target reconstruction.
+
+5.6C–D — commands, context, Json Crack, and file navigation:
+
+- [x] Load named `MainThreadCommands`, `ExtHostCommands`, `MainThreadMessageService`, `MainThreadWebviewPanels`, and `ExtHostWebviewPanels` nids; reject unsupported calls on those actors explicitly.
+- [x] Load and implement the bounded `MainThreadTextEditors`/extension-requested navigation actors.
+- [x] Build the current workspace-scoped command/menu registry from manifest contributions plus live command registrations.
+- [x] Preserve Code Server management-scan admission while enriching already-admitted user extensions with complete canonical on-disk manifest contributions.
+- [x] Retain command icon, group/order, `when`, enablement, alternate-command, and `setContext` state.
+- [ ] Keep the fail-closed context-expression evaluator in WBA and merge bounded event-driven editor, Explorer, and extension-view context snapshots from each surface's own RPC lane.
+- [x] Replace WBA's hand-written `workspaceContains` matcher with the already-vendored Code OSS-compatible `picomatch` path, including brace expressions.
+- [x] Synchronize the exact active Monaco selection into `ExtHostEditors` before an editor-scoped command is activated and invoked; do not poll selection.
+- [x] Project active Monaco cursor/selection changes event-wise through the direct strict MessagePack WBA lane into `ExtHostEditors`, coalescing bursts and resynchronizing only after the active-document open acknowledgement.
+- [x] Route editor command resolution/invocation through the existing strict MessagePack editor-to-WBA lane, implicit `onCommand:<id>` activation, and `ExtHostCommands`.
+- [x] Forward the active editor resource URI for the implemented editor command placements.
+- [x] Project extension information/warning/error requests through `MainThreadMessageService` into the existing editor notification UI.
+- [x] Render Json Crack's icon-bearing `editor/title` navigation command as a primary `.fe-toolbar-actions` button for JSON documents.
+- [x] Render Json Crack's `editorHasSelection` command in the existing editor Extension Context pointer/touch menu only for a live non-empty selection.
+- [x] Implement correlated extension-host-to-WBA-to-Python open requests and acknowledgement.
+- [x] Route `showTextDocument` and `vscode.open` through canonical project-contained backend file open and return a valid WBA editor id.
+- [x] Verify workspace switch/reset removes stale commands, context state, and pending navigation.
+
+5.6E–G — diff, panels/custom editors, and menu placement:
+
+- [ ] Add a generic two-resource backend-owned read-only diff contract separate from Git/draft diff state.
+- [x] Reuse the existing secure webview document/transport core for both activity views and panels without duplicating the sandbox or resource server.
+- [x] Implement named `MainThreadWebviewPanels`/`ExtHostWebviewPanels` lifecycle on that shared core, including dynamic title/icon, reveal/view state, serializer registration, and true disposal.
+- [x] Map `ViewColumn.Beside` to an embedded Sidebar surface and preserve panel metadata for `retainContextWhenHidden`.
+- [ ] Publish panel membership globally but target the initial reveal/preserve-focus intent to the client that invoked the command.
+- [ ] Implement `MainThreadCustomEditors`/`ExtHostCustomEditors` document, save/revert/backup, serializer, and disposal lifecycle.
+- [ ] Project multiple Codex conversations through custom-editor/panel identities while keeping one activity-bar provider surface.
+- [x] Project icon-bearing `editor/title` navigation actions into `.fe-toolbar`.
+- [x] Keep absent positive context keys ineligible without breaking unquoted comparison literals; suppress Debug Pretty Print and Copilot accept/reject until their real context and editor semantics are supported.
+- [x] Make the inline extension-action group a horizontal touch/wheel viewport while preserving fixed toolbar controls.
+- [x] Project `editor/context` actions into the shared editor Extension Context touch menu.
+- [x] Project `explorer/context` into the Explorer card-menu Extension Context submenu.
+- [x] Resolve editor context contributions when the stable touch-menu launcher opens instead of snapshotting asynchronous WBA results during editor construction.
+- [x] Project `webview/context` through the trusted wrapper with authoritative `webviewId`, bounded primitive element context, and no editor-selection synchronization.
+- [x] Reuse one reference-counted WBA-epoch resource scope across activity views and panels with identical extension/workspace/root identity while preserving realpath containment and separate document lifecycles.
+- [ ] Project `view/title` actions into inline and Electron-detached extension headers.
+- [x] Extend the existing touch-selection runtime for mobile commands without restoring Monaco's disabled native menu.
+- [ ] Preserve Browser, GeckoView, and Electron compatibility without adding native contribution authority.
+
+Acceptance fixtures:
+
+- [x] Closing `chatgpt.sidebarView` leaves a Codex icon in the app drawer and reopening restores the same logical surface.
+- [x] Opening a JSON document displays Json Crack's contributed SVG icon as a primary editor action; changing language/resource removes or restores it event-wise.
+- [x] Json Crack opens one beside-editor panel from the whole document and refreshes it on document change through the existing WBA document projection.
+- [x] Json Crack's selection command receives the exact Monaco selection, while an empty selection hides the context action and extension messages still render correctly.
+- [x] Code Visualizer follows the current Monaco caret through `activeTextEditor.selection` and `onDidChangeTextEditorSelection` without polling or reopening its view.
+- [x] Hiding/foreground-switching a retained Json Crack panel preserves its live webview; closing it disposes the shared panel and its subscriptions.
+- [ ] Json Crack panel creation reveals only in the invoking client initially, while shared membership remains available to other connected clients.
+- [ ] OpenAI `setContext` changes command/menu visibility without a restart or workspace leakage.
+- [ ] Adding enough eligible editor-title actions to overflow the toolbar keeps every action reachable by touch and mouse wheel without moving Run/Stop/status controls.
+- [ ] OpenAI file navigation reaches the canonical Code TE2 editor state.
+- [ ] A contributed diff opens the requested pair without mutating Git/draft baseline authority.
+- [ ] `chatgpt.conversationEditor` opens, restores, and disposes correctly, including multiple allowed conversation surfaces.
+- [ ] The same eligible command set appears in desktop editor, mobile touch, Explorer, and detached-header placements.
 
 ## Deferred decisions
 
@@ -242,7 +432,7 @@ Target architecture decisions:
 |---|---|
 | Retire `te2-rust` CLI alias | Installed-user compatibility must be measured after package rename |
 | Delete `te2_kotlin_lsp` | Current repository does not prove ownership |
-| Detailed UI VSIX architecture | Must be based on the cleaned framework and a selected real extension |
+| Multiple activity-view provider registrations | The extension host registration remains workspace-scoped and shared; WBA now resolves independent client runtime handles beneath that provider instead |
 
 ## Validation record
 
@@ -259,9 +449,30 @@ each phase executes. Do not mark a phase complete from implementation alone.
 | 2026-08-08 | 2 | Release/Ferrous active-framework restart using `--broadcast tailscale0` | Passed; native IPv4/IPv6 listeners replaced `socat`, Electron/console reconnected, Terminal and File Explorer reached ready, and worker `TE_FRAMEWORK_URL`/FWS URL remained loopback |
 | 2026-08-08 | 3A planning | Read-only active-writer, platform-fallback, profile-selection, and build-cache retention investigation | Confirmed canonical/fallback gaps, debug-by-default behavior, no build lock/pruning, and 10 stale final release binaries totaling 206.6 MiB |
 | 2026-08-08 | 3A | Python path/bootstrap/cache/console/runtime suites; Electron full suite/typecheck/compile; Rust full feature suite/format/check; isolated CLI profile smoke | Passed; 72 Python tests, 61 Electron tests, 63 Rust tests plus 4 ignored benchmarks, release/debug paths resolved correctly, 0 failures |
+| 2026-08-14 | 5.6C-D/G local | MainThreadTextEditors/file-open correlation, setContext/enablement/alternate state, editor cursor placement, and Explorer context-menu tests; TypeScript; full frontend suite; focused Python static/runtime tests; host build | Passed locally; 190 frontend tests and 10 Python tests, 0 failures; basedpyright and TypeScript clean. OpenAI live acceptance remains pending. |
 | 2026-08-08 | 3D | Migration/path/bootstrap fixture suite; current legacy sidecar schema probe; real-root JSON dry-run; static checks | Passed; destructive source-overwrite, destination-only retention, one-time receipt, active-writer guard, interrupted recovery, permissions, and report-only boundaries validated; no real apply performed |
+| 2026-08-10 | 5 | WBA `MainThreadStorage` persistence/isolation/dispatch tests; canonical path handoff suite; TypeScript; WBA build; webview and activation regressions | Passed; global and workspace Mementos survive cold runtime reconstruction, workspace state remains isolated, generated named nid is used, 13 focused Node tests and 10 Python path tests passed |
 | 2026-08-09 | 4B.1 | App-worker module/router unit tests, renamed-package subprocess smoke, existing pipe-worker integration, compileall, focused basedpyright | Passed; 7 tests, 0 failures; focused static analysis reported 0 errors |
 | 2026-08-09 | 4B.2 | Source-package stale scan; Code TE2 import smoke; Python, frontend, Rust, Electron, and clean wheel/sdist validation | Passed; 203 Python, 171 frontend, 66 Rust plus 4 ignored, and 61 Electron tests; TypeScript/build/compile passed; clean archives contain only `app/apps/code_te2` |
+| 2026-08-09 | 5 implementation | Webview RPC framing/runtime tests; Sidebar DTO/projection tests; 177-test frontend suite; canonical Code TE2 typecheck/build; focused Python static analysis; WBA server compile path; diff hygiene | Passed locally with 177 frontend and 7 Python tests; live OpenAI view and Electron detach/attach acceptance remain pending |
 | 2026-08-09 | 1–3C acceptance | Downstream-checkout live validation of remaining hover comparisons, Termux interface/no-XDG behavior, Linux canonical-root restart, framework stores, and Code TE2 state/WBA restart recovery | Passed; user-confirmed downstream acceptance complete |
 | 2026-08-09 | 4A | Python discovery/path/migration suites; wheel/sdist archive and isolated install checks; Rust format/check/full tests and optimized cache build; isolated server health/shutdown smoke; Electron typecheck/tests/compile/package | Passed; 48 Python tests, 69 Rust tests plus 4 ignored benchmarks, 61 Electron tests, canonical package contents and health identity, 0 failures |
 | 2026-08-09 | 4B implementation | Canonical-id/alias and state-move Rust tests; full Python, Code TE2, Rust, Electron, Gecko, and Cefrium suites; WBA/host rebuild; Gecko/Cefrium APK assembly; Electron package; wheel/sdist path audit; stale-name classification | Passed; 204 Python, 172 frontend, 70 Rust plus 4 ignored, and 62 Electron tests; both Android unit suites and APK builds passed; package archives contain only `app/apps/code_te2`; live shared-runtime cutover remains pending |
+| 2026-08-09 | Phase 5 prerequisites | Code TE2 typecheck/build and five focused WBA tests; isolated wheel extraction/import; full TE2 and ALS-RS Rust suites; non-default framework-port regression | Passed; TE2 74 tests plus 4 ignored, ALS-RS 139 tests in both library and binary targets, installed WBA matcher resolved without `node_modules`; TE2 `main` and `feature/ui-vsix-extensions` synchronized at `7cd923fc`, ALS-RS fix published at `15fb9af` |
+| 2026-08-09 | Phase 5 live checkpoint | Electron inline OpenAI view through the public Rust WBA mount; encoded webview authority resources; Cap'n Proto handshake and MCP/fetch traffic; opaque-sandbox Web Storage adapter; wrapper loading-mask computed style | OpenAI logged `app routes mounted` and `ready provider mounted`; UI is functional, while a gray visual overlay and detach/attach acceptance remain open |
+| 2026-08-10 | Phase 5 inline acceptance | Required vendored GitHub Dark Default payload; Code Server-compatible `--vscode-*` projection; pre-script `vscode-dark` body metadata; live wrapper/document inspection | Passed; inline OpenAI view accepted and the gray overlay is resolved; Electron detach/attach acceptance remains open |
+| 2026-08-10 | Phase 5.6 implementation checkpoint | Code TE2 typecheck/build; complete 175-test frontend suite; focused command, brace-glob, activity-webview, panel-webview, workspace-search, Sidebar projection, and UI IPC contract tests; focused Python static analysis; diff hygiene | Passed locally; contributed icons, local hide/reopen, editor commands, exact selection sync, message projection, and shared-core webview panels are implemented but Json Crack and cross-client behavior still require live acceptance |
+| 2026-08-10 | Phase 5.6 cursor projection | Code TE2 typecheck/build; 36 focused transport, WBA dispatch, ExtHostEditors, coalescing, and post-open-ack tests; complete 181-test frontend suite | Passed locally; Code Visualizer live caret/AST-following behavior remains for user acceptance |
+| 2026-08-11 | Phase 5.6 live acceptance | User validation of extension hide/reopen and WBA removal, Json Crack icon/command/panel lifecycle, Code Visualizer caret following, and Electron detached continuity | Shared/inline extension lifecycles, Json Crack, and Code Visualizer passed; Electron message continuity after detach failed and remains open |
+| 2026-08-12 | Phase 5.6J/5.7 investigation | Source comparison with Code Server's synchronous webview bootstrap; TE2 client/console/presentation identity trace; Gecko cold/warm health-fallback trace | Per-client reconstruction architecture recorded; Gecko hotfix approved to preserve app state on transport failure and reserve launcher fallback for authoritative terminal/missing-app results |
+| 2026-08-12 | Phase 5.7 implementation | Focused `AndroidRemoteAppHealthTest` and `AndroidClientStartupStateTest`; 2 GB disk preflight; `:app:assembleGeckoDebug`; diff hygiene | Passed under the Linux SDK wrapper/JDK 21; transport failure preserves the app and resets the authoritative-failure sequence; live outage acceptance remains open |
+| 2026-08-12 | Phase 5.6J/5.6K implementation | Code TE2 typecheck/build and 185 frontend tests; WBA per-client reconstruction/lease tests; 14 focused Python tests; Electron typecheck, compile, and 65 tests; 2 GB Android preflight, focused Gecko tests, and `:app:assembleGeckoDebug` | Passed locally; per-client reconstruction and shared-shell-first Electron readiness are implemented, with live cross-window/native continuity and delayed-start acceptance still open |
+| 2026-08-13 | Phase 5.8/5.9 investigation | WBA wrapper/socket lifecycle trace; Android Activity/service/relay ownership trace; live foreground-service, wake-lock, and device-idle inspection; Termux and Agent Log Server comparison | Confirmed compound failure: Android deactivates an Activity-owned browser/control plane while its foreground service owns no transport, then the UI VSIX wrapper converts a routine WBA reconnect into iframe destruction; implementation order fixed as WBA resume continuity followed by Android service ownership |
+| 2026-08-13 | Phase 5.8 implementation | Wrapper-level Happy DOM/fake-Socket.IO reconnect exercise; WBA epoch/generation/revision/sequence and bounded-journal decisions; pending-RPC, coalesced reconstruction, renewed-lease, stale-writer, reload/dispose coverage; Code TE2 typecheck/build and complete frontend suite | Passed locally; 186 frontend tests, 0 failures. Initial load, retained replay, current resume, HTML revision, WBA epoch, replay gap, pending interactive drop, state flush, stale writer, and authoritative dispose are covered. Browser/Electron/Gecko live outage and high-latency acceptance remains open. |
+| 2026-08-13 | Phase 5.8 GeckoView remote acceptance | Live remote GeckoView connection with the new UI VSIX resume and reconstruction path | Passed; the remote GeckoView connection remained functional. The broader cross-client outage, high-latency, and frontend-blocking acceptance matrix remains open. |
+| 2026-08-14 | Phase 5.9 implementation | Started-and-bound Android runtime ownership; fresh projection generation fencing; transient route preservation; persistent-renderer/power policy; Gecko and Cefrium unit suites; 2 GB disk preflights and both APK assemblies | Passed locally; 65 Gecko tests and 8 Cefrium tests, 0 failures. `:app:assembleGeckoDebug` and `:cefrium:assembleDebug` succeeded. The real-device lifecycle/network acceptance matrix remains open. |
+| 2026-08-14 | Android 0.2.329 publication | Manifest-driven seed publication; deterministic republish; Rust manifest/OTA tests; Gecko/Cefrium unit suites and disk-guarded APK builds; package metadata, embedded inventory, Code TE2 identity, host hash, ZIP alignment, and Gecko arm64 ELF audit | Passed locally. Both APKs use version code `20329`, embed all 205 version `0.2.329` files, contain no retired `file_editor_cm6` asset paths, and match the canonical Code TE2 host. Both APKs pass 16 KiB ZIP alignment; all 12 Gecko arm64 shared objects use `0x4000` `PT_LOAD` alignment. |
+| 2026-08-14 | Phase 5.6L implementation | Lazy client-scoped activity runtime, exact-client routing/failure isolation, encoded resource response tests, Rust streaming-proxy regression, Code TE2 typecheck/build/full frontend suite, focused Python unit/static checks, Rust format/full feature suite | Passed locally; 201 frontend tests, 3 focused Python tests, and 77 Rust tests plus 4 ignored benchmarks, 0 failures. Live diagnosis proved the old Rust proxy forwarded Brotli bytes while stripping `Content-Encoding`; the corrected framework binary still requires live restart/acceptance. |
+| 2026-08-14 | Phase 5.6 resource/menu continuation | Shared WBA-epoch webview resource scopes, live Monaco touch Extension Context resolution, contributed `webview/context` wrapper actions, TypeScript, host build, and complete frontend suite | Passed locally; 195 frontend tests, 0 failures. Live remote Codex diff and context-menu acceptance remains pending. |
+| 2026-08-14 | Phase 5.6 manifest-overlay correction | Live WBA `/cmd` comparison, partial-management/full-disk manifest regression, exact Codex `resourceScheme == file` menu regression, TypeScript, host/WBA rebuild, focused tests, and complete frontend suite | Passed locally; 197 frontend tests, 0 failures. The running WBA was intentionally not restarted, so live Codex context-menu acceptance remains pending. |
+| 2026-08-14 | Phase 5.6 Electron persistent extension renderer | First-presentation native `WebContentsView`, embedded bounds/visibility bridge, exact detach/attach reparenting, OS-native Sidebar dock menus, current-revision bootstrap message suffix, Code TE2 and Electron typechecks/builds, complete frontend/Electron suites, and focused WBA runtime tests | Passed locally; 197 frontend tests, 67 Electron tests, and 4 focused WBA tests, 0 failures. The live Electron process was not restarted; Codex auxiliary-panel continuity and native Sidebar menus require user acceptance with the rebuilt client. |

@@ -27,6 +27,15 @@
         "/api/app/file_editor_cm6/services/wba/socket.io",
         "/wba_ws/socket.io"
       ]
+    },
+    {
+      "id": "wba_webview",
+      "description": "Bounded HTTP bridge for extension-owned webview documents and local resources.",
+      "target": "static",
+      "host": "127.0.0.1",
+      "port": 18181,
+      "public_path": "/api/app/code_te2/services/wba/webview",
+      "upstream_path": "/webview"
     }
   ]
 }

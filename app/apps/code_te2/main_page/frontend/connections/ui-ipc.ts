@@ -31,6 +31,7 @@ interface UiIpcConnectionsDeps {
   ensureSocketIoLoaded: () => Promise<IoFactory | null | undefined>;
   initConsoleBridge: (args: ConsoleBridgeOptions) => unknown;
   getClientId: () => string;
+  getConsoleWorkerId: () => string;
   onHostStateResync?: () => Promise<void> | void;
   onSidebarConnected?: () => void;
 }
@@ -70,8 +71,8 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
       .then((io: IoFactory | null | undefined) => {
         if (!io) throw new Error('Socket.IO client is not available');
         const bridge = deps.initConsoleBridge({
+          workerId: deps.getConsoleWorkerId(),
           workerLabel: consoleWorkerLabel(),
-          uniquePerWindow: true,
           socketPath: SOCKET_IO_PATHS.te2Console,
           namespace: '/te2_console',
         });

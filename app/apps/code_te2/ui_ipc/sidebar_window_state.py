@@ -456,6 +456,65 @@ def _normalize_run_profile_surface(value: object, *, canonical_url: str) -> Json
     }
 
 
+def _normalize_extension_webview_surface(
+    value: object,
+    *,
+    canonical_url: str,
+) -> JsonObject:
+    raw = _as_object(value)
+    if not raw:
+        return {}
+    if (
+        _norm(raw.get("dto")) != "ExtensionWebviewSurface"
+        or _as_int(raw.get("version")) != 1
+    ):
+        raise ValueError("webviewSurface contract is invalid")
+    surface_id = _norm(raw.get("surfaceId") or raw.get("surface_id"))
+    host_id = _norm(raw.get("hostId") or raw.get("host_id"))
+    workspace_id = _norm(raw.get("workspaceId") or raw.get("workspace_id"))
+    project_path = _norm(raw.get("projectPath") or raw.get("project_path"))
+    extension_id = _norm(raw.get("extensionId") or raw.get("extension_id"))
+    view_id = _norm(raw.get("viewId") or raw.get("view_id"))
+    surface_kind = _norm(raw.get("surfaceKind") or raw.get("surface_kind")) or "view"
+    url = _validate_url_slot_url(_norm(raw.get("url")))
+    if not all(
+        (
+            surface_id,
+            host_id,
+            workspace_id,
+            project_path,
+            extension_id,
+            view_id,
+        )
+    ):
+        raise ValueError("webviewSurface identity is incomplete")
+    if url != canonical_url:
+        raise ValueError("webviewSurface URL must match the Sidebar URL")
+    if surface_kind not in {"view", "panel"}:
+        raise ValueError("webviewSurface kind is invalid")
+    return {
+        "dto": "ExtensionWebviewSurface",
+        "version": 1,
+        "surfaceId": surface_id,
+        "hostId": host_id,
+        "workspaceId": workspace_id,
+        "projectPath": project_path,
+        "extensionId": extension_id,
+        "viewId": view_id,
+        "surfaceKind": surface_kind,
+        "url": url,
+        "iconUrl": _norm(raw.get("iconUrl") or raw.get("icon_url")),
+        "retainContextWhenHidden": _as_bool(
+            raw.get("retainContextWhenHidden")
+            or raw.get("retain_context_when_hidden")
+        ),
+        "viewColumn": max(
+            0,
+            _as_int(raw.get("viewColumn") or raw.get("view_column")),
+        ),
+    }
+
+
 def _with_url_params(raw_url: str, params: dict[str, str]) -> str:
     split = urlsplit(raw_url or "/")
     query = dict(parse_qsl(split.query, keep_blank_values=True))
@@ -645,6 +704,14 @@ def _normalize_url_slot(raw: JsonObject) -> JsonObject:
         surface = _normalize_run_profile_surface(surface_value, canonical_url=url)
         slot["run_profile_surface"] = surface
         slot["runProfileSurface"] = surface
+    webview_surface_value = raw.get("webview_surface") or raw.get("webviewSurface")
+    if webview_surface_value is not None:
+        webview_surface = _normalize_extension_webview_surface(
+            webview_surface_value,
+            canonical_url=url,
+        )
+        slot["webview_surface"] = webview_surface
+        slot["webviewSurface"] = webview_surface
     return slot
 
 
@@ -855,7 +922,11 @@ def create_sidebar_window(params: JsonObject) -> JsonObject:
             "restore_url": url,
             "restoreUrl": url,
             "load": _norm(params.get("load")) or "lazy",
-            "icon": {"kind": "text", "text": "URL"},
+            "icon": (
+                _as_object(params.get("icon"))
+                if isinstance(params.get("icon"), dict)
+                else {"kind": "text", "text": "URL"}
+            ),
             "state_kind": "url",
             "stateKind": "url",
             "query_state": {"url": url},
@@ -898,6 +969,14 @@ def create_sidebar_window(params: JsonObject) -> JsonObject:
             surface = _normalize_run_profile_surface(surface_value, canonical_url=url)
             url_slot["run_profile_surface"] = surface
             url_slot["runProfileSurface"] = surface
+        webview_surface_value = params.get("webview_surface") or params.get("webviewSurface")
+        if webview_surface_value is not None:
+            webview_surface = _normalize_extension_webview_surface(
+                webview_surface_value,
+                canonical_url=url,
+            )
+            url_slot["webview_surface"] = webview_surface
+            url_slot["webviewSurface"] = webview_surface
         state = _upsert_slot(_load_pref_state(), url_slot)
         _save_pref_state(state)
         window = _normalize_slot(url_slot)

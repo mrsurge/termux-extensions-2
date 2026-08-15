@@ -39,6 +39,8 @@ DISPATCHER_MESSAGE_TYPE_BY_RPC_METHOD: dict[str, str] = {
     "explorer.extensions.marketplace.detail": "ext:marketplace_detail",
     "explorer.extensions.marketplace.install": "ext:marketplace_install",
     "explorer.extensions.marketplace.search": "ext:marketplace_search",
+    "explorer.extensions.menu.resolve": "ext:menu_resolve",
+    "explorer.extensions.command.execute": "ext:command_execute",
     "explorer.extensions.toggle": "ext:toggle",
     "explorer.extensions.uninstall": "ext:uninstall",
     "explorer.extensions.workspaceSettings.get": "ext:workspace_settings_get",

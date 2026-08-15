@@ -54,6 +54,9 @@ const BACKEND_PIPE_EVENT_TYPES = new Set([
   "watcher/enospc",
   "watcher/fileChanges",
   "diagnostics/update",
+  "webview/snapshot",
+  "extension/message",
+  "extension/editorOpenRequested",
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -3,7 +3,14 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("keeps the extension drawer and status projection in the host source graph", async () => {
-  const [template, controller, bridge, editorHandlers, hostBundle] =
+  const [
+    template,
+    controller,
+    bridge,
+    editorHandlers,
+    sidebarShortcuts,
+    hostBundle,
+  ] =
     await Promise.all([
       readFile("template.html", "utf8"),
       readFile("main_page/frontend/ui/extension-activity.ts", "utf8"),
@@ -12,6 +19,7 @@ test("keeps the extension drawer and status projection in the host source graph"
         "utf8",
       ),
       readFile("monaco_editor/editor_wba_runtime_handlers.ts", "utf8"),
+      readFile("main_page/frontend/sidebar-shortcuts/runtime.ts", "utf8"),
       readFile("static/dist/host.js", "utf8"),
     ]);
 
@@ -44,6 +52,11 @@ test("keeps the extension drawer and status projection in the host source graph"
   assert.match(controller, /MAX_RENDERED_LOG_CHARS\s*=\s*512 \* 1024/);
   assert.match(controller, /event\.key === "ArrowDown"/);
   assert.match(controller, /event\.key === "Escape"/);
+  assert.match(
+    sidebarShortcuts,
+    /versionChanged\s*&&\s*!_isExtensionWebviewEntry\(sc\)/,
+    "WBA HTML revisions must not reload the trusted Sidebar wrapper",
+  );
   assert.match(controller, /extensions\.activity\.snapshot/);
   assert.match(controller, /extensions\.logs\.select/);
   assert.match(bridge, /code-te2:extension-activity/);

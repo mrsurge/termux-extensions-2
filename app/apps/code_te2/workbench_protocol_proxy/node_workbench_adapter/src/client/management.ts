@@ -169,6 +169,58 @@ function sanitizeScannedExtensions(
   }
 }
 
+const MANIFEST_OWNED_EXTENSION_FIELDS = [
+  "name",
+  "publisher",
+  "version",
+  "engines",
+  "main",
+  "browser",
+  "activationEvents",
+  "contributes",
+  "extensionDependencies",
+  "extensionPack",
+] as const;
+
+export interface ExtensionManifestMergeResult {
+  extensions: unknown[];
+  enrichedIds: string[];
+}
+
+export function mergeInstalledExtensionManifests(
+  managementExtensions: unknown[],
+  diskExtensions: unknown[],
+  extensionIdentifierFrom: (extension: unknown) => string | null,
+): ExtensionManifestMergeResult {
+  const diskById = new Map<string, Record<string, unknown>>();
+  for (const extension of diskExtensions) {
+    if (!isRecord(extension)) continue;
+    const identifier = extensionIdentifierFrom(extension)?.toLowerCase();
+    if (identifier) diskById.set(identifier, extension);
+  }
+
+  const enrichedIds: string[] = [];
+  const extensions = managementExtensions.map((extension) => {
+    if (!isRecord(extension) || extension.isBuiltin !== false) return extension;
+    const identifier = extensionIdentifierFrom(extension)?.toLowerCase();
+    const diskExtension = identifier ? diskById.get(identifier) : null;
+    if (!identifier || !diskExtension) return extension;
+
+    const merged = { ...extension };
+    for (const fieldName of MANIFEST_OWNED_EXTENSION_FIELDS) {
+      if (Object.prototype.hasOwnProperty.call(diskExtension, fieldName)) {
+        merged[fieldName] = diskExtension[fieldName];
+      }
+    }
+    if (!merged.extensionLocation && diskExtension.extensionLocation) {
+      merged.extensionLocation = diskExtension.extensionLocation;
+    }
+    enrichedIds.push(identifier);
+    return merged;
+  });
+  return { extensions, enrichedIds };
+}
+
 function logLoadedExtensions(runtime: ManagementRuntime, scannedExtensions: unknown[]): void {
   try {
     const extIds = scannedExtensions.map((ext) => runtime.extensionIdentifierFrom(ext) ?? "?").sort();
@@ -315,8 +367,43 @@ export async function connectManagementSession(
     runtime.onEvent({ type: "mgmt/scanExtensions", ts_ms: Date.now(), ok: false, error: String((error as Error)?.message ?? error) });
   }
 
-  runtime.refs.rawExtensionConfigs = runtime.extractExtensionConfigDefaults(scannedExtensions);
   scannedExtensions = sanitizeScannedExtensions(runtime, scannedExtensions, !!useRemote, authority);
+  if (
+    scannedExtensions.length > 0
+    && !shouldSkipMgmtScan(runtime.env)
+    && extensionsSource(runtime.env) !== "disk"
+  ) {
+    try {
+      const diskExtensions = await runtime.spanTraceAsync(
+        "connect.scanExtensions.diskManifestOverlay",
+        () => runtime.scanExtensionsFromDisk(useRemote ? authority : null),
+      );
+      const merged = mergeInstalledExtensionManifests(
+        scannedExtensions,
+        diskExtensions,
+        runtime.extensionIdentifierFrom,
+      );
+      scannedExtensions = merged.extensions;
+      runtime.onEvent({
+        type: "mgmt/extensionManifestOverlay",
+        ts_ms: Date.now(),
+        ok: true,
+        diskCount: diskExtensions.length,
+        enrichedCount: merged.enrichedIds.length,
+      });
+      runtime.log(
+        `[extensions] enriched ${merged.enrichedIds.length} admitted user extension manifests from disk`,
+      );
+    } catch (error) {
+      runtime.onEvent({
+        type: "mgmt/extensionManifestOverlay",
+        ts_ms: Date.now(),
+        ok: false,
+        error: String((error as Error)?.message ?? error),
+      });
+    }
+  }
+  runtime.refs.rawExtensionConfigs = runtime.extractExtensionConfigDefaults(scannedExtensions);
   logLoadedExtensions(runtime, scannedExtensions);
   runtime.refs.extensions = Array.isArray(scannedExtensions) ? scannedExtensions : [];
 

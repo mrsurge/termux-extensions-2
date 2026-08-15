@@ -369,6 +369,8 @@ const explorerTreeMenuController = createExplorerTreeMenuController({
   getProjectPath: () => explorerRuntimeState.getProjectPath(),
   hasExplorerRpc: () => hasExplorerRpc(),
   notifyExplorer: (method, payload) => notifyExplorer(method, payload),
+  requestExplorer: (method, payload, timeoutMs) =>
+    requestExplorerRpc(method, payload, timeoutMs),
   buildSidebarMentionPayload: (payload) => buildSidebarMentionPayload(payload),
   toast,
   isInSelectMode: (rel) => rel !== null && isInSelectMode(rel),

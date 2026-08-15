@@ -1,10 +1,13 @@
 package com.termux.extensions
 
 import android.Manifest
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.IBinder
 import android.util.Log
 import android.view.View
 import android.view.inputmethod.InputMethodManager
@@ -41,11 +44,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var diagnostics: AndroidDiagnostics
     private lateinit var assetManager: EditorAssetManager
     private lateinit var shellGateway: AndroidShellGateway
-    private lateinit var relay: AndroidFrameworkRelay
 
     private val editorInputFilter = EditorInputFilter()
     private val consoleState = ComposeConsoleState()
-    private var uiIpcClient: UiIpcClient? = null
+    private var clientRuntimeService: PersistentNetworkService? = null
+    private var clientRuntimeBound = false
+    private var clientInitializationStarted = false
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
@@ -60,8 +64,77 @@ class MainActivity : AppCompatActivity() {
     private var isLocked = false
     private var toolsConsoleSelected = true
     private var persistentNetworkEnabled = false
+    private var pendingColdRestorePath: String? = null
     private var notificationPermissionRequestInFlight = false
     private var notificationPermissionDenied = false
+
+    private val clientRuntimeObserver = object : AndroidClientRuntimeObserver {
+        override fun onRuntimeStateChanged(snapshot: AndroidClientRuntimeSnapshot) {
+            if (!snapshot.projectionReady) return
+            runOnUiThread { completePendingColdRestore() }
+        }
+
+        override fun onImeContextChanged(active: Boolean) {
+            runOnUiThread {
+                editorInputFilter.isActive = active
+                if (!::browser.isInitialized) return@runOnUiThread
+                val target = currentFocus ?: browser.surfaceContainer
+                val inputMethod =
+                    getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
+                if (active) target.requestFocus()
+                inputMethod?.restartInput(target)
+                if (active) inputMethod?.showSoftInput(target, 0)
+            }
+        }
+
+        override fun onConsoleEvent(eventName: String, data: JSONObject) {
+            consoleState.onConsoleEvent(eventName, data)
+        }
+
+        override fun onNativeConsoleCommand(
+            command: AndroidNativeConsoleCommand,
+            completion: (Result<JSONObject>) -> Unit,
+        ): Boolean {
+            when (command) {
+                AndroidNativeConsoleCommand.FORCE_UPDATE_AND_RELOAD ->
+                    forceAssetUpdate(showFeedback = false, completion = completion)
+                AndroidNativeConsoleCommand.DEVTOOLS_STATE_GET,
+                AndroidNativeConsoleCommand.DEVTOOLS_TELEMETRY_CLEAR -> completion(
+                    Result.success(
+                        JSONObject()
+                            .put("available", false)
+                            .put("renderer", "cefrium"),
+                    ),
+                )
+            }
+            return true
+        }
+    }
+
+    private val clientRuntimeConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+            val service = (binder as? PersistentNetworkService.LocalBinder)?.service ?: return
+            clientRuntimeService = service
+            clientRuntimeBound = true
+            service.addObserver(clientRuntimeObserver)
+            service.configure(settingsStore.load())
+            service.setConsoleDrawerEnabled(
+                ::consoleOverlay.isInitialized &&
+                    consoleOverlay.visibility == View.VISIBLE &&
+                    toolsConsoleSelected,
+                CONSOLE_TAIL_LINES,
+            )
+            if (!clientInitializationStarted) {
+                clientInitializationStarted = true
+                initializeClient()
+            }
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            clientRuntimeBound = false
+            clientRuntimeService = null
+        }
+    }
 
     private fun prefs() =
         getSharedPreferences("cefrium_session_state", Context.MODE_PRIVATE)
@@ -78,10 +151,18 @@ class MainActivity : AppCompatActivity() {
         bindViews()
         bindControls()
 
+        startService(PersistentNetworkService.runtimeIntent(this))
+        bindService(
+            Intent(this, PersistentNetworkService::class.java),
+            clientRuntimeConnection,
+            Context.BIND_AUTO_CREATE,
+        )
+    }
+
+    private fun initializeClient() {
         try {
             initializeAssetsAndRelay()
             initializeBrowser()
-            connectFrameworkServices(settingsStore.load())
             checkForAssetUpdate()
             restoreOrLoadLauncher()
         } catch (error: Exception) {
@@ -107,8 +188,10 @@ class MainActivity : AppCompatActivity() {
 
         consoleState.bind(
             composeConsoleContainer,
-            onSendEval = { code, target -> uiIpcClient?.sendConsoleEval(code, target) },
-            onRequestClear = { uiIpcClient?.sendConsoleClear() },
+            onSendEval = { code, target ->
+                clientRuntimeService?.sendConsoleEval(code, target)
+            },
+            onRequestClear = { clientRuntimeService?.sendConsoleClear() },
         )
     }
 
@@ -144,10 +227,8 @@ class MainActivity : AppCompatActivity() {
             ).show()
         }
 
-        relay = AndroidFrameworkRelay(
-            assetRoot = assetManager.getAssetRoot(),
-            assetPathResolver = CefriumAssetRoutes::localPath,
-        ) { request -> shellGateway.handle(request) }
+        val runtimeService = clientRuntimeService
+            ?: throw IllegalStateException("Android client runtime is not bound")
         shellGateway = AndroidShellGateway(
             settingsStore = settingsStore,
             httpClient = httpClient,
@@ -156,16 +237,22 @@ class MainActivity : AppCompatActivity() {
                 diagnostics.snapshot(
                     JSONObject().apply {
                         put("frameworkBaseUrl", frameworkBaseUrl)
-                        put("relayOrigin", relay.browserOrigin)
+                        put("relayOrigin", runtimeService.browserFrameworkBaseUrl())
                         put("assetRootExists", assetManager.getAssetRoot().isDirectory)
                         put("localAssetVersion", assetManager.getLocalVersion() ?: JSONObject.NULL)
                         put("inAppShell", inAppShell)
                     },
                 )
             },
-            appUrlRewriter = { relay.rewriteFrameworkUrl(it) },
+            appUrlRewriter = runtimeService::rewriteFrameworkUrl,
+            settingsRuntimeProvider = { runtimeService.snapshot().toJson() },
+            onOpenBatterySettings = runtimeService::openBatteryOptimizationSettings,
         )
-        relay.start(frameworkBaseUrl)
+        runtimeService.configureLocalRelayRoutes(
+            assetRoot = assetManager.getAssetRoot(),
+            assetPathResolver = CefriumAssetRoutes::localPath,
+            requestHandler = shellGateway::handle,
+        )
     }
 
     private fun initializeBrowser() {
@@ -212,11 +299,31 @@ class MainActivity : AppCompatActivity() {
         if (savedPath != null && savedPath != rawSavedPath) {
             prefs().edit().putString(KEY_LAST_PATH, savedPath).apply()
         }
-        if (!savedPath.isNullOrBlank() && isAppPath(savedPath)) {
-            browser.loadUrl(relay.url(savedPath))
-        } else {
-            loadLauncher()
+        val runtime = clientRuntimeService ?: return
+        val savedAppPath = savedPath?.takeIf(::isAppPath)
+        when (
+            androidColdRestoreDecision(
+                hasSavedRemoteApp = savedAppPath != null,
+                projectionReady = runtime.snapshot().projectionReady,
+            )
+        ) {
+            AndroidColdRestoreDecision.LOAD_SAVED_APP -> {
+                browser.loadUrl(runtime.frameworkUrl(checkNotNull(savedAppPath)))
+            }
+            AndroidColdRestoreDecision.WAIT_FOR_FRESH_PROJECTION -> {
+                pendingColdRestorePath = checkNotNull(savedAppPath)
+                loadLauncher(preservePendingRestore = true)
+            }
+            AndroidColdRestoreDecision.LOAD_LAUNCHER -> loadLauncher()
         }
+    }
+
+    private fun completePendingColdRestore() {
+        val savedPath = pendingColdRestorePath ?: return
+        val runtime = clientRuntimeService ?: return
+        if (!runtime.snapshot().projectionReady || !::browser.isInitialized) return
+        pendingColdRestorePath = null
+        browser.loadUrl(runtime.frameworkUrl(savedPath))
     }
 
     private fun handleUrlChanged(url: String?) {
@@ -232,7 +339,9 @@ class MainActivity : AppCompatActivity() {
             append(parsed.rawPath?.takeIf { it.isNotBlank() } ?: "/")
             parsed.rawQuery?.let { append('?').append(it) }
         }
-        prefs().edit().putString(KEY_LAST_PATH, currentPath).apply()
+        if (pendingColdRestorePath == null || isAppPath(currentPath)) {
+            prefs().edit().putString(KEY_LAST_PATH, currentPath).apply()
+        }
         inAppShell = isAppPath(currentPath)
         nativeHeader.visibility = if (inAppShell) View.VISIBLE else View.GONE
         if (inAppShell) {
@@ -246,21 +355,26 @@ class MainActivity : AppCompatActivity() {
         updatePersistentNetworkService()
     }
 
-    private fun loadLauncher() {
-        if (!::relay.isInitialized || !::browser.isInitialized) return
+    private fun loadLauncher(preservePendingRestore: Boolean = false) {
+        if (clientRuntimeService == null || !::browser.isInitialized) return
+        if (!preservePendingRestore) pendingColdRestorePath = null
         currentPath = LAUNCHER_PATH
         inAppShell = false
         nativeHeader.visibility = View.GONE
-        prefs().edit().putString(KEY_LAST_PATH, currentPath).apply()
+        if (!preservePendingRestore) {
+            prefs().edit().putString(KEY_LAST_PATH, currentPath).apply()
+        }
         updatePersistentNetworkService()
-        browser.loadUrl(relay.url(LAUNCHER_PATH))
+        browser.loadUrl(clientRuntimeService?.frameworkUrl(LAUNCHER_PATH) ?: return)
     }
 
     private fun loadApp(appId: String) {
         currentAppId = appId
         isLocked = false
         findViewById<Button>(R.id.btnLock).text = "Lock"
-        browser.loadUrl(relay.url("/app/$appId?gv_native=1"))
+        browser.loadUrl(
+            clientRuntimeService?.frameworkUrl("/app/$appId?gv_native=1") ?: return,
+        )
     }
 
     private fun showRecents() {
@@ -404,15 +518,14 @@ class MainActivity : AppCompatActivity() {
     private fun recoverRenderer(status: Int, errorCode: Int) {
         Log.e(TAG, "Renderer terminated status=$status errorCode=$errorCode")
         Toast.makeText(this, "Browser renderer restarted", Toast.LENGTH_SHORT).show()
-        browser.loadUrl(relay.url(currentPath))
+        browser.loadUrl(clientRuntimeService?.frameworkUrl(currentPath) ?: return)
     }
 
     private fun applySettings(settings: AndroidAppSettings) {
         frameworkBaseUrl = settings.frameworkBaseUrl
         persistentNetworkEnabled = settings.persistentNetworkNotification
-        relay.retarget(frameworkBaseUrl)
+        clientRuntimeService?.configure(settings)
         runOnUiThread {
-            reconnectUiIpc(settings)
             updatePersistentNetworkService()
             Toast.makeText(
                 this,
@@ -421,38 +534,6 @@ class MainActivity : AppCompatActivity() {
             ).show()
         }
         checkForAssetUpdate()
-    }
-
-    private fun connectFrameworkServices(settings: AndroidAppSettings) {
-        reconnectUiIpc(settings)
-    }
-
-    private fun reconnectUiIpc(settings: AndroidAppSettings) {
-        uiIpcClient?.disconnect()
-        uiIpcClient = UiIpcClient(
-            filter = editorInputFilter,
-            imeContextSwitchingEnabled = settings.imeContextSwitchingEnabled,
-        ) { active ->
-            runOnUiThread {
-                if (!::browser.isInitialized) return@runOnUiThread
-                val target = currentFocus ?: browser.surfaceContainer
-                val inputMethod =
-                    getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
-                if (active) target.requestFocus()
-                inputMethod?.restartInput(target)
-                if (active) inputMethod?.showSoftInput(target, 0)
-            }
-        }.also { client ->
-            client.onConsoleEvent = consoleState::onConsoleEvent
-            client.connect(frameworkBaseUrl)
-            if (
-                ::consoleOverlay.isInitialized &&
-                consoleOverlay.visibility == View.VISIBLE &&
-                toolsConsoleSelected
-            ) {
-                client.setConsoleDrawerEnabled(true, CONSOLE_TAIL_LINES)
-            }
-        }
     }
 
     private fun checkForAssetUpdate() {
@@ -480,25 +561,42 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    private fun forceAssetUpdate() {
-        Toast.makeText(this, "Force-updating assets…", Toast.LENGTH_SHORT).show()
+    private fun forceAssetUpdate(
+        showFeedback: Boolean = true,
+        completion: (Result<JSONObject>) -> Unit = {},
+    ) {
+        if (showFeedback) {
+            Toast.makeText(this, "Force-updating assets…", Toast.LENGTH_SHORT).show()
+        }
         Thread {
-            val updated = assetManager.forceUpdateFromServer(frameworkBaseUrl)
+            val result = runCatching {
+                check(assetManager.forceUpdateFromServer(frameworkBaseUrl)) {
+                    "Asset update failed"
+                }
+                JSONObject().apply {
+                    put("updated", true)
+                    put("version", assetManager.getLocalVersion() ?: JSONObject.NULL)
+                    put("renderer", "cefrium")
+                }
+            }
             runOnUiThread {
-                if (updated) {
+                if (result.isSuccess) {
                     val version = assetManager.getLocalVersion() ?: "?"
                     consoleTitle.text = "Tools · v$version"
-                    Toast.makeText(
-                        this,
-                        "Assets updated to v$version",
-                        Toast.LENGTH_SHORT,
-                    ).show()
+                    if (showFeedback) {
+                        Toast.makeText(
+                            this,
+                            "Assets updated to v$version",
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }
                     browser.clearCache()
                     browser.reload()
-                    hideTools()
-                } else {
+                    if (showFeedback) hideTools()
+                } else if (showFeedback) {
                     Toast.makeText(this, "Asset update failed", Toast.LENGTH_SHORT).show()
                 }
+                completion(result)
             }
         }.start()
     }
@@ -522,7 +620,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun hideTools() {
         consoleOverlay.visibility = View.GONE
-        uiIpcClient?.setConsoleDrawerEnabled(false)
+        clientRuntimeService?.setConsoleDrawerEnabled(false)
         consoleState.resetSession()
     }
 
@@ -534,7 +632,7 @@ class MainActivity : AppCompatActivity() {
         btnToolsInspector.isEnabled = true
         consoleState.resetSession()
         loadAndroidDiagnostics()
-        uiIpcClient?.setConsoleDrawerEnabled(true, CONSOLE_TAIL_LINES)
+        clientRuntimeService?.setConsoleDrawerEnabled(true, CONSOLE_TAIL_LINES)
     }
 
     private fun showInspectorTools() {
@@ -543,7 +641,7 @@ class MainActivity : AppCompatActivity() {
         inspectorPanel.visibility = View.VISIBLE
         btnToolsConsole.isEnabled = true
         btnToolsInspector.isEnabled = false
-        uiIpcClient?.setConsoleDrawerEnabled(false)
+        clientRuntimeService?.setConsoleDrawerEnabled(false)
         consoleState.resetSession()
     }
 
@@ -564,26 +662,39 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updatePersistentNetworkService() {
-        if (!persistentNetworkEnabled || !inAppShell) {
-            stopService(Intent(this, PersistentNetworkService::class.java))
-            return
-        }
+        val remoteSessionActive = inAppShell || pendingColdRestorePath != null
         if (
+            persistentNetworkEnabled &&
+            remoteSessionActive &&
             android.os.Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED &&
             !notificationPermissionRequestInFlight &&
-            !notificationPermissionDenied
+            !notificationPermissionDenied &&
+            !prefs().getBoolean(KEY_NOTIFICATION_PERMISSION_REQUESTED, false)
         ) {
             notificationPermissionRequestInFlight = true
+            prefs().edit()
+                .putBoolean(KEY_NOTIFICATION_PERMISSION_REQUESTED, true)
+                .apply()
             ActivityCompat.requestPermissions(
                 this,
                 arrayOf(Manifest.permission.POST_NOTIFICATIONS),
                 NOTIFICATION_PERMISSION_REQUEST,
             )
         }
-        val intent = Intent(this, PersistentNetworkService::class.java)
-        if (android.os.Build.VERSION.SDK_INT >= 26) {
+        val settings = settingsStore.load()
+        clientRuntimeService?.configure(settings)
+        clientRuntimeService?.setPersistentSessionActive(remoteSessionActive)
+        val intent = PersistentNetworkService.runtimeIntent(this, remoteSessionActive)
+        if (
+            shouldKeepAndroidRendererActive(
+                persistentNetworkEnabled,
+                remoteSessionActive,
+                frameworkBaseUrl,
+            ) &&
+            android.os.Build.VERSION.SDK_INT >= 26
+        ) {
             ContextCompat.startForegroundService(this, intent)
         } else {
             startService(intent)
@@ -592,7 +703,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun isRelayOrigin(rawUrl: String): Boolean {
         return try {
-            val expected = URI(relay.browserOrigin)
+            val expected = URI(
+                clientRuntimeService?.browserFrameworkBaseUrl() ?: return false,
+            )
             val candidate = URI(rawUrl)
             candidate.scheme.equals(expected.scheme, ignoreCase = true) &&
                 candidate.host.equals(expected.host, ignoreCase = true) &&
@@ -639,7 +752,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onPause() {
-        if (::browser.isInitialized) browser.onPause()
+        if (
+            ::browser.isInitialized &&
+            !shouldKeepAndroidRendererActive(
+                persistentNetworkEnabled,
+                inAppShell || pendingColdRestorePath != null,
+                frameworkBaseUrl,
+            )
+        ) {
+            browser.onPause()
+        }
         super.onPause()
     }
 
@@ -653,13 +775,21 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        uiIpcClient?.disconnect()
-        uiIpcClient = null
+        clientRuntimeService?.clearLocalRelayRoutes()
+        if (isFinishing && !isChangingConfigurations) {
+            clientRuntimeService?.setPersistentSessionActive(false)
+            stopService(PersistentNetworkService.runtimeIntent(this))
+        }
+        clientRuntimeService?.removeObserver(clientRuntimeObserver)
+        if (clientRuntimeBound) {
+            unbindService(clientRuntimeConnection)
+            clientRuntimeBound = false
+        }
+        clientRuntimeService = null
         if (::browser.isInitialized) {
             browserContainer.removeView(browser.surfaceContainer)
             browser.close()
         }
-        if (::relay.isInitialized) relay.stop()
         super.onDestroy()
     }
 
@@ -668,6 +798,8 @@ class MainActivity : AppCompatActivity() {
         private const val LAUNCHER_PATH = "/android-shell/index.html"
         private const val DEFAULT_APP_ID = CODE_TE2_APP_ID
         private const val KEY_LAST_PATH = "last_path"
+        private const val KEY_NOTIFICATION_PERMISSION_REQUESTED =
+            "notification_permission_requested"
         private const val CONSOLE_TAIL_LINES = 500
         private const val CONTEXT_MENU_CANCEL = -1
         private const val NOTIFICATION_PERMISSION_REQUEST = 9301

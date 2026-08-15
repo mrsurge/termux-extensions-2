@@ -68,6 +68,14 @@ test('toolbar and Drafts overlay keep the intended source structure', async () =
     /id="fe-drawer-open" class="fe-menu-btn fe-agent-toggle"/,
   );
   assert.match(template, /#menu-branch-dd\s*\{[^}]*right:\s*-45px/);
+  assert.match(
+    template,
+    /#fe-extension-editor-actions\s*\{[^}]*overflow-x:\s*auto[^}]*touch-action:\s*pan-x/,
+  );
+  assert.match(
+    template,
+    /\.fe-extension-editor-action\s*\{[^}]*flex:\s*0 0 28px/,
+  );
   const desktopToolbarZ = Number(
     template.match(
       /\.layout-desktop \.fe-toolbar\s*\{[\s\S]*?z-index:\s*(\d+)/,

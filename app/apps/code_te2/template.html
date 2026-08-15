@@ -509,6 +509,57 @@
   #menu-branch { order: 5; margin-left: auto; }
   .fe-toolbar-issues { order: 6; }
   .fe-toolbar-actions { order: 7; display: flex; gap: 0.35rem; align-items: center; }
+  .fe-toolbar > .fe-toolbar-actions { flex: 0 1 auto; min-width: 0; }
+  .fe-toolbar-actions > :not(#fe-extension-editor-actions) { flex: 0 0 auto; }
+  #fe-extension-editor-actions {
+    display: inline-flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    gap: 0.2rem;
+    align-items: center;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x;
+    overscroll-behavior-x: contain;
+  }
+  #fe-extension-editor-actions::-webkit-scrollbar { display: none; width: 0; height: 0; }
+  #fe-extension-editor-actions[hidden] { display: none; }
+  .fe-extension-editor-action { flex: 0 0 28px; width: 28px; height: 28px; padding: 4px; display: inline-flex; align-items: center; justify-content: center; }
+  .fe-extension-editor-action img,
+  .fe-extension-context-icon img { display: block; width: 18px; height: 18px; object-fit: contain; }
+  .fe-extension-editor-context-menu {
+    position: fixed;
+    z-index: 360;
+    min-width: 210px;
+    max-width: min(360px, calc(100vw - 16px));
+    max-height: min(420px, calc(100vh - 16px));
+    overflow: auto;
+    padding: 4px;
+    background: var(--explorer-card-bg, #161b22);
+    border: 1px solid var(--explorer-card-border, #30363d);
+    border-radius: 4px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  }
+  .fe-extension-editor-context-menu button {
+    display: block;
+    width: 100%;
+    padding: 7px 10px;
+    border: 0;
+    border-radius: 2px;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    font: inherit;
+  }
+  .fe-extension-editor-context-menu button:hover:not(:disabled),
+  .fe-extension-editor-context-menu button:focus-visible {
+    background: var(--accent, #1f6feb);
+    outline: 0;
+  }
+  .fe-extension-editor-context-menu button:disabled { opacity: 0.5; }
   .fe-status { order: 8; }
   .fe-issues { display: inline-flex; align-items: center; gap: 6px; }
   .fe-issues-badge {
@@ -2447,6 +2498,7 @@
 
     <div class="fe-menu fe-toolbar-actions">
       <span id="fe-file-draft-badge" class="fe-file-draft-indicator" style="margin-right: 4px;"></span>
+      <span id="fe-extension-editor-actions" hidden></span>
       <button id="run-active-file-btn" class="fe-btn fe-icon-btn" title="Run active file in terminal" aria-label="Run active file" disabled>▶</button>
       <button id="stop-run-profiles-btn" class="fe-btn fe-icon-btn" title="Stop running profile" aria-label="Stop running profile" hidden>■</button>
       <span id="fe-lsp-spinner" class="fe-lsp-status--error" title="Adapter not started" aria-label="Adapter status"></span>
@@ -2701,6 +2753,17 @@
       <button class="fe-btn" id="editor-settings-close" aria-label="Close">✕</button>
     </div>
     <div class="fe-modal-body">
+      <div style="display:flex; align-items:center; gap:10px; padding:10px 12px; border:1px solid var(--border, #333); border-radius:4px;">
+        <div style="flex:1; min-width:0;">
+          <div style="font-weight:600;">Client identity</div>
+          <div id="editor-settings-client-identity" style="font-size:12px; opacity:0.72; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Loading…</div>
+        </div>
+        <button class="fe-btn" id="editor-settings-client-copy" type="button">Copy</button>
+        <button class="fe-btn" id="editor-settings-client-reset" type="button">Reset</button>
+      </div>
+
+      <div class="fe-dd-separator" style="margin: 12px 0;"></div>
+
       <div id="editor-settings-theme-strip" style="display:flex; align-items:center; gap:10px; padding:10px 12px; border:1px solid var(--border, #333); border-radius:10px; cursor:pointer;">
         <div style="flex:1;">
           <div style="font-weight:600;">Color Themes</div>

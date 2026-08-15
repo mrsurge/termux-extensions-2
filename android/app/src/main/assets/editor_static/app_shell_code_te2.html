@@ -329,7 +329,7 @@
     <script type="module" src="/static/js/te_ui.js"></script>
     <script type="module" src="/static/js/jobs_client.js"></script>
     <script type="module" src="/static/js/file_picker.js"></script>
-    <script id="__app_id_json" type="application/json">"file_editor_cm6"</script>
+    <script id="__app_id_json" type="application/json">"code_te2"</script>
     
     <script>
     let appShellMetricsRaf = 0;
@@ -630,6 +630,12 @@
                     }
                 });
             });
+        }
+
+        async function waitForNativeAppPrerequisites(targetAppId) {
+            const bridge = window.te2Electron;
+            if (!bridge || typeof bridge.waitForAppPrerequisites !== 'function') return;
+            await bridge.waitForAppPrerequisites(targetAppId);
         }
 
         function appLifecycleEndpoint(targetAppId, action) {
@@ -1013,6 +1019,7 @@
                 if (!appId) throw new Error('App ID not available for app shell');
                 const sidebarVersion = sidebarShortcutVersion();
                 const appDef = await waitForAppLifecycle();
+                await waitForNativeAppPrerequisites(appId);
                 const assetBaseUrl = typeof appDef.asset_base_url === 'string' ? appDef.asset_base_url.trim() : '';
                 const templatePath = assetBaseUrl
                     ? `${assetBaseUrl.replace(/\/+$/, '')}/${appDef.entrypoints.frontend_template.replace(/^\/+/, '')}`

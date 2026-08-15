@@ -24,6 +24,12 @@ UI_IPC_RPC_METHOD_HOST_RUN_PROFILES_GET: Final = "ui.host.runProfiles.get"
 UI_IPC_RPC_METHOD_HOST_RUN_PROFILES_SAVE: Final = "ui.host.runProfiles.save"
 UI_IPC_RPC_METHOD_HOST_RUN_PROFILE_STATE_GET: Final = "ui.host.runProfile.state.get"
 UI_IPC_RPC_METHOD_HOST_RUN_PROFILE_STOP: Final = "ui.host.runProfile.stop"
+UI_IPC_RPC_METHOD_HOST_EXTENSION_WEBVIEW_DISPOSE: Final = (
+    "ui.host.extensionWebview.dispose"
+)
+UI_IPC_RPC_METHOD_HOST_EXTENSION_WEBVIEW_CLIENT_STATE_RESET: Final = (
+    "ui.host.extensionWebview.clientState.reset"
+)
 UI_IPC_RPC_METHOD_HOST_BOOT_SNAPSHOT_GET: Final = "ui.host.bootSnapshot.get"
 UI_IPC_RPC_METHOD_HOST_LANGUAGE_BACKEND_SET: Final = "ui.host.languageBackend.set"
 UI_IPC_RPC_METHOD_HOST_EDITOR_JUMP_TO_LINE: Final = "ui.host.editor.jumpToLine"
@@ -56,6 +62,8 @@ UiIpcRpcMethod = Literal[
     "ui.host.runProfiles.save",
     "ui.host.runProfile.state.get",
     "ui.host.runProfile.stop",
+    "ui.host.extensionWebview.dispose",
+    "ui.host.extensionWebview.clientState.reset",
     "ui.host.bootSnapshot.get",
     "ui.host.languageBackend.set",
     "ui.host.editor.jumpToLine",
@@ -151,6 +159,8 @@ ALLOWED_REQUEST_METHODS: Final[set[str]] = {
     UI_IPC_RPC_METHOD_HOST_RUN_PROFILES_SAVE,
     UI_IPC_RPC_METHOD_HOST_RUN_PROFILE_STATE_GET,
     UI_IPC_RPC_METHOD_HOST_RUN_PROFILE_STOP,
+    UI_IPC_RPC_METHOD_HOST_EXTENSION_WEBVIEW_DISPOSE,
+    UI_IPC_RPC_METHOD_HOST_EXTENSION_WEBVIEW_CLIENT_STATE_RESET,
     UI_IPC_RPC_METHOD_HOST_BOOT_SNAPSHOT_GET,
     UI_IPC_RPC_METHOD_HOST_LANGUAGE_BACKEND_SET,
     UI_IPC_RPC_METHOD_HOST_EDITOR_JUMP_TO_LINE,

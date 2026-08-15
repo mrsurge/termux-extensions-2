@@ -49,6 +49,24 @@ export interface SidebarShortcut extends UnknownRecord {
   runTargetRoute?: RunTargetDescriptor;
   run_profile_surface?: RunProfileSurfaceDescriptor;
   runProfileSurface?: RunProfileSurfaceDescriptor;
+  webview_surface?: ExtensionWebviewSurfaceDescriptor;
+  webviewSurface?: ExtensionWebviewSurfaceDescriptor;
+}
+
+export interface ExtensionWebviewSurfaceDescriptor extends UnknownRecord {
+  dto: "ExtensionWebviewSurface";
+  version: 1;
+  surfaceId: string;
+  hostId: string;
+  workspaceId: string;
+  projectPath: string;
+  extensionId: string;
+  viewId: string;
+  surfaceKind: "view" | "panel";
+  url: string;
+  iconUrl: string;
+  retainContextWhenHidden: boolean;
+  viewColumn: number;
 }
 
 export interface RunProfileSurfaceDescriptor extends UnknownRecord {
@@ -179,6 +197,8 @@ export interface SidebarAppDockSlot extends UnknownRecord {
   runTargetRoute?: RunTargetDescriptor;
   run_profile_surface?: RunProfileSurfaceDescriptor;
   runProfileSurface?: RunProfileSurfaceDescriptor;
+  webview_surface?: ExtensionWebviewSurfaceDescriptor;
+  webviewSurface?: ExtensionWebviewSurfaceDescriptor;
   updated_at?: number;
   updatedAt?: number;
   version?: string | number;
@@ -205,6 +225,7 @@ export interface SidebarShortcutsOptions {
     payload?: UnknownRecord,
   ) => void;
   getClientId?: () => string;
+  getWindowId?: () => string;
   setMenuChecked?: (el: HTMLElement | null, checked: boolean) => void;
 }
 

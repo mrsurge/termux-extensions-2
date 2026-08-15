@@ -479,6 +479,40 @@
   margin: 4px 0;
 }
 
+.fe-card-menu .fe-dd-item-disabled {
+  cursor: default;
+  opacity: 0.48;
+}
+
+.fe-extension-context-trigger {
+  position: relative;
+}
+
+.fe-extension-context-submenu {
+  position: absolute;
+  right: 100%;
+  top: -1px;
+  min-width: 220px;
+  max-width: min(360px, calc(100vw - 24px));
+  max-height: min(420px, calc(100vh - 24px));
+  overflow: auto;
+  display: none;
+  background: var(--explorer-card-bg);
+  border: 1px solid var(--explorer-card-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.fe-extension-context-trigger.open > .fe-extension-context-submenu {
+  display: block;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .fe-extension-context-trigger:hover > .fe-extension-context-submenu {
+    display: block;
+  }
+}
+
 .fe-tree-node.fe-git-modified {
   border-left-color: #f97316;
 }

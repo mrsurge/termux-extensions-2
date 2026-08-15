@@ -118,7 +118,11 @@ import {
 import { ProviderRegistry } from "../extensions/provider-registry.mjs";
 import { ExtensionActivityRuntime } from "../extensions/activity-runtime.mjs";
 import { ExtensionActivationRuntime } from "../extensions/activation-runtime.mjs";
+import { ExtensionCommandRuntime } from "../extensions/command-runtime.mjs";
+import { ExtensionEditorNavigationRuntime } from "../extensions/editor-navigation-runtime.mjs";
+import { ExtensionMementoStore } from "../extensions/extension-storage.mjs";
 import { ExtensionLanguageResolver } from "../extensions/language-resolver.mjs";
+import { WebviewRuntime } from "../extensions/webview-runtime.mjs";
 import {
   CallHierarchySessionStore,
   prepareCallHierarchy,
@@ -258,11 +262,44 @@ const PARSE_ARGS_ONLY_METHODS = new Set<string>([
   "$registerDocumentRangeFormattingSupport",
   "$registerOnTypeFormattingSupport",
 
+  // Webview view registration, content, and presentation contract.
+  "$registerWebviewViewProvider",
+  "$unregisterWebviewViewProvider",
+  "$setWebviewViewTitle",
+  "$setWebviewViewDescription",
+  "$setWebviewViewBadge",
+  "$show",
+  "$setHtml",
+  "$setOptions",
+  "$postMessage",
+
+  // Extension commands, messages, and webview panels.
+  "$registerCommand",
+  "$unregisterCommand",
+  "$fireCommandActivationEvent",
+  "$getCommands",
+  "$executeCommand",
+  "$showMessage",
+  "$createWebviewPanel",
+  "$disposeWebview",
+  "$setTitle",
+  "$setIconPath",
+  "$registerSerializer",
+  "$unregisterSerializer",
+
+  // Supported MainThreadTextEditors navigation and cursor contract.
+  "$tryShowTextDocument",
+  "$tryShowEditor",
+  "$tryRevealRange",
+  "$trySetSelections",
+
   "$getInitialState",
   "$checkExists",
   "$startFileSearch",
   "$requestWorkspaceTrust",
   "$initializeExtensionStorage",
+  "$setValue",
+  "$registerExtensionStorageKeysToSync",
   "$registerLogger",
   "$deregisterLogger",
   "$setVisibility",
@@ -674,6 +711,10 @@ export class WorkbenchClient {
   _extensions: unknown[];
   _extensionActivity: ExtensionActivityRuntime;
   _extensionActivation: ExtensionActivationRuntime;
+  _extensionCommands: ExtensionCommandRuntime;
+  _extensionEditorNavigation: ExtensionEditorNavigationRuntime;
+  _extensionStorage: ExtensionMementoStore;
+  _webviews: WebviewRuntime;
   _languageResolver: ExtensionLanguageResolver;
   _providerRegistry: ProviderRegistry;
   _semanticTokenProjections: SemanticTokenProjectionManager;
@@ -689,8 +730,23 @@ export class WorkbenchClient {
   _languageCatalogCache: Record<string, unknown> | null;
   state: RuntimeBuilderState;
 
-  constructor({ onEvent }: { onEvent?: WorkbenchEventSink } = {}) {
+  onNotification: (method: string, params: unknown) => void;
+
+  constructor({
+    onEvent,
+    onNotification,
+    extensionStoragePath,
+    webviewReconstructionStoragePath,
+  }: {
+    onEvent?: WorkbenchEventSink;
+    onNotification?: (method: string, params: unknown) => void;
+    extensionStoragePath: string;
+    webviewReconstructionStoragePath: string;
+  }) {
     this.onEvent = typeof onEvent === "function" ? onEvent : () => {};
+    this.onNotification = typeof onNotification === "function"
+      ? onNotification
+      : () => {};
     this.mgmt = null; // { protocol }
     this.ext = null; // { protocol }
     this._mgmtIpc = null;
@@ -781,6 +837,34 @@ export class WorkbenchClient {
       onEvent: (payload) => this.onEvent(payload),
       log: (...args) => console.log(...args),
     });
+    this._extensionEditorNavigation = new ExtensionEditorNavigationRuntime({
+      rpcIds: {
+        MainThreadTextEditors: _rpcIds.MainThreadTextEditors,
+      },
+      fsPathFromUri: (uri) => this._fsPathFromUri(uri),
+      activePath: () => this.state.activePath,
+      activeEditorId: () => this._activeEditorId,
+      emitBackendEvent: (payload) => this.onEvent(payload),
+      notifyEditor: (method, params) => this.onNotification(method, params),
+      createId: () => crypto.randomUUID(),
+      log: (...args) => console.log(...args),
+    });
+    this._extensionCommands = new ExtensionCommandRuntime({
+      rpcIds: {
+        MainThreadCommands: _rpcIds.MainThreadCommands,
+        MainThreadMessageService: _rpcIds.MainThreadMessageService,
+        ExtHostCommands: _rpcIds.ExtHostCommands,
+      },
+      activateByEvent: (event) => this.activateByEvent(event),
+      sendExtAwaitTerminalReply: (rpcId, method, args, cancellable, timeoutMs) =>
+        this._sendExtAwaitTerminalReply(rpcId, method, args, cancellable, timeoutMs),
+      uriForPath: (filePath) => this._uriForPath(filePath),
+      openWorkbenchResource: (uri, options) =>
+        this._extensionEditorNavigation.openFromWorkbenchCommand(uri, options),
+      syncSelection: (params) => this._syncExtensionCommandSelection(params),
+      onEvent: (payload) => this.onEvent(payload),
+      log: (...args) => console.log(...args),
+    });
     this._providerRegistry = new ProviderRegistry();
     this._callHierarchySessions = new CallHierarchySessionStore();
     this._useRemote = true;
@@ -814,6 +898,40 @@ export class WorkbenchClient {
       docSymbolsProviderHandle: null,
       hoverProviderHandle: null,
     };
+    this._extensionStorage = new ExtensionMementoStore({
+      rootPath: extensionStoragePath,
+      workspacePath: () => this.state.workspaceFolder,
+    });
+    this._webviews = new WebviewRuntime({
+      reconstructionStoragePath: webviewReconstructionStoragePath,
+      rpcIds: {
+        MainThreadWebviews: _rpcIds.MainThreadWebviews,
+        MainThreadWebviewPanels: _rpcIds.MainThreadWebviewPanels,
+        MainThreadWebviewViews: _rpcIds.MainThreadWebviewViews,
+        ExtHostWebviews: _rpcIds.ExtHostWebviews,
+        ExtHostWebviewPanels: _rpcIds.ExtHostWebviewPanels,
+        ExtHostWebviewViews: _rpcIds.ExtHostWebviewViews,
+      },
+      getExtensions: () => this._extensions,
+      getWorkspaceFolder: () => this.state.workspaceFolder,
+      activateByEvent: (event) => this.activateByEvent(event),
+      sendExtAwaitTerminalReply: (rpcId, method, args, cancellable, timeoutMs) =>
+        this._sendExtAwaitTerminalReply(
+          rpcId,
+          method,
+          args,
+          cancellable,
+          timeoutMs,
+        ),
+      sendExt: (rpcId, method, args, cancellable = false) =>
+        this._sendExt(rpcId, method, args, cancellable),
+      sendExtMixed: (rpcId, method, args, cancellable = false) =>
+        this._sendExtMixed(rpcId, method, args, cancellable),
+      onLifecycleEvent: (payload) => this.onEvent(payload),
+      onClientNotification: (method, params) =>
+        this.onNotification(method, params),
+      log: (...args) => console.log(...args),
+    });
     this._semanticTokenProjections = new SemanticTokenProjectionManager({
       getDocument: (documentPath) =>
         this._semanticProjectionDocument(documentPath),
@@ -1268,7 +1386,10 @@ export class WorkbenchClient {
       spanTrace: (name, fn) => spanTrace(name, fn),
       spanTraceAsync: (name, fn) => spanTraceAsync(name, fn),
       logMetrics: (type, data) => logMetrics(type, data),
-      onEvent: (payload) => this.onEvent(payload),
+      onEvent: (payload) => {
+        this._handleWorkbenchEvent(payload);
+        this.onEvent(payload);
+      },
       clearProjectScopedSwitchState: (reason) =>
         this._clearProjectScopedSwitchState(reason),
       sha1Short: (text) =>
@@ -1494,6 +1615,7 @@ export class WorkbenchClient {
         this._languageResolver.setExtensions(value);
         this._languageCatalogCache = null;
         this._extensionActivity.setExtensions(value);
+        this._extensionCommands.setExtensions(value);
       },
       state: this.state,
       defaults: {
@@ -1546,6 +1668,7 @@ export class WorkbenchClient {
       connectionTypes: {
         ExtensionHost: ConnectionType.ExtensionHost,
         ExtHostConfiguration: _rpcIds.ExtHostConfiguration,
+        ExtHostCommands: _rpcIds.ExtHostCommands,
         ExtHostFileSystemInfo: _rpcIds.ExtHostFileSystemInfo,
         ExtHostLanguageFeatures: _rpcIds.ExtHostLanguageFeatures,
         ExtHostLanguages: _rpcIds.ExtHostLanguages,
@@ -1641,8 +1764,21 @@ export class WorkbenchClient {
       mainThreadLoggerRpcId: _rpcIds.MainThreadLogger,
       mainThreadOutputServiceRpcId: _rpcIds.MainThreadOutputService,
       mainThreadStatusBarRpcId: _rpcIds.MainThreadStatusBar,
+      mainThreadStorageRpcId: _rpcIds.MainThreadStorage,
       extHostWorkspaceRpcId: _rpcIds.ExtHostWorkspace,
       extensionActivity: this._extensionActivity,
+      initializeExtensionStorage: (shared, extensionId) =>
+        this._extensionStorage.initialize(shared, extensionId),
+      setExtensionStorageValue: (shared, extensionId, value) =>
+        this._extensionStorage.setValue(shared, extensionId, value),
+      handleWebviewRequest: (message) =>
+        this._webviews.handleMainThreadRequest(message),
+      handleCommandRequest: (message) => {
+        const navigation = this._extensionEditorNavigation.handleMainThreadRequest(message);
+        return navigation.handled
+          ? navigation
+          : this._extensionCommands.handleMainThreadRequest(message);
+      },
       debugExtReqSeen: this._debugExtReqSeen,
       setDebugExtReqSeen: (value) => {
         this._debugExtReqSeen = value;
@@ -1697,6 +1833,9 @@ export class WorkbenchClient {
   }
 
   _handleWorkbenchEvent(payload: Record<string, unknown>): void {
+    if (payload.type === "document/activeChanged" && typeof payload.path === "string") {
+      this._extensionEditorNavigation.activeEditorChanged(payload.path);
+    }
     if (payload.type === "provider/semanticTokens") {
       const handle = Number(payload.handle);
       const mode = payload.range === true ? "range" : "full";
@@ -1796,7 +1935,10 @@ export class WorkbenchClient {
     this._semanticTokenProjections.clear(reason || "session_reset");
     this._documentRegistry.clearLocal();
     this._providerRegistry.clear();
+    this._webviews.clear(reason || "session_reset");
+    this._extensionEditorNavigation.reset(reason || "session_reset");
     this._extensionActivation.reset(reason);
+    this._extensionCommands.reset();
     this._extensionActivity.reset(reason);
     this._extensions = [];
     this._languageResolver.clear();
@@ -1939,10 +2081,12 @@ export class WorkbenchClient {
         this._managementRuntime(),
         params,
       );
-      return await connectExtensionHostSession(
+      const result = await connectExtensionHostSession(
         this._extensionHostRuntime(),
         management,
       );
+      await this._webviews.activatePrimaryViews();
+      return result;
     } finally {
       this._connecting = false;
     }
@@ -2297,12 +2441,15 @@ export class WorkbenchClient {
    * their analysis to the new project.  Also re-subscribes the file watcher.
    */
   async _switchWorkspace(newFolder: string): Promise<Record<string, unknown>> {
-    return {
+    this._webviews.clear("workspace_switch", false);
+    const result = {
       ...(await switchWorkbenchWorkspace(
         this._workspaceLifecycleRuntime(),
         newFolder,
       )),
     } as Record<string, unknown>;
+    await this._webviews.activatePrimaryViews();
+    return result;
   }
 
   _clearProjectScopedSwitchState(reason: string): {
@@ -2312,6 +2459,8 @@ export class WorkbenchClient {
     const clearedBackgroundDocuments =
       this._documentRegistry.countBackground();
     this._semanticTokenProjections.clear(reason || "workspace_switch");
+    this._extensionEditorNavigation.reset(reason || "workspace_switch");
+    this._extensionCommands.resetContext();
     const rejectedPendingRequests = this._extRequests.rejectAll(
       new Error(reason || "workspace_switch"),
     );
@@ -2369,6 +2518,98 @@ export class WorkbenchClient {
     return this._extensionActivity.selectLog(channelId);
   }
 
+  _syncActiveEditorSelection(params: Record<string, unknown>): boolean {
+    const filePath = typeof params.path === "string" ? params.path.trim() : "";
+    if (!filePath || filePath !== this.state.activePath || !this._activeEditorId) {
+      return false;
+    }
+    const raw = isRecord(params.selection) ? params.selection : {};
+    const line = (value: unknown, fallback: number): number => {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? Math.max(1, Math.trunc(numeric)) : fallback;
+    };
+    const startLineNumber = line(raw.startLineNumber, 1);
+    const startColumn = line(raw.startColumn, 1);
+    const endLineNumber = line(raw.endLineNumber, startLineNumber);
+    const endColumn = line(raw.endColumn, startColumn);
+    const selectionStartLineNumber = line(raw.selectionStartLineNumber, startLineNumber);
+    const selectionStartColumn = line(raw.selectionStartColumn, startColumn);
+    const positionLineNumber = line(raw.positionLineNumber, endLineNumber);
+    const positionColumn = line(raw.positionColumn, endColumn);
+    const requestedSource = typeof params.source === "string"
+      ? params.source
+      : "";
+    const source = requestedSource === "mouse" || requestedSource === "keyboard"
+        || requestedSource === "code.navigation" || requestedSource === "code.jump"
+      ? requestedSource
+      : "api";
+    this._sendExt(
+      _rpcIds.ExtHostEditors,
+      "$acceptEditorPropertiesChanged",
+      [
+        this._activeEditorId,
+        {
+          options: null,
+          selections: {
+            selections: [{
+              startLineNumber,
+              startColumn,
+              endLineNumber,
+              endColumn,
+              selectionStartLineNumber,
+              selectionStartColumn,
+              positionLineNumber,
+              positionColumn,
+            }],
+            source,
+          },
+          visibleRanges: null,
+        },
+      ],
+      false,
+    );
+    return true;
+  }
+
+  _syncExtensionCommandSelection(params: Record<string, unknown>): void {
+    if (!this._syncActiveEditorSelection(params)) {
+      throw new Error("Extension command target is not the active editor");
+    }
+  }
+
+  extensionEditorStateUpdate(
+    params: Record<string, unknown>,
+  ): Record<string, unknown> {
+    return {
+      ok: this._syncActiveEditorSelection(params),
+      activePath: this.state.activePath,
+    };
+  }
+
+  extensionMenuResolve(
+    params: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    return this._extensionCommands.resolveMenu(params);
+  }
+
+  extensionCommandExecute(
+    params: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    return this._extensionCommands.execute(params);
+  }
+
+  extensionNavigationComplete(
+    params: Record<string, unknown>,
+  ): Record<string, unknown> {
+    return this._extensionEditorNavigation.completeBackendOpen(params);
+  }
+
+  extensionEditorOperationComplete(
+    params: Record<string, unknown>,
+  ): Record<string, unknown> {
+    return this._extensionEditorNavigation.completeEditorOperation(params);
+  }
+
   /** Find provider handle matching a languageId by scanning selector arrays. */
   _findProviderHandle(type: ProviderKind, languageId: string): number | null {
     try {
@@ -2415,9 +2656,67 @@ export class WorkbenchClient {
     for (const event of events) {
       this.onEvent({ ...event, ts_ms: Date.now() });
     }
+    this.onEvent(this._webviews.snapshot());
     console.error(
       `[resync] replayed providers: cmp=${replayed.completions} inlay=${replayed.inlayHints} inline=${replayed.inlineCompletions} semTok=${replayed.semanticTokens} folding=${replayed.foldingRanges} colors=${replayed.documentColors}`,
     );
     return { ok: true, ts_ms: Date.now(), replayed };
+  }
+
+  async webviewAttach(params: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return {
+      ...(await this._webviews.attach(params)),
+      webviewContextMenuContributed: this._extensionCommands.hasMenu(
+        "webview/context",
+      ),
+    };
+  }
+
+  webviewMessage(params: Record<string, unknown>): Record<string, unknown> {
+    return this._webviews.receiveBrowserMessage(params);
+  }
+
+  webviewState(params: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this._webviews.setBrowserState(params);
+  }
+
+  webviewClientStateReset(params: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this._webviews.resetClientState(params);
+  }
+
+  webviewVisibility(params: Record<string, unknown>): Record<string, unknown> {
+    return this._webviews.setVisibility(params);
+  }
+
+  webviewDispose(params: Record<string, unknown>): Record<string, unknown> {
+    return this._webviews.dispose(params);
+  }
+
+  webviewWrapperHtml(surfaceId: string): string {
+    return this._webviews.wrapper(surfaceId);
+  }
+
+  webviewDocumentHtml(
+    surfaceId: string,
+    resourceOrigin: string,
+    bootstrapToken: string,
+  ): string {
+    return this._webviews.document(surfaceId, resourceOrigin, bootstrapToken);
+  }
+
+  webviewResource(
+    surfaceId: string,
+    resourceToken: string,
+    scheme: string,
+    authority: string,
+    resourcePath: string,
+  ) {
+    return this._webviews.resource(
+      surfaceId,
+      resourceToken,
+      scheme,
+      authority,
+      resourcePath,
+    );
   }
 }

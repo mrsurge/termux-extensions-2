@@ -56,6 +56,7 @@ export interface ExtHostDispatchRuntime {
     MainThreadLogger: number;
     MainThreadOutputService: number;
     MainThreadStatusBar: number;
+    MainThreadStorage: number;
     ExtHostWorkspace: number;
   };
   extensionActivity: {
@@ -68,6 +69,26 @@ export interface ExtHostDispatchRuntime {
       handledReply?: boolean;
       replyResult?: unknown;
     };
+  };
+  initializeExtensionStorage: (
+    shared: boolean,
+    extensionId: string,
+  ) => Promise<string | undefined>;
+  setExtensionStorageValue: (
+    shared: boolean,
+    extensionId: string,
+    value: unknown,
+  ) => Promise<void>;
+  handleWebviewRequest: (message: DecodedExtHostRpc) => {
+    handled: boolean;
+    replyResult?: unknown;
+    error?: unknown;
+  };
+  handleCommandRequest?: (message: DecodedExtHostRpc) => {
+    handled: boolean;
+    replyResult?: unknown;
+    pending?: Promise<unknown>;
+    error?: unknown;
   };
   debug: ExtHostDispatchDebugRuntime;
   nowMs: () => number;
@@ -366,11 +387,143 @@ function requestReplyPayload(
     return encodeExtReplyOkJson(req, true);
   }
   if (method === "$getTools") return encodeExtReplyOkJson(req, []);
-  if (method === "$initializeExtensionStorage") return encodeExtReplyOkJson(req, "{}");
   if (method === "$resolveProxy") return encodeExtReplyOkJson(req, null);
   if (method === "$getPassword") return encodeExtReplyOkJson(req, null);
   if (method === "$executeCommand") return encodeExtReplyOkEmpty(req);
   return encodeExtReplyOkEmpty(req);
+}
+
+const MAIN_THREAD_STORAGE_METHODS = new Set([
+  "$initializeExtensionStorage",
+  "$setValue",
+  "$registerExtensionStorageKeysToSync",
+]);
+
+function storageRequestArguments(
+  msg: DecodedExtHostRpc,
+): { shared: boolean; extensionId: string; value?: unknown } {
+  const args = Array.isArray(msg.args) ? msg.args : [];
+  const shared = args[0];
+  const extensionId = args[1];
+  if (typeof shared !== "boolean") {
+    throw new TypeError(`${msg.method ?? "storage request"}: shared must be boolean`);
+  }
+  if (typeof extensionId !== "string" || !extensionId.trim()) {
+    throw new TypeError(`${msg.method ?? "storage request"}: extension id must be a non-empty string`);
+  }
+  return { shared, extensionId, value: args[2] };
+}
+
+function sendStorageError(
+  runtime: ExtHostDispatchRuntime,
+  msg: DecodedExtHostRpc,
+  error: unknown,
+): void {
+  const message = error instanceof Error ? error.message : String(error);
+  runtime.log(`[extension-storage] ${msg.method ?? "request"} failed: ${message}`);
+  sendReplyPayload(
+    runtime,
+    Number(msg.req ?? 0),
+    msg.method,
+    encodeExtReplyError(Number(msg.req ?? 0), {
+      message: `TE2 extension storage: ${message}`,
+    }),
+  );
+}
+
+function handleMainThreadStorageRequest(
+  runtime: ExtHostDispatchRuntime,
+  msg: DecodedExtHostRpc,
+): boolean {
+  const method = msg.method ?? "";
+  if (!MAIN_THREAD_STORAGE_METHODS.has(method)) return false;
+  if (msg.rpcId !== runtime.rpcIds.MainThreadStorage) {
+    sendStorageError(
+      runtime,
+      msg,
+      new Error(`${method} arrived on rpcId ${String(msg.rpcId)}; expected MainThreadStorage ${runtime.rpcIds.MainThreadStorage}`),
+    );
+    return true;
+  }
+
+  if (method === "$registerExtensionStorageKeysToSync") {
+    sendReplyPayload(
+      runtime,
+      Number(msg.req ?? 0),
+      msg.method,
+      encodeExtReplyOkEmpty(Number(msg.req ?? 0)),
+    );
+    return true;
+  }
+
+  let request: { shared: boolean; extensionId: string; value?: unknown };
+  try {
+    request = storageRequestArguments(msg);
+  } catch (error) {
+    sendStorageError(runtime, msg, error);
+    return true;
+  }
+
+  if (method === "$initializeExtensionStorage") {
+    runtime.initializeExtensionStorage(request.shared, request.extensionId).then((raw) => {
+      const payload = raw === undefined
+        ? encodeExtReplyOkEmpty(Number(msg.req ?? 0))
+        : encodeExtReplyOkJson(Number(msg.req ?? 0), raw);
+      sendReplyPayload(runtime, Number(msg.req ?? 0), msg.method, payload);
+    }).catch((error) => sendStorageError(runtime, msg, error));
+    return true;
+  }
+
+  runtime.setExtensionStorageValue(
+    request.shared,
+    request.extensionId,
+    request.value,
+  ).then(() => {
+    sendReplyPayload(
+      runtime,
+      Number(msg.req ?? 0),
+      msg.method,
+      encodeExtReplyOkEmpty(Number(msg.req ?? 0)),
+    );
+  }).catch((error) => sendStorageError(runtime, msg, error));
+  return true;
+}
+
+function handleMainThreadCommandRequest(
+  runtime: ExtHostDispatchRuntime,
+  msg: DecodedExtHostRpc,
+): boolean {
+  const handler = runtime.handleCommandRequest;
+  if (!handler) return false;
+  const result = handler(msg);
+  if (!result.handled) return false;
+  const req = Number(msg.req ?? 0);
+  const sendResult = (value: unknown): void => {
+    const payload = value === undefined
+      ? encodeExtReplyOkEmpty(req)
+      : encodeExtReplyOkJson(req, value);
+    sendReplyPayload(runtime, req, msg.method, payload);
+  };
+  const sendError = (error: unknown): void => {
+    sendReplyPayload(
+      runtime,
+      req,
+      msg.method,
+      encodeExtReplyError(req, {
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    );
+  };
+  if (result.error) {
+    sendError(result.error);
+  } else if (result.pending) {
+    result.pending.then(sendResult).catch(sendError);
+  } else if (Object.prototype.hasOwnProperty.call(result, "replyResult")) {
+    sendResult(result.replyResult);
+  } else {
+    sendResult(undefined);
+  }
+  return true;
 }
 
 function handleTryOpenDocument(runtime: ExtHostDispatchRuntime, msg: DecodedExtHostRpc): void {
@@ -527,6 +680,41 @@ export function handleExtHostRequest(runtime: ExtHostDispatchRuntime, msg: Decod
   } catch {
     // Preserve current behavior: continue best-effort even if the ACK send fails.
   }
+
+  const webviewResult = runtime.handleWebviewRequest(msg);
+  if (webviewResult.handled) {
+    if (webviewResult.error) {
+      sendReplyPayload(
+        runtime,
+        msg.req,
+        msg.method,
+        encodeExtReplyError(msg.req, {
+          message: webviewResult.error instanceof Error
+            ? webviewResult.error.message
+            : String(webviewResult.error),
+        }),
+      );
+    } else if (Object.prototype.hasOwnProperty.call(webviewResult, "replyResult")) {
+      sendReplyPayload(
+        runtime,
+        msg.req,
+        msg.method,
+        encodeExtReplyOkJson(msg.req, webviewResult.replyResult),
+      );
+    } else {
+      sendReplyPayload(
+        runtime,
+        msg.req,
+        msg.method,
+        encodeExtReplyOkEmpty(msg.req),
+      );
+    }
+    return true;
+  }
+
+  if (handleMainThreadCommandRequest(runtime, msg)) return true;
+
+  if (handleMainThreadStorageRequest(runtime, msg)) return true;
 
   applyProviderRegistration(runtime, msg);
   if (msg.method === "$changeMany") logDiagnosticsChange(runtime, msg);

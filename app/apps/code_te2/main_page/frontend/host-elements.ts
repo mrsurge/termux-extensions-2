@@ -58,6 +58,9 @@ export interface HostElements {
   editorSettingsModal: HTMLElement;
   editorSettingsClose: HTMLElement;
   editorSettingsConsoleWorkerId: HTMLElement;
+  editorSettingsClientIdentity: HTMLElement;
+  editorSettingsClientCopy: HTMLButtonElement;
+  editorSettingsClientReset: HTMLButtonElement;
   editorSettingsExtStrip: HTMLElement;
   editorSettingsExtSummary: HTMLElement;
   editorSettingsThemeStrip: HTMLElement;
@@ -138,6 +141,9 @@ export function captureHostElements(requireEl: RequireElement): HostElements {
     editorSettingsModal: requireEl('#editor-settings-modal'),
     editorSettingsClose: requireEl('#editor-settings-close'),
     editorSettingsConsoleWorkerId: requireEl('#editor-settings-console-worker-id'),
+    editorSettingsClientIdentity: requireEl('#editor-settings-client-identity'),
+    editorSettingsClientCopy: requireEl('#editor-settings-client-copy') as HTMLButtonElement,
+    editorSettingsClientReset: requireEl('#editor-settings-client-reset') as HTMLButtonElement,
     editorSettingsExtStrip: requireEl('#editor-settings-ext-strip'),
     editorSettingsExtSummary: requireEl('#editor-settings-ext-summary'),
     editorSettingsThemeStrip: requireEl('#editor-settings-theme-strip'),

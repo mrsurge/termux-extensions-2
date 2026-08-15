@@ -12,13 +12,14 @@ import java.nio.charset.StandardCharsets
 
 /**
  * Socket.IO client that connects to the editor's UI IPC bus and listens for
- * typed UI IPC RPC notifications to toggle the EditorInputFilter.
+ * typed IME and console notifications. Renderer-owned input filters subscribe
+ * through callbacks instead of owning this transport.
  */
 class UiIpcClient(
-    private val filter: EditorInputFilter,
     private val clientId: String = "android-native",
     private var imeContextSwitchingEnabled: Boolean = true,
-    private val onFilterChanged: ((Boolean) -> Unit)? = null
+    private val onImeContextChanged: ((Boolean) -> Unit)? = null,
+    private val onConnectionStateChanged: ((Boolean) -> Unit)? = null,
 ) {
     companion object {
         private const val TAG = "UiIpcClient"
@@ -39,6 +40,7 @@ class UiIpcClient(
     private var consoleDrawerEnabled = false
     private var consoleTailLines = DEFAULT_CONSOLE_TAIL_LINES
     private var activeImeOwner: String? = null
+    private var imeContextActive = false
     private val reconnectHandler = Handler(Looper.getMainLooper())
     private val reconnectUiIpc = Runnable {
         uiIpcSocket?.takeUnless { it.connected() }?.connect()
@@ -72,18 +74,19 @@ class UiIpcClient(
             uiIpcSocket = IO.socket(uri, opts).apply {
                 on(Socket.EVENT_CONNECT) {
                     reconnectHandler.removeCallbacks(reconnectUiIpc)
+                    onConnectionStateChanged?.invoke(true)
                     Log.i(TAG, "Connected to UI IPC at $normalizedBaseUrl")
                 }
                 on(Socket.EVENT_DISCONNECT) {
+                    onConnectionStateChanged?.invoke(false)
                     Log.i(TAG, "Disconnected from UI IPC — deactivating filter")
                     activeImeOwner = null
                     if (imeContextSwitchingEnabled) {
-                        setFilterActive(false)
-                    } else {
-                        filter.isActive = false
+                        setImeContextActive(false)
                     }
                 }
                 on(Socket.EVENT_CONNECT_ERROR) { args ->
+                    onConnectionStateChanged?.invoke(false)
                     reconnectHandler.removeCallbacks(reconnectUiIpc)
                     reconnectHandler.postDelayed(reconnectUiIpc, UI_IPC_CONNECT_RETRY_MS)
                     Log.w(TAG, "Connect error: ${args.firstOrNull()}")
@@ -210,14 +213,14 @@ class UiIpcClient(
         imeContextSwitchingEnabled = enabled
         if (!enabled) {
             activeImeOwner = null
-            setFilterActive(false)
+            setImeContextActive(false)
         }
     }
 
     private fun handleImeFocus(owner: String) {
         activeImeOwner = owner
         Log.d(TAG, "IME focus via UI RPC ($owner) — activating filter")
-        setFilterActive(true)
+        setImeContextActive(true)
     }
 
     private fun handleImeBlur(owner: String) {
@@ -227,7 +230,7 @@ class UiIpcClient(
         }
         activeImeOwner = null
         Log.d(TAG, "IME blur via UI RPC ($owner) — deactivating filter")
-        setFilterActive(false)
+        setImeContextActive(false)
     }
 
     /** Register this client as a console drawer to receive log broadcasts. */
@@ -319,9 +322,10 @@ class UiIpcClient(
         }
     }
 
-    private fun setFilterActive(active: Boolean) {
-        filter.isActive = active
-        onFilterChanged?.invoke(active)
+    private fun setImeContextActive(active: Boolean) {
+        if (imeContextActive == active) return
+        imeContextActive = active
+        onImeContextChanged?.invoke(active)
     }
 
     fun disconnect() {
@@ -332,7 +336,8 @@ class UiIpcClient(
             uiIpcSocket = null
             disconnectConsoleSocket()
             activeImeOwner = null
-            filter.isActive = false
+            setImeContextActive(false)
+            onConnectionStateChanged?.invoke(false)
         } catch (e: Exception) {
             Log.w(TAG, "Error disconnecting", e)
         }

@@ -58,9 +58,14 @@ interface MonacoRuntimeEditorLike {
   getScrollTop?(): number;
   getTopForLineNumber?(lineNumber: number): number;
   getSelection?(): MonacoRuntimeSelectionLike | null;
+  setSelections?(selections: Record<string, number>[]): void;
   setScrollTop?(scrollTop: number): void;
   setPosition?(position: { lineNumber: number; column: number }): void;
   revealLineInCenter?(lineNumber: number, scrollType?: number): void;
+  revealRange?(range: Record<string, number>): void;
+  revealRangeInCenter?(range: Record<string, number>): void;
+  revealRangeInCenterIfOutsideViewport?(range: Record<string, number>): void;
+  revealRangeAtTop?(range: Record<string, number>): void;
   focus?(): void;
   getOption?(option: unknown): unknown;
   getDomNode?(): HTMLElement | null;

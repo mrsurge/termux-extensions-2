@@ -248,6 +248,23 @@ test("UI IPC interruption preserves listeners until the next snapshot event", as
   }
 });
 
+test("native app readiness can wait event-wise without an independent timeout", async () => {
+  const manager = new RunTargetRelayManager(() => "http://127.0.0.1:8089");
+  let settled = false;
+  try {
+    const ready = manager.waitUntilProjectionReady(null).then(() => {
+      settled = true;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(settled, false);
+    await manager.updateRouteProjection(projection());
+    await ready;
+    assert.equal(settled, true);
+  } finally {
+    await manager.stopAll();
+  }
+});
+
 test("a fresh manager reconstructs listeners from one projection event", async () => {
   const [primaryPort, auxiliaryPort] = await availablePorts(2);
   const descriptor = routeSet(primaryPort, auxiliaryPort);
