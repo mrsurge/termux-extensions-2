@@ -100,10 +100,15 @@ shared by both renderers.
    authority. Browser-wide loading callbacks include Chii child-frame loads and
    must never clear client readiness or target-generation delivery; doing so
    creates a `target_reset` -> iframe recreation -> load callback feedback loop.
-8. Reconnect the browser control channel event-wise and republish target
+8. Treat initial display, return from another Tools tab, and Activity resume as
+   idempotent Inspector activation barriers. Reassert `client_ready` when the
+   document is not connected; otherwise replay the complete target snapshot and
+   active generation. The Inspector document must ignore a replay of its current
+   generation rather than recreating Chii.
+9. Reconnect the browser control channel event-wise and republish target
    creation, mutation, destruction, attachment, and protocol messages. No
    framework or target polling is permitted.
-9. Keep Run Profile `devRuntime` limited to its existing cache/console policy;
+10. Keep Run Profile `devRuntime` limited to its existing cache/console policy;
    it neither owns nor gates Inspector attachment.
 
 ## Phase 6: Monaco Find-Widget Focus Zoom
@@ -178,7 +183,9 @@ outside this slice. Cefrium APK installation is separately approved.
   profile-scoped attachment is necessary.
 - Cefrium starts its Inspector only after the main page completes its first
   relay-origin navigation. A stable target generation loads the Chii frontend
-  once and remains delivered across child-frame load notifications.
+  once and remains delivered across child-frame load notifications. Every
+  activation reconciles the existing Inspector client and authoritative target
+  snapshot without requiring a different target to be created or selected.
 - Focusing Monaco Find or Replace does not change the Cefrium visual viewport
   scale or leave the page zoomed.
 - Cefrium native context actions execute against ordinary editable/selected

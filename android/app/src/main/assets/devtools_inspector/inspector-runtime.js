@@ -131,8 +131,14 @@
       return;
     }
     if (message?.type === "target_reset") {
+      const nextGeneration =
+        Number(message.generation) || targetGeneration + 1;
+      if (targetReady && nextGeneration === targetGeneration) {
+        if (frameReady) setStatus("");
+        return;
+      }
       const hadTarget = targetReady;
-      targetGeneration = Number(message.generation) || targetGeneration + 1;
+      targetGeneration = nextGeneration;
       targetReady = true;
       setStatus("Connecting developer tools...");
       if (!frame || hadTarget) createFrontend();

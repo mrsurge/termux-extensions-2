@@ -1122,7 +1122,22 @@ class MainActivity : AppCompatActivity() {
             )
         }
         if (activityResumed) inspector.onResume()
+        reconcileInspectorClient(forceTargetReplay = true)
         updateInspectorSurface()
+    }
+
+    private fun reconcileInspectorClient(forceTargetReplay: Boolean) {
+        val inspector = inspectorBrowser ?: return
+        inspector.surfaceContainer.post {
+            if (inspectorBrowser !== inspector) return@post
+            if (!inspectorClientReady) {
+                inspector.evaluateJavaScript(
+                    "window.__te2DevToolsInspector?.connectNative();",
+                )
+                return@post
+            }
+            syncInspectorPageFromRuntime(forceTargetReplay = forceTargetReplay)
+        }
     }
 
     private fun handleInspectorQuery(
@@ -1154,7 +1169,7 @@ class MainActivity : AppCompatActivity() {
                 inspectorClientReady = true
                 inspectorPageLoaded = true
                 inspectorDeliveredGeneration = 0L
-                syncInspectorPageFromRuntime()
+                syncInspectorPageFromRuntime(forceTargetReplay = true)
                 updateInspectorSurface()
             }
             "protocol" -> {
@@ -1199,7 +1214,7 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun syncInspectorPageFromRuntime() {
+    private fun syncInspectorPageFromRuntime(forceTargetReplay: Boolean = false) {
         if (!inspectorPageLoaded || !inspectorClientReady) return
         val snapshot = devToolsRuntime?.debugSnapshot()
         val generation = snapshot?.optLong("targetGeneration", 0L) ?: 0L
@@ -1212,19 +1227,23 @@ class MainActivity : AppCompatActivity() {
         }
         publishInspectorTargetsToPage()
         if (generation > 0L && runtimeActiveTargetId != null) {
-            deliverInspectorTargetReset(generation)
+            deliverInspectorTargetReset(generation, forceReplay = forceTargetReplay)
         } else {
             inspectorDeliveredGeneration = 0L
             sendInspectorMessage(JSONObject().put("type", "target_waiting"))
         }
     }
 
-    private fun deliverInspectorTargetReset(generation: Long) {
+    private fun deliverInspectorTargetReset(
+        generation: Long,
+        forceReplay: Boolean = false,
+    ) {
         if (
             !shouldDeliverCefriumInspectorGeneration(
                 clientReady = inspectorPageLoaded && inspectorClientReady,
                 generation = generation,
                 deliveredGeneration = inspectorDeliveredGeneration,
+                forceReplay = forceReplay,
             )
         ) return
         if (

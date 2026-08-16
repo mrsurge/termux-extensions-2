@@ -11,7 +11,11 @@ internal fun shouldDeliverCefriumInspectorGeneration(
     clientReady: Boolean,
     generation: Long,
     deliveredGeneration: Long,
-): Boolean = clientReady && generation > 0L && generation != deliveredGeneration
+    forceReplay: Boolean = false,
+): Boolean =
+    clientReady &&
+        generation > 0L &&
+        (forceReplay || generation != deliveredGeneration)
 
 internal fun shouldRequestCefriumInspectorClientReady(
     isLoading: Boolean,

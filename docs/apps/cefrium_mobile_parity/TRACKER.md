@@ -4,8 +4,8 @@
 
 - Branch: `feature/cefrium-parity-mobile-ui`
 - Base: synchronized `main` at `1b1e80b6`
-- State: implementation and automated validation complete; final native
-  Inspector/context-action device acceptance pending
+- State: implementation and automated validation complete; initial native
+  Inspector activation accepted, with remaining context-action/lifecycle QA
 
 ## Source-Backed Findings
 
@@ -76,6 +76,9 @@
   surfaces, persisted Tools state, remote-app health behavior, and Run Target
   registration operate correctly in the live application.
 - [x] The shared changes did not regress the live GeckoView comparison client.
+- [x] Cefrium Inspector now initializes directly from a persisted visible
+  Inspector tab after the app page loads; it no longer requires opening
+  Processes, selecting FWS, and then switching back to the app target.
 
 ## Inspector And Target Ownership
 
@@ -102,6 +105,10 @@
 - [x] Add unit coverage for the deferred-start and one-delivery-per-generation
   lifecycle gates; `:cefrium:testDebugUnitTest` and `:cefrium:assembleDebug`
   pass.
+- [x] Reconcile every Inspector activation edge: a not-yet-ready document
+  explicitly reasserts `client_ready`, while an established document receives
+  the authoritative target snapshot and current generation. Duplicate
+  generation replay is idempotent and does not recreate Chii.
 - [ ] Verify hidden, reopened, navigated, detached where applicable, and removed
   Sidebar surface lifecycle.
 
@@ -138,10 +145,10 @@
 
 ## Deferred
 
-- The completed parity slice and Cefrium Find zoom correction have live user
-  acceptance. The Inspector child-frame reload-loop correction is assembled
-  and awaits targeted device acceptance; native context actions and magnifier
-  still require targeted device QA.
+- The completed parity slice, Cefrium Find zoom correction, and direct initial
+  Inspector activation have live user acceptance. Broader hidden/reopened
+  Inspector lifecycle, native context actions, and magnifier still require
+  targeted device QA.
 - Cefrium Run Profile cache-header mutation and cross-origin console injection
   remain deferred until the SDK exposes response mutation or child-frame/CDP
   control. The native registry reports both capabilities as false.

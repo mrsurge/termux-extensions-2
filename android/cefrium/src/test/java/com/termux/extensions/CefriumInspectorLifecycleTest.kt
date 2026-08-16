@@ -24,6 +24,26 @@ class CefriumInspectorLifecycleTest {
     }
 
     @Test
+    fun activationCanReplayTheCurrentGenerationWithoutInventingANewOne() {
+        assertTrue(
+            shouldDeliverCefriumInspectorGeneration(
+                clientReady = true,
+                generation = 3L,
+                deliveredGeneration = 3L,
+                forceReplay = true,
+            ),
+        )
+        assertFalse(
+            shouldDeliverCefriumInspectorGeneration(
+                clientReady = false,
+                generation = 3L,
+                deliveredGeneration = 3L,
+                forceReplay = true,
+            ),
+        )
+    }
+
+    @Test
     fun clientReadyIsRequestedOnlyAfterInitialLoadCompletes() {
         assertFalse(shouldRequestCefriumInspectorClientReady(true, false))
         assertTrue(shouldRequestCefriumInspectorClientReady(false, false))
