@@ -103,6 +103,39 @@ test("native surface release preserves the dev-runtime policy id", async () => {
   assert.deepEqual(released, ["run-profile:project:preview"]);
 });
 
+test("Cefrium runtime registration uses the origin-gated native query bridge", async () => {
+  const { prepareRunTargetUrl, releaseRunTargetSurface } = await importRunTargetResolver();
+  const requests = [];
+  globalThis.window = {
+    location: {
+      origin: "http://127.0.0.1:44000",
+      search: "?gv_native=1&te2_renderer=cefrium",
+    },
+    cefriumQuery({ request, onSuccess }) {
+      requests.push(JSON.parse(request));
+      onSuccess(JSON.stringify({ ok: true }));
+    },
+  };
+  globalThis.document = { documentElement: { dataset: {} } };
+  const runtime = {
+    surfaceId: "run-profile:project:preview",
+    profileId: "preview",
+    devRuntime: true,
+    devTools: false,
+    workerIdBase: "rp-prev",
+    workerLabel: "run-profile:project:preview",
+    frameworkOrigin: globalThis.window.location.origin,
+  };
+
+  await prepareRunTargetUrl(routeSet(), "http://localhost:43123/", runtime);
+  await releaseRunTargetSurface(runtime.surfaceId);
+
+  assert.equal(requests[0].method, "te2.runTarget.register");
+  assert.equal(requests[0].params.runtime.surfaceId, runtime.surfaceId);
+  assert.equal(requests[1].method, "te2.runTarget.release");
+  assert.equal(requests[1].params.surfaceId, runtime.surfaceId);
+});
+
 test("Gecko runtime registration remains event-driven and surface-scoped", async () => {
   const { prepareRunTargetUrl } = await importRunTargetResolver();
   const posted = [];

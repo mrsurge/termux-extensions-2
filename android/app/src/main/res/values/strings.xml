@@ -3,4 +3,18 @@
     <string name="app_name">Termux Extensions</string>
     <string name="loading_message">Connecting to framework...</string>
     <string name="error_framework_not_running">Framework not running. Please start it in Termux first.</string>
+    <string name="native_action_home">Home</string>
+    <string name="native_action_reload">Reload</string>
+    <string name="native_action_recents">Recents</string>
+    <string name="native_action_lock">Lock</string>
+    <string name="native_action_quit">Quit</string>
+    <string name="native_action_tools">Tools</string>
+    <string name="native_action_tools_symbol">⚙️</string>
+    <string name="native_action_back">Back</string>
+    <string name="native_action_flush_cache">Flush Cache</string>
+    <string name="native_action_update_ui">Update UI</string>
+    <string name="native_tools_console">Console</string>
+    <string name="native_tools_inspector">Inspector</string>
+    <string name="native_tools_processes">Processes</string>
+    <string name="cefrium_inspector_unavailable">Enable native developer tools in Android Settings.</string>
 </resources>

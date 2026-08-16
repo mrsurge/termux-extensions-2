@@ -3315,7 +3315,7 @@ The WebExtension intercepts these URL patterns (redirecting to local server):
 
 # Then rebuild the native clients:
 cd android
-./linux-sdk-env.sh ./gradlew :app:assembleGeckoDebug :cefrium:assembleDebug
+./termux-sdk-env.sh ./gradlew :app:assembleGeckoDebug :cefrium:assembleDebug
 ```
 
 ### Boot sequence
@@ -3885,7 +3885,7 @@ left untouched and is not imported during startup.
 
 ## 42) Android Cefrium Client
 
-The isolated `:cefrium` Android application module evaluates Cefrium 0.6.3 while reusing the shared Android source and packaged assets. GeckoView in `android/app` remains the primary Android renderer.
+The isolated `:cefrium` Android application module evaluates Cefrium 0.7.0 while reusing the shared Android source and packaged assets. GeckoView in `android/app` remains the primary Android renderer.
 
 ### Module boundary
 
@@ -3912,9 +3912,21 @@ The relay behavior is:
 
 Only paths declared by Cefrium asset routing are served from installed assets. Dynamic API, Socket.IO, terminal, and app-worker traffic pass through the relay.
 
-The activity provides shared launcher and Settings behavior, native controls, app-scoped quit, native context menus, trusted-localhost clipboard permission, file-picker forwarding, renderer recovery, lifecycle pause/resume, native diagnostics, and TE2 console access. The public Cefrium SDK does not expose the CDP transport required by TE2's native Inspector, so that gap must be reported rather than faked.
+The activity provides shared launcher and Settings behavior, native controls, app-scoped quit, native context menus, trusted-localhost clipboard permission, file-picker forwarding, renderer recovery, lifecycle pause/resume, native diagnostics, and TE2 console access.
 
-After each completed document load, an idempotent page policy wraps Monaco's exact `textarea.inputarea.android-ime-input` focus path and forces `preventScroll: true`. Do not replace this with a broad page-wide input workaround.
+Native app URLs retain `gv_native=1` for the established app-shell contract and add exact `te2_renderer=gecko|cefrium` identity. Code TE2 resolves Electron first, then the explicit Android renderer. A missing renderer on an established `gv_native=1` URL is legacy Gecko compatibility for APKs receiving newer OTA frontend assets; an unknown explicit renderer still fails instead of falling back to browser-local identity. Cefrium uses an exact-relay-origin `cefriumQuery` handler for stable installation identity and Run Profile surface registration, so it never waits for Gecko's WebExtension bridge. The app shell persists and forwards valid explicit renderer identity across its own navigation.
+
+Cefrium shares Android-owned Tools state and remote-app health semantics. Overlay visibility and the selected tab persist; Console and a persistent Processes browser are supported, with Processes loaded from the relay's `/fws` route. Missing-worker or terminal-readiness snapshots must occur three consecutive times before returning to the launcher. Unreachable or invalid health responses preserve the current app and reset the failure sequence.
+
+The high-level Cefrium wrapper does not expose CDP, but its bundled Chromium runtime includes an application-private `DevToolsServer`. Cefrium relays that abstract-domain socket through a dynamically allocated loopback-only listener, uses one browser control channel for event-driven page-target discovery, and attaches the selected target with a flattened CDP session. Kotlin owns the target picker and persists selection; a separate persistent Cefrium browser hosts the packaged Inspector frontend and exchanges raw protocol messages only through its exact local-asset `cefriumQuery` bridge. Framework Socket.IO and UI IPC are not CDP transports. Code TE2 Sidebar iframes remain frames/execution contexts under their owning page target rather than becoming a second `surfaceId`-based target authority.
+
+The first Cefrium Inspector runtime/browser startup is deferred until the main browser completes a real framework-relay document navigation and the persisted Tools state exposes the Inspector tab. After that first start, hiding Tools pauses presentation but retains the runtime and browser. The Inspector document's `client_ready` query is the only document-readiness authority: Cefrium's browser-wide loading callback also observes the nested Chii frontend iframe, so child-frame loads must not clear readiness or delivered target generation. Otherwise each repeated `target_reset` recreates that iframe and forms a reload loop that competes with main-page loading.
+
+Cefrium still retains validated Run Profile `devRuntime` registrations by exact `surfaceId`, but reports `cachePolicy=false` and `consoleInjection=false`: Run Target listeners bypass `AndroidFrameworkRelay`, and the Cefrium API cannot mutate response headers or inject into an exact cross-origin child frame. Do not add a partial raw-HTTP parser to the byte-for-byte Run Target relay. Browser-wide Inspector ownership is independent of this instrumentation gap.
+
+Cefrium's wrapper also omits Chromium's selection ActionMode host callback. A narrow same-package `WebContents` shim installs an application callback that delegates to Chromium's `ActionModeCallbackHelper` and enables Chromium's SurfaceControl magnifier. Native Cut/Copy/Paste/Select All and related selection actions remain Chromium-owned and do not use JavaScript editing commands.
+
+After each completed document load, an idempotent page policy wraps Monaco's exact `textarea.inputarea.android-ime-input` focus path and forces `preventScroll: true`. Code TE2 additionally marks the editor frame from the explicit native renderer query and applies a Cefrium-only 16 px font size to the Monaco Find/Replace textarea, preventing Chromium's small-input focus zoom without changing Gecko, desktop, or ordinary editor input styling. Do not replace either correction with a broad page-wide input workaround.
 
 ### Validation
 

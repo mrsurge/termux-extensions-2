@@ -91,6 +91,7 @@ class PersistentNetworkService : Service() {
     private val httpClient = OkHttpClient()
     private val frameworkRelay = AndroidFrameworkRelay()
     private val runTargetRelays = RunTargetRelayManager(httpClient)
+    private val devRuntimeSurfaces = AndroidDevRuntimeSurfaceRegistry()
     private val runTargetProjectionClient = RunTargetProjectionClient(httpClient)
     private lateinit var settingsStore: AndroidAppSettingsStore
 
@@ -196,6 +197,7 @@ class PersistentNetworkService : Service() {
         nativeConsoleWorker = null
         nativeConsoleConnected = false
         runTargetRelays.close()
+        devRuntimeSurfaces.clear()
         frameworkRelay.stop()
         observers.clear()
         super.onDestroy()
@@ -218,6 +220,7 @@ class PersistentNetworkService : Service() {
         if (frameworkChanged) {
             runTargetProjectionClient.disconnect()
             runTargetRelays.stopAll()
+            devRuntimeSurfaces.clear()
             frameworkRelay.retarget(next.frameworkBaseUrl)
             uiIpcClient?.disconnect()
             uiIpcClient = null
@@ -290,6 +293,12 @@ class PersistentNetworkService : Service() {
         connectNativeConsole()
         return next
     }
+
+    internal fun registerDevRuntimeSurface(params: JSONObject): AndroidDevRuntimeSurface =
+        devRuntimeSurfaces.register(params, frameworkRelay.browserOrigin)
+
+    internal fun releaseDevRuntimeSurface(surfaceId: String): Boolean =
+        devRuntimeSurfaces.release(surfaceId)
 
     fun openBatteryOptimizationSettings() {
         val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {

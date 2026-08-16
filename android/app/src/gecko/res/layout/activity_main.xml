@@ -20,37 +20,38 @@
                 android:id="@+id/btnHome"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Home" />
+                android:text="@string/native_action_home" />
 
             <Button
                 android:id="@+id/btnReload"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Reload" />
+                android:text="@string/native_action_reload" />
 
             <Button
                 android:id="@+id/btnRecents"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Recents" />
+                android:text="@string/native_action_recents" />
 
             <Button
                 android:id="@+id/btnLock"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Lock" />
+                android:text="@string/native_action_lock" />
 
             <Button
                 android:id="@+id/btnQuit"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Quit" />
+                android:text="@string/native_action_quit" />
 
             <Button
                 android:id="@+id/btnConsole"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="⚙️" />
+                android:contentDescription="@string/native_action_tools"
+                android:text="@string/native_action_tools_symbol" />
         </LinearLayout>
 
         <com.termux.extensions.FilteredGeckoView
@@ -84,7 +85,7 @@
                     android:id="@+id/btnConsoleBack"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Back" />
+                    android:text="@string/native_action_back" />
 
                 <TextView
                     android:id="@+id/consoleTitle"
@@ -102,13 +103,13 @@
                     android:id="@+id/btnConsoleStart"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Flush Cache" />
+                    android:text="@string/native_action_flush_cache" />
 
                 <Button
                     android:id="@+id/btnUpdateTe2"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Update UI" />
+                    android:text="@string/native_action_update_ui" />
 
             </LinearLayout>
 
@@ -125,21 +126,21 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="Console" />
+                    android:text="@string/native_tools_console" />
 
                 <Button
                     android:id="@+id/btnToolsInspector"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="Inspector" />
+                    android:text="@string/native_tools_inspector" />
 
                 <Button
                     android:id="@+id/btnToolsProcesses"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="Processes" />
+                    android:text="@string/native_tools_processes" />
             </LinearLayout>
 
             <androidx.compose.ui.platform.ComposeView

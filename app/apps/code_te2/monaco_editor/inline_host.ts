@@ -38,6 +38,9 @@ const INLINE_EDITOR_HOST_STYLE = `
 #editor-frame .monaco-editor .find-widget {
   z-index: 300;
 }
+#editor-frame[data-te2-native-renderer='cefrium'] .monaco-editor .find-widget textarea.input {
+  font-size: 16px !important;
+}
 #editor-frame .te2-mobile-special-key.te2-mobile-special-key-overlay-trigger {
   position: absolute;
   left: 14px;
@@ -161,6 +164,16 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function markNativeRenderer(editorFrame: HTMLElement): void {
+  const params = new URLSearchParams(window.location.search);
+  const renderer = (params.get('te2_renderer') || '').trim().toLowerCase();
+  if (renderer === 'cefrium') {
+    editorFrame.dataset.te2NativeRenderer = renderer;
+    return;
+  }
+  delete editorFrame.dataset.te2NativeRenderer;
+}
+
 function ensureInlineStylesheetAsset(id: string, href: string): void {
   if (document.getElementById(id)) return;
   const link = document.createElement('link');
@@ -248,6 +261,7 @@ export async function mountInlineEditorHost(
   window.__te2InlineMonacoBootSnapshot = options.bootSnapshot || null;
   window.__te2InlineMonacoBuildSidebarMentionPayload =
     options.buildSidebarMentionPayload;
+  markNativeRenderer(editorFrame);
   editorFrame.innerHTML = INLINE_EDITOR_MARKUP;
   await ensureInlineEditorAssetsLoaded(options.ensureSocketIoLoaded);
   await import('./m_editor_app.ts');

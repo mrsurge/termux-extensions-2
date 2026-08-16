@@ -3,6 +3,10 @@ import type {
   RunTargetDescriptor,
   RunTargetRouteSetDescriptor,
 } from './types.ts';
+import {
+  androidNativeRenderer,
+  requestCefriumNative,
+} from '../native-client-bridge.ts';
 
 interface NativeRunTargetWindow extends Window {
   te2Electron?: {
@@ -81,6 +85,12 @@ function registerRuntimeInstrumentation(
   const nativeWindow = window as NativeRunTargetWindow;
   const registration = typeof nativeWindow.te2Electron?.registerRunTargetSurface === 'function'
     ? nativeWindow.te2Electron.registerRunTargetSurface(runtime, url, route).then(() => {})
+    : androidNativeRenderer() === 'cefrium'
+      ? requestCefriumNative('te2.runTarget.register', {
+          runtime,
+          url,
+          route: route || null,
+        }).then(() => {})
     : nativeBridgeAvailable()
       ? registerThroughGecko(runtime, url, route)
       : Promise.resolve();
@@ -111,6 +121,10 @@ export async function releaseRunTargetSurface(surfaceId: string): Promise<void> 
   const nativeWindow = window as NativeRunTargetWindow;
   if (typeof nativeWindow.te2Electron?.releaseRunTargetSurface === 'function') {
     await nativeWindow.te2Electron.releaseRunTargetSurface(normalized);
+    return;
+  }
+  if (androidNativeRenderer() === 'cefrium') {
+    await requestCefriumNative('te2.runTarget.release', { surfaceId: normalized });
     return;
   }
   if (nativeBridgeAvailable()) {

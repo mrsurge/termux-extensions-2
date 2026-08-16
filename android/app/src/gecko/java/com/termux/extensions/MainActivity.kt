@@ -397,15 +397,8 @@ class MainActivity : AppCompatActivity() {
         return path == "/app" || path.startsWith("/app/")
     }
 
-    private fun ensureGvNative(uri: Uri): Uri {
-        if (uri.queryParameterNames.contains("gv_native")) return uri
-        val builder = uri.buildUpon()
-        val existingQuery = uri.encodedQuery
-        builder.encodedQuery(
-            if (existingQuery.isNullOrBlank()) "gv_native=1" else "$existingQuery&gv_native=1",
-        )
-        return builder.build()
-    }
+    private fun ensureGvNative(uri: Uri): Uri =
+        Uri.parse(withAndroidNativePageIdentity(uri.toString(), "gecko"))
 
     private fun createNavigationDelegate() = object : GeckoSession.NavigationDelegate {
         override fun onLoadRequest(
@@ -1328,8 +1321,10 @@ class MainActivity : AppCompatActivity() {
     private fun loadApp(appId: String) {
         if (!::geckoSession.isInitialized) return
         if (!requireAssetInterceptor("app navigation")) return
-        val appUrl = browserFrameworkBaseUrl().trimEnd('/') +
-            "/app/" + appId + "?gv_native=1"
+        val appUrl = withAndroidNativePageIdentity(
+            browserFrameworkBaseUrl().trimEnd('/') + "/app/" + appId,
+            "gecko",
+        )
         if (clientStartupState.gateAppNavigation(appUrl)) return
         inAppShell = true
         nativeHeader.visibility = View.VISIBLE
@@ -1748,6 +1743,7 @@ class MainActivity : AppCompatActivity() {
                     androidDiagnostics.snapshot(androidDiagnosticRuntimeState())
                 },
                 appUrlRewriter = runtimeService::rewriteFrameworkUrl,
+                nativeRenderer = "gecko",
                 settingsRuntimeProvider = {
                     runtimeService.snapshot().toJson()
                 },

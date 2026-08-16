@@ -18,9 +18,16 @@ class AndroidShellGateway(
     private val onSettingsChanged: (AndroidAppSettings) -> Unit,
     private val diagnosticsProvider: () -> JSONObject,
     private val appUrlRewriter: (String) -> String,
+    private val nativeRenderer: String,
     private val settingsRuntimeProvider: () -> JSONObject = { JSONObject() },
     private val onOpenBatterySettings: () -> Unit = {},
 ) {
+    init {
+        require(nativeRenderer.matches(Regex("[a-z0-9_-]+"))) {
+            "Invalid Android renderer name"
+        }
+    }
+
     fun handle(request: LocalHttpRequest): LocalHttpResponse? {
         if (!request.path.startsWith(API_PREFIX)) return null
         return try {
@@ -118,7 +125,12 @@ class AndroidShellGateway(
                 settings,
                 "/api/apps/$appId/open",
                 "POST",
-                JSONObject().put("params", JSONObject().put("gv_native", "1")),
+                JSONObject().put(
+                    "params",
+                    JSONObject()
+                        .put("gv_native", "1")
+                        .put("te2_renderer", nativeRenderer),
+                ),
             )
             "quit" -> forwardJson(settings, "/api/apps/$appId/quit", "POST")
             else -> throw IllegalArgumentException("Unsupported app action")
@@ -126,10 +138,13 @@ class AndroidShellGateway(
 
         val data = remote.optJSONObject("data") ?: JSONObject()
         if (action == "open") {
-            val rawUrl = data.optString("url", "/app/$appId?gv_native=1")
+            val rawUrl = data.optString("url", "/app/$appId")
             data.put(
                 "url",
-                appUrlRewriter(absoluteFrameworkUrl(settings.frameworkBaseUrl, rawUrl)),
+                withAndroidNativePageIdentity(
+                    appUrlRewriter(absoluteFrameworkUrl(settings.frameworkBaseUrl, rawUrl)),
+                    nativeRenderer,
+                ),
             )
         }
         return jsonResponse(200, data)

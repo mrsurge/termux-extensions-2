@@ -68,6 +68,19 @@
       nativePort.postMessage(message);
       return;
     }
+    if (typeof window.cefriumQuery === "function") {
+      window.cefriumQuery({
+        request: JSON.stringify({
+          method: "te2.devTools.message",
+          params: message,
+        }),
+        onSuccess() {},
+        onFailure() {
+          scheduleReconnect();
+        },
+      });
+      return;
+    }
     window.Te2DevToolsInspectorNative?.postMessage(JSON.stringify(message));
   }
 
@@ -118,10 +131,11 @@
       return;
     }
     if (message?.type === "target_reset") {
+      const hadTarget = targetReady;
       targetGeneration = Number(message.generation) || targetGeneration + 1;
       targetReady = true;
       setStatus("Connecting developer tools...");
-      createFrontend();
+      if (!frame || hadTarget) createFrontend();
       return;
     }
     if (message?.type === "targets_changed") {
@@ -151,6 +165,11 @@
 
   function connectNative() {
     if (!globalThis.browser?.runtime?.connectNative) {
+      if (typeof window.cefriumQuery === "function") {
+        postNative({ type: "client_ready" });
+        publishClientState("cefrium_connected");
+        return;
+      }
       window.Te2DevToolsInspectorNative?.clientReady();
       return;
     }
@@ -217,8 +236,9 @@
         queuedBytes: inboundBytes,
       };
     },
+    connectNative,
   });
 
   createFrontend();
-  connectNative();
+  if (typeof window.cefriumQuery !== "function") connectNative();
 })();

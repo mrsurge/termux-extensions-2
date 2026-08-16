@@ -1,3 +1,9 @@
+import {
+  androidNativeRenderer,
+  isAndroidNativePage,
+  requestCefriumNative,
+} from "./native-client-bridge.ts";
+
 const CLIENT_STORAGE_KEY = "te2.codeTe2.clientInstanceId.v1";
 const WINDOW_STORAGE_KEY = "te2.codeTe2.windowId.v1";
 const GECKO_IDENTITY_REQUEST = "te2.clientIdentity.request";
@@ -17,7 +23,7 @@ export interface CodeTe2ClientIdentity {
   clientInstanceId: string;
   windowId: string;
   consoleWorkerId: string;
-  provider: "browser" | "electron" | "gecko";
+  provider: "browser" | "electron" | "gecko" | "cefrium";
   label: string;
 }
 
@@ -50,14 +56,6 @@ function windowIdentity(): string {
   const generated = randomIdentity("window");
   window.sessionStorage.setItem(WINDOW_STORAGE_KEY, generated);
   return generated;
-}
-
-function isGeckoNativePage(): boolean {
-  return (
-    new URLSearchParams(window.location.search).get("gv_native") === "1" &&
-    typeof (window as NativeIdentityWindow).te2Electron?.readClientIdentity !==
-      "function"
-  );
 }
 
 function requestGeckoClientIdentity(reset: boolean): Promise<string> {
@@ -118,12 +116,26 @@ async function nativeClientInstanceId(reset: boolean): Promise<{
       label: "Electron desktop installation",
     };
   }
-  if (isGeckoNativePage()) {
+  const renderer = androidNativeRenderer();
+  if (renderer === "cefrium") {
+    const result = await requestCefriumNative(
+      reset ? "te2.clientIdentity.reset" : "te2.clientIdentity.read",
+    );
+    return {
+      clientInstanceId: validatedClientInstanceId(result.clientInstanceId),
+      provider: "cefrium",
+      label: "Cefrium Android installation",
+    };
+  }
+  if (renderer === "gecko") {
     return {
       clientInstanceId: await requestGeckoClientIdentity(reset),
       provider: "gecko",
       label: "GeckoView Android installation",
     };
+  }
+  if (isAndroidNativePage()) {
+    throw new Error("Android native renderer identity is missing or unsupported");
   }
   return {
     clientInstanceId: browserClientInstanceId(reset),
