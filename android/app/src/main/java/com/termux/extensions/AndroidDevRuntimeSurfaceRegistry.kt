@@ -5,6 +5,11 @@ import java.net.URI
 
 internal data class AndroidDevRuntimeSurface(
     val surfaceId: String,
+    val profileId: String,
+    val targetId: String,
+    val targetLabel: String,
+    val devRuntime: Boolean,
+    val devTools: Boolean,
     val workerIdBase: String,
     val workerLabel: String,
     val origins: Set<String>,
@@ -18,13 +23,21 @@ internal class AndroidDevRuntimeSurfaceRegistry {
     fun register(params: JSONObject, expectedFrameworkOrigin: String): AndroidDevRuntimeSurface {
         val runtime = params.optJSONObject("runtime")
             ?: throw IllegalArgumentException("Run Profile runtime metadata is missing")
-        require(runtime.optBoolean("devRuntime", false)) {
-            "Run Profile runtime is not enabled"
+        val devRuntime = runtime.optBoolean("devRuntime", false)
+        val devTools = runtime.optBoolean("devTools", false)
+        require(devRuntime || devTools) {
+            "Run Profile native integration is not enabled"
         }
         val surfaceId = runtime.optString("surfaceId").trim()
         require(surfaceId.isNotEmpty() && surfaceId.length <= 256) {
             "Run Profile surface id is invalid"
         }
+        val targetId = runtime.optString("targetId").trim().take(256)
+        require(!devTools || targetId.isNotEmpty()) {
+            "Run Profile developer-tools target id is invalid"
+        }
+        val targetLabel = runtime.optString("targetLabel").trim().take(256)
+            .ifEmpty { targetId.ifEmpty { surfaceId } }
         val frameworkOrigin = normalizedHttpOrigin(runtime.optString("frameworkOrigin"))
         require(frameworkOrigin == normalizedHttpOrigin(expectedFrameworkOrigin)) {
             "Run Profile framework origin is not trusted"
@@ -38,6 +51,11 @@ internal class AndroidDevRuntimeSurfaceRegistry {
         }
         val surface = AndroidDevRuntimeSurface(
             surfaceId = surfaceId,
+            profileId = runtime.optString("profileId").trim().take(256),
+            targetId = targetId,
+            targetLabel = targetLabel,
+            devRuntime = devRuntime,
+            devTools = devTools,
             workerIdBase = runtime.optString("workerIdBase").trim().take(64)
                 .ifEmpty { "rp-prof" },
             workerLabel = runtime.optString("workerLabel").trim().take(256)

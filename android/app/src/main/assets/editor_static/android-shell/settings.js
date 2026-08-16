@@ -4,7 +4,8 @@ const hostInput = document.querySelector("#framework-host");
 const portInput = document.querySelector("#framework-port");
 const persistentToggle = document.querySelector("#persistent-network-notification");
 const imeContextSwitchingToggle = document.querySelector("#ime-context-switching-enabled");
-const devToolsInspectorToggle = document.querySelector("#devtools-inspector-enabled");
+const devToolsRunProfilesToggle = document.querySelector("#devtools-run-profiles-enabled");
+const devToolsDebugToggle = document.querySelector("#devtools-debug-enabled");
 const saveButton = document.querySelector("#save-settings");
 const testButton = document.querySelector("#test-framework");
 const settingsStatus = document.querySelector("#settings-status");
@@ -26,7 +27,8 @@ async function loadSettings() {
   portInput.value = String(settings.frameworkPort || 8089);
   persistentToggle.checked = !!settings.persistentNetworkNotification;
   imeContextSwitchingToggle.checked = settings.imeContextSwitchingEnabled !== false;
-  devToolsInspectorToggle.checked = !!settings.devToolsInspectorEnabled;
+  devToolsRunProfilesToggle.checked = !!settings.devToolsRunProfilesEnabled;
+  devToolsDebugToggle.checked = !!settings.devToolsDebugEnabled;
   const runtime = settings.runtime || {};
   setStatus(
     powerPolicyStatus,
@@ -106,9 +108,14 @@ persistToggle(
   (settings) => settings.imeContextSwitchingEnabled !== false,
 );
 persistToggle(
-  devToolsInspectorToggle,
-  "devToolsInspectorEnabled",
-  (settings) => !!settings.devToolsInspectorEnabled,
+  devToolsRunProfilesToggle,
+  "devToolsRunProfilesEnabled",
+  (settings) => !!settings.devToolsRunProfilesEnabled,
+);
+persistToggle(
+  devToolsDebugToggle,
+  "devToolsDebugEnabled",
+  (settings) => !!settings.devToolsDebugEnabled,
 );
 
 saveButton?.addEventListener("click", async () => {

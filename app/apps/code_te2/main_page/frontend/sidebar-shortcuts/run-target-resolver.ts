@@ -79,13 +79,17 @@ function registerRuntimeInstrumentation(
   route?: RunTargetDescriptor,
 ): Promise<void> {
   const surfaceId = String(runtime.surfaceId || '').trim();
-  if (!surfaceId || runtime.devRuntime !== true) return Promise.resolve();
+  const renderer = androidNativeRenderer();
+  const shouldRegister = renderer === 'cefrium'
+    ? runtime.devRuntime === true || runtime.devTools === true
+    : runtime.devRuntime === true;
+  if (!surfaceId || !shouldRegister) return Promise.resolve();
   const current = runtimeRegistrations.get(surfaceId);
   if (current) return current;
   const nativeWindow = window as NativeRunTargetWindow;
   const registration = typeof nativeWindow.te2Electron?.registerRunTargetSurface === 'function'
     ? nativeWindow.te2Electron.registerRunTargetSurface(runtime, url, route).then(() => {})
-    : androidNativeRenderer() === 'cefrium'
+    : renderer === 'cefrium'
       ? requestCefriumNative('te2.runTarget.register', {
           runtime,
           url,
@@ -108,7 +112,7 @@ export async function prepareRunTargetUrl(
   runtime: RunProfileRuntimeMetadata | null = null,
 ): Promise<string> {
   const resolvedUrl = route ? originalRouteUrl(route) || fallbackUrl : fallbackUrl;
-  if (runtime?.devRuntime === true) {
+  if (runtime) {
     await registerRuntimeInstrumentation(runtime, resolvedUrl, route || undefined);
   }
   return resolvedUrl;

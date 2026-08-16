@@ -5,6 +5,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 
 class CefriumDevToolsTargetTest {
     @Test
@@ -91,6 +93,66 @@ class CefriumDevToolsTargetTest {
         )
 
         assertFalse(isInspectableCefriumDevToolsTarget(target))
+    }
+
+    @Test
+    fun parsesExactRunProfileMarker() {
+        val payload = """{
+          "surfaceId":"run-profile:project:preview",
+          "targetId":"run-profile:project:preview",
+          "targetLabel":"Preview",
+          "devTools":true
+        }"""
+        val marker = "te2-devtools:" + URLEncoder.encode(
+            payload,
+            StandardCharsets.UTF_8.name(),
+        )
+
+        assertEquals(
+            CefriumDevToolsMarker(
+                surfaceId = "run-profile:project:preview",
+                targetId = "run-profile:project:preview",
+                targetLabel = "Preview",
+            ),
+            parseCefriumDevToolsMarker(marker),
+        )
+    }
+
+    @Test
+    fun rejectsRuntimeOnlyMarker() {
+        val payload = """{
+          "surfaceId":"run-profile:project:preview",
+          "targetId":"run-profile:project:preview",
+          "devTools":false
+        }"""
+        val marker = "te2-devtools:" + URLEncoder.encode(
+            payload,
+            StandardCharsets.UTF_8.name(),
+        )
+
+        assertNull(parseCefriumDevToolsMarker(marker))
+    }
+
+    @Test
+    fun frameTargetWinsDefaultSelection() {
+        val frame = CefriumDevToolsTarget(
+            targetId = "profile",
+            title = "Preview",
+            url = "http://127.0.0.1:3000/",
+            type = "frame",
+            sessionId = "session",
+            executionContextId = 7,
+            frameId = "frame",
+            surfaceId = "surface",
+        )
+
+        assertEquals(
+            "profile",
+            chooseCefriumDevToolsTarget(
+                listOf(target("app", "http://127.0.0.1/app/code_te2"), frame),
+                null,
+            )?.targetId,
+        )
     }
 
     private fun target(id: String, url: String) = CefriumDevToolsTarget(

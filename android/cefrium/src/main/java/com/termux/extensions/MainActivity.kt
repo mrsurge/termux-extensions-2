@@ -84,7 +84,10 @@ class MainActivity : AppCompatActivity() {
     private var isLocked = false
     private var toolsState = AndroidToolsState()
     private var toolsSelectedTab = NativeToolsTab.CONSOLE
-    private var devToolsInspectorEnabled = false
+    private var devToolsRunProfilesEnabled = false
+    private var devToolsDebugEnabled = false
+    private val devToolsInspectorEnabled: Boolean
+        get() = devToolsRunProfilesEnabled || devToolsDebugEnabled
     private var devToolsStatus = "disabled"
     private var inspectorClientReady = false
     private var inspectorPageLoaded = false
@@ -196,6 +199,8 @@ class MainActivity : AppCompatActivity() {
                             .put("status", devToolsStatus)
                     snapshot
                         .put("configuredEnabled", devToolsInspectorEnabled)
+                        .put("runProfilesEnabled", devToolsRunProfilesEnabled)
+                        .put("debugTargetsEnabled", devToolsDebugEnabled)
                         .put("mainBrowserReady", mainBrowserReady)
                         .put("inspectorPageLoaded", inspectorPageLoaded)
                         .put("inspectorClientReady", inspectorClientReady)
@@ -235,6 +240,7 @@ class MainActivity : AppCompatActivity() {
                     toolsSelectedTab == NativeToolsTab.CONSOLE,
                 CONSOLE_TAIL_LINES,
             )
+            syncDevToolsRuntimePolicy()
             if (!clientInitializationStarted) {
                 clientInitializationStarted = true
                 initializeClient()
@@ -261,7 +267,8 @@ class MainActivity : AppCompatActivity() {
         val settings = settingsStore.load()
         frameworkBaseUrl = settings.frameworkBaseUrl
         persistentNetworkEnabled = settings.persistentNetworkNotification
-        devToolsInspectorEnabled = settings.devToolsInspectorEnabled
+        devToolsRunProfilesEnabled = settings.devToolsRunProfilesEnabled
+        devToolsDebugEnabled = settings.devToolsDebugEnabled
 
         setContentView(R.layout.activity_main)
         bindViews()
@@ -455,7 +462,7 @@ class MainActivity : AppCompatActivity() {
         }
         browser.setPullToRefreshEnabled(false)
         browser.surfaceContainer.post { selectionIntegration.installWhenReady() }
-        configureDevToolsInspector(devToolsInspectorEnabled)
+        configureDevToolsInspector()
         restoreToolsSurfaceState()
     }
 
@@ -693,12 +700,14 @@ class MainActivity : AppCompatActivity() {
                     callback.failure(400, error.message ?: "Run Profile registration is invalid")
                     return true
                 }
+                syncDevToolsRuntimePolicy()
                 JSONObject()
                     .put("ok", true)
                     .put("surfaceId", surface.surfaceId)
                     .put("capabilities", JSONObject().apply {
                         put("cachePolicy", false)
                         put("consoleInjection", false)
+                        put("devToolsTarget", surface.devTools)
                     })
             }
             "te2.runTarget.release" -> {
@@ -711,6 +720,7 @@ class MainActivity : AppCompatActivity() {
                     return true
                 }
                 clientRuntimeService?.releaseDevRuntimeSurface(surfaceId)
+                syncDevToolsRuntimePolicy()
                 JSONObject().put("ok", true).put("surfaceId", surfaceId)
             }
             else -> {
@@ -868,14 +878,16 @@ class MainActivity : AppCompatActivity() {
 
     private fun applySettings(settings: AndroidAppSettings) {
         val inspectorSettingChanged =
-            devToolsInspectorEnabled != settings.devToolsInspectorEnabled
+            devToolsRunProfilesEnabled != settings.devToolsRunProfilesEnabled ||
+                devToolsDebugEnabled != settings.devToolsDebugEnabled
         frameworkBaseUrl = settings.frameworkBaseUrl
         persistentNetworkEnabled = settings.persistentNetworkNotification
-        devToolsInspectorEnabled = settings.devToolsInspectorEnabled
+        devToolsRunProfilesEnabled = settings.devToolsRunProfilesEnabled
+        devToolsDebugEnabled = settings.devToolsDebugEnabled
         clientRuntimeService?.configure(settings)
         runOnUiThread {
             if (inspectorSettingChanged && ::browser.isInitialized) {
-                configureDevToolsInspector(settings.devToolsInspectorEnabled)
+                configureDevToolsInspector()
             }
             updatePersistentNetworkService()
             updateAppHealthMonitoring(immediate = true)
@@ -1047,9 +1059,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun configureDevToolsInspector(enabled: Boolean) {
-        devToolsInspectorEnabled = enabled
-        if (!enabled) {
+    private fun configureDevToolsInspector() {
+        if (!devToolsInspectorEnabled) {
             devToolsRuntime?.close()
             devToolsRuntime = null
             devToolsStatus = "disabled"
@@ -1062,8 +1073,17 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        syncDevToolsRuntimePolicy()
         ensureInspectorBrowser()
         updateInspectorSurface()
+    }
+
+    private fun syncDevToolsRuntimePolicy() {
+        devToolsRuntime?.updatePolicy(
+            runProfilesEnabled = devToolsRunProfilesEnabled,
+            debugTargetsEnabled = devToolsDebugEnabled,
+            surfaces = clientRuntimeService?.devRuntimeSurfaceSnapshot().orEmpty(),
+        )
     }
 
     private fun ensureInspectorBrowser() {
@@ -1082,8 +1102,19 @@ class MainActivity : AppCompatActivity() {
         val runtime = devToolsRuntime ?: CefriumDevToolsRuntime(
             httpClient = httpClient,
             listener = devToolsListener,
+            chobitsuSource = assets.open("devtools_inspector/chobitsu.js")
+                .bufferedReader()
+                .use { it.readText() },
+            targetRuntimeSource = assets.open(
+                "devtools_inspector/cefrium-target-runtime.js",
+            ).bufferedReader().use { it.readText() },
         ).also { devToolsRuntime = it }
-        runtime.start(toolsState.inspectorTargetId)
+        runtime.start(
+            preferredTargetId = toolsState.inspectorTargetId,
+            runProfilesEnabled = devToolsRunProfilesEnabled,
+            debugTargetsEnabled = devToolsDebugEnabled,
+            surfaces = clientRuntimeService?.devRuntimeSurfaceSnapshot().orEmpty(),
+        )
         val inspector = inspectorBrowser ?: CefriumBrowser.createWithSurface(this).also { next ->
             inspectorClientReady = false
             inspectorPageLoaded = false

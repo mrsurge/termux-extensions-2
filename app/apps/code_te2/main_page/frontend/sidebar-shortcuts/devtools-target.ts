@@ -45,9 +45,15 @@ export function runProfileRuntimeMetadata(
   const surfaceId = normalized(surface?.surfaceId) || configuredTargetId;
   if ((!devTools && !devRuntime) || !surfaceId) return null;
   const profileId = normalized(surface?.profileId);
+  const targetId = configuredTargetId || surfaceId;
+  const targetLabel = normalized(
+    sc.devtools_target_label || sc.devToolsTargetLabel,
+  ) || normalized(sc.label) || targetId;
   return {
     surfaceId,
     profileId,
+    targetId,
+    targetLabel,
     devRuntime,
     devTools,
     workerIdBase: runProfileWorkerIdBase(profileId || surfaceId),
@@ -62,15 +68,11 @@ export function devToolsTargetWindowName(
 ): string {
   const runtime = runProfileRuntimeMetadata(sc, frameworkOrigin);
   if (!runtime) return "";
-  const targetId = normalized(sc.devtools_target_id || sc.devToolsTargetId) ||
-    runtime.surfaceId;
-  const targetLabel =
-    normalized(sc.devtools_target_label || sc.devToolsTargetLabel) || sc.label;
   const prefix = runtime.devTools
     ? DEVTOOLS_TARGET_WINDOW_NAME_PREFIX
     : RUN_PROFILE_RUNTIME_WINDOW_NAME_PREFIX;
   return `${prefix}${encodeURIComponent(
-    JSON.stringify({ ...runtime, targetId, targetLabel }),
+    JSON.stringify(runtime),
   )}`;
 }
 

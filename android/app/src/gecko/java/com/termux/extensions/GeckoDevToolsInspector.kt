@@ -57,12 +57,22 @@ class GeckoDevToolsInspector(
     private var clientReady = false
     private var clientDebugState: JSONObject? = null
     private var enabled = false
+    private var runProfilesEnabled = false
+    private var debugTargetsEnabled = false
     private var debugSequence = 0L
     private val debugEvents = java.util.ArrayDeque<JSONObject>()
     private val frameProbes = linkedMapOf<String, JSONObject>()
 
-    fun configure(shouldEnable: Boolean, onComplete: (Boolean) -> Unit = {}) {
+    fun configure(
+        shouldEnableRunProfiles: Boolean,
+        shouldEnableDebugTargets: Boolean,
+        onComplete: (Boolean) -> Unit = {},
+    ) {
+        runProfilesEnabled = shouldEnableRunProfiles
+        debugTargetsEnabled = shouldEnableDebugTargets
+        val shouldEnable = shouldEnableRunProfiles || shouldEnableDebugTargets
         enabled = shouldEnable
+        pruneDisallowedTargets()
         if (!shouldEnable) {
             tearDownInspectorSession()
             val installed = extension
@@ -409,6 +419,10 @@ class GeckoDevToolsInspector(
         isTopLevel: Boolean,
         payload: JSONObject,
     ): String? {
+        if (!isTargetAllowed(isTopLevel)) {
+            disconnectPort(port)
+            return null
+        }
         val targetId = payload.optString("targetId").trim()
         if (targetId.isEmpty()) {
             disconnectPort(port)
@@ -476,6 +490,8 @@ class GeckoDevToolsInspector(
         debugEvents.forEach { eventItems.put(JSONObject(it.toString())) }
         return JSONObject()
             .put("enabled", enabled)
+            .put("runProfilesEnabled", runProfilesEnabled)
+            .put("debugTargetsEnabled", debugTargetsEnabled)
             .put("extensionId", extension?.id ?: JSONObject.NULL)
             .put("extensionVersion", extension?.metaData?.version ?: JSONObject.NULL)
             .put("inspectorSessionCreated", inspectorSession != null)
@@ -679,6 +695,17 @@ class GeckoDevToolsInspector(
             if (enabled) onStatusChanged("waiting for inspected page")
         }
         sendTargetsChanged()
+    }
+
+    private fun isTargetAllowed(isTopLevel: Boolean): Boolean =
+        if (isTopLevel) debugTargetsEnabled else runProfilesEnabled
+
+    private fun pruneDisallowedTargets() {
+        val disallowed = targets.values.filterNot { isTargetAllowed(it.isTopLevel) }
+        disallowed.forEach { target ->
+            detachTargetPort(target.port, target.targetId, target.endpoint)
+            disconnectPort(target.port)
+        }
     }
 
     private fun detachAllTargetPorts() {

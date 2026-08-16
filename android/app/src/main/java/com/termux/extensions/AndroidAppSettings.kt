@@ -9,7 +9,8 @@ data class AndroidAppSettings(
     val frameworkPort: Int = DEFAULT_FRAMEWORK_PORT,
     val persistentNetworkNotification: Boolean = false,
     val imeContextSwitchingEnabled: Boolean = true,
-    val devToolsInspectorEnabled: Boolean = false,
+    val devToolsRunProfilesEnabled: Boolean = false,
+    val devToolsDebugEnabled: Boolean = false,
 ) {
     val frameworkBaseUrl: String
         get() {
@@ -27,7 +28,9 @@ data class AndroidAppSettings(
         put("frameworkBaseUrl", frameworkBaseUrl)
         put("persistentNetworkNotification", persistentNetworkNotification)
         put("imeContextSwitchingEnabled", imeContextSwitchingEnabled)
-        put("devToolsInspectorEnabled", devToolsInspectorEnabled)
+        put("devToolsRunProfilesEnabled", devToolsRunProfilesEnabled)
+        put("devToolsDebugEnabled", devToolsDebugEnabled)
+        put("devToolsInspectorEnabled", devToolsRunProfilesEnabled || devToolsDebugEnabled)
     }
 
     companion object {
@@ -41,7 +44,8 @@ internal fun validatedAndroidAppSettings(
     frameworkPort: Int,
     persistentNetworkNotification: Boolean,
     imeContextSwitchingEnabled: Boolean = true,
-    devToolsInspectorEnabled: Boolean = false,
+    devToolsRunProfilesEnabled: Boolean = false,
+    devToolsDebugEnabled: Boolean = false,
 ): AndroidAppSettings {
     val host = frameworkHost.trim().removeSurrounding("[", "]")
     require(host.isNotEmpty()) { "Framework host is required" }
@@ -59,7 +63,8 @@ internal fun validatedAndroidAppSettings(
         frameworkPort = frameworkPort,
         persistentNetworkNotification = persistentNetworkNotification,
         imeContextSwitchingEnabled = imeContextSwitchingEnabled,
-        devToolsInspectorEnabled = devToolsInspectorEnabled,
+        devToolsRunProfilesEnabled = devToolsRunProfilesEnabled,
+        devToolsDebugEnabled = devToolsDebugEnabled,
     )
 }
 
@@ -72,6 +77,10 @@ class AndroidAppSettingsStore(context: Context) {
 
     fun load(): AndroidAppSettings {
         return try {
+            val legacyDevToolsEnabled = preferences.getBoolean(
+                KEY_DEVTOOLS_INSPECTOR_ENABLED,
+                false,
+            )
             validatedAndroidAppSettings(
                 frameworkHost = preferences.getString(
                     KEY_FRAMEWORK_HOST,
@@ -89,9 +98,13 @@ class AndroidAppSettingsStore(context: Context) {
                     KEY_IME_CONTEXT_SWITCHING_ENABLED,
                     true,
                 ),
-                devToolsInspectorEnabled = preferences.getBoolean(
-                    KEY_DEVTOOLS_INSPECTOR_ENABLED,
-                    false,
+                devToolsRunProfilesEnabled = preferences.getBoolean(
+                    KEY_DEVTOOLS_RUN_PROFILES_ENABLED,
+                    legacyDevToolsEnabled,
+                ),
+                devToolsDebugEnabled = preferences.getBoolean(
+                    KEY_DEVTOOLS_DEBUG_ENABLED,
+                    legacyDevToolsEnabled,
                 ),
             )
         } catch (_: IllegalArgumentException) {
@@ -101,6 +114,14 @@ class AndroidAppSettingsStore(context: Context) {
 
     fun update(payload: JSONObject): AndroidAppSettings {
         val current = load()
+        val legacyDevToolsValue = if (payload.has("devToolsInspectorEnabled")) {
+            payload.optBoolean(
+                "devToolsInspectorEnabled",
+                current.devToolsRunProfilesEnabled || current.devToolsDebugEnabled,
+            )
+        } else {
+            null
+        }
         val updated = validatedAndroidAppSettings(
             frameworkHost = if (payload.has("frameworkHost")) {
                 payload.optString("frameworkHost", current.frameworkHost)
@@ -128,13 +149,21 @@ class AndroidAppSettingsStore(context: Context) {
             } else {
                 current.imeContextSwitchingEnabled
             },
-            devToolsInspectorEnabled = if (payload.has("devToolsInspectorEnabled")) {
+            devToolsRunProfilesEnabled = if (payload.has("devToolsRunProfilesEnabled")) {
                 payload.optBoolean(
-                    "devToolsInspectorEnabled",
-                    current.devToolsInspectorEnabled,
+                    "devToolsRunProfilesEnabled",
+                    current.devToolsRunProfilesEnabled,
                 )
             } else {
-                current.devToolsInspectorEnabled
+                legacyDevToolsValue ?: current.devToolsRunProfilesEnabled
+            },
+            devToolsDebugEnabled = if (payload.has("devToolsDebugEnabled")) {
+                payload.optBoolean(
+                    "devToolsDebugEnabled",
+                    current.devToolsDebugEnabled,
+                )
+            } else {
+                legacyDevToolsValue ?: current.devToolsDebugEnabled
             },
         )
 
@@ -150,8 +179,16 @@ class AndroidAppSettingsStore(context: Context) {
                 updated.imeContextSwitchingEnabled,
             )
             .putBoolean(
+                KEY_DEVTOOLS_RUN_PROFILES_ENABLED,
+                updated.devToolsRunProfilesEnabled,
+            )
+            .putBoolean(
+                KEY_DEVTOOLS_DEBUG_ENABLED,
+                updated.devToolsDebugEnabled,
+            )
+            .putBoolean(
                 KEY_DEVTOOLS_INSPECTOR_ENABLED,
-                updated.devToolsInspectorEnabled,
+                updated.devToolsRunProfilesEnabled || updated.devToolsDebugEnabled,
             )
             .apply()
         return updated
@@ -167,5 +204,9 @@ class AndroidAppSettingsStore(context: Context) {
             "ime_context_switching_enabled"
         private const val KEY_DEVTOOLS_INSPECTOR_ENABLED =
             "devtools_inspector_enabled"
+        private const val KEY_DEVTOOLS_RUN_PROFILES_ENABLED =
+            "devtools_run_profiles_enabled"
+        private const val KEY_DEVTOOLS_DEBUG_ENABLED =
+            "devtools_debug_enabled"
     }
 }

@@ -50,12 +50,19 @@
       <header class="section-header">
         <h2>Diagnostics</h2>
       </header>
-      <label class="toggle-row" for="devtools-inspector-enabled">
+      <label class="toggle-row" for="devtools-run-profiles-enabled">
         <span>
-          <strong>Native developer tools</strong>
-          <small>Connect inspected pages to the persistent native Tools inspector. Changing this setting reloads the active app page.</small>
+          <strong>Dev tools run profiles</strong>
+          <small>Expose Run Profile pages with dev tools enabled as dedicated native Inspector targets.</small>
         </span>
-        <input id="devtools-inspector-enabled" type="checkbox">
+        <input id="devtools-run-profiles-enabled" type="checkbox">
+      </label>
+      <label class="toggle-row" for="devtools-debug-enabled">
+        <span>
+          <strong>Dev tools debug</strong>
+          <small>Expose Code TE2 and other native browser pages as diagnostic Inspector targets.</small>
+        </span>
+        <input id="devtools-debug-enabled" type="checkbox">
       </label>
     </section>
 

@@ -13,7 +13,11 @@ class AndroidDevRuntimeSurfaceRegistryTest {
             """{
               "runtime": {
                 "surfaceId": "run-profile:project:preview",
+                "profileId": "preview",
+                "targetId": "run-profile:project:preview",
+                "targetLabel": "Preview",
                 "devRuntime": true,
+                "devTools": false,
                 "frameworkOrigin": "http://127.0.0.1:44000",
                 "workerIdBase": "rp-prev",
                 "workerLabel": "run-profile:preview"
@@ -42,10 +46,39 @@ class AndroidDevRuntimeSurfaceRegistryTest {
         val surface = registry.register(params, "http://127.0.0.1:44000")
 
         assertEquals("run-profile:project:preview", surface.surfaceId)
+        assertEquals("run-profile:project:preview", surface.targetId)
+        assertEquals("Preview", surface.targetLabel)
+        assertTrue(surface.devRuntime)
         assertTrue(surface.origins.contains("http://localhost:43123"))
         assertTrue(surface.origins.contains("http://127.0.0.1:43123"))
         assertEquals(1, registry.snapshot().size)
         assertTrue(registry.release(surface.surfaceId))
+    }
+
+    @Test
+    fun retainsDevToolsOnlySurfaceIntent() {
+        val registry = AndroidDevRuntimeSurfaceRegistry()
+
+        val surface = registry.register(
+            JSONObject(
+                """{
+                  "runtime": {
+                    "surfaceId": "surface",
+                    "profileId": "server",
+                    "targetId": "profile:server",
+                    "targetLabel": "Server",
+                    "devRuntime": false,
+                    "devTools": true,
+                    "frameworkOrigin": "http://127.0.0.1:44000"
+                  },
+                  "url": "http://localhost:43123/"
+                }""",
+            ),
+            "http://127.0.0.1:44000",
+        )
+
+        assertEquals("profile:server", surface.targetId)
+        assertTrue(surface.devTools)
     }
 
     @Test(expected = IllegalArgumentException::class)
