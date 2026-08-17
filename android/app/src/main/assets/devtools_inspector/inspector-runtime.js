@@ -174,15 +174,10 @@
         if (frameReady) setStatus("");
         return;
       }
-      const hadTarget = targetReady;
       targetGeneration = nextGeneration;
       targetReady = true;
       setStatus("Connecting developer tools...");
-      if (!frame || hadTarget) {
-        createFrontend();
-      } else if (frameReady) {
-        setStatus("");
-      }
+      createFrontend();
       publishClientState("target_reset");
       return;
     }

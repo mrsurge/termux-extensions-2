@@ -9,6 +9,22 @@ internal class DevToolsProtocolBroker(
     private val maxQueuedChars: Int = DEFAULT_MAX_QUEUED_CHARS,
     private val onQueueOverflow: (Direction) -> Unit = {},
 ) {
+    data class DebugSnapshot(
+        val generation: Long,
+        val hasTarget: Boolean,
+        val hasClient: Boolean,
+        val targetToClientReceived: Long,
+        val targetToClientDelivered: Long,
+        val targetToClientDeliveryFailures: Long,
+        val targetToClientQueued: Int,
+        val targetToClientQueuedChars: Int,
+        val clientToTargetReceived: Long,
+        val clientToTargetDelivered: Long,
+        val clientToTargetDeliveryFailures: Long,
+        val clientToTargetQueued: Int,
+        val clientToTargetQueuedChars: Int,
+    )
+
     fun interface Endpoint {
         fun send(payload: String): Boolean
     }
@@ -30,6 +46,12 @@ internal class DevToolsProtocolBroker(
     private var target: Endpoint? = null
     private var client: Endpoint? = null
     private var generation = 0L
+    private var targetToClientReceived = 0L
+    private var targetToClientDelivered = 0L
+    private var targetToClientDeliveryFailures = 0L
+    private var clientToTargetReceived = 0L
+    private var clientToTargetDelivered = 0L
+    private var clientToTargetDeliveryFailures = 0L
 
     @Synchronized
     fun attachTarget(endpoint: Endpoint): Long {
@@ -78,6 +100,33 @@ internal class DevToolsProtocolBroker(
     fun hasClient(): Boolean = client != null
 
     @Synchronized
+    fun debugSnapshot(): DebugSnapshot = DebugSnapshot(
+        generation = generation,
+        hasTarget = target != null,
+        hasClient = client != null,
+        targetToClientReceived = targetToClientReceived,
+        targetToClientDelivered = targetToClientDelivered,
+        targetToClientDeliveryFailures = targetToClientDeliveryFailures,
+        targetToClientQueued = targetToClient.size,
+        targetToClientQueuedChars = targetToClientChars,
+        clientToTargetReceived = clientToTargetReceived,
+        clientToTargetDelivered = clientToTargetDelivered,
+        clientToTargetDeliveryFailures = clientToTargetDeliveryFailures,
+        clientToTargetQueued = clientToTarget.size,
+        clientToTargetQueuedChars = clientToTargetChars,
+    )
+
+    @Synchronized
+    fun resetDebugCounters() {
+        targetToClientReceived = 0L
+        targetToClientDelivered = 0L
+        targetToClientDeliveryFailures = 0L
+        clientToTargetReceived = 0L
+        clientToTargetDelivered = 0L
+        clientToTargetDeliveryFailures = 0L
+    }
+
+    @Synchronized
     fun clear() {
         target = null
         client = null
@@ -86,7 +135,12 @@ internal class DevToolsProtocolBroker(
     }
 
     private fun route(direction: Direction, payload: String, endpoint: Endpoint?) {
-        if (endpoint?.send(payload) == true) return
+        incrementReceived(direction)
+        if (endpoint?.send(payload) == true) {
+            incrementDelivered(direction)
+            return
+        }
+        if (endpoint != null) incrementDeliveryFailures(direction)
         enqueue(direction, payload)
     }
 
@@ -110,10 +164,12 @@ internal class DevToolsProtocolBroker(
             val pending = queue.removeFirst()
             updateQueuedChars(direction, -pending.chars)
             if (!endpoint.send(pending.payload)) {
+                incrementDeliveryFailures(direction)
                 queue.addFirst(pending)
                 updateQueuedChars(direction, pending.chars)
                 return
             }
+            incrementDelivered(direction)
         }
     }
 
@@ -133,6 +189,27 @@ internal class DevToolsProtocolBroker(
         when (direction) {
             Direction.TARGET_TO_CLIENT -> targetToClientChars += delta
             Direction.CLIENT_TO_TARGET -> clientToTargetChars += delta
+        }
+    }
+
+    private fun incrementReceived(direction: Direction) {
+        when (direction) {
+            Direction.TARGET_TO_CLIENT -> targetToClientReceived += 1
+            Direction.CLIENT_TO_TARGET -> clientToTargetReceived += 1
+        }
+    }
+
+    private fun incrementDelivered(direction: Direction) {
+        when (direction) {
+            Direction.TARGET_TO_CLIENT -> targetToClientDelivered += 1
+            Direction.CLIENT_TO_TARGET -> clientToTargetDelivered += 1
+        }
+    }
+
+    private fun incrementDeliveryFailures(direction: Direction) {
+        when (direction) {
+            Direction.TARGET_TO_CLIENT -> targetToClientDeliveryFailures += 1
+            Direction.CLIENT_TO_TARGET -> clientToTargetDeliveryFailures += 1
         }
     }
 

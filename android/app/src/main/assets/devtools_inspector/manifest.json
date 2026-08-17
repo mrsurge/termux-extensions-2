@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "TE2 Native Developer Tools",
-  "version": "1.15.5.7",
+  "version": "1.15.5.8",
   "description": "Connects a page-local Chobitsu target to the native Android developer-tools surface.",
   "browser_specific_settings": {
     "gecko": {

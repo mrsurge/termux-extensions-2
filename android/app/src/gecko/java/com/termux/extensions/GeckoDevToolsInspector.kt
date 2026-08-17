@@ -507,6 +507,7 @@ class GeckoDevToolsInspector(
             .put("clientReady", clientReady)
             .put("brokerHasClient", broker.hasClient())
             .put("brokerHasTarget", broker.hasTarget())
+            .put("broker", broker.debugSnapshot().toJson())
             .put("selectedTargetId", selectedTargetId ?: JSONObject.NULL)
             .put("activeTargetId", activeTargetId ?: JSONObject.NULL)
             .put(
@@ -521,6 +522,7 @@ class GeckoDevToolsInspector(
     fun clearDebugTelemetry(): JSONObject {
         debugEvents.clear()
         frameProbes.clear()
+        broker.resetDebugCounters()
         return debugSnapshot()
     }
 
@@ -798,7 +800,7 @@ class GeckoDevToolsInspector(
         private const val EXTENSION_LOCATION =
             "resource://android/assets/devtools_inspector/"
         private const val EXTENSION_ID = "devtools_inspector@mrselect6"
-        internal const val EXTENSION_VERSION = "1.15.5.7"
+        internal const val EXTENSION_VERSION = "1.15.5.8"
         private const val TARGET_NATIVE_APP_ID = "te2_devtools_target"
         private const val PROBE_NATIVE_APP_ID = "te2_devtools_probe"
         private const val CLIENT_NATIVE_APP_ID = "te2_devtools_client"
@@ -829,3 +831,18 @@ internal fun chooseDevToolsTargetAfterPrune(
     return selectedTargetId?.takeIf(availableTargetIds::contains)
         ?: availableTargetIds.firstOrNull()
 }
+
+private fun DevToolsProtocolBroker.DebugSnapshot.toJson(): JSONObject = JSONObject()
+    .put("generation", generation)
+    .put("hasTarget", hasTarget)
+    .put("hasClient", hasClient)
+    .put("targetToClientReceived", targetToClientReceived)
+    .put("targetToClientDelivered", targetToClientDelivered)
+    .put("targetToClientDeliveryFailures", targetToClientDeliveryFailures)
+    .put("targetToClientQueued", targetToClientQueued)
+    .put("targetToClientQueuedChars", targetToClientQueuedChars)
+    .put("clientToTargetReceived", clientToTargetReceived)
+    .put("clientToTargetDelivered", clientToTargetDelivered)
+    .put("clientToTargetDeliveryFailures", clientToTargetDeliveryFailures)
+    .put("clientToTargetQueued", clientToTargetQueued)
+    .put("clientToTargetQueuedChars", clientToTargetQueuedChars)
