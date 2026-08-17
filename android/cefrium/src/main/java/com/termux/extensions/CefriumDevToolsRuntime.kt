@@ -243,10 +243,15 @@ internal class CefriumDevToolsRuntime(
         debugTargetsEnabled: Boolean,
         surfaces: List<AndroidDevRuntimeSurface>,
     ) {
+        val policy = cefriumDevToolsPolicy(
+            runProfilesEnabled = runProfilesEnabled,
+            debugTargetsEnabled = debugTargetsEnabled,
+            surfaces = surfaces,
+        )
         synchronized(lock) {
-            desiredTargetId = preferredTargetId
-            applyPolicyLocked(runProfilesEnabled, debugTargetsEnabled, surfaces)
             if (started) return
+            desiredTargetId = preferredTargetId
+            applyPolicyLocked(policy)
             started = true
             status = "starting"
         }
@@ -279,23 +284,33 @@ internal class CefriumDevToolsRuntime(
         debugTargetsEnabled: Boolean,
         surfaces: List<AndroidDevRuntimeSurface>,
     ) {
-        synchronized(lock) {
-            applyPolicyLocked(runProfilesEnabled, debugTargetsEnabled, surfaces)
+        val nextPolicy = cefriumDevToolsPolicy(
+            runProfilesEnabled = runProfilesEnabled,
+            debugTargetsEnabled = debugTargetsEnabled,
+            surfaces = surfaces,
+        )
+        val changed = synchronized(lock) {
+            val currentPolicy = CefriumDevToolsPolicy(
+                runProfilesEnabled = this.runProfilesEnabled,
+                debugTargetsEnabled = this.debugTargetsEnabled,
+                surfaces = this.surfaces.toMap(),
+            )
+            if (!shouldReconcileCefriumDevToolsPolicy(currentPolicy, nextPolicy)) {
+                false
+            } else {
+                applyPolicyLocked(nextPolicy)
+                true
+            }
         }
+        if (!changed) return
         reconcilePolicy()
     }
 
-    private fun applyPolicyLocked(
-        runProfilesEnabled: Boolean,
-        debugTargetsEnabled: Boolean,
-        nextSurfaces: List<AndroidDevRuntimeSurface>,
-    ) {
-        this.runProfilesEnabled = runProfilesEnabled
-        this.debugTargetsEnabled = debugTargetsEnabled
+    private fun applyPolicyLocked(policy: CefriumDevToolsPolicy) {
+        runProfilesEnabled = policy.runProfilesEnabled
+        debugTargetsEnabled = policy.debugTargetsEnabled
         surfaces.clear()
-        nextSurfaces
-            .filter { it.devRuntime || (runProfilesEnabled && it.devTools) }
-            .forEach { surfaces[it.surfaceId] = it }
+        surfaces.putAll(policy.surfaces)
     }
 
     fun selectTarget(targetId: String) {

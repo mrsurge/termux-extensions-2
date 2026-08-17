@@ -1,5 +1,28 @@
 package com.termux.extensions
 
+internal data class CefriumDevToolsPolicy(
+    val runProfilesEnabled: Boolean,
+    val debugTargetsEnabled: Boolean,
+    val surfaces: Map<String, AndroidDevRuntimeSurface>,
+)
+
+internal fun cefriumDevToolsPolicy(
+    runProfilesEnabled: Boolean,
+    debugTargetsEnabled: Boolean,
+    surfaces: List<AndroidDevRuntimeSurface>,
+): CefriumDevToolsPolicy = CefriumDevToolsPolicy(
+    runProfilesEnabled = runProfilesEnabled,
+    debugTargetsEnabled = debugTargetsEnabled,
+    surfaces = surfaces
+        .filter { it.devRuntime || (runProfilesEnabled && it.devTools) }
+        .associateBy(AndroidDevRuntimeSurface::surfaceId),
+)
+
+internal fun shouldReconcileCefriumDevToolsPolicy(
+    current: CefriumDevToolsPolicy,
+    next: CefriumDevToolsPolicy,
+): Boolean = current != next
+
 internal fun shouldStartCefriumInspector(
     enabled: Boolean,
     mainBrowserReady: Boolean,

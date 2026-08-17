@@ -1,10 +1,24 @@
 package com.termux.extensions
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CefriumInspectorLifecycleTest {
+    private val surface = AndroidDevRuntimeSurface(
+        surfaceId = "run-profile:test",
+        profileId = "test",
+        targetId = "run-profile:test",
+        targetLabel = "Run test",
+        devRuntime = true,
+        devTools = true,
+        workerIdBase = "rp-test",
+        workerLabel = "run-profile:test",
+        frameworkOrigin = "http://127.0.0.1:8089",
+        origins = setOf("http://127.0.0.1:8000"),
+    )
+
     @Test
     fun inspectorLifetimeIsOwnedByTheLoadedAppShell() {
         assertFalse(shouldStartCefriumInspector(true, false, true))
@@ -68,5 +82,58 @@ class CefriumInspectorLifecycleTest {
     @Test
     fun childFrameLoadsCannotRestartAnEstablishedClientHandshake() {
         assertFalse(shouldRequestCefriumInspectorClientReady(false, true))
+    }
+
+    @Test
+    fun identicalRuntimePolicyDoesNotReconcileAgain() {
+        val current = cefriumDevToolsPolicy(
+            runProfilesEnabled = true,
+            debugTargetsEnabled = false,
+            surfaces = listOf(surface),
+        )
+        val next = cefriumDevToolsPolicy(
+            runProfilesEnabled = true,
+            debugTargetsEnabled = false,
+            surfaces = listOf(surface.copy()),
+        )
+
+        assertFalse(shouldReconcileCefriumDevToolsPolicy(current, next))
+    }
+
+    @Test
+    fun settingsOrSurfaceChangesStillReconcile() {
+        val current = cefriumDevToolsPolicy(
+            runProfilesEnabled = true,
+            debugTargetsEnabled = false,
+            surfaces = listOf(surface),
+        )
+
+        assertTrue(
+            shouldReconcileCefriumDevToolsPolicy(
+                current,
+                current.copy(debugTargetsEnabled = true),
+            ),
+        )
+        assertTrue(
+            shouldReconcileCefriumDevToolsPolicy(
+                current,
+                cefriumDevToolsPolicy(
+                    runProfilesEnabled = true,
+                    debugTargetsEnabled = false,
+                    surfaces = listOf(surface.copy(origins = setOf("http://127.0.0.1:9000"))),
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun disabledRunProfileInspectionRetainsOnlyDevRuntimePolicy() {
+        val policy = cefriumDevToolsPolicy(
+            runProfilesEnabled = false,
+            debugTargetsEnabled = false,
+            surfaces = listOf(surface.copy(devRuntime = false), surface.copy(surfaceId = "runtime")),
+        )
+
+        assertEquals(setOf("runtime"), policy.surfaces.keys)
     }
 }
