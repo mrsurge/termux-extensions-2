@@ -49,6 +49,7 @@ class AndroidDevRuntimeSurfaceRegistryTest {
         assertEquals("run-profile:project:preview", surface.targetId)
         assertEquals("Preview", surface.targetLabel)
         assertTrue(surface.devRuntime)
+        assertEquals("http://127.0.0.1:44000", surface.frameworkOrigin)
         assertTrue(surface.origins.contains("http://localhost:43123"))
         assertTrue(surface.origins.contains("http://127.0.0.1:43123"))
         assertEquals(1, registry.snapshot().size)

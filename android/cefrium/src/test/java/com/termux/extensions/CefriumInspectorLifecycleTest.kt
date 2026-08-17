@@ -6,12 +6,28 @@ import org.junit.Test
 
 class CefriumInspectorLifecycleTest {
     @Test
-    fun inspectorWaitsForMainPageAndVisibleInspectorTab() {
-        assertFalse(shouldStartCefriumInspector(true, false, true, true))
-        assertFalse(shouldStartCefriumInspector(true, true, false, true))
-        assertFalse(shouldStartCefriumInspector(true, true, true, false))
-        assertFalse(shouldStartCefriumInspector(false, true, true, true))
-        assertTrue(shouldStartCefriumInspector(true, true, true, true))
+    fun inspectorLifetimeIsOwnedByTheLoadedAppShell() {
+        assertFalse(shouldStartCefriumInspector(true, false, true))
+        assertFalse(shouldStartCefriumInspector(true, true, false))
+        assertFalse(shouldStartCefriumInspector(false, true, true))
+        assertTrue(shouldStartCefriumInspector(true, true, true))
+    }
+
+    @Test
+    fun devRuntimeInstrumentationDoesNotRequireInspectorSettings() {
+        assertFalse(shouldStartCefriumDevToolsRuntime(false, true, false, true))
+        assertFalse(shouldStartCefriumDevToolsRuntime(false, true, true, false))
+        assertFalse(shouldStartCefriumDevToolsRuntime(false, false, true, true))
+        assertTrue(shouldStartCefriumDevToolsRuntime(false, true, true, true))
+        assertTrue(shouldStartCefriumDevToolsRuntime(true, false, true, true))
+    }
+
+    @Test
+    fun retainedInspectorResumesOnlyForTheActivityLifecycle() {
+        assertFalse(shouldResumeCefriumInspectorBrowser(false, true, true))
+        assertTrue(shouldResumeCefriumInspectorBrowser(true, true, false))
+        assertFalse(shouldResumeCefriumInspectorBrowser(true, false, false))
+        assertTrue(shouldResumeCefriumInspectorBrowser(true, false, true))
     }
 
     @Test

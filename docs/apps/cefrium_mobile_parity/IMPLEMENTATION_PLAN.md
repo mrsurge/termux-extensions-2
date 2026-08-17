@@ -38,7 +38,8 @@ shared by both renderers.
 
 1. Move renderer-neutral Tools state and remote-app health decisions into the
    shared Android source set.
-2. Persist Cefrium Tools overlay visibility and selected supported tab.
+2. Persist Cefrium's selected supported Tools tab. Scope overlay visibility to
+   one native app-header session and start each new header with Tools closed.
 3. Add a persistent Cefrium Processes browser loaded from the relay's `/fws`
    path.
 4. Apply GeckoView's authoritative remote-app fallback rule to Cefrium: only
@@ -92,19 +93,19 @@ shared by both renderers.
    Cefrium browser. Its exact local asset document exchanges raw CDP messages
    through `cefriumQuery`; the Inspector browser itself is excluded from the
    selectable target list.
-6. Defer the first Inspector runtime/browser startup until the main Cefrium
-   browser completes a real framework-relay document navigation and the
-   persisted Tools state actually exposes the Inspector tab. Once started, keep
-   that runtime/browser persistent while the Tools drawer is hidden.
+6. Scope Inspector runtime/browser lifetime to one native app-header appearance.
+   Start it in the background after the main Cefrium browser completes a real
+   framework-relay app document navigation, and retain it while Tools is hidden,
+   another Tools tab is selected, or the app is backgrounded. Destroy it when
+   the header disappears or the app returns to the launcher.
 7. Treat the Inspector document's `client_ready` query as its readiness
    authority. Browser-wide loading callbacks include Chii child-frame loads and
    must never clear client readiness or target-generation delivery; doing so
    creates a `target_reset` -> iframe recreation -> load callback feedback loop.
-8. Treat initial display, return from another Tools tab, and Activity resume as
-   idempotent Inspector activation barriers. Reassert `client_ready` when the
-   document is not connected; otherwise replay the complete target snapshot and
-   active generation. The Inspector document must ignore a replay of its current
-   generation rather than recreating Chii.
+8. On the first gear open in each header session, force-reselect the first
+   available target exactly once, including an already-active sole target. If
+   discovery has not produced a target, retain the one-shot request until it
+   does. This intentionally executes the proven target-switch reset path.
 9. Reconnect the browser control channel event-wise and republish target
    creation, mutation, destruction, attachment, and protocol messages. No
    framework or target polling is permitted.
@@ -146,6 +147,64 @@ shared by both renderers.
 4. Enable Chromium's existing SurfaceControl magnifier before installing the
    ActionMode callback. Do not create a parallel application-owned magnifier.
 
+## Phase 8: Deterministic Model Transitions
+
+This is a cross-client Code TE2 correction. Cefrium and Gecko expose the race
+more readily because mobile scheduling stretches the interval between two
+competing open paths; the intended result is one deterministic transaction on
+every renderer.
+
+1. Make the post-visible-verification `openFileFlow` call the sole canonical WBA
+   open for a foreground file transition. Visible open completion remains
+   independent of WBA acknowledgement.
+2. Restrict `editor.modelReady` to backend notification. It must not initiate a
+   second WBA open or hydrate the complete provider snapshot.
+3. Remove `te2.resync` from the Python `modelReady` handler. Full WBA provider
+   and webview resync is reserved for genuine frontend connection/reconnection,
+   not ordinary model switches.
+4. Make WBA same-path, same-generation opens idempotent. A duplicate must not
+   reread disk, replace full text, clear dirty state, increment the document
+   version, emit another active-document transition, or invalidate prewarmed
+   semantic tokens.
+5. Create and attach the replacement Monaco model before disposing the detached
+   previous model. Disposal must never briefly leave the visible editor bound
+   to a disposed model.
+6. Preserve the existing draft-safe foreground synchronization barrier and the
+   authoritative Python open-state projection. This phase removes duplicate
+   work; it does not move active-file authority into the browser or WBA.
+7. Add transaction-scoped timing and focused regression coverage proving one
+   visible verification, one canonical WBA open, no per-open global resync, and
+   no same-generation full-text replacement.
+
+## Phase 9: Rust Proxy And Pipe Scheduling
+
+The Rust framework is already a multi-threaded Tokio server. The first fixes
+must remove synchronous work from its request and async dispatch hot paths;
+adding processes or worker threads before that would preserve the underlying
+contention while adding state-coordination complexity.
+
+1. Retain the loaded `AppRegistry` in `AppState` behind shared read ownership.
+   Refresh it only through explicit registry reload rather than reconstructing
+   it during every dynamic app-proxy request.
+2. Build an in-memory running-app index from one startup Framework-Shells
+   snapshot plus existing start/stop/lifecycle events. Proxy lookup must not
+   scan every FWS metadata directory, parse every `meta.json`, and probe
+   `/proc/<pid>/stat` for each request.
+3. Preserve exact app-worker identity and stale-process handling while moving
+   those checks to lifecycle reconciliation. A request may perform a bounded
+   validation only when its indexed entry is ambiguous or stale, not as the
+   normal path.
+4. Replace direct blocking Ferrous pipe writes from async dispatch tasks with
+   one bounded, ordered writer queue and dedicated blocking writer task/thread
+   per app-worker pipe bridge.
+5. Define queue backpressure and shutdown behavior explicitly: required
+   responses and ordered events cannot reorder or disappear; a closed or failed
+   writer fails pending sends deterministically and does not block a Tokio
+   worker indefinitely.
+6. Re-run proxy/direct latency and file-switch traces after both changes. Tune
+   Tokio worker count or consider process separation only if evidence still
+   shows scheduler starvation after synchronous scans and writes are removed.
+
 ## Validation
 
 Code TE2:
@@ -155,6 +214,19 @@ cd app/apps/code_te2
 npm run typecheck
 node build.mjs
 ```
+
+Rust framework:
+
+```bash
+cd framework/rust
+cargo fmt --all -- --check
+cargo check -p te2-server
+cargo test -p te2-server
+```
+
+Focused regression coverage must additionally exercise duplicate foreground
+open coalescing, true WBA reconnect resync, dynamic app-proxy lookup after app
+start/stop/reload, ordered pipe delivery, writer failure, and queue shutdown.
 
 Android, after confirming at least 2 GiB free:
 
@@ -173,7 +245,8 @@ outside this slice. Cefrium APK installation is separately approved.
 
 - Cefrium no longer waits for or identifies itself through Gecko-only bridges.
 - Cefrium has stable native installation identity across page reloads.
-- Console/Processes Tools state survives overlay close and Activity recreation.
+- Console/Processes selected-tab state survives Activity recreation; Cefrium
+  overlay visibility resets for each new app-header session.
 - Cefrium remote-app fallback matches GeckoView's authoritative health rule.
 - Registered Cefrium dev-runtime surfaces are validated and retained by exact
   `surfaceId`, with cache and console-injection capabilities reported as false.
@@ -181,15 +254,26 @@ outside this slice. Cefrium APK installation is separately approved.
   transport and whether Sidebar surfaces are targets, frames, or execution
   contexts. A working implementation is browser-wide unless the runtime proves
   profile-scoped attachment is necessary.
-- Cefrium starts its Inspector only after the main page completes its first
-  relay-origin navigation. A stable target generation loads the Chii frontend
-  once and remains delivered across child-frame load notifications. Every
-  activation reconciles the existing Inspector client and authoritative target
-  snapshot without requiring a different target to be created or selected.
+- Cefrium starts its Inspector only after the main app page completes its first
+  relay-origin navigation. The first gear open force-reselects the first target
+  once, including a self-selection, while overlay close and app background keep
+  the session alive. Launcher return removes the header and destroys the
+  Inspector runtime/browser/targets.
 - Focusing Monaco Find or Replace does not change the Cefrium visual viewport
   scale or leave the page zoomed.
 - Cefrium native context actions execute against ordinary editable/selected
   content and do not conflict with Monaco's custom touch menu.
 - Header mutation and console-injection gaps remain explicit rather than being
   conflated with the separate native Inspector transport.
+- A foreground file transition performs one canonical WBA open only after the
+  expected Monaco URI is attached and visible. `modelReady` causes no provider
+  replay, duplicate document open, disk reread, or dirty-state reset.
+- Genuine WBA frontend reconnect still receives the complete provider/webview
+  resync projection, while ordinary file switches do not.
+- Dynamic app proxying resolves from current in-memory registry/runtime state;
+  the normal request path performs no complete FWS metadata or `/proc` scan.
+- Ferrous app-worker pipe output preserves strict ordering without performing a
+  blocking write on a Tokio runtime worker.
+- Mobile local file-switch and proxied-request latency no longer depends on a
+  timing race that a faster desktop processor merely hides.
 - GeckoView comparison tests/build continue to pass.

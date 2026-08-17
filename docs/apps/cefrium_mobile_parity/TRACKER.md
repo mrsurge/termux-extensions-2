@@ -4,8 +4,10 @@
 
 - Branch: `feature/cefrium-parity-mobile-ui`
 - Base: synchronized `main` at `1b1e80b6`
-- State: implementation and automated validation complete; initial native
-  Inspector activation accepted, with remaining context-action/lifecycle QA
+- State: Cefrium parity implementation and automated validation complete;
+  native Inspector app-header lifecycle and initial target reselection accepted.
+  Cross-client model-transition and Rust scheduling fixes are source-backed and
+  planned but not yet implemented.
 
 ## Source-Backed Findings
 
@@ -24,6 +26,26 @@
 - [x] Cefrium request interception can observe or block requests but cannot
   safely provide Gecko-style response-header mutation or child-frame script
   injection by itself.
+- [x] The Rust server is already multi-threaded: the inspected release runtime
+  used 18 Tokio worker threads. Process splitting is not the first remedy for
+  the observed mobile latency.
+- [x] Foreground model switching currently has two WBA open initiators. The
+  `modelReady` path starts a WBA open and full provider/webview resync before the
+  open transaction performs its canonical post-visibility WBA open.
+- [x] On a slower client, the first open can settle before the second reaches
+  WBA, turning coalescing into a real same-file reopen. That path rereads disk,
+  replaces full text with `dirty=false`, emits another active-document change,
+  and forces draft, diagnostic, and semantic-token recovery work.
+- [x] Live WBA traces captured duplicate open sequences, including one
+  same-file reopen whose full-text replacement advanced the model from v1 to
+  v2. Provider hydration ranged from roughly 150 ms to 1.66 s, while ordinary
+  WBA document-open processing was generally 1-6 ms.
+- [x] Dynamic app proxy lookup currently reloads app registry state and scans
+  Framework-Shell metadata plus `/proc` process state synchronously on the
+  request path. The inspected runtime had 169 metadata records.
+- [x] App-worker pipe reads already run through `spawn_blocking`, but async
+  dispatch can still invoke the blocking pipe-write function directly on a
+  Tokio worker.
 
 ## Implementation
 
@@ -76,9 +98,11 @@
   surfaces, persisted Tools state, remote-app health behavior, and Run Target
   registration operate correctly in the live application.
 - [x] The shared changes did not regress the live GeckoView comparison client.
-- [x] Cefrium Inspector now initializes directly from a persisted visible
-  Inspector tab after the app page loads; it no longer requires opening
-  Processes, selecting FWS, and then switching back to the app target.
+- [x] Cefrium Inspector now starts in the background after the app page loads.
+  The first gear open force-reselects the first available target once, so the
+  user no longer has to open Processes or manually switch away and back.
+- [x] User accepted the app-header-scoped Inspector lifecycle and automatic
+  same-target nudge on a live Cefrium device on 2026-08-16.
 
 ## Inspector And Target Ownership
 
@@ -99,18 +123,18 @@
   callback observing Chii's child iframe and clearing target delivery on every
   nested load.
 - [x] Make `client_ready` the Inspector document-readiness authority, preserve
-  delivered target generations across child-frame loads, and defer first
-  Inspector startup until the main relay-origin page has loaded and Inspector
-  is visible.
+  delivered target generations across child-frame loads, and start the
+  background Inspector only after the main relay-origin app page has loaded.
 - [x] Add unit coverage for the deferred-start and one-delivery-per-generation
   lifecycle gates; `:cefrium:testDebugUnitTest` and `:cefrium:assembleDebug`
   pass.
-- [x] Reconcile every Inspector activation edge: a not-yet-ready document
-  explicitly reasserts `client_ready`, while an established document receives
-  the authoritative target snapshot and current generation. Duplicate
-  generation replay is idempotent and does not recreate Chii.
-- [ ] Verify hidden, reopened, navigated, detached where applicable, and removed
-  Sidebar surface lifecycle.
+- [x] Scope Inspector lifetime to one native app-header appearance. Overlay
+  close, tab changes, and app background retain it; launcher return or header
+  removal destroys its browser, CDP runtime, targets, and one-shot state.
+- [x] Force-reselect the first available target on the first gear open, even
+  when that target is already active; defer the one-shot until discovery when
+  necessary.
+- [ ] Verify detached where applicable and removed Sidebar surface lifecycle.
 
 ## Monaco Focus Zoom
 
@@ -143,14 +167,49 @@
   application-owned `Magnifier`.
 - [ ] Complete physical-device magnifier acceptance.
 
+## Deterministic Model Transitions
+
+- [ ] Make post-visible-verification `openFileFlow` the sole foreground WBA
+  open initiator.
+- [ ] Restrict `editor.modelReady` to backend notification; remove its WBA open
+  flush and provider-snapshot hydration.
+- [ ] Remove Python's per-modelReady `te2.resync`; retain full resync only for a
+  genuine WBA frontend connection/reconnection.
+- [ ] Make same-path, same-generation WBA opens no-op without disk reread,
+  full-text replacement, version advance, active-change replay, or semantic
+  cache invalidation.
+- [ ] Attach the replacement Monaco model before disposing the detached prior
+  model.
+- [ ] Add focused tests for one canonical open, reconnect-only resync,
+  same-generation idempotence, draft preservation, and model disposal order.
+- [ ] Compare mobile and desktop transaction traces after the fix and prove the
+  duplicate-open/provider-replay sequence is absent.
+
+## Rust Proxy And Pipe Scheduling
+
+- [ ] Store the loaded app registry in shared `AppState` and update it through
+  explicit registry reload.
+- [ ] Maintain a running-app index from startup snapshot and lifecycle events.
+- [ ] Remove complete FWS metadata and `/proc` scans from the normal dynamic
+  app-proxy request path while preserving bounded stale-entry reconciliation.
+- [ ] Route app-worker pipe output through a bounded ordered writer queue and a
+  dedicated blocking writer task/thread.
+- [ ] Specify and test backpressure, strict ordering, shutdown, and writer-error
+  propagation.
+- [ ] Re-run direct-versus-proxied request benchmarks and model-switch traces.
+- [ ] Consider Tokio worker-count tuning or process separation only if the
+  post-fix evidence still shows runtime starvation.
+
 ## Deferred
 
-- The completed parity slice, Cefrium Find zoom correction, and direct initial
-  Inspector activation have live user acceptance. Broader hidden/reopened
-  Inspector lifecycle, native context actions, and magnifier still require
-  targeted device QA.
+- The completed parity slice, Cefrium Find zoom correction, and app-header-owned
+  Inspector activation have live user acceptance. Native context actions and
+  magnifier still require targeted device QA.
 - Cefrium Run Profile cache-header mutation and cross-origin console injection
   remain deferred until the SDK exposes response mutation or child-frame/CDP
   control. The native registry reports both capabilities as false.
 - Broad visual redesign follows live Cefrium inspection rather than being
   inferred during this parity slice.
+- Multiprocess proxying and a separate Python worker remain last-resort options.
+  They are deferred until deterministic model transitions, cached proxy lookup,
+  and nonblocking async pipe dispatch are implemented and remeasured.

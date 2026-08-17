@@ -12,6 +12,7 @@ internal data class AndroidDevRuntimeSurface(
     val devTools: Boolean,
     val workerIdBase: String,
     val workerLabel: String,
+    val frameworkOrigin: String,
     val origins: Set<String>,
 )
 
@@ -60,6 +61,7 @@ internal class AndroidDevRuntimeSurfaceRegistry {
                 .ifEmpty { "rp-prof" },
             workerLabel = runtime.optString("workerLabel").trim().take(256)
                 .ifEmpty { surfaceId },
+            frameworkOrigin = frameworkOrigin,
             origins = origins,
         )
         surfaces[surfaceId] = surface

@@ -92,6 +92,8 @@ class MainActivity : AppCompatActivity() {
     private var inspectorClientReady = false
     private var inspectorPageLoaded = false
     private var inspectorDeliveredGeneration = 0L
+    private var inspectorInitialTargetNudgeRequested = false
+    private var inspectorInitialTargetNudgeCompleted = false
     private var inspectorPickerUpdating = false
     private var inspectorTargets = emptyList<CefriumDevToolsTarget>()
     private var inspectorActiveTargetId: String? = null
@@ -130,6 +132,7 @@ class MainActivity : AppCompatActivity() {
                 renderInspectorTargets()
                 publishInspectorTargetsToPage()
                 updateInspectorSurface()
+                performInitialInspectorTargetNudge()
             }
         }
 
@@ -201,10 +204,23 @@ class MainActivity : AppCompatActivity() {
                         .put("configuredEnabled", devToolsInspectorEnabled)
                         .put("runProfilesEnabled", devToolsRunProfilesEnabled)
                         .put("debugTargetsEnabled", devToolsDebugEnabled)
+                        .put("appShellActive", inAppShell)
                         .put("mainBrowserReady", mainBrowserReady)
+                        .put(
+                            "registeredRuntimeSurfaceCount",
+                            clientRuntimeService?.devRuntimeSurfaceSnapshot()?.size ?: 0,
+                        )
                         .put("inspectorPageLoaded", inspectorPageLoaded)
                         .put("inspectorClientReady", inspectorClientReady)
                         .put("inspectorDeliveredGeneration", inspectorDeliveredGeneration)
+                        .put(
+                            "inspectorInitialTargetNudgeRequested",
+                            inspectorInitialTargetNudgeRequested,
+                        )
+                        .put(
+                            "inspectorInitialTargetNudgeCompleted",
+                            inspectorInitialTargetNudgeCompleted,
+                        )
                         .put(
                             "inspectorDocumentUrl",
                             inspectorBrowser?.url ?: JSONObject.NULL,
@@ -438,7 +454,7 @@ class MainActivity : AppCompatActivity() {
                     selectionIntegration.installWhenReady()
                     browser.evaluateJavaScript(CefriumPagePolicy.installScript())
                     if (
-                        !mainBrowserReady &&
+                        inAppShell &&
                         browser.url.isNotBlank() &&
                         isRelayOrigin(browser.url)
                     ) {
@@ -515,7 +531,12 @@ class MainActivity : AppCompatActivity() {
         if (pendingColdRestorePath == null || isAppPath(currentPath)) {
             prefs().edit().putString(KEY_LAST_PATH, currentPath).apply()
         }
+        val wasInAppShell = inAppShell
         inAppShell = isAppPath(currentPath)
+        when {
+            !wasInAppShell && inAppShell -> beginAppShellInspectorSession()
+            wasInAppShell && !inAppShell -> endAppShellInspectorSession()
+        }
         nativeHeader.visibility = if (inAppShell) View.VISIBLE else View.GONE
         if (inAppShell) {
             parsed.path
@@ -635,7 +656,9 @@ class MainActivity : AppCompatActivity() {
         uiHandler.removeCallbacks(appHealthCheckRunnable)
         appHealthFailureCount = 0
         currentPath = LAUNCHER_PATH
+        val wasInAppShell = inAppShell
         inAppShell = false
+        if (wasInAppShell) endAppShellInspectorSession()
         nativeHeader.visibility = View.GONE
         if (!preservePendingRestore) {
             prefs().edit().putString(KEY_LAST_PATH, currentPath).apply()
@@ -700,13 +723,13 @@ class MainActivity : AppCompatActivity() {
                     callback.failure(400, error.message ?: "Run Profile registration is invalid")
                     return true
                 }
-                syncDevToolsRuntimePolicy()
+                runOnUiThread(::syncDevToolsRuntimePolicy)
                 JSONObject()
                     .put("ok", true)
                     .put("surfaceId", surface.surfaceId)
                     .put("capabilities", JSONObject().apply {
                         put("cachePolicy", false)
-                        put("consoleInjection", false)
+                        put("consoleInjection", surface.devRuntime)
                         put("devToolsTarget", surface.devTools)
                     })
             }
@@ -720,7 +743,7 @@ class MainActivity : AppCompatActivity() {
                     return true
                 }
                 clientRuntimeService?.releaseDevRuntimeSurface(surfaceId)
-                syncDevToolsRuntimePolicy()
+                runOnUiThread(::syncDevToolsRuntimePolicy)
                 JSONObject().put("ok", true).put("surfaceId", surfaceId)
             }
             else -> {
@@ -980,6 +1003,7 @@ class MainActivity : AppCompatActivity() {
         consoleOverlay.visibility = View.VISIBLE
         consoleTitle.text = "Tools · v${assetManager.getLocalVersion() ?: "unknown"}"
         persistToolsState(overlayVisible = true)
+        requestInitialInspectorTargetNudge()
         showToolsTab(toolsSelectedTab)
     }
 
@@ -987,7 +1011,6 @@ class MainActivity : AppCompatActivity() {
         consoleOverlay.visibility = View.GONE
         persistToolsState(overlayVisible = false)
         clientRuntimeService?.setConsoleDrawerEnabled(false)
-        inspectorBrowser?.onPause()
         processesBrowser?.onPause()
     }
 
@@ -1029,8 +1052,6 @@ class MainActivity : AppCompatActivity() {
         }
         if (inspectorSelected && consoleOverlay.visibility == View.VISIBLE) {
             ensureInspectorBrowser()
-        } else {
-            inspectorBrowser?.onPause()
         }
         if (processesSelected && consoleOverlay.visibility == View.VISIBLE) {
             ensureProcessesBrowser()
@@ -1049,26 +1070,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun restoreToolsSurfaceState() {
-        consoleOverlay.visibility = if (toolsState.overlayVisible) View.VISIBLE else View.GONE
         toolsSelectedTab = toolsState.selectedTab
+        consoleOverlay.visibility = View.GONE
+        persistToolsState(overlayVisible = false)
         showToolsTab(toolsSelectedTab)
-        if (!toolsState.overlayVisible) {
-            clientRuntimeService?.setConsoleDrawerEnabled(false)
-            inspectorBrowser?.onPause()
-            processesBrowser?.onPause()
-        }
+        clientRuntimeService?.setConsoleDrawerEnabled(false)
+        processesBrowser?.onPause()
     }
 
     private fun configureDevToolsInspector() {
         if (!devToolsInspectorEnabled) {
-            devToolsRuntime?.close()
-            devToolsRuntime = null
+            stopInspectorBrowser()
+            syncDevToolsRuntimePolicy()
             devToolsStatus = "disabled"
-            inspectorTargets = emptyList()
-            inspectorActiveTargetId = null
-            inspectorDeliveredGeneration = 0L
-            inspectorBrowser?.onPause()
-            renderInspectorTargets()
             updateInspectorSurface()
             return
         }
@@ -1078,25 +1092,92 @@ class MainActivity : AppCompatActivity() {
         updateInspectorSurface()
     }
 
-    private fun syncDevToolsRuntimePolicy() {
-        devToolsRuntime?.updatePolicy(
-            runProfilesEnabled = devToolsRunProfilesEnabled,
-            debugTargetsEnabled = devToolsDebugEnabled,
-            surfaces = clientRuntimeService?.devRuntimeSurfaceSnapshot().orEmpty(),
-        )
+    private fun stopDevToolsInspector() {
+        inspectorInitialTargetNudgeRequested = false
+        inspectorInitialTargetNudgeCompleted = false
+        stopDevToolsRuntime()
+        stopInspectorBrowser()
+        inspectorTargets = emptyList()
+        inspectorActiveTargetId = null
+        renderInspectorTargets()
     }
 
-    private fun ensureInspectorBrowser() {
+    private fun stopDevToolsRuntime() {
+        devToolsRuntime?.close()
+        devToolsRuntime = null
+    }
+
+    private fun stopInspectorBrowser() {
+        inspectorInitialTargetNudgeRequested = false
+        inspectorInitialTargetNudgeCompleted = false
+        inspectorBrowser?.let { inspector ->
+            if (::inspectorBrowserContainer.isInitialized) {
+                inspectorBrowserContainer.removeView(inspector.surfaceContainer)
+            }
+            inspector.close()
+        }
+        inspectorBrowser = null
+        inspectorClientReady = false
+        inspectorPageLoaded = false
+        inspectorDeliveredGeneration = 0L
+    }
+
+    private fun beginAppShellInspectorSession() {
+        mainBrowserReady = false
+        inspectorInitialTargetNudgeRequested = false
+        inspectorInitialTargetNudgeCompleted = false
+        consoleOverlay.visibility = View.GONE
+        persistToolsState(overlayVisible = false)
+        clientRuntimeService?.setConsoleDrawerEnabled(false)
+        processesBrowser?.onPause()
+    }
+
+    private fun endAppShellInspectorSession() {
+        consoleOverlay.visibility = View.GONE
+        persistToolsState(overlayVisible = false)
+        clientRuntimeService?.setConsoleDrawerEnabled(false)
+        processesBrowser?.onPause()
+        mainBrowserReady = false
+        stopDevToolsInspector()
+    }
+
+    private fun requestInitialInspectorTargetNudge() {
+        if (!inAppShell || inspectorInitialTargetNudgeCompleted) return
+        inspectorInitialTargetNudgeRequested = true
+        performInitialInspectorTargetNudge()
+    }
+
+    private fun performInitialInspectorTargetNudge() {
         if (
-            !shouldStartCefriumInspector(
-                enabled = devToolsInspectorEnabled,
+            !inAppShell ||
+            !inspectorInitialTargetNudgeRequested ||
+            inspectorInitialTargetNudgeCompleted
+        ) return
+        val target = inspectorTargets.firstOrNull() ?: return
+        val runtime = devToolsRuntime ?: return
+
+        // Mark the one-shot before reselecting because frame resets notify synchronously.
+        inspectorInitialTargetNudgeRequested = false
+        inspectorInitialTargetNudgeCompleted = true
+        if (!runtime.reselectTarget(target.targetId)) {
+            inspectorInitialTargetNudgeCompleted = false
+            inspectorInitialTargetNudgeRequested = true
+            return
+        }
+        persistToolsState(inspectorTargetId = target.targetId)
+    }
+
+    private fun syncDevToolsRuntimePolicy() {
+        val surfaces = clientRuntimeService?.devRuntimeSurfaceSnapshot().orEmpty()
+        if (
+            !shouldStartCefriumDevToolsRuntime(
+                inspectorEnabled = devToolsInspectorEnabled,
+                hasDevRuntimeSurface = surfaces.any { it.devRuntime },
                 mainBrowserReady = mainBrowserReady,
-                toolsVisible = ::consoleOverlay.isInitialized &&
-                    consoleOverlay.visibility == View.VISIBLE,
-                inspectorSelected = toolsSelectedTab == NativeToolsTab.INSPECTOR,
+                appShellActive = inAppShell,
             )
         ) {
-            updateInspectorSurface()
+            stopDevToolsRuntime()
             return
         }
         val runtime = devToolsRuntime ?: CefriumDevToolsRuntime(
@@ -1113,9 +1194,30 @@ class MainActivity : AppCompatActivity() {
             preferredTargetId = toolsState.inspectorTargetId,
             runProfilesEnabled = devToolsRunProfilesEnabled,
             debugTargetsEnabled = devToolsDebugEnabled,
-            surfaces = clientRuntimeService?.devRuntimeSurfaceSnapshot().orEmpty(),
+            surfaces = surfaces,
         )
-        val inspector = inspectorBrowser ?: CefriumBrowser.createWithSurface(this).also { next ->
+        runtime.updatePolicy(
+            runProfilesEnabled = devToolsRunProfilesEnabled,
+            debugTargetsEnabled = devToolsDebugEnabled,
+            surfaces = surfaces,
+        )
+    }
+
+    private fun ensureInspectorBrowser(resumeExisting: Boolean = false) {
+        syncDevToolsRuntimePolicy()
+        if (
+            !shouldStartCefriumInspector(
+                enabled = devToolsInspectorEnabled,
+                mainBrowserReady = mainBrowserReady,
+                appShellActive = inAppShell,
+            )
+        ) {
+            updateInspectorSurface()
+            return
+        }
+        if (devToolsRuntime == null) return
+        val existingInspector = inspectorBrowser
+        val inspector = existingInspector ?: CefriumBrowser.createWithSurface(this).also { next ->
             inspectorClientReady = false
             inspectorPageLoaded = false
             inspectorDeliveredGeneration = 0L
@@ -1152,8 +1254,16 @@ class MainActivity : AppCompatActivity() {
                     ?: return@also,
             )
         }
-        if (activityResumed) inspector.onResume()
-        reconcileInspectorClient(forceTargetReplay = true)
+        if (
+            shouldResumeCefriumInspectorBrowser(
+                activityResumed = activityResumed,
+                browserCreated = existingInspector == null,
+                resumeExisting = resumeExisting,
+            )
+        ) {
+            inspector.onResume()
+        }
+        reconcileInspectorClient(forceTargetReplay = false)
         updateInspectorSurface()
     }
 
@@ -1475,11 +1585,8 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         activityResumed = true
         if (::browser.isInitialized) browser.onResume()
-        if (
-            consoleOverlay.visibility == View.VISIBLE &&
-            toolsSelectedTab == NativeToolsTab.INSPECTOR
-        ) {
-            ensureInspectorBrowser()
+        if (inAppShell) {
+            ensureInspectorBrowser(resumeExisting = true)
         }
         if (
             consoleOverlay.visibility == View.VISIBLE &&

@@ -134,6 +134,41 @@ class CefriumDevToolsTargetTest {
     }
 
     @Test
+    fun parsesDevRuntimeMarkerWithoutExposingAnInspectorTarget() {
+        val payload = """{
+          "surfaceId":"run-profile:project:preview",
+          "targetId":"run-profile:project:preview",
+          "targetLabel":"Preview",
+          "devRuntime":true,
+          "devTools":false,
+          "frameworkOrigin":"http://127.0.0.1:44000"
+        }"""
+        val marker = "te2-run-profile:" + URLEncoder.encode(
+            payload,
+            StandardCharsets.UTF_8.name(),
+        )
+
+        assertEquals(
+            CefriumRunProfileMarker(
+                surfaceId = "run-profile:project:preview",
+                targetId = "run-profile:project:preview",
+                targetLabel = "Preview",
+                devRuntime = true,
+                devTools = false,
+                frameworkOrigin = "http://127.0.0.1:44000",
+            ),
+            parseCefriumRunProfileMarker(marker),
+        )
+        assertNull(parseCefriumDevToolsMarker(marker))
+    }
+
+    @Test
+    fun consoleWorkerPrefixIdentifiesCefrium() {
+        assertEquals("rp-prev-cfrm", cefriumConsoleWorkerPrefix("rp-prev"))
+        assertEquals("rp-prof-cfrm", cefriumConsoleWorkerPrefix(""))
+    }
+
+    @Test
     fun frameTargetWinsDefaultSelection() {
         val frame = CefriumDevToolsTarget(
             targetId = "profile",

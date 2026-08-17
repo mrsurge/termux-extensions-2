@@ -33,13 +33,20 @@ android {
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "../app/proguard-rules.pro",
+                "proguard-rules.pro",
             )
         }
         create("staging") {
             isDebuggable = false
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             signingConfig = signingConfigs.getByName("debug")
             matchingFallbacks += listOf("release")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "../app/proguard-rules.pro",
+                "proguard-rules.pro",
+            )
         }
     }
 

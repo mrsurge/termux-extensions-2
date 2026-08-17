@@ -3,9 +3,22 @@ package com.termux.extensions
 internal fun shouldStartCefriumInspector(
     enabled: Boolean,
     mainBrowserReady: Boolean,
-    toolsVisible: Boolean,
-    inspectorSelected: Boolean,
-): Boolean = enabled && mainBrowserReady && toolsVisible && inspectorSelected
+    appShellActive: Boolean,
+): Boolean = enabled && mainBrowserReady && appShellActive
+
+internal fun shouldStartCefriumDevToolsRuntime(
+    inspectorEnabled: Boolean,
+    hasDevRuntimeSurface: Boolean,
+    mainBrowserReady: Boolean,
+    appShellActive: Boolean,
+): Boolean =
+    (inspectorEnabled || hasDevRuntimeSurface) && mainBrowserReady && appShellActive
+
+internal fun shouldResumeCefriumInspectorBrowser(
+    activityResumed: Boolean,
+    browserCreated: Boolean,
+    resumeExisting: Boolean,
+): Boolean = activityResumed && (browserCreated || resumeExisting)
 
 internal fun shouldDeliverCefriumInspectorGeneration(
     clientReady: Boolean,

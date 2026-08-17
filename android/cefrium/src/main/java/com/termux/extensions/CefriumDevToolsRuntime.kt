@@ -14,11 +14,13 @@ import java.net.URI
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.Executors
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
 private const val DEVTOOLS_TARGET_WINDOW_NAME_PREFIX = "te2-devtools:"
+private const val RUN_PROFILE_RUNTIME_WINDOW_NAME_PREFIX = "te2-run-profile:"
 
 internal data class CefriumDevToolsTarget(
     val targetId: String,
@@ -60,30 +62,66 @@ internal data class CefriumDevToolsMarker(
     val targetLabel: String,
 )
 
-internal fun parseCefriumDevToolsMarker(windowName: String): CefriumDevToolsMarker? {
-    if (!windowName.startsWith(DEVTOOLS_TARGET_WINDOW_NAME_PREFIX)) return null
+internal data class CefriumRunProfileMarker(
+    val surfaceId: String,
+    val targetId: String,
+    val targetLabel: String,
+    val devRuntime: Boolean,
+    val devTools: Boolean,
+    val frameworkOrigin: String,
+)
+
+internal fun parseCefriumRunProfileMarker(windowName: String): CefriumRunProfileMarker? {
+    val prefix = when {
+        windowName.startsWith(DEVTOOLS_TARGET_WINDOW_NAME_PREFIX) ->
+            DEVTOOLS_TARGET_WINDOW_NAME_PREFIX
+        windowName.startsWith(RUN_PROFILE_RUNTIME_WINDOW_NAME_PREFIX) ->
+            RUN_PROFILE_RUNTIME_WINDOW_NAME_PREFIX
+        else -> return null
+    }
     return try {
-        val encoded = windowName.substring(DEVTOOLS_TARGET_WINDOW_NAME_PREFIX.length)
+        val encoded = windowName.substring(prefix.length)
         val payload = JSONObject(
             URLDecoder.decode(encoded, StandardCharsets.UTF_8.name()),
         )
-        if (!payload.optBoolean("devTools", false)) return null
+        val devRuntime = payload.optBoolean("devRuntime", false)
+        val devTools = payload.optBoolean("devTools", false)
+        if (!devRuntime && !devTools) return null
+        if (prefix == DEVTOOLS_TARGET_WINDOW_NAME_PREFIX && !devTools) return null
+        if (prefix == RUN_PROFILE_RUNTIME_WINDOW_NAME_PREFIX && (!devRuntime || devTools)) {
+            return null
+        }
         val surfaceId = payload.optString("surfaceId").trim()
         val targetId = payload.optString("targetId").trim().ifEmpty { surfaceId }
         if (
             surfaceId.isEmpty() || surfaceId.length > 256 ||
             targetId.isEmpty() || targetId.length > 256
         ) return null
-        CefriumDevToolsMarker(
+        CefriumRunProfileMarker(
             surfaceId = surfaceId,
             targetId = targetId,
             targetLabel = payload.optString("targetLabel").trim().take(256)
                 .ifEmpty { targetId },
+            devRuntime = devRuntime,
+            devTools = devTools,
+            frameworkOrigin = payload.optString("frameworkOrigin").trim(),
         )
     } catch (_: Exception) {
         null
     }
 }
+
+internal fun parseCefriumDevToolsMarker(windowName: String): CefriumDevToolsMarker? {
+    val marker = parseCefriumRunProfileMarker(windowName)?.takeIf { it.devTools } ?: return null
+    return CefriumDevToolsMarker(
+        surfaceId = marker.surfaceId,
+        targetId = marker.targetId,
+        targetLabel = marker.targetLabel,
+    )
+}
+
+internal fun cefriumConsoleWorkerPrefix(workerIdBase: String): String =
+    "${workerIdBase.trim().ifEmpty { "rp-prof" }}-cfrm"
 
 internal fun chooseCefriumDevToolsTarget(
     targets: Collection<CefriumDevToolsTarget>,
@@ -143,9 +181,15 @@ internal class CefriumDevToolsRuntime(
     private data class FrameCandidate(
         val context: FrameContext,
         val surface: AndroidDevRuntimeSurface,
+        val marker: CefriumRunProfileMarker,
         val url: String,
         val title: String,
         val bindingName: String,
+    )
+
+    private data class ConsoleSources(
+        val socketIo: String,
+        val consoleBridge: String,
     )
 
     private sealed interface PendingCommand {
@@ -154,11 +198,15 @@ internal class CefriumDevToolsRuntime(
         data class MarkerProbe(val context: FrameContext) : PendingCommand
         data class BindingInstall(val candidate: FrameCandidate) : PendingCommand
         data class RuntimeInstall(val candidate: FrameCandidate) : PendingCommand
+        data class ConsoleInstall(val candidate: FrameCandidate) : PendingCommand
     }
 
     private val lock = Any()
     private val scheduler: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { task ->
         Thread(task, "cefrium-devtools-control").apply { isDaemon = true }
+    }
+    private val sourceExecutor: ExecutorService = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "cefrium-console-source").apply { isDaemon = true }
     }
     private val commandId = AtomicLong(CONTROL_COMMAND_START)
     private val targets = linkedMapOf<String, CefriumDevToolsTarget>()
@@ -167,6 +215,9 @@ internal class CefriumDevToolsRuntime(
     private val monitorAttachTargets = mutableSetOf<String>()
     private val contexts = mutableMapOf<String, FrameContext>()
     private val contextTargets = mutableMapOf<String, String>()
+    private val consoleContexts = mutableMapOf<String, String>()
+    private val pendingConsoleContexts = mutableSetOf<String>()
+    private val consoleSourceCache = mutableMapOf<String, ConsoleSources>()
     private val pendingCommands = mutableMapOf<Long, PendingCommand>()
     private val surfaces = mutableMapOf<String, AndroidDevRuntimeSurface>()
 
@@ -182,6 +233,8 @@ internal class CefriumDevToolsRuntime(
     private var activeTargetId: String? = null
     private var activeSessionId: String? = null
     private var targetGeneration = 0L
+    private var consoleInjectionCount = 0L
+    private var lastConsoleInjectionError: String? = null
     private var status = "disabled"
 
     fun start(
@@ -241,7 +294,7 @@ internal class CefriumDevToolsRuntime(
         this.debugTargetsEnabled = debugTargetsEnabled
         surfaces.clear()
         nextSurfaces
-            .filter { it.devTools }
+            .filter { it.devRuntime || (runProfilesEnabled && it.devTools) }
             .forEach { surfaces[it.surfaceId] = it }
     }
 
@@ -250,6 +303,19 @@ internal class CefriumDevToolsRuntime(
         if (normalized.isEmpty()) return
         synchronized(lock) { desiredTargetId = normalized }
         activateDesiredTarget()
+    }
+
+    fun reselectTarget(targetId: String): Boolean {
+        val normalized = targetId.trim()
+        if (normalized.isEmpty()) return false
+        val available = synchronized(lock) {
+            if (!targets.containsKey(normalized)) return@synchronized false
+            desiredTargetId = normalized
+            true
+        }
+        if (!available) return false
+        activateDesiredTarget(force = true)
+        return true
     }
 
     fun sendProtocol(payload: String): Boolean {
@@ -305,6 +371,10 @@ internal class CefriumDevToolsRuntime(
             .put("monitorSessionCount", monitorSessions.size)
             .put("executionContextCount", contexts.size)
             .put("registeredSurfaceCount", surfaces.size)
+            .put("consoleInjectedContextCount", consoleContexts.size)
+            .put("consoleInjectionPendingCount", pendingConsoleContexts.size)
+            .put("consoleInjectionCount", consoleInjectionCount)
+            .put("lastConsoleInjectionError", lastConsoleInjectionError ?: JSONObject.NULL)
             .put("activeTargetId", activeTargetId ?: JSONObject.NULL)
             .put("desiredTargetId", desiredTargetId ?: JSONObject.NULL)
             .put("targetGeneration", targetGeneration)
@@ -314,6 +384,13 @@ internal class CefriumDevToolsRuntime(
     }
 
     private fun reconcilePolicy() {
+        val staleConsoleContexts = synchronized(lock) {
+            consoleContexts.filter { (contextKey, surfaceId) ->
+                contexts[contextKey] == null || surfaces[surfaceId]?.devRuntime != true
+            }.keys.toList()
+        }
+        staleConsoleContexts.forEach(::removeConsoleContext)
+
         val removeTargetIds = synchronized(lock) {
             targets.values.filter { target ->
                 if (target.isFrameTarget) {
@@ -332,7 +409,7 @@ internal class CefriumDevToolsRuntime(
             }
         }
         val shouldMonitor = synchronized(lock) {
-            runProfilesEnabled && surfaces.isNotEmpty()
+            surfaces.isNotEmpty()
         }
         if (shouldMonitor) {
             browserSnapshot.forEach { ensureMonitorAttached(it.targetId) }
@@ -531,11 +608,11 @@ internal class CefriumDevToolsRuntime(
             return
         }
         val shouldMonitor: Boolean
-        synchronized(lock) {
-            browserTargets[target.targetId] = target
+            synchronized(lock) {
+                browserTargets[target.targetId] = target
             if (debugTargetsEnabled) targets[target.targetId] = target
             else if (targets[target.targetId]?.isFrameTarget != true) targets.remove(target.targetId)
-            shouldMonitor = runProfilesEnabled && surfaces.isNotEmpty()
+            shouldMonitor = surfaces.isNotEmpty()
         }
         if (shouldMonitor) ensureMonitorAttached(target.targetId)
         publishTargetsAndActivateIfNeeded()
@@ -558,7 +635,7 @@ internal class CefriumDevToolsRuntime(
     private fun ensureMonitorAttached(targetId: String) {
         val shouldAttach = synchronized(lock) {
             if (
-                !started || !runProfilesEnabled || surfaces.isEmpty() || controlSocket == null ||
+                !started || surfaces.isEmpty() || controlSocket == null ||
                 !browserTargets.containsKey(targetId) ||
                 monitorSessions.values.any { it.browserTargetId == targetId } ||
                 !monitorAttachTargets.add(targetId)
@@ -616,7 +693,7 @@ internal class CefriumDevToolsRuntime(
         removeMonitorSession(sessionId)
         if (
             browserTargetId != null &&
-            synchronized(lock) { runProfilesEnabled && surfaces.isNotEmpty() }
+            synchronized(lock) { surfaces.isNotEmpty() }
         ) {
             ensureMonitorAttached(browserTargetId)
         }
@@ -635,7 +712,7 @@ internal class CefriumDevToolsRuntime(
 
     private fun handleExecutionContextCreated(sessionId: String?, params: JSONObject?) {
         if (sessionId == null || params == null) return
-        if (synchronized(lock) { !runProfilesEnabled || !monitorSessions.containsKey(sessionId) }) {
+        if (synchronized(lock) { !monitorSessions.containsKey(sessionId) }) {
             return
         }
         val contextPayload = params.optJSONObject("context") ?: return
@@ -656,7 +733,7 @@ internal class CefriumDevToolsRuntime(
 
     private fun probeFrameContext(context: FrameContext) {
         if (synchronized(lock) {
-                !runProfilesEnabled || surfaces.isEmpty() || contexts[context.key] != context
+                surfaces.isEmpty() || contexts[context.key] != context
             }
         ) return
         sendInternal(
@@ -679,6 +756,7 @@ internal class CefriumDevToolsRuntime(
             is PendingCommand.MarkerProbe -> completeMarkerProbe(pending.context, message)
             is PendingCommand.BindingInstall -> completeBindingInstall(pending.candidate, message)
             is PendingCommand.RuntimeInstall -> completeRuntimeInstall(pending.candidate, message)
+            is PendingCommand.ConsoleInstall -> completeConsoleInstall(pending.candidate, message)
         }
         return true
     }
@@ -688,7 +766,7 @@ internal class CefriumDevToolsRuntime(
         synchronized(lock) { monitorAttachTargets.remove(targetId) }
         if (sessionId.isBlank()) return
         val accepted = synchronized(lock) {
-            started && runProfilesEnabled && surfaces.isNotEmpty() &&
+            started && surfaces.isNotEmpty() &&
                 browserTargets.containsKey(targetId)
         }
         if (!accepted) {
@@ -708,31 +786,36 @@ internal class CefriumDevToolsRuntime(
         } catch (_: Exception) {
             return
         }
-        val marker = parseCefriumDevToolsMarker(probe.optString("windowName")) ?: return
+        val marker = parseCefriumRunProfileMarker(probe.optString("windowName")) ?: return
         val surface = synchronized(lock) { surfaces[marker.surfaceId] } ?: return
         if (
-            !surface.devTools || surface.targetId != marker.targetId ||
+            surface.targetId != marker.targetId ||
+            normalizedHttpOrigin(marker.frameworkOrigin) != surface.frameworkOrigin ||
             normalizedHttpOrigin(probe.optString("url")) !in surface.origins
         ) return
         val candidate = FrameCandidate(
             context = context,
             surface = surface,
+            marker = marker,
             url = probe.optString("url").trim(),
             title = probe.optString("title").trim(),
             bindingName = frameBindingName(context, surface),
         )
-        sendInternal(
-            method = "Runtime.addBinding",
-            params = JSONObject()
-                .put("name", candidate.bindingName)
-                .put("executionContextId", context.executionContextId),
-            sessionId = context.sessionId,
-            pending = PendingCommand.BindingInstall(candidate),
-        )
+        if (surface.devRuntime && marker.devRuntime) installConsoleBridge(candidate)
+        if (synchronized(lock) { runProfilesEnabled } && surface.devTools && marker.devTools) {
+            sendInternal(
+                method = "Runtime.addBinding",
+                params = JSONObject()
+                    .put("name", candidate.bindingName)
+                    .put("executionContextId", context.executionContextId),
+                sessionId = context.sessionId,
+                pending = PendingCommand.BindingInstall(candidate),
+            )
+        }
     }
 
     private fun completeBindingInstall(candidate: FrameCandidate, message: JSONObject) {
-        if (message.has("error") || !isCandidateCurrent(candidate)) return
+        if (message.has("error") || !isInspectorCandidateCurrent(candidate)) return
         val expression = buildString(
             chobitsuSource.length + targetRuntimeSource.length + 128,
         ) {
@@ -756,7 +839,7 @@ internal class CefriumDevToolsRuntime(
     }
 
     private fun completeRuntimeInstall(candidate: FrameCandidate, message: JSONObject) {
-        if (message.has("error") || !isCandidateCurrent(candidate)) return
+        if (message.has("error") || !isInspectorCandidateCurrent(candidate)) return
         val installed = message.optJSONObject("result")
             ?.optJSONObject("result")
             ?.optBoolean("value", false) == true
@@ -765,10 +848,134 @@ internal class CefriumDevToolsRuntime(
     }
 
     private fun isCandidateCurrent(candidate: FrameCandidate): Boolean = synchronized(lock) {
-        runProfilesEnabled &&
+        started &&
             contexts[candidate.context.key] == candidate.context &&
             surfaces[candidate.surface.surfaceId] == candidate.surface
     }
+
+    private fun isInspectorCandidateCurrent(candidate: FrameCandidate): Boolean =
+        isCandidateCurrent(candidate) && synchronized(lock) {
+            runProfilesEnabled && candidate.surface.devTools && candidate.marker.devTools
+        }
+
+    private fun isConsoleCandidateCurrent(candidate: FrameCandidate): Boolean =
+        isCandidateCurrent(candidate) && candidate.surface.devRuntime && candidate.marker.devRuntime
+
+    private fun installConsoleBridge(candidate: FrameCandidate) {
+        val accepted = synchronized(lock) {
+            if (
+                !isConsoleCandidateCurrent(candidate) ||
+                consoleContexts[candidate.context.key] == candidate.surface.surfaceId ||
+                !pendingConsoleContexts.add(candidate.context.key)
+            ) false else true
+        }
+        if (!accepted) return
+
+        sourceExecutor.execute {
+            val sources = try {
+                loadConsoleSources(candidate.surface.frameworkOrigin)
+            } catch (error: Exception) {
+                failConsoleInjection(candidate, error.message ?: error.javaClass.simpleName)
+                return@execute
+            }
+            if (!isConsoleCandidateCurrent(candidate)) {
+                synchronized(lock) { pendingConsoleContexts.remove(candidate.context.key) }
+                return@execute
+            }
+            val init = JSONObject()
+                .put("appId", "code_te2")
+                .put("baseUrl", candidate.surface.frameworkOrigin)
+                .put("workerLabel", candidate.surface.workerLabel)
+                .put(
+                    "workerIdPrefix",
+                    cefriumConsoleWorkerPrefix(candidate.surface.workerIdBase),
+                )
+                .put("workerOwnerLength", 4)
+                .put("uniquePerWindow", true)
+            val expression = buildString(
+                sources.socketIo.length + sources.consoleBridge.length + 512,
+            ) {
+                append("(()=>{if(globalThis.__te2RunProfileConsoleBridge)return true;\n")
+                append(sources.socketIo)
+                append("\n;\n")
+                append(sources.consoleBridge)
+                append("\n;globalThis.__te2RunProfileConsoleBridge=initConsoleBridge(")
+                append(init.toString())
+                append(");return !!globalThis.__te2RunProfileConsoleBridge;})()")
+            }
+            val sent = sendInternal(
+                method = "Runtime.evaluate",
+                params = JSONObject()
+                    .put("expression", expression)
+                    .put("contextId", candidate.context.executionContextId)
+                    .put("returnByValue", true)
+                    .put("awaitPromise", false),
+                sessionId = candidate.context.sessionId,
+                pending = PendingCommand.ConsoleInstall(candidate),
+            )
+            if (!sent) failConsoleInjection(candidate, "CDP console injection send failed")
+        }
+    }
+
+    private fun completeConsoleInstall(candidate: FrameCandidate, message: JSONObject) {
+        synchronized(lock) { pendingConsoleContexts.remove(candidate.context.key) }
+        if (!isConsoleCandidateCurrent(candidate)) return
+        val installed = !message.has("error") &&
+            message.optJSONObject("result")
+                ?.optJSONObject("result")
+                ?.optBoolean("value", false) == true
+        if (!installed) {
+            val error = message.optJSONObject("error")?.optString("message")
+                ?.takeIf(String::isNotBlank)
+                ?: message.optJSONObject("result")
+                    ?.optJSONObject("exceptionDetails")
+                    ?.optString("text")
+                    ?.takeIf(String::isNotBlank)
+                ?: "CDP console injection was rejected"
+            failConsoleInjection(candidate, error)
+            return
+        }
+        synchronized(lock) {
+            consoleContexts[candidate.context.key] = candidate.surface.surfaceId
+            consoleInjectionCount += 1
+            lastConsoleInjectionError = null
+        }
+    }
+
+    private fun failConsoleInjection(candidate: FrameCandidate, reason: String) {
+        synchronized(lock) {
+            pendingConsoleContexts.remove(candidate.context.key)
+            lastConsoleInjectionError = reason.take(512)
+        }
+        Log.w(TAG, "Run Profile console injection failed for ${candidate.surface.surfaceId}: $reason")
+    }
+
+    private fun loadConsoleSources(origin: String): ConsoleSources {
+        synchronized(lock) { consoleSourceCache[origin] }?.let { return it }
+        val socketIo = fetchSource("$origin/static/vendor/socket.io.min.js")
+        val consoleBridge = stripModuleExports(
+            fetchSource("$origin/static/js/te2_console_bridge.js"),
+        )
+        return ConsoleSources(socketIo, consoleBridge).also { sources ->
+            synchronized(lock) {
+                if (started) consoleSourceCache[origin] = sources
+            }
+        }
+    }
+
+    private fun fetchSource(url: String): String {
+        val request = Request.Builder().url(url).get().build()
+        return httpClient.newCall(request).execute().use { response ->
+            check(response.isSuccessful) { "HTTP ${response.code} while loading $url" }
+            response.body?.string()?.takeIf(String::isNotEmpty)
+                ?: throw IllegalStateException("$url is empty")
+        }
+    }
+
+    private fun stripModuleExports(source: String): String = source.replace(
+        Regex("\\bexport\\s+(?=(?:async\\s+)?(?:function|class|const|let|var))"),
+        "",
+    )
 
     private fun registerFrameTarget(candidate: FrameCandidate) {
         val target = CefriumDevToolsTarget(
@@ -830,9 +1037,32 @@ internal class CefriumDevToolsRuntime(
     private fun removeContext(contextKey: String) {
         val targetId = synchronized(lock) {
             contexts.remove(contextKey)
+            consoleContexts.remove(contextKey)
+            pendingConsoleContexts.remove(contextKey)
             contextTargets.remove(contextKey)
         }
         if (targetId != null) removeExposedTarget(targetId)
+    }
+
+    private fun removeConsoleContext(contextKey: String) {
+        val context = synchronized(lock) {
+            consoleContexts.remove(contextKey) ?: return
+            pendingConsoleContexts.remove(contextKey)
+            contexts[contextKey]
+        } ?: return
+        sendInternal(
+            method = "Runtime.evaluate",
+            params = JSONObject()
+                .put(
+                    "expression",
+                    "globalThis.__te2RunProfileConsoleBridge?.destroy?.();" +
+                        "delete globalThis.__te2RunProfileConsoleBridge;",
+                )
+                .put("contextId", context.executionContextId)
+                .put("returnByValue", false)
+                .put("awaitPromise", false),
+            sessionId = context.sessionId,
+        )
     }
 
     private fun removeContextsForSession(sessionId: String) {
@@ -880,7 +1110,7 @@ internal class CefriumDevToolsRuntime(
         activateDesiredTarget()
     }
 
-    private fun activateDesiredTarget() {
+    private fun activateDesiredTarget(force: Boolean = false) {
         val target = synchronized(lock) {
             desiredTargetId?.let(targets::get)
         } ?: return
@@ -888,7 +1118,7 @@ internal class CefriumDevToolsRuntime(
             val previousSession: String?
             val generation: Long
             synchronized(lock) {
-                if (activeTargetId == target.targetId && activeSessionId == null) return
+                if (!force && activeTargetId == target.targetId && activeSessionId == null) return
                 previousSession = activeSessionId
                 activeSessionId = null
                 activeTargetId = target.targetId
@@ -905,14 +1135,14 @@ internal class CefriumDevToolsRuntime(
             listener.onTargetsChanged(synchronized(lock) { targets.values.toList() }, target.targetId)
             return
         }
-        attachDirectTarget(target.targetId)
+        attachDirectTarget(target.targetId, force = force)
     }
 
-    private fun attachDirectTarget(targetId: String) {
+    private fun attachDirectTarget(targetId: String, force: Boolean = false) {
         val previousSession: String?
         synchronized(lock) {
             if (controlSocket == null || !targets.containsKey(targetId)) return
-            if (activeTargetId == targetId && activeSessionId != null) return
+            if (!force && activeTargetId == targetId && activeSessionId != null) return
             if (pendingCommands.values.any {
                     it is PendingCommand.DirectAttach && it.targetId == targetId
                 }
@@ -1010,6 +1240,8 @@ internal class CefriumDevToolsRuntime(
         monitorAttachTargets.clear()
         contexts.clear()
         contextTargets.clear()
+        consoleContexts.clear()
+        pendingConsoleContexts.clear()
     }
 
     private fun scheduleReconnect(epoch: Long) {
@@ -1048,6 +1280,7 @@ internal class CefriumDevToolsRuntime(
         runCatching { activeServer?.setRemoteDebuggingEnabled(false) }
         runCatching { activeServer?.destroy() }
         scheduler.shutdownNow()
+        sourceExecutor.shutdownNow()
         listener.onStatusChanged("disabled")
         listener.onTargetsChanged(emptyList(), null)
         listener.onTargetWaiting()
