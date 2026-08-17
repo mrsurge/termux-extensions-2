@@ -7,22 +7,24 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from queue import Empty, Queue
+from queue import Queue
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
-
-from fastapi import APIRouter, Request, HTTPException, Response, Body, Query
-from sse_starlette.sse import EventSourceResponse
 
 from app.te2_paths import te2_data_home
 
-__all__ = ["jobs_bp", "register_job_handler", "JobCancelled"]
+__all__ = [
+    "Job",
+    "JobCancelled",
+    "JobContext",
+    "JobManager",
+    "JobStatus",
+    "manager",
+    "register_job_handler",
+]
 
 
 def jobs_state_file() -> Path:
     return te2_data_home() / "framework" / "jobs.json"
-
-jobs_bp = APIRouter(prefix="/api")
-
 
 class JobStatus:
     PENDING = "pending"
@@ -357,72 +359,3 @@ def _noop_handler(ctx: JobContext, params: Dict[str, Any]) -> None:
         ctx.set_progress(completed=step + 1, total=steps)
         time.sleep(interval)
     ctx.finish(message=params.get("message", "Completed"))
-
-
-# ---------------------------------------------------------------------------
-# Blueprint routes
-# ---------------------------------------------------------------------------
-
-
-@jobs_bp.post("/jobs")
-async def create_job_route(payload: dict = Body(...)):
-    job_type = payload.get("type")
-    params = payload.get("params") or {}
-    if not isinstance(job_type, str) or not job_type:
-        raise HTTPException(status_code=400, detail="Job type is required")
-    try:
-        job = manager.create_job(job_type, params)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    return {"ok": True, "data": job.to_public_dict()}
-
-
-@jobs_bp.get("/jobs")
-def list_jobs_route():
-    jobs = [job.to_public_dict() for job in manager.list_jobs().values()]
-    return {"ok": True, "data": jobs}
-
-
-@jobs_bp.get("/jobs/{job_id}")
-def get_job_route(job_id: str):
-    job = manager.get_job(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    return {"ok": True, "data": job.to_public_dict()}
-
-
-@jobs_bp.post("/jobs/{job_id}/cancel")
-def cancel_job_route(job_id: str):
-    try:
-        job = manager.cancel_job(job_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="Job not found")
-    return {"ok": True, "data": job.to_public_dict()}
-
-
-@jobs_bp.delete("/jobs/{job_id}")
-def delete_job_route(job_id: str):
-    removed = manager.delete_job(job_id)
-    if not removed:
-        raise HTTPException(status_code=400, detail="Job is running or not found")
-    return {"ok": True, "data": None}
-
-
-@jobs_bp.get("/jobs/events")
-async def jobs_events_stream(job_id: Optional[str] = Query(None)):
-    job_ids = [job_id] if job_id else None
-    queue: Queue = Queue()
-    listener = manager.add_listener(queue, job_ids)
-
-    async def event_generator():
-        try:
-            while True:
-                try:
-                    payload = queue.get(timeout=25)
-                    yield dict(data=json.dumps(payload))
-                except Empty:
-                    yield dict(data="keep-alive")
-        finally:
-            manager.remove_listener(listener)
-
-    return EventSourceResponse(event_generator())

@@ -58,7 +58,10 @@ The supported package requires Python 3.12 or newer, a Rust toolchain with
 Cargo, and Node.js with npm. Git and Framework-Shells are required for the
 normal development workflow. The standalone Terminal uses Node.js at runtime
 and builds its native `node-pty` dependency for the current device on first
-use. Code-server is required for Code TE2 language/extension integration.
+use. Code TE2 can use its built-in Monaco language workers without Code Server.
+VS Code extension-host integration uses Code TE2's confirmation-gated pinned
+private Code Server runtime; the platform dependency installer does not install
+a global Code Server package.
 
 Platform package lists live under `scripts/requirements/`. Install their
 non-Python dependencies with:

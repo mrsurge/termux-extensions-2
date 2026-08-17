@@ -8,10 +8,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from app.libs import jobs as jobs_module
 from app.libs.jobs import Job, JobManager, JobStatus, jobs_state_file
 
 
 class FrameworkJobsStoreTests(unittest.TestCase):
+    def test_jobs_module_exposes_only_the_live_job_core(self) -> None:
+        self.assertFalse(hasattr(jobs_module, "jobs_bp"))
+
     def test_default_path_uses_the_canonical_framework_data_root(self) -> None:
         with tempfile.TemporaryDirectory() as raw_root:
             root = Path(raw_root)

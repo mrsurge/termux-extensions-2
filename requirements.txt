@@ -1,12 +1,12 @@
 fastapi
 starlette
-uvicorn[standard]
+uvicorn
+websockets
 httpx
 msgspec>=0.21.1
-sse-starlette
 anyio
 fastmcp
-framework-shells @ git+https://github.com/mrsurge/framework-shells
+framework-shells @ git+https://github.com/mrsurge/framework-shells@0bf3269cd69a000015b0ac484a04004b8dc564d1
 libarchive-c>=5.1
 python-socketio[client,asyncio-client]
 pyyaml

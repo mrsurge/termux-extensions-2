@@ -13,3 +13,7 @@ Current layout:
 - `ubuntu/npm.txt`: global npm packages for Debian/Ubuntu
 
 Use `scripts/install_dependencies.sh` to install these in the intended order.
+
+Code Server is intentionally absent from these global platform lists. Code TE2
+offers its pinned private managed runtime only after explicit user approval and
+installs it beneath `$TE2_DATA_HOME/code_server`.
