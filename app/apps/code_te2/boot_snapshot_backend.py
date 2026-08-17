@@ -27,6 +27,7 @@ from .stores import get_history_store, get_preferences_store
 
 log = logging.getLogger(__name__)
 _boot_prepare_tasks: dict[str, asyncio.Task[None]] = {}
+_boot_snapshot_task: asyncio.Task[JsonMap] | None = None
 EditorSnapshotBuilder = Callable[[], JsonMap]
 WatcherAvailabilityFn = Callable[[], bool]
 _editor_snapshot_builder: EditorSnapshotBuilder | None = None
@@ -66,6 +67,15 @@ class BootSnapshotPayload(TypedDict):
     run_profile_state: JsonMap
 
 
+class BootSnapshotCore(TypedDict):
+    active_project: str | None
+    host_state: JsonMap
+    session_state: JsonMap
+    editor_ssot: JsonMap
+    ui_prefs: JsonMap
+    explorer_bootstrap: ExplorerBootstrapPayload | None
+
+
 async def _prime_backend_runtime(project_root: str) -> None:
     try:
         if _web_workers_enabled():
@@ -95,6 +105,16 @@ async def cancel_backend_runtime_prepare_tasks() -> None:
         _ = task.cancel()
     if tasks:
         _ = await asyncio.gather(*tasks, return_exceptions=True)
+
+
+def _normalize_ui_preferences(value: object) -> JsonMap:
+    if not isinstance(value, dict):
+        return {}
+    result: JsonMap = {}
+    for key, item in cast(dict[object, object], value).items():
+        if isinstance(key, str):
+            result[key] = item
+    return result
 
 
 def _web_workers_enabled() -> bool:
@@ -203,49 +223,58 @@ def _build_explorer_bootstrap_payload(
     }
 
 
-async def handle_boot_snapshot_request(
-    _data: dict[str, object] | None = None,
-    *,
-    source_name: str,
-) -> JsonMap:
-    del _data
-    del source_name
-
+def _build_boot_snapshot_core() -> BootSnapshotCore:
     history = get_history_store()
     prefs_store = get_preferences_store()
     active_project = history.get_active_project()
     session_state = history.get_session_state()
-    host_state = _build_host_state_payload()
     editor_snapshot_builder = _editor_snapshot_builder
     if editor_snapshot_builder is None:
         raise RuntimeError("boot snapshot editor state builder is not configured")
-    editor_ssot = editor_snapshot_builder()
+    ui_prefs = _normalize_ui_preferences(
+        prefs_store.get_preferences(active_project).get("ui")
+    )
+    return {
+        "active_project": active_project,
+        "host_state": _build_host_state_payload(),
+        "session_state": session_state,
+        "editor_ssot": editor_snapshot_builder(),
+        "ui_prefs": ui_prefs,
+        "explorer_bootstrap": _build_explorer_bootstrap_payload(
+            project_root=active_project,
+            session_state=session_state,
+        ),
+    }
 
-    ui_prefs_raw = prefs_store.get_preferences(active_project).get("ui")
-    ui_prefs: JsonMap = {}
-    if isinstance(ui_prefs_raw, dict):
-        normalized_ui_prefs: JsonMap = {}
-        for key, value in cast(dict[object, object], ui_prefs_raw).items():
-            if isinstance(key, str):
-                normalized_ui_prefs[key] = value
-        ui_prefs = normalized_ui_prefs
 
-    code_server = await asyncio.to_thread(inspect_code_server_prerequisite)
-    if code_server.compatible and ui_prefs.get("webWorkersEnabled") is not True:
+async def _build_full_boot_snapshot() -> JsonMap:
+    core_task = asyncio.create_task(
+        asyncio.to_thread(_build_boot_snapshot_core),
+        name="code_te2_boot_snapshot_core",
+    )
+    code_server_task = asyncio.create_task(
+        asyncio.to_thread(inspect_code_server_prerequisite),
+        name="code_te2_boot_snapshot_code_server",
+    )
+    run_profile_task = asyncio.create_task(
+        build_run_profile_state_projection(),
+        name="code_te2_boot_snapshot_run_profiles",
+    )
+    core, code_server, run_profile_state = await asyncio.gather(
+        core_task,
+        code_server_task,
+        run_profile_task,
+    )
+    active_project = core["active_project"]
+    if code_server.compatible and core["ui_prefs"].get("webWorkersEnabled") is not True:
         _ensure_backend_runtime_task(active_project)
 
-    explorer_bootstrap = _build_explorer_bootstrap_payload(
-        project_root=active_project,
-        session_state=session_state,
-    )
-    run_profile_state = await build_run_profile_state_projection()
-
     snapshot: BootSnapshotPayload = {
-        "host_state": host_state,
-        "session_state": session_state,
-        "editor_ssot": editor_ssot,
-        "ui_prefs": ui_prefs,
-        "explorer_bootstrap": explorer_bootstrap,
+        "host_state": core["host_state"],
+        "session_state": core["session_state"],
+        "editor_ssot": core["editor_ssot"],
+        "ui_prefs": core["ui_prefs"],
+        "explorer_bootstrap": core["explorer_bootstrap"],
         "code_inspector": get_code_inspector_projection(),
         "code_server": code_server.payload(),
         "run_profile_state": run_profile_state,
@@ -254,3 +283,29 @@ async def handle_boot_snapshot_request(
         "ok": True,
         "snapshot": snapshot,
     }
+
+
+async def handle_boot_snapshot_request(
+    _data: dict[str, object] | None = None,
+    *,
+    source_name: str,
+) -> JsonMap:
+    del source_name
+    scope = str((_data or {}).get("scope") or "").strip()
+    if scope == "hostState":
+        host_state = await asyncio.to_thread(_build_host_state_payload)
+        return {"ok": True, "snapshot": {"host_state": host_state}}
+
+    global _boot_snapshot_task
+    task = _boot_snapshot_task
+    if task is None or task.done():
+        task = asyncio.create_task(
+            _build_full_boot_snapshot(),
+            name="code_te2_boot_snapshot",
+        )
+        _boot_snapshot_task = task
+    try:
+        return await asyncio.shield(task)
+    finally:
+        if task.done() and _boot_snapshot_task is task:
+            _boot_snapshot_task = None

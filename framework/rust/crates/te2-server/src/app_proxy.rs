@@ -10,7 +10,7 @@ use axum::{
 use tracing::warn;
 
 use crate::{
-    ApiResponse, AppState, apps_lifecycle, json_error,
+    ApiResponse, AppState, json_error,
     proxy_shell::{
         parse_proxy_shell, proxy_shell_upstream_path, proxy_shell_urls,
         rewrite_payload as rewrite_proxy_shell_payload,
@@ -20,7 +20,6 @@ use crate::{
         bridge_websocket, proxy_http_request, should_forward_request_header,
         should_forward_response_header, upstream_url,
     },
-    registry::AppRegistry,
     sio_proxy::{MatchedSioRoute, SioRouteIndex, SioTarget, join_upstream_path},
 };
 
@@ -57,7 +56,7 @@ pub(crate) fn register_sio_proxy_routes(
 }
 
 async fn proxy_shell_meta(State(state): State<AppState>, Path(app_id): Path<String>) -> Response {
-    let registry = AppRegistry::load(state.app_roots());
+    let registry = state.app_registry_snapshot();
     let Some(app) = registry.get_app(&app_id) else {
         return json_error(StatusCode::NOT_FOUND, &format!("App '{app_id}' not found"));
     };
@@ -91,8 +90,7 @@ async fn proxy_app_websocket(
     uri: Uri,
     headers: HeaderMap,
 ) -> Response {
-    let registry = AppRegistry::load(state.app_roots());
-    let Some(running_app) = apps_lifecycle::running_app_for_id(&registry, &app_id) else {
+    let Some(running_app) = state.running_app_for_id(&app_id) else {
         return json_error(
             StatusCode::SERVICE_UNAVAILABLE,
             &format!("App '{app_id}' is not running. Start it from the launcher first."),
@@ -169,7 +167,7 @@ async fn proxy_shell_request_inner(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let registry = AppRegistry::load(state.app_roots());
+    let registry = state.app_registry_snapshot();
     let Some(app) = registry.get_app(&app_id) else {
         return json_error(StatusCode::NOT_FOUND, &format!("App '{app_id}' not found"));
     };
@@ -190,7 +188,7 @@ async fn proxy_shell_request_inner(
             );
         }
     };
-    let Some(running_app) = apps_lifecycle::running_app_for_id(&registry, &canonical_app_id) else {
+    let Some(running_app) = state.running_app_for_id(&canonical_app_id) else {
         return json_error(
             StatusCode::SERVICE_UNAVAILABLE,
             &format!("App '{app_id}' is not running"),
@@ -294,7 +292,7 @@ async fn proxy_app_request_inner(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let registry = AppRegistry::load(state.app_roots());
+    let registry = state.app_registry_snapshot();
     let Some(canonical_app_id) = registry.canonical_app_id(&app_id) else {
         return json_error(StatusCode::NOT_FOUND, &format!("App '{app_id}' not found"));
     };
@@ -305,7 +303,7 @@ async fn proxy_app_request_inner(
         return response_with_extra_headers(StatusCode::NO_CONTENT, Body::empty(), &cors_headers);
     }
 
-    let Some(running_app) = apps_lifecycle::running_app_for_id(&registry, canonical_app_id) else {
+    let Some(running_app) = state.running_app_for_id(canonical_app_id) else {
         return json_error_with_headers(
             StatusCode::SERVICE_UNAVAILABLE,
             &format!("App '{app_id}' is not running. Start it from the launcher first."),
@@ -432,8 +430,7 @@ fn resolve_sio_upstream(state: &AppState, matched: &MatchedSioRoute) -> Option<(
     match matched.route.target {
         SioTarget::Static => Some((matched.route.host.clone(), matched.route.port?)),
         SioTarget::AppWorker => {
-            let registry = AppRegistry::load(state.app_roots());
-            let running = apps_lifecycle::running_app_for_id(&registry, &matched.route.app_id)?;
+            let running = state.running_app_for_id(&matched.route.app_id)?;
             Some(("127.0.0.1".to_owned(), running.port))
         }
     }

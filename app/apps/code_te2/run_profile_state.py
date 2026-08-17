@@ -9,6 +9,7 @@ from .host.run_target_service import release_run_target_route
 from .monaco_editor.editor_backend_services.contracts import JsonMap
 from .page_preview_shell_manager import page_preview_shell_state
 from .runner_profile_shell_manager import runner_profile_shell_state
+from .run_profile_shell_facts import run_profile_shell_facts_ready
 from .runner_profiles import (
     RunProfile,
     RunProfileMatch,
@@ -49,6 +50,7 @@ async def build_run_profile_state_projection(
     *,
     reconcile_stale_route: bool = False,
 ) -> JsonMap:
+    shell_state_ready = run_profile_shell_facts_ready()
     project_root, current_file = run_profile_request_context(data)
     if not project_root:
         return {
@@ -64,6 +66,7 @@ async def build_run_profile_state_projection(
             "candidateScope": "owners",
             "candidates": [],
             "runningProfiles": [],
+            "shellStateReady": shell_state_ready,
         }
 
     root = Path(project_root).expanduser().resolve(strict=False)
@@ -148,6 +151,7 @@ async def build_run_profile_state_projection(
         "candidateScope": "all" if include_all else "owners",
         "candidates": projected,
         "runningProfiles": running_profiles,
+        "shellStateReady": shell_state_ready,
     }
 
 
@@ -170,6 +174,7 @@ async def _build_profile_state_projection(
     )
     if (
         reconcile_stale_route
+        and run_profile_shell_facts_ready()
         and not state.running
         and (profile.runner == "pagePreview" or profile.port is not None)
     ):

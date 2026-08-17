@@ -6,8 +6,8 @@
 - Base: synchronized `main` at `1b1e80b6`
 - State: Cefrium parity implementation and automated validation complete;
   native Inspector app-header lifecycle and initial target reselection accepted.
-  Cross-client model-transition and Rust scheduling fixes are source-backed and
-  planned but not yet implemented.
+  Cross-client model-transition and Rust scheduling fixes are implemented and
+  automated validation is complete; post-restart latency traces remain pending.
 
 ## Source-Backed Findings
 
@@ -29,7 +29,8 @@
 - [x] The Rust server is already multi-threaded: the inspected release runtime
   used 18 Tokio worker threads. Process splitting is not the first remedy for
   the observed mobile latency.
-- [x] Foreground model switching currently has two WBA open initiators. The
+- [x] Before the deterministic-transition fix, foreground model switching had
+  two WBA open initiators. The
   `modelReady` path starts a WBA open and full provider/webview resync before the
   open transaction performs its canonical post-visibility WBA open.
 - [x] On a slower client, the first open can settle before the second reaches
@@ -40,12 +41,13 @@
   same-file reopen whose full-text replacement advanced the model from v1 to
   v2. Provider hydration ranged from roughly 150 ms to 1.66 s, while ordinary
   WBA document-open processing was generally 1-6 ms.
-- [x] Dynamic app proxy lookup currently reloads app registry state and scans
+- [x] Before the Rust scheduling fix, dynamic app proxy lookup reloaded app
+  registry state and scanned
   Framework-Shell metadata plus `/proc` process state synchronously on the
   request path. The inspected runtime had 169 metadata records.
-- [x] App-worker pipe reads already run through `spawn_blocking`, but async
-  dispatch can still invoke the blocking pipe-write function directly on a
-  Tokio worker.
+- [x] Before the Rust scheduling fix, app-worker pipe reads ran through
+  `spawn_blocking`, but async dispatch could still invoke the blocking
+  pipe-write function directly on a Tokio worker.
 
 ## Implementation
 
@@ -82,6 +84,10 @@
 - [x] GeckoView comparison unit tests.
 - [x] GeckoView comparison debug assembly.
 - [x] `git diff --check` across editable source and documentation.
+- [x] Deterministic-transition focused tests: 32 passed.
+- [x] Python `editor_ws.py` bytecode compilation.
+- [x] Rust formatting and default/native-feature checks.
+- [x] Rust native-feature suite: 80 passed, 4 benchmark tests ignored.
 - [ ] Full generated-artifact `git diff --check`: the canonical esbuild output
   contains upstream Monaco/highlight.js template-literal lines with significant
   trailing spaces. The source/build validation passes; do not rewrite those
@@ -169,32 +175,32 @@
 
 ## Deterministic Model Transitions
 
-- [ ] Make post-visible-verification `openFileFlow` the sole foreground WBA
+- [x] Make post-visible-verification `openFileFlow` the sole foreground WBA
   open initiator.
-- [ ] Restrict `editor.modelReady` to backend notification; remove its WBA open
+- [x] Restrict `editor.modelReady` to backend notification; remove its WBA open
   flush and provider-snapshot hydration.
-- [ ] Remove Python's per-modelReady `te2.resync`; retain full resync only for a
+- [x] Remove Python's per-modelReady `te2.resync`; retain full resync only for a
   genuine WBA frontend connection/reconnection.
-- [ ] Make same-path, same-generation WBA opens no-op without disk reread,
+- [x] Make same-path, same-generation WBA opens no-op without disk reread,
   full-text replacement, version advance, active-change replay, or semantic
   cache invalidation.
-- [ ] Attach the replacement Monaco model before disposing the detached prior
+- [x] Attach the replacement Monaco model before disposing the detached prior
   model.
-- [ ] Add focused tests for one canonical open, reconnect-only resync,
+- [x] Add focused tests for one canonical open, reconnect-only resync,
   same-generation idempotence, draft preservation, and model disposal order.
 - [ ] Compare mobile and desktop transaction traces after the fix and prove the
   duplicate-open/provider-replay sequence is absent.
 
 ## Rust Proxy And Pipe Scheduling
 
-- [ ] Store the loaded app registry in shared `AppState` and update it through
+- [x] Store the loaded app registry in shared `AppState` and update it through
   explicit registry reload.
-- [ ] Maintain a running-app index from startup snapshot and lifecycle events.
-- [ ] Remove complete FWS metadata and `/proc` scans from the normal dynamic
+- [x] Maintain a running-app index from startup snapshot and lifecycle events.
+- [x] Remove complete FWS metadata and `/proc` scans from the normal dynamic
   app-proxy request path while preserving bounded stale-entry reconciliation.
-- [ ] Route app-worker pipe output through a bounded ordered writer queue and a
+- [x] Route app-worker pipe output through a bounded ordered writer queue and a
   dedicated blocking writer task/thread.
-- [ ] Specify and test backpressure, strict ordering, shutdown, and writer-error
+- [x] Specify and test backpressure, strict ordering, shutdown, and writer-error
   propagation.
 - [ ] Re-run direct-versus-proxied request benchmarks and model-switch traces.
 - [ ] Consider Tokio worker-count tuning or process separation only if the

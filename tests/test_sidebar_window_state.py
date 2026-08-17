@@ -199,6 +199,51 @@ class SidebarWindowLedgerTests(unittest.TestCase):
         self.assertEqual("ExtensionWebviewSurface", surface["dto"])
         self.assertEqual("example.view", surface["viewId"])
 
+    def test_extension_webview_snapshot_is_atomic_and_idempotent(self) -> None:
+        project = "/workspace/project"
+        host_id = "vsix-webview:vsix:workspace:view"
+        url = "/api/app/code_te2/services/wba/webview/vsix%3Aworkspace%3Aview"
+        store = _FakePreferencesStore({"version": 2, "slots": {}})
+        desired = {
+            host_id: {
+                "kind": "url",
+                "host_id": host_id,
+                "title": "Extension View",
+                "url": url,
+                "load": "eager",
+                "version": "1",
+                "icon": {"kind": "text", "text": "EX"},
+                "webviewSurface": {
+                    "dto": "ExtensionWebviewSurface",
+                    "version": 1,
+                    "surfaceId": "vsix:workspace:view",
+                    "hostId": host_id,
+                    "workspaceId": "workspace",
+                    "projectPath": project,
+                    "extensionId": "example.webview",
+                    "viewId": "example.view",
+                    "surfaceKind": "view",
+                    "url": url,
+                },
+            }
+        }
+        with (
+            patch.object(sidebar_window_state, "get_preferences_store", return_value=store),
+            patch.object(sidebar_window_state, "list_launcher_apps", return_value=[]),
+        ):
+            first = sidebar_window_state.reconcile_extension_webview_slots(
+                project,
+                desired,
+            )
+            second = sidebar_window_state.reconcile_extension_webview_slots(
+                project,
+                desired,
+            )
+
+        self.assertTrue(first["changed"])
+        self.assertFalse(second["changed"])
+        self.assertEqual(1, store.update_count)
+
 
 if __name__ == "__main__":
     unittest.main()

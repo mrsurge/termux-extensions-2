@@ -50,6 +50,7 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
   let uiIpcConnectPromise: Promise<UiIpcRpcConnection> | null = null;
   let consoleBridgePromise: Promise<void> | null = null;
   let consoleBridgeStarted = false;
+  let uiIpcHasConnected = false;
 
   function consoleWorkerLabel(): string {
     const identity = (window as unknown as ElectronAppViewHintWindow).te2Electron?.identity;
@@ -287,12 +288,16 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
         ensureSocketIoLoaded: deps.ensureSocketIoLoaded,
         onConnect: () => {
           console.log('[UI_IPC_RPC] main page connected');
-          try {
-            void Promise.resolve(deps.onHostStateResync?.()).catch((error: unknown) => {
+          const reconnect = uiIpcHasConnected;
+          uiIpcHasConnected = true;
+          if (reconnect) {
+            try {
+              void Promise.resolve(deps.onHostStateResync?.()).catch((error: unknown) => {
+                console.warn('[UI_IPC_RPC] host state resync failed', error);
+              });
+            } catch (error) {
               console.warn('[UI_IPC_RPC] host state resync failed', error);
-            });
-          } catch (error) {
-            console.warn('[UI_IPC_RPC] host state resync failed', error);
+            }
           }
         },
         onDisconnect: (reason) => {

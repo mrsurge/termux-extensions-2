@@ -490,6 +490,17 @@ async def handle_ui_sidebar_window_close_request(params: JsonObject) -> JsonObje
     return result
 
 
+def forget_sidebar_window_runtime_state(host_ids: list[str]) -> None:
+    removed = {_norm(host_id) for host_id in host_ids if _norm(host_id)}
+    if not removed:
+        return
+    for key in [key for key in _client_presentations if key[1] in removed]:
+        _ = _client_presentations.pop(key, None)
+    for client_id, host_id in list(_client_active_windows.items()):
+        if _norm(host_id) in removed:
+            _client_active_windows[client_id] = ""
+
+
 async def handle_sidebar_window_presentation_update_request(
     ns: SidebarNamespace,
     sid: str,

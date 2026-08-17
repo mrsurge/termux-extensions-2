@@ -11,6 +11,13 @@ import socketio
 
 from ..host.run_target_service import release_run_target_route
 from ..run_profile_events import refresh_run_profile_state
+from ..run_profile_shell_facts import (
+    is_run_profile_shell_label,
+    record_run_profile_shell,
+    remove_run_profile_shell,
+    replace_run_profile_shell_facts,
+    run_profile_shell_label_for_id,
+)
 from ..run_profile_surfaces import (
     close_run_profile_surface_for_shell,
     reconcile_run_profile_surfaces,
@@ -31,12 +38,6 @@ FWS_LIFECYCLE_METHODS = frozenset(
         "fws.shell.removed",
     }
 )
-RUN_PROFILE_LABEL_PREFIXES = (
-    "runner-profile:code_te2:",
-    "page-preview:code_te2:",
-)
-
-
 class AsyncSocketIoClient(Protocol):
     connected: bool
 
@@ -134,6 +135,10 @@ async def _on_connect() -> None:
 
 
 async def _open_dashboard_snapshot() -> None:
+    # python-socketio invokes the namespace connect callback before completing
+    # its own connect-packet bookkeeping. Yield once so call() sees /fws as
+    # connected; this is a handshake boundary, not a polling loop.
+    await asyncio.sleep(0)
     client = _client
     if client is None or not client.connected:
         return
@@ -174,23 +179,33 @@ async def _on_notification(payload: object) -> None:
         return
     if method == "fws.shell.removed":
         shell_id = _text(params.get("shell_id"))
-        label = _relevant_shell_labels.pop(shell_id, "")
+        label = (
+            _relevant_shell_labels.pop(shell_id, "")
+            or run_profile_shell_label_for_id(shell_id)
+        )
         if not shell_id or not label:
             return
+        _ = remove_run_profile_shell(shell_id=shell_id, label=label)
     else:
         shell = _mapping(params.get("shell"))
         if shell is None:
             return
         shell_id = _text(shell.get("id"))
-        label = _text(shell.get("label")) or _relevant_shell_labels.get(shell_id, "")
-        relevant = _is_run_profile_label(label) or shell_id in _relevant_shell_labels
+        label = (
+            _text(shell.get("label"))
+            or _relevant_shell_labels.get(shell_id, "")
+            or run_profile_shell_label_for_id(shell_id)
+        )
+        relevant = is_run_profile_shell_label(label) or shell_id in _relevant_shell_labels
         if not relevant:
             return
         if shell_id:
             if method == "fws.shell.exited":
                 _ = _relevant_shell_labels.pop(shell_id, None)
+                _ = remove_run_profile_shell(shell_id=shell_id, label=label)
             else:
                 _relevant_shell_labels[shell_id] = label
+                _ = record_run_profile_shell(shell_id, label)
 
     if method in {"fws.shell.exited", "fws.shell.removed"} and label:
         await _release_route_best_effort(owner_id=label, shell_id=shell_id)
@@ -218,7 +233,7 @@ def _replace_relevant_shell_ids(payload: object) -> None:
             if (
                 shell is None
                 or _text(shell.get("status")).strip().lower() != "running"
-                or not _is_run_profile_label(_text(shell.get("label")))
+                or not is_run_profile_shell_label(_text(shell.get("label")))
             ):
                 continue
             shell_id = _text(shell.get("id"))
@@ -227,6 +242,7 @@ def _replace_relevant_shell_ids(payload: object) -> None:
                 relevant_labels[shell_id] = label
     _relevant_shell_labels.clear()
     _relevant_shell_labels.update(relevant_labels)
+    replace_run_profile_shell_facts(relevant_labels)
 
 
 async def _release_route_best_effort(*, owner_id: str, shell_id: str) -> None:
@@ -242,10 +258,6 @@ def _framework_url() -> str:
         or os.environ.get("TE_FRAMEWORK_URL")
         or "http://127.0.0.1:8089"
     ).rstrip("/")
-
-
-def _is_run_profile_label(label: str) -> bool:
-    return any(label.startswith(prefix) for prefix in RUN_PROFILE_LABEL_PREFIXES)
 
 
 def _mapping(value: object) -> Mapping[str, object] | None:

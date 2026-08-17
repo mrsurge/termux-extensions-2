@@ -39,10 +39,10 @@ use std::{
     env,
     net::{IpAddr, SocketAddr},
     path::PathBuf,
-    sync::Arc,
+    sync::{Arc, RwLock as StdRwLock},
 };
 use tokio::{
-    sync::{Notify, RwLock, broadcast},
+    sync::{Notify, RwLock as AsyncRwLock, broadcast},
     task::JoinSet,
     time::{Duration, timeout},
 };
@@ -61,10 +61,12 @@ pub(crate) struct AppState {
     instance_id: Arc<str>,
     http_client: reqwest::Client,
     sio_routes: Arc<SioRouteIndex>,
+    app_registry: Arc<StdRwLock<AppRegistry>>,
+    running_apps: Arc<StdRwLock<HashMap<String, runtime::RunningApp>>>,
     launch_store: Arc<LaunchStore>,
     #[cfg_attr(not(feature = "ferrous-framework-native"), allow(dead_code))]
     service_scheduler: framework_services::scheduler::FrameworkServiceScheduler,
-    readiness_store: Arc<RwLock<HashMap<String, JsonMap<String, Value>>>>,
+    readiness_store: Arc<AsyncRwLock<HashMap<String, JsonMap<String, Value>>>>,
     apps_events: broadcast::Sender<apps_lifecycle::AppsEvent>,
     fws_bridge: Arc<FwsBridgeConfig>,
     te2_runtime_bridge: Arc<Te2RuntimeBridgeConfig>,
@@ -99,6 +101,79 @@ impl AppState {
         &self.sio_routes
     }
 
+    pub(crate) fn app_registry_snapshot(&self) -> AppRegistry {
+        self.app_registry
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    pub(crate) fn replace_app_registry(&self, registry: AppRegistry) {
+        *self
+            .app_registry
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = registry;
+    }
+
+    pub(crate) fn running_apps_snapshot(&self) -> Vec<runtime::RunningApp> {
+        let mut apps = self
+            .running_apps
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        apps.sort_by(|left, right| left.app_id.cmp(&right.app_id));
+        apps
+    }
+
+    pub(crate) fn running_app_for_id(&self, app_id: &str) -> Option<runtime::RunningApp> {
+        let registry = self.app_registry_snapshot();
+        let canonical_app_id = registry.canonical_app_id(app_id.trim())?;
+        self.running_apps
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(canonical_app_id)
+            .cloned()
+    }
+
+    pub(crate) fn replace_running_apps(&self, apps: Vec<runtime::RunningApp>) {
+        let next = apps
+            .into_iter()
+            .map(|app| (app.app_id.clone(), app))
+            .collect::<HashMap<_, _>>();
+        *self
+            .running_apps
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = next;
+    }
+
+    #[cfg(feature = "ferrous-framework-native")]
+    pub(crate) fn upsert_running_app(&self, mut app: runtime::RunningApp) {
+        let registry = self.app_registry_snapshot();
+        let Some(canonical_app_id) = registry.canonical_app_id(&app.app_id) else {
+            return;
+        };
+        app.app_id = canonical_app_id.to_owned();
+        let mut running = self
+            .running_apps
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        upsert_running_app_entry(&mut running, canonical_app_id, app);
+    }
+
+    pub(crate) fn remove_running_app(&self, app_id: &str, shell_id: Option<&str>) -> bool {
+        let registry = self.app_registry_snapshot();
+        let Some(canonical_app_id) = registry.canonical_app_id(app_id.trim()) else {
+            return false;
+        };
+        let mut running = self
+            .running_apps
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        remove_running_app_entry(&mut running, canonical_app_id, shell_id)
+    }
+
     pub(crate) fn launch_store(&self) -> &Arc<LaunchStore> {
         &self.launch_store
     }
@@ -110,7 +185,9 @@ impl AppState {
         &self.service_scheduler
     }
 
-    pub(crate) fn readiness_store(&self) -> &Arc<RwLock<HashMap<String, JsonMap<String, Value>>>> {
+    pub(crate) fn readiness_store(
+        &self,
+    ) -> &Arc<AsyncRwLock<HashMap<String, JsonMap<String, Value>>>> {
         &self.readiness_store
     }
 
@@ -129,6 +206,35 @@ impl AppState {
     pub(crate) fn te2_runtime_upstream_base_url(&self) -> &str {
         &self.te2_runtime_bridge.upstream_base_url
     }
+}
+
+#[cfg(any(feature = "ferrous-framework-native", test))]
+fn upsert_running_app_entry(
+    running: &mut HashMap<String, runtime::RunningApp>,
+    canonical_app_id: &str,
+    app: runtime::RunningApp,
+) {
+    match running.get(canonical_app_id) {
+        Some(existing) if existing.updated_at > app.updated_at => {}
+        _ => {
+            running.insert(canonical_app_id.to_owned(), app);
+        }
+    }
+}
+
+fn remove_running_app_entry(
+    running: &mut HashMap<String, runtime::RunningApp>,
+    canonical_app_id: &str,
+    shell_id: Option<&str>,
+) -> bool {
+    if shell_id.is_some_and(|shell_id| {
+        running
+            .get(canonical_app_id)
+            .is_some_and(|app| app.shell_id != shell_id)
+    }) {
+        return false;
+    }
+    running.remove(canonical_app_id).is_some()
 }
 
 #[derive(Clone)]
@@ -197,6 +303,7 @@ async fn main() -> Result<()> {
         .build()
         .context("failed to build HTTP proxy client")?;
     let bootstrap_registry = AppRegistry::load(&config.app_roots);
+    let bootstrap_running_apps = apps_lifecycle::discover_running_apps(&bootstrap_registry);
     let sio_routes = Arc::new(SioRouteIndex::from_registry(&bootstrap_registry));
     let sio_mounts = sio_routes.mount_paths();
     let (apps_events, _) = broadcast::channel(APPS_EVENT_CHANNEL_CAPACITY);
@@ -221,9 +328,16 @@ async fn main() -> Result<()> {
         instance_id: Arc::from(new_instance_id()?),
         http_client,
         sio_routes,
+        app_registry: Arc::new(StdRwLock::new(bootstrap_registry)),
+        running_apps: Arc::new(StdRwLock::new(
+            bootstrap_running_apps
+                .into_iter()
+                .map(|app| (app.app_id.clone(), app))
+                .collect(),
+        )),
         launch_store,
         service_scheduler: framework_services::scheduler::FrameworkServiceScheduler::default(),
-        readiness_store: Arc::new(RwLock::new(HashMap::new())),
+        readiness_store: Arc::new(AsyncRwLock::new(HashMap::new())),
         apps_events,
         fws_bridge: Arc::new(fws_bridge_config.clone()),
         te2_runtime_bridge: Arc::new(load_te2_runtime_bridge_config()),
@@ -645,5 +759,47 @@ async fn wait_for_shutdown_signal() {
     #[cfg(not(unix))]
     {
         ctrl_c.await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{remove_running_app_entry, runtime::RunningApp, upsert_running_app_entry};
+    use serde_json::Map;
+    use std::collections::HashMap;
+
+    fn running(shell_id: &str, updated_at: f64) -> RunningApp {
+        RunningApp {
+            app_id: "code_te2".to_owned(),
+            port: 8100,
+            shell_id: shell_id.to_owned(),
+            label: None,
+            source: "test",
+            created_at: 1.0,
+            updated_at,
+            locked: false,
+            uptime: 0.0,
+            cpu: 0.0,
+            ram: 0,
+            readiness: Map::new(),
+        }
+    }
+
+    #[test]
+    fn running_app_index_keeps_newest_shell_and_ignores_stale_exit() {
+        let mut apps = HashMap::new();
+        upsert_running_app_entry(&mut apps, "code_te2", running("old", 10.0));
+        upsert_running_app_entry(&mut apps, "code_te2", running("new", 20.0));
+        upsert_running_app_entry(&mut apps, "code_te2", running("stale", 15.0));
+
+        assert_eq!(apps.get("code_te2").unwrap().shell_id, "new");
+        assert!(!remove_running_app_entry(
+            &mut apps,
+            "code_te2",
+            Some("old")
+        ));
+        assert_eq!(apps.get("code_te2").unwrap().shell_id, "new");
+        assert!(remove_running_app_entry(&mut apps, "code_te2", Some("new")));
+        assert!(!apps.contains_key("code_te2"));
     }
 }

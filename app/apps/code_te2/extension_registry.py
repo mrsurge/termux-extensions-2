@@ -638,6 +638,7 @@ def _load_stale_nids() -> dict[str, int]:
 # Extensions we never load — they spawn processes or do filesystem ops
 # that hang in our headless environment
 _EXCLUDED_EXTENSION_IDS = frozenset({
+    "te2.te2-extension-api-bridge",
     "vscode.git",
     "vscode.git-base",
     "vscode.github",

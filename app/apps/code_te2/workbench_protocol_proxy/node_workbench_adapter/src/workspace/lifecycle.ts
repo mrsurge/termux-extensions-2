@@ -188,6 +188,19 @@ export async function openFile(runtime: LifecycleRuntime, params: unknown = {}):
 
   const prevAbs = previousPath(prevUriObj);
   const isSameFileReopen = shouldTreatAsSameFile(prevUriObj, path);
+  const existingEntry = runtime.session.documentRegistry.getByPath(path);
+  const isDuplicateGeneration = !!(
+    isSameFileReopen &&
+    existingEntry &&
+    generation !== null &&
+    existingEntry.openGeneration === generation
+  );
+  if (isDuplicateGeneration) {
+    runtime.log(
+      `[openFile] ts=${Date.now()} duplicate path=${path} generation=${String(generation)} no-op`,
+    );
+    return { ok: true, req: null, duplicate: true, generation };
+  }
   const shouldReplaceEditor = !!(
     prevUriObj &&
     prevAbs &&
@@ -198,7 +211,6 @@ export async function openFile(runtime: LifecycleRuntime, params: unknown = {}):
     "openFile.uriForPath",
     () => runtime.uriForPath(path, authority),
   );
-  const existingEntry = runtime.session.documentRegistry.getByPath(path);
   let text: string | null = null;
   let lines: string[] | null = null;
   let languageId: string;

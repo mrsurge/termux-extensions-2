@@ -159,13 +159,22 @@ export async function runEditorOpenTransaction(
         const want = deps.monacoFileUri(deps.getWindow().monaco, currentPath);
         if (want && model.uri && String(model.uri.toString()) !== String(want.toString())) {
           if (diffEditor && typeof diffEditor.setModel === 'function') { try { diffEditor.setModel(null); } catch (_) {} }
-          try { if (typeof model.dispose === 'function') model.dispose(); } catch (_) {}
-          model = deps.createFileModel(payload.content || '', lang, currentPath);
-          deps.setModel(model);
-          if (typeof editor.setModel === 'function') editor.setModel(model);
-          deps.applyLanguageToModel(model, lang, currentPath);
-          deps.installMirrorPublisher();
-          deps.installScrollPublisher();
+          const previousModel = model;
+          const replacementModel = deps.createFileModel(payload.content || '', lang, currentPath);
+          let replacementAttached = false;
+          try {
+            if (typeof editor.setModel === 'function') editor.setModel(replacementModel);
+            model = replacementModel;
+            deps.setModel(replacementModel);
+            replacementAttached = true;
+            deps.applyLanguageToModel(replacementModel, lang, currentPath);
+            deps.installMirrorPublisher();
+            deps.installScrollPublisher();
+          } finally {
+            if (replacementAttached && previousModel !== replacementModel) {
+              try { if (typeof previousModel.dispose === 'function') previousModel.dispose(); } catch (_) {}
+            }
+          }
         } else {
           deps.applyOpenModelTextSafely(model, editor, payload.content || '', deps.setApplyingRemote);
           deps.applyLanguageToModel(model, lang, currentPath);

@@ -6,10 +6,10 @@ import hashlib
 import json as _json
 import re
 import shutil
-import time
+from collections.abc import Awaitable
 from importlib import import_module
 from pathlib import Path
-from typing import Awaitable, Protocol, cast
+from typing import Protocol, cast
 
 from app.te2_paths import ensure_runtime_home
 
@@ -133,10 +133,10 @@ def _label() -> str:
     return f"code_server:{APP_ID}:global"
 
 
-# ── Bridge extension install ──────────────────────────────────────────
+# ── Legacy extension cleanup ─────────────────────────────────────────
 
-_BRIDGE_EXT_ID = "te2-extension-api-bridge"
-_BRIDGE_EXT_SRC = Path(__file__).parent / "vendor" / _BRIDGE_EXT_ID
+_LEGACY_BRIDGE_EXTENSION_ID = "te2.te2-extension-api-bridge"
+_LEGACY_BRIDGE_DIRECTORY = "te2-extension-api-bridge"
 _CODE_TE2_PATHS = code_te2_paths()
 _CODE_SERVER_DATA_DIR = _CODE_TE2_PATHS.code_server_data_dir
 _CODE_SERVER_SOCKET_PATH = _CODE_TE2_PATHS.code_server_socket_path
@@ -173,78 +173,52 @@ def sync_vscode_watcher_settings(watcher_mode: str) -> None:
             "**/.git/*.lock": True,
         }
 
-    _USER_SETTINGS_PATH.write_text(
+    _ = _USER_SETTINGS_PATH.write_text(
         _json.dumps(settings, indent=4) + "\n", encoding="utf-8"
     )
     print(f"[code_server] watcher settings synced: mode={watcher_mode}", flush=True)
 
 
-def ensure_bridge_extension_installed() -> bool:
-    """Copy the vendored bridge extension to code-server's extensions dir if needed.
-
-    Compares package.json version to decide whether to update.
-    Also ensures the extension is registered in extensions.json so code-server loads it.
-    Returns True if installed/updated, False if already current. # and a comment for good measure
-    """
-    dest = _EXTENSIONS_DIR / _BRIDGE_EXT_ID
-    src_pkg = _BRIDGE_EXT_SRC / "package.json"
-
-    if not src_pkg.exists():
-        print(f"[code_server] bridge extension source missing: {src_pkg}", flush=True)
-        return False
-
-    src_manifest = _read_json_object(src_pkg)
-    src_version = str(src_manifest.get("version", "0"))
-
-    dest_pkg = dest / "package.json"
-    needs_copy = True
-    if dest_pkg.exists():
-        try:
-            dest_version = str(_read_json_object(dest_pkg).get("version", ""))
-            if dest_version == src_version:
-                needs_copy = False
-        except Exception:
-            pass  # corrupt — reinstall
-
-    if needs_copy:
-        if dest.exists():
-            shutil.rmtree(dest)
-        _EXTENSIONS_DIR.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(str(_BRIDGE_EXT_SRC), str(dest))
-        print(f"[code_server] bridge extension installed: {_BRIDGE_EXT_ID} v{src_version}", flush=True)
-
-    # Ensure extension is registered in extensions.json
-    ext_json_path = _EXTENSIONS_DIR / "extensions.json"
-    entries = _read_json_object_list(ext_json_path) if ext_json_path.exists() else []
-
-    publisher = str(src_manifest.get("publisher", "te2"))
-    ext_id = f"{publisher}.{src_manifest.get('name', _BRIDGE_EXT_ID)}"
-    already_registered = any(
-        _json_object(e.get("identifier", {})).get("id", "") == ext_id for e in entries
+def _is_legacy_bridge_entry(entry: JsonObject) -> bool:
+    identifier = _json_object(entry.get("identifier", {}))
+    return (
+        str(identifier.get("id") or "").lower() == _LEGACY_BRIDGE_EXTENSION_ID
+        or str(entry.get("relativeLocation") or "") == _LEGACY_BRIDGE_DIRECTORY
     )
 
-    if not already_registered:
-        entries.append({
-            "identifier": {"id": ext_id},
-            "version": src_version,
-            "location": {
-                "$mid": 1,
-                "path": str(dest),
-                "scheme": "file",
-            },
-            "relativeLocation": _BRIDGE_EXT_ID,
-            "metadata": {
-                "installedTimestamp": int(time.time() * 1000),
-                "source": "vsix",
-                "isPreReleaseVersion": False,
-                "hasPreReleaseVersion": False,
-            },
-        })
-        ext_json_path.write_text(_json.dumps(entries))
-        print(f"[code_server] bridge extension registered in extensions.json: {ext_id}", flush=True)
-        return True
 
-    return needs_copy
+def _write_json_object_list_atomic(path: Path, value: list[JsonObject]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_suffix(f"{path.suffix}.tmp")
+    try:
+        _ = temp_path.write_text(
+            _json.dumps(value, separators=(",", ":")) + "\n",
+            "utf-8",
+        )
+        _ = temp_path.replace(path)
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+def remove_legacy_bridge_extension() -> bool:
+    """Remove the superseded file-watcher bridge and its Code Server record."""
+    changed = False
+    destination = _EXTENSIONS_DIR / _LEGACY_BRIDGE_DIRECTORY
+    if destination.exists():
+        shutil.rmtree(destination)
+        changed = True
+
+    manifest_path = _EXTENSIONS_DIR / "extensions.json"
+    if manifest_path.exists():
+        entries = _read_json_object_list(manifest_path)
+        retained = [entry for entry in entries if not _is_legacy_bridge_entry(entry)]
+        if len(retained) != len(entries):
+            _write_json_object_list_atomic(manifest_path, retained)
+            changed = True
+
+    if changed:
+        print("[code_server] removed legacy TE2 extension API bridge", flush=True)
+    return changed
 
 
 def _expected_socket_path() -> str:
@@ -378,6 +352,14 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
 
     installation = await asyncio.to_thread(ensure_code_server_installation)
     code_server_bin = str(installation.executable)
+    legacy_bridge_removed = await asyncio.to_thread(remove_legacy_bridge_extension)
+    if legacy_bridge_removed:
+        try:
+            from .extension_registry import ensure_registry_and_gate
+
+            _ = await asyncio.to_thread(ensure_registry_and_gate)
+        except Exception as exc:
+            print(f"[code_server] extension registry cleanup failed (non-fatal): {exc}", flush=True)
 
     # Fast path: if a previous spawn already completed, check cached shell
     if _ready_event is not None and _ready_event.is_set() and _active_shell_id:
@@ -389,7 +371,7 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
     # If another coroutine is spawning, wait for it then retry
     if _ready_event is not None and not _ready_event.is_set():
         print("[code_server] waiting for concurrent spawn to finish", flush=True)
-        await _ready_event.wait()
+        _ = await _ready_event.wait()
         if _active_shell_id:
             cached = await _get_alive(_active_shell_id)
             if cached and _matches_expected_target(cached, code_server_bin):
@@ -432,19 +414,12 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
         _CODE_SERVER_PROBE_OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
         print(f"[code_server] executable resolved: {code_server_bin}", flush=True)
 
-        # Ensure bridge extension is installed before code-server starts
-        try:
-            ensure_bridge_extension_installed()
-        except Exception as exc:
-            print(f"[code_server] bridge extension install failed (non-fatal): {exc}", flush=True)
-
         # Scan extensions and rebuild the settings gate before code-server
-        # reads settings.json on boot.  Must run AFTER bridge install (so the
-        # bridge is in the manifest) and BEFORE watcher sync (which layers
-        # files.watcherExclude on top of the gate output).
+        # reads settings.json on boot and before watcher sync layers its
+        # files.watcherExclude values on top of the gate output.
         try:
             from .extension_registry import ensure_registry_and_gate
-            ensure_registry_and_gate()
+            _ = ensure_registry_and_gate()
         except Exception as exc:
             print(f"[code_server] extension registry scan failed (non-fatal): {exc}", flush=True)
 

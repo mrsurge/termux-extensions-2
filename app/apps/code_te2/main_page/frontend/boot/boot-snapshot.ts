@@ -28,8 +28,9 @@ function asRecord(value: unknown): JsonRecord | null {
 
 export async function requestHostBootSnapshot(
   deps: RequestBootSnapshotDeps,
+  payload: JsonRecord = {},
 ): Promise<HostBootSnapshot | null> {
-  const reply = asRecord(await deps.requestBackendBootSnapshot({})) as HostBootSnapshotReply | null;
+  const reply = asRecord(await deps.requestBackendBootSnapshot(payload)) as HostBootSnapshotReply | null;
   if (!reply || reply.ok === false) return null;
   return asRecord(reply.snapshot) as HostBootSnapshot | null;
 }

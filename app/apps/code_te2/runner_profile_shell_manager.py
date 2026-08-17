@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from collections.abc import Awaitable
 from dataclasses import dataclass
 import hashlib
 from importlib import import_module
@@ -10,8 +11,13 @@ import json
 from pathlib import Path
 import shlex
 import sys
-from typing import Awaitable, Protocol, cast
+from typing import Protocol, cast
 
+from .run_profile_shell_facts import (
+    record_run_profile_shell,
+    remove_run_profile_shell,
+    run_profile_shell_id,
+)
 from .runner_profiles import RunProfile
 
 
@@ -104,13 +110,14 @@ async def ensure_runner_profile_shell(
     cwd = _runner_cwd(root, profile)
     argv = _runner_argv(root, cwd, profile)
     command_preview = shlex.join(argv)
-    label = _label(str(root), profile.profile_id)
+    label = runner_profile_shell_label(str(root), profile.profile_id)
     lock = _spawn_locks.setdefault(label, asyncio.Lock())
 
     async with lock:
         mgr = await _framework_get_manager()()
         existing = await mgr.find_shell_by_label(label, status="running")
         if existing is not None and _is_running(existing):
+            _ = record_run_profile_shell(existing.id, label)
             if profile.running_behavior == "just save":
                 return RunnerProfileShell(
                     shell_id=existing.id,
@@ -119,7 +126,8 @@ async def ensure_runner_profile_shell(
                     reused=True,
                     command_preview=command_preview,
                 )
-            await mgr.terminate_shell(existing.id, force=True)
+            _ = await mgr.terminate_shell(existing.id, force=True)
+            _ = remove_run_profile_shell(shell_id=existing.id, label=label)
             await asyncio.sleep(0.2)
 
         orch = _orchestrator_factory()(mgr)
@@ -145,6 +153,7 @@ async def ensure_runner_profile_shell(
             record_spec_id=f"service:{APP_ID}:runner-profile",
             wait_ready=True,
         )
+        _ = record_run_profile_shell(shell.id, label)
         return RunnerProfileShell(
             shell_id=shell.id,
             label=label,
@@ -158,13 +167,12 @@ async def runner_profile_shell_state(
     *, project_root: str, profile_id: str
 ) -> RunnerProfileShellState:
     root = str(Path(project_root).expanduser().resolve(strict=False))
-    label = _label(root, profile_id)
-    mgr = await _framework_get_manager()()
-    shell = await mgr.find_shell_by_label(label, status="running")
+    label = runner_profile_shell_label(root, profile_id)
+    shell_id = run_profile_shell_id(label)
     return RunnerProfileShellState(
-        shell_id=shell.id if _is_running(shell) else "",
+        shell_id=shell_id,
         label=label,
-        running=_is_running(shell),
+        running=bool(shell_id),
     )
 
 
@@ -172,15 +180,17 @@ async def stop_runner_profile_shell(
     *, project_root: str, profile_id: str
 ) -> RunnerProfileShellState:
     root = str(Path(project_root).expanduser().resolve(strict=False))
-    label = _label(root, profile_id)
+    label = runner_profile_shell_label(root, profile_id)
     lock = _spawn_locks.setdefault(label, asyncio.Lock())
     async with lock:
         mgr = await _framework_get_manager()()
         shell = await mgr.find_shell_by_label(label, status="running")
-        if not _is_running(shell):
+        if shell is None or not _is_running(shell):
+            _ = remove_run_profile_shell(label=label)
             return RunnerProfileShellState(shell_id="", label=label, running=False)
         shell_id = shell.id
-        await mgr.terminate_shell(shell_id, force=True)
+        _ = await mgr.terminate_shell(shell_id, force=True)
+        _ = remove_run_profile_shell(shell_id=shell_id, label=label)
         return RunnerProfileShellState(shell_id=shell_id, label=label, running=False)
 
 
@@ -196,11 +206,11 @@ def _runner_argv(root: Path, cwd: Path, profile: RunProfile) -> list[str]:
 
 def _runner_env(profile: RunProfile, *, cwd: Path, matched_path: str) -> dict[str, str]:
     env = dict(profile.env)
-    env.setdefault("TE2_RUN_PROFILE_ID", profile.profile_id)
-    env.setdefault("TE2_RUN_PROFILE_RUNNER", profile.runner)
-    env.setdefault("TE2_RUN_PROFILE_EXEC", profile.exec_command)
-    env.setdefault("TE2_RUN_PROFILE_CWD", str(cwd))
-    env.setdefault("TE2_RUN_PROFILE_MATCHED_PATH", matched_path)
+    _ = env.setdefault("TE2_RUN_PROFILE_ID", profile.profile_id)
+    _ = env.setdefault("TE2_RUN_PROFILE_RUNNER", profile.runner)
+    _ = env.setdefault("TE2_RUN_PROFILE_EXEC", profile.exec_command)
+    _ = env.setdefault("TE2_RUN_PROFILE_CWD", str(cwd))
+    _ = env.setdefault("TE2_RUN_PROFILE_MATCHED_PATH", matched_path)
     return env
 
 
@@ -248,7 +258,7 @@ def _runner_cwd(root: Path, profile: RunProfile) -> Path:
 
 def _require_inside_project(path: Path, root: Path, *, what: str) -> None:
     try:
-        path.relative_to(root.resolve(strict=False))
+        _ = path.relative_to(root.resolve(strict=False))
     except ValueError:
         raise ValueError(f"Run profile {what} must be inside the active project") from None
 
@@ -267,7 +277,7 @@ def _command_payload_b64(*, argv: list[str], env: dict[str, str]) -> str:
     return base64.b64encode(raw.encode("utf-8")).decode("ascii")
 
 
-def _label(project_root: str, profile_id: str) -> str:
+def runner_profile_shell_label(project_root: str, profile_id: str) -> str:
     return f"runner-profile:{APP_ID}:{_project_hash(project_root)}:{_hash_text(profile_id)}"
 
 

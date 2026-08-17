@@ -899,6 +899,97 @@ def _upsert_slot(state: JsonObject, slot: JsonObject) -> JsonObject:
     return state
 
 
+def _without_slot_timestamps(slot: JsonObject) -> JsonObject:
+    return {
+        key: value
+        for key, value in slot.items()
+        if key not in {"created_at", "createdAt", "updated_at", "updatedAt"}
+    }
+
+
+def reconcile_extension_webview_slots(
+    project_root: str,
+    desired_slots: dict[str, JsonObject],
+    *,
+    upsert: bool = True,
+) -> JsonObject:
+    """Apply one complete WBA extension-surface membership snapshot.
+
+    WBA snapshots are authoritative for extension-owned URL slots in one
+    project. The reconciliation performs at most one preference write and does
+    not rewrite timestamps for an identical snapshot.
+    """
+    normalized_project = _norm(project_root)
+    if not normalized_project:
+        raise ValueError("project_root is required")
+
+    state = _load_pref_state()
+    slots = _as_object(state.get("slots"))
+    desired_host_ids = {_norm(host_id) for host_id in desired_slots if _norm(host_id)}
+    removed: list[str] = []
+    changed = False
+
+    for host_id, raw_slot in list(slots.items()):
+        slot = _normalize_slot(_as_object(raw_slot))
+        surface = _as_object(slot.get("webviewSurface") or slot.get("webview_surface"))
+        if not surface or _norm(surface.get("projectPath")) != normalized_project:
+            continue
+        if host_id not in desired_host_ids:
+            slots.pop(host_id, None)
+            removed.append(host_id)
+            changed = True
+
+    if upsert:
+        now = _now_ms()
+        for host_id, raw_slot in desired_slots.items():
+            normalized_host_id = _norm(host_id)
+            if not normalized_host_id:
+                continue
+            existing = _normalize_slot(_as_object(slots.get(normalized_host_id)))
+            created_at = _as_int(
+                existing.get("created_at") or existing.get("createdAt"),
+                now,
+            )
+            updated_at = _as_int(
+                existing.get("updated_at") or existing.get("updatedAt"),
+                created_at,
+            )
+            candidate = _normalize_slot(
+                {
+                    **raw_slot,
+                    "host_id": normalized_host_id,
+                    "hostId": normalized_host_id,
+                    "created_at": created_at,
+                    "updated_at": updated_at,
+                }
+            )
+            surface = _as_object(
+                candidate.get("webviewSurface") or candidate.get("webview_surface")
+            )
+            if (
+                not candidate
+                or _norm(surface.get("hostId")) != normalized_host_id
+                or _norm(surface.get("projectPath")) != normalized_project
+            ):
+                raise ValueError("extension webview slot identity is invalid")
+            if existing and _without_slot_timestamps(existing) == _without_slot_timestamps(candidate):
+                continue
+            candidate["updated_at"] = now
+            candidate["updatedAt"] = now
+            slots[normalized_host_id] = _normalize_slot(candidate)
+            changed = True
+
+    state["slots"] = slots
+    if changed:
+        _save_pref_state(state)
+    return {
+        "ok": True,
+        "changed": changed,
+        "removed": removed,
+        "state": get_sidebar_window_state(),
+    }
+
+
 def create_sidebar_window(params: JsonObject) -> JsonObject:
     kind = _norm(params.get("kind")).lower()
     if kind == "url":
