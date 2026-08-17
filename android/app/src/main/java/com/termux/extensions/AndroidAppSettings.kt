@@ -23,6 +23,7 @@ data class AndroidAppSettings(
         }
 
     fun toJson(): JSONObject = JSONObject().apply {
+        put("nativeSettingsSchemaVersion", NATIVE_SETTINGS_SCHEMA_VERSION)
         put("frameworkHost", frameworkHost)
         put("frameworkPort", frameworkPort)
         put("frameworkBaseUrl", frameworkBaseUrl)
@@ -36,6 +37,7 @@ data class AndroidAppSettings(
     companion object {
         const val DEFAULT_FRAMEWORK_HOST = "127.0.0.1"
         const val DEFAULT_FRAMEWORK_PORT = 8089
+        const val NATIVE_SETTINGS_SCHEMA_VERSION = 2
     }
 }
 

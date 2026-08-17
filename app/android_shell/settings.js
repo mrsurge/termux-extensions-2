@@ -4,8 +4,12 @@ const hostInput = document.querySelector("#framework-host");
 const portInput = document.querySelector("#framework-port");
 const persistentToggle = document.querySelector("#persistent-network-notification");
 const imeContextSwitchingToggle = document.querySelector("#ime-context-switching-enabled");
+const devToolsRunProfilesRow = document.querySelector("#devtools-run-profiles-row");
 const devToolsRunProfilesToggle = document.querySelector("#devtools-run-profiles-enabled");
+const devToolsDebugRow = document.querySelector("#devtools-debug-row");
 const devToolsDebugToggle = document.querySelector("#devtools-debug-enabled");
+const devToolsLegacyRow = document.querySelector("#devtools-legacy-row");
+const devToolsLegacyToggle = document.querySelector("#devtools-inspector-enabled");
 const saveButton = document.querySelector("#save-settings");
 const testButton = document.querySelector("#test-framework");
 const settingsStatus = document.querySelector("#settings-status");
@@ -21,14 +25,34 @@ function setStatus(element, state, text) {
   element.textContent = text;
 }
 
+function supportsSplitDevToolsSettings(settings) {
+  return Number(settings?.nativeSettingsSchemaVersion) >= 2 || (
+    typeof settings?.devToolsRunProfilesEnabled === "boolean" &&
+    typeof settings?.devToolsDebugEnabled === "boolean"
+  );
+}
+
+function applyDevToolsSettings(settings) {
+  const splitSettings = supportsSplitDevToolsSettings(settings);
+  devToolsRunProfilesRow.hidden = !splitSettings;
+  devToolsDebugRow.hidden = !splitSettings;
+  devToolsLegacyRow.hidden = splitSettings;
+
+  if (splitSettings) {
+    devToolsRunProfilesToggle.checked = !!settings.devToolsRunProfilesEnabled;
+    devToolsDebugToggle.checked = !!settings.devToolsDebugEnabled;
+  } else {
+    devToolsLegacyToggle.checked = !!settings.devToolsInspectorEnabled;
+  }
+}
+
 async function loadSettings() {
   const settings = await androidShellHost.getSettings();
   hostInput.value = settings.frameworkHost || "127.0.0.1";
   portInput.value = String(settings.frameworkPort || 8089);
   persistentToggle.checked = !!settings.persistentNetworkNotification;
   imeContextSwitchingToggle.checked = settings.imeContextSwitchingEnabled !== false;
-  devToolsRunProfilesToggle.checked = !!settings.devToolsRunProfilesEnabled;
-  devToolsDebugToggle.checked = !!settings.devToolsDebugEnabled;
+  applyDevToolsSettings(settings);
   const runtime = settings.runtime || {};
   setStatus(
     powerPolicyStatus,
@@ -116,6 +140,11 @@ persistToggle(
   devToolsDebugToggle,
   "devToolsDebugEnabled",
   (settings) => !!settings.devToolsDebugEnabled,
+);
+persistToggle(
+  devToolsLegacyToggle,
+  "devToolsInspectorEnabled",
+  (settings) => !!settings.devToolsInspectorEnabled,
 );
 
 saveButton?.addEventListener("click", async () => {

@@ -225,6 +225,10 @@ button {
   gap: 14px;
 }
 
+.toggle-row[hidden] {
+  display: none;
+}
+
 .section-header h2 {
   font-size: 1rem;
 }

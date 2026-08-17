@@ -149,6 +149,7 @@ class GeckoDevToolsInspector(
         inspectorView.visibility = if (visible) View.VISIBLE else View.GONE
         if (visible) {
             sendTargetsChanged()
+            sendClientControl("frontend_ensure")
             sendClientControl("debug_state_request")
         }
     }
@@ -420,7 +421,13 @@ class GeckoDevToolsInspector(
         payload: JSONObject,
     ): String? {
         if (!isTargetAllowed(isTopLevel)) {
-            disconnectPort(port)
+            recordDebugEvent(
+                "target_ready_ignored",
+                JSONObject()
+                    .put("reason", "target_class_disabled")
+                    .put("targetId", payload.optString("targetId"))
+                    .put("isTopLevel", isTopLevel),
+            )
             return null
         }
         val targetId = payload.optString("targetId").trim()
@@ -457,10 +464,11 @@ class GeckoDevToolsInspector(
         )
 
         if (
-            replacingActive ||
-            (
-                activeTargetId == null &&
-                (selectedTargetId == targetId || (selectedTargetId == null && isTopLevel))
+            shouldActivateRegisteredDevToolsTarget(
+                replacingActive = replacingActive,
+                activeTargetId = activeTargetId,
+                selectedTargetId = selectedTargetId,
+                targetId = targetId,
             )
         ) {
             activeTargetId = null
@@ -702,10 +710,18 @@ class GeckoDevToolsInspector(
 
     private fun pruneDisallowedTargets() {
         val disallowed = targets.values.filterNot { isTargetAllowed(it.isTopLevel) }
+        if (disallowed.any { it.targetId == selectedTargetId }) {
+            selectedTargetId = null
+        }
         disallowed.forEach { target ->
             detachTargetPort(target.port, target.targetId, target.endpoint)
             disconnectPort(target.port)
         }
+        chooseDevToolsTargetAfterPrune(
+            activeTargetId = activeTargetId,
+            selectedTargetId = selectedTargetId,
+            availableTargetIds = targets.keys,
+        )?.let(::selectTarget)
     }
 
     private fun detachAllTargetPorts() {
@@ -782,7 +798,7 @@ class GeckoDevToolsInspector(
         private const val EXTENSION_LOCATION =
             "resource://android/assets/devtools_inspector/"
         private const val EXTENSION_ID = "devtools_inspector@mrselect6"
-        internal const val EXTENSION_VERSION = "1.15.5.5"
+        internal const val EXTENSION_VERSION = "1.15.5.7"
         private const val TARGET_NATIVE_APP_ID = "te2_devtools_target"
         private const val PROBE_NATIVE_APP_ID = "te2_devtools_probe"
         private const val CLIENT_NATIVE_APP_ID = "te2_devtools_client"
@@ -790,4 +806,26 @@ class GeckoDevToolsInspector(
         private const val MAX_FRAME_PROBES = 32
         private const val MAX_DEBUG_EVENTS = 96
     }
+}
+
+internal fun shouldActivateRegisteredDevToolsTarget(
+    replacingActive: Boolean,
+    activeTargetId: String?,
+    selectedTargetId: String?,
+    targetId: String,
+): Boolean =
+    replacingActive ||
+        (
+            activeTargetId == null &&
+                (selectedTargetId == null || selectedTargetId == targetId)
+        )
+
+internal fun chooseDevToolsTargetAfterPrune(
+    activeTargetId: String?,
+    selectedTargetId: String?,
+    availableTargetIds: Collection<String>,
+): String? {
+    if (activeTargetId != null) return null
+    return selectedTargetId?.takeIf(availableTargetIds::contains)
+        ?: availableTargetIds.firstOrNull()
 }

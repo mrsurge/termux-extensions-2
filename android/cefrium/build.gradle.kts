@@ -13,8 +13,8 @@ android {
         applicationId = "com.termux.extensions.cefrium"
         minSdk = 29
         targetSdk = 34
-        versionCode = 20329
-        versionName = "1.0.7-r0.2.329-cefrium"
+        versionCode = 20331
+        versionName = "1.0.7-r0.2.331-cefrium"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["sharedUserIdValue"] = "com.termux.extensions.cefrium"

@@ -50,19 +50,26 @@
       <header class="section-header">
         <h2>Diagnostics</h2>
       </header>
-      <label class="toggle-row" for="devtools-run-profiles-enabled">
+      <label id="devtools-run-profiles-row" class="toggle-row" for="devtools-run-profiles-enabled" hidden>
         <span>
           <strong>Dev tools run profiles</strong>
           <small>Expose Run Profile pages with dev tools enabled as dedicated native Inspector targets.</small>
         </span>
         <input id="devtools-run-profiles-enabled" type="checkbox">
       </label>
-      <label class="toggle-row" for="devtools-debug-enabled">
+      <label id="devtools-debug-row" class="toggle-row" for="devtools-debug-enabled" hidden>
         <span>
           <strong>Dev tools debug</strong>
           <small>Expose Code TE2 and other native browser pages as diagnostic Inspector targets.</small>
         </span>
         <input id="devtools-debug-enabled" type="checkbox">
+      </label>
+      <label id="devtools-legacy-row" class="toggle-row" for="devtools-inspector-enabled" hidden>
+        <span>
+          <strong>Native developer tools</strong>
+          <small>Expose supported native browser pages as Inspector targets.</small>
+        </span>
+        <input id="devtools-inspector-enabled" type="checkbox">
       </label>
     </section>
 
