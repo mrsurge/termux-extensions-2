@@ -11,8 +11,9 @@ runtime from entering Gecko builds.
 
 ## Build
 
-The module pins the Cefrium SDK and Gradle plugin to `0.7.0`, targets arm64, and
-requires Android API 29 or newer.
+The module pins the Cefrium SDK and Gradle plugin to `0.7.1`, targets arm64, and
+requires Android API 29 or newer. The `0.7.1` patch release is required for its
+iframe WebSocket and scheduling-latency correction.
 
 Check free space before starting Gradle and stop if less than 2 GB is available:
 

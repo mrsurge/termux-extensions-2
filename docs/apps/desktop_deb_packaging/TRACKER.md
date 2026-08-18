@@ -6,8 +6,8 @@ Last updated: 2026-08-17
 
 | Phase | Status | Approval boundary |
 |---|---|---|
-| Phase 0: dependency cleanup | Complete and validated; commit still pending | Keep the audited Python runtime input; target locks belong to the selected distribution design |
-| Phase 1: integrate current `main` | Planned; remote delta investigated, merge not authorized | Finish Phase 0, refresh/approve the exact target, merge, then validate the imported baseline |
+| Phase 0: dependency cleanup | Complete, validated, and committed as `0c02c033` | Keep the audited Python runtime input; target locks belong to the selected distribution design |
+| Phase 1: integrate current `main` | Complete and validated at merge `8ac75fbc` | Imported baseline is accepted; Phase 2 may proceed without reopening the merge |
 | Phase 2A: desktop framework bookmarks | Planned from Android's bounded bookmark contract | Electron settings schema/store/UI and existing retarget integration |
 | Phase 2B: launcher local framework | Planned | Electron process controller and launcher capability implementation |
 | Phase 2C: remaining frontend polish | Intake placeholder only | Each concrete tweak requires separate named scope and approval |
@@ -49,6 +49,7 @@ Last updated: 2026-08-17
 | External capability binaries still have exact owners | `aria2c` backs Aria Downloader and `watchexec` backs the Code TE2 polling watcher | Linux prerequisites or Termux package metadata owns them, or the installed capability is removed |
 | `dtach` has no TE2 owner | Code TE2's terminal shellspec uses Framework-Shells `backend: pty`; only stale comments referred to dtach | Removed from the supported dependency surface |
 | Termux-LM no longer exists | There is no `app/apps/termux_lm`; only stale documentation remained | Documentation pruned |
+| Cefrium `0.7.0` is no longer published by its configured Maven repository | Upstream metadata exposes `0.7.1`; both the Gradle plugin and SDK now pin that release | Corrected and validated; `0.7.1` also carries the required iframe WebSocket/scheduling-latency fix |
 
 ## Architecture decisions
 
@@ -136,22 +137,45 @@ Last updated: 2026-08-17
 
 ## Phase 1 checklist — integrate current `main`
 
-- [ ] Commit the validated Phase 0 dependency-boundary cleanup.
-- [ ] Refresh remote `main` without changing the working branch and record both
+- [x] Commit the validated Phase 0 dependency-boundary cleanup.
+- [x] Refresh remote `main` without changing the working branch and record both
   exact heads.
-- [ ] Inspect all commits/files since the current feature base, especially Run
+- [x] Inspect all commits/files since the current feature base, especially Run
   Profile, framework projection, Code TE2 open/WBA, Electron, and Android
   changes.
-- [ ] Obtain explicit approval for the exact merge target.
-- [ ] Merge `main` into this feature branch without rebase/history rewrite.
-- [ ] Preserve the dependency-pruning commit and resolve source/generated
+- [x] Obtain explicit approval for the exact merge target.
+- [x] Merge `main` into this feature branch without rebase/history rewrite.
+- [x] Preserve the dependency-pruning commit and resolve source/generated
   overlap from current source authority.
-- [ ] Run framework Python/Rust tests appropriate to the imported delta.
-- [ ] Run Code TE2 typecheck/tests/build.
-- [ ] Run Electron typecheck/tests/build.
-- [ ] Run affected GeckoView/Cefrium unit and APK build validation after the
+- [x] Run framework Python/Rust tests appropriate to the imported delta.
+- [x] Run Code TE2 typecheck/tests/build.
+- [x] Run Electron typecheck/tests/build.
+- [x] Run affected GeckoView/Cefrium unit and APK build validation after the
   required free-space check.
-- [ ] Record merge commit and acceptance evidence before Phase 2 begins.
+- [x] Record merge commit and acceptance evidence before Phase 2 begins.
+
+### Phase 1 acceptance evidence
+
+- Feature head before integration: `0c02c0332d03a1c78180335bb22415ecada22cb4`.
+- Approved `origin/main` target: `f00ba916d5b405c776ea94a2f8a9e041be58ba99`.
+- Non-rebase merge commit: `8ac75fbca6ef114e4f8bf3a0187d642aa2db8bf8`.
+- Python: 223 tests passed.
+- Rust: formatting check passed; 74 server tests passed and 4 benchmark tests
+  remained intentionally ignored.
+- Code TE2: typecheck passed, all 209 Node tests passed, and the production
+  browser/WBA bundles rebuilt successfully.
+- Electron: typecheck passed, all 67 tests passed, and the unbundled source
+  compile succeeded.
+- Android free-space guard passed at 7.14 GiB. Gecko debug unit tests and APK
+  assembly succeeded. Cefrium debug unit tests and APK assembly succeeded after
+  correcting its SDK/plugin pin from unavailable `0.7.0` to required `0.7.1`.
+  The resulting debug APK SHA-256 values were
+  `27ea46c43df175df803b4fc1044fe71afc2d3b1d9a518c6d5236a2a8bad7a85c`
+  for Gecko and
+  `49e8e6d77c0a2a7af25e9c59334c9a7765326a0e0805b170bbc4c3b197da22cc`
+  for Cefrium.
+- No framework restart, APK install, publication, version bump, or push was
+  performed as part of integration.
 
 ## Phase 2A checklist — desktop framework bookmarks
 
