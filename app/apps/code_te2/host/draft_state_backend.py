@@ -284,6 +284,7 @@ async def handle_sidebar_draft_clear_request(
     history = get_history_store()
     cleared = history.clear_cached_document(project, target)
     if cleared:
+        document_revision = history.get_document_revision(project, target)
         editor_runtime_notify_draft_state_changed(project)
         await editor_runtime_emit_room_event(
             "editor:cache_state",
@@ -292,6 +293,7 @@ async def handle_sidebar_draft_clear_request(
                 "state": "clean",
                 "unsaved": False,
                 "reason": "sidebar_draft_clear",
+                "document_revision": document_revision,
             },
         )
 
@@ -309,6 +311,7 @@ async def handle_sidebar_draft_clear_request(
         "target": _target_payload(project, target),
         "cleared": cleared,
         "reloaded": reloaded,
+        "documentRevision": history.get_document_revision(project, target),
         "requestId": request_id,
         "source": source,
     }

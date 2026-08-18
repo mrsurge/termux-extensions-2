@@ -4,6 +4,7 @@ import { handleIssuesDumpRequest } from "./editor_socket_issues_dump_handler_uti
 import { handleIssuesCommand } from "./editor_socket_issues_cmd_handler_utils.js";
 import { handleFindCommand } from "./editor_socket_find_cmd_handler_utils.js";
 import { createAgentEditReviewRuntime } from "./editor_agent_edit_review_runtime.ts";
+import { resetDocumentRevisionRuntime } from "./editor_document_revision_runtime.ts";
 import {
   clearSearchHighlight,
   handleSearchHighlight,
@@ -205,6 +206,7 @@ export function registerEditorRuntimeSocketHandlers(
     deps.rpcNotifications.onNotification(
       EDITOR_RPC_NOTIFICATIONS.projectSwitching,
       () => {
+        resetDocumentRevisionRuntime();
         clearSearchHighlight(deps.getEditor());
         deps.clearCodeInspectorHighlights();
       },

@@ -68,13 +68,14 @@ export interface WorkbenchLike {
   ) => Promise<Record<string, unknown>>;
   extensionNavigationComplete: (
     params: Record<string, unknown>,
-  ) => Record<string, unknown>;
+  ) => Promise<Record<string, unknown>>;
   extensionEditorOperationComplete: (
     params: Record<string, unknown>,
-  ) => Record<string, unknown>;
+  ) => Promise<Record<string, unknown>>;
   extensionEditorStateUpdate: (
     params: Record<string, unknown>,
-  ) => Record<string, unknown>;
+  ) => Promise<Record<string, unknown>>;
+  clientActivePath: (params: Record<string, unknown>) => string | null;
   resolveLanguageId: (
     path: string,
     text: string,
@@ -514,7 +515,7 @@ export async function dispatchJsonRpcRequest(
 
   if (method === "vscode.extensionNavigation.complete") {
     try {
-      return success(id, runtime.wb.extensionNavigationComplete(params));
+      return success(id, await runtime.wb.extensionNavigationComplete(params));
     } catch (error) {
       return failure(id, -32602, error);
     }
@@ -522,14 +523,14 @@ export async function dispatchJsonRpcRequest(
 
   if (method === "vscode.editorOperation.complete") {
     try {
-      return success(id, runtime.wb.extensionEditorOperationComplete(params));
+      return success(id, await runtime.wb.extensionEditorOperationComplete(params));
     } catch (error) {
       return failure(id, -32602, error);
     }
   }
 
   if (method === "vscode.editorState.update") {
-    return success(id, runtime.wb.extensionEditorStateUpdate(params));
+    return success(id, await runtime.wb.extensionEditorStateUpdate(params));
   }
 
   if (method === "extensions.activateByEvent") {
@@ -616,7 +617,7 @@ export async function dispatchJsonRpcRequest(
       params,
       runtime.defaultRemoteAuthority,
     );
-    const alreadyActive = resolvedPath === runtime.wb.state?.activePath;
+    const alreadyActive = resolvedPath === runtime.wb.clientActivePath(params);
     const forceRefreshEff = forceRefreshReq || (alreadyActive && !!requestId);
     runtime.log(
       `[server] vscode.openFile ENTER path=${resolvedPath} id=${id} requestId=${requestId || "-"} alreadyActive=${alreadyActive ? 1 : 0} forceRefresh_req=${forceRefreshReq ? 1 : 0} forceRefresh_eff=${forceRefreshEff ? 1 : 0}`,
@@ -630,6 +631,8 @@ export async function dispatchJsonRpcRequest(
       forceRefresh: forceRefreshEff,
       generation: params.generation,
       workspaceFolder: params.workspaceFolder ?? null,
+      clientInstanceId: params.clientInstanceId,
+      windowId: params.windowId,
     });
     runtime.log(`[server] wb.openFile returned for ${resolvedPath}`);
     runtime.logStatus("open_file", { path: resolvedPath });

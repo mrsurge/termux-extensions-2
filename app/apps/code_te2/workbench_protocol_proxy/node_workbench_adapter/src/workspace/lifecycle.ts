@@ -170,6 +170,9 @@ export async function openFile(runtime: LifecycleRuntime, params: unknown = {}):
   const input = isRecord(params) ? params : {};
   const path = String(input.path ?? "");
   const authority = String(input.authority ?? runtime.authority);
+  const clientInstanceId = typeof input.clientInstanceId === "string"
+    ? input.clientInstanceId
+    : null;
   const forceRefresh = input.forceRefresh === true;
   const generation = coerceOptionalGeneration(input.generation);
 
@@ -309,6 +312,7 @@ export async function openFile(runtime: LifecycleRuntime, params: unknown = {}):
       activeEpoch: runtime.session.documentRegistry.activeEpoch,
       generation,
       workspaceFolder: runtime.state.workspaceFolder,
+      ...(clientInstanceId ? { clientInstanceId } : {}),
     });
     return { ok: true, req: null };
   }
@@ -423,6 +427,7 @@ export async function openFile(runtime: LifecycleRuntime, params: unknown = {}):
     activeEpoch: promoted.entry.activeEpoch,
     generation,
     workspaceFolder: runtime.state.workspaceFolder,
+    ...(clientInstanceId ? { clientInstanceId } : {}),
   });
   return { ok: true, req: reqDocs };
 }

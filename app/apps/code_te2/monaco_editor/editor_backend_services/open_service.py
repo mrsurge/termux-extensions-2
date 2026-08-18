@@ -14,7 +14,7 @@ from ...diagnostics_latency_metrics import (
 )
 from .contracts import EditorOpenFields, EditorOpenPayload
 from .payload_utils import get_opt_int, get_opt_str, get_str
-from ...open_state_backend import SidecarOpenStatePayload
+from ...open_state_backend import ClientForegroundPayload, SidecarOpenStatePayload
 
 
 class RecordSidecarOpenFileFn(Protocol):
@@ -23,8 +23,9 @@ class RecordSidecarOpenFileFn(Protocol):
         project: str,
         abs_path: str,
         *,
+        client_instance_id: str,
         reason: str,
-    ) -> SidecarOpenStatePayload: ...
+    ) -> tuple[SidecarOpenStatePayload, ClientForegroundPayload]: ...
 
 
 class EmitOpenStateChangedFn(Protocol):
@@ -32,6 +33,7 @@ class EmitOpenStateChangedFn(Protocol):
         self,
         open_state: SidecarOpenStatePayload,
         *,
+        client_foreground: ClientForegroundPayload | None = None,
         source: str | None = None,
         request_id: str | None = None,
     ) -> Awaitable[None]: ...
@@ -90,13 +92,10 @@ async def emit_editor_open_from_backend(
     normalize_abs_path: Callable[[str], str | None],
     is_under_project: Callable[[str, str], bool],
     read_file_payload: Callable[[str, str], EditorOpenPayload],
-    update_session_state: Callable[[dict[str, object]], object],
-    set_last_file: Callable[[str, str], object],
     emit_editor_open: Callable[[EditorOpenPayload], Awaitable[None]],
     record_sidecar_open_file: RecordSidecarOpenFileFn,
     emit_open_state_changed: EmitOpenStateChangedFn,
 ) -> EditorOpenPayload:
-    del set_last_file
     normalized = dict(payload_in) if isinstance(payload_in, Mapping) else {}
     fields = coerce_editor_open_request_fields(
         normalized,
@@ -121,8 +120,12 @@ async def emit_editor_open_from_backend(
 
         # Materialization validates the document before it becomes active or recent.
         state_started_ns = time.perf_counter_ns() if metrics_enabled else 0
-        open_state = record_sidecar_open_file(project, path, reason="file_open")
-        _ = update_session_state({"currentPath": path})
+        open_state, client_foreground = record_sidecar_open_file(
+            project,
+            path,
+            client_instance_id=source_client,
+            reason="file_open",
+        )
         record_open_stage(
             request_id,
             "backend_state_recorded",
@@ -162,7 +165,12 @@ async def emit_editor_open_from_backend(
         )
         source = get_str(normalized, "source", source_client)
         state_emit_started_ns = time.perf_counter_ns() if metrics_enabled else 0
-        await emit_open_state_changed(open_state, source=source, request_id=request_id)
+        await emit_open_state_changed(
+            open_state,
+            client_foreground=client_foreground,
+            source=source,
+            request_id=request_id,
+        )
         record_open_stage(
             request_id,
             "backend_open_state_enqueued",

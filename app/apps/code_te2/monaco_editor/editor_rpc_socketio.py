@@ -5,11 +5,17 @@ from collections.abc import Awaitable, Callable
 from typing import cast
 
 import socketio
+from socketio.exceptions import ConnectionRefusedError
 
 from ..frontend_rpc_codec import (
     FrontendRpcCodecError,
     decode_frontend_rpc_message,
     require_msgpack_v1_auth,
+)
+from ..client_presentation import (
+    ClientPresentationIdentity,
+    client_presentation_identity_from_environ,
+    client_presentation_room,
 )
 from ..open_state_backend import SidecarOpenStatePayload
 from .editor_rpc_contract import (
@@ -51,12 +57,12 @@ from .editor_ws import (
     editor_runtime_record_sidecar_open_file,
     editor_runtime_record_save_sha,
     editor_runtime_resolve_save_snapshot_response,
-    editor_runtime_set_last_file,
-    editor_runtime_update_session_state,
 )
 
 
 class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
+    _client_identity_by_sid: dict[str, ClientPresentationIdentity] = {}
+
     async def _emit_to_sid(self, sid: str, event_name: str, payload: bytes) -> None:
         emit_to_room = cast(Callable[..., Awaitable[object]], self.emit)
         await emit_to_room(event_name, payload, room=sid)
@@ -71,14 +77,22 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
         payload = cast(dict[str, object], result)
         if method == EDITOR_RPC_METHOD_JUMP_TO_LINE:
             await emit_editor_rpc_notification(
-                lambda event_name, notification_payload: self._emit_to_room("code_te2", event_name, notification_payload),
+                lambda event_name, notification_payload: self._emit_to_room(
+                    client_presentation_room(self._client_id(sid)),
+                    event_name,
+                    notification_payload,
+                ),
                 EDITOR_RPC_NOTIFICATION_FILE_JUMP_TO_LINE,
                 payload,
             )
             return
         if method == EDITOR_RPC_METHOD_GIT_BASELINES_GET:
             await emit_editor_rpc_notification(
-                lambda event_name, notification_payload: self._emit_to_room("code_te2", event_name, notification_payload),
+                lambda event_name, notification_payload: self._emit_to_room(
+                    client_presentation_room(self._client_id(sid)),
+                    event_name,
+                    notification_payload,
+                ),
                 EDITOR_RPC_NOTIFICATION_GIT_BASELINES,
                 payload,
             )
@@ -96,14 +110,22 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
         environ: dict[str, object],
         auth: object | None = None,
     ) -> None:
-        del environ
         try:
             require_msgpack_v1_auth(auth)
         except FrontendRpcCodecError as exc:
-            raise socketio.exceptions.ConnectionRefusedError(str(exc)) from exc  # pyright: ignore[reportUnknownMemberType]
+            raise ConnectionRefusedError(str(exc)) from exc
+        try:
+            identity = client_presentation_identity_from_environ(environ)
+        except ValueError as exc:
+            raise ConnectionRefusedError(str(exc)) from exc
+        assert identity is not None
+        self._client_identity_by_sid[sid] = identity
         enter_room = cast(Callable[..., Awaitable[object]], self.enter_room)
         await enter_room(sid, "code_te2")
-        snapshot = editor_runtime_build_connect_snapshot()
+        await enter_room(sid, client_presentation_room(identity["clientInstanceId"]))
+        snapshot = editor_runtime_build_connect_snapshot(
+            client_instance_id=identity["clientInstanceId"]
+        )
         await emit_editor_rpc_notification(
             lambda event_name, payload: self._emit_to_sid(sid, event_name, payload),
             EDITOR_RPC_NOTIFICATION_STATE_SSOT,
@@ -123,18 +145,30 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
         if isinstance(open_state_obj, dict):
             try:
                 await editor_runtime_emit_open_state_changed(
-                    cast(SidecarOpenStatePayload, open_state_obj),
+                    cast(SidecarOpenStatePayload, cast(object, open_state_obj)),
                     source="rpc_connect",
                 )
             except Exception:
                 pass
 
     async def on_disconnect(self, sid: str, reason: object | None = None) -> None:
+        identity = self._client_identity_by_sid.pop(sid, None)
         try:
             leave_room = cast(Callable[..., Awaitable[object]], self.leave_room)
             await leave_room(sid, "code_te2")
+            if identity is not None:
+                await leave_room(
+                    sid,
+                    client_presentation_room(identity["clientInstanceId"]),
+                )
         except Exception:
             pass
+
+    def _client_id(self, sid: str) -> str:
+        identity = self._client_identity_by_sid.get(sid)
+        if identity is None:
+            raise EditorRpcProtocolError(JSONRPC_INVALID_PARAMS, "client_identity_missing")
+        return identity["clientInstanceId"]
 
     async def on_rpc(self, sid: str, data: object) -> None:
         request_id: object = None
@@ -148,6 +182,7 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
                 str(exc),
             )
             return
+        source_client = self._client_id(sid)
 
         try:
             request = coerce_jsonrpc_request_envelope(decoded)
@@ -156,7 +191,7 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
                 await dispatch_editor_rpc_request(
                     notification["method"],
                     notification["params"],
-                    source_client=sid,
+                    source_client=source_client,
                     active_project=editor_runtime_active_project,
                     normalize_abs_path=editor_runtime_normalize_abs_path,
                     is_under_project=editor_runtime_is_under_project,
@@ -165,11 +200,13 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
                     read_disk_text=editor_runtime_read_disk_text,
                     git_head_text=editor_runtime_git_head_text,
                     get_cached_document=editor_runtime_get_cached_document,
-                    update_session_state=editor_runtime_update_session_state,
-                    set_last_file=editor_runtime_set_last_file,
                     record_sidecar_open_file=editor_runtime_record_sidecar_open_file,
                     emit_open_state_changed=editor_runtime_emit_open_state_changed,
-                    emit_to_room=editor_runtime_emit_room_event,
+                    emit_to_room=lambda event_name, payload: editor_runtime_emit_room_event(
+                        event_name,
+                        payload,
+                        client_instance_id=source_client,
+                    ),
                     notify_draft_state_changed=editor_runtime_notify_draft_state_changed,
                     record_save_sha=editor_runtime_record_save_sha,
                     record_file_activity=editor_runtime_record_file_activity,
@@ -185,7 +222,7 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
             result = await dispatch_editor_rpc_request(
                 request["method"],
                 request["params"],
-                source_client=sid,
+                source_client=source_client,
                 active_project=editor_runtime_active_project,
                 normalize_abs_path=editor_runtime_normalize_abs_path,
                 is_under_project=editor_runtime_is_under_project,
@@ -194,11 +231,13 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
                 read_disk_text=editor_runtime_read_disk_text,
                 git_head_text=editor_runtime_git_head_text,
                 get_cached_document=editor_runtime_get_cached_document,
-                update_session_state=editor_runtime_update_session_state,
-                set_last_file=editor_runtime_set_last_file,
                 record_sidecar_open_file=editor_runtime_record_sidecar_open_file,
                 emit_open_state_changed=editor_runtime_emit_open_state_changed,
-                emit_to_room=editor_runtime_emit_room_event,
+                emit_to_room=lambda event_name, payload: editor_runtime_emit_room_event(
+                    event_name,
+                    payload,
+                    client_instance_id=source_client,
+                ),
                 notify_draft_state_changed=editor_runtime_notify_draft_state_changed,
                 record_save_sha=editor_runtime_record_save_sha,
                 record_file_activity=editor_runtime_record_file_activity,

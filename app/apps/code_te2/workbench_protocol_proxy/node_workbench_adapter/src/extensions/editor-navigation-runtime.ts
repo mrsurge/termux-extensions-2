@@ -19,6 +19,7 @@ export interface ExtensionEditorNavigationResult {
 }
 
 interface PendingOpen {
+  clientInstanceId: string;
   path: string;
   selection: Record<string, unknown> | null;
   returnEditorId: boolean;
@@ -30,6 +31,7 @@ interface PendingOpen {
 }
 
 interface PendingEditorOperation {
+  clientInstanceId: string;
   resolve(): void;
   reject(error: Error): void;
   timer: ReturnType<typeof setTimeout>;
@@ -40,6 +42,7 @@ export interface ExtensionEditorNavigationRuntimeOptions {
   fsPathFromUri(uri: unknown): string | null;
   activePath(): string | null;
   activeEditorId(): string | null;
+  activeClientInstanceId(): string | null;
   emitBackendEvent(payload: Record<string, unknown>): void;
   notifyEditor(method: string, params: Record<string, unknown>): void;
   createId(): string;
@@ -156,6 +159,9 @@ export class ExtensionEditorNavigationRuntime {
     if (!requestId) throw new Error("Missing extension navigation request id");
     const pending = this.pendingOpens.get(requestId);
     if (!pending) return { ok: false, stale: true, requestId };
+    if (stringValue(params.clientInstanceId) !== pending.clientInstanceId) {
+      throw new Error("Extension navigation client identity mismatch");
+    }
     if (params.ok !== true) {
       this.failOpen(requestId, new Error(stringValue(params.error) ?? "Editor open failed"));
       return { ok: true, requestId };
@@ -175,6 +181,9 @@ export class ExtensionEditorNavigationRuntime {
     if (!operationId) throw new Error("Missing editor operation id");
     const pending = this.pendingEditorOperations.get(operationId);
     if (!pending) return { ok: false, stale: true, operationId };
+    if (stringValue(params.clientInstanceId) !== pending.clientInstanceId) {
+      throw new Error("Extension editor operation client identity mismatch");
+    }
     this.pendingEditorOperations.delete(operationId);
     this.clearTimeoutFn(pending.timer);
     if (params.ok === false) {
@@ -185,9 +194,14 @@ export class ExtensionEditorNavigationRuntime {
     return { ok: true, operationId };
   }
 
-  activeEditorChanged(path: string): void {
+  activeEditorChanged(path: string, clientInstanceId: string | null): void {
     for (const [requestId, pending] of this.pendingOpens) {
-      if (pending.path === path) this.maybeCompleteOpen(requestId, pending);
+      if (
+        pending.path === path &&
+        clientInstanceId === pending.clientInstanceId
+      ) {
+        this.maybeCompleteOpen(requestId, pending);
+      }
     }
   }
 
@@ -200,6 +214,10 @@ export class ExtensionEditorNavigationRuntime {
     if (!path) {
       return Promise.reject(new Error("TE2 can only open file-backed extension resources"));
     }
+    const clientInstanceId = this.options.activeClientInstanceId();
+    if (!clientInstanceId) {
+      return Promise.reject(new Error("Extension editor navigation has no active client"));
+    }
     const requestId = `extension_open_${this.options.createId()}`;
     const selection = firstSelection(options.selection);
     const line = positiveInteger(selection?.startLineNumber);
@@ -209,6 +227,7 @@ export class ExtensionEditorNavigationRuntime {
         this.failOpen(requestId, new Error(`Extension editor open timed out: ${path}`));
       }, 30000);
       this.pendingOpens.set(requestId, {
+        clientInstanceId,
         path,
         selection,
         returnEditorId,
@@ -229,6 +248,7 @@ export class ExtensionEditorNavigationRuntime {
       column,
       focus: options.preserveFocus !== true,
       selection,
+      clientInstanceId,
     });
     return promise;
   }
@@ -243,9 +263,16 @@ export class ExtensionEditorNavigationRuntime {
     data: Record<string, unknown>,
   ): Promise<void> {
     const editorId = stringValue(rawEditorId);
+    const clientInstanceId = this.options.activeClientInstanceId();
     const activeEditorId = this.options.activeEditorId();
     const path = this.options.activePath();
-    if (!editorId || !activeEditorId || editorId !== activeEditorId || !path) {
+    if (
+      !clientInstanceId ||
+      !editorId ||
+      !activeEditorId ||
+      editorId !== activeEditorId ||
+      !path
+    ) {
       return Promise.reject(new Error(`TextEditor(${String(rawEditorId)}) is not active`));
     }
     const operationId = `extension_editor_${this.options.createId()}`;
@@ -256,13 +283,19 @@ export class ExtensionEditorNavigationRuntime {
         this.pendingEditorOperations.delete(operationId);
         pending.reject(new Error(`Extension editor operation timed out: ${operation}`));
       }, 12000);
-      this.pendingEditorOperations.set(operationId, { resolve, reject, timer });
+      this.pendingEditorOperations.set(operationId, {
+        clientInstanceId,
+        resolve,
+        reject,
+        timer,
+      });
     });
     this.options.notifyEditor("vscode.editorOperation", {
       operationId,
       operation,
       editorId,
       path,
+      clientInstanceId,
       ...data,
     });
     return promise;
@@ -273,6 +306,7 @@ export class ExtensionEditorNavigationRuntime {
     if (
       !pending.backendAccepted ||
       pending.completing ||
+      this.options.activeClientInstanceId() !== pending.clientInstanceId ||
       this.options.activePath() !== pending.path ||
       !editorId
     ) {

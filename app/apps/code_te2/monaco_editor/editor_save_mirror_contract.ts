@@ -19,6 +19,7 @@ export interface EditorMirrorPayload {
   content_sha256?: unknown;
   unsaved?: unknown;
   source_client?: unknown;
+  document_revision?: unknown;
 }
 
 export interface EditorCacheStatePayload {
@@ -29,6 +30,7 @@ export interface EditorCacheStatePayload {
   content_sha256?: unknown;
   base_sha256?: unknown;
   source_client?: unknown;
+  document_revision?: unknown;
 }
 
 export interface EditorSaveSnapshotRequestPayload {

@@ -94,7 +94,7 @@ def register_run_profile_event_bus_handlers() -> None:
     if _event_bus_handlers_registered:
         return
     subscribe_worker_event("RunProfileStateChanged", _project_run_profile_state)
-    subscribe_worker_event("OpenStateChanged", _refresh_after_open_state)
+    subscribe_worker_event("ClientForegroundChanged", _refresh_after_client_foreground)
     subscribe_worker_event("ProjectSwitchFinished", _refresh_after_project_switch)
     _event_bus_handlers_registered = True
 
@@ -114,29 +114,61 @@ async def _project_run_profile_state(event: WorkerEvent) -> None:
     if not projection:
         return
     try:
+        from .open_state_backend import read_client_foreground
+        from .ui_ipc.ui_ipc_ws import (
+            emit_ui_ipc_rpc_notification,
+            list_ui_ipc_browser_clients,
+        )
+
+        for client_instance_id in list_ui_ipc_browser_clients():
+            path: str | None = None
+            if project_root:
+                foreground = await asyncio.to_thread(
+                    read_client_foreground,
+                    project_root,
+                    client_instance_id,
+                    reason="run_profile_projection",
+                )
+                path = foreground["path"]
+            client_projection = await build_run_profile_state_projection(
+                {"path": path} if path else {"path": ""}
+            )
+            client_projection["revision"] = projection.get("revision", 0)
+            client_projection["source"] = projection.get("source", event["source"])
+            await emit_ui_ipc_rpc_notification(
+                UI_IPC_RPC_NOTIFICATION_RUN_PROFILE_STATE_CHANGED,
+                client_projection,
+                client_instance_id=client_instance_id,
+            )
+    except Exception as exc:
+        logger.debug("[run_profile] client projection emit failed: %s", exc)
+
+
+async def _refresh_after_client_foreground(event: WorkerEvent) -> None:
+    foreground = event_payload_object(event, "clientForeground")
+    client_instance_id = _text(foreground.get("clientInstanceId"))
+    if not client_instance_id:
+        return
+    path = _text(foreground.get("path"))
+    try:
         from .ui_ipc.ui_ipc_ws import emit_ui_ipc_rpc_notification
 
+        projection = await build_run_profile_state_projection(
+            {"path": path} if path else {"path": ""}
+        )
+        projection["source"] = "client_foreground"
         await emit_ui_ipc_rpc_notification(
             UI_IPC_RPC_NOTIFICATION_RUN_PROFILE_STATE_CHANGED,
             projection,
+            client_instance_id=client_instance_id,
         )
     except Exception as exc:
-        logger.debug("[run_profile] projection emit failed: %s", exc)
-
-
-async def _refresh_after_open_state(event: WorkerEvent) -> None:
-    open_state = event_payload_object(event, "openState")
-    path = _text(open_state.get("openFile"))
-    data: JsonMap = {"path": path} if path else {}
-    _ = await refresh_run_profile_state(data, source="open_state")
+        logger.debug("[run_profile] foreground projection failed: %s", exc)
 
 
 async def _refresh_after_project_switch(event: WorkerEvent) -> None:
     cancel_all_run_profile_url_readiness()
-    open_state = event_payload_object(event, "openState")
-    path = _text(open_state.get("openFile"))
-    data: JsonMap = {"path": path} if path else {}
-    _ = await refresh_run_profile_state(data, source="project_switch")
+    _ = await refresh_run_profile_state({"path": ""}, source="project_switch")
 
 
 def _projection_signature(projection: JsonMap) -> str:

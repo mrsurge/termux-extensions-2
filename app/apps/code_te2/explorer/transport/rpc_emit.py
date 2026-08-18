@@ -52,3 +52,16 @@ async def emit_project_explorer_rpc_notification(
             return
 
     await emit_explorer_rpc_notification(method, params)
+
+
+async def emit_client_explorer_rpc_notification(
+    client_instance_id: str,
+    method: str,
+    params: dict[str, object],
+) -> bool:
+    from .connection_manager import manager
+
+    return await manager.send_client(
+        client_instance_id,
+        build_jsonrpc_notification(method, params),
+    )

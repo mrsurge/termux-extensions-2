@@ -20,7 +20,7 @@ from ..monaco_editor.editor_view_state_backend import (
     build_editor_git_baselines_payload,
     build_editor_jump_to_line_payload,
 )
-from ..stores import get_history_store
+from ..open_state_backend import read_client_foreground
 
 
 def _active_project_or_raise() -> str:
@@ -30,12 +30,20 @@ def _active_project_or_raise() -> str:
     return project
 
 
-def _resolve_editor_path(data: dict[str, object], project: str) -> str:
-    history = get_history_store()
+def _resolve_editor_path(
+    data: dict[str, object],
+    project: str,
+    client_instance_id: str,
+) -> str:
+    foreground = read_client_foreground(
+        project,
+        client_instance_id,
+        reason="host_editor_action",
+    )
     raw_path = str(
         data.get("path")
         or data.get("currentPath")
-        or history.get_last_file(project)
+        or foreground["path"]
         or ""
     ).strip()
     if not raw_path:
@@ -56,7 +64,7 @@ async def handle_host_editor_jump_to_line_request(
     source_name: str,
 ) -> JsonMap:
     project = _active_project_or_raise()
-    path = _resolve_editor_path(data, project)
+    path = _resolve_editor_path(data, project, source_name)
     payload = build_editor_jump_to_line_payload(
         {**data, "path": path},
         source_client=source_name,
@@ -65,7 +73,11 @@ async def handle_host_editor_jump_to_line_request(
         is_under_project=editor_runtime_is_under_project,
         record_file_activity=editor_runtime_record_file_activity,
     )
-    await editor_runtime_emit_room_event("editor:jump_to_line", payload)
+    await editor_runtime_emit_room_event(
+        "editor:jump_to_line",
+        payload,
+        client_instance_id=source_name,
+    )
     return {
         "ok": True,
         "path": path,
@@ -80,7 +92,7 @@ async def handle_host_editor_git_baselines_request(
     source_name: str,
 ) -> JsonMap:
     project = _active_project_or_raise()
-    path = _resolve_editor_path(data, project)
+    path = _resolve_editor_path(data, project, source_name)
     payload = build_editor_git_baselines_payload(
         {**data, "path": path},
         source_client=source_name,
@@ -90,7 +102,11 @@ async def handle_host_editor_git_baselines_request(
         read_disk_text=editor_runtime_read_disk_text,
         git_head_text=editor_runtime_git_head_text,
     )
-    await editor_runtime_emit_room_event("editor:git_baselines", payload)
+    await editor_runtime_emit_room_event(
+        "editor:git_baselines",
+        payload,
+        client_instance_id=source_name,
+    )
     return {"ok": True, "path": path, "tracked": bool(payload.get("tracked"))}
 
 
@@ -107,6 +123,7 @@ async def handle_host_editor_find_request(
     await editor_runtime_emit_room_event(
         "editor:find_cmd",
         {"action": action, "reason": reason, "source_client": source_name},
+        client_instance_id=source_name,
     )
     return {"ok": True, "action": action}
 
@@ -123,6 +140,7 @@ async def handle_host_editor_command_request(
     await editor_runtime_emit_room_event(
         "editor:edit_cmd",
         {"command": command, "source_client": source_name},
+        client_instance_id=source_name,
     )
     return {"ok": True, "command": command}
 
@@ -138,6 +156,7 @@ async def handle_host_editor_issues_command_request(
     await editor_runtime_emit_room_event(
         "editor:issues_cmd",
         {"action": action, "source_client": source_name},
+        client_instance_id=source_name,
     )
     return {"ok": True, "action": action}
 
@@ -150,7 +169,11 @@ async def handle_host_editor_issues_dump_request(
     request_id = str(data.get("request_id") or data.get("requestId") or f"host_issues_dump_{int(time.time() * 1000)}")
     timeout_s_obj = data.get("timeout_s")
     timeout_s = float(timeout_s_obj) if isinstance(timeout_s_obj, (int, float)) and timeout_s_obj > 0 else 10.0
-    response = await editor_runtime_request_issues_dump(request_id, timeout_s=timeout_s)
+    response = await editor_runtime_request_issues_dump(
+        request_id,
+        client_instance_id=source_name,
+        timeout_s=timeout_s,
+    )
     return {
         "ok": True,
         "request_id": request_id,

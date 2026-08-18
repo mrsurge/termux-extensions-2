@@ -21,8 +21,16 @@ export const WBA_RPC_EVENT = "rpc";
 
 export type JsonRpcReply = Record<string, unknown> | null;
 
+export interface EditorWbaRequestContext {
+  clientInstanceId: string;
+  windowId: string | null;
+}
+
 export interface EditorWbaSocketRuntime {
-  handleJsonRpc(request: unknown): Promise<JsonRpcReply>;
+  handleJsonRpc(
+    request: unknown,
+    context?: EditorWbaRequestContext,
+  ): Promise<JsonRpcReply>;
   nowMs(): number;
   log: (...args: unknown[]) => void;
 }
@@ -35,6 +43,33 @@ export interface EditorWbaSocketServer {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+const CLIENT_INSTANCE_PATTERN = /^client_[a-z0-9]{12,64}$/;
+const WINDOW_PATTERN = /^window_[a-z0-9]{20,64}$/;
+
+function identityValue(value: unknown, pattern: RegExp): string | null {
+  const candidate = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return pattern.test(candidate) ? candidate : null;
+}
+
+function clientRoom(clientInstanceId: string): string {
+  return `code_te2:client:${clientInstanceId}`;
+}
+
+export function editorWbaRequestContextFromQuery(
+  query: Record<string, unknown>,
+): EditorWbaRequestContext {
+  const clientInstanceId = identityValue(
+    query.client_instance_id,
+    CLIENT_INSTANCE_PATTERN,
+  );
+  const rawWindowId = query.window_id;
+  const windowId = identityValue(rawWindowId, WINDOW_PATTERN);
+  if (!clientInstanceId || (rawWindowId != null && !windowId)) {
+    throw new Error("invalid_client_presentation_identity");
+  }
+  return { clientInstanceId, windowId };
 }
 
 function shouldDeliverReply(
@@ -68,15 +103,33 @@ export function attachEditorWbaSocket(
       next(new Error("unsupported_rpc_codec"));
       return;
     }
+    let context: EditorWbaRequestContext;
+    try {
+      context = editorWbaRequestContextFromQuery(socket.handshake.query);
+    } catch {
+      next(new Error("invalid_client_presentation_identity"));
+      return;
+    }
+    socket.data.clientInstanceId = context.clientInstanceId;
+    socket.data.windowId = context.windowId;
     next();
   });
 
   namespace.on("connection", (socket) => {
+    const context: EditorWbaRequestContext = {
+      clientInstanceId: String(socket.data.clientInstanceId),
+      windowId: typeof socket.data.windowId === "string"
+        ? socket.data.windowId
+        : null,
+    };
+    void socket.join(clientRoom(context.clientInstanceId));
     runtime.log(
       JSON.stringify({
         type: "wba/socket/connect",
         ts_ms: runtime.nowMs(),
         id: socket.id,
+        clientInstanceId: context.clientInstanceId,
+        windowId: context.windowId,
         clients: namespace.sockets.size,
       }),
     );
@@ -87,7 +140,7 @@ export function attachEditorWbaSocket(
           const decoded = decodeWbaRpcMessage(payload);
           if (Array.isArray(decoded)) {
             const replies = await Promise.all(
-              decoded.map((entry) => runtime.handleJsonRpc(entry)),
+              decoded.map((entry) => runtime.handleJsonRpc(entry, context)),
             );
             const deliverable = replies.filter(shouldDeliverReply);
             if (deliverable.length)
@@ -95,7 +148,7 @@ export function attachEditorWbaSocket(
             return;
           }
 
-          const reply = await runtime.handleJsonRpc(decoded);
+          const reply = await runtime.handleJsonRpc(decoded, context);
           if (shouldDeliverReply(reply))
             socket.emit(WBA_RPC_EVENT, encodeWbaRpcMessage(reply));
         } catch (error) {
@@ -128,7 +181,13 @@ export function attachEditorWbaSocket(
 
   return {
     broadcastNotification(method: string, params: unknown): void {
-      namespace.emit(
+      const clientInstanceId = isRecord(params)
+        ? identityValue(params.clientInstanceId, CLIENT_INSTANCE_PATTERN)
+        : null;
+      const target = clientInstanceId
+        ? namespace.to(clientRoom(clientInstanceId))
+        : namespace;
+      target.emit(
         WBA_RPC_EVENT,
         encodeWbaRpcMessage({ jsonrpc: "2.0", method, params }),
       );

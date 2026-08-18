@@ -259,7 +259,7 @@ test('file tabs render bounded decorations and active close opens its successor'
 
     controller.broadcastOpenState({
       projectPath: '/workspace',
-      openFile: '/workspace/a.rs',
+      clientForeground: { path: '/workspace/a.rs' },
       recents: [
         { path: '/workspace/a.rs', label: 'a.rs', exists: true },
         { path: '/workspace/b.go', label: 'b.go', exists: true },
@@ -318,10 +318,10 @@ test('file tabs preserve nested authoritative open state during host resync', as
     controller.broadcastOpenState({
       activeProject: '/workspace',
       currentPath: '/workspace/a.rs',
+      clientForeground: { path: '/workspace/b.go' },
       recents,
       openState: {
         projectPath: '/workspace',
-        openFile: '/workspace/b.go',
         recents,
       },
     });
@@ -332,10 +332,10 @@ test('file tabs preserve nested authoritative open state during host resync', as
     controller.broadcastOpenState({
       activeProject: '/workspace',
       currentPath: '/workspace/a.rs',
+      clientForeground: { path: null },
       recents,
       openState: {
         projectPath: '/workspace',
-        openFile: null,
         recents,
       },
     });
@@ -372,7 +372,7 @@ test('file tabs project the active draft after decoration hydration and tab swit
 
     controller.broadcastOpenState({
       projectPath: '/workspace',
-      openFile: '/workspace/draft.py',
+      clientForeground: { path: '/workspace/draft.py' },
       recents,
     });
     assert.deepEqual(activeDrafts, [], 'missing decorations are not assumed clean');
@@ -386,7 +386,7 @@ test('file tabs project the active draft after decoration hydration and tab swit
     });
     controller.broadcastOpenState({
       projectPath: '/workspace',
-      openFile: '/workspace/clean.py',
+      clientForeground: { path: '/workspace/clean.py' },
       recents,
     });
 
@@ -454,7 +454,7 @@ test('open-state changes reveal an active tab outside the horizontal viewport', 
     });
     controller.broadcastOpenState({
       projectPath: '/workspace',
-      openFile: '/workspace/b.go',
+      clientForeground: { path: '/workspace/b.go' },
       recents: [
         { path: '/workspace/a.rs', label: 'a.rs', exists: true },
         { path: '/workspace/b.go', label: 'b.go', exists: true },

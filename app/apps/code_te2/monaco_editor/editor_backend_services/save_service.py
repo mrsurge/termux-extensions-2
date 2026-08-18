@@ -155,6 +155,7 @@ async def handle_editor_mirror(
         worker_pid=meta["worker_pid"],
     )
     is_unsaved = bool(entry.get("unsaved"))
+    document_revision = entry.get("document_revision")
 
     await emit_to_room(
         "editor:mirror",
@@ -165,6 +166,7 @@ async def handle_editor_mirror(
             "content_sha256": entry.get("content_sha256"),
             "unsaved": is_unsaved,
             "source_client": sid,
+            "document_revision": document_revision,
         },
     )
     await emit_to_room(
@@ -177,6 +179,7 @@ async def handle_editor_mirror(
             "content_sha256": entry.get("content_sha256"),
             "base_sha256": entry.get("base_sha256"),
             "source_client": sid,
+            "document_revision": document_revision,
         },
     )
     try:
@@ -245,10 +248,6 @@ async def handle_editor_save_request(
         or snapshot_path
         or get_opt_str(payload, "path")
     )
-    if not raw_path:
-        session_state = _history_store.get_session_state()
-        maybe_current = session_state.get("currentPath")
-        raw_path = maybe_current if isinstance(maybe_current, str) else None
 
     abs_path = normalize_abs_path(raw_path or "")
     if not abs_path:
@@ -306,7 +305,12 @@ async def handle_editor_save_request(
     if isinstance(save_sha, str) and save_sha:
         record_save_sha(abs_path, save_sha)
 
-    _ = _history_store.clear_cached_document(project, abs_path)
+    cleared_draft = _history_store.clear_cached_document(project, abs_path)
+    document_revision = (
+        _history_store.get_document_revision(project, abs_path)
+        if cleared_draft
+        else _history_store.advance_document_revision(project, abs_path)
+    )
     _ = _history_store.prune_clean_drafts(project)
 
     mark_git_cache_dirty(root_path)
@@ -333,6 +337,7 @@ async def handle_editor_save_request(
             "content_sha256": file_meta.get("sha256"),
             "base_sha256": file_meta.get("sha256"),
             "source_client": sid,
+            "document_revision": document_revision,
         },
     )
 
@@ -341,6 +346,10 @@ async def handle_editor_save_request(
         path=abs_path,
         source="editor_save",
         sha256=save_sha if isinstance(save_sha, str) else "",
+        document_revision=document_revision,
     )
 
-    return {"ok": True, "data": file_meta}
+    return {
+        "ok": True,
+        "data": {**file_meta, "document_revision": document_revision},
+    }

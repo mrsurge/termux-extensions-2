@@ -18,12 +18,10 @@ from ..monaco_editor.editor_ws import (
     editor_runtime_record_save_sha,
     editor_runtime_request_save_snapshot,
     editor_runtime_emit_open_state_changed,
-    editor_runtime_set_last_file,
-    editor_runtime_update_session_state,
 )
 from ..monaco_editor.editor_open_backend import emit_editor_open_from_backend
 from ..monaco_editor.editor_save_backend import handle_editor_save_request
-from ..monaco_editor.editor_backend_services.contracts import EditorOpenPayload, JsonMap
+from ..monaco_editor.editor_backend_services.contracts import JsonMap
 
 
 class HostOpenResult(TypedDict):
@@ -31,10 +29,6 @@ class HostOpenResult(TypedDict):
     request_id: str
     path: str
     rel: str
-
-
-async def _emit_editor_open_payload(open_payload: EditorOpenPayload) -> None:
-    await editor_runtime_emit_room_event("editor:open", dict(open_payload))
 
 
 async def handle_host_open_request(
@@ -104,9 +98,11 @@ async def handle_host_open_request(
         normalize_abs_path=editor_runtime_normalize_abs_path,
         is_under_project=editor_runtime_is_under_project,
         read_file_payload=editor_runtime_read_file_payload,
-        update_session_state=editor_runtime_update_session_state,
-        set_last_file=editor_runtime_set_last_file,
-        emit_editor_open=_emit_editor_open_payload,
+        emit_editor_open=lambda open_payload: editor_runtime_emit_room_event(
+            "editor:open",
+            dict(open_payload),
+            client_instance_id=source_name,
+        ),
         record_sidecar_open_file=editor_runtime_record_sidecar_open_file,
         emit_open_state_changed=editor_runtime_emit_open_state_changed,
     )
@@ -138,7 +134,10 @@ async def handle_host_save_request(
         active_project=editor_runtime_active_project,
         normalize_abs_path=editor_runtime_normalize_abs_path,
         is_under_project=editor_runtime_is_under_project,
-        request_snapshot=lambda rid: editor_runtime_request_save_snapshot(rid),
+        request_snapshot=lambda rid: editor_runtime_request_save_snapshot(
+            rid,
+            client_instance_id=source_name,
+        ),
         emit_to_room=editor_runtime_emit_room_event,
         notify_draft_state_changed=editor_runtime_notify_draft_state_changed,
         record_save_sha=editor_runtime_record_save_sha,

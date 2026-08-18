@@ -18,6 +18,7 @@ EventType = Literal[
     "AdapterStateChanged",
     "AdapterWorkspaceReady",
     "CodeInspectorChanged",
+    "ClientForegroundChanged",
     "DraftStateChanged",
     "DiagnosticsDetailChanged",
     "GitDiffBaseChanged",

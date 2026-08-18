@@ -36,8 +36,6 @@ class HistoryStoreLike(Protocol):
 
     def get_active_project(self) -> str | None: ...
 
-    def get_last_file(self, project_path: str | None) -> str | None: ...
-
     def reset_project_history(self, project_path: str) -> bool: ...
 
     def remove_project(self, project_path: str) -> bool: ...
@@ -259,6 +257,8 @@ def create_history_router(deps: HistoryRoutesDeps) -> APIRouter:
             from ...monaco_editor.editor_ws import editor_runtime_emit_open_state_changed
             from ...open_state_backend import write_sidecar_open_file
 
+            # This legacy HTTP endpoint mutates shared document membership only.
+            # Active presentation requires an authenticated client RPC lane.
             open_state = write_sidecar_open_file(str(project_root), path, reason="file_open")
             await editor_runtime_emit_open_state_changed(open_state, source="history_touch")
             return {"ok": True, "data": {"openState": dict(open_state)}}
@@ -271,16 +271,36 @@ def create_history_router(deps: HistoryRoutesDeps) -> APIRouter:
         project_root = _active_project_or_root(deps)
         try:
             from ...monaco_editor.editor_ws import editor_runtime_emit_open_state_changed
-            from ...open_state_backend import clear_sidecar_open_file
+            from ...open_state_backend import (
+                list_client_foregrounds,
+                remove_sidecar_recent_file,
+            )
+            from ...open_state_events import publish_client_foreground_changed
 
-            active_before = deps.history.get_last_file(str(project_root))
-            removed = deps.history.remove_file(str(project_root), path)
-            open_state: dict[str, object] | None = None
-            if active_before and Path(active_before).expanduser().resolve(strict=False) == Path(path).expanduser().resolve(strict=False):
-                next_state = clear_sidecar_open_file(str(project_root), reason="no_file", require_existing_sidecar=False)
-                await editor_runtime_emit_open_state_changed(next_state, source="history_remove")
-                open_state = dict(next_state)
-            return {"ok": True, "data": {"removed": removed, "openState": open_state}}
+            removed, open_state = remove_sidecar_recent_file(
+                str(project_root),
+                path,
+                require_existing_sidecar=False,
+            )
+            if removed:
+                _ = deps.history.remove_file(str(project_root), path)
+                await editor_runtime_emit_open_state_changed(
+                    open_state,
+                    source="history_remove",
+                )
+                for foreground in list_client_foregrounds(
+                    str(project_root),
+                    reason="recent_file_closed",
+                ):
+                    await publish_client_foreground_changed(
+                        open_state,
+                        foreground,
+                        source="history_remove",
+                    )
+            return {
+                "ok": True,
+                "data": {"removed": removed, "openState": dict(open_state)},
+            }
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -290,11 +310,31 @@ def create_history_router(deps: HistoryRoutesDeps) -> APIRouter:
         project_root = _active_project_or_root(deps)
         try:
             from ...monaco_editor.editor_ws import editor_runtime_emit_open_state_changed
-            from ...open_state_backend import clear_sidecar_open_file
+            from ...open_state_backend import (
+                clear_sidecar_recent_files,
+                list_client_foregrounds,
+            )
+            from ...open_state_events import publish_client_foreground_changed
 
+            open_state = clear_sidecar_recent_files(
+                str(project_root),
+                reason="no_file",
+                require_existing_sidecar=False,
+            )
             cleared = deps.history.clear_all_files(str(project_root))
-            open_state = clear_sidecar_open_file(str(project_root), reason="no_file", require_existing_sidecar=False)
-            await editor_runtime_emit_open_state_changed(open_state, source="history_clear")
+            await editor_runtime_emit_open_state_changed(
+                open_state,
+                source="history_clear",
+            )
+            for foreground in list_client_foregrounds(
+                str(project_root),
+                reason="no_file",
+            ):
+                await publish_client_foreground_changed(
+                    open_state,
+                    foreground,
+                    source="history_clear",
+                )
             return {"ok": True, "data": {"cleared": cleared, "openState": dict(open_state)}}
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc

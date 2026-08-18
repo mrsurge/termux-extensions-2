@@ -122,13 +122,13 @@ class LogicalDocumentSnapshotTests(unittest.TestCase):
 
         self.assertEqual(snapshot["projectGeneration"], 3)
         self.assertEqual(snapshot["openStateRevision"], 7)
-        self.assertEqual(snapshot["activePath"], active)
+        self.assertIsNone(snapshot["activePath"])
         self.assertEqual(
             [item["path"] for item in snapshot["background"]],
-            [draft, clean],
+            [active, draft, clean],
         )
         self.assertEqual(
-            snapshot["background"][0],
+            snapshot["background"][1],
             {
                 "path": draft,
                 "contentIdentity": "sha256:draft-sha",
@@ -137,9 +137,9 @@ class LogicalDocumentSnapshotTests(unittest.TestCase):
             },
         )
         self.assertTrue(
-            snapshot["background"][1]["contentIdentity"].startswith("stat-v1:")
+            snapshot["background"][2]["contentIdentity"].startswith("stat-v1:")
         )
-        self.assertFalse(snapshot["background"][1]["dirty"])
+        self.assertFalse(snapshot["background"][2]["dirty"])
 
     def test_draft_hydration_works_without_a_disk_file(self) -> None:
         with _temp_dir() as raw_project:

@@ -46,6 +46,8 @@ def abs_to_rel(abs_path: str, project_root: str) -> Optional[str]:
 
 
 class ExplorerConnection(Protocol):
+    client_instance_id: str
+
     async def accept(self) -> None: ...
 
     async def send_text(self, data: str) -> None: ...
@@ -192,6 +194,20 @@ class ConnectionManager:
             await websocket.send_text(json.dumps(message))
         except Exception as e:
             logger.warning(f"Failed to send personal message: {e}")
+
+    async def send_client(self, client_instance_id: str, message: JsonMessage) -> bool:
+        """Send to every Explorer presentation owned by one stable client."""
+        text = json.dumps(message)
+        sent = False
+        for connection in list(self.ws_project_map.keys()):
+            if connection.client_instance_id != client_instance_id:
+                continue
+            try:
+                await connection.send_text(text)
+                sent = True
+            except Exception as exc:
+                logger.warning("Failed to send client-scoped Explorer message: %s", exc)
+        return sent
 
 
 manager = ConnectionManager()

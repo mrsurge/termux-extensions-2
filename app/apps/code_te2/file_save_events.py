@@ -17,6 +17,7 @@ def publish_file_saved(
     path: str | Path,
     source: str,
     sha256: str = "",
+    document_revision: int | None = None,
 ) -> None:
     """Queue a post-commit save fact without extending the save response path."""
     root = Path(project_root).expanduser().resolve(strict=False)
@@ -35,6 +36,7 @@ def publish_file_saved(
                 "path": str(absolute),
                 "relativePath": relative,
                 "sha256": sha256,
+                "documentRevision": document_revision,
             }
         },
     )

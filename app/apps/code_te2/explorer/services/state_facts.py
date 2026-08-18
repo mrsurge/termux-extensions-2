@@ -44,6 +44,7 @@ class ReviewStatePayload(TypedDict):
 
 
 class SearchHighlightPayload(TypedDict):
+    clientInstanceId: str
     active: bool
     query: str
     isRegex: bool

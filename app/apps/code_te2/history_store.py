@@ -805,6 +805,28 @@ class HistoryStore:
         except Exception:
             return None
 
+    def get_document_revision(self, project_path: str, file_path: str) -> int:
+        """Return the durable monotonic state revision for one document."""
+        normalized_project = self._normalize_project_path(project_path)
+        try:
+            sidecar = ProjectSidecar.load_or_create(normalized_project)
+            sidecar.reload()
+            return sidecar.get_document_revision(file_path)
+        except Exception:
+            return 0
+
+    def advance_document_revision(self, project_path: str, file_path: str) -> int:
+        """Advance and persist one document's revision without changing its draft."""
+        normalized_project = self._normalize_project_path(project_path)
+        try:
+            sidecar = ProjectSidecar.load_or_create(normalized_project)
+            sidecar.reload()
+            revision = sidecar.advance_document_revision(file_path)
+            sidecar.save()
+            return revision
+        except Exception:
+            return 0
+
     def upsert_cached_document(
         self,
         project_path: str,
@@ -864,6 +886,7 @@ class HistoryStore:
                 "shell_run_id": shell_run_id,
                 "launcher_pid": launcher_pid,
                 "worker_pid": worker_pid,
+                "document_revision": 0,
                 "updated_at": _utc_timestamp(),
             }
             return dict(entry)

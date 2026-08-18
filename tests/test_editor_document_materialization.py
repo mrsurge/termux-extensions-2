@@ -25,7 +25,10 @@ from app.apps.code_te2.monaco_editor.editor_backend_services.document_open_polic
 from app.apps.code_te2.monaco_editor.editor_backend_services.open_service import (
     emit_editor_open_from_backend,
 )
-from app.apps.code_te2.open_state_backend import SidecarOpenStatePayload
+from app.apps.code_te2.open_state_backend import (
+    ClientForegroundPayload,
+    SidecarOpenStatePayload,
+)
 
 
 class _HistoryStore:
@@ -51,6 +54,10 @@ class _HistoryStore:
         del project, abs_path
         self.cache_reads += 1
         return self.cached_document
+
+    def get_document_revision(self, project: str, abs_path: str) -> int:
+        del project, abs_path
+        return 0
 
 
 class _PreferencesStore:
@@ -222,6 +229,7 @@ class DocumentMaterializationTests(unittest.TestCase):
                 "state": "mid_session",
                 "unsaved": True,
                 "reason": "restore",
+                "document_revision": 0,
             },
         )
 
@@ -241,21 +249,23 @@ class AsyncDocumentMaterializationTests(unittest.IsolatedAsyncioTestCase):
         async def emit_state(
             open_state: SidecarOpenStatePayload,
             *,
+            client_foreground: ClientForegroundPayload | None = None,
             source: str | None = None,
             request_id: str | None = None,
         ) -> None:
-            del open_state, source, request_id
+            del open_state, client_foreground, source, request_id
             mutations.append("emit_state")
 
         def record_sidecar(
             project: str,
             abs_path: str,
             *,
+            client_instance_id: str,
             reason: str,
-        ) -> SidecarOpenStatePayload:
-            del project, abs_path, reason
+        ) -> tuple[SidecarOpenStatePayload, ClientForegroundPayload]:
+            del project, abs_path, client_instance_id, reason
             mutations.append("sidecar")
-            return {
+            return ({
                 "projectPath": "/project",
                 "sidecarPath": "/sidecar",
                 "openFile": None,
@@ -266,19 +276,27 @@ class AsyncDocumentMaterializationTests(unittest.IsolatedAsyncioTestCase):
                 "reason": "test",
                 "ts": 0,
                 "recents": [],
-            }
+            }, {
+                "projectPath": "/project",
+                "clientInstanceId": "client_aaaaaaaaaaaa",
+                "path": "/project/image.png",
+                "rel": "image.png",
+                "exists": True,
+                "revision": 1,
+                "seededFromLegacy": False,
+                "reason": "test",
+                "ts": 0,
+            })
 
         with self.assertRaises(DocumentOpenRejectedError):
             await emit_editor_open_from_backend(
                 {"path": "/project/image.png"},
-                source_client="test",
+                source_client="client_aaaaaaaaaaaa",
                 request_id="open_rejected",
                 active_project=lambda: "/project",
                 normalize_abs_path=lambda path: path,
                 is_under_project=lambda project, path: path.startswith(project + "/"),
                 read_file_payload=reject_read,
-                update_session_state=lambda state: mutations.append("session"),
-                set_last_file=lambda project, path: None,
                 emit_editor_open=emit_open,
                 record_sidecar_open_file=record_sidecar,
                 emit_open_state_changed=emit_state,

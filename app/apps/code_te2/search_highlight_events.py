@@ -25,10 +25,17 @@ def register_search_highlight_event_bus_handlers() -> None:
 
 async def _handle_search_highlight_event(event: WorkerEvent) -> None:
     payload = _editor_payload_from_event(event)
+    client_instance_id = _string(event["payload"].get("clientInstanceId"))
+    if not client_instance_id:
+        logger.debug("[search_highlight_events] missing client identity")
+        return
     try:
         from .monaco_editor.editor_ws import emit_editor_search_highlight_from_backend
 
-        _ = await emit_editor_search_highlight_from_backend(payload)
+        await emit_editor_search_highlight_from_backend(
+            payload,
+            client_instance_id=client_instance_id,
+        )
     except Exception as exc:
         logger.debug("[search_highlight_events] editor emit failed: %s", exc)
 

@@ -22,6 +22,7 @@ import type {
   EditorSocketLike,
 } from './editor_save_mirror_contract.ts';
 import type { DraftDiffPayloadLike } from './editor_socket_draft_diff_handler_utils.ts';
+import { acceptDocumentProjection } from './editor_document_revision_runtime.ts';
 
 interface EditorRpcNotificationSource {
   onNotification(method: string, handler: (payload: Record<string, unknown>) => void): () => void;
@@ -40,6 +41,7 @@ interface EditorMirrorPayloadLike {
   content_sha256?: unknown;
   unsaved?: unknown;
   source_client?: unknown;
+  document_revision?: unknown;
 }
 
 interface SaveMirrorSocketHandlerDeps {
@@ -52,7 +54,7 @@ interface SaveMirrorSocketHandlerDeps {
   setLastContentSha256(value: string | null): void;
   getLastLocalEditAt(): number;
   getMirrorHotWindowMs(): number;
-  getEditorSocketId(): string | null;
+  getClientInstanceId(): string | null;
   setApplyingRemote(value: boolean): void;
   applyLineNumberSizing(): void;
   emitToHost(eventName: string, payload: Record<string, unknown>): void;
@@ -90,13 +92,16 @@ function handleEditorMirrorEvent(
   const mirrorPayload = asMirrorPayload(payload);
   deps.incrementMirrorState('rx');
   if (!isMirrorPayloadValid(mirrorPayload)) return;
-  if (shouldDropMirrorForSource(mirrorPayload, deps.getEditorSocketId())) {
-    deps.incrementMirrorState('drop_self');
+  if (shouldDropMirrorForPath(mirrorPayload?.path, deps.getCurrentPath())) {
+    deps.incrementMirrorState('drop_path');
     deps.syncMirrorDebug();
     return;
   }
-  if (shouldDropMirrorForPath(mirrorPayload?.path, deps.getCurrentPath())) {
-    deps.incrementMirrorState('drop_path');
+  if (!acceptDocumentProjection(mirrorPayload?.path, mirrorPayload?.document_revision)) {
+    return;
+  }
+  if (shouldDropMirrorForSource(mirrorPayload, deps.getClientInstanceId())) {
+    deps.incrementMirrorState('drop_self');
     deps.syncMirrorDebug();
     return;
   }
@@ -148,6 +153,7 @@ function handleEditorCacheStateEvent(
   const cacheStatePayload = asCacheStatePayload(payload);
   const currentPath = deps.getCurrentPath();
   if (!isCacheStatePayloadForCurrentPath(cacheStatePayload, currentPath)) return;
+  if (!acceptDocumentProjection(cacheStatePayload?.path, cacheStatePayload?.document_revision)) return;
   const baseSha = typeof cacheStatePayload?.base_sha256 === 'string' && cacheStatePayload.base_sha256.length === 64
     ? cacheStatePayload.base_sha256
     : null;

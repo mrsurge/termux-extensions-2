@@ -4,13 +4,18 @@ from __future__ import annotations
 import logging
 from typing import cast
 
+from .client_presentation import client_presentation_room
 from .monaco_editor.editor_rpc_contract import EDITOR_RPC_NOTIFICATION_OPEN_STATE_CHANGED
 from .monaco_editor.editor_rpc_emit import emit_editor_rpc_notification
-from .open_state_backend import SidecarOpenStatePayload
+from .frontend_rpc_codec import encode_frontend_rpc_message
+from .open_state_backend import ClientForegroundPayload, SidecarOpenStatePayload
 from .ui_ipc.rpc_contract import (
+    UI_IPC_RPC_NOTIFICATION_EVENT,
     UI_IPC_RPC_NOTIFICATION_HOST_ACTIVE_FILE_CHANGED,
     UI_IPC_RPC_NOTIFICATION_OPEN_STATE_CHANGED,
 )
+from .ui_ipc.rpc_contract import build_jsonrpc_notification
+from .socketio_runtime import emit_code_te2_socketio
 from .worker_services.event_bus import (
     WorkerEvent,
     build_event,
@@ -31,12 +36,22 @@ def open_state_payload_from_event(event: WorkerEvent) -> SidecarOpenStatePayload
     raw = event_payload_object(event, "openState")
     if not isinstance(raw.get("projectPath"), str):
         return None
-    return cast(SidecarOpenStatePayload, dict(raw))
+    return cast(SidecarOpenStatePayload, cast(object, dict(raw)))
+
+
+def client_foreground_payload_from_event(
+    event: WorkerEvent,
+) -> ClientForegroundPayload | None:
+    raw = event_payload_object(event, "clientForeground")
+    if not isinstance(raw.get("clientInstanceId"), str):
+        return None
+    return cast(ClientForegroundPayload, cast(object, dict(raw)))
 
 
 async def publish_open_state_changed(
     open_state: SidecarOpenStatePayload,
     *,
+    client_foreground: ClientForegroundPayload | None = None,
     source: str | None = None,
     request_id: str | None = None,
     project_generation: int | None = None,
@@ -71,6 +86,48 @@ async def publish_open_state_changed(
             payload=payload,
         )
     )
+    if client_foreground is not None:
+        await publish_client_foreground_changed(
+            open_state,
+            client_foreground,
+            source=source,
+            request_id=request_id,
+            project_generation=resolved_generation,
+        )
+
+
+async def publish_client_foreground_changed(
+    open_state: SidecarOpenStatePayload,
+    client_foreground: ClientForegroundPayload,
+    *,
+    source: str | None = None,
+    request_id: str | None = None,
+    project_generation: int | None = None,
+) -> None:
+    project = open_state["projectPath"]
+    resolved_generation = (
+        project_generation
+        if project_generation is not None
+        else current_project_generation(project)
+    )
+    payload: JsonObject = {
+        "openState": dict(open_state),
+        "clientForeground": dict(client_foreground),
+    }
+    if isinstance(source, str) and source:
+        payload["source"] = source
+    if isinstance(request_id, str) and request_id:
+        payload["request_id"] = request_id
+    await publish_worker_event(
+        build_event(
+            "ClientForegroundChanged",
+            project_root=project,
+            project_generation=resolved_generation,
+            source=source or str(open_state.get("reason") or "client_foreground"),
+            correlation_id=request_id,
+            payload=payload,
+        )
+    )
 
 
 def register_open_state_event_bus_handlers() -> None:
@@ -79,6 +136,7 @@ def register_open_state_event_bus_handlers() -> None:
     if _event_bus_handlers_registered:
         return
     subscribe_worker_event("OpenStateChanged", _handle_open_state_changed_event)
+    subscribe_worker_event("ClientForegroundChanged", _handle_client_foreground_changed_event)
     _event_bus_handlers_registered = True
 
 
@@ -108,8 +166,26 @@ async def _handle_open_state_changed_event(event: WorkerEvent) -> None:
     payload = _surface_payload(open_state, source=source, request_id=request_id)
     await _emit_editor_open_state(payload)
     await _emit_ui_open_state(payload)
+
+
+async def _handle_client_foreground_changed_event(event: WorkerEvent) -> None:
+    project = event.get("project_root")
+    if not project:
+        return
+    generation = event.get("project_generation")
+    if generation is not None and current_project_generation(project) != generation:
+        record_stale_drop("open_state_events:client_projector", event["type"])
+        return
+
+    open_state = open_state_payload_from_event(event)
+    client_foreground = client_foreground_payload_from_event(event)
+    if open_state is None or client_foreground is None:
+        return
+    source = _event_text(event, "source") or event["source"]
+    request_id = _event_text(event, "request_id") or event.get("correlation_id")
     await _emit_host_active_file_changed(
-        open_state,
+        client_foreground,
+        open_state=open_state,
         source=source,
         request_id=request_id,
     )
@@ -136,10 +212,8 @@ def _surface_payload(
 
 async def _emit_editor_open_state(payload: JsonObject) -> None:
     try:
-        from .monaco_editor.editor_socketio import EDITOR_SIO
-
         async def _emit(event_name: str, notification_payload: bytes) -> None:
-            await EDITOR_SIO.emit(  # pyright: ignore[reportUnknownMemberType]
+            await emit_code_te2_socketio(
                 event_name,
                 notification_payload,
                 room="code_te2",
@@ -157,41 +231,54 @@ async def _emit_editor_open_state(payload: JsonObject) -> None:
 
 async def _emit_ui_open_state(payload: JsonObject) -> None:
     try:
-        from .ui_ipc.ui_ipc_ws import emit_ui_ipc_rpc_notification
-
-        await emit_ui_ipc_rpc_notification(
-            UI_IPC_RPC_NOTIFICATION_OPEN_STATE_CHANGED,
-            payload,
+        method = UI_IPC_RPC_NOTIFICATION_OPEN_STATE_CHANGED
+        await emit_code_te2_socketio(
+            UI_IPC_RPC_NOTIFICATION_EVENT,
+            encode_frontend_rpc_message(
+                build_jsonrpc_notification(method, payload),
+                lane="ui_ipc",
+                method=method,
+            ),
+            namespace="/ui_ipc",
+            room="ui_ipc",
         )
     except Exception:
         pass
 
 
 async def _emit_host_active_file_changed(
-    open_state: SidecarOpenStatePayload,
+    client_foreground: ClientForegroundPayload,
     *,
+    open_state: SidecarOpenStatePayload,
     source: str | None,
     request_id: str | None,
 ) -> None:
     try:
         from .explorer.transport.connection_manager import abs_to_rel
-        from .ui_ipc.ui_ipc_ws import emit_ui_ipc_rpc_notification
 
-        project = open_state["projectPath"]
-        abs_path = open_state["openFile"]
+        project = client_foreground["projectPath"]
+        abs_path = client_foreground["path"]
         rel = abs_to_rel(abs_path, project) if abs_path else None
         payload: JsonObject = {
             "path": abs_path,
             "rel": rel,
             "openState": dict(open_state),
+            "clientForeground": dict(client_foreground),
         }
         if isinstance(source, str) and source:
             payload["source"] = source
         if isinstance(request_id, str) and request_id:
             payload["request_id"] = request_id
-        await emit_ui_ipc_rpc_notification(
-            UI_IPC_RPC_NOTIFICATION_HOST_ACTIVE_FILE_CHANGED,
-            payload,
+        method = UI_IPC_RPC_NOTIFICATION_HOST_ACTIVE_FILE_CHANGED
+        await emit_code_te2_socketio(
+            UI_IPC_RPC_NOTIFICATION_EVENT,
+            encode_frontend_rpc_message(
+                build_jsonrpc_notification(method, payload),
+                lane="ui_ipc",
+                method=method,
+            ),
+            namespace="/ui_ipc",
+            room=client_presentation_room(client_foreground["clientInstanceId"]),
         )
     except Exception:
         pass

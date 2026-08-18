@@ -17,8 +17,6 @@ class HistoryStoreLike(Protocol):
 
     def get_diff_base(self, project_path: str | None) -> str: ...
 
-    def get_last_file(self, project_path: str | None) -> str | None: ...
-
 
 class PreferencesStoreLike(Protocol):
     def get_preferences(self, project_path: str | None = None) -> JsonObject: ...
@@ -108,23 +106,22 @@ def build_state_payload(deps: StatePayloadDeps) -> JsonObject:
             project_exists = False
             project_message = f'Project "{project_label or project_path}" not accessible.'
 
-    last_file: str | None = None
+    # This payload is shared process state. Client foreground is overlaid only
+    # on authenticated UI IPC boot snapshots, never inferred globally here.
     open_state_payload: JsonObject | None = None
     recents: list[JsonObject] = []
     if project_path:
         try:
             open_state = read_sidecar_open_state(project_path, reason="sidecar_replay")
             open_state_payload = dict(open_state)
-            open_file = open_state.get("openFile")
-            last_file = open_file if isinstance(open_file, str) else None
             recents = [dict(entry) for entry in open_state["recents"]]
         except Exception:
-            last_file = None
-    last_file_exists = bool(last_file and Path(last_file).is_file())
-    last_file_label = deps.format_label(last_file)
+            pass
+
+    last_file: str | None = None
+    last_file_exists = False
+    last_file_label = deps.format_label(None)
     last_file_message = ""
-    if last_file and not last_file_exists:
-        last_file_message = f'File "{last_file_label or last_file}" not found.'
 
     editor_prefs = deps.preferences.get_preferences(project_path)
     runtime_meta = get_runtime_metadata()

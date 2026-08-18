@@ -1,6 +1,10 @@
 import {
   recordDiagnosticsOpenStage,
 } from '../../src/diagnostics/latency-probe.ts';
+import {
+  acceptDocumentProjection,
+  resetDocumentRevisionRuntime,
+} from '../../monaco_editor/editor_document_revision_runtime.ts';
 
 export interface CacheIndicatorPayload {
   state?: unknown;
@@ -14,6 +18,7 @@ export interface HostEditorEventsRuntimeDeps {
   triggerExternalRefresh: (path: string) => void | Promise<void>;
   applyAutosavePreference: (autoSave: boolean) => void;
   setLastSha256: (sha: string) => void;
+  getCurrentPath: () => string | null;
   getRestoredSessionActive: () => boolean;
   setRestoredSessionActive: (flag: boolean) => void;
   setRestoredSessionPath: (path: string) => void;
@@ -167,6 +172,9 @@ export function createHostEditorEventsRuntime(deps: HostEditorEventsRuntimeDeps)
     if (!isRecord(data)) return;
 
     const normalizedPath = stringField(data, 'path') || null;
+    const currentPath = deps.getCurrentPath();
+    if (!normalizedPath || !currentPath || normalizedPath !== currentPath) return;
+    if (!acceptDocumentProjection(normalizedPath, data.document_revision)) return;
     const contentSha = shaField(data, 'content_sha256');
     const baseSha = shaField(data, 'base_sha256');
     const state = stringField(data, 'state');
@@ -210,6 +218,7 @@ export function createHostEditorEventsRuntime(deps: HostEditorEventsRuntimeDeps)
         detail: {
           path: normalizedPath,
           unsaved: unsaved === true,
+          document_revision: data.document_revision,
         },
       }));
     }
@@ -271,10 +280,19 @@ export function createHostEditorEventsRuntime(deps: HostEditorEventsRuntimeDeps)
     });
     window.addEventListener('code-te2:editor-draft-state', (event) => {
       const p = isRecord(eventDetail(event)) ? eventDetail(event) as Record<string, unknown> : {};
-      if (p.has_draft && typeof p.path === 'string' && p.path) {
+      if (
+        p.has_draft
+        && typeof p.path === 'string'
+        && p.path
+        && p.path === deps.getCurrentPath()
+        && acceptDocumentProjection(p.path, p.document_revision)
+      ) {
         deps.setRestoredSessionActive(true);
         deps.setRestoredSessionPath(p.path);
       }
+    });
+    window.addEventListener('code-te2:project-switching', () => {
+      resetDocumentRevisionRuntime();
     });
     window.addEventListener('code-te2:editor-scroll-state', (event) => {
       handleEditorScrollState(eventDetail(event));

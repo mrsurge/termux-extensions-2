@@ -14,6 +14,7 @@ from ...frontend_rpc_codec import (
     encode_frontend_rpc_message,
     require_msgpack_v1_auth,
 )
+from ...client_presentation import client_presentation_identity_from_environ
 from ...diagnostics_latency_metrics import (
     diagnostics_latency_metrics_enabled,
     elapsed_ms,
@@ -72,9 +73,15 @@ else:
 class ExplorerRpcSocketShim:
     """Adapt ConnectionManager sends into JSON-RPC notifications and ack replies."""
 
-    def __init__(self, namespace: _SocketIOAsyncNamespace, sid: str):
+    def __init__(
+        self,
+        namespace: _SocketIOAsyncNamespace,
+        sid: str,
+        client_instance_id: str,
+    ):
         self.namespace = namespace
         self.sid = sid
+        self.client_instance_id = client_instance_id
         self._pending_requests: dict[str, asyncio.Future[dict[str, object]]] = {}
 
     async def accept(self) -> None:
@@ -193,12 +200,20 @@ class ExplorerRpcSocketIONamespace(_SocketIOAsyncNamespace):
         environ: dict[str, object],
         auth: object | None = None,
     ) -> None:
-        del environ
         try:
             require_msgpack_v1_auth(auth)
         except FrontendRpcCodecError as exc:
             raise _SocketIOConnectionRefusedError(str(exc)) from exc
-        rpc_socket = ExplorerRpcSocketShim(self, sid)
+        try:
+            identity = client_presentation_identity_from_environ(environ)
+        except ValueError as exc:
+            raise _SocketIOConnectionRefusedError(str(exc)) from exc
+        assert identity is not None
+        rpc_socket = ExplorerRpcSocketShim(
+            self,
+            sid,
+            identity["clientInstanceId"],
+        )
         dispatcher = ExplorerDispatcher(rpc_socket)
         await dispatcher.initialize()
         self.rpc_sockets[sid] = rpc_socket

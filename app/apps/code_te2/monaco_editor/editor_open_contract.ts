@@ -11,6 +11,7 @@ export interface EditorOpenPayload {
   reason?: string;
   content?: string;
   content_sha256?: string | null;
+  document_revision?: number;
   base_sha256?: string | null;
   state?: string;
   unsaved?: boolean;

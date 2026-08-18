@@ -14,7 +14,10 @@ from ...diagnostics_latency_metrics import (
     elapsed_ms,
     record_latency_event,
 )
-from ...open_state_events import open_state_payload_from_event
+from ...open_state_events import (
+    client_foreground_payload_from_event,
+    open_state_payload_from_event,
+)
 from ...worker_services.event_bus import (
     WorkerEvent,
     build_event,
@@ -28,6 +31,7 @@ from ...worker_services.event_bus import (
 from ..context import EmitPersonal
 from ..transport.connection_manager import abs_to_rel
 from ..transport.rpc_emit import (
+    emit_client_explorer_rpc_notification,
     emit_explorer_rpc_notification,
     emit_project_explorer_rpc_notification,
 )
@@ -172,6 +176,7 @@ def register_explorer_render_state_bus_handlers() -> None:
     subscribe_worker_event("GitPathRestored", _handle_git_path_restored_event)
     subscribe_worker_event("GitSnapshotChanged", _handle_git_snapshot_changed_event)
     subscribe_worker_event("OpenStateChanged", _handle_open_state_changed_event)
+    subscribe_worker_event("ClientForegroundChanged", _handle_client_foreground_changed_event)
     subscribe_worker_event("PreferencesChanged", _handle_preferences_changed_event)
     subscribe_worker_event("ReviewStateChanged", _handle_review_state_changed_event)
     subscribe_worker_event("WatcherConfigChanged", _handle_watcher_config_changed_event)
@@ -320,15 +325,26 @@ async def _handle_open_state_changed_event(event: WorkerEvent) -> None:
         "explorer.openState.changed",
         dict(open_state),
     )
-    await emit_project_explorer_rpc_notification(
-        project,
+
+
+async def _handle_client_foreground_changed_event(event: WorkerEvent) -> None:
+    project = event.get("project_root")
+    if not project or _is_stale_project_event(event, project):
+        return
+    open_state = open_state_payload_from_event(event)
+    client_foreground = client_foreground_payload_from_event(event)
+    if open_state is None or client_foreground is None:
+        return
+    await emit_client_explorer_rpc_notification(
+        client_foreground["clientInstanceId"],
         "explorer.activeFile.updated",
         {
-            "rel": open_state["openFileRel"],
-            "abs": open_state["openFile"],
+            "rel": client_foreground["rel"],
+            "abs": client_foreground["path"],
             "openState": dict(open_state),
+            "clientForeground": dict(client_foreground),
         },
-        )
+    )
 
 
 async def _handle_preferences_changed_event(event: WorkerEvent) -> None:

@@ -15,6 +15,7 @@ from .code_te2_paths import code_te2_paths
 JsonDict: TypeAlias = dict[str, object]
 StringDict: TypeAlias = dict[str, str]
 DraftEntry: TypeAlias = dict[str, object]
+MAX_DOCUMENT_REVISION_ENTRIES = 256
 
 
 def _utc_timestamp() -> str:
@@ -176,7 +177,18 @@ class ProjectSidecar:
             # Per-project MRU list. This is now the SSOT for recent files.
             "recent_files": [],
             # Last opened file for this project (SSOT).
+            # This field is migration input only. Client foreground authority
+            # lives in client_foregrounds and clears this value on first seed.
             "last_file": None,
+            # Bounded stable-client foreground reconnect projections. Document
+            # membership remains shared in recent_files.
+            "client_foregrounds": {},
+            "client_foreground_revision": 0,
+            # Per-path document-state revisions fence delayed draft/save/clean
+            # projections. The global counter preserves monotonicity when an
+            # old per-path entry is evicted from the bounded map.
+            "document_state_revision": 0,
+            "document_revisions": {},
             # Monotonic revision for sidecar-backed open-file events.
             "open_state_revision": 0,
             # Open directories in explorer tree (persisted across reloads).
@@ -417,6 +429,38 @@ class ProjectSidecar:
         # Return a shallow copy to prevent accidental mutation.
         return dict(entry)
 
+    def _document_revision_entries(self) -> dict[str, JsonDict]:
+        raw = _as_dict(self._data.get("document_revisions"))
+        return {key: _as_dict(value) for key, value in raw.items()}
+
+    def get_document_revision(self, file_path: str) -> int:
+        cache_key = _make_file_cache_key(self.project_path, file_path)
+        entry = self._document_revision_entries().get(cache_key)
+        if entry is not None:
+            return max(0, _as_int(entry.get("revision"), 0))
+        # If a bounded per-path entry was evicted, advancing to the global
+        # watermark is safer than reviving a lower revision for that path.
+        return max(0, _as_int(self._data.get("document_state_revision"), 0))
+
+    def advance_document_revision(self, file_path: str) -> int:
+        revision = max(0, _as_int(self._data.get("document_state_revision"), 0)) + 1
+        normalized = _normalize_file_path(file_path)
+        cache_key = _make_file_cache_key(self.project_path, normalized)
+        entries = self._document_revision_entries()
+        entries[cache_key] = {
+            "path": normalized,
+            "revision": revision,
+            "updated_at": _utc_timestamp(),
+        }
+        ordered = sorted(
+            entries.items(),
+            key=lambda item: _as_int(item[1].get("revision"), 0),
+            reverse=True,
+        )[:MAX_DOCUMENT_REVISION_ENTRIES]
+        self._data["document_state_revision"] = revision
+        self._data["document_revisions"] = dict(ordered)
+        return revision
+
     def upsert_cached_document(
         self,
         file_path: str,
@@ -435,6 +479,7 @@ class ProjectSidecar:
         content_sha256 = hashlib.sha256(content.encode("utf-8")).hexdigest()
         unsaved = content_sha256 != base_sha256
 
+        document_revision = self.advance_document_revision(file_path)
         entry = {
             "project_path": self.project_path,
             "file_path": _normalize_file_path(file_path),
@@ -448,6 +493,7 @@ class ProjectSidecar:
             "shell_run_id": shell_run_id,
             "launcher_pid": launcher_pid,
             "worker_pid": worker_pid,
+            "document_revision": document_revision,
             "updated_at": _utc_timestamp(),
         }
 
@@ -463,6 +509,7 @@ class ProjectSidecar:
         if existed:
             cache.pop(cache_key, None)
             self._data["session_cache"] = cache
+            self.advance_document_revision(file_path)
         return existed
 
     def list_project_drafts(self) -> list[DraftEntry]:
@@ -492,11 +539,20 @@ class ProjectSidecar:
             except Exception:
                 continue
         for key in to_remove:
+            entry = _as_dict(cache.get(key))
+            file_path = entry.get("file_path")
+            if isinstance(file_path, str) and file_path:
+                self.advance_document_revision(file_path)
             cache.pop(key, None)
         self._data["session_cache"] = cache
         return len(to_remove)
 
     def clear_session_cache(self) -> None:
+        cache = _as_dict(self._data.get("session_cache"))
+        for value in cache.values():
+            file_path = _as_dict(value).get("file_path")
+            if isinstance(file_path, str) and file_path:
+                self.advance_document_revision(file_path)
         self._data["session_cache"] = {}
 
     # --------------------------------------------------------------------- #
@@ -537,8 +593,8 @@ class ProjectSidecar:
         except Exception:
             return file_path
 
-    def record_file_activity(self, file_path: str, scroll_line: float | None = None) -> DraftEntry:
-        """Record file open, updating last_file and recent_files list (LRU).
+    def record_document_activity(self, file_path: str, scroll_line: float | None = None) -> DraftEntry:
+        """Record shared document membership/activity in the recent-files LRU.
         
         Args:
             file_path: The file being opened/accessed.
@@ -546,9 +602,6 @@ class ProjectSidecar:
         """
         normalized = _normalize_file_path(file_path)
         timestamp = _utc_timestamp()
-        
-        # Update last_file
-        self._data["last_file"] = normalized
         
         # Update recent_files (LRU, capped at 12)
         recent = _as_dict_list(self._data.get("recent_files"))
@@ -584,6 +637,13 @@ class ProjectSidecar:
         
         return entry
 
+    def record_file_activity(self, file_path: str, scroll_line: float | None = None) -> DraftEntry:
+        """Compatibility wrapper for shared document activity.
+
+        This method deliberately does not mutate the legacy global last_file.
+        """
+        return self.record_document_activity(file_path, scroll_line=scroll_line)
+
     def update_file_scroll_line(self, file_path: str, scroll_line: float) -> bool:
         """Update the top visible line for a specific file in recent_files.
         
@@ -617,7 +677,7 @@ class ProjectSidecar:
         return None
 
     def get_last_file(self) -> str | None:
-        """Return the last opened file path for this project."""
+        """Return the one-time legacy foreground seed, if still present."""
         value = self._data.get("last_file")
         return value if isinstance(value, str) else None
 
@@ -636,7 +696,10 @@ class ProjectSidecar:
         return revision
 
     def set_last_file(self, file_path: str | None) -> str | None:
-        """Set the last opened file path for this project."""
+        """Set the legacy migration seed.
+
+        New foreground writes must use set_client_foreground().
+        """
         if file_path:
             normalized = _normalize_file_path(file_path)
             self._data["last_file"] = normalized
@@ -645,13 +708,83 @@ class ProjectSidecar:
             self._data["last_file"] = None
             return None
 
+    def get_client_foreground_revision(self) -> int:
+        return _as_int(self._data.get("client_foreground_revision"), 0)
+
+    def _client_foreground_entries(self) -> dict[str, JsonDict]:
+        raw = _as_dict(self._data.get("client_foregrounds"))
+        return {
+            key: _as_dict(value)
+            for key, value in raw.items()
+            if isinstance(value, dict)
+        }
+
+    def get_client_foreground(self, client_instance_id: str) -> str | None:
+        entry = self.get_client_foreground_entry(client_instance_id)
+        if entry is None:
+            return None
+        value = entry.get("path")
+        return value if isinstance(value, str) and value else None
+
+    def get_client_foreground_entry(self, client_instance_id: str) -> JsonDict | None:
+        entry = self._client_foreground_entries().get(client_instance_id)
+        return dict(entry) if entry is not None else None
+
+    def list_client_foreground_entries(self) -> dict[str, JsonDict]:
+        return {
+            client_id: dict(entry)
+            for client_id, entry in self._client_foreground_entries().items()
+        }
+
+    def set_client_foreground(
+        self,
+        client_instance_id: str,
+        file_path: str | None,
+        *,
+        seeded_from_legacy: bool = False,
+        max_clients: int = 32,
+    ) -> int:
+        entries = self._client_foreground_entries()
+        revision = self.get_client_foreground_revision() + 1
+        normalized = _normalize_file_path(file_path) if file_path else None
+        entries[client_instance_id] = {
+            "path": normalized,
+            "revision": revision,
+            "updated_at": _utc_timestamp(),
+            "seeded_from_legacy": seeded_from_legacy,
+        }
+        ordered = sorted(
+            entries.items(),
+            key=lambda item: _as_int(item[1].get("revision"), 0),
+            reverse=True,
+        )[:max_clients]
+        self._data["client_foregrounds"] = dict(ordered)
+        self._data["client_foreground_revision"] = revision
+        return revision
+
+    def reconcile_client_foregrounds_after_close(self, file_path: str) -> list[str]:
+        normalized = _normalize_file_path(file_path)
+        remaining = [
+            str(entry.get("path"))
+            for entry in self.list_recent_files()
+            if isinstance(entry.get("path"), str) and entry.get("path") != normalized
+        ]
+        fallback = remaining[0] if remaining else None
+        changed: list[str] = []
+        for client_id, entry in self._client_foreground_entries().items():
+            if entry.get("path") != normalized:
+                continue
+            self.set_client_foreground(client_id, fallback)
+            changed.append(client_id)
+        return changed
+
     def list_recent_files(self) -> list[DraftEntry]:
         """Return list of recent files for this project."""
         recent = _as_dict_list(self._data.get("recent_files"))
         return [dict(e) for e in recent]
 
     def remove_recent_file(self, file_path: str) -> bool:
-        """Remove one recent file and clear last_file when it was active."""
+        """Remove one shared document and reconcile affected client foregrounds."""
         normalized = _normalize_file_path(file_path)
         recent = _as_dict_list(self._data.get("recent_files"))
         remaining = [
@@ -663,12 +796,16 @@ class ProjectSidecar:
         self._data["recent_files"] = remaining
         if self.get_last_file() == normalized:
             self._data["last_file"] = None
+        self.reconcile_client_foregrounds_after_close(normalized)
         return True
 
     def clear_recent_files(self) -> None:
-        """Clear the recent files list and last_file."""
+        """Clear shared document membership and every client foreground."""
         self._data["recent_files"] = []
         self._data["last_file"] = None
+        entries = self._client_foreground_entries()
+        for client_id in entries:
+            self.set_client_foreground(client_id, None)
 
     def get_draft_count(self) -> int:
         """Return count of unsaved drafts for this project."""

@@ -1,3 +1,5 @@
+import { acceptDocumentProjection } from './editor_document_revision_runtime.ts';
+
 interface MonacoModelLike {
   getLanguageId?(): string;
 }
@@ -61,6 +63,13 @@ export function applyBootSnapshotToEditor(
   }
 
   if (!snapshotFile || !nextPath || deps.getModel()) {
+    return;
+  }
+  if (!acceptDocumentProjection(nextPath, snapshotFile.document_revision)) {
+    console.warn('[editor:boot] rejected stale or unfenced document projection', {
+      path: nextPath,
+      document_revision: snapshotFile.document_revision,
+    });
     return;
   }
 

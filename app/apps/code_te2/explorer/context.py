@@ -44,6 +44,7 @@ class SetProjectRoot(Protocol):
 @dataclass(frozen=True)
 class ExplorerSearchReviewHandlerContext:
     project_root: Path
+    client_instance_id: str
     emit_personal: EmitPersonal
     broadcast_git_status: AsyncNoArg
     broadcast_review_state: AsyncNoArg
@@ -62,6 +63,7 @@ class ExplorerWatcherHandlerContext:
 @dataclass(frozen=True)
 class ExplorerFileTreeHandlerContext:
     project_root: Path
+    client_instance_id: str
     broadcast: Broadcast
     broadcast_git_status: AsyncNoArg
     broadcast_git_decorations: AsyncNoArg

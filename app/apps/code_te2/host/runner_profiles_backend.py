@@ -1,6 +1,7 @@
 # pyright: strict
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
@@ -288,10 +289,22 @@ async def handle_run_profile_state_get_request(
     *,
     source_name: str,
 ) -> JsonMap:
-    del source_name
+    request = dict(data) if isinstance(data, Mapping) else {}
+    if not _text(request.get("path")):
+        project, _ = run_profile_request_context({"path": ""})
+        if project:
+            from ..open_state_backend import read_client_foreground
+
+            foreground = await asyncio.to_thread(
+                read_client_foreground,
+                project,
+                source_name,
+                reason="run_profile_state_get",
+            )
+            request["path"] = foreground["path"] or ""
     try:
         projection = await build_run_profile_state_projection(
-            data,
+            request,
             reconcile_stale_route=True,
         )
     except ValueError as exc:

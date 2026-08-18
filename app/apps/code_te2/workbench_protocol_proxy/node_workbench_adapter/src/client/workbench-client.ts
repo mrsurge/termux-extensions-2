@@ -688,6 +688,27 @@ function isWatchSubscription(
   return typeof value["event"] === "function";
 }
 
+interface ClientEditorFacade {
+  clientInstanceId: string;
+  path: string;
+  editorId: string;
+  uriObj: unknown;
+  uri: string | null;
+  languageId: string | null;
+  tab: unknown;
+  lastOpenTs: number | null;
+}
+
+const CLIENT_INSTANCE_PATTERN = /^client_[a-z0-9]{12,64}$/;
+
+function clientInstanceIdFrom(params: unknown): string | null {
+  if (!isRecord(params) || typeof params.clientInstanceId !== "string") return null;
+  const clientInstanceId = params.clientInstanceId.trim().toLowerCase();
+  return CLIENT_INSTANCE_PATTERN.test(clientInstanceId)
+    ? clientInstanceId
+    : null;
+}
+
 export class WorkbenchClient {
   onEvent: WorkbenchEventSink;
   mgmt: MgmtSessionLike;
@@ -707,6 +728,11 @@ export class WorkbenchClient {
   _activeEditorId: string | null;
   _activeUriObj: unknown;
   _activeTab: unknown;
+  _clientEditorFacades: Map<string, ClientEditorFacade>;
+  _projectedClientInstanceId: string | null;
+  _clientContextOwner: string | null;
+  _clientContextDepth: number;
+  _clientContextWaiters: Array<() => void>;
   _documentRegistry: WorkbenchDocumentRegistry;
   _extensions: unknown[];
   _extensionActivity: ExtensionActivityRuntime;
@@ -769,6 +795,11 @@ export class WorkbenchClient {
     this._activeEditorId = null; // track current editor for close-before-open
     this._activeUriObj = null; // track current URI object for close-before-open
     this._activeTab = null;
+    this._clientEditorFacades = new Map<string, ClientEditorFacade>();
+    this._projectedClientInstanceId = null;
+    this._clientContextOwner = null;
+    this._clientContextDepth = 0;
+    this._clientContextWaiters = [];
     this._documentRegistry = new WorkbenchDocumentRegistry({
       extRpcIds: {
         ExtHostDocumentsAndEditors: _rpcIds.ExtHostDocumentsAndEditors,
@@ -844,6 +875,7 @@ export class WorkbenchClient {
       fsPathFromUri: (uri) => this._fsPathFromUri(uri),
       activePath: () => this.state.activePath,
       activeEditorId: () => this._activeEditorId,
+      activeClientInstanceId: () => this._projectedClientInstanceId,
       emitBackendEvent: (payload) => this.onEvent(payload),
       notifyEditor: (method, params) => this.onNotification(method, params),
       createId: () => crypto.randomUUID(),
@@ -1834,7 +1866,12 @@ export class WorkbenchClient {
 
   _handleWorkbenchEvent(payload: Record<string, unknown>): void {
     if (payload.type === "document/activeChanged" && typeof payload.path === "string") {
-      this._extensionEditorNavigation.activeEditorChanged(payload.path);
+      this._extensionEditorNavigation.activeEditorChanged(
+        payload.path,
+        typeof payload.clientInstanceId === "string"
+          ? payload.clientInstanceId
+          : null,
+      );
     }
     if (payload.type === "provider/semanticTokens") {
       const handle = Number(payload.handle);
@@ -1931,6 +1968,12 @@ export class WorkbenchClient {
     this._activeEditorId = null;
     this._activeUriObj = null;
     this._activeTab = null;
+    this._clientEditorFacades.clear();
+    this._projectedClientInstanceId = null;
+    this._clientContextOwner = null;
+    this._clientContextDepth = 0;
+    const contextWaiters = this._clientContextWaiters.splice(0);
+    for (const resolve of contextWaiters) resolve();
     this._semanticTokenProviderSignatures.clear();
     this._semanticTokenProjections.clear(reason || "session_reset");
     this._documentRegistry.clearLocal();
@@ -2092,6 +2135,96 @@ export class WorkbenchClient {
     }
   }
 
+  private _captureClientEditorFacade(clientInstanceId: string): void {
+    const path = this.state.activePath;
+    const editorId = this._activeEditorId;
+    if (!path || !editorId) {
+      this._clientEditorFacades.delete(clientInstanceId);
+      return;
+    }
+    this._clientEditorFacades.set(clientInstanceId, {
+      clientInstanceId,
+      path,
+      editorId,
+      uriObj: this._activeUriObj,
+      uri: this.state.activeUri,
+      languageId: this.state.activeLanguageId,
+      tab: this._activeTab,
+      lastOpenTs: this.state.lastOpenTs,
+    });
+  }
+
+  private _projectClientEditorFacade(clientInstanceId: string): void {
+    if (this._projectedClientInstanceId === clientInstanceId) return;
+    const facade = this._clientEditorFacades.get(clientInstanceId) ?? null;
+    this._projectedClientInstanceId = clientInstanceId;
+    this._activeEditorId = facade?.editorId ?? null;
+    this._activeUriObj = facade?.uriObj ?? null;
+    this._activeTab = facade?.tab ?? null;
+    this.state.activePath = facade?.path ?? null;
+    this.state.activeUri = facade?.uri ?? null;
+    this.state.activeLanguageId = facade?.languageId ?? null;
+    this.state.lastOpenTs = facade?.lastOpenTs ?? null;
+    if (facade) {
+      this._documentRegistry.promote(
+        facade.path,
+        this._documentRegistry.getOpenGeneration(facade.path) ?? null,
+      );
+    }
+    this._sendExt(
+      _rpcIds.ExtHostDocumentsAndEditors,
+      "$acceptDocumentsAndEditorsDelta",
+      [{ newActiveEditor: facade?.editorId ?? null }],
+      false,
+    );
+  }
+
+  private async _acquireClientContext(clientInstanceId: string): Promise<void> {
+    while (
+      this._clientContextOwner !== null &&
+      this._clientContextOwner !== clientInstanceId
+    ) {
+      await new Promise<void>((resolve) => {
+        this._clientContextWaiters.push(resolve);
+      });
+    }
+    this._clientContextOwner = clientInstanceId;
+    this._clientContextDepth += 1;
+    this._projectClientEditorFacade(clientInstanceId);
+  }
+
+  private _releaseClientContext(clientInstanceId: string): void {
+    if (this._clientContextOwner !== clientInstanceId) return;
+    this._clientContextDepth = Math.max(0, this._clientContextDepth - 1);
+    if (this._clientContextDepth !== 0) return;
+    this._clientContextOwner = null;
+    const waiters = this._clientContextWaiters.splice(0);
+    for (const resolve of waiters) resolve();
+  }
+
+  private async _runWithClientEditorFacade<T>(
+    params: unknown,
+    operation: () => Promise<T> | T,
+  ): Promise<T> {
+    const clientInstanceId = clientInstanceIdFrom(params);
+    if (!clientInstanceId) {
+      throw new Error("Missing required clientInstanceId");
+    }
+    await this._acquireClientContext(clientInstanceId);
+    try {
+      return await operation();
+    } finally {
+      this._releaseClientContext(clientInstanceId);
+    }
+  }
+
+  clientActivePath(params: unknown): string | null {
+    const clientInstanceId = clientInstanceIdFrom(params);
+    return clientInstanceId
+      ? this._clientEditorFacades.get(clientInstanceId)?.path ?? null
+      : null;
+  }
+
   async openFile(params: unknown = {}): Promise<Record<string, unknown>> {
     const requestedPath = isRecord(params) ? String(params.path ?? "") : "";
     const previousVersion = requestedPath
@@ -2110,10 +2243,15 @@ export class WorkbenchClient {
     }
     await previous;
     try {
-      const result = await openWorkbenchFile(
-        this._workspaceLifecycleRuntime(),
-        params,
-      );
+      const result = await this._runWithClientEditorFacade(params, async () => {
+        const opened = await openWorkbenchFile(
+          this._workspaceLifecycleRuntime(),
+          params,
+        );
+        const clientInstanceId = clientInstanceIdFrom(params);
+        if (clientInstanceId) this._captureClientEditorFacade(clientInstanceId);
+        return opened;
+      });
       const nextVersion = requestedPath
         ? this._documentRegistry.getVersion(requestedPath)
         : null;
@@ -2136,8 +2274,33 @@ export class WorkbenchClient {
   ): Record<string, unknown> {
     const result = this._documentRegistry.reconcileLogicalDocuments(params);
     if (Array.isArray(result.released)) {
+      const releasedPaths = new Set(result.released.map((path) => String(path)));
+      const removedEditors: string[] = [];
       for (const releasedPath of result.released) {
         this._semanticTokenProjections.invalidatePath(String(releasedPath));
+      }
+      for (const [clientInstanceId, facade] of this._clientEditorFacades) {
+        if (!releasedPaths.has(facade.path)) continue;
+        removedEditors.push(facade.editorId);
+        this._clientEditorFacades.delete(clientInstanceId);
+        if (this._projectedClientInstanceId === clientInstanceId) {
+          this._projectedClientInstanceId = null;
+          this._activeEditorId = null;
+          this._activeUriObj = null;
+          this._activeTab = null;
+          this.state.activePath = null;
+          this.state.activeUri = null;
+          this.state.activeLanguageId = null;
+          this.state.lastOpenTs = null;
+        }
+      }
+      if (removedEditors.length) {
+        this._sendExt(
+          _rpcIds.ExtHostDocumentsAndEditors,
+          "$acceptDocumentsAndEditorsDelta",
+          [{ removedEditors, newActiveEditor: this._activeEditorId }],
+          false,
+        );
       }
     }
     return result;
@@ -2456,6 +2619,28 @@ export class WorkbenchClient {
     rejectedPendingRequests: number;
     clearedBackgroundDocuments: number;
   } {
+    const removedEditors = Array.from(
+      new Set(
+        [...this._clientEditorFacades.values()].map((facade) => facade.editorId),
+      ),
+    );
+    if (removedEditors.length) {
+      this._sendExt(
+        _rpcIds.ExtHostDocumentsAndEditors,
+        "$acceptDocumentsAndEditorsDelta",
+        [{ removedEditors, newActiveEditor: null }],
+        false,
+      );
+    }
+    this._clientEditorFacades.clear();
+    this._projectedClientInstanceId = null;
+    this._activeEditorId = null;
+    this._activeUriObj = null;
+    this._activeTab = null;
+    this.state.activePath = null;
+    this.state.activeUri = null;
+    this.state.activeLanguageId = null;
+    this.state.lastOpenTs = null;
     const clearedBackgroundDocuments =
       this._documentRegistry.countBackground();
     this._semanticTokenProjections.clear(reason || "workspace_switch");
@@ -2577,37 +2762,49 @@ export class WorkbenchClient {
     }
   }
 
-  extensionEditorStateUpdate(
+  async extensionEditorStateUpdate(
     params: Record<string, unknown>,
-  ): Record<string, unknown> {
-    return {
+  ): Promise<Record<string, unknown>> {
+    return await this._runWithClientEditorFacade(params, () => ({
       ok: this._syncActiveEditorSelection(params),
       activePath: this.state.activePath,
-    };
+    }));
   }
 
   extensionMenuResolve(
     params: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return this._extensionCommands.resolveMenu(params);
+    return this._runWithClientEditorFacade(
+      params,
+      () => this._extensionCommands.resolveMenu(params),
+    );
   }
 
   extensionCommandExecute(
     params: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return this._extensionCommands.execute(params);
+    return this._runWithClientEditorFacade(
+      params,
+      () => this._extensionCommands.execute(params),
+    );
   }
 
-  extensionNavigationComplete(
+  async extensionNavigationComplete(
     params: Record<string, unknown>,
-  ): Record<string, unknown> {
-    return this._extensionEditorNavigation.completeBackendOpen(params);
+  ): Promise<Record<string, unknown>> {
+    return await this._runWithClientEditorFacade(
+      params,
+      () => this._extensionEditorNavigation.completeBackendOpen(params),
+    );
   }
 
-  extensionEditorOperationComplete(
+  async extensionEditorOperationComplete(
     params: Record<string, unknown>,
-  ): Record<string, unknown> {
-    return this._extensionEditorNavigation.completeEditorOperation(params);
+  ): Promise<Record<string, unknown>> {
+    return await this._runWithClientEditorFacade(
+      params,
+      () => this._extensionEditorNavigation.completeEditorOperation(params),
+    );
   }
 
   /** Find provider handle matching a languageId by scanning selector arrays. */

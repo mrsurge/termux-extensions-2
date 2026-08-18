@@ -1,8 +1,8 @@
 import { EDITOR_RPC_NOTIFICATIONS } from './editor_rpc_contract.ts';
 import { buildInlineDiffScrollbarOptions } from './editor_diff_scrollbar_options.ts';
+import { acceptDocumentProjection } from './editor_document_revision_runtime.ts';
 
 interface EditorSocketLike {
-  id?: string | null;
   on(eventName: string, handler: (payload: unknown) => void): void;
 }
 
@@ -41,7 +41,6 @@ interface MonacoDiffEditorLike {
 
 interface EditorSocketConnectionDeps {
   rpcNotifications?: EditorRpcNotificationSource | null;
-  setEditorSocketId(value: string | null): void;
   emitToHost(eventName: string, payload: Record<string, unknown>): void;
   getCachedPrefs(): unknown;
   setCachedPrefs(snapshot: unknown): void;
@@ -177,14 +176,21 @@ export function registerEditorSocketConnectionHandlers(
       deps.setCachedPrefs(snapshot);
       if (snapshotFile) {
         const file = snapshotFile;
-        deps.setBaseSha256(asString(file.base_sha256) || deps.getBaseSha256());
-        deps.setCurrentPath(asString(file.path) || deps.getCurrentPath());
-        const currentPath = deps.getCurrentPath();
-        const ssotGeneration = deps.wbBumpGeneration(currentPath, 'ssot');
-        try { deps.bcUpdatePath(currentPath, true); } catch (_) {}
         deps.ensureEditorWithPrefs().then(async () => {
+          const snapshotPath = asString(file.path);
+          if (!acceptDocumentProjection(snapshotPath, file.document_revision)) {
+            console.warn('[editor:ssot] rejected stale or unfenced document projection', {
+              path: snapshotPath,
+              document_revision: file.document_revision,
+            });
+            return;
+          }
+          deps.setBaseSha256(asString(file.base_sha256) || deps.getBaseSha256());
+          deps.setCurrentPath(snapshotPath || deps.getCurrentPath());
           const activePath = deps.getCurrentPath();
           if (!activePath) return;
+          const ssotGeneration = deps.wbBumpGeneration(activePath, 'ssot');
+          try { deps.bcUpdatePath(activePath, true); } catch (_) {}
           const lang = deps.languageFromPath(activePath);
           const activeModel = deps.getModel();
           const snapshotContent = asString(file.content);
@@ -207,6 +213,7 @@ export function registerEditorSocketConnectionHandlers(
             content_sha256: file.content_sha256,
             base_sha256: file.base_sha256 || (file.unsaved ? null : file.content_sha256),
             auto_save: file.auto_save,
+            document_revision: file.document_revision,
           });
           try {
             const ssotTx = deps.getOpenTransactionForPath(activePath);
@@ -214,7 +221,11 @@ export function registerEditorSocketConnectionHandlers(
             if (ssotJumpPayload) deps.applyResolvedOpenJump('ssot', ssotJumpPayload, ssotTx);
           } catch (_) {}
           if (file.has_draft) {
-            deps.emitToHost('editor_draft_state', { has_draft: true, path: activePath });
+            deps.emitToHost('editor_draft_state', {
+              has_draft: true,
+              path: activePath,
+              document_revision: file.document_revision,
+            });
             deps.requestDraftDiff('ssot');
           } else {
             deps.clearDraftDiffDecorations();
@@ -376,44 +387,7 @@ export function registerEditorSocketConnectionHandlers(
     }
   };
 
-  const handleOpenStatePayload = (payload: unknown): void => {
-    try {
-      const record = asRecord(payload);
-      if (!record) return;
-      const openFile = asString(record.openFile);
-      if (openFile) return;
-      deps.setCurrentPath(null);
-      deps.setBaseSha256(null);
-      deps.setLastContentSha256(null);
-      deps.bcUpdatePath(null, true);
-      try { deps.clearDraftDiffDecorations(); } catch (_) {}
-      try { deps.disposeGitBaselines(); } catch (_) {}
-      try {
-        const diffEditor = deps.getDiffEditor();
-        if (diffEditor && typeof diffEditor.setModel === 'function') diffEditor.setModel(null);
-      } catch (_) {}
-      try {
-        const editor = deps.getEditor();
-        if (editor && typeof editor.setModel === 'function') editor.setModel(null);
-      } catch (_) {}
-      try {
-        const model = deps.getModel();
-        if (model && typeof model.dispose === 'function') model.dispose();
-      } catch (_) {}
-      deps.setModel(null);
-      deps.emitToHost('editor_cache_state', {
-        path: null,
-        state: 'clean',
-        unsaved: false,
-        reason: record.reason || 'open_state_clear',
-      });
-    } catch (error) {
-      console.warn('[Monaco] open-state clear failed', error);
-    }
-  };
-
   socket.on('connect', () => {
-    deps.setEditorSocketId(socket.id || null);
     deps.emitToHost('editor_ready', {});
     deps.emitToHost('editor:iframe_ready', {});
   });
@@ -421,7 +395,6 @@ export function registerEditorSocketConnectionHandlers(
   if (deps.rpcNotifications) {
     deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.stateSsot, handleSsotSnapshot);
     deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.fileOpened, handleOpenPayload);
-    deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.openStateChanged, handleOpenStatePayload);
     deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.fileJumpToLine, (payload) => deps.handleJumpToLine(payload));
     deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.prefsChanged, handlePrefsChangedPayload);
   }

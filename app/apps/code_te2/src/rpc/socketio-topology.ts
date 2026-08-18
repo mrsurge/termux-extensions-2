@@ -23,11 +23,42 @@ export const SOCKET_IO_NAMESPACES = {
   wba: RPC_NAMESPACES.wba,
 } as const;
 
+interface SocketClientIdentity {
+  clientInstanceId: string;
+  windowId?: string | null;
+}
+
+let socketClientIdentity: Readonly<SocketClientIdentity> | null = null;
+
+export function configureCodeTe2SocketIdentity(
+  identity: SocketClientIdentity,
+): void {
+  const clientInstanceId = String(identity.clientInstanceId || '').trim().toLowerCase();
+  const windowId = String(identity.windowId || '').trim().toLowerCase();
+  if (!/^client_[a-z0-9]{12,64}$/.test(clientInstanceId)) {
+    throw new Error('Code TE2 socket client identity is invalid');
+  }
+  if (windowId && !/^window_[a-z0-9]{20,64}$/.test(windowId)) {
+    throw new Error('Code TE2 socket window identity is invalid');
+  }
+  socketClientIdentity = Object.freeze({
+    clientInstanceId,
+    windowId: windowId || null,
+  });
+}
+
 export function fileEditorSocketQuery(
   extra: Record<string, unknown> = {},
 ): Record<string, unknown> {
+  if (socketClientIdentity === null) {
+    throw new Error('Code TE2 socket identity has not been configured');
+  }
   return {
     app_id: CODE_TE2_APP_ID,
+    client_instance_id: socketClientIdentity.clientInstanceId,
+    ...(socketClientIdentity.windowId
+      ? { window_id: socketClientIdentity.windowId }
+      : {}),
     ...extra,
   };
 }

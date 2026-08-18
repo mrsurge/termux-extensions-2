@@ -139,7 +139,11 @@ class ExplorerMessagePackNamespaceTests(unittest.IsolatedAsyncioTestCase):
             emitted.append((event, data, room))
 
         namespace.emit = record_emit  # type: ignore[method-assign]
-        shim = ExplorerRpcSocketShim(namespace, "test-sid")
+        shim = ExplorerRpcSocketShim(
+            namespace,
+            "test-sid",
+            "client_aaaaaaaaaaaa",
+        )
 
         await shim.send_text(
             '{"jsonrpc":"2.0","method":"search.job.result","params":{"count":2}}'

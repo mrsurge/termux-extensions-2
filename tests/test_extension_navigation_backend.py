@@ -6,6 +6,9 @@ from unittest.mock import patch
 from app.apps.code_te2 import extension_navigation_backend
 
 
+CLIENT_ID = "client_abcdefghijkl"
+
+
 class ExtensionNavigationBackendTests(unittest.IsolatedAsyncioTestCase):
     async def test_open_waits_for_exact_editor_completion_before_wba_ack(self) -> None:
         adapter_calls: list[tuple[str, dict[str, object], float]] = []
@@ -16,7 +19,7 @@ class ExtensionNavigationBackendTests(unittest.IsolatedAsyncioTestCase):
             source_name: str,
             request_prefix: str,
         ) -> dict[str, object]:
-            self.assertEqual("extension_navigation", source_name)
+            self.assertEqual(CLIENT_ID, source_name)
             self.assertEqual("extension_open", request_prefix)
             self.assertEqual("ext-open-1", payload["request_id"])
             self.assertTrue(
@@ -24,7 +27,8 @@ class ExtensionNavigationBackendTests(unittest.IsolatedAsyncioTestCase):
                     {
                         "request_id": "ext-open-1",
                         "path": "/workspace/main.ts",
-                    }
+                    },
+                    CLIENT_ID,
                 )
             )
             return {
@@ -61,6 +65,7 @@ class ExtensionNavigationBackendTests(unittest.IsolatedAsyncioTestCase):
                     "line": 4,
                     "column": 2,
                     "focus": True,
+                    "clientInstanceId": CLIENT_ID,
                 }
             )
 
@@ -72,6 +77,7 @@ class ExtensionNavigationBackendTests(unittest.IsolatedAsyncioTestCase):
                         "ok": True,
                         "requestId": "ext-open-1",
                         "path": "/workspace/main.ts",
+                        "clientInstanceId": CLIENT_ID,
                     },
                     10.0,
                 )

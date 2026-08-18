@@ -11,7 +11,7 @@ from .file_ops import mark_git_cache_dirty, set_project_root
 from .render_state import build_bootstrap_snapshot, emit_bootstrap_snapshot
 from ..transport.connection_manager import ExplorerConnection, manager
 from ...project_sidecar import ProjectSidecar
-from ...open_state_backend import read_sidecar_open_state
+from ...open_state_backend import read_client_foreground, read_sidecar_open_state
 from ...stores import get_history_store, get_preferences_store
 from ..contracts.watcher import build_watcher_config_payload
 from ..context import AsyncNoArg, EmitPersonal
@@ -64,6 +64,7 @@ async def replay_explorer_session_bootstrap(
     project_root: Path,
     was_new_sidecar: bool,
     emit_personal: EmitPersonal,
+    client_instance_id: str,
     broadcast_git_status: AsyncNoArg,
     broadcast_review_state: AsyncNoArg,
 ) -> None:
@@ -81,10 +82,17 @@ async def replay_explorer_session_bootstrap(
 
     open_state: JsonObject | None = None
     active_file_rel: str | None = None
+    active_file_abs: str | None = None
     try:
         raw_open_state = read_sidecar_open_state(str(project_root), reason="reconnect")
         open_state = dict(raw_open_state)
-        active_file_rel = str(raw_open_state["openFileRel"])
+        foreground = read_client_foreground(
+            str(project_root),
+            client_instance_id,
+            reason="explorer_reconnect",
+        )
+        active_file_rel = foreground["rel"]
+        active_file_abs = foreground["path"]
     except Exception as exc:
         logger.warning("Failed to rehydrate active file: %s", exc)
 
@@ -101,11 +109,13 @@ async def replay_explorer_session_bootstrap(
 
     if open_state is not None:
         await emit_personal("explorer.openState.changed", dict(open_state))
-        current_path = str(open_state["openFile"])
-        rel = str(open_state["openFileRel"])
         await emit_personal(
             "explorer.activeFile.updated",
-            {"rel": rel, "abs": current_path, "openState": dict(open_state)},
+            {
+                "rel": active_file_rel,
+                "abs": active_file_abs,
+                "openState": dict(open_state),
+            },
         )
 
     try:

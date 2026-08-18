@@ -405,7 +405,6 @@ interface MonacoBootWindowLike extends Window {
   let cachedPrefs: CachedPrefsLike | null = null;
   let editorRpcSocket: EditorSocketLike | null = null;
   let wbaRpcSocket: EditorSocketLike | null = null;
-  let editorSocketId: string | null = null;
   let lastModelReadySyncKey: string | null = null;
   var openTransactionStore = createEditorOpenTransactionStore();
   let baseSha256: string | null = null;
@@ -2110,9 +2109,6 @@ interface MonacoBootWindowLike extends Window {
         >[0],
         buildSocketConnectionDeps({
           rpcNotifications: editorRpcTransport,
-          setEditorSocketId: function (value: string | null) {
-            editorSocketId = value;
-          },
           emitToHost: emitToHost,
           getCachedPrefs: function () {
             return cachedPrefs;
@@ -2297,8 +2293,9 @@ interface MonacoBootWindowLike extends Window {
           getMirrorHotWindowMs: function () {
             return prefRuntime.getMirrorHotWindowMs();
           },
-          getEditorSocketId: function () {
-            return editorSocketId;
+          getClientInstanceId: function () {
+            const value = fileEditorSocketQuery().client_instance_id;
+            return typeof value === 'string' ? value : null;
           },
           setApplyingRemote: function (value: boolean) {
             isApplyingRemote = !!value;

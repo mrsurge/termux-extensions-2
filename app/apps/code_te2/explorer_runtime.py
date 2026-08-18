@@ -86,6 +86,7 @@ from .worker_services.event_bus import current_project_generation
 class ExplorerDispatcher:
     def __init__(self, websocket: ExplorerConnection) -> None:
         self.websocket: ExplorerConnection = websocket
+        self.client_instance_id = websocket.client_instance_id
         self.project_root: Path = get_project_root()
         self._job_tracking: ExplorerJobTrackingRuntime | None = None
         self._tracked_job_ids: set[str] = set()
@@ -163,6 +164,7 @@ class ExplorerDispatcher:
                 project_root=project_root,
                 was_new_sidecar=was_new_sidecar,
                 emit_personal=self.emit_personal,
+                client_instance_id=self.client_instance_id,
                 broadcast_git_status=broadcast_git_status_for_bootstrap,
                 broadcast_review_state=broadcast_review_state_for_bootstrap,
             )
@@ -285,6 +287,7 @@ class ExplorerDispatcher:
         typed_mark_draft_cache_dirty = cast(MarkProjectDirty, mark_draft_cache_dirty)
         return ExplorerSearchReviewHandlerContext(
             project_root=self.project_root,
+            client_instance_id=self.client_instance_id,
             emit_personal=self.emit_personal,
             broadcast_git_status=self.broadcast_git_status,
             broadcast_review_state=self.broadcast_review_state,
@@ -330,6 +333,7 @@ class ExplorerDispatcher:
     def _build_file_tree_context(self) -> ExplorerFileTreeHandlerContext:
         return ExplorerFileTreeHandlerContext(
             project_root=self.project_root,
+            client_instance_id=self.client_instance_id,
             broadcast=self.broadcast,
             broadcast_git_status=self.broadcast_git_status,
             broadcast_git_decorations=self.broadcast_git_decorations,
@@ -1148,7 +1152,9 @@ class ExplorerDispatcher:
                 editor_runtime_emit_room_event,
                 editor_runtime_reload_disk_content_if_active,
             )
+            from .stores import get_history_store
 
+            history = get_history_store()
             for rel in rel_files:
                 abs_path = str(self.project_root / rel)
                 await editor_runtime_emit_room_event(
@@ -1158,6 +1164,10 @@ class ExplorerDispatcher:
                         "state": "clean",
                         "unsaved": False,
                         "reason": "discard_external",
+                        "document_revision": history.get_document_revision(
+                            str(self.project_root),
+                            abs_path,
+                        ),
                     },
                 )
                 _ = await editor_runtime_reload_disk_content_if_active(

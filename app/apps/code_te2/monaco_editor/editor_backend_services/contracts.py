@@ -40,6 +40,7 @@ class EditorOpenPayload(TypedDict, total=False):
     content: str
     base_sha256: str
     content_sha256: str
+    document_revision: int
     state: str
     unsaved: bool
     auto_save: bool | None

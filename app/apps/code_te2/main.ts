@@ -65,6 +65,7 @@ import { captureHostElements } from './main_page/frontend/host-elements.ts';
 import { createHostUiPrefsRuntime } from './main_page/frontend/host-ui-prefs-runtime.ts';
 import { createHostBootRuntime } from './main_page/frontend/host-boot-runtime.ts';
 import { resolveCodeTe2ClientIdentity } from './main_page/frontend/client-identity.ts';
+import { configureCodeTe2SocketIdentity } from './src/rpc/socketio-topology.ts';
 import { initResizeManager, loadLayoutPreferences } from './main_page/frontend/host-resize-manager.ts';
 import type { ProblemsPanelController } from './src/diagnostics/problems-panel.ts';
 import type { OpenFileOptions } from './main_page/frontend/file-ops/open-flow.ts';
@@ -152,6 +153,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
   window.host = host;
   window.api = api;
   const clientIdentity = await resolveCodeTe2ClientIdentity();
+  configureCodeTe2SocketIdentity(clientIdentity);
   const clientId = clientIdentity.clientInstanceId;
   let problemsPanel: ProblemsPanelController = {
     show() {},
@@ -188,17 +190,18 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
   };
   function dispatchHostOpenStateProjection(state: UnknownRecord, source: string): void {
     const openState = asUnknownRecord(state.openState);
-    const openFile = typeof openState.openFile === 'string' && openState.openFile ? openState.openFile : typeof state.currentPath === 'string' && state.currentPath ? state.currentPath : typeof state.lastFile === 'string' && state.lastFile ? state.lastFile : null;
+    const clientForeground = asUnknownRecord(state.clientForeground);
+    const foregroundPath = typeof clientForeground.path === 'string' && clientForeground.path
+      ? clientForeground.path
+      : typeof state.currentPath === 'string' && state.currentPath
+        ? state.currentPath
+        : null;
     const projectPath = typeof openState.projectPath === 'string' && openState.projectPath ? openState.projectPath : typeof state.activeProject === 'string' && state.activeProject ? state.activeProject : null;
     const openStatePayload: UnknownRecord = {
       ...openState,
       source,
     };
     if (projectPath) openStatePayload.projectPath = projectPath;
-    if (openFile) {
-      openStatePayload.openFile = openFile;
-      if (typeof openStatePayload.path !== 'string') openStatePayload.path = openFile;
-    }
     window.dispatchEvent(
       new CustomEvent('code-te2:open-state-changed', {
         detail: openStatePayload,
@@ -207,9 +210,13 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     window.dispatchEvent(
       new CustomEvent('code-te2:active-file-changed', {
         detail: {
-          ...openStatePayload,
-          path: openFile,
+          path: foregroundPath,
+          clientForeground: {
+            ...clientForeground,
+            path: foregroundPath,
+          },
           openState: openStatePayload,
+          source,
         },
       }),
     );
@@ -414,6 +421,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     setLastSha256: (sha) => {
       lastSha256 = sha;
     },
+    getCurrentPath: () => currentPath || null,
     getRestoredSessionActive: () => !!restoredSessionActive,
     setRestoredSessionActive: (flag) => {
       restoredSessionActive = !!flag;

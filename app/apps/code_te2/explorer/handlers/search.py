@@ -45,6 +45,7 @@ async def handle_search_highlight_set(
     await publish_search_highlight_changed(
         context.project_root,
         {
+            "clientInstanceId": context.client_instance_id,
             "active": True,
             "query": params["query"],
             "isRegex": params["isRegex"],
@@ -66,6 +67,7 @@ async def handle_search_highlight_clear(
     await publish_search_highlight_changed(
         context.project_root,
         {
+            "clientInstanceId": context.client_instance_id,
             "active": False,
             "query": "",
             "isRegex": False,

@@ -42,7 +42,7 @@ def run_profile_request_context(
     project_root = _active_project()
     if not project_root:
         return None, _request_path(data)
-    return project_root, _request_path(data) or _last_file(project_root)
+    return project_root, _request_path(data)
 
 
 async def build_run_profile_state_projection(
@@ -201,11 +201,6 @@ def _active_project() -> str | None:
     if not isinstance(value, str) or not value.strip():
         return None
     return str(Path(value).expanduser().resolve(strict=False))
-
-
-def _last_file(project_root: str) -> str | None:
-    value = get_history_store().get_last_file(project_root)
-    return value if isinstance(value, str) and value.strip() else None
 
 
 def _request_path(data: Mapping[str, object] | None) -> str | None:

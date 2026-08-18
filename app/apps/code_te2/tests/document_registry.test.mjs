@@ -878,6 +878,62 @@ test("logical document DTOs round-trip through the existing JSON-RPC dispatcher"
   );
 });
 
+test("client-scoped open dispatch preserves authenticated presentation identity", async () => {
+  const calls = [];
+  const runtime = {
+    defaultRemoteAuthority: "localhost",
+    normalizePathParam: (params) => String(params.path ?? ""),
+    normalizeAuthorityParam: (params, fallback) =>
+      String(params.authority ?? fallback ?? ""),
+    vscodeRemoteUri: (authority, path) =>
+      `vscode-remote://${authority}${path}`,
+    scheduleOpenFileSnapshot() {},
+    log() {},
+    logStatus() {},
+    wb: {
+      clientActivePath() {
+        return null;
+      },
+      async openFile(params) {
+        calls.push(params);
+        return { ok: true };
+      },
+    },
+  };
+
+  const response = await dispatchJsonRpcRequest(runtime, {
+    id: 43,
+    method: "vscode.openFile",
+    params: {
+      path: "/workspace/a.py",
+      languageId: "python",
+      generation: 7,
+      clientInstanceId: "client_abcdefghijkl",
+      windowId: "window_abcdefghijklmnopqrst",
+    },
+  });
+
+  assert.deepEqual(response, {
+    jsonrpc: "2.0",
+    id: 43,
+    result: {
+      ok: true,
+      path: "/workspace/a.py",
+      uri: "vscode-remote://localhost/workspace/a.py",
+    },
+  });
+  assert.deepEqual(calls, [{
+    path: "/workspace/a.py",
+    languageId: "python",
+    authority: "localhost",
+    forceRefresh: false,
+    generation: 7,
+    workspaceFolder: null,
+    clientInstanceId: "client_abcdefghijkl",
+    windowId: "window_abcdefghijklmnopqrst",
+  }]);
+});
+
 test("active editor selection updates use the existing WBA dispatcher", async () => {
   const calls = [];
   const params = {

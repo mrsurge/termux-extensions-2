@@ -154,6 +154,10 @@ test('Sidebar registration and presentation RPCs are reliable across reconnects'
         assert.equal(options.path, '/api/app/code_te2/socket.io');
         return socket;
       },
+      getSocketQuery: () => ({
+        client_instance_id: 'client_abcdefghijkl',
+        window_id: 'window_abcdefghijklmnopqrst',
+      }),
       initConsoleBridge: () => ({}),
       getClientId: () => 'client-a',
       onSidebarConnected: () => {
@@ -208,6 +212,10 @@ test('UI IPC requests host resync only after a genuine reconnect', async () => {
     let resyncs = 0;
     const connections = createUiIpcConnections({
       ensureSocketIoLoaded: async () => () => socket,
+      getSocketQuery: () => ({
+        client_instance_id: 'client_abcdefghijkl',
+        window_id: 'window_abcdefghijklmnopqrst',
+      }),
       initConsoleBridge: () => ({}),
       getClientId: () => 'client-a',
       getConsoleWorkerId: () => 'main_page:test',
@@ -308,6 +316,32 @@ test('editor RPC calls are reliable while notifications remain volatile', async 
   socket.trigger('connect');
   assert.equal(socket.rawEmits.length, 1);
   assert.equal(socket.volatileEmits.length, 1);
+});
+
+test('shared document membership never registers an exact-client model teardown', async () => {
+  const { registerEditorSocketConnectionHandlers } = await importTypeScript(
+    'monaco_editor/editor_socket_connection_runtime.ts',
+  );
+  const notificationHandlers = new Map();
+  const deps = new Proxy({
+    rpcNotifications: {
+      onNotification(method, handler) {
+        notificationHandlers.set(method, handler);
+        return () => notificationHandlers.delete(method);
+      },
+    },
+  }, {
+    get(target, property) {
+      if (property in target) return target[property];
+      return () => {};
+    },
+  });
+
+  registerEditorSocketConnectionHandlers({ on() {} }, deps);
+
+  assert.equal(notificationHandlers.has('editor.openState.changed'), false);
+  assert.equal(notificationHandlers.has('editor.state.ssot'), true);
+  assert.equal(notificationHandlers.has('editor.file.opened'), true);
 });
 
 test('required editor publications use request-response transport without volatile replay', async () => {
@@ -724,6 +758,7 @@ test('visible editor open completion does not await WBA or agent hydration', asy
     path: '/workspace/fast.py',
     content: 'print("ready")\n',
     request_id: 'rapid-open',
+    document_revision: 0,
   });
 
   const outcome = await Promise.race([

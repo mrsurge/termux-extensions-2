@@ -191,7 +191,7 @@ async def handle_editor_open(
     emit_editor_open = _get_emit_editor_open_from_backend()
     _ = await emit_editor_open(
         open_payload,
-        source_client="explorer_rpc",
+        source_client=context.client_instance_id,
         request_id=request_id,
     )
 

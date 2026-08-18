@@ -11,7 +11,10 @@ JsonObject = dict[str, object]
 
 log = logging.getLogger("extension_navigation_backend")
 
-_pending_open_completions: dict[str, asyncio.Future[JsonObject]] = {}
+_pending_open_completions: dict[
+    str,
+    tuple[str, asyncio.Future[JsonObject]],
+] = {}
 _navigation_tasks: set[asyncio.Task[None]] = set()
 
 
@@ -31,13 +34,19 @@ def _json_object(value: object) -> JsonObject:
     return {str(key): item for key, item in raw.items()}
 
 
-def resolve_extension_open_complete(payload: JsonObject) -> bool:
+def resolve_extension_open_complete(
+    payload: JsonObject,
+    client_instance_id: str,
+) -> bool:
     """Resolve the exact pending WBA open after Monaco publishes openComplete."""
     request_id = str(payload.get("request_id") or payload.get("requestId") or "")
     if not request_id:
         return False
-    future = _pending_open_completions.get(request_id)
-    if future is None or future.done():
+    waiting = _pending_open_completions.get(request_id)
+    if waiting is None:
+        return False
+    expected_client, future = waiting
+    if expected_client != client_instance_id or future.done():
         return False
     future.set_result(dict(payload))
     return True
@@ -62,16 +71,17 @@ async def _notify_wba(params: JsonObject) -> None:
 async def _run_extension_open(event: JsonObject) -> None:
     request_id = str(event.get("requestId") or event.get("request_id") or "")
     path = str(event.get("path") or "")
-    if not request_id or not path:
+    client_instance_id = str(event.get("clientInstanceId") or "")
+    if not request_id or not path or not client_instance_id:
         log.warning("ignored malformed extension open request")
         return
 
     loop = asyncio.get_running_loop()
     completion: asyncio.Future[JsonObject] = loop.create_future()
     previous = _pending_open_completions.pop(request_id, None)
-    if previous is not None and not previous.done():
-        _ = previous.cancel("extension open request was replaced")
-    _pending_open_completions[request_id] = completion
+    if previous is not None and not previous[1].done():
+        _ = previous[1].cancel("extension open request was replaced")
+    _pending_open_completions[request_id] = (client_instance_id, completion)
 
     try:
         from .host.file_ops_backend import handle_host_open_request
@@ -86,7 +96,7 @@ async def _run_extension_open(event: JsonObject) -> None:
                 "source": "extension_navigation",
                 "reason": "extension_navigation",
             },
-            source_name="extension_navigation",
+            source_name=client_instance_id,
             request_prefix="extension_open",
         )
         completed = await asyncio.wait_for(completion, timeout=20.0)
@@ -98,6 +108,7 @@ async def _run_extension_open(event: JsonObject) -> None:
                 "ok": True,
                 "requestId": request_id,
                 "path": path,
+                "clientInstanceId": client_instance_id,
             }
         )
     except Exception as exc:
@@ -108,6 +119,7 @@ async def _run_extension_open(event: JsonObject) -> None:
                     "ok": False,
                     "requestId": request_id,
                     "path": path,
+                    "clientInstanceId": client_instance_id,
                     "error": str(exc),
                 }
             )
@@ -119,7 +131,7 @@ async def _run_extension_open(event: JsonObject) -> None:
             )
     finally:
         current = _pending_open_completions.get(request_id)
-        if current is completion:
+        if current is not None and current[1] is completion:
             _ = _pending_open_completions.pop(request_id, None)
 
 
@@ -134,7 +146,7 @@ def schedule_extension_open(event: JsonObject) -> None:
 
 
 def reset_extension_navigation(reason: str = "extension navigation reset") -> None:
-    for future in list(_pending_open_completions.values()):
+    for _, future in list(_pending_open_completions.values()):
         if not future.done():
             _ = future.cancel(reason)
     _pending_open_completions.clear()

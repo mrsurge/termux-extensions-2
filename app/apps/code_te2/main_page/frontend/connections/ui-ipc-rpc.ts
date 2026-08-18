@@ -11,6 +11,7 @@ import { SOCKET_IO_PATHS, fileEditorSocketQuery } from '../../../src/rpc/socketi
 
 export interface CreateUiIpcRpcConnectionOptions {
   ensureSocketIoLoaded: () => Promise<IoFactory | null | undefined>;
+  query?: JsonObject;
   onConnect?: () => void;
   onDisconnect?: (reason?: string) => void;
   onConnectError?: (error: unknown) => void;
@@ -21,7 +22,7 @@ export function createUiIpcRpcConnection(options: CreateUiIpcRpcConnectionOption
   const client = createSocketIoJsonRpcClient({
     namespace: UI_IPC_RPC_NAMESPACE,
     path: SOCKET_IO_PATHS.uiIpc,
-    query: fileEditorSocketQuery(),
+    query: options.query ?? fileEditorSocketQuery(),
     requestIdPrefix: 'ui_ipc',
     auth: { rpcCodec: RPC_CODEC_MSGPACK_V1 },
     codec: messagePackRpcWireCodec,

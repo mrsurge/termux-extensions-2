@@ -370,15 +370,20 @@ test("webview context actions use the authoritative view id without editor selec
   });
 });
 
-test("projects active Monaco selections through ExtHostEditors", () => {
+test("projects active Monaco selections through the exact client facade", async () => {
   const calls = [];
   const client = Object.create(WorkbenchClient.prototype);
   client.state = { activePath: "/workspace/app.js" };
   client._activeEditorId = "editor-1";
+  client._projectedClientInstanceId = "client_aaaaaaaaaaaa";
+  client._clientContextOwner = null;
+  client._clientContextDepth = 0;
+  client._clientContextWaiters = [];
   client._sendExt = (...args) => calls.push(args);
 
   assert.deepEqual(
-    client.extensionEditorStateUpdate({
+    await client.extensionEditorStateUpdate({
+      clientInstanceId: "client_aaaaaaaaaaaa",
       path: "/workspace/app.js",
       source: "keyboard",
       selection: {
@@ -419,7 +424,8 @@ test("projects active Monaco selections through ExtHostEditors", () => {
   ], false]);
 
   assert.deepEqual(
-    client.extensionEditorStateUpdate({
+    await client.extensionEditorStateUpdate({
+      clientInstanceId: "client_aaaaaaaaaaaa",
       path: "/workspace/other.js",
       source: "not-valid",
       selection: {},

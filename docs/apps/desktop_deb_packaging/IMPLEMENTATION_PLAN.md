@@ -242,14 +242,14 @@ The remaining independent dependency cleanup may finish first, but the full
 approved `main` integration and baseline validation is a hard gate before
 desktop/client/editor source changes.
 
-### 1.5 Current active-file authority is global while document membership is already shared
+### 1.5 Pre-Phase 3 active-file authority was global while membership was shared
 
-The current sidecar stores one project-wide `last_file`, one
-`open_state_revision`, and a shared `recent_files` list. An editor open records
-that file as the shared last file and broadcasts `editor:open` to the global
-`code_te2` room, so one client's open forces every connected editor to converge
-on the same model. Boot restores `serverState.currentPath`/`lastFile`; file tabs
-and Explorer active highlighting also derive their foreground from that shared
+The pre-Phase 3 sidecar contract stored one project-wide `last_file`, one
+`open_state_revision`, and a shared `recent_files` list. An editor open recorded
+that file as the shared last file and broadcast `editor:open` to the global
+`code_te2` room, so one client's open forced every connected editor to converge
+on the same model. Boot restored `serverState.currentPath`/`lastFile`; file tabs
+and Explorer active highlighting also derived their foreground from that shared
 open-state projection.
 
 Several prerequisites for separating foreground state already exist:
@@ -265,9 +265,13 @@ Several prerequisites for separating foreground state already exist:
 - editor open-complete requests already carry request identity and source
   connection metadata.
 
-The remaining lock is therefore not the document/draft set itself. It is the
+The identified lock was therefore not the document/draft set itself. It was the
 single global foreground path, global open notification room, global Explorer
 active-file projection, and WBA's one synthetic active-editor facade.
+
+Phase 3 replaces those foreground paths with bounded stable-client projections
+while retaining shared membership, drafts, writes, and one WBA logical-document
+registry. Legacy `last_file` now exists only as a one-time migration seed.
 
 ## 2. Distribution architecture
 
@@ -624,10 +628,12 @@ button change.
 
 - `clientInstanceId` is the stable installation/profile identity already
   supplied by Browser, Electron, GeckoView, and Cefrium.
-- `windowId` distinguishes simultaneous/reloaded main-page presentations.
-- Live editor routing uses both values. A bounded backend projection keyed by
-  project and stable client identity retains the last client-declared active
-  path for cold reconnect; live window state wins while connected.
+- `windowId` distinguishes simultaneous/reloaded main-page presentations for
+  observability and presentation plumbing only. It is not another foreground
+  authority in this first slice.
+- Live editor routing uses the stable `clientInstanceId`. A bounded backend
+  projection keyed by project and stable client identity retains the last
+  client-declared active path for cold reconnect.
 - The client owns the choice. Backend storage is a reconnect projection, not a
   cross-client active-file authority.
 - On first migration only, a client without a projection may seed from the
@@ -636,8 +642,16 @@ button change.
 - Boot returns shared membership and a separate validated client foreground.
   If that path left membership or the project, the client chooses a
   deterministic shared-member fallback without changing other clients.
-- Records are bounded and stale client/window entries are pruned so arbitrary
-  identities cannot grow durable state indefinitely.
+- Records are bounded by stable client identity so arbitrary identities cannot
+  grow durable state indefinitely.
+
+Browser, Electron, GeckoView, and Cefrium use this same contract through the
+shared Code TE2 frontend. An Electron process may own several windows without
+silently creating several editor authorities: those windows share the one
+Electron client foreground until a later explicit multi-window interface offers
+an action such as `Open in new window as new client`. That future action must
+allocate and persist a distinct client identity deliberately; it must not infer
+independent editor state from `windowId`.
 
 ### 6.3 Client rooms and projections
 
@@ -664,12 +678,21 @@ client-keyed synthetic editor facades for selection, visibility, and command
 context.
 
 Code OSS still exposes one `activeTextEditor` per extension-host window. TE2
-therefore projects the most recently focused or command-originating client as
-that singular active editor immediately before focus/command-sensitive work.
+therefore projects the request- or command-originating client's facade as that
+singular active editor under a reentrant client-context fence immediately before
+focus/command-sensitive work.
 Document-scoped language requests continue to address the exact URI and must
 not depend on that global pointer. Commands, menus, mentions, diffs, and
 extension navigation carry the originating client identity so their result
 returns to the correct presentation.
+
+The direct WBA Socket.IO server authenticates the stable client identity and
+injects it into request parameters. Every normalized `vscode.openFile` request
+must retain that `clientInstanceId` and metadata-only `windowId` through the
+dispatcher into the client-keyed editor facade. Dropping them prevents the WBA
+open acknowledgement and therefore blocks hover and semantic-token requests,
+while shared extension-host diagnostic pushes can misleadingly continue to
+work.
 
 This preserves one extension-host/project runtime while being honest about the
 single-window Code OSS contract. A separate extension host per client is not
@@ -680,9 +703,24 @@ decision.
 
 Draft authority remains path-scoped and shared. Existing mirror/cache
 notifications continue to reach all clients, while only clients currently
-showing that path apply the content to Monaco. Add monotonic path/document
-revision fencing so stale delayed projections cannot overwrite a newer shared
+showing that path apply the content to Monaco. Monotonic path/document revision
+fencing prevents stale delayed projections from overwriting a newer shared
 draft or post-save clean state.
+
+The implemented fence uses one durable project-wide monotonic watermark plus a
+bounded 256-entry path-to-revision map in `ProjectSidecar`. Every authoritative
+draft, clean/save, discard, external-change, and cache-clear transition advances
+that stream once. Evicted paths read the global watermark before their next
+advance, so bounded storage can never revive a lower revision. A correlated
+mirror/cache projection pair carries the same revision.
+
+Frontend revision state is memory-only and bounded to 256 paths. A matched
+runtime requires a non-negative safe-integer revision on content-bearing open,
+mirror, and cache projections; a missing or lower revision is rejected before
+Monaco or host chrome changes. Equal revisions are accepted because paired
+mirror/cache projections describe the same backend transition. Project switch
+clears the frontend fence. This is arrival-order protection, not a browser
+content cache, CRDT, or operational transform.
 
 Save always includes the source client's exact path, model snapshot, base hash,
 and client identity. Backend path/project validation and the existing base-hash

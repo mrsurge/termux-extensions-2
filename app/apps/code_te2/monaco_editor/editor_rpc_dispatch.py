@@ -40,7 +40,7 @@ from .editor_mention_backend import handle_editor_mention_request
 from .editor_open_backend import EditorOpenPayload, emit_editor_open_from_backend
 from .editor_save_backend import handle_editor_mirror, handle_editor_save_request
 from .editor_backend_services.contracts import RuntimeMeta
-from ..open_state_backend import SidecarOpenStatePayload
+from ..open_state_backend import ClientForegroundPayload, SidecarOpenStatePayload
 from .editor_view_state_backend import (
     GetCachedDocumentFn,
     GitHeadTextFn,
@@ -56,10 +56,11 @@ NormalizeAbsPathFn = Callable[[str], str | None]
 IsUnderProjectFn = Callable[[str, str], bool]
 RuntimeMetaFn = Callable[[], RuntimeMeta]
 ReadFilePayloadFn = Callable[[str, str], EditorOpenPayload]
-UpdateSessionStateFn = Callable[[dict[str, object]], None]
-SetLastFileFn = Callable[[str, str], None]
 EmitToRoomFn = Callable[[str, dict[str, object]], Awaitable[None]]
-RecordSidecarOpenFileFn = Callable[..., SidecarOpenStatePayload]
+RecordSidecarOpenFileFn = Callable[
+    ...,
+    tuple[SidecarOpenStatePayload, ClientForegroundPayload],
+]
 EmitOpenStateChangedFn = Callable[..., Awaitable[None]]
 NotifyDraftStateChangedFn = Callable[[str], None]
 RecordSaveShaFn = Callable[[str, str], None]
@@ -86,8 +87,6 @@ async def dispatch_editor_rpc_request(
     read_disk_text: ReadDiskTextFn,
     git_head_text: GitHeadTextFn,
     get_cached_document: GetCachedDocumentFn,
-    update_session_state: UpdateSessionStateFn,
-    set_last_file: SetLastFileFn,
     record_sidecar_open_file: RecordSidecarOpenFileFn,
     emit_open_state_changed: EmitOpenStateChangedFn,
     emit_to_room: EmitToRoomFn,
@@ -113,8 +112,6 @@ async def dispatch_editor_rpc_request(
             normalize_abs_path=normalize_abs_path,
             is_under_project=is_under_project,
             read_file_payload=read_file_payload,
-            update_session_state=update_session_state,
-            set_last_file=set_last_file,
             emit_editor_open=lambda open_payload: emit_to_room("editor:open", dict(open_payload)),
             record_sidecar_open_file=record_sidecar_open_file,
             emit_open_state_changed=emit_open_state_changed,
@@ -204,7 +201,7 @@ async def dispatch_editor_rpc_request(
         record_open_stage(request_id, "backend_open_complete_received")
         from ..extension_navigation_backend import resolve_extension_open_complete
 
-        _ = resolve_extension_open_complete(params)
+        _ = resolve_extension_open_complete(params, source_client)
         await emit_to_room("editor:open_complete", _payload_with_source(params, source_client))
         finish_open_trace(request_id, "backend_open_complete_published")
         return {"ok": True}
@@ -230,7 +227,7 @@ async def dispatch_editor_rpc_request(
         return {"ok": True}
 
     if method == EDITOR_RPC_METHOD_SAVE_SNAPSHOT_RESPONSE:
-        resolve_save_snapshot_response(params)
+        resolve_save_snapshot_response(_payload_with_source(params, source_client))
         return {"ok": True}
 
     if method == EDITOR_RPC_METHOD_ISSUES_DUMP_RESPONSE:

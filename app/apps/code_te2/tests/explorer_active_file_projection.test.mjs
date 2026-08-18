@@ -54,14 +54,20 @@ function createDeps() {
   };
 }
 
-test('Explorer silently reveals each newly active file exactly once', async () => {
+test('Explorer silently reveals each exact-client active file exactly once', async () => {
   const { createExplorerNotificationHandler } = await importNotifications();
   const state = createDeps();
   const handler = createExplorerNotificationHandler(state.deps);
 
   handler.handleExplorerNotification('explorer.openState.changed', {
     projectPath: '/workspace',
-    openFileRel: 'src/a.ts',
+    recents: [{ path: '/workspace/src/a.ts' }],
+  });
+  assert.equal(state.activeFileRel, null);
+  assert.deepEqual(state.reveals, []);
+
+  handler.handleExplorerNotification('explorer.activeFile.updated', {
+    rel: 'src/a.ts',
   });
   assert.equal(state.activeFileRel, 'src/a.ts');
   assert.deepEqual(state.reveals, [

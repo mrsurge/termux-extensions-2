@@ -62,6 +62,7 @@ async def handle_host_draft_discard_request(
     cleared = history.clear_cached_document(project, target)
 
     if cleared:
+        document_revision = history.get_document_revision(project, target)
         editor_runtime_notify_draft_state_changed(project)
         await editor_runtime_emit_room_event(
             "editor:cache_state",
@@ -70,6 +71,7 @@ async def handle_host_draft_discard_request(
                 "state": "clean",
                 "unsaved": False,
                 "reason": "discard_external",
+                "document_revision": document_revision,
             },
         )
 
@@ -91,5 +93,6 @@ async def handle_host_draft_discard_request(
             "cleared": cleared,
             "reloaded": reloaded,
             "request_id": request_id,
+            "document_revision": history.get_document_revision(project, target),
         },
     }

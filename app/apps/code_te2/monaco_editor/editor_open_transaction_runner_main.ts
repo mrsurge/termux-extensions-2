@@ -12,6 +12,7 @@ import {
   settleOpenTransaction,
 } from './editor_open_transaction_state.ts';
 import { awaitOpenCompletion } from './editor_open_transaction_runner.ts';
+import { acceptDocumentProjection } from './editor_document_revision_runtime.ts';
 
 interface RunEditorOpenTransactionDeps {
   getWindow(): { monaco?: unknown };
@@ -53,7 +54,7 @@ interface RunEditorOpenTransactionDeps {
   coercePositiveInt(value: unknown): number | null;
   shouldRecreateOpenModel(monacoRef: unknown, monacoFileUriFn: (monacoRef: unknown, path: string) => EditorUriLike | null, model: OpenModelLike | null, absPath: string): boolean;
   applyOpenModelTextSafely(model: OpenModelLike, editor: OpenEditorLike, content: string, setApplyingRemote: (value: boolean) => void): void;
-  emitOpenCacheState(emitToHostFn: (eventType: string, payload: Record<string, unknown>) => void, absPath: string, hasDraft: boolean, sha256: string | null, baseSha256: string | null, autoSave: boolean | null): void;
+  emitOpenCacheState(emitToHostFn: (eventType: string, payload: Record<string, unknown>) => void, absPath: string, hasDraft: boolean, sha256: string | null, baseSha256: string | null, autoSave: boolean | null, documentRevision: number): void;
   queueBackendWorkbenchOpen(payload: Record<string, unknown>): void;
   requestAgentEditDocumentState(payload: Record<string, unknown>): Promise<unknown>;
   setApplyingRemote(value: boolean): void;
@@ -92,6 +93,15 @@ export async function runEditorOpenTransaction(
   if (!payload || !payload.path) return;
 
   const incomingPath = String(payload.path || '');
+  await deps.ensureEditorWithPrefs();
+  if (!acceptDocumentProjection(incomingPath, payload.document_revision)) {
+    console.warn('[editor:open] rejected stale or unfenced document projection', {
+      path: incomingPath,
+      document_revision: payload.document_revision,
+      request_id: payload.request_id || '',
+    });
+    return;
+  }
   let incomingUri: EditorUriLike | null = null;
   let sameFileNavigationOnly = false;
   try {
@@ -129,7 +139,6 @@ export async function runEditorOpenTransaction(
   try { deps.bcUpdatePath(currentPath, true); } catch (_) {}
 
   try {
-    await deps.ensureEditorWithPrefs();
     const lang = deps.languageFromPath(currentPath);
     let model = deps.getModel();
     const editor = deps.getEditor();
@@ -198,6 +207,7 @@ export async function runEditorOpenTransaction(
       content_sha256: payload.content_sha256,
       base_sha256: payload.base_sha256 || (payload.unsaved ? null : payload.content_sha256),
       auto_save: payload.auto_save,
+      document_revision: payload.document_revision,
     });
     if (payload.has_draft) deps.requestDraftDiff('open');
     else deps.clearDraftDiffDecorations();

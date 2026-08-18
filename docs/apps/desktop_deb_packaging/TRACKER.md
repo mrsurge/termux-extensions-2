@@ -11,7 +11,7 @@ Last updated: 2026-08-18
 | Phase 2A: desktop framework bookmarks | Complete; automated and live retarget acceptance passed | Existing Electron retarget transaction remains the only connection authority |
 | Phase 2B: launcher local framework | Implemented; automated validation and live source-mode acceptance passed | Bootstrap stdio lifecycle control plus Electron-owned process controller; TCP remains the data plane |
 | Phase 2C: remaining frontend polish | Intake placeholder only | Each concrete tweak requires separate named scope and approval |
-| Phase 3: client-scoped foreground document | Architecture drafted; implementation not authorized | Shared membership/drafts/WBA remain authoritative; only client presentation is split |
+| Phase 3: client-scoped foreground document | Source implementation complete and automated checks passing; live client matrix remains | Stable `clientInstanceId` is foreground authority; `windowId` is metadata, and Electron multi-window is deferred |
 | Phase 4: Linux desktop user install | Planned; blocked on client/runtime baseline acceptance and Python delivery decision | User-root installer implementation, local acceptance, and publication are distinct actions |
 | Phase 5: Termux `.deb` | Planned; dependency mapping required first | Device-native package investigation precedes payload implementation |
 
@@ -39,7 +39,7 @@ Last updated: 2026-08-18
 | `sse-starlette` remains transitive | TE2 no longer declares or imports it directly, but FastMCP/MCP still resolves it | Confirmed; ownership cleanup without installed-byte reduction |
 | Remote `main` materially changes the upcoming edit seams | At investigation time this branch was one commit ahead and nine behind `f00ba916`; `3a1e542a` changes boot/open/UI IPC/editor/WBA projection paths and the delta includes Run Profile/native-client fixes | Confirmed; merge gate must precede client/editor implementation |
 | Android bookmarks are separate from the active endpoint | Remote `main` stores up to 16 named native host/port bookmarks; choosing one fills fields and Save performs the actual retarget | Confirmed reference contract for desktop |
-| Global `last_file` still locks connected editors together | Editor open records sidecar `last_file`, broadcasts `editor:open` to `code_te2`, and boot/file tabs/Explorer derive foreground from shared open state | Confirmed target for Phase 3 |
+| Global `last_file` locked connected editors together | Editor opens formerly wrote sidecar `last_file`, broadcast `editor:open` to `code_te2`, and derived every foreground from shared open state | Replaced in the first Phase 3 slice by bounded per-client foreground projections; `last_file` is migration seed only |
 | Shared-document prerequisites already exist | Stable client/window ids, client-local tab order, path-keyed draft mirrors, and WBA retained logical documents already exist | Confirmed reusable seams |
 | One WBA extension host has one Code OSS active editor pointer | WBA retains shared documents but currently exposes one synthetic active-editor facade | Confirmed constraint; client facades must converge focus/command context honestly |
 | npm has one runtime owner | Code TE2, WBA, and shared browser artifacts are already bundled/vendored, while the Electron distribution is built before packaging | Declare npm as a package requirement solely for the standalone Terminal's private first-use bootstrap; elsewhere it is development tooling |
@@ -96,8 +96,8 @@ Last updated: 2026-08-18
   desktop/client/editor source changes or distribution construction.
 - [x] Keep one shared project, shared document membership, shared drafts/writes,
   and one WBA logical document registry.
-- [x] Split only foreground editor presentation by stable client plus live
-  window identity in the first Phase 3 slice.
+- [x] Split foreground editor presentation only by stable client in the first
+  Phase 3 slice; retain live window identity as metadata rather than authority.
 - [x] Treat backend client-active persistence as a bounded reconnect projection,
   not a new cross-client active-file authority.
 - [x] Preserve one extension host initially; project the most recently focused
@@ -278,33 +278,58 @@ Last updated: 2026-08-18
 
 ## Phase 3 checklist — client-scoped foreground document
 
-- [ ] Define shared document membership independently from legacy global
+- [x] Define shared document membership independently from legacy global
   `last_file` foreground state.
-- [ ] Add a bounded project/client active-file reconnect projection with a
+- [x] Add a bounded project/client active-file reconnect projection with a
   one-time legacy `last_file` seed.
-- [ ] Carry `clientInstanceId` and `windowId` through Editor, Explorer, and
-  relevant UI IPC connection registration.
-- [ ] Add exact presentation rooms and route materialized editor opens only to
+- [x] Carry stable `clientInstanceId` plus metadata-only `windowId` through
+  Editor, Explorer, WBA, and relevant UI IPC connection registration.
+- [x] Add exact client rooms and route materialized editor opens only to
   the source room.
-- [ ] Keep document membership, drafts, decorations, diagnostics, Git, and save
+- [x] Keep document membership, drafts, decorations, diagnostics, Git, and save
   facts shared.
-- [ ] Split boot snapshot payloads into shared membership and client foreground.
-- [ ] Derive file-tab active styling/reveal from client state while retaining
+- [x] Split boot snapshot payloads into shared membership and client foreground.
+- [x] Derive file-tab active styling/reveal from client state while retaining
   shared membership and client-local order.
-- [ ] Route Explorer active highlighting, toolbar active-file actions, Run,
+- [x] Route Explorer active highlighting, toolbar active-file actions, Run,
   jump/focus, open completion, and extension navigation to the source client.
-- [ ] Replace WBA's one browser-editor facade with client-keyed facades while
+- [x] Replace WBA's one browser-editor facade with client-keyed facades while
   retaining one shared logical document registry and one extension host.
-- [ ] Project the focusing/command-originating facade into Code OSS's singular
+- [x] Project the request/command-originating facade into Code OSS's singular
   active editor before focus-sensitive extension work.
-- [ ] Add monotonic draft/document revision fencing without claiming CRDT/OT
+- [x] Add monotonic draft/document revision fencing without claiming CRDT/OT
   same-file collaboration.
-- [ ] Keep save path/model/base-hash/client identity explicit and validated.
-- [ ] Prove two clients can work on different files without foreground theft.
-- [ ] Prove shared open, draft, save, close, and project-switch projections
+- [x] Keep save path/model/base-hash/client identity explicit and validated.
+- [x] Prove with deterministic backend tests that simultaneous clients can open
+  different files without losing membership or stealing foreground.
+- [x] Prove shared open, draft, save, close, and project-switch projections
   remain deterministic.
-- [ ] Prove reconnect/full restart restores only that client's foreground.
+- [x] Prove reconnect/full restart restores only that client's foreground.
 - [ ] Run the same live matrix in Browser, Electron, GeckoView, and Cefrium.
+
+### Phase 3 automated evidence
+
+- Python identity, open-state, logical-document, and extension-navigation tests
+  pass, including simultaneous two-client opens and one-time legacy seeding.
+- WBA Socket.IO rejects missing/malformed identity, accepts the canonical
+  snake-case query, and routes extension navigation through the exact client.
+- WBA open-dispatch regression coverage proves the socket-authenticated
+  `clientInstanceId` and metadata-only `windowId` survive `vscode.openFile`
+  normalization into the client-keyed facade. Live Gecko validation confirmed
+  BasedPyright hover content and advancing semantic-token result IDs after the
+  repaired acknowledgement while shared diagnostics remained available.
+- Code TE2 Socket.IO transport/open-flow/editor-state tests pass with canonical
+  identity injection and no disconnected foreground replay.
+- Electron multi-window remains an explicit later interface. Existing Electron
+  windows share one stable client foreground; `windowId` is not promoted into
+  state authority.
+- Durable revision tests cover draft-to-draft-to-clean ordering, bounded-map
+  eviction, paired mirror/cache revisions, stale frontend rejection, and stable
+  client self-mirror suppression.
+- Full restart and project-switch tests restore independent foreground paths for
+  the same stable clients without reviving global `last_file` authority.
+- The complete Code TE2 suites pass: 234 Python tests and 217 Node tests, plus
+  TypeScript typecheck, bundle regeneration, and Python bytecode compilation.
 
 ## Phase 4 checklist — Linux desktop user install
 

@@ -144,13 +144,19 @@ async def save_reviews(
             emit_diff_changed(str(rel_path), _meta_sha256(file_meta))
             invalidate_diff_cache(root_path, str(rel_path))
             
-            _ = _history_store.clear_cached_document(str(project_root), str(abs_path))
+            cleared = _history_store.clear_cached_document(str(project_root), str(abs_path))
+            document_revision = (
+                _history_store.get_document_revision(str(project_root), str(abs_path))
+                if cleared
+                else _history_store.advance_document_revision(str(project_root), str(abs_path))
+            )
             saved_count += 1
             publish_file_saved(
                 project_root=root_path,
                 path=abs_path,
                 source=op_prefix,
                 sha256=_meta_sha256(file_meta),
+                document_revision=document_revision,
             )
             
         except Exception as e:

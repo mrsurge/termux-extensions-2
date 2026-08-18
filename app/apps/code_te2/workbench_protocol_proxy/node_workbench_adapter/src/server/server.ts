@@ -6,7 +6,10 @@ import fs from "node:fs/promises";
 import process from "node:process";
 import { Buffer } from "node:buffer";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { EditorWbaSocketServer } from "./editor-socket.mjs";
+import type {
+  EditorWbaRequestContext,
+  EditorWbaSocketServer,
+} from "./editor-socket.mjs";
 import type { EventBridgeRuntime } from "./event-bridge";
 import type {
   AdapterServerState as DispatchServerState,
@@ -576,7 +579,10 @@ if (HEAP_SNAPSHOT_ENABLE) {
   } catch {}
 }
 
-async function handleJsonRpc(reqObj: unknown): Promise<JsonRpcReply> {
+async function handleJsonRpc(
+  reqObj: unknown,
+  context?: EditorWbaRequestContext,
+): Promise<JsonRpcReply> {
   // We accept either JSON-RPC 2.0, or a simple {cmd,args} convenience envelope.
   const envelope = asJsonRpcEnvelope(reqObj);
   let id = envelope.id ?? null;
@@ -587,6 +593,14 @@ async function handleJsonRpc(reqObj: unknown): Promise<JsonRpcReply> {
     method = envelope.cmd;
     params = envelope.args ?? null;
     id = envelope.id ?? 1;
+  }
+
+  if (context) {
+    params = {
+      ...(isRecord(params) ? params : {}),
+      clientInstanceId: context.clientInstanceId,
+      ...(context.windowId ? { windowId: context.windowId } : {}),
+    };
   }
 
   if (typeof method !== "string") {

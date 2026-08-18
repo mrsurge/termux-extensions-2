@@ -214,7 +214,8 @@ Spinner / Status indicator (host UI):
 
 - Explorer, editor/Python, direct editor/WBA, and UI IPC use strict `msgpack-v1` application payloads on their Socket.IO namespaces. Browser encoding is owned by `src/rpc/codec.ts`; Python encoding/decoding is owned by `frontend_rpc_codec.py`; WBA runtime encoding is owned by `workbench_protocol_proxy/node_workbench_adapter/src/protocol/messagepack-codec.ts`.
 - Sidebar IPC retains its current codec. Migrating `/ui_ipc` must not implicitly change the sibling `/sidebar_ipc` namespace.
-- Active-file authority is `ProjectSidecar.last_file`, coordinated through `open_state_backend.py` and editor open services. Frontend path variables are projections.
+- Shared document membership is the bounded `ProjectSidecar` recent/logical-document set. Each stable `clientInstanceId` owns one backend-projected foreground path through `open_state_backend.py`; `ProjectSidecar.last_file` is only a one-time migration seed. Frontend `currentPath` values are exact-client projections.
+- Shared content projections carry a durable per-path `document_revision` drawn from one monotonic project stream. Matched frontends reject missing or lower revisions before changing Monaco or active-path chrome; equal revisions are valid for the correlated mirror/cache pair emitted by one backend transition.
 - App-lane outbound traffic uses websocket-only `volatile.emit` with connected-state guards. Disconnected RPC requests fail, notifications and terminal input drop, and connect handlers rebuild authoritative state.
 - Code Server launch, VSIX/Open VSX commands, builtin-extension discovery, and WBA nid extraction all use the same pinned TE2-managed installation. System, `PATH`, NVM, and executable environment overrides are not runtime authorities.
 - Every WBA protocol actor, including language intelligence, commands, messages, and webviews, receives its resolved nid through named runtime-adapter fields. The generated config for the pinned managed Code Server runtime is production authority; `RPC_DEFAULTS` is only the matching 4.130 no-config fallback.
@@ -438,8 +439,23 @@ Important current note:
 SSOT tracks a single “active project root”. The worker derives most behavior from:
 - `_history_store.get_active_project()`
 
-### Active file (single-doc model)
-Active-file authority is backend-owned through `ProjectSidecar.last_file`, `open_state_backend.py`, and editor open services. Frontend `currentPath` values are projections, not cross-client authority.
+### Active file (one foreground per stable client)
+
+The active path is backend-projected per stable `clientInstanceId` through
+`open_state_backend.py` and bounded `ProjectSidecar.client_foregrounds` state.
+Shared recents remain the admitted/open document membership. Browser, Electron,
+GeckoView, and Cefrium use the same frontend identity contract; `windowId` is
+presentation/console metadata rather than another foreground authority.
+`ProjectSidecar.last_file` is consumed only as a one-time migration seed.
+Frontend `currentPath` values project their exact client's foreground and never
+act as cross-client authority.
+
+Complete boot snapshots share only their disk-heavy cross-client core. Before
+returning, Python materializes and overlays the requesting client's exact
+foreground editor SSOT, including the file payload. Shared open-state
+notifications remain document-membership facts and never clear or dispose a
+client's Monaco model; exact-client SSOT and file-open notifications exclusively
+own visible model lifetime.
 
 ### Drafts (project sidecar / session_cache)
 Drafts are stored in project sidecar "session_cache" entries:
@@ -449,6 +465,7 @@ Drafts are stored in project sidecar "session_cache" entries:
   - `base_sha256` (disk baseline hash when draft started)
   - `content_sha256` (draft content hash)
   - `unsaved` (True/False, computed as `content_sha256 != base_sha256`)
+  - `document_revision` (durable monotonic ordering fence for that path)
   - runtime identifiers (run_id, etc.)
 
 The editor Socket.IO server (`editor_ws.py`) is the worker-side entry point for persisting drafts from the inline editor runtime.
@@ -456,7 +473,9 @@ The editor Socket.IO server (`editor_ws.py`) is the worker-side entry point for 
 Draft mutations trigger the following pipeline:
 1. `on_editor_mirror` persists to `ProjectSidecar.session_cache` via `upsert_cached_document`
 2. `DraftIndexSidecar` is updated with the file's unsaved status (fast O(1) hasDraft)
-3. `editor:cache_state` is emitted to all editor clients (updates toolbar badge)
+3. `editor:mirror` and `editor:cache_state` carry the same newly assigned
+   document revision; clients showing another path ignore them, and clients on
+   the same path reject an older revision before changing content or chrome
 4. `notify_draft_state_changed()` broadcasts `explorer:updateDecorations` + `review:setEntries` to explorer clients
 
 The active-file draft badge is a destructive affordance. Its click path must
@@ -600,9 +619,10 @@ Representative notifications:
 | `editor.agentEdits.changed` | Agent edit state update. |
 
 ### Open/draft/save flow
-- Open requests update backend active-file authority (`ProjectSidecar.last_file`) and send authoritative file-open notifications.
+- Open requests atomically admit the path into shared document membership, update only the source `clientInstanceId` foreground, and send the materialized file-open notification to that exact client room.
 - Mirror updates persist draft state into `ProjectSidecar.session_cache` and refresh draft/decorations state.
 - Save requests write through backend guards, clear draft cache entries, invalidate dependent state, and notify Explorer/editor consumers.
+- Open, mirror, cache, save/clean, discard, and external-change projections are fenced by `document_revision`. The backend owns revision assignment; frontend state is bounded and memory-only. This prevents delayed arrival from overwriting newer state but does not provide CRDT/OT same-file collaboration.
 
 ### Diagnostics and language features
 Primary editor diagnostics, hovers, completions, symbols, semantic tokens, folding, inlay hints, and similar language-intelligence calls use the direct `/wba` path. The `/rpc/editor` lane carries state/control and typed editor notifications.
@@ -853,7 +873,7 @@ theme registration is skipped (by design) to avoid caching a no-op run.
   - `activeProject`, `preferences`, `lastFile`, etc.
 
 ### 4) Open path convergence
-- `editor.open` / `editor.jumpToLine` should update backend active-file authority and result in typed `/rpc/editor` file-open notifications.
+- `editor.open` / `editor.jumpToLine` should update only the originating stable-client foreground, retain shared membership, and result in typed `/rpc/editor` file-open notifications in that client's exact room.
 
 ### 5) Draft persistence and live indicators
 - `editor.mirror.publish` should produce a cached draft entry (project sidecar).
@@ -3735,14 +3755,18 @@ Validation owner docs live in `desktop_client/desktop_client.md` and `desktop_cl
 
 Code TE2 now separates visible editor open from semantic working-set hydration. The browser still renders one active Monaco model, but WBA retains a bounded extension-host document set for active and background files so language servers can see more than the currently visible file.
 
-Host file-open intent does not preflight a boot snapshot. The frontend may use its last projected project root only to form a tentative path, then sends the request directly to Python; the backend's canonical returned path drives visible-open acknowledgement and editor connection. A failed host-state refresh preserves the last valid frontend projection. Lightweight `scope: hostState` refreshes are single-flight in the frontend, while complete backend boot snapshots are single-flight across concurrent clients and move their disk-heavy synchronous assembly off the asyncio event loop. Initial UI IPC connection does not trigger a duplicate resync; only a genuine reconnect requests fresh host state.
+Host file-open intent does not preflight a boot snapshot. The frontend may use its last projected project root only to form a tentative path, then sends the request directly to Python; the backend's canonical returned path drives visible-open acknowledgement and editor connection for the originating client. A failed host-state refresh preserves the last valid frontend projection. Lightweight `scope: hostState` refreshes are single-flight in the frontend, while complete backend boot snapshots share only their disk-heavy core assembly across concurrent clients and materialize each requesting client's exact editor SSOT off-loop before returning. Initial UI IPC connection does not trigger a duplicate resync; only a genuine reconnect requests fresh host state.
 
 ### Authority split
 
-- `ProjectSidecar.last_file` and `open_state_backend.py` remain the active-file authority.
-- `ProjectSidecar` recents provide the bounded background open set.
+- `ProjectSidecar` recents provide the shared bounded admitted/open set.
+- `open_state_backend.py` and bounded `ProjectSidecar.client_foregrounds` provide one reconnectable foreground per stable `clientInstanceId`; legacy `last_file` is migration seed only.
+- Shared open-state projections carry membership only and never dispose or clear a client's Monaco model. Exact-client SSOT and file-open notifications own visible model creation and replacement.
+- `ProjectSidecar.document_state_revision` plus its bounded 256-entry `document_revisions` map order path-scoped content state. Evicted paths fall back to the global watermark, so pruning cannot lower their next revision.
 - Python owns sidecar-to-WBA projection in `logical_document_reconciler.py`.
 - WBA owns extension-host document lifetime in `workbench_protocol_proxy/node_workbench_adapter/src/workspace/document-registry.ts`.
+- WBA retains one shared logical document registry and extension host while projecting one synthetic editor facade per stable client under a reentrant request/command context fence. `windowId` remains metadata; a future Electron multi-window interface must allocate an explicit second client instead of inferring authority from a window.
+- The direct WBA Socket.IO boundary authenticates and injects `clientInstanceId` plus metadata-only `windowId`. Request normalization must preserve both through `vscode.openFile` into `WorkbenchClient.openFile`; otherwise the client facade cannot acknowledge the active document, leaving hover and semantic-token requests blocked even though shared extension-host diagnostic pushes can still arrive.
 - Draft-aware materialization is centralized in `monaco_editor/editor_backend_services/document_materialization_service.py`.
 
 ### Metadata-first reconcile

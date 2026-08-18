@@ -17,6 +17,7 @@ class HistoryStoreLike(Protocol):
     def get_cached_document(self, project_path: str, file_path: str) -> dict[str, object] | None: ...
     def clear_cached_document(self, project_path: str, file_path: str) -> bool: ...
     def get_active_project(self) -> str | None: ...
+    def get_document_revision(self, project_path: str, file_path: str) -> int: ...
 
 
 class PreferencesStoreLike(Protocol):
@@ -84,6 +85,7 @@ def build_cache_state_payload(
         "run_id": (cache_entry or {}).get("run_id"),
         "shell_id": (cache_entry or {}).get("shell_id"),
         "shell_run_id": (cache_entry or {}).get("shell_run_id"),
+        "document_revision": (cache_entry or {}).get("document_revision"),
     }
     return {key: value for key, value in payload.items() if value is not None}
 

@@ -155,29 +155,15 @@ export function createHostStateRuntime(deps: HostStateRuntimeDeps): HostStateRun
   function handleActiveFileChanged(detail: unknown): void {
     try {
       const payload = isRecord(detail) ? detail : {};
-      const openState = isRecord(payload.openState) ? payload.openState : null;
-      if (openState) {
-        handleOpenStateChanged(openState);
-        return;
-      }
-      const filePath = typeof payload.path === 'string' ? payload.path : '';
+      const foreground = isRecord(payload.clientForeground)
+        ? payload.clientForeground
+        : payload;
+      const filePath = typeof foreground.path === 'string' ? foreground.path : '';
       if (!filePath) {
         deps.clearActiveFilePath();
         return;
       }
       deps.applyActiveFilePath(filePath);
-    } catch {}
-  }
-
-  function handleOpenStateChanged(detail: unknown): void {
-    try {
-      const payload = isRecord(detail) ? detail : {};
-      const openFile = typeof payload.openFile === 'string' ? payload.openFile : '';
-      if (!openFile) {
-        deps.clearActiveFilePath();
-        return;
-      }
-      deps.applyActiveFilePath(openFile);
     } catch {}
   }
 
@@ -242,11 +228,6 @@ export function createHostStateRuntime(deps: HostStateRuntimeDeps): HostStateRun
     window.addEventListener('code-te2:active-file-changed', (evt) => {
       try {
         handleActiveFileChanged(evt instanceof CustomEvent ? evt.detail : undefined);
-      } catch {}
-    });
-    window.addEventListener('code-te2:open-state-changed', (evt) => {
-      try {
-        handleOpenStateChanged(evt instanceof CustomEvent ? evt.detail : undefined);
       } catch {}
     });
     window.addEventListener('code-te2:project-switching', (evt) => {

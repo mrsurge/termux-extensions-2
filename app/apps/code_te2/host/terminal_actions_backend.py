@@ -159,6 +159,16 @@ async def handle_host_run_active_file_request(
     project_root = _active_project()
     if project_root is None:
         return {"ok": False, "error": "No active project selected"}
+    if not _text(payload.get("path")):
+        from ..open_state_backend import read_client_foreground
+
+        foreground = await asyncio.to_thread(
+            read_client_foreground,
+            str(project_root),
+            source_name,
+            reason="run_request",
+        )
+        payload["path"] = foreground["path"] or ""
     lock = _run_locks.setdefault(str(project_root), asyncio.Lock())
     async with lock:
         return await _handle_host_run_active_file_request(
@@ -195,6 +205,7 @@ async def _handle_host_run_active_file_request(
     if enforce_current_context and not _run_context_is_current(
         project_root=project_root,
         active_file=active_file,
+        client_instance_id=source_name,
     ):
         return {
             "ok": False,
@@ -254,6 +265,7 @@ async def _handle_host_run_active_file_request(
     if enforce_current_context and not _run_context_is_current(
         project_root=project_root,
         active_file=active_file,
+        client_instance_id=source_name,
     ):
         return {
             "ok": False,
@@ -296,8 +308,6 @@ def _active_project() -> Path | None:
 def _active_file(payload: JsonMap, project_root: Path) -> Path | None:
     value = payload.get("path")
     if not isinstance(value, str) or not value.strip():
-        value = get_history_store().get_last_file(str(project_root))
-    if not isinstance(value, str) or not value.strip():
         return None
     path = Path(value).expanduser()
     if not path.is_absolute():
@@ -310,11 +320,22 @@ def _active_file(payload: JsonMap, project_root: Path) -> Path | None:
     return resolved
 
 
-def _run_context_is_current(*, project_root: Path, active_file: Path) -> bool:
+def _run_context_is_current(
+    *,
+    project_root: Path,
+    active_file: Path,
+    client_instance_id: str,
+) -> bool:
     current_project = _active_project()
     if current_project != project_root:
         return False
-    current_file = get_history_store().get_last_file(str(project_root))
+    from ..open_state_backend import read_client_foreground
+
+    current_file = read_client_foreground(
+        str(project_root),
+        client_instance_id,
+        reason="run_context_validation",
+    )["path"]
     if not isinstance(current_file, str) or not current_file.strip():
         return False
     return Path(current_file).expanduser().resolve(strict=False) == active_file

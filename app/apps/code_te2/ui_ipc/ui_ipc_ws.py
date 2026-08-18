@@ -24,6 +24,10 @@ from urllib.parse import parse_qs
 import socketio
 from socketio.exceptions import ConnectionRefusedError
 
+from ..client_presentation import (
+    client_presentation_identity_from_environ,
+    client_presentation_room,
+)
 from ..frontend_rpc_codec import (
     FrontendRpcCodecError,
     decode_frontend_rpc_message,
@@ -46,11 +50,17 @@ from .rpc_contract import (
 from .rpc_dispatch import dispatch_ui_ipc_rpc_request
 from .sidebar_rpc_contract import SIDEBAR_IPC_RPC_NAMESPACE
 from ..host.run_target_service import set_run_target_routes_emitter
+from ..socketio_runtime import emit_code_te2_socketio
 from ..file_tabs_projection import (
     set_file_tabs_projection_emitter,
 )
 
 JsonObject = dict[str, object]
+_BROWSER_CLIENT_BY_SID: dict[str, str] = {}
+
+
+def list_ui_ipc_browser_clients() -> tuple[str, ...]:
+    return tuple(sorted(set(_BROWSER_CLIENT_BY_SID.values())))
 
 
 class SocketIOServer(Protocol):
@@ -136,24 +146,27 @@ async def emit_ui_ipc_rpc_notification(
     skip_sid: str | None = None,
     to_sid: str | None = None,
     room: str = "ui_ipc",
+    client_instance_id: str | None = None,
 ) -> None:
-    from .ui_ipc_socketio import UI_IPC_SIO
-
     envelope = _encode_ui_ipc_notification(method, params)
-    sio = cast(SocketIOServer, UI_IPC_SIO)
+    target_room = (
+        client_presentation_room(client_instance_id)
+        if client_instance_id is not None
+        else room
+    )
     if to_sid:
-        await sio.emit(
+        await emit_code_te2_socketio(
             UI_IPC_RPC_NOTIFICATION_EVENT,
             envelope,
             namespace="/ui_ipc",
             to=to_sid,
         )
     else:
-        await sio.emit(
+        await emit_code_te2_socketio(
             UI_IPC_RPC_NOTIFICATION_EVENT,
             envelope,
             namespace="/ui_ipc",
-            room=room,
+            room=target_room,
             skip_sid=skip_sid,
         )
 
@@ -213,6 +226,26 @@ class UIIPCNamespace(socketio.AsyncNamespace):
             except FrontendRpcCodecError as exc:
                 raise ConnectionRefusedError(str(exc)) from exc
         await ns.enter_room(sid_text, room)
+        browser_identity = None
+        if room == "ui_ipc" and not native_source:
+            try:
+                browser_identity = client_presentation_identity_from_environ(environ)
+            except ValueError as exc:
+                raise ConnectionRefusedError(str(exc)) from exc
+            assert browser_identity is not None
+            _BROWSER_CLIENT_BY_SID[sid_text] = browser_identity["clientInstanceId"]
+            await ns.enter_room(
+                sid_text,
+                client_presentation_room(browser_identity["clientInstanceId"]),
+            )
+            await ns.save_session(
+                sid_text,
+                {
+                    "source": "browser",
+                    "clientId": browser_identity["clientInstanceId"],
+                    "windowId": browser_identity["windowId"],
+                },
+            )
         if room == "ui_ipc" and native_source:
             await ns.enter_room(sid_text, "ui_ipc_native")
             await ns.save_session(
@@ -257,6 +290,7 @@ class UIIPCNamespace(socketio.AsyncNamespace):
 
     async def on_disconnect(self, sid: object, reason: object | None = None) -> None:
         sid_text = _sid(sid)
+        _BROWSER_CLIENT_BY_SID.pop(sid_text, None)
         ns = _namespace(self)
         room = "sidebar_ipc" if ns.namespace == "/sidebar_ipc" else "ui_ipc"
         print(f"[{room}] disconnect sid={sid_text} reason={reason}", flush=True)
@@ -310,10 +344,17 @@ class UIIPCNamespace(socketio.AsyncNamespace):
                 )
                 return None
 
+            raw_session = await ns.get_session(sid_text)
+            session = _json_object(raw_session)
+            client_instance_id = str(session.get("clientId") or "").strip()
+            params = dict(parsed_request["params"])
+            if session.get("source") == "browser":
+                params["clientInstanceId"] = client_instance_id
+                params["windowId"] = session.get("windowId")
             result = await dispatch_ui_ipc_rpc_request(
                 parsed_request["method"],
-                parsed_request["params"],
-                source_name="ui_ipc_rpc",
+                params,
+                source_name=client_instance_id or "ui_ipc_rpc",
             )
             return _encode_ui_ipc_envelope(
                 build_jsonrpc_result(parsed_request["request_id"], result),

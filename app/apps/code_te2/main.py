@@ -711,6 +711,10 @@ async def delete_session_cache(
                     "state": "clean",
                     "unsaved": False,
                     "reason": "discard_external",
+                    "document_revision": _history_store.get_document_revision(
+                        expanded_project,
+                        expanded_path,
+                    ),
                 },
             )
             await editor_runtime_reload_disk_content_if_active(
@@ -1147,6 +1151,10 @@ async def review_discard(data: JsonDict = Body(...)) -> JsonDict:
                         "state": "clean",
                         "unsaved": False,
                         "reason": "discard_external",
+                        "document_revision": _history_store.get_document_revision(
+                            project_root,
+                            str(abs_path),
+                        ),
                     },
                 )
                 await editor_runtime_reload_disk_content_if_active(

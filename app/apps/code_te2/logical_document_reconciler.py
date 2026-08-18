@@ -124,14 +124,7 @@ def build_logical_document_snapshot(
 ) -> LogicalDocumentSnapshot:
     """Build one metadata-only WBA snapshot from the authoritative sidecar state."""
     project_path = _normalize_path(open_state["projectPath"])
-    raw_active_path = open_state.get("openFile")
-    active_path = (
-        _normalize_path(raw_active_path)
-        if isinstance(raw_active_path, str)
-        and raw_active_path
-        and _is_within_project(_normalize_path(raw_active_path), project_path)
-        else None
-    )
+    active_path: str | None = None
     sidecar = ProjectSidecar(project_path)
     descriptors: list[LogicalDocumentDescriptor] = []
     seen: set[str] = set()
@@ -142,8 +135,7 @@ def build_logical_document_snapshot(
             continue
         path = _normalize_path(raw_path)
         if (
-            path == active_path
-            or path in seen
+            path in seen
             or not _is_within_project(path, project_path)
         ):
             continue
@@ -395,7 +387,12 @@ class LogicalDocumentReconciler:
             or not path
             or not self._event_is_current(event, project)
             or _normalize_path(project) != open_state["projectPath"]
-            or _normalize_path(path) != open_state.get("openFile")
+            or _normalize_path(path)
+            not in {
+                _normalize_path(item["path"])
+                for item in open_state.get("recents", [])
+                if item.get("path")
+            }
         ):
             return
         self._latest_generation = self._effective_generation(event, project)

@@ -16,10 +16,11 @@ from .code_inspector_projection import (
     get_code_inspector_projection,
 )
 from .code_server_runtime_hooks import prime_code_server_runtime
+from .client_presentation import normalize_client_instance_id
 from .explorer.contracts.watcher import WatcherConfigPayload, build_watcher_config_payload
 from .explorer.transport.connection_manager import abs_to_rel
 from .monaco_editor.editor_backend_services.contracts import JsonMap
-from .open_state_backend import read_sidecar_open_state
+from .open_state_backend import read_client_foreground, read_sidecar_open_state
 from .run_profile_state import build_run_profile_state_projection
 from .project_sidecar import ProjectSidecar
 from .history_store import HistoryStore
@@ -28,7 +29,7 @@ from .stores import get_history_store, get_preferences_store
 log = logging.getLogger(__name__)
 _boot_prepare_tasks: dict[str, asyncio.Task[None]] = {}
 _boot_snapshot_task: asyncio.Task[JsonMap] | None = None
-EditorSnapshotBuilder = Callable[[], JsonMap]
+EditorSnapshotBuilder = Callable[..., JsonMap]
 WatcherAvailabilityFn = Callable[[], bool]
 _editor_snapshot_builder: EditorSnapshotBuilder | None = None
 _watcher_availability: WatcherAvailabilityFn | None = None
@@ -238,7 +239,7 @@ def _build_boot_snapshot_core() -> BootSnapshotCore:
         "active_project": active_project,
         "host_state": _build_host_state_payload(),
         "session_state": session_state,
-        "editor_ssot": editor_snapshot_builder(),
+        "editor_ssot": editor_snapshot_builder(client_instance_id=None),
         "ui_prefs": ui_prefs,
         "explorer_bootstrap": _build_explorer_bootstrap_payload(
             project_root=active_project,
@@ -285,16 +286,120 @@ async def _build_full_boot_snapshot() -> JsonMap:
     }
 
 
+def _client_identity(
+    data: dict[str, object] | None,
+    *,
+    source_name: str,
+) -> str:
+    client_instance_id = normalize_client_instance_id(
+        (data or {}).get("clientInstanceId")
+    )
+    if client_instance_id is None:
+        client_instance_id = normalize_client_instance_id(source_name)
+    if client_instance_id is None:
+        raise ValueError("client_identity_required")
+    return client_instance_id
+
+
+def _overlay_client_foreground(
+    response: JsonMap,
+    *,
+    client_instance_id: str,
+) -> JsonMap:
+    raw_snapshot = response.get("snapshot")
+    if not isinstance(raw_snapshot, dict):
+        return dict(response)
+    snapshot = dict(cast(dict[str, object], raw_snapshot))
+    raw_host_state = snapshot.get("host_state")
+    host_state = (
+        dict(cast(dict[str, object], raw_host_state))
+        if isinstance(raw_host_state, dict)
+        else {}
+    )
+    project = host_state.get("activeProject")
+    foreground: JsonMap | None = None
+    raw_editor_ssot = snapshot.get("editor_ssot")
+    editor_ssot: JsonMap | None = None
+    if isinstance(raw_editor_ssot, dict):
+        editor_snapshot_builder = _editor_snapshot_builder
+        if editor_snapshot_builder is None:
+            raise RuntimeError("boot snapshot editor state builder is not configured")
+        client_editor_ssot = editor_snapshot_builder(
+            client_instance_id=client_instance_id
+        )
+        editor_ssot = dict(cast(dict[str, object], raw_editor_ssot))
+        editor_ssot.update(client_editor_ssot)
+        raw_foreground = editor_ssot.get("clientForeground")
+        if isinstance(raw_foreground, dict):
+            foreground = dict(cast(dict[str, object], raw_foreground))
+    elif isinstance(project, str) and project:
+        foreground = dict(
+            read_client_foreground(
+                project,
+                client_instance_id,
+                reason="boot_reconnect",
+            )
+        )
+    path = (
+        foreground.get("path")
+        if foreground is not None
+        else editor_ssot.get("currentPath")
+        if editor_ssot is not None
+        else None
+    )
+    active_path = path if isinstance(path, str) and path else None
+    host_state.update(
+        {
+            "clientForeground": foreground,
+            "currentPath": active_path,
+            "lastFile": active_path,
+            "lastFileLabel": HistoryStore.format_label(active_path),
+            "lastFileExists": bool(active_path and Path(active_path).is_file()),
+            "lastFileMessage": "",
+        }
+    )
+    snapshot["host_state"] = host_state
+
+    if editor_ssot is not None:
+        editor_ssot.update(
+            {
+                "clientInstanceId": client_instance_id,
+                "clientForeground": foreground,
+                "currentPath": active_path,
+            }
+        )
+        snapshot["editor_ssot"] = editor_ssot
+
+    raw_explorer = snapshot.get("explorer_bootstrap")
+    if isinstance(raw_explorer, dict):
+        explorer = dict(cast(dict[str, object], raw_explorer))
+        rel = foreground.get("rel") if foreground is not None else None
+        explorer["active_file"] = (
+            {"rel": rel, "abs": active_path}
+            if active_path and isinstance(rel, str) and rel
+            else None
+        )
+        snapshot["explorer_bootstrap"] = explorer
+
+    result = dict(response)
+    result["snapshot"] = snapshot
+    return result
+
+
 async def handle_boot_snapshot_request(
     _data: dict[str, object] | None = None,
     *,
     source_name: str,
 ) -> JsonMap:
-    del source_name
+    client_instance_id = _client_identity(_data, source_name=source_name)
     scope = str((_data or {}).get("scope") or "").strip()
     if scope == "hostState":
         host_state = await asyncio.to_thread(_build_host_state_payload)
-        return {"ok": True, "snapshot": {"host_state": host_state}}
+        return await asyncio.to_thread(
+            _overlay_client_foreground,
+            {"ok": True, "snapshot": {"host_state": host_state}},
+            client_instance_id=client_instance_id,
+        )
 
     global _boot_snapshot_task
     task = _boot_snapshot_task
@@ -305,7 +410,25 @@ async def handle_boot_snapshot_request(
         )
         _boot_snapshot_task = task
     try:
-        return await asyncio.shield(task)
+        shared_snapshot = await asyncio.shield(task)
+        client_snapshot = await asyncio.to_thread(
+            _overlay_client_foreground,
+            shared_snapshot,
+            client_instance_id=client_instance_id,
+        )
+        raw_snapshot = client_snapshot.get("snapshot")
+        if isinstance(raw_snapshot, dict):
+            snapshot = cast(dict[str, object], raw_snapshot)
+            raw_host = snapshot.get("host_state")
+            path = (
+                cast(dict[str, object], raw_host).get("currentPath")
+                if isinstance(raw_host, dict)
+                else None
+            )
+            snapshot["run_profile_state"] = await build_run_profile_state_projection(
+                {"path": path} if isinstance(path, str) and path else {"path": ""}
+            )
+        return client_snapshot
     finally:
         if task.done() and _boot_snapshot_task is task:
             _boot_snapshot_task = None

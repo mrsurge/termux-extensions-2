@@ -96,6 +96,15 @@ class UiIpcMessagePackTests(unittest.IsolatedAsyncioTestCase):
             "params": {},
         }
 
+        async def get_session(_sid: str) -> dict[str, object]:
+            return {
+                "source": "browser",
+                "clientId": "client_aaaaaaaaaaaa",
+                "windowId": "window_aaaaaaaaaaaaaaaaaaaa",
+            }
+
+        namespace.get_session = get_session  # type: ignore[method-assign]
+
         with patch(
             "app.apps.code_te2.ui_ipc.ui_ipc_ws.dispatch_ui_ipc_rpc_request",
             new=AsyncMock(return_value={"ok": True}),
@@ -158,20 +167,36 @@ class UiIpcMessagePackTests(unittest.IsolatedAsyncioTestCase):
         async def emit(*args: object, **kwargs: object) -> None:
             del args, kwargs
 
+        async def save_session(sid: str, session: dict[str, object]) -> None:
+            self.assertEqual("ui-sid", sid)
+            self.assertEqual("client_aaaaaaaaaaaa", session["clientId"])
+
         namespace.enter_room = enter_room  # type: ignore[method-assign]
         namespace.emit = emit  # type: ignore[method-assign]
+        namespace.save_session = save_session  # type: ignore[method-assign]
         with patch(
             "app.apps.code_te2.ui_ipc.ui_ipc_ws._emit_browser_connect_adapter_state",
             new=AsyncMock(),
         ) as emit_adapter_state:
             await namespace.on_connect(
                 "ui-sid",
-                {},
+                {
+                    "QUERY_STRING": (
+                        "client_instance_id=client_aaaaaaaaaaaa"
+                        "&window_id=window_aaaaaaaaaaaaaaaaaaaa"
+                    )
+                },
                 {RPC_CODEC_AUTH_FIELD: RPC_CODEC_MSGPACK_V1},
             )
             await asyncio.sleep(0)
 
-        self.assertEqual([("ui-sid", "ui_ipc")], entered)
+        self.assertEqual(
+            [
+                ("ui-sid", "ui_ipc"),
+                ("ui-sid", "code_te2:client:client_aaaaaaaaaaaa"),
+            ],
+            entered,
+        )
         emit_adapter_state.assert_awaited_once()
 
     async def test_native_ui_connect_joins_native_room_and_receives_route_snapshot(self) -> None:

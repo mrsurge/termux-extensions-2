@@ -4,7 +4,12 @@ interface EditorMirrorPayloadLike {
 
 export function shouldDropMirrorForSource(
   payload: EditorMirrorPayloadLike | null | undefined,
-  editorSocketId: string | null | undefined,
+  clientInstanceId: string | null | undefined,
 ): boolean {
-  return !!(payload && payload.source_client && editorSocketId && String(payload.source_client) === String(editorSocketId));
+  return !!(
+    payload
+    && payload.source_client
+    && clientInstanceId
+    && String(payload.source_client) === String(clientInstanceId)
+  );
 }

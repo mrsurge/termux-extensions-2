@@ -25,24 +25,10 @@ class SaveValidationError(Exception):
 
 class HistoryStoreLike(Protocol):
     def get_active_project(self) -> str | None: ...
-    def upsert_cached_document(
-        self,
-        *,
-        project_path: str,
-        file_path: str,
-        content: str,
-        base_sha256: str,
-        run_id: str,
-        shell_id: str,
-        shell_run_id: str,
-        launcher_pid: int,
-        worker_pid: int,
-    ) -> dict[str, object]: ...
+    def clear_cached_document(self, project_path: str, file_path: str) -> bool: ...
+    def get_document_revision(self, project_path: str, file_path: str) -> int: ...
+    def advance_document_revision(self, project_path: str, file_path: str) -> int: ...
     def prune_clean_drafts(self, project_path: str) -> int: ...
-
-
-class RuntimeMetaProvider(Protocol):
-    def __call__(self) -> Mapping[str, object]: ...
 
 
 class BroadcastCacheStateFn(Protocol):
@@ -82,21 +68,6 @@ class BaseMismatchMetaLike(Protocol):
     current_meta: dict[str, object]
 
 
-def _to_int(value: object, default: int = 0) -> int:
-    if isinstance(value, bool):
-        return int(value)
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        return int(value)
-    if isinstance(value, str):
-        try:
-            return int(value.strip())
-        except Exception:
-            return default
-    return default
-
-
 async def write_editor_buffer_to_disk(
     *,
     client_id: str,
@@ -114,7 +85,6 @@ async def write_editor_buffer_to_disk(
     emit_diff_changed: Callable[[str, str], None],
     mark_git_cache_dirty: Callable[[Path], None],
     invalidate_diff_cache: Callable[[Path, str], None],
-    runtime_meta: RuntimeMetaProvider,
     broadcast_cache_state: BroadcastCacheStateFn,
     notify_draft_state_changed: Callable[[str], None],
     get_combined_diffs_async: GetCombinedDiffsAsyncFn,
@@ -164,28 +134,28 @@ async def write_editor_buffer_to_disk(
 
     project_path = history_store.get_active_project()
     if project_path and current_file:
-        meta = runtime_meta()
-        cache_entry = history_store.upsert_cached_document(
-            project_path=project_path,
-            file_path=current_file,
-            content=content,
-            base_sha256=sha,
-            run_id=str(meta.get("run_id", "")),
-            shell_id=str(meta.get("shell_id", "")),
-            shell_run_id=str(meta.get("shell_run_id", "")),
-            launcher_pid=_to_int(meta.get("launcher_pid", 0), 0),
-            worker_pid=_to_int(meta.get("worker_pid", 0), 0),
+        cleared = history_store.clear_cached_document(project_path, current_file)
+        document_revision = (
+            history_store.get_document_revision(project_path, current_file)
+            if cleared
+            else history_store.advance_document_revision(project_path, current_file)
         )
+        cache_entry: JsonMap = {
+            "unsaved": False,
+            "content_sha256": sha,
+            "base_sha256": sha,
+            "document_revision": document_revision,
+        }
         broadcast_cache_state(
             project_path,
             current_file,
             state="clean",
-            unsaved=bool(cache_entry.get("unsaved", False)),
+            unsaved=False,
             cache_entry=cache_entry,
             reason="save",
         )
         removed_clean = history_store.prune_clean_drafts(project_path)
-        if removed_clean:
+        if cleared or removed_clean:
             try:
                 notify_draft_state_changed(project_path)
             except Exception:

@@ -316,6 +316,13 @@ def _build_cache_state_payload(
     cache_entry: dict[str, object] | None = None,
     reason: str = 'update',
 ) -> dict[str, object]:
+    if cache_entry is None and project_path and file_path:
+        cache_entry = {
+            "document_revision": _history_store.get_document_revision(
+                project_path,
+                file_path,
+            )
+        }
     return _build_cache_state_payload_service(
         project_path,
         file_path,
@@ -337,6 +344,13 @@ def _broadcast_cache_state(
     cache_entry: dict[str, object] | None = None,
     reason: str = 'update',
 ) -> None:
+    if cache_entry is None and project_path and file_path:
+        cache_entry = {
+            "document_revision": _history_store.get_document_revision(
+                project_path,
+                file_path,
+            )
+        }
     _broadcast_cache_state_service(
         project_path,
         file_path,
@@ -494,33 +508,30 @@ def _persist_to_cache_debounced():
     
     print(f"[SESSION_CACHE] Persisted draft for {current_file} (Unsaved: {cache_entry.get('unsaved', False)})", file=sys.stderr)
 
-    # Live draft propagation (SSOT active file only): broadcast the draft buffer to other clients.
+    # Draft content is shared project state. Client foreground is presentation only,
+    # so publishing a draft must not depend on a process-global active document.
     try:
-        state = _history_store.get_session_state() or {}
-        ssot_current = state.get("currentPath")
-        if isinstance(ssot_current, str) and ssot_current.strip() and str(ssot_current) == str(current_file):
-            from app.apps.code_te2.explorer.transport.rpc_emit import (
-                emit_project_explorer_rpc_notification,
-            )
+        from app.apps.code_te2.explorer.transport.rpc_emit import (
+            emit_project_explorer_rpc_notification,
+        )
 
-            proj_norm = str(Path(project_path).expanduser().resolve(strict=False))
-            source_client = source_client_id
-
-            payload: dict[str, object] = {
-                "path": str(current_file),
-                "project_path": proj_norm,
-                "content": current_content,
-                "base_sha256": current_sha or '',
-                "content_sha256": current_hash or '',
-                "source_client": source_client,
-            }
-            asyncio.create_task(
-                emit_project_explorer_rpc_notification(
-                    proj_norm,
-                    "explorer.draft.content",
-                    payload,
-                )
+        proj_norm = str(Path(project_path).expanduser().resolve(strict=False))
+        payload: dict[str, object] = {
+            "path": str(current_file),
+            "project_path": proj_norm,
+            "content": current_content,
+            "base_sha256": current_sha or '',
+            "content_sha256": current_hash or '',
+            "source_client": source_client_id,
+            "document_revision": cache_entry.get("document_revision"),
+        }
+        asyncio.create_task(
+            emit_project_explorer_rpc_notification(
+                proj_norm,
+                "explorer.draft.content",
+                payload,
             )
+        )
     except Exception:
         pass
 
@@ -952,7 +963,6 @@ async def _write_editor_buffer_to_disk(*, client_id: str, op_id: str | None) -> 
         emit_diff_changed=emit_diff_changed,
         mark_git_cache_dirty=mark_git_cache_dirty,
         invalidate_diff_cache=invalidate_diff_cache,
-        runtime_meta=_get_runtime_metadata,
         broadcast_cache_state=_broadcast_cache_state,
         notify_draft_state_changed=notify_draft_state_changed,
         get_combined_diffs_async=_get_combined_diffs_async,

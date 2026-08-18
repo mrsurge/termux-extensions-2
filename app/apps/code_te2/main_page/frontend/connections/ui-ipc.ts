@@ -32,6 +32,7 @@ interface UiIpcConnectionsDeps {
   initConsoleBridge: (args: ConsoleBridgeOptions) => unknown;
   getClientId: () => string;
   getConsoleWorkerId: () => string;
+  getSocketQuery?: () => JsonObject;
   onHostStateResync?: () => Promise<void> | void;
   onSidebarConnected?: () => void;
 }
@@ -44,6 +45,7 @@ interface SidebarRuntimeEventWindow {
 }
 
 export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
+  const getSocketQuery = deps.getSocketQuery ?? fileEditorSocketQuery;
   let sidebarIpcSocket: SocketLike | null = null;
   let sidebarRpcRequestCounter = 0;
   let uiIpcRpcConnection: UiIpcRpcConnection | null = null;
@@ -86,15 +88,6 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
         console.warn('[console_bridge] main page start failed', err);
       });
     return consoleBridgePromise;
-  }
-
-  function activeFilePayloadFromOpenState(params: JsonObject): JsonObject {
-    const openFile = typeof params.openFile === 'string' && params.openFile ? params.openFile : null;
-    return {
-      ...params,
-      path: openFile,
-      openState: params,
-    };
   }
 
   function dispatchSidebarEvent(data: JsonObject): void {
@@ -241,7 +234,7 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
         const socket = io(SOCKET_IO_NAMESPACES.sidebarIpc, {
           path: SOCKET_IO_PATHS.uiIpc,
           transports: ['websocket'],
-          query: fileEditorSocketQuery(),
+          query: getSocketQuery(),
         });
         sidebarIpcSocket = socket;
         socket.on('connect', () => {
@@ -286,6 +279,7 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
     if (!uiIpcRpcConnection) {
       uiIpcRpcConnection = createUiIpcRpcConnection({
         ensureSocketIoLoaded: deps.ensureSocketIoLoaded,
+        query: getSocketQuery(),
         onConnect: () => {
           console.log('[UI_IPC_RPC] main page connected');
           const reconnect = uiIpcHasConnected;
@@ -337,7 +331,6 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
             dispatchWindowCustomEvent('code-te2:active-file-changed', params);
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.openStateChanged) {
             dispatchWindowCustomEvent('code-te2:open-state-changed', params);
-            dispatchWindowCustomEvent('code-te2:active-file-changed', activeFilePayloadFromOpenState(params));
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.fileTabsDecorationsChanged) {
             dispatchWindowCustomEvent('code-te2:file-tabs-decorations-changed', params);
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.projectSwitching) {

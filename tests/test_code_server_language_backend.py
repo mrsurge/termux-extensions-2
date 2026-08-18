@@ -28,50 +28,104 @@ def _installation() -> CodeServerInstallation:
 class CodeServerLanguageBackendTests(unittest.IsolatedAsyncioTestCase):
     async def test_host_state_snapshot_scope_avoids_full_boot_payload(self) -> None:
         host_state = {"activeProject": "/workspace"}
-        with patch.object(
-            boot_snapshot_backend,
-            "_build_host_state_payload",
-            return_value=host_state,
-        ) as build_host_state:
+        with (
+            patch.object(
+                boot_snapshot_backend,
+                "_build_host_state_payload",
+                return_value=host_state,
+            ) as build_host_state,
+            patch.object(
+                boot_snapshot_backend,
+                "read_client_foreground",
+                return_value={
+                    "clientInstanceId": "client_aaaaaaaaaaaa",
+                    "path": "/workspace/main.py",
+                    "rel": "main.py",
+                },
+            ),
+        ):
             result = await boot_snapshot_backend.handle_boot_snapshot_request(
-                {"scope": "hostState"},
+                {
+                    "scope": "hostState",
+                    "clientInstanceId": "client_aaaaaaaaaaaa",
+                },
                 source_name="test",
             )
 
-        self.assertEqual(
-            {"ok": True, "snapshot": {"host_state": host_state}},
-            result,
-        )
+        snapshot = cast(JsonMap, result["snapshot"])
+        self.assertEqual(["host_state"], list(snapshot))
+        projected_host = cast(JsonMap, snapshot["host_state"])
+        self.assertEqual("/workspace/main.py", projected_host["currentPath"])
+        foreground = cast(JsonMap, projected_host["clientForeground"])
+        self.assertEqual("client_aaaaaaaaaaaa", foreground["clientInstanceId"])
         build_host_state.assert_called_once_with()
 
     async def test_full_boot_snapshot_is_single_flight(self) -> None:
         started = asyncio.Event()
         release = asyncio.Event()
         calls = 0
+        editor_calls: list[str | None] = []
+
+        def build_editor_snapshot(*, client_instance_id: str | None) -> JsonMap:
+            editor_calls.append(client_instance_id)
+            path = (
+                f"/workspace/{client_instance_id}.py"
+                if client_instance_id is not None
+                else None
+            )
+            return {
+                "clientInstanceId": client_instance_id,
+                "clientForeground": {
+                    "clientInstanceId": client_instance_id,
+                    "path": path,
+                    "rel": Path(path).name if path is not None else None,
+                },
+                "currentPath": path,
+                "file": {
+                    "path": path,
+                    "content": client_instance_id or "",
+                    "document_revision": 1,
+                },
+            }
 
         async def build_snapshot() -> JsonMap:
             nonlocal calls
             calls += 1
             started.set()
             await release.wait()
-            return {"ok": True, "snapshot": {}}
+            return {
+                "ok": True,
+                "snapshot": {"host_state": {}, "editor_ssot": {}},
+            }
 
         boot_snapshot_backend._boot_snapshot_task = None
-        with patch.object(
-            boot_snapshot_backend,
-            "_build_full_boot_snapshot",
-            side_effect=build_snapshot,
+        with (
+            patch.object(
+                boot_snapshot_backend,
+                "_build_full_boot_snapshot",
+                side_effect=build_snapshot,
+            ),
+            patch.object(
+                boot_snapshot_backend,
+                "_editor_snapshot_builder",
+                side_effect=build_editor_snapshot,
+            ),
+            patch.object(
+                boot_snapshot_backend,
+                "build_run_profile_state_projection",
+                new=AsyncMock(return_value={}),
+            ),
         ):
             first = asyncio.create_task(
                 boot_snapshot_backend.handle_boot_snapshot_request(
-                    {},
+                    {"clientInstanceId": "client_aaaaaaaaaaaa"},
                     source_name="first",
                 )
             )
             await started.wait()
             second = asyncio.create_task(
                 boot_snapshot_backend.handle_boot_snapshot_request(
-                    {},
+                    {"clientInstanceId": "client_bbbbbbbbbbbb"},
                     source_name="second",
                 )
             )
@@ -80,7 +134,21 @@ class CodeServerLanguageBackendTests(unittest.IsolatedAsyncioTestCase):
             release.set()
             first_result, second_result = await asyncio.gather(first, second)
 
-        self.assertEqual(first_result, second_result)
+        self.assertEqual(1, calls)
+        first_snapshot = cast(JsonMap, first_result["snapshot"])
+        second_snapshot = cast(JsonMap, second_result["snapshot"])
+        first_editor = cast(JsonMap, first_snapshot["editor_ssot"])
+        second_editor = cast(JsonMap, second_snapshot["editor_ssot"])
+        self.assertEqual("client_aaaaaaaaaaaa", first_editor["clientInstanceId"])
+        self.assertEqual("client_bbbbbbbbbbbb", second_editor["clientInstanceId"])
+        first_file = cast(JsonMap, first_editor["file"])
+        second_file = cast(JsonMap, second_editor["file"])
+        self.assertEqual("client_aaaaaaaaaaaa", first_file["content"])
+        self.assertEqual("client_bbbbbbbbbbbb", second_file["content"])
+        self.assertEqual(
+            ["client_aaaaaaaaaaaa", "client_bbbbbbbbbbbb"],
+            editor_calls,
+        )
         self.assertIsNone(boot_snapshot_backend._boot_snapshot_task)
 
     async def test_legacy_extension_bridge_cleanup_is_idempotent(self) -> None:

@@ -28,7 +28,6 @@ interface FileTabsControllerDeps {
 
 interface FileTabsOpenState {
   projectPath: string;
-  openFile: string;
   recents: RecentFileEntry[];
 }
 
@@ -112,15 +111,21 @@ function normalizedOpenState(state: unknown): FileTabsOpenState {
       : !nestedOpenState && typeof record.activeProject === 'string'
         ? record.activeProject
         : '',
-    openFile: typeof projection.openFile === 'string'
-      ? projection.openFile
-      : !nestedOpenState && typeof record.currentPath === 'string'
-        ? record.currentPath
-        : !nestedOpenState && typeof record.lastFile === 'string'
-          ? record.lastFile
-          : '',
     recents,
   };
+}
+
+function clientForegroundPath(state: unknown): string {
+  const record = isRecord(state) ? state : {};
+  if (isRecord(record.clientForeground)) {
+    return typeof record.clientForeground.path === 'string'
+      ? record.clientForeground.path
+      : '';
+  }
+  if (typeof record.path === 'string') return record.path;
+  if (typeof record.currentPath === 'string') return record.currentPath;
+  if (typeof record.lastFile === 'string') return record.lastFile;
+  return '';
 }
 
 function nonnegativeInteger(value: unknown): number {
@@ -433,13 +438,19 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
   function refreshOpenState(state: unknown): void {
     const next = normalizedOpenState(state);
     projectPath = next.projectPath;
-    activePath = next.openFile;
     recents = next.recents;
     const order = mergeFileTabOrder(
       recents.map((entry) => entry.path),
       storedOrder(projectPath),
     );
     persistOrder(projectPath, order);
+    render();
+    projectActiveDraftState();
+    scheduleActiveTabReveal();
+  }
+
+  function refreshClientForeground(state: unknown): void {
+    activePath = clientForegroundPath(state);
     render();
     projectActiveDraftState();
     scheduleActiveTabReveal();
@@ -629,6 +640,9 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
     window.addEventListener('code-te2:open-state-changed', (event) => {
       if (event instanceof CustomEvent) refreshOpenState(event.detail);
     });
+    window.addEventListener('code-te2:active-file-changed', (event) => {
+      if (event instanceof CustomEvent) refreshClientForeground(event.detail);
+    });
     window.addEventListener('code-te2:file-tabs-decorations-changed', (event) => {
       if (event instanceof CustomEvent) refreshDecorations(event.detail);
     });
@@ -638,6 +652,7 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
     if (!state) return;
     window.__codeTe2EditorState = state;
     refreshOpenState(state);
+    refreshClientForeground(state);
     window.dispatchEvent(new CustomEvent('code-te2:recents-updated', { detail: state }));
   }
 
