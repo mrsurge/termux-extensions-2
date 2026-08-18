@@ -38,6 +38,15 @@ export const androidShellHost = {
     method: "PUT",
     body: JSON.stringify(settings),
   }),
+  getFrameworkBookmarks: () => request("/framework-bookmarks"),
+  saveFrameworkBookmark: (bookmark) => request("/framework-bookmarks", {
+    method: "POST",
+    body: JSON.stringify(bookmark),
+  }),
+  deleteFrameworkBookmark: (name) => request("/framework-bookmarks", {
+    method: "DELETE",
+    body: JSON.stringify({ name }),
+  }),
   getFrameworkStatus: () => request("/framework/status"),
   getFwsStatus: () => request("/fws/status"),
   openBatterySettings: () => request("/power/settings", { method: "POST" }),

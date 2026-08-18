@@ -54,7 +54,7 @@ class AndroidAppSettingsTest {
         )
 
         val json = settings.toJson()
-        assertEquals(2, json.getInt("nativeSettingsSchemaVersion"))
+        assertEquals(3, json.getInt("nativeSettingsSchemaVersion"))
         assertEquals(true, json.getBoolean("devToolsInspectorEnabled"))
         assertEquals(true, json.getBoolean("devToolsRunProfilesEnabled"))
         assertEquals(false, json.getBoolean("devToolsDebugEnabled"))

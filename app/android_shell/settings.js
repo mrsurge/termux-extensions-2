@@ -12,12 +12,18 @@ const devToolsLegacyRow = document.querySelector("#devtools-legacy-row");
 const devToolsLegacyToggle = document.querySelector("#devtools-inspector-enabled");
 const saveButton = document.querySelector("#save-settings");
 const testButton = document.querySelector("#test-framework");
+const frameworkBookmarksSection = document.querySelector("#framework-bookmarks-section");
+const frameworkBookmarkNameInput = document.querySelector("#framework-bookmark-name");
+const saveFrameworkBookmarkButton = document.querySelector("#save-framework-bookmark");
+const frameworkBookmarksList = document.querySelector("#framework-bookmarks");
+const frameworkBookmarksEmpty = document.querySelector("#framework-bookmarks-empty");
 const settingsStatus = document.querySelector("#settings-status");
 const powerPolicyStatus = document.querySelector("#power-policy-status");
 const openPowerSettingsButton = document.querySelector("#open-power-settings");
 const fwsStatus = document.querySelector("#fws-status");
 const fwsFrame = document.querySelector("#fws-frame");
 const fwsUnavailable = document.querySelector("#fws-unavailable");
+let frameworkBookmarks = [];
 
 function setStatus(element, state, text) {
   if (!element) return;
@@ -46,6 +52,68 @@ function applyDevToolsSettings(settings) {
   }
 }
 
+function supportsFrameworkBookmarks(settings) {
+  return Number(settings?.nativeSettingsSchemaVersion) >= 3;
+}
+
+function endpointLabel(bookmark) {
+  if (typeof bookmark?.frameworkBaseUrl === "string" && bookmark.frameworkBaseUrl) {
+    return bookmark.frameworkBaseUrl;
+  }
+  const host = String(bookmark?.frameworkHost || "");
+  const authority = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+  return `http://${authority}:${Number(bookmark?.frameworkPort) || 0}`;
+}
+
+function renderFrameworkBookmarks() {
+  frameworkBookmarksList.replaceChildren();
+  frameworkBookmarksEmpty.hidden = frameworkBookmarks.length > 0;
+  for (const bookmark of frameworkBookmarks) {
+    const card = document.createElement("div");
+    card.className = "framework-bookmark-card";
+
+    const useButton = document.createElement("button");
+    useButton.type = "button";
+    useButton.className = "framework-bookmark-use";
+    const name = document.createElement("strong");
+    name.textContent = bookmark.name;
+    const endpoint = document.createElement("small");
+    endpoint.textContent = endpointLabel(bookmark);
+    useButton.append(name, endpoint);
+    useButton.addEventListener("click", () => {
+      hostInput.value = bookmark.frameworkHost;
+      portInput.value = String(bookmark.frameworkPort);
+      androidShellHost.toast(`Loaded ${bookmark.name}; press Save to connect`);
+    });
+
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "framework-bookmark-remove";
+    removeButton.textContent = "Remove";
+    removeButton.addEventListener("click", async () => {
+      removeButton.disabled = true;
+      try {
+        const result = await androidShellHost.deleteFrameworkBookmark(bookmark.name);
+        frameworkBookmarks = Array.isArray(result?.bookmarks) ? result.bookmarks : [];
+        renderFrameworkBookmarks();
+        androidShellHost.toast(`Removed ${bookmark.name}`);
+      } catch (error) {
+        androidShellHost.toast(error?.message || "Bookmark removal failed");
+        removeButton.disabled = false;
+      }
+    });
+
+    card.append(useButton, removeButton);
+    frameworkBookmarksList.appendChild(card);
+  }
+}
+
+async function loadFrameworkBookmarks() {
+  const result = await androidShellHost.getFrameworkBookmarks();
+  frameworkBookmarks = Array.isArray(result?.bookmarks) ? result.bookmarks : [];
+  renderFrameworkBookmarks();
+}
+
 async function loadSettings() {
   const settings = await androidShellHost.getSettings();
   hostInput.value = settings.frameworkHost || "127.0.0.1";
@@ -53,6 +121,8 @@ async function loadSettings() {
   persistentToggle.checked = !!settings.persistentNetworkNotification;
   imeContextSwitchingToggle.checked = settings.imeContextSwitchingEnabled !== false;
   applyDevToolsSettings(settings);
+  frameworkBookmarksSection.hidden = !supportsFrameworkBookmarks(settings);
+  if (!frameworkBookmarksSection.hidden) await loadFrameworkBookmarks();
   const runtime = settings.runtime || {};
   setStatus(
     powerPolicyStatus,
@@ -126,6 +196,26 @@ persistToggle(
   "persistentNetworkNotification",
   (settings) => !!settings.persistentNetworkNotification,
 );
+
+saveFrameworkBookmarkButton?.addEventListener("click", async () => {
+  saveFrameworkBookmarkButton.disabled = true;
+  try {
+    const result = await androidShellHost.saveFrameworkBookmark({
+      name: frameworkBookmarkNameInput.value,
+      frameworkHost: hostInput.value,
+      frameworkPort: Number(portInput.value),
+    });
+    frameworkBookmarks = Array.isArray(result?.bookmarks) ? result.bookmarks : [];
+    renderFrameworkBookmarks();
+    const savedName = frameworkBookmarkNameInput.value.trim();
+    frameworkBookmarkNameInput.value = "";
+    androidShellHost.toast(`Saved ${savedName}`);
+  } catch (error) {
+    androidShellHost.toast(error?.message || "Bookmark save failed");
+  } finally {
+    saveFrameworkBookmarkButton.disabled = false;
+  }
+});
 persistToggle(
   imeContextSwitchingToggle,
   "imeContextSwitchingEnabled",

@@ -47,6 +47,36 @@ class AndroidShellGateway(
                     jsonResponse(200, settingsResponse(settings))
                 }
 
+                request.method == "GET" &&
+                    request.path == "$API_PREFIX/framework-bookmarks" -> {
+                    jsonResponse(
+                        200,
+                        frameworkBookmarksResponse(settingsStore.loadFrameworkEndpointBookmarks()),
+                    )
+                }
+
+                request.method == "POST" &&
+                    request.path == "$API_PREFIX/framework-bookmarks" -> {
+                    val payload = JSONObject(request.body.toString(StandardCharsets.UTF_8))
+                    jsonResponse(
+                        200,
+                        frameworkBookmarksResponse(
+                            settingsStore.upsertFrameworkEndpointBookmark(payload),
+                        ),
+                    )
+                }
+
+                request.method == "DELETE" &&
+                    request.path == "$API_PREFIX/framework-bookmarks" -> {
+                    val payload = JSONObject(request.body.toString(StandardCharsets.UTF_8))
+                    jsonResponse(
+                        200,
+                        frameworkBookmarksResponse(
+                            settingsStore.deleteFrameworkEndpointBookmark(payload),
+                        ),
+                    )
+                }
+
                 request.method == "POST" &&
                     request.path == "$API_PREFIX/power/settings" -> {
                     onOpenBatterySettings()
@@ -250,6 +280,13 @@ class AndroidShellGateway(
         settings.toJson().apply {
             put("runtime", settingsRuntimeProvider())
         }
+
+    private fun frameworkBookmarksResponse(
+        bookmarks: List<AndroidFrameworkEndpointBookmark>,
+    ): JSONObject = JSONObject().put(
+        "bookmarks",
+        JSONArray().apply { bookmarks.forEach { put(it.toJson()) } },
+    )
 
     private fun absoluteFrameworkUrl(frameworkBaseUrl: String, raw: String): String {
         if (raw.startsWith("http://") || raw.startsWith("https://")) return raw
