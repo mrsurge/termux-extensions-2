@@ -239,6 +239,16 @@ through Framework-Shells and expose it through TE2's proxy surface. The wrapped
 application remains independently runnable; TE2 is its development harness,
 not a hidden product dependency.
 
+## Acknowledgements
+
+TE2 depends on excellent independent open-source projects, including:
+
+- [Cefrium](https://codeberg.org/cefrium/cef-android), which brings CEF to
+  Android and powers TE2's Chromium-based Android client. Special thanks to its
+  maintainer for the `0.7.1` iframe WebSocket and scheduling-latency fix.
+- [Electron](https://www.electronjs.org/), whose Chromium and Node.js runtime
+  powers TE2's Linux desktop shell.
+
 ## Repository Guidance
 
 - Read [AGENTS.md](AGENTS.md) before changing the repository.
