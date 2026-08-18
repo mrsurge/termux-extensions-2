@@ -304,6 +304,66 @@ button {
   justify-content: flex-end;
 }
 
+.bookmark-create-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+}
+
+.bookmark-create-row .secondary-button {
+  min-height: 42px;
+}
+
+.framework-bookmarks {
+  display: grid;
+  gap: 9px;
+}
+
+.framework-bookmark-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--surface) 92%, var(--accent) 8%);
+}
+
+.framework-bookmark-use,
+.framework-bookmark-remove {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+}
+
+.framework-bookmark-use {
+  display: block;
+  min-width: 0;
+  padding: 11px 13px;
+  text-align: left;
+}
+
+.framework-bookmark-use strong,
+.framework-bookmark-use small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.framework-bookmark-use small {
+  margin-top: 4px;
+  color: var(--muted);
+}
+
+.framework-bookmark-remove {
+  min-width: 76px;
+  border-left: 1px solid var(--border);
+  color: #ffaca8;
+}
+
 #fws-frame {
   width: 100%;
   min-height: 68vh;
@@ -341,5 +401,9 @@ button {
   .launcher-root,
   .settings-page {
     padding: 12px;
+  }
+
+  .bookmark-create-row {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

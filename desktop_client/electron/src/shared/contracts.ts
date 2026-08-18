@@ -1,6 +1,20 @@
-export type DesktopShellSettings = {
+export const DESKTOP_SETTINGS_VERSION = 1;
+
+export type DesktopFrameworkBookmark = {
+  name: string;
   frameworkHost: string;
   frameworkPort: number;
+};
+
+export type DesktopFrameworkBookmarkView = DesktopFrameworkBookmark & {
+  frameworkBaseUrl: string;
+};
+
+export type DesktopShellSettings = {
+  version: typeof DESKTOP_SETTINGS_VERSION;
+  frameworkHost: string;
+  frameworkPort: number;
+  frameworkBookmarks: DesktopFrameworkBookmark[];
   zoomLevel: number;
 };
 
@@ -28,6 +42,9 @@ export type NativeRequestMethod =
   | "get_settings"
   | "get_browser_framework_origin"
   | "save_settings"
+  | "get_framework_bookmarks"
+  | "upsert_framework_bookmark"
+  | "delete_framework_bookmark"
   | "framework_request"
   | "get_framework_status"
   | "get_fws_status"

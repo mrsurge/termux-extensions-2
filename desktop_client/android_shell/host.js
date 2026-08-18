@@ -82,10 +82,10 @@ export async function getSettings() {
 }
 
 export async function saveSettings(settings) {
-  const result = await nativeRequest(
-    "save_settings",
-    normalizeSettings(settings),
-  );
+  const result = await nativeRequest("save_settings", {
+    frameworkHost: String(settings?.frameworkHost || "").trim(),
+    frameworkPort: Number(settings?.frameworkPort),
+  });
   const nextSettings = result?.settings || result;
   cachedSettings = normalizeSettings(nextSettings);
   cachedBrowserFrameworkOrigin = result?.browserFrameworkOrigin || null;
@@ -281,6 +281,11 @@ export const desktopShellHost = {
   quitApp,
   getSettings,
   saveSettings,
+  getFrameworkBookmarks: () => nativeRequest("get_framework_bookmarks"),
+  saveFrameworkBookmark: (bookmark) =>
+    nativeRequest("upsert_framework_bookmark", bookmark),
+  deleteFrameworkBookmark: (name) =>
+    nativeRequest("delete_framework_bookmark", { name }),
   getFrameworkStatus,
   getFwsStatus: () => nativeRequest("get_fws_status"),
   getAssetStatus: () => nativeRequest("get_asset_status"),

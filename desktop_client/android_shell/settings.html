@@ -39,6 +39,35 @@
     <section class="settings-section">
       <header class="section-header">
         <div>
+          <h2>Framework Bookmarks</h2>
+          <div class="status-line">Saved only in this desktop client.</div>
+        </div>
+      </header>
+      <div class="bookmark-create-row">
+        <label class="field" for="framework-bookmark-name">
+          <span>Bookmark name</span>
+          <input
+            id="framework-bookmark-name"
+            type="text"
+            maxlength="64"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="Home server"
+          >
+        </label>
+        <button id="save-framework-bookmark" class="secondary-button" type="button">
+          Bookmark current
+        </button>
+      </div>
+      <div id="framework-bookmarks" class="framework-bookmarks" aria-live="polite"></div>
+      <div id="framework-bookmarks-empty" class="empty-state">
+        No framework bookmarks saved.
+      </div>
+    </section>
+
+    <section class="settings-section">
+      <header class="section-header">
+        <div>
           <h2>Desktop Assets</h2>
           <div id="asset-status" class="status-line" data-state="loading">Checking local assets</div>
         </div>

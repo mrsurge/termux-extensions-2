@@ -55,14 +55,18 @@ import {
   validateElectronSidebarSurfaceReference,
 } from "../shared/sidebar-surface-contracts";
 import {
+  deleteFrameworkBookmark,
+  frameworkBookmarkViews,
   frameworkOrigin,
   readDesktopSettings,
+  upsertFrameworkBookmark,
   validZoom,
   writeDesktopSettings,
 } from "./target";
 import type {
   AppNavigation,
   AssetUpdateResult,
+  DesktopFrameworkBookmarkView,
   DesktopShellSettings,
   NativeRequestMethod,
 } from "../shared/contracts";
@@ -757,6 +761,38 @@ async function saveConnection(params: Record<string, unknown>): Promise<{
   };
 }
 
+function frameworkBookmarksResult(): {
+  bookmarks: DesktopFrameworkBookmarkView[];
+} {
+  return { bookmarks: frameworkBookmarkViews(settings.frameworkBookmarks) };
+}
+
+async function saveFrameworkBookmark(
+  params: Record<string, unknown>,
+): Promise<{ bookmarks: DesktopFrameworkBookmarkView[] }> {
+  settings = await writeDesktopSettings({
+    ...settings,
+    frameworkBookmarks: upsertFrameworkBookmark(
+      settings.frameworkBookmarks,
+      params,
+    ),
+  });
+  return frameworkBookmarksResult();
+}
+
+async function removeFrameworkBookmark(
+  params: Record<string, unknown>,
+): Promise<{ bookmarks: DesktopFrameworkBookmarkView[] }> {
+  settings = await writeDesktopSettings({
+    ...settings,
+    frameworkBookmarks: deleteFrameworkBookmark(
+      settings.frameworkBookmarks,
+      params.name,
+    ),
+  });
+  return frameworkBookmarksResult();
+}
+
 async function viewAction(params: Record<string, unknown>): Promise<Record<string, unknown>> {
   const action = String(params.action || "");
   if (action === "home") closeAppView();
@@ -793,6 +829,9 @@ async function nativeRequest(
   if (method === "get_settings") return settings;
   if (method === "get_browser_framework_origin") return { origin: relay.browserOrigin };
   if (method === "save_settings") return saveConnection(params);
+  if (method === "get_framework_bookmarks") return frameworkBookmarksResult();
+  if (method === "upsert_framework_bookmark") return saveFrameworkBookmark(params);
+  if (method === "delete_framework_bookmark") return removeFrameworkBookmark(params);
   if (method === "framework_request") {
     return frameworkRequest({
       path: String(params.path || ""),

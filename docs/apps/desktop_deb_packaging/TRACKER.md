@@ -8,7 +8,7 @@ Last updated: 2026-08-17
 |---|---|---|
 | Phase 0: dependency cleanup | Complete, validated, and committed as `0c02c033` | Keep the audited Python runtime input; target locks belong to the selected distribution design |
 | Phase 1: integrate current `main` | Complete and validated at merge `8ac75fbc` | Imported baseline is accepted; Phase 2 may proceed without reopening the merge |
-| Phase 2A: desktop framework bookmarks | Planned from Android's bounded bookmark contract | Electron settings schema/store/UI and existing retarget integration |
+| Phase 2A: desktop framework bookmarks | Implemented; automated validation complete, live retarget acceptance pending | Existing Electron retarget transaction remains the only connection authority |
 | Phase 2B: launcher local framework | Planned | Electron process controller and launcher capability implementation |
 | Phase 2C: remaining frontend polish | Intake placeholder only | Each concrete tweak requires separate named scope and approval |
 | Phase 3: client-scoped foreground document | Architecture drafted; implementation not authorized | Shared membership/drafts/WBA remain authoritative; only client presentation is split |
@@ -179,19 +179,33 @@ Last updated: 2026-08-17
 
 ## Phase 2A checklist — desktop framework bookmarks
 
-- [ ] Add typed/versioned desktop bookmark fields without replacing active
+- [x] Add typed/versioned desktop bookmark fields without replacing active
   `frameworkHost`/`frameworkPort`.
-- [ ] Store at most 16 bookmarks with trimmed names up to 64 characters.
-- [ ] Use case-insensitive bookmark names for native upsert/delete identity.
-- [ ] Reuse desktop host/port validation for hostname, IPv4, and bracketed IPv6
+- [x] Store at most 16 bookmarks with trimmed names up to 64 characters.
+- [x] Use case-insensitive bookmark names for native upsert/delete identity.
+- [x] Reuse desktop host/port validation for hostname, IPv4, and bracketed IPv6
   inputs.
-- [ ] Recover safely from malformed stored bookmark data and write atomically.
-- [ ] Add bounded Electron native get/upsert/delete request contracts.
-- [ ] Add Bookmark Current, load, and remove controls to desktop Settings.
-- [ ] Make bookmark selection fill fields only; require Save to connect.
-- [ ] Keep Save routed through the existing `saveConnection` transaction.
+- [x] Recover safely from malformed stored bookmark data and write atomically.
+- [x] Add bounded Electron native get/upsert/delete request contracts.
+- [x] Add Bookmark Current, load, and remove controls to desktop Settings.
+- [x] Make bookmark selection fill fields only; require Save to connect.
+- [x] Keep Save routed through the existing `saveConnection` transaction.
 - [ ] Validate relay, UI IPC, Run Target, app-view, and asset behavior after
   repeated bookmark load plus local/remote Save operations.
+
+### Phase 2A automated evidence
+
+- Desktop settings schema v1 persists active endpoint, zoom, and at most 16
+  validated bookmarks in the existing atomic `desktop-shell.json` record.
+- Malformed records recover entry-by-entry; bookmark upsert/delete uses trimmed,
+  case-insensitive names and preserves list position on replacement.
+- Hostname, IPv4, bracketed IPv6, HTTPS, credential rejection, invalid-port,
+  name-bound, capacity, malformed-read, and atomic-write tests pass.
+- Electron TypeScript validation passes; all 71 Electron tests pass; the
+  unbundled Electron source compile and both modified launcher JavaScript syntax
+  checks pass.
+- No framework restart, Electron launch, version bump, commit, push, or Android
+  change was performed for this implementation slice.
 
 ## Phase 2B checklist — local framework launcher
 
