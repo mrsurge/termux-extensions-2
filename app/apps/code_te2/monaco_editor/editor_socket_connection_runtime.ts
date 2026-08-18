@@ -48,6 +48,7 @@ interface EditorSocketConnectionDeps {
   setBaseSha256(value: string | null): void;
   getCurrentPath(): string | null;
   setCurrentPath(value: string | null): void;
+  clearActiveModel(reason: string): void;
   wbBumpGeneration(path: string | null, reason: string): number;
   wbQueueDidChange(path: string, text: string, languageId: string, generation: number): void;
   wbQueueSymbols(path: string, generation: number): void;
@@ -276,6 +277,7 @@ export function registerEditorSocketConnectionHandlers(
           }
         });
       } else {
+        deps.clearActiveModel('ssot_empty');
         deps.updateDebug('ws=ssot-empty');
       }
     } catch (error) {

@@ -581,12 +581,6 @@ async def _emit_sidebar_cwd_set_for_project_routes(reason: str) -> None:
     await sidebar_ws.emit_sidebar_cwd_set_global(reason=reason)
 
 
-async def _emit_explorer_project_opened_for_project_routes(payload: dict[str, object]) -> None:
-    from .explorer.transport.rpc_emit import emit_explorer_rpc_notification
-
-    await emit_explorer_rpc_notification("explorer.project.opened", payload)
-
-
 def _create_project_for_project_routes(parent_path: str, name: str) -> dict[str, object]:
     from .explorer.services.file_ops import create_project
 
@@ -608,7 +602,6 @@ _PROJECT_ROUTES_DEPS = ProjectRoutesDeps(
     create_project=_create_project_for_project_routes,
     format_label=HistoryStore.format_label,
     get_sidecar_path=ProjectSidecar.get_sidecar_path,
-    emit_explorer_project_opened=_emit_explorer_project_opened_for_project_routes,
 )
 code_te2_bp.include_router(create_project_router(_PROJECT_ROUTES_DEPS))
 

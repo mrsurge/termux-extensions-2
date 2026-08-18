@@ -1924,6 +1924,45 @@ interface MonacoBootWindowLike extends Window {
     lastDraftZones = next.lastDraftZones;
   }
 
+  function clearActiveModel(reason: string): void {
+    const previousModel = model;
+    model = null;
+    currentPath = null;
+    baseSha256 = null;
+    lastContentSha256 = null;
+    openTransactionStore.activeOpenTransaction = null;
+    try {
+      mirrorRuntime.disposeMirrorPublisher();
+    } catch (_) {}
+    _setScrollPublisherInstalled(false);
+    try {
+      _clearDiagnosticsForLeavingModel(reason || "ssot_empty");
+    } catch (_) {}
+    try {
+      clearDraftDiffDecorations();
+    } catch (_) {}
+    try {
+      disposeGitBaselines();
+    } catch (_) {}
+    try {
+      if (diffEditor) ensurePlainEditorWithPrefs();
+    } catch (_) {}
+    try {
+      if (editor && typeof editor.setModel === "function") editor.setModel(null);
+    } catch (_) {}
+    try {
+      if (previousModel && typeof previousModel.dispose === "function") {
+        previousModel.dispose();
+      }
+    } catch (_) {}
+    try {
+      _wbBumpGeneration(null, reason || "ssot_empty");
+    } catch (_) {}
+    try {
+      bcUpdatePath(null, true);
+    } catch (_) {}
+  }
+
   function clearDraftDiffZones(): void {
     draftZoneIds = clearDraftDiffZonesState(editor, draftZoneIds);
   }
@@ -2128,6 +2167,7 @@ interface MonacoBootWindowLike extends Window {
           setCurrentPath: function (value: string | null) {
             currentPath = value;
           },
+          clearActiveModel: clearActiveModel,
           wbBumpGeneration: _wbBumpGeneration,
           wbQueueDidChange: _wbQueueDidChange,
           wbQueueSymbols: _wbQueueSymbols,

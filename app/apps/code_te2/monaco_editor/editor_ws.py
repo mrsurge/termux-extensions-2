@@ -28,12 +28,16 @@ from ..open_state_backend import (
     read_sidecar_open_state,
     write_client_document_open,
 )
-from ..open_state_events import publish_open_state_changed
+from ..open_state_events import (
+    publish_client_foreground_changed,
+    publish_open_state_changed,
+)
 from ..socketio_runtime import emit_code_te2_socketio
 from .editor_open_backend import (
     EditorOpenPayload,
     emit_editor_open_from_backend as _emit_editor_open_from_backend_impl,
 )
+from .editor_client_registry import connected_editor_client_instance_ids
 from .editor_backend_services.contracts import RuntimeMeta
 from .editor_backend_services.document_materialization_service import (
     materialize_document_payload,
@@ -59,6 +63,7 @@ from .editor_rpc_contract import (
     EDITOR_RPC_NOTIFICATION_READY,
     EDITOR_RPC_NOTIFICATION_SAVE_SNAPSHOT_REQUEST,
     EDITOR_RPC_NOTIFICATION_SEARCH_HIGHLIGHT,
+    EDITOR_RPC_NOTIFICATION_STATE_SSOT,
     EditorRpcNotification,
 )
 from .editor_rpc_emit import emit_editor_rpc_notification
@@ -461,6 +466,7 @@ def editor_runtime_build_connect_snapshot(
     *,
     role: str = "",
     client_instance_id: str | None,
+    reason: str = "reconnect",
 ) -> dict[str, object]:
     project = _active_project()
     session_state = _history_store.get_session_state()
@@ -470,9 +476,9 @@ def editor_runtime_build_connect_snapshot(
     client_foreground: dict[str, object] | None = None
     if project and client_instance_id is not None:
         try:
-            open_state = read_sidecar_open_state(project, reason="reconnect")
+            open_state = read_sidecar_open_state(project, reason=reason)
             client_foreground = dict(
-                read_client_foreground(project, client_instance_id, reason="reconnect")
+                read_client_foreground(project, client_instance_id, reason=reason)
             )
             current_path = client_foreground.get("path")
         except Exception:
@@ -497,6 +503,53 @@ def editor_runtime_build_connect_snapshot(
             snapshot["file"] = _read_file_payload(project, abs_path)
             snapshot["file"]["request_id"] = connect_request_id
     return snapshot
+
+
+async def editor_runtime_replay_sidecar_open_state(
+    project: str,
+    *,
+    reason: str = "sidecar_replay",
+    source: str | None = None,
+    project_generation: int | None = None,
+) -> dict[str, object]:
+    """Project the new shared project and each live client's own foreground."""
+    resolved_source = source or reason
+    open_state = read_sidecar_open_state(project, reason=reason)
+    await publish_open_state_changed(
+        open_state,
+        source=resolved_source,
+        project_generation=project_generation,
+    )
+
+    for client_instance_id in connected_editor_client_instance_ids():
+        snapshot = editor_runtime_build_connect_snapshot(
+            client_instance_id=client_instance_id,
+            reason=reason,
+        )
+        file_obj = snapshot.get("file")
+        if isinstance(file_obj, dict):
+            file_obj["reason"] = reason
+            file_obj["request_id"] = (
+                f"project_switch_{int(time.time() * 1000)}_{client_instance_id}"
+            )
+        await _emit_editor_rpc_notification_to_room(
+            EDITOR_RPC_NOTIFICATION_STATE_SSOT,
+            snapshot,
+            room=client_presentation_room(client_instance_id),
+        )
+        client_foreground_obj = snapshot.get("clientForeground")
+        if isinstance(client_foreground_obj, dict):
+            await publish_client_foreground_changed(
+                open_state,
+                cast(
+                    ClientForegroundPayload,
+                    cast(object, client_foreground_obj),
+                ),
+                source=resolved_source,
+                project_generation=project_generation,
+            )
+
+    return dict(open_state)
 
 
 async def _emit_editor_rpc_notification_to_room(

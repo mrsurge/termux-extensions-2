@@ -36,7 +36,6 @@ class ProjectServiceDeps:
     create_project: Callable[[str, str], JsonObject]
     format_label: Callable[[str | None], str]
     get_sidecar_path: Callable[[str], Path]
-    emit_explorer_project_opened: Callable[[JsonObject], Awaitable[None]] | None = None
 
 
 async def _ignore_async_errors(fn: Callable[[], Awaitable[object | None]]) -> None:
@@ -209,16 +208,6 @@ async def open_project(
     sync_active_explorer_dispatchers_project_root(project_root)
     state = deps.build_state_payload()
     lookup_after = lookup_project(deps, display_path)
-    project_opened_payload: JsonObject = {
-        "path": display_path,
-        "resolved_path": str(project_root),
-        "new_sidecar": switch_result.was_new_sidecar,
-        "source": reason,
-    }
-    emit_explorer_project_opened = deps.emit_explorer_project_opened
-    if emit_explorer_project_opened is not None:
-        await _ignore_async_errors(lambda: emit_explorer_project_opened(project_opened_payload))
-
     return {
         "ok": True,
         "path": display_path,

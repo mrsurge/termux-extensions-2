@@ -13,7 +13,6 @@ from ..frontend_rpc_codec import (
     require_msgpack_v1_auth,
 )
 from ..client_presentation import (
-    ClientPresentationIdentity,
     client_presentation_identity_from_environ,
     client_presentation_room,
 )
@@ -35,6 +34,11 @@ from .editor_rpc_contract import (
     coerce_jsonrpc_request_envelope,
 )
 from .editor_rpc_dispatch import dispatch_editor_rpc_request
+from .editor_client_registry import (
+    editor_client_identity,
+    register_editor_client,
+    unregister_editor_client,
+)
 from .editor_rpc_emit import emit_editor_rpc_error, emit_editor_rpc_notification, emit_editor_rpc_result
 from .editor_ws import (
     editor_runtime_active_project,
@@ -61,8 +65,6 @@ from .editor_ws import (
 
 
 class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
-    _client_identity_by_sid: dict[str, ClientPresentationIdentity] = {}
-
     async def _emit_to_sid(self, sid: str, event_name: str, payload: bytes) -> None:
         emit_to_room = cast(Callable[..., Awaitable[object]], self.emit)
         await emit_to_room(event_name, payload, room=sid)
@@ -119,7 +121,7 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
         except ValueError as exc:
             raise ConnectionRefusedError(str(exc)) from exc
         assert identity is not None
-        self._client_identity_by_sid[sid] = identity
+        register_editor_client(sid, identity)
         enter_room = cast(Callable[..., Awaitable[object]], self.enter_room)
         await enter_room(sid, "code_te2")
         await enter_room(sid, client_presentation_room(identity["clientInstanceId"]))
@@ -152,7 +154,7 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
                 pass
 
     async def on_disconnect(self, sid: str, reason: object | None = None) -> None:
-        identity = self._client_identity_by_sid.pop(sid, None)
+        identity = unregister_editor_client(sid)
         try:
             leave_room = cast(Callable[..., Awaitable[object]], self.leave_room)
             await leave_room(sid, "code_te2")
@@ -165,7 +167,7 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
             pass
 
     def _client_id(self, sid: str) -> str:
-        identity = self._client_identity_by_sid.get(sid)
+        identity = editor_client_identity(sid)
         if identity is None:
             raise EditorRpcProtocolError(JSONRPC_INVALID_PARAMS, "client_identity_missing")
         return identity["clientInstanceId"]

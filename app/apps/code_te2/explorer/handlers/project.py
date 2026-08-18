@@ -108,17 +108,6 @@ async def handle_git_clone(
     )
     context.set_project_root(switch_result.project_root)
 
-    await context.emit_personal(
-        "explorer.project.opened",
-        {
-            "path": switch_result.display_path,
-            "resolved_path": str(switch_result.project_root),
-            "new_sidecar": switch_result.was_new_sidecar,
-            "openState": switch_result.open_state,
-        },
-        None,
-    )
-
     op_id = worker_git_service.new_git_job_op_id("git_clone")
     remember_tracked_job(switch_result.project_root, context.tracked_job_ids, op_id)
     try:

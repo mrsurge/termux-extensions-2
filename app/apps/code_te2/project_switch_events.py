@@ -44,6 +44,7 @@ async def _handle_project_switch_started_event(event: WorkerEvent) -> None:
 
 async def _handle_project_switch_finished_event(event: WorkerEvent) -> None:
     await _emit_project_switch_notification(event, phase="end")
+    await _emit_explorer_project_opened(event)
 
 
 async def _emit_project_switch_notification(
@@ -106,6 +107,9 @@ def _project_switch_payload(
     open_state = event_payload_object(event, "openState")
     if open_state:
         payload["openState"] = open_state
+    new_sidecar = raw_payload.get("new_sidecar")
+    if isinstance(new_sidecar, bool):
+        payload["new_sidecar"] = new_sidecar
     return payload
 
 
@@ -163,3 +167,27 @@ async def _emit_explorer_search_reset(payload: JsonObject) -> None:
         )
     except Exception as exc:
         logger.debug("[project_switch_events] explorer search reset emit failed: %s", exc)
+
+
+async def _emit_explorer_project_opened(event: WorkerEvent) -> None:
+    project = event.get("project_root")
+    if not project:
+        return
+    payload = _project_switch_payload(event, phase="end", project=project)
+    try:
+        from .explorer.transport.rpc_emit import emit_explorer_rpc_notification
+
+        await emit_explorer_rpc_notification(
+            "explorer.project.opened",
+            {
+                "path": payload.get("displayPath") or project,
+                "resolved_path": project,
+                "projectPath": project,
+                "new_sidecar": payload.get("new_sidecar") is True,
+                "openState": payload.get("openState"),
+                "source": payload.get("source") or "project_switch",
+                "switchId": payload.get("switchId") or "",
+            },
+        )
+    except Exception as exc:
+        logger.debug("[project_switch_events] explorer project-opened emit failed: %s", exc)

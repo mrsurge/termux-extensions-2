@@ -457,6 +457,15 @@ notifications remain document-membership facts and never clear or dispose a
 client's Monaco model; exact-client SSOT and file-open notifications exclusively
 own visible model lifetime.
 
+A project-root switch remains shared and atomic across every connected client
+even though visible foreground ownership is client-scoped. After the new
+sidecar is installed, the backend publishes shared membership once and sends
+one exact `editor.state.ssot` snapshot to each connected stable client. A
+client whose new-project foreground is explicitly empty receives
+`{ path: null }`, which clears its stale Monaco model. The successful
+`ProjectSwitchFinished` event is the sole global `explorer.project.opened`
+projection; failures before that event publish no completion.
+
 ### Drafts (project sidecar / session_cache)
 Drafts are stored in project sidecar "session_cache" entries:
 - key = absolute file path
@@ -699,6 +708,7 @@ Behavior:
 | `explorer.search.more.result` | More cached search results response. |
 | `explorer.search.moreInFile.result` | More cached matches for one file. |
 | `explorer.search.cancelled` | Search cancellation acknowledgement. |
+| `explorer.project.opened` | One global successful project-switch projection emitted from `ProjectSwitchFinished`; failed switches do not publish it. |
 
 ### Draft decoration pipeline
 When a file is edited:

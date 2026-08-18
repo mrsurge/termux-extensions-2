@@ -344,6 +344,48 @@ test('shared document membership never registers an exact-client model teardown'
   assert.equal(notificationHandlers.has('editor.file.opened'), true);
 });
 
+test('an empty exact-client SSOT clears the old project model', async () => {
+  const { registerEditorSocketConnectionHandlers } = await importTypeScript(
+    'monaco_editor/editor_socket_connection_runtime.ts',
+  );
+  const notificationHandlers = new Map();
+  const cleared = [];
+  const debug = [];
+  const deps = new Proxy({
+    rpcNotifications: {
+      onNotification(method, handler) {
+        notificationHandlers.set(method, handler);
+        return () => notificationHandlers.delete(method);
+      },
+    },
+    setCachedPrefs() {},
+    clearActiveModel(reason) {
+      cleared.push(reason);
+    },
+    updateDebug(value) {
+      debug.push(value);
+    },
+  }, {
+    get(target, property) {
+      if (property in target) return target[property];
+      return () => {};
+    },
+  });
+
+  registerEditorSocketConnectionHandlers({ on() {} }, deps);
+  notificationHandlers.get('editor.state.ssot')({
+    project: '/workspace/new-project',
+    currentPath: null,
+    clientForeground: {
+      clientInstanceId: 'client_aaaaaaaaaaaa',
+      path: null,
+    },
+  });
+
+  assert.deepEqual(cleared, ['ssot_empty']);
+  assert.deepEqual(debug, ['ws=ssot-empty']);
+});
+
 test('required editor publications use request-response transport without volatile replay', async () => {
   const { createEditorRpcTransport } = await importTypeScript(
     'monaco_editor/editor_rpc_transport.ts',

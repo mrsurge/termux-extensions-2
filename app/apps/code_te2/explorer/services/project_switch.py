@@ -136,6 +136,7 @@ async def switch_project_connection(
                 "switchId": switch_id,
                 "adapterStatus": adapter_status,
                 "status": "ready" if adapter_status != "error" else "error",
+                "new_sidecar": was_new_sidecar,
                 "openState": open_state if isinstance(open_state, dict) else None,
             },
         )
