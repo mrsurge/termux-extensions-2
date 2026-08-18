@@ -31,7 +31,18 @@ if (!nativeBridge && !parentBridge) {
 let nextRequestId = 0;
 let cachedSettings = null;
 let cachedBrowserFrameworkOrigin = null;
+let cachedLocalFrameworkState = null;
 const pendingRequests = new Map();
+const localFrameworkListeners = new Set();
+
+window.addEventListener("message", (event) => {
+  if (event.source !== globalThis.parent) return;
+  if (event.data?.type !== "te2-desktop:local-framework-state") return;
+  const state = event.data.state;
+  if (!state || typeof state !== "object") return;
+  cachedLocalFrameworkState = state;
+  for (const listener of localFrameworkListeners) listener(state);
+});
 
 globalThis.__te2NativeReply = (id, ok, value) => {
   const key = String(id);
@@ -70,7 +81,6 @@ function normalizeSettings(settings = {}) {
     Number.isInteger(parsedPort) && parsedPort >= 1 && parsedPort <= 65535
       ? parsedPort
       : DEFAULT_SETTINGS.frameworkPort;
-
   return { frameworkHost, frameworkPort };
 }
 
@@ -93,6 +103,18 @@ export async function saveSettings(settings) {
     ...cachedSettings,
     connectionChanged: Boolean(result?.connectionChanged),
   };
+}
+
+async function getLocalFrameworkState() {
+  const state = await nativeRequest("get_local_framework_state");
+  cachedLocalFrameworkState = state;
+  return state;
+}
+
+function onLocalFrameworkState(listener) {
+  localFrameworkListeners.add(listener);
+  if (cachedLocalFrameworkState) listener(cachedLocalFrameworkState);
+  return () => localFrameworkListeners.delete(listener);
 }
 
 function getFrameworkOrigin(settings) {
@@ -286,6 +308,14 @@ export const desktopShellHost = {
     nativeRequest("upsert_framework_bookmark", bookmark),
   deleteFrameworkBookmark: (name) =>
     nativeRequest("delete_framework_bookmark", { name }),
+  getLocalFrameworkConfig: () => nativeRequest("get_local_framework_config"),
+  saveLocalFrameworkConfig: (config) =>
+    nativeRequest("save_local_framework_config", config),
+  getLocalFrameworkState,
+  startLocalFramework: () => nativeRequest("start_local_framework"),
+  stopLocalFramework: () => nativeRequest("stop_local_framework"),
+  useLocalFramework: () => nativeRequest("use_local_framework"),
+  onLocalFrameworkState,
   getFrameworkStatus,
   getFwsStatus: () => nativeRequest("get_fws_status"),
   getAssetStatus: () => nativeRequest("get_asset_status"),

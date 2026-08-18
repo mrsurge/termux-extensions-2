@@ -32,6 +32,14 @@ refreshButton?.addEventListener("click", async () => {
   }
 });
 
+window.addEventListener("te2:launcher-refresh", () => {
+  void Promise.all(
+    extensionInstances.map((instance) => instance?.refresh?.()),
+  ).catch((error) => {
+    desktopShellHost.toast(error?.message || "Launcher refresh failed");
+  });
+});
+
 window.addEventListener(
   "pagehide",
   () => {

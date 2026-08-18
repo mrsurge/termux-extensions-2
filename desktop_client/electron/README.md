@@ -87,8 +87,12 @@ The packaged `TE2Desktop` launcher supplies `--no-sandbox` to the bundled
   held native focus, losing that focus closes it through its normal lifecycle;
   a same-turn focus recovery cancels the pending close.
 
-Settings persist in `~/.config/te2/desktop-shell.json`; shared installed assets
-live in `~/.local/share/te2/desktop_assets` unless their XDG roots are changed.
+Connection/bookmark/zoom settings persist in
+`~/.config/te2/desktop-shell.json`. Local framework launch policy persists
+separately in `~/.config/te2/desktop-local-framework.json`; before that file is
+created, Electron shows unsaved defaults and PATH-based `te2` detection. Shared
+installed assets live in `~/.local/share/te2/desktop_assets` unless their XDG
+roots are changed.
 
 Useful smoke variables are `TE2_DESKTOP_EXIT_AFTER_SECONDS`,
 `TE2_DESKTOP_AUTO_OPEN`, `TE2_DESKTOP_APP_ID`, and

@@ -26,6 +26,13 @@ import {
   frameworkConnectionError,
 } from "./framework-errors";
 import { startFrameworkRelay, type FrameworkRelay } from "./framework-relay";
+import {
+  LocalFrameworkController,
+} from "./local-framework-controller";
+import {
+  readLocalFrameworkConfig,
+  writeLocalFrameworkConfig,
+} from "./local-framework-config";
 import { DESKTOP_MODAL_WINDOW_POLICY } from "./modal-window-policy";
 import { RunTargetRelayManager } from "./run-target-relay";
 import { ElectronRunProfileRuntime } from "./run-profile-runtime";
@@ -68,6 +75,8 @@ import type {
   AssetUpdateResult,
   DesktopFrameworkBookmarkView,
   DesktopShellSettings,
+  LocalFrameworkConfigView,
+  LocalFrameworkState,
   NativeRequestMethod,
 } from "../shared/contracts";
 import { settleNativeRequest } from "../shared/native-request-contracts";
@@ -114,6 +123,8 @@ let uiIpcClient: ElectronUiIpcClient | null = null;
 let runProfileRuntime: ElectronRunProfileRuntime | null = null;
 let detachedSurfaceRegistry: DetachedSidebarSurfaceRegistry | null = null;
 let dialogHost: DesktopDialogHost | null = null;
+let localFrameworkController: LocalFrameworkController | null = null;
+let localFrameworkConfig: LocalFrameworkConfigView;
 let electronClientIdentity: ElectronClientIdentity;
 const surfaceWindows = new Set<BrowserWindow>();
 const trustedFrameworkContents = new Set<WebContents>();
@@ -754,6 +765,7 @@ async function saveConnection(params: Record<string, unknown>): Promise<{
     relay.retarget(nextOrigin);
     closeAppView();
   }
+  localFrameworkController?.publishCurrent();
   return {
     settings,
     browserFrameworkOrigin: relay.browserOrigin,
@@ -791,6 +803,27 @@ async function removeFrameworkBookmark(
     ),
   });
   return frameworkBookmarksResult();
+}
+
+async function refreshLocalFrameworkConfiguration(): Promise<LocalFrameworkConfigView> {
+  if (!localFrameworkController?.ownsRunningProcess()) {
+    localFrameworkConfig = await readLocalFrameworkConfig();
+  }
+  return localFrameworkConfig;
+}
+
+async function saveLocalFrameworkConfiguration(
+  params: Record<string, unknown>,
+): Promise<{ config: LocalFrameworkConfigView; state: LocalFrameworkState }> {
+  if (localFrameworkController?.ownsRunningProcess()) {
+    throw new Error("Stop the Electron-owned local framework before changing its launch configuration");
+  }
+  localFrameworkConfig = await writeLocalFrameworkConfig(params);
+  if (!localFrameworkController) {
+    throw new Error("Local framework controller is unavailable");
+  }
+  const state = await localFrameworkController.refresh();
+  return { config: localFrameworkConfig, state };
 }
 
 async function viewAction(params: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -832,6 +865,30 @@ async function nativeRequest(
   if (method === "get_framework_bookmarks") return frameworkBookmarksResult();
   if (method === "upsert_framework_bookmark") return saveFrameworkBookmark(params);
   if (method === "delete_framework_bookmark") return removeFrameworkBookmark(params);
+  if (method === "get_local_framework_config") {
+    return refreshLocalFrameworkConfiguration();
+  }
+  if (method === "save_local_framework_config") {
+    return saveLocalFrameworkConfiguration(params);
+  }
+  if (method === "get_local_framework_state") {
+    if (!localFrameworkController) throw new Error("Local framework controller is unavailable");
+    await refreshLocalFrameworkConfiguration();
+    return localFrameworkController.refresh();
+  }
+  if (method === "start_local_framework") {
+    if (!localFrameworkController) throw new Error("Local framework controller is unavailable");
+    await refreshLocalFrameworkConfiguration();
+    return localFrameworkController.start();
+  }
+  if (method === "stop_local_framework") {
+    if (!localFrameworkController) throw new Error("Local framework controller is unavailable");
+    return localFrameworkController.stop();
+  }
+  if (method === "use_local_framework") {
+    if (!localFrameworkController) throw new Error("Local framework controller is unavailable");
+    return localFrameworkController.useLocal();
+  }
   if (method === "framework_request") {
     return frameworkRequest({
       path: String(params.path || ""),
@@ -939,9 +996,26 @@ async function main(): Promise<void> {
   await protocol.handle(SHELL_SCHEME, localShellResponse);
 
   settings = await readDesktopSettings();
+  localFrameworkConfig = await readLocalFrameworkConfig();
   electronClientIdentity = await readDesktopClientIdentity();
   configuredFrameworkOrigin = frameworkOrigin(settings);
   relay = await startFrameworkRelay(configuredFrameworkOrigin, assets);
+  if (localFrameworkConfig.error) {
+    console.warn(`[te2-local] ${localFrameworkConfig.error}`);
+  }
+  localFrameworkController = new LocalFrameworkController({
+    getLaunchConfig: () => localFrameworkConfig,
+    getSelectedOrigin: () => configuredFrameworkOrigin,
+    selectLocal: async (port) => {
+      await saveConnection({
+        frameworkHost: "127.0.0.1",
+        frameworkPort: port,
+      });
+    },
+    publish: (state: LocalFrameworkState) => {
+      sendToShell("te2-desktop:local-framework-state", state);
+    },
+  });
   runTargetRelays = new RunTargetRelayManager(() => configuredFrameworkOrigin);
   connectElectronUiIpc();
   runProfileRuntime = new ElectronRunProfileRuntime(
@@ -1007,6 +1081,8 @@ async function main(): Promise<void> {
 
 app.on("window-all-closed", () => app.quit());
 app.on("before-quit", () => {
+  localFrameworkController?.shutdownForElectronExit();
+  localFrameworkController = null;
   ipcMain.removeHandler("te2-desktop:app-view-control");
   ipcMain.removeListener(
     "te2-desktop:sidebar-surface-ready",

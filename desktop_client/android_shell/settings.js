@@ -17,6 +17,16 @@ const assetVersion = document.querySelector("#asset-version");
 const assetInterceptor = document.querySelector("#asset-interceptor");
 const assetRoot = document.querySelector("#asset-root");
 const updateAssetsButton = document.querySelector("#update-assets");
+const localFrameworkCommandInput = document.querySelector("#local-framework-command");
+const localFrameworkVenvInput = document.querySelector("#local-framework-venv");
+const localFrameworkPortInput = document.querySelector("#local-framework-port");
+const localFrameworkBroadcastRows = document.querySelector("#local-framework-broadcast");
+const localFrameworkEnvironmentRows = document.querySelector("#local-framework-env");
+const localFrameworkConfigStatus = document.querySelector("#local-framework-config-status");
+const localFrameworkConfigPath = document.querySelector("#local-framework-config-path");
+const saveLocalFrameworkConfigButton = document.querySelector("#save-local-framework-config");
+const addLocalFrameworkBroadcastButton = document.querySelector("#add-local-framework-broadcast");
+const addLocalFrameworkEnvironmentButton = document.querySelector("#add-local-framework-env");
 let frameworkBookmarks = [];
 
 function setStatus(element, state, text) {
@@ -99,6 +109,116 @@ async function loadSettings() {
     "Desktop settings loaded",
   );
   await loadFrameworkBookmarks();
+}
+
+function createRemoveButton(row) {
+  const removeButton = document.createElement("button");
+  removeButton.type = "button";
+  removeButton.className = "secondary-button compact-button local-framework-row-remove";
+  removeButton.textContent = "Remove";
+  removeButton.addEventListener("click", () => row.remove());
+  return removeButton;
+}
+
+function appendBroadcastRow(value = "") {
+  const row = document.createElement("div");
+  row.className = "local-framework-row local-framework-broadcast-row";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.autocomplete = "off";
+  input.spellcheck = false;
+  input.placeholder = "tailscale0";
+  input.value = String(value || "");
+  row.append(input, createRemoveButton(row));
+  localFrameworkBroadcastRows.appendChild(row);
+}
+
+function appendEnvironmentRow(key = "", value = "") {
+  const row = document.createElement("div");
+  row.className = "local-framework-row local-framework-env-row";
+  const keyInput = document.createElement("input");
+  keyInput.type = "text";
+  keyInput.autocomplete = "off";
+  keyInput.spellcheck = false;
+  keyInput.placeholder = "ENV_VARIABLE";
+  keyInput.value = String(key || "");
+  keyInput.dataset.role = "key";
+  const valueInput = document.createElement("input");
+  valueInput.type = "text";
+  valueInput.autocomplete = "off";
+  valueInput.spellcheck = false;
+  valueInput.placeholder = "value";
+  valueInput.value = String(value ?? "");
+  valueInput.dataset.role = "value";
+  row.append(keyInput, valueInput, createRemoveButton(row));
+  localFrameworkEnvironmentRows.appendChild(row);
+}
+
+function renderLocalFrameworkConfig(config) {
+  localFrameworkCommandInput.value = String(config?.command || "");
+  localFrameworkVenvInput.value = String(config?.venvPath || "");
+  localFrameworkPortInput.value = String(config?.port || 8089);
+  localFrameworkBroadcastRows.replaceChildren();
+  for (const selector of Array.isArray(config?.broadcast) ? config.broadcast : []) {
+    appendBroadcastRow(selector);
+  }
+  localFrameworkEnvironmentRows.replaceChildren();
+  for (const [key, value] of Object.entries(config?.env || {})) {
+    appendEnvironmentRow(key, value);
+  }
+  localFrameworkConfigPath.textContent = String(config?.path || "");
+
+  if (config?.error) {
+    setStatus(localFrameworkConfigStatus, "error", config.error);
+    return;
+  }
+  if (config?.commandDetected) {
+    const source = config.commandSource === "detected"
+      ? "Detected from PATH"
+      : config.commandSource === "override"
+        ? "Source override detected"
+        : "Configured command detected";
+    const venv = config.venv
+      ? `; virtual environment ready at ${config.venvPath}`
+      : "";
+    setStatus(localFrameworkConfigStatus, "online", `${source}${venv}`);
+    return;
+  }
+  setStatus(
+    localFrameworkConfigStatus,
+    "offline",
+    "TE2 was not detected; set an absolute command path to enable local launch",
+  );
+}
+
+async function loadLocalFrameworkConfig() {
+  const config = await desktopShellHost.getLocalFrameworkConfig();
+  renderLocalFrameworkConfig(config);
+}
+
+function collectLocalFrameworkConfig() {
+  const broadcast = Array.from(
+    localFrameworkBroadcastRows.querySelectorAll("input"),
+    (input) => input.value.trim(),
+  ).filter(Boolean);
+  const env = {};
+  for (const row of localFrameworkEnvironmentRows.querySelectorAll(".local-framework-env-row")) {
+    const key = row.querySelector('[data-role="key"]')?.value.trim() || "";
+    const value = row.querySelector('[data-role="value"]')?.value || "";
+    if (!key && value) throw new Error("Environment rows with a value require a variable name");
+    if (!key) continue;
+    if (Object.hasOwn(env, key)) {
+      throw new Error(`Environment variable ${key} is listed more than once`);
+    }
+    env[key] = value;
+  }
+  return {
+    command: localFrameworkCommandInput.value.trim(),
+    venvPath: localFrameworkVenvInput.value.trim(),
+    broadcast,
+    port: Number(localFrameworkPortInput.value),
+    env,
+  };
 }
 
 async function testFramework() {
@@ -286,6 +406,35 @@ updateAssetsButton?.addEventListener(
   () => void updateAssets(),
 );
 
+addLocalFrameworkBroadcastButton?.addEventListener("click", () => {
+  appendBroadcastRow();
+});
+
+addLocalFrameworkEnvironmentButton?.addEventListener("click", () => {
+  appendEnvironmentRow();
+});
+
+saveLocalFrameworkConfigButton?.addEventListener("click", async () => {
+  saveLocalFrameworkConfigButton.disabled = true;
+  setStatus(localFrameworkConfigStatus, "loading", "Saving launch configuration");
+  try {
+    const result = await desktopShellHost.saveLocalFrameworkConfig(
+      collectLocalFrameworkConfig(),
+    );
+    renderLocalFrameworkConfig(result?.config || result);
+    desktopShellHost.toast("Local framework launch configuration saved");
+  } catch (error) {
+    setStatus(
+      localFrameworkConfigStatus,
+      "error",
+      error?.message || "Launch configuration save failed",
+    );
+    desktopShellHost.toast(error?.message || "Launch configuration save failed");
+  } finally {
+    saveLocalFrameworkConfigButton.disabled = false;
+  }
+});
+
 saveFrameworkBookmarkButton?.addEventListener("click", async () => {
   saveFrameworkBookmarkButton.disabled = true;
   try {
@@ -307,7 +456,10 @@ saveFrameworkBookmarkButton?.addEventListener("click", async () => {
 });
 
 try {
-  await loadSettings();
+  await Promise.all([
+    loadSettings(),
+    loadLocalFrameworkConfig(),
+  ]);
 
   await Promise.all([
     testFramework(),

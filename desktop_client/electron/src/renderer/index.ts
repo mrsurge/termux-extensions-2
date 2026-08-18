@@ -3,6 +3,7 @@ import type {
   AssetStatus,
   DesktopBridge,
   DesktopShellSettings,
+  LocalFrameworkState,
   NativeRequestMethod,
 } from "../shared/contracts";
 import { MAX_ZOOM_LEVEL, MIN_ZOOM_LEVEL } from "../shared/contracts";
@@ -49,6 +50,18 @@ let toastTimer = 0;
 let frameworkOnline: boolean | null = null;
 let frameworkStatusTimer = 0;
 let frameworkStatusGeneration = 0;
+let localFrameworkState: LocalFrameworkState | null = null;
+
+function publishLocalFrameworkStateToLauncher(): void {
+  if (!localFrameworkState || !launcherView.contentWindow) return;
+  launcherView.contentWindow.postMessage(
+    {
+      type: "te2-desktop:local-framework-state",
+      state: localFrameworkState,
+    },
+    window.location.origin,
+  );
+}
 
 installChromiumScrollbarStyle(document);
 launcherView.addEventListener("load", () => {
@@ -61,6 +74,7 @@ launcherView.addEventListener("load", () => {
       `[te2-desktop] Failed to install launcher scrollbar CSS: ${errorMessage(error)}`,
     );
   }
+  publishLocalFrameworkStateToLauncher();
 });
 
 function toast(message: string): void {
@@ -243,6 +257,10 @@ bridge.onAppNavigation(handleNavigation);
 bridge.onAssetUpdated((version) => {
   setAssetBadge(version);
   toast(`Desktop assets updated to v${version || "unknown"}`);
+});
+bridge.onLocalFrameworkState((state) => {
+  localFrameworkState = state;
+  publishLocalFrameworkStateToLauncher();
 });
 bridge.onSteer((action) => {
   if (action === "home") showHome();

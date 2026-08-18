@@ -1,6 +1,6 @@
 # Desktop User Install And Termux Debian Packaging Tracker
 
-Last updated: 2026-08-17
+Last updated: 2026-08-18
 
 ## Program status
 
@@ -8,8 +8,8 @@ Last updated: 2026-08-17
 |---|---|---|
 | Phase 0: dependency cleanup | Complete, validated, and committed as `0c02c033` | Keep the audited Python runtime input; target locks belong to the selected distribution design |
 | Phase 1: integrate current `main` | Complete and validated at merge `8ac75fbc` | Imported baseline is accepted; Phase 2 may proceed without reopening the merge |
-| Phase 2A: desktop framework bookmarks | Implemented; automated validation complete, live retarget acceptance pending | Existing Electron retarget transaction remains the only connection authority |
-| Phase 2B: launcher local framework | Planned | Electron process controller and launcher capability implementation |
+| Phase 2A: desktop framework bookmarks | Complete; automated and live retarget acceptance passed | Existing Electron retarget transaction remains the only connection authority |
+| Phase 2B: launcher local framework | Implemented; automated validation and live source-mode acceptance passed | Bootstrap stdio lifecycle control plus Electron-owned process controller; TCP remains the data plane |
 | Phase 2C: remaining frontend polish | Intake placeholder only | Each concrete tweak requires separate named scope and approval |
 | Phase 3: client-scoped foreground document | Architecture drafted; implementation not authorized | Shared membership/drafts/WBA remain authoritative; only client presentation is split |
 | Phase 4: Linux desktop user install | Planned; blocked on client/runtime baseline acceptance and Python delivery decision | User-root installer implementation, local acceptance, and publication are distinct actions |
@@ -31,7 +31,7 @@ Last updated: 2026-08-17
 | Desktop settings support one target | `DesktopShellSettings` contains one host/port pair and zoom | Confirmed |
 | Retarget cleanup already exists | `saveConnection` stops Run Target listeners, reconnects UI IPC, clears instrumentation, retargets the relay, and closes the app view | Confirmed; must be reused |
 | Launcher supports frontend extensions | `desktop_client/android_shell/extensions/registry.js` mounts launcher extensions | Confirmed presentation seam |
-| Electron has no local framework process controller | Electron main owns client/runtime relays but does not spawn or retain a TE2 framework child | Confirmed missing capability |
+| Electron originally had no local framework process controller | Electron main owned client/runtime relays but did not spawn or retain a TE2 framework child | Implemented in Phase 2B through the exact bootstrap entrypoint |
 | Electron dominates compressed desktop payload size | Current unpacked directory is about 317 MiB; measured xz stream is about 86.6 MiB, zstd about 102.5 MiB, and gzip about 120.3 MiB | Confirmed |
 | Cargo intermediates are not runtime payload | The bootstrap accepts a final server path; only the validated release executable is required on packaged targets | Confirmed |
 | Uvicorn's native `standard` extras are not required by the current design | Isolated HTTP and WebSocket runtime-bridge smoke passed with explicit `websockets` and without `uvloop` or `httptools` | Pruned and validated |
@@ -88,8 +88,8 @@ Last updated: 2026-08-17
   matching Android's load-then-Save behavior.
 - [x] The existing relay/UI IPC retarget transaction remains connection
   authority.
-- [x] Local framework launch is explicit, loopback-only, and Electron-main
-  owned.
+- [x] Local framework launch is explicit and Electron-main owned; loopback is
+  the default and non-loopback exposure requires configured broadcast selectors.
 - [x] Electron stops only a framework child it spawned and retained.
 - [x] Finish independent Phase 0 cleanup before integrating `main`.
 - [x] Integrate and validate the approved current `main` baseline before any
@@ -190,13 +190,15 @@ Last updated: 2026-08-17
 - [x] Add Bookmark Current, load, and remove controls to desktop Settings.
 - [x] Make bookmark selection fill fields only; require Save to connect.
 - [x] Keep Save routed through the existing `saveConnection` transaction.
-- [ ] Validate relay, UI IPC, Run Target, app-view, and asset behavior after
+- [x] Validate relay, UI IPC, Run Target, app-view, and asset behavior after
   repeated bookmark load plus local/remote Save operations.
 
 ### Phase 2A automated evidence
 
-- Desktop settings schema v1 persists active endpoint, zoom, and at most 16
-  validated bookmarks in the existing atomic `desktop-shell.json` record.
+- Phase 2A desktop settings schema v1 persists the active endpoint, zoom, and
+  at most 16 validated bookmarks in the existing atomic
+  `desktop-shell.json` record. Phase 2B keeps local launch policy out of that
+  connection authority.
 - Malformed records recover entry-by-entry; bookmark upsert/delete uses trimmed,
   case-insensitive names and preserves list position on replacement.
 - Hostname, IPv4, bracketed IPv6, HTTPS, credential rejection, invalid-port,
@@ -206,27 +208,66 @@ Last updated: 2026-08-17
   checks pass.
 - No framework restart, Electron launch, version bump, commit, push, or Android
   change was performed for this implementation slice.
+- User live acceptance confirmed bookmark load/Save retarget behavior before
+  Phase 2B implementation began; Phase 2A was committed and pushed as
+  `0efc731c`.
 
 ## Phase 2B checklist — local framework launcher
 
-- [ ] Add a launcher extension for local framework state/actions.
-- [ ] Add a tested `TE2_DESKTOP_*` exact-executable override for source smoke.
-- [ ] Add native request contracts for capability, state, start, and stop.
-- [ ] Implement an Electron-main `LocalFrameworkController`.
-- [ ] Keep local bind host loopback-only and use the configured local port.
-- [ ] Recognize an existing TE2 process through `/api/health` without claiming
+- [x] Add a launcher extension for local framework state/actions.
+- [x] Add the tested exact absolute `TE2_DESKTOP_TE2_EXECUTABLE` override for
+  source smoke.
+- [x] Add the separate versioned
+  `$TE2_CONFIG_HOME/desktop-local-framework.json` launch contract.
+- [x] Keep an unmanaged source install file-free until Settings Save; prefill
+  its command through Electron-main PATH detection.
+- [x] Validate and atomically persist command, optional venv, broadcast array,
+  port, and bounded environment overrides with private file permissions.
+- [x] Activate a configured venv through `VIRTUAL_ENV` plus a prepended
+  `<venv>/bin` PATH.
+- [x] Add bounded Settings rows for broadcast selectors and environment values.
+- [x] Project command detection/source and venv readiness/load state to the
+  launcher.
+- [x] Add native request contracts for capability, state, start, stop, and Use
+  Local.
+- [x] Implement an Electron-main `LocalFrameworkController`.
+- [x] Keep loopback access and use the configured local port; add external
+  exposure only through explicit `broadcast[]` selectors.
+- [x] Recognize an existing TE2 process through `/api/health` without claiming
   its ownership.
-- [ ] Reject a non-TE2 port collision without choosing a hidden random port.
-- [ ] Spawn only the exact packaged/source-configured TE2 executable.
-- [ ] Use bounded startup readiness and retarget only after success.
-- [ ] Publish process state event-wise to the launcher.
-- [ ] Retain the exact owned child handle.
-- [ ] Stop owned framework through SIGTERM and its existing shutdown sequence.
-- [ ] Never terminate an externally owned TE2 process.
+- [x] Reject a non-TE2 port collision without choosing a hidden random port.
+- [x] Spawn only the exact packaged/source-configured TE2 executable.
+- [x] Add bootstrap `--stdio-control`: stdin NDJSON requests, inherited FD 3
+  NDJSON responses/events, unchanged stdout/stderr, and shutdown on owner EOF.
+- [x] Keep protocol v1 allowlisted to shutdown; reject arbitrary command
+  execution while retaining a versioned extension seam.
+- [x] Use bounded startup readiness and retarget only after success.
+- [x] Publish process state event-wise to the launcher.
+- [x] Retain the exact owned child handle.
+- [x] Stop an owned framework through the stdio shutdown request, then bounded
+  process-group SIGTERM/SIGKILL fallback.
+- [x] Never terminate an externally owned TE2 process.
+- [x] Keep the local launch port in the separate local-framework config rather
+  than duplicating it in desktop connection settings.
 - [ ] Validate start, stop, unexpected exit, startup failure, target switching,
   Electron exit, and relaunch.
-- [ ] Validate the complete source-mode flow through the exact-executable
+- [x] Validate the complete source-mode flow through the exact-executable
   override before packaging begins.
+
+### Phase 2B automated evidence
+
+- Bootstrap parser/protocol/integrated shutdown/owner-EOF tests pass: 27
+  bootstrap tests.
+- Electron controller/config tests cover override/config/PATH command
+  resolution, private atomic persistence, malformed-config recovery, venv and
+  environment precedence, broadcast arguments, TE2/free/collision health
+  classification, external ownership, owned start/select/stop, unexpected
+  exit, and Electron-exit EOF.
+- Electron TypeScript validation passes; all 87 Electron tests pass; the
+  unbundled Electron source compile and launcher JavaScript syntax checks pass.
+- The live shared framework was not restarted or terminated during automated
+  validation. User live acceptance confirmed the source-mode launch/config
+  flow on 2026-08-18; the complete manual failure/lifecycle matrix remains open.
 
 ## Phase 2C checklist — remaining desktop/frontend polish
 
@@ -357,3 +398,4 @@ Last updated: 2026-08-17
 | 2026-08-17 | Phase 0 external dependency cleanup | Pruned obsolete installation metadata and documentation for the absent Termux-LM app, documented core/bootstrap/build/distribution ownership, corrected Code TE2 PTY comments, and passed targeted plus the full repository test suite | Phase 0 complete and validated; commit pending |
 | 2026-08-17 | Terminal installation bootstrap contract | Confirmed the existing canonical TE2 data root, ABI/lock fingerprint, marker, lock, atomic install, validation, and repair behavior; 6 Terminal runtime tests plus the dependency contract test passed | System package prerequisites supply Node/npm; existing Python owns first-use module install and all later validation/repair; no new helper |
 | 2026-08-17 | Linux installation architecture refinement | Compared system-owned Debian layout with the existing canonical TE2/XDG user roots and Termux's user-owned prefix model | Linux moves to a versioned home-directory install with private venv and narrow apt prerequisites; Termux retains its separate `.deb` |
+| 2026-08-18 | Phase 2B source-mode local framework | Automated bootstrap/controller/config/type/build validation plus user live validation of the Electron launcher configuration and local-framework flow | Passed; exact-executable source-mode acceptance complete, with the broader manual failure/lifecycle matrix still open |

@@ -39,6 +39,72 @@
     <section class="settings-section">
       <header class="section-header">
         <div>
+          <h2>Local Framework Launch</h2>
+          <div id="local-framework-config-status" class="status-line" data-state="loading">
+            Loading launch configuration
+          </div>
+        </div>
+      </header>
+      <label class="field" for="local-framework-command">
+        <span>TE2 command</span>
+        <input
+          id="local-framework-command"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="/absolute/path/to/te2"
+        >
+        <small>Auto-detected from PATH until this configuration is saved.</small>
+      </label>
+      <label class="field" for="local-framework-venv">
+        <span>Virtual environment</span>
+        <input
+          id="local-framework-venv"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="/absolute/path/to/venv"
+        >
+        <small>Sets VIRTUAL_ENV and prepends its bin directory to PATH.</small>
+      </label>
+      <label class="field field-port local-framework-port-field" for="local-framework-port">
+        <span>Port</span>
+        <input id="local-framework-port" type="number" inputmode="numeric" min="1" max="65535">
+      </label>
+
+      <div class="local-framework-list-field">
+        <div class="local-framework-list-header">
+          <div>
+            <strong>Broadcast selectors</strong>
+            <small>Leave empty for loopback only. Accepts interfaces, IPs, CIDRs, or all.</small>
+          </div>
+          <button id="add-local-framework-broadcast" class="secondary-button compact-button" type="button">+</button>
+        </div>
+        <div id="local-framework-broadcast" class="local-framework-rows"></div>
+      </div>
+
+      <div class="local-framework-list-field">
+        <div class="local-framework-list-header">
+          <div>
+            <strong>Environment</strong>
+            <small>Additional values passed only to the local TE2 process.</small>
+          </div>
+          <button id="add-local-framework-env" class="secondary-button compact-button" type="button">+</button>
+        </div>
+        <div id="local-framework-env" class="local-framework-rows"></div>
+      </div>
+
+      <div class="section-actions local-framework-config-actions">
+        <span id="local-framework-config-path" class="status-line"></span>
+        <button id="save-local-framework-config" class="primary-button" type="button">
+          Save launch configuration
+        </button>
+      </div>
+    </section>
+
+    <section class="settings-section">
+      <header class="section-header">
+        <div>
           <h2>Framework Bookmarks</h2>
           <div class="status-line">Saved only in this desktop client.</div>
         </div>

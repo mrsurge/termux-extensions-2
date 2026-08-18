@@ -13,6 +13,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable, Generator, Mapping, MutableMapping, Sequence
 from contextlib import contextmanager
@@ -20,7 +21,7 @@ from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv6Address, ip_address, ip_network
 from pathlib import Path
 from types import FrameType
-from typing import Any, cast
+from typing import Any, TextIO, cast
 
 from app.te2_paths import ensure_runtime_home, resolve_te2_paths
 
@@ -29,6 +30,9 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = "8089"
 DEFAULT_RUNTIME_BRIDGE_HOST = "127.0.0.1"
 SERVER_PACKAGE = "te2-server"
+STDIO_CONTROL_FD = 3
+STDIO_CONTROL_PROTOCOL_VERSION = 1
+STDIO_CONTROL_MAX_LINE_BYTES = 64 * 1024
 
 SignalHandler = int | signal.Handlers | Callable[[int, FrameType | None], object]
 
@@ -54,6 +58,7 @@ class BootstrapArgs:
     framework_shells_secret_fingerprint: str | None
     framework_shells_fws_socketio_server_pid: str | None
     framework_shells_run_id: str | None
+    stdio_control: bool
 
 
 @dataclass(frozen=True)
@@ -113,7 +118,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             if command.build_already_done:
                 return 0
             return subprocess.run(command.argv, env=env, check=False).returncode
-        return _run_child(command.argv, env)
+        return _run_child(command.argv, env, stdio_control=args.stdio_control)
 
 
 def _parse_args(argv: Sequence[str] | None) -> BootstrapArgs:
@@ -171,6 +176,14 @@ def _parse_args(argv: Sequence[str] | None) -> BootstrapArgs:
     parser.add_argument("--build-only", action="store_true", help="Build the Rust server and exit without launching it.")
     parser.add_argument("--print-command", action="store_true", help="Print the resolved child command and exit.")
     parser.add_argument(
+        "--stdio-control",
+        action="store_true",
+        help=(
+            "Accept versioned NDJSON lifecycle commands on stdin and emit "
+            "structured responses/events on inherited file descriptor 3."
+        ),
+    )
+    parser.add_argument(
         "--broadcast",
         nargs="+",
         metavar="IP_SUBNET_OR_IFACE",
@@ -223,6 +236,7 @@ def _parse_args(argv: Sequence[str] | None) -> BootstrapArgs:
         framework_shells_secret_fingerprint=cast(str | None, raw.framework_shells_secret_fingerprint),
         framework_shells_fws_socketio_server_pid=cast(str | None, raw.framework_shells_fws_socketio_server_pid),
         framework_shells_run_id=cast(str | None, raw.framework_shells_run_id),
+        stdio_control=cast(bool, raw.stdio_control),
     )
 
 
@@ -752,28 +766,192 @@ def _prime_framework_shells_import(env: dict[str, str]) -> None:
                 os.environ[key] = old_value
 
 
-def _run_child(command: Sequence[str], env: dict[str, str]) -> int:
-    runtime_bridge = _start_runtime_bridge(env)
-    child = subprocess.Popen(command, env=env)
+def _open_stdio_control(enabled: bool) -> TextIO | None:
+    if not enabled:
+        return None
+    try:
+        descriptor = os.dup(STDIO_CONTROL_FD)
+    except OSError as exc:
+        raise SystemExit(
+            f"--stdio-control requires a writable inherited file descriptor {STDIO_CONTROL_FD}"
+        ) from exc
+    return os.fdopen(descriptor, "w", encoding="utf-8", buffering=1)
+
+
+def _stdio_control_response(raw_line: str) -> tuple[dict[str, object], bool]:
+    try:
+        decoded = cast(object, json.loads(raw_line))
+    except json.JSONDecodeError:
+        return _stdio_control_error(None, "invalid_json", "Control request must be valid JSON"), False
+    if not isinstance(decoded, dict):
+        return _stdio_control_error(None, "invalid_request", "Control request must be an object"), False
+    request = cast(dict[str, object], decoded)
+
+    request_id = request.get("id")
+    if not isinstance(request_id, (str, int)) or isinstance(request_id, bool):
+        return _stdio_control_error(None, "invalid_id", "Control request id must be a string or integer"), False
+    if isinstance(request_id, str) and (not request_id or len(request_id) > 128):
+        return _stdio_control_error(None, "invalid_id", "Control request id is empty or too long"), False
+    if request.get("version") != STDIO_CONTROL_PROTOCOL_VERSION:
+        return _stdio_control_error(
+            request_id,
+            "unsupported_version",
+            f"Control protocol version must be {STDIO_CONTROL_PROTOCOL_VERSION}",
+        ), False
+    method = request.get("method")
+    if method != "shutdown":
+        return _stdio_control_error(
+            request_id,
+            "unsupported_method",
+            f"Unsupported control method: {method!r}",
+        ), False
+    return {
+        "version": STDIO_CONTROL_PROTOCOL_VERSION,
+        "type": "response",
+        "id": request_id,
+        "ok": True,
+        "result": {"state": "stopping"},
+    }, True
+
+
+def _stdio_control_error(
+    request_id: object,
+    code: str,
+    message: str,
+) -> dict[str, object]:
+    return {
+        "version": STDIO_CONTROL_PROTOCOL_VERSION,
+        "type": "response",
+        "id": request_id,
+        "ok": False,
+        "error": {"code": code, "message": message},
+    }
+
+
+def _run_stdio_control_reader(
+    input_stream: TextIO,
+    emit: Callable[[Mapping[str, object]], None],
+    request_shutdown: Callable[[str], None],
+    finished: threading.Event,
+) -> None:
+    while not finished.is_set():
+        raw_line = input_stream.readline(STDIO_CONTROL_MAX_LINE_BYTES + 1)
+        if raw_line == "":
+            if not finished.is_set():
+                request_shutdown("owner_eof")
+            return
+        if len(raw_line.encode("utf-8", "replace")) > STDIO_CONTROL_MAX_LINE_BYTES:
+            emit(_stdio_control_error(None, "frame_too_large", "Control request is too large"))
+            remainder = raw_line
+            while remainder and not remainder.endswith("\n"):
+                remainder = input_stream.readline(STDIO_CONTROL_MAX_LINE_BYTES + 1)
+            continue
+        if not raw_line.strip():
+            continue
+        response, shutdown = _stdio_control_response(raw_line)
+        emit(response)
+        if shutdown:
+            request_shutdown("command")
+            return
+
+
+def _run_child(
+    command: Sequence[str],
+    env: dict[str, str],
+    *,
+    stdio_control: bool = False,
+) -> int:
+    control_stream = _open_stdio_control(stdio_control)
+    try:
+        runtime_bridge = _start_runtime_bridge(env)
+    except BaseException:
+        if control_stream is not None:
+            control_stream.close()
+        raise
+    try:
+        child = subprocess.Popen(command, env=env)
+    except BaseException:
+        _stop_process(runtime_bridge, "runtime bridge")
+        if control_stream is not None:
+            control_stream.close()
+        raise
     previous_handlers: dict[signal.Signals, SignalHandler] = {}
+    control_write_lock = threading.Lock()
+    finished = threading.Event()
+    shutdown_started = threading.Event()
+
+    def emit_control(payload: Mapping[str, object]) -> None:
+        if control_stream is None or finished.is_set():
+            return
+        encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+        with control_write_lock:
+            try:
+                control_stream.write(f"{encoded}\n")
+                control_stream.flush()
+            except (BrokenPipeError, OSError, ValueError):
+                pass
+
+    def request_shutdown(reason: str, signum: int = signal.SIGTERM) -> None:
+        if shutdown_started.is_set():
+            return
+        shutdown_started.set()
+        emit_control(
+            {
+                "version": STDIO_CONTROL_PROTOCOL_VERSION,
+                "type": "event",
+                "event": "stopping",
+                "reason": reason,
+            }
+        )
+        if child.poll() is None:
+            _ = child.send_signal(signum)
 
     def forward_signal(signum: int, _frame: FrameType | None) -> object:
         # Let the Rust server run its FWS shutdown-tree sequence first. The
         # runtime bridge stays available for console/MCP traffic until cleanup.
-        if child.poll() is None:
-            child.send_signal(signum)
+        request_shutdown("signal", signum)
 
     for signum in (signal.SIGINT, signal.SIGTERM):
         previous_handlers[signum] = cast(SignalHandler, signal.getsignal(signum))
-        signal.signal(signum, forward_signal)
+        _ = signal.signal(signum, forward_signal)
+
+    if control_stream is not None:
+        emit_control(
+            {
+                "version": STDIO_CONTROL_PROTOCOL_VERSION,
+                "type": "hello",
+                "capabilities": ["shutdown"],
+                "bootstrapPid": os.getpid(),
+                "runtimeBridgePid": runtime_bridge.pid,
+                "serverPid": child.pid,
+            }
+        )
+        threading.Thread(
+            target=_run_stdio_control_reader,
+            args=(sys.stdin, emit_control, request_shutdown, finished),
+            name="te2-stdio-control",
+            daemon=True,
+        ).start()
 
     try:
-        return child.wait()
+        return_code = child.wait()
+        emit_control(
+            {
+                "version": STDIO_CONTROL_PROTOCOL_VERSION,
+                "type": "event",
+                "event": "exited",
+                "exitCode": return_code,
+            }
+        )
+        return return_code
     finally:
+        finished.set()
         _stop_process(runtime_bridge, "runtime bridge")
         _stop_process(child, "Rust framework")
         for signum, handler in previous_handlers.items():
-            signal.signal(signum, handler)
+            _ = signal.signal(signum, handler)
+        if control_stream is not None:
+            control_stream.close()
 
 
 def _env_flag(name: str) -> bool:

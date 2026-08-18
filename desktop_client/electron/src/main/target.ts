@@ -35,7 +35,7 @@ function readPort(value: unknown): number {
     : DEFAULT_PORT;
 }
 
-function validatePort(value: unknown): number {
+export function validateFrameworkPort(value: unknown): number {
   const port = Number(value);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error("Framework port must be an integer between 1 and 65535");
@@ -74,7 +74,7 @@ export function validateFrameworkEndpoint(endpoint: {
 }): FrameworkEndpoint & { frameworkBaseUrl: string } {
   const frameworkHost = String(endpoint.frameworkHost ?? "").trim();
   if (!frameworkHost) throw new Error("Framework host cannot be empty");
-  const frameworkPort = validatePort(endpoint.frameworkPort);
+  const frameworkPort = validateFrameworkPort(endpoint.frameworkPort);
   const candidate = /^[a-z][a-z\d+.-]*:\/\//i.test(frameworkHost)
     ? frameworkHost
     : `http://${frameworkHost}`;

@@ -4,6 +4,7 @@ import type {
   AppNavigation,
   DesktopBridge,
   DesktopSteerAction,
+  LocalFrameworkState,
   NativeRequestMethod,
 } from "../shared/contracts";
 import { unwrapNativeRequestResult } from "../shared/native-request-contracts";
@@ -30,6 +31,16 @@ const bridge: DesktopBridge = {
     };
     ipcRenderer.on("te2-desktop:asset-updated", listener);
     return () => ipcRenderer.off("te2-desktop:asset-updated", listener);
+  },
+  onLocalFrameworkState(callback: (state: LocalFrameworkState) => void) {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      state: LocalFrameworkState,
+    ) => {
+      callback(state);
+    };
+    ipcRenderer.on("te2-desktop:local-framework-state", listener);
+    return () => ipcRenderer.off("te2-desktop:local-framework-state", listener);
   },
   onSteer(callback: (action: DesktopSteerAction) => void) {
     const listener = (_event: Electron.IpcRendererEvent, action: DesktopSteerAction) => {

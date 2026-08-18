@@ -193,6 +193,20 @@ te2 migrate-legacy-roots          # write-free report
 te2 migrate-legacy-roots --json   # write-free structured report
 ```
 
+Electron stores local launch policy separately at
+`$TE2_CONFIG_HOME/desktop-local-framework.json`. When that file is absent,
+Settings presents in-memory defaults and an unsaved `te2` PATH detection; the
+Linux installer later seeds its exact private-venv and command paths. Source
+smokes may still use the higher-priority absolute
+`TE2_DESKTOP_TE2_EXECUTABLE` override. The versioned launch record owns the
+command, optional venv, broadcast selectors, port, and bounded environment
+overrides. An empty broadcast list stays loopback-only. Normal framework
+traffic remains on HTTP/Socket.IO/WebSocket/SSE. The bootstrap's
+`--stdio-control` mode is a desktop lifecycle channel: stdin accepts versioned
+NDJSON control requests, inherited file descriptor 3 returns structured
+responses/events, and stdout/stderr remain ordinary logs. Protocol v1 permits
+only graceful shutdown; it is not an arbitrary command-execution interface.
+
 Legacy-root recovery is deliberately opt-in. After reviewing the dry-run,
 `te2 migrate-legacy-roots --apply` performs the versioned one-time migration
 only while the framework is stopped. The allowlisted legacy source is

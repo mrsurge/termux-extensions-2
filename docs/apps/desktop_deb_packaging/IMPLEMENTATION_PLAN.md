@@ -1,7 +1,8 @@
 # Desktop User Install And Termux Debian Packaging Implementation Plan
 
-Status: planning only. No phase in this document authorizes implementation,
-dependency removal, package publication, version changes, or changes under
+Status: active phased implementation. This document records the approved
+architecture; each implementation phase still requires its own explicit scope.
+It does not authorize package publication, version changes, or changes under
 `android/`.
 
 This plan covers six ordered outcomes:
@@ -167,12 +168,13 @@ before dependency wheels and the Rust server. The earlier 90--110 MiB estimate
 was invalid. Package-size work must account for the TE2 asset payload explicitly
 instead of treating the Python wheel as negligible.
 
-### 1.3 Desktop Settings store one endpoint
+### 1.3 Desktop Settings separate connection and local launch policy
 
-Electron persists `DesktopShellSettings` in
-`$TE2_CONFIG_HOME/desktop-shell.json`. The current schema contains one
-`frameworkHost`, one `frameworkPort`, and `zoomLevel`. Saving a connection
-already performs the important retarget transaction:
+Electron persists `DesktopShellSettings` schema v1 in
+`$TE2_CONFIG_HOME/desktop-shell.json`. It contains one active
+`frameworkHost`/`frameworkPort`, up to 16 named framework bookmarks, and
+`zoomLevel`, but no local-process configuration. Saving a connection performs
+the important retarget transaction:
 
 1. stop native Run Target listeners;
 2. reconnect UI IPC;
@@ -182,6 +184,29 @@ already performs the important retarget transaction:
 
 Saved-target work must reuse that transaction. It must not create a second
 relay or connection authority.
+
+Local launch policy is a separate versioned
+`$TE2_CONFIG_HOME/desktop-local-framework.json` record:
+
+```json
+{
+  "version": 1,
+  "command": "/absolute/path/to/te2",
+  "venvPath": "/absolute/path/to/venv",
+  "broadcast": [],
+  "port": 8089,
+  "env": {}
+}
+```
+
+The file is absent on an unmanaged source install. Electron projects unsaved
+defaults and resolves `te2` from PATH in main-process code only; the renderer
+never executes a shell substitution. Saving Settings creates the record, while
+the Linux installer writes the same contract with its exact private-venv and
+command paths. The source-only absolute `TE2_DESKTOP_TE2_EXECUTABLE` override
+has highest precedence, then the saved command, then unsaved PATH detection.
+An empty broadcast array is loopback-only; a non-empty array maps to the
+existing multi-selector `--broadcast` CLI contract.
 
 The local launcher is a frontend extension registry rooted in
 `desktop_client/android_shell/extensions/`. That is the natural presentation
@@ -356,9 +381,9 @@ usable. A versioned install receipt owns only installed application payloads;
 uninstall never deletes ordinary TE2 configuration, projects, or app state.
 
 The small user-local wrappers invoke the current private venv and exact prebuilt
-server. `te2-desktop` invokes the installed Electron launcher and supplies the
-exact `te2` executable to Electron main through a `TE2_DESKTOP_*` environment
-contract.
+server. Installation writes the versioned desktop local-framework record with
+the current release's exact `te2` command and private venv. The environment
+override remains only a higher-priority source/test seam.
 
 The desktop entry launches the user-local `te2-desktop` wrapper, has a stable
 application id, uses the user-local installed icon, and does not open a
@@ -480,7 +505,6 @@ version
 frameworkHost
 frameworkPort
 frameworkBookmarks[] = { name, frameworkHost, frameworkPort }
-localFrameworkPort
 zoomLevel
 ```
 
@@ -505,38 +529,62 @@ zoomLevel
 ### 5.2 Launcher-owned local framework action
 
 Add a launcher extension that renders local runtime state separately from the
-remote app catalog. It is enabled only when Electron main reports a usable
-packaged/runtime executable. Source development may provide an explicit tested
-`TE2_DESKTOP_*` executable override; the browser renderer never guesses paths.
+remote app catalog. Start is enabled only when Electron main resolves a usable
+command from the source override, saved local-launch record, or unsaved PATH
+detection. An already-running external TE2 on the configured local port may
+still be selected without claiming ownership. The browser renderer never
+searches PATH, executes shell substitutions, or guesses paths.
 
 Electron main owns a `LocalFrameworkController` with these rules:
 
 1. Start is always an explicit user action; there is no automatic local daemon.
-2. The framework binds only to loopback and uses the configured local port.
+2. The framework always retains loopback access and uses the configured local
+   port. It is exposed beyond loopback only through explicit validated
+   `broadcast[]` selectors.
 3. If `/api/health` identifies an existing TE2 server on that port, the client
    may select it but does not claim ownership or stop it.
 4. If the port is occupied by anything else, start fails with a concise error
    and does not silently choose a different endpoint.
-5. A spawned framework uses the exact package launcher/prebuilt server and a
-   bounded `/api/health` readiness check.
+5. A spawned framework uses the exact resolved command, optional validated
+   venv activation, bounded environment overrides, explicit broadcast
+   selectors, and `--stdio-control`. The installed `te2` entry continues through
+   `app.cli.run_rust_framework` into `framework/bootstrap/bootstrap.py`, so the
+   controller does not create a second framework launch architecture.
 6. Only after readiness succeeds does Electron select the local target,
    retarget the existing relay/UI IPC path, and refresh launcher apps.
 7. Electron retains the child handle and exposes starting, running, stopping,
    exited, and failed state to the launcher without renderer polling.
-8. Stop and Electron shutdown send SIGTERM to only the owned bootstrap child,
-   allow its existing Rust/FWS shutdown sequence to run, then use a bounded
-   forced termination only for that child if required.
+8. Stop first sends the allowlisted versioned `shutdown` request through the
+   bootstrap control channel. Electron shutdown sends the same request and
+   closes stdin; stdin EOF is an ownership-loss shutdown signal. If graceful
+   shutdown does not finish within the bound, Electron signals only the owned
+   process group with SIGTERM and then SIGKILL.
 9. Switching back to a remote target does not kill an externally owned local
    framework. Behavior for an Electron-owned child is explicit in the UI and
    covered by tests.
 
-The launcher presents Start/Stop/Use Local state and errors. Settings owns the
-local port and framework bookmarks. Neither surface becomes framework process
-authority; that remains Electron main.
+The launcher presents Start/Stop/Use Local state, the detected command source,
+venv readiness/load status, broadcast exposure, and errors. Settings owns the
+separate versioned launch record and the connection bookmarks. Neither surface
+becomes framework process authority; that remains Electron main.
 
 The source-mode controller and UI can be validated before distribution work.
 Phase 4 later wires the user-installed executable path and performs installed
 acceptance.
+
+The stdio control plane is intentionally narrow and independent from TE2's TCP
+data plane:
+
+- Electron captures the bootstrap's unchanged stdout and stderr and forwards
+  them to the desktop launcher's stdio streams.
+- stdin accepts newline-delimited JSON requests with protocol `version: 1`.
+- inherited file descriptor 3 emits newline-delimited hello, response, and
+  lifecycle event records.
+- protocol v1 allows only `shutdown`; arbitrary command or shell execution is
+  rejected. New control methods can be added later only as explicit allowlisted
+  protocol revisions.
+- HTTP, Socket.IO, WebSocket, SSE, app proxying, and worker IPC remain on their
+  existing transports. The control channel is not a second framework API.
 
 ### 5.3 Remaining small desktop/frontend changes
 
@@ -687,8 +735,9 @@ collaboration design.
    install writes to the same canonical per-user data root, including its
    target-native `node-pty` installation path, fingerprint reuse, marker
    validation, and repair behavior.
-9. Wire and validate the user-installed executable capability used by the Phase
-   2 local-framework controller.
+9. Seed and validate the Phase 2 local-framework config with the installed
+   command and private-venv paths without overwriting later user edits during an
+   ordinary desktop launch.
 10. Install into a clean Debian/Ubuntu target and audit the install receipt,
     permissions, current pointer, wrappers, desktop entry, and payload paths.
 11. Validate `te2 --help`, `/api/health`, desktop launch, app launch, asset

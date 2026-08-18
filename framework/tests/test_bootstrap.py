@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import fcntl
+import io
 import os
 import subprocess
 import sys
@@ -75,6 +76,87 @@ class FrameworkBootstrapTests(unittest.TestCase):
         self.assertFalse(debug_args.release)
         with self.assertRaises(SystemExit):
             self.bootstrap._parse_args(["--release", "--debug"])
+
+    def test_stdio_control_is_explicit(self) -> None:
+        self.assertFalse(self.bootstrap._parse_args([]).stdio_control)
+        self.assertTrue(self.bootstrap._parse_args(["--stdio-control"]).stdio_control)
+
+    def test_stdio_control_accepts_only_versioned_shutdown(self) -> None:
+        response, shutdown = self.bootstrap._stdio_control_response(
+            '{"version":1,"id":"request-1","method":"shutdown"}\n'
+        )
+        self.assertTrue(shutdown)
+        self.assertEqual(response["id"], "request-1")
+        self.assertTrue(response["ok"])
+
+        response, shutdown = self.bootstrap._stdio_control_response(
+            '{"version":1,"id":2,"method":"exec"}\n'
+        )
+        self.assertFalse(shutdown)
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["error"]["code"], "unsupported_method")
+
+    def test_stdio_control_reader_requests_shutdown_on_command_or_owner_eof(self) -> None:
+        emitted: list[dict[str, object]] = []
+        shutdown_reasons: list[str] = []
+        finished = self.bootstrap.threading.Event()
+        self.bootstrap._run_stdio_control_reader(
+            io.StringIO('{"version":1,"id":"stop","method":"shutdown"}\n'),
+            emitted.append,
+            shutdown_reasons.append,
+            finished,
+        )
+        self.assertEqual(shutdown_reasons, ["command"])
+        self.assertTrue(emitted[0]["ok"])
+
+        emitted.clear()
+        shutdown_reasons.clear()
+        self.bootstrap._run_stdio_control_reader(
+            io.StringIO(""),
+            emitted.append,
+            shutdown_reasons.append,
+            finished,
+        )
+        self.assertEqual(shutdown_reasons, ["owner_eof"])
+        self.assertEqual(emitted, [])
+
+    def test_stdio_control_integrates_shutdown_without_mixing_structured_frames_into_logs(self) -> None:
+        class RuntimeBridgeStub:
+            pid = 31001
+
+            @staticmethod
+            def poll() -> int:
+                return 0
+
+        class ControlCapture(io.StringIO):
+            def close(self) -> None:
+                self.flush()
+
+        control = ControlCapture()
+        stdin = io.StringIO('{"version":1,"id":"electron-1","method":"shutdown"}\n')
+        command = [sys.executable, "-c", "import time; time.sleep(30)"]
+        with mock.patch.object(
+            self.bootstrap,
+            "_start_runtime_bridge",
+            return_value=RuntimeBridgeStub(),
+        ), mock.patch.object(
+            self.bootstrap,
+            "_open_stdio_control",
+            return_value=control,
+        ), mock.patch.object(self.bootstrap.sys, "stdin", stdin):
+            return_code = self.bootstrap._run_child(command, os.environ.copy(), stdio_control=True)
+
+        frames = [
+            self.bootstrap.json.loads(line)
+            for line in control.getvalue().splitlines()
+        ]
+        self.assertLess(return_code, 0)
+        self.assertEqual(frames[0]["type"], "hello")
+        self.assertEqual(frames[1]["id"], "electron-1")
+        self.assertTrue(frames[1]["ok"])
+        self.assertEqual(frames[2]["event"], "stopping")
+        self.assertEqual(frames[2]["reason"], "command")
+        self.assertEqual(frames[3]["event"], "exited")
 
     def test_canonical_server_environment_drives_bootstrap_defaults(self) -> None:
         environment = {
