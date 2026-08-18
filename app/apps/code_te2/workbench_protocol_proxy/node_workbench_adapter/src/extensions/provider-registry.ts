@@ -716,8 +716,7 @@ export class ProviderRegistry {
       triggerCharacters,
       supportsResolve,
     });
-    const language = firstSelectorLanguage(selector);
-    if (language) {
+    for (const language of selectorLanguages(selector)) {
       outcome.events.push({
         type: "provider/completions",
         handle,

@@ -4,6 +4,31 @@ import test from "node:test";
 import { provideCompletions } from "../workbench_protocol_proxy/node_workbench_adapter/dist/extensions/intelligence/completions.mjs";
 import { ProviderRegistry } from "../workbench_protocol_proxy/node_workbench_adapter/dist/extensions/provider-registry.mjs";
 
+test("completion registration publishes every advertised selector language", () => {
+  const registry = new ProviderRegistry();
+  const outcome = registry.registerFromRequest("$registerCompletionsProvider", [
+    184,
+    [
+      { language: "c", scheme: "vscode-remote" },
+      { language: "cpp", scheme: "vscode-remote" },
+      { language: "cuda-cpp", scheme: "vscode-remote" },
+    ],
+    [".", ">"],
+    true,
+  ]);
+
+  assert.deepEqual(
+    outcome.events,
+    ["c", "cpp", "cuda-cpp"].map((language) => ({
+      type: "provider/completions",
+      handle: 184,
+      language,
+      triggerCharacters: [".", ">"],
+      supportsResolve: true,
+    })),
+  );
+});
+
 test("completion dispatch includes every provider matching the exact document", async () => {
   const registry = new ProviderRegistry();
   registry.registerFromRequest("$registerCompletionsProvider", [
