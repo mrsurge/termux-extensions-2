@@ -1,2 +1,0 @@
-# Packages that require tur-repo.
-# Code TE2 installs its pinned private Code Server runtime on explicit request.

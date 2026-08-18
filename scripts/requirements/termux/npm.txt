@@ -1,2 +1,0 @@
-# Termux prefers apt over npm.
-# Leave this empty unless we intentionally standardize an npm fallback.

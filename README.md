@@ -54,24 +54,53 @@ under `app/apps/*/manifest.json`; there is no built-in `codex_agent` app.
 
 ## Requirements
 
-The supported package requires Python 3.12 or newer, a Rust toolchain with
-Cargo, and Node.js with npm. Git and Framework-Shells are required for the
-normal development workflow. The standalone Terminal uses Node.js at runtime
-and builds its native `node-pty` dependency for the current device on first
-use. Code TE2 can use its built-in Monaco language workers without Code Server.
+TE2's Python runtime requires Python 3.12 or newer. The standalone Terminal
+also requires Node.js and npm: its first launch installs the locked `node-pty`
+and headless xterm modules into TE2's private data root for the current Node
+ABI. Archive Manager additionally needs the platform `libarchive` shared
+library.
+
+The checked-in Code TE2 frontend, WBA backend, and shared browser assets are
+already built or vendored; ordinary runtime does not install npm dependency
+trees for them. The Electron distribution is built before installation
+publication and does
+not install npm dependencies on the user's machine.
+
+A source or Git/pip install also needs Rust with Cargo because the launcher
+builds and caches the framework server. Outside the Terminal's private runtime
+bootstrap, npm is development-only when regenerating Code TE2, WBA, Terminal,
+or Electron bundles. No global npm application packages are required. Git is
+needed to clone the repository or resolve a Git dependency, but the running
+framework's Git implementation is Rust/libgit2 owned.
+
+Some source integrations invoke external tools:
+
+- `aria2c` enables the Aria Downloader worker;
+- `watchexec` enables Code TE2's optional polling watcher; and
+- C/C++ compiler commands enable Code TE2's direct C/C++ Run action.
+
+For installed releases, each retained integration is supplied through the Linux
+prerequisite transaction or Termux package metadata, or removed from the
+product. Users are not sent to repository construction scripts for dependency
+setup.
+
+Code TE2 can use its built-in Monaco language workers without Code Server.
 VS Code extension-host integration uses Code TE2's confirmation-gated pinned
-private Code Server runtime; the platform dependency installer does not install
-a global Code Server package.
+private Code Server runtime; no global Code Server installation is supported.
+The managed Code Server Linux standalone bootstrap may require `curl` or `wget`
+when the user opts in. Its Termux path downloads the pinned package with Python
+and installs the exact package dependencies at that time.
 
-Platform package lists live under `scripts/requirements/`. Install their
-non-Python dependencies with:
+The planned generic Linux desktop install is user-owned beneath the canonical
+TE2 data root. It uses a private Python venv and prebuilt Rust/Electron payloads;
+apt is limited to system prerequisites that are impractical to place in that
+user root. The separate Termux distribution remains a `.deb` because Termux's
+apt prefix and package ownership already belong to the Termux user.
 
-```bash
-./scripts/install_dependencies.sh
-```
-
-Use `--platform termux` or `--platform ubuntu` when auto-detection is not
-appropriate.
+Repository scripts are developer/release construction tooling and may build the
+Linux installer or Termux `.deb`. They are not copied into an ordinary install
+or exposed as user installation entrypoints; users see them only in a cloned or
+editable source checkout.
 
 ## Install And Run
 

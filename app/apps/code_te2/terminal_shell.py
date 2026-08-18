@@ -104,7 +104,7 @@ async def create_editor_shell(
     if existing:
         return _json_object(cast(object, await mgr.describe(existing)))
 
-    # Create dtach-backed shell for persistence
+    # Framework-Shells owns the persistent interactive PTY session.
     subgroups = _terminal_subgroups(project_path)
     rec = await orch.start_from_ref(
         SHELLSPEC_REF,
@@ -154,7 +154,7 @@ async def resize_editor_shell(shell_id: str, cols: int, rows: int) -> bool:
     try:
         await mgr.resize_pty(shell_id, cols, rows)
 
-        # Ensure dtach attach proxy + interactive shells observe the resize.
+        # Ensure the PTY front process and interactive shells observe the resize.
         # Without SIGWINCH reaching the "front" process, readline can keep an
         # old column count and you'll see wrap/overwrite glitches in xterm.
         try:

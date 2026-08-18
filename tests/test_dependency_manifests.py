@@ -31,13 +31,5 @@ class DependencyManifestTests(unittest.TestCase):
         self.assertNotIn("sse-starlette", requirements)
         self.assertIn(FRAMEWORK_SHELLS_REQUIREMENT, requirements)
 
-    def test_platform_manifests_do_not_install_global_code_server(self) -> None:
-        ubuntu_npm = _manifest_entries("scripts/requirements/ubuntu/npm.txt")
-        termux_tur = _manifest_entries("scripts/requirements/termux/tur.txt")
-
-        self.assertNotIn("code-server", ubuntu_npm)
-        self.assertNotIn("code-server", termux_tur)
-
-
 if __name__ == "__main__":
     unittest.main()
