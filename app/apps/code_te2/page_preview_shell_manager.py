@@ -2,11 +2,18 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable
 from dataclasses import dataclass
 import hashlib
 from importlib import import_module
 from pathlib import Path
-from typing import Awaitable, Protocol, cast
+from typing import Protocol, cast
+
+from .run_profile_shell_facts import (
+    record_run_profile_shell,
+    remove_run_profile_shell,
+    run_profile_shell_id,
+)
 
 # Page Preview is a framework-shell service, not a terminal command. The manager
 # reuses the fixed-port shell when alive and keeps launch details out of UI code.
@@ -96,12 +103,13 @@ async def ensure_page_preview_shell(
     port: int = DEFAULT_PORT,
 ) -> PagePreviewShell:
     root = str(Path(project_root).expanduser().resolve(strict=False))
-    label = _label(root, profile_id)
+    label = page_preview_shell_label(root, profile_id)
     lock = _spawn_locks.setdefault(label, asyncio.Lock())
     async with lock:
         mgr = await _framework_get_manager()()
         existing = await mgr.find_shell_by_label(label, status="running")
         if existing is not None and _is_running(existing):
+            _ = record_run_profile_shell(existing.id, label)
             return PagePreviewShell(
                 shell_id=existing.id,
                 label=label,
@@ -134,6 +142,7 @@ async def ensure_page_preview_shell(
             record_spec_id=f"service:{APP_ID}:page-preview",
             wait_ready=True,
         )
+        _ = record_run_profile_shell(shell.id, label)
         return PagePreviewShell(shell_id=shell.id, label=label, url=_url(port), reused=False)
 
 
@@ -141,13 +150,12 @@ async def page_preview_shell_state(
     *, project_root: str, profile_id: str
 ) -> PagePreviewShellState:
     root = str(Path(project_root).expanduser().resolve(strict=False))
-    label = _label(root, profile_id)
-    mgr = await _framework_get_manager()()
-    shell = await mgr.find_shell_by_label(label, status="running")
+    label = page_preview_shell_label(root, profile_id)
+    shell_id = run_profile_shell_id(label)
     return PagePreviewShellState(
-        shell_id=shell.id if _is_running(shell) else "",
+        shell_id=shell_id,
         label=label,
-        running=_is_running(shell),
+        running=bool(shell_id),
     )
 
 
@@ -155,15 +163,17 @@ async def stop_page_preview_shell(
     *, project_root: str, profile_id: str
 ) -> PagePreviewShellState:
     root = str(Path(project_root).expanduser().resolve(strict=False))
-    label = _label(root, profile_id)
+    label = page_preview_shell_label(root, profile_id)
     lock = _spawn_locks.setdefault(label, asyncio.Lock())
     async with lock:
         mgr = await _framework_get_manager()()
         shell = await mgr.find_shell_by_label(label, status="running")
-        if not _is_running(shell):
+        if shell is None or not _is_running(shell):
+            _ = remove_run_profile_shell(label=label)
             return PagePreviewShellState(shell_id="", label=label, running=False)
         shell_id = shell.id
-        await mgr.terminate_shell(shell_id, force=True)
+        _ = await mgr.terminate_shell(shell_id, force=True)
+        _ = remove_run_profile_shell(shell_id=shell_id, label=label)
         return PagePreviewShellState(shell_id=shell_id, label=label, running=False)
 
 
@@ -182,7 +192,7 @@ async def _find_preview_port_conflict(
     return None
 
 
-def _label(project_root: str, profile_id: str) -> str:
+def page_preview_shell_label(project_root: str, profile_id: str) -> str:
     return f"page-preview:{APP_ID}:{_project_hash(project_root)}:{_hash_text(profile_id)}"
 
 

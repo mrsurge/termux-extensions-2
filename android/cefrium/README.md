@@ -11,7 +11,7 @@ runtime from entering Gecko builds.
 
 ## Build
 
-The module pins the Cefrium SDK and Gradle plugin to `0.6.3`, targets arm64, and
+The module pins the Cefrium SDK and Gradle plugin to `0.7.0`, targets arm64, and
 requires Android API 29 or newer.
 
 Check free space before starting Gradle and stop if less than 2 GB is available:
@@ -19,7 +19,7 @@ Check free space before starting Gradle and stop if less than 2 GB is available:
 ```bash
 df -Pk .
 cd android
-./linux-sdk-env.sh ./gradlew :cefrium:testDebugUnitTest :cefrium:assembleDebug
+./termux-sdk-env.sh ./gradlew :cefrium:testDebugUnitTest :cefrium:assembleDebug
 ```
 
 The debug APK is written to:
@@ -63,14 +63,41 @@ The activity provides the shared launcher and Settings UI, native
 Home/Reload/Recents/Lock/Quit/Tools controls, app-scoped quit, native context
 menus, trusted-localhost clipboard permission, file-picker result forwarding,
 renderer recovery, lifecycle pause/resume, native diagnostics, and TE2 console
-access.
+access. App pages carry an explicit `te2_renderer=cefrium` marker. An
+exact-relay-origin query handler provides stable native client identity and
+validated Run Profile surface registration without waiting for Gecko-only
+WebExtension APIs.
 
-The public Cefrium SDK does not expose the CDP transport required by TE2's
-native Inspector, so the Inspector tab reports that limitation. UI IPC remains
-connected for focus signals, but this implementation does not reflect into
-Chromium internals to install Gecko's native `InputConnection` wrapper.
+Tools overlay visibility and the selected tab persist in Android-owned state.
+Console and a persistent Processes browser are supported; Processes loads the
+relay-owned `/fws` page. Remote-app health uses the same three-consecutive-
+authoritative-failures rule as GeckoView, while transport or invalid-payload
+failures preserve the current app.
+
+The high-level Cefrium wrapper does not expose CDP, but the bundled Chromium
+runtime includes an application-private `DevToolsServer`. Cefrium relays that
+abstract-domain socket through a dynamic loopback-only listener, discovers page
+targets through one browser control channel, and routes the selected flattened
+session to the persistent Inspector browser through `cefriumQuery`. The native
+target picker and selected target are Android-owned; framework sockets are not
+part of this CDP path. UI IPC remains connected for focus signals, but this
+implementation does not reflect into Chromium internals to install Gecko's
+native `InputConnection` wrapper.
 Browser-side Monaco and xterm Android input behavior must be validated on a
 device before deciding whether a public Cefrium integration point is needed.
+
+Cefrium omits Chromium's selection ActionMode host callback. A narrow
+same-package `WebContents` shim installs a callback that delegates to Chromium's
+own `ActionModeCallbackHelper` and enables its SurfaceControl magnifier. Native
+selection commands remain renderer-owned; they are not reproduced in
+JavaScript.
+
+Run Profile `devRuntime` surfaces are validated and retained by exact
+`surfaceId`, but Cefrium reports `cachePolicy=false` and
+`consoleInjection=false`. Run Target listeners bypass `AndroidFrameworkRelay`,
+and Cefrium's public API cannot mutate response headers or inject into an exact
+cross-origin child frame. Do not replace those missing APIs with a partial HTTP
+parser in the byte-for-byte relay.
 
 ## Validation Baseline
 
@@ -86,5 +113,5 @@ The desktop Android build environment has verified:
 - Android build-tools 36 16 KB ZIP alignment
 - `PT_LOAD` alignment of `0x4000` or greater for every packaged native library
 
-Physical-device rendering, keyboard/touch behavior, context menus, clipboard,
+Physical-device Inspector lifecycle, selection actions/magnifier, keyboard,
 file picking, media, and renderer recovery remain device-validation items.

@@ -21,37 +21,38 @@
                 android:id="@+id/btnHome"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Home" />
+                android:text="@string/native_action_home" />
 
             <Button
                 android:id="@+id/btnReload"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Reload" />
+                android:text="@string/native_action_reload" />
 
             <Button
                 android:id="@+id/btnRecents"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Recents" />
+                android:text="@string/native_action_recents" />
 
             <Button
                 android:id="@+id/btnLock"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Lock" />
+                android:text="@string/native_action_lock" />
 
             <Button
                 android:id="@+id/btnQuit"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Quit" />
+                android:text="@string/native_action_quit" />
 
             <Button
                 android:id="@+id/btnConsole"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="⚙️" />
+                android:contentDescription="@string/native_action_tools"
+                android:text="@string/native_action_tools_symbol" />
         </LinearLayout>
 
         <FrameLayout
@@ -85,7 +86,7 @@
                     android:id="@+id/btnConsoleBack"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Back" />
+                    android:text="@string/native_action_back" />
 
                 <TextView
                     android:id="@+id/consoleTitle"
@@ -103,13 +104,13 @@
                     android:id="@+id/btnConsoleStart"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Flush Cache" />
+                    android:text="@string/native_action_flush_cache" />
 
                 <Button
                     android:id="@+id/btnUpdateTe2"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Update UI" />
+                    android:text="@string/native_action_update_ui" />
             </LinearLayout>
 
             <LinearLayout
@@ -125,14 +126,21 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="Console" />
+                    android:text="@string/native_tools_console" />
 
                 <Button
                     android:id="@+id/btnToolsInspector"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="Inspector" />
+                    android:text="@string/native_tools_inspector" />
+
+                <Button
+                    android:id="@+id/btnToolsProcesses"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/native_tools_processes" />
             </LinearLayout>
 
             <androidx.compose.ui.platform.ComposeView
@@ -149,16 +157,41 @@
                 android:background="#292A2D"
                 android:visibility="gone">
 
-                <TextView
-                    android:id="@+id/inspectorStatus"
+                <Spinner
+                    android:id="@+id/inspectorTargetPicker"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_gravity="top"
+                    android:contentDescription="@string/native_tools_inspector"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp" />
+
+                <FrameLayout
+                    android:id="@+id/inspectorBrowserContainer"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    android:gravity="center"
-                    android:padding="24dp"
-                    android:text="Cefrium SDK 0.6.3 does not expose the CDP transport required by the native inspector."
-                    android:textColor="#FFFFFF"
-                    android:textIsSelectable="true" />
+                    android:layout_marginTop="48dp">
+
+                    <TextView
+                        android:id="@+id/inspectorStatus"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="#292A2D"
+                        android:gravity="center"
+                        android:padding="24dp"
+                        android:text="@string/cefrium_inspector_unavailable"
+                        android:textColor="#FFFFFF"
+                        android:textIsSelectable="true" />
+                </FrameLayout>
             </FrameLayout>
+
+            <FrameLayout
+                android:id="@+id/processesPanel"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:background="#292A2D"
+                android:visibility="gone" />
         </LinearLayout>
     </FrameLayout>
 

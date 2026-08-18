@@ -63,6 +63,7 @@ async def refresh_run_profile_state(
                 "candidateScope": "owners",
                 "candidates": [],
                 "runningProfiles": [],
+                "shellStateReady": False,
                 "error": str(exc),
             }
 
@@ -154,6 +155,7 @@ def _projection_signature(projection: JsonMap) -> str:
             "candidateScope",
             "candidates",
             "runningProfiles",
+            "shellStateReady",
             "error",
         )
     }

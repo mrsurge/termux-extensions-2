@@ -260,11 +260,9 @@ async def _handle_workspace_switched(ev: JsonObject) -> None:
 async def _handle_webview_snapshot(ev: JsonObject) -> None:
     from pathlib import Path
 
-    from .ui_ipc.sidebar_window_state import get_sidebar_window_state
-    from .ui_ipc.sidebar_ws import (
-        handle_ui_sidebar_window_close_request,
-        handle_ui_sidebar_window_create_request,
-    )
+    from .sidebar_window_events import publish_sidebar_window_state_changed
+    from .ui_ipc.sidebar_window_state import reconcile_extension_webview_slots
+    from .ui_ipc.sidebar_ws import forget_sidebar_window_runtime_state
 
     raw_root = ev.get("workspaceFolder")
     if not isinstance(raw_root, str) or not raw_root.strip():
@@ -321,29 +319,7 @@ async def _handle_webview_snapshot(ev: JsonObject) -> None:
             "viewColumn": _int_value(raw_surface.get("viewColumn"), 0),
         }
 
-    state = _json_object(get_sidebar_window_state())
-    slots = _json_object(state.get("slots", {}))
-    for host_id, raw_slot in slots.items():
-        slot = _json_object(raw_slot)
-        surface = _json_object(
-            slot.get("webviewSurface") or slot.get("webview_surface")
-        )
-        if not surface:
-            continue
-        slot_project = str(surface.get("projectPath") or "").strip()
-        if slot_project != project_root or host_id in admitted:
-            continue
-        _ = await handle_ui_sidebar_window_close_request(
-            {
-                "host_id": host_id,
-                "hostId": host_id,
-                "client_id": "main_page",
-                "source": "wba_event_bridge:webview_snapshot",
-            }
-        )
-
-    if backend_root != project_root:
-        return
+    desired_slots: dict[str, JsonObject] = {}
     for raw_surface in surfaces:
         host_id = str(raw_surface.get("hostId") or "").strip()
         surface = admitted.get(host_id)
@@ -353,28 +329,42 @@ async def _handle_webview_snapshot(ev: JsonObject) -> None:
         url = str(surface["url"])
         icon_url = str(surface.get("iconUrl") or "").strip()
         extension_id = str(surface.get("extensionId") or "Extension")
-        _ = await handle_ui_sidebar_window_create_request(
-            {
-                "kind": "url",
-                "host_id": host_id,
-                "hostId": host_id,
-                "title": title,
-                "label": title,
-                "url": url,
-                "restore_url": url,
-                "load": "eager",
-                "activate": False,
-                "client_id": "main_page",
-                "source": "wba_event_bridge:webview_snapshot",
-                "version": str(raw_surface.get("htmlRevision") or 0),
-                "icon": (
-                    {"kind": "image", "src": icon_url}
-                    if icon_url
-                    else {"kind": "text", "text": extension_id[:2].upper()}
-                ),
-                "webviewSurface": surface,
-            }
+        desired_slots[host_id] = {
+            "kind": "url",
+            "host_id": host_id,
+            "hostId": host_id,
+            "title": title,
+            "label": title,
+            "url": url,
+            "restore_url": url,
+            "load": "eager",
+            "version": str(raw_surface.get("htmlRevision") or 0),
+            "icon": (
+                {"kind": "image", "src": icon_url}
+                if icon_url
+                else {"kind": "text", "text": extension_id[:2].upper()}
+            ),
+            "webviewSurface": surface,
+        }
+
+    result = reconcile_extension_webview_slots(
+        project_root,
+        desired_slots,
+        upsert=backend_root == project_root,
+    )
+    if result.get("changed") is not True:
+        return
+    removed = result.get("removed")
+    if isinstance(removed, list):
+        removed_values = cast(list[object], removed)
+        forget_sidebar_window_runtime_state(
+            [host_id for host_id in removed_values if isinstance(host_id, str)]
         )
+    await publish_sidebar_window_state_changed(
+        _json_object(result.get("state", {})),
+        source="wba_event_bridge:webview_snapshot",
+        sidebar_scope="global",
+    )
 
 
 def _event_workspace_root(ev: JsonObject) -> str | None:

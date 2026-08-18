@@ -160,18 +160,19 @@ class UiIpcMessagePackTests(unittest.IsolatedAsyncioTestCase):
 
         namespace.enter_room = enter_room  # type: ignore[method-assign]
         namespace.emit = emit  # type: ignore[method-assign]
-        with (
-            patch("app.apps.code_te2.ui_ipc.ui_ipc_ws.get_history_store") as history,
-            patch("app.apps.code_te2.ui_ipc.ui_ipc_ws.get_project_root", return_value=""),
-        ):
-            history.return_value.get_active_project.return_value = ""
+        with patch(
+            "app.apps.code_te2.ui_ipc.ui_ipc_ws._emit_browser_connect_adapter_state",
+            new=AsyncMock(),
+        ) as emit_adapter_state:
             await namespace.on_connect(
                 "ui-sid",
                 {},
                 {RPC_CODEC_AUTH_FIELD: RPC_CODEC_MSGPACK_V1},
             )
+            await asyncio.sleep(0)
 
         self.assertEqual([("ui-sid", "ui_ipc")], entered)
+        emit_adapter_state.assert_awaited_once()
 
     async def test_native_ui_connect_joins_native_room_and_receives_route_snapshot(self) -> None:
         namespace = UIIPCNamespace("/ui_ipc")
@@ -201,15 +202,10 @@ class UiIpcMessagePackTests(unittest.IsolatedAsyncioTestCase):
         namespace.enter_room = enter_room  # type: ignore[method-assign]
         namespace.save_session = save_session  # type: ignore[method-assign]
         namespace.emit = emit  # type: ignore[method-assign]
-        with (
-            patch("app.apps.code_te2.ui_ipc.ui_ipc_ws.get_history_store") as history,
-            patch("app.apps.code_te2.ui_ipc.ui_ipc_ws.get_project_root", return_value=""),
-            patch(
-                "app.apps.code_te2.host.run_target_service.list_run_target_routes",
-                new=AsyncMock(return_value=projection),
-            ),
+        with patch(
+            "app.apps.code_te2.host.run_target_service.list_run_target_routes",
+            new=AsyncMock(return_value=projection),
         ):
-            history.return_value.get_active_project.return_value = ""
             await namespace.on_connect(
                 "native-sid",
                 {

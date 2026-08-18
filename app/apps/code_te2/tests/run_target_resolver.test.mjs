@@ -51,6 +51,7 @@ test("route URL stays canonical while Electron receives instrumentation metadata
   const { prepareRunTargetUrl } = await importRunTargetResolver();
   let registration = null;
   globalThis.window = {
+    location: { search: "" },
     te2Electron: {
       registerRunTargetSurface: async (runtime, url, route) => {
         registration = { runtime, url, route };
@@ -103,6 +104,74 @@ test("native surface release preserves the dev-runtime policy id", async () => {
   assert.deepEqual(released, ["run-profile:project:preview"]);
 });
 
+test("Cefrium runtime registration uses the origin-gated native query bridge", async () => {
+  const { prepareRunTargetUrl, releaseRunTargetSurface } = await importRunTargetResolver();
+  const requests = [];
+  globalThis.window = {
+    location: {
+      origin: "http://127.0.0.1:44000",
+      search: "?gv_native=1&te2_renderer=cefrium",
+    },
+    cefriumQuery({ request, onSuccess }) {
+      requests.push(JSON.parse(request));
+      onSuccess(JSON.stringify({ ok: true }));
+    },
+  };
+  globalThis.document = { documentElement: { dataset: {} } };
+  const runtime = {
+    surfaceId: "run-profile:project:preview",
+    profileId: "preview",
+    targetId: "run-profile:project:preview",
+    targetLabel: "Preview",
+    devRuntime: true,
+    devTools: false,
+    workerIdBase: "rp-prev",
+    workerLabel: "run-profile:project:preview",
+    frameworkOrigin: globalThis.window.location.origin,
+  };
+
+  await prepareRunTargetUrl(routeSet(), "http://localhost:43123/", runtime);
+  await releaseRunTargetSurface(runtime.surfaceId);
+
+  assert.equal(requests[0].method, "te2.runTarget.register");
+  assert.equal(requests[0].params.runtime.surfaceId, runtime.surfaceId);
+  assert.equal(requests[1].method, "te2.runTarget.release");
+  assert.equal(requests[1].params.surfaceId, runtime.surfaceId);
+});
+
+test("Cefrium registers a dev-tools-only Run Profile target", async () => {
+  const { prepareRunTargetUrl } = await importRunTargetResolver();
+  const requests = [];
+  globalThis.window = {
+    location: {
+      origin: "http://127.0.0.1:44000",
+      search: "?gv_native=1&te2_renderer=cefrium",
+    },
+    cefriumQuery({ request, onSuccess }) {
+      requests.push(JSON.parse(request));
+      onSuccess(JSON.stringify({ ok: true }));
+    },
+  };
+  globalThis.document = { documentElement: { dataset: {} } };
+  const runtime = {
+    surfaceId: "run-profile:project:preview",
+    profileId: "preview",
+    targetId: "run-profile:project:preview",
+    targetLabel: "Preview",
+    devRuntime: false,
+    devTools: true,
+    workerIdBase: "rp-prev",
+    workerLabel: "run-profile:project:preview",
+    frameworkOrigin: globalThis.window.location.origin,
+  };
+
+  await prepareRunTargetUrl(null, "http://localhost:43123/", runtime);
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].method, "te2.runTarget.register");
+  assert.equal(requests[0].params.runtime.targetId, runtime.targetId);
+});
+
 test("Gecko runtime registration remains event-driven and surface-scoped", async () => {
   const { prepareRunTargetUrl } = await importRunTargetResolver();
   const posted = [];
@@ -142,6 +211,8 @@ test("Gecko runtime registration remains event-driven and surface-scoped", async
   const runtime = {
     surfaceId: "run-profile:project:preview",
     profileId: "preview",
+    targetId: "run-profile:project:preview",
+    targetLabel: "Preview",
     devRuntime: true,
     devTools: false,
     workerIdBase: "rp-prev",
@@ -163,6 +234,34 @@ test("Gecko runtime registration remains event-driven and surface-scoped", async
   assert.equal(posted[0].message.route.shellId, "shell-generation-1");
   assert.equal(posted[0].origin, runtimeWindow.location.origin);
   assert.equal(listeners.size, 0);
+});
+
+test("Gecko does not register dev-tools-only targets through the runtime bridge", async () => {
+  const { prepareRunTargetUrl } = await importRunTargetResolver();
+  const posted = [];
+  globalThis.window = {
+    location: { origin: "http://framework.example:8089", search: "?gv_native=1" },
+    postMessage(message) {
+      posted.push(message);
+    },
+  };
+  globalThis.document = {
+    documentElement: { dataset: { te2RunTargetBridge: "1" } },
+  };
+
+  await prepareRunTargetUrl(null, "http://localhost:43123/", {
+    surfaceId: "run-profile:project:preview",
+    profileId: "preview",
+    targetId: "run-profile:project:preview",
+    targetLabel: "Preview",
+    devRuntime: false,
+    devTools: true,
+    workerIdBase: "rp-prev",
+    workerLabel: "run-profile:project:preview",
+    frameworkOrigin: globalThis.window.location.origin,
+  });
+
+  assert.deepEqual(posted, []);
 });
 
 test("Gecko surface release is a single exact event, not route polling", async () => {

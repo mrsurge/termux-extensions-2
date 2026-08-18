@@ -644,7 +644,7 @@ export function createExplorerSearchOverlayController(
     ) {
       payload.searchThreads = Math.max(1, Math.floor(case_.searchThreads));
     }
-    await searchController.performSearch(case_.query, payload);
+    searchController.scheduleSearch(case_.query, payload);
   }
 
   function handleReviewEntriesUpdated(payload: unknown): void {

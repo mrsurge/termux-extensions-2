@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+import json
+import tempfile
 import unittest
 from pathlib import Path
 from typing import cast
@@ -23,6 +26,99 @@ def _installation() -> CodeServerInstallation:
 
 
 class CodeServerLanguageBackendTests(unittest.IsolatedAsyncioTestCase):
+    async def test_host_state_snapshot_scope_avoids_full_boot_payload(self) -> None:
+        host_state = {"activeProject": "/workspace"}
+        with patch.object(
+            boot_snapshot_backend,
+            "_build_host_state_payload",
+            return_value=host_state,
+        ) as build_host_state:
+            result = await boot_snapshot_backend.handle_boot_snapshot_request(
+                {"scope": "hostState"},
+                source_name="test",
+            )
+
+        self.assertEqual(
+            {"ok": True, "snapshot": {"host_state": host_state}},
+            result,
+        )
+        build_host_state.assert_called_once_with()
+
+    async def test_full_boot_snapshot_is_single_flight(self) -> None:
+        started = asyncio.Event()
+        release = asyncio.Event()
+        calls = 0
+
+        async def build_snapshot() -> JsonMap:
+            nonlocal calls
+            calls += 1
+            started.set()
+            await release.wait()
+            return {"ok": True, "snapshot": {}}
+
+        boot_snapshot_backend._boot_snapshot_task = None
+        with patch.object(
+            boot_snapshot_backend,
+            "_build_full_boot_snapshot",
+            side_effect=build_snapshot,
+        ):
+            first = asyncio.create_task(
+                boot_snapshot_backend.handle_boot_snapshot_request(
+                    {},
+                    source_name="first",
+                )
+            )
+            await started.wait()
+            second = asyncio.create_task(
+                boot_snapshot_backend.handle_boot_snapshot_request(
+                    {},
+                    source_name="second",
+                )
+            )
+            await asyncio.sleep(0)
+            self.assertEqual(1, calls)
+            release.set()
+            first_result, second_result = await asyncio.gather(first, second)
+
+        self.assertEqual(first_result, second_result)
+        self.assertIsNone(boot_snapshot_backend._boot_snapshot_task)
+
+    async def test_legacy_extension_bridge_cleanup_is_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            extensions_dir = Path(temp_dir)
+            bridge_dir = extensions_dir / "te2-extension-api-bridge"
+            bridge_dir.mkdir()
+            (bridge_dir / "package.json").write_text("{}", encoding="utf-8")
+            manifest_path = extensions_dir / "extensions.json"
+            manifest_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "identifier": {"id": "te2.te2-extension-api-bridge"},
+                            "relativeLocation": "te2-extension-api-bridge",
+                        },
+                        {
+                            "identifier": {"id": "example.keep"},
+                            "relativeLocation": "example.keep-1.0.0",
+                        },
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            with patch.object(
+                code_server_shell_manager,
+                "_EXTENSIONS_DIR",
+                extensions_dir,
+            ):
+                first = code_server_shell_manager.remove_legacy_bridge_extension()
+                second = code_server_shell_manager.remove_legacy_bridge_extension()
+
+            self.assertTrue(first)
+            self.assertFalse(second)
+            self.assertFalse(bridge_dir.exists())
+            entries = json.loads(manifest_path.read_text("utf-8"))
+            self.assertEqual(["example.keep"], [entry["identifier"]["id"] for entry in entries])
+
     async def test_code_server_mode_persists_only_after_runtime_prime(self) -> None:
         installation = _installation()
         persist = AsyncMock(return_value={"webWorkersEnabled": False})

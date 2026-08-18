@@ -13,9 +13,12 @@ from unittest.mock import AsyncMock, patch
 
 from app.apps.code_te2 import runner_profiles
 from app.apps.code_te2 import (
+    page_preview_shell_manager,
     run_profile_events,
+    run_profile_shell_facts,
     run_profile_state,
     run_profile_surfaces,
+    runner_profile_shell_manager,
 )
 from app.apps.code_te2.monaco_editor.editor_backend_services import save_service
 from app.apps.code_te2.host import terminal_actions_backend
@@ -1363,6 +1366,89 @@ class RunProfileProcessStateTests(unittest.IsolatedAsyncioTestCase):
 
 
 class RunProfileProjectionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_shell_state_reads_event_facts_without_manager_lookup(self) -> None:
+        root = "/workspace/project"
+        runner_label = runner_profile_shell_manager.runner_profile_shell_label(
+            root,
+            "runner",
+        )
+        preview_label = page_preview_shell_manager.page_preview_shell_label(
+            root,
+            "preview",
+        )
+        run_profile_shell_facts.reset_run_profile_shell_facts()
+        try:
+            _ = run_profile_shell_facts.record_run_profile_shell(
+                "shell-runner",
+                runner_label,
+            )
+            _ = run_profile_shell_facts.record_run_profile_shell(
+                "shell-preview",
+                preview_label,
+            )
+            with (
+                patch.object(
+                    runner_profile_shell_manager,
+                    "_framework_get_manager",
+                    side_effect=AssertionError("manager lookup is forbidden"),
+                ),
+                patch.object(
+                    page_preview_shell_manager,
+                    "_framework_get_manager",
+                    side_effect=AssertionError("manager lookup is forbidden"),
+                ),
+            ):
+                runner_state = await runner_profile_shell_manager.runner_profile_shell_state(
+                    project_root=root,
+                    profile_id="runner",
+                )
+                preview_state = await page_preview_shell_manager.page_preview_shell_state(
+                    project_root=root,
+                    profile_id="preview",
+                )
+
+            self.assertTrue(runner_state.running)
+            self.assertEqual("shell-runner", runner_state.shell_id)
+            self.assertTrue(preview_state.running)
+            self.assertEqual("shell-preview", preview_state.shell_id)
+        finally:
+            run_profile_shell_facts.reset_run_profile_shell_facts()
+
+    async def test_stale_route_cleanup_waits_for_authoritative_fws_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            profile = RunProfileProcessStateTests()._match(root).profile
+            shell_state = SimpleNamespace(
+                shell_id="",
+                label="runner-profile:code_te2:project:web",
+                running=False,
+            )
+            release = AsyncMock()
+            with (
+                patch.object(
+                    run_profile_state,
+                    "runner_profile_shell_state",
+                    AsyncMock(return_value=shell_state),
+                ),
+                patch.object(
+                    run_profile_state,
+                    "run_profile_shell_facts_ready",
+                    return_value=False,
+                ),
+                patch.object(
+                    run_profile_state,
+                    "_release_route_best_effort",
+                    release,
+                ),
+            ):
+                _ = await run_profile_state._build_profile_state_projection(
+                    profile,
+                    project_root=root,
+                    reconcile_stale_route=True,
+                )
+
+            release.assert_not_awaited()
+
     async def test_state_projection_uses_existing_shell_identity(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir).resolve()
@@ -1543,6 +1629,8 @@ class RunProfileProjectionTests(unittest.IsolatedAsyncioTestCase):
         release = AsyncMock(return_value=True)
         close_surface = AsyncMock(return_value=1)
         run_profile_fws_bridge._relevant_shell_labels.clear()
+        run_profile_shell_facts.reset_run_profile_shell_facts()
+        self.addCleanup(run_profile_shell_facts.reset_run_profile_shell_facts)
         unrelated = {
             "method": "fws.shell.updated",
             "params": {"shell": {"id": "other", "label": "terminal:other"}},
@@ -1588,8 +1676,59 @@ class RunProfileProjectionTests(unittest.IsolatedAsyncioTestCase):
             ["fws.shell.updated", "fws.shell.removed"],
         )
 
+    async def test_fws_snapshot_waits_one_turn_for_namespace_connect(self) -> None:
+        namespace_ready = False
+
+        class _HandshakeClient:
+            connected = True
+
+            async def call(
+                self,
+                event: str,
+                data: object,
+                *,
+                namespace: str,
+                timeout: int,
+            ) -> object:
+                del event, data, namespace, timeout
+                if not namespace_ready:
+                    raise RuntimeError("namespace is not connected")
+                return {"result": {"state": {"shells": []}}}
+
+        previous_client = run_profile_fws_bridge._client
+        run_profile_shell_facts.reset_run_profile_shell_facts()
+        run_profile_fws_bridge._client = cast(object, _HandshakeClient())
+
+        def mark_namespace_ready() -> None:
+            nonlocal namespace_ready
+            namespace_ready = True
+
+        asyncio.get_running_loop().call_soon(mark_namespace_ready)
+        try:
+            with (
+                patch.object(
+                    run_profile_fws_bridge,
+                    "reconcile_run_profile_surfaces",
+                    AsyncMock(return_value=0),
+                ),
+                patch.object(
+                    run_profile_fws_bridge,
+                    "refresh_run_profile_state",
+                    AsyncMock(return_value={}),
+                ),
+            ):
+                await run_profile_fws_bridge._open_dashboard_snapshot()
+
+            self.assertTrue(
+                run_profile_shell_facts.get_run_profile_shell_facts()["initialized"]
+            )
+        finally:
+            run_profile_fws_bridge._client = previous_client
+            run_profile_shell_facts.reset_run_profile_shell_facts()
+
     def test_fws_snapshot_tracks_only_running_run_profile_shells(self) -> None:
         run_profile_fws_bridge._relevant_shell_labels.clear()
+        run_profile_shell_facts.reset_run_profile_shell_facts()
         try:
             run_profile_fws_bridge._replace_relevant_shell_ids(
                 {
@@ -1623,8 +1762,19 @@ class RunProfileProjectionTests(unittest.IsolatedAsyncioTestCase):
                     "running-profile": "runner-profile:code_te2:project:python",
                 },
             )
+            self.assertEqual(
+                run_profile_shell_facts.get_run_profile_shell_facts(),
+                {
+                    "initialized": True,
+                    "revision": 1,
+                    "shellsById": {
+                        "running-profile": "runner-profile:code_te2:project:python",
+                    },
+                },
+            )
         finally:
             run_profile_fws_bridge._relevant_shell_labels.clear()
+            run_profile_shell_facts.reset_run_profile_shell_facts()
 
 
 class RunProfileRefinementContractTests(unittest.IsolatedAsyncioTestCase):

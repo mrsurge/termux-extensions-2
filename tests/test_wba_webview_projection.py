@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from app.apps.code_te2 import wba_event_bridge
 
@@ -27,21 +27,23 @@ class WbaWebviewProjectionTests(unittest.IsolatedAsyncioTestCase):
             "viewColumn": 0,
             "htmlRevision": 2,
         }
-        create = AsyncMock(return_value={"ok": True})
-        close = AsyncMock(return_value={"ok": True})
+        reconcile = Mock(
+            return_value={"ok": True, "changed": True, "removed": [], "state": {"slots": {}}}
+        )
+        publish = AsyncMock()
         with (
             patch.object(wba_event_bridge, "_event_workspace_root", return_value=project),
             patch(
-                "app.apps.code_te2.ui_ipc.sidebar_window_state.get_sidebar_window_state",
-                return_value={"slots": {}},
+                "app.apps.code_te2.ui_ipc.sidebar_window_state.reconcile_extension_webview_slots",
+                reconcile,
             ),
             patch(
-                "app.apps.code_te2.ui_ipc.sidebar_ws.handle_ui_sidebar_window_create_request",
-                create,
+                "app.apps.code_te2.sidebar_window_events.publish_sidebar_window_state_changed",
+                publish,
             ),
             patch(
-                "app.apps.code_te2.ui_ipc.sidebar_ws.handle_ui_sidebar_window_close_request",
-                close,
+                "app.apps.code_te2.ui_ipc.sidebar_ws.forget_sidebar_window_runtime_state",
+                Mock(),
             ),
         ):
             await wba_event_bridge.dispatch_wba_pipe_event(
@@ -52,18 +54,19 @@ class WbaWebviewProjectionTests(unittest.IsolatedAsyncioTestCase):
                 }
             )
 
-        create.assert_awaited_once()
-        create_call = create.await_args
-        self.assertIsNotNone(create_call)
-        assert create_call is not None
-        payload = create_call.args[0]
-        self.assertFalse(payload["activate"])
+        reconcile.assert_called_once()
+        reconcile_call = reconcile.call_args
+        self.assertIsNotNone(reconcile_call)
+        assert reconcile_call is not None
+        self.assertEqual(project, reconcile_call.args[0])
+        self.assertTrue(reconcile_call.kwargs["upsert"])
+        payload = reconcile_call.args[1][surface["hostId"]]
         self.assertEqual("image", payload["icon"]["kind"])
         self.assertEqual(surface["iconUrl"], payload["icon"]["src"])
         self.assertEqual("ExtensionWebviewSurface", payload["webviewSurface"]["dto"])
         self.assertEqual("view", payload["webviewSurface"]["surfaceKind"])
         self.assertTrue(payload["webviewSurface"]["retainContextWhenHidden"])
-        close.assert_not_awaited()
+        publish.assert_awaited_once()
 
     async def test_panel_snapshot_projects_disposable_surface_identity(self) -> None:
         project = "/workspace/project"
@@ -84,20 +87,22 @@ class WbaWebviewProjectionTests(unittest.IsolatedAsyncioTestCase):
             "viewColumn": 2,
             "htmlRevision": 1,
         }
-        create = AsyncMock(return_value={"ok": True})
+        reconcile = Mock(
+            return_value={"ok": True, "changed": True, "removed": [], "state": {"slots": {}}}
+        )
         with (
             patch.object(wba_event_bridge, "_event_workspace_root", return_value=project),
             patch(
-                "app.apps.code_te2.ui_ipc.sidebar_window_state.get_sidebar_window_state",
-                return_value={"slots": {}},
+                "app.apps.code_te2.ui_ipc.sidebar_window_state.reconcile_extension_webview_slots",
+                reconcile,
             ),
             patch(
-                "app.apps.code_te2.ui_ipc.sidebar_ws.handle_ui_sidebar_window_create_request",
-                create,
+                "app.apps.code_te2.sidebar_window_events.publish_sidebar_window_state_changed",
+                AsyncMock(),
             ),
             patch(
-                "app.apps.code_te2.ui_ipc.sidebar_ws.handle_ui_sidebar_window_close_request",
-                AsyncMock(return_value={"ok": True}),
+                "app.apps.code_te2.ui_ipc.sidebar_ws.forget_sidebar_window_runtime_state",
+                Mock(),
             ),
         ):
             await wba_event_bridge.dispatch_wba_pipe_event(
@@ -108,10 +113,10 @@ class WbaWebviewProjectionTests(unittest.IsolatedAsyncioTestCase):
                 }
             )
 
-        create_call = create.await_args
-        self.assertIsNotNone(create_call)
-        assert create_call is not None
-        payload = create_call.args[0]
+        reconcile_call = reconcile.call_args
+        self.assertIsNotNone(reconcile_call)
+        assert reconcile_call is not None
+        payload = reconcile_call.args[1][surface["hostId"]]
         self.assertEqual("panel", payload["webviewSurface"]["surfaceKind"])
         self.assertEqual(2, payload["webviewSurface"]["viewColumn"])
         self.assertEqual("EX", payload["icon"]["text"])
@@ -119,30 +124,29 @@ class WbaWebviewProjectionTests(unittest.IsolatedAsyncioTestCase):
     async def test_empty_snapshot_closes_stale_workspace_surface(self) -> None:
         project = "/workspace/project"
         host_id = "vsix-webview:vsix:workspace:view"
-        close = AsyncMock(return_value={"ok": True})
+        reconcile = Mock(
+            return_value={
+                "ok": True,
+                "changed": True,
+                "removed": [host_id],
+                "state": {"slots": {}},
+            }
+        )
+        forget = Mock()
+        publish = AsyncMock()
         with (
             patch.object(wba_event_bridge, "_event_workspace_root", return_value=project),
             patch(
-                "app.apps.code_te2.ui_ipc.sidebar_window_state.get_sidebar_window_state",
-                return_value={
-                    "slots": {
-                        host_id: {
-                            "webviewSurface": {
-                                "dto": "ExtensionWebviewSurface",
-                                "version": 1,
-                                "projectPath": project,
-                            }
-                        }
-                    }
-                },
+                "app.apps.code_te2.ui_ipc.sidebar_window_state.reconcile_extension_webview_slots",
+                reconcile,
             ),
             patch(
-                "app.apps.code_te2.ui_ipc.sidebar_ws.handle_ui_sidebar_window_create_request",
-                AsyncMock(return_value={"ok": True}),
+                "app.apps.code_te2.sidebar_window_events.publish_sidebar_window_state_changed",
+                publish,
             ),
             patch(
-                "app.apps.code_te2.ui_ipc.sidebar_ws.handle_ui_sidebar_window_close_request",
-                close,
+                "app.apps.code_te2.ui_ipc.sidebar_ws.forget_sidebar_window_runtime_state",
+                forget,
             ),
         ):
             await wba_event_bridge.dispatch_wba_pipe_event(
@@ -153,11 +157,9 @@ class WbaWebviewProjectionTests(unittest.IsolatedAsyncioTestCase):
                 }
             )
 
-        close.assert_awaited_once()
-        close_call = close.await_args
-        self.assertIsNotNone(close_call)
-        assert close_call is not None
-        self.assertEqual(host_id, close_call.args[0]["host_id"])
+        reconcile.assert_called_once_with(project, {}, upsert=True)
+        forget.assert_called_once_with([host_id])
+        publish.assert_awaited_once()
 
 
 if __name__ == "__main__":

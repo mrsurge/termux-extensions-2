@@ -2,7 +2,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
-    id("com.cefrium") version "0.6.3"
+    id("com.cefrium") version "0.7.0"
 }
 
 android {
@@ -13,8 +13,8 @@ android {
         applicationId = "com.termux.extensions.cefrium"
         minSdk = 29
         targetSdk = 34
-        versionCode = 20329
-        versionName = "1.0.7-r0.2.329-cefrium"
+        versionCode = 20332
+        versionName = "1.0.7-r0.2.332-cefrium"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["sharedUserIdValue"] = "com.termux.extensions.cefrium"
@@ -33,13 +33,20 @@ android {
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "../app/proguard-rules.pro",
+                "proguard-rules.pro",
             )
         }
         create("staging") {
             isDebuggable = false
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             signingConfig = signingConfigs.getByName("debug")
             matchingFallbacks += listOf("release")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "../app/proguard-rules.pro",
+                "proguard-rules.pro",
+            )
         }
     }
 
@@ -83,7 +90,7 @@ configurations.all {
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.02.01")
 
-    implementation("com.cefrium:cefrium-sdk:0.6.3")
+    implementation("com.cefrium:cefrium-sdk:0.7.0")
     implementation("androidx.core:core-ktx:1.16.0")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.browser:browser:1.8.0")

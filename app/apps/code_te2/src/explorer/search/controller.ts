@@ -328,7 +328,10 @@ export function createExplorerSearchController(
     }
   }
 
-  function scheduleSearch(query: string): void {
+  function scheduleSearch(
+    query: string,
+    preparedPayload?: JsonObject,
+  ): void {
     const mode = deps.getSearchMode();
     if (mode === "changes" || mode === "review") return;
     deps.setSearchQuery(query);
@@ -343,7 +346,16 @@ export function createExplorerSearchController(
     }
 
     cancelActiveSearch("replaced");
-    const payload = buildSearchPayload(query);
+    const payload = preparedPayload || buildSearchPayload(query);
+    if (preparedPayload) {
+      deps.setSearchIdentity({
+        correlationId: stringValue(payload.correlationId),
+        searchId: stringValue(payload.searchId),
+        jobId: stringValue(payload.jobId) || stringValue(payload.opId),
+        root: stringValue(payload.root) || deps.getProjectPath() || null,
+        projectGeneration: numberValue(payload.projectGeneration),
+      });
+    }
     deps.setSearchLoading(true);
     deps.setSearchError(null);
     setSearchStatus({ status: "running", message: "Waiting to search" });

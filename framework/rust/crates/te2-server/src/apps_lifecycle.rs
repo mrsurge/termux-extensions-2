@@ -1,5 +1,8 @@
 #[cfg(feature = "ferrous-framework-native")]
-use ferrous_framework::{FerrousNativeLifecycleEventKind, FerrousNativeManager};
+use ferrous_framework::{
+    FerrousNativeLifecycleEventKind, FerrousNativeManager, FerrousNativeShellRecord,
+    FerrousNativeShellStatus,
+};
 
 use axum::{
     Json, Router,
@@ -19,6 +22,7 @@ use std::{
     collections::{HashMap, HashSet},
     convert::Infallible,
     path::PathBuf,
+    time::{SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::broadcast;
 use tokio::time::Duration;
@@ -36,7 +40,7 @@ use crate::{
     json_error,
     launcher::{launch_app, launch_supported},
     proxy_transport::absolute_upstream_url,
-    registry::{self, AppRegistry, AppRoot},
+    registry::{self, AppRegistry},
     runtime::{FwsDiscovery, RunningApp},
 };
 
@@ -106,7 +110,7 @@ pub(crate) fn router() -> Router<AppState> {
 }
 
 async fn list_apps(State(state): State<AppState>) -> Json<ApiResponse<Vec<Value>>> {
-    let registry = AppRegistry::load(state.app_roots());
+    let registry = state.app_registry_snapshot();
     Json(ApiResponse {
         ok: true,
         data: registry.list_payloads(),
@@ -114,8 +118,8 @@ async fn list_apps(State(state): State<AppState>) -> Json<ApiResponse<Vec<Value>
 }
 
 async fn apps_catalog(State(state): State<AppState>) -> Json<ApiResponse<Vec<Value>>> {
-    let registry = AppRegistry::load(state.app_roots());
-    let running_ids = running_app_ids(&registry);
+    let registry = state.app_registry_snapshot();
+    let running_ids = running_app_ids(&state);
     let readiness = state.readiness_store().read().await;
     Json(ApiResponse {
         ok: true,
@@ -124,11 +128,11 @@ async fn apps_catalog(State(state): State<AppState>) -> Json<ApiResponse<Vec<Val
 }
 
 async fn running_apps(State(state): State<AppState>) -> Json<ApiResponse<Vec<Value>>> {
-    let registry = AppRegistry::load(state.app_roots());
+    let registry = state.app_registry_snapshot();
     let readiness = state.readiness_store().read().await;
     Json(ApiResponse {
         ok: true,
-        data: running_app_payloads(&registry, &readiness),
+        data: running_app_payloads(&state, &registry, &readiness),
     })
 }
 
@@ -144,7 +148,7 @@ async fn start_app(State(state): State<AppState>, Path(app_id): Path<String>) ->
 }
 
 async fn start_app_inner(state: &AppState, app_id: &str) -> Result<(String, Value), Response> {
-    let registry = AppRegistry::load(state.app_roots());
+    let registry = state.app_registry_snapshot();
     let Some(app) = registry.get_app(app_id).cloned() else {
         return Err(json_error(
             StatusCode::NOT_FOUND,
@@ -159,7 +163,7 @@ async fn start_app_inner(state: &AppState, app_id: &str) -> Result<(String, Valu
         ));
     }
     ensure_starting_readiness_if_supported(state, &app).await;
-    if let Some(running) = running_app_for_id(&registry, &canonical_app_id) {
+    if let Some(running) = state.running_app_for_id(&canonical_app_id) {
         ensure_pipe_bridge_for_running_app(state, &running);
         let readiness = state.readiness_store().read().await;
         return Ok((
@@ -214,12 +218,8 @@ async fn start_app_inner(state: &AppState, app_id: &str) -> Result<(String, Valu
         }
     };
 
-    if let Some(running) = wait_for_running_app(
-        state.app_roots(),
-        &canonical_app_id,
-        &launch_result.shell_id,
-    )
-    .await
+    if let Some(running) =
+        wait_for_running_app(state, &canonical_app_id, &launch_result.shell_id).await
     {
         ensure_pipe_bridge_for_running_app(state, &running);
         let readiness = state.readiness_store().read().await;
@@ -280,7 +280,7 @@ async fn open_app(
 }
 
 async fn quit_app(State(state): State<AppState>, Path(app_id): Path<String>) -> Response {
-    let registry = AppRegistry::load(state.app_roots());
+    let registry = state.app_registry_snapshot();
     let Some(canonical_app_id) = registry.canonical_app_id(&app_id).map(str::to_owned) else {
         return json_error(StatusCode::NOT_FOUND, &format!("App '{app_id}' not found"));
     };
@@ -339,6 +339,7 @@ async fn quit_app(State(state): State<AppState>, Path(app_id): Path<String>) -> 
         .write()
         .await
         .remove(&canonical_app_id);
+    state.remove_running_app(&canonical_app_id, None);
     publish_app_running_changed(&state, &canonical_app_id, "quit", None, Some(false)).await;
     Json(ApiResponse {
         ok: true,
@@ -356,7 +357,7 @@ async fn set_app_readiness(
     Path(app_id): Path<String>,
     payload: Option<Json<JsonMap<String, Value>>>,
 ) -> Response {
-    let registry = AppRegistry::load(state.app_roots());
+    let registry = state.app_registry_snapshot();
     let app = match readiness_manifest_or_error(&registry, &app_id) {
         Ok(app) => app,
         Err(response) => return response,
@@ -403,7 +404,7 @@ async fn set_app_readiness(
 }
 
 async fn get_app_readiness(State(state): State<AppState>, Path(app_id): Path<String>) -> Response {
-    let registry = AppRegistry::load(state.app_roots());
+    let registry = state.app_registry_snapshot();
     let canonical_app_id = match readiness_manifest_or_error(&registry, &app_id) {
         Ok(app) => app.app_id.clone(),
         Err(response) => return response,
@@ -421,7 +422,7 @@ async fn get_app_readiness(State(state): State<AppState>, Path(app_id): Path<Str
         })
         .into_response();
     }
-    let data = if running_app_for_id(&registry, &canonical_app_id).is_some() {
+    let data = if state.running_app_for_id(&canonical_app_id).is_some() {
         json!({ "app_id": canonical_app_id, "status": "starting" })
     } else {
         json!({ "app_id": canonical_app_id, "status": "stopped" })
@@ -433,6 +434,8 @@ async fn reload_apps(
     State(state): State<AppState>,
 ) -> Json<ApiResponse<serde_json::Map<String, Value>>> {
     let registry = AppRegistry::load(state.app_roots());
+    state.replace_app_registry(registry.clone());
+    state.replace_running_apps(discover_running_apps(&registry));
     let mut data = serde_json::Map::new();
     data.insert(
         "count".to_owned(),
@@ -560,10 +563,8 @@ async fn apps_events_sse(
 }
 
 async fn apps_snapshot_payload(state: &AppState, app_id: Option<&str>) -> Value {
-    // Launcher snapshots combine the manifest registry with read-only FWS
-    // discovery so running markers work before lifecycle mutation is ported.
-    let registry = AppRegistry::load(state.app_roots());
-    let running_ids = running_app_ids(&registry);
+    let registry = state.app_registry_snapshot();
+    let running_ids = running_app_ids(state);
     let mut catalog = {
         let readiness = state.readiness_store().read().await;
         catalog_payloads_with_running_and_readiness(&registry, &running_ids, &readiness)
@@ -682,7 +683,9 @@ pub(crate) fn start_fws_lifecycle_app_bridge(
                     let Some(app_id) = event.shell.app_id.clone() else {
                         continue;
                     };
-                    if event.shell.backend == "pipe" {
+                    if event.shell.backend == "pipe"
+                        && event.shell.status == FerrousNativeShellStatus::Running
+                    {
                         app_worker_pipe_bridge::ensure_bridge(
                             Some(manager.clone()),
                             event.shell_id.clone(),
@@ -692,17 +695,37 @@ pub(crate) fn start_fws_lifecycle_app_bridge(
                     }
                     let (trigger, running_override) = match event.kind {
                         FerrousNativeLifecycleEventKind::Spawned => {
-                            ("fws_shell_spawned", Some(true))
+                            let indexed = if let Some(running) =
+                                running_app_from_native_shell(&event.shell)
+                            {
+                                state.upsert_running_app(running);
+                                true
+                            } else {
+                                false
+                            };
+                            ("fws_shell_spawned", Some(indexed))
                         }
-                        FerrousNativeLifecycleEventKind::Updated => ("fws_shell_updated", None),
+                        FerrousNativeLifecycleEventKind::Updated => {
+                            if let Some(running) = running_app_from_native_shell(&event.shell) {
+                                state.upsert_running_app(running);
+                            } else {
+                                state.remove_running_app(&app_id, Some(&event.shell_id));
+                            }
+                            ("fws_shell_updated", None)
+                        }
                         FerrousNativeLifecycleEventKind::Exited => {
+                            state.remove_running_app(&app_id, Some(&event.shell_id));
                             ("fws_shell_exited", Some(false))
                         }
                     };
                     publish_app_running_changed(&state, &app_id, trigger, None, running_override)
                         .await;
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    let registry = state.app_registry_snapshot();
+                    state.replace_running_apps(discover_running_apps(&registry));
+                    publish_catalog_snapshot(&state).await;
+                }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             }
         }
@@ -736,12 +759,12 @@ async fn publish_app_running_changed(
     app_info: Option<&Value>,
     running_override: Option<bool>,
 ) {
-    let registry = AppRegistry::load(state.app_roots());
+    let registry = state.app_registry_snapshot();
     let Some(canonical_app_id) = registry.canonical_app_id(app_id) else {
         return;
     };
-    let running = running_app_for_id(&registry, canonical_app_id);
-    let running_flag = running_override.unwrap_or_else(|| running.is_some());
+    let running = state.running_app_for_id(canonical_app_id);
+    let running_flag = running.is_some() || running_override == Some(true);
     let shell_id = running
         .as_ref()
         .map(|app| app.shell_id.clone())
@@ -768,33 +791,29 @@ async fn publish_app_running_changed(
     );
 }
 
-fn running_app_ids(registry: &AppRegistry) -> HashSet<String> {
-    discover_running_apps(registry)
+fn running_app_ids(state: &AppState) -> HashSet<String> {
+    state
+        .running_apps_snapshot()
         .into_iter()
         .map(|app| app.app_id)
         .collect()
 }
 
 fn running_app_payloads(
+    state: &AppState,
     registry: &AppRegistry,
     readiness_store: &HashMap<String, JsonMap<String, Value>>,
 ) -> Vec<Value> {
-    discover_running_apps(registry)
+    state
+        .running_apps_snapshot()
         .into_iter()
         .map(|app| running_app_to_value(registry, app, readiness_store))
         .collect()
 }
 
-pub(crate) fn running_app_for_id(registry: &AppRegistry, app_id: &str) -> Option<RunningApp> {
-    let app_id = registry.canonical_app_id(app_id.trim())?;
-    discover_running_apps(registry)
-        .into_iter()
-        .find(|app| app.app_id == app_id)
-}
-
-fn discover_running_apps(registry: &AppRegistry) -> Vec<RunningApp> {
-    // FWS remains the authority for already-running app workers in this slice;
-    // the Rust server filters that read model to apps known by the registry.
+pub(crate) fn discover_running_apps(registry: &AppRegistry) -> Vec<RunningApp> {
+    // Discovery is a startup/reconciliation operation only. Request-time proxy
+    // lookup reads AppState's lifecycle-maintained running-app index.
     let mut apps_by_id: HashMap<String, RunningApp> = HashMap::new();
     for mut app in FwsDiscovery::from_env().list_running_apps().into_iter() {
         let Some(canonical_app_id) = registry.canonical_app_id(&app.app_id) else {
@@ -815,9 +834,10 @@ fn discover_running_apps(registry: &AppRegistry) -> Vec<RunningApp> {
 
 fn running_app_to_value(
     registry: &AppRegistry,
-    app: RunningApp,
+    mut app: RunningApp,
     readiness_store: &HashMap<String, JsonMap<String, Value>>,
 ) -> Value {
+    app.uptime = (current_unix_seconds() - app.created_at).max(0.0);
     let app_id = app.app_id.clone();
     let mut payload = serde_json::to_value(app)
         .ok()
@@ -839,20 +859,67 @@ fn running_app_to_value(
 }
 
 async fn wait_for_running_app(
-    app_roots: &[AppRoot],
+    state: &AppState,
     app_id: &str,
     shell_id: &str,
 ) -> Option<RunningApp> {
-    for _ in 0..30 {
-        let registry = AppRegistry::load(app_roots);
-        if let Some(running) = running_app_for_id(&registry, app_id) {
-            if running.shell_id == shell_id || running.app_id == app_id {
-                return Some(running);
+    let mut events = state.apps_events().subscribe();
+    let wait = async {
+        loop {
+            if let Some(running) = state.running_app_for_id(app_id) {
+                if running.shell_id == shell_id {
+                    return Some(running);
+                }
+            }
+            match events.recv().await {
+                Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
+                Err(broadcast::error::RecvError::Closed) => return None,
             }
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+    tokio::time::timeout(Duration::from_secs(3), wait)
+        .await
+        .ok()
+        .flatten()
+}
+
+#[cfg(feature = "ferrous-framework-native")]
+fn running_app_from_native_shell(shell: &FerrousNativeShellRecord) -> Option<RunningApp> {
+    if shell.status != FerrousNativeShellStatus::Running || !shell.is_app_worker {
+        return None;
     }
-    None
+    let app_id = shell.app_id.clone()?;
+    let port = shell
+        .env_overrides
+        .get("TE_APP_WORKER_PORT")
+        .or_else(|| shell.env.get("TE_APP_WORKER_PORT"))?
+        .trim()
+        .parse::<u16>()
+        .ok()?;
+    let created_at = shell.created_at_ms as f64 / 1000.0;
+    let updated_at = shell.updated_at_ms as f64 / 1000.0;
+    let now = current_unix_seconds();
+    Some(RunningApp {
+        app_id,
+        port,
+        shell_id: shell.id.clone(),
+        label: (!shell.label.is_empty()).then(|| shell.label.clone()),
+        source: "ferrous_framework_native",
+        created_at,
+        updated_at,
+        locked: false,
+        uptime: (now - created_at).max(0.0),
+        cpu: 0.0,
+        ram: 0,
+        readiness: JsonMap::new(),
+    })
+}
+
+fn current_unix_seconds() -> f64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs_f64())
+        .unwrap_or_default()
 }
 
 fn readiness_manifest_or_error<'a>(

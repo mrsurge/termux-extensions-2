@@ -878,7 +878,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     setStatus: (text: string) => {
       statusEl.textContent = text;
     },
-    ensureProjectContext: () => editorStateController.ensureProjectContext(),
     toAbsolute,
     homeDir: HOME_DIR,
     getRestoredSessionActive: () => !!restoredSessionActive,

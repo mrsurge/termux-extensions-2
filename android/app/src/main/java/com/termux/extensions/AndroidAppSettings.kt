@@ -9,30 +9,28 @@ data class AndroidAppSettings(
     val frameworkPort: Int = DEFAULT_FRAMEWORK_PORT,
     val persistentNetworkNotification: Boolean = false,
     val imeContextSwitchingEnabled: Boolean = true,
-    val devToolsInspectorEnabled: Boolean = false,
+    val devToolsRunProfilesEnabled: Boolean = false,
+    val devToolsDebugEnabled: Boolean = false,
 ) {
     val frameworkBaseUrl: String
-        get() {
-            val authorityHost = if (frameworkHost.contains(':') && !frameworkHost.startsWith('[')) {
-                "[$frameworkHost]"
-            } else {
-                frameworkHost
-            }
-            return "http://$authorityHost:$frameworkPort"
-        }
+        get() = androidFrameworkBaseUrl(frameworkHost, frameworkPort)
 
     fun toJson(): JSONObject = JSONObject().apply {
+        put("nativeSettingsSchemaVersion", NATIVE_SETTINGS_SCHEMA_VERSION)
         put("frameworkHost", frameworkHost)
         put("frameworkPort", frameworkPort)
         put("frameworkBaseUrl", frameworkBaseUrl)
         put("persistentNetworkNotification", persistentNetworkNotification)
         put("imeContextSwitchingEnabled", imeContextSwitchingEnabled)
-        put("devToolsInspectorEnabled", devToolsInspectorEnabled)
+        put("devToolsRunProfilesEnabled", devToolsRunProfilesEnabled)
+        put("devToolsDebugEnabled", devToolsDebugEnabled)
+        put("devToolsInspectorEnabled", devToolsRunProfilesEnabled || devToolsDebugEnabled)
     }
 
     companion object {
         const val DEFAULT_FRAMEWORK_HOST = "127.0.0.1"
         const val DEFAULT_FRAMEWORK_PORT = 8089
+        const val NATIVE_SETTINGS_SCHEMA_VERSION = 3
     }
 }
 
@@ -41,8 +39,25 @@ internal fun validatedAndroidAppSettings(
     frameworkPort: Int,
     persistentNetworkNotification: Boolean,
     imeContextSwitchingEnabled: Boolean = true,
-    devToolsInspectorEnabled: Boolean = false,
+    devToolsRunProfilesEnabled: Boolean = false,
+    devToolsDebugEnabled: Boolean = false,
 ): AndroidAppSettings {
+    val endpoint = validatedAndroidFrameworkEndpoint(frameworkHost, frameworkPort)
+
+    return AndroidAppSettings(
+        frameworkHost = endpoint.first,
+        frameworkPort = endpoint.second,
+        persistentNetworkNotification = persistentNetworkNotification,
+        imeContextSwitchingEnabled = imeContextSwitchingEnabled,
+        devToolsRunProfilesEnabled = devToolsRunProfilesEnabled,
+        devToolsDebugEnabled = devToolsDebugEnabled,
+    )
+}
+
+internal fun validatedAndroidFrameworkEndpoint(
+    frameworkHost: String,
+    frameworkPort: Int,
+): Pair<String, Int> {
     val host = frameworkHost.trim().removeSurrounding("[", "]")
     require(host.isNotEmpty()) { "Framework host is required" }
     require(host.length <= 253) { "Framework host is too long" }
@@ -54,13 +69,16 @@ internal fun validatedAndroidAppSettings(
     }
     require(frameworkPort in 1..65535) { "Framework port must be between 1 and 65535" }
 
-    return AndroidAppSettings(
-        frameworkHost = host,
-        frameworkPort = frameworkPort,
-        persistentNetworkNotification = persistentNetworkNotification,
-        imeContextSwitchingEnabled = imeContextSwitchingEnabled,
-        devToolsInspectorEnabled = devToolsInspectorEnabled,
-    )
+    return host to frameworkPort
+}
+
+internal fun androidFrameworkBaseUrl(frameworkHost: String, frameworkPort: Int): String {
+    val authorityHost = if (frameworkHost.contains(':') && !frameworkHost.startsWith('[')) {
+        "[$frameworkHost]"
+    } else {
+        frameworkHost
+    }
+    return "http://$authorityHost:$frameworkPort"
 }
 
 /** SharedPreferences repository for settings that belong to the Android shell, not TE2. */
@@ -72,6 +90,10 @@ class AndroidAppSettingsStore(context: Context) {
 
     fun load(): AndroidAppSettings {
         return try {
+            val legacyDevToolsEnabled = preferences.getBoolean(
+                KEY_DEVTOOLS_INSPECTOR_ENABLED,
+                false,
+            )
             validatedAndroidAppSettings(
                 frameworkHost = preferences.getString(
                     KEY_FRAMEWORK_HOST,
@@ -89,9 +111,13 @@ class AndroidAppSettingsStore(context: Context) {
                     KEY_IME_CONTEXT_SWITCHING_ENABLED,
                     true,
                 ),
-                devToolsInspectorEnabled = preferences.getBoolean(
-                    KEY_DEVTOOLS_INSPECTOR_ENABLED,
-                    false,
+                devToolsRunProfilesEnabled = preferences.getBoolean(
+                    KEY_DEVTOOLS_RUN_PROFILES_ENABLED,
+                    legacyDevToolsEnabled,
+                ),
+                devToolsDebugEnabled = preferences.getBoolean(
+                    KEY_DEVTOOLS_DEBUG_ENABLED,
+                    legacyDevToolsEnabled,
                 ),
             )
         } catch (_: IllegalArgumentException) {
@@ -101,6 +127,14 @@ class AndroidAppSettingsStore(context: Context) {
 
     fun update(payload: JSONObject): AndroidAppSettings {
         val current = load()
+        val legacyDevToolsValue = if (payload.has("devToolsInspectorEnabled")) {
+            payload.optBoolean(
+                "devToolsInspectorEnabled",
+                current.devToolsRunProfilesEnabled || current.devToolsDebugEnabled,
+            )
+        } else {
+            null
+        }
         val updated = validatedAndroidAppSettings(
             frameworkHost = if (payload.has("frameworkHost")) {
                 payload.optString("frameworkHost", current.frameworkHost)
@@ -128,13 +162,21 @@ class AndroidAppSettingsStore(context: Context) {
             } else {
                 current.imeContextSwitchingEnabled
             },
-            devToolsInspectorEnabled = if (payload.has("devToolsInspectorEnabled")) {
+            devToolsRunProfilesEnabled = if (payload.has("devToolsRunProfilesEnabled")) {
                 payload.optBoolean(
-                    "devToolsInspectorEnabled",
-                    current.devToolsInspectorEnabled,
+                    "devToolsRunProfilesEnabled",
+                    current.devToolsRunProfilesEnabled,
                 )
             } else {
-                current.devToolsInspectorEnabled
+                legacyDevToolsValue ?: current.devToolsRunProfilesEnabled
+            },
+            devToolsDebugEnabled = if (payload.has("devToolsDebugEnabled")) {
+                payload.optBoolean(
+                    "devToolsDebugEnabled",
+                    current.devToolsDebugEnabled,
+                )
+            } else {
+                legacyDevToolsValue ?: current.devToolsDebugEnabled
             },
         )
 
@@ -150,22 +192,81 @@ class AndroidAppSettingsStore(context: Context) {
                 updated.imeContextSwitchingEnabled,
             )
             .putBoolean(
+                KEY_DEVTOOLS_RUN_PROFILES_ENABLED,
+                updated.devToolsRunProfilesEnabled,
+            )
+            .putBoolean(
+                KEY_DEVTOOLS_DEBUG_ENABLED,
+                updated.devToolsDebugEnabled,
+            )
+            .putBoolean(
                 KEY_DEVTOOLS_INSPECTOR_ENABLED,
-                updated.devToolsInspectorEnabled,
+                updated.devToolsRunProfilesEnabled || updated.devToolsDebugEnabled,
             )
             .apply()
         return updated
+    }
+
+    @Synchronized
+    internal fun loadFrameworkEndpointBookmarks(): List<AndroidFrameworkEndpointBookmark> =
+        decodeAndroidFrameworkEndpointBookmarks(
+            preferences.getString(KEY_FRAMEWORK_ENDPOINT_BOOKMARKS, null),
+        )
+
+    @Synchronized
+    internal fun upsertFrameworkEndpointBookmark(
+        payload: JSONObject,
+    ): List<AndroidFrameworkEndpointBookmark> {
+        val bookmark = validatedAndroidFrameworkEndpointBookmark(
+            name = payload.optString("name"),
+            frameworkHost = payload.optString("frameworkHost"),
+            frameworkPort = payload.optInt("frameworkPort", -1),
+        )
+        val updated = upsertAndroidFrameworkEndpointBookmark(
+            loadFrameworkEndpointBookmarks(),
+            bookmark,
+        )
+        persistFrameworkEndpointBookmarks(updated)
+        return updated
+    }
+
+    @Synchronized
+    internal fun deleteFrameworkEndpointBookmark(
+        payload: JSONObject,
+    ): List<AndroidFrameworkEndpointBookmark> {
+        val updated = deleteAndroidFrameworkEndpointBookmark(
+            loadFrameworkEndpointBookmarks(),
+            payload.optString("name"),
+        )
+        persistFrameworkEndpointBookmarks(updated)
+        return updated
+    }
+
+    private fun persistFrameworkEndpointBookmarks(
+        bookmarks: List<AndroidFrameworkEndpointBookmark>,
+    ) {
+        preferences.edit()
+            .putString(
+                KEY_FRAMEWORK_ENDPOINT_BOOKMARKS,
+                encodeAndroidFrameworkEndpointBookmarks(bookmarks),
+            )
+            .apply()
     }
 
     companion object {
         private const val PREFERENCES_NAME = "android_app_settings"
         private const val KEY_FRAMEWORK_HOST = "framework_host"
         private const val KEY_FRAMEWORK_PORT = "framework_port"
+        private const val KEY_FRAMEWORK_ENDPOINT_BOOKMARKS = "framework_endpoint_bookmarks"
         private const val KEY_PERSISTENT_NETWORK_NOTIFICATION =
             "persistent_network_notification"
         private const val KEY_IME_CONTEXT_SWITCHING_ENABLED =
             "ime_context_switching_enabled"
         private const val KEY_DEVTOOLS_INSPECTOR_ENABLED =
             "devtools_inspector_enabled"
+        private const val KEY_DEVTOOLS_RUN_PROFILES_ENABLED =
+            "devtools_run_profiles_enabled"
+        private const val KEY_DEVTOOLS_DEBUG_ENABLED =
+            "devtools_debug_enabled"
     }
 }

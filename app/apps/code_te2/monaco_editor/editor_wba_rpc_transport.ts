@@ -144,6 +144,8 @@ export function editorWorkbenchMethodToWbaMethod(method: string): string | null 
       return 'vscode.textmate.grammars.load';
     case 'language_catalog':
       return 'te2.language_catalog';
+    case 'resync':
+      return 'te2.resync';
     default:
       return null;
   }

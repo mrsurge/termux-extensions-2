@@ -1422,14 +1422,22 @@ interface MonacoBootWindowLike extends Window {
   }
 
   function handleWbaSocketReadyForEditor(reason: string): void {
-    void workbenchRuntime
-      .wbFlushActiveModelOpen("wba_ready:" + String(reason || "connect"))
+    void editorWorkbenchCall("resync", {}, { timeoutMs: 5000 })
       .catch((error) => {
-        console.warn(
-          "[wba] active model open flush failed after connect",
-          error,
-        );
+        console.warn("[wba] reconnect resync failed", error);
+        return null;
       })
+      .then(() =>
+        workbenchRuntime
+          .wbFlushActiveModelOpen("wba_ready:" + String(reason || "connect"))
+          .catch((error) => {
+            console.warn(
+              "[wba] active model open flush failed after connect",
+              error,
+            );
+            return null;
+          }),
+      )
       .then((result) => {
         const record =
           result && typeof result === "object"
@@ -1713,21 +1721,6 @@ interface MonacoBootWindowLike extends Window {
         request_id: payload.request_id ? String(payload.request_id) : "",
         source: payload.source ? String(payload.source) : "",
       });
-      if (!_languageWorkersEnabled()) {
-        void workbenchRuntime
-          .wbFlushActiveModelOpen("model_ready")
-          .catch((error) => {
-            console.warn("[model_ready] WBA open flush failed", error);
-          })
-          .then((result) => {
-            const record =
-              result && typeof result === "object"
-                ? (result as Record<string, unknown>)
-                : {};
-            if (record.deferred === true) return;
-            void hydrateWorkbenchProviderSnapshot("model_ready");
-          });
-      }
       console.log("[model_ready] emit", {
         path: String(payload.path),
         generation,

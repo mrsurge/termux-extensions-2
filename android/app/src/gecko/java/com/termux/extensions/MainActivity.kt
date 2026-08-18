@@ -75,7 +75,10 @@ class MainActivity : AppCompatActivity() {
     private var pendingRuntimeGeneration: Long? = null
     private var pendingStartupGeneration: Long? = null
     private var devToolsInspector: GeckoDevToolsInspector? = null
-    private var devToolsInspectorEnabled = false
+    private var devToolsRunProfilesEnabled = false
+    private var devToolsDebugEnabled = false
+    private val devToolsInspectorEnabled: Boolean
+        get() = devToolsRunProfilesEnabled || devToolsDebugEnabled
     private var devToolsInspectorStatus = "disabled"
     private var processesSession: GeckoSession? = null
     private var processesLoadedUrl: String? = null
@@ -175,6 +178,8 @@ class MainActivity : AppCompatActivity() {
                     snapshot
                         .put("available", devToolsInspector != null)
                         .put("configuredEnabled", devToolsInspectorEnabled)
+                        .put("runProfilesEnabled", devToolsRunProfilesEnabled)
+                        .put("debugTargetsEnabled", devToolsDebugEnabled)
                         .put("status", devToolsInspectorStatus)
                     completion(Result.success(snapshot))
                 }
@@ -184,6 +189,8 @@ class MainActivity : AppCompatActivity() {
                     snapshot
                         .put("available", devToolsInspector != null)
                         .put("configuredEnabled", devToolsInspectorEnabled)
+                        .put("runProfilesEnabled", devToolsRunProfilesEnabled)
+                        .put("debugTargetsEnabled", devToolsDebugEnabled)
                         .put("status", devToolsInspectorStatus)
                     completion(Result.success(snapshot))
                 }
@@ -219,7 +226,10 @@ class MainActivity : AppCompatActivity() {
                             )
                             return@runOnUiThread
                         }
-                        devToolsInspector?.configure(devToolsInspectorEnabled) {
+                        devToolsInspector?.configure(
+                            devToolsRunProfilesEnabled,
+                            devToolsDebugEnabled,
+                        ) {
                             runOnUiThread { unlockGeckoNavigation() }
                         }
                     }
@@ -397,15 +407,8 @@ class MainActivity : AppCompatActivity() {
         return path == "/app" || path.startsWith("/app/")
     }
 
-    private fun ensureGvNative(uri: Uri): Uri {
-        if (uri.queryParameterNames.contains("gv_native")) return uri
-        val builder = uri.buildUpon()
-        val existingQuery = uri.encodedQuery
-        builder.encodedQuery(
-            if (existingQuery.isNullOrBlank()) "gv_native=1" else "$existingQuery&gv_native=1",
-        )
-        return builder.build()
-    }
+    private fun ensureGvNative(uri: Uri): Uri =
+        Uri.parse(withAndroidNativePageIdentity(uri.toString(), "gecko"))
 
     private fun createNavigationDelegate() = object : GeckoSession.NavigationDelegate {
         override fun onLoadRequest(
@@ -1328,8 +1331,10 @@ class MainActivity : AppCompatActivity() {
     private fun loadApp(appId: String) {
         if (!::geckoSession.isInitialized) return
         if (!requireAssetInterceptor("app navigation")) return
-        val appUrl = browserFrameworkBaseUrl().trimEnd('/') +
-            "/app/" + appId + "?gv_native=1"
+        val appUrl = withAndroidNativePageIdentity(
+            browserFrameworkBaseUrl().trimEnd('/') + "/app/" + appId,
+            "gecko",
+        )
         if (clientStartupState.gateAppNavigation(appUrl)) return
         inAppShell = true
         nativeHeader.visibility = View.VISIBLE
@@ -1748,6 +1753,7 @@ class MainActivity : AppCompatActivity() {
                     androidDiagnostics.snapshot(androidDiagnosticRuntimeState())
                 },
                 appUrlRewriter = runtimeService::rewriteFrameworkUrl,
+                nativeRenderer = "gecko",
                 settingsRuntimeProvider = {
                     runtimeService.snapshot().toJson()
                 },
@@ -1927,7 +1933,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun applyAndroidSettings(settings: AndroidAppSettings, reconnect: Boolean) {
         val devToolsSettingChanged =
-            devToolsInspectorEnabled != settings.devToolsInspectorEnabled
+            devToolsRunProfilesEnabled != settings.devToolsRunProfilesEnabled ||
+                devToolsDebugEnabled != settings.devToolsDebugEnabled
         val frameworkChanged = frameworkBaseUrl != settings.frameworkBaseUrl
         frameworkBaseUrl = settings.frameworkBaseUrl
         if (frameworkChanged) {
@@ -1944,7 +1951,8 @@ class MainActivity : AppCompatActivity() {
             })
         }
         persistentNetworkNotificationEnabled = settings.persistentNetworkNotification
-        devToolsInspectorEnabled = settings.devToolsInspectorEnabled
+        devToolsRunProfilesEnabled = settings.devToolsRunProfilesEnabled
+        devToolsDebugEnabled = settings.devToolsDebugEnabled
         if (!reconnect) return
 
         runOnUiThread {
@@ -1958,7 +1966,10 @@ class MainActivity : AppCompatActivity() {
                 updateDevToolsInspectorStatus(
                     if (devToolsInspectorEnabled) "starting" else "stopping",
                 )
-                devToolsInspector?.configure(devToolsInspectorEnabled) { configured ->
+                devToolsInspector?.configure(
+                    devToolsRunProfilesEnabled,
+                    devToolsDebugEnabled,
+                ) { configured ->
                     runOnUiThread {
                         updateDevToolsInspectorSurface()
                         if (configured && inAppShell && ::geckoSession.isInitialized) {

@@ -10,13 +10,19 @@ mod native {
     use ferrous_framework::{FerrousNativeManager, FerrousNativeShellStatus};
     use std::{
         collections::HashSet,
-        sync::{Arc, Mutex, OnceLock},
+        sync::{
+            Arc, Mutex, OnceLock,
+            atomic::{AtomicBool, Ordering},
+            mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError, sync_channel},
+        },
+        thread::{self, JoinHandle},
         time::Duration,
     };
     use tokio::runtime::Handle;
     use tracing::{debug, warn};
 
     static ACTIVE_BRIDGES: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    const PIPE_WRITER_QUEUE_CAPACITY: usize = 256;
 
     pub(crate) fn ensure_bridge(
         manager: Option<FerrousNativeManager>,
@@ -58,6 +64,25 @@ mod native {
         scheduler: FrameworkServiceScheduler,
         handle: Handle,
     ) -> anyhow::Result<()> {
+        let (sink, writer) = start_pipe_writer(manager.clone(), shell_id, app_id)?;
+        let read_result =
+            run_bridge_read(manager, shell_id, app_id, scheduler, handle, sink.clone());
+        sink.close();
+        let write_result = writer
+            .join()
+            .map_err(|_| anyhow::anyhow!("app-worker pipe writer panicked"))?;
+        read_result?;
+        write_result
+    }
+
+    fn run_bridge_read(
+        manager: FerrousNativeManager,
+        shell_id: &str,
+        app_id: &str,
+        scheduler: FrameworkServiceScheduler,
+        handle: Handle,
+        sink: Arc<FerrousPipeSink>,
+    ) -> anyhow::Result<()> {
         let mut buffer = Vec::<u8>::new();
         loop {
             match manager.read_stdout_chunk_blocking(shell_id, Duration::from_millis(250))? {
@@ -65,12 +90,12 @@ mod native {
                     buffer.extend_from_slice(&chunk);
                     while let Some(line) = take_line(&mut buffer) {
                         handle_stdout_line(
-                            &manager,
                             shell_id,
                             app_id,
                             &line,
                             scheduler.clone(),
                             handle.clone(),
+                            sink.clone(),
                         );
                     }
                 }
@@ -85,12 +110,12 @@ mod native {
     }
 
     fn handle_stdout_line(
-        manager: &FerrousNativeManager,
         shell_id: &str,
         app_id: &str,
         line: &[u8],
         scheduler: FrameworkServiceScheduler,
         handle: Handle,
+        sink: Arc<FerrousPipeSink>,
     ) {
         let text = String::from_utf8_lossy(line);
         let request = match decode_line(text.as_ref()) {
@@ -118,14 +143,11 @@ mod native {
                 .clone()
                 .unwrap_or_else(|| "framework.rust".to_owned()),
         };
-        let sink: Arc<dyn PipeEventSink> = Arc::new(FerrousPipeSink {
-            manager: manager.clone(),
-            shell_id: shell_id.to_owned(),
-            app_id: app_id.to_owned(),
-        });
-        let response_sink = Arc::clone(&sink);
+        let event_sink: Arc<dyn PipeEventSink> = sink.clone();
+        let response_sink = sink;
         handle.spawn(async move {
-            let response = dispatch_request(request, &responder, &scheduler, Some(sink)).await;
+            let response =
+                dispatch_request(request, &responder, &scheduler, Some(event_sink)).await;
             if let Err(error) = response_sink.send(response) {
                 warn!(%error, "failed to write pipe response to app-worker");
             }
@@ -133,18 +155,100 @@ mod native {
     }
 
     struct FerrousPipeSink {
-        manager: FerrousNativeManager,
+        sender: SyncSender<Vec<u8>>,
+        closed: Arc<AtomicBool>,
         shell_id: String,
         app_id: String,
+    }
+
+    impl FerrousPipeSink {
+        fn enqueue(&self, encoded: Vec<u8>) -> anyhow::Result<()> {
+            if self.closed.load(Ordering::Acquire) {
+                anyhow::bail!("app-worker pipe writer is closed");
+            }
+            match self.sender.try_send(encoded) {
+                Ok(()) => {
+                    debug!(shell_id = %self.shell_id, app_id = %self.app_id, "queued app-worker pipe frame");
+                    Ok(())
+                }
+                Err(TrySendError::Full(_)) => {
+                    anyhow::bail!("app-worker pipe writer queue is full")
+                }
+                Err(TrySendError::Disconnected(_)) => {
+                    anyhow::bail!("app-worker pipe writer is disconnected")
+                }
+            }
+        }
+
+        fn close(&self) {
+            self.closed.store(true, Ordering::Release);
+        }
     }
 
     impl PipeEventSink for FerrousPipeSink {
         fn send(&self, envelope: PipeEnvelope) -> anyhow::Result<()> {
             let encoded = encode_line(&envelope)?;
-            self.manager
-                .write_to_pipe_blocking(&self.shell_id, encoded.as_bytes())?;
-            debug!(shell_id = %self.shell_id, app_id = %self.app_id, "wrote app-worker pipe frame");
+            self.enqueue(encoded.into_bytes())
+        }
+    }
+
+    fn start_pipe_writer(
+        manager: FerrousNativeManager,
+        shell_id: &str,
+        app_id: &str,
+    ) -> anyhow::Result<(Arc<FerrousPipeSink>, JoinHandle<anyhow::Result<()>>)> {
+        let (sender, receiver) = sync_channel(PIPE_WRITER_QUEUE_CAPACITY);
+        let closed = Arc::new(AtomicBool::new(false));
+        let sink = Arc::new(FerrousPipeSink {
+            sender,
+            closed: closed.clone(),
+            shell_id: shell_id.to_owned(),
+            app_id: app_id.to_owned(),
+        });
+        let writer_shell_id = shell_id.to_owned();
+        let writer_app_id = app_id.to_owned();
+        let writer = thread::Builder::new()
+            .name(format!("te2-pipe-writer-{shell_id}"))
+            .spawn(move || {
+                let result = run_pipe_writer(
+                    manager,
+                    &writer_shell_id,
+                    &writer_app_id,
+                    receiver,
+                    closed.clone(),
+                );
+                closed.store(true, Ordering::Release);
+                result
+            })?;
+        Ok((sink, writer))
+    }
+
+    fn run_pipe_writer(
+        manager: FerrousNativeManager,
+        shell_id: &str,
+        app_id: &str,
+        receiver: Receiver<Vec<u8>>,
+        closed: Arc<AtomicBool>,
+    ) -> anyhow::Result<()> {
+        run_ordered_pipe_writer(receiver, closed, |encoded| {
+            manager.write_to_pipe_blocking(shell_id, encoded)?;
+            debug!(%shell_id, %app_id, "wrote app-worker pipe frame");
             Ok(())
+        })
+    }
+
+    fn run_ordered_pipe_writer(
+        receiver: Receiver<Vec<u8>>,
+        closed: Arc<AtomicBool>,
+        mut write: impl FnMut(&[u8]) -> anyhow::Result<()>,
+    ) -> anyhow::Result<()> {
+        loop {
+            match receiver.recv_timeout(Duration::from_millis(100)) {
+                Ok(encoded) => write(&encoded)?,
+                Err(RecvTimeoutError::Timeout) if closed.load(Ordering::Acquire) => return Ok(()),
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => return Ok(()),
+            }
         }
     }
 
@@ -162,6 +266,66 @@ mod native {
             return Ok(false);
         };
         Ok(state.status == FerrousNativeShellStatus::Running)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::{FerrousPipeSink, run_ordered_pipe_writer};
+        use std::sync::{Arc, atomic::AtomicBool, mpsc::sync_channel};
+
+        #[test]
+        fn bounded_writer_queue_preserves_order_and_fails_explicitly() {
+            let (sender, receiver) = sync_channel(2);
+            let sink = FerrousPipeSink {
+                sender,
+                closed: Arc::new(AtomicBool::new(false)),
+                shell_id: "shell".to_owned(),
+                app_id: "app".to_owned(),
+            };
+
+            sink.enqueue(vec![1]).unwrap();
+            sink.enqueue(vec![2]).unwrap();
+            assert!(
+                sink.enqueue(vec![3])
+                    .unwrap_err()
+                    .to_string()
+                    .contains("full")
+            );
+            assert_eq!(receiver.recv().unwrap(), vec![1]);
+            assert_eq!(receiver.recv().unwrap(), vec![2]);
+
+            sink.close();
+            assert!(
+                sink.enqueue(vec![4])
+                    .unwrap_err()
+                    .to_string()
+                    .contains("closed")
+            );
+        }
+
+        #[test]
+        fn ordered_writer_drains_on_close_and_propagates_write_failure() {
+            let (sender, receiver) = sync_channel(2);
+            let closed = Arc::new(AtomicBool::new(false));
+            sender.send(vec![1]).unwrap();
+            sender.send(vec![2]).unwrap();
+            closed.store(true, std::sync::atomic::Ordering::Release);
+            let mut written = Vec::new();
+            run_ordered_pipe_writer(receiver, closed, |frame| {
+                written.push(frame.to_vec());
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(written, vec![vec![1], vec![2]]);
+
+            let (sender, receiver) = sync_channel(1);
+            sender.send(vec![3]).unwrap();
+            let error = run_ordered_pipe_writer(receiver, Arc::new(AtomicBool::new(false)), |_| {
+                anyhow::bail!("write failed")
+            })
+            .unwrap_err();
+            assert!(error.to_string().contains("write failed"));
+        }
     }
 }
 

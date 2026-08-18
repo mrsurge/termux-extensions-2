@@ -154,7 +154,7 @@ test('Sidebar registration and presentation RPCs are reliable across reconnects'
         assert.equal(options.path, '/api/app/code_te2/socket.io');
         return socket;
       },
-      initConsoleBridge: () => null,
+      initConsoleBridge: () => ({}),
       getClientId: () => 'client-a',
       onSidebarConnected: () => {
         registered += 1;
@@ -192,6 +192,44 @@ test('Sidebar registration and presentation RPCs are reliable across reconnects'
     );
   } finally {
     globalThis.window = previousWindow;
+  }
+});
+
+test('UI IPC requests host resync only after a genuine reconnect', async () => {
+  const { createUiIpcConnections } = await importTypeScript(
+    'main_page/frontend/connections/ui-ipc.ts',
+  );
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  globalThis.window = { dispatchEvent: () => true };
+  globalThis.document = { dispatchEvent: () => true };
+  try {
+    const socket = new FakeSocket();
+    let resyncs = 0;
+    const connections = createUiIpcConnections({
+      ensureSocketIoLoaded: async () => () => socket,
+      initConsoleBridge: () => ({}),
+      getClientId: () => 'client-a',
+      getConsoleWorkerId: () => 'main_page:test',
+      onHostStateResync: () => {
+        resyncs += 1;
+      },
+    });
+
+    const connecting = connections.connectUIIPC();
+    await settlePromises();
+    socket.trigger('connect');
+    await connecting;
+    await settlePromises();
+    assert.equal(resyncs, 0);
+
+    socket.trigger('disconnect', 'transport close');
+    socket.trigger('connect');
+    await settlePromises();
+    assert.equal(resyncs, 1);
+  } finally {
+    globalThis.window = previousWindow;
+    globalThis.document = previousDocument;
   }
 });
 
@@ -240,6 +278,7 @@ test('maps the editor definition action onto the WBA definition method', async (
     editorWorkbenchMethodToWbaMethod('definition'),
     'vscode.definition',
   );
+  assert.equal(editorWorkbenchMethodToWbaMethod('resync'), 'te2.resync');
 });
 
 test('editor RPC calls are reliable while notifications remain volatile', async () => {
@@ -596,9 +635,17 @@ test('visible editor open completion does not await WBA or agent hydration', asy
     'monaco_editor/editor_open_transaction_state.ts',
   );
   let currentPath = null;
-  let model = null;
+  const modelLifecycleOrder = [];
+  const oldModel = {
+    uri: { toString: () => 'file:///workspace/old.py' },
+    getValue: () => 'old\n',
+    getLanguageId: () => 'python',
+    dispose: () => modelLifecycleOrder.push('dispose:old'),
+  };
+  let model = oldModel;
   const editor = {
     setModel: (nextModel) => {
+      modelLifecycleOrder.push('editor:setModel');
       model = nextModel;
     },
     getModel: () => model,
@@ -689,10 +736,46 @@ test('visible editor open completion does not await WBA or agent hydration', asy
   assert.equal(wbaOpenCalls, 1);
   assert.equal(agentHydrationCalls, 1);
   assert.deepEqual(baselineRequests, [{ immediate: true, reason: 'open' }]);
+  assert.ok(
+    modelLifecycleOrder.indexOf('editor:setModel') <
+      modelLifecycleOrder.indexOf('dispose:old'),
+  );
 
   wbaOpen.resolve({ ok: true });
   agentHydration.resolve({ ok: true });
   await settlePromises();
+});
+
+test('modelReady is backend notification rather than WBA open or resync', () => {
+  const frontendSource = fs.readFileSync(
+    path.join(appRoot, 'monaco_editor/m_editor_app.ts'),
+    'utf8',
+  );
+  const frontendBody = frontendSource.match(
+    /function emitModelReady[\s\S]*?\n  function requestGitBaselines/,
+  )?.[0];
+  assert.ok(frontendBody, 'frontend modelReady handler must remain present');
+  assert.match(frontendBody, /EDITOR_RPC_METHODS\.modelReady/);
+  assert.doesNotMatch(frontendBody, /wbFlushActiveModelOpen/);
+  assert.doesNotMatch(frontendBody, /hydrateWorkbenchProviderSnapshot/);
+
+  const reconnectBody = frontendSource.match(
+    /function handleWbaSocketReadyForEditor[\s\S]*?\n  function _clearEditorDecorationStateRuntime/,
+  )?.[0];
+  assert.ok(reconnectBody, 'WBA reconnect handler must remain present');
+  assert.match(reconnectBody, /editorWorkbenchCall\("resync"/);
+  assert.match(reconnectBody, /hydrateWorkbenchProviderSnapshot/);
+
+  const backendSource = fs.readFileSync(
+    path.join(appRoot, 'monaco_editor/editor_ws.py'),
+    'utf8',
+  );
+  const backendBody = backendSource.match(
+    /async def editor_runtime_handle_model_ready[\s\S]*?\n\nasync def editor_runtime_handle_issues_dump_response/,
+  )?.[0];
+  assert.ok(backendBody, 'backend modelReady handler must remain present');
+  assert.doesNotMatch(backendBody, /adapter_rpc/);
+  assert.doesNotMatch(backendBody, /te2\.resync/);
 });
 
 test('TextMate catalog and factory initialization are shared across concurrent callers', async () => {

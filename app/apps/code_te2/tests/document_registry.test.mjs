@@ -455,6 +455,35 @@ test("active document promotion emits the backend reconciliation fact", async ()
   assert.equal(activeEvent.workspaceFolder, "/workspace");
 });
 
+test("same-path same-generation open is idempotent", async () => {
+  const fixture = createLifecycleRuntime({
+    "/workspace/a.rs": "fn a() {}\n",
+  });
+
+  await openFile(fixture.runtime, { path: "/workspace/a.rs", generation: 7 });
+  fixture.registry.replaceFullText({
+    path: "/workspace/a.rs",
+    text: "fn drafted() {}\n",
+    openGeneration: 7,
+    dirty: true,
+  });
+  const callsBeforeDuplicate = fixture.calls.length;
+  const eventsBeforeDuplicate = fixture.events.length;
+
+  const duplicate = await openFile(fixture.runtime, {
+    path: "/workspace/a.rs",
+    generation: 7,
+    forceRefresh: true,
+  });
+
+  assert.equal(duplicate.duplicate, true);
+  assert.deepEqual(fixture.reads, ["/workspace/a.rs"]);
+  assert.equal(fixture.calls.length, callsBeforeDuplicate);
+  assert.equal(fixture.events.length, eventsBeforeDuplicate);
+  assert.equal(fixture.registry.getByPath("/workspace/a.rs").versionId, 2);
+  assert.equal(fixture.registry.getByPath("/workspace/a.rs").dirty, true);
+});
+
 test("active switching retains the complete synthetic tab set", async () => {
   const fixture = createLifecycleRuntime({
     "/workspace/a.rs": "fn a() {}\n",

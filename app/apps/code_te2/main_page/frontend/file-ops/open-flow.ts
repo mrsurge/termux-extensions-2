@@ -5,12 +5,6 @@ import {
   recordDiagnosticsOpenStage,
 } from '../../../src/diagnostics/latency-probe.ts';
 
-interface OpenFlowProjectState {
-  activeProject?: string | null;
-  activeProjectExists?: boolean;
-  activeProjectMessage?: string;
-}
-
 export interface OpenFileOptions {
   allowOverwrite?: boolean;
   forceRefresh?: boolean;
@@ -35,7 +29,6 @@ interface OpenRequestPayload extends Record<string, unknown> {
 
 interface OpenFlowControllerDeps {
   setStatus: (text: string) => void;
-  ensureProjectContext: () => Promise<OpenFlowProjectState | null | undefined>;
   toAbsolute: (path: string, base?: string | null, home?: string) => string;
   homeDir: string;
   getRestoredSessionActive: () => boolean;
@@ -102,21 +95,12 @@ export function createOpenFlowController(deps: OpenFlowControllerDeps) {
     beginDiagnosticsOpenTrace(openRequestId, path);
     deps.setStatus('Opening...');
 
-    const projectStartedAt = diagnosticsLatencyProbeEnabled() ? performance.now() : null;
-    const projectState = await deps.ensureProjectContext();
-    recordDiagnosticsOpenStage(openRequestId, 'host_project_context', {
-      durationMs: projectStartedAt !== null ? performance.now() - projectStartedAt : undefined,
-    });
-    if (!projectState || !projectState.activeProject || !projectState.activeProjectExists) {
-      finishDiagnosticsOpenTrace(openRequestId, 'host_project_unavailable');
-      deps.setStatus('');
-      deps.toast(projectState?.activeProjectMessage || 'Select a project before opening files.');
-      return;
-    }
-
     try {
-      const resolvedTarget = deps.toAbsolute(path, null, deps.homeDir);
-      if (!forceRefresh && !allowOverwrite && deps.getRestoredSessionActive() && deps.getCurrentPath() && resolvedTarget === deps.getCurrentPath()) {
+      const projectRoot = deps.getCachedProjectRoot();
+      const tentativeTarget = projectRoot
+        ? deps.toAbsolute(path, projectRoot, deps.homeDir)
+        : path;
+      if (!forceRefresh && !allowOverwrite && deps.getRestoredSessionActive() && deps.getCurrentPath() && tentativeTarget === deps.getCurrentPath()) {
         finishDiagnosticsOpenTrace(openRequestId, 'host_restored_open_skipped');
         console.log('[Editor] Skipping host-side open; restored session buffer already loaded');
         deps.setStatus('');
@@ -127,10 +111,14 @@ export function createOpenFlowController(deps: OpenFlowControllerDeps) {
       deps.setIndicatorInactive();
 
       const backendStartedAt = diagnosticsLatencyProbeEnabled() ? performance.now() : null;
-      await deps.requestBackendOpen({
+      const response = await deps.requestBackendOpen({
         ...openRequestOptions,
-        path: resolvedTarget,
+        path: tentativeTarget,
       });
+      const responseRecord = isRecord(response) ? response : null;
+      const resolvedTarget = typeof responseRecord?.path === 'string' && responseRecord.path
+        ? responseRecord.path
+        : tentativeTarget;
       recordDiagnosticsOpenStage(openRequestId, 'host_backend_open_resolved', {
         durationMs: backendStartedAt !== null ? performance.now() - backendStartedAt : undefined,
       });

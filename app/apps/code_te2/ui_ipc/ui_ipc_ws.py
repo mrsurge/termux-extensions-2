@@ -15,6 +15,7 @@ namespace.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable
 from collections.abc import Mapping
 from typing import Protocol, cast, override
@@ -34,12 +35,7 @@ from .rpc_contract import (
     UI_IPC_RPC_NAMESPACE,
     UI_IPC_RPC_NOTIFICATION_ADAPTER_STATE,
     UI_IPC_RPC_NOTIFICATION_EVENT,
-    UI_IPC_RPC_NOTIFICATION_FILE_TABS_DECORATIONS_CHANGED,
-    UI_IPC_RPC_NOTIFICATION_HOST_ACTIVE_FILE_CHANGED,
-    UI_IPC_RPC_NOTIFICATION_OPEN_STATE_CHANGED,
-    UI_IPC_RPC_NOTIFICATION_RUN_PROFILE_STATE_CHANGED,
     UI_IPC_RPC_NOTIFICATION_RUN_TARGET_ROUTES_CHANGED,
-    UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOWS_CHANGED,
     UiIpcRpcProtocolError,
     build_jsonrpc_error,
     build_jsonrpc_notification,
@@ -50,11 +46,7 @@ from .rpc_contract import (
 from .rpc_dispatch import dispatch_ui_ipc_rpc_request
 from .sidebar_rpc_contract import SIDEBAR_IPC_RPC_NAMESPACE
 from ..host.run_target_service import set_run_target_routes_emitter
-from ..stores import get_history_store
-from ..explorer.services.file_ops import get_project_root
-from ..open_state_backend import read_sidecar_open_state
 from ..file_tabs_projection import (
-    build_file_tabs_projection,
     set_file_tabs_projection_emitter,
 )
 
@@ -178,6 +170,25 @@ set_run_target_routes_emitter(_emit_run_target_routes_to_native)
 set_file_tabs_projection_emitter(emit_ui_ipc_rpc_notification)
 
 
+async def _emit_browser_connect_adapter_state(
+    ns: SocketIONamespace,
+    sid: str,
+) -> None:
+    try:
+        from ..workbench_adapter_shell_manager import get_adapter_state
+
+        await ns.emit(
+            UI_IPC_RPC_NOTIFICATION_EVENT,
+            _encode_ui_ipc_notification(
+                UI_IPC_RPC_NOTIFICATION_ADAPTER_STATE,
+                _json_object(get_adapter_state()),
+            ),
+            to=sid,
+        )
+    except Exception as exc:
+        print(f"[ui_ipc] adapter connect projection failed sid={sid}: {exc}", flush=True)
+
+
 class UIIPCNamespace(socketio.AsyncNamespace):
 
     # python-socketio dispatches via 'on_' + event_name. Translate colons to
@@ -235,84 +246,14 @@ class UIIPCNamespace(socketio.AsyncNamespace):
                     "Native run-target projection is unavailable"
                 ) from exc
         print(f"[{room}] connect sid={sid_text}", flush=True)
-        # Push current adapter state to the newly connected client.
-        if room == "ui_ipc":
-            try:
-                from ..workbench_adapter_shell_manager import get_adapter_state
-                state = _json_object(get_adapter_state())
-                await ns.emit(
-                    UI_IPC_RPC_NOTIFICATION_EVENT,
-                    _encode_ui_ipc_notification(UI_IPC_RPC_NOTIFICATION_ADAPTER_STATE, state),
-                    to=sid_text,
-                )
-            except Exception:
-                pass
-            try:
-                history = get_history_store()
-                project = history.get_active_project() or str(get_project_root())
-                if project:
-                    open_state = read_sidecar_open_state(project, reason="reconnect")
-                    current_path = open_state["openFile"]
-                    rel = open_state["openFileRel"]
-                    await ns.emit(
-                        UI_IPC_RPC_NOTIFICATION_EVENT,
-                        _encode_ui_ipc_notification(
-                            UI_IPC_RPC_NOTIFICATION_OPEN_STATE_CHANGED,
-                            dict(open_state),
-                        ),
-                        to=sid_text,
-                    )
-                    await ns.emit(
-                        UI_IPC_RPC_NOTIFICATION_EVENT,
-                        _encode_ui_ipc_notification(
-                            UI_IPC_RPC_NOTIFICATION_HOST_ACTIVE_FILE_CHANGED,
-                            {
-                                "path": current_path,
-                                "rel": rel,
-                                "openState": dict(open_state),
-                                "source": "ui_ipc_connect",
-                            },
-                        ),
-                        to=sid_text,
-                    )
-                    file_tabs = await build_file_tabs_projection(project)
-                    await ns.emit(
-                        UI_IPC_RPC_NOTIFICATION_EVENT,
-                        _encode_ui_ipc_notification(
-                            UI_IPC_RPC_NOTIFICATION_FILE_TABS_DECORATIONS_CHANGED,
-                            file_tabs,
-                        ),
-                        to=sid_text,
-                    )
-            except Exception:
-                pass
-            try:
-                from .sidebar_window_state import get_sidebar_window_state
-
-                await ns.emit(
-                    UI_IPC_RPC_NOTIFICATION_EVENT,
-                    _encode_ui_ipc_notification(
-                        UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOWS_CHANGED,
-                        _json_object(get_sidebar_window_state()),
-                    ),
-                    to=sid_text,
-                )
-            except Exception:
-                pass
-            try:
-                from ..run_profile_state import build_run_profile_state_projection
-
-                run_profile_state = await build_run_profile_state_projection()
-                await ns.emit(
-                    UI_IPC_RPC_NOTIFICATION_EVENT,
-                    _encode_ui_ipc_notification(
-                        UI_IPC_RPC_NOTIFICATION_RUN_PROFILE_STATE_CHANGED,
-                        run_profile_state,
-                    ),
-                    to=sid_text,
-                )
-            except Exception:
-                pass
+        if room == "ui_ipc" and not native_source:
+            # The Socket.IO connect acknowledgement must not wait for disk-backed
+            # host/sidebar/run-profile snapshots. Browser boot/reconnect owns one
+            # explicit snapshot request after the transport becomes usable.
+            _ = asyncio.create_task(
+                _emit_browser_connect_adapter_state(ns, sid_text),
+                name="code_te2_ui_ipc_connect_projection",
+            )
 
     async def on_disconnect(self, sid: object, reason: object | None = None) -> None:
         sid_text = _sid(sid)

@@ -7,12 +7,17 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.util.Log
 import android.view.View
 import android.view.inputmethod.InputMethodManager
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -28,25 +33,40 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.net.URI
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 class MainActivity : AppCompatActivity() {
     private lateinit var browser: CefriumBrowser
+    private lateinit var selectionIntegration: CefriumSelectionIntegration
+    private var devToolsRuntime: CefriumDevToolsRuntime? = null
+    private var inspectorBrowser: CefriumBrowser? = null
+    private var processesBrowser: CefriumBrowser? = null
+    private var processesLoadedUrl: String? = null
     private lateinit var browserContainer: FrameLayout
     private lateinit var nativeHeader: View
     private lateinit var consoleOverlay: FrameLayout
     private lateinit var composeConsoleContainer: ComposeView
     private lateinit var inspectorPanel: FrameLayout
+    private lateinit var inspectorBrowserContainer: FrameLayout
+    private lateinit var inspectorStatus: TextView
+    private lateinit var inspectorTargetPicker: Spinner
+    private lateinit var inspectorTargetAdapter: ArrayAdapter<String>
+    private lateinit var processesPanel: FrameLayout
     private lateinit var btnToolsConsole: Button
     private lateinit var btnToolsInspector: Button
+    private lateinit var btnToolsProcesses: Button
     private lateinit var consoleTitle: TextView
 
     private lateinit var settingsStore: AndroidAppSettingsStore
     private lateinit var diagnostics: AndroidDiagnostics
     private lateinit var assetManager: EditorAssetManager
     private lateinit var shellGateway: AndroidShellGateway
+    private lateinit var toolsStateStore: AndroidToolsStateStore
 
     private val editorInputFilter = EditorInputFilter()
     private val consoleState = ComposeConsoleState()
+    private val uiHandler = Handler(Looper.getMainLooper())
+    private val appHealthProbeInFlight = AtomicBoolean(false)
     private var clientRuntimeService: PersistentNetworkService? = null
     private var clientRuntimeBound = false
     private var clientInitializationStarted = false
@@ -62,11 +82,85 @@ class MainActivity : AppCompatActivity() {
     private var canNavigateBack = false
     private var inAppShell = false
     private var isLocked = false
-    private var toolsConsoleSelected = true
+    private var toolsState = AndroidToolsState()
+    private var toolsSelectedTab = NativeToolsTab.CONSOLE
+    private var devToolsRunProfilesEnabled = false
+    private var devToolsDebugEnabled = false
+    private val devToolsInspectorEnabled: Boolean
+        get() = devToolsRunProfilesEnabled || devToolsDebugEnabled
+    private var devToolsStatus = "disabled"
+    private var inspectorClientReady = false
+    private var inspectorPageLoaded = false
+    private var inspectorDeliveredGeneration = 0L
+    private var inspectorInitialTargetNudgeRequested = false
+    private var inspectorInitialTargetNudgeCompleted = false
+    private var inspectorPickerUpdating = false
+    private var inspectorTargets = emptyList<CefriumDevToolsTarget>()
+    private var inspectorActiveTargetId: String? = null
+    private var mainBrowserReady = false
+    private var androidDiagnosticsLoadedForTools = false
+    private var activityResumed = false
+    private var appHealthFailureCount = 0
+    private val appHealthCheckRunnable = Runnable { runAppHealthProbe() }
+    private var navigationGeneration = 0L
     private var persistentNetworkEnabled = false
     private var pendingColdRestorePath: String? = null
     private var notificationPermissionRequestInFlight = false
     private var notificationPermissionDenied = false
+
+    private val devToolsListener = object : CefriumDevToolsRuntime.Listener {
+        override fun onStatusChanged(status: String) {
+            runOnUiThread {
+                devToolsStatus = status
+                updateInspectorSurface()
+            }
+        }
+
+        override fun onTargetsChanged(
+            targets: List<CefriumDevToolsTarget>,
+            activeTargetId: String?,
+        ) {
+            runOnUiThread {
+                inspectorTargets = targets
+                inspectorActiveTargetId = activeTargetId
+                if (
+                    activeTargetId != null &&
+                    activeTargetId != toolsState.inspectorTargetId
+                ) {
+                    persistToolsState(inspectorTargetId = activeTargetId)
+                }
+                renderInspectorTargets()
+                publishInspectorTargetsToPage()
+                updateInspectorSurface()
+                performInitialInspectorTargetNudge()
+            }
+        }
+
+        override fun onTargetReset(generation: Long) {
+            runOnUiThread {
+                deliverInspectorTargetReset(generation)
+                updateInspectorSurface()
+            }
+        }
+
+        override fun onTargetWaiting() {
+            runOnUiThread {
+                inspectorDeliveredGeneration = 0L
+                sendInspectorMessage(JSONObject().put("type", "target_waiting"))
+                updateInspectorSurface()
+            }
+        }
+
+        override fun onProtocolMessage(payload: String) {
+            runOnUiThread {
+                sendInspectorMessage(
+                    JSONObject()
+                        .put("type", "protocol")
+                        .put("payload", payload),
+                )
+            }
+        }
+    }
 
     private val clientRuntimeObserver = object : AndroidClientRuntimeObserver {
         override fun onRuntimeStateChanged(snapshot: AndroidClientRuntimeSnapshot) {
@@ -99,13 +193,51 @@ class MainActivity : AppCompatActivity() {
                 AndroidNativeConsoleCommand.FORCE_UPDATE_AND_RELOAD ->
                     forceAssetUpdate(showFeedback = false, completion = completion)
                 AndroidNativeConsoleCommand.DEVTOOLS_STATE_GET,
-                AndroidNativeConsoleCommand.DEVTOOLS_TELEMETRY_CLEAR -> completion(
-                    Result.success(
-                        JSONObject()
-                            .put("available", false)
-                            .put("renderer", "cefrium"),
-                    ),
-                )
+                AndroidNativeConsoleCommand.DEVTOOLS_TELEMETRY_CLEAR -> runOnUiThread {
+                    val snapshot = devToolsRuntime?.debugSnapshot()
+                        ?: JSONObject()
+                            .put("available", true)
+                            .put("renderer", "cefrium")
+                            .put("enabled", false)
+                            .put("status", devToolsStatus)
+                    snapshot
+                        .put("configuredEnabled", devToolsInspectorEnabled)
+                        .put("runProfilesEnabled", devToolsRunProfilesEnabled)
+                        .put("debugTargetsEnabled", devToolsDebugEnabled)
+                        .put("appShellActive", inAppShell)
+                        .put("mainBrowserReady", mainBrowserReady)
+                        .put(
+                            "registeredRuntimeSurfaceCount",
+                            clientRuntimeService?.devRuntimeSurfaceSnapshot()?.size ?: 0,
+                        )
+                        .put("inspectorPageLoaded", inspectorPageLoaded)
+                        .put("inspectorClientReady", inspectorClientReady)
+                        .put("inspectorDeliveredGeneration", inspectorDeliveredGeneration)
+                        .put(
+                            "inspectorInitialTargetNudgeRequested",
+                            inspectorInitialTargetNudgeRequested,
+                        )
+                        .put(
+                            "inspectorInitialTargetNudgeCompleted",
+                            inspectorInitialTargetNudgeCompleted,
+                        )
+                        .put(
+                            "inspectorDocumentUrl",
+                            inspectorBrowser?.url ?: JSONObject.NULL,
+                        )
+                        .put(
+                            "inspectorUiActiveTargetId",
+                            inspectorActiveTargetId ?: JSONObject.NULL,
+                        )
+                        .put("inspectorUiTargetCount", inspectorTargets.size)
+                        .put("toolsSelectedTab", toolsSelectedTab.storageValue)
+                        .put(
+                            "toolsOverlayVisible",
+                            ::consoleOverlay.isInitialized &&
+                                consoleOverlay.visibility == View.VISIBLE,
+                        )
+                    completion(Result.success(snapshot))
+                }
             }
             return true
         }
@@ -121,9 +253,10 @@ class MainActivity : AppCompatActivity() {
             service.setConsoleDrawerEnabled(
                 ::consoleOverlay.isInitialized &&
                     consoleOverlay.visibility == View.VISIBLE &&
-                    toolsConsoleSelected,
+                    toolsSelectedTab == NativeToolsTab.CONSOLE,
                 CONSOLE_TAIL_LINES,
             )
+            syncDevToolsRuntimePolicy()
             if (!clientInitializationStarted) {
                 clientInitializationStarted = true
                 initializeClient()
@@ -144,8 +277,14 @@ class MainActivity : AppCompatActivity() {
         diagnostics = AndroidDiagnostics(applicationContext)
         diagnostics.beginSession()
         settingsStore = AndroidAppSettingsStore(applicationContext)
-        frameworkBaseUrl = settingsStore.load().frameworkBaseUrl
-        persistentNetworkEnabled = settingsStore.load().persistentNetworkNotification
+        toolsStateStore = AndroidToolsStateStore(applicationContext)
+        toolsState = toolsStateStore.load()
+        toolsSelectedTab = toolsState.selectedTab
+        val settings = settingsStore.load()
+        frameworkBaseUrl = settings.frameworkBaseUrl
+        persistentNetworkEnabled = settings.persistentNetworkNotification
+        devToolsRunProfilesEnabled = settings.devToolsRunProfilesEnabled
+        devToolsDebugEnabled = settings.devToolsDebugEnabled
 
         setContentView(R.layout.activity_main)
         bindViews()
@@ -182,8 +321,13 @@ class MainActivity : AppCompatActivity() {
         consoleOverlay = findViewById(R.id.consoleOverlay)
         composeConsoleContainer = findViewById(R.id.composeConsoleContainer)
         inspectorPanel = findViewById(R.id.inspectorPanel)
+        inspectorBrowserContainer = findViewById(R.id.inspectorBrowserContainer)
+        inspectorStatus = findViewById(R.id.inspectorStatus)
+        inspectorTargetPicker = findViewById(R.id.inspectorTargetPicker)
+        processesPanel = findViewById(R.id.processesPanel)
         btnToolsConsole = findViewById(R.id.btnToolsConsole)
         btnToolsInspector = findViewById(R.id.btnToolsInspector)
+        btnToolsProcesses = findViewById(R.id.btnToolsProcesses)
         consoleTitle = findViewById(R.id.consoleTitle)
 
         consoleState.bind(
@@ -193,6 +337,14 @@ class MainActivity : AppCompatActivity() {
             },
             onRequestClear = { clientRuntimeService?.sendConsoleClear() },
         )
+        inspectorTargetAdapter = ArrayAdapter<String>(
+            this,
+            android.R.layout.simple_spinner_item,
+            mutableListOf("Waiting for inspected page..."),
+        ).apply {
+            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+        inspectorTargetPicker.adapter = inspectorTargetAdapter
     }
 
     private fun bindControls() {
@@ -209,6 +361,23 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnUpdateTe2).setOnClickListener { forceAssetUpdate() }
         btnToolsConsole.setOnClickListener { showConsoleTools() }
         btnToolsInspector.setOnClickListener { showInspectorTools() }
+        btnToolsProcesses.setOnClickListener { showProcessesTools() }
+        inspectorTargetPicker.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(
+                parent: AdapterView<*>?,
+                view: View?,
+                position: Int,
+                id: Long,
+            ) {
+                if (inspectorPickerUpdating) return
+                val target = inspectorTargets.getOrNull(position) ?: return
+                if (target.targetId == inspectorActiveTargetId) return
+                persistToolsState(inspectorTargetId = target.targetId)
+                devToolsRuntime?.selectTarget(target.targetId)
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
         consoleOverlay.setOnClickListener { hideTools() }
         findViewById<View>(R.id.consolePanel).setOnClickListener { /* consume */ }
     }
@@ -245,18 +414,26 @@ class MainActivity : AppCompatActivity() {
                 )
             },
             appUrlRewriter = runtimeService::rewriteFrameworkUrl,
+            nativeRenderer = "cefrium",
             settingsRuntimeProvider = { runtimeService.snapshot().toJson() },
             onOpenBatterySettings = runtimeService::openBatteryOptimizationSettings,
         )
         runtimeService.configureLocalRelayRoutes(
             assetRoot = assetManager.getAssetRoot(),
             assetPathResolver = CefriumAssetRoutes::localPath,
-            requestHandler = shellGateway::handle,
+            requestHandler = { request ->
+                CefriumInspectorAssetRoute.handle(assets, request)
+                    ?: shellGateway.handle(request)
+            },
         )
     }
 
     private fun initializeBrowser() {
         browser = CefriumBrowser.createWithSurface(this)
+        selectionIntegration = CefriumSelectionIntegration(browser)
+        browser.setQueryHandler { _, request, origin, callback ->
+            handleNativeQuery(request, origin, callback)
+        }
         browserContainer.addView(
             browser.surfaceContainer,
             FrameLayout.LayoutParams(
@@ -274,7 +451,16 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 this.canNavigateBack = canGoBack
                 if (!isLoading) {
+                    selectionIntegration.installWhenReady()
                     browser.evaluateJavaScript(CefriumPagePolicy.installScript())
+                    if (
+                        inAppShell &&
+                        browser.url.isNotBlank() &&
+                        isRelayOrigin(browser.url)
+                    ) {
+                        mainBrowserReady = true
+                        ensureInspectorBrowser()
+                    }
                 }
             }
         }
@@ -291,6 +477,9 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread { showContextMenu(menuItems) }
         }
         browser.setPullToRefreshEnabled(false)
+        browser.surfaceContainer.post { selectionIntegration.installWhenReady() }
+        configureDevToolsInspector()
+        restoreToolsSurfaceState()
     }
 
     private fun restoreOrLoadLauncher() {
@@ -308,7 +497,7 @@ class MainActivity : AppCompatActivity() {
             )
         ) {
             AndroidColdRestoreDecision.LOAD_SAVED_APP -> {
-                browser.loadUrl(runtime.frameworkUrl(checkNotNull(savedAppPath)))
+                restoreSavedAppAfterHealth(checkNotNull(savedAppPath))
             }
             AndroidColdRestoreDecision.WAIT_FOR_FRESH_PROJECTION -> {
                 pendingColdRestorePath = checkNotNull(savedAppPath)
@@ -323,7 +512,7 @@ class MainActivity : AppCompatActivity() {
         val runtime = clientRuntimeService ?: return
         if (!runtime.snapshot().projectionReady || !::browser.isInitialized) return
         pendingColdRestorePath = null
-        browser.loadUrl(runtime.frameworkUrl(savedPath))
+        restoreSavedAppAfterHealth(savedPath)
     }
 
     private fun handleUrlChanged(url: String?) {
@@ -342,7 +531,12 @@ class MainActivity : AppCompatActivity() {
         if (pendingColdRestorePath == null || isAppPath(currentPath)) {
             prefs().edit().putString(KEY_LAST_PATH, currentPath).apply()
         }
+        val wasInAppShell = inAppShell
         inAppShell = isAppPath(currentPath)
+        when {
+            !wasInAppShell && inAppShell -> beginAppShellInspectorSession()
+            wasInAppShell && !inAppShell -> endAppShellInspectorSession()
+        }
         nativeHeader.visibility = if (inAppShell) View.VISIBLE else View.GONE
         if (inAppShell) {
             parsed.path
@@ -353,13 +547,118 @@ class MainActivity : AppCompatActivity() {
                 ?.let { currentAppId = it }
         }
         updatePersistentNetworkService()
+        appHealthFailureCount = 0
+        updateAppHealthMonitoring(immediate = true)
+    }
+
+    private fun restoreSavedAppAfterHealth(savedPath: String) {
+        val generation = ++navigationGeneration
+        val appId = appIdFromPath(savedPath)
+        Thread {
+            val health = probeRemoteAppHealth(frameworkBaseUrl, appId)
+            runOnUiThread {
+                if (generation != navigationGeneration || !::browser.isInitialized) {
+                    return@runOnUiThread
+                }
+                if (health == AndroidRemoteAppHealth.UNHEALTHY || appId == null) {
+                    loadLauncher()
+                    return@runOnUiThread
+                }
+                currentAppId = appId
+                browser.loadUrl(nativeFrameworkUrl(savedPath) ?: return@runOnUiThread)
+            }
+        }.start()
+    }
+
+    private fun appIdFromPath(path: String): String? {
+        val pathname = path.substringBefore('?').substringBefore('#')
+        if (!pathname.startsWith("/app/")) return null
+        return pathname.removePrefix("/app/").substringBefore('/').takeIf { it.isNotBlank() }
+    }
+
+    private fun probeRemoteAppHealth(
+        frameworkUrl: String,
+        appId: String?,
+    ): AndroidRemoteAppHealth {
+        if (appId.isNullOrBlank()) return AndroidRemoteAppHealth.UNHEALTHY
+        return try {
+            val request = Request.Builder()
+                .url(frameworkUrl.trimEnd('/') + "/api/apps/running")
+                .get()
+                .build()
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) AndroidRemoteAppHealth.UNREACHABLE
+                else evaluateRunningAppsPayload(response.body?.string().orEmpty(), appId)
+            }
+        } catch (_: Exception) {
+            AndroidRemoteAppHealth.UNREACHABLE
+        }
+    }
+
+    private fun updateAppHealthMonitoring(immediate: Boolean = false) {
+        uiHandler.removeCallbacks(appHealthCheckRunnable)
+        if (!activityResumed || !inAppShell) return
+        uiHandler.postDelayed(
+            appHealthCheckRunnable,
+            if (immediate) 0L else APP_HEALTH_INTERVAL_MS,
+        )
+    }
+
+    private fun runAppHealthProbe() {
+        if (!activityResumed || !inAppShell) return
+        if (!appHealthProbeInFlight.compareAndSet(false, true)) return
+        val appId = currentAppId
+        val frameworkUrl = frameworkBaseUrl
+        Thread {
+            val health = probeRemoteAppHealth(frameworkUrl, appId)
+            runOnUiThread {
+                appHealthProbeInFlight.set(false)
+                if (!activityResumed || !inAppShell || currentAppId != appId) {
+                    return@runOnUiThread
+                }
+                val fallback = evaluateRemoteAppFallback(
+                    health,
+                    appHealthFailureCount,
+                    APP_HEALTH_FAILURE_LIMIT,
+                )
+                appHealthFailureCount = fallback.consecutiveUnhealthyCount
+                when (health) {
+                    AndroidRemoteAppHealth.UNHEALTHY -> Log.w(
+                        TAG,
+                        "Remote app authoritative health failure " +
+                            "$appHealthFailureCount/$APP_HEALTH_FAILURE_LIMIT app=$appId",
+                    )
+                    AndroidRemoteAppHealth.UNREACHABLE -> Log.w(
+                        TAG,
+                        "Remote app health transport unavailable; preserving app=$appId",
+                    )
+                    AndroidRemoteAppHealth.HEALTHY -> Unit
+                }
+                if (fallback.loadHome) loadLauncher() else updateAppHealthMonitoring()
+            }
+        }.start()
+    }
+
+    private fun nativeFrameworkUrl(path: String): String? {
+        val runtime = clientRuntimeService ?: return null
+        val url = runtime.frameworkUrl(path)
+        return if (isAppPath(path)) {
+            withAndroidNativePageIdentity(url, "cefrium")
+        } else {
+            url
+        }
     }
 
     private fun loadLauncher(preservePendingRestore: Boolean = false) {
+        ++navigationGeneration
         if (clientRuntimeService == null || !::browser.isInitialized) return
         if (!preservePendingRestore) pendingColdRestorePath = null
+        uiHandler.removeCallbacks(appHealthCheckRunnable)
+        appHealthFailureCount = 0
         currentPath = LAUNCHER_PATH
+        val wasInAppShell = inAppShell
         inAppShell = false
+        if (wasInAppShell) endAppShellInspectorSession()
         nativeHeader.visibility = View.GONE
         if (!preservePendingRestore) {
             prefs().edit().putString(KEY_LAST_PATH, currentPath).apply()
@@ -369,12 +668,91 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadApp(appId: String) {
+        ++navigationGeneration
         currentAppId = appId
         isLocked = false
         findViewById<Button>(R.id.btnLock).text = "Lock"
         browser.loadUrl(
-            clientRuntimeService?.frameworkUrl("/app/$appId?gv_native=1") ?: return,
+            withAndroidNativePageIdentity(
+                clientRuntimeService?.frameworkUrl("/app/$appId") ?: return,
+                "cefrium",
+            ),
         )
+    }
+
+    private fun handleNativeQuery(
+        request: String,
+        origin: String,
+        callback: CefriumBrowser.QueryCallback,
+    ): Boolean {
+        if (!isRelayOrigin(origin)) {
+            callback.failure(403, "Cefrium native bridge origin is not trusted")
+            return true
+        }
+        val payload = try {
+            JSONObject(request)
+        } catch (_: Exception) {
+            callback.failure(400, "Cefrium native bridge request is not valid JSON")
+            return true
+        }
+        val result = when (payload.optString("method")) {
+            "te2.clientIdentity.read" -> JSONObject()
+                .put("ok", true)
+                .put("clientInstanceId", androidClientInstanceId(applicationContext))
+            "te2.clientIdentity.reset" -> {
+                val installationId = clientRuntimeService?.resetClientIdentity()
+                if (installationId == null) {
+                    callback.failure(503, "Android runtime service is not connected")
+                    return true
+                }
+                JSONObject()
+                    .put("ok", true)
+                    .put("clientInstanceId", "client_$installationId")
+            }
+            "te2.runTarget.register" -> {
+                val runtimeService = clientRuntimeService
+                if (runtimeService == null) {
+                    callback.failure(503, "Android runtime service is not connected")
+                    return true
+                }
+                val surface = try {
+                    runtimeService.registerDevRuntimeSurface(
+                        payload.optJSONObject("params") ?: JSONObject(),
+                    )
+                } catch (error: Exception) {
+                    callback.failure(400, error.message ?: "Run Profile registration is invalid")
+                    return true
+                }
+                runOnUiThread(::syncDevToolsRuntimePolicy)
+                JSONObject()
+                    .put("ok", true)
+                    .put("surfaceId", surface.surfaceId)
+                    .put("capabilities", JSONObject().apply {
+                        put("cachePolicy", false)
+                        put("consoleInjection", surface.devRuntime)
+                        put("devToolsTarget", surface.devTools)
+                    })
+            }
+            "te2.runTarget.release" -> {
+                val surfaceId = payload.optJSONObject("params")
+                    ?.optString("surfaceId")
+                    ?.trim()
+                    .orEmpty()
+                if (surfaceId.isEmpty()) {
+                    callback.failure(400, "Run Profile surface id is missing")
+                    return true
+                }
+                clientRuntimeService?.releaseDevRuntimeSurface(surfaceId)
+                runOnUiThread(::syncDevToolsRuntimePolicy)
+                JSONObject().put("ok", true).put("surfaceId", surfaceId)
+            }
+            else -> {
+                callback.failure(404, "Unsupported Cefrium native bridge method")
+                return true
+            }
+        }
+        callback.success(result.toString())
+        return true
     }
 
     private fun showRecents() {
@@ -518,15 +896,24 @@ class MainActivity : AppCompatActivity() {
     private fun recoverRenderer(status: Int, errorCode: Int) {
         Log.e(TAG, "Renderer terminated status=$status errorCode=$errorCode")
         Toast.makeText(this, "Browser renderer restarted", Toast.LENGTH_SHORT).show()
-        browser.loadUrl(clientRuntimeService?.frameworkUrl(currentPath) ?: return)
+        browser.loadUrl(nativeFrameworkUrl(currentPath) ?: return)
     }
 
     private fun applySettings(settings: AndroidAppSettings) {
+        val inspectorSettingChanged =
+            devToolsRunProfilesEnabled != settings.devToolsRunProfilesEnabled ||
+                devToolsDebugEnabled != settings.devToolsDebugEnabled
         frameworkBaseUrl = settings.frameworkBaseUrl
         persistentNetworkEnabled = settings.persistentNetworkNotification
+        devToolsRunProfilesEnabled = settings.devToolsRunProfilesEnabled
+        devToolsDebugEnabled = settings.devToolsDebugEnabled
         clientRuntimeService?.configure(settings)
         runOnUiThread {
+            if (inspectorSettingChanged && ::browser.isInitialized) {
+                configureDevToolsInspector()
+            }
             updatePersistentNetworkService()
+            updateAppHealthMonitoring(immediate = true)
             Toast.makeText(
                 this,
                 "Framework target updated",
@@ -615,34 +1002,476 @@ class MainActivity : AppCompatActivity() {
     private fun showTools() {
         consoleOverlay.visibility = View.VISIBLE
         consoleTitle.text = "Tools · v${assetManager.getLocalVersion() ?: "unknown"}"
-        showConsoleTools()
+        persistToolsState(overlayVisible = true)
+        requestInitialInspectorTargetNudge()
+        showToolsTab(toolsSelectedTab)
     }
 
     private fun hideTools() {
         consoleOverlay.visibility = View.GONE
+        persistToolsState(overlayVisible = false)
         clientRuntimeService?.setConsoleDrawerEnabled(false)
-        consoleState.resetSession()
+        processesBrowser?.onPause()
     }
 
     private fun showConsoleTools() {
-        toolsConsoleSelected = true
-        composeConsoleContainer.visibility = View.VISIBLE
-        inspectorPanel.visibility = View.GONE
-        btnToolsConsole.isEnabled = false
-        btnToolsInspector.isEnabled = true
-        consoleState.resetSession()
-        loadAndroidDiagnostics()
-        clientRuntimeService?.setConsoleDrawerEnabled(true, CONSOLE_TAIL_LINES)
+        showToolsTab(NativeToolsTab.CONSOLE)
     }
 
     private fun showInspectorTools() {
-        toolsConsoleSelected = false
-        composeConsoleContainer.visibility = View.GONE
-        inspectorPanel.visibility = View.VISIBLE
-        btnToolsConsole.isEnabled = true
-        btnToolsInspector.isEnabled = false
+        showToolsTab(NativeToolsTab.INSPECTOR)
+    }
+
+    private fun showProcessesTools() {
+        showToolsTab(NativeToolsTab.PROCESSES)
+    }
+
+    private fun showToolsTab(tab: NativeToolsTab) {
+        toolsSelectedTab = tab
+        persistToolsState(selectedTab = tab)
+        val consoleSelected = tab == NativeToolsTab.CONSOLE
+        val inspectorSelected = tab == NativeToolsTab.INSPECTOR
+        val processesSelected = tab == NativeToolsTab.PROCESSES
+        composeConsoleContainer.visibility = if (consoleSelected) View.VISIBLE else View.GONE
+        inspectorPanel.visibility = if (inspectorSelected) View.VISIBLE else View.GONE
+        processesPanel.visibility = if (processesSelected) View.VISIBLE else View.GONE
+        btnToolsConsole.isEnabled = !consoleSelected
+        btnToolsInspector.isEnabled = !inspectorSelected
+        btnToolsProcesses.isEnabled = !processesSelected
+        clientRuntimeService?.setConsoleDrawerEnabled(
+            consoleOverlay.visibility == View.VISIBLE && consoleSelected,
+            CONSOLE_TAIL_LINES,
+        )
+        if (
+            consoleSelected &&
+            consoleOverlay.visibility == View.VISIBLE &&
+            !androidDiagnosticsLoadedForTools
+        ) {
+            androidDiagnosticsLoadedForTools = true
+            loadAndroidDiagnostics()
+        }
+        if (inspectorSelected && consoleOverlay.visibility == View.VISIBLE) {
+            ensureInspectorBrowser()
+        }
+        if (processesSelected && consoleOverlay.visibility == View.VISIBLE) {
+            ensureProcessesBrowser()
+        } else {
+            processesBrowser?.onPause()
+        }
+    }
+
+    private fun persistToolsState(
+        overlayVisible: Boolean = toolsState.overlayVisible,
+        selectedTab: NativeToolsTab = toolsState.selectedTab,
+        inspectorTargetId: String? = toolsState.inspectorTargetId,
+    ) {
+        toolsState = AndroidToolsState(overlayVisible, selectedTab, inspectorTargetId)
+        toolsStateStore.save(toolsState)
+    }
+
+    private fun restoreToolsSurfaceState() {
+        toolsSelectedTab = toolsState.selectedTab
+        consoleOverlay.visibility = View.GONE
+        persistToolsState(overlayVisible = false)
+        showToolsTab(toolsSelectedTab)
         clientRuntimeService?.setConsoleDrawerEnabled(false)
-        consoleState.resetSession()
+        processesBrowser?.onPause()
+    }
+
+    private fun configureDevToolsInspector() {
+        if (!devToolsInspectorEnabled) {
+            stopInspectorBrowser()
+            syncDevToolsRuntimePolicy()
+            devToolsStatus = "disabled"
+            updateInspectorSurface()
+            return
+        }
+
+        syncDevToolsRuntimePolicy()
+        ensureInspectorBrowser()
+        updateInspectorSurface()
+    }
+
+    private fun stopDevToolsInspector() {
+        inspectorInitialTargetNudgeRequested = false
+        inspectorInitialTargetNudgeCompleted = false
+        stopDevToolsRuntime()
+        stopInspectorBrowser()
+        inspectorTargets = emptyList()
+        inspectorActiveTargetId = null
+        renderInspectorTargets()
+    }
+
+    private fun stopDevToolsRuntime() {
+        devToolsRuntime?.close()
+        devToolsRuntime = null
+    }
+
+    private fun stopInspectorBrowser() {
+        inspectorInitialTargetNudgeRequested = false
+        inspectorInitialTargetNudgeCompleted = false
+        inspectorBrowser?.let { inspector ->
+            if (::inspectorBrowserContainer.isInitialized) {
+                inspectorBrowserContainer.removeView(inspector.surfaceContainer)
+            }
+            inspector.close()
+        }
+        inspectorBrowser = null
+        inspectorClientReady = false
+        inspectorPageLoaded = false
+        inspectorDeliveredGeneration = 0L
+    }
+
+    private fun beginAppShellInspectorSession() {
+        mainBrowserReady = false
+        inspectorInitialTargetNudgeRequested = false
+        inspectorInitialTargetNudgeCompleted = false
+        consoleOverlay.visibility = View.GONE
+        persistToolsState(overlayVisible = false)
+        clientRuntimeService?.setConsoleDrawerEnabled(false)
+        processesBrowser?.onPause()
+    }
+
+    private fun endAppShellInspectorSession() {
+        consoleOverlay.visibility = View.GONE
+        persistToolsState(overlayVisible = false)
+        clientRuntimeService?.setConsoleDrawerEnabled(false)
+        processesBrowser?.onPause()
+        mainBrowserReady = false
+        stopDevToolsInspector()
+    }
+
+    private fun requestInitialInspectorTargetNudge() {
+        if (!inAppShell || inspectorInitialTargetNudgeCompleted) return
+        inspectorInitialTargetNudgeRequested = true
+        performInitialInspectorTargetNudge()
+    }
+
+    private fun performInitialInspectorTargetNudge() {
+        if (
+            !inAppShell ||
+            !inspectorInitialTargetNudgeRequested ||
+            inspectorInitialTargetNudgeCompleted
+        ) return
+        val target = inspectorTargets.firstOrNull() ?: return
+        val runtime = devToolsRuntime ?: return
+
+        // Mark the one-shot before reselecting because frame resets notify synchronously.
+        inspectorInitialTargetNudgeRequested = false
+        inspectorInitialTargetNudgeCompleted = true
+        if (!runtime.reselectTarget(target.targetId)) {
+            inspectorInitialTargetNudgeCompleted = false
+            inspectorInitialTargetNudgeRequested = true
+            return
+        }
+        persistToolsState(inspectorTargetId = target.targetId)
+    }
+
+    private fun syncDevToolsRuntimePolicy() {
+        val surfaces = clientRuntimeService?.devRuntimeSurfaceSnapshot().orEmpty()
+        if (
+            !shouldStartCefriumDevToolsRuntime(
+                inspectorEnabled = devToolsInspectorEnabled,
+                hasDevRuntimeSurface = surfaces.any { it.devRuntime },
+                mainBrowserReady = mainBrowserReady,
+                appShellActive = inAppShell,
+            )
+        ) {
+            stopDevToolsRuntime()
+            return
+        }
+        val runtime = devToolsRuntime ?: CefriumDevToolsRuntime(
+            httpClient = httpClient,
+            listener = devToolsListener,
+            chobitsuSource = assets.open("devtools_inspector/chobitsu.js")
+                .bufferedReader()
+                .use { it.readText() },
+            targetRuntimeSource = assets.open(
+                "devtools_inspector/cefrium-target-runtime.js",
+            ).bufferedReader().use { it.readText() },
+        ).also { devToolsRuntime = it }
+        runtime.start(
+            preferredTargetId = toolsState.inspectorTargetId,
+            runProfilesEnabled = devToolsRunProfilesEnabled,
+            debugTargetsEnabled = devToolsDebugEnabled,
+            surfaces = surfaces,
+        )
+        runtime.updatePolicy(
+            runProfilesEnabled = devToolsRunProfilesEnabled,
+            debugTargetsEnabled = devToolsDebugEnabled,
+            surfaces = surfaces,
+        )
+    }
+
+    private fun ensureInspectorBrowser(resumeExisting: Boolean = false) {
+        syncDevToolsRuntimePolicy()
+        if (
+            !shouldStartCefriumInspector(
+                enabled = devToolsInspectorEnabled,
+                mainBrowserReady = mainBrowserReady,
+                appShellActive = inAppShell,
+            )
+        ) {
+            updateInspectorSurface()
+            return
+        }
+        if (devToolsRuntime == null) return
+        val existingInspector = inspectorBrowser
+        val inspector = existingInspector ?: CefriumBrowser.createWithSurface(this).also { next ->
+            inspectorClientReady = false
+            inspectorPageLoaded = false
+            inspectorDeliveredGeneration = 0L
+            next.setPullToRefreshEnabled(false)
+            next.setQueryHandler { _, request, origin, callback ->
+                handleInspectorQuery(request, origin, callback)
+            }
+            next.setOnLoadingStateChangedListener { isLoading, _, _ ->
+                runOnUiThread {
+                    if (
+                        inspectorBrowser === next &&
+                        shouldRequestCefriumInspectorClientReady(
+                            isLoading = isLoading,
+                            clientReady = inspectorClientReady,
+                        )
+                    ) {
+                        next.evaluateJavaScript(
+                            "window.__te2DevToolsInspector?.connectNative();",
+                        )
+                    }
+                }
+            }
+            inspectorBrowserContainer.addView(
+                next.surfaceContainer,
+                0,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                ),
+            )
+            inspectorBrowser = next
+            next.loadUrl(
+                clientRuntimeService?.frameworkUrl(CefriumInspectorAssetRoute.DOCUMENT_PATH)
+                    ?: return@also,
+            )
+        }
+        if (
+            shouldResumeCefriumInspectorBrowser(
+                activityResumed = activityResumed,
+                browserCreated = existingInspector == null,
+                resumeExisting = resumeExisting,
+            )
+        ) {
+            inspector.onResume()
+        }
+        reconcileInspectorClient(forceTargetReplay = false)
+        updateInspectorSurface()
+    }
+
+    private fun reconcileInspectorClient(forceTargetReplay: Boolean) {
+        val inspector = inspectorBrowser ?: return
+        inspector.surfaceContainer.post {
+            if (inspectorBrowser !== inspector) return@post
+            if (!inspectorClientReady) {
+                inspector.evaluateJavaScript(
+                    "window.__te2DevToolsInspector?.connectNative();",
+                )
+                return@post
+            }
+            syncInspectorPageFromRuntime(forceTargetReplay = forceTargetReplay)
+        }
+    }
+
+    private fun handleInspectorQuery(
+        request: String,
+        origin: String,
+        callback: CefriumBrowser.QueryCallback,
+    ): Boolean {
+        val inspector = inspectorBrowser
+        if (
+            inspector == null ||
+            !isRelayOrigin(origin)
+        ) {
+            callback.failure(403, "Cefrium Inspector bridge is not on its trusted document")
+            return true
+        }
+        val payload = try {
+            JSONObject(request)
+        } catch (_: Exception) {
+            callback.failure(400, "Cefrium Inspector request is not valid JSON")
+            return true
+        }
+        if (payload.optString("method") != "te2.devTools.message") {
+            callback.failure(404, "Unsupported Cefrium Inspector bridge method")
+            return true
+        }
+        val message = payload.optJSONObject("params") ?: JSONObject()
+        when (message.optString("type")) {
+            "client_ready" -> {
+                inspectorClientReady = true
+                inspectorPageLoaded = true
+                inspectorDeliveredGeneration = 0L
+                syncInspectorPageFromRuntime(forceTargetReplay = true)
+                updateInspectorSurface()
+            }
+            "protocol" -> {
+                val protocolPayload = message.optString("payload")
+                val runtime = devToolsRuntime
+                if (runtime == null || !runtime.sendProtocol(protocolPayload)) {
+                    callback.failure(503, "Cefrium Inspector target is not connected")
+                    return true
+                }
+            }
+            "target_select" -> {
+                val targetId = message.optString("targetId").trim()
+                if (targetId.isNotEmpty()) {
+                    persistToolsState(inspectorTargetId = targetId)
+                    devToolsRuntime?.selectTarget(targetId)
+                }
+            }
+            "client_state" -> {
+                val targetId = message.optString("activeTargetId").trim()
+                if (targetId.isNotEmpty() && inspectorTargets.any { it.targetId == targetId }) {
+                    persistToolsState(inspectorTargetId = targetId)
+                }
+            }
+            else -> {
+                callback.failure(400, "Unsupported Cefrium Inspector message")
+                return true
+            }
+        }
+        callback.success(JSONObject().put("ok", true).toString())
+        return true
+    }
+
+    private fun publishInspectorTargetsToPage() {
+        if (!inspectorClientReady) return
+        sendInspectorMessage(
+            JSONObject()
+                .put("type", "targets_changed")
+                .put("activeTargetId", inspectorActiveTargetId ?: "")
+                .put("targets", org.json.JSONArray().apply {
+                    inspectorTargets.forEach { put(it.toJson()) }
+                }),
+        )
+    }
+
+    private fun syncInspectorPageFromRuntime(forceTargetReplay: Boolean = false) {
+        if (!inspectorPageLoaded || !inspectorClientReady) return
+        val snapshot = devToolsRuntime?.debugSnapshot()
+        val generation = snapshot?.optLong("targetGeneration", 0L) ?: 0L
+        val runtimeActiveTargetId = snapshot
+            ?.optString("activeTargetId")
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+        if (runtimeActiveTargetId != null) {
+            inspectorActiveTargetId = runtimeActiveTargetId
+        }
+        publishInspectorTargetsToPage()
+        if (generation > 0L && runtimeActiveTargetId != null) {
+            deliverInspectorTargetReset(generation, forceReplay = forceTargetReplay)
+        } else {
+            inspectorDeliveredGeneration = 0L
+            sendInspectorMessage(JSONObject().put("type", "target_waiting"))
+        }
+    }
+
+    private fun deliverInspectorTargetReset(
+        generation: Long,
+        forceReplay: Boolean = false,
+    ) {
+        if (
+            !shouldDeliverCefriumInspectorGeneration(
+                clientReady = inspectorPageLoaded && inspectorClientReady,
+                generation = generation,
+                deliveredGeneration = inspectorDeliveredGeneration,
+                forceReplay = forceReplay,
+            )
+        ) return
+        if (
+            sendInspectorMessage(
+                JSONObject()
+                    .put("type", "target_reset")
+                    .put("generation", generation),
+            )
+        ) {
+            inspectorDeliveredGeneration = generation
+        }
+    }
+
+    private fun sendInspectorMessage(message: JSONObject): Boolean {
+        if (!inspectorPageLoaded || !inspectorClientReady) return false
+        val inspector = inspectorBrowser ?: return false
+        inspector.evaluateJavaScript(
+            "window.__te2DevToolsInspector?.receiveNativeMessage(" +
+                JSONObject.quote(message.toString()) +
+                ");",
+        )
+        return true
+    }
+
+    private fun renderInspectorTargets() {
+        if (!::inspectorTargetAdapter.isInitialized) return
+        inspectorPickerUpdating = true
+        try {
+            inspectorTargetAdapter.clear()
+            if (inspectorTargets.isEmpty()) {
+                inspectorTargetAdapter.add("Waiting for inspected page...")
+                inspectorTargetPicker.isEnabled = false
+                return
+            }
+            inspectorTargetAdapter.addAll(
+                inspectorTargets.map { target ->
+                    val suffix = target.title.takeIf { it.isNotBlank() }
+                    if (suffix == null) target.targetLabel()
+                    else "${target.targetLabel()} - $suffix"
+                },
+            )
+            inspectorTargetPicker.isEnabled = true
+            val selectedTargetId = inspectorActiveTargetId ?: toolsState.inspectorTargetId
+            val selectedIndex = inspectorTargets.indexOfFirst { it.targetId == selectedTargetId }
+                .coerceAtLeast(0)
+            inspectorTargetPicker.setSelection(selectedIndex, false)
+        } finally {
+            inspectorPickerUpdating = false
+        }
+    }
+
+    private fun updateInspectorSurface() {
+        if (!::inspectorStatus.isInitialized) return
+        inspectorTargetPicker.visibility = if (devToolsInspectorEnabled) View.VISIBLE else View.GONE
+        val statusText = when {
+            !devToolsInspectorEnabled -> "Enable native developer tools in Android Settings."
+            !mainBrowserReady -> "Waiting for the app page to load..."
+            devToolsStatus.startsWith("error:") -> "Developer tools $devToolsStatus"
+            !inspectorPageLoaded -> "Loading developer tools..."
+            !inspectorClientReady -> "Connecting developer tools..."
+            inspectorTargets.isEmpty() -> "Waiting for an inspectable Cefrium page..."
+            inspectorActiveTargetId == null -> "Connecting developer tools..."
+            else -> null
+        }
+        inspectorStatus.text = statusText.orEmpty()
+        inspectorStatus.visibility = if (statusText == null) View.GONE else View.VISIBLE
+    }
+
+    private fun ensureProcessesBrowser() {
+        val runtime = clientRuntimeService ?: return
+        val processes = processesBrowser ?: CefriumBrowser.createWithSurface(this).also {
+            it.setPullToRefreshEnabled(false)
+            processesPanel.addView(
+                it.surfaceContainer,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                ),
+            )
+            processesBrowser = it
+        }
+        val url = runtime.frameworkUrl("/fws")
+        if (processesLoadedUrl != url) {
+            processesLoadedUrl = url
+            processes.loadUrl(url)
+        }
+        if (activityResumed) processes.onResume()
     }
 
     private fun loadAndroidDiagnostics() {
@@ -728,6 +1557,12 @@ class MainActivity : AppCompatActivity() {
         if (::browser.isInitialized && browser.onActivityResult(requestCode, resultCode, data)) {
             return
         }
+        if (inspectorBrowser?.onActivityResult(requestCode, resultCode, data) == true) {
+            return
+        }
+        if (processesBrowser?.onActivityResult(requestCode, resultCode, data) == true) {
+            return
+        }
         super.onActivityResult(requestCode, resultCode, data)
     }
 
@@ -748,10 +1583,25 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        activityResumed = true
         if (::browser.isInitialized) browser.onResume()
+        if (inAppShell) {
+            ensureInspectorBrowser(resumeExisting = true)
+        }
+        if (
+            consoleOverlay.visibility == View.VISIBLE &&
+            toolsSelectedTab == NativeToolsTab.PROCESSES
+        ) {
+            ensureProcessesBrowser()
+        }
+        updateAppHealthMonitoring(immediate = true)
     }
 
     override fun onPause() {
+        activityResumed = false
+        uiHandler.removeCallbacks(appHealthCheckRunnable)
+        inspectorBrowser?.onPause()
+        processesBrowser?.onPause()
         if (
             ::browser.isInitialized &&
             !shouldKeepAndroidRendererActive(
@@ -775,6 +1625,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        uiHandler.removeCallbacks(appHealthCheckRunnable)
         clientRuntimeService?.clearLocalRelayRoutes()
         if (isFinishing && !isChangingConfigurations) {
             clientRuntimeService?.setPersistentSessionActive(false)
@@ -786,10 +1637,23 @@ class MainActivity : AppCompatActivity() {
             clientRuntimeBound = false
         }
         clientRuntimeService = null
+        devToolsRuntime?.close()
+        devToolsRuntime = null
+        inspectorBrowser?.let { inspector ->
+            inspectorBrowserContainer.removeView(inspector.surfaceContainer)
+            inspector.close()
+        }
+        inspectorBrowser = null
         if (::browser.isInitialized) {
+            selectionIntegration.close()
             browserContainer.removeView(browser.surfaceContainer)
             browser.close()
         }
+        processesBrowser?.let { processes ->
+            processesPanel.removeView(processes.surfaceContainer)
+            processes.close()
+        }
+        processesBrowser = null
         super.onDestroy()
     }
 
@@ -803,6 +1667,8 @@ class MainActivity : AppCompatActivity() {
         private const val CONSOLE_TAIL_LINES = 500
         private const val CONTEXT_MENU_CANCEL = -1
         private const val NOTIFICATION_PERMISSION_REQUEST = 9301
+        private const val APP_HEALTH_INTERVAL_MS = 2_000L
+        private const val APP_HEALTH_FAILURE_LIMIT = 3
         private val JSON_MEDIA_TYPE = "application/json".toMediaType()
     }
 }

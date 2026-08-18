@@ -22,6 +22,28 @@
     status.hidden = !message;
   }
 
+  function frontendState() {
+    const snapshot = {
+      framePresent: !!frame,
+      frameConnected: !!frame?.isConnected,
+      frameReady,
+      documentReadyState: "",
+      chiiMarker: false,
+      bodyChildElementCount: 0,
+      statusHidden: status.hidden,
+      statusText: status.textContent || "",
+    };
+    try {
+      const frontendDocument = frame?.contentDocument;
+      snapshot.documentReadyState = frontendDocument?.readyState || "";
+      snapshot.chiiMarker = frame?.contentWindow?.chii === true;
+      snapshot.bodyChildElementCount = frontendDocument?.body?.childElementCount || 0;
+    } catch (_error) {
+      // The packaged Inspector frame is same-origin; retain bounded state if it is not.
+    }
+    return snapshot;
+  }
+
   function frameUrl() {
     return `front_end/chii_app.html#?embedded=${encodeURIComponent(parentOrigin)}`;
   }
@@ -46,9 +68,23 @@
       frameReady = true;
       if (targetReady) setStatus("");
       flushInbound();
+      publishClientState("frontend_load");
     });
     frame.src = frameUrl();
     root.appendChild(frame);
+  }
+
+  function ensureFrontend() {
+    const snapshot = frontendState();
+    const completedWithoutChii =
+      snapshot.frameReady &&
+      snapshot.documentReadyState === "complete" &&
+      (!snapshot.chiiMarker || snapshot.bodyChildElementCount === 0);
+    if (!snapshot.framePresent || !snapshot.frameConnected || completedWithoutChii) {
+      createFrontend();
+      return false;
+    }
+    return true;
   }
 
   function queueInbound(payload) {
@@ -68,6 +104,19 @@
       nativePort.postMessage(message);
       return;
     }
+    if (typeof window.cefriumQuery === "function") {
+      window.cefriumQuery({
+        request: JSON.stringify({
+          method: "te2.devTools.message",
+          params: message,
+        }),
+        onSuccess() {},
+        onFailure() {
+          scheduleReconnect();
+        },
+      });
+      return;
+    }
     window.Te2DevToolsInspectorNative?.postMessage(JSON.stringify(message));
   }
 
@@ -84,6 +133,7 @@
         value: option.value,
         text: option.textContent || "",
       })),
+      frontend: frontendState(),
     });
   }
 
@@ -118,10 +168,22 @@
       return;
     }
     if (message?.type === "target_reset") {
-      targetGeneration = Number(message.generation) || targetGeneration + 1;
+      const nextGeneration =
+        Number(message.generation) || targetGeneration + 1;
+      if (targetReady && nextGeneration === targetGeneration) {
+        if (frameReady) setStatus("");
+        return;
+      }
+      targetGeneration = nextGeneration;
       targetReady = true;
       setStatus("Connecting developer tools...");
       createFrontend();
+      publishClientState("target_reset");
+      return;
+    }
+    if (message?.type === "frontend_ensure") {
+      ensureFrontend();
+      publishClientState("frontend_ensure");
       return;
     }
     if (message?.type === "targets_changed") {
@@ -151,6 +213,11 @@
 
   function connectNative() {
     if (!globalThis.browser?.runtime?.connectNative) {
+      if (typeof window.cefriumQuery === "function") {
+        postNative({ type: "client_ready" });
+        publishClientState("cefrium_connected");
+        return;
+      }
       window.Te2DevToolsInspectorNative?.clientReady();
       return;
     }
@@ -215,10 +282,12 @@
         frameReady,
         queuedMessages: inboundQueue.length,
         queuedBytes: inboundBytes,
+        frontend: frontendState(),
       };
     },
+    connectNative,
   });
 
   createFrontend();
-  connectNative();
+  if (typeof window.cefriumQuery !== "function") connectNative();
 })();

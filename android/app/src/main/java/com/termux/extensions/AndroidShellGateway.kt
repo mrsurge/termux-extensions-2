@@ -18,9 +18,16 @@ class AndroidShellGateway(
     private val onSettingsChanged: (AndroidAppSettings) -> Unit,
     private val diagnosticsProvider: () -> JSONObject,
     private val appUrlRewriter: (String) -> String,
+    private val nativeRenderer: String,
     private val settingsRuntimeProvider: () -> JSONObject = { JSONObject() },
     private val onOpenBatterySettings: () -> Unit = {},
 ) {
+    init {
+        require(nativeRenderer.matches(Regex("[a-z0-9_-]+"))) {
+            "Invalid Android renderer name"
+        }
+    }
+
     fun handle(request: LocalHttpRequest): LocalHttpResponse? {
         if (!request.path.startsWith(API_PREFIX)) return null
         return try {
@@ -38,6 +45,36 @@ class AndroidShellGateway(
                     val settings = settingsStore.update(payload)
                     onSettingsChanged(settings)
                     jsonResponse(200, settingsResponse(settings))
+                }
+
+                request.method == "GET" &&
+                    request.path == "$API_PREFIX/framework-bookmarks" -> {
+                    jsonResponse(
+                        200,
+                        frameworkBookmarksResponse(settingsStore.loadFrameworkEndpointBookmarks()),
+                    )
+                }
+
+                request.method == "POST" &&
+                    request.path == "$API_PREFIX/framework-bookmarks" -> {
+                    val payload = JSONObject(request.body.toString(StandardCharsets.UTF_8))
+                    jsonResponse(
+                        200,
+                        frameworkBookmarksResponse(
+                            settingsStore.upsertFrameworkEndpointBookmark(payload),
+                        ),
+                    )
+                }
+
+                request.method == "DELETE" &&
+                    request.path == "$API_PREFIX/framework-bookmarks" -> {
+                    val payload = JSONObject(request.body.toString(StandardCharsets.UTF_8))
+                    jsonResponse(
+                        200,
+                        frameworkBookmarksResponse(
+                            settingsStore.deleteFrameworkEndpointBookmark(payload),
+                        ),
+                    )
                 }
 
                 request.method == "POST" &&
@@ -118,7 +155,12 @@ class AndroidShellGateway(
                 settings,
                 "/api/apps/$appId/open",
                 "POST",
-                JSONObject().put("params", JSONObject().put("gv_native", "1")),
+                JSONObject().put(
+                    "params",
+                    JSONObject()
+                        .put("gv_native", "1")
+                        .put("te2_renderer", nativeRenderer),
+                ),
             )
             "quit" -> forwardJson(settings, "/api/apps/$appId/quit", "POST")
             else -> throw IllegalArgumentException("Unsupported app action")
@@ -126,10 +168,13 @@ class AndroidShellGateway(
 
         val data = remote.optJSONObject("data") ?: JSONObject()
         if (action == "open") {
-            val rawUrl = data.optString("url", "/app/$appId?gv_native=1")
+            val rawUrl = data.optString("url", "/app/$appId")
             data.put(
                 "url",
-                appUrlRewriter(absoluteFrameworkUrl(settings.frameworkBaseUrl, rawUrl)),
+                withAndroidNativePageIdentity(
+                    appUrlRewriter(absoluteFrameworkUrl(settings.frameworkBaseUrl, rawUrl)),
+                    nativeRenderer,
+                ),
             )
         }
         return jsonResponse(200, data)
@@ -235,6 +280,13 @@ class AndroidShellGateway(
         settings.toJson().apply {
             put("runtime", settingsRuntimeProvider())
         }
+
+    private fun frameworkBookmarksResponse(
+        bookmarks: List<AndroidFrameworkEndpointBookmark>,
+    ): JSONObject = JSONObject().put(
+        "bookmarks",
+        JSONArray().apply { bookmarks.forEach { put(it.toJson()) } },
+    )
 
     private fun absoluteFrameworkUrl(frameworkBaseUrl: String, raw: String): String {
         if (raw.startsWith("http://") || raw.startsWith("https://")) return raw

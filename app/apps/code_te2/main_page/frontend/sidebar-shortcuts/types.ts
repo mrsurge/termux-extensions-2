@@ -86,6 +86,8 @@ export interface RunProfileSurfaceDescriptor extends UnknownRecord {
 export interface RunProfileRuntimeMetadata extends UnknownRecord {
   surfaceId: string;
   profileId: string;
+  targetId: string;
+  targetLabel: string;
   devRuntime: boolean;
   devTools: boolean;
   workerIdBase: string;

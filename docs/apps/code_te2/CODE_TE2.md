@@ -3315,7 +3315,7 @@ The WebExtension intercepts these URL patterns (redirecting to local server):
 
 # Then rebuild the native clients:
 cd android
-./linux-sdk-env.sh ./gradlew :app:assembleGeckoDebug :cefrium:assembleDebug
+./termux-sdk-env.sh ./gradlew :app:assembleGeckoDebug :cefrium:assembleDebug
 ```
 
 ### Boot sequence
@@ -3341,6 +3341,8 @@ cd android
 ## 37) Run Profiles, Runtime Launchers, And Draft-Save Transaction
 
 Run Profile execution is backend-owned through `ui.host.file.run`. The frontend sends run intent; backend hooks resolve the active project/file, select a profile, decide what must be saved, and only then launch a runner shell or the default terminal fallback.
+
+Run Profile shell state is projected from one process-local fact store. The existing FWS lifecycle bridge performs one authoritative `fws.dashboard.open` snapshot after namespace connection, replaces the complete running-shell set, then applies `fws.shell.*` events; launch and stop paths update the same facts immediately. The initial connect handler yields one event-loop turn before requesting the snapshot so python-socketio completes `/fws` namespace bookkeeping. `runner_profile_shell_state()` and `page_preview_shell_state()` are constant-time fact reads and never query the Framework-Shell manager. Before the first authoritative snapshot, absence is not proof of a stopped shell and stale-route cleanup is suppressed. There is no polling. Live validation on 2026-08-17 reduced `ui.host.runProfile.state.get` from about 6.7 seconds to about 107 ms end-to-end and full boot from about 13 seconds to about 154 ms; the exact three-profile `test-python` projection measured a 4.8 ms median.
 
 ### Config and schema
 
@@ -3733,6 +3735,8 @@ Validation owner docs live in `desktop_client/desktop_client.md` and `desktop_cl
 
 Code TE2 now separates visible editor open from semantic working-set hydration. The browser still renders one active Monaco model, but WBA retains a bounded extension-host document set for active and background files so language servers can see more than the currently visible file.
 
+Host file-open intent does not preflight a boot snapshot. The frontend may use its last projected project root only to form a tentative path, then sends the request directly to Python; the backend's canonical returned path drives visible-open acknowledgement and editor connection. A failed host-state refresh preserves the last valid frontend projection. Lightweight `scope: hostState` refreshes are single-flight in the frontend, while complete backend boot snapshots are single-flight across concurrent clients and move their disk-heavy synchronous assembly off the asyncio event loop. Initial UI IPC connection does not trigger a duplicate resync; only a genuine reconnect requests fresh host state.
+
 ### Authority split
 
 - `ProjectSidecar.last_file` and `open_state_backend.py` remain the active-file authority.
@@ -3775,6 +3779,25 @@ WBA document registry roles:
 A normal tab switch demotes the previous document and promotes the target without duplicate `addedDocuments`, avoiding LSP close/open churn. Workspace switches release all retained documents. Extension-host reset clears WBA-local registry state.
 
 After active promotion, WBA publishes `document/activeChanged` over the existing framework-shell pipe so Python schedules latest-wins reconciliation. Draft changes, workspace-file changes, adapter-ready/reset, and project-switch facts also drive reconciliation. There is no timer, polling path, new socket, or Python editor-intelligence hop.
+
+### Foreground transaction and reconnect boundaries
+
+A foreground switch first creates and attaches the replacement Monaco model,
+then disposes the detached previous model. After the expected URI is visibly
+attached, the transaction invokes one canonical `openFileFlow`; visible
+`editor.openComplete.publish` remains independent of that WBA promise.
+
+`editor.modelReady` is only a frontend-to-Python lifecycle notification. It
+does not flush a WBA open or replay providers. A genuine direct-WBA Socket.IO
+connection calls `te2.resync`, then flushes the active model and hydrates the
+provider snapshot. This keeps late/reconnected clients complete without making
+ordinary file switches replay workspace, provider, and webview state.
+
+WBA treats an active same-path open with the same non-null generation as an
+idempotent duplicate. It does not reread disk, replace text, clear dirty state,
+advance the document version or active epoch, emit another active-document
+event, or invalidate prewarmed semantic tokens. A newer generation remains a
+real refresh and retains the draft-safe full-text synchronization path.
 
 ### Extension activation and language resolution
 
@@ -3885,7 +3908,7 @@ left untouched and is not imported during startup.
 
 ## 42) Android Cefrium Client
 
-The isolated `:cefrium` Android application module evaluates Cefrium 0.6.3 while reusing the shared Android source and packaged assets. GeckoView in `android/app` remains the primary Android renderer.
+The isolated `:cefrium` Android application module evaluates Cefrium 0.7.0 while reusing the shared Android source and packaged assets. GeckoView in `android/app` remains the primary Android renderer.
 
 ### Module boundary
 
@@ -3912,9 +3935,21 @@ The relay behavior is:
 
 Only paths declared by Cefrium asset routing are served from installed assets. Dynamic API, Socket.IO, terminal, and app-worker traffic pass through the relay.
 
-The activity provides shared launcher and Settings behavior, native controls, app-scoped quit, native context menus, trusted-localhost clipboard permission, file-picker forwarding, renderer recovery, lifecycle pause/resume, native diagnostics, and TE2 console access. The public Cefrium SDK does not expose the CDP transport required by TE2's native Inspector, so that gap must be reported rather than faked.
+The activity provides shared launcher and Settings behavior, native controls, app-scoped quit, native context menus, trusted-localhost clipboard permission, file-picker forwarding, renderer recovery, lifecycle pause/resume, native diagnostics, and TE2 console access.
 
-After each completed document load, an idempotent page policy wraps Monaco's exact `textarea.inputarea.android-ime-input` focus path and forces `preventScroll: true`. Do not replace this with a broad page-wide input workaround.
+Native app URLs retain `gv_native=1` for the established app-shell contract and add exact `te2_renderer=gecko|cefrium` identity. Code TE2 resolves Electron first, then the explicit Android renderer. A missing renderer on an established `gv_native=1` URL is legacy Gecko compatibility for APKs receiving newer OTA frontend assets; an unknown explicit renderer still fails instead of falling back to browser-local identity. Cefrium uses an exact-relay-origin `cefriumQuery` handler for stable installation identity and Run Profile surface registration, so it never waits for Gecko's WebExtension bridge. The app shell persists and forwards valid explicit renderer identity across its own navigation.
+
+Cefrium shares Android-owned Tools state and remote-app health semantics. The selected tab persists, but overlay visibility is scoped to the current native app-header session and each newly appearing header starts with Tools closed. Console and a persistent Processes browser are supported, with Processes loaded from the relay's `/fws` route. Missing-worker or terminal-readiness snapshots must occur three consecutive times before returning to the launcher. Unreachable or invalid health responses preserve the current app and reset the failure sequence.
+
+The high-level Cefrium wrapper does not expose CDP, but its bundled Chromium runtime includes an application-private `DevToolsServer`. Cefrium relays that abstract-domain socket through a dynamically allocated loopback-only listener, uses one browser control channel for event-driven page-target discovery, and attaches the selected target with a flattened CDP session. Kotlin owns the target picker and persists selection; a separate persistent Cefrium browser hosts the packaged Inspector frontend and exchanges raw protocol messages only through its exact local-asset `cefriumQuery` bridge. Framework Socket.IO and UI IPC are not CDP transports. Code TE2 Sidebar iframes remain frames/execution contexts under their owning page target rather than becoming a second `surfaceId`-based target authority.
+
+One Cefrium Inspector session is owned by each appearance of the native app-shell header. After the main browser completes a real framework-relay app document load, the CDP runtime and persistent Inspector browser start in the background even while Tools is closed or another Tools tab is selected. The first gear open force-reselects the first available target exactly once, including selecting an already-active sole target; if no target exists yet, the one-shot waits for target discovery. This deliberately exercises the same CDP detach/attach or frame-generation reset path as a manual target switch. Overlay close, Tools-tab changes, and app backgrounding retain the runtime/browser. Returning to the launcher, disabling Inspector, Activity destruction, or otherwise removing the app header closes the runtime/browser/targets and resets the one-shot state. The Inspector document's `client_ready` query remains the only document-readiness authority, and browser-wide child-frame loading callbacks must not clear established readiness or delivered target generation.
+
+Cefrium still retains validated Run Profile `devRuntime` registrations by exact `surfaceId`, but reports `cachePolicy=false` and `consoleInjection=false`: Run Target listeners bypass `AndroidFrameworkRelay`, and the Cefrium API cannot mutate response headers or inject into an exact cross-origin child frame. Do not add a partial raw-HTTP parser to the byte-for-byte Run Target relay. Browser-wide Inspector ownership is independent of this instrumentation gap.
+
+Cefrium's wrapper also omits Chromium's selection ActionMode host callback. A narrow same-package `WebContents` shim installs an application callback that delegates to Chromium's `ActionModeCallbackHelper` and enables Chromium's SurfaceControl magnifier. Native Cut/Copy/Paste/Select All and related selection actions remain Chromium-owned and do not use JavaScript editing commands.
+
+After each completed document load, an idempotent page policy wraps Monaco's exact `textarea.inputarea.android-ime-input` focus path and forces `preventScroll: true`. Code TE2 additionally marks the editor frame from the explicit native renderer query and applies a Cefrium-only 16 px font size to the Monaco Find/Replace textarea, preventing Chromium's small-input focus zoom without changing Gecko, desktop, or ordinary editor input styling. Do not replace either correction with a broad page-wide input workaround.
 
 ### Validation
 
@@ -4162,3 +4197,5 @@ behavior nondeterministic.
 Extension-context Mementos are a separate WBA main-thread contract. WBA implements Code Server 4.130's `MainThreadStorage` actor: `$initializeExtensionStorage` returns the last persisted raw JSON value and `$setValue` serializes an atomic replacement beneath `$TE2_DATA_HOME/code_te2/code_server/User/te2-extension-storage`. Global state is keyed by canonical extension id; workspace state is additionally partitioned by the resolved active-workspace identity. The exact root is resolved by Python and passed through the Framework-Shell environment, so Node does not independently resolve TE2/XDG roots. `$registerExtensionStorageKeysToSync` intentionally retains data locally because TE2 does not currently implement VS Code Settings Sync. This store is neither extension settings authority nor webview presentation state.
 
 The current extension-webview theme contract is intentionally fixed rather than coupled to Monaco's selectable editor theme. WBA requires the packaged `monaco_editor/themes/vendored/github/dark-default.json`, projects its string color entries with Code Server's `--vscode-<color-id>` naming, and decorates the extension body with the `vscode-dark` class and VS Code theme data attributes before extension scripts run. The trusted wrapper uses the same GitHub Dark Default Sidebar background. Missing or mismatched theme assets fail WBA initialization; WBA-provided dynamic themes remain deferred.
+
+Python reconciles each complete WBA extension-surface snapshot as one idempotent Sidebar ledger transaction. It removes stale project surfaces, upserts changed members, writes preferences at most once, and publishes one membership update only when material state changed. Identical snapshots do not advance slot timestamps or rewrite preferences.

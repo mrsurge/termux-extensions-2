@@ -4056,6 +4056,21 @@ export function initSidebarShortcuts(
       entry.url = loadUrl;
       entry.devToolsName = _configureShortcutIframeElement(entry.iframe, sc);
 
+      const runtimeMetadata = runProfileRuntimeMetadata(sc);
+      if (
+        sc.kind === SHORTCUT_KIND_URL &&
+        runtimeMetadata &&
+        (runtimeMetadata.devRuntime === true || runtimeMetadata.devTools === true)
+      ) {
+        // Native policy ownership follows the authoritative Sidebar projection,
+        // not whether this iframe happens to be active or eager right now.
+        void prepareRunTargetUrl(
+          sc.run_target_route || sc.runTargetRoute,
+          loadUrl,
+          runtimeMetadata,
+        );
+      }
+
       // WBA owns extension HTML revisions inside its stable trusted wrapper.
       if (
         entry.loaded &&

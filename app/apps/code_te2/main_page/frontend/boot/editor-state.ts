@@ -46,6 +46,8 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 export function createEditorStateController(deps: EditorStateControllerDeps) {
+  let syncPromise: Promise<HostEditorState | null> | null = null;
+
   function hydrateEditorState(state: HostEditorState | null | undefined): HostEditorState | null {
     const nextState = state || null;
     deps.setEditorState(nextState);
@@ -57,19 +59,23 @@ export function createEditorStateController(deps: EditorStateControllerDeps) {
   async function requestSnapshotHostState(): Promise<HostEditorState | null> {
     const snapshot = await requestHostBootSnapshot({
       requestBackendBootSnapshot: (payload) => deps.requestBackendBootSnapshot(payload),
-    });
+    }, { scope: 'hostState' });
     return getBootSnapshotHostState(snapshot) as HostEditorState | null;
   }
 
   async function syncEditorState(forceRefresh = false): Promise<HostEditorState | null> {
     if (!forceRefresh && deps.getEditorState()) return deps.getEditorState();
-    try {
-      const state = await requestSnapshotHostState();
-      return hydrateEditorState(state);
-    } catch (err) {
-      console.error('Failed to fetch host snapshot state:', err);
-      return hydrateEditorState(null);
-    }
+    if (syncPromise) return syncPromise;
+    syncPromise = requestSnapshotHostState()
+      .then((state) => state ? hydrateEditorState(state) : deps.getEditorState())
+      .catch((err) => {
+        console.error('Failed to fetch host snapshot state:', err);
+        return deps.getEditorState();
+      })
+      .finally(() => {
+        syncPromise = null;
+      });
+    return syncPromise;
   }
 
   async function ensureProjectContext(): Promise<HostEditorState | null> {

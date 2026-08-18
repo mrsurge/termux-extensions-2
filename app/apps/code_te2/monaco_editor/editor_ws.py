@@ -97,7 +97,6 @@ class EmitEditorOpenFn(Protocol):
 _ISSUES_DUMP_WAITING: dict[str, str | asyncio.Future[dict[str, object]]] = {}
 _ISSUES_DUMP_TTL_S = 20.0
 _SAVE_SNAPSHOT_WAITING: dict[str, asyncio.Future[dict[str, object]]] = {}
-_MODEL_READY_LAST_BY_SID: dict[str, str] = {}
 _project_switch_seq = 0
 
 # Tracks SHA256 of the most recent editor-initiated save per abs path.
@@ -598,24 +597,13 @@ async def editor_runtime_handle_model_ready(source_client: str, data: dict[str, 
         return
     generation = _coerce_generation(data.get("generation"))
     generation_key = str(generation) if generation is not None else "-"
-    sync_key = path + "::" + generation_key
-    if _MODEL_READY_LAST_BY_SID.get(source_client) == sync_key:
-        return
-    _MODEL_READY_LAST_BY_SID[source_client] = sync_key
-
-    try:
-        from ..workbench_adapter_shell_manager import adapter_rpc
-
-        await adapter_rpc("te2.resync", timeout=5.0)
-        _wb_log.info(
-            "[model_ready] sid=%s path=%s generation=%s source=%s",
-            source_client,
-            path,
-            generation_key,
-            str(data.get("source") or ""),
-        )
-    except Exception as exc:
-        _wb_log.warning("[model_ready] resync failed sid=%s path=%s err=%s", source_client, path, exc)
+    _wb_log.info(
+        "[model_ready] sid=%s path=%s generation=%s source=%s",
+        source_client,
+        path,
+        generation_key,
+        str(data.get("source") or ""),
+    )
 
 
 async def editor_runtime_handle_issues_dump_response(source_client: str, data: dict[str, object]) -> None:

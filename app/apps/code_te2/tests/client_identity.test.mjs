@@ -73,7 +73,7 @@ test("native identity providers override relay-origin browser storage", async ()
   }
 
   const geckoWindow = new Window({
-    url: "http://127.0.0.1:43000/app/code_te2?gv_native=1",
+    url: "http://127.0.0.1:43000/app/code_te2?gv_native=1&te2_renderer=gecko",
   });
   geckoWindow.postMessage = (message) => {
     if (message?.channel !== "te2.clientIdentity.request") return;
@@ -100,5 +100,79 @@ test("native identity providers override relay-origin browser storage", async ()
   } finally {
     delete globalThis.window;
     geckoWindow.close();
+  }
+
+  const cefriumWindow = new Window({
+    url: "http://127.0.0.1:44000/app/code_te2?gv_native=1&te2_renderer=cefrium",
+  });
+  cefriumWindow.cefriumQuery = ({ request, onSuccess }) => {
+    const method = JSON.parse(request).method;
+    onSuccess(JSON.stringify({
+      ok: true,
+      clientInstanceId: method.endsWith("reset")
+        ? "client_112233445566"
+        : "client_abcdef123456",
+    }));
+  };
+  globalThis.window = cefriumWindow;
+  try {
+    const { resolveCodeTe2ClientIdentity } = await importClientIdentity();
+    const cefrium = await resolveCodeTe2ClientIdentity();
+    assert.equal(cefrium.provider, "cefrium");
+    assert.equal(cefrium.clientInstanceId, "client_abcdef123456");
+    const reset = await resolveCodeTe2ClientIdentity({ reset: true });
+    assert.equal(reset.clientInstanceId, "client_112233445566");
+  } finally {
+    delete globalThis.window;
+    cefriumWindow.close();
+  }
+});
+
+test("legacy native pages without a renderer retain the Gecko installation identity", async () => {
+  const runtimeWindow = new Window({
+    url: "http://127.0.0.1:45000/app/code_te2?gv_native=1",
+  });
+  runtimeWindow.postMessage = (message) => {
+    if (message?.channel !== "te2.clientIdentity.request") return;
+    queueMicrotask(() => {
+      runtimeWindow.dispatchEvent(
+        new runtimeWindow.MessageEvent("message", {
+          data: {
+            channel: "te2.clientIdentity.response",
+            requestId: message.requestId,
+            result: { ok: true, clientInstanceId: "client_legacygecko12" },
+          },
+          origin: runtimeWindow.location.origin,
+          source: runtimeWindow,
+        }),
+      );
+    });
+  };
+  globalThis.window = runtimeWindow;
+  try {
+    const { resolveCodeTe2ClientIdentity } = await importClientIdentity();
+    const identity = await resolveCodeTe2ClientIdentity();
+    assert.equal(identity.provider, "gecko");
+    assert.equal(identity.clientInstanceId, "client_legacygecko12");
+  } finally {
+    delete globalThis.window;
+    runtimeWindow.close();
+  }
+});
+
+test("native pages fail explicitly for an unknown renderer", async () => {
+  const runtimeWindow = new Window({
+    url: "http://127.0.0.1:45000/app/code_te2?gv_native=1&te2_renderer=unknown",
+  });
+  globalThis.window = runtimeWindow;
+  try {
+    const { resolveCodeTe2ClientIdentity } = await importClientIdentity();
+    await assert.rejects(
+      resolveCodeTe2ClientIdentity(),
+      /renderer identity is missing or unsupported/,
+    );
+  } finally {
+    delete globalThis.window;
+    runtimeWindow.close();
   }
 });

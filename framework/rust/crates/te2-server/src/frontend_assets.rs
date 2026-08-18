@@ -12,9 +12,7 @@ use std::{
     path::{Path as StdPath, PathBuf},
 };
 
-use crate::{
-    ApiResponse, AppState, apps_lifecycle::running_app_for_id, json_error, registry::AppRegistry,
-};
+use crate::{ApiResponse, AppState, json_error};
 
 pub(crate) fn router() -> Router<AppState> {
     Router::new()
@@ -45,7 +43,7 @@ async fn app_shell(
     Path(app_id): Path<String>,
     OriginalUri(original_uri): OriginalUri,
 ) -> Response {
-    let registry = AppRegistry::load(state.app_roots());
+    let registry = state.app_registry_snapshot();
     let Some(app) = registry.get_app(&app_id) else {
         return StatusCode::NOT_FOUND.into_response();
     };
@@ -58,7 +56,7 @@ async fn app_shell(
         return Redirect::temporary(&canonical_url).into_response();
     }
     let backend_required = app.backend_module().is_some();
-    if backend_required && running_app_for_id(&registry, &app.app_id).is_none() {
+    if backend_required && state.running_app_for_id(&app.app_id).is_none() {
         return Redirect::to("/").into_response();
     }
 
@@ -125,7 +123,7 @@ async fn serve_app_file(
         (None, Some((app_dir, filename)))
     };
 
-    let registry = AppRegistry::load(state.app_roots());
+    let registry = state.app_registry_snapshot();
     // Both `/apps/by-id/{app_id}/...` and legacy `/apps/{dir}/...` resolve
     // through one route to avoid overlapping wildcard route ambiguity.
     let resolved = if let Some((app_id, filename)) = resolved_by_id {

@@ -11,7 +11,8 @@ class AndroidAppSettingsTest {
 
         assertEquals("http://127.0.0.1:8089", settings.frameworkBaseUrl)
         assertEquals(true, settings.imeContextSwitchingEnabled)
-        assertEquals(false, settings.devToolsInspectorEnabled)
+        assertEquals(false, settings.devToolsRunProfilesEnabled)
+        assertEquals(false, settings.devToolsDebugEnabled)
     }
 
     @Test
@@ -21,14 +22,16 @@ class AndroidAppSettingsTest {
             frameworkPort = 8081,
             persistentNetworkNotification = true,
             imeContextSwitchingEnabled = false,
-            devToolsInspectorEnabled = true,
+            devToolsRunProfilesEnabled = true,
+            devToolsDebugEnabled = false,
         )
 
         assertEquals("100.108.128.8", settings.frameworkHost)
         assertEquals("http://100.108.128.8:8081", settings.frameworkBaseUrl)
         assertEquals(true, settings.persistentNetworkNotification)
         assertEquals(false, settings.imeContextSwitchingEnabled)
-        assertEquals(true, settings.devToolsInspectorEnabled)
+        assertEquals(true, settings.devToolsRunProfilesEnabled)
+        assertEquals(false, settings.devToolsDebugEnabled)
     }
 
     @Test
@@ -41,6 +44,20 @@ class AndroidAppSettingsTest {
 
         assertEquals("::1", settings.frameworkHost)
         assertEquals("http://[::1]:8089", settings.frameworkBaseUrl)
+    }
+
+    @Test
+    fun compatibilityJsonReportsAggregateInspectorState() {
+        val settings = AndroidAppSettings(
+            devToolsRunProfilesEnabled = true,
+            devToolsDebugEnabled = false,
+        )
+
+        val json = settings.toJson()
+        assertEquals(3, json.getInt("nativeSettingsSchemaVersion"))
+        assertEquals(true, json.getBoolean("devToolsInspectorEnabled"))
+        assertEquals(true, json.getBoolean("devToolsRunProfilesEnabled"))
+        assertEquals(false, json.getBoolean("devToolsDebugEnabled"))
     }
 
     @Test

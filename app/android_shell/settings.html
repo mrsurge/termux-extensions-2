@@ -50,10 +50,24 @@
       <header class="section-header">
         <h2>Diagnostics</h2>
       </header>
-      <label class="toggle-row" for="devtools-inspector-enabled">
+      <label id="devtools-run-profiles-row" class="toggle-row" for="devtools-run-profiles-enabled" hidden>
+        <span>
+          <strong>Dev tools run profiles</strong>
+          <small>Expose Run Profile pages with dev tools enabled as dedicated native Inspector targets.</small>
+        </span>
+        <input id="devtools-run-profiles-enabled" type="checkbox">
+      </label>
+      <label id="devtools-debug-row" class="toggle-row" for="devtools-debug-enabled" hidden>
+        <span>
+          <strong>Dev tools debug</strong>
+          <small>Expose Code TE2 and other native browser pages as diagnostic Inspector targets.</small>
+        </span>
+        <input id="devtools-debug-enabled" type="checkbox">
+      </label>
+      <label id="devtools-legacy-row" class="toggle-row" for="devtools-inspector-enabled" hidden>
         <span>
           <strong>Native developer tools</strong>
-          <small>Connect inspected pages to the persistent native Tools inspector. Changing this setting reloads the active app page.</small>
+          <small>Expose supported native browser pages as Inspector targets.</small>
         </span>
         <input id="devtools-inspector-enabled" type="checkbox">
       </label>
@@ -76,6 +90,35 @@
       </div>
       <div class="section-actions">
         <button id="save-settings" class="primary-button" type="button">Save</button>
+      </div>
+    </section>
+
+    <section id="framework-bookmarks-section" class="settings-section" hidden>
+      <header class="section-header">
+        <div>
+          <h2>Framework Bookmarks</h2>
+          <div class="status-line">Saved only in this Android app.</div>
+        </div>
+      </header>
+      <div class="bookmark-create-row">
+        <label class="field" for="framework-bookmark-name">
+          <span>Bookmark name</span>
+          <input
+            id="framework-bookmark-name"
+            type="text"
+            maxlength="64"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="Home server"
+          >
+        </label>
+        <button id="save-framework-bookmark" class="secondary-button" type="button">
+          Bookmark current
+        </button>
+      </div>
+      <div id="framework-bookmarks" class="framework-bookmarks" aria-live="polite"></div>
+      <div id="framework-bookmarks-empty" class="empty-state">
+        No framework bookmarks saved.
       </div>
     </section>
 

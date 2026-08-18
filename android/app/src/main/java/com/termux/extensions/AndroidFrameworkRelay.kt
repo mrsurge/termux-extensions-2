@@ -92,6 +92,7 @@ class AndroidFrameworkRelay(
                 while (running) {
                     try {
                         val socket = server.accept()
+                        socket.tcpNoDelay = true
                         track(socket)
                         workers.execute { handleClient(socket) }
                     } catch (error: Exception) {
@@ -256,6 +257,7 @@ class AndroidFrameworkRelay(
                 InetSocketAddress(currentTarget.host, currentTarget.port),
                 CONNECT_TIMEOUT_MS,
             )
+            upstream.tcpNoDelay = true
             upstream.soTimeout = 0
             client.soTimeout = 0
 

@@ -21,6 +21,13 @@ class DevToolsProtocolBrokerTest {
         assertEquals(1, clientMessages.size)
         assertTrue(broker.hasTarget())
         assertTrue(broker.hasClient())
+        val snapshot = broker.debugSnapshot()
+        assertEquals(1L, snapshot.clientToTargetReceived)
+        assertEquals(1L, snapshot.clientToTargetDelivered)
+        assertEquals(1L, snapshot.targetToClientReceived)
+        assertEquals(1L, snapshot.targetToClientDelivered)
+        assertEquals(0, snapshot.clientToTargetQueued)
+        assertEquals(0, snapshot.targetToClientQueued)
     }
 
     @Test
@@ -36,6 +43,10 @@ class DevToolsProtocolBrokerTest {
             listOf("""{"method":"Runtime.consoleAPICalled"}"""),
             clientMessages,
         )
+        val snapshot = broker.debugSnapshot()
+        assertEquals(1L, snapshot.targetToClientReceived)
+        assertEquals(1L, snapshot.targetToClientDelivered)
+        assertEquals(0, snapshot.targetToClientQueued)
     }
 
     @Test
