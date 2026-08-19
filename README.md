@@ -274,14 +274,8 @@ TE2 depends on excellent independent open-source projects, including:
 
 ## Repository Guidance
 
-- Read [AGENTS.md](AGENTS.md) before changing the repository.
-- Read [.repo_memory.md](.repo_memory.md) for concise current architecture.
-- Use [docs/README.md](docs/README.md) to understand the documentation tree.
-- Treat `docs/planning/` as design history. Verify every claimed path and
-  runtime contract against current source.
-
-Android source and Android asset publication are separate work areas. They are
-not implied by ordinary framework or frontend changes.
+[Technical Deep Dive](docs/apps/code_te2/CODE_TE2.md) (for a technical deep dive in how one makes a code/editor dev platform
+ with a python script and have it perform as good as a VS-Clone)
 
 GeckoView remains the primary Android client. The isolated `android/cefrium`
 application module evaluates the Cefrium CEF runtime without adding Chromium
