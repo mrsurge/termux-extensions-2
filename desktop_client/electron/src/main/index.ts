@@ -36,6 +36,7 @@ import {
 import { DESKTOP_MODAL_WINDOW_POLICY } from "./modal-window-policy";
 import { RunTargetRelayManager } from "./run-target-relay";
 import { ElectronRunProfileRuntime } from "./run-profile-runtime";
+import { SecondaryEditorRegistry } from "./secondary-editor-registry";
 import { DetachedSidebarSurfaceRegistry } from "./sidebar-surface-registry";
 import {
   readDesktopSidebarPresentationState,
@@ -43,14 +44,15 @@ import {
 } from "./sidebar-presentation-store";
 import { ElectronUiIpcClient } from "./ui-ipc-client";
 import {
-  readDesktopClientIdentity,
-  resetDesktopClientIdentity,
-  type ElectronClientIdentity,
-} from "./client-identity-store";
+  readDesktopIdentities,
+  resetDesktopIdentities,
+  type ElectronDesktopIdentities,
+} from "./desktop-state-store";
 import {
   ELECTRON_APP_VIEW_IDENTITY,
   ELECTRON_FRAMEWORK_PARTITION,
   validateElectronAppViewCommand,
+  type ElectronEditorSurfaceMode,
   type ElectronAppViewInspection,
 } from "../shared/app-view-contracts";
 import {
@@ -122,10 +124,11 @@ let runTargetRelays: RunTargetRelayManager | null = null;
 let uiIpcClient: ElectronUiIpcClient | null = null;
 let runProfileRuntime: ElectronRunProfileRuntime | null = null;
 let detachedSurfaceRegistry: DetachedSidebarSurfaceRegistry | null = null;
+let secondaryEditorRegistry: SecondaryEditorRegistry | null = null;
 let dialogHost: DesktopDialogHost | null = null;
 let localFrameworkController: LocalFrameworkController | null = null;
 let localFrameworkConfig: LocalFrameworkConfigView;
-let electronClientIdentity: ElectronClientIdentity;
+let electronClientIdentities: ElectronDesktopIdentities;
 const surfaceWindows = new Set<BrowserWindow>();
 const trustedFrameworkContents = new Set<WebContents>();
 const assets = new DesktopAssetManager();
@@ -272,6 +275,7 @@ function appViewBounds(): Electron.Rectangle {
 
 function resizeAppView(): void {
   appView?.setBounds(appViewBounds());
+  secondaryEditorRegistry?.layout();
   detachedSurfaceRegistry?.layoutEmbedded();
 }
 
@@ -284,6 +288,7 @@ function closeSurfaceWindows(): void {
 
 function closeAppView(): void {
   detachedSurfaceRegistry?.closeAll(false);
+  secondaryEditorRegistry?.closeAll();
   runProfileRuntime?.clear();
   if (!appView) return;
   const closing = appView;
@@ -295,9 +300,16 @@ function closeAppView(): void {
   if (!closing.webContents.isDestroyed()) closing.webContents.close();
 }
 
-function assertTrustedAppViewSender(contents: WebContents): void {
+type AppViewRole = "primary" | "secondary";
+
+function assertTrustedAppViewSender(contents: WebContents): AppViewRole {
   const current = appView?.webContents;
-  if (!current || current.isDestroyed() || contents !== current) {
+  const role = current && !current.isDestroyed() && contents === current
+    ? "primary"
+    : secondaryEditorRegistry?.ownsContents(contents)
+      ? "secondary"
+      : null;
+  if (!role) {
     throw new Error("Rejected Electron app-view command from a stale renderer");
   }
   let origin = "";
@@ -309,6 +321,7 @@ function assertTrustedAppViewSender(contents: WebContents): void {
   if (origin !== relay.browserOrigin) {
     throw new Error("Rejected Electron app-view command from an untrusted origin");
   }
+  return role;
 }
 
 async function updateDesktopAssets(
@@ -328,6 +341,7 @@ async function updateDesktopAssets(
   const contents = appView?.webContents;
   if (reloadActiveView && contents && !contents.isDestroyed()) {
     contents.reloadIgnoringCache();
+    secondaryEditorRegistry?.reload();
   }
   return result;
 }
@@ -337,8 +351,19 @@ async function handleAppViewControl(
   rawCommand: unknown,
   payload?: unknown,
 ): Promise<unknown> {
-  assertTrustedAppViewSender(event.sender);
+  const role = assertTrustedAppViewSender(event.sender);
   const command = validateElectronAppViewCommand(rawCommand);
+  if (
+    role === "secondary" &&
+    ![
+      "read_client_identity",
+      "wait_for_app_prerequisites",
+      "set_second_editor_mode",
+      "second_editor_ready",
+    ].includes(command)
+  ) {
+    throw new Error(`Secondary editor may not invoke ${command}`);
+  }
   if (command === "inspect") {
     const frameworkSession = session.fromPartition(ELECTRON_FRAMEWORK_PARTITION);
     const [assetStatus, cacheSizeBytes] = await Promise.all([
@@ -365,12 +390,86 @@ async function handleAppViewControl(
     return updateDesktopAssets(true, false);
   }
   if (command === "read_client_identity") {
-    return { clientInstanceId: electronClientIdentity.clientInstanceId };
+    return {
+      clientInstanceId: role === "secondary"
+        ? electronClientIdentities.secondaryClientInstanceId
+        : electronClientIdentities.primaryClientInstanceId,
+    };
   }
   if (command === "reset_client_identity") {
-    electronClientIdentity = await resetDesktopClientIdentity();
+    if (role !== "primary") {
+      throw new Error("Only the primary editor may reset desktop client identities");
+    }
+    secondaryEditorRegistry?.closeAll();
+    electronClientIdentities = await resetDesktopIdentities();
     connectElectronUiIpc();
-    return { clientInstanceId: electronClientIdentity.clientInstanceId };
+    return { clientInstanceId: electronClientIdentities.primaryClientInstanceId };
+  }
+  if (command === "open_second_editor") {
+    if (role !== "primary") {
+      throw new Error("Only the primary editor may open the second editor");
+    }
+    if (!secondaryEditorRegistry || !payload || typeof payload !== "object") {
+      throw new Error("Secondary editor host is unavailable");
+    }
+    const request = payload as Record<string, unknown>;
+    const presentation = await secondaryEditorRegistry.open(
+      request.projectPath,
+      request.path,
+    );
+    return { ok: true, presentation };
+  }
+  if (command === "sync_second_editor_project") {
+    if (role !== "primary") {
+      throw new Error("Only the primary editor may synchronize the second editor project");
+    }
+    if (!secondaryEditorRegistry || !payload || typeof payload !== "object") {
+      throw new Error("Secondary editor host is unavailable");
+    }
+    const presentation = await secondaryEditorRegistry.syncProject(
+      (payload as Record<string, unknown>).projectPath,
+    );
+    return { ok: true, presentation };
+  }
+  if (command === "place_second_editor_surface") {
+    if (role !== "primary") {
+      throw new Error("Only the primary editor may place the second editor");
+    }
+    if (!secondaryEditorRegistry || !payload || typeof payload !== "object") {
+      throw new Error("Secondary editor host is unavailable");
+    }
+    const request = payload as Record<string, unknown>;
+    secondaryEditorRegistry.place(request.bounds, request.visible);
+    return { ok: true };
+  }
+  if (command === "set_second_editor_dock_size") {
+    if (role !== "primary") {
+      throw new Error("Only the primary editor may resize the second editor");
+    }
+    if (!secondaryEditorRegistry || !payload || typeof payload !== "object") {
+      throw new Error("Secondary editor host is unavailable");
+    }
+    const presentation = await secondaryEditorRegistry.setDockSize(
+      (payload as Record<string, unknown>).dockSize,
+    );
+    return { ok: true, presentation };
+  }
+  if (command === "set_second_editor_mode") {
+    if (!secondaryEditorRegistry || !payload || typeof payload !== "object") {
+      throw new Error("Secondary editor host is unavailable");
+    }
+    const mode = String((payload as Record<string, unknown>).mode || "") as ElectronEditorSurfaceMode;
+    if (!["closed", "docked", "collapsed", "detached"].includes(mode)) {
+      throw new Error("Secondary editor mode is invalid");
+    }
+    const presentation = await secondaryEditorRegistry.setMode(mode);
+    return { ok: true, presentation };
+  }
+  if (command === "second_editor_ready") {
+    if (role !== "secondary" || !secondaryEditorRegistry?.handleReady(event.sender)) {
+      throw new Error("Rejected secondary editor ready signal");
+    }
+    return { ok: true };
   }
   if (command === "wait_for_app_prerequisites") {
     const appId = payload && typeof payload === "object"
@@ -504,7 +603,7 @@ async function handleAppViewControl(
   if (command === "reload") {
     const contents = event.sender;
     setImmediate(() => {
-      if (appView?.webContents === contents && !contents.isDestroyed()) {
+      if (!contents.isDestroyed()) {
         contents.reloadIgnoringCache();
       }
     });
@@ -733,7 +832,7 @@ async function navigateApp(rawUrl: string): Promise<{ url: string }> {
 function connectElectronUiIpc(): void {
   uiIpcClient?.disconnect();
   uiIpcClient = new ElectronUiIpcClient(
-    `electron:${electronClientIdentity.clientInstanceId}`,
+    `electron:${electronClientIdentities.primaryClientInstanceId}`,
     (projection) => {
       void runTargetRelays?.updateRouteProjection(projection).catch((error) => {
         console.warn(`[te2-run-target] route projection rejected: ${errorMessage(error)}`);
@@ -850,6 +949,7 @@ async function viewAction(params: Record<string, unknown>): Promise<Record<strin
       zoomLevel: validZoom(params.zoomLevel),
     });
     appView?.webContents.setZoomFactor(settings.zoomLevel);
+    secondaryEditorRegistry?.setZoomFactor(settings.zoomLevel);
     return { zoomLevel: settings.zoomLevel };
   } else if (!action) throw new Error("Missing view action");
   return {};
@@ -997,7 +1097,7 @@ async function main(): Promise<void> {
 
   settings = await readDesktopSettings();
   localFrameworkConfig = await readLocalFrameworkConfig();
-  electronClientIdentity = await readDesktopClientIdentity();
+  electronClientIdentities = await readDesktopIdentities();
   configuredFrameworkOrigin = frameworkOrigin(settings);
   relay = await startFrameworkRelay(configuredFrameworkOrigin, assets);
   if (localFrameworkConfig.error) {
@@ -1025,6 +1125,31 @@ async function main(): Promise<void> {
   installFrameworkPermissionPolicy();
 
   mainWindow = createMainWindow();
+  secondaryEditorRegistry = new SecondaryEditorRegistry({
+    getAppPath: () => app.getAppPath(),
+    getMainWindow: () => mainWindow,
+    getAppViewBounds: appViewBounds,
+    getAppZoomFactor: () => appView?.webContents.getZoomFactor() || 1,
+    getConfiguredFrameworkOrigin: () => configuredFrameworkOrigin,
+    getRelayOrigin: () => relay.browserOrigin,
+    getZoomFactor: () => settings.zoomLevel,
+    frameworkPartition: ELECTRON_FRAMEWORK_PARTITION,
+    registerContents: (contents) => trustedFrameworkContents.add(contents),
+    unregisterContents: (contents) => trustedFrameworkContents.delete(contents),
+    installContextMenu: (contents, owner) => installContextMenu(contents, owner),
+    installScrollbars: (contents) => installChromiumScrollbars(contents, "secondary-editor"),
+    installAppChrome: async (contents) => {
+      await contents.insertCSS(APP_NATIVE_STYLE, { cssOrigin: "user" });
+    },
+    closeDialogs: (contents) => dialogHost?.closeForOwner(contents),
+    publishPresentation: (command) => {
+      const contents = appView?.webContents;
+      if (contents && !contents.isDestroyed()) {
+        contents.send("te2-desktop:second-editor-command", command);
+      }
+    },
+    layoutPrimary: resizeAppView,
+  });
   detachedSurfaceRegistry = new DetachedSidebarSurfaceRegistry({
     getAppPath: () => app.getAppPath(),
     getAppContents: () => appView?.webContents || null,
@@ -1045,6 +1170,10 @@ async function main(): Promise<void> {
   dialogHost = new DesktopDialogHost({
     getMainWindow: () => mainWindow,
     getAppContents: () => appView?.webContents || null,
+    isTrustedAppContents: (contents) =>
+      secondaryEditorRegistry?.ownsContents(contents) === true,
+    getOwnerWindow: (contents) =>
+      secondaryEditorRegistry?.ownerWindow(contents) || mainWindow,
     getRelayOrigin: () => relay.browserOrigin,
     getAppPath: () => app.getAppPath(),
     shellUrl: `${SHELL_SCHEME}://${SHELL_HOST}/dialog/index.html`,
@@ -1094,6 +1223,8 @@ app.on("before-quit", () => {
   );
   detachedSurfaceRegistry?.closeAll(false);
   detachedSurfaceRegistry = null;
+  secondaryEditorRegistry?.closeAll();
+  secondaryEditorRegistry = null;
   closeAppView();
   dialogHost?.dispose();
   dialogHost = null;

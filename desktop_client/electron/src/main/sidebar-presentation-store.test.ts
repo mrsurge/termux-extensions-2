@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 
 import {
@@ -10,6 +10,7 @@ import {
   validateDesktopSidebarPresentationState,
   writeDesktopSidebarPresentationState,
 } from "./sidebar-presentation-store";
+import { desktopStatePath } from "./desktop-state-store";
 
 const sampleState = {
   version: 1 as const,
@@ -33,12 +34,12 @@ test("Sidebar presentation state is stored atomically under the TE2 config bound
   );
   const loaded = await readDesktopSidebarPresentationState(environment);
   const raw = JSON.parse(
-    await readFile(desktopSidebarPresentationPath(environment), "utf8"),
+    await readFile(desktopStatePath(environment), "utf8"),
   );
 
   assert.deepEqual(written, sampleState);
   assert.deepEqual(loaded, sampleState);
-  assert.deepEqual(raw, sampleState);
+  assert.deepEqual(raw.sidebar, sampleState);
 });
 
 test("Sidebar presentation validation rejects unknown modes and versions", () => {
@@ -56,7 +57,7 @@ test("Sidebar presentation validation rejects unknown modes and versions", () =>
   );
 });
 
-test("missing or corrupt presentation state resolves to an empty versioned state", async () => {
+test("missing presentation state resolves to an empty versioned state", async () => {
   const configHome = await mkdtemp(join(tmpdir(), "te2-electron-presentation-"));
   const loaded = await readDesktopSidebarPresentationState({
     ...process.env,
@@ -89,12 +90,12 @@ test("legacy Code TE2 identities are canonicalized and rewritten on read", async
       terminal: "embedded",
     },
   };
-  await writeDesktopSidebarPresentationState(legacy, environment);
-  // The public writer already normalizes. Seed the historical payload directly.
+  await mkdir(dirname(path), { recursive: true });
+  // Seed the historical standalone file before the unified state exists.
   await writeFile(path, `${JSON.stringify(legacy, null, 2)}\n`, "utf8");
 
   const loaded = await readDesktopSidebarPresentationState(environment);
-  const raw = await readFile(path, "utf8");
+  const raw = await readFile(desktopStatePath(environment), "utf8");
 
   assert.deepEqual(loaded.order, ["slot:code_te2:primary", "terminal"]);
   assert.equal(loaded.foregroundHostId, "slot:code_te2:primary");

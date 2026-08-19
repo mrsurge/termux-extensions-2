@@ -62,6 +62,8 @@
     --explorer-width-effective: var(--explorer-width, var(--explorer-width-default));
     --agent-width-default: max(400px, 34vw);
     --agent-width-effective: var(--agent-width, var(--agent-width-default));
+    --secondary-editor-dock-size: 480px;
+    --secondary-editor-width-effective: 0px;
     /* Font scale control */
     --chrome-font-scale: 0.85;  /* Default to Medium */
     --chrome-base-font: calc(14px * var(--chrome-font-scale));
@@ -97,7 +99,7 @@
 
   .fe-root.layout-desktop {
     display: grid;
-    grid-template-columns: var(--explorer-width-effective) minmax(0, 1fr) var(--agent-width-effective);
+    grid-template-columns: var(--explorer-width-effective) minmax(0, 1fr) var(--secondary-editor-width-effective) var(--agent-width-effective);
     grid-template-rows: auto auto 1fr auto auto;
     height: 100%;
     min-height: 0;
@@ -106,17 +108,25 @@
   }
 
   .fe-root.layout-desktop.explorer-collapsed {
-    grid-template-columns: 0px minmax(0, 1fr) var(--agent-width-effective);
+    grid-template-columns: 0px minmax(0, 1fr) var(--secondary-editor-width-effective) var(--agent-width-effective);
   }
 
-  /* Desktop toolbar sits over the editor column; side rails own their full height. */
+  .fe-root.layout-desktop.te2-secondary-editor-docked {
+    --secondary-editor-width-effective: var(--secondary-editor-dock-size);
+  }
+
+  .fe-root.layout-desktop.te2-secondary-editor-collapsed {
+    --secondary-editor-width-effective: 52px;
+  }
+
+  /* Desktop toolbar spans both editor surfaces; side rails own their full height. */
   .layout-desktop .fe-toolbar {
-    grid-column: 2;
+    grid-column: 2 / 4;
     grid-row: 1;
     z-index: 40;
   }
 
-  /* Recent-file tabs stay with the editor column; side rails own columns 1 and 3. */
+  /* Recent-file tabs stay with the primary editor; side rails own columns 1 and 4. */
   .layout-desktop .fe-file-tabs {
     grid-column: 2;
     grid-row: 2;
@@ -164,7 +174,7 @@
     top: auto;
     bottom: auto;
     width: 100% !important;
-    grid-column: 3;
+    grid-column: 4;
     grid-row: 1 / 5;
     border-left: 1px solid var(--border);
     transition: none !important;
@@ -189,11 +199,21 @@
 
   /* Adjust grid when sidebar is closed */
   .layout-desktop:has(.agent-drawer:not(.open)) {
-    grid-template-columns: var(--explorer-width-effective) 1fr 0px;
+    grid-template-columns: var(--explorer-width-effective) minmax(0, 1fr) var(--secondary-editor-width-effective) 0px;
   }
 
   .layout-desktop.explorer-collapsed:has(.agent-drawer:not(.open)) {
-    grid-template-columns: 0px 1fr 0px;
+    grid-template-columns: 0px minmax(0, 1fr) var(--secondary-editor-width-effective) 0px;
+  }
+
+  .layout-desktop .te2-secondary-editor-host {
+    grid-column: 3;
+    grid-row: 2 / 5;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    pointer-events: none;
+    background: #0d1117;
   }
 
   /* Keep sidebar iframes measurable while hidden (avoid zero-size resizes). */
@@ -277,6 +297,10 @@
     grid-row: 1;
     flex-wrap: wrap;
     row-gap: 2px;
+  }
+
+  .layout-mobile .te2-secondary-editor-host {
+    display: none;
   }
 
   .layout-mobile .fe-file-tabs {
@@ -436,11 +460,24 @@
     display: block;
     width: 6px;
     cursor: col-resize;
-    grid-column: 3;
+    grid-column: 4;
     grid-row: 1 / 5;
     justify-self: start;
     transform: translateX(-100%);
     z-index: 220;
+    touch-action: none;
+  }
+
+  /* Primary/secondary editor boundary (desktop, docked mode only). */
+  .layout-desktop.te2-secondary-editor-docked .resize-handle--secondary {
+    display: block;
+    width: 6px;
+    cursor: col-resize;
+    grid-column: 3;
+    grid-row: 2 / 5;
+    justify-self: start;
+    transform: translateX(-100%);
+    z-index: 280;
     touch-action: none;
   }
 
@@ -740,6 +777,33 @@
   .fe-file-tab.fe-git-untracked { border-left: 3px solid #00aaff; background: rgb(19, 61, 128); }
   .fe-file-tab.fe-git-ignored { border-left: 3px solid #6b7280; }
   .fe-file-tab.fe-git-conflict { border-left: 3px solid #ef4444; }
+  .fe-file-tab-context-menu {
+    position: fixed;
+    z-index: 420;
+    min-width: 210px;
+    padding: 4px;
+    border: 1px solid var(--explorer-card-border, #30363d);
+    border-radius: 4px;
+    background: var(--explorer-card-bg, #161b22);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  }
+  .fe-file-tab-context-menu button {
+    display: block;
+    width: 100%;
+    padding: 7px 10px;
+    border: 0;
+    border-radius: 2px;
+    color: inherit;
+    background: transparent;
+    text-align: left;
+    font: inherit;
+    cursor: pointer;
+  }
+  .fe-file-tab-context-menu button:hover,
+  .fe-file-tab-context-menu button:focus-visible {
+    background: var(--accent, #1f6feb);
+    outline: 0;
+  }
   .fe-modal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.5); z-index: 1000; }
   .fe-modal.show { display: flex; }
   .fe-modal-card { width: min(800px, 92vw); max-height: 80vh; background: var(--card, #0b0f1a); color: var(--foreground, #e5e7eb); border: 1px solid var(--border, #333); border-radius: 10px; display: flex; flex-direction: column; overflow: hidden; }
@@ -2520,6 +2584,7 @@
         <div class="fe-dd-item" id="mi-save"><span>Save</span><span class="fe-kbd">Ctrl/Cmd+S</span></div>
         <div class="fe-dd-item" id="mi-saveas"><span>Save As…</span><span class="fe-kbd">Ctrl/Cmd+Shift+S</span></div>
         <div class="fe-dd-item" id="mi-close"><span>Close</span></div>
+        <div class="fe-dd-item" id="mi-open-second-window"><span>Open in a Second Window</span></div>
         <div class="fe-dd-item" id="mi-quit"><span>Quit</span></div>
         <div class="fe-dd-separator"></div>
         <div class="fe-dd-item" id="mi-run-profiles"><span>Run Profiles...</span></div>
@@ -2603,6 +2668,11 @@
 	  <div class="fe-editor-container" id="editor-container">
 	    <div id="editor-frame" data-editor-mode="inline" aria-label="Code editor"></div>
 	  </div>
+
+  <div id="secondary-editor-host" class="te2-secondary-editor-host" aria-hidden="true"></div>
+
+  <!-- Resize handle between the primary and docked secondary editors. -->
+  <div class="resize-handle resize-handle--secondary" data-panel="secondary"></div>
 
   <!-- Resize handle for terminal (mobile only) -->
   <div class="resize-handle resize-handle--terminal" data-panel="terminal"></div>

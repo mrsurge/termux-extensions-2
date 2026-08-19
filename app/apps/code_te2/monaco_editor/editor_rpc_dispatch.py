@@ -100,7 +100,11 @@ async def dispatch_editor_rpc_request(
     handle_breadcrumb_navigate: HandleEditorPayloadFn,
 ) -> object:
     if method in (EDITOR_RPC_METHOD_HOST_SAVE, EDITOR_RPC_METHOD_FOCUS, EDITOR_RPC_METHOD_BLUR):
-        return await handle_editor_host_action(method, params)
+        return await handle_editor_host_action(
+            method,
+            params,
+            source_client=source_client,
+        )
 
     if method == EDITOR_RPC_METHOD_OPEN:
         request_id = str(params.get("request_id") or f"rpc_open_{int(time.time() * 1000)}")

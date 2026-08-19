@@ -1,4 +1,4 @@
-# Desktop User Install And Termux Debian Packaging Implementation Plan
+# Unified Linux And Termux Release Installer Implementation Plan
 
 Status: active phased implementation. This document records the approved
 architecture; each implementation phase still requires its own explicit scope.
@@ -15,27 +15,27 @@ This plan covers six ordered outcomes:
 3. split shared editor-document authority from client-scoped foreground
    presentation while preserving shared drafts, writes, WBA documents, and
    projections;
-4. produce a Linux desktop user-owned installation containing Electron, a
-   private Python runtime, a prebuilt Rust server, launchers, and a desktop
-   entry; and
-5. produce a separate Termux Debian package that uses Termux's shared Python
-   environment and preferred repository packages.
+4. produce one autodetecting release installer plus immutable, target-specific
+   archives for apt-based glibc Linux and Termux; and
+5. validate the Termux target mode against its shared Python interpreter,
+   preferred repository dependencies, Bionic server, and user-owned release
+   layout.
 
-The Linux and Termux artifacts intentionally have different runtime layouts.
-Linux isolates Python dependencies in a user-owned virtual environment beneath
-the canonical TE2 data root.
-Termux uses its shared Python environment because several native Python
-dependencies are better supplied by Termux repositories than rebuilt through
-pip. Phase 5 must discover and validate those package mappings before a Termux
-payload is designed.
+Linux and Termux intentionally retain different runtime layouts behind one
+installer authority. Linux isolates Python dependencies in a user-owned virtual
+environment beneath the canonical TE2 data root. Termux uses its shared Python
+interpreter and repository-supplied native dependencies, while TE2's own Python
+payload remains versioned beneath the same canonical TE2 release root. Phase 5
+must discover and validate those package mappings before the Termux target mode
+is accepted.
 
 The distribution work also recognizes four intentionally different install
 modes. A source checkout and a Git/pip install may build and cache the Rust
-server from source. A Linux desktop user install receives a prebuilt GNU/Linux
-server and owns a private venv beneath `$TE2_DATA_HOME`. A Termux Debian package
-receives a prebuilt Bionic/Android server and installs TE2 into Termux's shared
-Python environment. Distribution payloads must never stage Cargo's intermediate
-build tree.
+server from source. The unified installer selects either a glibc Linux archive
+containing the GNU/Linux server and Electron payload or a Termux archive
+containing the Bionic/Android server. Linux owns a private venv; Termux reuses
+its shared interpreter without a venv. Distribution payloads must never stage
+Cargo's intermediate build tree.
 
 ## 1. Source-backed starting point
 
@@ -98,22 +98,24 @@ Source inspection resolves the external dependency classes as follows:
 | `dtach` | Retired; Code TE2 uses Framework-Shells' PTY backend |
 | OpenSSL command-line tools, Termux `libev`, and Termux `c-ares` | No current TE2 execution-path owner |
 
-Linux and Termux package metadata own their exact validated dependency mapping
-in Phases 4 and 5. Checked-in Code TE2, WBA, and shared browser artifacts are
-already built or vendored; the Electron distribution is built before packaging.
-npm remains a package requirement only because the standalone Terminal
-intentionally installs its locked private runtime on first use; elsewhere npm
-is source-regeneration tooling. A retained packaged capability receives its
-external executable through package metadata; otherwise that capability is
-removed from the packaged product.
+The unified installer's target manifests own the exact validated dependency
+mapping for Linux and Termux in Phases 4 and 5. Checked-in Code TE2, WBA, and
+shared browser artifacts are already built or vendored; the Electron
+distribution is built before publication. npm remains an installed prerequisite
+only because the standalone Terminal intentionally installs its locked private
+runtime on first use; elsewhere npm is source-regeneration tooling. A retained
+installed capability receives its external executable through the selected
+target's prerequisite transaction; otherwise that capability is removed from
+the installed product.
 
-The package must preserve the Terminal's existing per-user runtime authority
-without adding another helper. The `.deb` declares the target Node.js/npm
-packages, and the existing packaged Python `ensure_terminal_node_runtime()`
-path remains the sole installer, validator, and repair authority for the
-Terminal's private modules. The first Terminal launch installs them; later
-launches perform the existing cheap validation and reuse or repair the runtime.
-No Debian maintainer script runs npm or writes into a user's home.
+The installer must preserve the Terminal's existing per-user runtime authority
+without adding another helper. Its target prerequisite manifest installs or
+validates Node.js/npm, and the existing packaged Python
+`ensure_terminal_node_runtime()` path remains the sole installer, validator,
+and repair authority for the Terminal's private modules. The first Terminal
+launch installs them; later launches perform the existing cheap validation and
+reuse or repair the runtime. The release installer never runs npm on the
+Terminal runtime's behalf.
 
 The durable runtime remains under
 `$TE2_DATA_HOME/node_runtime/terminal/<fingerprint>`, normally
@@ -124,13 +126,14 @@ version, and Node module ABI. The existing cross-process lock, atomic staging,
 `.te2-runtime.json` marker, required-package validation, and explicit
 `TE2_TERMINAL_NODE_RUNTIME_DIR` override remain authoritative.
 
-This is also the dependency-admission rule for the packaged product: a
-dependency must be installed by pip, by an already-owned application bootstrap,
-or by the target `.deb` and its declared package dependencies. If none of those
-authorities owns it, the dependency and the unsupported capability that needs
-it are removed instead of gaining another installer or helper script.
-Repository scripts may construct development or release artifacts, including
-the `.deb`, but installed users never invoke them for setup.
+This is also the dependency-admission rule for the installed product: a
+dependency must be installed into the Linux private venv, supplied by an
+already-owned application bootstrap, or installed by the unified installer's
+validated apt transaction for the selected target. If none of those authorities
+owns it, the dependency and the unsupported capability that needs it are
+removed instead of gaining another installer or helper script. Repository
+scripts may construct the installer and release archives, but installed users
+never invoke repository construction scripts for setup.
 
 Code TE2 installs and resolves its pinned private Code Server only beneath
 `$TE2_DATA_HOME/code_server`; a global package is neither required nor used.
@@ -278,42 +281,57 @@ registry. Legacy `last_file` now exists only as a one-time migration seed.
 ### 2.1 Common rules
 
 - Package versions come from the synchronized TE2 framework version; the
-  Python package, Rust server, Electron package, Debian metadata, release tag,
-  and checksums must agree.
+  installer manifest, Python package, Rust server, Electron package, release
+  tag, archive names, and checksums must agree.
 - Release assets are produced from one immutable synchronized tag. Moving
   branches and unpinned Git URLs are never package inputs.
 - Build jobs may acquire locked source dependencies before staging. Cargo,
   Electron, npm, and wheel caches remain outside the package root.
-- Build staging and final `.deb` files stay outside tracked source or under an
-  ignored build-output root.
-- Both builders enforce the existing 3 GiB free-space guard before Electron or
-  Rust compilation begins.
+- Build staging and final release archives stay outside tracked source or under
+  an ignored build-output root.
+- Release builders enforce the existing 3 GiB free-space guard before Electron
+  or Rust compilation begins.
 - The packaged Rust binary is a release build and is passed to the existing
   bootstrap through `--server-bin`/`TE2_SERVER_BIN`; Cargo is not a target
   runtime dependency.
 - User data never lives beneath the package prefix. The existing canonical
   `TE2_*_HOME`/XDG/Termux resolution remains the only writable-state contract.
-- Managed Code Server is not bundled into either package. Its existing
+- Managed Code Server is not bundled into either target archive. Its existing
   confirmation-gated private installer remains authoritative.
-- Linux and Termux artifacts receive independent clean-install, upgrade,
-  uninstall, and launch smoke tests.
+- One installer owns detection, prerequisite installation, archive acquisition,
+  verification, staging, receipts, activation, upgrades, and removal. Target
+  adapters may differ only where the platform runtime layout requires it.
+- Detection checks Termux before generic Linux. The initial generic Linux target
+  requires Linux, glibc, `apt-get`, and a supported architecture. Musl systems,
+  unsupported package managers, and unknown architectures fail explicitly.
+- Linux and Termux modes receive independent clean-install, upgrade, uninstall,
+  and launch smoke tests.
 
 The initial tagged release-asset matrix is:
 
 ```text
-te2-<version>-py3-none-any.whl
-te2-server-<version>-x86_64-unknown-linux-gnu
-te2-server-<version>-aarch64-linux-android
-TE2Desktop-<version>-linux-x64.tar.xz
+install-te2
+te2-<version>-linux-x86_64.tar.gz
+te2-<version>-termux-aarch64.tar.gz
 SHA256SUMS
 ```
 
-The exact names may be normalized when the release builder is implemented, but
-the semantic matrix is fixed: one tagged Python payload, one GNU/Linux server,
-one Bionic/Android server, one Electron payload, and checksums. Release binaries
-belong in release assets, not committed into Git history. The
-`aarch64-linux-android` server is initially a Termux package input; it does not
-authorize embedding the framework server into an Android APK.
+Each target archive carries a versioned `manifest.json`, the exact TE2 wheel or
+release-owned Python payload input, its validated final Rust server, and only
+the target-specific additions it needs. The Linux archive also carries the
+pruned Electron application and XDG assets. The Termux archive carries no
+Electron payload. Release binaries belong in release assets, not Git history.
+The Bionic server remains a Termux installer input and does not authorize
+embedding the framework server into an Android APK.
+
+Tar with gzip is the initial archive format because it preserves executable
+modes and symlinks without adding a decompressor prerequisite. ZIP is not a
+release format. The installer supports three deterministic acquisition paths in
+this order: an explicit `--payload <archive>`, a matching archive adjacent to
+the installer, or a download from the selected immutable release. Downloaded
+and local archives use the same checksum and internal-manifest validation. An
+offline payload install assumes its OS/Termux prerequisite packages are already
+available; it does not promise an offline apt repository.
 
 ### 2.2 Install-mode contract
 
@@ -321,33 +339,23 @@ authorize embedding the framework server into an Android APK.
 |---|---|---|---|
 | Editable/source checkout | Caller-owned environment | Built/reused through the canonical cache | Optional source build |
 | Git/pip source install | Caller-owned environment or venv | Built/reused through the canonical cache | Not implied |
-| Linux desktop user install | Private venv under the canonical TE2 user data root | Tagged GNU/Linux release binary | Tagged bundled Linux x64 payload |
-| Termux `.deb` | Shared Termux Python environment | Tagged Bionic/Android release binary | Not included |
+| Unified installer: glibc Linux | Release-owned private venv under the canonical TE2 data root | Archive-owned GNU/Linux release binary | Archive-owned Linux x64 payload |
+| Unified installer: Termux | Shared Termux interpreter and repository dependencies; release-owned TE2 Python tree | Archive-owned Bionic/Android release binary | Not included |
 
 Source and Git/pip installs continue to include Rust source because they must be
-able to build the server. The Linux installed launchers and Termux package
-launcher always set the exact `TE2_SERVER_BIN`/`--server-bin` path so the target
-machine never invokes Cargo. The builder may retain incremental Cargo artifacts
-in its external cache, but copies only the validated final `te2-server`
-executable into distribution staging.
+able to build the server. Both installed target modes always set the exact
+`TE2_SERVER_BIN`/`--server-bin` path so the target machine never invokes Cargo.
+The builder may retain incremental Cargo artifacts in its external cache, but
+copies only the validated final `te2-server` executable into release staging.
 
-The Linux Python-delivery detail remains a measured Phase 4 decision:
-
-1. **Thin network bootstrap:** the user installer creates a private venv and
-   installs an exact immutable Git tag. This minimizes the downloaded release
-   payload but depends on GitHub, DNS, TLS, Git, pip resolution, and external
-   package indexes.
-2. **Self-contained release:** the installer downloads or carries the tagged
-   TE2 wheel and locked dependency payload needed to construct the private venv
-   without further Python network access. This is larger but deterministic,
-   reinstallable offline, and suitable for atomic upgrade recovery.
-
-Phase 4 must build and measure both prototypes before locking the final payload
-shape. The measured wheel size makes the thin exact-tag bootstrap the current
-size-oriented candidate. Its networked failure and recovery contract must be
-explicit. The self-contained form remains the offline/reproducible alternative.
-In either prototype, the Python source revision must match the installed version
-and bundled Rust/Electron release assets exactly.
+The Python-delivery decision is closed: installed releases use the immutable
+target archive, not a Git clone or exact-tag network bootstrap. The archive
+contains the version-matched TE2 wheel and the target's locked Python install
+inputs. Linux constructs its private venv from those inputs. Termux uses its
+shared interpreter and repository-native dependencies but installs TE2's own
+Python files into the versioned release tree rather than relying on a moving
+source checkout. Python source identity must match the manifest, Rust server,
+Electron payload, and synchronized release version exactly.
 
 ### 2.3 Linux desktop user installation
 
@@ -374,15 +382,14 @@ The release builder always produces:
 
 - the release Rust server binary;
 - the pruned Electron application directory; and
-- the version-matched Python installation input and checksums.
+- the version-matched Python installation inputs, manifest, and checksums.
 
-The self-contained prototype additionally carries the exact TE2 wheel and
-locked dependency payload. The thin prototype records the exact tagged Git
-source and every target prerequisite. Both prototypes stage a complete version,
-validate the private venv, CLI, Rust server, and Electron launcher, then switch
-the `current` pointer atomically. A failed update leaves the prior release
-usable. A versioned install receipt owns only installed application payloads;
-uninstall never deletes ordinary TE2 configuration, projects, or app state.
+The installer stages a complete version from the verified target archive,
+constructs and validates the private venv, validates the CLI, Rust server, and
+Electron launcher, then switches the `current` pointer atomically. A failed
+update leaves the prior release usable. A versioned install receipt owns only
+installed application payloads; uninstall never deletes ordinary TE2
+configuration, projects, or app state.
 
 The small user-local wrappers invoke the current private venv and exact prebuilt
 server. Installation writes the versioned desktop local-framework record with
@@ -394,56 +401,63 @@ application id, uses the user-local installed icon, and does not open a
 terminal. The existing intentional Electron `--no-sandbox` launcher behavior
 remains unchanged unless a separately approved sandboxing design replaces it.
 
-The installer runs as the user. It may use apt with a narrow, explicit
-privileged step for system requirements that are impractical to vendor, such as
-the platform Python/venv support, Node/npm, SSL runtime, or `libarchive` shared
-library. Apt never owns the TE2 application payload. All TE2 Python/bootstrap,
-Rust, and Electron files remain in the user installation root.
+The installer runs application-file operations as the user. Its Linux target
+adapter may use a narrow, explicit privileged apt step for system requirements
+that are impractical to vendor, such as platform Python/venv support, Node/npm,
+SSL runtime, or the `libarchive` shared library. Apt never owns the TE2
+application payload. All TE2 Python/bootstrap, Rust, and Electron files remain
+in the user installation root.
 
-Repository construction scripts may build this installer and its release
-payloads. They are not copied into the installed application. A user sees the
-repository `scripts/` directory only in a cloned or editable source checkout.
+Repository construction scripts may build the public installer and its release
+archives. Repository scripts themselves are not copied into the installed
+application. A user sees the repository `scripts/` directory only in a cloned
+or editable source checkout.
 
-### 2.4 Termux package
+### 2.4 Termux target mode
 
-Initial target: Termux `aarch64`. The package is framework/CLI-only: it contains
-no Electron payload and no desktop entry.
+Initial target: Termux `aarch64`. This mode is framework/CLI-only: its archive
+contains no Electron payload and installs no desktop entry.
 
-Package name: `te2`.
-
-Intended installed layout, expressed relative to the active Termux `$PREFIX`:
+Termux deliberately uses the active `$PREFIX/bin/python` interpreter rather
+than a venv. The unified installer still keeps TE2's own versioned application
+payload and server under the canonical TE2 data root:
 
 ```text
+$TE2_DATA_HOME/install/releases/<version>/python/...
+$TE2_DATA_HOME/install/releases/<version>/libexec/te2-server
+$TE2_DATA_HOME/install/releases/<version>/manifest.json
+$TE2_DATA_HOME/install/current -> releases/<version>
 $PREFIX/bin/te2
-$PREFIX/lib/te2/libexec/te2-server
-$PREFIX/lib/pythonX.Y/site-packages/app/...
-$PREFIX/lib/pythonX.Y/site-packages/te2-<version>.dist-info/...
 ```
 
-Termux deliberately uses the shared Python environment. Phase 5 begins with a
+The wrapper resolves the current release's exact Python tree and Bionic server.
+Termux apt owns the shared interpreter and validated native/runtime
+dependencies; it does not own TE2 application files. Phase 5 begins with a
 device-native dependency matrix:
 
 1. enumerate every direct and transitive Python requirement from the cleaned
    Phase 0 set;
 2. query the current Termux repositories for preferred Python/native packages;
 3. validate import names and versions from those packages;
-4. identify only the packages that still require a TE2-built payload; and
-5. prove that TE2-owned files do not collide with files owned by another Termux
-   package.
+4. identify only the packages that still require a target-built wheel or other
+   release-owned input; and
+5. prove that the release-owned Python tree runs against those shared
+   dependencies without writing TE2 into shared `site-packages`.
 
-Repository packages become Debian `Depends` entries and remain owned by their
-Termux packages. Any missing Python package must be built on Termux for the
-actual ABI and staged into the TE2 payload at package-build time so dpkg owns
-the installed files. `postinst` must not run networked pip. If a dependency
-cannot be packaged without overwriting another package's files, Phase 5 stops
-for a new design decision instead of forcing pip into the shared prefix.
+The installer records the exact apt package mapping in the Termux target
+manifest and installs missing prerequisites directly, without `sudo`. Any
+remaining Python payload must be built for the actual Termux ABI and included
+in the immutable target archive. Installer activation performs no networked pip
+resolution after archive verification. If a dependency cannot be supplied by
+the accepted apt mapping or immutable archive without overwriting shared-prefix
+files, Phase 5 stops for a new design decision.
 
 The Rust server is built for `aarch64-linux-android` in the release pipeline and
-installed as a prebuilt Bionic-compatible binary. Native Termux build validation
-remains required even if a cross-build is later automated. The package audit
-rejects hard links, rejects paths outside `$PREFIX`, and checks all generated
-shebangs and symlinks. Code Server remains the existing separate, user-approved
-managed installation.
+installed as a prebuilt Bionic-compatible binary. Native Termux validation
+remains required even if a cross-build is later automated. The installer audit
+rejects hard links, paths outside the declared release root or wrapper path,
+invalid shebangs, and invalid symlinks. Code Server remains the existing
+separate, user-approved managed installation.
 
 ## 3. Phase 0 — dependency cleanup and reproducibility
 
@@ -468,14 +482,16 @@ managed installation.
 1. Audit `node`, `npm`, compiler tools, libarchive, Git, dtach, aria2,
    watchexec, curl/wget, OpenSSL, and the old Termux native packages against
    current subprocess/native-library use.
-2. Keep dependency installation owned by pip, existing app bootstraps, or the
-   target package metadata; remove unowned dependencies and capabilities.
+2. Keep dependency installation owned by the Linux private-venv transaction,
+   the unified installer's target prerequisite manifest, or an existing app
+   bootstrap; remove unowned dependencies and capabilities.
 3. Document the source/core-runtime/build-only/optional split in the supported
-   README without presenting it as target package metadata.
-4. Let the Linux and Termux package builders own separate exact dependency
+   README without presenting it as the finalized installer dependency manifest.
+4. Let the unified release builder own separate exact Linux and Termux target
    manifests after their clean-target investigations in Phases 4 and 5.
-5. Allow repository scripts to construct development and release artifacts,
-   including `.deb` files, but never expose them as installed-user setup paths.
+5. Allow repository scripts to construct development artifacts, the public
+   installer, and release archives, but never expose repository scripts as
+   installed-user setup paths.
 
 ## 4. Phase 1 — integrate and validate the current `main` baseline
 
@@ -749,61 +765,311 @@ collaboration design.
 8. Browser, Electron, GeckoView, and Cefrium pass the same matrix before the
    package baseline is frozen.
 
-## 7. Phase 4 — Linux desktop user installation
+### 6.7 Phase 3B — Electron `Open in a Second Window`
 
-1. Add an ignored distribution staging layout and one deterministic Linux
-   release/installer builder under repository construction tooling.
-2. Map Electron `x64` to Debian `amd64` and fail unsupported architectures
-   explicitly.
-3. Produce the tagged TE2 wheel, GNU/Linux Rust server, and Electron release
-   assets without copying build caches or intermediate trees into staging.
-4. Prototype and measure both the exact-tag Git bootstrap and self-contained
-   Python payload; record compressed size, install time, failure behavior, and
-   offline reinstall behavior.
-5. Select the Python-delivery mode explicitly; the thin exact-tag mode is the
-   current size-oriented candidate and the self-contained mode is the offline
-   alternative.
-6. Add a user-owned versioned install root beneath `$TE2_DATA_HOME`, atomic
-   `current` switching, a manifest/receipt, user-local CLI/desktop wrappers,
-   icon, `.desktop` entry, and private-venv handling.
-7. Add the narrow apt prerequisite transaction for system Python/venv support,
-   Node/npm, SSL/runtime libraries, and platform `libarchive` after validating
-   the exact baseline mapping. Apt must not own the TE2 application tree.
-8. Validate that the existing Python Terminal bootstrap from a clean user
-   install writes to the same canonical per-user data root, including its
-   target-native `node-pty` installation path, fingerprint reuse, marker
-   validation, and repair behavior.
-9. Seed and validate the Phase 2 local-framework config with the installed
-   command and private-venv paths without overwriting later user edits during an
-   ordinary desktop launch.
-10. Install into a clean Debian/Ubuntu target and audit the install receipt,
-    permissions, current pointer, wrappers, desktop entry, and payload paths.
-11. Validate `te2 --help`, `/api/health`, desktop launch, app launch, asset
-    install, and clean removal.
-12. Validate an atomic upgrade and rollback without deleting ordinary TE2 user
-    data.
+Phase 3 established the prerequisite: one stable client identity owns one
+reconnectable foreground while shared document membership, drafts, writes,
+diagnostics, and WBA logical documents remain project-scoped. Phase 3B uses
+that contract rather than creating an Electron-only document authority.
 
-## 8. Phase 5 — Termux `.deb`
+The user-facing feature is named **Open in a Second Window** even while its
+secondary editor is docked inside the main Electron window. The first version
+supports exactly one secondary editor surface. Its placement can be closed,
+docked, visually collapsed, or detached into a floating native window.
+
+#### 6.7.1 State ownership
+
+The secondary editor is a real Code TE2 client with its own stable
+`clientInstanceId` and the normal Editor, UI IPC, and WBA routing needed by its
+reduced surface. It is not another `windowId` attached to the primary client.
+Its canonical foreground therefore already belongs in the existing bounded
+`ProjectSidecar.client_foregrounds` map. No `secondWindow`, geometry, dock
+mode, or Electron presentation object is added to `ProjectSidecar`.
+
+The ownership split is:
+
+- `ProjectSidecar.client_foregrounds[secondaryClientInstanceId]` owns the
+  canonical foreground file and reconnect revision for each project;
+- existing shared open-state authority owns admitted documents, recents,
+  drafts, writes, diagnostics, and WBA logical-document lifetime;
+- Electron main owns whether the secondary surface is closed, docked,
+  collapsed, or detached, plus dock size and detached native-window geometry;
+- the secondary renderer owns ephemeral Monaco cursor, selection, scroll, and
+  focus state through the same client projection paths as any other frontend;
+- `windowId` and `presentationId` remain transient presentation and
+  observability metadata.
+
+The Electron store must not duplicate a `filePath`. On creation or reconnect,
+the secondary renderer authenticates with its own stable client id and obtains
+the backend-owned foreground through the ordinary boot/open-state flow.
+
+#### 6.7.2 Electron presentation schema
+
+The current Electron sidebar-only presentation file is generalized into the
+versioned `$TE2_CONFIG_HOME/desktop-state.json` store. It atomically owns both
+desktop client identities, the existing Sidebar state, and a bounded
+editor-surface section. The implemented schema is:
+
+```jsonc
+{
+  "version": 1,
+  "identities": {
+    "primaryClientInstanceId": "client_<stable-random-id>",
+    "secondaryClientInstanceId": "client_<stable-random-id>"
+  },
+  "sidebar": {
+    "version": 1,
+    "order": [],
+    "foregroundHostId": "",
+    "lastAgentHostId": "",
+    "lastAgentPresentationId": "",
+    "presentations": {}
+  },
+  "editorSurfaces": {
+    "secondary": {
+      "projects": {
+        "<configured-framework-origin>\u0000<canonical-project-path>": {
+          "mode": "closed",
+          "dockSize": 480,
+          "detachedBounds": {
+            "x": 100,
+            "y": 100,
+            "width": 980,
+            "height": 720
+          },
+          "maximized": false
+        }
+      }
+    }
+  }
+}
+```
+
+The store performs one bounded migration from the former
+`desktop-client-identity.json` and `sidebar-presentation.json` records, then
+removes those legacy files. A malformed canonical store fails closed instead
+of silently reverting to another identity or presentation authority.
+
+The exact configured upstream framework origin participates in the project
+key. The random loopback browser-relay origin must not: it changes between
+processes and would collide or strand state. Project records are normalized,
+validated, bounded, and written through atomic replacement. Invalid bounds are
+clamped to the current display work area before showing a detached window.
+
+The secondary `clientInstanceId` is generated as another complete valid client
+identity, not derived from `windowId` or by appending an unchecked suffix to the
+primary id. It is stable across Electron restarts and reused across projects;
+the backend foreground map is already project-scoped. Resetting the desktop
+client identity rotates both primary and secondary ids and clears or rekeys the
+corresponding local presentation records in one transaction.
+
+Closing the surface is presentation-only in the first version. It records
+`mode: "closed"` but may retain the backend foreground so reopening returns to
+the warm document. A separately named reset/remove action may clear the
+secondary client foreground; ordinary Close must not remove shared document
+membership.
+
+#### 6.7.3 Renderer and native placement
+
+The secondary editor requires its own renderer/WebContents because Code TE2's
+Socket.IO identity, Monaco host globals, DOM ids, and editor boot state are
+renderer-scoped singletons. It must not be implemented by cloning DOM nodes,
+moving the primary Monaco instance, or applying CSS to a second copy of the
+full main page.
+
+Add a dedicated reduced Code TE2 boot mode that mounts one Monaco editor plus a
+compact header. It omits the shared file-tab strip and does not render
+background tabs. Its header contains:
+
+- the canonical active filename;
+- a reduced menu with Save, Save As, Discard Draft, and other actions already
+  valid for the secondary client's foreground;
+- Close, Collapse/Expand, and Detach/Attach controls; and
+- an explicit visual indication that this is the second editor surface.
+
+The primary main-page client remains orchestration authority for creating the
+secondary surface and requesting which admitted model it should show. The
+intent flows through an allowlisted Electron preload/main broker to the
+secondary renderer. The secondary renderer then performs the normal
+client-authenticated backend open itself; Electron must not forge its Editor
+RPC identity on behalf of the renderer.
+
+Docked and collapsed placement uses a retained Electron `WebContentsView`
+inside the main window. The primary Code TE2 page owns a real grid placeholder
+below the shared toolbar and between the primary editor and Sidebar. It reports
+that placeholder's CSS-pixel bounds through an exact-view preload command;
+Electron translates them through the primary app-view zoom and positions the
+retained native view over that slot. The primary app view remains full-size, so
+this is not an outer Electron window split. Detach reparents that same view into
+a floating `BrowserWindow`, and Attach reparents it back without navigating or
+replacing the renderer. Close returns its IPC response before deferred renderer
+disposal, retains the backend foreground, and allows reopen to reconstruct the
+reduced client against that warm state. Renderer loss uses the same
+reconstruction path without moving the primary foreground.
+
+The docked boundary is a Code TE2-owned drag handle. During a drag, the primary
+renderer hides the sibling native `WebContentsView` so it cannot capture the
+pointer stream, updates only the grid's secondary-column size, and persists the
+final bounded width through a primary-only Electron command. Electron writes
+that width into the existing per-framework/per-project presentation record;
+browser `localStorage` does not become a second presentation authority. The
+reduced renderer also removes only the primary template's visual surfaces. It
+must retain the injected stylesheet, font, and Codicon nodes on which Monaco's
+breadcrumb and flex sizing depend.
+
+The secondary renderer is still hosted through the ordinary Code TE2 app shell,
+so it may invoke the shared event-driven `wait_for_app_prerequisites` gate before
+the reduced runtime boots. That does not grant it primary-only app-view actions.
+Its compact header replaces the background tab strip inside the placeholder.
+
+The native registry remains one-entry in this phase but should use a keyed
+surface shape so later multiple secondary editors do not require replacing the
+contract. Only Electron exposes the broker and native placement implementation.
+
+#### 6.7.4 Shared-document and WBA behavior
+
+Opening a file in the second window admits or reuses the shared logical
+document, records the path only for the secondary client foreground, and sends
+the materialized open only to that client room. The primary client's foreground
+does not move.
+
+The primary may select from shared membership to direct the secondary surface,
+but the secondary surface intentionally shows no background tab bar. Shared
+draft, save, diagnostic, Git, semantic-token, hover, extension command, and
+revision-fence behavior remains unchanged. WBA reuses its one extension host
+and existing client-keyed editor facade; the secondary identity participates
+exactly like another remote client.
+
+The primary file-tab strip exposes an Electron-only right-click action named
+**Open in a Second Window**. It sends the clicked tab's admitted path directly
+to the secondary client without activating that tab in the primary client or
+changing shared membership. Keyboard Context Menu and Shift+F10 invoke the
+same path-specific action.
+
+Project switch remains shared. Electron resolves the new
+framework-origin/project presentation record, then either keeps the secondary
+surface closed or reconstructs its stored presentation and allows the
+secondary client boot to obtain that project's foreground. Stale project,
+membership, or display geometry is reconciled deterministically rather than
+silently opening an unrelated primary-client file.
+
+#### 6.7.5 Android and browser contract
+
+GeckoView and Cefrium do not read Electron's `$TE2_CONFIG_HOME` presentation
+store and do not receive its native broker. No Android source or asset change is
+required for this phase. Each Android frontend continues requesting only its
+own exact client foreground; another entry in the server's bounded
+`client_foregrounds` map is not projected as Android presentation state.
+
+The ordinary browser client likewise remains single-surface. Unknown future
+presentation fields must be rejected or ignored only at the Electron native
+store boundary; they are not added to shared Code TE2 boot snapshots merely to
+make unsupported clients ignore them.
+
+#### 6.7.6 Implementation slices
+
+1. Generalize and test the Electron desktop presentation schema, including the
+   stable secondary client identity, bounded framework/project records, atomic
+   writes, reset behavior, and display-bound validation.
+2. Add the exact-view Electron broker and one-entry secondary editor native
+   registry with docked, collapsed, detached, attached, and closed modes.
+3. Add the reduced secondary-editor boot mode and compact header using existing
+   Editor/UI IPC/WBA lanes rather than new document transports.
+4. Add primary-page File-menu and selected-tab right-click `Open in a Second
+   Window` orchestration without changing the primary foreground, shared close,
+   or background-tab membership.
+5. Add cold boot, project switch, reconnect, retarget, secondary renderer
+   crash, and identity-reset reconciliation.
+6. Validate shared drafts/writes/WBA behavior with primary and secondary
+   editors showing different files and then the same file.
+
+Slices 1 through 5 are implemented in source. The native registry retains one
+exact `WebContentsView`; the reduced renderer opens through its own authenticated
+UI IPC and Editor clients; and Save, Focus, and Blur backend projections now
+target the originating client's presentation room. Slice 6 remains the live
+acceptance gate rather than another state authority.
+
+#### 6.7.7 Acceptance matrix
+
+1. Opening file B in the second surface leaves the primary on file A and keeps
+   both in shared document membership.
+2. Dock, collapse, detach, attach, and close never change either client's
+   canonical foreground accidentally.
+3. Reopening after Close restores the secondary client's warm foreground.
+4. Electron restart restores the saved per-framework/per-project presentation
+   after framework readiness and project identity are established.
+5. Retargeting to another framework never reuses a same-path project record
+   from the previous server.
+6. Project switch reconciles both client foregrounds and selects the correct
+   stored presentation without reviving legacy `last_file` authority.
+7. Save, Save As, discard, diagnostics, hover, semantic tokens, extension
+   commands, and navigation act through the secondary client's exact identity.
+8. Simultaneous primary/secondary edits to one shared draft obey the existing
+   monotonic revision fence and make no new CRDT/OT claim.
+9. Secondary renderer loss can reconstruct from native presentation plus
+   backend foreground without moving the primary editor.
+10. Browser, GeckoView, and Cefrium behavior and payloads remain unchanged.
+
+## 7. Phase 4 — unified installer and Linux target archive
+
+1. Add an ignored distribution staging layout and one deterministic release
+   builder under repository construction tooling.
+2. Produce the public `install-te2` entrypoint, versioned target manifests,
+   target archives, and `SHA256SUMS` from one synchronized immutable tag.
+3. Implement Termux-first platform detection, then apt-based glibc Linux
+   detection, architecture normalization, and explicit rejection of unsupported
+   kernels, libc implementations, package managers, and architectures.
+4. Implement deterministic payload selection: explicit `--payload`, adjacent
+   matching archive, then immutable release download.
+5. Verify the external checksum and internal target/version/content manifest
+   before any release is activated.
+6. Produce the Linux `x86_64` archive with the tagged TE2 wheel and locked
+   Python inputs, GNU/Linux Rust server, pruned Electron payload, XDG assets,
+   and no build intermediates.
+7. Add the user-owned versioned install root beneath `$TE2_DATA_HOME`, atomic
+   `current` switching, manifest/receipt, user-local CLI/desktop wrappers, icon,
+   `.desktop` entry, and private-venv handling.
+8. Add the narrow Linux apt prerequisite transaction for system Python/venv
+   support, Node/npm, SSL/runtime libraries, and platform `libarchive` after
+   validating the exact baseline mapping. Apt must not own TE2 application
+   files.
+9. Validate the existing Python Terminal bootstrap from a clean user install,
+   including target-native `node-pty`, canonical data-root placement,
+   fingerprint reuse, marker validation, and repair behavior.
+10. Seed and validate the Phase 2 local-framework config with the installed
+    command and private-venv paths without overwriting later user edits.
+11. Validate online download, adjacent payload, explicit offline payload,
+    checksum failure, interrupted install, atomic upgrade, rollback, and
+    receipt-owned removal on clean Debian/Ubuntu targets.
+12. Validate `te2 --help`, `/api/health`, desktop launch, app launch, assets,
+    and normal shutdown without deleting ordinary TE2 user state.
+
+## 8. Phase 5 — Termux target mode
 
 1. Run the dependency-to-Termux-package investigation on a current Termux
-   device before writing payload rules.
-2. Freeze the accepted repository/package mapping in a machine-readable input.
-3. Build any remaining Python payloads and validate the tagged
-   `aarch64-linux-android` Rust server natively on Termux.
-4. Stage TE2 into the shared Termux Python environment with dpkg ownership and
-   no networked maintainer step.
-5. Generate the Termux control metadata and `$PREFIX/bin/te2` wrapper. Declare
-   the Termux Node.js/npm packages required by the standalone Terminal's
-   current private first-use runtime bootstrap; do not install global npm
-   application packages.
-6. Preserve the existing Python Terminal bootstrap and canonical per-user
-   `$TE2_DATA_HOME/node_runtime/terminal` runtime; never execute npm from a
-   package maintainer script.
-7. Audit payload paths, ownership collisions, shebangs, symlinks, and hard
-   links.
-8. Install on a clean Termux target and validate imports, `te2 --help`, release
-   server launch, `/api/health`, app-worker startup, terminal runtime bootstrap,
-   managed Code Server opt-in, upgrade, and uninstall.
+   device before freezing its target manifest.
+2. Freeze the accepted apt package/import mapping in a machine-readable
+   installer input, including Python, Node/npm, compiler requirements for
+   `node-pty`, SSL/runtime libraries, and retained optional capabilities.
+3. Build any remaining Python payloads for the Termux ABI and validate the
+   tagged `aarch64-linux-android` Rust server natively on Termux.
+4. Produce `te2-<version>-termux-aarch64.tar.gz` with the release-owned TE2
+   Python tree inputs, Bionic server, manifest, and no Electron assets.
+5. Reuse the common installer acquisition, checksum, staging, receipt, current
+   pointer, upgrade, rollback, and removal transaction.
+6. Install Termux prerequisites with apt directly and without `sudo`; never
+   install TE2 itself into shared `site-packages` or use a networked pip
+   resolution after archive verification.
+7. Install `$PREFIX/bin/te2` as a receipt-owned wrapper for the current
+   release's exact Python tree and server.
+8. Preserve the existing Python Terminal bootstrap and canonical per-user
+   `$TE2_DATA_HOME/node_runtime/terminal` runtime; the installer must not run
+   npm for that private runtime.
+9. Audit payload paths, shared-prefix collisions, shebangs, symlinks, hard
+   links, and uninstall ownership.
+10. Validate download and offline payload modes, imports, `te2 --help`, release
+    server launch, `/api/health`, app workers, Terminal bootstrap, managed Code
+    Server opt-in, atomic upgrade/rollback, and uninstall on a clean device.
 
 ## 9. Validation and publication boundaries
 
@@ -817,14 +1083,14 @@ Minimum automated validation by phase:
   source-mode local-runtime smoke, and live retarget acceptance.
 - Phase 3: multi-client editor/Explorer/WBA tests plus live Browser, Electron,
   GeckoView, and Cefrium two-client acceptance.
-- Phase 4: Electron typecheck/tests/build, Rust release build/tests, package
-  metadata/content audit, clean Linux install/upgrade/remove smoke, desktop-file
-  validation, and local server health.
-- Phase 5: device-native dependency resolution, package ownership/path audit,
-  clean Termux install/upgrade/remove smoke, framework/app-worker/terminal tests,
-  and managed Code Server opt-in.
+- Phase 4: Electron typecheck/tests/build, Rust release build/tests, installer
+  detection/acquisition/checksum tests, archive content audit, clean Linux
+  install/upgrade/remove smoke, desktop-file validation, and local server health.
+- Phase 5: device-native dependency resolution, Termux target-manifest and
+  archive audit, clean install/upgrade/remove smoke, framework/app-worker/
+  terminal tests, offline payload validation, and managed Code Server opt-in.
 
-Each phase is a separate implementation approval boundary. Package signing,
-APT repository publication, automatic updates, Android distribution, HTTPS
-certificate management, background system services, and non-amd64 Electron
-packages are deferred unless separately approved.
+Each phase is a separate implementation approval boundary. Artifact signing,
+automatic update channels, Android distribution, HTTPS certificate management,
+background system services, non-apt glibc distributions, musl targets, and
+non-amd64 Electron archives are deferred unless separately approved.

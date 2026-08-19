@@ -536,11 +536,18 @@ let reconstructionDirty=false;let persistenceInFlight=false;
 const transport={loaded:false,serverEpoch:'',surfaceGeneration:'',htmlRevision:-1,lastServerSequence:0};
 const query=new URLSearchParams(window.location.search);
 function requiredIdentity(name){const value=String(query.get(name)||'').trim();if(!value)throw new Error('Missing extension webview '+name);return value;}
-const clientInstanceId=requiredIdentity('clientInstanceId');
-const windowId=String(query.get('windowId')||sessionStorage.getItem('te2.extension-webview.window.v1')||crypto.randomUUID()).trim();
+function validatedIdentity(name,value,pattern){const normalized=String(value||'').trim().toLowerCase();if(!pattern.test(normalized))throw new Error('Invalid extension webview '+name);return normalized;}
+const clientInstanceId=validatedIdentity('clientInstanceId',requiredIdentity('clientInstanceId'),/^client_[a-z0-9]{12,64}$/);
+const requestedWindowId=query.get('windowId');
+const storedWindowId=String(sessionStorage.getItem('te2.extension-webview.window.v1')||'').trim().toLowerCase();
+const windowId=requestedWindowId!==null
+  ? validatedIdentity('windowId',requestedWindowId,/^window_[a-z0-9]{20,64}$/)
+  : /^window_[a-z0-9]{20,64}$/.test(storedWindowId)
+    ? storedWindowId
+    : 'window_'+crypto.randomUUID().replaceAll('-','').toLowerCase();
 sessionStorage.setItem('te2.extension-webview.window.v1',windowId);
 const presentationId=requiredIdentity('presentationId');
-const socket=window.io('/wba',{path:'/api/app/code_te2/services/wba/socket.io',transports:['websocket'],reconnection:true,reconnectionAttempts:Infinity,reconnectionDelay:500,reconnectionDelayMax:5000,randomizationFactor:0.25,auth:{rpcCodec:'msgpack-v1'}});
+const socket=window.io('/wba',{path:'/api/app/code_te2/services/wba/socket.io',transports:['websocket'],query:{client_instance_id:clientInstanceId,window_id:windowId},reconnection:true,reconnectionAttempts:Infinity,reconnectionDelay:500,reconnectionDelayMax:5000,randomizationFactor:0.25,auth:{rpcCodec:'msgpack-v1'}});
 function errorMessage(error){return String(error&&error.message||error||'Unknown extension webview error');}
 function rpc(method,params){return new Promise((resolve,reject)=>{if(!socket.connected){reject(new Error('WBA transport is disconnected'));return;}const id=nextId++;pending.set(id,{resolve,reject});socket.emit('rpc',encodeWbaRpcMessage({jsonrpc:'2.0',id,method,params}));});}
 function rejectPending(error){for(const waiter of pending.values())waiter.reject(error);pending.clear();}

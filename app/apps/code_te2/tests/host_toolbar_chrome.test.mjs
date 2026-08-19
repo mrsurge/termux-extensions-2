@@ -55,10 +55,12 @@ test('toolbar issue counter owns the next-issue action', async () => {
 });
 
 test('toolbar and Drafts overlay keep the intended source structure', async () => {
-  const [template, overlay, reviewRenderer] = await Promise.all([
+  const [template, overlay, reviewRenderer, resizeManager, secondaryRuntime] = await Promise.all([
     readFile(path.join(appRoot, 'template.html'), 'utf8'),
     readFile(path.join(appRoot, 'src/explorer/search/overlay-controller.ts'), 'utf8'),
     readFile(path.join(appRoot, 'src/explorer/search/review-results-renderer.ts'), 'utf8'),
+    readFile(path.join(appRoot, 'main_page/frontend/host-resize-manager.ts'), 'utf8'),
+    readFile(path.join(appRoot, 'main_page/frontend/secondary-editor-runtime.ts'), 'utf8'),
   ]);
 
   assert.doesNotMatch(template, /id="fe-issues-toggle"/);
@@ -76,6 +78,35 @@ test('toolbar and Drafts overlay keep the intended source structure', async () =
     template,
     /\.fe-extension-editor-action\s*\{[^}]*flex:\s*0 0 28px/,
   );
+  assert.match(
+    template,
+    /\.layout-desktop \.fe-toolbar\s*\{[\s\S]*?grid-column:\s*2 \/ 4/,
+  );
+  assert.match(
+    template,
+    /\.layout-desktop \.te2-secondary-editor-host\s*\{[\s\S]*?grid-column:\s*3;[\s\S]*?grid-row:\s*2 \/ 5/,
+  );
+  assert.match(
+    template,
+    /\.layout-desktop \.agent-drawer\s*\{[\s\S]*?grid-column:\s*4/,
+  );
+  assert.match(
+    template,
+    /<div id="secondary-editor-host" class="te2-secondary-editor-host" aria-hidden="true"><\/div>/,
+  );
+  assert.match(
+    template,
+    /class="resize-handle resize-handle--secondary" data-panel="secondary"/,
+  );
+  assert.match(
+    template,
+    /\.layout-desktop\.te2-secondary-editor-docked \.resize-handle--secondary\s*\{[\s\S]*?grid-column:\s*3/,
+  );
+  assert.match(resizeManager, /code-te2:secondary-editor-resize-start/);
+  assert.match(resizeManager, /code-te2:secondary-editor-resize-end/);
+  assert.match(secondaryRuntime, /clearPrimaryTemplateSurfaces\(rootEl\)/);
+  assert.match(secondaryRuntime, /\['LINK', 'META', 'STYLE', 'TITLE'\]/);
+  assert.doesNotMatch(secondaryRuntime, /rootEl\.replaceChildren\(\)/);
   const desktopToolbarZ = Number(
     template.match(
       /\.layout-desktop \.fe-toolbar\s*\{[\s\S]*?z-index:\s*(\d+)/,

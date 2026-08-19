@@ -2,7 +2,7 @@
 
 import { clampTerminalDrawerHeight } from './ui/drawer-sizing.ts';
 
-type ResizePanel = 'explorer' | 'agent' | 'terminal' | null;
+type ResizePanel = 'explorer' | 'agent' | 'secondary' | 'terminal' | null;
 
 interface LayoutPreferences {
   explorerWidth?: string;
@@ -12,6 +12,8 @@ interface LayoutPreferences {
 
 const EXPLORER_DEFAULT_WIDTH = 430;
 const AGENT_DEFAULT_WIDTH = 400;
+const SECONDARY_MIN_WIDTH = 320;
+const PRIMARY_MIN_WIDTH = 240;
 const PANEL_MIN_WIDTH = 0;
 const LAYOUT_PREFERENCES_KEY = 'code_te2_layout_prefs';
 const LEGACY_LAYOUT_PREFERENCES_KEY = 'code_cm6_layout_prefs';
@@ -60,6 +62,19 @@ function measuredExplorerWidth(): number | null {
   return measured > 0 ? measured : null;
 }
 
+function measuredSecondaryWidth(): number | null {
+  const host = document.getElementById('secondary-editor-host');
+  const measured = host?.getBoundingClientRect().width || 0;
+  return measured > 0 ? measured : null;
+}
+
+function secondaryDockWidth(): number | null {
+  const root = document.querySelector<HTMLElement>('.fe-root');
+  return parsePixelValue(
+    root ? getComputedStyle(root).getPropertyValue('--secondary-editor-dock-size') : null,
+  );
+}
+
 function currentPanelWidth(panel: Exclude<ResizePanel, null>): number {
   if (panel === 'agent') {
     return measuredAgentWidth() || cssPixelProperty('--agent-width') || AGENT_DEFAULT_WIDTH;
@@ -68,6 +83,9 @@ function currentPanelWidth(panel: Exclude<ResizePanel, null>): number {
     return measuredExplorerWidth() ||
       cssPixelProperty('--explorer-width') ||
       EXPLORER_DEFAULT_WIDTH;
+  }
+  if (panel === 'secondary') {
+    return measuredSecondaryWidth() || secondaryDockWidth() || SECONDARY_MIN_WIDTH;
   }
   return cssPixelProperty('--terminal-height') || 340;
 }
@@ -92,13 +110,34 @@ function effectiveAgentWidthForMath(): number {
     AGENT_DEFAULT_WIDTH;
 }
 
+function effectiveSecondaryWidthForMath(): number {
+  const root = document.querySelector<HTMLElement>('.fe-root');
+  if (!root?.classList.contains('te2-secondary-editor-docked')) return 0;
+  return measuredSecondaryWidth() || secondaryDockWidth() || SECONDARY_MIN_WIDTH;
+}
+
 function maxPanelWidth(panel: Exclude<ResizePanel, null>): number {
   const rootWidth = Math.floor(rootLayoutWidth());
   if (panel === 'explorer') {
-    return Math.max(PANEL_MIN_WIDTH, rootWidth - effectiveAgentWidthForMath());
+    return Math.max(
+      PANEL_MIN_WIDTH,
+      rootWidth - effectiveAgentWidthForMath() - effectiveSecondaryWidthForMath(),
+    );
   }
   if (panel === 'agent') {
-    return Math.max(PANEL_MIN_WIDTH, rootWidth - effectiveExplorerWidthForMath());
+    return Math.max(
+      PANEL_MIN_WIDTH,
+      rootWidth - effectiveExplorerWidthForMath() - effectiveSecondaryWidthForMath(),
+    );
+  }
+  if (panel === 'secondary') {
+    return Math.max(
+      SECONDARY_MIN_WIDTH,
+      rootWidth
+        - effectiveExplorerWidthForMath()
+        - effectiveAgentWidthForMath()
+        - PRIMARY_MIN_WIDTH,
+    );
   }
   return rootWidth;
 }
@@ -171,6 +210,7 @@ export function initResizeManager(): void {
       const panelType: ResizePanel =
         handle.dataset.panel === 'explorer' ||
         handle.dataset.panel === 'agent' ||
+        handle.dataset.panel === 'secondary' ||
         handle.dataset.panel === 'terminal'
           ? handle.dataset.panel
           : null;
@@ -186,7 +226,7 @@ export function initResizeManager(): void {
       dragShield.addEventListener('touchend', onEnd);
       dragShield.addEventListener('touchcancel', onEnd);
       
-      if (panelType === 'explorer' || panelType === 'agent') {
+      if (panelType === 'explorer' || panelType === 'agent' || panelType === 'secondary') {
         startPos = clientX;
         startSize = currentPanelWidth(panelType);
       } else if (panelType === 'terminal') {
@@ -199,6 +239,11 @@ export function initResizeManager(): void {
       }
       
       handle.classList.add('dragging');
+      if (panelType === 'secondary') {
+        window.dispatchEvent(new CustomEvent('code-te2:secondary-editor-resize-start', {
+          detail: { dockSize: startSize },
+        }));
+      }
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onEnd);
       document.addEventListener('touchmove', onMove);
@@ -220,6 +265,20 @@ export function initResizeManager(): void {
         const delta = startPos - clientX;
         const newWidth = clamp(startSize + delta, PANEL_MIN_WIDTH, maxPanelWidth('agent'));
         document.documentElement.style.setProperty('--agent-width', `${newWidth}px`);
+      } else if (panel === 'secondary') {
+        const delta = startPos - clientX;
+        const newWidth = clamp(
+          startSize + delta,
+          SECONDARY_MIN_WIDTH,
+          maxPanelWidth('secondary'),
+        );
+        document.querySelector<HTMLElement>('.fe-root')?.style.setProperty(
+          '--secondary-editor-dock-size',
+          `${newWidth}px`,
+        );
+        window.dispatchEvent(new CustomEvent('code-te2:secondary-editor-resize', {
+          detail: { dockSize: newWidth },
+        }));
       } else if (panel === 'terminal') {
         const terminalDrawer = document.getElementById('terminal-drawer');
         if (terminalDrawer && terminalDrawer.classList.contains('terminal-drawer--collapsed')) {
@@ -253,6 +312,12 @@ export function initResizeManager(): void {
       document.removeEventListener('touchend', onEnd);
       document.removeEventListener('touchcancel', onEnd);
       removeDragShield();
+
+      if (panel === 'secondary') {
+        window.dispatchEvent(new CustomEvent('code-te2:secondary-editor-resize-end', {
+          detail: { dockSize: currentPanelWidth('secondary') },
+        }));
+      }
       
       saveLayoutPreferences();
     };
