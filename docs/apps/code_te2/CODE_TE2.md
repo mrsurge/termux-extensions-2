@@ -3676,9 +3676,9 @@ Allowed app-view commands are:
 | `inspect` | Return current URL, relay origin, configured framework origin, cache size, Electron/Chromium versions, and asset status. |
 | `reload` | Reload the exact app view. |
 | `home` | Return to the desktop launcher. |
-| `read_client_identity` | Read the stable Electron installation identity stored beneath `$TE2_CONFIG_HOME`. |
-| `reset_client_identity` | Atomically replace that identity after Code TE2 has removed the old identity's reconstruction records. |
-| `wait_for_app_prerequisites` | Await the first current Code TE2 Run Target projection after backend readiness; all other apps are a no-op. |
+| `read_client_identity` | Read the calling renderer role's stable Electron client identity from `$TE2_CONFIG_HOME/desktop-state.json`. |
+| `reset_client_identity` | From the primary renderer only, atomically rotate both desktop editor identities and clear secondary presentation after Code TE2 removes the old reconstruction records. |
+| `wait_for_app_prerequisites` | Await the first current Code TE2 Run Target projection after backend readiness; both primary and reduced secondary Code TE2 renderers use this shared app-shell gate, while all other apps are a no-op. |
 | `force_asset_update` | Run the desktop asset updater. |
 | `register_run_target_surface` | Register exact-frame `devRuntime` instrumentation metadata; it does not create a proxy. |
 | `release_run_target_surface` | Release exact-frame instrumentation metadata; it does not tear down a running shell's proxy. |
@@ -3689,6 +3689,12 @@ Allowed app-view commands are:
 | `close_sidebar_surface` | Close the exact detached presentation and request inline reattachment. |
 | `reconcile_sidebar_surfaces` | Close native presentations absent from the current authoritative Sidebar ledger. |
 | `refresh_sidebar_surface` | Explicitly reload the exact native Sidebar renderer. |
+| `open_second_editor` | From the primary renderer only, open one selected admitted project path in the stable secondary editor client. |
+| `sync_second_editor_project` | From the primary renderer only, reconcile the secondary presentation against the active project. |
+| `place_second_editor_surface` | From the primary renderer only, place the retained secondary view over the Code TE2-owned grid placeholder. |
+| `set_second_editor_dock_size` | From the primary renderer only, persist a bounded dock width in the current framework/project presentation record. |
+| `set_second_editor_mode` | Change the secondary presentation among closed, docked, collapsed, and detached. |
+| `second_editor_ready` | Let only the current secondary renderer release its queued canonical file-open intent. |
 
 The command allowlist is exact-view and origin validated in Electron main. The
 preload also delivers bounded detached-surface events only to that exact app
@@ -3750,6 +3756,52 @@ readiness layer polls. App-view navigation does not tear down a still-running
 shell's group. Electron closes all relay listeners and active streams when the
 framework connection changes or the desktop process exits.
 
+### Second editor surface
+
+Electron exposes one **Open in a Second Window** surface. It is a complete
+second Code TE2 client with a stable `clientInstanceId`, not another
+presentation id for the primary client. The backend-owned
+`ProjectSidecar.client_foregrounds` entry therefore remains its canonical file
+state, while shared membership, drafts, writes, diagnostics, and WBA logical
+documents retain their existing project-scoped authorities.
+
+Electron main owns one retained framework-partition `WebContentsView`. Dock,
+Collapse, Detach, and Attach reparent that exact renderer between the main
+window and a frameless `BrowserWindow` without navigation. Close disposes the
+renderer but does not clear its backend foreground, so reopen reconstructs a
+fresh renderer against the warm client state. The reduced renderer mounts one
+inline Monaco surface and a filename/action header without a background tab
+strip. Its Save, Save As, Discard Draft, file open, and WBA traffic use its own
+authenticated UI IPC, Editor, and WBA identities; Editor-originated Save, Focus,
+and Blur notifications target only that client's presentation room.
+
+When embedded, the primary Code TE2 page reserves a grid column below the
+shared toolbar and between the primary editor and Sidebar. A DOM placeholder
+reports CSS-pixel bounds and visibility through the exact-view preload;
+Electron applies the primary app-view zoom and places the retained native view
+over it while leaving the primary app view full-sized. The primary tab strip's
+Electron-only right-click/Context Menu action opens the clicked admitted path in
+the secondary client without activating it in the primary client. The reduced
+renderer may use the shared Code TE2 app-readiness prerequisite, but placement,
+project synchronization, and path-open initiation remain primary-only native
+commands.
+
+The reduced boot removes only the primary template's visual nodes and retains
+the injected link/style/font assets required by Monaco, its breadcrumb widget,
+and Codicons. In docked mode, a primary-page drag handle owns the boundary. It
+temporarily hides the sibling native view so the primary page keeps pointer
+capture, updates the grid column during the gesture, and commits the final
+bounded width through `set_second_editor_dock_size`. The existing Electron
+presentation store remains the sole dock-size authority; Code TE2 layout
+`localStorage` does not retain that value.
+
+Versioned `$TE2_CONFIG_HOME/desktop-state.json` atomically owns distinct primary
+and secondary client identities, existing Sidebar presentation, and bounded
+secondary presentation keyed by configured upstream framework origin plus
+canonical project path. It migrates the former identity and Sidebar files once.
+The random loopback relay origin is never a persistence key. Browser, GeckoView,
+and Cefrium remain single-surface and do not receive this native contract.
+
 ### Desktop shell behavior
 
 - Native Quit validates the current `/app/<app_id>` URL, posts only that app's quit endpoint, and returns to the desktop launcher without terminating Electron.
@@ -3775,7 +3827,7 @@ Host file-open intent does not preflight a boot snapshot. The frontend may use i
 - `ProjectSidecar.document_state_revision` plus its bounded 256-entry `document_revisions` map order path-scoped content state. Evicted paths fall back to the global watermark, so pruning cannot lower their next revision.
 - Python owns sidecar-to-WBA projection in `logical_document_reconciler.py`.
 - WBA owns extension-host document lifetime in `workbench_protocol_proxy/node_workbench_adapter/src/workspace/document-registry.ts`.
-- WBA retains one shared logical document registry and extension host while projecting one synthetic editor facade per stable client under a reentrant request/command context fence. `windowId` remains metadata; a future Electron multi-window interface must allocate an explicit second client instead of inferring authority from a window.
+- WBA retains one shared logical document registry and extension host while projecting one synthetic editor facade per stable client under a reentrant request/command context fence. `windowId` remains metadata; Electron's secondary editor follows this rule by allocating an explicit second stable client rather than inferring authority from a window.
 - The direct WBA Socket.IO boundary authenticates and injects `clientInstanceId` plus metadata-only `windowId`. Request normalization must preserve both through `vscode.openFile` into `WorkbenchClient.openFile`; otherwise the client facade cannot acknowledge the active document, leaving hover and semantic-token requests blocked even though shared extension-host diagnostic pushes can still arrive.
 - Draft-aware materialization is centralized in `monaco_editor/editor_backend_services/document_materialization_service.py`.
 
@@ -4176,6 +4228,15 @@ its existing application-private installation id through the always-on
 asset-intercept WebExtension. Editor Settings displays and copies the identity;
 reset is confirmation-gated and removes only that client's records before the
 native/browser identity changes and the page reloads.
+
+The trusted wrapper authenticates its own strict-MessagePack `/wba` Socket.IO
+connection with that exact `clientInstanceId` and `windowId`; identity in the
+wrapper document URL is not inherited by the nested Socket.IO handshake. A
+missing window identity may be generated only in canonical
+`window_<lowercase-alphanumeric>` form and retained for that page session, while
+an explicitly supplied malformed identity fails closed. Inline, hidden, and
+Electron-detached presentations therefore retain the same authenticated client
+runtime instead of falling into `invalid_client_presentation_identity`.
 
 WBA stores bounded reconstruction records beneath
 `$TE2_DATA_HOME/code_te2/code_server/User/te2-webview-reconstruction`, keyed by

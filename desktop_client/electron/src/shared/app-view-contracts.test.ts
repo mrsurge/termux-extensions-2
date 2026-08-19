@@ -60,6 +60,30 @@ test("Electron app-view commands are strictly allowlisted", () => {
     validateElectronAppViewCommand("reconcile_sidebar_surfaces"),
     "reconcile_sidebar_surfaces",
   );
+  assert.equal(
+    validateElectronAppViewCommand("open_second_editor"),
+    "open_second_editor",
+  );
+  assert.equal(
+    validateElectronAppViewCommand("sync_second_editor_project"),
+    "sync_second_editor_project",
+  );
+  assert.equal(
+    validateElectronAppViewCommand("place_second_editor_surface"),
+    "place_second_editor_surface",
+  );
+  assert.equal(
+    validateElectronAppViewCommand("set_second_editor_dock_size"),
+    "set_second_editor_dock_size",
+  );
+  assert.equal(
+    validateElectronAppViewCommand("set_second_editor_mode"),
+    "set_second_editor_mode",
+  );
+  assert.equal(
+    validateElectronAppViewCommand("second_editor_ready"),
+    "second_editor_ready",
+  );
   assert.throws(
     () => validateElectronAppViewCommand("execute_javascript"),
     /Unsupported Electron app-view command/,

@@ -230,8 +230,16 @@ test("activity-bar webview contribution resolves lazily per client behind one wo
   assert.match(wrapper, /#te2-status\[hidden\],#te2-context-menu\[hidden\]\{display:none\}/);
   assert.match(wrapper, /background:#010409/);
   assert.match(wrapper, /te2\.extension-webview\.window\.v1/);
-  assert.match(wrapper, /clientInstanceId=requiredIdentity/);
+  assert.match(
+    wrapper,
+    /clientInstanceId=validatedIdentity\('clientInstanceId',requiredIdentity/,
+  );
   assert.match(wrapper, /presentationId=requiredIdentity/);
+  assert.match(
+    wrapper,
+    /query:\{client_instance_id:clientInstanceId,window_id:windowId\}/,
+  );
+  assert.match(wrapper, /'window_'\+crypto\.randomUUID\(\)\.replaceAll/);
   assert.match(wrapper, /bootstrapToken/);
   assert.match(wrapper, /socket\.emit\('rpc'/);
   assert.doesNotMatch(wrapper, /socket\.volatile\.emit/);
@@ -248,6 +256,46 @@ test("activity-bar webview contribution resolves lazily per client behind one wo
   assert.match(document, /data-te2-webview-theme/);
   assert.match(document, /--vscode-sideBar-background:#010409/);
   assert.match(document, /--vscode-editor-foreground:#e6edf3/);
+
+  const identityWindow = new Window({
+    url: `http://127.0.0.1:8089${surface.url}?clientInstanceId=client_browseridentity0001&presentationId=presentation_generatedwindow1`,
+  });
+  t.after(() => identityWindow.close());
+  identityWindow.document.body.innerHTML = [
+    '<div id="te2-status">Loading extension view…</div>',
+    '<iframe id="te2-webview" title="Extension view" hidden></iframe>',
+    '<div id="te2-context-menu" role="menu" hidden></div>',
+  ].join("");
+  let wrapperSocketRequest = null;
+  const inertSocket = {
+    connected: false,
+    sendBuffer: [],
+    emit() {},
+    on() { return this; },
+  };
+  identityWindow.io = (namespace, options) => {
+    wrapperSocketRequest = { namespace, options };
+    return inertSocket;
+  };
+  identityWindow.__te2WbaCodec = {
+    encodeWbaRpcMessage,
+    decodeWbaRpcMessage,
+  };
+  identityWindow.eval(wrapperModuleSource(wrapper));
+  assert.equal(wrapperSocketRequest.namespace, "/wba");
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(wrapperSocketRequest.options.query)),
+    {
+      client_instance_id: "client_browseridentity0001",
+      window_id: identityWindow.sessionStorage.getItem(
+        "te2.extension-webview.window.v1",
+      ),
+    },
+  );
+  assert.match(
+    wrapperSocketRequest.options.query.window_id,
+    /^window_[a-z0-9]{20,64}$/,
+  );
   assert.match(document, /class="vscode-dark"/);
   assert.match(document, /data-vscode-theme-kind="vscode-dark"/);
   assert.match(document, /data-vscode-theme-name="GitHub Dark Default"/);
@@ -592,7 +640,7 @@ test("wrapper preserves its live document across transport resume and reloads on
 
   const surface = runtime.snapshot().surfaces[0];
   const window = new Window({
-    url: `http://127.0.0.1:8089${surface.url}?clientInstanceId=client_resumeidentity0001&windowId=window_resumeidentity0001&presentationId=presentation_resume0001`,
+    url: `http://127.0.0.1:8089${surface.url}?clientInstanceId=client_resumeidentity0001&windowId=window_resumeidentity000001&presentationId=presentation_resume0001`,
   });
   t.after(() => window.close());
   window.document.body.innerHTML = [
@@ -672,9 +720,21 @@ test("wrapper preserves its live document across transport resume and reloads on
       for (const handler of handlers.get(event) ?? []) handler(payload);
     },
   };
-  window.io = () => socket;
+  let wrapperSocketRequest = null;
+  window.io = (namespace, options) => {
+    wrapperSocketRequest = { namespace, options };
+    return socket;
+  };
   window.__te2WbaCodec = { encodeWbaRpcMessage, decodeWbaRpcMessage };
   window.eval(wrapperModuleSource(runtime.wrapper(surface.surfaceId)));
+  assert.equal(wrapperSocketRequest.namespace, "/wba");
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(wrapperSocketRequest.options.query)),
+    {
+      client_instance_id: "client_resumeidentity0001",
+      window_id: "window_resumeidentity000001",
+    },
+  );
 
   const frame = window.document.getElementById("te2-webview");
   socket.connected = true;
@@ -929,7 +989,7 @@ test("wrapper preserves its live document across transport resume and reloads on
   const epochDecision = await runtime.attach({
     surfaceId: surface.surfaceId,
     clientInstanceId: "client_resumeidentity0001",
-    windowId: "window_resumeidentity0001",
+    windowId: "window_resumeidentity000001",
     presentationId: "presentation_resume0001",
     serverEpoch: "stale-wba-process-epoch",
     surfaceGeneration: attachResults[4].surfaceGeneration,

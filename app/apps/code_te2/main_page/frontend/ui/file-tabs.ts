@@ -21,6 +21,7 @@ interface FileTabsControllerDeps {
   track: HTMLElement;
   formatFileNameDisplay: (name: string) => string;
   openFile: (path: string) => Promise<unknown>;
+  openInSecondWindow?: (path: string) => Promise<unknown>;
   closeRecentFile: (path: string) => Promise<unknown>;
   resetToNewFile: () => void;
   onActiveDraftChanged?: (path: string, hasDraft: boolean) => void;
@@ -267,6 +268,63 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
   let suppressClickPath = '';
   let activeTabRevealFrame: UiFrameHandle | null = null;
   let projectedDraftKey = '';
+  let activeContextMenu: HTMLElement | null = null;
+  let activeContextMenuCleanup: (() => void) | null = null;
+
+  function closeContextMenu(): void {
+    activeContextMenu?.remove();
+    activeContextMenu = null;
+    const cleanup = activeContextMenuCleanup;
+    activeContextMenuCleanup = null;
+    cleanup?.();
+  }
+
+  function openContextMenu(entry: RecentFileEntry, clientX: number, clientY: number): void {
+    if (!entry.exists || !deps.openInSecondWindow) return;
+    closeContextMenu();
+    const menu = document.createElement('div');
+    menu.className = 'fe-file-tab-context-menu';
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', `Actions for ${entry.label}`);
+    const openSecond = document.createElement('button');
+    openSecond.type = 'button';
+    openSecond.setAttribute('role', 'menuitem');
+    openSecond.textContent = 'Open in a Second Window';
+    openSecond.addEventListener('click', () => {
+      closeContextMenu();
+      void deps.openInSecondWindow?.(entry.path).catch((error) => {
+        console.error('[FileTabs] Failed to open tab in second window:', error);
+      });
+    });
+    menu.appendChild(openSecond);
+    document.body.appendChild(menu);
+    activeContextMenu = menu;
+
+    const menuRect = menu.getBoundingClientRect();
+    const tabsRect = deps.viewport.getBoundingClientRect();
+    const viewportWidth = window.visualViewport?.width || window.innerWidth;
+    const viewportHeight = window.visualViewport?.height || window.innerHeight;
+    const rightEdge = Math.min(viewportWidth - 8, tabsRect.right || viewportWidth - 8);
+    menu.style.left = `${Math.max(8, Math.min(clientX, rightEdge - menuRect.width))}px`;
+    menu.style.top = `${Math.max(8, Math.min(clientY, viewportHeight - menuRect.height - 8))}px`;
+    openSecond.focus();
+
+    const dismissPointer = (event: PointerEvent) => {
+      if (event.target instanceof Node && menu.contains(event.target)) return;
+      closeContextMenu();
+    };
+    const dismissKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      closeContextMenu();
+    };
+    activeContextMenuCleanup = () => {
+      document.removeEventListener('pointerdown', dismissPointer, true);
+      document.removeEventListener('keydown', dismissKey, true);
+    };
+    document.addEventListener('pointerdown', dismissPointer, true);
+    document.addEventListener('keydown', dismissKey, true);
+  }
 
   function visualEntries(): RecentFileEntry[] {
     const byPath = new Map(recents.map((entry) => [entry.path, entry]));
@@ -357,6 +415,7 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
 
   function render(): void {
     const entries = visualEntries();
+    closeContextMenu();
     deps.track.replaceChildren();
     if (!entries.length) {
       const empty = document.createElement('div');
@@ -422,6 +481,12 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
         }
         void openEntry(entry);
       });
+      tab.addEventListener('contextmenu', (event) => {
+        if (!entry.exists || !deps.openInSecondWindow) return;
+        event.preventDefault();
+        event.stopPropagation();
+        openContextMenu(entry, event.clientX, event.clientY);
+      });
       tab.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
@@ -429,6 +494,10 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
         } else if (event.key === 'Delete') {
           event.preventDefault();
           void closeEntry(entry);
+        } else if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+          event.preventDefault();
+          const rect = tab.getBoundingClientRect();
+          openContextMenu(entry, rect.left + 8, rect.bottom);
         }
       });
       deps.track.appendChild(tab);
@@ -596,6 +665,7 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
     };
 
     deps.track.addEventListener('pointerdown', (event) => {
+      if (typeof event.button === 'number' && event.button !== 0) return;
       if (!(event.target instanceof Element)) return;
       if (event.target.closest('.fe-file-tab-close')) return;
       candidate = event.target.closest<HTMLElement>('.fe-file-tab');
@@ -646,6 +716,7 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
     window.addEventListener('code-te2:file-tabs-decorations-changed', (event) => {
       if (event instanceof CustomEvent) refreshDecorations(event.detail);
     });
+    window.addEventListener('pagehide', closeContextMenu, { once: true });
   }
 
   function broadcastOpenState(state: unknown): void {

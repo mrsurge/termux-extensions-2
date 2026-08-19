@@ -4,6 +4,7 @@ export interface HostElements {
   cacheStateBadge: HTMLElement;
   container: HTMLElement;
   editorFrameEl: HTMLElement;
+  secondaryEditorHost: HTMLElement;
   root: HTMLElement;
   sidebarDrawerEl: HTMLElement;
   issuesBadgesEl: HTMLButtonElement;
@@ -25,6 +26,7 @@ export interface HostElements {
   miSave: HTMLElement;
   miSaveAs: HTMLElement;
   miClose: HTMLElement;
+  miOpenSecondWindow: HTMLElement;
   miQuit: HTMLElement;
   miRunProfiles: HTMLElement;
   miInstallPagePreview: HTMLElement;
@@ -87,6 +89,7 @@ export function captureHostElements(requireEl: RequireElement): HostElements {
     cacheStateBadge: requireEl('#fe-file-draft-badge'),
     container: requireEl('#editor-container'),
     editorFrameEl: requireEl('#editor-frame'),
+    secondaryEditorHost: requireEl('#secondary-editor-host'),
     root: requireEl('.fe-root'),
     sidebarDrawerEl: requireEl('#agent-drawer'),
     issuesBadgesEl: requireEl('#fe-issues-badges') as HTMLButtonElement,
@@ -108,6 +111,7 @@ export function captureHostElements(requireEl: RequireElement): HostElements {
     miSave: requireEl('#mi-save'),
     miSaveAs: requireEl('#mi-saveas'),
     miClose: requireEl('#mi-close'),
+    miOpenSecondWindow: requireEl('#mi-open-second-window'),
     miQuit: requireEl('#mi-quit'),
     miRunProfiles: requireEl('#mi-run-profiles'),
     miInstallPagePreview: requireEl('#mi-install-page-preview'),

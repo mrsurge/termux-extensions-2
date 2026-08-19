@@ -28,6 +28,12 @@ export const ELECTRON_APP_VIEW_COMMANDS = [
   "refresh_sidebar_surface",
   "close_sidebar_surface",
   "reconcile_sidebar_surfaces",
+  "open_second_editor",
+  "sync_second_editor_project",
+  "place_second_editor_surface",
+  "set_second_editor_dock_size",
+  "set_second_editor_mode",
+  "second_editor_ready",
 ] as const;
 
 export type ElectronAppViewCommand = typeof ELECTRON_APP_VIEW_COMMANDS[number];
@@ -98,6 +104,52 @@ export type ElectronSidebarPresentationState = {
   lastAgentPresentationId: string;
   presentations: Record<string, ElectronSidebarPresentationMode>;
 };
+
+export type ElectronEditorSurfaceMode =
+  | "closed"
+  | "docked"
+  | "collapsed"
+  | "detached";
+
+export type ElectronEditorSurfaceBounds = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type ElectronEditorSurfacePresentation = {
+  mode: ElectronEditorSurfaceMode;
+  dockSize: number;
+  detachedBounds: ElectronEditorSurfaceBounds;
+  maximized: boolean;
+};
+
+export type ElectronSecondEditorOpenRequest = {
+  projectPath: string;
+  path: string;
+};
+
+export type ElectronSecondEditorProjectRequest = {
+  projectPath: string;
+};
+
+export type ElectronSecondEditorPlaceRequest = {
+  bounds: ElectronEditorSurfaceBounds;
+  visible: boolean;
+};
+
+export type ElectronSecondEditorCommand =
+  | {
+      type: "open";
+      projectPath: string;
+      path: string;
+    }
+  | {
+      type: "state";
+      projectPath: string;
+      presentation: ElectronEditorSurfacePresentation;
+    };
 
 export const ELECTRON_SIDEBAR_SURFACE_DESCRIPTOR_VERSION = 2 as const;
 
@@ -228,6 +280,27 @@ export type ElectronAppViewBridge = {
     presentationId?: string,
   ): Promise<{ ok: true }>;
   reconcileSidebarSurfaces(surfaceIds: string[]): Promise<{ ok: true }>;
+  openSecondEditor(
+    projectPath: string,
+    path: string,
+  ): Promise<{ ok: true; presentation: ElectronEditorSurfacePresentation }>;
+  syncSecondEditorProject(
+    projectPath: string,
+  ): Promise<{ ok: true; presentation: ElectronEditorSurfacePresentation }>;
+  placeSecondEditorSurface(
+    bounds: ElectronEditorSurfaceBounds,
+    visible: boolean,
+  ): Promise<{ ok: true }>;
+  setSecondEditorDockSize(
+    dockSize: number,
+  ): Promise<{ ok: true; presentation: ElectronEditorSurfacePresentation }>;
+  setSecondEditorMode(
+    mode: ElectronEditorSurfaceMode,
+  ): Promise<{ ok: true; presentation: ElectronEditorSurfacePresentation }>;
+  secondEditorReady(): Promise<{ ok: true }>;
+  onSecondEditorCommand(
+    listener: (command: ElectronSecondEditorCommand) => void,
+  ): () => void;
   onSidebarSurfaceEvent(
     listener: (event: ElectronSidebarSurfaceEvent) => void,
   ): () => void;

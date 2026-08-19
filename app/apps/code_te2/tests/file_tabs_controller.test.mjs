@@ -138,6 +138,19 @@ class FakeElement extends EventTarget {
     return this.rect;
   }
 
+  contains(node) {
+    if (node === this) return true;
+    return this.children.some((child) => child.contains?.(node));
+  }
+
+  focus() {}
+
+  remove() {
+    if (!this.parentElement) return;
+    this.parentElement.children = this.parentElement.children.filter((child) => child !== this);
+    this.parentElement = null;
+  }
+
   replaceChildren(...children) {
     this.children = [];
     this.append(...children);
@@ -158,6 +171,8 @@ class FakeElement extends EventTarget {
 }
 
 class FakeDocument extends EventTarget {
+  body = new FakeElement();
+
   createElement() {
     return new FakeElement();
   }
@@ -188,6 +203,9 @@ function installDom() {
   const window = new EventTarget();
   window.document = document;
   window.CustomEvent = FakeCustomEvent;
+  window.innerWidth = 1200;
+  window.innerHeight = 800;
+  window.visualViewport = { width: 1200, height: 800 };
   globalThis.CustomEvent = FakeCustomEvent;
   globalThis.document = document;
   globalThis.Element = FakeElement;
@@ -291,6 +309,51 @@ test('file tabs render bounded decorations and active close opens its successor'
     assert.deepEqual(opened, ['/workspace/b.go']);
     assert.deepEqual(closed, ['/workspace/a.rs']);
     assert.equal(resets, 0);
+  } finally {
+    dom.restore();
+  }
+});
+
+test('file tab context menu opens the selected tab in the second editor', async () => {
+  const dom = installDom();
+  try {
+    const { createFileTabsController } = await importFileTabs();
+    const viewport = new FakeElement();
+    viewport.rect = { left: 0, right: 700, top: 0, bottom: 36, width: 700, height: 36 };
+    const track = new FakeElement();
+    const openedSecond = [];
+    const controller = createFileTabsController({
+      viewport,
+      track,
+      formatFileNameDisplay: (value) => value,
+      openFile: async () => {},
+      openInSecondWindow: async (filePath) => openedSecond.push(filePath),
+      closeRecentFile: async () => {},
+      resetToNewFile: () => {},
+    });
+    controller.broadcastOpenState({
+      projectPath: '/workspace',
+      clientForeground: { path: '/workspace/a.rs' },
+      recents: [
+        { path: '/workspace/a.rs', label: 'a.rs', exists: true },
+        { path: '/workspace/b.go', label: 'b.go', exists: true },
+      ],
+    });
+
+    const contextMenu = new Event('contextmenu', { cancelable: true });
+    Object.defineProperties(contextMenu, {
+      clientX: { value: 640 },
+      clientY: { value: 24 },
+    });
+    track.children[1].dispatchEvent(contextMenu);
+
+    assert.equal(contextMenu.defaultPrevented, true);
+    assert.equal(globalThis.document.body.children.length, 1);
+    const menu = globalThis.document.body.children[0];
+    assert.equal(menu.children[0].textContent, 'Open in a Second Window');
+    menu.children[0].click();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(openedSecond, ['/workspace/b.go']);
   } finally {
     dom.restore();
   }

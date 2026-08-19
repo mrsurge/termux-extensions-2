@@ -79,10 +79,10 @@ Some source integrations invoke external tools:
 - `watchexec` enables Code TE2's optional polling watcher; and
 - C/C++ compiler commands enable Code TE2's direct C/C++ Run action.
 
-For installed releases, each retained integration is supplied through the Linux
-prerequisite transaction or Termux package metadata, or removed from the
-product. Users are not sent to repository construction scripts for dependency
-setup.
+For installed releases, each retained integration is supplied through the
+unified installer's validated Linux or Termux prerequisite manifest, or removed
+from the product. Users are not sent to repository construction scripts for
+dependency setup.
 
 Code TE2 can use its built-in Monaco language workers without Code Server.
 VS Code extension-host integration uses Code TE2's confirmation-gated pinned
@@ -91,16 +91,25 @@ The managed Code Server Linux standalone bootstrap may require `curl` or `wget`
 when the user opts in. Its Termux path downloads the pinned package with Python
 and installs the exact package dependencies at that time.
 
-The planned generic Linux desktop install is user-owned beneath the canonical
-TE2 data root. It uses a private Python venv and prebuilt Rust/Electron payloads;
-apt is limited to system prerequisites that are impractical to place in that
-user root. The separate Termux distribution remains a `.deb` because Termux's
-apt prefix and package ownership already belong to the Termux user.
+The planned installed release uses one autodetecting `install-te2` entrypoint
+with target-specific, checksummed tar/gzip archives. Detection checks Termux
+first, then supports an initial apt-based glibc Linux target. An explicit local
+payload or matching archive beside the installer supports offline application
+payload installation; otherwise the installer downloads the immutable release
+archive. Unsupported libc implementations, package managers, architectures,
+and platforms fail explicitly.
+
+Linux installs beneath the canonical TE2 data root with a private Python venv
+and prebuilt Rust/Electron payloads; apt is limited to system prerequisites.
+Termux reuses its shared Python interpreter and apt-supplied dependencies
+without a venv, while TE2's own Python tree and Bionic server remain versioned
+beneath the canonical TE2 data root. Both targets share manifest verification,
+receipts, atomic current-release activation, upgrade/rollback, and removal.
 
 Repository scripts are developer/release construction tooling and may build the
-Linux installer or Termux `.deb`. They are not copied into an ordinary install
-or exposed as user installation entrypoints; users see them only in a cloned or
-editable source checkout.
+public installer and target archives. They are not copied into an ordinary
+install or exposed as user installation entrypoints; users see them only in a
+cloned or editable source checkout.
 
 ## Install And Run
 

@@ -15,16 +15,33 @@ from ..ui_ipc.rpc_contract import (
 JsonObject = dict[str, object]
 
 
-async def handle_editor_host_action(method: str, params: JsonObject) -> JsonObject:
+async def handle_editor_host_action(
+    method: str,
+    params: JsonObject,
+    *,
+    source_client: str,
+) -> JsonObject:
     from ..ui_ipc.ui_ipc_ws import emit_ui_ipc_rpc_notification
 
     if method == EDITOR_RPC_METHOD_HOST_SAVE:
-        await emit_ui_ipc_rpc_notification(UI_IPC_RPC_NOTIFICATION_EDITOR_SAVE, params)
+        await emit_ui_ipc_rpc_notification(
+            UI_IPC_RPC_NOTIFICATION_EDITOR_SAVE,
+            params,
+            client_instance_id=source_client,
+        )
         return {"ok": True}
     if method == EDITOR_RPC_METHOD_FOCUS:
-        await emit_ui_ipc_rpc_notification(UI_IPC_RPC_NOTIFICATION_EDITOR_FOCUS, params)
+        await emit_ui_ipc_rpc_notification(
+            UI_IPC_RPC_NOTIFICATION_EDITOR_FOCUS,
+            params,
+            client_instance_id=source_client,
+        )
         return {"ok": True}
     if method == EDITOR_RPC_METHOD_BLUR:
-        await emit_ui_ipc_rpc_notification(UI_IPC_RPC_NOTIFICATION_EDITOR_BLUR, params)
+        await emit_ui_ipc_rpc_notification(
+            UI_IPC_RPC_NOTIFICATION_EDITOR_BLUR,
+            params,
+            client_instance_id=source_client,
+        )
         return {"ok": True}
     raise ValueError(f"Unsupported editor host action: {method}")

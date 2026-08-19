@@ -36,6 +36,8 @@ type PendingDialog = {
 type DialogHostOptions = {
   getMainWindow(): BrowserWindow | null;
   getAppContents(): WebContents | null;
+  isTrustedAppContents?(contents: WebContents): boolean;
+  getOwnerWindow?(contents: WebContents): BrowserWindow | null;
   getRelayOrigin(): string;
   getAppPath(): string;
   shellUrl: string;
@@ -139,7 +141,7 @@ export class DesktopDialogHost {
     try {
       this.assertTrustedOwner(event.sender);
       const request = validateDialogRequest(value);
-      await this.ensureWindow(request);
+      await this.ensureWindow(request, event.sender);
 
       const sessionId = randomUUID();
       const result = new Promise<DialogResult>((resolveResult, rejectResult) => {
@@ -251,7 +253,10 @@ export class DesktopDialogHost {
 
   private assertTrustedOwner(contents: WebContents): void {
     const current = this.options.getAppContents();
-    if (!current || current.isDestroyed() || contents !== current) {
+    const trusted =
+      Boolean(current && !current.isDestroyed() && contents === current) ||
+      this.options.isTrustedAppContents?.(contents) === true;
+    if (!trusted) {
       throw new Error("Rejected dialog request from a stale renderer");
     }
     let origin = "";
@@ -269,11 +274,15 @@ export class DesktopDialogHost {
     return Boolean(this.window && !this.window.isDestroyed() && contents === this.window.webContents);
   }
 
-  private async ensureWindow(request: DialogRequest): Promise<void> {
+  private async ensureWindow(
+    request: DialogRequest,
+    ownerContents: WebContents,
+  ): Promise<void> {
     if (this.window && !this.window.isDestroyed() && !this.readyPromise) return;
     if (this.readyPromise) return this.readyPromise;
 
-    const parent = this.options.getMainWindow();
+    const parent =
+      this.options.getOwnerWindow?.(ownerContents) || this.options.getMainWindow();
     if (!parent || parent.isDestroyed()) throw new Error("Desktop window is unavailable");
     const requestedSize = INITIAL_DIALOG_SIZE[request.width];
     const workArea = screen.getDisplayMatching(parent.getBounds()).workArea;

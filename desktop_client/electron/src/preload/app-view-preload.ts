@@ -12,6 +12,10 @@ import {
   type ElectronSidebarSurfaceEvent,
   type ElectronSidebarMenuRequest,
   type ElectronSidebarPresentationState,
+  type ElectronEditorSurfaceBounds,
+  type ElectronEditorSurfaceMode,
+  type ElectronEditorSurfacePresentation,
+  type ElectronSecondEditorCommand,
 } from "../shared/app-view-contracts";
 import type { AssetUpdateResult } from "../shared/contracts";
 
@@ -146,6 +150,48 @@ const electronBridge: ElectronAppViewBridge = Object.freeze({
   },
   reconcileSidebarSurfaces(surfaceIds: string[]): Promise<{ ok: true }> {
     return invokeElectron("reconcile_sidebar_surfaces", { surfaceIds });
+  },
+  openSecondEditor(
+    projectPath: string,
+    path: string,
+  ): Promise<{ ok: true; presentation: ElectronEditorSurfacePresentation }> {
+    return invokeElectron("open_second_editor", { projectPath, path });
+  },
+  syncSecondEditorProject(
+    projectPath: string,
+  ): Promise<{ ok: true; presentation: ElectronEditorSurfacePresentation }> {
+    return invokeElectron("sync_second_editor_project", { projectPath });
+  },
+  placeSecondEditorSurface(
+    bounds: ElectronEditorSurfaceBounds,
+    visible: boolean,
+  ): Promise<{ ok: true }> {
+    return invokeElectron("place_second_editor_surface", { bounds, visible });
+  },
+  setSecondEditorDockSize(
+    dockSize: number,
+  ): Promise<{ ok: true; presentation: ElectronEditorSurfacePresentation }> {
+    return invokeElectron("set_second_editor_dock_size", { dockSize });
+  },
+  setSecondEditorMode(
+    mode: ElectronEditorSurfaceMode,
+  ): Promise<{ ok: true; presentation: ElectronEditorSurfacePresentation }> {
+    return invokeElectron("set_second_editor_mode", { mode });
+  },
+  secondEditorReady(): Promise<{ ok: true }> {
+    return invokeElectron("second_editor_ready");
+  },
+  onSecondEditorCommand(
+    listener: (command: ElectronSecondEditorCommand) => void,
+  ): () => void {
+    const channel = "te2-desktop:second-editor-command";
+    const handler = (_event: Electron.IpcRendererEvent, value: unknown) => {
+      if (value && typeof value === "object") {
+        listener(value as ElectronSecondEditorCommand);
+      }
+    };
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.off(channel, handler);
   },
   onSidebarSurfaceEvent(
     listener: (event: ElectronSidebarSurfaceEvent) => void,
