@@ -190,6 +190,14 @@ class AndroidFrameworkRelay(
             val input = BufferedInputStream(client.getInputStream())
             val request = readRequest(input) ?: return
             val path = request.target.substringBefore('?')
+            if (path == TE2_SERVICE_WORKER_PATH) {
+                sendLocalResponse(
+                    client,
+                    request.method,
+                    LocalHttpResponse.text(404, "404 Not Found"),
+                )
+                return
+            }
             val routing = localRouting
             if (request.isChunked && (
                     (routing.requestHandler != null && (
@@ -438,6 +446,7 @@ class AndroidFrameworkRelay(
         output.write("Content-Type: ${contentType(file.name)}\r\n".bytes())
         output.write("Content-Length: ${file.length()}\r\n".bytes())
         output.write("Cache-Control: $cacheControl\r\n".bytes())
+        output.write("X-TE2-Android-Asset-Source: files-dir\r\n".bytes())
         output.write("Access-Control-Allow-Origin: *\r\n".bytes())
         output.write("Connection: close\r\n\r\n".bytes())
         if (method != "HEAD") {
@@ -663,6 +672,7 @@ class AndroidFrameworkRelay(
     }
 
     companion object {
+        private const val TE2_SERVICE_WORKER_PATH = "/sw.js"
         private const val LOOPBACK_HOST = "127.0.0.1"
         private const val ANDROID_SHELL_PREFIX = "/android-shell/"
         private const val ANDROID_API_PREFIX = "/android-api"

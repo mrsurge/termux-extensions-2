@@ -45,15 +45,91 @@ class AndroidFrameworkRelayTest {
         relay.start("http://127.0.0.1:65534")
         closeables += AutoCloseable(relay::stop)
 
-        assertEquals(
-            "launcher",
-            request(relay.port, "GET /android-shell/index.html HTTP/1.1\r\nHost: local\r\n\r\n")
-                .body,
+        val launcher = request(
+            relay.port,
+            "GET /android-shell/index.html HTTP/1.1\r\nHost: local\r\n\r\n",
+        )
+        assertEquals("launcher", launcher.body)
+        assertTrue(
+            launcher.head.contains(
+                "X-TE2-Android-Asset-Source: files-dir",
+                ignoreCase = true,
+            ),
         )
         assertEquals(
             """{"ok":true}""",
             request(relay.port, "GET /android-api/settings HTTP/1.1\r\nHost: local\r\n\r\n")
                 .body,
+        )
+    }
+
+    @Test
+    fun blocksOnlyTheTe2RootServiceWorkerBeforeUpstreamProxying() {
+        val upstream = OneShotServer { socket ->
+            val request = readHead(BufferedInputStream(socket.getInputStream()))
+            assertTrue(request.startsWith("GET /apps/example/sw.js "))
+            socket.getOutputStream().write(
+                (
+                    "HTTP/1.1 200 OK\r\n" +
+                        "Content-Length: 12\r\n" +
+                        "Connection: close\r\n\r\n" +
+                        "other-worker"
+                    ).toByteArray(),
+            )
+        }
+        closeables += upstream
+        val root = Files.createTempDirectory("cefrium-relay-assets").toFile()
+        closeables += AutoCloseable { root.deleteRecursively() }
+        val relay = AndroidFrameworkRelay(root, CefriumAssetRoutes::localPath)
+        relay.start(upstream.origin)
+        closeables += AutoCloseable(relay::stop)
+
+        val blocked = request(
+            relay.port,
+            "GET /sw.js?v=stale HTTP/1.1\r\nHost: local\r\n\r\n",
+        )
+        assertTrue(blocked.head.startsWith("HTTP/1.1 404 Not Found"))
+        assertEquals("404 Not Found", blocked.body)
+
+        assertEquals(
+            "other-worker",
+            request(
+                relay.port,
+                "GET /apps/example/sw.js HTTP/1.1\r\nHost: local\r\n\r\n",
+            ).body,
+        )
+    }
+
+    @Test
+    fun missingDeclaredAssetsFailClosedInsteadOfReachingUpstream() {
+        val upstream = OneShotServer { socket ->
+            val request = readHead(BufferedInputStream(socket.getInputStream()))
+            assertTrue(request.startsWith("GET /api/health "))
+            socket.getOutputStream().write(
+                (
+                    "HTTP/1.1 200 OK\r\n" +
+                        "Content-Length: 7\r\n" +
+                        "Connection: close\r\n\r\n" +
+                        "healthy"
+                    ).toByteArray(),
+            )
+        }
+        closeables += upstream
+        val root = Files.createTempDirectory("cefrium-relay-assets").toFile()
+        closeables += AutoCloseable { root.deleteRecursively() }
+        val relay = AndroidFrameworkRelay(root, CefriumAssetRoutes::localPath)
+        relay.start(upstream.origin)
+        closeables += AutoCloseable(relay::stop)
+
+        val missingAsset = request(
+            relay.port,
+            "GET /static/js/missing.js HTTP/1.1\r\nHost: local\r\n\r\n",
+        )
+        assertTrue(missingAsset.head.startsWith("HTTP/1.1 404 Not Found"))
+
+        assertEquals(
+            "healthy",
+            request(relay.port, "GET /api/health HTTP/1.1\r\nHost: local\r\n\r\n").body,
         )
     }
 

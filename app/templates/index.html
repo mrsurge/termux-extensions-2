@@ -14,6 +14,7 @@
     // Native Android shells use their OTA asset layer and must not be controlled by the PWA worker.
     (function () {
         let enabled = false;
+        let nativeRenderer = '';
         try {
             const params = new URLSearchParams(location.search);
             if (params.get('gv_native') === '1') {
@@ -22,25 +23,77 @@
             } else if (sessionStorage.getItem('te_gv_native') === '1') {
                 enabled = true;
             }
+
+            const renderer = (params.get('te2_renderer') || '').trim().toLowerCase();
+            if (renderer === 'gecko' || renderer === 'cefrium') {
+                nativeRenderer = renderer;
+                sessionStorage.setItem('te_android_renderer', renderer);
+            } else if (params.has('te2_renderer')) {
+                sessionStorage.removeItem('te_android_renderer');
+            } else {
+                const storedRenderer = (sessionStorage.getItem('te_android_renderer') || '').trim().toLowerCase();
+                if (storedRenderer === 'gecko' || storedRenderer === 'cefrium') {
+                    nativeRenderer = storedRenderer;
+                }
+            }
         } catch (error) {}
+
+        function isTe2ServiceWorker(worker) {
+            if (!worker || typeof worker.scriptURL !== 'string') return false;
+            try {
+                const script = new URL(worker.scriptURL, location.origin);
+                return script.origin === location.origin && script.pathname === '/sw.js';
+            } catch (_) {
+                return false;
+            }
+        }
+
+        function isTe2ServiceWorkerRegistration(registration) {
+            if (!registration) return false;
+            const workers = [registration.installing, registration.waiting, registration.active]
+                .filter(Boolean);
+            if (workers.some(isTe2ServiceWorker)) return true;
+            if (workers.length > 0) return false;
+            try {
+                return registration.scope === new URL('/', location.origin).href;
+            } catch (_) {
+                return false;
+            }
+        }
+
+        async function clearTe2ServiceWorkerState() {
+            const registrationCleanup = navigator.serviceWorker.getRegistrations().then(registrations =>
+                Promise.all(
+                    registrations
+                        .filter(isTe2ServiceWorkerRegistration)
+                        .map(registration => registration.unregister())
+                )
+            );
+            const cacheCleanup = 'caches' in window
+                ? caches.keys().then(cacheNames =>
+                    Promise.all(
+                        cacheNames
+                            .filter(name => name.startsWith('te2-v'))
+                            .map(name => caches.delete(name))
+                    )
+                )
+                : Promise.resolve();
+            await Promise.all([registrationCleanup, cacheCleanup]);
+        }
 
         window.teNativeServiceWorkerDisabled = enabled;
         window.teNativeServiceWorkerReady = enabled ? (async function () {
             if (!('serviceWorker' in navigator)) return true;
 
-            const wasControlled = navigator.serviceWorker.controller !== null;
+            const wasControlled = isTe2ServiceWorker(navigator.serviceWorker.controller);
+            if (nativeRenderer === 'cefrium') {
+                clearTe2ServiceWorkerState().catch(error => {
+                    console.warn('[index] native service worker cleanup failed:', error);
+                });
+                return true;
+            }
             try {
-                const registrations = await navigator.serviceWorker.getRegistrations();
-                await Promise.all(registrations.map(registration => registration.unregister()));
-
-                if ('caches' in window) {
-                    const cacheNames = await caches.keys();
-                    await Promise.all(
-                        cacheNames
-                            .filter(name => name.startsWith('te2-v'))
-                            .map(name => caches.delete(name))
-                    );
-                }
+                await clearTe2ServiceWorkerState();
             } catch (error) {
                 console.warn('[index] native service worker cleanup failed:', error);
             }

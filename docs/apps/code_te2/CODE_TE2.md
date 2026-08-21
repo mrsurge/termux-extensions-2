@@ -3276,7 +3276,7 @@ Publication runs `editor-distro`, overlays scoped ESM/CSS into `app/static/vendo
 
 ---
 
-## 36) GeckoView Static Asset Bundling
+## 36) Android Static Asset Bundling
 
 ### Problem
 
@@ -3299,6 +3299,25 @@ survive as stale files.
 - `asset_intercept` extension uses `webRequest.onBeforeRequest` to redirect matching static asset URLs to a local HTTP file server
 - Local server (`LocalAssetServer.kt`) runs on a random port, serves from `filesDir/editor_static/`
 - Port communicated to extension via native messaging (`MessageDelegate`)
+
+**Cefrium routing through the framework relay:**
+- `AndroidFrameworkRelay` resolves the same declared asset families into
+  `filesDir/editor_static/` before considering the upstream framework server.
+- A declared asset missing from the local root returns `404`; it never falls
+  through to the upstream server.
+
+For both renderers, the materialized local tree is the asset authority rather
+than a best-effort cache. The remote framework remains authoritative for
+server-rendered documents, APIs, Socket.IO/WebSockets, and other dynamic
+services. Local file responses carry
+`X-TE2-Android-Asset-Source: files-dir` so live network inspection can prove
+their provenance.
+
+Native Android framework documents do not use TE2's PWA Service Worker. The
+shared framework relay rejects the exact root `/sw.js` request before local
+routing or upstream proxying. Other Service Worker script paths are unaffected.
+This prevents Cache Storage from becoming an asset authority ahead of the
+APK-seeded/OTA tree.
 
 ### What gets bundled
 

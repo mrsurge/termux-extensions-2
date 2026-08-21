@@ -222,6 +222,7 @@ class LocalAssetServer(
         output.write("Content-Type: $contentType\r\n".toByteArray())
         output.write("Content-Length: ${file.length()}\r\n".toByteArray())
         output.write("Cache-Control: $cacheControl\r\n".toByteArray())
+        output.write("X-TE2-Android-Asset-Source: files-dir\r\n".toByteArray())
         output.write("Access-Control-Allow-Origin: *\r\n".toByteArray())
         output.write("Connection: close\r\n\r\n".toByteArray())
         FileInputStream(file).use { input -> input.copyTo(output) }
