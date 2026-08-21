@@ -149,7 +149,7 @@ const PUBLIC_WEBVIEW_BASE = "/api/app/code_te2/services/wba/webview";
 const MAX_WEBVIEW_EVENT_JOURNAL_COUNT = 256;
 const MAX_WEBVIEW_EVENT_JOURNAL_BYTES = 2 * 1024 * 1024;
 const WEBVIEW_RESOURCE_HOST =
-  /https:\/\/([a-z][a-z0-9+.-]*)(?:\+|%2b)([^/]*?)\.vscode-resource\.vscode-cdn\.net(\/[^\s\"'<>)]*)?/gi;
+  /https:\/\/([a-z][a-z0-9+.-]*)(?:\+|%2b)([^/]*?)\.vscode-resource\.vscode-cdn\.net((?:\/(?:(?!&(?:quot|apos|#(?:0*34|0*39|x0*22|x0*27));(?=\s*[,}\]]))[^\s\"'<>\)])*)?)/gi;
 
 function isRecord(value: unknown): value is JsonObject {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -369,6 +369,35 @@ function encodePathSegments(value: string): string {
   return `${leading}${encoded}${trailing}`;
 }
 
+function decodeHtmlResourcePath(value: string): string {
+  return value.replace(
+    /&(?:amp|lt|gt|quot|apos|#\d+|#x[\da-f]+);/gi,
+    (entity) => {
+      const normalized = entity.toLowerCase();
+      const named: Record<string, string> = {
+        "&amp;": "&",
+        "&lt;": "<",
+        "&gt;": ">",
+        "&quot;": '"',
+        "&apos;": "'",
+      }[normalized];
+      if (named !== undefined) return named;
+      const numeric = normalized.startsWith("&#x")
+        ? Number.parseInt(normalized.slice(3, -1), 16)
+        : Number.parseInt(normalized.slice(2, -1), 10);
+      if (
+        !Number.isSafeInteger(numeric) ||
+        numeric < 0 ||
+        numeric > 0x10ffff ||
+        (numeric >= 0xd800 && numeric <= 0xdfff)
+      ) {
+        return entity;
+      }
+      return String.fromCodePoint(numeric);
+    },
+  );
+}
+
 function resourceUrl(surfaceId: string, resource: UriRecord | null): string {
   if (!resource) return "";
   const scheme = encodeURIComponent(stringValue(resource.scheme));
@@ -397,6 +426,7 @@ function rewriteResourceUrls(
       );
       let resourcePath = pathRaw || "/";
       resourcePath = resourcePath.split(/[?#]/, 1)[0] || "/";
+      resourcePath = decodeHtmlResourcePath(resourcePath);
       try {
         resourcePath = decodeURI(resourcePath);
       } catch {}

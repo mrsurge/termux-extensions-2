@@ -138,6 +138,13 @@ test("activity-bar webview contribution resolves lazily per client behind one wo
       extSends.push({ rpcId, method, args, cancellable });
       queueMicrotask(() => {
         const [handle] = args;
+        const markdownSettings = JSON.stringify({
+          source: `vscode-remote://localhost${projectPath}/README.md`,
+          webviewResourceRoot: `https://vscode-remote%2Blocalhost.vscode-resource.vscode-cdn.net${projectPath}/guide&notes.md`,
+        })
+          .replaceAll("&", "&amp;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
         runtime.handleMainThreadRequest({
           kind: "ext",
           type: 1,
@@ -166,7 +173,7 @@ test("activity-bar webview contribution resolves lazily per client behind one wo
           method: "$setHtml",
           args: [
             handle,
-            `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https://*.vscode-cdn.net"><base href="https://vscode-remote%2Blocalhost.vscode-resource.vscode-cdn.net${projectPath}/"></head><body><img src="https://vscode-remote%2Blocalhost.vscode-resource.vscode-cdn.net${projectPath}/icon.svg?revision=2#mark"><img src="https://vscode-remote+remote-002bauthority.vscode-resource.vscode-cdn.net${projectPath}/remote.svg"><script src="index.js"></script></body></html>`,
+            `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https://*.vscode-cdn.net"><meta id="vscode-markdown-preview-data" data-settings="${markdownSettings}"><base href="https://vscode-remote%2Blocalhost.vscode-resource.vscode-cdn.net${projectPath}/"></head><body><img src="https://vscode-remote%2Blocalhost.vscode-resource.vscode-cdn.net${projectPath}/icon.svg?revision=2#mark"><img src="https://vscode-remote+remote-002bauthority.vscode-resource.vscode-cdn.net${projectPath}/remote.svg"><script src="index.js"></script></body></html>`,
           ],
         });
       });
@@ -256,6 +263,21 @@ test("activity-bar webview contribution resolves lazily per client behind one wo
   assert.match(document, /data-te2-webview-theme/);
   assert.match(document, /--vscode-sideBar-background:#010409/);
   assert.match(document, /--vscode-editor-foreground:#e6edf3/);
+  const parsedDocumentWindow = new Window();
+  t.after(() => parsedDocumentWindow.close());
+  const parsedDocument = new parsedDocumentWindow.DOMParser().parseFromString(
+    document,
+    "text/html",
+  );
+  const parsedMarkdownSettings = JSON.parse(
+    parsedDocument
+      .querySelector("#vscode-markdown-preview-data")
+      .getAttribute("data-settings"),
+  );
+  assert.match(
+    parsedMarkdownSettings.webviewResourceRoot,
+    /\/guide%26notes\.md$/,
+  );
 
   const identityWindow = new Window({
     url: `http://127.0.0.1:8089${surface.url}?clientInstanceId=client_browseridentity0001&presentationId=presentation_generatedwindow1`,
