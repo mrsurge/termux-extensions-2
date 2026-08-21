@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Iterable, Iterator, Optional
+from typing import Iterator, Optional
 
-from app.te2_console_runtime import TE2_CONSOLE_LOG_PATH
+from app.te2_console_log import TE2_CONSOLE_LOG_PATH, iter_console_log_lines_reverse
 from .models import ConsoleLogEntry
 
 DEFAULT_CONSOLE_LOG_PATH = TE2_CONSOLE_LOG_PATH
@@ -36,12 +36,20 @@ class ConsoleStore:
 
     def tail(self, *, limit: int = 100, worker_id: str | None = None, level: str | None = None) -> list[ConsoleLogEntry]:
         limit = max(1, min(int(limit), 1000))
-        entries = [
-            entry
-            for entry in self.iter_entries()
-            if _matches(entry, worker_id=worker_id, level=level)
-        ]
-        return entries[-limit:]
+        entries: list[ConsoleLogEntry] = []
+        for raw in iter_console_log_lines_reverse(self.log_path):
+            try:
+                payload = json.loads(raw)
+                entry = ConsoleLogEntry.model_validate(payload)
+            except (json.JSONDecodeError, UnicodeDecodeError, ValueError, TypeError):
+                continue
+            if not _matches(entry, worker_id=worker_id, level=level):
+                continue
+            entries.append(entry)
+            if len(entries) >= limit:
+                break
+        entries.reverse()
+        return entries
 
     def search(
         self,

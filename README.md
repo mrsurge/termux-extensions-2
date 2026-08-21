@@ -197,10 +197,18 @@ Useful launcher commands:
 te2 --build-only
 te2 --debug
 te2 --print-command
+te2 --memory-profile "$HOME/.cache/te2-memory-profile"
 te2 console list-workers
 te2 migrate-legacy-roots          # write-free report
 te2 migrate-legacy-roots --json   # write-free structured report
 ```
+
+`--memory-profile` is an explicit desktop diagnostic mode. It requires a
+separately installed Heaptrack, uses an optimized symbolized Rust profile, and
+enables explicit Python and Node heap snapshots. It is not a production
+allocator mode. See
+[the framework memory profiling guide](docs/apps/framework_memory_profiling/README.md)
+before running it, especially when the active agent session is hosted by TE2.
 
 Electron stores local launch policy separately at
 `$TE2_CONFIG_HOME/desktop-local-framework.json`. When that file is absent,

@@ -26,6 +26,9 @@ let _workerId = null;
 let _workerLabel = null;
 let _originals = {};
 let _pendingEvals = new Map();
+let _ownsSocket = false;
+let _socketHandlers = {};
+let _windowHandlers = {};
 
 export function getConsoleBridgeStatus() {
   return {
@@ -114,7 +117,10 @@ function _perWindowWorkerId(label, prefix = '', ownerLength = 8) {
 
 function _emitLog(level, rawArgs) {
   if (!_bridgeSocket || !_bridgeSocket.connected) return;
-  _bridgeSocket.emit('console:log', {
+  const emitter = _bridgeSocket.volatile && typeof _bridgeSocket.volatile.emit === 'function'
+    ? _bridgeSocket.volatile
+    : _bridgeSocket;
+  emitter.emit('console:log', {
     workerId: _workerId,
     workerLabel: _workerLabel,
     level,
@@ -134,12 +140,14 @@ function _patchConsole() {
 }
 
 function _hookErrors() {
-  window.addEventListener('error', (e) => {
+  _windowHandlers.error = (e) => {
     _emitLog('error', [e.message, e.filename, e.lineno, e.colno, e.error || null]);
-  });
-  window.addEventListener('unhandledrejection', (e) => {
+  };
+  _windowHandlers.unhandledrejection = (e) => {
     _emitLog('error', ['UnhandledRejection', e.reason]);
-  });
+  };
+  window.addEventListener('error', _windowHandlers.error);
+  window.addEventListener('unhandledrejection', _windowHandlers.unhandledrejection);
 }
 
 function _cleanupEval(reqId) {
@@ -152,7 +160,7 @@ function _cleanupEval(reqId) {
 
 function _hookEval() {
   if (!_bridgeSocket) return;
-  _bridgeSocket.on('console:eval', async ({ reqId, code, timeoutSeconds }) => {
+  _socketHandlers.eval = async ({ reqId, code, timeoutSeconds }) => {
     const timeoutMs = (timeoutSeconds || 20) * 1000 + 2000;
     let timeoutHandle;
     let rejectTimeout;
@@ -192,15 +200,17 @@ function _hookEval() {
         ...(errorType ? { errorType } : {}),
       });
     }
-  });
-  _bridgeSocket.on('console:evalCancel', ({ reqId }) => {
+  };
+  _socketHandlers.evalCancel = ({ reqId }) => {
     const pending = _pendingEvals.get(reqId);
     if (pending) {
       clearTimeout(pending.timeoutHandle);
       _pendingEvals.delete(reqId);
       pending.reject(new Error('eval_cancelled'));
     }
-  });
+  };
+  _bridgeSocket.on('console:eval', _socketHandlers.eval);
+  _bridgeSocket.on('console:evalCancel', _socketHandlers.evalCancel);
 }
 
 /**
@@ -238,6 +248,7 @@ export function initConsoleBridge(opts = {}) {
 
   if (opts.socket) {
     _bridgeSocket = opts.socket;
+    _ownsSocket = false;
   } else {
     const io = window.io;
     if (!io) {
@@ -254,22 +265,25 @@ export function initConsoleBridge(opts = {}) {
         workerLabel: _workerLabel,
       },
     });
+    _ownsSocket = true;
   }
 
   // Tell the server this is a console-producing worker
-  _bridgeSocket.on('connect', () => {
+  _socketHandlers.connect = () => {
     _bridgeSocket.emit('console:register', { workerId: _workerId, workerLabel: _workerLabel, role: 'worker' });
     _emitBridgeStatus();
-  });
+  };
+  _bridgeSocket.on('connect', _socketHandlers.connect);
   if (typeof _bridgeSocket.on === 'function') {
-    _bridgeSocket.on('disconnect', () => {
+    _socketHandlers.disconnect = () => {
       for (const [reqId, pending] of _pendingEvals) {
         clearTimeout(pending.timeoutHandle);
         pending.reject(new Error('socket_disconnected'));
       }
       _pendingEvals.clear();
       _emitBridgeStatus();
-    });
+    };
+    _bridgeSocket.on('disconnect', _socketHandlers.disconnect);
   }
   // If already connected, register immediately
   if (_bridgeSocket.connected) {
@@ -298,7 +312,24 @@ export function destroyConsoleBridge() {
   for (const level of LEVELS) {
     if (_originals[level]) console[level] = _originals[level];
   }
+  if (_bridgeSocket && typeof _bridgeSocket.off === 'function') {
+    if (_socketHandlers.connect) _bridgeSocket.off('connect', _socketHandlers.connect);
+    if (_socketHandlers.disconnect) _bridgeSocket.off('disconnect', _socketHandlers.disconnect);
+    if (_socketHandlers.eval) _bridgeSocket.off('console:eval', _socketHandlers.eval);
+    if (_socketHandlers.evalCancel) _bridgeSocket.off('console:evalCancel', _socketHandlers.evalCancel);
+  }
+  if (_ownsSocket && _bridgeSocket && typeof _bridgeSocket.disconnect === 'function') {
+    try { _bridgeSocket.disconnect(); } catch (_) {}
+  }
+  if (_windowHandlers.error) window.removeEventListener?.('error', _windowHandlers.error);
+  if (_windowHandlers.unhandledrejection) {
+    window.removeEventListener?.('unhandledrejection', _windowHandlers.unhandledrejection);
+  }
   _originals = {};
+  _socketHandlers = {};
+  _windowHandlers = {};
+  _bridgeSocket = null;
+  _ownsSocket = false;
   _bridgeActive = false;
   _workerId = null;
   _workerLabel = null;

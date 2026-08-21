@@ -11,7 +11,10 @@ function createMockSocket() {
     connected: true,
     on(event, fn) { if (!handlers.has(event)) handlers.set(event, []); handlers.get(event).push(fn); },
     emit(event, data) { emitted.push({ event, data }); },
-    off() {},
+    off(event, fn) {
+      if (!handlers.has(event)) return;
+      handlers.set(event, handlers.get(event).filter(handler => handler !== fn));
+    },
     _handlers: handlers,
     _emitted: emitted,
     _fire(event, data) { const fns = handlers.get(event) || []; for (const fn of fns) fn(data); },
@@ -25,6 +28,10 @@ function createMockWindow() {
     io: undefined,
     sessionStorage: { _data: {}, getItem(k) { return this._data[k] ?? null; }, setItem(k, v) { this._data[k] = v; } },
     addEventListener(type, fn) { if (!listeners.has(type)) listeners.set(type, []); listeners.get(type).push(fn); },
+    removeEventListener(type, fn) {
+      if (!listeners.has(type)) return;
+      listeners.set(type, listeners.get(type).filter(listener => listener !== fn));
+    },
     dispatchEvent() {},
     _listeners: listeners,
   };
@@ -168,5 +175,37 @@ describe('console bridge worker identity', () => {
     const second = _moduleCache.initConsoleBridge(options);
     assert.equal(second.workerId, first.workerId);
     second.destroy();
+  });
+});
+
+describe('console bridge lifecycle', () => {
+  test('destroy removes socket and window handlers from a shared socket', async () => {
+    const mockSocket = createMockSocket();
+    const mockWindow = createMockWindow();
+    const bridge = await loadBridge(mockWindow, mockSocket);
+
+    assert.equal(mockSocket._handlers.get('console:eval').length, 1);
+    assert.equal(mockWindow._listeners.get('error').length, 1);
+
+    bridge.destroy();
+
+    assert.equal(mockSocket._handlers.get('console:eval').length, 0);
+    assert.equal(mockWindow._listeners.get('error').length, 0);
+  });
+
+  test('console logs use volatile delivery when available', async () => {
+    const mockSocket = createMockSocket();
+    const volatileEvents = [];
+    mockSocket.volatile = {
+      emit(event, data) { volatileEvents.push({ event, data }); },
+    };
+    const mockWindow = createMockWindow();
+    const bridge = await loadBridge(mockWindow, mockSocket);
+
+    console.log('volatile-test');
+    bridge.destroy();
+
+    assert.equal(volatileEvents.at(-1).event, 'console:log');
+    assert.equal(volatileEvents.at(-1).data.args[0], 'volatile-test');
   });
 });

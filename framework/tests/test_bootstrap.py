@@ -81,6 +81,41 @@ class FrameworkBootstrapTests(unittest.TestCase):
         self.assertFalse(self.bootstrap._parse_args([]).stdio_control)
         self.assertTrue(self.bootstrap._parse_args(["--stdio-control"]).stdio_control)
 
+    def test_memory_profile_selects_symbolized_profile_and_heaptrack_wrapper(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            output_dir = Path(raw_tmp) / "profiles"
+            args = self.bootstrap._parse_args(["--memory-profile", str(output_dir)])
+
+            self.assertEqual(self.bootstrap._rust_build_profile(args), "memory")
+            with mock.patch.object(self.bootstrap.shutil, "which", return_value="/usr/bin/heaptrack"):
+                command = self.bootstrap._memory_profile_server_command(
+                    args,
+                    ["/cache/te2-server"],
+                )
+
+            self.assertEqual(
+                command,
+                [
+                    "/usr/bin/heaptrack",
+                    "--output",
+                    str(output_dir / "te2-server.heaptrack"),
+                    "/cache/te2-server",
+                ],
+            )
+
+    def test_memory_profile_environment_enables_python_and_node_snapshots(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            output_dir = Path(raw_tmp) / "profiles"
+            environment: dict[str, str] = {"NODE_OPTIONS": "--trace-warnings"}
+
+            self.bootstrap._configure_memory_profile_env(environment, str(output_dir))
+
+            self.assertEqual(environment["TE2_MEMORY_PROFILE_DIR"], str(output_dir))
+            self.assertEqual(environment["PYTHONTRACEMALLOC"], "25")
+            self.assertIn("--trace-warnings", environment["NODE_OPTIONS"])
+            self.assertIn("--heapsnapshot-signal=SIGUSR2", environment["NODE_OPTIONS"])
+            self.assertIn(f"--diagnostic-dir={output_dir}", environment["NODE_OPTIONS"])
+
     def test_stdio_control_accepts_only_versioned_shutdown(self) -> None:
         response, shutdown = self.bootstrap._stdio_control_response(
             '{"version":1,"id":"request-1","method":"shutdown"}\n'

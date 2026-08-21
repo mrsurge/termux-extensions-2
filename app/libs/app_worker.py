@@ -24,6 +24,7 @@ from starlette.types import ASGIApp
 import uvicorn
 
 from app.libs.pipe_protocol import PipeEnvelope
+from app.memory_profile import install_python_memory_profiler
 
 
 JsonObject = dict[str, object]
@@ -309,6 +310,7 @@ def main() -> None:
         protocol_stdout = sys.stdout
         sys.stdout = sys.stderr
     os.environ["TE_APP_ID"] = args.app_id
+    _ = install_python_memory_profiler(f"app_worker-{args.app_id}")
 
     mounted_subapps: list[tuple[str, ASGIApp]] = []
     backend_serving_hook: Callable[[], object] | None = None

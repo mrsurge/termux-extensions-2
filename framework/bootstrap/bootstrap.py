@@ -8,6 +8,7 @@ import importlib
 import json
 import os
 import secrets
+import shlex
 import signal
 import shutil
 import socket
@@ -59,6 +60,7 @@ class BootstrapArgs:
     framework_shells_fws_socketio_server_pid: str | None
     framework_shells_run_id: str | None
     stdio_control: bool
+    memory_profile_dir: str | None
 
 
 @dataclass(frozen=True)
@@ -110,7 +112,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     env = _build_env(args)
     if args.print_command:
         command = _server_command(args, env, build=False)
-        print(" ".join(command.argv))
+        print(" ".join(_memory_profile_server_command(args, command.argv)))
         return 0
     with _framework_migration_guard(env):
         command = _server_command(args, env, build=True)
@@ -118,7 +120,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             if command.build_already_done:
                 return 0
             return subprocess.run(command.argv, env=env, check=False).returncode
-        return _run_child(command.argv, env, stdio_control=args.stdio_control)
+        child_command = _memory_profile_server_command(args, command.argv)
+        return _run_child(child_command, env, stdio_control=args.stdio_control)
 
 
 def _parse_args(argv: Sequence[str] | None) -> BootstrapArgs:
@@ -184,6 +187,15 @@ def _parse_args(argv: Sequence[str] | None) -> BootstrapArgs:
         ),
     )
     parser.add_argument(
+        "--memory-profile",
+        metavar="OUTPUT_DIR",
+        default=os.environ.get("TE2_MEMORY_PROFILE_DIR"),
+        help=(
+            "Run an optimized symbolized Rust server under Heaptrack and enable "
+            "explicit Python/Node heap snapshots beneath OUTPUT_DIR."
+        ),
+    )
+    parser.add_argument(
         "--broadcast",
         nargs="+",
         metavar="IP_SUBNET_OR_IFACE",
@@ -237,6 +249,7 @@ def _parse_args(argv: Sequence[str] | None) -> BootstrapArgs:
         framework_shells_fws_socketio_server_pid=cast(str | None, raw.framework_shells_fws_socketio_server_pid),
         framework_shells_run_id=cast(str | None, raw.framework_shells_run_id),
         stdio_control=cast(bool, raw.stdio_control),
+        memory_profile_dir=cast(str | None, raw.memory_profile),
     )
 
 
@@ -278,6 +291,8 @@ def _build_env(args: BootstrapArgs) -> dict[str, str]:
             pythonpath_parts.insert(0, path)
     env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
 
+    _configure_memory_profile_env(env, args.memory_profile_dir)
+
     _ensure_framework_shells_env(env, args)
     return env
 
@@ -286,6 +301,26 @@ def _sanitize_runtime_env(env: dict[str, str]) -> None:
     cargo_target_dir = env.pop("CARGO_TARGET_DIR", None)
     if cargo_target_dir:
         env.setdefault("TE2_SERVER_CARGO_TARGET_DIR", cargo_target_dir)
+
+
+def _configure_memory_profile_env(env: dict[str, str], raw_output_dir: str | None) -> None:
+    if not raw_output_dir:
+        return
+    output_dir = Path(raw_output_dir).expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    env["TE2_MEMORY_PROFILE_DIR"] = str(output_dir)
+    env.setdefault("PYTHONTRACEMALLOC", "25")
+
+    existing = shlex.split(env.get("NODE_OPTIONS", ""))
+    desired = [
+        "--heapsnapshot-signal=SIGUSR2",
+        f"--diagnostic-dir={output_dir}",
+    ]
+    for option in desired:
+        name = option.split("=", 1)[0]
+        if not any(item == name or item.startswith(f"{name}=") for item in existing):
+            existing.append(option)
+    env["NODE_OPTIONS"] = shlex.join(existing)
 
 
 def _normalize_broadcast_arg(raw_broadcast: Sequence[str] | None) -> list[str] | None:
@@ -317,6 +352,7 @@ def _server_command(
         return _cached_server_command(args, env, manifest, build=build)
 
     subcommand = "build" if args.build_only else "run"
+    profile = _rust_build_profile(args)
     command = [
         "cargo",
         subcommand,
@@ -325,8 +361,10 @@ def _server_command(
         "-p",
         SERVER_PACKAGE,
     ]
-    if args.release:
+    if profile == "release":
         command.append("--release")
+    elif profile != "debug":
+        command.extend(["--profile", profile])
     if _ferrous_framework_enabled(args):
         command.extend(["--features", "ferrous-framework-native"])
     if not args.build_only:
@@ -342,7 +380,7 @@ def _cached_server_command(
     build: bool,
 ) -> ServerCommand:
     cache_dir = Path(args.cache_dir) if args.cache_dir else _default_cache_dir(env)
-    profile = "release" if args.release else "debug"
+    profile = _rust_build_profile(args)
     features = ["ferrous-framework-native"] if _ferrous_framework_enabled(args) else []
     fingerprint = _rust_source_fingerprint(manifest, profile=profile, features=features)
     binary_name = _server_binary_name()
@@ -368,8 +406,10 @@ def _cached_server_command(
             "-p",
             SERVER_PACKAGE,
         ]
-        if args.release:
+        if profile == "release":
             build_command.append("--release")
+        elif profile != "debug":
+            build_command.extend(["--profile", profile])
         if features:
             build_command.extend(["--features", ",".join(features)])
         build_env = dict(env)
@@ -384,6 +424,32 @@ def _cached_server_command(
         _publish_cached_binary(built_binary, cached_binary)
         _prune_final_binary_cache(cache_dir / "bin", cached_binary)
     return ServerCommand([str(cached_binary)], build_already_done=True)
+
+
+def _rust_build_profile(args: BootstrapArgs) -> str:
+    if args.memory_profile_dir:
+        return "memory"
+    return "release" if args.release else "debug"
+
+
+def _memory_profile_server_command(
+    args: BootstrapArgs,
+    command: Sequence[str],
+) -> list[str]:
+    if not args.memory_profile_dir or args.build_only:
+        return list(command)
+    heaptrack = shutil.which("heaptrack")
+    if not heaptrack:
+        raise SystemExit(
+            "--memory-profile requires heaptrack; install it before the controlled profiling run"
+        )
+    output_dir = Path(args.memory_profile_dir).expanduser().resolve()
+    return [
+        heaptrack,
+        "--output",
+        str(output_dir / "te2-server.heaptrack"),
+        *command,
+    ]
 
 
 @contextmanager

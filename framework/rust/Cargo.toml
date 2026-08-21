@@ -40,3 +40,8 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[profile.memory]
+inherits = "release"
+debug = 2
+strip = "none"

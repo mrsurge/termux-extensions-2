@@ -9,13 +9,14 @@ from typing import Any, TextIO
 
 import socketio
 
-from app.te2_paths import te2_cache_home
+from app.te2_console_log import (
+    TE2_CONSOLE_LOG_DIR,
+    TE2_CONSOLE_LOG_PATH,
+    read_console_log_tail,
+)
 
 TE2_CONSOLE_NAMESPACE = "/te2_console"
 TE2_CONSOLE_SOCKET_PATH = "/te2_console_ws/socket.io"
-TE2_CONSOLE_LOG_DIR = te2_cache_home() / "console"
-TE2_CONSOLE_LOG_PATH = TE2_CONSOLE_LOG_DIR / "te2_console_log.jsonl"
-
 _REPLAY_MAX_BYTES = 6 * 1024 * 1024
 _DEFAULT_REPLAY_MAX_LINES = 500
 _MAX_REPLAY_LINES = 5000
@@ -94,49 +95,28 @@ async def _broadcast_workers(ns) -> None:
 
 
 async def _replay_to_sid(ns, sid: str, max_lines: int | None = None) -> None:
-    try:
-        with TE2_CONSOLE_LOG_PATH.open("r", encoding="utf-8") as fh:
-            lines = [line.strip() for line in fh if line.strip()]
-    except FileNotFoundError:
-        return
-
-    total_lines = len(lines)
-    if max_lines is not None and max_lines > 0 and total_lines > max_lines:
-        lines = lines[-max_lines:]
-
-    selected: list[str] = []
-    selected_bytes = 0
-    for line in reversed(lines):
-        try:
-            line_bytes = len(line.encode("utf-8"))
-        except Exception:
-            continue
-        if line_bytes > _REPLAY_MAX_BYTES:
-            continue
-        if selected and (selected_bytes + line_bytes) > _REPLAY_MAX_BYTES:
-            break
-        selected.append(line)
-        selected_bytes += line_bytes
-
-    selected.reverse()
-    truncated = len(selected) < total_lines
-    if truncated:
+    line_limit = _MAX_REPLAY_LINES if max_lines is None else max_lines
+    tail = read_console_log_tail(
+        TE2_CONSOLE_LOG_PATH,
+        max_lines=line_limit,
+        max_bytes=_REPLAY_MAX_BYTES,
+    )
+    if tail.truncated:
         await ns.emit(
             "console:replay_meta",
             {
                 "truncated": True,
                 "replay_max_bytes": _REPLAY_MAX_BYTES,
-                "bytes_sent": selected_bytes,
-                "entries_sent": len(selected),
-                "entries_dropped": max(0, total_lines - len(selected)),
+                "bytes_sent": tail.bytes_selected,
+                "entries_sent": len(tail.lines),
             },
             to=sid,
         )
 
-    for line in selected:
+    for raw_line in tail.lines:
         try:
-            entry = json.loads(line)
-        except json.JSONDecodeError:
+            entry = json.loads(raw_line)
+        except (json.JSONDecodeError, UnicodeDecodeError):
             continue
         await ns.emit("console:log", entry, to=sid)
 
@@ -146,7 +126,9 @@ def _normalize_tail_lines(value) -> int:
         parsed = int(value)
     except Exception:
         return _DEFAULT_REPLAY_MAX_LINES
-    if parsed <= 0:
+    if parsed == 0:
+        return 0
+    if parsed < 0:
         return _DEFAULT_REPLAY_MAX_LINES
     return min(parsed, _MAX_REPLAY_LINES)
 
@@ -212,7 +194,8 @@ async def on_console_register(ns, sid, data):
         await ns.enter_room(sid, "console:drawers")
         tail_lines = _normalize_tail_lines(data.get("tail_lines"))
         await ns.emit("console:workers", sorted(_registered_workers), to=sid)
-        await _replay_to_sid(ns, sid, max_lines=tail_lines)
+        if tail_lines:
+            await _replay_to_sid(ns, sid, max_lines=tail_lines)
         print(f"[te2_console] drawer registered sid={sid}", flush=True)
         return
 

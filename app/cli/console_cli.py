@@ -7,12 +7,12 @@ import sys
 import time
 from typing import Any
 
-from app.te2_paths import te2_cache_home
+from app.te2_console_log import TE2_CONSOLE_LOG_PATH, iter_console_log_lines_reverse
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = "8089"
 DEFAULT_TIMEOUT = 20.0
-LOG_PATH = te2_cache_home() / "console" / "te2_console_log.jsonl"
+LOG_PATH = TE2_CONSOLE_LOG_PATH
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -201,8 +201,12 @@ def _cmd_tail(argv: list[str]) -> int:
     parser.add_argument("--level", "-l", default=None, help="Filter by level (log, info, warn, error, debug)")
     args = parser.parse_args(argv)
 
-    entries = _read_log_entries(worker_id=args.worker, level=args.level)
-    for entry in entries[-args.limit:]:
+    entries = _read_log_tail(
+        limit=max(1, args.limit),
+        worker_id=args.worker,
+        level=args.level,
+    )
+    for entry in entries:
         _print_entry(entry)
     return 0
 
@@ -221,7 +225,7 @@ def _cmd_search(argv: list[str]) -> int:
         return 1
 
     count = 0
-    for entry in _read_log_entries(worker_id=args.worker, level=args.level):
+    for entry in _iter_log_entries(worker_id=args.worker, level=args.level):
         haystack = _entry_text(entry).lower()
         if q in haystack:
             _print_entry(entry)
@@ -231,10 +235,9 @@ def _cmd_search(argv: list[str]) -> int:
     return 0
 
 
-def _read_log_entries(*, worker_id: str | None = None, level: str | None = None) -> list[dict[str, Any]]:
+def _iter_log_entries(*, worker_id: str | None = None, level: str | None = None):
     if not LOG_PATH.exists():
-        return []
-    entries: list[dict[str, Any]] = []
+        return
     with LOG_PATH.open("r", encoding="utf-8") as fh:
         for raw in fh:
             line = raw.strip()
@@ -248,7 +251,29 @@ def _read_log_entries(*, worker_id: str | None = None, level: str | None = None)
                 continue
             if level and entry.get("level") != level:
                 continue
-            entries.append(entry)
+            yield entry
+
+
+def _read_log_tail(
+    *,
+    limit: int,
+    worker_id: str | None = None,
+    level: str | None = None,
+) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for raw in iter_console_log_lines_reverse(LOG_PATH):
+        try:
+            entry = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        if worker_id and entry.get("workerId") != worker_id:
+            continue
+        if level and entry.get("level") != level:
+            continue
+        entries.append(entry)
+        if len(entries) >= limit:
+            break
+    entries.reverse()
     return entries
 
 
