@@ -781,6 +781,9 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
 
   const electronSecondEditor = (window as ElectronSecondEditorWindow).te2Electron;
   let lastSecondaryProjectSync = '';
+  let pendingSecondaryProjectSync = '';
+  let secondaryProjectSyncing = '';
+  let secondaryAdapterReady = false;
   let secondaryEditorPresentation: ElectronSecondEditorPresentation = {
     mode: 'closed',
     dockSize: 480,
@@ -804,6 +807,15 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     const publish = () => {
       secondaryPlacementFrame = 0;
       const rect = secondaryEditorHost.getBoundingClientRect();
+      const sidebarResizeHandle = root.querySelector<HTMLElement>('.resize-handle--agent');
+      const sidebarResizeRect = sidebarResizeHandle?.getBoundingClientRect();
+      const sidebarResizeOverlap = sidebarResizeRect && sidebarResizeRect.width > 0
+        ? Math.max(
+          0,
+          Math.min(rect.right, sidebarResizeRect.right)
+            - Math.max(rect.left, sidebarResizeRect.left),
+        )
+        : 0;
       const visible = visibleOverride ?? (
         secondaryEditorEmbedded()
         && !secondaryEditorResizing
@@ -815,7 +827,10 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
       void electronSecondEditor.placeSecondEditorSurface?.({
         x: rect.left,
         y: rect.top,
-        width: rect.width,
+        // A sibling native WebContentsView always paints above page CSS. Keep
+        // the Sidebar resize handle's translated overlap outside this view so
+        // its existing DOM z-index can receive the initial pointer event.
+        width: Math.max(0, rect.width - sidebarResizeOverlap),
         height: rect.height,
       }, visible).catch((error) => {
         console.warn('[second_editor] native placement failed', error);
@@ -904,6 +919,16 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
       }
     },
   );
+  const handleSecondaryAdapterState = (event: Event) => {
+    const detail = event instanceof CustomEvent && event.detail && typeof event.detail === 'object'
+      ? event.detail as { status?: unknown }
+      : {};
+    secondaryAdapterReady = detail.status === 'ready';
+    if (secondaryAdapterReady && pendingSecondaryProjectSync) {
+      void syncSecondEditorProject(pendingSecondaryProjectSync);
+    }
+  };
+  window.addEventListener('code-te2:adapter-state', handleSecondaryAdapterState);
   window.addEventListener('pagehide', () => {
     if (secondaryPlacementFrame) window.cancelAnimationFrame(secondaryPlacementFrame);
     secondaryPlacementResizeObserver?.disconnect();
@@ -912,24 +937,42 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     window.removeEventListener('resize', handleSecondaryPlacementChange);
     window.removeEventListener('code-te2:secondary-editor-resize-start', handleSecondaryResizeStart);
     window.removeEventListener('code-te2:secondary-editor-resize-end', handleSecondaryResizeEnd);
+    window.removeEventListener('code-te2:adapter-state', handleSecondaryAdapterState);
     document.removeEventListener('visibilitychange', handleSecondaryPlacementChange);
     publishSecondaryEditorPlacement(false, true);
   }, { once: true });
 
   async function syncSecondEditorProject(path: string | null): Promise<void> {
     const projectPath = String(path || '').trim();
+    if (projectPath) pendingSecondaryProjectSync = projectPath;
+    const webWorkersEnabled = hostUiPrefsRuntime.latestSnapshot()?.webWorkersEnabled === true;
     if (
       !projectPath
-      || projectPath === lastSecondaryProjectSync
       || typeof electronSecondEditor?.syncSecondEditorProject !== 'function'
     ) return;
-    lastSecondaryProjectSync = projectPath;
+    if (!webWorkersEnabled && !secondaryAdapterReady) return;
+    if (
+      projectPath === lastSecondaryProjectSync
+      || projectPath === secondaryProjectSyncing
+    ) return;
+    secondaryProjectSyncing = projectPath;
     try {
       const result = await electronSecondEditor.syncSecondEditorProject(projectPath);
+      lastSecondaryProjectSync = projectPath;
+      if (pendingSecondaryProjectSync === projectPath) {
+        pendingSecondaryProjectSync = '';
+      }
       applySecondaryEditorPresentation(result.presentation);
     } catch (error) {
-      lastSecondaryProjectSync = '';
       console.warn('[second_editor] project synchronization failed', error);
+    } finally {
+      secondaryProjectSyncing = '';
+      if (
+        pendingSecondaryProjectSync
+        && pendingSecondaryProjectSync !== projectPath
+      ) {
+        void syncSecondEditorProject(pendingSecondaryProjectSync);
+      }
     }
   }
 
@@ -943,6 +986,15 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
       return;
     }
     try {
+      if (hostUiPrefsRuntime.latestSnapshot()?.webWorkersEnabled !== true) {
+        const ready = secondaryAdapterReady
+          || await hostStateRuntime.ensureWorkbenchAdapterReady();
+        if (!ready) {
+          host.toast('The extension host is not ready for a second editor window');
+          return;
+        }
+        secondaryAdapterReady = true;
+      }
       const result = await electronSecondEditor.openSecondEditor(
         cachedProjectRoot,
         targetPath,

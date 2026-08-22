@@ -96,6 +96,93 @@ def _set_adapter_state(status: str, project: Optional[str] = None, error: Option
     _adapter_state["error"] = error
 
 
+def _normalized_project_path(value: object) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return str(Path(value).expanduser().resolve(strict=False))
+
+
+def _rpc_result(response: JsonObject, *, method: str) -> JsonObject:
+    error = _json_object(response.get("error"))
+    if error:
+        message = error.get("message")
+        raise RuntimeError(str(message if isinstance(message, str) and message else error))
+    result = _json_object(response.get("result"))
+    if not result:
+        raise RuntimeError(f"{method} returned no object result")
+    return result
+
+
+def _adapter_state_is_ready_for(project_root: str) -> bool:
+    normalized_project = _normalized_project_path(project_root) or str(project_root)
+    return bool(
+        _adapter_state.get("status") == "ready"
+        and _normalized_project_path(_adapter_state.get("project")) == normalized_project
+        and _adapter_state.get("error") is None
+    )
+
+
+async def _publish_ready_if_changed(project_root: str) -> None:
+    normalized_project = _normalized_project_path(project_root) or str(project_root)
+    if _adapter_state_is_ready_for(normalized_project):
+        return
+    _set_adapter_state("ready", project=normalized_project, error=None)
+    await _publish_adapter_state_fact()
+
+
+async def adopt_adapter_ready_event(payload: JsonObject) -> bool:
+    """Recover Python lifecycle state from WBA's completed connect event."""
+    session = _json_object(payload.get("session"))
+    event_project = _normalized_project_path(session.get("workspaceFolder"))
+    expected_project = _normalized_project_path(_adapter_state.get("project"))
+    if (
+        not bool(session.get("connected"))
+        or not bool(session.get("extConnected"))
+        or event_project is None
+        or expected_project is None
+        or event_project != expected_project
+    ):
+        return False
+    await _publish_ready_if_changed(expected_project)
+    return True
+
+
+async def _adopt_live_adapter_session(project_root: str) -> bool:
+    """Adopt or retarget one surviving WBA process without polling."""
+    expected_project = _normalized_project_path(project_root) or str(project_root)
+    try:
+        status_result = _rpc_result(
+            await adapter_rpc("adapter.status", timeout=15.0),
+            method="adapter.status",
+        )
+        session = _json_object(status_result.get("session"))
+        connected = bool(session.get("connected"))
+        ext_connected = bool(session.get("extConnected"))
+        live_project = _normalized_project_path(session.get("workspaceFolder"))
+        if connected and ext_connected and live_project == expected_project:
+            await _publish_ready_if_changed(expected_project)
+            return True
+
+        if connected and ext_connected:
+            reconnect_result = _rpc_result(
+                await adapter_rpc(
+                    "adapter.reconnect",
+                    {"workspaceFolder": expected_project},
+                    timeout=75.0,
+                ),
+                method="adapter.reconnect",
+            )
+            if reconnect_result.get("readyForDocumentOpen") is not True:
+                raise RuntimeError(
+                    "adapter.reconnect did not acknowledge readyForDocumentOpen"
+                )
+            await _publish_ready_if_changed(expected_project)
+            return True
+    except Exception as exc:
+        log.warning("[adapter] live session adoption failed: %s", exc)
+    return False
+
+
 async def mark_adapter_workspace_switching(project_root: str) -> None:
     """Publish that the shared adapter is changing workspace roots."""
     _set_adapter_state("switching", project=str(project_root), error=None)
@@ -366,7 +453,7 @@ async def _drain_pushes() -> None:
     try:
         while _pending_pushes:
             batch = _pending_pushes.popleft()
-            obj = batch["obj"]
+            obj: JsonObject = batch["obj"]
             if batch["diagnostics_owner"] is not None:
                 event = _te2_push_event(obj)
                 if event is None:
@@ -418,6 +505,9 @@ async def _handle_push_event(
             log.debug("[adapter_stdio] ignored empty te2.event push")
             return
         event_type = str(event.get("type") or "")
+        if event_type == "adapter/ready":
+            _ = await adopt_adapter_ready_event(event)
+            return
         dispatch_started_ns = time.perf_counter_ns()
         if event_type == "diagnostics/update":
             record_latency_event(
@@ -568,12 +658,19 @@ async def ensure_workbench_adapter_shell(
         if cached and cached.label == label:
             if _matches_expected_target(cached, code_server_socket_path):
                 if await _ensure_live_adapter_io(cached.id):
-                    if _adapter_state["status"] != "ready":
-                        _set_adapter_state("ready", project=project_root)
-                        await _publish_adapter_state_fact()
-                    return cached
+                    if (
+                        _adapter_state_is_ready_for(project_root)
+                        or await _adopt_live_adapter_session(project_root)
+                    ):
+                        return cached
+                    log.info(
+                        "[adapter] cached shell session was not adoptable, re-spawning"
+                    )
                 # Live pipe capabilities lost (process restart or FWS owner change) — re-spawn.
-                log.info("[adapter] cached shell alive but live pipe unavailable, re-spawning")
+                else:
+                    log.info(
+                        "[adapter] cached shell alive but live pipe unavailable, re-spawning"
+                    )
                 await _clear_stdout_subscription()
                 await mgr.terminate_shell(cached.id, force=True)
                 await asyncio.sleep(1.5)  # let port 18181 release
@@ -588,9 +685,16 @@ async def ensure_workbench_adapter_shell(
         if _matches_expected_target(existing, code_server_socket_path):
             if await _ensure_live_adapter_io(existing.id):
                 _active_shell_id = existing.id
-                return existing
+                if await _adopt_live_adapter_session(project_root):
+                    return existing
+                log.info(
+                    "[adapter] existing shell session was not adoptable, re-spawning"
+                )
             # Live pipe capabilities lost — kill and re-spawn.
-            log.info("[adapter] existing shell alive but live pipe unavailable, re-spawning")
+            else:
+                log.info(
+                    "[adapter] existing shell alive but live pipe unavailable, re-spawning"
+                )
         await _clear_stdout_subscription()
         await mgr.terminate_shell(existing.id, force=True)
         await asyncio.sleep(1.5)  # let port 18181 release
@@ -685,11 +789,11 @@ async def ensure_workbench_adapter_shell(
             connect_resp = await adapter_rpc(
                 "adapter.connect",
                 connect_params,
-                timeout=15.0,
+                timeout=75.0,
             )
             print(f"[adapter_shell_mgr] bootstrap connect resp: {connect_resp}")
-            _set_adapter_state("ready", project=project_root)
-            await _publish_adapter_state_fact()
+            _ = _rpc_result(connect_resp, method="adapter.connect")
+            await _publish_ready_if_changed(project_root)
         except Exception as exc:
             print(f"[adapter_shell_mgr] bootstrap adapter.connect FAILED: {exc}")
             _set_adapter_state("error", project=project_root, error=str(exc))

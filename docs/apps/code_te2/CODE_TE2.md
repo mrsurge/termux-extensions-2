@@ -3821,6 +3821,24 @@ canonical project path. It migrates the former identity and Sidebar files once.
 The random loopback relay origin is never a persistence key. Browser, GeckoView,
 and Cefrium remain single-surface and do not receive this native contract.
 
+Cold restoration is WBA-gated in Code Server mode. The primary page may restore
+and visibly attach its own Monaco model immediately, but it retains the latest
+secondary-project request until the backend projects authoritative adapter
+`ready`; only then does it ask Electron to recreate a persisted non-closed
+secondary renderer. A manual **Open in a Second Window** action awaits the same
+event-driven readiness promise. Monaco web-worker mode is exempt because it
+intentionally has no WBA lifecycle.
+
+When the Python app worker restarts while the global WBA Framework-Shell
+survives, the shell manager re-subscribes to its pipe and performs one
+`adapter.status` adoption handshake. It accepts only a connected extension-host
+session for the exact active workspace, or explicitly retargets a connected
+session before publishing `ready`. A late WBA `adapter/ready` event repairs
+Python state after a slow `adapter.connect`; there is no readiness polling. This
+prevents the restored secondary foreground from racing extension-host
+initialization while preserving the rule that ordinary visible Monaco opens do
+not wait for WBA acknowledgement.
+
 ### Desktop shell behavior
 
 - Native Quit validates the current `/app/<app_id>` URL, posts only that app's quit endpoint, and returns to the desktop launcher without terminating Electron.
