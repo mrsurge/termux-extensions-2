@@ -3878,6 +3878,13 @@ the host reveals the tab only after that open succeeds, the primary foreground
 does not move, and no document content crosses the presentation `postMessage`
 channel.
 
+The portable reduced header consumes the auxiliary client's exact diagnostics
+count projection and renders the same error/warning pills as the primary
+editor. Its Next Issue action stays on that auxiliary UI IPC lane. A translucent
+mobile Second Window shortcut exists only while the auxiliary foreground is
+populated and reopens a locally dismissed or collapsed drawer without choosing
+or creating a file.
+
 The former bottom-drawer Problems presentation is removed. Explorer Diagnostics
 remains the project-wide diagnostics UI, while a nonvisual host projection keeps
 summary/export consumers independent of hidden DOM.
@@ -4074,7 +4081,7 @@ left untouched and is not imported during startup.
 
 ## 42) Android Cefrium Client
 
-The isolated `:cefrium` Android application module evaluates Cefrium 0.7.0 while reusing the shared Android source and packaged assets. GeckoView in `android/app` remains the primary Android renderer.
+The isolated `:cefrium` Android application module evaluates Cefrium 0.7.1 while reusing the shared Android source and packaged assets. GeckoView in `android/app` remains the primary Android renderer.
 
 ### Module boundary
 
@@ -4115,7 +4122,29 @@ Cefrium still retains validated Run Profile `devRuntime` registrations by exact 
 
 Cefrium's wrapper also omits Chromium's selection ActionMode host callback. A narrow same-package `WebContents` shim installs an application callback that delegates to Chromium's `ActionModeCallbackHelper` and enables Chromium's SurfaceControl magnifier. Native Cut/Copy/Paste/Select All and related selection actions remain Chromium-owned and do not use JavaScript editing commands.
 
-After each completed document load, an idempotent page policy wraps Monaco's exact `textarea.inputarea.android-ime-input` focus path and forces `preventScroll: true`. Code TE2 additionally marks the editor frame from the explicit native renderer query and applies a Cefrium-only 16 px font size to the Monaco Find/Replace textarea, preventing Chromium's small-input focus zoom without changing Gecko, desktop, or ordinary editor input styling. Do not replace either correction with a broad page-wide input workaround.
+After each completed document load, an idempotent page policy wraps Monaco's exact `textarea.inputarea.android-ime-input` focus path and forces `preventScroll: true`. It patches the top realm plus every existing and future same-origin iframe realm, which gives the retained mobile secondary editor the same correction without crossing an origin boundary. Code TE2 additionally marks the editor frame from the explicit native renderer query and applies a Cefrium-only 16 px font size to the Monaco Find/Replace textarea, preventing Chromium's small-input focus zoom without changing Gecko, desktop, or ordinary editor input styling. Do not replace either correction with a broad page-wide input workaround.
+
+On Android 11/API 30 and newer, Cefrium observes root `WindowInsets.Type.ime()`
+animation state. `onPrepare` records the pre-layout visibility and `onStart`
+reads the applied end state before the first animated frame is drawn; only a
+real `visible -> hidden` animation dispatches. `onEnd` reconciles final
+visibility and covers Android's documented cancelled-before-`onStart` case.
+The reducer emits at most once per visible epoch and requires exact UI IPC
+editor ownership, a resumed/focused app page, and hidden native Tools chrome.
+Aggregate browser/subframe loading is not a lifecycle reset or readiness gate.
+
+The native client dispatches one event into the deepest focused same-origin
+document. Code TE2 transfers DOM focus from Monaco's exact Android textarea to
+the real File toolbar button with `preventScroll`; one next-animation-frame
+reconciliation repeats that transfer only if Chromium retained/reclaimed the
+textarea during IME teardown. Cefrium's UI IPC callback updates only native
+ownership/filter state: it never calls `restartInput` or `showSoftInput`.
+This is the inverse of GeckoView's explicit keyboard recovery: a later direct
+Monaco tap follows Chromium's ordinary focus path and summons the IME again.
+Initial/repeated hidden states, show and visible-to-visible resize animations,
+lifecycle transitions, GeckoView, and cross-origin documents do not
+participate. There is no IME polling, viewport inference, synthetic click,
+native focus sink/query, timer loop, or alternate fallback path.
 
 ### Validation
 

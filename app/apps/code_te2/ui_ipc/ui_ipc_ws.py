@@ -27,6 +27,7 @@ from socketio.exceptions import ConnectionRefusedError
 from ..client_presentation import (
     client_presentation_identity_from_environ,
     client_presentation_room,
+    normalize_client_instance_id,
 )
 from ..frontend_rpc_codec import (
     FrontendRpcCodecError,
@@ -114,17 +115,23 @@ def _sid(value: object) -> str:
     return str(value or "")
 
 
-def _native_client_identity(environ: object) -> tuple[str, str]:
+def _native_client_identity(environ: object) -> tuple[str, str, str | None]:
     if not isinstance(environ, Mapping):
-        return "", ""
+        return "", "", None
     raw_environ = cast(Mapping[object, object], environ)
     query_string = str(raw_environ.get("QUERY_STRING") or "")
     query = parse_qs(query_string, keep_blank_values=False)
     source = str((query.get("source") or [""])[0]).strip()
     if source not in {"android_native", "electron_native"}:
-        return "", ""
+        return "", "", None
     client_id = str((query.get("client_id") or [""])[0]).strip()
-    return source, client_id[:128]
+    raw_presentation_id = str(
+        (query.get("presentation_client_id") or [""])[0]
+    ).strip()
+    presentation_id = normalize_client_instance_id(raw_presentation_id)
+    if raw_presentation_id and presentation_id is None:
+        raise ValueError("invalid_native_presentation_client_id")
+    return source, client_id[:128], presentation_id
 
 
 def _namespace(ns: object) -> SocketIONamespace:
@@ -219,7 +226,12 @@ class UIIPCNamespace(socketio.AsyncNamespace):
         sid_text = _sid(sid)
         ns = _namespace(self)
         room = "sidebar_ipc" if ns.namespace == "/sidebar_ipc" else "ui_ipc"
-        native_source, native_client_id = _native_client_identity(environ)
+        try:
+            native_source, native_client_id, native_presentation_id = (
+                _native_client_identity(environ)
+            )
+        except ValueError as exc:
+            raise ConnectionRefusedError(str(exc)) from exc
         if room == "ui_ipc":
             try:
                 require_msgpack_v1_auth(auth)
@@ -248,11 +260,17 @@ class UIIPCNamespace(socketio.AsyncNamespace):
             )
         if room == "ui_ipc" and native_source:
             await ns.enter_room(sid_text, "ui_ipc_native")
+            if native_presentation_id is not None:
+                await ns.enter_room(
+                    sid_text,
+                    client_presentation_room(native_presentation_id),
+                )
             await ns.save_session(
                 sid_text,
                 {
                     "source": native_source,
                     "clientId": native_client_id,
+                    "presentationClientId": native_presentation_id,
                 },
             )
             try:

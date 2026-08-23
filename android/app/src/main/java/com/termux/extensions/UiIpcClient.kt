@@ -17,8 +17,9 @@ import java.nio.charset.StandardCharsets
  */
 class UiIpcClient(
     private val clientId: String = "android-native",
+    private val presentationClientId: String? = null,
     private var imeContextSwitchingEnabled: Boolean = true,
-    private val onImeContextChanged: ((Boolean) -> Unit)? = null,
+    private val onImeContextChanged: ((Boolean, String?) -> Unit)? = null,
     private val onConnectionStateChanged: ((Boolean) -> Unit)? = null,
 ) {
     companion object {
@@ -41,6 +42,7 @@ class UiIpcClient(
     private var consoleTailLines = DEFAULT_CONSOLE_TAIL_LINES
     private var activeImeOwner: String? = null
     private var imeContextActive = false
+    private var imeContextOwner: String? = null
     private val reconnectHandler = Handler(Looper.getMainLooper())
     private val reconnectUiIpc = Runnable {
         uiIpcSocket?.takeUnless { it.connected() }?.connect()
@@ -61,8 +63,14 @@ class UiIpcClient(
                 path = "/ui_ipc_ws/socket.io"
                 transports = arrayOf("websocket")
                 upgrade = false
-                query = "app_id=code_te2&source=android_native&client_id=" +
-                    URLEncoder.encode(clientId, StandardCharsets.UTF_8.name())
+                query = buildString {
+                    append("app_id=code_te2&source=android_native&client_id=")
+                    append(URLEncoder.encode(clientId, StandardCharsets.UTF_8.name()))
+                    presentationClientId?.takeIf { it.isNotBlank() }?.let {
+                        append("&presentation_client_id=")
+                        append(URLEncoder.encode(it, StandardCharsets.UTF_8.name()))
+                    }
+                }
                 auth = mapOf("rpcCodec" to UI_IPC_RPC_CODEC)
                 reconnection = true
                 reconnectionDelay = 2000
@@ -323,9 +331,11 @@ class UiIpcClient(
     }
 
     private fun setImeContextActive(active: Boolean) {
-        if (imeContextActive == active) return
+        val owner = activeImeOwner.takeIf { active }
+        if (imeContextActive == active && imeContextOwner == owner) return
         imeContextActive = active
-        onImeContextChanged?.invoke(active)
+        imeContextOwner = owner
+        onImeContextChanged?.invoke(active, owner)
     }
 
     fun disconnect() {

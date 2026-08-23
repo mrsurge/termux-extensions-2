@@ -210,6 +210,10 @@ class UiIpcMessagePackTests(unittest.IsolatedAsyncioTestCase):
         async def save_session(sid: str, session: dict[str, object]) -> None:
             self.assertEqual("native-sid", sid)
             self.assertEqual("android_native", session["source"])
+            self.assertEqual(
+                "client_aaaaaaaaaaaa",
+                session["presentationClientId"],
+            )
 
         async def emit(
             event: str,
@@ -236,13 +240,18 @@ class UiIpcMessagePackTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "QUERY_STRING": (
                         "app_id=code_te2&source=android_native&client_id=android%3Agecko"
+                        "&presentation_client_id=client_aaaaaaaaaaaa"
                     )
                 },
                 {RPC_CODEC_AUTH_FIELD: RPC_CODEC_MSGPACK_V1},
             )
 
         self.assertEqual(
-            [("native-sid", "ui_ipc"), ("native-sid", "ui_ipc_native")],
+            [
+                ("native-sid", "ui_ipc"),
+                ("native-sid", "ui_ipc_native"),
+                ("native-sid", "code_te2:client:client_aaaaaaaaaaaa"),
+            ],
             entered,
         )
         decoded = [
@@ -289,6 +298,27 @@ class UiIpcMessagePackTests(unittest.IsolatedAsyncioTestCase):
             [("native-sid", "ui_ipc"), ("native-sid", "ui_ipc_native")],
             entered,
         )
+
+    async def test_native_ui_connect_rejects_invalid_presentation_client_id(self) -> None:
+        namespace = UIIPCNamespace("/ui_ipc")
+        namespace.enter_room = AsyncMock()  # type: ignore[method-assign]
+
+        with self.assertRaisesRegex(
+            ConnectionRefusedError,
+            "invalid_native_presentation_client_id",
+        ):
+            await namespace.on_connect(
+                "native-sid",
+                {
+                    "QUERY_STRING": (
+                        "app_id=code_te2&source=android_native&client_id=android%3Agecko"
+                        "&presentation_client_id=not-a-client"
+                    )
+                },
+                {RPC_CODEC_AUTH_FIELD: RPC_CODEC_MSGPACK_V1},
+            )
+
+        namespace.enter_room.assert_not_awaited()  # type: ignore[attr-defined]
 
     async def test_native_connect_snapshot_is_serialized_with_route_publications(self) -> None:
         first_list_started = asyncio.Event()

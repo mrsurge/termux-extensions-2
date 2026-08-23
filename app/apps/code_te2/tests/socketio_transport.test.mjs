@@ -942,3 +942,92 @@ test('Android Gecko keyboard recovery synchronously restores focus', async () =>
     stableHost,
   );
 });
+
+test('Android Cefrium IME dismissal transfers the active editor to the toolbar', async () => {
+  const {
+    bindCefriumImeDismissal,
+    CEFRIUM_IME_DISMISSED_EVENT,
+    isCefriumAndroidRuntime,
+    releaseCefriumEditorFocus,
+  } = await importTypeScript(
+    'monaco_editor/editor_cefrium_ime_dismissal_utils.ts',
+  );
+  const calls = [];
+  const input = {};
+  const toolbarButton = {
+    tagName: 'BUTTON',
+    focus: () => {
+      calls.push(['toolbar-focus']);
+      doc.activeElement = toolbarButton;
+    },
+  };
+  const doc = {
+    activeElement: input,
+    getElementById: (id) => id === 'menu-file-btn' ? toolbarButton : null,
+  };
+  const editor = {
+    hasTextFocus: () => true,
+    getDomNode: () => ({
+      closest: (selector) => selector === '#editor-frame' ? {} : null,
+      querySelector: () => input,
+    }),
+  };
+
+  assert.equal(releaseCefriumEditorFocus(editor, doc), true);
+  assert.deepEqual(calls, [['toolbar-focus']]);
+  assert.equal(doc.activeElement, toolbarButton);
+  assert.equal(
+    isCefriumAndroidRuntime('?gv_native=1&te2_renderer=cefrium'),
+    true,
+  );
+  assert.equal(
+    isCefriumAndroidRuntime('?gv_native=1&te2_renderer=gecko'),
+    false,
+  );
+
+  calls.length = 0;
+  doc.activeElement = input;
+  let focusAttempts = 0;
+  toolbarButton.focus = () => {
+    focusAttempts += 1;
+    calls.push(['toolbar-focus', focusAttempts]);
+    if (focusAttempts > 1) doc.activeElement = toolbarButton;
+  };
+  const listeners = new Map();
+  const frames = new Map();
+  const cancelledFrames = [];
+  let nextFrameId = 1;
+  const win = {
+    location: { search: '?gv_native=1&te2_renderer=cefrium' },
+    document: doc,
+    addEventListener: (eventName, listener) => listeners.set(eventName, listener),
+    removeEventListener: (eventName, listener) => {
+      if (listeners.get(eventName) === listener) listeners.delete(eventName);
+    },
+    requestAnimationFrame: (callback) => {
+      const frameId = nextFrameId++;
+      frames.set(frameId, callback);
+      return frameId;
+    },
+    cancelAnimationFrame: (frameId) => {
+      cancelledFrames.push(frameId);
+      frames.delete(frameId);
+    },
+  };
+  const binding = bindCefriumImeDismissal(editor, win);
+  assert.ok(binding);
+  listeners.get(CEFRIUM_IME_DISMISSED_EVENT)();
+  assert.equal(focusAttempts, 1);
+  assert.equal(doc.activeElement, input);
+  assert.equal(frames.size, 1);
+  frames.get(1)();
+  assert.equal(focusAttempts, 2);
+  assert.equal(doc.activeElement, toolbarButton);
+
+  doc.activeElement = input;
+  listeners.get(CEFRIUM_IME_DISMISSED_EVENT)();
+  assert.equal(frames.size, 2);
+  binding.dispose();
+  assert.deepEqual(cancelledFrames, [2]);
+  assert.equal(listeners.has(CEFRIUM_IME_DISMISSED_EVENT), false);
+});

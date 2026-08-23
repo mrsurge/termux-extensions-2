@@ -7,12 +7,12 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
 import android.view.View
-import android.view.inputmethod.InputMethodManager
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
@@ -25,6 +25,9 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.ui.platform.ComposeView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsAnimationCompat
+import androidx.core.view.WindowInsetsCompat
 import com.cefrium.CefriumBrowser
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -32,6 +35,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.net.URI
+import java.util.IdentityHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -64,6 +68,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var toolsStateStore: AndroidToolsStateStore
 
     private val editorInputFilter = EditorInputFilter()
+    private val imeDismissalReducer = CefriumImeDismissalReducer()
     private val consoleState = ComposeConsoleState()
     private val uiHandler = Handler(Looper.getMainLooper())
     private val appHealthProbeInFlight = AtomicBoolean(false)
@@ -100,6 +105,7 @@ class MainActivity : AppCompatActivity() {
     private var mainBrowserReady = false
     private var androidDiagnosticsLoadedForTools = false
     private var activityResumed = false
+    private var activeImeOwner: String? = null
     private var appHealthFailureCount = 0
     private val appHealthCheckRunnable = Runnable { runAppHealthProbe() }
     private var navigationGeneration = 0L
@@ -168,16 +174,10 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread { completePendingColdRestore() }
         }
 
-        override fun onImeContextChanged(active: Boolean) {
+        override fun onImeContextChanged(active: Boolean, owner: String?) {
             runOnUiThread {
+                activeImeOwner = owner.takeIf { active }
                 editorInputFilter.isActive = active
-                if (!::browser.isInitialized) return@runOnUiThread
-                val target = currentFocus ?: browser.surfaceContainer
-                val inputMethod =
-                    getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
-                if (active) target.requestFocus()
-                inputMethod?.restartInput(target)
-                if (active) inputMethod?.showSoftInput(target, 0)
             }
         }
 
@@ -443,6 +443,7 @@ class MainActivity : AppCompatActivity() {
         )
         browser.surfaceContainer.isFocusable = true
         browser.surfaceContainer.isFocusableInTouchMode = true
+        installImeInsetsObserver()
 
         browser.setOnUrlChangedListener { url ->
             runOnUiThread { handleUrlChanged(url) }
@@ -450,6 +451,9 @@ class MainActivity : AppCompatActivity() {
         browser.setOnLoadingStateChangedListener { isLoading, canGoBack, _ ->
             runOnUiThread {
                 this.canNavigateBack = canGoBack
+                if (isLoading) {
+                    mainBrowserReady = false
+                }
                 if (!isLoading) {
                     selectionIntegration.installWhenReady()
                     browser.evaluateJavaScript(CefriumPagePolicy.installScript())
@@ -480,6 +484,101 @@ class MainActivity : AppCompatActivity() {
         browser.surfaceContainer.post { selectionIntegration.installWhenReady() }
         configureDevToolsInspector()
         restoreToolsSurfaceState()
+    }
+
+    private fun installImeInsetsObserver() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        val decorView = window.decorView
+        var latestImeInsets = ViewCompat.getRootWindowInsets(decorView)
+        val imeAnimationStartVisibility =
+            IdentityHashMap<WindowInsetsAnimationCompat, Boolean>()
+
+        fun imeState(imeVisible: Boolean): CefriumImeVisibilityState =
+            CefriumImeVisibilityState(
+                imeVisible = imeVisible,
+                editorOwnsIme = activeImeOwner == "editor",
+                activityResumed = activityResumed,
+                windowFocused = hasWindowFocus(),
+                appPageReady = inAppShell,
+                nativeOverlayHidden = consoleOverlay.visibility != View.VISIBLE,
+            )
+
+        fun dispatchImeDismissalIf(requested: Boolean) {
+            if (requested && ::browser.isInitialized) {
+                browser.evaluateJavaScript(CefriumPagePolicy.imeDismissalScript())
+            }
+        }
+
+        fun applyImeSnapshot(insets: WindowInsetsCompat) {
+            dispatchImeDismissalIf(
+                imeDismissalReducer.update(
+                    imeState(insets.isVisible(WindowInsetsCompat.Type.ime())),
+                ),
+            )
+        }
+
+        latestImeInsets?.let(::applyImeSnapshot)
+        ViewCompat.setWindowInsetsAnimationCallback(
+            decorView,
+            object : WindowInsetsAnimationCompat.Callback(
+                WindowInsetsAnimationCompat.Callback.DISPATCH_MODE_CONTINUE_ON_SUBTREE,
+            ) {
+                override fun onPrepare(animation: WindowInsetsAnimationCompat) {
+                    if (animation.typeMask and WindowInsetsCompat.Type.ime() == 0) return
+                    val startInsets = ViewCompat.getRootWindowInsets(decorView)
+                        ?: latestImeInsets
+                        ?: return
+                    imeAnimationStartVisibility[animation] =
+                        startInsets.isVisible(WindowInsetsCompat.Type.ime())
+                }
+
+                override fun onStart(
+                    animation: WindowInsetsAnimationCompat,
+                    bounds: WindowInsetsAnimationCompat.BoundsCompat,
+                ): WindowInsetsAnimationCompat.BoundsCompat {
+                    if (animation.typeMask and WindowInsetsCompat.Type.ime() == 0) {
+                        return bounds
+                    }
+                    val startedVisible = imeAnimationStartVisibility.remove(animation)
+                        ?: return bounds
+                    val endInsets = ViewCompat.getRootWindowInsets(decorView)
+                        ?: return bounds
+                    val endsVisible = endInsets.isVisible(WindowInsetsCompat.Type.ime())
+                    if (startedVisible && !endsVisible) {
+                        dispatchImeDismissalIf(
+                            imeDismissalReducer.beginHideAnimation(
+                                imeState(imeVisible = true),
+                            ),
+                        )
+                    }
+                    return bounds
+                }
+
+                override fun onProgress(
+                    insets: WindowInsetsCompat,
+                    runningAnimations: MutableList<WindowInsetsAnimationCompat>,
+                ): WindowInsetsCompat {
+                    if (
+                        runningAnimations.any {
+                            it.typeMask and WindowInsetsCompat.Type.ime() != 0
+                        }
+                    ) {
+                        latestImeInsets = insets
+                    }
+                    return insets
+                }
+
+                override fun onEnd(animation: WindowInsetsAnimationCompat) {
+                    if (animation.typeMask and WindowInsetsCompat.Type.ime() == 0) return
+                    imeAnimationStartVisibility.remove(animation)
+                    val finalInsets = ViewCompat.getRootWindowInsets(decorView)
+                        ?: latestImeInsets
+                        ?: return
+                    latestImeInsets = finalInsets
+                    applyImeSnapshot(finalInsets)
+                }
+            },
+        )
     }
 
     private fun restoreOrLoadLauncher() {
@@ -524,10 +623,14 @@ class MainActivity : AppCompatActivity() {
         }
         if (!isRelayOrigin(url)) return
 
-        currentPath = buildString {
+        val nextPath = buildString {
             append(parsed.rawPath?.takeIf { it.isNotBlank() } ?: "/")
             parsed.rawQuery?.let { append('?').append(it) }
         }
+        if (nextPath != currentPath) {
+            imeDismissalReducer.reset()
+        }
+        currentPath = nextPath
         if (pendingColdRestorePath == null || isAppPath(currentPath)) {
             prefs().edit().putString(KEY_LAST_PATH, currentPath).apply()
         }
@@ -1589,6 +1692,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        imeDismissalReducer.reset()
         activityResumed = true
         if (::browser.isInitialized) browser.onResume()
         if (inAppShell) {
@@ -1605,6 +1709,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         activityResumed = false
+        imeDismissalReducer.reset()
         uiHandler.removeCallbacks(appHealthCheckRunnable)
         inspectorBrowser?.onPause()
         processesBrowser?.onPause()
@@ -1631,6 +1736,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        ViewCompat.setWindowInsetsAnimationCallback(window.decorView, null)
+        imeDismissalReducer.reset()
         uiHandler.removeCallbacks(appHealthCheckRunnable)
         clientRuntimeService?.clearLocalRelayRoutes()
         if (isFinishing && !isChangingConfigurations) {

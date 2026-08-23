@@ -14,6 +14,7 @@ import {
   type SecondaryEditorHostState,
   type SecondaryEditorMode,
 } from './secondary-editor-state.ts';
+import { renderDiagnosticIssuePills } from './ui/diagnostic-issue-pills.ts';
 
 type SecondaryMode = SecondaryEditorMode;
 
@@ -125,6 +126,36 @@ const STYLE = `
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.te2-secondary-editor-issues {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 4px;
+  min-width: 0 !important;
+  padding: 0 2px !important;
+  border: 0 !important;
+  background: transparent !important;
+  cursor: pointer;
+}
+.te2-secondary-editor-issues:disabled { cursor: default; }
+.te2-secondary-editor-issues .fe-issues-dot {
+  display: inline-flex;
+  min-width: 16px;
+  padding: 2px 6px;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .06);
+  font-weight: 700;
+  font-size: 11px;
+  line-height: 1;
+}
+.te2-secondary-editor-issues .fe-issues-dot.error {
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, .45);
+}
+.te2-secondary-editor-issues .fe-issues-dot.warning {
+  color: #eab308;
+  border-color: rgba(234, 179, 8, .40);
+}
 .te2-secondary-editor-menu {
   position: absolute;
   top: 35px;
@@ -184,6 +215,7 @@ const STYLE = `
 .te2-secondary-editor[data-mode='collapsed'] .te2-secondary-editor-body,
 .te2-secondary-editor[data-mode='collapsed'] .te2-secondary-editor-menu-button,
 .te2-secondary-editor[data-mode='collapsed'] .te2-secondary-editor-title,
+.te2-secondary-editor[data-mode='collapsed'] .te2-secondary-editor-issues,
 .te2-secondary-editor[data-mode='collapsed'] .te2-secondary-editor-collapse,
 .te2-secondary-editor[data-mode='collapsed'] .te2-secondary-editor-detach {
   display: none;
@@ -334,6 +366,7 @@ export async function bootSecondaryEditorRuntime(
     <header class="te2-secondary-editor-header">
       <button class="te2-secondary-editor-menu-button" type="button" title="File actions" aria-label="File actions">☰</button>
       <span class="te2-secondary-editor-title" title="No file open">No file open</span>
+      <button class="te2-secondary-editor-issues" type="button" title="Next issue" aria-label="Next issue" disabled></button>
       <button class="te2-secondary-editor-expand" type="button" title="Expand second window" aria-label="Expand second window">◧</button>
       <button class="te2-secondary-editor-collapse" type="button" title="Collapse second window" aria-label="Collapse second window">▯</button>
       <button class="te2-secondary-editor-detach" type="button" title="Detach second window" aria-label="Detach second window">↗</button>
@@ -356,11 +389,13 @@ export async function bootSecondaryEditorRuntime(
   const status = root.querySelector<HTMLElement>('.te2-secondary-editor-status');
   const menu = root.querySelector<HTMLElement>('.te2-secondary-editor-menu');
   const menuButton = root.querySelector<HTMLButtonElement>('.te2-secondary-editor-menu-button');
-  if (!editorFrame || !title || !status || !menu || !menuButton) {
+  const issuesButton = root.querySelector<HTMLButtonElement>('.te2-secondary-editor-issues');
+  if (!editorFrame || !title || !status || !menu || !menuButton || !issuesButton) {
     throw new Error('Second editor shell did not initialize');
   }
   const titleEl = title;
   const statusEl = status;
+  const issuesButtonEl = issuesButton;
 
   let projectPath = '';
   let currentPath = '';
@@ -374,6 +409,10 @@ export async function bootSecondaryEditorRuntime(
   }
 
   function setCurrentPath(path: string): void {
+    if (currentPath !== path) {
+      renderDiagnosticIssuePills(issuesButtonEl, {});
+      issuesButtonEl.disabled = true;
+    }
     currentPath = path;
     const label = path ? basename(path) : 'No file open';
     titleEl.textContent = label;
@@ -520,8 +559,10 @@ export async function bootSecondaryEditorRuntime(
     } else if (method === UI_IPC_RPC_NOTIFICATIONS.editorSave) {
       void save();
     } else if (method === UI_IPC_RPC_NOTIFICATIONS.hostActiveFileChanged) {
-      const foreground = asRecord(params.clientForeground);
-      setCurrentPath(stringValue(foreground.path) || stringValue(params.path));
+      setCurrentPath(secondaryEditorActivePath({
+        clientForeground: asRecord(params.clientForeground),
+        currentPath: stringValue(params.path),
+      }));
     } else if (method === UI_IPC_RPC_NOTIFICATIONS.projectSwitching) {
       setStatus('Switching project…');
     } else if (method === UI_IPC_RPC_NOTIFICATIONS.projectSwitched) {
@@ -531,6 +572,9 @@ export async function bootSecondaryEditorRuntime(
     } else if (method === UI_IPC_RPC_NOTIFICATIONS.editorNotify) {
       const message = stringValue(params.message) || stringValue(params.text);
       if (message) host.toast(message);
+    } else if (method === UI_IPC_RPC_NOTIFICATIONS.editorDiagnosticsCounts) {
+      const counts = renderDiagnosticIssuePills(issuesButtonEl, params);
+      issuesButtonEl.disabled = counts.total === 0;
     }
   }
 
@@ -565,6 +609,16 @@ export async function bootSecondaryEditorRuntime(
   menuButton.addEventListener('click', (event) => {
     event.stopPropagation();
     menu.hidden = !menu.hidden;
+  });
+  issuesButtonEl.addEventListener('click', () => {
+    if (issuesButtonEl.disabled) return;
+    void connection.request(
+      UI_IPC_RPC_METHODS.hostEditorIssuesCommand,
+      { action: 'next' },
+      8_000,
+    ).catch((error) => {
+      console.warn('[second_editor] issue navigation failed', error);
+    });
   });
   document.addEventListener('click', (event) => {
     if (!menu.hidden && event.target instanceof Node && !menu.contains(event.target)) {
