@@ -41,7 +41,8 @@ const INLINE_EDITOR_HOST_STYLE = `
 #editor-frame[data-te2-native-renderer='cefrium'] .monaco-editor .find-widget textarea.input {
   font-size: 16px !important;
 }
-#editor-frame .te2-mobile-special-key.te2-mobile-special-key-overlay-trigger {
+#editor-frame .te2-mobile-special-key.te2-mobile-special-key-overlay-trigger,
+.fe-editor-container > .te2-mobile-second-window-trigger {
   position: absolute;
   left: 14px;
   bottom: 14px;
@@ -60,8 +61,13 @@ const INLINE_EDITOR_HOST_STYLE = `
 #editor-frame .te2-mobile-special-key.te2-mobile-special-key-save-trigger {
   left: 66px;
 }
+.fe-editor-container > .te2-mobile-second-window-trigger {
+  left: 118px;
+}
 #editor-frame .te2-mobile-special-key.te2-mobile-special-key-save-trigger[hidden],
-.fe-root:not(.layout-mobile) #editor-frame .te2-mobile-special-key-overlay-trigger {
+.fe-editor-container > .te2-mobile-second-window-trigger[hidden],
+.fe-root:not(.layout-mobile) #editor-frame .te2-mobile-special-key-overlay-trigger,
+.fe-root:not(.layout-mobile) .fe-editor-container > .te2-mobile-second-window-trigger {
   display: none;
 }
 .fe-root.layout-mobile > .te2-mobile-special-key-panel {

@@ -62,3 +62,11 @@ export function mobileSecondaryTabVisible(options: {
     && options.populated
     && !options.dismissed;
 }
+
+export function mobileSecondaryShortcutVisible(options: {
+  supported: boolean;
+  mobileLayout: boolean;
+  populated: boolean;
+}): boolean {
+  return options.supported && options.mobileLayout && options.populated;
+}

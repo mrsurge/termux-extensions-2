@@ -5,6 +5,7 @@ import {
   acceptDocumentProjection,
   resetDocumentRevisionRuntime,
 } from '../../monaco_editor/editor_document_revision_runtime.ts';
+import { renderDiagnosticIssuePills } from './ui/diagnostic-issue-pills.ts';
 
 export interface CacheIndicatorPayload {
   state?: unknown;
@@ -79,11 +80,6 @@ function boolField(source: Record<string, unknown> | null | undefined, key: stri
 function shaField(source: Record<string, unknown>, key: string): string | null {
   const value = source[key];
   return typeof value === 'string' && value.length === 64 ? value : null;
-}
-
-function numberOrZero(value: unknown): number {
-  const n = Number(value || 0);
-  return Number.isFinite(n) ? n : 0;
 }
 
 function timeoutMs(value: unknown, fallback: number): number {
@@ -241,28 +237,8 @@ export function createHostEditorEventsRuntime(deps: HostEditorEventsRuntimeDeps)
 
   function applyDiagnosticsCounts(payload: unknown): void {
     try {
-      const p = isRecord(payload) ? payload : {};
-      const errors = numberOrZero(p.errors);
-      const warnings = numberOrZero(p.warnings);
-      const hints = numberOrZero(p.hints);
-      const total = errors + warnings + hints;
-      const el = deps.issuesBadgesEl;
-      el.innerHTML = '';
-      if (errors > 0) {
-        const d = document.createElement('span');
-        d.className = 'fe-issues-dot error';
-        d.textContent = String(errors);
-        d.title = `${errors} error${errors !== 1 ? 's' : ''}`;
-        el.appendChild(d);
-      }
-      if (warnings > 0) {
-        const d = document.createElement('span');
-        d.className = 'fe-issues-dot warning';
-        d.textContent = String(warnings);
-        d.title = `${warnings} warning${warnings !== 1 ? 's' : ''}`;
-        el.appendChild(d);
-      }
-      deps.setIssuesButtonsEnabled(total !== 0);
+      const counts = renderDiagnosticIssuePills(deps.issuesBadgesEl, payload);
+      deps.setIssuesButtonsEnabled(counts.total !== 0);
     } catch {}
   }
 

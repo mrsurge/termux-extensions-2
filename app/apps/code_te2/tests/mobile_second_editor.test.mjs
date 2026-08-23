@@ -40,6 +40,23 @@ async function importStateRuntime() {
   ).toString("base64")}`);
 }
 
+async function importIssueRuntime() {
+  const result = await build({
+    entryPoints: [path.join(
+      appRoot,
+      "main_page/frontend/ui/diagnostic-issue-pills.ts",
+    )],
+    bundle: true,
+    format: "esm",
+    platform: "node",
+    target: "es2022",
+    write: false,
+  });
+  return import(`data:text/javascript;base64,${Buffer.from(
+    result.outputFiles[0].text,
+  ).toString("base64")}`);
+}
+
 test("mobile second editor follows client capability rather than viewport width", async () => {
   const { supportsMobileSecondEditor } = await importRuntime();
   const mobileNavigator = {
@@ -101,6 +118,43 @@ test("mobile Second Window tab requires populated, non-dismissed state", async (
   assert.equal(mobileSecondaryTabVisible({ ...base, dismissed: true }), false);
   assert.equal(mobileSecondaryTabVisible({ ...base, mobileLayout: false }), false);
   assert.equal(mobileSecondaryTabVisible({ ...base, supported: false }), false);
+});
+
+test("mobile Second Window shortcut survives local tab dismissal", async () => {
+  const { mobileSecondaryShortcutVisible } = await importStateRuntime();
+
+  assert.equal(mobileSecondaryShortcutVisible({
+    supported: true,
+    mobileLayout: true,
+    populated: true,
+  }), true);
+  assert.equal(mobileSecondaryShortcutVisible({
+    supported: true,
+    mobileLayout: true,
+    populated: false,
+  }), false);
+  assert.equal(mobileSecondaryShortcutVisible({
+    supported: true,
+    mobileLayout: false,
+    populated: true,
+  }), false);
+});
+
+test("diagnostic issue pills normalize the shared count projection", async () => {
+  const { diagnosticIssueCounts } = await importIssueRuntime();
+
+  assert.deepEqual(diagnosticIssueCounts({ errors: 2, warnings: 3, hints: 4 }), {
+    errors: 2,
+    warnings: 3,
+    hints: 4,
+    total: 9,
+  });
+  assert.deepEqual(diagnosticIssueCounts({ errors: -1, warnings: NaN }), {
+    errors: 0,
+    warnings: 0,
+    hints: 0,
+    total: 0,
+  });
 });
 
 test("mobile collapse and close preserve the retained renderer geometry", async () => {

@@ -2,6 +2,7 @@ import { bindSaveKeyCommand } from './editor_rpc_save_key_utils.ts';
 import { bindFocusRelay } from './editor_rpc_focus_relay_utils.ts';
 import { bindVendoredCtrlHelperFocus } from './editor_mobile_ctrl_helper_utils.ts';
 import { bindAndroidKeyboardRecovery } from './editor_android_keyboard_recovery_utils.ts';
+import { bindCefriumImeDismissal } from './editor_cefrium_ime_dismissal_utils.ts';
 import { bindMobileEditorSpecialKeys } from './editor_mobile_special_keys_utils.ts';
 import {
   EDITOR_RPC_METHODS,
@@ -58,6 +59,7 @@ export function createEditorRpcHostActionRuntime(
   let focusDisposable: DisposableLike | null = null;
   let mobileCtrlDisposable: DisposableLike | null = null;
   let androidKeyboardRecoveryDisposable: DisposableLike | null = null;
+  let cefriumImeDismissalDisposable: DisposableLike | null = null;
   let mobileSpecialKeysDisposable: DisposableLike | null = null;
 
   function resolveActiveEditor(): EditorLike | null {
@@ -178,6 +180,22 @@ export function createEditorRpcHostActionRuntime(
     }
   }
 
+  function bindNativeImeDismissal(): void {
+    try {
+      cefriumImeDismissalDisposable?.dispose?.();
+      cefriumImeDismissalDisposable = null;
+
+      const editor = resolveActiveEditor();
+      if (!editor) return;
+      cefriumImeDismissalDisposable = bindCefriumImeDismissal(
+        editor,
+        deps.getWindow(),
+      );
+    } catch (error) {
+      console.warn('[cefrium_ime_dismissal] bind failed', error);
+    }
+  }
+
   function bindMobileSpecialKeys(): void {
     try {
       mobileSpecialKeysDisposable?.dispose?.();
@@ -202,6 +220,7 @@ export function createEditorRpcHostActionRuntime(
     bindFocus();
     bindMobileCtrlHelper();
     bindKeyboardRecovery();
+    bindNativeImeDismissal();
     bindMobileSpecialKeys();
   }
 

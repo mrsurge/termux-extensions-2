@@ -5,13 +5,13 @@
     "file_editor_cm6"
   ],
   "icon_src": "/apps/code_te2/static/icons/CODE_TE2.png",
-  "version": "0.2.333",
+  "version": "0.2.336",
   "description": "The Monaco based code editor for TE2",
   "author": "mrSurge",
   "entrypoints": {
     "backend_blueprint": "main.py",
     "frontend_template": "template.html",
-    "frontend_script": "static/dist/host.js?v=0.2.333"
+    "frontend_script": "static/dist/host.js?v=0.2.336"
   },
   "shellspec": {
     "app_worker": "shellspec/app_worker.yaml#app-worker"

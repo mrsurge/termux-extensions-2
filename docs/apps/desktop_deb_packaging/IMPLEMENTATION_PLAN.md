@@ -1025,7 +1025,14 @@ instead of occupancy-driven. The correction keeps null authoritative, projects
 exact secondary occupancy, adds real outer-drawer collapse, and assigns one
 stable repository-owned debug/staging signing identity. Code TE2 rebuild,
 version `0.2.333` asset publication, and all debug/staging APK assemblies have
-passed; the GeckoView/Cefrium live acceptance matrix remains.
+passed. The follow-up source/build slice is synchronized and published as
+`0.2.334`; the GeckoView/Cefrium interaction acceptance matrix remains.
+
+The follow-up `0.2.334` slice keeps an unpopulated auxiliary foreground fully
+absent, adds the main editor's exact-client error/warning pills to the portable
+reduced header, and exposes a translucent mobile shortcut only while a second
+foreground exists. The shortcut reopens a dismissed or collapsed drawer; it
+does not invent, select, or force an auxiliary file.
 
 The user-facing feature remains named **Open in a Second Window**. On an
 eligible mobile client, the second editor is presented in the existing bottom
@@ -1121,6 +1128,14 @@ inner tab bar or pretend to support native detach. Collapse preserves the warm
 renderer and populated drawer tab. Close returns the drawer to a locally
 dismissed, explicitly reopenable state while retaining the canonical auxiliary
 foreground.
+
+The portable header also renders error/warning pills from the auxiliary
+client's existing `ui.editor.diagnostics.counts` projection. Activating those
+pills sends the ordinary Next Issue command through that renderer's own UI IPC
+connection, preserving exact-client navigation. On mobile, a translucent
+Second Window shortcut shares the editor overlay affordance only while the
+auxiliary foreground is populated. It remains available after local drawer
+dismissal and only restores presentation state.
 
 The existing Problems drawer tab, header, container, toggle-menu entry, and
 duplicate `createProblemsPanel` instance are removed. The Explorer diagnostics
@@ -1249,31 +1264,41 @@ network polling.
 #### 6.9.2 Event-driven transition contract
 
 On Android 11/API 30 and newer, Cefrium observes the root window's
-`WindowInsets.Type.ime()` visibility. A small testable state reducer emits one
-dismissal only when all of these are true:
+`WindowInsets.Type.ime()` animation lifecycle. `onPrepare` captures the current
+visibility before layout; `onStart` reads the applied end state before the
+first animated frame. A small testable state reducer emits one dismissal only
+when all of these are true:
 
-- IME visibility made a confirmed `visible -> hidden` transition;
+- the IME animation is a confirmed `visible -> hidden` transition, rather than
+  a show or visible-to-visible keyboard resize;
 - the current UI IPC IME owner is Monaco/editor input;
-- the Activity and app page still have focus and are not navigating,
-  backgrounding, or being destroyed; and
-- the transition was not caused by a known native programmatic focus/keyboard
-  transaction.
+- the Activity/window and app page are ready and focused; and
+- native Tools chrome is hidden.
 
 Initial hidden state does not emit. Repeated hidden insets do not emit. Older
 Android versions retain current behavior unless an equivalent compatibility
 signal is separately proven; this phase does not add a resize heuristic.
+`onEnd` reconciles final visibility, including an animation Android cancels
+before `onStart`, without emitting twice in the same visible epoch.
 
 For a valid dismissal, Cefrium dispatches one exact-page event through its
 existing browser JavaScript evaluation surface. The Code TE2 editor listener
-uses Monaco's public focus API and its active Android input textarea to blur the
-editor. If Cefrium still requires an explicit focus destination, use a bounded
-non-editable focus sink owned by the editor host rather than focusing an
-arbitrary page control. The resulting normal frontend blur projection updates
-UI IPC/input-filter state; native code does not forge backend editor state.
+transfers focus from Monaco's exact active Android textarea to the real File
+toolbar button with `preventScroll`. It reconciles once on the next animation
+frame only if Chromium retained or reclaimed the textarea during IME teardown.
+This is intentionally the opposite of GeckoView's keyboard recovery control:
+Cefrium removes DOM text focus early enough that a subsequent scroll cannot
+resurrect the already-dismissed IME.
 
-The next direct user tap in Monaco follows the existing focus path and is
-allowed to summon the keyboard normally. No sticky suppression flag survives
-the dismissal.
+The normal frontend blur projection updates exact-client UI IPC/input-filter
+state. Cefrium consumes that projection as state only and never calls
+`restartInput`, `showSoftInput`, or another native focus transaction. Native
+code does not forge backend editor state.
+
+The next direct user tap in Monaco follows the existing Chromium focus path and
+is allowed to summon the keyboard normally. No sticky suppression flag survives
+the dismissal. There is no synthetic click, native focus sink/query, timer
+loop, polling loop, or unverified fallback path.
 
 #### 6.9.3 Scope boundaries
 
@@ -1286,13 +1311,20 @@ the dismissal.
 - Keep the existing Cefrium `preventScroll` textarea focus policy and 16 px
   Find/Replace focus-zoom correction intact.
 
+The `preventScroll` policy must cover the actual realm that owns Monaco.
+Cefrium installs it in the top-level page and in every existing or future
+same-origin iframe realm; cross-origin frames are deliberately inaccessible.
+This is required for the retained mobile second editor, whose textarea
+prototype is distinct from the primary page's prototype.
+
 #### 6.9.4 Implementation and acceptance
 
 1. Add a unit-tested Cefrium IME visibility/focus transition reducer.
-2. Wire API-30 root-insets observation to the reducer and Activity/page
-   lifecycle fences.
+2. Wire API-30 root-insets animation start/end observation to the reducer and
+   Activity/page lifecycle fences.
 3. Add one idempotent editor-side native-dismissal listener with explicit
-   disposal across editor/model reconstruction.
+   disposal and a single next-frame focus reconciliation across editor/model
+   reconstruction.
 4. Validate on a connected Cefrium device: focus Monaco, type, dismiss the IME,
    scroll without keyboard resurrection, then tap Monaco and type again.
 5. Validate that navigation, background/foreground, drawer interaction,

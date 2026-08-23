@@ -63,6 +63,9 @@ internal data class AndroidClientRuntimeSnapshot(
 internal interface AndroidClientRuntimeObserver {
     fun onRuntimeStateChanged(snapshot: AndroidClientRuntimeSnapshot) = Unit
     fun onImeContextChanged(active: Boolean) = Unit
+    fun onImeContextChanged(active: Boolean, owner: String?) {
+        onImeContextChanged(active)
+    }
     fun onConsoleEvent(eventName: String, data: JSONObject) = Unit
 
     fun onNativeConsoleCommand(
@@ -361,10 +364,13 @@ class PersistentNetworkService : Service() {
     private fun connectUiIpc() {
         val client = UiIpcClient(
             clientId = androidNativeConsoleWorkerId(applicationContext, rendererName()),
+            presentationClientId = androidClientInstanceId(applicationContext),
             imeContextSwitchingEnabled = settings.imeContextSwitchingEnabled,
-            onImeContextChanged = { active ->
+            onImeContextChanged = { active, owner ->
                 handler.post {
-                    observers.forEach { observer -> observer.onImeContextChanged(active) }
+                    observers.forEach { observer ->
+                        observer.onImeContextChanged(active, owner)
+                    }
                 }
             },
             onConnectionStateChanged = { connected ->

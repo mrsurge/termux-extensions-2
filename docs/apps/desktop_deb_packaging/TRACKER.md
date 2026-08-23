@@ -1,6 +1,6 @@
 # Unified Linux And Termux Release Installer Tracker
 
-Last updated: 2026-08-22
+Last updated: 2026-08-23
 
 ## Program status
 
@@ -14,7 +14,7 @@ Last updated: 2026-08-22
 | Phase 3: client-scoped foreground document | Source implementation complete and automated checks passing; live client matrix remains | Stable `clientInstanceId` is foreground authority; `windowId` is metadata, and native presentation stays outside backend document authority |
 | Phase 3B: Electron `Open in a Second Window` | Source implementation and automated checks complete; live Electron acceptance remains | One explicit secondary client, backend-owned foreground, Electron-owned per-project presentation; Android/browser unchanged |
 | Phase 3C: mobile `Open in a Second Window` drawer | Lifecycle correction and synchronized asset/APK validation complete; live client matrix remains | Exact-null remains empty; tab is occupancy-driven; Collapse minimizes the outer drawer and Close is page-session presentation only |
-| Phase 3D: Cefrium IME-dismissal focus release | Source-backed plan approved; implementation follows Phase 3C | Event-driven API-30 IME visibility transition; Cefrium-only and no polling/viewport inference |
+| Phase 3D: Cefrium IME-dismissal focus release | Core live interaction accepted repeatedly; auxiliary false-positive matrix remains | Event-driven API-30 IME animation transition; Cefrium-only and no polling/viewport inference |
 | Phase 4A: source/Git desktop bootstrap | Implemented and validated from a clean wheel | Python entrypoints build one fingerprinted Electron runtime and receipt-owned XDG integration; prebuilt release archives remain separate |
 | Phase 4: unified installer and Linux target | Planned; architecture selected, implementation separately gated | Installer construction, Linux acceptance, and release publication are distinct actions |
 | Phase 5: Termux target mode | Planned; dependency mapping required first | Reuses the Phase 4 installer transaction; device-native dependency investigation precedes target-archive acceptance |
@@ -463,14 +463,16 @@ Last updated: 2026-08-22
   and reveal it only after a correlated open succeeds.
 - [x] Preserve the populated tab and retained renderer when the reduced mobile
   header collapses the outer drawer; keep Close as page-session dismissal.
+- [x] Reuse the exact-client diagnostics count/Next Issue contract in the
+  portable reduced header and expose a populated-only mobile reopen shortcut.
 - [x] Assign GeckoView/Cefrium debug and staging builds one repository-owned
   development certificate while leaving release signing separate.
 - [ ] Validate same/different-file drafts, WBA features, project switch,
   reconnect, restart, orientation, identity reset, and two-client isolation.
-- [x] Rebuild Code TE2 at synchronized version `0.2.333`, publish the canonical
-  Android asset seed, and assemble signed GeckoView/Cefrium debug and staging
-  APKs.
-- [ ] Install and complete GeckoView/Cefrium live acceptance separately.
+- [x] Rebuild Code TE2 at synchronized version `0.2.334`, publish the canonical
+  Android asset seed, and assemble signed GeckoView/Cefrium debug APKs.
+- [ ] Complete GeckoView/Cefrium live acceptance separately. The `0.2.334`
+  Cefrium debug APK is installed on both connected devices.
 
 Automated evidence recorded on 2026-08-22:
 
@@ -491,18 +493,60 @@ Automated evidence recorded on 2026-08-22:
 
 - [x] Confirm the current ownership split: UI IPC reports editor focus intent,
   while native Android must observe actual IME visibility.
-- [x] Select API-30 `WindowInsets.Type.ime()` visible-to-hidden transition as
-  the dismissal signal; reject polling and viewport-resize heuristics.
+- [x] Select API-30 `WindowInsets.Type.ime()` animation `onPrepare`/`onStart`
+  visible-to-hidden transition as the dismissal signal; retain `onEnd` final
+  reconciliation and reject polling/viewport-resize heuristics.
 - [x] Define lifecycle, focus-owner, navigation, and programmatic-transition
   fences for a genuine manual dismissal.
 - [x] Keep GeckoView's explicit keyboard recovery behavior unchanged.
-- [ ] Implement and unit-test the Cefrium native IME transition reducer.
-- [ ] Dispatch one exact-page dismissal event and add an idempotent Monaco blur
-  listener with lifecycle disposal.
-- [ ] Validate dismiss-scroll-refocus typing plus navigation, background,
-  dialogs, drawer, rotation, and editor-switch false-positive cases.
-- [ ] Run Cefrium unit/debug builds, shared Code TE2 checks, and unchanged Gecko
+- [x] Implement and unit-test the Cefrium native IME transition reducer.
+- [x] Dispatch one exact-page dismissal event and add an idempotent Monaco focus
+  transfer to the real File toolbar button, with one next-animation-frame
+  reconciliation and lifecycle disposal.
+- [x] Keep Cefrium UI IPC focus/blur state-only; remove native
+  `restartInput`/`showSoftInput`, focus sinks, and acknowledgement queries.
+- [x] Extend the existing exact-textarea `preventScroll` page policy into
+  existing and future same-origin iframe realms without touching cross-origin
+  frames.
+- [x] Validate repeated dismiss-scroll-refocus typing on a live Cefrium device.
+- [ ] Validate navigation, background, dialogs, drawer, rotation, and
+  editor-switch false-positive cases.
+- [x] Run Cefrium unit/debug builds, shared Code TE2 checks, and unchanged Gecko
   comparison coverage.
+
+Automated/publication evidence recorded on 2026-08-22:
+
+- Code TE2 typecheck and all 232 Node tests passed before the canonical bundle.
+- The canonical `0.2.334` Android asset seed contains 205 files and was
+  published only after `host.js` was rebuilt.
+- Cefrium and Gecko debug unit tests and APK assemblies passed under JDK 21.
+- Cefrium debug `versionCode=20334` / `1.0.7-r0.2.334-cefrium` installed
+  successfully on both connected devices. Manual IME/zoom/pill/shortcut
+  interaction acceptance remains intentionally unchecked.
+
+Corrective implementation evidence recorded on 2026-08-23:
+
+- The first DOM-only focus-sink implementation was replaced because it left
+  Cefrium's Chromium surface as Android's focused view. Version `0.2.335` uses
+  a one-shot event-driven DOM-blur/native-focus handshake instead.
+- Code TE2 typecheck, the focused Gecko/Cefrium keyboard Node tests, and
+  Cefrium plus Gecko comparison unit tests pass. The canonical 205-file
+  `0.2.335` Android asset seed contains the byte-identical rebuilt `host.js`.
+- Cefrium debug assembly passed and `versionCode=20335` /
+  `1.0.7-r0.2.335-cefrium` installed successfully on both connected devices.
+  Live dismiss-scroll-refocus acceptance remains intentionally unchecked.
+- Live traces on `0.2.336` proved two independent races: delayed exact-client
+  UI IPC focus could call native `restartInput`/`showSoftInput`, and an
+  `onEnd`-only dismissal arrived after Chromium had queued one final IME show.
+  UI IPC is now state-only; `onPrepare` captures the start state and `onStart`
+  dispatches a genuine hide before the first animated frame, with `onEnd` only
+  reconciling final visibility.
+- Code TE2 typecheck, the focused next-frame browser regression test, Cefrium
+  reducer/unit tests, the canonical 205-file `0.2.336` asset bundle, Cefrium
+  debug assembly, and Gecko comparison unit/debug assembly passed.
+  `1.0.7-r0.2.336-cefrium` was installed on the connected Motorola and repeated
+  dismiss-scroll-refocus acceptance passed without the prior double-dismiss
+  animation jank.
 
 ## Phase 4 checklist — unified installer and Linux target
 

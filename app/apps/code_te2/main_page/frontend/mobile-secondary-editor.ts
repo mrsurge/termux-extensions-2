@@ -1,4 +1,7 @@
-import { mobileSecondaryTabVisible } from './secondary-editor-state.ts';
+import {
+  mobileSecondaryShortcutVisible,
+  mobileSecondaryTabVisible,
+} from './secondary-editor-state.ts';
 
 interface NavigatorWithUaData extends Navigator {
   userAgentData?: { mobile?: boolean };
@@ -75,6 +78,18 @@ export function createMobileSecondaryEditorController(
   let populated = false;
   let dismissed = false;
   let openSequence = 0;
+  const shortcut = document.createElement('button');
+  shortcut.type = 'button';
+  shortcut.className = [
+    'te2-mobile-special-key',
+    'te2-mobile-special-key-overlay-trigger',
+    'te2-mobile-second-window-trigger',
+  ].join(' ');
+  shortcut.textContent = 'Ⅱ';
+  shortcut.title = 'Open Second Window';
+  shortcut.setAttribute('aria-label', 'Open Second Window');
+  shortcut.hidden = true;
+  options.root.querySelector<HTMLElement>('.fe-editor-container')?.appendChild(shortcut);
   const pendingOpens = new Map<string, {
     resolve(path: string): void;
     reject(error: Error): void;
@@ -97,6 +112,11 @@ export function createMobileSecondaryEditorController(
     if (options.tab) {
       options.tab.hidden = !available;
     }
+    shortcut.hidden = !mobileSecondaryShortcutVisible({
+      supported,
+      mobileLayout: isMobileLayout(),
+      populated,
+    });
     const selected = available && options.tab?.classList.contains('active') === true;
     const visible = available && selected;
     options.container.hidden = !visible;
@@ -253,6 +273,20 @@ export function createMobileSecondaryEditorController(
     attributeFilter: ['class'],
   });
   window.addEventListener('message', onMessage);
+  shortcut.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  shortcut.addEventListener('click', () => {
+    dismissed = false;
+    updateVisibility();
+    void Promise.resolve(drawer?.open()).then(() => {
+      options.tab?.click();
+      show();
+    }).catch((error) => {
+      options.toast(error instanceof Error ? error.message : String(error));
+    });
+  });
   reconcileLayout();
 
   return {
@@ -295,6 +329,7 @@ export function createMobileSecondaryEditorController(
       resolveReady = null;
       rejectReady = null;
       frame?.remove();
+      shortcut.remove();
       frame = null;
       ready = false;
       populated = false;
