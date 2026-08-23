@@ -11,6 +11,12 @@ import subprocess
 from typing import Final
 import uuid
 
+from app.node_toolchain import (
+    NodeToolchainError,
+    inspect_node_identity,
+    node_toolchain_env,
+    resolve_node_toolchain as resolve_shared_node_toolchain,
+)
 from app.te2_paths import te2_data_home
 
 
@@ -51,156 +57,25 @@ def terminal_node_runtime_base() -> Path:
     return (te2_data_home() / "node_runtime" / "terminal").resolve()
 
 
-def _absolute_executable(raw: str | Path) -> Path:
-    return Path(os.path.abspath(os.path.expanduser(str(raw))))
-
-
-def _is_executable(path: Path) -> bool:
-    return path.is_file() and os.access(path, os.X_OK)
-
-
-def _candidate_pair(node_raw: str | Path, npm_raw: str | Path | None = None) -> tuple[Path, Path] | None:
-    node = _absolute_executable(node_raw)
-    npm = _absolute_executable(npm_raw) if npm_raw else node.parent / "npm"
-    if _is_executable(node) and _is_executable(npm):
-        return node, npm
-    return None
-
-
-def _login_shell_node_pair() -> tuple[Path, Path] | None:
-    shell_candidates = [
-        str(os.environ.get("SHELL") or "").strip(),
-        shutil.which("bash") or "",
-        shutil.which("zsh") or "",
-        shutil.which("sh") or "",
-    ]
-    command = (
-        "printf '__TE2_NODE__%s\\n' \"$(command -v node 2>/dev/null)\"; "
-        "printf '__TE2_NPM__%s\\n' \"$(command -v npm 2>/dev/null)\""
-    )
-    seen: set[str] = set()
-    for raw_shell in shell_candidates:
-        if not raw_shell:
-            continue
-        shell = str(_absolute_executable(raw_shell))
-        if shell in seen or not _is_executable(Path(shell)):
-            continue
-        seen.add(shell)
-        flag = "-lic" if Path(shell).name in {"bash", "zsh"} else "-lc"
-        try:
-            result = subprocess.run(
-                [shell, flag, command],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError):
-            continue
-        node_value = ""
-        npm_value = ""
-        for line in result.stdout.splitlines():
-            if line.startswith("__TE2_NODE__"):
-                node_value = line.removeprefix("__TE2_NODE__").strip()
-            elif line.startswith("__TE2_NPM__"):
-                npm_value = line.removeprefix("__TE2_NPM__").strip()
-        if node_value and npm_value:
-            pair = _candidate_pair(node_value, npm_value)
-            if pair is not None:
-                return pair
-    return None
-
-
 def resolve_node_toolchain() -> tuple[Path, Path]:
-    node_override = str(os.environ.get("TE2_TERMINAL_NODE_BIN") or "").strip()
-    npm_override = str(os.environ.get("TE2_TERMINAL_NPM_BIN") or "").strip()
-    candidates: list[tuple[Path, Path]] = []
-    if node_override:
-        pair = _candidate_pair(node_override, npm_override or None)
-        if pair is not None:
-            candidates.append(pair)
-
-    path_node = shutil.which("node")
-    path_npm = shutil.which("npm")
-    if path_node:
-        pair = _candidate_pair(path_node, path_npm)
-        if pair is not None:
-            candidates.append(pair)
-
-    login_pair = _login_shell_node_pair()
-    if login_pair is not None:
-        candidates.append(login_pair)
-
-    nvm_root = Path(os.environ.get("NVM_DIR", str(Path.home() / ".nvm"))).expanduser()
-    nvm_nodes = list(nvm_root.glob("versions/node/*/bin/node"))
-    nvm_nodes.sort(key=lambda path: path.stat().st_mtime if path.exists() else 0, reverse=True)
-    for node in nvm_nodes:
-        pair = _candidate_pair(node)
-        if pair is not None:
-            candidates.append(pair)
-
-    prefix = str(os.environ.get("PREFIX") or "").strip()
-    if prefix:
-        pair = _candidate_pair(Path(prefix) / "bin" / "node")
-        if pair is not None:
-            candidates.append(pair)
-
-    seen: set[tuple[str, str]] = set()
-    for node, npm in candidates:
-        key = (str(node), str(npm))
-        if key in seen:
-            continue
-        seen.add(key)
-        return node, npm
-
-    detail = "Set TE2_TERMINAL_NODE_BIN and TE2_TERMINAL_NPM_BIN to explicit executables."
-    raise NodeRuntimeError(f"Unable to find a usable Node.js/npm toolchain. {detail}")
+    try:
+        return resolve_shared_node_toolchain(
+            node_override_key="TE2_TERMINAL_NODE_BIN",
+            npm_override_key="TE2_TERMINAL_NPM_BIN",
+        )
+    except NodeToolchainError as exc:
+        raise NodeRuntimeError(str(exc)) from exc
 
 
 def _toolchain_env(node_binary: Path) -> dict[str, str]:
-    env = os.environ.copy()
-    path_parts = [part for part in env.get("PATH", "").split(os.pathsep) if part]
-    node_dir = str(node_binary.parent)
-    if node_dir in path_parts:
-        path_parts.remove(node_dir)
-    path_parts.insert(0, node_dir)
-    env["PATH"] = os.pathsep.join(path_parts)
-    env["npm_config_audit"] = "false"
-    env["npm_config_fund"] = "false"
-    env["npm_config_update_notifier"] = "false"
-    prefix = str(env.get("PREFIX") or "").strip()
-    if prefix and (Path(prefix) / "include" / "node" / "node.h").is_file():
-        env.setdefault("npm_config_nodedir", prefix)
-    return env
+    return node_toolchain_env(node_binary)
 
 
 def _node_identity(node_binary: Path) -> dict[str, str]:
-    expression = (
-        "JSON.stringify({platform:process.platform,arch:process.arch,"
-        "modules:String(process.versions.modules||''),node:String(process.versions.node||'')})"
-    )
     try:
-        result = subprocess.run(
-            [str(node_binary), "-p", expression],
-            capture_output=True,
-            text=True,
-            timeout=15,
-            env=_toolchain_env(node_binary),
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise NodeRuntimeError(f"Unable to inspect Node.js runtime: {exc}") from exc
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout).strip()
-        raise NodeRuntimeError(f"Unable to inspect Node.js runtime: {detail}")
-    try:
-        raw = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        raise NodeRuntimeError("Node.js returned an invalid runtime identity") from exc
-    identity = {key: str(raw.get(key) or "") for key in ("platform", "arch", "modules", "node")}
-    if not all(identity.values()):
-        raise NodeRuntimeError(f"Node.js returned an incomplete runtime identity: {identity}")
-    return identity
+        return inspect_node_identity(node_binary)
+    except NodeToolchainError as exc:
+        raise NodeRuntimeError(str(exc)) from exc
 
 
 def _runtime_fingerprint(identity: dict[str, str]) -> str:

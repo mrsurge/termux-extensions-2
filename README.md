@@ -62,16 +62,20 @@ library.
 
 The checked-in Code TE2 frontend, WBA backend, and shared browser assets are
 already built or vendored; ordinary runtime does not install npm dependency
-trees for them. The Electron distribution is built before installation
-publication and does
-not install npm dependencies on the user's machine.
+trees for them. The final archive-based Linux release will carry a prebuilt
+Electron distribution. A source, editable, or Git/pip install instead carries
+the small locked Electron source tree and builds it only when the user runs
+`te2 desktop install` or first launches `te2-desktop`.
 
 A source or Git/pip install also needs Rust with Cargo because the launcher
-builds and caches the framework server. Outside the Terminal's private runtime
-bootstrap, npm is development-only when regenerating Code TE2, WBA, Terminal,
-or Electron bundles. No global npm application packages are required. Git is
-needed to clone the repository or resolve a Git dependency, but the running
-framework's Git implementation is Rust/libgit2 owned.
+builds and caches the framework server. Building the optional desktop client
+from that install requires a glibc Linux x86-64 host plus Node.js 22.12 or newer
+and npm; its locked dependency and Electron downloads remain in the TE2 cache.
+Outside that explicit desktop build and the Terminal's private first-use
+runtime bootstrap, npm is development-only when regenerating checked-in
+artifacts. No global npm application package is required. Git is needed to
+clone the repository or resolve a Git dependency, but the running framework's
+Git implementation is Rust/libgit2 owned.
 
 Some source integrations invoke external tools:
 
@@ -128,6 +132,19 @@ For a package install directly from Git:
 python -m pip install "te2 @ git+https://github.com/mrsurge/termux-extensions-2.git"
 te2
 ```
+
+On supported Linux desktops, the same source/Git install can build and register
+the Electron client in the current Python environment:
+
+```bash
+te2 desktop install
+te2-desktop
+```
+
+`te2 desktop status`, `repair`, and `uninstall` inspect, rebuild, or remove the
+fingerprinted user-local runtime and receipt-owned XDG integration. The build
+requires at least 3 GiB of free disk space; a matching validated runtime is
+reused without rebuilding.
 
 Open `http://127.0.0.1:8089`. TE2 binds to localhost by default. Use
 `te2 --broadcast all` only when unrestricted network access is intentional.

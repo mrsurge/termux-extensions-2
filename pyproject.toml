@@ -13,6 +13,7 @@ dynamic = ["dependencies"]
 [project.scripts]
 te2 = "app.cli.run_rust_framework:main"
 te2-rust = "app.cli.run_rust_framework:main"
+te2-desktop = "desktop_client.electron_cli:main"
 
 [tool.setuptools]
 include-package-data = true
@@ -30,6 +31,16 @@ include-package-data = true
     "vendor/node_socketio/**/*",
     "vendor/picomatch/**/*",
 ]
+"desktop_client" = [
+    "desktop_asset_inventory.json",
+    "android_shell/**/*",
+    "electron/build.mjs",
+    "electron/package-lock.json",
+    "electron/package.json",
+    "electron/package.mjs",
+    "electron/tsconfig.json",
+    "electron/src/**/*",
+]
 
 [tool.setuptools.exclude-package-data]
 "app" = [
@@ -37,6 +48,14 @@ include-package-data = true
     "apps/code_te2/node_modules/**/*",
     "apps/terminal/node_modules",
     "apps/terminal/node_modules/**/*",
+]
+"desktop_client" = [
+    "electron/src/**/*.test.ts",
+    "electron/*.heapsnapshot",
+    "electron/*.jsonl",
+    "electron/python-*.json",
+    "electron/*.tracemalloc",
+    "electron/te2-server.heaptrack*",
 ]
 
 [tool.setuptools.data-files]
@@ -65,12 +84,16 @@ include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["app*"]
+include = ["app*", "desktop_client*"]
 exclude = [
     "app.apps.code_te2.node_modules",
     "app.apps.code_te2.node_modules.*",
     "app.apps.terminal.node_modules",
     "app.apps.terminal.node_modules.*",
+    "desktop_client.android_shell",
+    "desktop_client.android_shell.*",
+    "desktop_client.electron",
+    "desktop_client.electron.*",
 ]
 namespaces = true
 

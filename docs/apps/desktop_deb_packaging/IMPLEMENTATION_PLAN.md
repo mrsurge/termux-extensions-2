@@ -87,7 +87,7 @@ Source inspection resolves the external dependency classes as follows:
 |---|---|
 | Python 3.12+ | Core runtime |
 | platform `libarchive` shared library | Archive Manager runtime |
-| Node.js and npm | Package runtime requirements owned by the standalone Terminal's private first-use bootstrap; not framework, Code TE2, WBA, or Electron dependency installers |
+| Node.js and npm | Standalone Terminal private first-use bootstrap, plus the explicit source/editable/Git Electron bootstrap; final Linux archives carry prebuilt Electron |
 | native compiler toolchain and Node headers | Target-specific support to validate for the standalone Terminal's first-use `node-pty` bootstrap |
 | Rust and Cargo | Source/Git install framework build only; absent from prebuilt packages |
 | Git CLI | Source acquisition only; framework Git is Rust/libgit2-owned and WBA excludes VS Code Git extensions |
@@ -100,13 +100,14 @@ Source inspection resolves the external dependency classes as follows:
 
 The unified installer's target manifests own the exact validated dependency
 mapping for Linux and Termux in Phases 4 and 5. Checked-in Code TE2, WBA, and
-shared browser artifacts are already built or vendored; the Electron
-distribution is built before publication. npm remains an installed prerequisite
-only because the standalone Terminal intentionally installs its locked private
-runtime on first use; elsewhere npm is source-regeneration tooling. A retained
-installed capability receives its external executable through the selected
-target's prerequisite transaction; otherwise that capability is removed from
-the installed product.
+shared browser artifacts are already built or vendored. Final Linux archives
+carry a prebuilt Electron distribution. Source/editable/Git Python installs may
+instead invoke the explicit Electron source bootstrap recorded in Phase 4A.
+npm therefore has exactly two installed-code owners: that opt-in source desktop
+build and the standalone Terminal's locked private first-use runtime. Elsewhere
+npm is source-regeneration tooling. A retained installed capability receives
+its external executable through the selected target's prerequisite transaction;
+otherwise that capability is removed from the installed product.
 
 The installer must preserve the Terminal's existing per-user runtime authority
 without adding another helper. Its target prerequisite manifest installs or
@@ -1011,6 +1012,38 @@ acceptance gate rather than another state authority.
 10. Browser, GeckoView, and Cefrium behavior and payloads remain unchanged.
 
 ## 7. Phase 4 — unified installer and Linux target archive
+
+### 7.1 Source/editable/Git package desktop bridge
+
+Source-oriented Python installs have an explicit desktop bootstrap before the
+prebuilt release archive exists. The wheel contains only the locked Electron
+production source, `desktop_asset_inventory.json`, the desktop shell assets,
+and the exact shared dialog/component runtime inputs imported by that source.
+It does not contain Electron, `node_modules`, generated `dist`/`build` trees,
+or local profiler output.
+
+`te2 desktop install` and `te2-desktop` are Python-owned entrypoints. On glibc
+Linux x86-64 they resolve Node.js 22.12+ and npm through the same bounded
+PATH/login-shell/NVM/Termux-aware resolver used by the Terminal bootstrap,
+fingerprint the complete production input set plus Node identity, and lock the
+transaction. A missing fingerprint runs locked `npm ci`, source compilation,
+and Electron packaging beneath `$TE2_CACHE_HOME/desktop/electron`, guarded by
+the existing 3 GiB free-space minimum. Only the validated pruned application is
+atomically published beneath `$TE2_DATA_HOME/desktop/electron/runtimes`; an
+atomic relative `current` link selects it.
+
+The bootstrap writes a Python-environment-specific `~/.local/bin/te2-desktop`
+wrapper plus XDG desktop entry and icon. A private receipt records their hashes.
+Install/repair may replace only byte-identical files or files still matching a
+prior receipt; uninstall preserves modified or unrelated external files. Status
+does not require Node, and launch builds only when no valid current runtime is
+available.
+
+This bridge is not the final archive installer and does not change its delivery
+contract. The tagged Linux archive still carries a prebuilt Electron payload,
+while the Termux archive carries none.
+
+### 7.2 Prebuilt release archive and unified installer
 
 1. Add an ignored distribution staging layout and one deterministic release
    builder under repository construction tooling.

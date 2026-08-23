@@ -1,6 +1,6 @@
 # Unified Linux And Termux Release Installer Tracker
 
-Last updated: 2026-08-18
+Last updated: 2026-08-22
 
 ## Program status
 
@@ -13,6 +13,7 @@ Last updated: 2026-08-18
 | Phase 2C: remaining frontend polish | Intake placeholder only | Each concrete tweak requires separate named scope and approval |
 | Phase 3: client-scoped foreground document | Source implementation complete and automated checks passing; live client matrix remains | Stable `clientInstanceId` is foreground authority; `windowId` is metadata, and native presentation stays outside backend document authority |
 | Phase 3B: Electron `Open in a Second Window` | Source implementation and automated checks complete; live Electron acceptance remains | One explicit secondary client, backend-owned foreground, Electron-owned per-project presentation; Android/browser unchanged |
+| Phase 4A: source/Git desktop bootstrap | Implemented and validated from a clean wheel | Python entrypoints build one fingerprinted Electron runtime and receipt-owned XDG integration; prebuilt release archives remain separate |
 | Phase 4: unified installer and Linux target | Planned; architecture selected, implementation separately gated | Installer construction, Linux acceptance, and release publication are distinct actions |
 | Phase 5: Termux target mode | Planned; dependency mapping required first | Reuses the Phase 4 installer transaction; device-native dependency investigation precedes target-archive acceptance |
 
@@ -47,7 +48,7 @@ Last updated: 2026-08-18
 | Electron presentation is already native-owned | Sidebar order/mode persists beneath `$TE2_CONFIG_HOME`, while file-tab order is browser-local and project-keyed | Generalize native desktop presentation for the secondary editor; do not add geometry to ProjectSidecar |
 | The current Electron identity store owns only one client | `desktop-client-identity.json` contains one stable `clientInstanceId` | Phase 3B must allocate and persist a second complete client identity deliberately |
 | Code TE2 renderer state is singleton-shaped | Socket identity, Monaco host globals, DOM ids, and main-page boot are scoped to one renderer | The secondary editor requires its own renderer and reduced boot mode, not duplicated DOM or CSS hiding |
-| npm has one runtime owner | Code TE2, WBA, and shared browser artifacts are already bundled/vendored, while the Electron distribution is built before publication | The installer supplies Node/npm solely for the standalone Terminal's private first-use bootstrap; elsewhere it is development tooling |
+| npm has two explicit installed-code owners | Code TE2, WBA, and shared browser artifacts are already bundled/vendored; source/Git Electron and standalone Terminal use separate locked bootstraps | Final Linux archives prebuild Electron; source installs may opt into `te2 desktop install`, while Terminal retains its private first-use modules |
 | Standalone Terminal first use retains its current bootstrap | Its separate locked runtime runs `npm ci`; `node-pty` 1.1.0 uses a native install script and has no Linux prebuild in the current payload | Target prerequisite manifests supply Node/npm; the bootstrap installs the modules with target-native build support validated per installer mode |
 | Terminal runtime state is per-user canonical TE2 data | Current Python resolves `$TE2_DATA_HOME/node_runtime/terminal/<fingerprint>`, normally beneath `~/.local/share/te2`, with a lock, atomic staging, marker, package checks, and ABI-aware reuse | The selected installer target manifest supplies Node/npm; existing Python remains the only private-module installer and validator |
 | Installed dependencies have only explicit admission paths | Linux private venv, an existing owned app bootstrap, or the unified installer's validated target prerequisite transaction | Remove unowned dependencies and their unsupported capability instead of adding helper installers |
@@ -411,6 +412,21 @@ Last updated: 2026-08-18
 
 ## Phase 4 checklist — unified installer and Linux target
 
+- [x] Package the bounded Electron production source and its exact shared inputs
+  in source/editable/Git Python installs without generated or profiler output.
+- [x] Add `te2 desktop install|repair|status|uninstall|launch` and the
+  `te2-desktop` entrypoint.
+- [x] Fingerprint and lock the source bootstrap, retain npm/Electron downloads
+  under `$TE2_CACHE_HOME`, discard intermediates, and atomically activate only
+  a validated runtime beneath `$TE2_DATA_HOME`.
+- [x] Install receipt-owned user-local wrapper/XDG files, refuse unowned
+  collisions, and preserve modified files during uninstall.
+- [x] Validate a clean 41 MiB wheel, isolated wheel install, installed-wheel
+  Electron build, fingerprint reuse, 90 Electron tests, packaged launch, 22
+  focused Python tests, and strict Python type checking.
+- [ ] Replace the source-build bridge with a prebuilt Electron payload in the
+  final Linux target archive; do not run npm during archive installation.
+
 - [ ] Add ignored release staging/output roots and one deterministic builder
   under repository construction tooling.
 - [ ] Produce `install-te2`, target manifests, target `.tar.gz` archives, and
@@ -507,3 +523,4 @@ Last updated: 2026-08-18
 | 2026-08-18 | Electron second editor planning | Inspected project/client foreground persistence, Electron identity and Sidebar presentation stores, project-keyed file-tab order, renderer-global socket identity, and native detached-surface placement | Phase 3B records one explicit secondary client, backend-owned foreground, Electron-owned per-framework/per-project placement, reduced renderer boot, and unchanged Android/browser behavior |
 | 2026-08-18 | Electron second editor implementation | Electron 90-test suite, Electron and Code TE2 typechecks/builds, Code TE2 220-test suite, targeted Python relay test, basedpyright, selected-tab context-menu regression, and embedded-grid structural checks | Source implementation passed automated validation; secondary app-shell readiness and Code TE2-owned in-grid placement replace the failed first live shape; live placement, restart, project-switch, retarget, and shared-edit acceptance remain open |
 | 2026-08-18 | Electron second editor sizing correction | Source inspection identified wholesale app-container clearing as removal of the injected template CSS/font assets; both typechecks, targeted host tests, and the Electron 90-test suite passed after selective cleanup and persisted dock resizing | Reduced Monaco chrome retains canonical sizing; docked editor width is directly resizable without adding frontend presentation authority; live acceptance remains open |
+| 2026-08-22 | Source/Git Electron bootstrap | Clean wheel content audit and isolated install, installed-wheel source build, cached fingerprint reuse, packaged Wayland launch, Electron typecheck plus 90 tests, 22 focused Python tests, and basedpyright | Passed; source installs can explicitly build/register Electron without embedding its 317 MiB runtime, while release archives remain prebuilt |

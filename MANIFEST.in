@@ -1,3 +1,13 @@
 graft app
+graft desktop_client
 prune app/**/node_modules
+prune desktop_client/electron/build
+prune desktop_client/electron/dist
+prune desktop_client/electron/node_modules
+exclude desktop_client/electron/*.heapsnapshot
+exclude desktop_client/electron/*.jsonl
+exclude desktop_client/electron/python-*.json
+exclude desktop_client/electron/*.tracemalloc
+exclude desktop_client/electron/te2-server.heaptrack*
+recursive-exclude desktop_client/electron/src *.test.ts
 global-exclude __pycache__/* *.pyc

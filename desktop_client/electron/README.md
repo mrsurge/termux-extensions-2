@@ -5,6 +5,40 @@ renderer and keeps the desktop-owned launcher, Settings, persistent header,
 asset updates, and app-scoped lifecycle controls from the earlier desktop
 clients.
 
+## Install from a source or Git Python package
+
+The TE2 Python package carries this locked production source, the desktop shell
+assets, and the exact shared dialog/component inputs used by the build. On a
+glibc Linux x86-64 host with Node.js 22.12 or newer and npm:
+
+```bash
+te2 desktop install
+te2-desktop
+```
+
+The explicit bootstrap runs `npm ci`, compiles the source, and packages the
+Electron application in a cache staging tree. It then atomically publishes one
+fingerprinted runtime beneath `$TE2_DATA_HOME/desktop/electron`, activates its
+`current` link, and installs `~/.local/bin/te2-desktop`, the XDG desktop entry,
+and icon. npm and Electron downloads remain beneath
+`$TE2_CACHE_HOME/desktop/electron`; build intermediates are discarded.
+
+At least 3 GiB of free space is required only when a build is needed. A matching
+validated runtime is reused. The integration writer refuses to overwrite an
+unrelated existing file, and uninstall removes external files only while their
+hashes still match its private receipt.
+
+Useful management commands are:
+
+```bash
+te2 desktop status
+te2 desktop repair
+te2 desktop uninstall
+```
+
+The later archive-based Linux installer remains a separate release path and
+will ship a prebuilt Electron payload instead of requiring an end-user build.
+
 ## Run from source
 
 Node 22.12 or newer is required.

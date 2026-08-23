@@ -4,9 +4,11 @@ import importlib.util
 import site
 import sys
 import sysconfig
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 from importlib import metadata
+from typing import cast
 
 import app as app_pkg
 
@@ -18,11 +20,15 @@ def main() -> int:
     if len(sys.argv) > 1 and sys.argv[1] == "migrate-legacy-roots":
         from app.cli.legacy_roots import main as migration_main
         return int(migration_main(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "desktop":
+        from desktop_client.electron_cli import main as desktop_main
+        return int(desktop_main(sys.argv[2:]))
     bootstrap = _load_bootstrap_module()
     entry = getattr(bootstrap, "main", None)
     if not callable(entry):
         raise SystemExit("Rust framework bootstrap does not expose main()")
-    return int(entry(sys.argv[1:]))
+    bootstrap_main = cast(Callable[[list[str]], int], entry)
+    return int(bootstrap_main(sys.argv[1:]))
 
 
 def _load_bootstrap_module() -> ModuleType:
@@ -41,14 +47,20 @@ def _load_bootstrap_module() -> ModuleType:
 
 def _bootstrap_candidates() -> list[Path]:
     package_root = Path(app_pkg.__file__).resolve().parents[1]
-    data_root = Path(sysconfig.get_path("data"))
+    data_value = sysconfig.get_path("data")
+    if not data_value:
+        raise SystemExit("Python installation does not expose a data install path")
+    data_root = Path(data_value)
     candidates = [
         package_root / "framework" / "bootstrap" / "bootstrap.py",
         package_root / "te2" / "framework" / "bootstrap" / "bootstrap.py",
         *(_distribution_bootstrap_candidates()),
         data_root / "te2" / "framework" / "bootstrap" / "bootstrap.py",
-        Path(site.USER_BASE) / "te2" / "framework" / "bootstrap" / "bootstrap.py",
     ]
+    if site.USER_BASE:
+        candidates.append(
+            Path(site.USER_BASE) / "te2" / "framework" / "bootstrap" / "bootstrap.py"
+        )
     return _dedupe_paths(candidates)
 
 
@@ -64,7 +76,7 @@ def _distribution_bootstrap_candidates() -> list[Path]:
         if file_text.endswith("te2/framework/bootstrap/bootstrap.py") or file_text.endswith(
             "framework/bootstrap/bootstrap.py"
         ):
-            candidates.append(Path(distribution.locate_file(file)))
+            candidates.append(Path(str(distribution.locate_file(file))))
     return candidates
 
 
