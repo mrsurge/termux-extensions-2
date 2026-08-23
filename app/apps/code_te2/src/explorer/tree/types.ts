@@ -28,6 +28,7 @@ export type ExplorerTreeMenuActionType =
   | 'createFile'
   | 'createDir'
   | 'openExternal'
+  | 'openSecondWindow'
   | 'copyName'
   | 'copyPath'
   | 'copyRelPath'

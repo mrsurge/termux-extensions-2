@@ -1,7 +1,8 @@
 /**
- * Problems panel — VS Code-style diagnostic list grouped by file.
- * Lives inside the bottom drawer as a tab alongside Terminal and Console,
- * and also powers the Explorer's Diagnostics tab.
+ * Problems projection — VS Code-style diagnostic list grouped by file.
+ * The DOM controller powers the Explorer's Diagnostics tab. The host uses the
+ * nonvisual state controller for summaries and boot projection; there is no
+ * duplicate bottom-drawer Problems surface.
  *
  * Diff-aware: updates are additive/subtractive — new markers append to bottom,
  * stale markers are removed. No full DOM wipe on update. Collapse state of
@@ -84,6 +85,50 @@ function coerceProblemsDetail(value: unknown): ProblemsDetail {
     ));
   }
   return detail;
+}
+
+function summarizeProblems(
+  detail: ProblemsDetail,
+  projectRoot?: string,
+): Record<string, { errors: number; warnings: number }> {
+  const proj = (projectRoot || '').replace(/\/+$/, '');
+  const summary: Record<string, { errors: number; warnings: number }> = {};
+  for (const [absPath, markers] of Object.entries(detail)) {
+    if (!Array.isArray(markers) || markers.length === 0) continue;
+    const rel = proj && absPath.startsWith(`${proj}/`)
+      ? absPath.slice(proj.length + 1)
+      : absPath;
+    if (!summary[rel]) summary[rel] = { errors: 0, warnings: 0 };
+    for (const marker of markers) {
+      if (marker.severity === SEV_ERROR) summary[rel].errors += 1;
+      else if (marker.severity === SEV_WARNING) summary[rel].warnings += 1;
+    }
+  }
+  return summary;
+}
+
+export function createProblemsState(): ProblemsPanelController {
+  let currentDetail: ProblemsDetail = {};
+  return {
+    show() {},
+    hide() {},
+    update(detail) {
+      currentDetail = coerceProblemsDetail(detail);
+    },
+    setActiveFile() {},
+    destroy() {
+      currentDetail = {};
+    },
+    getDetail() {
+      return currentDetail;
+    },
+    getSummary(projectRoot) {
+      return summarizeProblems(currentDetail, projectRoot);
+    },
+    get isVisible() {
+      return false;
+    },
+  };
 }
 
 function sevClass(s: number | undefined): string {
@@ -518,20 +563,7 @@ export function createProblemsPanel(options: ProblemsPanelOptions = {}): Problem
      * @param {string} [projectRoot] - if provided, paths are made relative
      */
     getSummary(projectRoot?: string) {
-      const proj = (projectRoot || '').replace(/\/+$/, '');
-      const summary: Record<string, { errors: number; warnings: number }> = {};
-      for (const [absPath, markers] of Object.entries(currentDetail)) {
-        if (!Array.isArray(markers) || markers.length === 0) continue;
-        const rel = proj && absPath.startsWith(proj + '/')
-          ? absPath.slice(proj.length + 1) : absPath;
-        if (!summary[rel]) summary[rel] = { errors: 0, warnings: 0 };
-        for (const m of markers) {
-          const sev = m.severity || 0;
-          if (sev === SEV_ERROR) summary[rel].errors++;
-          else if (sev === SEV_WARNING) summary[rel].warnings++;
-        }
-      }
-      return summary;
+      return summarizeProblems(currentDetail, projectRoot);
     },
 
     get isVisible() { return visible; },

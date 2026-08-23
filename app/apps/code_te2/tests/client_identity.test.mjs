@@ -30,9 +30,16 @@ test("client identity is stable per browser profile and reset is explicit", asyn
     const { resolveCodeTe2ClientIdentity } = await importClientIdentity();
     const first = await resolveCodeTe2ClientIdentity();
     const second = await resolveCodeTe2ClientIdentity();
+    const secondary = await resolveCodeTe2ClientIdentity({ role: "secondary" });
     assert.equal(first.provider, "browser");
     assert.equal(second.clientInstanceId, first.clientInstanceId);
     assert.equal(second.windowId, first.windowId);
+    assert.notEqual(secondary.clientInstanceId, first.clientInstanceId);
+    assert.notEqual(secondary.windowId, first.windowId);
+    assert.equal(
+      (await resolveCodeTe2ClientIdentity({ role: "secondary" })).clientInstanceId,
+      secondary.clientInstanceId,
+    );
     assert.equal(
       first.consoleWorkerId,
       `main_page:${first.clientInstanceId}:${first.windowId}`,
@@ -41,6 +48,10 @@ test("client identity is stable per browser profile and reset is explicit", asyn
     const reset = await resolveCodeTe2ClientIdentity({ reset: true });
     assert.notEqual(reset.clientInstanceId, first.clientInstanceId);
     assert.equal(reset.windowId, first.windowId);
+    assert.notEqual(
+      (await resolveCodeTe2ClientIdentity({ role: "secondary" })).clientInstanceId,
+      secondary.clientInstanceId,
+    );
   } finally {
     delete globalThis.window;
     runtimeWindow.close();
@@ -72,11 +83,19 @@ test("native identity providers override relay-origin browser storage", async ()
     electronWindow.close();
   }
 
-  const geckoWindow = new Window({
+  const geckoHostWindow = new Window({
     url: "http://127.0.0.1:43000/app/code_te2?gv_native=1&te2_renderer=gecko",
   });
-  geckoWindow.postMessage = (message) => {
+  const geckoFrame = geckoHostWindow.document.createElement("iframe");
+  geckoFrame.src =
+    "http://127.0.0.1:43000/app/code_te2?gv_native=1&te2_renderer=gecko&te2_editor_role=secondary";
+  geckoHostWindow.document.body.appendChild(geckoFrame);
+  const geckoWindow = geckoFrame.contentWindow;
+  assert.ok(geckoWindow);
+  let geckoRole = "";
+  geckoHostWindow.postMessage = (message) => {
     if (message?.channel !== "te2.clientIdentity.request") return;
+    geckoRole = message.role;
     queueMicrotask(() => {
       geckoWindow.dispatchEvent(
         new geckoWindow.MessageEvent("message", {
@@ -86,7 +105,7 @@ test("native identity providers override relay-origin browser storage", async ()
             result: { ok: true, clientInstanceId: "client_a1b2c3d4e5f6" },
           },
           origin: geckoWindow.location.origin,
-          source: geckoWindow,
+          source: geckoHostWindow,
         }),
       );
     });
@@ -94,19 +113,23 @@ test("native identity providers override relay-origin browser storage", async ()
   globalThis.window = geckoWindow;
   try {
     const { resolveCodeTe2ClientIdentity } = await importClientIdentity();
-    const gecko = await resolveCodeTe2ClientIdentity();
+    const gecko = await resolveCodeTe2ClientIdentity({ role: "secondary" });
     assert.equal(gecko.provider, "gecko");
     assert.equal(gecko.clientInstanceId, "client_a1b2c3d4e5f6");
+    assert.equal(geckoRole, "secondary");
   } finally {
     delete globalThis.window;
-    geckoWindow.close();
+    geckoHostWindow.close();
   }
 
   const cefriumWindow = new Window({
     url: "http://127.0.0.1:44000/app/code_te2?gv_native=1&te2_renderer=cefrium",
   });
+  let cefriumRole = "";
   cefriumWindow.cefriumQuery = ({ request, onSuccess }) => {
-    const method = JSON.parse(request).method;
+    const payload = JSON.parse(request);
+    const method = payload.method;
+    cefriumRole = payload.params.role;
     onSuccess(JSON.stringify({
       ok: true,
       clientInstanceId: method.endsWith("reset")
@@ -117,9 +140,10 @@ test("native identity providers override relay-origin browser storage", async ()
   globalThis.window = cefriumWindow;
   try {
     const { resolveCodeTe2ClientIdentity } = await importClientIdentity();
-    const cefrium = await resolveCodeTe2ClientIdentity();
+    const cefrium = await resolveCodeTe2ClientIdentity({ role: "secondary" });
     assert.equal(cefrium.provider, "cefrium");
     assert.equal(cefrium.clientInstanceId, "client_abcdef123456");
+    assert.equal(cefriumRole, "secondary");
     const reset = await resolveCodeTe2ClientIdentity({ reset: true });
     assert.equal(reset.clientInstanceId, "client_112233445566");
   } finally {

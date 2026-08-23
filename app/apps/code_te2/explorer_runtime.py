@@ -334,6 +334,7 @@ class ExplorerDispatcher:
         return ExplorerFileTreeHandlerContext(
             project_root=self.project_root,
             client_instance_id=self.client_instance_id,
+            emit_personal=self.emit_personal,
             broadcast=self.broadcast,
             broadcast_git_status=self.broadcast_git_status,
             broadcast_git_decorations=self.broadcast_git_decorations,
@@ -689,6 +690,28 @@ class ExplorerDispatcher:
             return await self.send_error(exc.message, msg_id)
 
         await handle_editor_open(self._build_file_tree_context(), params, msg_id)
+
+    async def handle_explorer_editor_openSecondWindow(
+        self,
+        payload: JsonObject,
+        msg_id: str | None,
+    ) -> None:
+        from .explorer.contracts.file_tree import (
+            ExplorerFileTreeContractError,
+            parse_open_second_window_params,
+        )
+        from .explorer.handlers.file_tree import handle_open_second_window
+
+        try:
+            params = parse_open_second_window_params(payload)
+        except ExplorerFileTreeContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        await handle_open_second_window(
+            self._build_file_tree_context(),
+            params,
+            msg_id,
+        )
 
     async def handle_explorer_move(self, payload: JsonObject, msg_id: str | None) -> None:
         from .explorer.contracts.file_tree import (

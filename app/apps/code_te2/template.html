@@ -395,7 +395,6 @@
 
   .terminal-drawer.terminal-drawer--collapsed .terminal-header,
   .terminal-drawer.terminal-drawer--collapsed .console-header,
-  .terminal-drawer.terminal-drawer--collapsed .problems-header,
   .terminal-drawer.terminal-drawer--collapsed .extension-log-header,
   .terminal-drawer.terminal-drawer--collapsed .code-inspector-header {
     display: none !important;
@@ -403,7 +402,7 @@
 
   .terminal-drawer.terminal-drawer--collapsed #terminal-container,
   .terminal-drawer.terminal-drawer--collapsed #console-container,
-  .terminal-drawer.terminal-drawer--collapsed #problems-container,
+  .terminal-drawer.terminal-drawer--collapsed #second-editor-container,
   .terminal-drawer.terminal-drawer--collapsed #extension-log-container,
   .terminal-drawer.terminal-drawer--collapsed #code-inspector-container {
     height: 1px;
@@ -1202,6 +1201,21 @@
   }
   #console-container .vc-mask { display: none !important; }
   #console-container .vc-switch { display: none !important; }
+  #second-editor-container {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--bg, #0b0f1a);
+  }
+  .te2-mobile-secondary-editor-frame {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: var(--bg, #0b0f1a);
+  }
   /* Make vConsole panel fill the container instead of using fixed positioning */
   #console-container #__vconsole {
     position: relative !important;
@@ -1270,33 +1284,6 @@
     border-color: var(--fg-dim, #6e7681);
   }
 
-  /* Problems panel */
-  .problems-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 3px 8px;
-    background: var(--bg, #0b0f1a);
-    border-bottom: 1px solid var(--border, #333);
-    flex-shrink: 0;
-    font-size: 12px;
-    position: relative;
-    z-index: 10;
-  }
-  .problems-header .console-clear-btn {
-    margin-left: auto;
-    background: transparent;
-    border: 1px solid var(--border, #333);
-    color: var(--fg-dim, #6e7681);
-    border-radius: 4px;
-    padding: 2px 8px;
-    font-size: 11px;
-    cursor: pointer;
-  }
-  .problems-header .console-clear-btn:hover {
-    color: var(--fg, #e6edf3);
-    border-color: var(--fg-dim, #6e7681);
-  }
   .extension-log-header {
     display: flex;
     align-items: center;
@@ -1662,113 +1649,7 @@
       max-width: 42vw;
     }
   }
-  #problems-container {
-    position: relative;
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    background: var(--bg, #0b0f1a);
-    font-family: var(--font-mono, 'Fira Code', monospace);
-    font-size: 12px;
-    color: var(--fg, #e6edf3);
-  }
-  #problems-container .problems-empty {
-    padding: 16px;
-    color: var(--fg-dim, #6e7681);
-    text-align: center;
-  }
-  #problems-container .problems-file-group {
-    border-bottom: 1px solid var(--border-dim, #21262d);
-  }
-  #problems-container .problems-file-header {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
-    background: var(--bg-secondary, #161b22);
-    cursor: pointer;
-    user-select: none;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--fg, #e6edf3);
-  }
-  #problems-container .problems-chevron {
-    flex-shrink: 0;
-    width: 12px;
-    font-size: 10px;
-    text-align: center;
-    color: var(--fg-dim, #6e7681);
-  }
-  #problems-container .problems-file-header:hover {
-    background: var(--bg-highlight, #1c2129);
-  }
-  #problems-container .problems-file-header .problems-badge {
-    font-size: 10px;
-    padding: 0 5px;
-    border-radius: 8px;
-    font-weight: 700;
-    line-height: 16px;
-  }
-  #problems-container .problems-badge.error {
-    background: #da363340;
-    color: #ffa198;
-  }
-  #problems-container .problems-badge.warning {
-    background: #9e6a0340;
-    color: #d29922;
-  }
-  #problems-container .problems-item {
-    display: flex;
-    align-items: flex-start;
-    gap: 6px;
-    padding: 3px 10px 3px 24px;
-    cursor: pointer;
-    line-height: 1.4;
-  }
-  #problems-container .problems-item:hover {
-    background: var(--bg-highlight, #1c2129);
-  }
-  #problems-container .problems-icon {
-    flex-shrink: 0;
-    width: 14px;
-    text-align: center;
-    line-height: 1.4;
-  }
-  #problems-container .problems-icon.error { color: #ffa198; }
-  #problems-container .problems-icon.warning { color: #d29922; }
-  #problems-container .problems-icon.info { color: #79c0ff; }
-  #problems-container .problems-msg {
-    flex: 1;
-    min-width: 0;
-    word-break: break-word;
-  }
-  #problems-container .problems-source {
-    color: var(--fg-dim, #6e7681);
-    margin-left: 4px;
-  }
-  #problems-container .problems-location {
-    flex-shrink: 0;
-    color: var(--fg-dim, #6e7681);
-    font-size: 11px;
-    white-space: nowrap;
-  }
-  #problems-container .problems-mention-btn {
-    flex-shrink: 0;
-    cursor: pointer;
-    opacity: 0;
-    transition: opacity 0.15s;
-    font-size: 12px;
-    padding: 0 2px;
-    margin-left: 4px;
-  }
-  #problems-container .problems-item:hover .problems-mention-btn {
-    opacity: 0.7;
-  }
-  #problems-container .problems-mention-btn:hover {
-    opacity: 1 !important;
-  }
-
-  /* ── Diagnostics tab inside search overlay (mirrors #problems-container styles) ── */
+  /* ── Diagnostics tab inside the Explorer search overlay ── */
   .fe-search-diagnostics-container {
     font-family: var(--font-mono, 'Fira Code', monospace);
     font-size: 12px;
@@ -2628,7 +2509,6 @@
         </div>
         <div class="fe-dd-separator"></div>
         <div class="fe-dd-item" id="mi-export-diagnostics"><span>Export Diagnostics…</span></div>
-        <div class="fe-dd-item" id="mi-toggle-problems"><span>Toggle Problems</span></div>
         <div class="fe-dd-separator"></div>
         <div class="fe-dd-item" id="mi-editor-settings"><span>Settings…</span></div>
       </div>
@@ -2682,7 +2562,7 @@
     <div class="drawer-tab-bar">
       <button class="drawer-tab active" data-tab="terminal">Terminal</button>
       <button class="drawer-tab" data-tab="console">Console</button>
-      <button class="drawer-tab" data-tab="problems">Problems</button>
+      <button id="drawer-tab-second-window" class="drawer-tab" data-tab="second-window" hidden>Second Window</button>
       <button class="drawer-tab" data-tab="extensions">Extensions</button>
       <button class="drawer-tab" data-tab="code-inspector">Code Inspector</button>
       <span class="drawer-tab-actions">
@@ -2712,13 +2592,7 @@
       </div>
     </div>
     <div id="console-container" data-drawer-panel="console" style="display:none; width:100%; height:100%; overflow:auto;"></div>
-    <div id="problems-header" class="problems-header" data-drawer-panel="problems" style="display:none;">
-      <span style="color:var(--fg-dim,#6e7681);">Problems</span>
-      <div style="margin-left:auto; display:flex; gap:8px;">
-        <button class="console-clear-btn" id="problems-collapse-btn" title="Collapse problems" style="margin-left:0;">▼</button>
-      </div>
-    </div>
-    <div id="problems-container" data-drawer-panel="problems" style="display:none; width:100%; height:100%; overflow:auto;"></div>
+    <div id="second-editor-container" data-drawer-panel="second-window" hidden></div>
     <div id="extension-log-header" class="extension-log-header" data-drawer-panel="extensions" style="display:none;">
       <span id="extension-log-extension-label" class="extension-log-filter-label">Extension</span>
       <div class="extension-log-filter">

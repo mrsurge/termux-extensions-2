@@ -46,30 +46,55 @@ internal fun parseAndroidNativeConsoleCommand(code: String): AndroidNativeConsol
     }
 }
 
-internal fun androidInstallationId(context: Context): String {
+private const val PRIMARY_CLIENT_ROLE = "primary"
+private const val SECONDARY_CLIENT_ROLE = "secondary"
+private const val PRIMARY_INSTALLATION_ID_KEY = "installation_id"
+private const val SECONDARY_INSTALLATION_ID_KEY = "secondary_editor_installation_id"
+
+private fun normalizedAndroidClientRole(role: String): String = when (role) {
+    PRIMARY_CLIENT_ROLE, SECONDARY_CLIENT_ROLE -> role
+    else -> throw IllegalArgumentException("invalid Android client role")
+}
+
+private fun installationIdKey(role: String): String =
+    if (normalizedAndroidClientRole(role) == SECONDARY_CLIENT_ROLE) {
+        SECONDARY_INSTALLATION_ID_KEY
+    } else {
+        PRIMARY_INSTALLATION_ID_KEY
+    }
+
+internal fun androidInstallationId(
+    context: Context,
+    role: String = PRIMARY_CLIENT_ROLE,
+): String {
     val preferences = context.getSharedPreferences(
         "android_native_console",
         Context.MODE_PRIVATE,
     )
-    val installationId = preferences.getString("installation_id", null)
+    val key = installationIdKey(role)
+    val installationId = preferences.getString(key, null)
         ?.takeIf { it.matches(Regex("[a-f0-9]{12}")) }
         ?: UUID.randomUUID().toString().replace("-", "").take(12).also {
-            preferences.edit().putString("installation_id", it).apply()
+            preferences.edit().putString(key, it).apply()
         }
     return installationId
 }
 
 internal fun resetAndroidInstallationId(context: Context): String {
-    val installationId = UUID.randomUUID().toString().replace("-", "").take(12)
+    val primaryInstallationId = UUID.randomUUID().toString().replace("-", "").take(12)
+    val secondaryInstallationId = UUID.randomUUID().toString().replace("-", "").take(12)
     context.getSharedPreferences("android_native_console", Context.MODE_PRIVATE)
         .edit()
-        .putString("installation_id", installationId)
+        .putString(PRIMARY_INSTALLATION_ID_KEY, primaryInstallationId)
+        .putString(SECONDARY_INSTALLATION_ID_KEY, secondaryInstallationId)
         .commit()
-    return installationId
+    return primaryInstallationId
 }
 
-internal fun androidClientInstanceId(context: Context): String =
-    "client_${androidInstallationId(context)}"
+internal fun androidClientInstanceId(
+    context: Context,
+    role: String = PRIMARY_CLIENT_ROLE,
+): String = "client_${androidInstallationId(context, role)}"
 
 internal fun androidNativeConsoleWorkerId(context: Context, renderer: String): String {
     require(renderer.matches(Regex("[a-z0-9_-]+"))) { "invalid renderer name" }

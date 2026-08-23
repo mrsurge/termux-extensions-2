@@ -321,6 +321,7 @@ export class SecondaryEditorRegistry {
 
     const target = new URL("/app/code_te2", this.#options.getRelayOrigin());
     target.searchParams.set("gv_native", "1");
+    target.searchParams.set("te2_editor_role", "secondary");
     target.searchParams.set("te2_desktop_editor", "secondary");
     await view.webContents.loadURL(target.href);
     if (this.#view !== view || generation !== this.#loadGeneration) {

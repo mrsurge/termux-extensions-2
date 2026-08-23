@@ -2,10 +2,33 @@ from __future__ import annotations
 
 import unittest
 
-from app.apps.code_te2.ui_ipc.rpc_contract import parse_ui_ipc_rpc_request
+from app.apps.code_te2.ui_ipc.rpc_contract import (
+    UI_IPC_RPC_NOTIFICATION_HOST_SECOND_EDITOR_OPEN,
+    parse_ui_ipc_rpc_notification,
+    parse_ui_ipc_rpc_request,
+)
 
 
 class UiIpcRpcContractTests(unittest.TestCase):
+    def test_second_editor_open_is_an_allowed_notification(self) -> None:
+        parsed = parse_ui_ipc_rpc_notification(
+            {
+                "jsonrpc": "2.0",
+                "method": UI_IPC_RPC_NOTIFICATION_HOST_SECOND_EDITOR_OPEN,
+                "params": {
+                    "projectPath": "/workspace",
+                    "path": "/workspace/main.py",
+                },
+            }
+        )
+
+        self.assertIsNotNone(parsed)
+        assert parsed is not None
+        self.assertEqual(
+            UI_IPC_RPC_NOTIFICATION_HOST_SECOND_EDITOR_OPEN,
+            parsed["method"],
+        )
+
     def test_extension_webview_dispose_is_an_allowed_request(self) -> None:
         parsed = parse_ui_ipc_rpc_request(
             {

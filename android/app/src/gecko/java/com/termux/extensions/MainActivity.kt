@@ -1852,6 +1852,13 @@ class MainActivity : AppCompatActivity() {
                                                     "clientInstanceId",
                                                     androidClientInstanceId(this@MainActivity),
                                                 )
+                                                put(
+                                                    "secondaryClientInstanceId",
+                                                    androidClientInstanceId(
+                                                        this@MainActivity,
+                                                        "secondary",
+                                                    ),
+                                                )
                                             })
                                         }
                                     }
@@ -1870,6 +1877,10 @@ class MainActivity : AppCompatActivity() {
                                 put(
                                     "clientInstanceId",
                                     androidClientInstanceId(this@MainActivity),
+                                )
+                                put(
+                                    "secondaryClientInstanceId",
+                                    androidClientInstanceId(this@MainActivity, "secondary"),
                                 )
                             }
                             port.postMessage(msg)
@@ -1947,6 +1958,10 @@ class MainActivity : AppCompatActivity() {
                 put(
                     "clientInstanceId",
                     androidClientInstanceId(this@MainActivity),
+                )
+                put(
+                    "secondaryClientInstanceId",
+                    androidClientInstanceId(this@MainActivity, "secondary"),
                 )
             })
         }

@@ -23,6 +23,7 @@ DISPATCHER_MESSAGE_TYPE_BY_RPC_METHOD: dict[str, str] = {
     "explorer.entries.delete": "explorer:batchDelete",
     "explorer.entries.move": "explorer:batchMove",
     "explorer.editor.open": "explorer:editor_open",
+    "explorer.editor.openSecondWindow": "explorer:editor_openSecondWindow",
     "explorer.entry.copy": "explorer:copy",
     "explorer.entry.copyFrom": "explorer:copyFrom",
     "explorer.entry.delete": "explorer:delete",

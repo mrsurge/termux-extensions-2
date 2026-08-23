@@ -3339,6 +3339,11 @@ exclude source maps, backup files, Python bytecode/cache directories, and
   `versionCode`/`versionName` are advanced to identify the native package that
   carries that seed.
 - `EditorAssetManager.seedFromApk()` compares bundled vs local version; skips copy if matching
+- A frontend/native contract change must advance the synchronized frontend
+  versions before handoff. When Android source participates, build Code TE2,
+  publish that exact version into the APK seed, and only then assemble the APK.
+  GeckoView and Cefrium do not use a Service Worker for these assets, so a
+  stale same-version seed cannot be repaired by browser cache invalidation.
 
 ### URL pattern interception
 
@@ -3819,7 +3824,8 @@ and secondary client identities, existing Sidebar presentation, and bounded
 secondary presentation keyed by configured upstream framework origin plus
 canonical project path. It migrates the former identity and Sidebar files once.
 The random loopback relay origin is never a persistence key. Browser, GeckoView,
-and Cefrium remain single-surface and do not receive this native contract.
+and Cefrium do not receive this Electron-native placement contract; their mobile
+secondary presentation uses the portable drawer contract below.
 
 Cold restoration is WBA-gated in Code Server mode. The primary page may restore
 and visibly attach its own Monaco model immediately, but it retains the latest
@@ -3838,6 +3844,43 @@ Python state after a slow `adapter.connect`; there is no readiness polling. This
 prevents the restored secondary foreground from racing extension-host
 initialization while preserving the rule that ordinary visible Monaco opens do
 not wait for WBA acknowledgement.
+
+### Mobile second editor surface
+
+Eligible mobile browser profiles, GeckoView, and Cefrium expose the same
+**Open in a Second Window** document semantics through a retained same-origin
+iframe in the bottom drawer. Capability comes from the mobile/native client
+identity, never from a narrow desktop viewport. The iframe boots the portable
+reduced editor under an independently persisted secondary `clientInstanceId`
+and its own authenticated UI IPC, Editor, and WBA lanes. Its canonical file is
+the existing `ProjectSidecar.client_foregrounds` entry for that client; shared
+membership, drafts, writes, diagnostics, and WBA documents remain unchanged.
+
+Ordinary mobile browsers store a separate primary/secondary identity pair in
+browser storage. GeckoView and Cefrium store both installation identities in
+Android application-private preferences and expose the requested role through
+their existing native identity bridges. Reset rotates both ids in one native
+transaction. The random process-local framework relay origin is never identity
+authority.
+
+The mobile host owns only drawer visibility. Close, hide, and mobile breakpoint
+exit retain the iframe and do not clear the backend foreground. An explicit
+`clientForeground.path: null` is authoritative empty state and never falls back
+to the primary/shared `currentPath`. The retained iframe reports its exact
+foreground to the host; **Second Window** is visible in the tab strip only while
+that foreground is populated. Close dismisses that populated tab for the page
+session, while Collapse minimizes only the outer drawer and leaves the tab plus
+renderer warm. A later explicit open clears the local dismissal. Explorer file
+cards send a validated file-only request through `/rpc/explorer`; Python checks
+project containment and document admission, then notifies only the invoking
+client's UI IPC room. The secondary renderer performs the canonical open, so
+the host reveals the tab only after that open succeeds, the primary foreground
+does not move, and no document content crosses the presentation `postMessage`
+channel.
+
+The former bottom-drawer Problems presentation is removed. Explorer Diagnostics
+remains the project-wide diagnostics UI, while a nonvisual host projection keeps
+summary/export consumers independent of hidden DOM.
 
 ### Desktop shell behavior
 

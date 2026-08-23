@@ -8,8 +8,14 @@ import type { JsonObject } from '../../src/rpc/transport.ts';
 import { basename, HOME_DIR, parentDir, toAbsolute } from './core/utils.ts';
 import { createUiIpcRpcConnection } from './connections/ui-ipc-rpc.ts';
 import { ensureSocketIoLoaded } from './connections/vendor-loaders.ts';
+import {
+  mobileSecondaryModeTransition,
+  secondaryEditorActivePath,
+  type SecondaryEditorHostState,
+  type SecondaryEditorMode,
+} from './secondary-editor-state.ts';
 
-type SecondaryMode = 'closed' | 'docked' | 'collapsed' | 'detached';
+type SecondaryMode = SecondaryEditorMode;
 
 interface SecondaryPresentation {
   mode: SecondaryMode;
@@ -19,7 +25,7 @@ interface SecondaryPresentation {
 }
 
 type SecondaryCommand =
-  | { type: 'open'; projectPath: string; path: string }
+  | { type: 'open'; projectPath: string; path: string; requestId?: string }
   | { type: 'state'; projectPath: string; presentation: SecondaryPresentation };
 
 interface SecondaryElectronBridge {
@@ -32,6 +38,15 @@ interface SecondaryElectronBridge {
   ): () => void;
 }
 
+interface SecondaryPresentationBridge {
+  kind: 'electron' | 'mobile';
+  ready(): Promise<void>;
+  setMode(mode: SecondaryMode): Promise<SecondaryPresentation>;
+  publishForeground(path: string): void;
+  publishOpenResult(requestId: string, ok: boolean, path: string, error?: string): void;
+  onCommand(listener: (command: SecondaryCommand) => void): () => void;
+}
+
 interface SecondaryRuntimeWindow extends Window {
   te2Electron?: SecondaryElectronBridge;
 }
@@ -40,11 +55,7 @@ interface SecondaryHost {
   toast(message: string, kind?: unknown): void;
 }
 
-type HostState = {
-  activeProject?: string | null;
-  currentPath?: string | null;
-  clientForeground?: { path?: string | null } | null;
-};
+type HostState = SecondaryEditorHostState;
 
 const STYLE = `
 .te2-secondary-editor {
@@ -74,6 +85,13 @@ const STYLE = `
 }
 .te2-secondary-editor[data-mode='detached'] .te2-secondary-editor-header {
   -webkit-app-region: drag;
+}
+.te2-secondary-editor[data-presentation='mobile'] {
+  border-left: 0;
+}
+.te2-secondary-editor[data-presentation='mobile'] .te2-secondary-editor-expand,
+.te2-secondary-editor[data-presentation='mobile'] .te2-secondary-editor-detach {
+  display: none !important;
 }
 .te2-secondary-editor button,
 .te2-secondary-editor-menu {
@@ -179,6 +197,82 @@ function runtimeWindow(): SecondaryRuntimeWindow {
   return window as SecondaryRuntimeWindow;
 }
 
+function createPresentationBridge(): SecondaryPresentationBridge {
+  const electron = runtimeWindow().te2Electron;
+  if (electron) {
+    return {
+      kind: 'electron',
+      async ready() {
+        await electron.secondEditorReady();
+      },
+      async setMode(mode) {
+        return (await electron.setSecondEditorMode(mode)).presentation;
+      },
+      publishForeground() {},
+      publishOpenResult() {},
+      onCommand(listener) {
+        return electron.onSecondEditorCommand(listener);
+      },
+    };
+  }
+  if (window.parent === window) {
+    throw new Error('Second editor requires a presentation host');
+  }
+  const origin = window.location.origin;
+  return {
+    kind: 'mobile',
+    async ready() {
+      window.parent.postMessage({
+        channel: 'te2.secondaryEditor.presentation',
+        type: 'ready',
+      }, origin);
+    },
+    async setMode(mode) {
+      const transition = mobileSecondaryModeTransition(mode);
+      window.parent.postMessage({
+        channel: 'te2.secondaryEditor.presentation',
+        type: 'mode',
+        mode: transition.hostMode,
+      }, origin);
+      return {
+        mode: transition.rendererMode,
+        dockSize: 0,
+        detachedBounds: { x: 0, y: 0, width: 0, height: 0 },
+        maximized: false,
+      };
+    },
+    publishForeground(path) {
+      window.parent.postMessage({
+        channel: 'te2.secondaryEditor.presentation',
+        type: 'foreground',
+        path,
+      }, origin);
+    },
+    publishOpenResult(requestId, ok, path, error) {
+      window.parent.postMessage({
+        channel: 'te2.secondaryEditor.presentation',
+        type: 'openResult',
+        requestId,
+        ok,
+        path,
+        error: error || '',
+      }, origin);
+    },
+    onCommand(listener) {
+      const onMessage = (event: MessageEvent): void => {
+        if (event.source !== window.parent || event.origin !== origin) return;
+        const data = asRecord(event.data);
+        if (data.channel !== 'te2.secondaryEditor.command') return;
+        const command = data.command;
+        if (!command || typeof command !== 'object' || Array.isArray(command)) return;
+        listener(command as SecondaryCommand);
+      };
+      window.addEventListener('message', onMessage);
+      return () => window.removeEventListener('message', onMessage);
+    },
+  };
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -199,11 +293,6 @@ function errorMessage(error: unknown): string {
 
 function hostStateFromReply(reply: unknown): HostState {
   return nestedRecord(nestedRecord(reply, 'snapshot'), 'host_state') as HostState;
-}
-
-function activePathFromState(state: HostState): string {
-  const foreground = asRecord(state.clientForeground);
-  return stringValue(foreground.path) || stringValue(state.currentPath);
 }
 
 function installStyle(): void {
@@ -229,9 +318,7 @@ export async function bootSecondaryEditorRuntime(
   rootEl: HTMLElement,
   host: SecondaryHost,
 ): Promise<void> {
-  const electron = runtimeWindow().te2Electron;
-  if (!electron) throw new Error('Second editor requires the Electron app-view bridge');
-  const electronBridge = electron;
+  const presentationBridge = createPresentationBridge();
 
   installStyle();
   // The framework injects the app template's stylesheet links and inline CSS
@@ -242,6 +329,7 @@ export async function bootSecondaryEditorRuntime(
   const root = document.createElement('section');
   root.className = 'te2-secondary-editor';
   root.dataset.mode = 'docked';
+  root.dataset.presentation = presentationBridge.kind;
   root.innerHTML = `
     <header class="te2-secondary-editor-header">
       <button class="te2-secondary-editor-menu-button" type="button" title="File actions" aria-label="File actions">☰</button>
@@ -290,11 +378,12 @@ export async function bootSecondaryEditorRuntime(
     const label = path ? basename(path) : 'No file open';
     titleEl.textContent = label;
     titleEl.title = path || label;
+    presentationBridge.publishForeground(path);
   }
 
   function applyHostState(state: HostState): void {
     projectPath = stringValue(state.activeProject);
-    setCurrentPath(activePathFromState(state));
+    setCurrentPath(secondaryEditorActivePath(state));
   }
 
   async function requestHostState(): Promise<HostState> {
@@ -308,14 +397,14 @@ export async function bootSecondaryEditorRuntime(
     return state;
   }
 
-  async function publishNativeReady(): Promise<void> {
+  async function publishPresentationReady(): Promise<void> {
     if (!editorReady || nativeReadySent) return;
     nativeReadySent = true;
     try {
-      await electronBridge.secondEditorReady();
+      await presentationBridge.ready();
     } catch (error) {
       nativeReadySent = false;
-      console.warn('[second_editor] native readiness failed', error);
+      console.warn('[second_editor] presentation readiness failed', error);
     }
   }
 
@@ -336,7 +425,7 @@ export async function bootSecondaryEditorRuntime(
       if (targetPath) {
         await connection.request(
           UI_IPC_RPC_METHODS.hostFileOpen,
-          { path: targetPath, source: 'electron_second_editor_save_as' },
+          { path: targetPath, source: 'secondary_editor_save_as' },
           8_000,
         );
       }
@@ -377,7 +466,7 @@ export async function bootSecondaryEditorRuntime(
     try {
       await connection.request(
         UI_IPC_RPC_METHODS.hostDraftDiscard,
-        { path: currentPath, source: 'electron_second_editor' },
+        { path: currentPath, source: 'secondary_editor' },
         8_000,
       );
       setStatus('Draft discarded');
@@ -390,8 +479,8 @@ export async function bootSecondaryEditorRuntime(
   }
 
   async function setMode(mode: SecondaryMode): Promise<void> {
-    const result = await electronBridge.setSecondEditorMode(mode);
-    currentMode = result.presentation.mode;
+    const result = await presentationBridge.setMode(mode);
+    currentMode = result.mode;
     root.dataset.mode = currentMode;
   }
 
@@ -415,9 +504,10 @@ export async function bootSecondaryEditorRuntime(
     }
     await connection.request(
       UI_IPC_RPC_METHODS.hostFileOpen,
-      { path: command.path, source: 'electron_second_editor' },
+      { path: command.path, source: 'secondary_editor' },
       8_000,
     );
+    await requestHostState();
   }
 
   function handleNotification(
@@ -426,7 +516,7 @@ export async function bootSecondaryEditorRuntime(
   ): void {
     if (method === UI_IPC_RPC_NOTIFICATIONS.editorReady) {
       editorReady = true;
-      void publishNativeReady();
+      void publishPresentationReady();
     } else if (method === UI_IPC_RPC_NOTIFICATIONS.editorSave) {
       void save();
     } else if (method === UI_IPC_RPC_NOTIFICATIONS.hostActiveFileChanged) {
@@ -457,12 +547,20 @@ export async function bootSecondaryEditorRuntime(
     onNotification: handleNotification,
   });
 
-  const unsubscribeNative = electronBridge.onSecondEditorCommand((command) => {
-    void handleNativeCommand(command).catch((error) => {
-      host.toast(errorMessage(error));
+  const unsubscribePresentation = presentationBridge.onCommand((command) => {
+    void handleNativeCommand(command).then(() => {
+      if (command.type === 'open' && command.requestId) {
+        presentationBridge.publishOpenResult(command.requestId, true, currentPath);
+      }
+    }).catch((error) => {
+      const message = errorMessage(error);
+      if (command.type === 'open' && command.requestId) {
+        presentationBridge.publishOpenResult(command.requestId, false, currentPath, message);
+      }
+      host.toast(message);
     });
   });
-  window.addEventListener('pagehide', unsubscribeNative, { once: true });
+  window.addEventListener('pagehide', unsubscribePresentation, { once: true });
 
   menuButton.addEventListener('click', (event) => {
     event.stopPropagation();

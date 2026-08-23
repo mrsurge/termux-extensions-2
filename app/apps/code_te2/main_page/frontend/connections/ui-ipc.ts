@@ -329,6 +329,8 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
             dispatchWindowCustomEvent('code-te2:editor-diagnostics-counts', params);
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.hostActiveFileChanged) {
             dispatchWindowCustomEvent('code-te2:active-file-changed', params);
+          } else if (method === UI_IPC_RPC_NOTIFICATIONS.hostSecondEditorOpen) {
+            dispatchWindowCustomEvent('code-te2:second-editor-open', params);
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.openStateChanged) {
             dispatchWindowCustomEvent('code-te2:open-state-changed', params);
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.fileTabsDecorationsChanged) {

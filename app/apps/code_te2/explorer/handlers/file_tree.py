@@ -196,6 +196,49 @@ async def handle_editor_open(
     )
 
 
+async def handle_open_second_window(
+    context: ExplorerFileTreeHandlerContext,
+    params: ExplorerRelParams,
+    msg_id: str | None,
+) -> None:
+    from ...monaco_editor.editor_backend_services.document_open_policy import (
+        validate_editor_document,
+    )
+    from ...stores import get_history_store
+    from ...ui_ipc.rpc_contract import (
+        UI_IPC_RPC_NOTIFICATION_HOST_SECOND_EDITOR_OPEN,
+    )
+    from ...ui_ipc.ui_ipc_ws import emit_ui_ipc_rpc_notification
+
+    project_root = context.project_root.expanduser().resolve(strict=True)
+    candidate = (project_root / params["rel"]).expanduser().resolve(strict=True)
+    try:
+        _ = candidate.relative_to(project_root)
+    except ValueError as exc:
+        raise ValueError("Second Window file must be inside the active project") from exc
+    if not candidate.is_file():
+        raise ValueError("Second Window target must be a file")
+
+    history = get_history_store()
+    cached = history.get_cached_document(str(project_root), str(candidate))
+    validate_editor_document(str(candidate), cached)
+
+    await emit_ui_ipc_rpc_notification(
+        UI_IPC_RPC_NOTIFICATION_HOST_SECOND_EDITOR_OPEN,
+        {
+            "path": str(candidate),
+            "projectPath": str(project_root),
+        },
+        client_instance_id=context.client_instance_id,
+    )
+    if msg_id:
+        await context.emit_personal(
+            "explorer.editor.secondWindow.opened",
+            {"ok": True, "path": str(candidate)},
+            msg_id,
+        )
+
+
 async def handle_move_entry(
     context: ExplorerFileTreeHandlerContext,
     params: ExplorerMoveCopyParams,

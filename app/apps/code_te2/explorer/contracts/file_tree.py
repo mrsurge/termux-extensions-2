@@ -98,6 +98,15 @@ def parse_delete_entry_params(payload: object) -> ExplorerRelParams:
     return {"rel": rel}
 
 
+def parse_open_second_window_params(payload: object) -> ExplorerRelParams:
+    envelope = _as_object(payload)
+    rel = _parse_required_string(
+        envelope.get("rel"),
+        missing_message="Open in a Second Window requires rel",
+    )
+    return {"rel": rel}
+
+
 def parse_batch_delete_params(payload: object) -> ExplorerBatchRelsParams:
     envelope = _as_object(payload)
     return {"rels": _parse_string_list(envelope.get("rels"))}

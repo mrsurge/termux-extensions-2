@@ -64,6 +64,7 @@ class ExplorerWatcherHandlerContext:
 class ExplorerFileTreeHandlerContext:
     project_root: Path
     client_instance_id: str
+    emit_personal: EmitPersonal
     broadcast: Broadcast
     broadcast_git_status: AsyncNoArg
     broadcast_git_decorations: AsyncNoArg

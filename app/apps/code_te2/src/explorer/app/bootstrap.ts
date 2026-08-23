@@ -367,6 +367,8 @@ const explorerTreeMenuController = createExplorerTreeMenuController({
   getTreeElement: () => treeElement,
   getSelectedEntries: () => selectedEntries,
   getProjectPath: () => explorerRuntimeState.getProjectPath(),
+  supportsSecondEditor: () =>
+    document.documentElement.dataset.te2SecondEditor === 'true',
   hasExplorerRpc: () => hasExplorerRpc(),
   notifyExplorer: (method, payload) => notifyExplorer(method, payload),
   requestExplorer: (method, payload, timeoutMs) =>

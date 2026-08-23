@@ -22,6 +22,7 @@ interface ExplorerTreeMenuControllerDeps {
   getTreeElement(): HTMLElement | null;
   getSelectedEntries(): Set<string>;
   getProjectPath(): string | null;
+  supportsSecondEditor(): boolean;
   hasExplorerRpc(): boolean;
   notifyExplorer(method: ExplorerRpcMethod, payload: JsonObject): void;
   requestExplorer(
@@ -344,6 +345,14 @@ export function createExplorerTreeMenuController(
       items.push({ divider: true });
     }
 
+    if (isFile && deps.supportsSecondEditor()) {
+      items.push({
+        label: 'Open in a Second Window',
+        type: 'openSecondWindow',
+      });
+      items.push({ divider: true });
+    }
+
     items.push({ label: 'Copy Name', type: 'copyName' });
     items.push({ label: 'Copy Path', type: 'copyPath' });
     items.push({ label: 'Copy Relative Path', type: 'copyRelPath' });
@@ -608,6 +617,19 @@ export function createExplorerTreeMenuController(
         } catch (error) {
           console.error(error);
           deps.toast('Failed to open File Explorer');
+        }
+        return;
+      }
+      case 'openSecondWindow': {
+        if (!ensureExplorerRpc()) return;
+        try {
+          await deps.requestExplorer(
+            EXPLORER_RPC_METHODS.editorOpenSecondWindow,
+            { rel },
+            15_000,
+          );
+        } catch (error) {
+          deps.toast(deps.getErrorMessage(error, 'Second window failed'));
         }
         return;
       }

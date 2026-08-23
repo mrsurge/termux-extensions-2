@@ -9,7 +9,7 @@ import { initBranchMenu } from './main_page/frontend/host-git-branch-menu.ts';
 import { initSidebarShortcuts } from './main_page/frontend/sidebar-shortcuts/runtime.ts';
 import ReconnectingWebSocket from './main_page/frontend/connections/reconnecting-websocket.ts';
 import { createConsoleDrawer } from './main_page/frontend/host-console-drawer.ts';
-import { createProblemsPanel } from './src/diagnostics/problems-panel.ts';
+import { createProblemsState } from './src/diagnostics/problems-panel.ts';
 import { installDiagnosticsLatencyProbe } from './src/diagnostics/latency-probe.ts';
 import { createExtensionActivityPanel } from './main_page/frontend/ui/extension-activity.ts';
 import { createCodeInspectorPanel } from './main_page/frontend/ui/code-inspector.ts';
@@ -64,8 +64,12 @@ import { createHostSidebarRuntime } from './main_page/frontend/host-sidebar-runt
 import { captureHostElements } from './main_page/frontend/host-elements.ts';
 import { createHostUiPrefsRuntime } from './main_page/frontend/host-ui-prefs-runtime.ts';
 import { createHostBootRuntime } from './main_page/frontend/host-boot-runtime.ts';
-import { resolveCodeTe2ClientIdentity } from './main_page/frontend/client-identity.ts';
+import {
+  codeTe2ClientRoleFromLocation,
+  resolveCodeTe2ClientIdentity,
+} from './main_page/frontend/client-identity.ts';
 import { bootSecondaryEditorRuntime } from './main_page/frontend/secondary-editor-runtime.ts';
+import { createMobileSecondaryEditorController } from './main_page/frontend/mobile-secondary-editor.ts';
 import { configureCodeTe2SocketIdentity } from './src/rpc/socketio-topology.ts';
 import { initResizeManager, loadLayoutPreferences } from './main_page/frontend/host-resize-manager.ts';
 import type { ProblemsPanelController } from './src/diagnostics/problems-panel.ts';
@@ -196,29 +200,15 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
   window.__feAppContext = appContext;
   window.host = host;
   window.api = api;
-  const clientIdentity = await resolveCodeTe2ClientIdentity();
+  const clientRole = codeTe2ClientRoleFromLocation();
+  const clientIdentity = await resolveCodeTe2ClientIdentity({ role: clientRole });
   configureCodeTe2SocketIdentity(clientIdentity);
-  if (new URLSearchParams(window.location.search).get('te2_desktop_editor') === 'secondary') {
+  if (clientRole === 'secondary') {
     await bootSecondaryEditorRuntime(rootEl, host);
     return;
   }
   const clientId = clientIdentity.clientInstanceId;
-  let problemsPanel: ProblemsPanelController = {
-    show() {},
-    hide() {},
-    update(_detail: unknown) {},
-    setActiveFile(_absPath: string) {},
-    destroy() {},
-    getDetail() {
-      return {};
-    },
-    getSummary(_projectRoot?: string) {
-      return {};
-    },
-    get isVisible() {
-      return false;
-    },
-  };
+  let problemsPanel: ProblemsPanelController = createProblemsState();
   let editorViewState: EditorViewState | null = null; // Loaded from backend at startup via /editor/view_state
   let cachedProjectRoot: string | null = null;
   let currentPath = '';
@@ -387,6 +377,13 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     root,
     sidebarDrawerEl,
   });
+  const mobileSecondEditor = createMobileSecondaryEditorController({
+    root,
+    container: requireEl('#second-editor-container'),
+    tab: document.querySelector<HTMLButtonElement>('#drawer-tab-second-window'),
+    toast: (message) => host.toast(message),
+  });
+  window.addEventListener('pagehide', () => mobileSecondEditor.destroy(), { once: true });
 
   const hostChromeRuntime = createHostChromeRuntime({
     issuesBadgesEl,
@@ -545,7 +542,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
         { clientInstanceId: clientIdentity.clientInstanceId },
         10_000,
       );
-      await resolveCodeTe2ClientIdentity({ reset: true });
+      await resolveCodeTe2ClientIdentity({ reset: true, role: 'primary' });
       window.location.reload();
     },
     toast: (msg: string, ms?: number) => host.toast(msg, ms),
@@ -780,6 +777,10 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
   });
 
   const electronSecondEditor = (window as ElectronSecondEditorWindow).te2Electron;
+  document.documentElement.dataset.te2SecondEditor = (
+    typeof electronSecondEditor?.openSecondEditor === 'function'
+    || mobileSecondEditor.supported
+  ) ? 'true' : 'false';
   let lastSecondaryProjectSync = '';
   let pendingSecondaryProjectSync = '';
   let secondaryProjectSyncing = '';
@@ -977,8 +978,9 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
   }
 
   async function openInSecondWindow(targetPath = currentPath): Promise<void> {
-    if (typeof electronSecondEditor?.openSecondEditor !== 'function') {
-      host.toast('A second editor window is available only in the Electron client');
+    const electronAvailable = typeof electronSecondEditor?.openSecondEditor === 'function';
+    if (!electronAvailable && !mobileSecondEditor.supported) {
+      host.toast('A second editor window is unavailable in this client');
       return;
     }
     if (!cachedProjectRoot || !targetPath) {
@@ -995,22 +997,57 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
         }
         secondaryAdapterReady = true;
       }
-      const result = await electronSecondEditor.openSecondEditor(
-        cachedProjectRoot,
-        targetPath,
-      );
-      applySecondaryEditorPresentation(result.presentation);
+      if (typeof electronSecondEditor?.openSecondEditor === 'function') {
+        const result = await electronSecondEditor.openSecondEditor(
+          cachedProjectRoot,
+          targetPath,
+        );
+        applySecondaryEditorPresentation(result.presentation);
+      } else {
+        await mobileSecondEditor.open(cachedProjectRoot, targetPath);
+      }
     } catch (error) {
       host.toast(`Second window failed: ${(error as Error)?.message || String(error)}`);
     }
   }
+
+  function handleSecondEditorOpenRequest(event: Event): void {
+    const detail = event instanceof CustomEvent && event.detail
+      && typeof event.detail === 'object'
+      ? event.detail as Record<string, unknown>
+      : {};
+    const projectPath = typeof detail.projectPath === 'string'
+      ? detail.projectPath.trim().replace(/\/+$/, '')
+      : '';
+    const activeProject = (cachedProjectRoot || '').trim().replace(/\/+$/, '');
+    const targetPath = typeof detail.path === 'string' ? detail.path.trim() : '';
+    if (!projectPath || projectPath !== activeProject || !targetPath) {
+      host.toast('Second window request no longer matches the active project');
+      return;
+    }
+    void openInSecondWindow(targetPath);
+  }
+
+  window.addEventListener(
+    'code-te2:second-editor-open',
+    handleSecondEditorOpenRequest,
+  );
+  window.addEventListener('pagehide', () => {
+    window.removeEventListener(
+      'code-te2:second-editor-open',
+      handleSecondEditorOpenRequest,
+    );
+  }, { once: true });
 
   const fileTabsController = createFileTabsController({
     viewport: fileTabsViewport,
     track: fileTabsTrack,
     formatFileNameDisplay: (name: string) => formatFileNameDisplay(name),
     openFile: (path: string) => openFile(path),
-    openInSecondWindow: typeof electronSecondEditor?.openSecondEditor === 'function'
+    openInSecondWindow: (
+      typeof electronSecondEditor?.openSecondEditor === 'function'
+      || mobileSecondEditor.supported
+    )
       ? (path: string) => openInSecondWindow(path)
       : undefined,
     closeRecentFile: (path: string) => uiIpcConnections.requestUiIpc(
@@ -1030,7 +1067,8 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
   });
   fileTabsController.installWindowHooks();
   miOpenSecondWindow.hidden =
-    typeof electronSecondEditor?.openSecondEditor !== 'function';
+    typeof electronSecondEditor?.openSecondEditor !== 'function'
+    && !mobileSecondEditor.supported;
 
   // Synchronize host + inline editor when a project is opened over project RPC.
   // Called from Explorer runtime via window.__codeTe2HandleProjectOpened(path, payload).
@@ -1513,11 +1551,10 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
   const {
     terminal,
     consoleDrawer,
-    problemsPanel: drawerProblemsPanel,
   } = initPanelsAndDrawer({
     createTerminalDrawer,
     createConsoleDrawer,
-    createProblemsPanel,
+    mobileSecondEditor,
     createExtensionActivityPanel,
     createCodeInspectorPanel,
     initDrawerAndShortcuts,
@@ -1528,7 +1565,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     triggerEditorSearchPanel: (reason: string, opts?: UnknownRecord) => searchPanelController.triggerEditorSearchPanel(reason, opts),
     openFile: (path: string, opts?: OpenFileOptions) => openFile(path, opts),
     jumpToCurrentFileLine: (line: number | string) => jumpToCurrentFileLine(line),
-    requestDiagnosticsMention: (payload: UnknownRecord) => uiIpcConnections.requestBackendDiagnosticsMention(buildSidebarMentionPayload(payload)),
     requestCodeInspectorCommand: (payload: UnknownRecord) => uiIpcConnections.requestUiIpc(UI_IPC_RPC_METHODS.hostCodeInspectorCommand, payload),
     emitImeIntent: (active: boolean, params: UnknownRecord = {}) => {
       uiIpcConnections.emitUiIpcNotification(active ? 'imeFocus' : 'imeBlur', params);
@@ -1553,8 +1589,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
       console.warn('[Preferences] failed to apply preferences-changed event', error);
     }
   });
-  problemsPanel = drawerProblemsPanel;
-
   // ---------- State load/init ----------
   // host.setTitle('Code CM6');
   const stateInitController = createStateInitController({

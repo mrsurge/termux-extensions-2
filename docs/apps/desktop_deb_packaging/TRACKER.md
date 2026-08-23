@@ -13,6 +13,8 @@ Last updated: 2026-08-22
 | Phase 2C: remaining frontend polish | Intake placeholder only | Each concrete tweak requires separate named scope and approval |
 | Phase 3: client-scoped foreground document | Source implementation complete and automated checks passing; live client matrix remains | Stable `clientInstanceId` is foreground authority; `windowId` is metadata, and native presentation stays outside backend document authority |
 | Phase 3B: Electron `Open in a Second Window` | Source implementation and automated checks complete; live Electron acceptance remains | One explicit secondary client, backend-owned foreground, Electron-owned per-project presentation; Android/browser unchanged |
+| Phase 3C: mobile `Open in a Second Window` drawer | Lifecycle correction and synchronized asset/APK validation complete; live client matrix remains | Exact-null remains empty; tab is occupancy-driven; Collapse minimizes the outer drawer and Close is page-session presentation only |
+| Phase 3D: Cefrium IME-dismissal focus release | Source-backed plan approved; implementation follows Phase 3C | Event-driven API-30 IME visibility transition; Cefrium-only and no polling/viewport inference |
 | Phase 4A: source/Git desktop bootstrap | Implemented and validated from a clean wheel | Python entrypoints build one fingerprinted Electron runtime and receipt-owned XDG integration; prebuilt release archives remain separate |
 | Phase 4: unified installer and Linux target | Planned; architecture selected, implementation separately gated | Installer construction, Linux acceptance, and release publication are distinct actions |
 | Phase 5: Termux target mode | Planned; dependency mapping required first | Reuses the Phase 4 installer transaction; device-native dependency investigation precedes target-archive acceptance |
@@ -48,6 +50,11 @@ Last updated: 2026-08-22
 | Electron presentation is already native-owned | Sidebar order/mode persists beneath `$TE2_CONFIG_HOME`, while file-tab order is browser-local and project-keyed | Generalize native desktop presentation for the secondary editor; do not add geometry to ProjectSidecar |
 | The current Electron identity store owns only one client | `desktop-client-identity.json` contains one stable `clientInstanceId` | Phase 3B must allocate and persist a second complete client identity deliberately |
 | Code TE2 renderer state is singleton-shaped | Socket identity, Monaco host globals, DOM ids, and main-page boot are scoped to one renderer | The secondary editor requires its own renderer and reduced boot mode, not duplicated DOM or CSS hiding |
+| Mobile can reuse the backend second-client contract without Electron native placement | `ProjectSidecar.client_foregrounds` is client-keyed, while the bottom drawer already owns a retained constrained portrait surface | Use a separate retained iframe/client in the drawer; do not mount another Monaco in the primary document realm |
+| Android relay origin cannot persist an auxiliary identity | GeckoView and Cefrium load through a random process-local loopback relay and already obtain primary identity from application-private native storage | Extend both native identity bridges with one paired auxiliary id; never use relay-origin local storage as Android identity authority |
+| Problems drawer duplicates Explorer diagnostics | Both consume `explorer.diagnostics.detail`; Explorer retains detail, derives badges while closed, and renders the same problems component in its diagnostics tab | Remove the duplicate drawer DOM/controller while preserving Explorer diagnostics and diagnostics export data |
+| Explorer file-card actions already have a typed RPC boundary | Card actions originate in `src/explorer/tree/menu-controller.ts` and extension actions use `/rpc/explorer` | Add a validated file-only second-window intent through Explorer backend and exact-client UI IPC; do not call another frontend lane directly |
+| Cefrium has editor focus intent but no keyboard-visibility authority | UI IPC toggles the native input filter and Cefrium can evaluate page JavaScript, but current code does not observe `WindowInsets.Type.ime()` | Use an API-30 visible-to-hidden native transition to signal one exact-page Monaco blur; do not infer from viewport resize |
 | npm has two explicit installed-code owners | Code TE2, WBA, and shared browser artifacts are already bundled/vendored; source/Git Electron and standalone Terminal use separate locked bootstraps | Final Linux archives prebuild Electron; source installs may opt into `te2 desktop install`, while Terminal retains its private first-use modules |
 | Standalone Terminal first use retains its current bootstrap | Its separate locked runtime runs `npm ci`; `node-pty` 1.1.0 uses a native install script and has no Linux prebuild in the current payload | Target prerequisite manifests supply Node/npm; the bootstrap installs the modules with target-native build support validated per installer mode |
 | Terminal runtime state is per-user canonical TE2 data | Current Python resolves `$TE2_DATA_HOME/node_runtime/terminal/<fingerprint>`, normally beneath `~/.local/share/te2`, with a lock, atomic staging, marker, package checks, and ABI-aware reuse | The selected installer target manifest supplies Node/npm; existing Python remains the only private-module installer and validator |
@@ -127,6 +134,18 @@ Last updated: 2026-08-22
   canonical project path; never key it by the random loopback relay origin.
 - [x] Keep Browser, GeckoView, and Cefrium single-surface and unchanged during
   the Electron-only second-window phase.
+- [x] Extend the second-client model in a later explicit mobile phase rather
+  than retroactively mixing Android/browser presentation into Phase 3B.
+- [x] Gate mobile second-editor capability from native/mobile client identity,
+  never from a narrow desktop viewport alone.
+- [x] Keep the mobile auxiliary Monaco in a separate retained iframe/document
+  realm and reuse the ordinary exact-client Editor/UI IPC/WBA lanes.
+- [x] Replace the redundant Problems drawer presentation with the mobile second
+  editor while retaining Explorer diagnostics as the project-wide UI.
+- [x] Route Explorer second-window actions through `/rpc/explorer`, backend
+  path validation, and exact-client host notification.
+- [x] Treat Cefrium IME dismissal as an event-driven native insets transition
+  followed by frontend focus release; do not poll or alter Gecko recovery.
 
 ## Phase 0 checklist — dependencies
 
@@ -410,6 +429,81 @@ Last updated: 2026-08-22
 - [ ] Confirm Browser, GeckoView, and Cefrium payloads and behavior are
   unchanged.
 
+## Phase 3C checklist — mobile `Open in a Second Window` drawer
+
+- [x] Complete source-backed feasibility and ownership investigation.
+- [x] Define non-desktop client capability independently from the responsive
+  layout breakpoint.
+- [x] Define one stable paired auxiliary client identity for ordinary mobile
+  browser, GeckoView, and Cefrium providers.
+- [x] Keep the canonical auxiliary foreground in existing
+  `ProjectSidecar.client_foregrounds` and presentation out of shared backend
+  state.
+- [x] Select one retained iframe/document realm in the bottom drawer rather
+  than a second Monaco instance in the primary document.
+- [x] Select the existing Problems drawer slot for replacement while retaining
+  Explorer diagnostics detail, badges, navigation, mentions, and export.
+- [x] Define file-tab and Explorer card-menu open intent without moving the
+  invoking primary foreground.
+- [x] Implement and test role-aware browser/GeckoView/Cefrium identity pairs
+  and atomic identity reset.
+- [x] Extract the portable reduced-editor core without regressing Electron's
+  native secondary renderer.
+- [x] Remove the duplicate Problems drawer DOM/controller and preserve all
+  Explorer diagnostics consumers.
+- [x] Implement the eligible-mobile Second Window drawer tab, retained iframe,
+  close/reopen behavior, and breakpoint reconciliation.
+- [x] Add typed Explorer RPC validation plus exact-client UI IPC routing for
+  file-card `Open in a Second Window`.
+- [x] Generalize file-tab opening to Electron and eligible mobile capability
+  providers while hiding it from unsupported desktop browsers.
+- [x] Keep an explicit null auxiliary foreground authoritative instead of
+  reviving the shared/primary current path.
+- [x] Hide the Second Window tab while the exact auxiliary foreground is empty
+  and reveal it only after a correlated open succeeds.
+- [x] Preserve the populated tab and retained renderer when the reduced mobile
+  header collapses the outer drawer; keep Close as page-session dismissal.
+- [x] Assign GeckoView/Cefrium debug and staging builds one repository-owned
+  development certificate while leaving release signing separate.
+- [ ] Validate same/different-file drafts, WBA features, project switch,
+  reconnect, restart, orientation, identity reset, and two-client isolation.
+- [x] Rebuild Code TE2 at synchronized version `0.2.333`, publish the canonical
+  Android asset seed, and assemble signed GeckoView/Cefrium debug and staging
+  APKs.
+- [ ] Install and complete GeckoView/Cefrium live acceptance separately.
+
+Automated evidence recorded on 2026-08-22:
+
+- Code TE2 TypeScript validation passed, all 237 Node tests passed, and the
+  canonical `node build.mjs` bundle completed.
+- The focused Python UI IPC and Explorer second-window suite passed all five
+  tests, including exact-client routing and symlink-escape rejection.
+- The canonical `0.2.333` Android asset seed was published after the frontend
+  build. Its bundled `host.js` is byte-identical to the source output and the
+  same hash/version was verified inside all four APKs.
+- GeckoView and Cefrium unit-test tasks plus debug and staging APK assemblies
+  completed with more than 7 GiB free. Every APK uses the stable repository
+  development certificate; Gradle reports both release variants with no
+  development signing config. No APK was installed and the shared framework
+  was not restarted.
+
+## Phase 3D checklist — Cefrium IME-dismissal focus release
+
+- [x] Confirm the current ownership split: UI IPC reports editor focus intent,
+  while native Android must observe actual IME visibility.
+- [x] Select API-30 `WindowInsets.Type.ime()` visible-to-hidden transition as
+  the dismissal signal; reject polling and viewport-resize heuristics.
+- [x] Define lifecycle, focus-owner, navigation, and programmatic-transition
+  fences for a genuine manual dismissal.
+- [x] Keep GeckoView's explicit keyboard recovery behavior unchanged.
+- [ ] Implement and unit-test the Cefrium native IME transition reducer.
+- [ ] Dispatch one exact-page dismissal event and add an idempotent Monaco blur
+  listener with lifecycle disposal.
+- [ ] Validate dismiss-scroll-refocus typing plus navigation, background,
+  dialogs, drawer, rotation, and editor-switch false-positive cases.
+- [ ] Run Cefrium unit/debug builds, shared Code TE2 checks, and unchanged Gecko
+  comparison coverage.
+
 ## Phase 4 checklist — unified installer and Linux target
 
 - [x] Package the bounded Electron production source and its exact shared inputs
@@ -524,3 +618,4 @@ Last updated: 2026-08-22
 | 2026-08-18 | Electron second editor implementation | Electron 90-test suite, Electron and Code TE2 typechecks/builds, Code TE2 220-test suite, targeted Python relay test, basedpyright, selected-tab context-menu regression, and embedded-grid structural checks | Source implementation passed automated validation; secondary app-shell readiness and Code TE2-owned in-grid placement replace the failed first live shape; live placement, restart, project-switch, retarget, and shared-edit acceptance remain open |
 | 2026-08-18 | Electron second editor sizing correction | Source inspection identified wholesale app-container clearing as removal of the injected template CSS/font assets; both typechecks, targeted host tests, and the Electron 90-test suite passed after selective cleanup and persisted dock resizing | Reduced Monaco chrome retains canonical sizing; docked editor width is directly resizable without adding frontend presentation authority; live acceptance remains open |
 | 2026-08-22 | Source/Git Electron bootstrap | Clean wheel content audit and isolated install, installed-wheel source build, cached fingerprint reuse, packaged Wayland launch, Electron typecheck plus 90 tests, 22 focused Python tests, and basedpyright | Passed; source installs can explicitly build/register Electron without embedding its 317 MiB runtime, while release archives remain prebuilt |
+| 2026-08-22 | Mobile second editor and Cefrium IME planning | Inspected Electron's reduced secondary renderer and identity broker, mobile drawer/Problems duplication, Explorer card-menu lane, Android native identity bridges, UI IPC focus intent, and Cefrium page-evaluation seam | Approved Phase 3C uses a paired exact client in a retained bottom-drawer iframe; later Phase 3D uses event-driven native IME dismissal to release Monaco focus |

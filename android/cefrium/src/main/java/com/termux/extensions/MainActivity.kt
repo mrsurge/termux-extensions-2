@@ -695,19 +695,25 @@ class MainActivity : AppCompatActivity() {
             callback.failure(400, "Cefrium native bridge request is not valid JSON")
             return true
         }
+        val role = if (
+            payload.optJSONObject("params")?.optString("role") == "secondary"
+        ) {
+            "secondary"
+        } else {
+            "primary"
+        }
         val result = when (payload.optString("method")) {
             "te2.clientIdentity.read" -> JSONObject()
                 .put("ok", true)
-                .put("clientInstanceId", androidClientInstanceId(applicationContext))
+                .put("clientInstanceId", androidClientInstanceId(applicationContext, role))
             "te2.clientIdentity.reset" -> {
-                val installationId = clientRuntimeService?.resetClientIdentity()
-                if (installationId == null) {
+                if (clientRuntimeService?.resetClientIdentity() == null) {
                     callback.failure(503, "Android runtime service is not connected")
                     return true
                 }
                 JSONObject()
                     .put("ok", true)
-                    .put("clientInstanceId", "client_$installationId")
+                    .put("clientInstanceId", androidClientInstanceId(applicationContext, role))
             }
             "te2.runTarget.register" -> {
                 val runtimeService = clientRuntimeService

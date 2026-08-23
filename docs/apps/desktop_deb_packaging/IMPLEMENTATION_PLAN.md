@@ -1011,6 +1011,295 @@ acceptance gate rather than another state authority.
    backend foreground without moving the primary editor.
 10. Browser, GeckoView, and Cefrium behavior and payloads remain unchanged.
 
+### 6.8 Phase 3C — mobile `Open in a Second Window` drawer
+
+Phase 3C deliberately follows the Electron-only Phase 3B implementation. It
+reuses the same shared-document and exact-client editor contracts, but it does
+not copy Electron's native `WebContentsView`, geometry store, or detach broker
+into Android or an ordinary browser.
+
+Implementation status as of 2026-08-22: the initial source implementation
+exposed two lifecycle defects during review: explicit-null secondary foreground
+fell back to the shared current path, and the drawer tab was capability-driven
+instead of occupancy-driven. The correction keeps null authoritative, projects
+exact secondary occupancy, adds real outer-drawer collapse, and assigns one
+stable repository-owned debug/staging signing identity. Code TE2 rebuild,
+version `0.2.333` asset publication, and all debug/staging APK assemblies have
+passed; the GeckoView/Cefrium live acceptance matrix remains.
+
+The user-facing feature remains named **Open in a Second Window**. On an
+eligible mobile client, the second editor is presented in the existing bottom
+drawer. The drawer is already the constrained portrait-layout surface and
+avoids adding another horizontal editor split to a narrow viewport.
+
+#### 6.8.1 Eligibility and breakpoint contract
+
+Availability is a client capability, not a CSS accident. The mobile second
+editor is enabled only for a non-desktop browser identity:
+
+- GeckoView and Cefrium native renderer identities are explicitly eligible;
+- an ordinary browser is eligible when the browser reports a mobile user agent
+  through `NavigatorUAData.mobile` or a bounded mobile fallback;
+- Electron continues using its existing native second editor; and
+- a desktop browser made narrow enough to enter `.layout-mobile` does not gain
+  a second editor merely because of its viewport width.
+
+The bottom-drawer presentation mounts only while the shared layout manager is
+in the mobile breakpoint. Rotating or resizing out of that breakpoint hides
+the mobile presentation without changing either client foreground or shared
+document membership. Returning to the mobile breakpoint can reveal the same
+warm iframe during the page session.
+
+The Explorer and file-tab actions are capability-driven. Electron shows them
+through its existing native implementation; eligible mobile clients show them
+through the drawer implementation; unsupported desktop browser clients do not
+offer a command that cannot be fulfilled.
+
+#### 6.8.2 Identity and state ownership
+
+The mobile auxiliary editor is a complete second Code TE2 client. It receives
+its own valid `clientInstanceId`, `windowId`, Editor lane, UI IPC lane, and WBA
+facade. It is never represented as another `windowId` on the primary client.
+
+One stable auxiliary identity is paired with each stable primary identity:
+
+- ordinary mobile browser profiles persist a separately generated valid client
+  id beside the existing browser identity;
+- GeckoView and Cefrium persist the paired id in application-private native
+  storage and expose it through a role-aware extension/query identity bridge;
+- the random Android framework-relay origin is never an identity store; and
+- identity reset rotates the primary and auxiliary ids in one transaction so
+  a stale auxiliary foreground cannot survive under the new installation
+  identity.
+
+The secondary client id is independently generated and validated against the
+canonical `client_<lowercase-alphanumeric>` contract. Do not append an
+unchecked suffix to the primary id or derive identity from a transient
+presentation/window id.
+
+Canonical file ownership stays unchanged:
+
+- `ProjectSidecar.client_foregrounds[auxiliaryClientInstanceId]` owns the
+  auxiliary foreground for each project;
+- shared open-state owns admitted/background documents and tab membership;
+- drafts, writes, Git, diagnostics, and WBA logical documents remain shared;
+- the mobile host owns only drawer/iframe visibility for the current page
+  session; and
+- the bottom drawer does not introduce native geometry or another durable
+  backend presentation record.
+
+An explicit null auxiliary foreground remains empty; it must not fall back to
+the primary/shared current path. The drawer tab is absent while that exact
+foreground is empty. Closing or hiding a populated mobile surface does not
+clear its backend foreground. Close dismisses the tab for the current page
+session, while Collapse only minimizes the outer drawer and preserves the
+visible populated tab. An explicit second-window open clears the dismissal and
+reveals the warm auxiliary client. An explicit future reset action may clear
+the foreground; ordinary presentation close must not.
+
+#### 6.8.3 Portable reduced renderer and drawer presentation
+
+The mobile auxiliary editor runs in one retained same-origin iframe mounted in
+the existing bottom drawer. The iframe is required: Code TE2's Monaco globals,
+DOM ids, socket identity, and editor boot state are singleton-shaped inside one
+document realm. Do not clone the primary Monaco DOM or mount a second editor in
+the primary page document.
+
+Refactor the implemented Electron secondary runtime into a renderer-neutral
+reduced-editor core plus small Electron and mobile presentation adapters. The
+portable core retains:
+
+- the compact filename header;
+- the File menu with Save, Save As, and Discard Draft;
+- one Monaco editor with no background tab strip; and
+- the ordinary exact-client Editor/UI IPC/WBA boot and open sequence.
+
+Electron retains its Close, Collapse, Detach, and Attach native controls. The
+mobile adapter keeps the reduced header's Collapse and Close controls but
+delegates their effects to the outer drawer; it does not render a redundant
+inner tab bar or pretend to support native detach. Collapse preserves the warm
+renderer and populated drawer tab. Close returns the drawer to a locally
+dismissed, explicitly reopenable state while retaining the canonical auxiliary
+foreground.
+
+The existing Problems drawer tab, header, container, toggle-menu entry, and
+duplicate `createProblemsPanel` instance are removed. The Explorer diagnostics
+tab remains diagnostics presentation authority: it already retains the same
+`explorer.diagnostics.detail` projection, updates live while open, derives tree
+badges while closed, supports navigation/mentions, and provides a better
+project-wide view. Host diagnostics export must read that retained Explorer
+detail (or a shared nonvisual diagnostics projection), not preserve a hidden
+Problems-panel DOM instance as state authority.
+
+On eligible mobile clients, **Second Window** occupies the removed Problems
+drawer slot. On desktop layouts the redundant Problems item remains absent;
+Electron continues rendering its native secondary editor outside the drawer.
+
+#### 6.8.4 Open intent and Explorer integration
+
+The primary file-tab action is generalized from Electron-only to the advertised
+second-editor capability. A mobile invocation ensures the retained iframe
+exists and sends only a correlated bounded presentation/open intent. The
+auxiliary renderer performs the ordinary authenticated `editor.open` under its
+own client id and returns only success plus its canonical foreground path. The
+host reveals and selects the Second Window tab only after success. No document
+content, draft, or WBA response crosses a `postMessage` presentation channel.
+
+File cards in Explorer gain **Open in a Second Window** for admitted files on
+both supported desktop and mobile clients. Explorer remains on its own lane:
+
+1. the menu action calls a new typed `/rpc/explorer` method with the clicked
+   relative path;
+2. Python validates the active project, file kind, admission boundary, and the
+   originating primary client identity;
+3. the backend emits one exact-client UI IPC open request to that invoking
+   host; and
+4. the host selects its Electron or mobile presentation, after which the
+   auxiliary renderer performs its own canonical open.
+
+There is no global-active-client fallback or broadcast. The clicked file is
+admitted into shared membership and therefore appears as a background tab in
+the primary client, while only the invoking client's auxiliary foreground
+moves. Opening from one phone, browser profile, or Electron installation must
+not affect another client's auxiliary foreground.
+
+#### 6.8.5 Lifecycle and reconciliation
+
+- Project switch remains shared. Both the primary and auxiliary clients receive
+  exact-client foreground reconciliation for the new project.
+- A missing/stale auxiliary foreground resolves through the existing explicit
+  null contract; once `clientForeground` is present, null never copies the
+  primary/shared foreground implicitly and the drawer tab disappears.
+- Drawer hide/show and mobile breakpoint changes retain the live iframe.
+- Page reload, renderer loss, or full client restart reconstructs the iframe
+  through the backend foreground when the user next opens the Second Window
+  presentation.
+- Shared membership removal and project switch can clear an invalid auxiliary
+  model through the existing exact-client SSOT path.
+- Disconnected open intents fail explicitly; Socket.IO send buffers and polling
+  are not used for deferred secondary opens.
+
+#### 6.8.6 Implementation slices
+
+1. Add a tested, renderer-neutral second-editor capability and role-aware
+   primary/auxiliary identity pair for browser, GeckoView, and Cefrium.
+2. Extract the reduced editor core from the Electron-only presentation without
+   regressing Electron's retained native renderer.
+3. Remove the duplicate Problems drawer presentation and point diagnostics
+   export/summary consumers at the existing Explorer diagnostics projection.
+4. Add the eligible-mobile Second Window drawer tab and retained iframe
+   controller, including mobile breakpoint hide/reveal behavior.
+5. Generalize file-tab opening and add the typed Explorer card-menu request,
+   backend validation, exact-client UI IPC routing, and host presentation
+   dispatch.
+6. Add project-switch, reconnect, identity-reset, renderer-loss, orientation,
+   and unsupported-desktop reconciliation tests.
+7. Rebuild Code TE2, publish Android assets only under a separately approved
+   publication scope, and run the live client matrix.
+
+#### 6.8.7 Acceptance matrix
+
+1. On GeckoView, Cefrium, and an ordinary eligible mobile browser, opening file
+   B in Second Window leaves the primary editor on file A.
+2. File B enters shared membership and appears as a background tab without
+   becoming the primary foreground.
+3. Drawer hide/show and portrait breakpoint exit/re-entry preserve the warm
+   auxiliary editor and its cursor/scroll state during the page session.
+4. Page reload and full client restart restore the auxiliary client's canonical
+   file and repopulated tab unless the current page session explicitly dismissed
+   the presentation.
+5. Save, Save As, discard, diagnostics, hover, semantic tokens, extension
+   commands, and navigation use the auxiliary identity and existing revision
+   fence.
+6. Explorer card actions select the invoking client's auxiliary editor only;
+   two connected mobile clients can open different auxiliary files.
+7. Project switch, shared close, identity reset, and transport reconnect cannot
+   revive a stale auxiliary path or move the primary foreground.
+8. The duplicate Problems drawer is gone while Explorer diagnostics, badges,
+   navigation, mentions, summaries, and diagnostics export continue to work.
+9. Electron's dock/collapse/detach/attach implementation is unchanged and its
+   Explorer action uses the same validated intent contract.
+10. A narrow desktop browser exposes neither the mobile drawer tab nor a dead
+    Open in a Second Window action.
+11. Empty exact-client foreground state exposes no Second Window tab; Collapse
+    minimizes the drawer without losing the tab or warm renderer, and Close
+    dismisses only the page-session presentation.
+
+### 6.9 Phase 3D — Cefrium IME-dismissal focus release
+
+This phase is deliberately separate from the second-editor work. It changes
+the Cefrium Android client and Monaco focus presentation only after Phase 3C is
+validated.
+
+#### 6.9.1 Problem and ownership
+
+After Monaco receives focus in Cefrium, manually dismissing the Android soft
+keyboard leaves Monaco's controlled textarea focused. Chromium can therefore
+request the IME again during a subsequent document scroll. Tapping a
+non-editor element prevents the recurrence because it blurs Monaco; the desired
+fix is to perform that focus release when native Android confirms a genuine IME
+dismissal.
+
+Native Android owns keyboard visibility. Monaco owns editor focus. The existing
+UI IPC `ui.ime.focus`/`ui.ime.blur` facts describe editor intent and input-filter
+ownership; they are not proof that the system keyboard is currently visible.
+Do not infer dismissal from viewport resize, visual-viewport height, timers, or
+network polling.
+
+#### 6.9.2 Event-driven transition contract
+
+On Android 11/API 30 and newer, Cefrium observes the root window's
+`WindowInsets.Type.ime()` visibility. A small testable state reducer emits one
+dismissal only when all of these are true:
+
+- IME visibility made a confirmed `visible -> hidden` transition;
+- the current UI IPC IME owner is Monaco/editor input;
+- the Activity and app page still have focus and are not navigating,
+  backgrounding, or being destroyed; and
+- the transition was not caused by a known native programmatic focus/keyboard
+  transaction.
+
+Initial hidden state does not emit. Repeated hidden insets do not emit. Older
+Android versions retain current behavior unless an equivalent compatibility
+signal is separately proven; this phase does not add a resize heuristic.
+
+For a valid dismissal, Cefrium dispatches one exact-page event through its
+existing browser JavaScript evaluation surface. The Code TE2 editor listener
+uses Monaco's public focus API and its active Android input textarea to blur the
+editor. If Cefrium still requires an explicit focus destination, use a bounded
+non-editable focus sink owned by the editor host rather than focusing an
+arbitrary page control. The resulting normal frontend blur projection updates
+UI IPC/input-filter state; native code does not forge backend editor state.
+
+The next direct user tap in Monaco follows the existing focus path and is
+allowed to summon the keyboard normally. No sticky suppression flag survives
+the dismissal.
+
+#### 6.9.3 Scope boundaries
+
+- Cefrium only; GeckoView keeps its current explicit Show Keyboard recovery
+  control and is not normalized to Chromium behavior in this phase.
+- Do not call `hideSoftInput` in response to the already-hidden transition.
+- Do not blur on Activity pause, app navigation, native Tools focus, file
+  picker/dialog focus, or ordinary focus movement outside Monaco.
+- Do not add periodic IME checks or frontend viewport observers.
+- Keep the existing Cefrium `preventScroll` textarea focus policy and 16 px
+  Find/Replace focus-zoom correction intact.
+
+#### 6.9.4 Implementation and acceptance
+
+1. Add a unit-tested Cefrium IME visibility/focus transition reducer.
+2. Wire API-30 root-insets observation to the reducer and Activity/page
+   lifecycle fences.
+3. Add one idempotent editor-side native-dismissal listener with explicit
+   disposal across editor/model reconstruction.
+4. Validate on a connected Cefrium device: focus Monaco, type, dismiss the IME,
+   scroll without keyboard resurrection, then tap Monaco and type again.
+5. Validate that navigation, background/foreground, drawer interaction,
+   dialogs, rotation, and editor switching do not produce false blur events.
+6. Run Cefrium unit/debug builds and the shared Code TE2 typecheck/build/tests;
+   retain Gecko debug comparison coverage without changing Gecko behavior.
+
 ## 7. Phase 4 — unified installer and Linux target archive
 
 ### 7.1 Source/editable/Git package desktop bridge

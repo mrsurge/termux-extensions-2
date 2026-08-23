@@ -39,6 +39,7 @@ test("Explorer resolves and executes contributed context commands through its RP
     getTreeElement: () => null,
     getSelectedEntries: () => new Set(["src"]),
     getProjectPath: () => "/workspace",
+    supportsSecondEditor: () => false,
     hasExplorerRpc: () => true,
     notifyExplorer() {},
     requestExplorer: async (method, payload) => {
@@ -92,4 +93,60 @@ test("Explorer resolves and executes contributed context commands through its RP
       },
     },
   ]);
+});
+
+test("Explorer routes file cards to the source client's second editor", async () => {
+  const dom = new Window({ url: "http://127.0.0.1/apps/by-id/code_te2" });
+  Object.assign(globalThis, {
+    window: dom,
+    document: dom.document,
+    Element: dom.Element,
+    HTMLElement: dom.HTMLElement,
+  });
+  const menu = document.createElement("div");
+  menu.className = "fe-card-menu";
+  document.body.appendChild(menu);
+  const anchor = document.createElement("button");
+  document.body.appendChild(anchor);
+  const calls = [];
+  const { createExplorerTreeMenuController } = await importController();
+  const controller = createExplorerTreeMenuController({
+    getTreeElement: () => null,
+    getSelectedEntries: () => new Set(),
+    getProjectPath: () => "/workspace",
+    supportsSecondEditor: () => true,
+    hasExplorerRpc: () => true,
+    notifyExplorer() {},
+    requestExplorer: async (method, payload) => {
+      calls.push({ method, payload });
+      return { ok: true };
+    },
+    buildSidebarMentionPayload: (payload) => payload,
+    toast() {},
+    isInSelectMode: () => false,
+    enableSelectMode() {},
+    disableSelectMode() {},
+    openFileAndMaybeJump: async () => {},
+    isCancelledError: () => false,
+    getErrorMessage: (_error, fallback) => fallback,
+  });
+
+  controller.openCardMenuForEntry(
+    { rel: "src/main.ts", name: "main.ts", kind: "file" },
+    anchor,
+  );
+  const secondWindowItem = Array.from(
+    document.querySelectorAll(".fe-card-menu > .fe-dd-item"),
+  ).find((element) => element.textContent === "Open in a Second Window");
+  assert.ok(secondWindowItem);
+  secondWindowItem.dispatchEvent(new dom.MouseEvent("click", { bubbles: true }));
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.deepEqual(calls.find((call) =>
+    call.method === "explorer.editor.openSecondWindow"
+  ), {
+    method: "explorer.editor.openSecondWindow",
+    payload: { rel: "src/main.ts" },
+  });
 });

@@ -4,8 +4,14 @@ import {
   requestCefriumNative,
 } from "./native-client-bridge.ts";
 
-const CLIENT_STORAGE_KEY = "te2.codeTe2.clientInstanceId.v1";
-const WINDOW_STORAGE_KEY = "te2.codeTe2.windowId.v1";
+const CLIENT_STORAGE_KEYS = Object.freeze({
+  primary: "te2.codeTe2.clientInstanceId.v1",
+  secondary: "te2.codeTe2.secondaryClientInstanceId.v1",
+});
+const WINDOW_STORAGE_KEYS = Object.freeze({
+  primary: "te2.codeTe2.windowId.v1",
+  secondary: "te2.codeTe2.secondaryWindowId.v1",
+});
 const GECKO_IDENTITY_REQUEST = "te2.clientIdentity.request";
 const GECKO_IDENTITY_RESPONSE = "te2.clientIdentity.response";
 const ID_PATTERN = /^client_[a-z0-9]{12,64}$/;
@@ -27,6 +33,8 @@ export interface CodeTe2ClientIdentity {
   label: string;
 }
 
+export type CodeTe2ClientRole = "primary" | "secondary";
+
 function randomIdentity(prefix: "client" | "window"): string {
   const raw = globalThis.crypto.randomUUID().replaceAll("-", "").toLowerCase();
   return `${prefix}_${raw}`;
@@ -41,24 +49,38 @@ function validatedClientInstanceId(value: unknown): string {
   return normalized;
 }
 
-function browserClientInstanceId(reset: boolean): string {
-  if (reset) window.localStorage.removeItem(CLIENT_STORAGE_KEY);
-  const existing = window.localStorage.getItem(CLIENT_STORAGE_KEY);
+function browserClientInstanceId(
+  reset: boolean,
+  role: CodeTe2ClientRole,
+): string {
+  if (reset) {
+    window.localStorage.removeItem(CLIENT_STORAGE_KEYS.primary);
+    window.localStorage.removeItem(CLIENT_STORAGE_KEYS.secondary);
+  }
+  const storageKey = CLIENT_STORAGE_KEYS[role];
+  const existing = window.localStorage.getItem(storageKey);
   if (existing && ID_PATTERN.test(existing)) return existing;
   const generated = randomIdentity("client");
-  window.localStorage.setItem(CLIENT_STORAGE_KEY, generated);
+  window.localStorage.setItem(storageKey, generated);
   return generated;
 }
 
-function windowIdentity(): string {
-  const existing = window.sessionStorage.getItem(WINDOW_STORAGE_KEY);
+function windowIdentity(role: CodeTe2ClientRole): string {
+  const storageKey = WINDOW_STORAGE_KEYS[role];
+  const existing = window.sessionStorage.getItem(storageKey);
   if (existing && /^window_[a-z0-9]{20,64}$/.test(existing)) return existing;
   const generated = randomIdentity("window");
-  window.sessionStorage.setItem(WINDOW_STORAGE_KEY, generated);
+  window.sessionStorage.setItem(storageKey, generated);
   return generated;
 }
 
-function requestGeckoClientIdentity(reset: boolean): Promise<string> {
+function requestGeckoClientIdentity(
+  reset: boolean,
+  role: CodeTe2ClientRole,
+): Promise<string> {
+  const requestTarget = role === "secondary" && window.parent !== window
+    ? window.parent
+    : window;
   return new Promise((resolve, reject) => {
     const requestId = globalThis.crypto.randomUUID();
     const timeout = window.setTimeout(() => {
@@ -66,7 +88,10 @@ function requestGeckoClientIdentity(reset: boolean): Promise<string> {
       reject(new Error("Gecko native client identity bridge timed out"));
     }, 10_000);
     function onMessage(event: MessageEvent): void {
-      if (event.source !== window || event.origin !== window.location.origin)
+      if (
+        event.source !== requestTarget ||
+        event.origin !== window.location.origin
+      )
         return;
       const data = event.data;
       if (
@@ -92,14 +117,17 @@ function requestGeckoClientIdentity(reset: boolean): Promise<string> {
       }
     }
     window.addEventListener("message", onMessage);
-    window.postMessage(
-      { channel: GECKO_IDENTITY_REQUEST, requestId, reset },
+    requestTarget.postMessage(
+      { channel: GECKO_IDENTITY_REQUEST, requestId, reset, role },
       window.location.origin,
     );
   });
 }
 
-async function nativeClientInstanceId(reset: boolean): Promise<{
+async function nativeClientInstanceId(
+  reset: boolean,
+  role: CodeTe2ClientRole,
+): Promise<{
   clientInstanceId: string;
   provider: CodeTe2ClientIdentity["provider"];
   label: string;
@@ -120,6 +148,7 @@ async function nativeClientInstanceId(reset: boolean): Promise<{
   if (renderer === "cefrium") {
     const result = await requestCefriumNative(
       reset ? "te2.clientIdentity.reset" : "te2.clientIdentity.read",
+      { role },
     );
     return {
       clientInstanceId: validatedClientInstanceId(result.clientInstanceId),
@@ -129,7 +158,7 @@ async function nativeClientInstanceId(reset: boolean): Promise<{
   }
   if (renderer === "gecko") {
     return {
-      clientInstanceId: await requestGeckoClientIdentity(reset),
+      clientInstanceId: await requestGeckoClientIdentity(reset, role),
       provider: "gecko",
       label: "GeckoView Android installation",
     };
@@ -138,20 +167,32 @@ async function nativeClientInstanceId(reset: boolean): Promise<{
     throw new Error("Android native renderer identity is missing or unsupported");
   }
   return {
-    clientInstanceId: browserClientInstanceId(reset),
+    clientInstanceId: browserClientInstanceId(reset, role),
     provider: "browser",
     label: "Browser profile",
   };
 }
 
 export async function resolveCodeTe2ClientIdentity(
-  options: { reset?: boolean } = {},
+  options: { reset?: boolean; role?: CodeTe2ClientRole } = {},
 ): Promise<CodeTe2ClientIdentity> {
-  const resolved = await nativeClientInstanceId(options.reset === true);
-  const windowId = windowIdentity();
+  const role = options.role === "secondary" ? "secondary" : "primary";
+  const resolved = await nativeClientInstanceId(options.reset === true, role);
+  const windowId = windowIdentity(role);
   return Object.freeze({
     ...resolved,
     windowId,
     consoleWorkerId: `main_page:${resolved.clientInstanceId}:${windowId}`,
   });
+}
+
+export function codeTe2ClientRoleFromLocation(): CodeTe2ClientRole {
+  const params = new URLSearchParams(window.location.search);
+  const explicit = (params.get("te2_editor_role") || "").trim().toLowerCase();
+  if (explicit && explicit !== "primary" && explicit !== "secondary") {
+    throw new Error("Code TE2 editor role is invalid");
+  }
+  if (explicit === "secondary") return "secondary";
+  if (params.get("te2_desktop_editor") === "secondary") return "secondary";
+  return "primary";
 }

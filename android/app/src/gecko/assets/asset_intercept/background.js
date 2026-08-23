@@ -10,7 +10,7 @@ let enabled = false;
 let nativePort = null;
 let reconnectTimer = 0;
 let frameworkBaseUrl = "";
-let clientInstanceId = "";
+let clientInstanceIds = { primary: "", secondary: "" };
 const pendingIdentityResets = new Map();
 const devRuntimeOriginsBySurface = new Map();
 const devRuntimeLabelsBySurface = new Map();
@@ -247,12 +247,18 @@ function frameworkOrigin() {
 browser.runtime.onMessage.addListener((message, sender) => {
   if (message?.type === "client_identity_get") {
     const senderOrigin = (() => {
-      try { return new URL(sender.url || "").origin; } catch (_) { return ""; }
+      try {
+        return new URL(sender.url || "").origin;
+      } catch (_) {
+        return "";
+      }
     })();
+    const role = message.role === "secondary" ? "secondary" : "primary";
     if (sender.frameId !== 0 || senderOrigin !== frameworkOrigin()) {
       return Promise.resolve({ ok: false, error: "Client identity request origin is not trusted" });
     }
     if (message.reset !== true) {
+      const clientInstanceId = clientInstanceIds[role];
       return Promise.resolve(clientInstanceId
         ? { ok: true, clientInstanceId }
         : { ok: false, error: "Native client identity is not ready" });
@@ -267,8 +273,8 @@ browser.runtime.onMessage.addListener((message, sender) => {
         pendingIdentityResets.delete(requestId);
         resolve({ ok: false, error: "Native client identity reset timed out" });
       }, 10000);
-      pendingIdentityResets.set(requestId, { resolve, timeout });
-      nativePort.postMessage({ type: "client_identity_reset", requestId });
+      pendingIdentityResets.set(requestId, { resolve, timeout, role });
+      nativePort.postMessage({ type: "client_identity_reset", requestId, role });
     });
   }
   if (message?.type === "run_runtime_config") {
@@ -332,7 +338,10 @@ function connectNativeBridge() {
         const previousFrameworkBaseUrl = frameworkBaseUrl;
         assetServerPort = message.port;
         frameworkBaseUrl = String(message.frameworkBaseUrl || "");
-        clientInstanceId = String(message.clientInstanceId || "");
+        clientInstanceIds = {
+          primary: String(message.clientInstanceId || ""),
+          secondary: String(message.secondaryClientInstanceId || ""),
+        };
         if (previousFrameworkBaseUrl && previousFrameworkBaseUrl !== frameworkBaseUrl) {
           clearDevRuntimePolicies();
         }
@@ -348,7 +357,11 @@ function connectNativeBridge() {
         if (!pending) return;
         pendingIdentityResets.delete(requestId);
         clearTimeout(pending.timeout);
-        clientInstanceId = String(message.clientInstanceId || "");
+        clientInstanceIds = {
+          primary: String(message.clientInstanceId || ""),
+          secondary: String(message.secondaryClientInstanceId || ""),
+        };
+        const clientInstanceId = clientInstanceIds[pending.role];
         pending.resolve(clientInstanceId
           ? { ok: true, clientInstanceId }
           : { ok: false, error: "Native client identity reset failed" });
@@ -359,7 +372,7 @@ function connectNativeBridge() {
       assetServerPort = 0;
       enabled = false;
       frameworkBaseUrl = "";
-      clientInstanceId = "";
+      clientInstanceIds = { primary: "", secondary: "" };
       for (const pending of pendingIdentityResets.values()) {
         clearTimeout(pending.timeout);
         pending.resolve({ ok: false, error: "Native client identity bridge disconnected" });

@@ -53,21 +53,33 @@ window.addEventListener("message", (event) => {
 });
 
 window.addEventListener("message", async (event) => {
-  if (event.source !== window || !event.data || event.data.channel !== CLIENT_IDENTITY_REQUEST) return;
+  if (
+    !event.source ||
+    event.origin !== window.location.origin ||
+    !event.data ||
+    event.data.channel !== CLIENT_IDENTITY_REQUEST
+  ) return;
   const requestId = String(event.data.requestId || "");
   if (!requestId) return;
+  const role = event.data.role === "secondary" ? "secondary" : "primary";
+  if (
+    (role === "primary" && event.source !== window) ||
+    (role === "secondary" && event.source === window)
+  ) return;
+  const responseTarget = event.source;
   let result;
   try {
     result = await browser.runtime.sendMessage({
       type: "client_identity_get",
       requestId,
       reset: event.data.reset === true,
+      role,
       pageOrigin: window.location.origin,
     });
   } catch (error) {
     result = { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
-  window.postMessage({
+  responseTarget.postMessage({
     channel: CLIENT_IDENTITY_RESPONSE,
     requestId,
     result: result || { ok: false, error: "Native client identity returned no response" },

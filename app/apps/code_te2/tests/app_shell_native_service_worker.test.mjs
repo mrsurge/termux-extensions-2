@@ -55,7 +55,7 @@ function nativeWindow(renderer, script, hangingTe2Unregister) {
   Object.defineProperty(window, "caches", {
     configurable: true,
     value: {
-      keys: async () => ["te2-v0.2.332", "embedded-app-cache"],
+      keys: async () => ["te2-v0.2.333", "embedded-app-cache"],
       delete: async (name) => {
         calls.cacheDelete.push(name);
         return true;
@@ -84,7 +84,7 @@ for (const [label, templateUrl] of templates) {
 
     assert.equal(ready, true);
     assert.deepEqual(calls.unregister, ["te2"]);
-    assert.deepEqual(calls.cacheDelete, ["te2-v0.2.332"]);
+    assert.deepEqual(calls.cacheDelete, ["te2-v0.2.333"]);
     assert.equal(window.sessionStorage.getItem("te_android_renderer"), "cefrium");
   });
 
@@ -99,7 +99,7 @@ for (const [label, templateUrl] of templates) {
 
     assert.equal(await window.teNativeServiceWorkerReady, true);
     assert.deepEqual(calls.unregister, ["te2"]);
-    assert.deepEqual(calls.cacheDelete, ["te2-v0.2.332"]);
+    assert.deepEqual(calls.cacheDelete, ["te2-v0.2.333"]);
     assert.equal(window.sessionStorage.getItem("te_android_renderer"), "gecko");
   });
 }

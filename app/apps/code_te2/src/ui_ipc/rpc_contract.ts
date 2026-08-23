@@ -53,6 +53,7 @@ export const UI_IPC_RPC_NOTIFICATIONS = {
   editorDiagnosticsCounts: 'ui.editor.diagnostics.counts',
   adapterState: 'ui.adapter.state',
   hostActiveFileChanged: 'ui.host.activeFile.changed',
+  hostSecondEditorOpen: 'ui.host.secondEditor.open',
   openStateChanged: 'ui.openState.changed',
   fileTabsDecorationsChanged: 'ui.fileTabs.decorations.changed',
   projectSwitching: 'ui.project.switching',

@@ -4,7 +4,7 @@
  *   bindMenuToggle: (el: Element, handler: Function) => void,
  *   requireEl: (selector: string) => HTMLElement,
  *   consoleDrawer: { show: Function, hide: Function },
- *   problemsPanel: { show: Function, hide: Function },
+ *   mobileSecondEditor?: { show: Function, hide: Function },
  *   extensionActivityPanel: { show: Function, hide: Function },
  *   codeInspectorPanel: { show: Function, hide: Function },
  *   toggleTerminal: () => void,
@@ -23,8 +23,7 @@ export function initDrawerAndShortcuts(deps: any) {
     const terminalHeader = document.querySelector<HTMLElement>('.terminal-header');
     const terminalContainer = document.getElementById('terminal-container');
     const consoleContainer = document.getElementById('console-container');
-    const problemsContainer = document.getElementById('problems-container');
-    const problemsHeader = document.getElementById('problems-header');
+    const secondEditorContainer = document.getElementById('second-editor-container');
     const extensionLogContainer = document.getElementById('extension-log-container');
     const extensionLogHeader = document.getElementById('extension-log-header');
     const codeInspectorContainer = document.getElementById('code-inspector-container');
@@ -41,14 +40,13 @@ export function initDrawerAndShortcuts(deps: any) {
         if (terminalHeader) terminalHeader.style.display = 'none';
         if (terminalContainer) terminalContainer.style.display = 'none';
         if (consoleContainer) consoleContainer.style.display = 'none';
-        if (problemsContainer) problemsContainer.style.display = 'none';
-        if (problemsHeader) problemsHeader.style.display = 'none';
+        if (secondEditorContainer) secondEditorContainer.hidden = true;
         if (extensionLogContainer) extensionLogContainer.style.display = 'none';
         if (extensionLogHeader) extensionLogHeader.style.display = 'none';
         if (codeInspectorContainer) codeInspectorContainer.style.display = 'none';
         if (codeInspectorHeader) codeInspectorHeader.style.display = 'none';
         deps.consoleDrawer.hide();
-        deps.problemsPanel.hide();
+        deps.mobileSecondEditor?.hide();
         deps.extensionActivityPanel.hide();
         deps.codeInspectorPanel.hide();
 
@@ -57,8 +55,8 @@ export function initDrawerAndShortcuts(deps: any) {
           if (terminalContainer) terminalContainer.style.display = '';
         } else if (target === 'console') {
           deps.consoleDrawer.show();
-        } else if (target === 'problems') {
-          deps.problemsPanel.show();
+        } else if (target === 'second-window') {
+          deps.mobileSecondEditor?.show();
         } else if (target === 'extensions') {
           deps.extensionActivityPanel.show();
         } else if (target === 'code-inspector') {
@@ -78,17 +76,6 @@ export function initDrawerAndShortcuts(deps: any) {
       const isOpen = drawer && drawer.classList.contains('open');
       const consoleTab = document.querySelector<HTMLElement>('.drawer-tab[data-tab="console"]');
       if (consoleTab) consoleTab.click();
-      if (!isOpen) deps.toggleTerminal();
-    });
-  }
-
-  const miToggleProblems = document.getElementById('mi-toggle-problems');
-  if (miToggleProblems) {
-    deps.bindMenuToggle(miToggleProblems, () => {
-      const drawer = document.getElementById('terminal-drawer');
-      const isOpen = drawer && drawer.classList.contains('open');
-      const problemsTab = document.querySelector<HTMLElement>('.drawer-tab[data-tab="problems"]');
-      if (problemsTab) problemsTab.click();
       if (!isOpen) deps.toggleTerminal();
     });
   }
