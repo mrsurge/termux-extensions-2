@@ -291,7 +291,7 @@ registry. Legacy `last_file` now exists only as a one-time migration seed.
   Electron, npm, and wheel caches remain outside the package root.
 - Build staging and final release artifacts stay outside tracked source or under
   an ignored build-output root.
-- Release builders enforce the existing 2 GiB free-space guard before Electron
+- Release builders enforce the existing 3 GiB free-space guard before Electron
   or Rust compilation begins.
 - A supported release platform wheel contains the validated Rust release
   server as package data plus an explicit release manifest. The bootstrap
@@ -1389,7 +1389,7 @@ PATH/login-shell/NVM/Termux-aware resolver used by the Terminal bootstrap,
 fingerprint the complete production input set plus Node identity, and lock the
 transaction. A missing fingerprint runs locked `npm ci`, source compilation,
 and Electron packaging beneath `$TE2_CACHE_HOME/desktop/electron`, guarded by
-the existing 2 GiB free-space minimum. Only the validated pruned application is
+the existing 3 GiB free-space minimum. Only the validated pruned application is
 atomically published beneath `$TE2_DATA_HOME/desktop/electron/runtimes`; an
 atomic relative `current` link selects it.
 

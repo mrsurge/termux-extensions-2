@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools>=82", "wheel>=0.46"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -30,6 +30,10 @@ include-package-data = true
 "app.apps.code_te2" = [
     "vendor/node_socketio/**/*",
     "vendor/picomatch/**/*",
+]
+"app.release_runtime" = [
+    "provenance.json",
+    "bin/*",
 ]
 "desktop_client" = [
     "desktop_asset_inventory.json",

@@ -8,6 +8,7 @@ rust-version.workspace = true
 [features]
 default = []
 ferrous-framework-native = ["dep:ferrous_framework"]
+release-vendored-tls = ["git2/vendored-openssl"]
 
 [dependencies]
 anyhow.workspace = true

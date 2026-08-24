@@ -31,6 +31,7 @@ app/static/vendor/lsp_servers/android-kotlin-lsp
 android/app/build
 **/build
 .codex-scratch/
+.release/
 
 # Local worktrees except published submodules
 worktrees/*

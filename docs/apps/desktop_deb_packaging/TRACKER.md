@@ -16,7 +16,7 @@ Last updated: 2026-08-24
 | Phase 3C: mobile `Open in a Second Window` drawer | Lifecycle correction and synchronized asset/APK validation complete; live client matrix remains | Exact-null remains empty; tab is occupancy-driven; Collapse minimizes the outer drawer and Close is page-session presentation only |
 | Phase 3D: Cefrium IME-dismissal focus release | Core live interaction accepted repeatedly; auxiliary false-positive matrix remains | Event-driven API-30 IME animation transition; Cefrium-only and no polling/viewport inference |
 | Phase 4A: source/Git desktop bootstrap | Implemented and validated from a clean wheel | Python entrypoints build one fingerprinted Electron runtime and receipt-owned XDG integration; binary wheels and prebuilt release components remain separate |
-| Phase 4B: release provenance and Linux platform wheel | Planned; source seams confirmed | Supported wheels embed the verified Rust server; source provenance alone may use Cargo |
+| Phase 4B: release provenance and Linux platform wheel | Implemented; audited build and clean SSH acceptance passed, publication mirror remains | Supported wheels embed the verified Rust server; source provenance alone may use Cargo |
 | Phase 4C: unified installer and Linux target | Planned; architecture selected, implementation separately gated | Managed venv and Electron materialization compose exact tagged components atomically |
 | Phase 4D: final integration and publication | Planned; immutable release transaction recorded | Final main integration, annotated tag, clean builds, TestPyPI/PyPI, and GitHub publication are separately gated |
 | Phase 5: Termux target mode | Planned; dependency mapping required first | Reuses the Phase 4 installer transaction; device-native dependency investigation precedes target-archive acceptance |
@@ -33,7 +33,7 @@ Last updated: 2026-08-24
 | User dependency installation has explicit owners | Linux private-venv inputs, existing app bootstraps, and installer target manifests cover the supported paths | Repository construction scripts are not user setup entrypoints |
 | Global Code Server is unsupported | Code TE2 resolves only its consent-gated private managed runtime | Confirmed |
 | Packaged framework can avoid target Cargo | The current bootstrap accepts `--server-bin` | Confirmed |
-| Bootstrap does not yet auto-select a wheel-owned server | Without explicit `--server-bin`/`TE2_SERVER_BIN`, the current bootstrap resolves Rust source and the fingerprinted Cargo cache | Phase 4B must add manifest-driven packaged-binary resolution rather than a site-packages heuristic |
+| Bootstrap selects a verified wheel-owned server | After explicit server overrides, binary-release provenance resolves and verifies the wheel-owned executable; invalid binary provenance fails without Cargo fallback | Implemented and clean-install validated in Phase 4B |
 | Framework readiness has an identity-bearing endpoint | Rust serves `/api/health` with app/version/instance/listener metadata | Confirmed |
 | Desktop settings support one target | `DesktopShellSettings` contains one host/port pair and zoom | Confirmed |
 | Retarget cleanup already exists | `saveConnection` stops Run Target listeners, reconnects UI IPC, clears instrumentation, retargets the relay, and closes the app view | Confirmed; must be reused |
@@ -587,24 +587,49 @@ Corrective implementation evidence recorded on 2026-08-23:
 
 ## Phase 4B checklist — release provenance and Linux platform wheel
 
-- [ ] Add ignored release staging/output roots and one deterministic builder
+- [x] Add ignored release staging/output roots and one deterministic builder
   under repository construction tooling.
-- [ ] Generate explicit source-build and binary-release provenance manifests;
+- [x] Generate explicit source-build and binary-release provenance manifests;
   treat PEP 610 metadata as diagnostic context only.
-- [ ] Build and audit the optimized GNU/Linux Rust server on the accepted
+- [x] Build and audit the optimized GNU/Linux Rust server on the accepted
   compatibility baseline.
-- [ ] Select a truthful manylinux-compatible x86_64 wheel tag from linkage and
+- [x] Select a truthful manylinux-compatible x86_64 wheel tag from linkage and
   clean-target evidence.
-- [ ] Embed only the validated server and release manifest in the Linux platform
+- [x] Embed only the validated server and release manifest in the Linux platform
   wheel; exclude Cargo and Electron intermediates.
-- [ ] Teach bootstrap resolution to use and verify the packaged server only for
+- [x] Teach bootstrap resolution to use and verify the packaged server only for
   binary-release provenance.
-- [ ] Add exact-version atomic repair or actionable failure for a missing,
+- [x] Add exact-version atomic repair or actionable failure for a missing,
   corrupt, or wrong-target packaged server; never fall through to Cargo.
-- [ ] Build the matching sdist and prove sdist/source/VCS/editable installs keep
+- [x] Build the matching sdist and prove sdist/source/VCS/editable installs keep
   the canonical fingerprinted Cargo fallback.
 - [ ] Mirror the exact platform wheel bytes on GitHub and require their digest
   to match the PyPI candidate.
+
+### Phase 4B acceptance evidence
+
+- The pinned manylinux builder produced a 50,917,872-byte
+  `py3-none-manylinux_2_28_x86_64` wheel and a 38,765,407-byte source
+  distribution from one exact Git source identity. The wheel records
+  `Root-Is-Purelib: false`, retains executable mode on `te2-server`, and embeds
+  the exact source commit, release identity, target, minimum glibc, package
+  version, relative server path, and server SHA-256.
+- Auditwheel affirmed `manylinux_2_28_x86_64`; `readelf` found a maximum GLIBC
+  reference of 2.28 and `ldd` found no missing libraries. The content audit
+  rejected Cargo/Electron intermediates and unowned `node_modules` trees while
+  retaining Code TE2's explicitly checked-in Socket.IO runtime vendor.
+- A clean source-distribution install generated a `py3-none-any` wheel with
+  source-build provenance, no packaged server, and selected the canonical
+  fingerprinted Cargo output beneath an isolated TE2 cache root.
+- The unprivileged remote Debian Trixie acceptance installed the exact wheel in
+  a fresh Python 3.13 venv, selected the wheel-owned server, rejected deliberate
+  server corruption by digest, repaired from the exact wheel, launched the
+  framework, passed `/api/health`, discovered all eight built-in apps including
+  `code_te2`, and shut down cleanly.
+- All 39 focused release/bootstrap tests and all 49 framework tests pass. The
+  broader repository run passes 266 of 267 tests; its unrelated remaining
+  failure is a stale boot-snapshot test callback that does not accept the
+  existing `client_role` keyword.
 
 ## Phase 4C checklist — unified installer and Linux target
 
@@ -615,7 +640,8 @@ Corrective implementation evidence recorded on 2026-08-23:
   architecture detection with Termux evaluated before generic Linux.
 - [ ] Map Linux `x86_64`/Electron `x64` consistently and reject unsupported
   targets explicitly.
-- [ ] Enforce the 2 GiB pre-build free-space check.
+- [ ] Enforce the 3 GiB Electron pre-build free-space check and a separate 2
+  GiB minimum for the release-wheel construction transaction.
 - [ ] Keep Cargo/Electron caches and intermediate output outside release staging.
 - [ ] Produce the Linux Electron archive with the pruned runtime and XDG inputs,
   but no duplicate wheel/server or build intermediates.
@@ -751,3 +777,4 @@ Corrective implementation evidence recorded on 2026-08-23:
 | 2026-08-22 | Source/Git Electron bootstrap | Clean wheel content audit and isolated install, installed-wheel source build, cached fingerprint reuse, packaged Wayland launch, Electron typecheck plus 90 tests, 22 focused Python tests, and basedpyright | Passed; source installs can explicitly build/register Electron without embedding its 317 MiB runtime, while release archives remain prebuilt |
 | 2026-08-22 | Mobile second editor and Cefrium IME planning | Inspected Electron's reduced secondary renderer and identity broker, mobile drawer/Problems duplication, Explorer card-menu lane, Android native identity bridges, UI IPC focus intent, and Cefrium page-evaluation seam | Approved Phase 3C uses a paired exact client in a retained bottom-drawer iframe; later Phase 3D uses event-driven native IME dismissal to release Monaco focus |
 | 2026-08-24 | Release wheel and publication refinement | Rechecked Python package layout, bootstrap `--server-bin` behavior, managed desktop roots, existing source-build bridge, and the remote clean Debian Trixie acceptance role without recording connection details | Linux platform wheels own the packaged Rust server, Electron remains a separate GitHub component, source provenance alone may compile, and mandatory remote SSH install/framework/repair/upgrade acceptance gates TestPyPI/PyPI/GitHub publication |
+| 2026-08-24 | Phase 4B Linux platform wheel | Pinned manylinux build, auditwheel/readelf/ldd/content audits, source-sdist Cargo fallback, 39 focused tests, 49 framework tests, and fresh unprivileged SSH install/corruption-repair/live-framework acceptance | Passed; exact GitHub/PyPI byte mirror remains a publication task |
