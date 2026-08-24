@@ -27,6 +27,7 @@ const moduleConfig = {
     "src/extensions/webview-runtime.ts",
     "src/extensions/intelligence/completions.ts",
     "src/extensions/intelligence/code-navigation.ts",
+    "src/extensions/intelligence/diagnostics-snapshot.ts",
     "src/extensions/intelligence/document-colors.ts",
     "src/extensions/intelligence/hover.ts",
     "src/extensions/intelligence/inlay-hints.ts",

@@ -74,6 +74,36 @@ interface LanguageBridgeLike {
   hoverSeq: number;
 }
 
+interface ElectronProjectionProbeNativeBridge {
+  readClientIdentity?(): Promise<{ clientInstanceId: string }>;
+  setProjectionProbeEnabled?(
+    enabled: boolean,
+    clear?: boolean,
+  ): Promise<unknown>;
+  inspectProjectionProbe?(): Promise<unknown>;
+}
+
+interface ElectronProjectionProbeWindow extends Window {
+  te2Electron?: ElectronProjectionProbeNativeBridge;
+  __te2ElectronProjectionProbe?: ElectronProjectionProbe;
+}
+
+interface ElectronProjectionProbe {
+  enable(enabled?: boolean, clear?: boolean): Promise<unknown>;
+  setLocalEnabled(enabled: boolean, clear?: boolean): Record<string, unknown>;
+  clear(): Record<string, unknown>;
+  snapshotLocal(): Record<string, unknown>;
+  snapshot(): Promise<Record<string, unknown>>;
+}
+
+interface ElectronProjectionTraceEvent {
+  sequence: number;
+  ts: number;
+  phase: string;
+  detail: Record<string, unknown>;
+  state: Record<string, unknown>;
+}
+
 interface WorkbenchRuntimeDeps {
   getWindow(): Window & typeof globalThis;
   getMonaco(): MonacoLike | null;
@@ -191,6 +221,148 @@ export function createEditorWorkbenchRuntime(
     pendingOpenFile: null,
     pendingSymbols: null,
   };
+  const projectionTraceEvents: ElectronProjectionTraceEvent[] = [];
+  let projectionTraceEnabled = false;
+  let projectionTraceSequence = 0;
+
+  function boundedTextFingerprint(value: string): string {
+    let hash = 0x811c9dc5;
+    for (let index = 0; index < value.length; index += 1) {
+      hash ^= value.charCodeAt(index);
+      hash = Math.imul(hash, 0x01000193);
+    }
+    return `fnv1a32:${(hash >>> 0).toString(16).padStart(8, '0')}:${value.length}`;
+  }
+
+  function projectionProbeLocalState(): Record<string, unknown> {
+    const activeModel = deps.getModel();
+    let textFingerprint = '';
+    try {
+      textFingerprint = activeModel?.getValue
+        ? boundedTextFingerprint(String(activeModel.getValue()))
+        : '';
+    } catch (_) {}
+    return {
+      role: new URLSearchParams(deps.getWindow().location.search).get('te2_editor_role') || 'primary',
+      url: deps.getWindow().location.href,
+      currentPath: deps.getCurrentPath(),
+      generation: currentGeneration(),
+      frameworkReady: frameworkReady(),
+      barrierOpen: barrierOpen(deps.getCurrentPath(), currentGeneration()),
+      wbaConnected: deps.isWbaRpcConnected(),
+      model: activeModel
+        ? {
+            uri: activeModel.uri ? String(activeModel.uri.toString()) : '',
+            languageId: activeModel.getLanguageId ? activeModel.getLanguageId() : '',
+            versionId: activeModel.getVersionId ? activeModel.getVersionId() : null,
+            textFingerprint,
+          }
+        : null,
+      openAck: {
+        path: String(wbFlow.openAckPath || ''),
+        generation: Number(wbFlow.openAckGeneration ?? -1),
+        promisePath: String(wbFlow.openAckPromisePath || ''),
+        promiseGeneration: Number(wbFlow.openAckPromiseGeneration ?? -1),
+        pending: !!wbFlow.openAckPromise,
+      },
+      pending: {
+        openFile: wbFlow.pendingOpenFile
+          ? {
+              path: wbFlow.pendingOpenFile.path,
+              generation: wbFlow.pendingOpenFile.generation,
+              requestId: wbFlow.pendingOpenFile.requestId,
+              source: wbFlow.pendingOpenFile.source,
+            }
+          : null,
+        didChange: wbFlow.pendingDidChange
+          ? {
+              path: wbFlow.pendingDidChange.path,
+              generation: wbFlow.pendingDidChange.generation,
+            }
+          : null,
+        symbols: wbFlow.pendingSymbols
+          ? {
+              path: wbFlow.pendingSymbols.path,
+              generation: wbFlow.pendingSymbols.generation,
+            }
+          : null,
+      },
+    };
+  }
+
+  function recordProjectionTrace(
+    phase: string,
+    detail: Record<string, unknown> = {},
+  ): void {
+    if (!projectionTraceEnabled) return;
+    const event: ElectronProjectionTraceEvent = {
+      sequence: ++projectionTraceSequence,
+      ts: Date.now(),
+      phase,
+      detail,
+      state: projectionProbeLocalState(),
+    };
+    projectionTraceEvents.push(event);
+    if (projectionTraceEvents.length > 256) {
+      projectionTraceEvents.splice(0, projectionTraceEvents.length - 256);
+    }
+    console.log('[electron_projection_trace] ' + JSON.stringify(event));
+  }
+
+  function projectionProbeSnapshotLocal(): Record<string, unknown> {
+    return {
+      available: true,
+      enabled: projectionTraceEnabled,
+      sequence: projectionTraceSequence,
+      state: projectionProbeLocalState(),
+      events: projectionTraceEvents.slice(),
+    };
+  }
+
+  const projectionProbeWindow = deps.getWindow() as ElectronProjectionProbeWindow;
+  if (projectionProbeWindow.te2Electron) {
+    const projectionProbe: ElectronProjectionProbe = {
+      async enable(enabled: boolean = true, clear: boolean = true): Promise<unknown> {
+        projectionProbe.setLocalEnabled(enabled, clear);
+        const [identity, wba, electron] = await Promise.all([
+          projectionProbeWindow.te2Electron?.readClientIdentity?.().catch(() => null),
+          deps.wbaRpcCall('te2.projectionTrace.configure', { enabled, clear, limit: 256 }, { timeoutMs: 5000 }),
+          projectionProbeWindow.te2Electron?.setProjectionProbeEnabled?.(enabled, clear),
+        ]);
+        return {
+          ok: true,
+          identity,
+          primary: projectionProbe.snapshotLocal(),
+          electron,
+          wba,
+        };
+      },
+      setLocalEnabled(enabled: boolean, clear: boolean = true): Record<string, unknown> {
+        if (clear) projectionTraceEvents.length = 0;
+        projectionTraceEnabled = enabled === true;
+        return projectionProbe.snapshotLocal();
+      },
+      clear(): Record<string, unknown> {
+        projectionTraceEvents.length = 0;
+        return projectionProbe.snapshotLocal();
+      },
+      snapshotLocal: projectionProbeSnapshotLocal,
+      async snapshot(): Promise<Record<string, unknown>> {
+        const [identity, wba, electron] = await Promise.all([
+          projectionProbeWindow.te2Electron?.readClientIdentity?.().catch(() => null),
+          deps.wbaRpcCall('te2.projectionTrace.snapshot', { limit: 256 }, { timeoutMs: 5000 }),
+          projectionProbeWindow.te2Electron?.inspectProjectionProbe?.(),
+        ]);
+        return {
+          identity,
+          primary: projectionProbe.snapshotLocal(),
+          electron,
+          wba,
+        };
+      },
+    };
+    projectionProbeWindow.__te2ElectronProjectionProbe = projectionProbe;
+  }
 
   function sameLanguageDocumentContext(ctx: unknown, nowCtx: unknown): boolean {
     try {
@@ -416,11 +588,6 @@ export function createEditorWorkbenchRuntime(
       for (const owner of owners) {
         try { editorNs.setModelMarkers(model, owner, []); } catch (_) {}
       }
-      for (const resource of matchingResources) {
-        const clearedOwners = diagMarkerStore.clearResource(resource);
-        for (const owner of clearedOwners) owners.add(owner);
-      }
-
       if (diagProjectedUri === activeUri) {
         diagProjectedOwners = new Set<string>();
         diagProjectedUri = '';
@@ -430,7 +597,7 @@ export function createEditorWorkbenchRuntime(
         '[workbench] diagnostics clear leaving model reason=' + reason
         + ' resource=' + activeUri
         + ' owners=' + owners.size
-        + ' resources=' + matchingResources.size
+        + ' retainedResources=' + matchingResources.size
         + ' path=' + activePath,
       );
     } catch (_) {}
@@ -565,7 +732,9 @@ export function createEditorWorkbenchRuntime(
   }
 
   function bumpGeneration(path: string | null, reason: string): number {
-    return wbBumpGeneration(wbFlow, path, reason);
+    const generation = wbBumpGeneration(wbFlow, path, reason);
+    recordProjectionTrace('generation_bumped', { path, reason, generation });
+    return generation;
   }
 
   function frameworkReady(): boolean {
@@ -587,6 +756,7 @@ export function createEditorWorkbenchRuntime(
 
   function setOpenAck(path: string, generation: number): void {
     wbSetOpenAck(wbFlow, path, generation, currentGeneration);
+    recordProjectionTrace('open_ack_set', { path, generation });
   }
 
   function queueDidChange(path: string, text: string, languageId: string, generation: number): void {
@@ -604,14 +774,24 @@ export function createEditorWorkbenchRuntime(
     if (!deps.isWbaRpcConnected()) {
       console.warn('[wba] didChange queued: direct WBA socket is not connected');
       queueDidChange(payload.path, payload.text, payload.languageId, payload.generation);
+      recordProjectionTrace('did_change_queued_disconnected', {
+        path: payload.path,
+        generation: payload.generation,
+      });
       return false;
     }
-    return deps.wbaRpcNotify(wbaMethod, {
+    const emitted = deps.wbaRpcNotify(wbaMethod, {
       path: payload.path,
       text: String(payload.text || ''),
       languageId: String(payload.languageId || ''),
       generation: Number.isFinite(Number(payload.generation)) ? Number(payload.generation) : currentGeneration(),
     });
+    recordProjectionTrace('did_change_emitted', {
+      path: payload.path,
+      generation: payload.generation,
+      emitted,
+    });
+    return emitted;
   }
 
   function flushDidChangeIfReady(): void {
@@ -723,6 +903,11 @@ export function createEditorWorkbenchRuntime(
     }
     const normalizedParams = params || {};
     const timeoutMs = opts && Number(opts.timeoutMs) ? Number(opts.timeoutMs) : 5000;
+    recordProjectionTrace('workbench_call_started', {
+      method,
+      path: String(normalizedParams.path || deps.getCurrentPath() || ''),
+      generation: normalizedParams.generation ?? currentGeneration(),
+    });
     if (isIntelligenceWorkbenchMethod(method) && isProjectSwitchInProgress()) {
       await awaitProjectSwitchAck();
     }
@@ -731,8 +916,27 @@ export function createEditorWorkbenchRuntime(
       if (!openAck.ok) {
         throw new Error(openAck.reason || 'open_ack_not_ready');
       }
+      normalizedParams.generation = Number.isFinite(Number(normalizedParams.generation))
+        ? Number(normalizedParams.generation)
+        : currentGeneration();
     }
-    return rawEditorWorkbenchCall(method, normalizedParams, opts);
+    try {
+      const result = await rawEditorWorkbenchCall(method, normalizedParams, opts);
+      recordProjectionTrace('workbench_call_completed', {
+        method,
+        path: String(normalizedParams.path || deps.getCurrentPath() || ''),
+        generation: normalizedParams.generation ?? currentGeneration(),
+      });
+      return result;
+    } catch (error) {
+      recordProjectionTrace('workbench_call_failed', {
+        method,
+        path: String(normalizedParams.path || deps.getCurrentPath() || ''),
+        generation: normalizedParams.generation ?? currentGeneration(),
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
   }
 
   function normalizeOpenFilePayload(opts: Record<string, unknown>): WorkbenchPendingOpenFilePayload | null {
@@ -775,6 +979,12 @@ export function createEditorWorkbenchRuntime(
 
   function sendQueuedOpenFile(payload: WorkbenchPendingOpenFilePayload): Promise<unknown> {
     let requestFailed = false;
+    recordProjectionTrace('open_file_started', {
+      path: payload.path,
+      generation: payload.generation,
+      requestId: payload.requestId,
+      source: payload.source,
+    });
     const openPromise = rawEditorWorkbenchCall('open_file', {
       path: payload.path,
       languageId: payload.languageId,
@@ -784,15 +994,31 @@ export function createEditorWorkbenchRuntime(
       generation: payload.generation,
     }, { timeoutMs: payload.timeoutMs }).then((result) => {
       if (payload.generation !== currentGeneration() || String(payload.path) !== String(deps.getCurrentPath() || '')) {
+        recordProjectionTrace('open_file_stale_reply', {
+          path: payload.path,
+          generation: payload.generation,
+          requestId: payload.requestId,
+        });
         return { ok: false, stale: true };
       }
       setOpenAck(payload.path, payload.generation);
       deps.onActiveEditorOpenAck?.(payload.path);
       flushPendingAfterOpen();
       schedulePostReadyStructureRefresh(payload.path, payload.generation, payload.source);
+      recordProjectionTrace('open_file_completed', {
+        path: payload.path,
+        generation: payload.generation,
+        requestId: payload.requestId,
+      });
       return result;
     }).catch((error) => {
       requestFailed = true;
+      recordProjectionTrace('open_file_failed', {
+        path: payload.path,
+        generation: payload.generation,
+        requestId: payload.requestId,
+        error: error instanceof Error ? error.message : String(error),
+      });
       if (payload.generation === currentGeneration() && String(payload.path) === String(deps.getCurrentPath() || '')) {
         const pending = wbFlow.pendingOpenFile;
         if (!pending || sameOpenRequest(pending, payload)) {

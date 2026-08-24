@@ -175,6 +175,8 @@ export function buildStatusResult(runtime: EventBridgeRuntime): Record<string, u
     config: runtime.state.config,
     clients: { ws: runtime.wsClientCount() },
     session: runtime.state.session,
+    clientOperations: status.clientOperations ?? null,
+    clientEditorFacades: status.clientEditorFacades ?? [],
   };
 }
 

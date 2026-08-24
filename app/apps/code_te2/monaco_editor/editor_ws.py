@@ -632,6 +632,7 @@ _CLIENT_SCOPED_EDITOR_EVENTS = {
     "editor:git_baselines",
     "editor:notify",
     "editor:open_complete",
+    "editor:diagnostics_counts",
     "editor:ready",
     "editor:issues_dump_request",
     "editor:issues_cmd",

@@ -369,6 +369,9 @@ test("JSON-RPC dispatch preserves Monaco model versions for both token methods",
   const calls = [];
   const runtime = {
     wb: {
+      async runClientDocumentOperation(_params, _label, operation) {
+        return await operation();
+      },
       resolveLanguageId: () => "rust",
       async activateLanguage() {
         return { ok: true };

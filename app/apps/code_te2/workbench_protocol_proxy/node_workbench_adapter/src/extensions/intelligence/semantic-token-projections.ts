@@ -7,7 +7,7 @@ export interface SemanticProjectionDocument {
   languageId: string;
   textFingerprint: string;
   projectGeneration: number | null;
-  role: "active" | "background" | "provisional-background";
+  clientForeground: boolean;
 }
 
 export interface SemanticProjectionFullResult {
@@ -230,7 +230,7 @@ export class SemanticTokenProjectionManager {
         if (!path) break;
         this.queued.delete(path);
         const document = this.options.getDocument(path);
-        if (!document || document.role === "active") continue;
+        if (!document || document.clientForeground) continue;
         const stored = this.entries.get(path);
         if (stored && this.isStoredCurrent(stored, document)) continue;
         try {

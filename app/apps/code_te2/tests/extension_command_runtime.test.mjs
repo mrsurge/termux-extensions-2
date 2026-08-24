@@ -8,6 +8,7 @@ import {
   evaluateWhenClause,
   ExtensionCommandRuntime,
 } from "../workbench_protocol_proxy/node_workbench_adapter/dist/extensions/command-runtime.mjs";
+import { ClientOperationGate } from "../workbench_protocol_proxy/node_workbench_adapter/dist/client/client-operation-gate.mjs";
 import { WorkbenchClient } from "../workbench_protocol_proxy/node_workbench_adapter/dist/client/workbench-client.mjs";
 import { checkWorkspaceContains } from "../workbench_protocol_proxy/node_workbench_adapter/dist/workspace/workspace-contains.mjs";
 
@@ -376,9 +377,7 @@ test("projects active Monaco selections through the exact client facade", async 
   client.state = { activePath: "/workspace/app.js" };
   client._activeEditorId = "editor-1";
   client._projectedClientInstanceId = "client_aaaaaaaaaaaa";
-  client._clientContextOwner = null;
-  client._clientContextDepth = 0;
-  client._clientContextWaiters = [];
+  client._clientOperationGate = new ClientOperationGate({ minimumTimeoutMs: 5 });
   client._sendExt = (...args) => calls.push(args);
 
   assert.deepEqual(

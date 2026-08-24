@@ -3055,17 +3055,33 @@ Extension Host ($changeMany owner=typescript, markers=16)
 
 When the user switches files (`openPathFromBackend`):
 
-1. `_clearDiagnosticsForSwitch()` iterates all known owners → `setModelMarkers(model, owner, [])` for each
-2. Toolbar counts zeroed immediately
-3. `_diagKnownOwners` reset to empty Set
-4. Spinner/baton starts for the new file
-5. New diagnostics arrive per-owner → markers accumulate correctly
+1. `clearDiagnosticsForLeavingModel()` removes rendered markers from the
+   outgoing Monaco model without deleting that renderer's owner/resource entries
+   from `diagMarkerStore`.
+2. The replacement model is created and attached through the normal exact-client
+   foreground transaction.
+3. Existing markers for the returning URI are reprojected from
+   `diagMarkerStore` immediately; the client does not wait for an extension-host
+   edit or another `$changeMany` event to make diagnostics visible again.
+4. Later `diagnostics/changeMany` events update both the retained per-renderer
+   marker store and the currently matching Monaco model.
+
+A genuinely late or reconnected renderer also needs diagnostics that the
+extension host may have published before that renderer existed. WBA therefore
+retains the latest non-empty `(owner, resource)` payload in a bounded snapshot
+(512 resources, 8 MiB). The existing explicit `te2.resync` transaction replays
+that snapshot as ordinary `diagnostics/changeMany` events after provider replay.
+An explicit empty marker update removes its snapshot entry, and a real WBA
+session reset clears the complete snapshot. There is no polling or Python
+editor-diagnostics replay in this path.
 
 ### Key files
 
 | File | Role |
 |------|------|
-| `m_editor_app.ts` | `_applyDiagnosticsUpdate()`, `_emitAggregatedDiagCounts()`, `_clearDiagnosticsForSwitch()`, `_applyCachedDiagnosticsForActive()` |
+| `monaco_editor/editor_workbench_runtime.ts` | Direct WBA marker ingestion, rendered-marker clearing, and retained owner/resource reprojection. |
+| `workbench_protocol_proxy/node_workbench_adapter/src/extensions/intelligence/diagnostics-snapshot.ts` | Bounded latest diagnostic snapshot for late-client `te2.resync`. |
+| `workbench_protocol_proxy/node_workbench_adapter/src/client/workbench-client.ts` | Captures live diagnostic events, clears them on session reset, and replays them during resync. |
 | `diagnostics_bridge.py` | `_process_diagnostics_update()`, `set_consumer_ready()`, `send_cached_diagnostics_to_sid()`, `_pending_entries` buffer |
 | `server.mjs` | `diagnosticsFromChangeMany()` — extracts owner from `$changeMany` args, passes through in `diagnostics/update` event |
 
@@ -3902,7 +3918,12 @@ Validation owner docs live in `desktop_client/desktop_client.md` and `desktop_cl
 
 ## 39) WBA Logical Documents And Multi-File Extension Handling
 
-Code TE2 now separates visible editor open from semantic working-set hydration. The browser still renders one active Monaco model, but WBA retains a bounded extension-host document set for active and background files so language servers can see more than the currently visible file.
+Code TE2 now separates each client's visible editor from semantic working-set
+hydration. Every stable client renders at most one foreground Monaco model per
+editor surface, while WBA retains one shared extension-host document per URI and
+one synthetic editor facade per `clientInstanceId`. Multiple Electron and mobile
+surfaces may therefore point at the same URI without duplicating the logical
+document or stealing one another's active editor identity.
 
 Host file-open intent does not preflight a boot snapshot. The frontend may use its last projected project root only to form a tentative path, then sends the request directly to Python; the backend's canonical returned path drives visible-open acknowledgement and editor connection for the originating client. A failed host-state refresh preserves the last valid frontend projection. Lightweight `scope: hostState` refreshes are single-flight in the frontend, while complete backend boot snapshots share only their disk-heavy core assembly across concurrent clients and materialize each requesting client's exact editor SSOT off-loop before returning. Initial UI IPC connection does not trigger a duplicate resync; only a genuine reconnect requests fresh host state.
 
@@ -3914,7 +3935,8 @@ Host file-open intent does not preflight a boot snapshot. The frontend may use i
 - `ProjectSidecar.document_state_revision` plus its bounded 256-entry `document_revisions` map order path-scoped content state. Evicted paths fall back to the global watermark, so pruning cannot lower their next revision.
 - Python owns sidecar-to-WBA projection in `logical_document_reconciler.py`.
 - WBA owns extension-host document lifetime in `workbench_protocol_proxy/node_workbench_adapter/src/workspace/document-registry.ts`.
-- WBA retains one shared logical document registry and extension host while projecting one synthetic editor facade per stable client under a reentrant request/command context fence. `windowId` remains metadata; Electron's secondary editor follows this rule by allocating an explicit second stable client rather than inferring authority from a window.
+- WBA retains one shared, role-neutral logical document registry and extension host while projecting one synthetic editor facade per stable client. `windowId` remains metadata; Electron's secondary editor follows this rule by allocating an explicit second stable client rather than inferring authority from a window.
+- Client-sensitive extension commands, menus, editor state, and navigation pass through one fair bounded operation gate. Ordinary concurrency is FIFO even for the same client. Only an in-process operation token or an exact registered `requestId`/`operationId` round trip may reenter the owner; client-id equality alone is never reentrancy authority. A bounded lease or reset rejects the owner and queued callers so one stalled operation cannot poison every later client.
 - The direct WBA Socket.IO boundary authenticates and injects `clientInstanceId` plus metadata-only `windowId`. Request normalization must preserve both through `vscode.openFile` into `WorkbenchClient.openFile`; otherwise the client facade cannot acknowledge the active document, leaving hover and semantic-token requests blocked even though shared extension-host diagnostic pushes can still arrive.
 - Draft-aware materialization is centralized in `monaco_editor/editor_backend_services/document_materialization_service.py`.
 
@@ -3939,19 +3961,41 @@ WBA exposes two stdio JSON-RPC methods through the existing adapter control plan
 
 Hydration carries exact content, language, content/base identities, dirty state, and reconcile-time active epoch. Stale project generations, open-state revisions, active epochs, and active-document replacement are rejected.
 
-### Document registry roles
+Before WBA reconciles that Python snapshot, `WorkbenchClient` injects the exact
+union of every retained client facade path and every in-flight open. Those paths
+are protected from hydration replacement and release even though Python's
+metadata snapshot intentionally has no global active path.
 
-WBA document registry roles:
+### Document and editor lifetime
 
-| Role | Meaning |
-|---|---|
-| `active` | The current visible editor model and synthetic active editor facade. |
-| `background` | Retained extension-host document without the active editor facade. |
-| `provisional-background` | Temporary background state used while resolving/hydrating. |
+The document registry has no global `active`, `background`, or provisional role.
+It owns one shared document entry per canonical path. Client foreground is a
+separate reference set derived from the synthetic editor-facade map plus
+in-flight opens. A new client opening an already-retained URI gets a distinct
+editor id while reusing the same extension-host document; switching one client
+removes and replaces only that client's prior editor facade.
 
-A normal tab switch demotes the previous document and promotes the target without duplicate `addedDocuments`, avoiding LSP close/open churn. Workspace switches release all retained documents. Extension-host reset clears WBA-local registry state.
+The shared document entry owns content, language, document version, and
+extension-host lifetime, but it does not own a frontend open generation. Each
+client editor facade owns its own current generation. Every document-backed
+activation, provider request, and `didChange` therefore enters the fair
+exact-client projection gate with the authenticated `clientInstanceId` before
+consulting that facade. This prevents one client's newer generation from making
+another client's valid edits or intelligence requests look stale when both
+surfaces display the same URI.
 
-After active promotion, WBA publishes `document/activeChanged` over the existing framework-shell pipe so Python schedules latest-wins reconciliation. Draft changes, workspace-file changes, adapter-ready/reset, and project-switch facts also drive reconciliation. There is no timer, polling path, new socket, or Python editor-intelligence hop.
+A normal client tab switch therefore does not duplicate `addedDocuments` or
+cause LSP close/open churn. Logical reconciliation releases a document only when
+it is absent from the shared desired set and from every client/open reference.
+Workspace switches release all retained documents and editor facades.
+Extension-host reset clears WBA-local registry, facade, correlation, and gate
+state.
+
+After a client foreground open, WBA publishes `document/activeChanged` with that
+client identity over the existing framework-shell pipe so Python schedules
+latest-wins reconciliation. Draft changes, workspace-file changes,
+adapter-ready/reset, and project-switch facts also drive reconciliation. There
+is no timer, polling path, new socket, or Python editor-intelligence hop.
 
 ### Foreground transaction and reconnect boundaries
 
@@ -3966,11 +4010,15 @@ connection calls `te2.resync`, then flushes the active model and hydrates the
 provider snapshot. This keeps late/reconnected clients complete without making
 ordinary file switches replay workspace, provider, and webview state.
 
-WBA treats an active same-path open with the same non-null generation as an
+WBA treats a same-client, same-path open with the same non-null generation as an
 idempotent duplicate. It does not reread disk, replace text, clear dirty state,
-advance the document version or active epoch, emit another active-document
+advance the document version or mutation epoch, emit another active-document
 event, or invalidate prewarmed semantic tokens. A newer generation remains a
-real refresh and retains the draft-safe full-text synchronization path.
+real facade refresh and retains the draft-safe full-text synchronization path.
+An A -> other file -> A reopen therefore replays A's facade and current
+generation even when another client still retains A's shared document. If the
+full text is byte-identical, this replay does not fabricate an edit, duplicate
+the extension-host document, advance its version, or cause LSP close/open churn.
 
 ### Extension activation and language resolution
 

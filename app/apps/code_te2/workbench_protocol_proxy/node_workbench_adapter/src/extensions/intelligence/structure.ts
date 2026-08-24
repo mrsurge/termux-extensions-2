@@ -17,7 +17,7 @@ export interface StructureRuntime {
   documentScheme: () => string;
   languageIdFromPath: (filePath: string) => string;
   getDocumentVersion: (path: string) => number | null;
-  getOpenGeneration: (path: string) => unknown;
+  getActiveGeneration: () => unknown;
   updateActiveDocument: (path: string, uriObj: unknown, languageId: string) => void;
   selectorGroupsSummary: (kind: "documentSymbols" | "foldingRanges") => string;
   findAllProviderHandles: (
@@ -109,7 +109,7 @@ function documentOpenError(runtime: StructureRuntime, path: string, input: Recor
     return { ok: false, error: "document_not_open" };
   }
   const generation = coerceOptionalGeneration(input.generation);
-  const openGeneration = runtime.getOpenGeneration(path);
+  const openGeneration = runtime.getActiveGeneration();
   if (
     generation !== null &&
     openGeneration !== undefined &&

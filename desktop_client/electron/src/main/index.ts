@@ -471,6 +471,30 @@ async function handleAppViewControl(
     }
     return { ok: true };
   }
+  if (command === "set_projection_probe_enabled") {
+    if (role !== "primary") {
+      throw new Error("Only the primary editor may configure the projection probe");
+    }
+    const request = payload && typeof payload === "object"
+      ? payload as Record<string, unknown>
+      : {};
+    const secondary = secondaryEditorRegistry
+      ? await secondaryEditorRegistry.setProjectionProbeEnabled(
+          request.enabled === true,
+          request.clear !== false,
+        )
+      : { available: false, role: "secondary", reason: "registry_unavailable" };
+    return { ok: true, secondary };
+  }
+  if (command === "inspect_projection_probe") {
+    if (role !== "primary") {
+      throw new Error("Only the primary editor may inspect the projection probe");
+    }
+    const secondary = secondaryEditorRegistry
+      ? await secondaryEditorRegistry.inspectProjectionProbe()
+      : { available: false, role: "secondary", reason: "registry_unavailable" };
+    return { ok: true, secondary };
+  }
   if (command === "wait_for_app_prerequisites") {
     const appId = payload && typeof payload === "object"
       ? String((payload as Record<string, unknown>).appId || "").trim()

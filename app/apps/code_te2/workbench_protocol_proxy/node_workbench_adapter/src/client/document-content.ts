@@ -187,7 +187,6 @@ export async function tryOpenDocument(
       uri: uriObj,
       text: normalizedText,
       languageId,
-      role: "background",
       dirty: false,
       encoding,
     });

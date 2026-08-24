@@ -115,6 +115,49 @@ export class SecondaryEditorRegistry {
     if (contents && !contents.isDestroyed()) contents.reloadIgnoringCache();
   }
 
+  async setProjectionProbeEnabled(
+    enabled: boolean,
+    clear: boolean,
+  ): Promise<Record<string, unknown>> {
+    const contents = this.#view?.webContents;
+    if (!contents || contents.isDestroyed()) {
+      return { available: false, role: "secondary", reason: "renderer_unavailable" };
+    }
+    const result = await contents.executeJavaScript(`(() => {
+      const probe = window.__te2ElectronProjectionProbe;
+      if (!probe || typeof probe.setLocalEnabled !== "function") {
+        return { available: false, role: "secondary", reason: "probe_unavailable" };
+      }
+      return probe.setLocalEnabled(${enabled === true}, ${clear === true});
+    })()`);
+    return {
+      available: true,
+      role: "secondary",
+      currentUrl: contents.getURL(),
+      result,
+    };
+  }
+
+  async inspectProjectionProbe(): Promise<Record<string, unknown>> {
+    const contents = this.#view?.webContents;
+    if (!contents || contents.isDestroyed()) {
+      return { available: false, role: "secondary", reason: "renderer_unavailable" };
+    }
+    const result = await contents.executeJavaScript(`(() => {
+      const probe = window.__te2ElectronProjectionProbe;
+      if (!probe || typeof probe.snapshotLocal !== "function") {
+        return { available: false, role: "secondary", reason: "probe_unavailable" };
+      }
+      return probe.snapshotLocal();
+    })()`);
+    return {
+      available: true,
+      role: "secondary",
+      currentUrl: contents.getURL(),
+      result,
+    };
+  }
+
   async open(
     rawProjectPath: unknown,
     rawPath: unknown,

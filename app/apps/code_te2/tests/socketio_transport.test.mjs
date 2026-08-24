@@ -515,6 +515,18 @@ test('rapid WBA model opens run single-flight and retain only the latest documen
   await settlePromises();
   assert.equal(latestSettled, true);
   assert.deepEqual(openAcks, ["/workspace/latest.rs"]);
+
+  const hover = runtime.editorWorkbenchCall('hover', {
+    path: currentPath,
+    languageId: 'rust',
+    lineNumber: 1,
+    column: 1,
+  });
+  await settlePromises();
+  assert.equal(calls.length, 3);
+  assert.equal(calls[2].params.generation, latestGeneration);
+  calls[2].call.resolve({ ok: true, result: null });
+  await hover;
 });
 
 test('diagnostic links are revived as Monaco URIs before marker projection', async () => {
@@ -599,6 +611,104 @@ test('diagnostic links are revived as Monaco URIs before marker projection', asy
   assert.equal(marker.relatedInformation[0].resource.scheme, 'vscode');
   assert.equal(marker.code.target.path, '/schema');
   assert.equal(marker.code.target.scheme, 'https');
+});
+
+test('diagnostics survive a client-local model switch and reproject on return', async () => {
+  const { createEditorWorkbenchRuntime } = await importTypeScript(
+    'monaco_editor/editor_workbench_runtime.ts',
+  );
+  let currentPath = '/workspace/main.py';
+  let model = {
+    uri: { toString: () => `file://${currentPath}` },
+    getLanguageId: () => 'python',
+    getVersionId: () => 1,
+    getValue: () => '',
+  };
+  const markerBatches = [];
+  const runtime = createEditorWorkbenchRuntime({
+    getWindow: () => ({ __te2AdapterReady: true }),
+    getMonaco: () => ({
+      MarkerSeverity: { Error: 8, Warning: 4, Info: 2, Hint: 1 },
+      editor: {
+        getModelMarkers: () => [],
+        setModelMarkers: (_model, owner, markers) => markerBatches.push({
+          path: currentPath,
+          owner,
+          markers,
+        }),
+      },
+    }),
+    getEditor: () => ({ getModel: () => model }),
+    getModel: () => model,
+    getCurrentPath: () => currentPath,
+    emitToHost: () => {},
+    absPathFromVscodeUri: (uri) => {
+      const value = String(uri);
+      if (value.startsWith('file://')) return value.slice('file://'.length);
+      if (value.startsWith('vscode-remote://')) {
+        return new URL(value).pathname;
+      }
+      return value;
+    },
+    languageFromPath: () => 'python',
+    isLanguageContextCurrent: () => true,
+    getLanguageBridge: () => ({ hoverSeq: 0 }),
+    setDebugDiag: () => {},
+    requestBreadcrumbSymbols: () => {},
+    languageWorkersEnabled: () => false,
+    isWbaRpcConnected: () => true,
+    wbaRpcCall: async () => ({ ok: true }),
+    wbaRpcNotify: () => true,
+    clearTimeoutFn: clearTimeout,
+    setTimeoutFn: setTimeout,
+  });
+
+  runtime.applyDiagnosticsUpdate({
+    type: 'diagnostics/changeMany',
+    args: ['basedpyright', [[
+      {
+        scheme: 'vscode-remote',
+        authority: 'localhost',
+        path: '/workspace/main.py',
+      },
+      [{
+        message: 'Import could not be resolved',
+        severity: 8,
+        startLineNumber: 1,
+        startColumn: 8,
+        endLineNumber: 1,
+        endColumn: 14,
+      }],
+    ]]],
+  });
+  assert.equal(markerBatches.at(-1).markers.length, 1);
+
+  runtime.clearDiagnosticsForLeavingModel('file_switch');
+  assert.equal(markerBatches.at(-1).markers.length, 0);
+
+  currentPath = '/workspace/other.py';
+  model = {
+    uri: { toString: () => `file://${currentPath}` },
+    getLanguageId: () => 'python',
+    getVersionId: () => 1,
+    getValue: () => '',
+  };
+  runtime.syncDiagnosticsForCurrentModel('other_open');
+
+  currentPath = '/workspace/main.py';
+  model = {
+    uri: { toString: () => `file://${currentPath}` },
+    getLanguageId: () => 'python',
+    getVersionId: () => 1,
+    getValue: () => '',
+  };
+  runtime.syncDiagnosticsForCurrentModel('return_open');
+
+  const restored = markerBatches.at(-1);
+  assert.equal(restored.path, '/workspace/main.py');
+  assert.equal(restored.owner, 'basedpyright');
+  assert.equal(restored.markers.length, 1);
+  assert.equal(restored.markers[0].message, 'Import could not be resolved');
 });
 
 test('editor scroll state publishes the top visible line separately from the cursor', async () => {
