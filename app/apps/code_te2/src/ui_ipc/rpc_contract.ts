@@ -32,6 +32,7 @@ export const UI_IPC_RPC_METHODS = {
   hostGitRemoteAdd: 'ui.host.git.remote.add',
   hostStateFileScrollUpdate: 'ui.host.state.fileScroll.update',
   hostRecentFileClose: 'ui.host.recentFile.close',
+  hostClientForegroundClear: 'ui.host.clientForeground.clear',
   sidebarWindowCreate: 'ui.sidebar.window.create',
   sidebarWindowActivate: 'ui.sidebar.window.activate',
   sidebarWindowClose: 'ui.sidebar.window.close',

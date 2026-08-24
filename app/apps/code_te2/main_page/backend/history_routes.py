@@ -270,33 +270,22 @@ def create_history_router(deps: HistoryRoutesDeps) -> APIRouter:
         """Remove a file from the recent files list."""
         project_root = _active_project_or_root(deps)
         try:
-            from ...monaco_editor.editor_ws import editor_runtime_emit_open_state_changed
-            from ...open_state_backend import (
-                list_client_foregrounds,
-                remove_sidecar_recent_file,
-            )
-            from ...open_state_events import publish_client_foreground_changed
+            from ...open_state_backend import remove_sidecar_recent_file
+            from ...open_state_events import publish_document_closed
 
-            removed, open_state = remove_sidecar_recent_file(
+            removed, open_state, affected_foregrounds = remove_sidecar_recent_file(
                 str(project_root),
                 path,
                 require_existing_sidecar=False,
             )
             if removed:
                 _ = deps.history.remove_file(str(project_root), path)
-                await editor_runtime_emit_open_state_changed(
+                await publish_document_closed(
                     open_state,
+                    closed_path=path,
+                    affected_foregrounds=affected_foregrounds,
                     source="history_remove",
                 )
-                for foreground in list_client_foregrounds(
-                    str(project_root),
-                    reason="recent_file_closed",
-                ):
-                    await publish_client_foreground_changed(
-                        open_state,
-                        foreground,
-                        source="history_remove",
-                    )
             return {
                 "ok": True,
                 "data": {"removed": removed, "openState": dict(open_state)},

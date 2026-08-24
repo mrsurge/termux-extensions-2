@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from typing import cast
 
 from .client_presentation import client_presentation_room
@@ -30,6 +31,15 @@ logger = logging.getLogger(__name__)
 
 JsonObject = dict[str, object]
 _event_bus_handlers_registered = False
+ClientEditorSsotProjector = Callable[[str, str], Awaitable[object]]
+_client_editor_ssot_projector: ClientEditorSsotProjector | None = None
+
+
+def configure_client_editor_ssot_projector(
+    projector: ClientEditorSsotProjector,
+) -> None:
+    global _client_editor_ssot_projector
+    _client_editor_ssot_projector = projector
 
 
 def open_state_payload_from_event(event: WorkerEvent) -> SidecarOpenStatePayload | None:
@@ -103,6 +113,7 @@ async def publish_client_foreground_changed(
     source: str | None = None,
     request_id: str | None = None,
     project_generation: int | None = None,
+    project_editor_snapshot: bool = False,
 ) -> None:
     project = open_state["projectPath"]
     resolved_generation = (
@@ -118,6 +129,8 @@ async def publish_client_foreground_changed(
         payload["source"] = source
     if isinstance(request_id, str) and request_id:
         payload["request_id"] = request_id
+    if project_editor_snapshot:
+        payload["projectEditorSnapshot"] = True
     await publish_worker_event(
         build_event(
             "ClientForegroundChanged",
@@ -130,6 +143,38 @@ async def publish_client_foreground_changed(
     )
 
 
+async def publish_document_closed(
+    open_state: SidecarOpenStatePayload,
+    *,
+    closed_path: str,
+    affected_foregrounds: list[ClientForegroundPayload],
+    source: str,
+    project_generation: int | None = None,
+) -> None:
+    """Publish one post-commit fact for a shared document-membership close."""
+    project = open_state["projectPath"]
+    await publish_worker_event(
+        build_event(
+            "DocumentClosed",
+            project_root=project,
+            project_generation=(
+                project_generation
+                if project_generation is not None
+                else current_project_generation(project)
+            ),
+            source=source,
+            payload={
+                "closedPath": closed_path,
+                "openState": dict(open_state),
+                "affectedForegrounds": [
+                    dict(foreground) for foreground in affected_foregrounds
+                ],
+                "source": source,
+            },
+        )
+    )
+
+
 def register_open_state_event_bus_handlers() -> None:
     """Register projectors for backend-owned open-state facts."""
     global _event_bus_handlers_registered
@@ -137,6 +182,7 @@ def register_open_state_event_bus_handlers() -> None:
         return
     subscribe_worker_event("OpenStateChanged", _handle_open_state_changed_event)
     subscribe_worker_event("ClientForegroundChanged", _handle_client_foreground_changed_event)
+    subscribe_worker_event("DocumentClosed", _handle_document_closed_event)
     _event_bus_handlers_registered = True
 
 
@@ -189,6 +235,70 @@ async def _handle_client_foreground_changed_event(event: WorkerEvent) -> None:
         source=source,
         request_id=request_id,
     )
+    if event["payload"].get("projectEditorSnapshot") is True:
+        projector = _client_editor_ssot_projector
+        if projector is None:
+            logger.error(
+                "[open_state_events] exact editor snapshot projector is not configured"
+            )
+            return
+        try:
+            _ = await projector(
+                client_foreground["clientInstanceId"],
+                source,
+            )
+        except Exception:
+            logger.exception(
+                "[open_state_events] exact editor snapshot failed client=%s",
+                client_foreground["clientInstanceId"],
+            )
+
+
+async def _handle_document_closed_event(event: WorkerEvent) -> None:
+    project = event.get("project_root")
+    if not project:
+        return
+    generation = event.get("project_generation")
+    if generation is not None and current_project_generation(project) != generation:
+        record_stale_drop("open_state_events:document_closed", event["type"])
+        return
+    open_state = open_state_payload_from_event(event)
+    if open_state is None:
+        return
+    source = _event_text(event, "source") or event["source"]
+    await publish_open_state_changed(
+        open_state,
+        source=source,
+        project_generation=generation,
+    )
+    raw_foregrounds = event["payload"].get("affectedForegrounds")
+    if not isinstance(raw_foregrounds, list):
+        return
+    for raw_foreground in cast(list[object], raw_foregrounds):
+        if not isinstance(raw_foreground, dict):
+            continue
+        raw_record = cast(dict[object, object], raw_foreground)
+        client_instance_id = raw_record.get("clientInstanceId")
+        if not isinstance(client_instance_id, str):
+            continue
+        foreground = cast(
+            ClientForegroundPayload,
+            cast(
+                object,
+                {
+                    key: value
+                    for key, value in raw_record.items()
+                    if isinstance(key, str)
+                },
+            ),
+        )
+        await publish_client_foreground_changed(
+            open_state,
+            foreground,
+            source=source,
+            project_generation=generation,
+            project_editor_snapshot=True,
+        )
 
 
 def _event_text(event: WorkerEvent, key: str) -> str | None:

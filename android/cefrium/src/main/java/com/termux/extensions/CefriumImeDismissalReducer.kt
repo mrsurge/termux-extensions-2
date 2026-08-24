@@ -2,7 +2,6 @@ package com.termux.extensions
 
 internal data class CefriumImeVisibilityState(
     val imeVisible: Boolean,
-    val editorOwnsIme: Boolean,
     val activityResumed: Boolean,
     val windowFocused: Boolean,
     val appPageReady: Boolean,
@@ -10,46 +9,50 @@ internal data class CefriumImeVisibilityState(
 )
 
 internal class CefriumImeDismissalReducer {
-    private var previousImeVisible: Boolean? = null
     private var dismissalDispatchedForVisibleEpoch = false
+    private var hideReleasePending = false
+
+    fun observe(state: CefriumImeVisibilityState) {
+        if (state.imeVisible) {
+            dismissalDispatchedForVisibleEpoch = false
+            hideReleasePending = false
+        }
+    }
 
     fun beginHideAnimation(state: CefriumImeVisibilityState): Boolean {
-        previousImeVisible = state.imeVisible
         if (
             !state.imeVisible ||
             dismissalDispatchedForVisibleEpoch ||
-            !state.isEligibleForEditorRelease()
+            !state.isEligibleForReleaseRuntime()
         ) {
             return false
         }
         dismissalDispatchedForVisibleEpoch = true
+        hideReleasePending = true
         return true
     }
 
-    fun update(state: CefriumImeVisibilityState): Boolean {
-        val previous = previousImeVisible
-        previousImeVisible = state.imeVisible
+    fun completeHideAnimation(state: CefriumImeVisibilityState): Boolean {
+        val releasePending = hideReleasePending
+        hideReleasePending = false
         if (state.imeVisible) {
             dismissalDispatchedForVisibleEpoch = false
             return false
         }
-        val shouldRelease = previous == true &&
-            !dismissalDispatchedForVisibleEpoch &&
-            state.isEligibleForEditorRelease()
-        if (shouldRelease) {
-            dismissalDispatchedForVisibleEpoch = true
-        }
-        return shouldRelease
+        return releasePending && state.isEligibleForEditorReleaseCompletion()
     }
 
     fun reset() {
-        previousImeVisible = null
         dismissalDispatchedForVisibleEpoch = false
+        hideReleasePending = false
     }
 
-    private fun CefriumImeVisibilityState.isEligibleForEditorRelease(): Boolean =
-        editorOwnsIme &&
-            activityResumed &&
+    private fun CefriumImeVisibilityState.isEligibleForEditorReleaseCompletion(): Boolean =
+        !imeVisible &&
+            isEligibleForReleaseRuntime()
+
+    private fun CefriumImeVisibilityState.isEligibleForReleaseRuntime(): Boolean =
+        activityResumed &&
             windowFocused &&
             appPageReady &&
             nativeOverlayHidden

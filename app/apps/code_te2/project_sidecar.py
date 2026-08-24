@@ -8,7 +8,7 @@ import tempfile
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import ClassVar, TypeAlias, cast
+from typing import ClassVar, Literal, TypeAlias, cast
 
 from .code_te2_paths import code_te2_paths
 
@@ -16,6 +16,7 @@ JsonDict: TypeAlias = dict[str, object]
 StringDict: TypeAlias = dict[str, str]
 DraftEntry: TypeAlias = dict[str, object]
 MAX_DOCUMENT_REVISION_ENTRIES = 256
+ClientRole: TypeAlias = Literal["primary", "secondary"]
 
 
 def _utc_timestamp() -> str:
@@ -741,10 +742,18 @@ class ProjectSidecar:
         client_instance_id: str,
         file_path: str | None,
         *,
+        client_role: ClientRole | None = None,
         seeded_from_legacy: bool = False,
         max_clients: int = 32,
     ) -> int:
         entries = self._client_foreground_entries()
+        existing = entries.get(client_instance_id, {})
+        stored_role = existing.get("client_role")
+        resolved_role: ClientRole = (
+            client_role
+            if client_role in {"primary", "secondary"}
+            else ("secondary" if stored_role == "secondary" else "primary")
+        )
         revision = self.get_client_foreground_revision() + 1
         normalized = _normalize_file_path(file_path) if file_path else None
         entries[client_instance_id] = {
@@ -752,6 +761,7 @@ class ProjectSidecar:
             "revision": revision,
             "updated_at": _utc_timestamp(),
             "seeded_from_legacy": seeded_from_legacy,
+            "client_role": resolved_role,
         }
         ordered = sorted(
             entries.items(),
@@ -774,7 +784,12 @@ class ProjectSidecar:
         for client_id, entry in self._client_foreground_entries().items():
             if entry.get("path") != normalized:
                 continue
-            self.set_client_foreground(client_id, fallback)
+            role = "secondary" if entry.get("client_role") == "secondary" else "primary"
+            self.set_client_foreground(
+                client_id,
+                None if role == "secondary" else fallback,
+                client_role=role,
+            )
             changed.append(client_id)
         return changed
 
@@ -783,7 +798,7 @@ class ProjectSidecar:
         recent = _as_dict_list(self._data.get("recent_files"))
         return [dict(e) for e in recent]
 
-    def remove_recent_file(self, file_path: str) -> bool:
+    def remove_recent_file(self, file_path: str) -> tuple[bool, list[str]]:
         """Remove one shared document and reconcile affected client foregrounds."""
         normalized = _normalize_file_path(file_path)
         recent = _as_dict_list(self._data.get("recent_files"))
@@ -792,12 +807,12 @@ class ProjectSidecar:
             if entry.get("path") != normalized
         ]
         if len(remaining) == len(recent):
-            return False
+            return False, []
         self._data["recent_files"] = remaining
         if self.get_last_file() == normalized:
             self._data["last_file"] = None
-        self.reconcile_client_foregrounds_after_close(normalized)
-        return True
+        changed_clients = self.reconcile_client_foregrounds_after_close(normalized)
+        return True, changed_clients
 
     def clear_recent_files(self) -> None:
         """Clear shared document membership and every client foreground."""

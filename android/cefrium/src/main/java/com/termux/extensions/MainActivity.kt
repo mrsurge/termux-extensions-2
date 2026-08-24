@@ -490,34 +490,72 @@ class MainActivity : AppCompatActivity() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
         val decorView = window.decorView
         var latestImeInsets = ViewCompat.getRootWindowInsets(decorView)
+        var lastAppliedImeVisibility: Boolean? = null
         val imeAnimationStartVisibility =
             IdentityHashMap<WindowInsetsAnimationCompat, Boolean>()
 
         fun imeState(imeVisible: Boolean): CefriumImeVisibilityState =
             CefriumImeVisibilityState(
                 imeVisible = imeVisible,
-                editorOwnsIme = activeImeOwner == "editor",
                 activityResumed = activityResumed,
                 windowFocused = hasWindowFocus(),
                 appPageReady = inAppShell,
                 nativeOverlayHidden = consoleOverlay.visibility != View.VISIBLE,
             )
 
-        fun dispatchImeDismissalIf(requested: Boolean) {
+        fun logImeTransition(
+            stage: String,
+            imeVisible: Boolean? = null,
+            startedVisible: Boolean? = null,
+            dispatchRequested: Boolean = false,
+        ) {
+            Log.d(
+                TAG,
+                "IME dismissal stage=$stage" +
+                    " visible=${imeVisible ?: "unknown"}" +
+                    " startedVisible=${startedVisible ?: "unknown"}" +
+                    " owner=${activeImeOwner ?: "none"}" +
+                    " resumed=$activityResumed" +
+                    " focused=${hasWindowFocus()}" +
+                    " appPage=$inAppShell" +
+                    " overlayHidden=${consoleOverlay.visibility != View.VISIBLE}" +
+                    " dispatch=$dispatchRequested",
+            )
+        }
+
+        fun dispatchImeDismissalIf(
+            stage: String,
+            requested: Boolean,
+            imeVisible: Boolean? = null,
+            startedVisible: Boolean? = null,
+        ) {
+            logImeTransition(
+                stage = stage,
+                imeVisible = imeVisible,
+                startedVisible = startedVisible,
+                dispatchRequested = requested,
+            )
             if (requested && ::browser.isInitialized) {
                 browser.evaluateJavaScript(CefriumPagePolicy.imeDismissalScript())
             }
         }
 
-        fun applyImeSnapshot(insets: WindowInsetsCompat) {
-            dispatchImeDismissalIf(
-                imeDismissalReducer.update(
-                    imeState(insets.isVisible(WindowInsetsCompat.Type.ime())),
-                ),
-            )
+        fun observeAppliedImeInsets(insets: WindowInsetsCompat) {
+            latestImeInsets = insets
+            val visible = insets.isVisible(WindowInsetsCompat.Type.ime())
+            imeDismissalReducer.observe(imeState(visible))
+            if (lastAppliedImeVisibility != visible) {
+                lastAppliedImeVisibility = visible
+                logImeTransition(stage = "applied", imeVisible = visible)
+            }
         }
 
-        latestImeInsets?.let(::applyImeSnapshot)
+        latestImeInsets?.let(::observeAppliedImeInsets)
+        ViewCompat.setOnApplyWindowInsetsListener(browserContainer) { _, insets ->
+            observeAppliedImeInsets(insets)
+            insets
+        }
+        ViewCompat.requestApplyInsets(browserContainer)
         ViewCompat.setWindowInsetsAnimationCallback(
             decorView,
             object : WindowInsetsAnimationCompat.Callback(
@@ -528,8 +566,13 @@ class MainActivity : AppCompatActivity() {
                     val startInsets = ViewCompat.getRootWindowInsets(decorView)
                         ?: latestImeInsets
                         ?: return
-                    imeAnimationStartVisibility[animation] =
-                        startInsets.isVisible(WindowInsetsCompat.Type.ime())
+                    val startedVisible = startInsets.isVisible(WindowInsetsCompat.Type.ime())
+                    imeAnimationStartVisibility[animation] = startedVisible
+                    logImeTransition(
+                        stage = "prepare",
+                        imeVisible = startedVisible,
+                        startedVisible = startedVisible,
+                    )
                 }
 
                 override fun onStart(
@@ -539,17 +582,25 @@ class MainActivity : AppCompatActivity() {
                     if (animation.typeMask and WindowInsetsCompat.Type.ime() == 0) {
                         return bounds
                     }
-                    val startedVisible = imeAnimationStartVisibility.remove(animation)
+                    val startedVisible = imeAnimationStartVisibility[animation]
                         ?: return bounds
                     val endInsets = ViewCompat.getRootWindowInsets(decorView)
+                        ?: latestImeInsets
                         ?: return bounds
                     val endsVisible = endInsets.isVisible(WindowInsetsCompat.Type.ime())
-                    if (startedVisible && !endsVisible) {
-                        dispatchImeDismissalIf(
-                            imeDismissalReducer.beginHideAnimation(
-                                imeState(imeVisible = true),
-                            ),
+                    val releaseRequested = startedVisible &&
+                        !endsVisible &&
+                        imeDismissalReducer.beginHideAnimation(
+                            imeState(imeVisible = true),
                         )
+                    logImeTransition(
+                        stage = "start",
+                        imeVisible = endsVisible,
+                        startedVisible = startedVisible,
+                        dispatchRequested = releaseRequested,
+                    )
+                    if (releaseRequested && ::browser.isInitialized) {
+                        browser.evaluateJavaScript(CefriumPagePolicy.imeDismissalScript())
                     }
                     return bounds
                 }
@@ -570,12 +621,20 @@ class MainActivity : AppCompatActivity() {
 
                 override fun onEnd(animation: WindowInsetsAnimationCompat) {
                     if (animation.typeMask and WindowInsetsCompat.Type.ime() == 0) return
-                    imeAnimationStartVisibility.remove(animation)
+                    val startedVisible = imeAnimationStartVisibility.remove(animation)
                     val finalInsets = ViewCompat.getRootWindowInsets(decorView)
                         ?: latestImeInsets
                         ?: return
                     latestImeInsets = finalInsets
-                    applyImeSnapshot(finalInsets)
+                    val finalVisible = finalInsets.isVisible(WindowInsetsCompat.Type.ime())
+                    dispatchImeDismissalIf(
+                        stage = "end",
+                        requested = imeDismissalReducer.completeHideAnimation(
+                            imeState(finalVisible),
+                        ),
+                        imeVisible = finalVisible,
+                        startedVisible = startedVisible,
+                    )
                 }
             },
         )
@@ -1694,6 +1753,9 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         imeDismissalReducer.reset()
         activityResumed = true
+        if (::browserContainer.isInitialized) {
+            ViewCompat.requestApplyInsets(browserContainer)
+        }
         if (::browser.isInitialized) browser.onResume()
         if (inAppShell) {
             ensureInspectorBrowser(resumeExisting = true)
@@ -1737,6 +1799,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         ViewCompat.setWindowInsetsAnimationCallback(window.decorView, null)
+        if (::browserContainer.isInitialized) {
+            ViewCompat.setOnApplyWindowInsetsListener(browserContainer, null)
+        }
         imeDismissalReducer.reset()
         uiHandler.removeCallbacks(appHealthCheckRunnable)
         clientRuntimeService?.clearLocalRelayRoutes()

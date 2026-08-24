@@ -94,6 +94,22 @@ test('all app-worker namespaces use one canonical path while WBA stays direct', 
   assert.equal(topology.SOCKET_IO_PATHS.te2Console, '/te2_console_ws/socket.io');
 });
 
+test('socket identity publishes the validated editor role on every app lane', async () => {
+  const topology = await importTypeScript('src/rpc/socketio-topology.ts');
+  topology.configureCodeTe2SocketIdentity({
+    clientInstanceId: 'client_aaaaaaaaaaaa',
+    windowId: 'window_aaaaaaaaaaaaaaaaaaaa',
+    clientRole: 'secondary',
+  });
+
+  assert.deepEqual(topology.fileEditorSocketQuery(), {
+    app_id: 'code_te2',
+    client_instance_id: 'client_aaaaaaaaaaaa',
+    client_role: 'secondary',
+    window_id: 'window_aaaaaaaaaaaaaaaaaaaa',
+  });
+});
+
 test('shared RPC transport delivers connected calls reliably without replaying reconnect-era work', async () => {
   const { createSocketIoJsonRpcClient } = await importTypeScript('src/rpc/transport.ts');
   const socket = new FakeSocket();

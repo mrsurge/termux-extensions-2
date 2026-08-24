@@ -16,7 +16,11 @@ from .code_inspector_projection import (
     get_code_inspector_projection,
 )
 from .code_server_runtime_hooks import prime_code_server_runtime
-from .client_presentation import normalize_client_instance_id
+from .client_presentation import (
+    ClientRole,
+    normalize_client_instance_id,
+    normalize_client_role,
+)
 from .explorer.contracts.watcher import WatcherConfigPayload, build_watcher_config_payload
 from .explorer.transport.connection_manager import abs_to_rel
 from .monaco_editor.editor_backend_services.contracts import JsonMap
@@ -305,6 +309,7 @@ def _overlay_client_foreground(
     response: JsonMap,
     *,
     client_instance_id: str,
+    client_role: ClientRole,
 ) -> JsonMap:
     raw_snapshot = response.get("snapshot")
     if not isinstance(raw_snapshot, dict):
@@ -325,7 +330,8 @@ def _overlay_client_foreground(
         if editor_snapshot_builder is None:
             raise RuntimeError("boot snapshot editor state builder is not configured")
         client_editor_ssot = editor_snapshot_builder(
-            client_instance_id=client_instance_id
+            client_instance_id=client_instance_id,
+            client_role=client_role,
         )
         editor_ssot = dict(cast(dict[str, object], raw_editor_ssot))
         editor_ssot.update(client_editor_ssot)
@@ -338,6 +344,7 @@ def _overlay_client_foreground(
                 project,
                 client_instance_id,
                 reason="boot_reconnect",
+                client_role=client_role,
             )
         )
     path = (
@@ -392,6 +399,7 @@ async def handle_boot_snapshot_request(
     source_name: str,
 ) -> JsonMap:
     client_instance_id = _client_identity(_data, source_name=source_name)
+    client_role = normalize_client_role((_data or {}).get("clientRole"))
     scope = str((_data or {}).get("scope") or "").strip()
     if scope == "hostState":
         host_state = await asyncio.to_thread(_build_host_state_payload)
@@ -399,6 +407,7 @@ async def handle_boot_snapshot_request(
             _overlay_client_foreground,
             {"ok": True, "snapshot": {"host_state": host_state}},
             client_instance_id=client_instance_id,
+            client_role=client_role,
         )
 
     global _boot_snapshot_task
@@ -415,6 +424,7 @@ async def handle_boot_snapshot_request(
             _overlay_client_foreground,
             shared_snapshot,
             client_instance_id=client_instance_id,
+            client_role=client_role,
         )
         raw_snapshot = client_snapshot.get("snapshot")
         if isinstance(raw_snapshot, dict):

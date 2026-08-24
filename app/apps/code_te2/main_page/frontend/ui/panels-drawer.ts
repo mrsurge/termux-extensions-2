@@ -29,11 +29,11 @@ export function initPanelsAndDrawer(deps: any) {
   });
   const consoleDrawer = deps.createConsoleDrawer();
   const extensionActivityPanel = deps.createExtensionActivityPanel({
-    openDrawer: () => terminal.open(),
+    openDrawer: () => terminal.openDrawer(),
     closeDrawer: () => terminal.close(),
   });
   const codeInspectorPanel = deps.createCodeInspectorPanel({
-    openDrawer: () => terminal.open(),
+    openDrawer: () => terminal.openDrawer(),
     closeDrawer: () => terminal.close(),
     requestCommand: (payload: Record<string, unknown>) => deps.requestCodeInspectorCommand(payload),
     openFile: (path: string, options?: Record<string, unknown>) => deps.openFile(path, options),
@@ -41,7 +41,10 @@ export function initPanelsAndDrawer(deps: any) {
 
   const consoleCollapseBtn = document.getElementById('console-collapse-btn');
   if (consoleCollapseBtn) consoleCollapseBtn.addEventListener('click', () => terminal.close());
-  deps.mobileSecondEditor?.attachDrawer(terminal);
+  deps.mobileSecondEditor?.attachDrawer({
+    open: () => terminal.openDrawer(),
+    close: () => terminal.close(),
+  });
 
   deps.initDrawerAndShortcuts({
     bindMenuToggle: deps.bindMenuToggle,
@@ -51,6 +54,8 @@ export function initPanelsAndDrawer(deps: any) {
     extensionActivityPanel,
     codeInspectorPanel,
     toggleTerminal: () => terminal.toggle(),
+    openDrawer: () => terminal.openDrawer(),
+    activateTerminal: () => terminal.activateTerminal(),
     setFontScale: (preset: string) => deps.setFontScale(preset),
     triggerEditorSearchPanel: (reason: string, opts: any) => deps.triggerEditorSearchPanel(reason, opts),
     hostToast: (msg: string) => deps.hostToast(msg),

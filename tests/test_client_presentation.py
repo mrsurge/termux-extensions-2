@@ -19,6 +19,7 @@ class ClientPresentationIdentityTests(unittest.TestCase):
                 "QUERY_STRING": (
                     "app_id=code_te2&client_instance_id=client_aaaaaaaaaaaa"
                     "&window_id=window_aaaaaaaaaaaaaaaaaaaa"
+                    "&client_role=secondary"
                 )
             }
         )
@@ -27,6 +28,7 @@ class ClientPresentationIdentityTests(unittest.TestCase):
             {
                 "clientInstanceId": "client_aaaaaaaaaaaa",
                 "windowId": "window_aaaaaaaaaaaaaaaaaaaa",
+                "clientRole": "secondary",
             },
         )
         self.assertEqual(
@@ -62,7 +64,12 @@ class ClientPresentationIdentityTests(unittest.TestCase):
         }
         original = copy.deepcopy(shared)
 
-        def editor_snapshot(*, client_instance_id: str) -> dict[str, object]:
+        def editor_snapshot(
+            *,
+            client_instance_id: str,
+            client_role: str,
+        ) -> dict[str, object]:
+            self.assertEqual(client_role, "primary")
             client_id = client_instance_id
             path = "/workspace/a.py" if client_id == "client_aaaaaaaaaaaa" else "/workspace/b.rs"
             return {
@@ -88,10 +95,12 @@ class ClientPresentationIdentityTests(unittest.TestCase):
             client_a = boot_snapshot_backend._overlay_client_foreground(  # pyright: ignore[reportPrivateUsage]
                 shared,
                 client_instance_id="client_aaaaaaaaaaaa",
+                client_role="primary",
             )
             client_b = boot_snapshot_backend._overlay_client_foreground(  # pyright: ignore[reportPrivateUsage]
                 shared,
                 client_instance_id="client_bbbbbbbbbbbb",
+                client_role="primary",
             )
 
         self.assertEqual(shared, original)

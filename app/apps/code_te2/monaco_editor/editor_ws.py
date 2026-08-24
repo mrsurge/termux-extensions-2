@@ -29,6 +29,7 @@ from ..open_state_backend import (
     write_client_document_open,
 )
 from ..open_state_events import (
+    configure_client_editor_ssot_projector,
     publish_client_foreground_changed,
     publish_open_state_changed,
 )
@@ -466,6 +467,7 @@ def editor_runtime_build_connect_snapshot(
     *,
     role: str = "",
     client_instance_id: str | None,
+    client_role: str | None = None,
     reason: str = "reconnect",
 ) -> dict[str, object]:
     project = _active_project()
@@ -479,6 +481,15 @@ def editor_runtime_build_connect_snapshot(
             open_state = read_sidecar_open_state(project, reason=reason)
             client_foreground = dict(
                 read_client_foreground(project, client_instance_id, reason=reason)
+                if client_role is None
+                else read_client_foreground(
+                    project,
+                    client_instance_id,
+                    reason=reason,
+                    client_role=(
+                        "secondary" if client_role == "secondary" else "primary"
+                    ),
+                )
             )
             current_path = client_foreground.get("path")
         except Exception:
@@ -505,6 +516,35 @@ def editor_runtime_build_connect_snapshot(
     return snapshot
 
 
+async def editor_runtime_emit_client_ssot(
+    client_instance_id: str,
+    reason: str,
+) -> dict[str, object]:
+    """Replay the authoritative foreground into one exact editor presentation."""
+    from .editor_client_registry import editor_client_role_for_instance
+
+    snapshot = editor_runtime_build_connect_snapshot(
+        client_instance_id=client_instance_id,
+        client_role=editor_client_role_for_instance(client_instance_id),
+        reason=reason,
+    )
+    file_obj = snapshot.get("file")
+    if isinstance(file_obj, dict):
+        file_obj["reason"] = reason
+        file_obj["request_id"] = (
+            f"foreground_{int(time.time() * 1000)}_{client_instance_id}"
+        )
+    await _emit_editor_rpc_notification_to_room(
+        EDITOR_RPC_NOTIFICATION_STATE_SSOT,
+        snapshot,
+        room=client_presentation_room(client_instance_id),
+    )
+    return snapshot
+
+
+configure_client_editor_ssot_projector(editor_runtime_emit_client_ssot)
+
+
 async def editor_runtime_replay_sidecar_open_state(
     project: str,
     *,
@@ -522,20 +562,9 @@ async def editor_runtime_replay_sidecar_open_state(
     )
 
     for client_instance_id in connected_editor_client_instance_ids():
-        snapshot = editor_runtime_build_connect_snapshot(
-            client_instance_id=client_instance_id,
+        snapshot = await editor_runtime_emit_client_ssot(
+            client_instance_id,
             reason=reason,
-        )
-        file_obj = snapshot.get("file")
-        if isinstance(file_obj, dict):
-            file_obj["reason"] = reason
-            file_obj["request_id"] = (
-                f"project_switch_{int(time.time() * 1000)}_{client_instance_id}"
-            )
-        await _emit_editor_rpc_notification_to_room(
-            EDITOR_RPC_NOTIFICATION_STATE_SSOT,
-            snapshot,
-            room=client_presentation_room(client_instance_id),
         )
         client_foreground_obj = snapshot.get("clientForeground")
         if isinstance(client_foreground_obj, dict):

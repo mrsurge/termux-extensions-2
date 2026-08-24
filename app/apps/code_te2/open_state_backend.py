@@ -7,7 +7,11 @@ import time
 from pathlib import Path
 from typing import Literal, TypedDict
 
-from .client_presentation import normalize_client_instance_id
+from .client_presentation import (
+    ClientRole,
+    normalize_client_instance_id,
+    normalize_client_role,
+)
 from .project_sidecar import ProjectSidecar
 
 _OPEN_STATE_LOCK = threading.RLock()
@@ -53,6 +57,7 @@ class ClientForegroundPayload(TypedDict):
     exists: bool
     revision: int
     seededFromLegacy: bool
+    clientRole: ClientRole
     reason: str
     ts: int
 
@@ -147,6 +152,7 @@ def _client_foreground_payload(
         "exists": exists,
         "revision": revision,
         "seededFromLegacy": entry.get("seeded_from_legacy") is True,
+        "clientRole": normalize_client_role(entry.get("client_role")),
         "reason": reason,
         "ts": int(time.time() * 1000),
     }
@@ -241,6 +247,7 @@ def read_client_foreground(
     *,
     reason: str = "reconnect",
     seed_if_missing: bool = True,
+    client_role: ClientRole | None = None,
 ) -> ClientForegroundPayload:
     normalized_project = _normalize_path(project_path)
     normalized_client = _require_client_instance_id(client_instance_id)
@@ -253,21 +260,45 @@ def read_client_foreground(
         if entry is None and seed_if_missing:
             legacy = sidecar.get_last_file()
             legacy_valid = legacy in valid_members if legacy else False
-            selected = legacy if legacy_valid else (valid_members[0] if valid_members else None)
+            resolved_role = normalize_client_role(client_role)
+            selected = (
+                None
+                if resolved_role == "secondary"
+                else (legacy if legacy_valid else (valid_members[0] if valid_members else None))
+            )
             sidecar.set_client_foreground(
                 normalized_client,
                 selected,
-                seeded_from_legacy=legacy_valid,
+                client_role=resolved_role,
+                seeded_from_legacy=legacy_valid and resolved_role == "primary",
             )
-            if legacy is not None:
+            if legacy is not None and resolved_role == "primary":
                 sidecar.set_last_file(None)
             sidecar.save()
         elif entry is not None and current not in valid_members and current is not None:
+            resolved_role = normalize_client_role(
+                client_role if client_role is not None else entry.get("client_role")
+            )
             sidecar.set_client_foreground(
                 normalized_client,
-                valid_members[0] if valid_members else None,
+                (
+                    None
+                    if resolved_role == "secondary"
+                    else (valid_members[0] if valid_members else None)
+                ),
+                client_role=resolved_role,
             )
             sidecar.save()
+        elif entry is not None and client_role is not None:
+            resolved_role = normalize_client_role(client_role)
+            if entry.get("client_role") != resolved_role:
+                sidecar.set_client_foreground(
+                    normalized_client,
+                    current,
+                    client_role=resolved_role,
+                    seeded_from_legacy=entry.get("seeded_from_legacy") is True,
+                )
+                sidecar.save()
         return _client_foreground_payload(
             project_path=normalized_project,
             sidecar=sidecar,
@@ -323,6 +354,7 @@ def write_client_foreground(
     client_instance_id: str,
     *,
     reason: str = "foreground_change",
+    client_role: ClientRole | None = None,
 ) -> ClientForegroundPayload:
     normalized_project = _normalize_path(project_path)
     normalized_client = _require_client_instance_id(client_instance_id)
@@ -333,7 +365,11 @@ def write_client_foreground(
         if normalized_file is not None:
             if normalized_file not in _valid_member_paths(normalized_project, sidecar):
                 raise ValueError("foreground_document_not_admitted")
-        sidecar.set_client_foreground(normalized_client, normalized_file)
+        sidecar.set_client_foreground(
+            normalized_client,
+            normalized_file,
+            client_role=client_role,
+        )
         sidecar.set_last_file(None)
         sidecar.save()
         return _client_foreground_payload(
@@ -392,8 +428,8 @@ def remove_sidecar_recent_file(
     *,
     reason: OpenStateReason | str = "recent_file_closed",
     require_existing_sidecar: bool = True,
-) -> tuple[bool, SidecarOpenStatePayload]:
-    """Remove one sidecar recent entry and return its new open-state projection."""
+) -> tuple[bool, SidecarOpenStatePayload, list[ClientForegroundPayload]]:
+    """Remove one shared document and return every affected client projection."""
     normalized_project = _normalize_path(project_path)
     normalized_file = _normalize_path(file_path)
     if require_existing_sidecar and not ProjectSidecar.sidecar_exists(normalized_project):
@@ -404,15 +440,25 @@ def remove_sidecar_recent_file(
     with _OPEN_STATE_LOCK:
         sidecar = ProjectSidecar.load_or_create(normalized_project)
         sidecar.reload()
-        removed = sidecar.remove_recent_file(normalized_file)
+        removed, changed_clients = sidecar.remove_recent_file(normalized_file)
         if removed:
             sidecar.bump_open_state_revision()
             sidecar.save()
-        return removed, _payload_from_sidecar(
+        open_state = _payload_from_sidecar(
             project_path=normalized_project,
             sidecar=sidecar,
             reason=str(reason),
         )
+        affected = [
+            _client_foreground_payload(
+                project_path=normalized_project,
+                sidecar=sidecar,
+                client_instance_id=client_id,
+                reason=str(reason),
+            )
+            for client_id in changed_clients
+        ]
+        return removed, open_state, affected
 
 
 def clear_sidecar_recent_files(

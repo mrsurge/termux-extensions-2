@@ -7,14 +7,12 @@ import org.junit.Test
 class CefriumImeDismissalReducerTest {
     private fun state(
         visible: Boolean,
-        editorOwnsIme: Boolean = true,
         activityResumed: Boolean = true,
         windowFocused: Boolean = true,
         appPageReady: Boolean = true,
         nativeOverlayHidden: Boolean = true,
     ) = CefriumImeVisibilityState(
         imeVisible = visible,
-        editorOwnsIme = editorOwnsIme,
         activityResumed = activityResumed,
         windowFocused = windowFocused,
         appPageReady = appPageReady,
@@ -22,42 +20,51 @@ class CefriumImeDismissalReducerTest {
     )
 
     @Test
-    fun emitsOnlyForEligibleVisibleToHiddenTransition() {
+    fun hideAnimationDispatchesAtStartAndCompletion() {
         val reducer = CefriumImeDismissalReducer()
 
-        assertFalse(reducer.update(state(visible = false)))
-        assertFalse(reducer.update(state(visible = true)))
-        assertTrue(reducer.update(state(visible = false)))
-        assertFalse(reducer.update(state(visible = false)))
+        reducer.observe(state(visible = true))
+        assertTrue(reducer.beginHideAnimation(state(visible = true)))
+        assertTrue(reducer.completeHideAnimation(state(visible = false)))
+        assertFalse(reducer.completeHideAnimation(state(visible = false)))
     }
 
     @Test
-    fun rejectsTransitionsWithoutEditorAndLifecycleOwnership() {
+    fun completionDoesNotDependOnCompositionFilterOwnership() {
+        val reducer = CefriumImeDismissalReducer()
+
+        reducer.observe(state(visible = true))
+        assertTrue(reducer.beginHideAnimation(state(visible = true)))
+        assertTrue(reducer.completeHideAnimation(state(visible = false)))
+    }
+
+    @Test
+    fun rejectsStartWithoutLifecycleOwnership() {
         val rejected = listOf(
-            state(visible = false, editorOwnsIme = false),
-            state(visible = false, activityResumed = false),
-            state(visible = false, windowFocused = false),
-            state(visible = false, appPageReady = false),
-            state(visible = false, nativeOverlayHidden = false),
+            state(visible = true, activityResumed = false),
+            state(visible = true, windowFocused = false),
+            state(visible = true, appPageReady = false),
+            state(visible = true, nativeOverlayHidden = false),
         )
 
         for (candidate in rejected) {
             val reducer = CefriumImeDismissalReducer()
-            assertFalse(reducer.update(state(visible = true)))
-            assertFalse(reducer.update(candidate))
+            reducer.observe(state(visible = true))
+            assertFalse(reducer.beginHideAnimation(candidate))
+            assertFalse(reducer.completeHideAnimation(state(visible = false)))
         }
     }
 
     @Test
-    fun hideAnimationDispatchesBeforeEndAndOnlyOncePerVisibleEpoch() {
+    fun startDispatchesOnlyOncePerVisibleEpoch() {
         val reducer = CefriumImeDismissalReducer()
 
-        assertFalse(reducer.update(state(visible = true)))
+        reducer.observe(state(visible = true))
         assertTrue(reducer.beginHideAnimation(state(visible = true)))
         assertFalse(reducer.beginHideAnimation(state(visible = true)))
-        assertFalse(reducer.update(state(visible = false)))
+        assertTrue(reducer.completeHideAnimation(state(visible = false)))
 
-        assertFalse(reducer.update(state(visible = true)))
+        reducer.observe(state(visible = true))
         assertTrue(reducer.beginHideAnimation(state(visible = true)))
     }
 
@@ -66,20 +73,29 @@ class CefriumImeDismissalReducerTest {
         val reducer = CefriumImeDismissalReducer()
 
         assertFalse(reducer.beginHideAnimation(state(visible = false)))
-        assertFalse(
-            reducer.beginHideAnimation(
-                state(visible = true, editorOwnsIme = false),
-            ),
-        )
+        assertFalse(reducer.beginHideAnimation(state(visible = true, windowFocused = false)))
     }
 
     @Test
-    fun resetMakesNextHiddenInsetAnInitialObservation() {
+    fun visibleCompletionCancelsPendingReleaseAndStartsANewEpoch() {
         val reducer = CefriumImeDismissalReducer()
 
-        assertFalse(reducer.update(state(visible = true)))
-        assertTrue(reducer.update(state(visible = false)))
-        reducer.reset()
-        assertFalse(reducer.update(state(visible = false)))
+        reducer.observe(state(visible = true))
+        assertTrue(reducer.beginHideAnimation(state(visible = true)))
+        assertFalse(reducer.completeHideAnimation(state(visible = true)))
+        assertTrue(reducer.beginHideAnimation(state(visible = true)))
+    }
+
+    @Test
+    fun completionStillRequiresLiveWindowEligibility() {
+        val reducer = CefriumImeDismissalReducer()
+
+        reducer.observe(state(visible = true))
+        assertTrue(reducer.beginHideAnimation(state(visible = true)))
+        assertFalse(
+            reducer.completeHideAnimation(
+                state(visible = false, windowFocused = false),
+            ),
+        )
     }
 }
