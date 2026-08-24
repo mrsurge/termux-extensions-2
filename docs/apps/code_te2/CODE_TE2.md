@@ -11,7 +11,7 @@ This is intentionally written as a wiring and ownership reference: what runs whe
 ## How To Read This Doc
 
 - The sections from **Current Architecture** through **4) SSOT (HistoryStore / PreferencesStore) model** are the authoritative current-state summary for the live direct-WBA editor path.
-- The deeper sections after that remain useful operational reference, but some were written across earlier migration stages. If a lower section conflicts with the current-state summary, trust the code and `docs/planning/FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md`.
+- The deeper sections after that remain useful operational reference, but some were written across earlier migration stages. If a lower section conflicts with the current-state summary, trust current source; use `docs/planning/FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md` only for refactor direction.
 - This document is the **current wiring reference**. The remaining refactor direction lives in `docs/planning/FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md`.
 
 ---
@@ -220,6 +220,31 @@ Spinner / Status indicator (host UI):
 - Code Server launch, VSIX/Open VSX commands, builtin-extension discovery, and WBA nid extraction all use the same pinned TE2-managed installation. System, `PATH`, NVM, and executable environment overrides are not runtime authorities.
 - Every WBA protocol actor, including language intelligence, commands, messages, and webviews, receives its resolved nid through named runtime-adapter fields. The generated config for the pinned managed Code Server runtime is production authority; `RPC_DEFAULTS` is only the matching 4.130 no-config fallback.
 - The installed WBA MessagePack codec is one self-contained bundled ESM file at `workbench_protocol_proxy/node_workbench_adapter/dist/protocol/messagepack-codec.mjs`.
+
+## 0.7) Relay Boundaries
+
+Several relays participate in a native client session, but they have separate
+owners and must not be treated as interchangeable.
+
+- **Framework app and Socket.IO proxies** are Rust-server routes. They expose
+  public per-app mounts and forward to an already-running loopback app worker or
+  declared service endpoint. They are non-launching transport/policy boundaries;
+  Socket.IO routes forward physical Engine.IO traffic without interpreting
+  namespaces or RPC payloads.
+- **`AndroidFrameworkRelay`** is a process-local Android client relay owned by
+  `PersistentNetworkService`. It gives the GeckoView or Cefrium browser a local
+  loopback framework origin, serves native Android routes and declared installed
+  assets locally, and streams all remaining framework HTTP, SSE, Socket.IO, and
+  WebSocket traffic to the configured upstream framework origin. Gecko and
+  Cefrium activities bind this service; it is not a Rust app-worker proxy.
+- **Run Target relays** are native client port-forwarders for remote Run Profile
+  listeners. They reconcile the framework's route projection and do not serve
+  framework pages or establish the browser framework origin.
+
+The Cefrium module configures Cefrium-specific local routes, but it does not
+create a competing framework-route authority: its process-local client runtime
+owns browser-relay lifecycle and upstream retargeting. Gecko uses the same
+client-runtime pattern in its own process.
 
 ---
 
@@ -521,7 +546,9 @@ The sections below remain useful as operational reference, but they were accumul
 - older explorer naming before the `explorer/transport/` and `explorer_runtime.py` split
 - legacy `vscode_api` / `vscode_rpc` context that is no longer the current hot path
 
-If a lower section conflicts with the current-state summary above, trust the code and `docs/planning/FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md`.
+If a lower section conflicts with the current-state summary above, trust current
+source; use `docs/planning/FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md` only for
+refactor direction.
 
 ---
 
@@ -4135,7 +4162,9 @@ The isolated `:cefrium` Android application module evaluates Cefrium 0.7.1 while
 
 The Cefrium module is intentionally isolated:
 
-- `:cefrium` owns its activity, layout, manifest, and loopback relay.
+- `:cefrium` owns its activity, layout, manifest, and Cefrium-specific local
+  relay routing; its process-local `PersistentNetworkService` owns the
+  `AndroidFrameworkRelay` lifecycle.
 - It applies the `com.cefrium` Gradle plugin only inside the Cefrium module.
 - The plugin must not be applied to Gecko variants because it generates Chromium resource classes and carries the large CEF runtime.
 - The module shares the packaged asset model and common Android source, but remains an evaluation path until the primary-renderer decision changes.
@@ -4451,3 +4480,58 @@ Extension-context Mementos are a separate WBA main-thread contract. WBA implemen
 The current extension-webview theme contract is intentionally fixed rather than coupled to Monaco's selectable editor theme. WBA requires the packaged `monaco_editor/themes/vendored/github/dark-default.json`, projects its string color entries with Code Server's `--vscode-<color-id>` naming, and decorates the extension body with the `vscode-dark` class and VS Code theme data attributes before extension scripts run. The trusted wrapper uses the same GitHub Dark Default Sidebar background. Missing or mismatched theme assets fail WBA initialization; WBA-provided dynamic themes remain deferred.
 
 Python reconciles each complete WBA extension-surface snapshot as one idempotent Sidebar ledger transaction. It removes stale project surfaces, upserts changed members, writes preferences at most once, and publishes one membership update only when material state changed. Identical snapshots do not advance slot timestamps or rewrite preferences.
+
+---
+
+## 45) Sidebar Membership And Host Presentation Ownership
+
+Sidebar state deliberately has two authorities. The shared backend ledger owns
+which surfaces exist; every client host owns how those surfaces are presented.
+This separation prevents a browser, Electron, GeckoView, or Cefrium renderer
+from overwriting another renderer's local dock order or foreground choice.
+
+### Shared membership ledger
+
+Ledger v2 persists only stable slot identity, membership, lifecycle/readiness,
+and surface metadata. It does not persist dock order and it has no global-active
+Sidebar surface. A complete membership snapshot deterministically removes
+missing slots, preserves valid identities, and publishes only a material change.
+An unchanged snapshot must not rewrite preferences or advance slot timestamps.
+
+The backend remains the authority for lifecycle removal. An ordinary user URL
+slot has destructive Close semantics. An activity-bar extension webview instead
+changes only the current client's presentation to `hidden`; its WBA membership
+and Extension Views drawer entry remain available for reopening. See §44 for
+the extension-webview runtime and lifetime rules.
+
+### Per-host presentation
+
+Each host stores versioned local presentation state: dock order, foreground host,
+last agent host/presentation tuple, and embedded/hidden/detached mode. Browser
+and GeckoView use origin-local storage. Electron uses its validated preload/main
+bridge and atomic XDG-config storage. A snapshot prunes absent membership,
+preserves surviving local order, appends new slots, and chooses a local fallback
+foreground.
+
+`clientInstanceId` is the stable client authority. `windowId` is reload-stable
+metadata and `presentationId` identifies a transient inline/detached incarnation.
+Neither is shared Sidebar membership authority. Canonical legacy slot and
+presentation identities migrate once; canonical records win collisions.
+
+### Exact-client Sidebar mentions
+
+An agent/Sidebar mention carries the originating `clientInstanceId`, stable
+agent host id, and current `presentationId`. The host republishes that ephemeral
+tuple when its iframe is created/replaced and after Sidebar IPC registration.
+Python derives the client from its connection and validates the tuple against
+the live host, ledger membership, agent conversation, and registered app peer.
+It derives conversation identity from the ledger slot and emits only to that
+app room. A missing or stale tuple fails closed: there is no global-active or
+broadcast fallback.
+
+### Lane boundary
+
+Presentation actions follow the normal Code TE2 rule: frontend -> own backend
+-> target backend hook -> target notification. Do not connect frontend lanes
+directly or use Sidebar state as cross-client editor/document authority. The
+general UI IPC contract is §21; WBA extension-surface reconciliation is §44.
