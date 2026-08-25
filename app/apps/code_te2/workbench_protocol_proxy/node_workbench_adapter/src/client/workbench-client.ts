@@ -106,6 +106,7 @@ import type {
 } from "../workspace/lifecycle";
 import type { ExtHostInitOptions } from "../extensions/catalog";
 import type { ProviderKind } from "../extensions/provider-registry";
+import { DiagnosticsSnapshotStore } from "../extensions/intelligence/diagnostics-snapshot.mjs";
 import {
   buildExtensionsSnapshot,
   buildExtHostInitData,
@@ -185,6 +186,7 @@ import {
 import { WorkbenchDocumentRegistry } from "../workspace/document-registry.mjs";
 import { checkWorkspaceContains } from "../workspace/workspace-contains.mjs";
 import { searchWorkspaceFiles } from "../workspace/file-search.mjs";
+import { ClientOperationGate } from "./client-operation-gate.mjs";
 
 type WorkbenchEventSink = (payload: Record<string, unknown>) => void;
 type MgmtIpcLike = NonNullable<ManagementRuntime["refs"]["mgmtIpc"]>;
@@ -696,7 +698,35 @@ interface ClientEditorFacade {
   uri: string | null;
   languageId: string | null;
   tab: unknown;
+  generation: number | string | null;
   lastOpenTs: number | null;
+}
+
+interface ClientProjectionTraceEvent {
+  sequence: number;
+  ts: number;
+  phase: string;
+  label: string;
+  requestClientInstanceId: string | null;
+  requestPath: string | null;
+  requestGeneration: number | string | null;
+  projectedClientInstanceId: string | null;
+  activePath: string | null;
+  activeEditorId: string | null;
+  activeGeneration: number | string | null;
+  facade: {
+    path: string;
+    editorId: string;
+    generation: number | string | null;
+  } | null;
+  document: {
+    path: string;
+    versionId: number;
+    languageId: string;
+    textFingerprint: string;
+    activeEpoch: number;
+  } | null;
+  error: string | null;
 }
 
 const CLIENT_INSTANCE_PATTERN = /^client_[a-z0-9]{12,64}$/;
@@ -716,8 +746,8 @@ export class WorkbenchClient {
   _mgmtIpc: MgmtIpcLike | null;
   _fsWatcherSub: WatchSubscriptionLike;
   _connecting: boolean;
-  _openFileQueue: Promise<void>;
   _openFilePending: number;
+  _openingPaths: Map<string, number>;
   _extRequests: PendingExtRequestOwner;
   _signService: unknown;
   _debugExtReqSeen: number;
@@ -728,11 +758,13 @@ export class WorkbenchClient {
   _activeEditorId: string | null;
   _activeUriObj: unknown;
   _activeTab: unknown;
+  _activeGeneration: number | string | null;
   _clientEditorFacades: Map<string, ClientEditorFacade>;
   _projectedClientInstanceId: string | null;
-  _clientContextOwner: string | null;
-  _clientContextDepth: number;
-  _clientContextWaiters: Array<() => void>;
+  _clientOperationGate: ClientOperationGate;
+  _clientProjectionTraceEnabled: boolean;
+  _clientProjectionTraceSequence: number;
+  _clientProjectionTraceEvents: ClientProjectionTraceEvent[];
   _documentRegistry: WorkbenchDocumentRegistry;
   _extensions: unknown[];
   _extensionActivity: ExtensionActivityRuntime;
@@ -743,6 +775,7 @@ export class WorkbenchClient {
   _webviews: WebviewRuntime;
   _languageResolver: ExtensionLanguageResolver;
   _providerRegistry: ProviderRegistry;
+  _diagnosticSnapshots: DiagnosticsSnapshotStore;
   _semanticTokenProjections: SemanticTokenProjectionManager;
   _semanticTokenProviderSignatures: Map<string, string>;
   _callHierarchySessions: CallHierarchySessionStore;
@@ -778,8 +811,8 @@ export class WorkbenchClient {
     this._mgmtIpc = null;
     this._fsWatcherSub = null; // IPC event subscription for remoteFilesystem fileChange
     this._connecting = false;
-    this._openFileQueue = Promise.resolve();
     this._openFilePending = 0;
+    this._openingPaths = new Map<string, number>();
     this._semanticTokenProviderSignatures = new Map<string, string>();
     this._extRequests = new PendingExtRequestOwner();
     this._signService = createNoopSignService();
@@ -795,11 +828,19 @@ export class WorkbenchClient {
     this._activeEditorId = null; // track current editor for close-before-open
     this._activeUriObj = null; // track current URI object for close-before-open
     this._activeTab = null;
+    this._activeGeneration = null;
     this._clientEditorFacades = new Map<string, ClientEditorFacade>();
     this._projectedClientInstanceId = null;
-    this._clientContextOwner = null;
-    this._clientContextDepth = 0;
-    this._clientContextWaiters = [];
+    this._clientProjectionTraceEnabled = false;
+    this._clientProjectionTraceSequence = 0;
+    this._clientProjectionTraceEvents = [];
+    this._clientOperationGate = new ClientOperationGate({
+      onTimeout: (snapshot) => {
+        console.error(
+          `[client_operation_gate] lease expired ${JSON.stringify(snapshot)}`,
+        );
+      },
+    });
     this._documentRegistry = new WorkbenchDocumentRegistry({
       extRpcIds: {
         ExtHostDocumentsAndEditors: _rpcIds.ExtHostDocumentsAndEditors,
@@ -825,6 +866,10 @@ export class WorkbenchClient {
         ),
       uriForPath: (path) => this._uriForPath(path),
       workspacePath: () => this.state.workspaceFolder,
+      isPathClientForeground: (documentPath) =>
+        this._isPathClientForeground(documentPath),
+      isPathProjectedForeground: (documentPath) =>
+        this._projectedClientPath() === documentPath,
       resolveLanguageId: (path, text, requestedLanguageId) =>
         this.resolveLanguageId(path, text, requestedLanguageId),
       activateLanguage: (languageId) => this.activateLanguage(languageId),
@@ -876,6 +921,11 @@ export class WorkbenchClient {
       activePath: () => this.state.activePath,
       activeEditorId: () => this._activeEditorId,
       activeClientInstanceId: () => this._projectedClientInstanceId,
+      registerOperationReentry: (requestId, clientInstanceId) =>
+        this._clientOperationGate.registerReentryKey(
+          requestId,
+          clientInstanceId,
+        ),
       emitBackendEvent: (payload) => this.onEvent(payload),
       notifyEditor: (method, params) => this.onNotification(method, params),
       createId: () => crypto.randomUUID(),
@@ -898,6 +948,9 @@ export class WorkbenchClient {
       log: (...args) => console.log(...args),
     });
     this._providerRegistry = new ProviderRegistry();
+    this._diagnosticSnapshots = new DiagnosticsSnapshotStore({
+      uriToString: (resource) => stringifyUriSafe(resource),
+    });
     this._callHierarchySessions = new CallHierarchySessionStore();
     this._useRemote = true;
     this._authority = DEFAULT_REMOTE_AUTHORITY;
@@ -970,7 +1023,7 @@ export class WorkbenchClient {
       listBackgroundPaths: () =>
         this._documentRegistry
           .values()
-          .filter((entry) => entry.role !== "active")
+          .filter((entry) => !this._isPathClientForeground(entry.path))
           .map((entry) => entry.path),
       compute: async (documentPath) => {
         await this._prewarmSemanticTokens(documentPath);
@@ -1097,7 +1150,7 @@ export class WorkbenchClient {
       defaultRemoteAuthority: DEFAULT_REMOTE_AUTHORITY,
       useRemote: this._useRemote,
       languageIdFromPath: (filePath) => _languageIdFromPath(filePath),
-      didChange: (params, opts) => this.didChange(params, opts),
+      didChange: (params, opts) => this._applyProjectedDidChange(params, opts),
       findAllProviderHandles: (kind, document) =>
         this._providerRegistry.findAllProviderHandlesForDocument(
           kind,
@@ -1121,7 +1174,7 @@ export class WorkbenchClient {
       defaultRemoteAuthority: DEFAULT_REMOTE_AUTHORITY,
       useRemote: this._useRemote,
       languageIdFromPath: (filePath) => _languageIdFromPath(filePath),
-      didChange: (params, opts) => this.didChange(params, opts),
+      didChange: (params, opts) => this._applyProjectedDidChange(params, opts),
       findAllProviderHandles: (kind, document) =>
         this._providerRegistry.findAllProviderHandlesForDocument(
           kind,
@@ -1144,7 +1197,7 @@ export class WorkbenchClient {
       authority: this._authority,
       defaultRemoteAuthority: DEFAULT_REMOTE_AUTHORITY,
       languageIdFromPath: (filePath) => _languageIdFromPath(filePath),
-      didChange: (params, opts) => this.didChange(params, opts),
+      didChange: (params, opts) => this._applyProjectedDidChange(params, opts),
       uriForPath: (filePath, authority) =>
         this._uriForPath(filePath, authority),
       sendExtPending: (rpcId, method, args, cancellable, pendingOptions) =>
@@ -1206,7 +1259,7 @@ export class WorkbenchClient {
       defaultRemoteAuthority: DEFAULT_REMOTE_AUTHORITY,
       useRemote: this._useRemote,
       languageIdFromPath: (filePath) => _languageIdFromPath(filePath),
-      didChange: (params, opts) => this.didChange(params, opts),
+      didChange: (params, opts) => this._applyProjectedDidChange(params, opts),
       findAllProviderHandles: (kind, languageId) =>
         this._findAllProviderHandles(kind, languageId),
       findSemanticFullHandles: (document) =>
@@ -1256,7 +1309,7 @@ export class WorkbenchClient {
       languageId: entry.languageId,
       textFingerprint: entry.textFingerprint,
       projectGeneration: entry.projectGeneration,
-      role: entry.role,
+      clientForeground: this._isPathClientForeground(entry.path),
     };
   }
 
@@ -1273,7 +1326,7 @@ export class WorkbenchClient {
     if (
       !entry ||
       !document ||
-      entry.role === "active" ||
+      this._isPathClientForeground(entry.path) ||
       this._providerRegistry.findSemanticFullHandlesForDocument(document)
         .length === 0
     ) {
@@ -1313,8 +1366,7 @@ export class WorkbenchClient {
       languageIdFromPath: (filePath) => _languageIdFromPath(filePath),
       getDocumentVersion: (path) =>
         this._documentRegistry.getVersion(path),
-      getOpenGeneration: (path) =>
-        this._documentRegistry.getOpenGeneration(path),
+      getActiveGeneration: () => this._activeGeneration,
       // Provider calls are consumers of the active-document lifecycle, not owners.
       // Let openFile()/didChange() remain the only state writers for activePath/Uri.
       updateActiveDocument: () => {},
@@ -1382,6 +1434,10 @@ export class WorkbenchClient {
       activeTab: this._activeTab,
       setActiveTab: (value) => {
         this._activeTab = value;
+      },
+      activeGeneration: this._activeGeneration,
+      setActiveGeneration: (value) => {
+        this._activeGeneration = value;
       },
       nextModelNumber: this._nextModelNumber,
       setNextModelNumber: (value) => {
@@ -1514,7 +1570,113 @@ export class WorkbenchClient {
   }
 
   status() {
-    return { ...this.state };
+    return {
+      ...this.state,
+      clientOperations: this._clientOperationGate.snapshot(),
+      clientEditorFacades: Array.from(
+        this._clientEditorFacades.values(),
+        (facade) => ({
+          clientInstanceId: facade.clientInstanceId,
+          path: facade.path,
+          editorId: facade.editorId,
+          generation: facade.generation,
+        }),
+      ),
+    };
+  }
+
+  private _recordClientProjectionTrace(
+    phase: string,
+    label: string,
+    params: unknown,
+    error: unknown = null,
+  ): void {
+    if (!this._clientProjectionTraceEnabled) return;
+    const request = isRecord(params) ? params : {};
+    const requestClientInstanceId = clientInstanceIdFrom(request);
+    const facade = requestClientInstanceId
+      ? this._clientEditorFacades.get(requestClientInstanceId) ?? null
+      : null;
+    const requestPath = typeof request.path === "string" && request.path
+      ? request.path
+      : facade?.path ?? null;
+    const document = requestPath
+      ? this._documentRegistry.getByPath(requestPath)
+      : null;
+    const requestGeneration = (
+      typeof request.generation === "number" ||
+      typeof request.generation === "string"
+    ) ? request.generation : null;
+    const event: ClientProjectionTraceEvent = {
+      sequence: ++this._clientProjectionTraceSequence,
+      ts: Date.now(),
+      phase,
+      label,
+      requestClientInstanceId,
+      requestPath,
+      requestGeneration,
+      projectedClientInstanceId: this._projectedClientInstanceId,
+      activePath: this.state.activePath,
+      activeEditorId: this._activeEditorId,
+      activeGeneration: this._activeGeneration,
+      facade: facade
+        ? {
+            path: facade.path,
+            editorId: facade.editorId,
+            generation: facade.generation,
+          }
+        : null,
+      document: document
+        ? {
+            path: document.path,
+            versionId: document.versionId,
+            languageId: document.languageId,
+            textFingerprint: document.textFingerprint,
+            activeEpoch: document.activeEpoch,
+          }
+        : null,
+      error: error == null
+        ? null
+        : error instanceof Error
+          ? error.message
+          : String(error),
+    };
+    this._clientProjectionTraceEvents.push(event);
+    console.log(`[client_projection_trace] ${JSON.stringify(event)}`);
+    if (this._clientProjectionTraceEvents.length > 256) {
+      this._clientProjectionTraceEvents.splice(
+        0,
+        this._clientProjectionTraceEvents.length - 256,
+      );
+    }
+  }
+
+  projectionTraceConfigure(
+    params: Record<string, unknown>,
+  ): Record<string, unknown> {
+    if (params.clear === true) this._clientProjectionTraceEvents.length = 0;
+    if (typeof params.enabled === "boolean") {
+      this._clientProjectionTraceEnabled = params.enabled;
+    }
+    return this.projectionTraceSnapshot(params);
+  }
+
+  projectionTraceSnapshot(
+    params: Record<string, unknown> = {},
+  ): Record<string, unknown> {
+    const limit = Number.isFinite(Number(params.limit))
+      ? Math.max(0, Math.min(256, Math.trunc(Number(params.limit))))
+      : 256;
+    const events = limit
+      ? this._clientProjectionTraceEvents.slice(-limit)
+      : [];
+    return {
+      ok: true,
+      enabled: this._clientProjectionTraceEnabled,
+      sequence: this._clientProjectionTraceSequence,
+      events,
+      status: this.status(),
+    };
   }
 
   resolveLanguageId(
@@ -1865,6 +2027,9 @@ export class WorkbenchClient {
   }
 
   _handleWorkbenchEvent(payload: Record<string, unknown>): void {
+    if (payload.type === "diagnostics/changeMany") {
+      this._diagnosticSnapshots.apply(payload);
+    }
     if (payload.type === "document/activeChanged" && typeof payload.path === "string") {
       this._extensionEditorNavigation.activeEditorChanged(
         payload.path,
@@ -1968,16 +2133,17 @@ export class WorkbenchClient {
     this._activeEditorId = null;
     this._activeUriObj = null;
     this._activeTab = null;
+    this._activeGeneration = null;
     this._clientEditorFacades.clear();
     this._projectedClientInstanceId = null;
-    this._clientContextOwner = null;
-    this._clientContextDepth = 0;
-    const contextWaiters = this._clientContextWaiters.splice(0);
-    for (const resolve of contextWaiters) resolve();
+    this._clientOperationGate.clear(reason || "session_reset");
+    this._openingPaths.clear();
+    this._openFilePending = 0;
     this._semanticTokenProviderSignatures.clear();
     this._semanticTokenProjections.clear(reason || "session_reset");
     this._documentRegistry.clearLocal();
     this._providerRegistry.clear();
+    this._diagnosticSnapshots.clear();
     this._webviews.clear(reason || "session_reset");
     this._extensionEditorNavigation.reset(reason || "session_reset");
     this._extensionActivation.reset(reason);
@@ -2150,6 +2316,7 @@ export class WorkbenchClient {
       uri: this.state.activeUri,
       languageId: this.state.activeLanguageId,
       tab: this._activeTab,
+      generation: this._activeGeneration,
       lastOpenTs: this.state.lastOpenTs,
     });
   }
@@ -2161,61 +2328,82 @@ export class WorkbenchClient {
     this._activeEditorId = facade?.editorId ?? null;
     this._activeUriObj = facade?.uriObj ?? null;
     this._activeTab = facade?.tab ?? null;
+    this._activeGeneration = facade?.generation ?? null;
     this.state.activePath = facade?.path ?? null;
     this.state.activeUri = facade?.uri ?? null;
     this.state.activeLanguageId = facade?.languageId ?? null;
     this.state.lastOpenTs = facade?.lastOpenTs ?? null;
-    if (facade) {
-      this._documentRegistry.promote(
-        facade.path,
-        this._documentRegistry.getOpenGeneration(facade.path) ?? null,
-      );
-    }
     this._sendExt(
       _rpcIds.ExtHostDocumentsAndEditors,
       "$acceptDocumentsAndEditorsDelta",
       [{ newActiveEditor: facade?.editorId ?? null }],
       false,
     );
+    this._documentRegistry.syncPresentation();
   }
 
-  private async _acquireClientContext(clientInstanceId: string): Promise<void> {
-    while (
-      this._clientContextOwner !== null &&
-      this._clientContextOwner !== clientInstanceId
-    ) {
-      await new Promise<void>((resolve) => {
-        this._clientContextWaiters.push(resolve);
-      });
+  private _projectedClientPath(): string | null {
+    const clientInstanceId = this._projectedClientInstanceId;
+    return clientInstanceId
+      ? this._clientEditorFacades.get(clientInstanceId)?.path ?? null
+      : null;
+  }
+
+  private _isPathClientForeground(documentPath: string): boolean {
+    for (const facade of this._clientEditorFacades.values()) {
+      if (facade.path === documentPath) return true;
     }
-    this._clientContextOwner = clientInstanceId;
-    this._clientContextDepth += 1;
-    this._projectClientEditorFacade(clientInstanceId);
+    return this._openingPaths.has(documentPath);
   }
 
-  private _releaseClientContext(clientInstanceId: string): void {
-    if (this._clientContextOwner !== clientInstanceId) return;
-    this._clientContextDepth = Math.max(0, this._clientContextDepth - 1);
-    if (this._clientContextDepth !== 0) return;
-    this._clientContextOwner = null;
-    const waiters = this._clientContextWaiters.splice(0);
-    for (const resolve of waiters) resolve();
+  private _protectedDocumentPaths(): string[] {
+    return Array.from(new Set([
+      ...this._openingPaths.keys(),
+      ...Array.from(
+        this._clientEditorFacades.values(),
+        (facade) => facade.path,
+      ),
+    ]));
+  }
+
+  private _trackOpeningPath(documentPath: string, delta: 1 | -1): void {
+    if (!documentPath) return;
+    const next = (this._openingPaths.get(documentPath) ?? 0) + delta;
+    if (next > 0) this._openingPaths.set(documentPath, next);
+    else this._openingPaths.delete(documentPath);
   }
 
   private async _runWithClientEditorFacade<T>(
     params: unknown,
     operation: () => Promise<T> | T,
+    options: {
+      label: string;
+      timeoutMs: number;
+      reentryKey?: string | null;
+    },
   ): Promise<T> {
     const clientInstanceId = clientInstanceIdFrom(params);
     if (!clientInstanceId) {
       throw new Error("Missing required clientInstanceId");
     }
-    await this._acquireClientContext(clientInstanceId);
-    try {
-      return await operation();
-    } finally {
-      this._releaseClientContext(clientInstanceId);
-    }
+    this._recordClientProjectionTrace("queued", options.label, params);
+    return this._clientOperationGate.run(
+      clientInstanceId,
+      async () => {
+        this._recordClientProjectionTrace("entered", options.label, params);
+        this._projectClientEditorFacade(clientInstanceId);
+        this._recordClientProjectionTrace("projected", options.label, params);
+        try {
+          const result = await operation();
+          this._recordClientProjectionTrace("completed", options.label, params);
+          return result;
+        } catch (error) {
+          this._recordClientProjectionTrace("failed", options.label, params, error);
+          throw error;
+        }
+      },
+      options,
+    );
   }
 
   clientActivePath(params: unknown): string | null {
@@ -2230,18 +2418,8 @@ export class WorkbenchClient {
     const previousVersion = requestedPath
       ? this._documentRegistry.getVersion(requestedPath)
       : null;
-    const queuedBehindAnotherOpen = this._openFilePending > 0;
-    const previous = this._openFileQueue.catch(() => undefined);
-    let release: () => void = () => {};
-    const current = new Promise<void>((resolve) => {
-      release = resolve;
-    });
     this._openFilePending += 1;
-    this._openFileQueue = previous.then(() => current);
-    if (queuedBehindAnotherOpen) {
-      console.error("[openFile] queued behind in-flight openFile");
-    }
-    await previous;
+    this._trackOpeningPath(requestedPath, 1);
     try {
       const result = await this._runWithClientEditorFacade(params, async () => {
         const opened = await openWorkbenchFile(
@@ -2251,6 +2429,12 @@ export class WorkbenchClient {
         const clientInstanceId = clientInstanceIdFrom(params);
         if (clientInstanceId) this._captureClientEditorFacade(clientInstanceId);
         return opened;
+      }, {
+        label: `openFile:${requestedPath || "unknown"}`,
+        timeoutMs: 30000,
+        reentryKey: isRecord(params)
+          ? String(params.requestId ?? params.request_id ?? "")
+          : null,
       });
       const nextVersion = requestedPath
         ? this._documentRegistry.getVersion(requestedPath)
@@ -2265,14 +2449,17 @@ export class WorkbenchClient {
       return result;
     } finally {
       this._openFilePending = Math.max(0, this._openFilePending - 1);
-      release();
+      this._trackOpeningPath(requestedPath, -1);
     }
   }
 
   reconcileLogicalDocuments(
     params: Record<string, unknown>,
   ): Record<string, unknown> {
-    const result = this._documentRegistry.reconcileLogicalDocuments(params);
+    const result = this._documentRegistry.reconcileLogicalDocuments({
+      ...params,
+      clientForegroundPaths: this._protectedDocumentPaths(),
+    });
     if (Array.isArray(result.released)) {
       const releasedPaths = new Set(result.released.map((path) => String(path)));
       const removedEditors: string[] = [];
@@ -2288,6 +2475,7 @@ export class WorkbenchClient {
           this._activeEditorId = null;
           this._activeUriObj = null;
           this._activeTab = null;
+          this._activeGeneration = null;
           this.state.activePath = null;
           this.state.activeUri = null;
           this.state.activeLanguageId = null;
@@ -2321,28 +2509,16 @@ export class WorkbenchClient {
    * Push a full-text buffer update to the extension host for live diagnostics.
    * Uses $acceptModelChanged on ExtHostDocuments with isFlush:true.
    */
-  didChange(
+  private async _applyProjectedDidChange(
     params: unknown = {},
     opts: DidChangeOptions = {},
-  ): Record<string, unknown> | Promise<Record<string, unknown>> {
+  ): Promise<Record<string, unknown>> {
     const documentPath = isRecord(params) ? String(params.path ?? "") : "";
-    const result = applyDidChange(
+    const result = await applyDidChange(
       this._workspaceLifecycleRuntime(),
       params,
       opts,
     );
-    if (result instanceof Promise) {
-      return result.then((resolved) => {
-        if (
-          resolved.ok === true &&
-          resolved.contentChanged === true &&
-          documentPath
-        ) {
-          this._semanticTokenProjections.invalidatePath(documentPath);
-        }
-        return resolved;
-      });
-    }
     if (
       result.ok === true &&
       result.contentChanged === true &&
@@ -2351,6 +2527,38 @@ export class WorkbenchClient {
       this._semanticTokenProjections.invalidatePath(documentPath);
     }
     return result;
+  }
+
+  async didChange(
+    params: unknown = {},
+    opts: DidChangeOptions = {},
+  ): Promise<Record<string, unknown>> {
+    const documentPath = isRecord(params) ? String(params.path ?? "") : "";
+    return await this._runWithClientEditorFacade(
+      params,
+      async () => {
+        const result = await this._applyProjectedDidChange(params, opts);
+        const clientInstanceId = clientInstanceIdFrom(params);
+        if (clientInstanceId) this._captureClientEditorFacade(clientInstanceId);
+        return result;
+      },
+      {
+        label: `didChange:${documentPath || "unknown"}`,
+        timeoutMs: Math.max(5000, Number(opts.timeoutMs ?? 3000) + 5000),
+      },
+    );
+  }
+
+  runClientDocumentOperation<T>(
+    params: unknown,
+    label: string,
+    operation: () => Promise<T> | T,
+    timeoutMs = 30000,
+  ): Promise<T> {
+    return this._runWithClientEditorFacade(params, operation, {
+      label,
+      timeoutMs: Math.max(5000, Math.min(120000, timeoutMs)),
+    });
   }
 
   async documentSymbols(
@@ -2637,6 +2845,7 @@ export class WorkbenchClient {
     this._activeEditorId = null;
     this._activeUriObj = null;
     this._activeTab = null;
+    this._activeGeneration = null;
     this.state.activePath = null;
     this.state.activeUri = null;
     this.state.activeLanguageId = null;
@@ -2768,7 +2977,10 @@ export class WorkbenchClient {
     return await this._runWithClientEditorFacade(params, () => ({
       ok: this._syncActiveEditorSelection(params),
       activePath: this.state.activePath,
-    }));
+    }), {
+      label: "editorState.update",
+      timeoutMs: 5000,
+    });
   }
 
   extensionMenuResolve(
@@ -2777,6 +2989,10 @@ export class WorkbenchClient {
     return this._runWithClientEditorFacade(
       params,
       () => this._extensionCommands.resolveMenu(params),
+      {
+        label: "extensionMenus.resolve",
+        timeoutMs: 15000,
+      },
     );
   }
 
@@ -2786,6 +3002,10 @@ export class WorkbenchClient {
     return this._runWithClientEditorFacade(
       params,
       () => this._extensionCommands.execute(params),
+      {
+        label: "extensionCommands.execute",
+        timeoutMs: 35000,
+      },
     );
   }
 
@@ -2795,6 +3015,11 @@ export class WorkbenchClient {
     return await this._runWithClientEditorFacade(
       params,
       () => this._extensionEditorNavigation.completeBackendOpen(params),
+      {
+        label: "extensionNavigation.complete",
+        timeoutMs: 10000,
+        reentryKey: String(params.requestId ?? params.request_id ?? ""),
+      },
     );
   }
 
@@ -2804,6 +3029,11 @@ export class WorkbenchClient {
     return await this._runWithClientEditorFacade(
       params,
       () => this._extensionEditorNavigation.completeEditorOperation(params),
+      {
+        label: "editorOperation.complete",
+        timeoutMs: 10000,
+        reentryKey: String(params.operationId ?? params.operation_id ?? ""),
+      },
     );
   }
 
@@ -2831,6 +3061,8 @@ export class WorkbenchClient {
    */
   resync(): Record<string, unknown> {
     const { replayed, events } = this._providerRegistry.buildResyncEvents();
+    const diagnosticEvents = this._diagnosticSnapshots.buildResyncEvents();
+    const diagnosticStats = this._diagnosticSnapshots.stats();
     const workspaceFolder =
       typeof this.state.workspaceFolder === "string" &&
       this.state.workspaceFolder
@@ -2853,11 +3085,19 @@ export class WorkbenchClient {
     for (const event of events) {
       this.onEvent({ ...event, ts_ms: Date.now() });
     }
+    for (const event of diagnosticEvents) {
+      this.onEvent(event);
+    }
     this.onEvent(this._webviews.snapshot());
     console.error(
-      `[resync] replayed providers: cmp=${replayed.completions} inlay=${replayed.inlayHints} inline=${replayed.inlineCompletions} semTok=${replayed.semanticTokens} folding=${replayed.foldingRanges} colors=${replayed.documentColors}`,
+      `[resync] replayed providers: cmp=${replayed.completions} inlay=${replayed.inlayHints} inline=${replayed.inlineCompletions} semTok=${replayed.semanticTokens} folding=${replayed.foldingRanges} colors=${replayed.documentColors} diagnostics=${diagnosticStats.resources}`,
     );
-    return { ok: true, ts_ms: Date.now(), replayed };
+    return {
+      ok: true,
+      ts_ms: Date.now(),
+      replayed,
+      diagnostics: diagnosticStats,
+    };
   }
 
   async webviewAttach(params: Record<string, unknown>): Promise<Record<string, unknown>> {

@@ -523,6 +523,30 @@ export async function bootSecondaryEditorRuntime(
     root.dataset.mode = currentMode;
   }
 
+  async function closeSecondaryEditor(): Promise<void> {
+    if (presentationBridge.kind === 'electron') {
+      await setMode('closed');
+      return;
+    }
+    if (busy) return;
+    busy = true;
+    setStatus('Closing…');
+    try {
+      await connection.request(
+        UI_IPC_RPC_METHODS.hostClientForegroundClear,
+        {},
+        8_000,
+      );
+      setCurrentPath('');
+      await setMode('closed');
+    } catch (error) {
+      setStatus('');
+      host.toast(`Close failed: ${errorMessage(error)}`);
+    } finally {
+      busy = false;
+    }
+  }
+
   async function handleNativeCommand(command: SecondaryCommand): Promise<void> {
     if (command.type === 'state') {
       projectPath = command.projectPath;
@@ -559,10 +583,13 @@ export async function bootSecondaryEditorRuntime(
     } else if (method === UI_IPC_RPC_NOTIFICATIONS.editorSave) {
       void save();
     } else if (method === UI_IPC_RPC_NOTIFICATIONS.hostActiveFileChanged) {
-      setCurrentPath(secondaryEditorActivePath({
+      const nextPath = secondaryEditorActivePath({
         clientForeground: asRecord(params.clientForeground),
         currentPath: stringValue(params.path),
-      }));
+      });
+      const shouldClosePresentation = !!currentPath && !nextPath;
+      setCurrentPath(nextPath);
+      if (shouldClosePresentation) void setMode('closed');
     } else if (method === UI_IPC_RPC_NOTIFICATIONS.projectSwitching) {
       setStatus('Switching project…');
     } else if (method === UI_IPC_RPC_NOTIFICATIONS.projectSwitched) {
@@ -636,7 +663,7 @@ export async function bootSecondaryEditorRuntime(
     else if (action === 'discard') void discardDraft();
   });
   root.querySelector('.te2-secondary-editor-close')?.addEventListener('click', () => {
-    void setMode('closed');
+    void closeSecondaryEditor();
   });
   root.querySelector('.te2-secondary-editor-collapse')?.addEventListener('click', () => {
     void setMode('collapsed');

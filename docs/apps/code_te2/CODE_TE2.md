@@ -1,75 +1,51 @@
 # CODE_TE2 (Monaco Editor) — End‑to‑End Reference
 
-This document describes the **current** Code TE2 editor surface used by `code_te2` inside TE2:
-
-- **Monaco is mounted inline in the host page** served by the **app worker**.
-- The live editor path now spans **multiple logical Socket.IO namespaces** with different owners: worker-owned SSOT lanes, backend-owned relay lanes, and the direct WBA editor lane.
-- Document content, drafts, and preferences are governed by SSOT (`_history_store` / project sidecar, `_preferences_store`).
-
-This is intentionally written as a wiring and ownership reference: what runs where, what talks over which lane, and which sections are authoritative for the current live stack.
+This is the current wiring and ownership reference for the Monaco-based
+`code_te2` application. It covers the deployed app-worker, WBA, framework, and
+native-client stack; planning documents record migration history rather than
+runtime authority.
 
 ## How To Read This Doc
 
-- The sections from **Current Architecture** through **4) SSOT (HistoryStore / PreferencesStore) model** are the authoritative current-state summary for the live direct-WBA editor path.
-- The deeper sections after that remain useful operational reference, but some were written across earlier migration stages. If a lower section conflicts with the current-state summary, trust the code and `docs/planning/FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md`.
-- This document is the **current wiring reference**. The remaining refactor direction lives in `docs/planning/FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md`.
+- Current source wins over this document. In particular, generated bundles and
+  planning documents do not establish runtime behavior.
+- Read §§0–6 for architecture and app contracts, then use the focused later
+  sections for a subsystem. `docs/planning/FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md`
+  is direction/history, despite its legacy name.
+
+### Stable section map
+
+This pass keeps existing section numbers stable so links do not change alongside
+the pending source work. Deliberately absent numbers are removed historical
+material: §§16–18 were replaced by the current §§14–15 reference, and §§27–29
+were folded into §§22 and 26. A future navigation-only pass may renumber after
+link consumers are updated.
 
 ---
 
 ## Current Architecture
 
-This is the live operating model today:
-- TE2 remains the **only** authority for edit/save/draft/autosave/versioning (SSOT).
-- `code-server` owns extension execution and the remote VS Code extension host.
-- The Node **workbench adapter** owns the VS Code protocol boundary.
-- The **inline editor runtime** is the only frontend that talks directly to the WBA for language intelligence.
-- The **host page** and **Explorer** remain backend-owned surfaces; they do not need editor-grade latency.
+The live division is deliberately narrow:
 
-Cross references:
-- `docs/planning/FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md`
-- `docs/planning/FILE_EDITOR_CM6_DIAGNOSTICS_PROJECTION_DEBOUNCE_IDEA.md`
-- `docs/planning/FILE_EDITOR_CM6_WBA_ACK_AND_DECOMPOSITION_AUDIT.md`
-- `docs/planning/FILE_EDITOR_CM6_EDITOR_DIAGNOSTICS_SIDEBAND_AND_WBA_WS_PLAN.md`
+- TE2 worker SSOT owns edits, saves, drafts, preferences, client foregrounds,
+  and cross-surface orchestration.
+- `code-server` owns extension execution; the Node workbench adapter (WBA)
+  owns the VS Code protocol and editor-facing language RPC.
+- The inline editor calls `/wba` directly for language features and `/rpc/editor`
+  for state/control. Host and Explorer remain WBA-blind and use backend lanes.
+- Framework routes proxy bytes and lifecycle; they do not become document or
+  namespace authority.
 
-### Current milestone (direct WBA editor intelligence + live diagnostics)
-Status: implemented and working for the active built-in language lane.
+Code-server is a pipe-backend framework shell at the resolved
+`$TE2_RUNTIME_HOME/code_te2/code_server.sock`; readiness gates WBA startup.
+The WBA retains stdio JSON-RPC only for backend control work. Its browser hot
+path is `/wba`. `te2.resync` is an editor-frontend `/wba` request, while project
+switching, watcher resubscription, extension menus/navigation, webview backend,
+and logical-document reconcile remain backend control-plane work.
 
-Current facts:
-- `code-server` runs as a **pipe-backend** framework shell on a **Unix domain socket**, currently `~/.config/code-server/code-server.sock`, using `--socket` and `--socket-mode 0600`. Stdout is still used by Python for readiness detection (`HTTP server listening`).
-- The Node **workbench adapter** runs as a **pipe-backend** framework shell. Its backend-owned control plane still uses **stdio JSON-RPC** (`adapter_rpc(...)`) for lifecycle and control operations.
-- The inline editor runtime language-intelligence hot path is now **direct `/wba` Socket.IO JSON-RPC**, not `editor_workbench_*` through `editor_ws.py`.
-- The host page remains **WBA-blind**. It gets boot snapshot and adapter readiness from backend-owned `/ui_ipc` flows.
-- Explorer/backend still uses the WBA stdio control plane for a few **control-plane** operations such as `adapter.switchWorkspace`, `adapter.resubscribeWatcher`, and editor-backend `te2.resync`. Those are residual control hooks, not the editor hot path.
-- Raw editor diagnostics and provider-registration notifications arrive through the WBA editor-facing event stream. `diagnostics_bridge.py` remains relevant for normalized explorer/problems diagnostics, not as the primary editor diagnostics transport.
-- The workbench adapter and code-server are still started eagerly at worker boot. Code-server readiness gates adapter startup.
-- File watching still relies on code-server's native filesystem/IPC path plus optional watchexec poll fallback. Watcher fanout is owned by `wba_event_bridge.py`, `workspace_events.py`, and Explorer watcher handlers.
-- Builtin language extensions are still loaded through the WBA bootstrap/runtime path.
-
-### Current milestone (workbench TextMate runtime on the direct-WBA path)
-Status: implemented and user-verified.
-
-Current facts:
-- TextMate tokenization now uses vendored `vscode-textmate` and `vscode-oniguruma` from `monaco_editor/editor_textmate_runtime.ts`, not the old frontend UMD bootstrap lane.
-- The active grammar factory/runtime helpers now live under `monaco_editor/vscode_workbench_textmate_vendor/` and consume WBA-provided grammar metadata from `grammars_list` / `grammars_load`.
-- `inline_host.ts` no longer loads the old TextMate/oniguruma UMD scripts into the active path.
-- `m_editor_app.ts` now replays active-model language application after WBA connect so boot-time grammar/catalog races recover on `main_page`.
-- User-verified after reload: bracket matching, TextMate scopes/colors, semantic tokens, hovers with syntax highlighting, and folding all remained operational.
-
-Known limitations / residue:
-- Some backend control paths still use the stdio WBA control plane.
-- Some source modules are still loose JS and should continue to move to TS incrementally.
-- Files without a supporting language provider still will not produce meaningful diagnostics.
-
-### Current refactor direction
-
-The active docs-first refactor track is:
-- finish strict typing outside the already-clean editor, explorer, and WBA lanes
-- make every remaining Socket.IO surface intentionally JSON-RPC compliant instead of event-name RPC
-- collapse the app-specific Socket.IO server sprawl behind one server/path while preserving the current logical namespaces
-- keep transport consolidation proxy-only; do not move SSOT or WBA ownership just to get one physical socket server
-- defer HTML live preview until this refactor track lands
-
-That target architecture and migration order live in `docs/planning/FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md`.
+TextMate uses the vendored workbench runtime in
+`monaco_editor/editor_textmate_runtime.ts` and WBA grammar metadata. A provider
+is still required for meaningful language features.
 
 ### Extension validation matrix (next milestone)
 We will validate at least 2 deterministic features (hover + symbols + diagnostics) per language:
@@ -148,12 +124,12 @@ Host boot / readiness pipeline:
 Explorer/backend WBA control-plane residue:
   explorer/backend
     -> adapter_rpc(...) over stdio
-    -> adapter.switchWorkspace / adapter.resubscribeWatcher / te2.resync
+    -> switch/workspace, watcher, extension, webview, and reconcile control work
 
 File watcher pipeline:
   code-server parcel watcher detects disk change
     -> remoteFilesystem IPC channel fires EventFire (ResponseType 204)
-    -> workbench_client.mjs onEvent({type: "watcher/fileChanges", changes: [...]})
+    -> src/client/workbench-client.ts onEvent({type: "watcher/fileChanges", changes: [...]})
     -> wba_event_bridge.py / workspace_events.py normalize and fan out
     -> Explorer watcher handlers update backend-owned tree state and emit typed Explorer notifications
   Fallbacks: raise inotify limit -> watchexec --poll -- cat -> none (manual refresh)
@@ -196,10 +172,7 @@ Current deterministic runtime endpoints:
   - `/wba` is the browser-facing editor RPC/event namespace
 
 Discovery / control endpoints (worker, proxied via main process):
-- `GET /api/app/code_te2/code_server/discover`
-- `GET /api/app/code_te2/workbench_adapter/discover`
-- `GET /api/app/code_te2/workbench_adapter/start`
-- `GET /api/app/code_te2/workbench_adapter/status`
+- `GET /api/app/code_te2/workbench_adapter/{discover,start,attach,status}`
 - `POST /api/app/code_te2/workbench_adapter/cmd`
 
 The `workbench_adapter/*` HTTP routes are still backend-owned control/discovery surfaces. They are not the editor hot path once the inline editor runtime is connected to `/wba`.
@@ -220,6 +193,31 @@ Spinner / Status indicator (host UI):
 - Code Server launch, VSIX/Open VSX commands, builtin-extension discovery, and WBA nid extraction all use the same pinned TE2-managed installation. System, `PATH`, NVM, and executable environment overrides are not runtime authorities.
 - Every WBA protocol actor, including language intelligence, commands, messages, and webviews, receives its resolved nid through named runtime-adapter fields. The generated config for the pinned managed Code Server runtime is production authority; `RPC_DEFAULTS` is only the matching 4.130 no-config fallback.
 - The installed WBA MessagePack codec is one self-contained bundled ESM file at `workbench_protocol_proxy/node_workbench_adapter/dist/protocol/messagepack-codec.mjs`.
+
+## 0.7) Relay Boundaries
+
+Several relays participate in a native client session, but they have separate
+owners and must not be treated as interchangeable.
+
+- **Framework app and Socket.IO proxies** are Rust-server routes. They expose
+  public per-app mounts and forward to an already-running loopback app worker or
+  declared service endpoint. They are non-launching transport/policy boundaries;
+  Socket.IO routes forward physical Engine.IO traffic without interpreting
+  namespaces or RPC payloads.
+- **`AndroidFrameworkRelay`** is a process-local Android client relay owned by
+  `PersistentNetworkService`. It gives the GeckoView or Cefrium browser a local
+  loopback framework origin, serves native Android routes and declared installed
+  assets locally, and streams all remaining framework HTTP, SSE, Socket.IO, and
+  WebSocket traffic to the configured upstream framework origin. Gecko and
+  Cefrium activities bind this service; it is not a Rust app-worker proxy.
+- **Run Target relays** are native client port-forwarders for remote Run Profile
+  listeners. They reconcile the framework's route projection and do not serve
+  framework pages or establish the browser framework origin.
+
+The Cefrium module configures Cefrium-specific local routes, but it does not
+create a competing framework-route authority: its process-local client runtime
+owns browser-relay lifecycle and upstream retargeting. Gecko uses the same
+client-runtime pattern in its own process.
 
 ---
 
@@ -261,7 +259,7 @@ Spinner / Status indicator (host UI):
 - `app/apps/code_te2/explorer/transport/rpc_socketio.py`
   - `ExplorerRpcSocketIONamespace("/rpc/explorer")`
   - Parses strict msgpack-v1 JSON-RPC explorer requests and adapts them onto the backend dispatcher.
-- `app/apps/code_te2/explorer/rpc_contract.py`
+- `app/apps/code_te2/explorer/transport/rpc_contract.py`
   - Explorer RPC method aliases and notification constants.
 - `app/apps/code_te2/explorer_runtime.py`
   - Runtime/composition shell for `ExplorerDispatcher`.
@@ -270,9 +268,9 @@ Spinner / Status indicator (host UI):
   - Own the extracted file-tree, Rust-pipe FS/Git/search integration, project, watcher, review, prefs, and editor-integration behavior.
 
 ### Socket.IO route proxy (main process, proxy-only)
-- `app/extensions/apps/sio_service.py`
-  - Framework-owned raw Engine.IO websocket route proxy loaded from app manifests.
-  - It forwards websocket frames only; it does not parse Socket.IO namespaces or JSON-RPC payloads.
+- `framework/rust/crates/te2-server/src/sio_proxy.rs` and `app_proxy.rs`
+  - Rust-owned public app and raw Engine.IO route proxies.
+  - They forward traffic only; they do not parse namespaces or JSON-RPC payloads.
 - `app/apps/code_te2/sio_service.json`
   - Declares `/api/app/code_te2/socket.io` -> app worker `/socket.io/`.
   - Declares `/api/app/code_te2/services/wba/socket.io` -> Node WBA `/wba_ws/socket.io`.
@@ -401,35 +399,15 @@ Important:
 
 ---
 
-## 3) Main‑process service loader (why services exist)
+## 3) Manifest services and physical routes
 
-Services declared in `app/apps/code_te2/manifest.json` currently include non-Socket.IO service modules:
-
-```json
-"services": {
-  "path": "services",
-  "modules": [
-    "sidebar_backchannel_uds"
-  ]
-},
-"sio_service": "sio_service.json"
-```
-
-Loaded by the main framework’s apps extension loader:
-- `app/extensions/apps/loader.py`
-  - imports each `services/<module>.py`
-  - calls `register(app)` if present
-  - auto‑includes any `APIRouter` objects found in the service module
-
-Services run in the **main process** and should provide only:
-- Transport shims/proxies
-- Infrastructure that must outlive worker restarts
-
-They must **not** mutate app worker SSOT (HistoryStore / ProjectSidecar).
-
-Important current note:
-- `sio_service.json` is the active physical Socket.IO route source of truth.
-- The old `vscode_rpc` side-channel has been removed; editor intelligence is WBA-owned.
+`sio_service.json` is the active Code TE2 physical Socket.IO-route declaration.
+Rust reads the manifest and proxies those routes; it does not import or execute
+Python `services` modules. The current Sidebar lane is worker-owned
+`/sidebar_ipc`, not a main-process service-loader feature. Treat
+`services/sidebar_backchannel_uds.py` and its README as historical/orphaned
+until source either wires or retires them. The removed `vscode_rpc` side channel
+is not part of the current architecture.
 
 ---
 
@@ -449,6 +427,13 @@ presentation/console metadata rather than another foreground authority.
 `ProjectSidecar.last_file` is consumed only as a one-time migration seed.
 Frontend `currentPath` values project their exact client's foreground and never
 act as cross-client authority.
+
+Every foreground retains an authenticated `primary` or `secondary` role. New
+secondary identities start empty rather than inheriting shared MRU. Removing a
+shared document commits membership and each affected foreground together, emits
+one `DocumentClosed` fact, falls affected primary clients back to shared MRU,
+clears affected secondary clients, and projects exact-client editor SSOT so
+Monaco replaces or disposes the visible model.
 
 Complete boot snapshots share only their disk-heavy cross-client core. Before
 returning, Python materializes and overlays the requesting client's exact
@@ -509,19 +494,8 @@ does not contact the backend.
 ### Preferences (PreferencesStore)
 Editor preferences are stored per active project and used to initialize the inline editor options.
 
-Preferences changes are performed through Monaco editor backend HTTP routes/backend hooks and typed editor or UI IPC notifications. `/editor/*` routes are Monaco editor backend routes in current source, not NiceGUI-owned routes.
-
----
-
-## Transitional Note About The Rest Of This File
-
-The sections below remain useful as operational reference, but they were accumulated across multiple architecture stages. Expect some lower subsections to still mention transitional or historical surfaces such as:
-
-- pre-direct-WBA editor workbench relay wording
-- older explorer naming before the `explorer/transport/` and `explorer_runtime.py` split
-- legacy `vscode_api` / `vscode_rpc` context that is no longer the current hot path
-
-If a lower section conflicts with the current-state summary above, trust the code and `docs/planning/FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md`.
+Preferences changes use Monaco backend hooks and typed editor/UI IPC
+notifications. `/editor/*` routes are owned by `monaco_editor/editor_backend.py`.
 
 ---
 
@@ -563,6 +537,8 @@ Notes:
 - namespace: `/rpc/editor`
 - wire event: `rpc`
 - payload codec: strict `msgpack-v1` JSON-RPC
+- connection identity: validated `client_instance_id`, optional `window_id`, and
+  authenticated `client_role` (`primary` or `secondary`)
 
 Important:
 - This section describes the **worker-owned editor state/control lane**.
@@ -596,6 +572,7 @@ Representative methods from the Python/TypeScript editor RPC contracts:
 | `editor.save.snapshot.response` | Save snapshot response. |
 | `editor.issues.dump.response` | Issues dump response. |
 | `editor.breadcrumb.navigate` | Breadcrumb navigation request. |
+| `editor.codeInspector.publish` | Publish a retained Code Inspector projection. |
 
 ### Notifications
 Representative notifications:
@@ -626,6 +603,7 @@ Representative notifications:
 | `editor.openState.changed` | Open-state update. |
 | `editor.project.switching` / `editor.project.switched` | Project switch lifecycle. |
 | `editor.agentEdits.changed` | Agent edit state update. |
+| `editor.codeInspector.command` | Code Inspector command projection. |
 
 ### Open/draft/save flow
 - Open requests atomically admit the path into shared document membership, update only the source `clientInstanceId` foreground, and send the materialized file-open notification to that exact client room.
@@ -645,7 +623,8 @@ Primary editor diagnostics, hovers, completions, symbols, semantic tokens, foldi
 - legacy path alias: `/explorer_ws/socket.io`
 - namespace: `/rpc/explorer`
 - worker-side namespace: `ExplorerRpcSocketIONamespace("/rpc/explorer")`
-- main-process proxy: `app/extensions/apps/sio_service.py` using `app/apps/code_te2/sio_service.json`
+- Rust route proxy: `framework/rust/crates/te2-server/src/sio_proxy.rs`, using
+  `app/apps/code_te2/sio_service.json`
 - payload codec: strict `msgpack-v1` JSON-RPC
 
 ### Connection
@@ -656,8 +635,8 @@ Explorer keeps legacy method aliases for frontend compatibility, but the contrac
 
 | Method | Alias | Purpose |
 |---|---|---|
-| `explorer.tree.list` | `tree:list` | Request directory listing. |
-| `explorer.tree.expand` | `tree:expand` | Expand a directory node. |
+| `explorer.list` | `tree:list` | Request directory listing. |
+| `explorer.openDirs.set` | `tree:expand` | Set expanded directory state. |
 | `explorer.search.run` | `search:run` | Start a file-name or content search. |
 | `explorer.search.more` | `search:more` | Request more cached search results from the session. |
 | `explorer.search.moreInFile` | `search:moreInFile` | Request more cached matches for one file. |
@@ -665,11 +644,12 @@ Explorer keeps legacy method aliases for frontend compatibility, but the contrac
 | `explorer.review.list` | `review:list` | Request review entries. |
 | `explorer.review.save` | `review:save` | Save selected drafts to disk. |
 | `explorer.review.discard` | `review:discard` | Discard selected drafts. |
-| `explorer.prefs.updateUi` | `prefs:updateUi` | Update one global UI preference key. |
-| `explorer.prefs.vendorAgentIcon` | `prefs:vendorAgentIcon` | Vendor an icon asset into the SSOT cache dir. |
+| `explorer.prefs.ui.update` | `prefs:updateUi` | Update one global UI preference key. |
+| `explorer.prefs.agentIcon.vendor` | `prefs:vendorAgentIcon` | Vendor an icon asset into the SSOT cache dir. |
 
 ### UI Preferences (global)
-- Store: `_preferences_store` (disk-backed) in `~/.local/share/termux-extensions-2/code_oss_prefs.json` under the `ui` object.
+- Store: `_preferences_store` (disk-backed) at
+  `$TE2_CONFIG_HOME/code_te2/preferences.json`, under the `ui` object.
 - Update flow:
   - client -> server: `prefs:updateUi` payload `{key, value}`
   - server -> all clients: `prefs:setUi` payload `{ui: { ...full snapshot... }}`
@@ -778,13 +758,15 @@ Because the VS Code Monaco ESM imports CSS files, the harness serves `.css` as:
 - `Content-Type: application/javascript` module shim (injects `<link>` to `?raw=1`)
 - raw CSS is available when `?raw=1` is present
 
-### Build procedure (current source)
-The current `worktrees/vscode-te2-diff` publication path produces the pinned Monaco ESM tree:
+### Publication boundary
+The committed deployed ESM tree is
+`app/static/vendor/monaco-editor-core/esm/`. Its patched VS Code source checkout
+is external and user-local; this repository does not contain a rebuildable
+`worktrees/vscode-te2-diff` checkout. Do not treat source-map paths inside the
+vendored bundle as a dependency or issue a guessed build command.
 
-- Output dir: `worktrees/vscode-te2-diff/out-monaco-editor-core/esm/`
-- Produced by: `NODE_OPTIONS="--max-old-space-size=4096" npx gulp editor-distro` inside `worktrees/vscode-te2-diff`
-
-There is no current `worktrees/vscode-te2-diff/build_monaco_te2.sh` script and no current `out-monaco-editor-core/te2-lang/` output in the checked source. If language-worker publication is needed, verify the current owning script before documenting or running it.
+When an approved external publication is available, copy its verified ESM output
+into the committed vendor tree, then rebuild Code TE2 with `node build.mjs`.
 
 ### Common failure mode: inline editor boot is blank but worker is running
 Symptom:
@@ -794,7 +776,9 @@ Cause:
 - Required Monaco build artifacts or the built host bundle were missing, so the host could not complete inline editor boot.
 
 Fix:
-- Rebuild the Monaco ESM output, rebuild `app/apps/code_te2` (`node build.mjs`), restart only the relevant app worker when approved, and hard refresh.
+- Verify the committed ESM tree and rebuild `app/apps/code_te2` with
+  `node build.mjs`. Restart only the relevant app worker when approved, then
+  hard refresh.
 
 ---
 
@@ -816,16 +800,9 @@ The inline editor runtime builds Monaco options from SSOT preferences (`buildMon
   - `github-light-default` (preferred)
   - `github-dark` (legacy alias -> `github-dark-default`)
   - `github-light` (legacy alias -> `github-light-default`)
-  - `atom-dark`
-  - `atom-light`
-  - `material-dark`
-  - `material-light`
-  - `darcula`
-  - `monokai-pro`
-  - `one-dark-pro`
-  - TE2-local extras (optional):
-    - `te2-dark` (diff colors match `github-dark-default`)
-    - `te2-light` (diff colors match `github-light-default`)
+  - the nine vendored GitHub themes under
+    `monaco_editor/themes/vendored/github/`
+  - `te2-vs-dark`, used only for the diff-scoped dark presentation
 
 Note: TE2 loads Monaco first (`editor.main.js`), then registers official themes from
 `/api/app/code_te2/ui/monaco_editor/themes/*.json`. If Monaco isn't loaded yet,
@@ -852,7 +829,8 @@ theme registration is skipped (by design) to avoid caching a no-op run.
 ## 9) Debugging checklist (what to verify first)
 
 ### 1) Transport is correct (no reconnect loops)
-- Confirm framework Socket.IO route proxy: `app/extensions/apps/sio_service.py`.
+- Confirm Rust framework Socket.IO route proxy:
+  `framework/rust/crates/te2-server/src/sio_proxy.rs`.
 - Confirm file_editor route config: `app/apps/code_te2/sio_service.json`.
 - Confirm worker `SUBAPPS` mount shape:
   ```python
@@ -897,16 +875,6 @@ theme registration is skipped (by design) to avoid caching a no-op run.
 - Editor and Explorer namespaces must run on the same shared worker Socket.IO server, not on separate main-process servers.
 
 ---
-
-## 10) Transitional state (what is still legacy)
-
-As of now:
-- The Monaco editor surface is **not** NiceGUI.
-- `/editor/*` HTTP endpoints used by the Monaco runtime are Monaco editor backend routes, with route ownership in `monaco_editor/editor_backend.py` and service implementations under `monaco_editor/editor_backend_services/`.
-- `nicegui_editor/editor_app.py` is not the current owner for `/editor/check_cache`.
-- Historical `/editor` Socket.IO namespace references are pre-`/rpc/editor` context. Current editor state/control traffic uses `/rpc/editor` on the shared app Socket.IO path.
-
-The current transition is not a NiceGUI migration; it is a consolidation around typed backend hooks, strict msgpack-v1 RPC lanes, and Rust pipe-owned framework services where appropriate.
 
 ---
 
@@ -1017,841 +985,83 @@ Primary implementation lives in:
 
 ---
 
-## 13) Resolved: Git diff + drafts assertion / thrash
-
-When Git diff mode is enabled and the user types at EOF, the diff-projection engine previously
-hit an assertion in `lineRangeMappingFromRangeMappings` (trailing-line invariant). This caused
-visual thrash (green insertion flash, editor re-render on every keystroke) unless the last line
-happened to have a deletion widget.
-
-### Root cause
-
-Stock Monaco had `applyModifiedEdits` and `applyOriginalEdits` **stubbed out** (`return undefined; // TODO@hediet`).
-The TE2 pinned-baseline branch un-stubbed them for draft-diff projection but did not re-stub them
-for autosave mode. The un-stubbed projection produced bad mappings at EOF boundaries where the
-trailing-line invariant (`originalTrailing === modifiedTrailing`) fails.
-
-`assertFn` in Monaco calls `onUnexpectedError` which is **non-throwing** (fires via `setTimeout`),
-so try/catch at the call site cannot intercept it.
-
-### Fix: Projection gating (`diffEditorViewModel.ts`)
-
-All 3 projection zones are now gated with `!model.te2AutosaveMode`:
-
-| Zone | Location | Gate |
-|------|----------|------|
-| 1 | `modified.onDidChangeContent` (~line 239) | `if (diff && !model.te2AutosaveMode)` |
-| 2 | `original.onDidChangeContent` (~line 271) | `if (diff && !model.te2AutosaveMode)` |
-| 3 | post-`computeDiff` autorun (~line 367) | `else if (!model.te2AutosaveMode)` |
-
-When `te2AutosaveMode = true`: projection skipped entirely (stock behavior), debouncer does clean
-full `computeDiff` — no thrash, no assertion.
-
-When `te2AutosaveMode = false`: projection runs for pinned-baseline draft-diff tracking.
-
-### Fix: EOF trailing-line invariant (`rangeMapping.ts`)
-
-Instead of `assertFn` (non-throwing, crashes error handler), the last mapping is **extended to
-absorb the EOF boundary** — simulating what a deletion widget naturally provides:
-
-```typescript
-const origTrailing = originalLines.length.lineCount - lastChange.original.endLineNumberExclusive;
-const modTrailing = modifiedLines.length.lineCount - lastChange.modified.endLineNumberExclusive;
-if (origTrailing !== modTrailing) {
-    const maxTrailing = Math.max(origTrailing, modTrailing);
-    changes[changes.length - 1] = new DetailedLineRangeMapping(
-        new LineRange(lastChange.original.startLineNumber,
-                      lastChange.original.endLineNumberExclusive + maxTrailing),
-        new LineRange(lastChange.modified.startLineNumber,
-                      lastChange.modified.endLineNumberExclusive + maxTrailing),
-        lastChange.innerChanges,
-    );
-}
-```
-
-### Fix: Mode switch baseline snapshot (`m_editor_app.ts`)
-
-When toggling autosave OFF → draft mode, the baseline is now a **snapshot of the current editor
-content** (not `gitDiskModel`, which after autosave equals the editor = empty diff):
-
-```javascript
-var baselineContent = model.getValue();
-diffModel.modifiedBaseline = monaco.editor.createModel(baselineContent, lang);
-```
-
-Applied in both `applyGitBaselines` (~line 2716) and `prefs_changed` handler (~line 4071).
-
-### Fix: Mirror client autosave suppression (host cache indicator path)
-
-Mirror clients no longer trigger autosave for mirrored content. The host cache-indicator path accepts
-`{ skipAutosave: true }`, passed when `reason === 'mirror'` in `_applyCacheIndicatorImpl`.
-
-### Debugger note
-If your browser keeps pausing on this, DevTools likely has "Pause on exceptions" enabled; disable it while iterating so the UI remains usable.
-
----
-
-## 14) Historical: pre-direct-WBA removal planning for `vscode_rpc` and `vscode_api`
-
-This section is archival context from the period before the direct `/wba` editor transport and UDS code-server cutover. Do not treat it as the authoritative description of the current hot path. Current source has removed the `vscode_api` and `vscode_rpc` transport/shell/service files; only legacy sidecar migration keys remain.
-
-### Background
-Early in development, two standalone Node.js JSON-RPC harnesses were created as separate framework shells:
-- **`vscode_rpc`**: a minimal WS JSON-RPC server intended to provide semantic tokens, themes, and grammars.
-- **`vscode_api`**: a larger harness intended to manage VSIX install/registry, TextMate grammars, themes, and eventually language features.
-
-These were designed before the **workbench adapter** (stdio pipe transport) was fully operational. Now that the adapter provides direct access to the real VS Code extension host (diagnostics, hover, symbols, didChange — all working), the standalone harnesses are redundant for language features.
-
-### What the adapter already covers
-The workbench adapter (`workbench_client.mjs` + `server.mjs`) talks to the real code-server extension host and provides:
-- All language intelligence (diagnostics, hover, symbols, didChange) via stdio pipe
-- All built-in extension activation (~30 language extensions)
-- Provider registration and handle tracking
-- Document model synchronization
-
-### What `vscode_api` provided historically (removed)
-The removed `vscode_api` harness historically handled:
-- **VSIX install/registry**: `vscode.vsix.*` methods (install, list, enable/disable per-project)
-- **TextMate grammars**: `vscode.textmate.grammars.list` / `vscode.textmate.grammars.load`
-- **Theme loading**: `vscode.themes.list` / `vscode.themes.load`
-- **Language configuration**: `vscode.languages.list` (returns `configuration_raw` for bracket matching, comments, etc.)
-- **Bootstrap snapshot**: `vscode.bootstrap.snapshot` (cached grammar/theme/language index)
-
-At the time, these were considered static asset queries that did not require a running extension host. Current source no longer uses the standalone `vscode_api` harness; current integration should use the live code-server/WBA-backed services or Monaco editor backend routes instead of reviving this path.
-
-### Files removed (`vscode_rpc`)
-| File | Purpose |
-|------|---------|
-| `services/vscode_rpc_transport.py` | Main-process WS proxy |
-| `vscode_rpc_shell_manager.py` | Shell lifecycle manager |
-| `shellspec/vscode_rpc.yaml` | Framework shell definition |
-| `manifest.json` (references) | Service registration |
-
-### Files removed (`vscode_api`, after migration)
-| File | Purpose |
-|------|---------|
-| `services/vscode_api_transport.py` | Main-process WS proxy |
-| `vscode_api_shell_manager.py` | Shell lifecycle manager |
-| `shellspec/vscode_api.yaml` | Framework shell definition |
-| `main.py` (references) | Discovery/resolve endpoints |
-| `main.js` (references) | Frontend bootstrap/snapshot calls |
-| `m_editor_app.ts` (references) | Grammar/theme loading calls |
-| `inline_host.ts` (references) | Inline editor bootstrap / mount path |
-
-### Historical migration strategy (superseded)
-The workbench adapter already scans all extensions at startup (`_buildExtensionsSnapshot()`), so it has the full `contributes.grammars`, `contributes.themes`, and `contributes.languages` metadata in memory. The preferred migration path is to add new JSON-RPC methods to the adapter rather than building separate Python utilities.
-
-**Phase 1: Grammar/theme/language queries via adapter** (preferred path)
-Add these methods to `server.mjs` `handleJsonRpc()`:
-
-| Method | What it does | Data source |
-|--------|-------------|-------------|
-| `vscode.grammars.list` | List all contributed grammars (scopeName, language, path) | Scanned extensions `contributes.grammars` |
-| `vscode.grammars.load` | Load raw `.tmLanguage.json` content by scopeName or path | `fs.readFile` on extension content path |
-| `vscode.themes.list` | List all contributed themes (label, uiTheme, path) | Scanned extensions `contributes.themes` |
-| `vscode.themes.load` | Load raw theme JSON by path or label | `fs.readFile` on extension content path |
-| `vscode.languages.list` | List language contributions + configuration | Scanned extensions `contributes.languages` |
-| `vscode.languages.config` | Load raw language configuration JSONC | `fs.readFile` on extension content path |
-
-These reuse the existing stdio pipe transport (browser → Socket.IO → `editor_ws.py` → adapter stdin → response). No new transport or framework shell needed.
-
-Python-side: add corresponding `editor_ws.py` handlers (same pattern as `on_editor_workbench_hover`).
-Historical frontend target: update `m_editor_app.ts` away from the `vscode_api` WS harness. Current source has already moved editor language intelligence to `/wba` and editor state/control to `/rpc/editor`.
-
-**Phase 2: VSIX management via Python**
-VSIX install/registry is pure file management (download, extract, update `extensions.json`). This doesn't need the adapter or an extension host. A Python utility reading `~/.local/share/termux-extensions-2/code-te2-extensions/` directly is sufficient.
-
-**Phase 3: Bootstrap snapshot consolidation**
-The old `vscode.bootstrap.snapshot` direction is superseded; do not add new boot dependencies on the removed `vscode_api` harness.
-
-### Priority
-- `vscode_rpc`: removed; nothing depends on it in production.
-- `vscode_api`: removed. Treat the remaining details in this section as archival context only.
-
----
-
-## 15) Historical: `vscode_api` harness snapshot
-
-This section is retained as background for legacy/secondary surfaces and migration history. It is not the current editor language-intelligence architecture.
-
-`vscode_api` was a historical follow-up to `vscode_rpc`. The live source has removed this harness; this snapshot is preserved only as archival context.
-
-Goal:
-- Provide a **single** WS JSON-RPC connection that becomes the long-lived “VS Code API harness”.
-- This is the place where TE2 will eventually support:
-  - VSIX install/registry
-  - TextMate grammars + themes from installed extensions
-  - Extension host services (vscode.* APIs) where needed
-  - Language feature providers (semantic tokens, diagnostics, completions, etc.)
-
-Important invariant:
-- TE2 main process is **proxy-only**; all SSOT interaction remains in the worker.
-
-### Current scaffolding (v0)
-- Worker discovery: `GET /api/app/code_te2/vscode_api/discover`
-  - starts/adopts a framework shell
-  - returns `ws_url` like `/vscode_api_ws?shell_id=<shell_id>`
-  - returns `instance_id` (currently always `"primary"`)
-- Host WS shim (service): `WS /vscode_api_ws?shell_id=<shell_id>`
-  - proxy-only, forwards frames verbatim to the shell’s WS
-- Shellspec: `app/apps/code_te2/shellspec/vscode_api.yaml#vscode-api`
-- Server entrypoint: `worktrees/vscode-te2-diff/te2/vscode_api_server.mjs`
-  - currently supports:
-    - `rpc.ping`
-    - `vscode_api.version`
-    - `vscode_api.capabilities`
-    - `vscode.vsix.*` (registry + per-project enable/disable)
-    - `vscode.themes.*` (list/load raw theme json)
-    - `vscode.textmate.*` (list/load raw grammars)
-    - `vscode.languages.list` (enabled extensions only; includes `configuration_raw`)
-
-Storage:
-- Global VSIX install pool: `~/.local/share/termux-extensions-2/code-te2-extensions/`
-- Per-project enablement SSOT: `ProjectSidecar.vscode_api.enabled_extensions`
-
-Resolve by path (future multi-instance hook):
-- `GET /api/app/code_te2/vscode_api/resolve?path=<abs>`
-  - Today: only resolves if `path` is under the active project root.
-  - Future: selects the best running instance by workspace-folder match (code-server session registry pattern).
-
-Themes (global SSOT):
-- Theme selection is stored in `_preference_store` using the existing `theme` preference key.
-- Built-in themes use simple ids like `te2-dark`, `te2-light`, `github-dark-default`, etc.
-- VSIX-provided themes use: `vscode:<extensionId>:<relPath>`
-  - Example: `vscode:GitHub.github-vscode-theme:extension/themes/dark-default.json`
-- The Monaco editor runtime converts VS Code theme `tokenColors` into Monaco theme rules and applies it after loading via `vscode_api` (`vscode.themes.load`).
-
-TextMate apply (grammars from VSIX):
-- Monaco editor runtime uses `vscode-oniguruma` + `vscode-textmate` (UMD globals) to tokenize lines using TextMate grammars.
-- Grammar resolution prefers `vscode_api` (`vscode.textmate.grammars.list` + `vscode.textmate.grammars.load`) and falls back to legacy static assets under `monaco_editor/textmate/` when present.
-- Boot-time prefetch:
-  - `vscode.bootstrap.snapshot` (cached on `window.__te2VscodeBootstrap`)
-    - includes `languages` (enabled extensions only), plus `themes` and `grammars`
-  - `_refreshVscodeGrammarIndex()` (cached for scopeName/language mapping)
-- Scope selection:
-  - Uses VSIX grammar `language` field when available to map to Monaco `languageId`.
-  - Supports extension-sensitive scopes for `.jsx`/`.tsx` when present.
-  - Falls back to the previous hard-coded scope map when no VSIX grammar matches.
-
-VSIX language configuration (per-project):
-- `vscode.languages.list` returns `contributes.languages` (only for enabled extensions) plus `configuration_raw` (jsonc).
-- Monaco editor runtime calls `monaco.languages.setLanguageConfiguration(languageId, cfg)` so bracket auto-closing, comments, etc. follow VSIX language configs.
-
-Current-source note:
-- Do not build new integration against `vscode_api`; the live source uses code-server/WBA-backed services and Monaco editor backend routes instead.
-
-Language providers (working):
-- **Stdio LSP bridge has been removed** (2026-02-07). It caused marker owner collisions with the workbench adapter path.
-- Diagnostics now flow through the direct WBA event path plus backend normalization/projection where needed; `diagnostics_bridge.py` is not the editor hot path:
-  - Subscribes to adapter WS (`127.0.0.1:18181/ws`) for `diagnostics/update` events
-  - Caches per-path (max 100 entries) and broadcasts via editor Socket.IO (`editor:diagnostics`)
-  - On client connect (`on_connect`): sends cached diagnostics + nudges adapter for fresh ones
-  - On file switch (`on_editor_open_request`): sends cached diagnostics for the new file + nudges adapter
-  - Nudge mechanism: POST `vscode.openFile` to adapter `/cmd` to force extension host re-emit
-  - Monaco editor runtime handler converts bridge payload to `_applyDiagnosticsUpdate()` format
-- **All built-in language extensions** are loaded (filtered to language-only subset, ~30 of 95 scanned).
-- Diagnostics work for Python, TypeScript, JavaScript, CSS, HTML, JSON, and all other languages with built-in VS Code support.
-- RPC features (hover, symbols, openFile, didChange) flow through direct `/wba` JSON-RPC; older editor Socket.IO -> adapter stdio relay wording is historical.
-
-Editor command notifications now live on the typed `/rpc/editor` lane; older `editor_ws.py` Socket.IO event names are historical context.
-
-Diagnostics debug overlay + logs (current):
-- Debug overlay text (lower-left): `ext=yes/no og=yes/no diag=rx/ap/np/nm/mm` plus optional `touch=reinit:*`.
-  - `ext`: `monaco-touch-selection` helper detected.
-  - `og`: `.overflow-guard` element present in current editor DOM.
-  - `diag=rx/ap/np/nm/mm` counters:
-    - `rx`: diagnostics events received by Monaco editor runtime.
-    - `ap`: `setModelMarkers` calls performed (includes cache reapply and empty arrays).
-    - `np`: dropped because path could not be derived from URI.
-    - `nm`: dropped because no model available.
-    - `mm`: dropped because item path != active model path.
-  - Counters are cumulative for the editor-runtime lifetime (not per file).
-  - `touch=reinit:*` appears when touch-selection UI re-installs after editor DOM rebuild.
-- Frontend console logs (Monaco editor runtime):
-  - `[editor:diagnostics] rx diagnostics/update path=... markers=N currentPath=...`
-  - `[vscode_api] setModelMarkers count=... sevs=[...] lines=[...]`
-  - `[vscode_api] verify getModelMarkers count=...`
-- Adapter-side console logs (Node workbench adapter):
-  - `[wb_client] $changeMany owner=... pairs=... markerCounts=[...]`
-  - `[server] diagnostics/changeMany -> norm=owner=... items=... markerCounts=[...]`
-
-
-Legacy LSP config (`lsp_servers.json`) is no longer used. The following section is preserved for reference only:
-
-LSP server mapping (legacy — removed):
-- The bridge was driven by a json mapping file:
-  - default path: `~/.local/share/termux-extensions-2/code-te2-extensions/lsp_servers.json`
-  - override: `TE2_LSP_CONFIG_PATH=/abs/path/to/lsp_servers.json`
-- Format:
-  - `servers.<languageId>.cmd` is an argv array (first item is executable).
-  - Optional: `servers.<languageId>.key` lets multiple languageIds share one spawned server.
-  - Optional: `servers.<languageId>.env` and `servers.<languageId>.initializationOptions`.
-  - Template vars inside `cmd` strings:
-    - `${project_root}` → active project root
-    - `${ext:<publisher.name>}` → VSIX install content root for that extension (e.g. `${ext:ms-python.python}`)
-- Minimal built-ins:
-  - JS/TS uses vendored `app/static/vendor/lsp_servers/node_modules/.bin/typescript-language-server --stdio`
-  - Python uses `pyright-langserver --stdio` **only if present on PATH**
-
-Example `lsp_servers.json`:
-```json
-{
-  "version": 1,
-  "servers": {
-    "typescript": { "key": "ts", "cmd": ["typescript-language-server", "--stdio"] },
-    "javascript": { "key": "ts", "cmd": ["typescript-language-server", "--stdio"] },
-    "python": { "key": "pyright", "cmd": ["pyright-langserver", "--stdio"] }
-  }
-}
-```
-
-Example (use a VSIX-bundled language server binary):
-```json
-{
-  "version": 1,
-  "servers": {
-    "python": {
-      "key": "pyright",
-      "cmd": ["${ext:ms-python.python}/node_modules/.bin/pyright-langserver", "--stdio"]
-    }
-  }
-}
-```
-
----
-
-## 16) Multi-client fanout + future multi-instance (code-server pattern)
-
-Historical note: this section predates removal of the standalone `vscode_api` harness. Keep the multi-instance ideas as design context, but current implementation should be expressed in terms of code-server/WBA-backed editor instances and typed app RPC lanes.
-
-### Goal (TE2 direction)
-Maintain **multiple clients → single backend instance** fanout as the default:
-- Many browser clients (desktop/mobile, multiple tabs, GeckoView, etc.) can attach to the same active project editor.
-- The backend is the authority for “workspace-ish” runtime state (enabled extensions, indexing, language services, etc.).
-- SSOT remains worker-owned (`_history_store`/ProjectSidecar + `_preferences_store`).
-
-Keep the option open to support **multiple editor instances** later (e.g. two projects, or two “workspaces” under one project) without redesign.
-
-### Why this is the right default
-- TE2 already uses a SSOT model and atomic persistence (drafts + writes).
-- Multi-client fanout is easier to reason about than multi-instance from day 1:
-  - one set of indexes
-  - one extension host
-  - one language-service hub
-  - one source of truth for “what is enabled”
-
-### The minimal invariant to keep multi-instance possible later
-Make instance identity explicit **now**, even if we only run one instance:
-
-- `project_root`: absolute path for the active project
-- `instance_id`: stable string for a backend instance (default: `"primary"`)
-- `client_id`: stable per-browser/tab id (already exists in other TE2 transports)
-
-Every client→server request should carry at least `{project_root, instance_id, client_id}` so later we can add parallel instances without changing payload formats.
-
-### Discovery & routing contract (recommended)
-Two related but distinct problems:
-
-1) **Discover**: “Start or adopt an instance for the *current* active project.”
-   - Historical note: the removed `vscode_api` harness used the former-id route `GET /api/app/file_editor_cm6/vscode_api/discover`; do not treat that route as current source.
-
-2) **Resolve**: “Given a file path, which running instance should handle it?”
-   - This is the missing piece that enables “open file from outside,” multi-tab/multi-instance, and clean attach behavior.
-
-Historical resolve endpoint shape (worker-owned API, host proxy-only):
-- `GET /api/app/code_te2/vscode_api/resolve?path=<abs>`
-  - returned `{ws_url, token, project_root, instance_id, shell_id}` in the old design. A future current implementation should not reuse the removed harness name.
-
-### Reference pattern (code-server)
-The code-server project solved the “which instance should handle this file?” problem by maintaining a session registry:
-
-- Patch: `../mrselect6-2/code-server/patches/store-socket.diff`
-  - The extension host registers its IPC socket + workspace folders into a local session manager server.
-- Implementation: `../mrselect6-2/code-server/src/node/vscodeSocket.ts`
-  - Keeps a Map of active sessions.
-  - Selects the best session by:
-    - “workspace folder prefix match” against the file path
-    - “can connect” probing to prune dead sockets
-
-The current TE2 analogue would be:
-- A registry of active code-server/WBA-backed editor instances keyed by `{project_root, instance_id}` (and optionally workspace folders).
-- A resolve routine that selects the right backend for a given absolute path.
-
-### Storage / collision notes (important for multi-client)
-If multiple workspaces can be served under the same origin, avoid browser-storage collisions:
-- Reference: `../mrselect6-2/code-server/patches/unique-db.diff`
-  - Hashes by `location.pathname` to prevent IndexedDB collisions between `/workspace1` and `/workspace2`.
-
-TE2 should apply the same principle anywhere we persist client-side state:
-- per-app localStorage keys
-- IndexedDB keys (if used)
-- caches related to `client_id`
-
-### What stays where (TE2 boundary rule)
-- **Main framework**: proxy-only (services provide WS shims, no SSOT writes).
-- **App worker**: SSOT owner (preferences/history/project sidecar).
-- **code-server/WBA-backed services**: heavy work (VSIX metadata, TextMate data, language features, indexing) where current source supports it.
-- **browser editor runtime**: thin renderer (Monaco UI + provider shims that call backend).
-
-### Immediate follow-ups (ties to your priorities)
-1) **TextMate/grammars/tokens/styling**
-   - Keep grammar/theme indexing on current code-server/WBA-backed or Monaco editor backend paths.
-   - Keep TextMate as baseline tokenization; semantic detail comes from language features.
-2) **Language servers**
-   - Provide document symbols, diagnostics, semantic tokens over the same WS JSON-RPC surface.
-3) **Extension UI iframes**
-   - Defer; this becomes “webviews” and CSP/origin problems (see code-server `patches/webview.diff`).
-
----
-
-## 17) Historical: workbench adapter bring-up and protocol notes
-
-Most of this section is bring-up history. The authoritative current transport split is described earlier in this document; use the notes here for protocol/implementation background, not for deciding today's hot path.
-
-Goal: **avoid rebuilding** VS Code / code-server workbench JS while still extracting language “gold” (diagnostics, hover, completion, symbols) into TE2.
-
-Approach:
-- Run stock code-server as-is.
-- Put a small **WS mirror+decode proxy** in front of it (transparent relay).
-- Decode the workbench protocol frames (Mgmt + ExtHost) and publish a **TE2-friendly side channel**.
-
-### Important non-goal
-- **Do not** treat any “trace replay” as a production protocol. Traces/HARs are for discovery + debugging only.
-
-### Key reference
-- `../mrselect6-2/vscode-protocol/README.md`
-  - Documents the **wire framing protocol** (Regular/Ack/KeepAlive/etc) and the **two WS connections**:
-    - renderer-Management (channel protocol)
-    - renderer-ExtensionHost (RPC protocol)
-
-### Offline decoder (protocol discovery)
-Tooling (TE2):
-- `scripts/vscode_ws_decode_har.py`
-  - Decodes Firefox HAR `_webSocketMessages` and prints:
-    - handshake type counts (auth/sign/connectionType/ok)
-    - wire frame type counts
-    - management channel top methods
-    - extension host top methods
-  - Recent improvements:
-    - tolerates “comment line” prefix before JSON in HAR files
-    - decodes ExtHost **mixed-args** frames (RequestMixedArgs / RequestMixedArgsWithCancellation)
-
-Captured HARs (examples):
-- `newwsdata1.har`, `newwsdata2-oneclient.har`, `newwsdata3-oneclient-second_stream.har`
-- `newestws1.har`, `newestws2.har`
-
-### Live decoder proxy (Go, current)
-For live interception + decoding (browser or headless client → proxy → code-server):
-- Upstream proxy/decoder: `../mrselect6-2/vscode-protocol/proxy.go`
-  - Can emit TE2-friendly JSON events (`-te2-json`) and optionally write a capped JSONL trace (`-trace-out ... -trace-max-bytes ...`).
-- Example trace file (repo-local): `tmp/go_te2_decoder_trace.jsonl`
-
-Use this as:
-- a transparent relay
-- a deterministic “ground truth” logger/decoder for what the real workbench does
-
-Do not use it as:
-- a “replay engine” that pretends to be the workbench
-
-### What we know works from HARs (important findings)
-
-#### Two websockets per session (invariant)
-Each captured HAR contains **2 WS URLs** (same base path, different reconnection tokens):
-- one Management stream
-- one ExtensionHost stream
-
-#### Language features seen on ExtensionHost stream
-These are already present in the traces (so proxy extraction is feasible):
-- `$provideHover`
-- `$provideCompletionItems`
-- `$provideDocumentSymbols`
-- `$provideCodeActions`
-
-#### Diagnostics payload shape (confirmed)
-Diagnostics are pushed via ExtensionHost method:
-- **`$changeMany`**
-
-Decoded example (normalized):
-```json
-[
-  "python",
-  [
-    [
-      {"scheme":"vscode-remote","authority":"localhost:8080","path":"/.../agent_bridge.py"},
-      [
-        {
-          "startLineNumber":12,"startColumn":11,"endLineNumber":12,"endColumn":16,
-          "message":"SyntaxError: invalid syntax (agent_bridge.py, line 12)",
-          "source":"compile","severity":8,
-          "modelVersionId":1
-        }
-      ]
-    ]
-  ]
-]
-```
-
-Interpretation:
-- arg0: marker owner / source id (here: `"python"`)
-- arg1: list of `[resourceUri, markers[]]`
-
-This is the payload we want to convert into TE2 diagnostics to render in Monaco.
-
-#### Hover request/response (confirmed)
-Hover is served via ExtensionHost method:
-- **`$provideHover`**
-
-Observed request shape (from `maximal-hover-scrape.hal` via `scripts/vscode_ws_decode_har.py --extract-te2 --extract-method '$provideHover'`):
-```json
-{
-  "type": "ext/request",
-  "method": "$provideHover",
-  "args": [
-    25,
-    {"scheme":"vscode-remote","authority":"localhost:8080","path":"/.../agent_bridge.py"},
-    {"lineNumber": 25, "column": 16},
-    {}
-  ]
-}
-```
-
-Observed reply shapes:
-- `ReplyOKEmpty` when nothing applies
-- `ReplyOKJSON` with a payload like:
-```json
-{
-  "range": {"startLineNumber":25,"startColumn":8,"endLineNumber":25,"endColumn":18},
-  "contents": [{"value": "```python\\n...```\\n---\\n```text\\n...```", "isTrusted": false}],
-  "id": 0
-}
-```
-
-Important: the first argument (`25` in the example) is a **provider handle/id** chosen by the workbench session.
-It is **not stable across sessions** unless we derive it by observing provider registrations (e.g. `$registerHoverProvider`)
-or by piggybacking on real workbench requests.
-
-### Proxy POC (do this first)
-**POC v0** (“observe-only”):
-- proxy WS frames untouched (browser ↔ proxy ↔ code-server)
-- decode ExtHost frames and stream TE2 events:
-  - `diagnostics/changed` (from `$changeMany`)
-  - `hover/response`, `completion/response`, `symbols/response` (observe-only for now)
-
-**POC v1** (“inject one request”):
-- pick a single predetermined opened file in code-server session
-- inject exactly one request and wait for response:
-  - hover request → hover response
-
-Notes:
-- For injection, the document must already exist in code-server’s model.
-- Later we can drive open/close via Management channel (workbench actions) or by reproducing doc/editor delta traffic, but that is out of scope for v0/v1.
-
-### Headless workbench adapter (Node, stdio pipe transport)
-The adapter is a headless workbench client that replaces browser-based bootstrapping:
-- Server: `app/apps/code_te2/workbench_protocol_proxy/node_workbench_adapter/server.mjs`
-  - Exposes **stdio JSON-RPC** (production transport): Python writes JSON-RPC to stdin, reads `<<<RPC>>>` prefixed responses from stdout.
-  - Also exposes HTTP JSON-RPC on port 18181 (vestigial, will be removed).
-  - `console.log` is redirected to `console.error` so adapter logs go to stderr (visible in framework shells UI) while stdout is reserved for the pipe protocol.
-- Client core: `app/apps/code_te2/workbench_protocol_proxy/node_workbench_adapter/workbench_client.mjs`
-  - Uses VS Code OSS remote agent connection/runtime code (`remoteAgentConnection`, `browserSocketFactory`, IPC runtime) to connect in **remote mode**
-  - Sends the ExtensionHost init JSON over the ExtHost websocket
-  - Sends the minimal editor/document delta events required to open a file (`$acceptDocumentsAndEditorsDelta`, tab model, editor properties, dirty state)
-  - Learns provider handles by observing `$register*Provider` frames (when present)
-  - Universal provider lookup: `_findProviderHandle(type, languageId)` searches registered providers by language
-  - Multi-provider lookup: `_findAllProviderHandles(type, languageId)` returns **all** matching handles (used by hover to call providers in parallel, VS Code style)
-
-Python-side integration:
-- `workbench_adapter_shell_manager.py`:
-  - `adapter_rpc(method, params, timeout)` — sends JSON-RPC over stdin, awaits `<<<RPC>>>` response from stdout reader
-  - `_stdout_reader_loop()` — reads adapter stdout in 1MB chunks (no line length limit), routes `<<<RPC>>>` lines to pending futures, logs the rest
-  - `ensure_workbench_adapter_shell()` — spawns adapter (pipe backend, `wait_ready=False`), does stdio ping readiness loop, then calls `adapter.connect` bootstrap with code-server URL
-- `editor_ws.py` handlers:
-  - `on_editor_workbench_open_file` → `adapter_rpc("vscode.openFile", ...)`
-  - `on_editor_workbench_hover` → `adapter_rpc("vscode.hover", ...)`
-  - `on_editor_workbench_symbols` → `adapter_rpc("vscode.documentSymbols", ...)`
-  - `on_editor_workbench_did_change` → `adapter_rpc("vscode.didChange", ...)` (fire-and-forget)
-- `diagnostics_bridge.py`:
-  - `nudge_diagnostics_for_file()` → `adapter_rpc("vscode.openFile", ...)` (replaced old httpx POST)
-
-Current status (facts observed in adapter runs):
-- Adapter can establish remote-mode mgmt+ext connections and keep them alive.
-- `vscode.openFile`, `vscode.documentSymbols`, `vscode.hover`, and `vscode.didChange` are wired end-to-end through the stdio pipe.
-- **All built-in language extensions** are loaded and activated (TypeScript, JavaScript, Python, CSS, HTML, JSON, etc.)
-- Python provider flow is validated with `ms-pyright.pyright` in the current dev setup.
-- TS/JS provider flow validated via built-in `typescript-language-features` — diagnostics, hover, symbols all working.
-- C++ (clangd): validated — diagnostics on open and **live diagnostics on edit** working after endColumn fix.
-- Keepalive/ack handling is stable enough for iterative feature validation.
-
-Per-document tracking maps (in `workbench_client.mjs`):
-- `_docVersions`: path → versionId (monotonically increasing, reset to 1 on openFile)
-- `_docLineCount`: path → number of lines
-- `_docCharCount`: path → total character count (for `rangeLength`)
-- `_docLastLineLength`: path → character length of the last line (for valid `endColumn`)
-
-### Extension host protocol findings (important for future work)
-
-#### Builtin extension loading
-- code-server scans ~95 builtin extensions. Including all of them causes the ext host to hang.
-- **Root cause**: non-language extensions (git-base, emmet, npm, etc.) activate on `"*"` event and try filesystem operations (`$ensureActivation("file")`) that the headless adapter cannot serve. This blocks the serial activation queue.
-- **Solution**: `_buildExtensionsSnapshot()` applies a language-only filter that keeps:
-  - All user-installed extensions (always)
-  - `*-language-features` extensions (typescript-language-features, css-language-features, etc.)
-  - Grammar/language extensions (vscode.python, vscode.javascript, etc.) without `"*"` activation
-  - Theme extensions
-  - `vscode.configuration-editing` (JSON schema completions)
-- This reduces ~95 → ~30 extensions and allows full activation in under 2 seconds.
-- Controlled via env: `TE2_INCLUDE_BUILTIN_EXTS=0` reverts to user-extensions-only mode.
-
-#### Extension host RPC reply requirements
-
-Not all ext host requests can be answered with `ReplyOkEmpty`. Key methods that need typed replies:
-- `$initializeExtensionStorage` → `ReplyOkJson("{}")` (JSON string — ext host calls `JSON.parse()` on the deserialized result, then `safeParseValue` calls `JSON.parse("{}")` → `{}`)
-- `$getTools` → `ReplyOkJson([])` (empty tools array)
-- `$getInitialState` → `ReplyOkJson({ isFocused: true, isActive: true })`
-- `$checkExists` → `ReplyOkJson(false)`
-- `$requestWorkspaceTrust` → `ReplyOkJson(true)` (followed by `$onDidGrantWorkspaceTrust`)
-- `$register` (rpcId 29, MainThreadOutputService) → `ReplyOkJson("<channelId>")` (string — clangd blocks waiting for this; returns a synthetic channel ID like `"te2-output-<req>"`)
-- `$startFileSearch` → `ReplyOkJson(UriComponents[])` after WBA's bounded workspace glob search; an unconditional empty array prevents workspace-scanning extensions from functioning.
-- `$startTextSearch` → `ReplyOkJson(null)`
-- `$executeCommand` → `ReplyOkEmpty`
-
-#### Activation events
-- `$activateByEvent("*")` must NOT be sent — it activates problematic non-language extensions.
-- `$activateByEvent("onLanguage")` is sent at bootstrap (generic).
-- `$activateByEvent("onLanguage:<id>")` is sent per-file at openFile time (e.g. `"onLanguage:python"`).
-
-#### LanguageId detection
-- `workbench_client.mjs` includes a `_languageIdFromPath()` helper (40+ file extensions → VS Code language IDs).
-- Falls back to path-based detection when `params.languageId` is empty/missing.
-- Critical for correct activation: `$activateByEvent("onLanguage:javascript")` vs `"onLanguage:typescript"` determines which extensions activate and what strictness level applies.
-
-### Extension validation milestones (current track)
-Goal: verify deterministic language-feature parity (open file -> symbols/hover/diagnostics) across popular ecosystems before broadening scope.
-
-Execution reference:
-- `docs/apps/code_te2/MONACO_WORKBENCH_SPRINT_PLAN.md`
-- `docs/apps/code_te2/README.md` (Roadmap Update section)
-- `docs/apps/code_te2/VSCODE_API_CONTRACT.md`
-- `docs/apps/code_te2/VSCODE_API_STATE_OWNERSHIP.md`
-- `docs/apps/code_te2/VSCODE_API_DEPRECATIONS.md`
-
-1. Python (`ms-pyright.pyright`) - **validated**
-   - validated: open file, document symbols, hover, diagnostics
-   - pending: sustained diagnostics/completions stability under longer sessions
-2. TypeScript/JavaScript (built-in TS service) - **validated**
-   - validated: diagnostics for `.ts`, `.js`, `.mjs`, `.jsx`, `.tsx` files
-   - JS files receive JavaScript-level strictness (lenient); TS files receive full type checking
-   - pending: hover, symbols, completions verification
-3. C++ (`llvm-vs-code-extensions.vscode-clangd`) - **validated**
-   - validated: diagnostics on open, live diagnostics on edit
-   - required fix: `endColumn` must use actual last-line length (clangd rejects INT32_MAX as invalid UTF-16 offset)
-   - required fix: `$register` (rpcId 29, OutputService) must return a string channel ID (clangd blocks on this)
-   - pending: hover, symbols verification
-4. Rust (candidate extension under test) - pending
-   - target checks: provider registration, document symbols, hover, diagnostics
-
-Baseline note:
-- TypeScript/JavaScript language intelligence is built into the VS Code stack (TypeScript service), so TS/JS acts as a baseline control in this milestone plan rather than an external-extension test case.
-
-Planning boundary:
-- `CODE_TE2.md` remains architecture/protocol truth.
-- `MONACO_WORKBENCH_SPRINT_PLAN.md` remains the actionable sprint execution plan.
-
-### Minified code reverse engineering workflow (policy)
-When we need to learn the “real” sequence from installed/minified code-server JS, use a stream-only workflow:
-- Prefer: `prettier <file> 2>/dev/null | nl -ba | rg -n '<pattern>'` for deterministic line numbers
-- Then: re-run and extract context with `sed -n '<start>,<end>p'`
-
-See:
-- `AGENTS.md` (“Minified Code Search Policy”)
-- `CTAG-ANNOTATIONS.md` (tagging prettified functions for later lookup)
-
-### TE2 integration surface (current)
-Editor language intelligence now uses the direct editor-facing WBA socket:
-- inline editor runtime connects to `/wba_ws/socket.io` namespace `/wba`
-- `editorWorkbenchCall(...)` maps workbench methods to WBA JSON-RPC methods
-- WBA replies and notifications return directly to the inline editor runtime without the old Python workbench relay in the hot path
-
-Current hot-path examples:
-- `open_file` → `/wba` RPC `vscode.openFile`
-- `hover` → `/wba` RPC `vscode.hover`
-- `symbols` → `/wba` RPC `vscode.documentSymbols`
-- `did_change` → `/wba` RPC `vscode.didChange`
-- provider registration / editor diagnostics notifications → `/wba` JSON-RPC notifications (`te2.event` fanout)
-
-Current backend/control-plane residue:
-- Explorer/backend project-switch and watcher-resubscribe flows still call `adapter_rpc(...)` over stdio
-- editor-backend model-ready resync still calls `adapter_rpc("te2.resync")`
-
-Current diagnostics split:
-- raw editor diagnostics are WBA/editor-owned and flow to the inline editor runtime through `/wba`
-- normalized explorer/problems diagnostics remain backend-owned
-- `diagnostics_bridge.py` is no longer the primary editor diagnostics hot path
-
-Live editor diagnostics data flow:
-- User types in Monaco → direct `/wba` `vscode.didChange` → WBA → `$acceptModelChanged` → extension host re-analyzes → WBA notification fanout → browser editor diagnostics store
-- The adapter tracks per-document `versionId` (monotonically increasing, reset to 1 on `openFile`), previous line count, char count, and **last line length** for correct range replacement
-- **endColumn tracking**: `_docLastLineLength` map stores the character length of each document's last line. Initialized on `openFile()` from `lines[lines.length - 1].length`, updated on every `didChange()` after splitting the new text. Used as `endColumn: prevLastLineLen + 1` in the change range. Fallback is `10000` for documents opened before tracking was added (safe for clangd, clamped by the mirror model).
-- File watchers (Section 19) handle post-save diagnostics automatically — code-server's parcel watcher detects disk changes and feeds `$onFileEvent` to the extension host; TE2 subscribes to the same IPC channel for explorer updates
-
-Document-symbol ordering hardening (validated):
-- Monaco now gates workbench flow by `(path, generation)` and requires `open_file` ack before queued `didChange` and symbols flush.
-- `editor:ssot`, `editor:open`, baton replay, and `openPathFromBackend` all use the same ordered open flow.
-- Adapter invariants return `document_not_open` / `stale_generation` for out-of-order requests.
-- Backend stdio writes are still serialized in `workbench_adapter_shell_manager.py` for the remaining control-plane calls.
-
-The old `vscode_rpc_ws` path has been removed. The old `vscode_api_ws` path is not the active editor intelligence transport; treat related text as historical unless a specific current feature still depends on it.
-
-The UI (Monaco editor runtime) remains a thin renderer:
-- It subscribes to TE2 events, updates Monaco markers/hover providers, and never runs an extension host itself.
-- Hover and symbol providers are registered immediately for the current file's language (no async dependency on VSIX language list).
----
-
-## 18) Planned: Breadcrumb navigation widget (extracted from VS Code)
-
-### Goal
-Add a VS Code-style breadcrumb bar above the Monaco editor runtime showing:
-- File path segments (project root → current file)
-- Document symbols (outline: classes → methods → current scope based on cursor position)
-
-Clicking path segments navigates the explorer; clicking symbol segments scrolls to that symbol.
-
-### Source reference
-The VS Code breadcrumb implementation lives in the code-server submodule:
-- **Worktree**: `../mrselect6-2/code-server/lib/vscode/src/vs/`
-- **Core widget** (standalone, extractable):
-  - `base/browser/ui/breadcrumbs/breadcrumbsWidget.ts` (~366 lines)
-  - `base/browser/ui/breadcrumbs/breadcrumbsWidget.css` (37 lines)
-- **Workbench integration** (NOT extractable, too entangled):
-  - `workbench/browser/parts/editor/breadcrumbsControl.ts` (~878 lines)
-  - `workbench/browser/parts/editor/breadcrumbsModel.ts` (~147 lines)
-  - `workbench/browser/parts/editor/breadcrumbsPicker.ts` (~438 lines)
-  - `workbench/browser/parts/editor/breadcrumbs.ts` (~308 lines)
-  - `workbench/browser/parts/editor/media/breadcrumbscontrol.css`
-
-### Feasibility analysis
-
-**The core `BreadcrumbsWidget` is highly extractable.** It's a pure DOM widget with minimal dependencies:
-- `vs/base/browser/dom.js` — DOM helpers (createElement, classList, events)
-- `vs/base/browser/ui/scrollbar/scrollableElement.js` — Horizontal scrollbar
-- `vs/base/common/event.js` — Event emitters (Emitter, Event)
-- `vs/base/common/lifecycle.js` — Disposable pattern
-- `vs/base/common/themables.js` — ThemeIcon (for separator chevron)
-
-It renders with plain DOM manipulation (no React, no VS Code UI framework). The `BreadcrumbsItem` is abstract — you subclass it and implement `render(container: HTMLElement)` to put whatever you want in each crumb.
-
-**The workbench integration layer is NOT extractable.** `BreadcrumbsControl` depends on 12+ VS Code services (IOutlineService, IEditorService, IWorkspaceContextService, IConfigurationService, etc.). Don't even try.
-
-### Recommended approach: extract widget, build our own data model
-
-**Step 1: Transpile the core widget (~400 lines)**
-- Extract `breadcrumbsWidget.ts` + its `vs/base/` dependencies
-- Transpile to ES module (esbuild single-file bundle, externalize nothing)
-- Dependencies are all from `vs/base/` (utility code, no workbench)
-- The `DomScrollableElement` is the biggest transitive dep (~600 lines) but also standalone
-- Estimated total bundle: ~2-3KB minified
-
-**Step 2: Build a TE2 `BreadcrumbsItem` subclass**
-- `FilePathItem`: renders seti icon + directory/file name per path segment
-- `SymbolItem`: renders codicon + symbol name from document outline
-- Both use the existing seti icons (`app/static/vendor/seti-icons/`) for file type icons
-
-**Step 3: Wire data from the workbench adapter**
-- **File path**: already known from SSOT (`currentPath` + `project_root`). Split into segments. No adapter call needed.
-- **Document symbols**: already available via `vscode.documentSymbols` adapter RPC. Returns a symbol tree.
-- **Cursor → symbol mapping**: when cursor position changes, walk the symbol tree to find the deepest symbol whose range contains the cursor. This is ~20 lines of JS.
-
-**Step 4: Mount in the editor UI**
-- Place between `fe-toolbar` and the Monaco editor runtime
-- Update on: file open (`editor:open`), cursor move (Monaco `onDidChangeCursorPosition`), symbol response
-- Click handler: path segments emit `editor_open_request` (for folder nav) or scroll to symbol range
-
-### Icon infrastructure (already available)
-- **Seti icons**: `app/static/vendor/seti-icons/` — `getIcon(fileName)` returns SVG + color for 500+ file types
-- **Codicons**: available from the Monaco bundle (`vs/base/common/codicons`) for symbol kind icons
-- No additional icon assets needed
-
-### What this does NOT need
-- No `IOutlineService` — we have `vscode.documentSymbols` via the adapter
-- No `IEditorService` — we have SSOT `currentPath`
-- No `IWorkspaceContextService` — we have SSOT `project_root`
-- No `BreadcrumbsControl` or `BreadcrumbsModel` — we build our own (much simpler)
-- No `BreadcrumbsPicker` — optional future addition (dropdown on click)
-
-### Build plan (esbuild from code-server worktree)
-
-**Why esbuild, not manual vendoring:**
-The core widget imports ~54 transitive files from `vs/base/` (dom.ts alone is 2633 lines, event.ts is 1812, lifecycle.ts is 888). Manually copying and maintaining those is impractical. Instead, we use esbuild to bundle the widget + all deps into a single tree-shaken ESM file.
-
-**Directory structure:**
-```
-app/apps/code_te2/monaco_editor/vscode_build_src/
-  ├─ README.md                  # What this is, how to rebuild
-  ├─ build.mjs                  # esbuild script
-  ├─ breadcrumbs_entry.ts       # Thin entrypoint (re-exports BreadcrumbsWidget)
-  └─ out/
-      └─ breadcrumbsWidget.js   # Bundled ESM artifact (served to browser)
-```
-
-**Build script (`build.mjs`):**
-- Uses esbuild with `bundle: true, format: 'esm', platform: 'browser'`
-- Resolves imports from `../mrselect6-2/code-server/lib/vscode/src/` (the worktree)
-- Tree-shakes unused exports (breadcrumbsWidget.ts only uses ~10 functions from dom.ts's 2633 lines)
-- Outputs single file to `out/breadcrumbsWidget.js`
-- CSS is embedded (breadcrumbsWidget.css is 37 lines)
-- Expected output: ~10-20KB minified (the widget + scrollbar + event/lifecycle/dom utilities)
-
-**Entrypoint (`breadcrumbs_entry.ts`):**
-```typescript
-export { BreadcrumbsWidget, BreadcrumbsItem, IBreadcrumbsWidgetStyles, IBreadcrumbsItemEvent }
-  from 'vs/base/browser/ui/breadcrumbs/breadcrumbsWidget';
-export { ScrollbarVisibility } from 'vs/base/common/scrollable';
-export { ThemeIcon } from 'vs/base/common/themables';
-export { Codicon } from 'vs/base/common/codicons';
-```
-
-**Dependency resolution chain:**
-```
-breadcrumbsWidget.ts (366 lines)
-  ├─ dom.ts (2633 lines, but tree-shaken to ~10 used functions)
-  ├─ domStylesheets.ts (~50 lines)
-  ├─ mouseEvent.ts (~100 lines)
-  ├─ ui/scrollbar/scrollableElement.ts + 6 scrollbar files
-  ├─ common/event.ts (1812 lines)
-  ├─ common/lifecycle.ts (888 lines)
-  ├─ common/arrays.ts (949 lines, tree-shaken to commonPrefixLength)
-  ├─ common/themables.ts (117 lines)
-  └─ common/scrollable.ts (522 lines)
-Total transitive: ~54 unique .ts files from vs/base/ (all MIT licensed)
-```
-
-### Integration plan (after build)
-
-**Step 1: Build the widget bundle**
-- Create `vscode_build_src/` with build script + entrypoint
-- Run esbuild → `out/breadcrumbsWidget.js`
-- Serve via existing Monaco static route
-
-**Step 2: Create TE2 breadcrumb component (`te2_breadcrumbs.js`)**
-- Import `BreadcrumbsWidget`, `BreadcrumbsItem` from the bundle
-- Implement `FilePathItem extends BreadcrumbsItem`:
-  - `render()`: seti icon + segment name
-  - Click → navigate explorer to that directory
-- Implement `SymbolItem extends BreadcrumbsItem`:
-  - `render()`: codicon + symbol name (class/function/variable)
-  - Click → scroll Monaco to symbol range
-- Mount widget in a container div between `fe-toolbar` and the inline editor container
-
-**Step 3: Wire data sources**
-- **File path**: listen to `editor:open` → split `currentPath` relative to `project_root` → update crumbs
-- **Document symbols**: call `editor_workbench_symbols` on file open (already implemented)
-- **Cursor tracking**: listen to Monaco `onDidChangeCursorPosition` → walk symbol tree → update active symbol crumbs
-- **Symbol tree walk**: find deepest symbol whose `range.startLineNumber <= cursor.lineNumber <= range.endLineNumber`
-
-**Step 4: Style to match TE2 theme**
-- Map `IBreadcrumbsWidgetStyles` colors to TE2 CSS variables
-- Separator icon: `Codicon.chevronRight` (already in the bundle)
-- Height: ~22px (matches VS Code's breadcrumb bar)
+## 13) Diff and draft stability invariants
+
+Inline Git and draft-diff presentation must preserve cursor stability under
+autosave and EOF edits:
+
+- Projection gates use `te2AutosaveMode`; autosave takes the normal diff
+  recompute path instead of draft-projection machinery.
+- EOF range mappings absorb the trailing-line boundary rather than depending on
+  an assertion or a deletion widget.
+- Switching from autosave to draft mode snapshots current model content as the
+  draft baseline.
+- Mirror-originated cache updates suppress autosave so a second client does not
+  create an echo loop.
+
+The current runtime is split across the editor diff and baseline modules, rather
+than the historic line locations in `m_editor_app.ts`. Frontend behavior is
+the validation target: rapid typing must not reset the model, move the cursor,
+or reapply a stale baseline.
+
+## 14) Workbench Adapter and Extension-Host Protocol
+
+The workbench adapter is the headless VS Code client between the direct editor
+lane and the remote code-server extension host. Editable sources are
+`workbench_protocol_proxy/node_workbench_adapter/src/server/server.ts` and
+`src/client/workbench-client.ts`; framework shells execute their `dist/`
+output. The adapter is not a replacement app SSOT.
+
+### Transport and ownership
+
+- The inline editor uses strict MessagePack JSON-RPC on the public
+  `/api/app/code_te2/services/wba/socket.io` path and `/wba` namespace for
+  `vscode.openFile`, hover, symbols, changes, provider events, and diagnostics.
+- Backend lifecycle/control work uses the pipe protocol
+  (`<<<RPC>>>` replies and `<<<PUSH>>>` facts). The local HTTP `/cmd`
+  endpoint remains a control compatibility surface, not the editor hot path.
+- WBA tracks one shared extension-host document per URI and projects a synthetic
+  editor facade per stable client. Client role is established by the app editor
+  and UI IPC lanes; WBA document membership remains role-neutral.
+
+### Extension-host invariants
+
+- Builtin loading filters problematic wildcard-activating non-language
+  extensions while retaining user extensions, language/grammar/theme
+  contributions, language-feature extensions, and
+  `vscode.configuration-editing`.
+- Bootstrap uses `onLanguage`; a file open adds `onLanguage:<languageId>`.
+  Do not emit wildcard activation.
+- Extension-host replies must use the expected typed value. In particular:
+  storage receives `{}`, tools receives `[]`, initial state is focused and
+  active, workspace trust is granted, output registration receives a string
+  channel id, file search receives bounded URI results, text search receives
+  `null`, and commands may use an empty acknowledgement.
+- The client derives a language id from the path when an open request does not
+  provide one, preserving distinct JavaScript and TypeScript activation.
+
+### Validation and source inspection
+
+Validate language behavior as a feature set, not merely an installed extension:
+open, symbols, hover, and diagnostics for Python, TypeScript/JavaScript, C++,
+and Rust as applicable. The sprint plan is
+`MONACO_WORKBENCH_SPRINT_PLAN.md`; this document owns architecture and protocol
+facts.
+
+When inspecting an intentionally targeted bundle, keep the operation
+stream-only, for example `prettier <file> 2>/dev/null | nl -ba | rg`. The
+repository policy is **Search Discipline** in `AGENTS.md`; annotations live at
+`app/CTAG-ANNOTATIONS.md`. Do not infer a local worktree from source-map
+paths embedded in a vendored bundle.
+
+## 15) Breadcrumb navigation
+
+Breadcrumbs are implemented as a TE2-native plain-DOM bar. `inline_host.ts`
+injects `#te2-breadcrumbs`; `editor_breadcrumb_runtime.ts` renders path and
+symbol state. Path clicks use `editor.breadcrumb.navigate`; symbol clicks
+navigate within the active model. Only the deployed stylesheet from the
+vendored Monaco tree is used. The former external-worktree extraction and
+build plan is not a current dependency.
 
 ## 19) File watcher pipeline — triple fallback
 
@@ -1863,7 +1073,7 @@ Code TE2 relies primarily on code-server's native watcher/IPC path, with fallbac
 ```text
 code-server parcel watcher detects disk change
   -> remoteFilesystem IPC channel fires EventFire (ResponseType 204)
-  -> workbench_client.mjs onEvent({type: "watcher/fileChanges", changes: [...]})
+  -> src/client/workbench-client.ts onEvent({type: "watcher/fileChanges", changes: [...]})
   -> wba_event_bridge.py handles watcher/fileChanges and watcher/enospc
   -> workspace_events.py publishes normalized file-change events
   -> Explorer watcher handlers update backend-owned tree/decorations state
@@ -1882,7 +1092,7 @@ code-server parcel watcher detects disk change
 - Watchexec is a fallback watcher source; it is not the primary code-server IPC watcher path.
 
 ### Key files
-- `app/apps/code_te2/workbench_protocol_proxy/node_workbench_adapter/src/workbench_client.mjs`: receives code-server watcher events.
+- `app/apps/code_te2/workbench_protocol_proxy/node_workbench_adapter/src/src/client/workbench-client.ts`: receives code-server watcher events.
 - `app/apps/code_te2/wba_event_bridge.py`: handles `watcher/enospc` and `watcher/fileChanges` events from WBA.
 - `app/apps/code_te2/workspace_events.py`: publishes normalized file-change events and calls `handle_external_file_change`.
 - `app/apps/code_te2/watchexec_shell_manager.py`: fallback watchexec shell manager.
@@ -1900,89 +1110,17 @@ The WBA/code-server side remains the primary watcher source. TE2 fallback watche
 
 ---
 
-## 20) Cursor Stability Hardening (Autosave + Git Diff)
+## 20) Cursor stability and published Monaco artifacts
 
-This section documents the stabilization work that removed full-page thrash and significantly reduced cursor jumps under rapid typing.
+Autosave and Git/draft diff must not reset a model or move the cursor while a
+user types. The inline runtime debounces mirror and Git-baseline work, ignores
+stale path/revision results, and delays baseline application during active
+typing. Published Monaco diff logic additionally honors `te2AutosaveMode`.
 
-### Root causes observed
-
-1. **Diff mode flag drift in inline editor context**
-   In `applyGitBaselines()`, `diffEditor.setModel(...)` was skipped when model refs matched, even if `te2AutosaveMode` / `te2FreezeProjection` / `modifiedBaseline` flags were stale.
-
-2. **Mirror echo/jitter under autosave**
-   `editor:mirror` applied full-buffer updates (`model.setValue(...)`) during active typing windows.
-
-3. **Git baseline recompute racing typing**
-   In autosave + inline diff mode, baseline updates could apply while the user was still entering text.
-
-### Runtime fixes (inline-editor-only)
-
-#### A) Diff flag parity enforcement
-
-Inside `applyGitBaselines()`:
-- Compute desired flags from current prefs (`autoSave`, inline diff state).
-- If refs match but flags differ, force `diffEditor.setModel(desiredModel)` (no stale mode drift).
-- Debug badge now surfaces this via:
-  - `flags=ok as=<0|1> fr=<0|1> mb=<0|1>`
-  - `flags=rebind ...`
-  - `flags=set ...`
-
-#### B) Mirror echo guards + autosave debounce
-
-Mirror publisher/consumer now includes:
-- Local mirror publish debounce:
-  - autosave ON: `1000ms`
-  - autosave OFF: `180ms`
-- Hot-typing guard for inbound `editor:mirror`:
-  - autosave ON: `850ms`
-  - autosave OFF: `250ms`
-- Drop conditions in mirror handler:
-  - self echo (`source_client` matches socket id)
-  - stale/no-op SHA (`payload.content_sha256 == lastContentSha256`)
-  - hot typing window
-
-Overlay counters:
-- `mir=rx<...>/ap<...>/self<...>/sha<...>/hot<...>`
-
-#### C) Debounced git baseline requests
-
-Client-side request debounce:
-- autosave ON: `320ms`
-- autosave OFF: `180ms`
-- Save-complete path still uses immediate request (`requestGitBaselines({ immediate: true })`).
-
-#### D) Idle apply for autosave + diff
-
-For **autosave ON + inline diff ON**, incoming `editor:git_baselines` payloads are deferred until typing is idle:
-- apply idle window: `1000ms`
-- latest payload wins (`pendingGitBaselinePayload`)
-- debug badge shows `git=defer <ms>` while deferring.
-
-### Build/linking caveat (critical)
-
-If you copy build artifacts with:
-`cp -r out-monaco-editor-core/esm/ app/static/vendor/monaco-editor-core/esm/`
-you can accidentally create `esm/esm/...` and serve stale code from root `esm/...`.
-
-Correct copy pattern:
-`cp -r out-monaco-editor-core/esm/* app/static/vendor/monaco-editor-core/esm/`
-
-Verification checks:
-- `app/static/vendor/monaco-editor-core/esm/vs/.../diffEditorViewModel.js` contains `te2AutosaveMode` logic.
-- Verify the current published Monaco ESM artifact containing the patched logic under `app/static/vendor/monaco-editor-core/esm/`.
-
-### Key files
-
-- `app/apps/code_te2/monaco_editor/m_editor_app.ts`
-  - flag parity check in `applyGitBaselines()`
-  - mirror debounce/guards and mirror debug counters
-  - debounced/idle git baseline scheduling
-- `worktrees/vscode-te2-diff/src/vs/editor/browser/widget/diffEditor/diffEditorViewModel.ts`
-  - autosave-gated TE2 diff control flow (`te2AutosaveMode`)
-- `worktrees/vscode-te2-diff/src/vs/editor/common/editorCommon.ts`
-  - `IDiffEditorModel.te2AutosaveMode?: boolean`
-
----
+The deployed ESM tree is the only in-repository source for its patched Monaco
+behavior. Copy an approved external publication **into** its contents, never as
+a nested `esm/esm` directory, then rebuild `static/dist/host.js`. No local
+VS Code worktree is required or documented here.
 
 ## 21) UI IPC — Backend-mediated app UI facts
 
@@ -2009,6 +1147,7 @@ Host/main page frontend
 |---|---|
 | Host/main page boot/readiness | Backend-owned boot snapshots and adapter-state facts. |
 | Native/Android IME focus hints | Typed focus/blur facts on `/ui_ipc`; Android consumes strict msgpack-v1, not raw JSON `ui_event`. |
+| Secondary-editor close | `ui.host.clientForeground.clear` accepts only the authenticated secondary browser client, clears that exact foreground, and requests an exact-client editor SSOT projection. |
 | Cross-surface actions | Frontend -> own backend -> target backend hook/service -> target notification. |
 | Metrics | `CODE_TE2_RPC_CODEC_METRICS=1` enables default-off codec metadata on stdout. |
 
@@ -2030,317 +1169,94 @@ To add a new UI IPC operation:
 3. Emit a target-surface notification from that target backend when another surface needs to react.
 4. Do not add raw `ui_event` relays or synthetic DOM-event bridges.
 
+Browser UI IPC sessions carry the same validated stable client identity and
+`clientRole` as the editor lane. A host action must not forge a client id or
+clear a primary foreground on behalf of a secondary presentation.
+
 ---
 
-## 22) Extension Configuration Auto-Extraction
+## 22) Extension configuration and settings
 
-### Problem
+The WBA initializes extension configuration from three effective scopes:
 
-VS Code extensions read settings during `activate()` via `workspace.getConfiguration("section").get("key")`.
-This reads from the ext host's in-memory configuration model, which is populated by the
-`$initializeConfiguration` RPC (rpcId=80) sent from the workbench adapter at boot.
+1. extension `contributes.configuration.properties` defaults;
+2. Code TE2 User settings; and
+3. the active project `.vscode/settings.json`.
 
-If an extension's config keys are missing from the data we send, `get()` returns `undefined`.
-Extensions that gate on enable flags (e.g. clangd checks `clangd.enable`) silently skip
-starting their language server — no error, no crash, just no providers registered.
+`src/client/workbench-client.ts` scans every extension contribution, nests each
+declared default into `IConfigurationInitData.defaults`, and publishes
+`` plus ``. This removes
+per-extension hardcoding while retaining normal VS Code precedence.
 
-Previously `_buildConfigurationInitData()` hardcoded per-extension configs (Python only).
-Every new extension required manual additions. This doesn't scale and is fragile.
+### User and Workspace authority
 
-### Solution — automatic defaults from `package.json`
+The Languages & Extensions UI exposes only these scopes:
 
-Every VS Code extension declares its settings in `package.json` under
-`contributes.configuration.properties`. Each property has a dotted key and a schema with a
-`"default"` value:
+- **User**: registry-v2 `user_settings`, atomically materialized with TE2 gates
+  at `/code_te2/code_server/User/settings.json` and sent as
+  `userRemote`.
+- **Workspace**: `<projectRoot>/.vscode/settings.json`, sent as both
+  `workspace` and `folders[0]`.
 
-```json
-{
-  "contributes": {
-    "configuration": {
-      "properties": {
-        "clangd.enable": { "type": "boolean", "default": true },
-        "clangd.path":   { "type": "string",  "default": "clangd" }
-      }
-    }
-  }
-}
-```
+The schema form and JSON editor are two views of the same scope; neither creates
+a third settings store. WBA leaves application, policy, user-local, and profile
+sections empty. Workspace settings override User values, while language servers
+can still apply their own on-disk project-configuration precedence.
 
-`_buildConfigurationInitData(folder, authority, scannedExtensions)` now:
-
-1. Iterates ALL `scannedExtensions` (already available from mgmt scan)
-2. For each extension, reads `packageJSON.contributes.configuration.properties`
-3. For each property with a `"default"` value, splits the key at dots
-   (e.g. `"clangd.enable"` → section `clangd`, prop `enable`) and nests it into a
-   `contents` object — handles deeply nested keys like `"python.analysis.autoSearchPaths"`
-4. Sends the whole thing as the `defaults` field of `IConfigurationInitData`
-5. User/extension overrides come from `User/settings.json` via `userRemote` (see §29)
-
-The result: any installed extension gets its declared defaults automatically. No hardcoding.
-
-### Wire format
-
-The `$initializeConfiguration` payload is `IConfigurationInitData`:
-
-```
-{ defaults, policy, application, userLocal, userRemote, workspace, folders, configurationScopes }
-```
-
-Each section is an `IConfigurationModel`:
-
-```
-{ contents: { section: { key: value, ... } }, overrides: [], keys: ["section.key", ...] }
-```
-
-`defaults` carries the extension-contributed defaults. `userRemote` carries TE2 overrides
-from `User/settings.json`. `workspace` and `folders[0]` carry project-scoped overrides
-from `<projectRoot>/.vscode/settings.json` (see §29). All other sections are empty.
-
-After `$initializeConfiguration`, we also send `$acceptConfigurationChanged` with the same
-data and the full key list so extensions that listen for config changes pick up the values.
-
-### TE2 overrides (applied after scan)
-
-No hardcoded extension overrides remain in the WBA configuration builder. The Languages & Extensions modal exposes only two effective scopes:
-
-1. **User** is the global remote-workbench scope. Both the extension schema form and the User JSON editor read and write the same registry v2 `user_settings` map.
-2. **Workspace** is the active repository scope and reads/writes `<projectRoot>/.vscode/settings.json` directly.
-
-`rebuild_settings_gate()` atomically materializes the User map together with TE2's generated global and language gates into `~/.config/code-server/User/settings.json`. The WBA reads that one file into `userRemote`; TE2 intentionally leaves `userLocal` and profile-specific settings empty. Workspace settings are sent through `workspace` and `folders[0]`, so normal VS Code precedence makes repository values override global User values.
-
-Registry v1 data is migrated once. Legacy per-extension `configuration_values`, effective non-generated values from the existing User file, and legacy `custom_settings` are folded into `user_settings`; explicit legacy User JSON values win historical conflicts.
-
-### Key file
-
-`workbench_client.mjs` → `_buildConfigurationInitData()` (~line 1120)
-
-
-## 29) Settings Pipeline - User and Workspace Settings
-
-### Overview
-
-The settings UI and WBA expose two scopes, not VS Code's full local/remote/profile matrix:
-
-```text
-Extension schema form -+
-                       +-> registry v2 user_settings
-User Settings JSON ----+           |
-                                   | rebuild_settings_gate()
-                                   v
-                     User/settings.json -> userRemote
-
-Workspace schema form -+
-                       +-> <projectRoot>/.vscode/settings.json
-Workspace JSON --------+              -> workspace + folders[0]
-```
-
-The extension schema form is only a typed view over keys in the same User or Workspace object. It is not a third settings authority and does not store values on extension registry entries.
-
-### Materialization priority in `rebuild_settings_gate()`
-
-The global User file is generated atomically in this order, with later values winning:
-
-1. `_GLOBAL_GATE`, which disables smart editor features globally.
-2. `_LANGUAGE_SLOT_OVERRIDES` for active language-feature slots.
-3. The existing framework-owned `files.watcherExclude` value.
-4. Registry `user_settings`, which is the user-owned global map.
-
-This allows an explicit User value to override a generated gate. Removing a schema key removes it from `user_settings` and therefore from the next materialized User file.
-
-### VS Code configuration precedence (adapter-level)
-
-The adapter builds `IConfigurationInitData` with these effective sections, low to high:
-
-1. `defaults` from extension `contributes.configuration` defaults.
-2. `userRemote` from `User/settings.json`.
-3. `workspace` from `<projectRoot>/.vscode/settings.json`.
-4. `folders[0]`, which mirrors `workspace` for the single-root project.
-
-`application`, `policy`, `userLocal`, and profile-specific settings are intentionally empty in TE2. Workspace settings override User settings for overlapping keys.
-
-### Adapter relay
-
-The WBA configuration builder reads both settings files:
-
-- Flat dotted User keys are nested and sent in `userRemote`.
-- User language blocks such as `[python]` become configuration overrides.
-- Workspace keys and language blocks use the same conversion and are sent in `workspace` plus `folders[0]`.
-- After `$initializeConfiguration`, `$acceptConfigurationChanged` republishes the effective configuration and key list.
-
-A settings save restarts only the adapter path required to rebuild extension-host configuration; it does not introduce another persistent settings tier.
-
-### Project config files override editor settings
-
-Extensions such as basedpyright may read project config files directly from disk, including `pyrightconfig.json` and `pyproject.toml`. Their own precedence rules can override both User and Workspace editor settings. This is extension behavior, not another TE2 settings scope.
-
-### User Settings UI
-
-The User tab offers two synchronized views of one global map:
-
-- extension schema forms edit only the keys declared by that extension;
-- the User Settings JSON editor can edit arbitrary global keys.
-
-Both persist to registry `user_settings` and materialize to `User/settings.json`. Saving one view is immediately reflected when the other view is reopened.
-
-### Workspace Settings UI
-
-The Workspace tab reads and writes the active project's `.vscode/settings.json`. Schema forms merge only the selected extension's keys, while the Workspace JSON editor exposes the complete object. Saving creates the `.vscode` directory when needed and restarts the adapter.
-
-Extension enable/disable and uninstall remain global operations, so those controls are hidden while Workspace scope is active.
-
-### Legacy migration
-
-Loading a registry older than version 2 performs a one-time migration into `user_settings`. The migration combines effective non-generated User file values and legacy per-extension values, then applies legacy `custom_settings` last so explicit User JSON wins conflicts. Legacy `configuration_values` and `custom_settings` fields are removed.
-
-### Key files
-
-| File | Role |
-|------|------|
-| `extension_registry.py` | User settings authority, legacy migration, schema-key merge, and atomic User file materialization |
-| `explorer/handlers/extensions.py` | User and Workspace settings RPC handlers |
-| `workbench_protocol_proxy/node_workbench_adapter/src/client/configuration.ts` | Maps User to `userRemote` and repository settings to `workspace` / `folders[0]` |
-| `main_page/frontend/ui/settings-refresh.ts` | User and Workspace JSON loading/saving |
-| `main_page/frontend/ui/settings-manager.ts` | Scope-aware extension schema configuration |
-| `main_page/frontend/ui/settings-config-modal.ts` | Typed schema form save behavior |
-| `template.html` | Languages & Extensions modal and User/Workspace tabs |
-
-## 23) Semantic Tokens Pipeline (End-to-End)
-
-### Problem
-
-Monaco standalone has no built-in semantic token support from VS Code's extension host. Five barriers had to be overcome:
-
-1. **CancellationToken argument bug** — VS Code's RPC layer auto-pushes a real `CancellationToken` onto the args array. Passing `{}` as a placeholder shifted all parameters, causing `n.onCancellationRequested is not a function` errors on every semantic token request.
-
-2. **Uint32Array alignment crash** — Node.js Buffer pool uses a shared ArrayBuffer. `buf.byteOffset` isn't guaranteed to be 4-byte aligned, so `new Uint32Array(buf.buffer, buf.byteOffset, ...)` throws RangeError. This crash was caught silently and returned as a JSON-RPC error to the frontend.
-
-3. **Monaco `semanticHighlighting = false`** — `standaloneThemeService.ts` hardcodes this flag to `false`, so `isSemanticColoringEnabled()` always returns false and Monaco never applies semantic tokens even when data arrives.
-
-4. **No semantic-to-TextMate scope mapping** — Monaco standalone's `getTokenStyleMetadata()` matches semantic token type names directly against theme rules, but themes only define TextMate scope names. Without a bridge, `function` tokens get white instead of purple, `variable` tokens get orange instead of white, etc.
-
-5. **`setColorMap` palette conflict** — Encoded TextMate tokenization (`tokenizeLine2`) requires `setColorMap()` to sync the ~300-color TextMate palette to Monaco. But this replaces the rendering palette, making semantic token foreground indices (compiled against the ~20-color theme palette from `defineTheme`) point to wrong colors. E.g., index 7 = orange in the theme palette but some random blue in the TextMate palette.
-
-### Solution
-
-1. **CancellationToken fix**: Never include `{}` in args for cancellable requests. The `cancellable: true` flag sets wire type 2/4, and the RPC layer handles the rest. See `WORKBENCH_SEMANTIC_COMPLETIONS_KNOWLEDGE.md` for the full arg patterns table.
-
-2. **Alignment fix**: Copy buffer to a fresh aligned `Uint8Array` before creating `Uint32Array`. Applied to both `semanticTokens()` and `semanticTokensRange()` in `workbench_client.mjs`.
-
-3. **semanticHighlighting source fix**: Changed `standaloneThemeService.ts:182` from `false` to `true` in the TE2 Monaco build. A runtime monkey-patch (`_forceSemanticHighlighting()`) also exists as a fallback.
-
-4. **Semantic token color mapping**: `buildSemanticTokenRules()` (in `editor_semantic_token_rules_utils.js`, called by theme conversion runtime) mirrors VS Code's `TokenClassificationRegistry` by mapping each semantic token type (e.g., `function`, `variable`, `parameter`) to its equivalent TextMate scope (e.g., `entity.name.function`, `variable.other.readwrite`, `variable.parameter`), resolves the color from the theme's `tokenColors`, and injects the rules into the Monaco theme.
-
-5. **Palette index translation**: `_patchSemanticTokenColorIndices()` monkey-patches `getTokenStyleMetadata` on the active theme object. After `setColorMap` overrides the rendering palette, the patch translates foreground indices: tokenTheme index → hex color (via `Color.toString()`) → find matching hex in TextMate color map → return TextMate index. This ensures semantic tokens render the correct color even when the rendering palette has been overridden.
-
-### Encoded TextMate tokenization
-
-TE2 uses vscode-textmate's encoded mode (`tokenizeLine2`) instead of text mode (`tokenizeLine`). Text mode only provides the innermost scope string per token — Monaco matching this single scope against theme rules produces different colors than code-server, which evaluates the full scope stack.
-
-Encoded mode resolves the full scope stack against the theme internally and returns a `Uint32Array` with pre-computed color indices, matching code-server exactly. Requirements:
-- `registry.setTheme(IRawTheme)` must be called before tokenization
-- `monaco.languages.setColorMap(registry.getColorMap())` syncs the rendering palette
-- Provider exposes `tokenizeEncoded(line, state)` — Monaco auto-detects this via `isEncodedTokensProvider()`
-
-### Data flow
-
-```
-ext host ($provideDocumentRangeSemanticTokens)
-  → workbench_client.mjs (decode Uint32Array, attach legend)
-  → server.mjs (vscode.semanticTokensRange route)
-  → /wba reply
-  → m_editor_app.ts / editor_workbench_runtime.ts
-  → Monaco getTokenStyleMetadata() → _patchSemanticTokenColorIndices translation → rendered colors
-```
-
-### Token data format
-
-5-element tuples in a flat Uint32Array: `[deltaLine, deltaStartChar, length, tokenTypeIndex, tokenModifiersMask]`
-
-- `tokenTypeIndex` indexes into `legend.tokenTypes` (e.g., 0 = "namespace", 7 = "variable", 11 = "function")
-- `tokenModifiersMask` is a bitmask indexing into `legend.tokenModifiers` (e.g., bit 0 = "declaration", bit 3 = "readonly")
-
-### Monaco build required
-
-The `semanticHighlighting = true` source change requires a Monaco rebuild:
-
-```bash
-cd worktrees/vscode-te2-diff
-NODE_OPTIONS="--max-old-space-size=4096" npx gulp editor-distro
-# Copy ESM artifacts
-VENDOR_DIR="../../app/static/vendor/monaco-editor-core"
-rm -rf "$VENDOR_DIR/esm" && mkdir -p "$VENDOR_DIR/esm"
-cd out-monaco-editor-core/esm
-find . \( -name "*.js" -o -name "*.css" -o -name "*.ttf" \) \
-  -exec sh -c 'mkdir -p "'"$VENDOR_DIR"'/esm/$(dirname "$1")" && cp "$1" "'"$VENDOR_DIR"'/esm/$1"' _ {} \;
-# Rebuild the inline editor bootstrap bundle
-cd ../.. && node ../../scripts/build_monaco_bootstrap_bundle.mjs
-```
+`rebuild_settings_gate()` writes the User file atomically: generated global
+and language gates, existing framework watcher exclusions, then user-owned
+settings with the last value winning. Registry-v1 values migrate once into
+`user_settings`.
 
 ### Key files
 
 | File | Role |
 |---|---|
-| `workbench_client.mjs` | CancellationToken fix, Uint32Array alignment fix, legend extraction, semantic token RPC, `resync()` |
-| `server.mjs` | `vscode.semanticTokensRange` route, `te2.resync` RPC |
-| `editor_wba_rpc_transport.ts` | direct `/wba` transport for semantic-token RPC and notifications |
-| `editor_workbench_runtime.ts` | direct semantic-token request path and readiness gating |
-| `editor_ws.py` | residual backend `te2.resync` trigger in readiness/model-ready paths |
-| `m_editor_app.ts` + `editor_*_utils.js` | Theme/runtime orchestration (`_forceSemanticHighlighting()`, `_patchSemanticTokenColorIndices()`, encoded TextMate provider `tokenizeEncoded`, `_applyThemeToTextmateRegistry()`), with semantic/theme rule builders extracted to utility modules |
-| `standaloneThemeService.ts` | Source fix: `semanticHighlighting = true` |
-| `tokenClassificationRegistry.ts` | VS Code's semantic-to-TextMate mapping (reference) |
+| `extension_registry.py` | Registry settings, migration, and User-file materialization. |
+| `explorer/handlers/extensions.py` | User and Workspace settings RPC handlers. |
+| `src/client/configuration.ts` | WBA configuration-model conversion. |
+| `main_page/frontend/ui/settings-*.ts` | Scope-aware JSON and schema presentation. |
 
-### Page reload / multi-client: `te2.resync`
+## 23) Semantic tokens and TextMate tokenization
 
-Provider registrations are one-time events from ext host boot. A fresh frontend (page reload) or second client never sees them. The `te2.resync` RPC solves this:
+The inline editor receives semantic-token replies over direct WBA JSON-RPC and
+installs normal Monaco providers. Token data is the VS Code five-integer delta
+stream: delta line, delta start, length, legend token type, and modifier mask.
 
-1. A backend control-plane caller sees the adapter is already running
-2. It calls `te2.resync` over stdio `adapter_rpc(...)`
-3. The adapter replays cached provider/diagnostics-side events through its editor-facing `/wba` socket server
-4. The connected inline editor runtime re-registers providers with legends without restarting the adapter
+### Runtime invariants
 
-Properties:
-- No adapter restart — ext host stays hot, baton sequence untouched
-- Multi-client safe — each client can receive the replay through `/wba`
-- Idempotent — `registeredSemanticTokens` set guards against duplicates
-- First step toward Option 3 architecture (adapter as stateful backend)
+- Cancellable WBA calls do not add a fake cancellation argument; the protocol
+  owns cancellation framing.
+- Adapter decoding copies Buffer data before constructing a Uint32Array, so a
+  pooled unaligned byte offset cannot break semantic-token decoding.
+- The committed standalone theme service enables semantic highlighting. The
+  editor runtime also repairs a theme that reports it disabled.
+- vscodeThemeToMonacoTheme() converts contributed semantic rules and
+  TextMate-compatible theme data before Monaco defineTheme / setTheme.
+- The TextMate registry applies the selected raw theme, publishes its color map
+  through monaco.languages.setColorMap(), and resets all loaded models for
+  retokenization.
 
-### Known limitations
+No _patchSemanticTokenColorIndices() runtime exists. Do not document a
+palette-index monkey patch or infer a replacement from stale history; inspect
+the committed Monaco vendor tree and the current theme runtime before changing
+palette behavior.
 
-- **Hover tooltip colors**: Hover code blocks use `colorize()` (TextMate tokenization), not semantic tokens. Parameter colors in hovers may be a slightly different shade than the editor's semantic token color (TextMate-resolved vs semantic-resolved for the same scope).
-- **Python semantic tokens**: Pyright (open-source) does not register a semantic token provider. Only TypeScript/JavaScript get semantic tokens from the ext host. Python semantic tokens require Pylance (proprietary, unavailable for code-server). Python coloring is purely TextMate-based.
-- **Palette patch timing**: `_patchSemanticTokenColorIndices()` must run after editor creation + tmRegistry initialization + setColorMap. Multiple call sites ensure at least one hits the right timing window.
+### Reconnect
 
-### Background full-token projections
+te2.resync is a frontend WBA request. A fresh editor client asks the WBA to
+replay provider and diagnostics state without restarting the extension host.
+The replay is idempotent and supplies each client only through the WBA lane.
 
-The retained WBA logical-document set also owns background full-document
-semantic-token prewarming.
+### Key files
 
-- Only real full-document semantic token providers participate. Range providers
-  remain foreground, range-bound requests; WBA never fabricates ranges.
-- Hydrated background documents are queued in logical/MRU order and computed
-  with concurrency one. The queue pauses while a visible `openFile`
-  transaction is in flight.
-- The cache key includes WBA document version, content identity, language,
-  SHA-256 text fingerprint, project generation, and full-provider generation.
-- A foreground Monaco full-token request uses the existing
-  `vscode.semanticTokens` path. When its text fingerprint matches, WBA returns
-  the compact cached map without an extension-host provider round trip.
-- The draft-safe foreground synchronization barrier remains in place, but a
-  byte-identical full-text update changes only document metadata. It does not
-  advance the WBA model version, emit `$acceptModelChanged`, or invalidate the
-  prewarmed token map. A real text mutation performs all three.
-- The editor keeps one stable semantic-token provider registration per language.
-  Replayed selector snapshots are reconciled by provider handle, full providers
-  win over range providers when both exist, and duplicate registrations are
-  no-ops. Real provider or legend changes produce one microtask-coalesced,
-  language-scoped invalidation; reconnect hydration finishes with one active
-  language refresh instead of per-selector invalidation bursts.
-- Real text mutation, logical close, workspace/session reset, or a full-provider
-  change invalidates the complete entry. Range-provider changes do not invalidate
-  it.
-- Cached arrays are retained as `Uint32Array` with a 32 MiB whole-entry LRU
-  budget. Entries are never truncated; eviction releases the corresponding
-  extension-host semantic-token result ID.
+| File | Role |
+|---|---|
+| src/client/workbench-client.ts and src/server/server.ts | WBA semantic-token request and event handling. |
+| editor_wba_rpc_transport.ts | Direct editor WBA transport. |
+| editor_textmate_runtime.ts | Encoded TextMate provider, color-map publish, and model reset. |
+| editor_theme_apply_runtime_utils.ts | Theme definition and application order. |
+| editor_ui_editor_runtime.ts | Defensive semantic-highlighting repair. |
 
 ## 24) Completions Pipeline (End-to-End)
 
@@ -2352,14 +1268,14 @@ Completions flow from the frontend through the same WBA RPC pipeline as other ed
 
 ```
 Monaco CompletionItemProvider.provideCompletionItems()
-  → m_editor_app.ts / editor_workbench_runtime.ts
+  → editor_language_bridge_providers.ts / editor_workbench_runtime.ts
   → editor_wba_rpc_transport.ts: /wba RPC "vscode.completions"
-  → server.mjs: route to wb.completions()
-  → workbench_client.mjs: $provideCompletionItems(handle, resource, position, context, token)
+  → src/server/server.ts: route to wb.completions()
+  → src/client/workbench-client.ts: $provideCompletionItems(handle, resource, position, context, token)
   → ext host: language server computes completions
   ← ISuggestResultDto (minified wire format)
-  ← workbench_client.mjs: _inflateCompletionItems() → Monaco suggestions
-  ← server.mjs → /wba reply → Monaco widget
+  ← src/client/workbench-client.ts: _inflateCompletionItems() → Monaco suggestions
+  ← src/server/server.ts → /wba reply → Monaco widget
 ```
 
 ### The debounce race condition
@@ -2380,7 +1296,7 @@ Two-part fix ensures the ext host always has the latest document content:
 - `_flushMirrorDebounce()` force-fires the pending debounce timer before each completion request
 - `text: m.getValue()` is included in every completion RPC as the authoritative full document content
 
-**Part 2 — Adapter (`workbench_client.mjs`)**:
+**Part 2 — Adapter (`src/client/workbench-client.ts`)**:
 - `completions()` checks for `params.text`; if present, calls `this.didChange()` synchronously before `$provideCompletionItems`
 - `didChange()` writes `$acceptModelChanged` directly to the ext host's stdin pipe — synchronous, no transport delay
 - The ext host processes the didChange before the completion request because both run in the same Node.js event loop tick
@@ -2408,15 +1324,16 @@ The ext host returns a minified DTO with single-letter field names for wire effi
 
 | File | Role |
 |---|---|
-| `m_editor_app.ts` | `provideCompletionItems`, `_flushMirrorDebounce()`, sends `text` param |
+| `editor_language_bridge_providers.ts` | Monaco `provideCompletionItems` bridge and request shaping. |
+| `m_editor_app.ts` | `_flushMirrorDebounce()` and editor-runtime assembly. |
 | `editor_wba_rpc_transport.ts` | direct `/wba` RPC transport |
 | `editor_workbench_runtime.ts` | maps completion requests to WBA RPC |
-| `server.mjs` | `vscode.completions` route — passes text to `wb.completions()` |
-| `workbench_client.mjs` | `completions()` — pre-flight didChange, `$provideCompletionItems`, `_inflateCompletionItems()` |
+| `src/server/server.ts` | `vscode.completions` route — passes text to `wb.completions()` |
+| `src/client/workbench-client.ts` | `completions()` — pre-flight didChange, `$provideCompletionItems`, `_inflateCompletionItems()` |
 
 ### Inflation and range handling
 
-`_inflateCompletionItems()` in `workbench_client.mjs`:
+`_inflateCompletionItems()` in `src/client/workbench-client.ts`:
 1. Reads `dto.a` as `defaultRanges` (insert + replace ranges for all items)
 2. For each item in `dto.b`: maps minified fields to Monaco's `CompletionItem` shape
 3. If an item has its own `c.j` range, uses that; otherwise uses `defaultRanges`
@@ -2486,176 +1403,27 @@ te2 console search "query" --worker <worker-id> --limit 100
 
 ---
 
-## 26) Monarch Palette Corruption Fix (Universal)
+## 26) Themes, TextMate palette, and retokenization
 
-### Problem
+Theme selection is a preference-backed editor concern. Code TE2 registers the
+vendored GitHub themes and extension-contributed themes, resolves the selected
+theme JSON, converts it to Monaco data, then applies it through the theme
+runtime. The live loader is loadVscodeTextmateThemesRuntime() and the live
+application path is applyMonacoThemeRuntime().
 
-Monaco has two independent tokenization systems:
+The same raw VS Code theme is applied to the TextMate registry. Its color map is
+published to Monaco and every loaded model is reset for tokenization. This
+sequence keeps encoded TextMate scopes, semantic-token rules, and visible Monaco
+theme state aligned. It does not use the removed palette-index monkey patch.
 
-| System   | Path | Token encoding |
-|----------|------|---------------|
-| TextMate | `vscode-textmate` registry → `tokenizeLine2()` | `Uint32Array` with foreground indices from the TextMate color map (~300 colors) |
-| Monarch  | Regex rules → `tokenTheme.match(languageId, scopes)` | Packed metadata with foreground indices from tokenTheme's internal palette (~20 colors) |
+Theme changes are idempotent: load or reuse JSON, define the Monaco theme when
+needed, set the selected id, update the page base class, apply the TextMate
+theme/color map, then reset tokenization. A missing contributed theme must fail
+locally without changing the active theme.
 
-When `setColorMap()` overrides the rendering palette with TextMate's color map, Monarch-only languages (Kotlin, TOML, Makefile, etc.) resolve their foreground indices against the wrong palette, producing incorrect colors.
-
-### Root cause
-
-`TokenTheme.match()` returns metadata containing foreground indices from its own small palette. After `setColorMap()`, the renderer uses the TextMate color map (which is much larger and has different index→color mappings). The Monarch indices now point to the wrong colors.
-
-### Fix: `_colorIndexTranslation` in `TokenTheme`
-
-**File**: `worktrees/vscode-te2-diff/src/vs/editor/common/languages/supports/tokenization.ts`
-
-A translation array is added to `TokenTheme`:
-
-```
-_colorIndexTranslation: Uint32Array | null = null;
-```
-
-In `match()`, when `_colorIndexTranslation` is set, the foreground index is extracted from the metadata, looked up in the translation table, and repacked:
-
-```
-const fg = (metadata & 0x00FFFF80) >>> 15;
-if (fg < this._colorIndexTranslation.length) {
-    const mapped = this._colorIndexTranslation[fg];
-    metadata = ((metadata & ~0x00FFFF80) | (mapped << 15)) >>> 0;
-}
-```
-
-**MetadataConsts bit layout** (from `encodedTokenAttributes.ts`):
-- `FOREGROUND_MASK`: `0x00FF8000` → bits 15–22
-- `FOREGROUND_OFFSET`: 15
-
-### Wiring
-
-`_patchSemanticTokenColorIndices()` in `m_editor_app.ts` builds the translation table by matching colors from tokenTheme's small palette to their indices in the TextMate color map, then sets it directly on the tokenTheme object:
-
-```js
-theme.tokenTheme._colorIndexTranslation = indexTranslation;
-theme.tokenTheme._cache.clear();
-```
-
-The cache must be cleared because previously cached metadata has stale foreground indices.
-
-**Tree-shaking note**: The `setColorIndexTranslation()` method was tree-shaken from the Monaco build because it was only called through `as any` casts. The field `_colorIndexTranslation` and the `match()` logic survive because they execute in the hot path.
-
-### Key files
-
-| File | Role |
-|------|------|
-| `tokenization.ts` (patched source) | `_colorIndexTranslation` field + translation logic in `match()` |
-| `standaloneThemeService.ts` (patched source) | `setColorMapOverride()` builds translation + forwards |
-| `m_editor_app.ts` `_patchSemanticTokenColorIndices()` | App-layer: sets field directly on tokenTheme |
-| `monaco.bootstrap.bundle.js` | Built bundle containing the fix (~line 164490) |
-
-## 27) Dynamic Theme System
-
-### Architecture overview
-
-Themes are discovered from two sources:
-
-1. **Vendored themes** — shipped in `monaco_editor/themes/vendored/{vendor}/`
-2. **Extension themes** — discovered via `contributes.themes[]` in installed VSIX extensions
-
-Both sources are merged by `GET /monaco_editor/available_themes` and returned as:
-
-```json
-{
-  "id": "github-dark-default",
-  "label": "GitHub Dark Default",
-  "uiTheme": "vs-dark",
-  "source": "vendored",
-  "sourceLabel": "GitHub Theme (Bundled)",
-  "serveUrl": "/api/app/code_te2/ui/monaco_editor/themes/vendored/github/github-dark-default.json"
-}
-```
-
-### Vendored themes
-
-Located at `monaco_editor/themes/vendored/github/`:
-- `theme_index.json` — manifest mapping theme IDs to filenames
-- 9 theme JSON files (GitHub Dark Default, GitHub Light, Dimmed, High Contrast, etc.)
-
-### Extension `contributes.themes` parsing
-
-`extension_registry.py` → `_parse_extension_package()` extracts `contributes.themes[]` entries from each extension's `package.json`:
-
-```python
-themes = pkg.get("contributes", {}).get("themes", [])
-```
-
-Each entry yields `{id, label, uiTheme, path}`. These appear in the `available_themes` response with `source: "extension"`.
-
-### Frontend registry
-
-`m_editor_app.ts`:
-- `_ensureThemeRegistry()` — fetches `available_themes` once, builds a `Map<id, entry>`
-- `_getVscodeThemeJsonUrl(themeId)` — looks up serve URL from registry; fallback to vendored path map
-- `loadVscodeTextmateThemes()` — loads ALL themes from registry into `_jsonCache`, calls `defineTheme()` for each
-- `resolveMonacoThemeId(themeKey)` (from `editor_theme_resolver_utils.js`) — normalizes theme key to Monaco-registered theme ID
-- `applyMonacoTheme(themeKey)` — applies theme + lazy load + TextMate sync + palette patch + retokenization
-
-### Theme submodal (UI)
-
-| Element | Purpose |
-|---------|---------|
-| `#editor-themes-modal` (z-index 345) | Full theme browser, fe-modal pattern |
-| `#editor-settings-theme-strip` | Clickable strip in settings modal → opens theme browser |
-
-Sections: **Bundled** (vendored), **From Extensions** (installed).
-
-> **Built-in Monaco themes disabled** — `vs`, `vs-dark`, `hc-black`, `hc-light` are hidden from the theme picker and their IDs redirect to the closest GitHub vendored theme. These built-in themes lack a `tokenColors` array, so after `setColorMap()` overrides the rendering palette for TextMate, semantic tokens resolve foreground indices against the wrong palette (producing black or invisible text). Only vscode-style themes with full `tokenColors` JSON are supported. This will be revisited when a proper `setColorMap(null)` → retokenize pipeline is implemented.
-
-### Key files
-
-| File | Role |
-|------|------|
-| `m_editor_app.ts` + `editor_theme_*_utils.js` | Theme registry, loading, conversion, and application |
-| `editor_backend.py` | `GET /available_themes` endpoint, vendored theme serving |
-| `extension_registry.py` | `contributes.themes[]` parsing |
-| `main_page/frontend/` | Theme submodal open/close/refresh logic |
-| `template.html` | `#editor-themes-modal` markup |
-| `themes/vendored/github/theme_index.json` | Vendored theme manifest |
-
-### Gotchas
-
-- **Short hex colors**: Monaco's tokenization parser rejects 3/4-char CSS shorthand hex (`#fff`, `#0008`). Converter helpers in `editor_parse_utils.js` expand these to 6/8-char before passing to `defineTheme()`.
-- **Built-in themes disabled**: `vs`, `vs-dark`, `hc-black`, `hc-light` are hidden from the picker. They lack `tokenColors` so semantic tokens resolve to wrong palette indices after `setColorMap()`. IDs redirect to closest GitHub vendored theme via `resolveMonacoThemeId()` (`editor_theme_resolver_utils.js`). See §28 for related retokenization details.
-
-## 28) Theme-Switch Retokenization
-
-### Problem
-
-After `applyMonacoTheme()` calls `setTheme()` + `setColorMap()` + `_patchSemanticTokenColorIndices()`, the already-tokenized lines in the editor model still contain cached token data from the **old** theme. Colors only update after a full page reload.
-
-### Fix
-
-At the end of `applyMonacoTheme()`, after all theme/palette/translation updates are complete, force retokenization on every open model:
-
-```js
-var models = window.monaco.editor.getModels();
-for (var mi = 0; mi < models.length; mi++) {
-  if (models[mi] && typeof models[mi].resetTokenization === 'function') {
-    models[mi].resetTokenization();
-  }
-}
-```
-
-`resetTokenization()` invalidates the model's line-level token cache, causing Monaco to re-run all tokenizers (TextMate `tokenizeLine2` and Monarch `match()`) against the updated color map and translation table.
-
-### Execution order in `applyMonacoTheme()`
-
-1. `loadVscodeTextmateThemes()` — ensure all themes defined
-2. `resolveMonacoThemeId()` — normalize theme key
-3. Lazy-load single theme if not cached
-4. `monaco.editor.setTheme(resolvedId)` — activates theme, rebuilds `tokenTheme`
-5. `_applyThemeToTextmateRegistry(tmActiveThemeJson)` — updates TextMate color map via `setColorMap()`
-6. `_forceSemanticHighlighting()` — ensures semantic tokens enabled
-7. `_patchSemanticTokenColorIndices()` — rebuilds `_colorIndexTranslation` on new tokenTheme + clears cache
-8. **`resetTokenization()` on all models** — flushes stale line tokens, triggers full retokenization
-
----
+Key sources: editor_theme_loader_runtime_utils.ts,
+editor_theme_apply_runtime_utils.ts, editor_textmate_runtime.ts, and the
+vendored GitHub theme directory.
 
 ## 30) RPC Protocol IDs (`rpcId`) — How They Work and Auto-Discovery
 
@@ -2701,7 +1469,7 @@ handshake or discovery step.
 
 ### How TE2 handles them — `rpc-config.json` auto-discovery
 
-The workbench adapter (`workbench_client.mjs`) replaces the real renderer.
+The workbench adapter (`src/client/workbench-client.ts`) replaces the real renderer.
 Since it doesn't import `extHost.protocol.ts`, the rpcIds are resolved via a
 **cached config file** (`te2_rpc_config.json`) that is auto-generated by
 structurally parsing the installed code-server bundle, with `extHost.protocol.ts` as a fallback/cross-check when available.
@@ -2797,427 +1565,95 @@ alphanumeric-only factory name.
 | `extHost.protocol.ts` (code-server) | Single source of all `createProxyIdentifier()` calls |
 | `proxyIdentifier.ts` (code-server) | `ProxyIdentifier` class with static counter |
 | `rpcProtocol.ts` (code-server) | `getProxy()` / `_remoteCall()` — wires nid to RPC |
-| `workbench_client.mjs` (TE2) | Named `_rpcIds` lookups, config loader, hardcoded fallback defaults |
+| `src/client/workbench-client.ts` (TE2) | Named `_rpcIds` lookups, config loader, hardcoded fallback defaults |
 | `extension_registry.py` (TE2) | `ensure_rpc_config()` — version-gated extraction and caching |
 | `workbench_adapter_shell_manager.py` (TE2) | Calls `ensure_rpc_config()` before adapter launch |
-| `~/.config/code-server/te2_rpc_config.json` | Cached nid map (auto-generated, version-gated) |
-
-## 31) Adapter Auto-Restart & Status Indicator
-
-### Problem
-
-When extensions are installed, uninstalled, toggled, or reconfigured, the workbench adapter (and sometimes code-server) must be restarted for changes to take effect. Previously this required a full page reload. There was also no persistent visual indicator showing whether the adapter was connected.
-
-### Solution: auto-restart pipeline
-
-Extension operations trigger automatic shell termination and inline editor remount:
-
-| Operation | Shells killed | Handler |
-|-----------|--------------|---------|
-| Install / Uninstall | code-server + adapter | `_restart_code_server_and_adapter()` |
-| Toggle / Configure / User Settings | adapter only | `_restart_adapter_only()` |
-| Manual restart (UI menu) | adapter only | `handle_ext_restart_adapter()` |
-
-### Restart flow
-
-1. **Backend**: extension handler (e.g. `handle_ext_configure`) calls `_restart_adapter_only()`
-2. **Backend**: `terminate_adapter_shell()` kills the Node process, clears pipe/reader/RPC state, cancels pending futures
-3. **Backend**: emits `ext:adapter_restarting` to frontend via explorer WS
-4. **Frontend**: save handler calls `_reloadEditorIframe()` (legacy name) which now remounts the inline editor runtime:
-   - Resets `window.__adapterConnected = false`
-   - Sets spinner to busy state
-   - Reboots the inline editor host after 1.5 s delay (let shell terminate)
-   - Re-invokes `ensureWorkbenchAdapterReady()` after 2 s (let the editor runtime reconnect)
-5. **Inline editor runtime**: boots → emits `editor_readiness_check` → backend launches new adapter → baton completes → spinner goes green
-
-The `ext:adapter_restarting` event handler is a safety-net backup. The primary reload is triggered directly by the save/install handlers in the host frontend module graph.
-
-### 3-state status indicator
-
-The spinner element (`#fe-lsp-spinner`) is always visible with three CSS states:
-
-| State | CSS class | Visual | Meaning |
-|-------|-----------|--------|---------|
-| busy | `fe-lsp-status--busy` | Animated spinner | Adapter starting or diagnostics running |
-| ok | `fe-lsp-status--ok` | Green check (✓) | Adapter connected |
-| error | `fe-lsp-status--error` | Red X (✗) | Adapter not connected |
-
-State is managed by `_feUpdateLspSpinner()` which reads:
-- `window.__feLspSpinnerUi.busyShow` — true while an activity is in progress
-- `window.__adapterConnected` — set to true by `_spinnerHide()` after baton completes
-
-### Adapter context menu
-
-Long-press (touch) or right-click (desktop) on the status indicator opens a dropdown (`#fe-adapter-dd`) with:
-- **Reload Extension Adapter** — sends `ext:restart_adapter` to backend, triggers full restart flow
-
-Uses the `fe-menubar` dropdown pattern (not native browser menus).
-
-### Shell termination helpers
-
-- `terminate_adapter_shell()` in `workbench_adapter_shell_manager.py`: kills adapter process, clears `_adapter_pipe`, `_pipe_reader_task`, `_rpc_pending` futures, resets `_adapter_ready`
-- `terminate_code_server_shell()` in `code_server_shell_manager.py`: kills code-server process, resets `_code_server_ready` event
-
-Both use the framework-shells `terminate` endpoint to kill the underlying shell.
-
-### Key files
-
-| File | Role |
-|------|------|
-| `workbench_adapter_shell_manager.py` | `terminate_adapter_shell()` — adapter teardown |
-| `code_server_shell_manager.py` | `terminate_code_server_shell()` — code-server teardown |
-| `explorer_ws.py` | `_restart_adapter_only()`, `_restart_code_server_and_adapter()`, restart handlers |
-| `template.html` | 3-state CSS classes, `#fe-adapter-dd` dropdown, spinner default class |
-| `main_page/frontend/` | Inline editor remount, LSP spinner, adapter dropdown, and host event handlers |
-
-## 32) Touch Selection Extension (`monaco-touch-selection`)
-
-Mobile touch handling (teardrops, selection handles, context menu) is provided by
-a **vendored, patched fork** of the
-[monaco-touch-selection](https://github.com/nicepkg/monaco-collection) library
-(upstream v1.1.1 by _potmot_).  The fork lives in a local worktree, is built from
-TypeScript source, and the UMD output is deployed into the editor's static vendor
-directory.
-
-### Overview
-
-The extension hooks into a Monaco `ICodeEditor` and adds:
-
-- **Teardrop cursor indicator** — a draggable handle below the cursor.
-- **Selection handle bars** — left/right draggable handles around a selection range.
-- **Touch context menu** — a floating toolbar with clipboard, selection, hover, and undo/redo tools.
-- **Centered utility islands** — separate mobile tab and code-inspector toolbars centered by their combined width.
-- **Drag-to-reveal** — while dragging a handle, the editor auto-scrolls to keep the cursor visible.
-- **Touch offset** — during drag, the target position is shifted up by 1.5 line-heights so the user's finger doesn't occlude the text.
-- **Rendered-column hit testing** — horizontal touch coordinates are resolved against Monaco's rendered column offsets, including tabs and variable-width glyph advances.
-
-### TE2-specific patches (on top of upstream)
-
-| Patch | What it does |
-|-------|-------------|
-| **Dynamic `EditorOption` lookup** | Resolves `fontSize` / `lineHeight` enum IDs at call-time via `globalThis.monaco`, not at UMD-load-time (avoids wrong fallback values in TE2's Monaco build) |
-| **`bottomCursor` positioning fix** | Uses `top` + `marginTop` instead of `bottom` so the teardrop renders at the correct vertical offset |
-| **Config-change listener** | Re-reads `fontSize` / `lineHeight` on `editor.onDidChangeConfiguration` so teardrop position updates after settings changes |
-| **Touch offset correction** | During drag, targets `clientY + touchOffsetY - lineHeight * 1.5` for finger clearance |
-| **Precise horizontal targeting** | Uses `getOffsetForColumn()` with a binary search bounded to the touched visual row, choosing the nearest rendered column without crossing Monaco wrap boundaries |
-| **Fixed-rate drag sampling** | `touchmove` records only the latest touch; one 50 ms loop resolves rendered columns, performs edge scrolling, and writes changed Monaco positions without accumulating per-event work |
-| **Touch menu activation** | Handle taps and completed handle drags open the menu islands automatically; desktop remains explicit right-click behavior |
-| **Selection adjustment primitives** | Grow/shrink tools remain available to custom integrations, but the default mobile menu no longer mounts their island |
-| **Select Word tool** | Built-in tool that selects the word at the cursor position |
-| **Hover tool** | Built-in tool (🚁) that closes the menu and triggers `editor.action.showHover` at the cursor |
-
-> **Critical timing note**: `EditorOption` enum lookup **must** happen inside
-> `editorTouchSelectionHelp()` at call-time, not at module/UMD-load-time.
-> `globalThis.monaco` is not yet available when the UMD script is first evaluated.
-> Placing the lookup at module scope causes fallback values (52/67) to be used,
-> which breaks teardrop positioning.
-
-### Build process
-
-```bash
-# 1. Source lives in the local worktree
-cd worktrees/monaco-touch-selection/
-
-# 2. Compile TypeScript and build both JavaScript and CSS
-npm run build
-#    → dist/index.umd.cjs   (deployed file)
-#    → dist/index.js         (ESM, not used)
-#    → dist/style.css         (deployed file)
-
-# 3. From the repository root, deploy the generated vendor assets
-cp worktrees/monaco-touch-selection/dist/index.umd.cjs \
-   app/apps/code_te2/static/vendor/monaco-touch-selection/monaco-touch-selection.patched.umd.js
-cp worktrees/monaco-touch-selection/dist/style.css \
-   app/apps/code_te2/static/vendor/monaco-touch-selection/monaco-touch-selection.css
-```
-
-The patched CSS source is `worktrees/monaco-touch-selection/src/style.css`.
-The files under the Code TE2 static vendor directory are deployment artifacts;
-do not patch them independently from the worktree source.
-
-### Gesture reference
-
-| Gesture | Target | Action |
-|---------|--------|--------|
-| **Tap** | Editor surface | Set cursor position |
-| **Double-tap** | Editor surface | Select word at tap position |
-| **Tap** | Teardrop (cursor handle) | Open the touch-menu stack |
-| **Drag** | Teardrop (cursor handle) | Reposition the cursor through the fixed-rate rendered-column sampler with calibrated 1.5-line finger clearance; open menus on release |
-| **Drag** | Selection handle bar | Adjust the range boundary through the fixed-rate sampler; open menus on release |
-| **Tap** | Line number gutter | Select entire line above the tapped line |
-| **Tap then drag** | Line number gutter | Change line range selection |
-
-### Touch menu tools
-
-Tools appear in the context menu in the order listed below.
-
-| # | Tool | Icon | Action | Menu after |
-|---|------|------|--------|------------|
-| 1 | **Copy** | 📋 (clipboard SVG) | Copy selection to clipboard | Stays open |
-| 2 | **Cut** | ✂️ (scissors SVG) | Cut selection to clipboard | Stays open |
-| 3 | **Paste** | 📥 (paste SVG) | Paste from clipboard at cursor | Stays open |
-| 4 | **Undo** | ↩ (undo SVG) | Undo last edit | Stays open |
-| 5 | **Redo** | ↪ (redo SVG) | Redo last edit | Stays open |
-| 6 | **Select Word** | ⬚ (dashed box SVG) | Select the word at cursor position | Stays open |
-| 7 | **Select All** | ↔ (expand arrows SVG) | Select all text in editor | Stays open |
-| 8 | **Hover** | 🚁 (helicopter emoji) | Close menu, show hover info at cursor position | Closes |
-| 9 | **Close** | ✕ (X SVG) | Dismiss the touch menu | Closes |
-
-The mobile utility row keeps the tab-navigation and code-inspector controls in
-separate islands, centered as one combined group. Grow/shrink selection tools
-remain available to custom integrations but are not mounted by default.
-
-### Initialization
-
-The extension is loaded in `m_editor_app.ts` as a UMD global:
-
-```js
-// Called after editor DOM is ready (and on re-init after language switches)
-window['monaco-touch-selection'].editorTouchSelectionHelp(editor);
-```
-
-No options object is passed — all tools (including Hover) are built into the
-extension source.  The `tools` callback is available for external consumers who
-need to add custom tools, but TE2 does not use it.
-
-### Key files
-
-| File | Role |
-|------|------|
-| `worktrees/monaco-touch-selection/src/index.ts` | TypeScript source — all patches, tools, and logic |
-| `worktrees/monaco-touch-selection/src/style.css` | Patched touch-target and menu CSS source |
-| `worktrees/monaco-touch-selection/dist/index.umd.cjs` | Build output (UMD) |
-| `app/.../vendor/monaco-touch-selection/monaco-touch-selection.patched.umd.js` | Deployed vendored UMD (copy of build output) |
-| `app/.../vendor/monaco-touch-selection/monaco-touch-selection.css` | Deployed CSS (copy of worktree build output) |
-| `app/.../monaco_editor/m_editor_app.ts` | Initialization call (`editorTouchSelectionHelp(editor)`) |
-
-## 33) Diagnostics Owner-Keyed Markers (Multi-Source Fix)
-
-### Problem
-
-Diagnostics from different extension-host sources (ESLint, TypeScript, etc.) were
-being set on the Monaco model with a **single hardcoded owner** (`'vscode_api'`).
-Because `monaco.editor.setModelMarkers(model, owner, markers)` is a
-**replace-all-for-this-owner** operation, each `$changeMany` from a new source
-would overwrite the previous source's markers.
-
-Typical sequence:
-
-1. ESLint `$changeMany` arrives → `setModelMarkers(model, 'vscode_api', [332 markers])` ✅
-2. TypeScript `$changeMany` arrives 400ms later → `setModelMarkers(model, 'vscode_api', [16 markers])` ❌
-3. Result: 332 ESLint markers gone, only 16 TypeScript markers remain.
-
-This caused the "flash then disappear" symptom — ESLint squiggles briefly visible
-then wiped out by the TypeScript push.
-
-### Fix
-
-Each diagnostic source now uses its **original owner string** (`eslint0`,
-`typescript`, etc.) as the Monaco marker owner. Markers from different owners
-coexist independently.
-
-#### Frontend (`m_editor_app.ts`)
-
-| Component | Before | After |
-|-----------|--------|-------|
-| `setModelMarkers` owner | Hardcoded `'vscode_api'` | `params.owner` from adapter (`eslint0`, `typescript`, …) |
-| `_diagCache` | `Map(path → {markers})` | `Map(path → Map(owner → {markers}))` — preserves all owners |
-| `_applyCachedDiagnosticsForActive` | Replays single cached entry | Iterates all cached owners, sets markers for each |
-| `_clearDiagnosticsForSwitch` | Clears `'vscode_api'` only | Iterates `_diagKnownOwners` Set, clears each owner + legacy fallback |
-| Toolbar counts | Counted from latest `setModelMarkers` call only | `_emitAggregatedDiagCounts()` reads `getModelMarkers({resource})` across all owners |
-
-#### Backend (`diagnostics_bridge.py`)
-
-| Component | Before | After |
-|-----------|--------|-------|
-| `_diag_cache` key | `abs_path` (single entry per file) | `(abs_path, owner)` tuple — both ESLint and TS entries coexist |
-| `_pending_entry` | Single buffered entry (last-write-wins) | `_pending_entries` list, deduped by owner — all sources buffered |
-| `send_cached_diagnostics_to_sid` | Sends one cached entry | Iterates all `(path, owner)` entries matching path |
-| `set_consumer_ready` flush | Flushes one entry | Flushes all buffered entries for the expected path |
-
-### Data flow
-
-```
-Extension Host ($changeMany owner=eslint0, markers=332)
-  → workbench_client.mjs (preserves owner in event)
-  → server.mjs emitTe2Event({ type: "diagnostics/update", owner: "eslint0", items: [...] })
-  → diagnostics_bridge.py caches at key ("path", "eslint0"), forwards entry
-  → m_editor_app.ts _applyDiagnosticsUpdate({ owner: "eslint0", items: [...] })
-  → monaco.editor.setModelMarkers(model, "eslint0", [332 markers])
-
-Extension Host ($changeMany owner=typescript, markers=16)
-  → same pipeline, owner="typescript"
-  → monaco.editor.setModelMarkers(model, "typescript", [16 markers])
-  → both owner's markers coexist: getModelMarkers() returns 348 total
-```
-
-### File switch behavior
-
-When the user switches files (`openPathFromBackend`):
-
-1. `_clearDiagnosticsForSwitch()` iterates all known owners → `setModelMarkers(model, owner, [])` for each
-2. Toolbar counts zeroed immediately
-3. `_diagKnownOwners` reset to empty Set
-4. Spinner/baton starts for the new file
-5. New diagnostics arrive per-owner → markers accumulate correctly
-
-### Key files
-
-| File | Role |
-|------|------|
-| `m_editor_app.ts` | `_applyDiagnosticsUpdate()`, `_emitAggregatedDiagCounts()`, `_clearDiagnosticsForSwitch()`, `_applyCachedDiagnosticsForActive()` |
-| `diagnostics_bridge.py` | `_process_diagnostics_update()`, `set_consumer_ready()`, `send_cached_diagnostics_to_sid()`, `_pending_entries` buffer |
-| `server.mjs` | `diagnosticsFromChangeMany()` — extracts owner from `$changeMany` args, passes through in `diagnostics/update` event |
-
-## 34) Multi-Provider Pipeline — Systemic Fix (Hover, Completions, Symbols, Semantic Tokens)
-
-This section records the original multi-provider failure and its evolution.
-The current frontend hot path is direct strict-MessagePack `/wba`, not
-`editor_ws.py`. Provider registrations arrive as WBA events plus a reconnect
-snapshot and are projected through public Monaco provider APIs.
-
-The same generic bridge now covers hover, completions, document symbols, folding,
-document colors, inlay hints, inline completions, semantic tokens, document
-highlights, definitions, references, and implementations. Document highlights
-are what supply cursor-position occurrence highlighting. The bridge is driven by
-advertised provider selectors and contains no per-language routing cases.
-
-### Problem: Single-provider selection (systemic)
-
-`_findProviderHandle(type, languageId)` returned only the **first** matching handle for every provider type. Extensions routinely register **multiple** providers per language — e.g. `typescript-language-features` registers 3 completion providers for JavaScript (main completions, directive comment completions like `@ts-check`, and snippet/refactoring completions). Only the first one was ever called; the rest were silently dropped.
-
-This affected **all** provider-based features: hover, completions, document symbols, semantic tokens, and semantic tokens range.
-
-Example: For JSON hover, `vscode.npm` registers with `{"language":"json","pattern":"**/package.json"}` **before** `vscode.json-language-features` registers its unrestricted `{"language":"json"}` provider. So `pyrightconfig.json` always got npm's handle → ext host rejected it (pattern mismatch) → empty reply.
-
-Example: For JS completions, the directive comment provider (`@ts-check`, `@ts-nocheck`, `@ts-ignore`, `@ts-expect-error`) was never reached because the main TS completion provider was always returned first.
-
-### Fix: Parallel multi-provider calling (VS Code approach)
-
-The provider registry matches the exact document tuple — language, scheme,
-authority, and path — and returns **all** matching provider handles. Every
-document-scoped provider method now fires its RPC to all matching handles
-simultaneously and merges or selects results:
-
-| Method | RPC | Merge Strategy |
-|--------|-----|----------------|
-| `hover()` | `$provideHover` | Concat non-empty contents, take first range |
-| `completions()` | `$provideCompletionItems` | Concat items arrays, OR isIncomplete flags |
-| `symbols()` | `$provideDocumentSymbols` | Concat symbol arrays |
-| `semanticTokens()` | `$provideDocumentSemanticTokens` | Pick richest response (binary delta encoding prevents merging) |
-| `semanticTokensRange()` | `$provideDocumentRangeSemanticTokens` | Pick richest response |
-| `getSemanticTokensLegend()` | (local lookup) | First non-null legend |
-
-```
-completions(params)
-  → findAllProviderHandlesForDocument("completions", document)
-      → [handle_A, handle_B, handle_C]
-  → Promise.all(handles.map(h → $provideCompletionItems(h, uri, position, context)))
-  → merge: concat items, OR isIncomplete, keep first cacheId
-  → return merged completions
-```
-
-Each method has a `_*Single()` helper (e.g. `_completionsSingle()`, `_hoverSingle()`, `_symbolsSingle()`, `_semanticTokensSingle()`) that preserves the old single-provider path for callers that pin a specific `providerHandle`.
-
-Language-only matching is insufficient: extensions may register selectors with
-only `scheme` and `pattern`. New document-scoped code must use
-`findAllProviderHandlesForDocument()` (or the semantic-token full/range
-equivalent), not `_findProviderHandle()` or `_findAllProviderHandles()`.
-
-### Problem 2: Cold boot hover registration timing
-
-On cold boot, hover providers registered for the **wrong language**. The sequence:
-
-1. `createFileModel(content, 'json', path)` — Monaco doesn't know `json` as a language (rich language workers removed), model gets `plaintext`
-2. `setTimeout(0)` → `installVscodeApiLanguageBridgeProviders()` → `_currentLanguageContext()` sees `plaintext` → registers hover for `plaintext` only
-3. `applyLanguageToModel()` async chain → `ensureTextmateTokenization('json')` → registers `json` language, calls `setModelLanguage(model, 'json')` → but bridge already ran
-4. User hovers on JSON → no `json` hover provider exists → request never fires
-
-Python worked because Monaco recognizes `python` natively — model gets `python` at creation time, so the immediate bridge registration sees the correct language.
-
-### Fix: Re-run bridge after async language application
-
-Added `installVscodeApiLanguageBridgeProviders()` call in `applyLanguageToModel()`'s final `.then()` (after `setModelLanguage` succeeds post-TextMate install). The `registeredHover` set prevents duplicate registration — only new language IDs get providers.
-
-### Problem 3: Extension `contributes` stripped by sanitization
-
-`_sanitizeExtensionForInit()` stripped the `contributes` property from extension data (env var `TE2_EXT_INCLUDE_CONTRIB` defaulted OFF). Without `contributes`, JSON extension couldn't see `jsonValidation` contributions from other extensions → no schema associations → no hover content.
-
-Fix: Flipped default to ON (`"1"`). The OOM bugs that originally motivated stripping are resolved.
-
-### Problem 4: `$readFile` / `$stat` crash on `vscode://` URIs
-
-JSON extension calls `workspace.fs.readFile('vscode://schemas/vscode-extensions')`. This goes to `MainThreadFileSystem.$readFile` (nid 48). The adapter's catch-all returned `encodeExtReplyOkEmpty` (void/type 7), but the caller expected a VSBuffer → `.buffer` on undefined → crash.
-
-Fix: Added method-specific handlers for `$readFile` and `$stat` that return `encodeExtReplyError` (type 11). Extension catches the error gracefully and falls back to HTTP SchemaStore.
-
-Helper functions added:
-- `encodeExtReplyOkVSBuffer(req, buf)` — type 8 reply, for returning binary data
-- `encodeExtReplyError(req, errObj)` — type 11 reply, for returning structured errors
-
-### Problem 5: JSON language registration missing
-
-After removing Monaco's rich language workers, `json` was no longer a known language ID. `createModel(content, 'json', uri)` silently fell back to `plaintext`.
-
-Fix: Added guard in `ensureTextmateTokenization()` (~line 396 of `m_editor_app.ts`) that calls `monaco.languages.register({ id: lang })` if the language isn't already known. TextMate can then attach its tokenizer.
-
-### Reply type reference
-
-| Type | Name | Usage |
-|------|------|-------|
-| 5 | Ack | Fire-and-forget acknowledgment |
-| 7 | ReplyOKEmpty | Method returned void/null |
-| 8 | ReplyOKVSBuffer | Binary buffer response |
-| 9 | ReplyOKJSON | JSON payload response |
-| 10 | ReplyOKMixed | Mixed response |
-| 11 | ReplyError | Structured error |
-| 12 | ReplyErrorVSBuffer | Binary error |
-
-### Cold boot sequence (hover perspective)
-
-```
-t+0ms    inline editor runtime connected
-t+5ms    [editor:ssot] rx → currentPath = pyrightconfig.json
-t+5ms    [workbench-flow] generation=1
-t+50ms   open_file DEFERRED — waiting for baton
-t+50ms   [VSIX Languages] list FAILS (vscode_api deprecated)
-t+50ms   ensureTextmateTokenization(json) → registers json language ID
-t+60ms   installVscodeApiLanguageBridgeProviders() → immediate=plaintext (model still plaintext)
-         registers hover for plaintext
-t+100ms  TextMate ready → loadGrammar(source.json) → install json tokenizer
-         setModelLanguage(model, json)
-         installVscodeApiLanguageBridgeProviders() → immediate=json (NOW correct)
-         registers hover for json  ← THE FIX
-t+4000ms readiness: adapter_launched ok
-t+4100ms readiness: baton ok → replay open_file
-t+4100ms EMIT editor_workbench_open_file
-t+6000ms diagnostics arrive, symbols arrive
-t+20s    user hovers → provideHover fires → editorWorkbenchCall('hover')
-         → adapter hover() → _findAllProviderHandles → parallel $provideHover
-         → merged result returned
-```
-
-### Key files
-
-| File | Role |
-|------|------|
-| `monaco_editor/editor_language_bridge_providers.ts` | Generic event/snapshot-driven Monaco provider projection, including document highlights and navigation providers. |
-| `monaco_editor/editor_wba_runtime_handlers.ts` | Consumes WBA provider-registration events. |
-| `monaco_editor/editor_wba_rpc_transport.ts` | Maps editor bridge calls to direct WBA JSON-RPC methods. |
-| `workbench_protocol_proxy/node_workbench_adapter/src/extensions/provider-registry.ts` | Tracks every matching extension-host provider and publishes registration state. |
-| `workbench_protocol_proxy/node_workbench_adapter/src/extensions/intelligence/code-navigation.ts` | Multi-provider document highlights, definitions, references, implementations, and call hierarchy. |
-| `workbench_protocol_proxy/node_workbench_adapter/src/server/request-dispatch.ts` | Dispatches the direct `vscode.*` WBA request surface. |
-
-### Hover content projection
-
-The WBA continues to aggregate every selector-matched hover provider in provider order. The editor frontend normalizes that merged `contents` array generically before returning it through Monaco's public hover-provider API:
-
-- plain strings become Markdown `value` records;
-- legacy `{ language, value }` marked-code records are recognized before generic Markdown and become fenced code blocks using the supplied language identifier;
-- Code OSS `IMarkdownString` fields are allowlisted and type-checked, including trust, HTML/theme/alert flags, base URI, and extracted URI components;
-- malformed entries and malformed optional metadata are dropped deterministically.
-
-Before returning a non-empty hover, the frontend extracts every fenced-code language from the normalized Markdown, resolves each tag through Monaco's contributed language IDs and aliases, and awaits the existing WBA TextMate tokenizer for that language. This covers signatures whose fence language differs from the active document language—for example, a JavaScript provider returning a TypeScript signature—without adding a JavaScript, TypeScript, HTML, CSS, or other language-specific routing branch. Cancellation or a document-version change after grammar loading discards the stale hover.
+| `$TE2_CACHE_HOME/code_server/probes/te2_rpc_config.json` | Cached nid map (auto-generated, version-gated) |
+
+## 31) Adapter restart and status
+
+Extension installation, removal, enablement, and settings changes restart the
+minimum WBA or code-server path necessary to rebuild extension-host state. The
+backend restart implementation lives in explorer/services/extension_restarts.py;
+the Explorer request handler is explorer/handlers/extensions.py. The restart
+fact is explorer.extensions.adapter.restarting.
+
+The host exposes one persistent busy, ok, or error adapter indicator and
+remounts the editor frame through _reloadEditorFrame() when a replacement editor
+runtime is required. The indicator is presentation only: readiness remains a
+backend and framework-shell fact. Termination releases adapter pipe state and
+pending requests before a new shell is adopted.
+
+## 32) Touch selection
+
+Code TE2 ships a patched vendored monaco-touch-selection UMD and stylesheet at
+static/vendor/monaco-touch-selection/. It supplies mobile cursor/selection
+handles, a context menu, drag-to-reveal, and rendered-column hit testing without
+changing desktop right-click behavior.
+
+The deployed integration keeps Monaco option lookup at editor-init time, updates
+handle geometry after configuration changes, samples drag movement at a bounded
+rate, and uses the rendered visual row/column rather than a raw character
+estimate. The default touch menu supplies clipboard, undo/redo, word/all
+selection, hover, and close actions. Tab-navigation and Code Inspector controls
+are separate utility islands.
+
+editor_touch_menu_utils.ts initializes the helper after editor DOM readiness.
+It passes the current mobile flag plus leading and navigation tools; it does not
+rely on an implicit all-tools default. inline_host.ts loads the UMD asset.
+
+The repository contains deployment artifacts, not a rebuildable local source
+worktree. Update these assets only from an approved external source publication
+and validate touch handles, wrapped lines, configuration changes, and the menu
+on a target device.
+
+## 33) Diagnostics owner-keyed markers
+
+Extension-host diagnostics preserve their original owner. Monaco marker writes are
+replace-all only within an owner, so sharing one owner would make a later
+TypeScript, ESLint, or other update erase earlier markers.
+
+The editor WBA runtime keeps a marker service keyed by resource and owner. It
+reprojects every owner for the active model, clears rendered owners when leaving
+a model, and aggregates toolbar counts from the retained marker state. A WBA
+resync replays the bounded owner/resource snapshot to a newly connected editor;
+there is no polling or frontend-to-frontend diagnostics relay.
+
+The backend normalization path is separate from that direct editor path:
+adapter stdout PUSH frames enter workbench_adapter_shell_manager.py, flow through
+wba_event_bridge.py, and call diagnostics_bridge.handle_wba_diagnostics_update().
+That cache is bounded by DIAG_CACHE_MAX = 500. The removed adapter-WebSocket
+subscriber and its older consumer-ready, nudge, and pending-entry helper names
+are not current interfaces.
+
+Key files: editor_workbench_runtime.ts, src/server/event-bridge.ts,
+src/extensions/intelligence/diagnostics-snapshot.mjs,
+wba_event_bridge.py, and diagnostics_bridge.py.
+
+## 34) Multi-provider language features
+
+Provider registration is WBA-driven and generic. The registry matches the exact
+document selector (language, scheme, authority, and path), not just a language
+id, and invokes every matching provider. Results are merged where meaningful:
+hover contents and completion/symbol lists combine; semantic-token requests use
+the richest compatible response.
+
+The editor installs public Monaco providers from WBA registration events and a
+reconnect snapshot. It registers a missing contributed language before applying
+TextMate tokenization, then repeats bridge installation after the asynchronous
+language application so a plaintext cold model cannot permanently miss its
+providers.
+
+Extension contribution metadata remains available to activation and
+configuration. Unsupported vscode scheme file-system calls receive typed error
+replies rather than an empty value with the wrong wire type. Hover content is
+normalized and type-checked before Monaco receives it; grammar loading for a
+fenced language is cancelled when the active document version changes.
+
+Key sources: editor_language_bridge_providers.ts,
+editor_wba_runtime_handlers.ts, src/extensions/provider-registry.ts,
+src/extensions/intelligence/code-navigation.ts, and
+src/server/request-dispatch.ts.
 
 ## 35) Android / GeckoView IME and Monaco Text Input
 
@@ -3266,13 +1702,14 @@ There are two distinct layers:
 | `android/.../MainActivity.kt` | Wires filter, IPC client, restartInput callback. |
 | `monaco_editor/editor_mobile_ctrl_helper_utils.ts` | Adapts vendored Gboard Ctrl control bytes into Monaco keybinding chords. |
 | `monaco_editor/editor_mobile_special_keys_utils.ts` | Owns the mobile special-key row and fallback Save overlay. |
-| `worktrees/vscode-te2-diff/src/vs/editor/browser/config/editorConfiguration.ts` | Disables native `EditContext` on Android. |
-| `worktrees/vscode-te2-diff/src/vs/editor/browser/controller/editContext/textArea/textAreaEditContextState.ts` | Android detached textarea seed/prefix/suffix state. |
-| `worktrees/vscode-te2-diff/src/vs/editor/browser/controller/editContext/textArea/textAreaEditContextInput.ts` | Android coalesced input transaction path. |
+| `app/static/vendor/monaco-editor-core/esm/` | Committed patched Monaco artifacts; their editable VS Code source is external. |
 
 ### Publication path
 
-Publication runs `editor-distro`, overlays scoped ESM/CSS into `app/static/vendor/monaco-editor-core/esm`, regenerates the Monaco bootstrap when needed, and rebuilds Code TE2 `static/dist/host.js`. Android native source is not part of the Monaco text transaction publication unless the native filter layer itself changes.
+An approved external Monaco publication overlays scoped ESM/CSS into
+`app/static/vendor/monaco-editor-core/esm`, then Code TE2 rebuilds
+`static/dist/host.js`. Android native source is not part of that publication
+unless the native filter layer itself changes.
 
 ---
 
@@ -3664,7 +2101,7 @@ The Run Profiles modal is `main_page/frontend/ui/run-profiles-modal.ts`. It uses
 
 ---
 
-## 38) Desktop Client Integration
+## 38) Native clients and secondary-editor integration
 
 The active Linux desktop client is the Electron shell under `desktop_client/electron/`. `desktop_client/ui.py` remains a GTK/WebKit behavioral reference, not the current runtime.
 
@@ -3707,12 +2144,14 @@ Allowed app-view commands are:
 | `register_run_target_surface` | Register exact-frame `devRuntime` instrumentation metadata; it does not create a proxy. |
 | `release_run_target_surface` | Release exact-frame instrumentation metadata; it does not tear down a running shell's proxy. |
 | `open_sidebar_menu` | Present one bounded OS-native Sidebar dock menu and return only the selected action id. |
+| `read_sidebar_presentation_state` / `write_sidebar_presentation_state` | Read or persist the bounded per-client Sidebar presentation state. |
 | `place_sidebar_surface` | Create or reposition one persistent extension renderer over its DOM-owned embedded placeholder. |
 | `detach_sidebar_surface` | Move a persistent extension renderer into an Electron-main-owned floating window, or reconstruct an ordinary URL surface there. |
 | `focus_sidebar_surface` | Focus the exact detached surface presentation. |
 | `close_sidebar_surface` | Close the exact detached presentation and request inline reattachment. |
 | `reconcile_sidebar_surfaces` | Close native presentations absent from the current authoritative Sidebar ledger. |
 | `refresh_sidebar_surface` | Explicitly reload the exact native Sidebar renderer. |
+| `set_projection_probe_enabled` / `inspect_projection_probe` | Control and inspect the bounded native projection diagnostic probe. |
 | `open_second_editor` | From the primary renderer only, open one selected admitted project path in the stable secondary editor client. |
 | `sync_second_editor_project` | From the primary renderer only, reconcile the secondary presentation against the active project. |
 | `place_second_editor_surface` | From the primary renderer only, place the retained secondary view over the Code TE2-owned grid placeholder. |
@@ -3863,20 +2302,21 @@ their existing native identity bridges. Reset rotates both ids in one native
 transaction. The random process-local framework relay origin is never identity
 authority.
 
-The mobile host owns only drawer visibility. Close, hide, and mobile breakpoint
-exit retain the iframe and do not clear the backend foreground. An explicit
-`clientForeground.path: null` is authoritative empty state and never falls back
-to the primary/shared `currentPath`. The retained iframe reports its exact
-foreground to the host; **Second Window** is visible in the tab strip only while
-that foreground is populated. Close dismisses that populated tab for the page
-session, while Collapse minimizes only the outer drawer and leaves the tab plus
-renderer warm. A later explicit open clears the local dismissal. Explorer file
-cards send a validated file-only request through `/rpc/explorer`; Python checks
-project containment and document admission, then notifies only the invoking
-client's UI IPC room. The secondary renderer performs the canonical open, so
-the host reveals the tab only after that open succeeds, the primary foreground
-does not move, and no document content crosses the presentation `postMessage`
-channel.
+The mobile host owns drawer visibility and the iframe presentation lifetime.
+Collapse and mobile breakpoint exit retain the iframe and its backend
+foreground. Close is different: the authenticated secondary UI IPC client asks
+Python to clear its own foreground, exact-client SSOT disposes the Monaco model,
+and the host destroys the iframe and removes the **Second Window** tab. An
+explicit `clientForeground.path: null` is authoritative empty state and never
+falls back to the primary/shared `currentPath`; a newly observed secondary
+identity also starts empty instead of seeding from shared MRU. The retained
+iframe reports its exact foreground to the host, so the tab is visible only
+while that foreground is populated. Explorer file cards send a validated
+file-only request through `/rpc/explorer`; Python checks project containment and
+document admission, then notifies only the invoking client's UI IPC room. The
+secondary renderer performs the canonical open, so the host reveals the tab
+only after that open succeeds, the primary foreground does not move, and no
+document content crosses the presentation `postMessage` channel.
 
 The portable reduced header consumes the auxiliary client's exact diagnostics
 count projection and renders the same error/warning pills as the primary
@@ -3888,6 +2328,12 @@ or creating a file.
 The former bottom-drawer Problems presentation is removed. Explorer Diagnostics
 remains the project-wide diagnostics UI, while a nonvisual host projection keeps
 summary/export consumers independent of hidden DOM.
+
+Opening the bottom-drawer shell is presentation-only. Console, Extensions,
+Code Inspector, and Second Window may open an otherwise empty drawer without
+constructing xterm, connecting `/terminal`, or creating a PTY. Terminal runtime
+initialization occurs only when the Terminal tab or an explicit terminal command
+is selected.
 
 ### Desktop shell behavior
 
@@ -3902,7 +2348,12 @@ Validation owner docs live in `desktop_client/desktop_client.md` and `desktop_cl
 
 ## 39) WBA Logical Documents And Multi-File Extension Handling
 
-Code TE2 now separates visible editor open from semantic working-set hydration. The browser still renders one active Monaco model, but WBA retains a bounded extension-host document set for active and background files so language servers can see more than the currently visible file.
+Code TE2 now separates each client's visible editor from semantic working-set
+hydration. Every stable client renders at most one foreground Monaco model per
+editor surface, while WBA retains one shared extension-host document per URI and
+one synthetic editor facade per `clientInstanceId`. Multiple Electron and mobile
+surfaces may therefore point at the same URI without duplicating the logical
+document or stealing one another's active editor identity.
 
 Host file-open intent does not preflight a boot snapshot. The frontend may use its last projected project root only to form a tentative path, then sends the request directly to Python; the backend's canonical returned path drives visible-open acknowledgement and editor connection for the originating client. A failed host-state refresh preserves the last valid frontend projection. Lightweight `scope: hostState` refreshes are single-flight in the frontend, while complete backend boot snapshots share only their disk-heavy core assembly across concurrent clients and materialize each requesting client's exact editor SSOT off-loop before returning. Initial UI IPC connection does not trigger a duplicate resync; only a genuine reconnect requests fresh host state.
 
@@ -3910,12 +2361,14 @@ Host file-open intent does not preflight a boot snapshot. The frontend may use i
 
 - `ProjectSidecar` recents provide the shared bounded admitted/open set.
 - `open_state_backend.py` and bounded `ProjectSidecar.client_foregrounds` provide one reconnectable foreground per stable `clientInstanceId`; legacy `last_file` is migration seed only.
+- Each foreground entry retains its authenticated `primary` or `secondary` client role. Removing a shared document commits membership and all affected foreground transitions atomically, then publishes one `DocumentClosed` fact: affected primary clients move to shared MRU, affected secondary clients clear, and exact-client editor SSOT replaces or disposes their Monaco model.
 - Shared open-state projections carry membership only and never dispose or clear a client's Monaco model. Exact-client SSOT and file-open notifications own visible model creation and replacement.
 - `ProjectSidecar.document_state_revision` plus its bounded 256-entry `document_revisions` map order path-scoped content state. Evicted paths fall back to the global watermark, so pruning cannot lower their next revision.
 - Python owns sidecar-to-WBA projection in `logical_document_reconciler.py`.
 - WBA owns extension-host document lifetime in `workbench_protocol_proxy/node_workbench_adapter/src/workspace/document-registry.ts`.
-- WBA retains one shared logical document registry and extension host while projecting one synthetic editor facade per stable client under a reentrant request/command context fence. `windowId` remains metadata; Electron's secondary editor follows this rule by allocating an explicit second stable client rather than inferring authority from a window.
-- The direct WBA Socket.IO boundary authenticates and injects `clientInstanceId` plus metadata-only `windowId`. Request normalization must preserve both through `vscode.openFile` into `WorkbenchClient.openFile`; otherwise the client facade cannot acknowledge the active document, leaving hover and semantic-token requests blocked even though shared extension-host diagnostic pushes can still arrive.
+- WBA retains one shared, role-neutral logical document registry and extension host while projecting one synthetic editor facade per stable client. `windowId` remains metadata; Electron's secondary editor follows this rule by allocating an explicit second stable client rather than inferring authority from a window.
+- Client-sensitive extension commands, menus, editor state, and navigation pass through one fair bounded operation gate. Ordinary concurrency is FIFO even for the same client. Only an in-process operation token or an exact registered `requestId`/`operationId` round trip may reenter the owner; client-id equality alone is never reentrancy authority. A bounded lease or reset rejects the owner and queued callers so one stalled operation cannot poison every later client.
+- The direct WBA Socket.IO boundary authenticates and injects `clientInstanceId` plus metadata-only `windowId`. The worker editor and UI IPC lanes additionally carry the authenticated client role; WBA does not infer that role from a window. Request normalization must preserve the WBA identity through `vscode.openFile` into `WorkbenchClient.openFile`; otherwise the client facade cannot acknowledge the active document, leaving hover and semantic-token requests blocked even though shared extension-host diagnostic pushes can still arrive.
 - Draft-aware materialization is centralized in `monaco_editor/editor_backend_services/document_materialization_service.py`.
 
 ### Metadata-first reconcile
@@ -3939,19 +2392,41 @@ WBA exposes two stdio JSON-RPC methods through the existing adapter control plan
 
 Hydration carries exact content, language, content/base identities, dirty state, and reconcile-time active epoch. Stale project generations, open-state revisions, active epochs, and active-document replacement are rejected.
 
-### Document registry roles
+Before WBA reconciles that Python snapshot, `WorkbenchClient` injects the exact
+union of every retained client facade path and every in-flight open. Those paths
+are protected from hydration replacement and release even though Python's
+metadata snapshot intentionally has no global active path.
 
-WBA document registry roles:
+### Document and editor lifetime
 
-| Role | Meaning |
-|---|---|
-| `active` | The current visible editor model and synthetic active editor facade. |
-| `background` | Retained extension-host document without the active editor facade. |
-| `provisional-background` | Temporary background state used while resolving/hydrating. |
+The document registry has no global `active`, `background`, or provisional role.
+It owns one shared document entry per canonical path. Client foreground is a
+separate reference set derived from the synthetic editor-facade map plus
+in-flight opens. A new client opening an already-retained URI gets a distinct
+editor id while reusing the same extension-host document; switching one client
+removes and replaces only that client's prior editor facade.
 
-A normal tab switch demotes the previous document and promotes the target without duplicate `addedDocuments`, avoiding LSP close/open churn. Workspace switches release all retained documents. Extension-host reset clears WBA-local registry state.
+The shared document entry owns content, language, document version, and
+extension-host lifetime, but it does not own a frontend open generation. Each
+client editor facade owns its own current generation. Every document-backed
+activation, provider request, and `didChange` therefore enters the fair
+exact-client projection gate with the authenticated `clientInstanceId` before
+consulting that facade. This prevents one client's newer generation from making
+another client's valid edits or intelligence requests look stale when both
+surfaces display the same URI.
 
-After active promotion, WBA publishes `document/activeChanged` over the existing framework-shell pipe so Python schedules latest-wins reconciliation. Draft changes, workspace-file changes, adapter-ready/reset, and project-switch facts also drive reconciliation. There is no timer, polling path, new socket, or Python editor-intelligence hop.
+A normal client tab switch therefore does not duplicate `addedDocuments` or
+cause LSP close/open churn. Logical reconciliation releases a document only when
+it is absent from the shared desired set and from every client/open reference.
+Workspace switches release all retained documents and editor facades.
+Extension-host reset clears WBA-local registry, facade, correlation, and gate
+state.
+
+After a client foreground open, WBA publishes `document/activeChanged` with that
+client identity over the existing framework-shell pipe so Python schedules
+latest-wins reconciliation. Draft changes, workspace-file changes,
+adapter-ready/reset, and project-switch facts also drive reconciliation. There
+is no timer, polling path, new socket, or Python editor-intelligence hop.
 
 ### Foreground transaction and reconnect boundaries
 
@@ -3966,11 +2441,15 @@ connection calls `te2.resync`, then flushes the active model and hydrates the
 provider snapshot. This keeps late/reconnected clients complete without making
 ordinary file switches replay workspace, provider, and webview state.
 
-WBA treats an active same-path open with the same non-null generation as an
+WBA treats a same-client, same-path open with the same non-null generation as an
 idempotent duplicate. It does not reread disk, replace text, clear dirty state,
-advance the document version or active epoch, emit another active-document
+advance the document version or mutation epoch, emit another active-document
 event, or invalidate prewarmed semantic tokens. A newer generation remains a
-real refresh and retains the draft-safe full-text synchronization path.
+real facade refresh and retains the draft-safe full-text synchronization path.
+An A -> other file -> A reopen therefore replays A's facade and current
+generation even when another client still retains A's shared document. If the
+full text is byte-identical, this replay does not fabricate an edit, duplicate
+the extension-host document, advance its version, or cause LSP close/open churn.
 
 ### Extension activation and language resolution
 
@@ -4087,7 +2566,9 @@ The isolated `:cefrium` Android application module evaluates Cefrium 0.7.1 while
 
 The Cefrium module is intentionally isolated:
 
-- `:cefrium` owns its activity, layout, manifest, and loopback relay.
+- `:cefrium` owns its activity, layout, manifest, and Cefrium-specific local
+  relay routing; its process-local `PersistentNetworkService` owns the
+  `AndroidFrameworkRelay` lifecycle.
 - It applies the `com.cefrium` Gradle plugin only inside the Cefrium module.
 - The plugin must not be applied to Gecko variants because it generates Chromium resource classes and carries the large CEF runtime.
 - The module shares the packaged asset model and common Android source, but remains an evaluation path until the primary-renderer decision changes.
@@ -4403,3 +2884,58 @@ Extension-context Mementos are a separate WBA main-thread contract. WBA implemen
 The current extension-webview theme contract is intentionally fixed rather than coupled to Monaco's selectable editor theme. WBA requires the packaged `monaco_editor/themes/vendored/github/dark-default.json`, projects its string color entries with Code Server's `--vscode-<color-id>` naming, and decorates the extension body with the `vscode-dark` class and VS Code theme data attributes before extension scripts run. The trusted wrapper uses the same GitHub Dark Default Sidebar background. Missing or mismatched theme assets fail WBA initialization; WBA-provided dynamic themes remain deferred.
 
 Python reconciles each complete WBA extension-surface snapshot as one idempotent Sidebar ledger transaction. It removes stale project surfaces, upserts changed members, writes preferences at most once, and publishes one membership update only when material state changed. Identical snapshots do not advance slot timestamps or rewrite preferences.
+
+---
+
+## 45) Sidebar Membership And Host Presentation Ownership
+
+Sidebar state deliberately has two authorities. The shared backend ledger owns
+which surfaces exist; every client host owns how those surfaces are presented.
+This separation prevents a browser, Electron, GeckoView, or Cefrium renderer
+from overwriting another renderer's local dock order or foreground choice.
+
+### Shared membership ledger
+
+Ledger v2 persists only stable slot identity, membership, lifecycle/readiness,
+and surface metadata. It does not persist dock order and it has no global-active
+Sidebar surface. A complete membership snapshot deterministically removes
+missing slots, preserves valid identities, and publishes only a material change.
+An unchanged snapshot must not rewrite preferences or advance slot timestamps.
+
+The backend remains the authority for lifecycle removal. An ordinary user URL
+slot has destructive Close semantics. An activity-bar extension webview instead
+changes only the current client's presentation to `hidden`; its WBA membership
+and Extension Views drawer entry remain available for reopening. See §44 for
+the extension-webview runtime and lifetime rules.
+
+### Per-host presentation
+
+Each host stores versioned local presentation state: dock order, foreground host,
+last agent host/presentation tuple, and embedded/hidden/detached mode. Browser
+and GeckoView use origin-local storage. Electron uses its validated preload/main
+bridge and atomic XDG-config storage. A snapshot prunes absent membership,
+preserves surviving local order, appends new slots, and chooses a local fallback
+foreground.
+
+`clientInstanceId` is the stable client authority. `windowId` is reload-stable
+metadata and `presentationId` identifies a transient inline/detached incarnation.
+Neither is shared Sidebar membership authority. Canonical legacy slot and
+presentation identities migrate once; canonical records win collisions.
+
+### Exact-client Sidebar mentions
+
+An agent/Sidebar mention carries the originating `clientInstanceId`, stable
+agent host id, and current `presentationId`. The host republishes that ephemeral
+tuple when its iframe is created/replaced and after Sidebar IPC registration.
+Python derives the client from its connection and validates the tuple against
+the live host, ledger membership, agent conversation, and registered app peer.
+It derives conversation identity from the ledger slot and emits only to that
+app room. A missing or stale tuple fails closed: there is no global-active or
+broadcast fallback.
+
+### Lane boundary
+
+Presentation actions follow the normal Code TE2 rule: frontend -> own backend
+-> target backend hook -> target notification. Do not connect frontend lanes
+directly or use Sidebar state as cross-client editor/document authority. The
+general UI IPC contract is §21; WBA extension-surface reconciliation is §44.

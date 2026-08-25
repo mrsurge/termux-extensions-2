@@ -1,6 +1,6 @@
 [package]
 name = "te2-server"
-version = "0.2.336"
+version = "0.2.337"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
@@ -8,6 +8,7 @@ rust-version.workspace = true
 [features]
 default = []
 ferrous-framework-native = ["dep:ferrous_framework"]
+release-vendored-tls = ["git2/vendored-openssl"]
 
 [dependencies]
 anyhow.workspace = true

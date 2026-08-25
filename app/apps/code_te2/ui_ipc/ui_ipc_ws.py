@@ -256,6 +256,7 @@ class UIIPCNamespace(socketio.AsyncNamespace):
                     "source": "browser",
                     "clientId": browser_identity["clientInstanceId"],
                     "windowId": browser_identity["windowId"],
+                    "clientRole": browser_identity["clientRole"],
                 },
             )
         if room == "ui_ipc" and native_source:
@@ -369,6 +370,7 @@ class UIIPCNamespace(socketio.AsyncNamespace):
             if session.get("source") == "browser":
                 params["clientInstanceId"] = client_instance_id
                 params["windowId"] = session.get("windowId")
+                params["clientRole"] = session.get("clientRole")
             result = await dispatch_ui_ipc_rpc_request(
                 parsed_request["method"],
                 params,

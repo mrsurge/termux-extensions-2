@@ -23,15 +23,15 @@ class ProjectSwitchProjectionTests(unittest.TestCase):
         try:
             editor_client_registry.register_editor_client(
                 sid_values[0],
-                {"clientInstanceId": CLIENT_A, "windowId": None},
+                {"clientInstanceId": CLIENT_A, "windowId": None, "clientRole": "primary"},
             )
             editor_client_registry.register_editor_client(
                 sid_values[1],
-                {"clientInstanceId": CLIENT_B, "windowId": None},
+                {"clientInstanceId": CLIENT_B, "windowId": None, "clientRole": "primary"},
             )
             editor_client_registry.register_editor_client(
                 sid_values[2],
-                {"clientInstanceId": CLIENT_A, "windowId": None},
+                {"clientInstanceId": CLIENT_A, "windowId": None, "clientRole": "primary"},
             )
             self.assertEqual(
                 editor_client_registry.connected_editor_client_instance_ids(),
@@ -91,9 +91,10 @@ class ProjectSwitchProjectionTests(unittest.TestCase):
         def build_snapshot(
             *,
             client_instance_id: str,
+            client_role: str | None,
             reason: str,
         ) -> dict[str, object]:
-            del reason
+            del client_role, reason
             return dict(snapshots[client_instance_id])
 
         with (

@@ -8,6 +8,8 @@
  *   extensionActivityPanel: { show: Function, hide: Function },
  *   codeInspectorPanel: { show: Function, hide: Function },
  *   toggleTerminal: () => void,
+ *   openDrawer: () => void,
+ *   activateTerminal: () => Promise<void>,
  *   setFontScale: (preset: 'small'|'medium'|'large') => void,
  *   triggerEditorSearchPanel: (reason?: string, opts?: any) => Promise<any>,
  *   hostToast: (msg: string) => void,
@@ -53,6 +55,7 @@ export function initDrawerAndShortcuts(deps: any) {
         if (target === 'terminal') {
           if (terminalHeader) terminalHeader.style.display = '';
           if (terminalContainer) terminalContainer.style.display = '';
+          void deps.activateTerminal();
         } else if (target === 'console') {
           deps.consoleDrawer.show();
         } else if (target === 'second-window') {
@@ -76,7 +79,7 @@ export function initDrawerAndShortcuts(deps: any) {
       const isOpen = drawer && drawer.classList.contains('open');
       const consoleTab = document.querySelector<HTMLElement>('.drawer-tab[data-tab="console"]');
       if (consoleTab) consoleTab.click();
-      if (!isOpen) deps.toggleTerminal();
+      if (!isOpen) deps.openDrawer();
     });
   }
 

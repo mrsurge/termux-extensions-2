@@ -45,6 +45,9 @@ UI_IPC_RPC_METHOD_HOST_GIT_BRANCHES_LIST: Final = "ui.host.git.branches.list"
 UI_IPC_RPC_METHOD_HOST_GIT_REMOTE_ADD: Final = "ui.host.git.remote.add"
 UI_IPC_RPC_METHOD_HOST_STATE_FILE_SCROLL_UPDATE: Final = "ui.host.state.fileScroll.update"
 UI_IPC_RPC_METHOD_HOST_RECENT_FILE_CLOSE: Final = "ui.host.recentFile.close"
+UI_IPC_RPC_METHOD_HOST_CLIENT_FOREGROUND_CLEAR: Final = (
+    "ui.host.clientForeground.clear"
+)
 UI_IPC_RPC_METHOD_HOST_CODE_INSPECTOR_COMMAND: Final = "ui.host.codeInspector.command"
 UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_CREATE: Final = "ui.sidebar.window.create"
 UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_ACTIVATE: Final = "ui.sidebar.window.activate"
@@ -79,6 +82,7 @@ UiIpcRpcMethod = Literal[
     "ui.host.git.remote.add",
     "ui.host.state.fileScroll.update",
     "ui.host.recentFile.close",
+    "ui.host.clientForeground.clear",
     "ui.host.codeInspector.command",
     "ui.sidebar.window.create",
     "ui.sidebar.window.activate",
@@ -180,6 +184,7 @@ ALLOWED_REQUEST_METHODS: Final[set[str]] = {
     UI_IPC_RPC_METHOD_HOST_GIT_REMOTE_ADD,
     UI_IPC_RPC_METHOD_HOST_STATE_FILE_SCROLL_UPDATE,
     UI_IPC_RPC_METHOD_HOST_RECENT_FILE_CLOSE,
+    UI_IPC_RPC_METHOD_HOST_CLIENT_FOREGROUND_CLEAR,
     UI_IPC_RPC_METHOD_HOST_CODE_INSPECTOR_COMMAND,
     UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_CREATE,
     UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_ACTIVATE,

@@ -19,6 +19,7 @@ from .rpc_contract import (
     UI_IPC_RPC_METHOD_HOST_FILE_SAVE,
     UI_IPC_RPC_METHOD_HOST_PAGE_PREVIEW_TEMPLATE_INSTALL,
     UI_IPC_RPC_METHOD_HOST_RECENT_FILE_CLOSE,
+    UI_IPC_RPC_METHOD_HOST_CLIENT_FOREGROUND_CLEAR,
     UI_IPC_RPC_METHOD_HOST_RUN_PROFILES_GET,
     UI_IPC_RPC_METHOD_HOST_RUN_PROFILES_SAVE,
     UI_IPC_RPC_METHOD_HOST_RUN_PROFILE_STATE_GET,
@@ -64,7 +65,10 @@ from ..host.git_backend import (
 from ..host.state_backend import handle_host_file_scroll_update_request
 from ..host.terminal_actions_backend import handle_host_run_active_file_request
 from ..host.page_preview_backend import handle_host_page_preview_template_install_request
-from ..host.recent_files_backend import handle_host_recent_file_close_request
+from ..host.recent_files_backend import (
+    handle_host_client_foreground_clear_request,
+    handle_host_recent_file_close_request,
+)
 from ..host.run_profiles_config_backend import (
     handle_host_run_profiles_get_request,
     handle_host_run_profiles_save_request,
@@ -248,6 +252,12 @@ async def dispatch_ui_ipc_rpc_request(
 
     if method == UI_IPC_RPC_METHOD_HOST_RECENT_FILE_CLOSE:
         return await handle_host_recent_file_close_request(
+            params,
+            source_name=source_name,
+        )
+
+    if method == UI_IPC_RPC_METHOD_HOST_CLIENT_FOREGROUND_CLEAR:
+        return await handle_host_client_foreground_clear_request(
             params,
             source_name=source_name,
         )

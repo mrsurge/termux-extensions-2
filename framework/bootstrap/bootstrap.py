@@ -24,6 +24,7 @@ from pathlib import Path
 from types import FrameType
 from typing import Any, TextIO, cast
 
+from app.release_runtime import ReleaseRuntimeError, packaged_server_path
 from app.te2_paths import ensure_runtime_home, resolve_te2_paths
 
 APP_ID = "te2"
@@ -291,6 +292,13 @@ def _build_env(args: BootstrapArgs) -> dict[str, str]:
             pythonpath_parts.insert(0, path)
     env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
 
+    executable_dir = str(Path(sys.executable).parent)
+    path_parts = [part for part in env.get("PATH", "").split(os.pathsep) if part]
+    if executable_dir in path_parts:
+        path_parts.remove(executable_dir)
+    path_parts.insert(0, executable_dir)
+    env["PATH"] = os.pathsep.join(path_parts)
+
     _configure_memory_profile_env(env, args.memory_profile_dir)
 
     _ensure_framework_shells_env(env, args)
@@ -347,6 +355,15 @@ def _server_command(
             raise SystemExit("--build-only cannot be used with --server-bin")
         return ServerCommand([str(Path(args.server_bin))])
 
+    if not args.cargo_manifest:
+        try:
+            packaged_server = packaged_server_path()
+        except ReleaseRuntimeError as exc:
+            raise SystemExit(str(exc)) from exc
+        if packaged_server is not None:
+            _validate_packaged_server_options(args)
+            return ServerCommand([str(packaged_server)], build_already_done=True)
+
     manifest = Path(args.cargo_manifest) if args.cargo_manifest else _default_rust_manifest()
     if not args.cargo_manifest and not args.no_build_cache:
         return _cached_server_command(args, env, manifest, build=build)
@@ -370,6 +387,28 @@ def _server_command(
     if not args.build_only:
         command.append("--")
     return ServerCommand(command)
+
+
+def _validate_packaged_server_options(args: BootstrapArgs) -> None:
+    incompatible: list[str] = []
+    if args.build_only:
+        incompatible.append("--build-only")
+    if not args.release:
+        incompatible.append("--debug")
+    if args.force_build:
+        incompatible.append("--force-build")
+    if args.no_build_cache:
+        incompatible.append("--no-build-cache")
+    if args.no_ferrous_framework:
+        incompatible.append("--no-ferrous-framework")
+    if args.memory_profile_dir:
+        incompatible.append("--memory-profile")
+    if incompatible:
+        joined = ", ".join(incompatible)
+        raise SystemExit(
+            f"TE2 binary-release wheel cannot use source-build option(s): {joined}. "
+            "Install from source or pass an explicit --cargo-manifest to request a source build."
+        )
 
 
 def _cached_server_command(

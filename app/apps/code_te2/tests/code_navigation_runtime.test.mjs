@@ -250,6 +250,9 @@ test("dispatches definition requests after activating the document language", as
     normalizeAuthorityParam: (params, fallback) =>
       params.authority || fallback,
     wb: {
+      async runClientDocumentOperation(_params, _label, operation) {
+        return await operation();
+      },
       resolveLanguageId: (_path, _text, languageId) =>
         languageId || "rust",
       async activateLanguage(languageId) {
@@ -287,6 +290,7 @@ test("dispatches definition requests after activating the document language", as
       lineNumber: 4,
       column: 3,
       timeoutMs: undefined,
+      generation: undefined,
     }],
   ]);
 });

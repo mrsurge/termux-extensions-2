@@ -126,7 +126,8 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
         await enter_room(sid, "code_te2")
         await enter_room(sid, client_presentation_room(identity["clientInstanceId"]))
         snapshot = editor_runtime_build_connect_snapshot(
-            client_instance_id=identity["clientInstanceId"]
+            client_instance_id=identity["clientInstanceId"],
+            client_role=identity["clientRole"],
         )
         await emit_editor_rpc_notification(
             lambda event_name, payload: self._emit_to_sid(sid, event_name, payload),

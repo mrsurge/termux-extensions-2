@@ -13,7 +13,10 @@ from app.apps.code_te2.frontend_rpc_codec import (
     decode_frontend_rpc_message,
     encode_frontend_rpc_message,
 )
+from app.apps.code_te2.client_presentation import client_presentation_room
+from app.apps.code_te2.monaco_editor import editor_ws
 from app.apps.code_te2.monaco_editor.editor_rpc_contract import (
+    EDITOR_RPC_NOTIFICATION_DIAGNOSTICS_COUNTS,
     EDITOR_RPC_NOTIFICATION_READY,
 )
 from app.apps.code_te2.monaco_editor.editor_rpc_emit import (
@@ -27,12 +30,52 @@ from app.apps.code_te2.host.run_target_service import (
 )
 from app.apps.code_te2.ui_ipc.rpc_contract import (
     UI_IPC_RPC_METHOD_HOST_BOOT_SNAPSHOT_GET,
+    UI_IPC_RPC_NOTIFICATION_EDITOR_DIAGNOSTICS_COUNTS,
     UI_IPC_RPC_NOTIFICATION_RUN_TARGET_ROUTES_CHANGED,
 )
 from app.apps.code_te2.ui_ipc.ui_ipc_ws import UIIPCNamespace
 
 
 class EditorMessagePackTests(unittest.IsolatedAsyncioTestCase):
+    async def test_diagnostics_counts_are_scoped_to_the_publishing_client(self) -> None:
+        client_instance_id = "client_aaaaaaaaaaaa"
+        payload = {
+            "path": "/project/main.py",
+            "errors": 1,
+            "warnings": 0,
+            "hints": 0,
+            "total": 1,
+        }
+
+        with (
+            patch.object(
+                editor_ws,
+                "_emit_editor_rpc_notification_to_room",
+                new=AsyncMock(),
+            ) as emit_editor,
+            patch.object(
+                editor_ws,
+                "_emit_ui_ipc_editor_notification",
+                new=AsyncMock(),
+            ) as emit_ui_ipc,
+        ):
+            await editor_ws.editor_runtime_emit_room_event(
+                "editor:diagnostics_counts",
+                payload,
+                client_instance_id=client_instance_id,
+            )
+
+        emit_editor.assert_awaited_once_with(
+            EDITOR_RPC_NOTIFICATION_DIAGNOSTICS_COUNTS,
+            payload,
+            room=client_presentation_room(client_instance_id),
+        )
+        emit_ui_ipc.assert_awaited_once_with(
+            UI_IPC_RPC_NOTIFICATION_EDITOR_DIAGNOSTICS_COUNTS,
+            payload,
+            client_instance_id=client_instance_id,
+        )
+
     async def test_notification_helper_emits_messagepack(self) -> None:
         emitted: list[tuple[str, bytes]] = []
 

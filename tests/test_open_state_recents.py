@@ -24,6 +24,7 @@ from app.apps.code_te2.open_state_backend import (
 
 CLIENT_A = "client_aaaaaaaaaaaa"
 CLIENT_B = "client_bbbbbbbbbbbb"
+CLIENT_C = "client_cccccccccccc"
 
 
 class OpenStateRecentsTests(unittest.TestCase):
@@ -92,12 +93,16 @@ class OpenStateRecentsTests(unittest.TestCase):
                 )
                 self.assertEqual(client_a["path"], str(second))
                 self.assertEqual(client_b["path"], str(first))
-                removed, after = remove_sidecar_recent_file(
+                removed, after, affected = remove_sidecar_recent_file(
                     str(project),
                     str(second),
                 )
 
                 self.assertTrue(removed)
+                self.assertEqual(
+                    [foreground["clientInstanceId"] for foreground in affected],
+                    [CLIENT_A],
+                )
                 self.assertEqual(after["revision"], before_close["revision"] + 1)
                 self.assertEqual(
                     [entry["path"] for entry in after["recents"]],
@@ -112,12 +117,78 @@ class OpenStateRecentsTests(unittest.TestCase):
                     str(first),
                 )
 
-                removed_again, unchanged = remove_sidecar_recent_file(
+                removed_again, unchanged, affected_again = remove_sidecar_recent_file(
                     str(project),
                     str(second),
                 )
                 self.assertFalse(removed_again)
+                self.assertEqual(affected_again, [])
                 self.assertEqual(unchanged["revision"], after["revision"])
+
+    def test_closed_document_falls_back_for_primary_and_clears_secondary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            project = root / "project"
+            sidecars = root / "sidecars"
+            project.mkdir()
+            first = project / "first.py"
+            second = project / "second.py"
+            first.write_text("first\n", encoding="utf-8")
+            second.write_text("second\n", encoding="utf-8")
+
+            with patch.object(project_sidecar, "_sidecar_root", return_value=sidecars):
+                write_client_document_open(
+                    str(project),
+                    str(first),
+                    CLIENT_A,
+                    require_existing_sidecar=False,
+                )
+                read_client_foreground(
+                    str(project),
+                    CLIENT_C,
+                    client_role="secondary",
+                )
+                write_client_document_open(str(project), str(second), CLIENT_A)
+                write_client_document_open(str(project), str(second), CLIENT_C)
+
+                removed, _open_state, affected = remove_sidecar_recent_file(
+                    str(project),
+                    str(second),
+                )
+
+                self.assertTrue(removed)
+                by_client = {
+                    foreground["clientInstanceId"]: foreground
+                    for foreground in affected
+                }
+                self.assertEqual(by_client[CLIENT_A]["path"], str(first))
+                self.assertEqual(by_client[CLIENT_A]["clientRole"], "primary")
+                self.assertIsNone(by_client[CLIENT_C]["path"])
+                self.assertEqual(by_client[CLIENT_C]["clientRole"], "secondary")
+
+    def test_new_secondary_client_does_not_seed_from_shared_mru(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            project = root / "project"
+            sidecars = root / "sidecars"
+            project.mkdir()
+            opened = project / "opened.py"
+            opened.write_text("value = 1\n", encoding="utf-8")
+
+            with patch.object(project_sidecar, "_sidecar_root", return_value=sidecars):
+                write_sidecar_open_file(
+                    str(project),
+                    str(opened),
+                    require_existing_sidecar=False,
+                )
+                foreground = read_client_foreground(
+                    str(project),
+                    CLIENT_C,
+                    client_role="secondary",
+                )
+
+                self.assertIsNone(foreground["path"])
+                self.assertEqual(foreground["clientRole"], "secondary")
 
     def test_client_foregrounds_are_independent_and_legacy_seed_is_one_time(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

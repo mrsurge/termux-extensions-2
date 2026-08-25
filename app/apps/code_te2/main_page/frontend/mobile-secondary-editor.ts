@@ -137,6 +137,25 @@ export function createMobileSecondaryEditorController(
     });
   }
 
+  function destroyFrame(reason: string): void {
+    if (readyTimeout) window.clearTimeout(readyTimeout);
+    readyTimeout = 0;
+    rejectReady?.(new Error(reason));
+    for (const pending of pendingOpens.values()) {
+      window.clearTimeout(pending.timeout);
+      pending.reject(new Error(reason));
+    }
+    pendingOpens.clear();
+    readyPromise = null;
+    resolveReady = null;
+    rejectReady = null;
+    frame?.remove();
+    frame = null;
+    ready = false;
+    populated = false;
+    options.container.replaceChildren();
+  }
+
   function applyForeground(path: string): void {
     const wasSelected = options.tab?.classList.contains('active') === true;
     populated = !!path;
@@ -234,6 +253,7 @@ export function createMobileSecondaryEditorController(
       dismissed = true;
       selectFallbackTab();
       hide();
+      destroyFrame('Second Window editor was closed');
       updateVisibility();
       closeDrawer();
     }
@@ -260,7 +280,7 @@ export function createMobileSecondaryEditorController(
 
   function reconcileLayout(): void {
     updateVisibility();
-    if (supported && isMobileLayout() && !frame) {
+    if (supported && isMobileLayout() && !frame && !dismissed) {
       void ensureFrame().catch((error) => {
         options.toast(error instanceof Error ? error.message : String(error));
       });
@@ -301,6 +321,7 @@ export function createMobileSecondaryEditorController(
       if (!isMobileLayout()) {
         throw new Error('Second Window is available in the mobile layout');
       }
+      dismissed = false;
       await ensureFrame();
       const requestId = `mobile_secondary_${Date.now().toString(36)}_${(++openSequence).toString(36)}`;
       const resultPromise = waitForOpenResult(requestId);
@@ -317,22 +338,8 @@ export function createMobileSecondaryEditorController(
     destroy() {
       layoutObserver.disconnect();
       window.removeEventListener('message', onMessage);
-      if (readyTimeout) window.clearTimeout(readyTimeout);
-      readyTimeout = 0;
-      rejectReady?.(new Error('Second Window editor was destroyed'));
-      for (const pending of pendingOpens.values()) {
-        window.clearTimeout(pending.timeout);
-        pending.reject(new Error('Second Window editor was destroyed'));
-      }
-      pendingOpens.clear();
-      readyPromise = null;
-      resolveReady = null;
-      rejectReady = null;
-      frame?.remove();
+      destroyFrame('Second Window editor was destroyed');
       shortcut.remove();
-      frame = null;
-      ready = false;
-      populated = false;
       dismissed = false;
     },
   };

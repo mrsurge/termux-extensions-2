@@ -184,7 +184,7 @@ export interface DocumentFeatureRuntimeDeps {
   useRemote: boolean;
   languageIdFromPath: (filePath: string) => string;
   getDocumentVersion: (path: string) => number | null;
-  getOpenGeneration: (path: string) => number | string | null | undefined;
+  getActiveGeneration: () => number | string | null;
   updateActiveDocument: (path: string, uriObj: unknown, languageId: string) => void;
   selectorGroupsSummary: (kind: "documentSymbols" | "foldingRanges" | "hover") => string;
   findAllProviderHandles: (
@@ -233,6 +233,8 @@ export interface WorkspaceLifecycleRuntimeDeps {
   setActiveUriObj: (value: unknown) => void;
   activeTab: unknown;
   setActiveTab: (value: unknown) => void;
+  activeGeneration: number | string | null;
+  setActiveGeneration: (value: number | string | null) => void;
   nextModelNumber: number;
   setNextModelNumber: (value: number) => void;
   documentRegistry: WorkbenchDocumentRegistry;
@@ -554,7 +556,7 @@ export function createDocumentFeatureRuntime(deps: DocumentFeatureRuntimeDeps): 
     documentScheme: () => deps.useRemote ? "vscode-remote" : "file",
     languageIdFromPath: (filePath: string) => deps.languageIdFromPath(filePath),
     getDocumentVersion: (path: string) => deps.getDocumentVersion(path),
-    getOpenGeneration: (path: string) => deps.getOpenGeneration(path),
+    getActiveGeneration: () => deps.getActiveGeneration(),
     updateActiveDocument: (path: string, uriObj: unknown, languageId: string) => deps.updateActiveDocument(path, uriObj, languageId),
     selectorGroupsSummary: (kind: "documentSymbols" | "foldingRanges" | "hover") => deps.selectorGroupsSummary(kind),
     findAllProviderHandles: (kind: "documentSymbols" | "foldingRanges" | "hover", document: ProviderDocument) => deps.findAllProviderHandles(kind, document),
@@ -603,6 +605,7 @@ export function createWorkspaceLifecycleRuntime(deps: WorkspaceLifecycleRuntimeD
   let currentActiveEditorId = deps.activeEditorId;
   let currentActiveUriObj = deps.activeUriObj;
   let currentActiveTab = deps.activeTab;
+  let currentActiveGeneration = deps.activeGeneration;
   let currentNextModelNumber = deps.nextModelNumber;
   let currentMgmtIpc = deps.mgmtIpc;
   let currentFsWatcherSub = deps.fsWatcherSub;
@@ -616,6 +619,8 @@ export function createWorkspaceLifecycleRuntime(deps: WorkspaceLifecycleRuntimeD
       set activeUriObj(value: unknown) { currentActiveUriObj = value; deps.setActiveUriObj(value); },
       get activeTab() { return currentActiveTab; },
       set activeTab(value: unknown) { currentActiveTab = value; deps.setActiveTab(value); },
+      get activeGeneration() { return currentActiveGeneration; },
+      set activeGeneration(value: number | string | null) { currentActiveGeneration = value; deps.setActiveGeneration(value); },
       get nextModelNumber() { return currentNextModelNumber; },
       set nextModelNumber(value: number) { currentNextModelNumber = value; deps.setNextModelNumber(value); },
       documentRegistry: deps.documentRegistry,

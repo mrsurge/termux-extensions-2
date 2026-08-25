@@ -76,6 +76,18 @@ export interface WorkbenchLike {
     params: Record<string, unknown>,
   ) => Promise<Record<string, unknown>>;
   clientActivePath: (params: Record<string, unknown>) => string | null;
+  runClientDocumentOperation: <T>(
+    params: Record<string, unknown>,
+    label: string,
+    operation: () => Promise<T> | T,
+    timeoutMs?: number,
+  ) => Promise<T>;
+  projectionTraceConfigure: (
+    params: Record<string, unknown>,
+  ) => Record<string, unknown>;
+  projectionTraceSnapshot: (
+    params?: Record<string, unknown>,
+  ) => Record<string, unknown>;
   resolveLanguageId: (
     path: string,
     text: string,
@@ -256,6 +268,32 @@ const LANGUAGE_ACTIVATION_METHODS = new Set([
   "vscode.semanticTokensRange",
 ]);
 
+const DOCUMENT_OPERATION_METHODS = new Set([
+  "vscode.documentSymbols",
+  "vscode.foldingRanges",
+  "vscode.hover",
+  "vscode.documentHighlights",
+  "vscode.definition",
+  "vscode.references",
+  "vscode.implementations",
+  "vscode.callHierarchy.prepare",
+  "vscode.callHierarchy.incoming",
+  "vscode.callHierarchy.outgoing",
+  "vscode.callHierarchy.release",
+  "vscode.completions",
+  "vscode.documentColors",
+  "vscode.colorPresentations",
+  "vscode.inlayHints",
+  "vscode.inlayHints.resolve",
+  "vscode.inlayHints.release",
+  "vscode.inlineCompletions",
+  "vscode.inlineCompletions.free",
+  "vscode.inlineCompletions.didShow",
+  "vscode.semanticTokens",
+  "vscode.semanticTokensRange",
+  "vscode.didChange",
+]);
+
 function boundedTimeout(value: unknown, fallback = 30000): number {
   const timeout = Number(value);
   if (!Number.isFinite(timeout)) return fallback;
@@ -289,6 +327,15 @@ export async function dispatchJsonRpcRequest(
 ): Promise<Record<string, unknown> | null> {
   const { id, method } = request;
   const params = asRecord(request.params);
+  const runDocumentOperation = <T>(
+    label: string,
+    operation: () => Promise<T> | T,
+  ): Promise<T> => runtime.wb.runClientDocumentOperation(
+    params,
+    label,
+    operation,
+    boundedTimeout(params.timeoutMs) + 5000,
+  );
 
   if (method === "te2.ping") {
     return success(id, { ok: true, ts_ms: runtime.nowMs() });
@@ -328,6 +375,14 @@ export async function dispatchJsonRpcRequest(
 
   if (method === "te2.status" || method === "adapter.status") {
     return success(id, runtime.buildStatusResult());
+  }
+
+  if (method === "te2.projectionTrace.configure") {
+    return success(id, runtime.wb.projectionTraceConfigure(params));
+  }
+
+  if (method === "te2.projectionTrace.snapshot") {
+    return success(id, runtime.wb.projectionTraceSnapshot(params));
   }
 
   if (method === "adapter.events") {
@@ -589,7 +644,14 @@ export async function dispatchJsonRpcRequest(
       params.languageId,
     );
     try {
-      await runtime.wb.activateLanguage(languageId);
+      if (DOCUMENT_OPERATION_METHODS.has(method)) {
+        await runDocumentOperation(
+          `activateLanguage:${method}`,
+          () => runtime.wb.activateLanguage(languageId),
+        );
+      } else {
+        await runtime.wb.activateLanguage(languageId);
+      }
     } catch (error) {
       return failure(id, -32000, error);
     }
@@ -631,6 +693,7 @@ export async function dispatchJsonRpcRequest(
       forceRefresh: forceRefreshEff,
       generation: params.generation,
       workspaceFolder: params.workspaceFolder ?? null,
+      requestId,
       clientInstanceId: params.clientInstanceId,
       windowId: params.windowId,
     });
@@ -650,14 +713,15 @@ export async function dispatchJsonRpcRequest(
       params,
       runtime.defaultRemoteAuthority,
     );
-    const result = await runtime.wb.documentSymbols({
-      path: resolvedPath,
-      authority,
-      providerHandle: params.providerHandle,
-      languageId: params.languageId,
-      timeoutMs: params.timeoutMs,
-      generation: params.generation,
-    });
+    const result = await runDocumentOperation("documentSymbols", () =>
+      runtime.wb.documentSymbols({
+        path: resolvedPath,
+        authority,
+        providerHandle: params.providerHandle,
+        languageId: params.languageId,
+        timeoutMs: params.timeoutMs,
+        generation: params.generation,
+      }));
     return success(id, result);
   }
 
@@ -668,15 +732,16 @@ export async function dispatchJsonRpcRequest(
       params,
       runtime.defaultRemoteAuthority,
     );
-    const result = await runtime.wb.foldingRanges({
-      path: resolvedPath,
-      authority,
-      providerHandle: params.providerHandle,
-      languageId: params.languageId,
-      timeoutMs: params.timeoutMs,
-      generation: params.generation,
-      context: params.context,
-    });
+    const result = await runDocumentOperation("foldingRanges", () =>
+      runtime.wb.foldingRanges({
+        path: resolvedPath,
+        authority,
+        providerHandle: params.providerHandle,
+        languageId: params.languageId,
+        timeoutMs: params.timeoutMs,
+        generation: params.generation,
+        context: params.context,
+      }));
     return success(id, result);
   }
 
@@ -687,15 +752,17 @@ export async function dispatchJsonRpcRequest(
       params,
       runtime.defaultRemoteAuthority,
     );
-    const result = await runtime.wb.hover({
-      path: resolvedPath,
-      authority,
-      providerHandle: params.providerHandle,
-      languageId: params.languageId,
-      lineNumber: params.lineNumber,
-      column: params.column,
-      timeoutMs: params.timeoutMs,
-    });
+    const result = await runDocumentOperation("hover", () =>
+      runtime.wb.hover({
+        path: resolvedPath,
+        authority,
+        providerHandle: params.providerHandle,
+        languageId: params.languageId,
+        lineNumber: params.lineNumber,
+        column: params.column,
+        timeoutMs: params.timeoutMs,
+        generation: params.generation,
+      }));
     return success(id, result);
   }
 
@@ -708,14 +775,16 @@ export async function dispatchJsonRpcRequest(
     );
     return success(
       id,
-      await runtime.wb.documentHighlights({
-        path: resolvedPath,
-        authority,
-        languageId: params.languageId,
-        lineNumber: params.lineNumber,
-        column: params.column,
-        timeoutMs: params.timeoutMs,
-      }),
+      await runDocumentOperation("documentHighlights", () =>
+        runtime.wb.documentHighlights({
+          path: resolvedPath,
+          authority,
+          languageId: params.languageId,
+          lineNumber: params.lineNumber,
+          column: params.column,
+          timeoutMs: params.timeoutMs,
+          generation: params.generation,
+        })),
     );
   }
 
@@ -728,7 +797,7 @@ export async function dispatchJsonRpcRequest(
     );
     return success(
       id,
-      await runtime.wb.references({
+      await runDocumentOperation("references", () => runtime.wb.references({
         path: resolvedPath,
         authority,
         languageId: params.languageId,
@@ -736,7 +805,8 @@ export async function dispatchJsonRpcRequest(
         column: params.column,
         includeDeclaration: params.includeDeclaration,
         timeoutMs: params.timeoutMs,
-      }),
+        generation: params.generation,
+      })),
     );
   }
 
@@ -749,14 +819,15 @@ export async function dispatchJsonRpcRequest(
     );
     return success(
       id,
-      await runtime.wb.definitions({
+      await runDocumentOperation("definitions", () => runtime.wb.definitions({
         path: resolvedPath,
         authority,
         languageId: params.languageId,
         lineNumber: params.lineNumber,
         column: params.column,
         timeoutMs: params.timeoutMs,
-      }),
+        generation: params.generation,
+      })),
     );
   }
 
@@ -769,14 +840,15 @@ export async function dispatchJsonRpcRequest(
     );
     return success(
       id,
-      await runtime.wb.implementations({
+      await runDocumentOperation("implementations", () => runtime.wb.implementations({
         path: resolvedPath,
         authority,
         languageId: params.languageId,
         lineNumber: params.lineNumber,
         column: params.column,
         timeoutMs: params.timeoutMs,
-      }),
+        generation: params.generation,
+      })),
     );
   }
 
@@ -789,27 +861,47 @@ export async function dispatchJsonRpcRequest(
     );
     return success(
       id,
-      await runtime.wb.prepareCallHierarchy({
-        path: resolvedPath,
-        authority,
-        languageId: params.languageId,
-        lineNumber: params.lineNumber,
-        column: params.column,
-        timeoutMs: params.timeoutMs,
-      }),
+      await runDocumentOperation("callHierarchy.prepare", () =>
+        runtime.wb.prepareCallHierarchy({
+          path: resolvedPath,
+          authority,
+          languageId: params.languageId,
+          lineNumber: params.lineNumber,
+          column: params.column,
+          timeoutMs: params.timeoutMs,
+          generation: params.generation,
+        })),
     );
   }
 
   if (method === "vscode.callHierarchy.incoming") {
-    return success(id, await runtime.wb.incomingCalls(params));
+    return success(
+      id,
+      await runDocumentOperation(
+        "callHierarchy.incoming",
+        () => runtime.wb.incomingCalls(params),
+      ),
+    );
   }
 
   if (method === "vscode.callHierarchy.outgoing") {
-    return success(id, await runtime.wb.outgoingCalls(params));
+    return success(
+      id,
+      await runDocumentOperation(
+        "callHierarchy.outgoing",
+        () => runtime.wb.outgoingCalls(params),
+      ),
+    );
   }
 
   if (method === "vscode.callHierarchy.release") {
-    return success(id, runtime.wb.releaseCallHierarchy(params));
+    return success(
+      id,
+      await runDocumentOperation(
+        "callHierarchy.release",
+        () => runtime.wb.releaseCallHierarchy(params),
+      ),
+    );
   }
 
   if (method === "vscode.completions") {
@@ -819,18 +911,20 @@ export async function dispatchJsonRpcRequest(
       params,
       runtime.defaultRemoteAuthority,
     );
-    const result = await runtime.wb.completions({
-      path: resolvedPath,
-      authority,
-      providerHandle: params.providerHandle,
-      languageId: params.languageId,
-      lineNumber: params.lineNumber,
-      column: params.column,
-      triggerKind: params.triggerKind,
-      triggerCharacter: params.triggerCharacter,
-      text: params.text,
-      timeoutMs: params.timeoutMs,
-    });
+    const result = await runDocumentOperation("completions", () =>
+      runtime.wb.completions({
+        path: resolvedPath,
+        authority,
+        providerHandle: params.providerHandle,
+        languageId: params.languageId,
+        lineNumber: params.lineNumber,
+        column: params.column,
+        triggerKind: params.triggerKind,
+        triggerCharacter: params.triggerCharacter,
+        text: params.text,
+        timeoutMs: params.timeoutMs,
+        generation: params.generation,
+      }));
     return success(id, result);
   }
 
@@ -841,15 +935,17 @@ export async function dispatchJsonRpcRequest(
       params,
       runtime.defaultRemoteAuthority,
     );
-    const result = await runtime.wb.documentColors({
-      path: resolvedPath,
-      authority,
-      providerHandle: params.providerHandle,
-      languageId: params.languageId,
-      text: params.text,
-      modelVersionId: params.modelVersionId,
-      timeoutMs: params.timeoutMs,
-    });
+    const result = await runDocumentOperation("documentColors", () =>
+      runtime.wb.documentColors({
+        path: resolvedPath,
+        authority,
+        providerHandle: params.providerHandle,
+        languageId: params.languageId,
+        text: params.text,
+        modelVersionId: params.modelVersionId,
+        timeoutMs: params.timeoutMs,
+        generation: params.generation,
+      }));
     return success(id, result);
   }
 
@@ -860,14 +956,16 @@ export async function dispatchJsonRpcRequest(
       params,
       runtime.defaultRemoteAuthority,
     );
-    const result = await runtime.wb.colorPresentations({
-      path: resolvedPath,
-      authority,
-      providerHandle: params.providerHandle,
-      languageId: params.languageId,
-      colorInfo: params.colorInfo,
-      timeoutMs: params.timeoutMs,
-    });
+    const result = await runDocumentOperation("colorPresentations", () =>
+      runtime.wb.colorPresentations({
+        path: resolvedPath,
+        authority,
+        providerHandle: params.providerHandle,
+        languageId: params.languageId,
+        colorInfo: params.colorInfo,
+        timeoutMs: params.timeoutMs,
+        generation: params.generation,
+      }));
     return success(id, result);
   }
 
@@ -878,32 +976,36 @@ export async function dispatchJsonRpcRequest(
       params,
       runtime.defaultRemoteAuthority,
     );
-    const result = await runtime.wb.inlayHints({
-      path: resolvedPath,
-      authority,
-      providerHandle: params.providerHandle,
-      languageId: params.languageId,
-      range: params.range,
-      text: params.text,
-      modelVersionId: params.modelVersionId,
-      timeoutMs: params.timeoutMs,
-    });
+    const result = await runDocumentOperation("inlayHints", () =>
+      runtime.wb.inlayHints({
+        path: resolvedPath,
+        authority,
+        providerHandle: params.providerHandle,
+        languageId: params.languageId,
+        range: params.range,
+        text: params.text,
+        modelVersionId: params.modelVersionId,
+        timeoutMs: params.timeoutMs,
+        generation: params.generation,
+      }));
     return success(id, result);
   }
 
   if (method === "vscode.inlayHints.resolve") {
-    const result = await runtime.wb.resolveInlayHint({
-      providerHandle: params.providerHandle,
-      cacheId: params.cacheId,
-    });
+    const result = await runDocumentOperation("inlayHints.resolve", () =>
+      runtime.wb.resolveInlayHint({
+        providerHandle: params.providerHandle,
+        cacheId: params.cacheId,
+      }));
     return success(id, result);
   }
 
   if (method === "vscode.inlayHints.release") {
-    const result = await runtime.wb.releaseInlayHints({
-      providerHandle: params.providerHandle,
-      cacheId: params.cacheId,
-    });
+    const result = await runDocumentOperation("inlayHints.release", () =>
+      runtime.wb.releaseInlayHints({
+        providerHandle: params.providerHandle,
+        cacheId: params.cacheId,
+      }));
     return success(id, result);
   }
 
@@ -914,37 +1016,41 @@ export async function dispatchJsonRpcRequest(
       params,
       runtime.defaultRemoteAuthority,
     );
-    const result = await runtime.wb.inlineCompletions({
-      path: resolvedPath,
-      authority,
-      providerHandle: params.providerHandle,
-      languageId: params.languageId,
-      lineNumber: params.lineNumber,
-      column: params.column,
-      context: params.context,
-      text: params.text,
-      modelVersionId: params.modelVersionId,
-      timeoutMs: params.timeoutMs,
-    });
+    const result = await runDocumentOperation("inlineCompletions", () =>
+      runtime.wb.inlineCompletions({
+        path: resolvedPath,
+        authority,
+        providerHandle: params.providerHandle,
+        languageId: params.languageId,
+        lineNumber: params.lineNumber,
+        column: params.column,
+        context: params.context,
+        text: params.text,
+        modelVersionId: params.modelVersionId,
+        timeoutMs: params.timeoutMs,
+        generation: params.generation,
+      }));
     return success(id, result);
   }
 
   if (method === "vscode.inlineCompletions.free") {
-    const result = await runtime.wb.freeInlineCompletions({
-      providerHandle: params.providerHandle,
-      pid: params.pid,
-      reason: params.reason,
-    });
+    const result = await runDocumentOperation("inlineCompletions.free", () =>
+      runtime.wb.freeInlineCompletions({
+        providerHandle: params.providerHandle,
+        pid: params.pid,
+        reason: params.reason,
+      }));
     return success(id, result);
   }
 
   if (method === "vscode.inlineCompletions.didShow") {
-    const result = await runtime.wb.handleInlineCompletionDidShow({
-      providerHandle: params.providerHandle,
-      pid: params.pid,
-      idx: params.idx,
-      updatedInsertText: params.updatedInsertText,
-    });
+    const result = await runDocumentOperation("inlineCompletions.didShow", () =>
+      runtime.wb.handleInlineCompletionDidShow({
+        providerHandle: params.providerHandle,
+        pid: params.pid,
+        idx: params.idx,
+        updatedInsertText: params.updatedInsertText,
+      }));
     return success(id, result);
   }
 
@@ -955,16 +1061,18 @@ export async function dispatchJsonRpcRequest(
       params,
       runtime.defaultRemoteAuthority,
     );
-    const result = await runtime.wb.semanticTokens({
-      path: resolvedPath,
-      authority,
-      providerHandle: params.providerHandle,
-      languageId: params.languageId,
-      previousResultId: params.previousResultId,
-      text: params.text,
-      modelVersionId: params.modelVersionId,
-      timeoutMs: params.timeoutMs,
-    });
+    const result = await runDocumentOperation("semanticTokens", () =>
+      runtime.wb.semanticTokens({
+        path: resolvedPath,
+        authority,
+        providerHandle: params.providerHandle,
+        languageId: params.languageId,
+        previousResultId: params.previousResultId,
+        text: params.text,
+        modelVersionId: params.modelVersionId,
+        timeoutMs: params.timeoutMs,
+        generation: params.generation,
+      }));
     return success(id, result);
   }
 
@@ -981,16 +1089,18 @@ export async function dispatchJsonRpcRequest(
       params,
       runtime.defaultRemoteAuthority,
     );
-    const result = await runtime.wb.semanticTokensRange({
-      path: resolvedPath,
-      authority,
-      providerHandle: params.providerHandle,
-      languageId: params.languageId,
-      range: params.range,
-      text: params.text,
-      modelVersionId: params.modelVersionId,
-      timeoutMs: params.timeoutMs,
-    });
+    const result = await runDocumentOperation("semanticTokensRange", () =>
+      runtime.wb.semanticTokensRange({
+        path: resolvedPath,
+        authority,
+        providerHandle: params.providerHandle,
+        languageId: params.languageId,
+        range: params.range,
+        text: params.text,
+        modelVersionId: params.modelVersionId,
+        timeoutMs: params.timeoutMs,
+        generation: params.generation,
+      }));
     runtime.log(
       `[semanticTokensRange_reply] ok=${String((result as { ok?: unknown })?.ok)} hasData=${!!field(field(result, "result"), "data")} dataLen=${Array.isArray(field(field(result, "result"), "data")) ? (field(field(result, "result"), "data") as unknown[]).length : 0}`,
     );
@@ -1000,11 +1110,13 @@ export async function dispatchJsonRpcRequest(
   if (method === "vscode.didChange") {
     const resolvedPath = runtime.normalizePathParam(params);
     if (!resolvedPath) return missingPathError(id);
-    const result = runtime.wb.didChange({
+    const result = await runtime.wb.didChange({
       path: resolvedPath,
       text: String(params.text ?? ""),
       languageId: params.languageId,
       generation: params.generation,
+      clientInstanceId: params.clientInstanceId,
+      windowId: params.windowId,
     });
     return success(id, result);
   }

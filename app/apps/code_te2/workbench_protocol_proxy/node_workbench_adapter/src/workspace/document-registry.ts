@@ -2,21 +2,14 @@ import * as nodePath from "node:path";
 
 import { semanticTextFingerprint } from "../extensions/intelligence/semantic-token-projections.mjs";
 
-export type WorkbenchDocumentRole =
-  | "active"
-  | "background"
-  | "provisional-background";
-
 export interface WorkbenchDocumentEntry {
   path: string;
   uri: Record<string, unknown>;
   uriKey: string;
-  role: WorkbenchDocumentRole;
   versionId: number;
   lineCount: number;
   charCount: number;
   lastLineLength: number;
-  openGeneration: number | string | null;
   languageId: string;
   textFingerprint: string;
   contentIdentity: string | null;
@@ -57,6 +50,8 @@ export interface DocumentRegistryRuntime {
     requestedLanguageId?: unknown,
   ) => string;
   activateLanguage: (languageId: string) => Promise<unknown>;
+  isPathClientForeground: (path: string) => boolean;
+  isPathProjectedForeground: (path: string) => boolean;
   log: (...args: unknown[]) => void;
 }
 
@@ -65,8 +60,6 @@ export interface RetainDocumentInput {
   uri: Record<string, unknown>;
   text: string;
   languageId: string;
-  role?: WorkbenchDocumentRole;
-  openGeneration?: number | string | null;
   contentIdentity?: string | null;
   baseSha256?: string | null;
   openStateRevision?: number;
@@ -86,7 +79,6 @@ export interface ReplaceDocumentInput extends DocumentMutationGuard {
   path: string;
   text: string;
   languageId?: string;
-  openGeneration?: number | string | null;
   contentIdentity?: string | null;
   baseSha256?: string | null;
   openStateRevision?: number;
@@ -152,6 +144,7 @@ interface LogicalDocumentSnapshot {
   activePath: string | null;
   activeEpoch: number;
   background: Map<string, LogicalDocumentDescriptor>;
+  protectedPaths: Set<string>;
 }
 
 interface LogicalHydrationRequest extends LogicalDocumentDescriptor {
@@ -250,19 +243,8 @@ export class WorkbenchDocumentRegistry {
     return this.getByPath(path)?.versionId ?? null;
   }
 
-  getOpenGeneration(
-    path: string,
-  ): number | string | null | undefined {
-    const entry = this.getByPath(path);
-    return entry ? entry.openGeneration : undefined;
-  }
-
   countBackground(): number {
-    let count = 0;
-    for (const entry of this._byPath.values()) {
-      if (entry.role !== "active") count += 1;
-    }
-    return count;
+    return this._byPath.size;
   }
 
   retain(input: RetainDocumentInput): {
@@ -282,12 +264,10 @@ export class WorkbenchDocumentRegistry {
       path,
       uri: input.uri,
       uriKey,
-      role: input.role ?? "background",
       versionId: 1,
       lineCount: lines.length,
       charCount: input.text.length,
       lastLineLength: lastLineLength(lines),
-      openGeneration: input.openGeneration ?? null,
       languageId: input.languageId || "plaintext",
       textFingerprint: semanticTextFingerprint(input.text),
       contentIdentity: input.contentIdentity ?? null,
@@ -317,43 +297,23 @@ export class WorkbenchDocumentRegistry {
     addedDocument.lines = null;
     this._syncTabModel();
     this.runtime.log(
-      `[document_registry] retained path=${path} role=${entry.role} version=1`,
+      `[document_registry] retained path=${path} version=1`,
     );
     return { entry, added: true };
   }
 
-  promote(path: string, openGeneration?: number | string | null): {
+  markClientOpen(path: string): {
     entry: WorkbenchDocumentEntry;
-    demoted: WorkbenchDocumentEntry | null;
   } {
     const entry = this._require(path);
-    let demoted: WorkbenchDocumentEntry | null = null;
-    for (const candidate of this._byPath.values()) {
-      if (candidate !== entry && candidate.role === "active") {
-        candidate.role = "provisional-background";
-        demoted = candidate;
-      }
-    }
     this._activeEpoch += 1;
-    entry.role = "active";
     entry.activeEpoch = this._activeEpoch;
-    if (openGeneration !== undefined) {
-      entry.openGeneration = openGeneration;
-    }
     this._syncTabModel();
-    return { entry, demoted };
+    return { entry };
   }
 
-  demote(
-    path: string,
-    role: Exclude<WorkbenchDocumentRole, "active"> =
-      "provisional-background",
-  ): WorkbenchDocumentEntry | null {
-    const entry = this.getByPath(path);
-    if (!entry) return null;
-    entry.role = role;
+  syncPresentation(): void {
     this._syncTabModel();
-    return entry;
   }
 
   replaceFullText(
@@ -388,9 +348,6 @@ export class WorkbenchDocumentRegistry {
     const previousLanguageId = entry.languageId;
     const previousDirty = entry.dirty;
     if (input.languageId) entry.languageId = input.languageId;
-    if (hasOwn(input, "openGeneration")) {
-      entry.openGeneration = input.openGeneration ?? null;
-    }
     if (hasOwn(input, "contentIdentity")) {
       entry.contentIdentity = input.contentIdentity ?? null;
     }
@@ -536,6 +493,18 @@ export class WorkbenchDocumentRegistry {
     const rejected: LogicalDocumentRejected[] = [];
     const desired = new Map<string, LogicalDocumentDescriptor>();
     const protectedPaths = new Set<string>();
+    const rawClientForegroundPaths = params.clientForegroundPaths;
+    if (!Array.isArray(rawClientForegroundPaths)) {
+      return { ok: false, error: "invalid_client_foreground_paths" };
+    }
+    for (const rawPath of rawClientForegroundPaths) {
+      const protectedPath = normalizeAbsolutePath(rawPath);
+      if (!protectedPath || !isPathWithin(protectedPath, projectPath)) {
+        return { ok: false, error: "invalid_client_foreground_path" };
+      }
+      protectedPaths.add(protectedPath);
+    }
+    const releaseProtectedPaths = new Set(protectedPaths);
     const rawBackground = params.background;
     for (let index = 0; index < rawBackground.length; index += 1) {
       const raw = rawBackground[index];
@@ -545,7 +514,7 @@ export class WorkbenchDocumentRegistry {
         rejected.push({ index, error: "invalid_background_descriptor" });
         continue;
       }
-      protectedPaths.add(candidatePath);
+      releaseProtectedPaths.add(candidatePath);
       if (!isPathWithin(candidatePath, projectPath)) {
         rejected.push({
           index,
@@ -605,13 +574,10 @@ export class WorkbenchDocumentRegistry {
       });
     }
 
-    const activeEntry = this.values().find((entry) => entry.role === "active");
-    if (activeEntry) {
-      activeEntry.openStateRevision = openStateRevision;
-      activeEntry.projectGeneration = projectGeneration;
-      protectedPaths.add(activeEntry.path);
+    if (activePath) {
+      protectedPaths.add(activePath);
+      releaseProtectedPaths.add(activePath);
     }
-    if (activePath) protectedPaths.add(activePath);
 
     const hydration: LogicalHydrationRequest[] = [];
     for (const descriptor of desired.values()) {
@@ -624,15 +590,6 @@ export class WorkbenchDocumentRegistry {
         });
         continue;
       }
-      if (entry.role === "active") {
-        rejected.push({
-          path: descriptor.path,
-          error: "active_document_protected",
-        });
-        continue;
-      }
-
-      entry.role = "background";
       entry.openStateRevision = openStateRevision;
       entry.projectGeneration = projectGeneration;
       if (entry.contentIdentity !== descriptor.contentIdentity) {
@@ -650,14 +607,7 @@ export class WorkbenchDocumentRegistry {
     for (const entry of this.values()) {
       if (
         desired.has(entry.path) ||
-        protectedPaths.has(entry.path) ||
-        entry.role === "active"
-      ) {
-        continue;
-      }
-      if (
-        entry.role === "provisional-background" &&
-        entry.openStateRevision >= openStateRevision
+        releaseProtectedPaths.has(entry.path)
       ) {
         continue;
       }
@@ -671,6 +621,7 @@ export class WorkbenchDocumentRegistry {
       activePath,
       activeEpoch: this._activeEpoch,
       background: desired,
+      protectedPaths,
     };
     return {
       ok: true,
@@ -703,7 +654,6 @@ export class WorkbenchDocumentRegistry {
           uri: this.runtime.uriForPath(initial.path),
           text: initial.text,
           languageId,
-          role: "background",
           contentIdentity: initial.contentIdentity,
           baseSha256: initial.baseSha256,
           openStateRevision: initial.openStateRevision,
@@ -768,7 +718,6 @@ export class WorkbenchDocumentRegistry {
       return { ok: false, error: replaced.error, path: input.path };
     }
     if (replaced.ack) await replaced.ack.promise;
-    existing.role = "background";
     return {
       ok: true,
       action: "replaced",
@@ -860,7 +809,7 @@ export class WorkbenchDocumentRegistry {
       input: { kind: 1, uri: entry.uri },
       isPinned: false,
       isPreview: true,
-      isActive: entry.role === "active",
+      isActive: this.runtime.isPathProjectedForeground(entry.path),
       isDirty: entry.dirty,
     }));
     this.runtime.sendExt(
@@ -923,9 +872,10 @@ export class WorkbenchDocumentRegistry {
     }
     if (
       path === snapshot.activePath ||
-      this.getByPath(path)?.role === "active"
+      snapshot.protectedPaths.has(path) ||
+      this.runtime.isPathClientForeground(path)
     ) {
-      return { ok: false, error: "active_document_protected" };
+      return { ok: false, error: "client_foreground_document_protected" };
     }
     const descriptor = snapshot.background.get(path);
     if (!descriptor) {
@@ -963,7 +913,7 @@ export class WorkbenchDocumentRegistry {
     const current = this.getByPath(input.path);
     if (
       current !== entry ||
-      current.role === "active" ||
+      this.runtime.isPathClientForeground(input.path) ||
       current.contentIdentity !== input.contentIdentity ||
       current.openStateRevision !== input.openStateRevision ||
       current.projectGeneration !== input.projectGeneration

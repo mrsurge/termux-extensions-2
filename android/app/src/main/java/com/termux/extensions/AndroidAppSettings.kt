@@ -8,7 +8,7 @@ data class AndroidAppSettings(
     val frameworkHost: String = DEFAULT_FRAMEWORK_HOST,
     val frameworkPort: Int = DEFAULT_FRAMEWORK_PORT,
     val persistentNetworkNotification: Boolean = false,
-    val imeContextSwitchingEnabled: Boolean = true,
+    val imeContextSwitchingEnabled: Boolean = false,
     val devToolsRunProfilesEnabled: Boolean = false,
     val devToolsDebugEnabled: Boolean = false,
 ) {
@@ -38,7 +38,7 @@ internal fun validatedAndroidAppSettings(
     frameworkHost: String,
     frameworkPort: Int,
     persistentNetworkNotification: Boolean,
-    imeContextSwitchingEnabled: Boolean = true,
+    imeContextSwitchingEnabled: Boolean = false,
     devToolsRunProfilesEnabled: Boolean = false,
     devToolsDebugEnabled: Boolean = false,
 ): AndroidAppSettings {
@@ -109,7 +109,7 @@ class AndroidAppSettingsStore(context: Context) {
                 ),
                 imeContextSwitchingEnabled = preferences.getBoolean(
                     KEY_IME_CONTEXT_SWITCHING_ENABLED,
-                    true,
+                    false,
                 ),
                 devToolsRunProfilesEnabled = preferences.getBoolean(
                     KEY_DEVTOOLS_RUN_PROFILES_ENABLED,

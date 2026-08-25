@@ -10,7 +10,7 @@ class AndroidAppSettingsTest {
         val settings = AndroidAppSettings()
 
         assertEquals("http://127.0.0.1:8089", settings.frameworkBaseUrl)
-        assertEquals(true, settings.imeContextSwitchingEnabled)
+        assertEquals(false, settings.imeContextSwitchingEnabled)
         assertEquals(false, settings.devToolsRunProfilesEnabled)
         assertEquals(false, settings.devToolsDebugEnabled)
     }

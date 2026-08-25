@@ -43,6 +43,10 @@ export interface ExtensionEditorNavigationRuntimeOptions {
   activePath(): string | null;
   activeEditorId(): string | null;
   activeClientInstanceId(): string | null;
+  registerOperationReentry?(
+    requestId: string,
+    clientInstanceId: string,
+  ): boolean;
   emitBackendEvent(payload: Record<string, unknown>): void;
   notifyEditor(method: string, params: Record<string, unknown>): void;
   createId(): string;
@@ -238,6 +242,7 @@ export class ExtensionEditorNavigationRuntime {
         timer,
       });
     });
+    this.options.registerOperationReentry?.(requestId, clientInstanceId);
     this.options.emitBackendEvent({
       type: "extension/editorOpenRequested",
       ts_ms: Date.now(),
@@ -290,6 +295,7 @@ export class ExtensionEditorNavigationRuntime {
         timer,
       });
     });
+    this.options.registerOperationReentry?.(operationId, clientInstanceId);
     this.options.notifyEditor("vscode.editorOperation", {
       operationId,
       operation,

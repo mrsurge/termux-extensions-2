@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+import importlib.util
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
-from typing import Mapping
+import sys
+from typing import cast
 
 
 class NodeToolchainError(RuntimeError):
@@ -76,6 +79,23 @@ def _login_shell_node_pair(environ: Mapping[str, str]) -> tuple[Path, Path] | No
     return None
 
 
+def _python_environment_node_pair() -> tuple[Path, Path] | None:
+    return _candidate_pair(Path(sys.executable).parent / "node")
+
+
+def _nodejs_wheel_root(node_binary: Path) -> Path | None:
+    if node_binary.parent != Path(sys.executable).parent:
+        return None
+    spec = importlib.util.find_spec("nodejs_wheel")
+    origin = spec.origin if spec is not None else None
+    if not origin:
+        return None
+    package_root = Path(origin).parent
+    if (package_root / "include" / "node" / "node.h").is_file():
+        return package_root
+    return None
+
+
 def resolve_node_toolchain(
     *,
     node_override_key: str,
@@ -89,6 +109,10 @@ def resolve_node_toolchain(
         pair = _candidate_pair(node_override, npm_override or None)
         if pair is not None:
             return pair
+
+    python_pair = _python_environment_node_pair()
+    if python_pair is not None:
+        return python_pair
 
     path_node = shutil.which("node", path=source.get("PATH"))
     path_npm = shutil.which("npm", path=source.get("PATH"))
@@ -120,8 +144,8 @@ def resolve_node_toolchain(
             return pair
 
     raise NodeToolchainError(
-        "Unable to find a usable Node.js/npm toolchain. "
-        f"Set {node_override_key} and {npm_override_key} to explicit executables."
+        f"Unable to find a usable Node.js/npm toolchain. Set {node_override_key} "
+        + f"and {npm_override_key} to explicit executables."
     )
 
 
@@ -142,7 +166,10 @@ def node_toolchain_env(
     env["npm_config_update_notifier"] = "false"
     prefix = str(env.get("PREFIX") or "").strip()
     if prefix and (Path(prefix) / "include" / "node" / "node.h").is_file():
-        env.setdefault("npm_config_nodedir", prefix)
+        _ = env.setdefault("npm_config_nodedir", prefix)
+    wheel_root = _nodejs_wheel_root(node_binary)
+    if wheel_root is not None:
+        _ = env.setdefault("npm_config_nodedir", str(wheel_root))
     return env
 
 
@@ -170,9 +197,12 @@ def inspect_node_identity(
         detail = (result.stderr or result.stdout).strip()
         raise NodeToolchainError(f"Unable to inspect Node.js runtime: {detail}")
     try:
-        raw = json.loads(result.stdout)
+        loaded = cast(object, json.loads(result.stdout))
     except json.JSONDecodeError as exc:
         raise NodeToolchainError("Node.js returned an invalid runtime identity") from exc
+    if not isinstance(loaded, dict):
+        raise NodeToolchainError("Node.js returned a non-object runtime identity")
+    raw = cast(dict[str, object], loaded)
     identity = {
         key: str(raw.get(key) or "")
         for key in ("platform", "arch", "modules", "node")

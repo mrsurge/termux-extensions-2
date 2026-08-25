@@ -29,6 +29,8 @@ interface TerminalDrawerOptions {
 
 interface TerminalDrawerController {
   open: () => Promise<void>;
+  openDrawer: () => void;
+  activateTerminal: () => Promise<void>;
   close: () => void;
   toggle: () => void;
   destroy: () => Promise<void>;
@@ -1245,10 +1247,8 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     }, { passive: false });
   }
 
-  /**
-   * Open the terminal drawer
-   */
-  async function open(): Promise<void> {
+  /** Open only the shared drawer shell; this must not create a PTY. */
+  function openDrawer(): void {
     if (isOpen) return;
     if (!(drawer instanceof HTMLElement)) return;
 
@@ -1256,10 +1256,14 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     drawer.classList.add('open');
     setTerminalResizeHandleActive(true);
     isOpen = true;
+  }
+
+  /** Activate the terminal surface and lazily create its renderer/session. */
+  async function activateTerminal(): Promise<void> {
+    openDrawer();
     setDrawerHelperFocusActive(true);
     startupSizing = true;
 
-    // Create terminal instance if first time
     if (!term) {
       await initTerminal();
     } else {
@@ -1278,6 +1282,12 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
 
     await ensureTerminalSocket();
     emitTerminalRegister(shellId || 'auto');
+  }
+
+  /** Open the drawer with the terminal explicitly selected. */
+  async function open(): Promise<void> {
+    openDrawer();
+    await activateTerminal();
   }
 
   /**
@@ -1502,6 +1512,8 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
 
   return {
     open,
+    openDrawer,
+    activateTerminal,
     close,
     toggle,
     destroy,

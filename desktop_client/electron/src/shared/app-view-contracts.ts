@@ -34,6 +34,8 @@ export const ELECTRON_APP_VIEW_COMMANDS = [
   "set_second_editor_dock_size",
   "set_second_editor_mode",
   "second_editor_ready",
+  "set_projection_probe_enabled",
+  "inspect_projection_probe",
 ] as const;
 
 export type ElectronAppViewCommand = typeof ELECTRON_APP_VIEW_COMMANDS[number];
@@ -298,6 +300,11 @@ export type ElectronAppViewBridge = {
     mode: ElectronEditorSurfaceMode,
   ): Promise<{ ok: true; presentation: ElectronEditorSurfacePresentation }>;
   secondEditorReady(): Promise<{ ok: true }>;
+  setProjectionProbeEnabled(
+    enabled: boolean,
+    clear?: boolean,
+  ): Promise<unknown>;
+  inspectProjectionProbe(): Promise<unknown>;
   onSecondEditorCommand(
     listener: (command: ElectronSecondEditorCommand) => void,
   ): () => void;

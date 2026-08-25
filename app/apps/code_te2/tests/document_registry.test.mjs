@@ -43,6 +43,8 @@ function createRegistry(
   {
     workspacePath = "/workspace",
     activateLanguage = async () => {},
+    isPathClientForeground = () => false,
+    isPathProjectedForeground = () => false,
   } = {},
 ) {
   let req = 0;
@@ -66,6 +68,8 @@ function createRegistry(
       return requestedLanguageId || (path.endsWith(".rs") ? "rust" : "plaintext");
     },
     activateLanguage,
+    isPathClientForeground,
+    isPathProjectedForeground,
     log() {},
   });
 }
@@ -113,6 +117,7 @@ function reconcileParams({
   openStateRevision = 10,
   activePath = "/workspace/active.rs",
   background = [],
+  clientForegroundPaths = [],
 } = {}) {
   return {
     projectPath: "/workspace",
@@ -120,6 +125,7 @@ function reconcileParams({
     openStateRevision,
     activePath,
     background,
+    clientForegroundPaths,
   };
 }
 
@@ -143,20 +149,24 @@ function createLifecycleRuntime(files) {
   const calls = [];
   const events = [];
   const reads = [];
-  const registry = createRegistry(calls);
-  const session = {
-    activeEditorId: null,
-    activeUriObj: null,
-    activeTab: null,
-    nextModelNumber: 1,
-    documentRegistry: registry,
-  };
   const state = {
     workspaceFolder: "/workspace",
     activePath: null,
     activeUri: null,
     activeLanguageId: null,
     lastOpenTs: null,
+  };
+  const registry = createRegistry(calls, {
+    isPathClientForeground: (path) => state.activePath === path,
+    isPathProjectedForeground: (path) => state.activePath === path,
+  });
+  const session = {
+    activeEditorId: null,
+    activeUriObj: null,
+    activeTab: null,
+    activeGeneration: null,
+    nextModelNumber: 1,
+    documentRegistry: registry,
   };
   const runtime = {
     ensureConnected() {},
@@ -230,7 +240,6 @@ test("registry retains once, replaces without close/open, and releases once", as
     uri,
     text: "fn first() {}\n",
     languageId: "rust",
-    role: "background",
     contentIdentity: "one",
     openStateRevision: 4,
     projectGeneration: 2,
@@ -248,15 +257,14 @@ test("registry retains once, replaces without close/open, and releases once", as
     1,
   );
 
-  const promoted = registry.promote(path);
-  assert.equal(promoted.entry.role, "active");
+  const opened = registry.markClientOpen(path);
   const replaced = registry.replaceFullText(
     {
       path,
       text: "fn second() {}\n",
       languageId: "rust",
       dirty: true,
-      expectedActiveEpoch: promoted.entry.activeEpoch,
+      expectedActiveEpoch: opened.entry.activeEpoch,
       expectedContentIdentity: "one",
     },
     { waitForAck: true, isDirtyEvent: true },
@@ -292,9 +300,7 @@ test("byte-identical replacement updates metadata without model churn", () => {
     uri: uriForPath(path),
     text,
     languageId: "rust",
-    role: "background",
     contentIdentity: "before",
-    openGeneration: 1,
     dirty: false,
   });
 
@@ -303,7 +309,6 @@ test("byte-identical replacement updates metadata without model churn", () => {
       path,
       text,
       languageId: "rust",
-      openGeneration: 2,
       contentIdentity: "after",
       dirty: true,
     },
@@ -315,7 +320,6 @@ test("byte-identical replacement updates metadata without model churn", () => {
   assert.equal(replaced.previousVersionId, retained.entry.versionId);
   assert.equal(replaced.versionId, retained.entry.versionId);
   assert.equal(replaced.ack, null);
-  assert.equal(registry.getByPath(path)?.openGeneration, 2);
   assert.equal(registry.getByPath(path)?.contentIdentity, "after");
   assert.equal(registry.getByPath(path)?.dirty, true);
   assert.equal(
@@ -328,7 +332,7 @@ test("byte-identical replacement updates metadata without model churn", () => {
   );
 });
 
-test("active A to B to A transfers editor role without document churn", async () => {
+test("client A to B to A retains shared documents without document churn", async () => {
   const fixture = createLifecycleRuntime({
     "/workspace/a.rs": "fn a() {}\n",
     "/workspace/b.rs": "fn b() {}\n",
@@ -340,11 +344,8 @@ test("active A to B to A transfers editor role without document churn", async ()
 
   assert.deepEqual(fixture.reads, ["/workspace/a.rs", "/workspace/b.rs"]);
   assert.equal(fixture.registry.size, 2);
-  assert.equal(fixture.registry.getByPath("/workspace/a.rs").role, "active");
-  assert.equal(
-    fixture.registry.getByPath("/workspace/b.rs").role,
-    "provisional-background",
-  );
+  assert.equal(fixture.registry.getByPath("/workspace/a.rs").activeEpoch, 3);
+  assert.equal(fixture.registry.getByPath("/workspace/b.rs").activeEpoch, 2);
 
   const deltas = documentDeltas(fixture.calls);
   assert.equal(
@@ -372,9 +373,8 @@ test("$tryOpenDocument shares registry identity with active documents", async ()
     uri: uriForPath(activePath),
     text: "fn active() {}\n",
     languageId: "rust",
-    role: "active",
   });
-  registry.promote(activePath);
+  registry.markClientOpen(activePath);
   calls.length = 0;
 
   const runtime = {
@@ -439,7 +439,7 @@ test("workspace switch removes editor facade then releases every document", asyn
   assert.equal(deltas[1].removedDocuments.length, 2);
 });
 
-test("active document promotion emits the backend reconciliation fact", async () => {
+test("client document open emits the backend reconciliation fact", async () => {
   const fixture = createLifecycleRuntime({
     "/workspace/a.rs": "fn a() {}\n",
   });
@@ -464,7 +464,6 @@ test("same-path same-generation open is idempotent", async () => {
   fixture.registry.replaceFullText({
     path: "/workspace/a.rs",
     text: "fn drafted() {}\n",
-    openGeneration: 7,
     dirty: true,
   });
   const callsBeforeDuplicate = fixture.calls.length;
@@ -496,7 +495,6 @@ test("active switching retains the complete synthetic tab set", async () => {
     uri: uriForPath("/workspace/b.rs"),
     text: "fn b() {}\n",
     languageId: "rust",
-    role: "background",
   });
   fixture.calls.length = 0;
 
@@ -539,15 +537,13 @@ test("logical reconcile requests only missing or stale background hydration", as
     uri: uriForPath(activePath),
     text: "fn active() {}\n",
     languageId: "rust",
-    role: "active",
   });
-  registry.promote(activePath);
+  registry.markClientOpen(activePath);
   registry.retain({
     path: stalePath,
     uri: uriForPath(stalePath),
     text: "fn old() {}\n",
     languageId: "rust",
-    role: "background",
     contentIdentity: "old-content",
     baseSha256: "old-base",
   });
@@ -556,7 +552,6 @@ test("logical reconcile requests only missing or stale background hydration", as
     uri: uriForPath(orphanPath),
     text: "fn orphan() {}\n",
     languageId: "rust",
-    role: "background",
     contentIdentity: "orphan-content",
     baseSha256: "orphan-base",
   });
@@ -585,7 +580,6 @@ test("logical reconcile requests only missing or stale background hydration", as
     ],
   );
   assert.deepEqual(reconciled.released, [orphanPath]);
-  assert.equal(registry.getByPath(activePath).role, "active");
   assert.equal(registry.getByPath(orphanPath), null);
 
   const [staleRequest, missingRequest] = reconciled.hydration;
@@ -690,9 +684,8 @@ test("logical hydration rejects stale revisions, generations, and active epochs"
     uri: uriForPath(activePath),
     text: "fn active() {}\n",
     languageId: "rust",
-    role: "active",
   });
-  registry.promote(activePath);
+  registry.markClientOpen(activePath);
 
   const accepted = registry.reconcileLogicalDocuments(
     reconcileParams({
@@ -752,9 +745,9 @@ test("logical hydration rejects stale revisions, generations, and active epochs"
         }),
       )
     ).error,
-    "active_document_protected",
+    "client_foreground_document_protected",
   );
-  registry.promote(activePath);
+  registry.markClientOpen(activePath);
   assert.equal(
     (
       await registry.hydrateLogicalDocument(
@@ -929,9 +922,64 @@ test("client-scoped open dispatch preserves authenticated presentation identity"
     forceRefresh: false,
     generation: 7,
     workspaceFolder: null,
+    requestId: null,
     clientInstanceId: "client_abcdefghijkl",
     windowId: "window_abcdefghijklmnopqrst",
   }]);
+});
+
+test("document provider dispatch replays the authenticated client facade", async () => {
+  const calls = [];
+  const runtime = {
+    defaultRemoteAuthority: "localhost",
+    normalizePathParam: (params) => String(params.path ?? ""),
+    normalizeAuthorityParam: (params, fallback) =>
+      String(params.authority ?? fallback ?? ""),
+    wb: {
+      resolveLanguageId() {
+        return "python";
+      },
+      async activateLanguage(languageId) {
+        calls.push(["activate", languageId]);
+        return { ok: true };
+      },
+      async runClientDocumentOperation(params, label, operation) {
+        calls.push(["project", label, params.clientInstanceId]);
+        return await operation();
+      },
+      async hover(params) {
+        calls.push(["hover", params]);
+        return { ok: true, result: null };
+      },
+    },
+  };
+
+  const response = await dispatchJsonRpcRequest(runtime, {
+    id: 44,
+    method: "vscode.hover",
+    params: {
+      path: "/workspace/a.py",
+      languageId: "python",
+      lineNumber: 1,
+      column: 2,
+      generation: 17,
+      clientInstanceId: "client_abcdefghijkl",
+      windowId: "window_abcdefghijklmnopqrst",
+    },
+  });
+
+  assert.deepEqual(response, {
+    jsonrpc: "2.0",
+    id: 44,
+    result: { ok: true, result: null },
+  });
+  assert.deepEqual(calls.slice(0, 3), [
+    ["project", "activateLanguage:vscode.hover", "client_abcdefghijkl"],
+    ["activate", "python"],
+    ["project", "hover", "client_abcdefghijkl"],
+  ]);
+  assert.equal(calls[3][0], "hover");
+  assert.equal(calls[3][1].generation, 17);
 });
 
 test("active editor selection updates use the existing WBA dispatcher", async () => {

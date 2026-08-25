@@ -181,6 +181,15 @@ const electronBridge: ElectronAppViewBridge = Object.freeze({
   secondEditorReady(): Promise<{ ok: true }> {
     return invokeElectron("second_editor_ready");
   },
+  setProjectionProbeEnabled(
+    enabled: boolean,
+    clear: boolean = true,
+  ): Promise<unknown> {
+    return invokeElectron("set_projection_probe_enabled", { enabled, clear });
+  },
+  inspectProjectionProbe(): Promise<unknown> {
+    return invokeElectron("inspect_projection_probe");
+  },
   onSecondEditorCommand(
     listener: (command: ElectronSecondEditorCommand) => void,
   ): () => void {

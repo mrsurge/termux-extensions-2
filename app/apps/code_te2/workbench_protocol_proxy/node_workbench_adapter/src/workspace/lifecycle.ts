@@ -21,6 +21,7 @@ export interface WorkspaceSessionState {
   activeEditorId: string | null;
   activeUriObj: unknown;
   activeTab: unknown;
+  activeGeneration: number | string | null;
   nextModelNumber: number;
   documentRegistry: WorkbenchDocumentRegistry;
 }
@@ -128,16 +129,12 @@ function updateActiveState(runtime: LifecycleRuntime, path: string, uriObj: Reco
   }
 }
 
-function currentOpenGeneration(runtime: LifecycleRuntime, path: string): number | string | null | undefined {
-  return runtime.session.documentRegistry.getOpenGeneration(path);
-}
-
 function openGuard(runtime: LifecycleRuntime, path: string, generation: number | string | null): Record<string, unknown> | null {
   if (!runtime.session.documentRegistry.getByPath(path)) {
     runtime.warn(`[didChange] drop path=${path} reason=document_not_open`);
     return { ok: false, error: "document_not_open" };
   }
-  const openGeneration = currentOpenGeneration(runtime, path);
+  const openGeneration = runtime.session.activeGeneration;
   if (
     generation !== null &&
     openGeneration !== undefined &&
@@ -196,7 +193,7 @@ export async function openFile(runtime: LifecycleRuntime, params: unknown = {}):
     isSameFileReopen &&
     existingEntry &&
     generation !== null &&
-    existingEntry.openGeneration === generation
+    runtime.session.activeGeneration === generation
   );
   if (isDuplicateGeneration) {
     runtime.log(
@@ -286,7 +283,6 @@ export async function openFile(runtime: LifecycleRuntime, params: unknown = {}):
         path,
         text,
         languageId,
-        openGeneration: generation,
         dirty: false,
       },
       { isDirtyEvent: false },
@@ -300,6 +296,7 @@ export async function openFile(runtime: LifecycleRuntime, params: unknown = {}):
     runtime.session.activeEditorId = prevEditorId;
     runtime.session.activeUriObj = uriObj;
     runtime.session.activeTab = prevTab;
+    runtime.session.activeGeneration = generation;
     void runtime.activateLanguage(languageId).catch((error) => {
       runtime.warn(
         `[openFile] language activation failed languageId=${languageId}: ${String((error as Error)?.message ?? error)}`,
@@ -326,19 +323,12 @@ export async function openFile(runtime: LifecycleRuntime, params: unknown = {}):
           uri: uriObj,
           text,
           languageId,
-          role: "background",
-          openGeneration: generation,
           dirty: false,
         });
       });
-  const promoted = runtime.session.documentRegistry.promote(path, generation);
-  if (promoted.demoted) {
-    runtime.log(
-      `[openFile] ts=${Date.now()} demotedDocument=[${promoted.demoted.path}] role=provisional-background`,
-    );
-  }
+  const openedDocument = runtime.session.documentRegistry.markClientOpen(path);
   runtime.log(
-    `[openFile] ts=${Date.now()} ${retained.added ? "addedDocuments" : "promotedDocument"}=[${path}] lineCount=${retained.entry.lineCount}`,
+    `[openFile] ts=${Date.now()} ${retained.added ? "addedDocuments" : "retainedDocument"}=[${path}] lineCount=${retained.entry.lineCount}`,
   );
 
   const editorDelta = runtime.spanTrace("openFile.buildDelta.addedEditors", () => ({
@@ -420,11 +410,12 @@ export async function openFile(runtime: LifecycleRuntime, params: unknown = {}):
   runtime.session.activeEditorId = editorId;
   runtime.session.activeUriObj = uriObj;
   runtime.session.activeTab = tabActive;
+  runtime.session.activeGeneration = generation;
   runtime.onEvent({
     type: "document/activeChanged",
     ts_ms: Date.now(),
     path,
-    activeEpoch: promoted.entry.activeEpoch,
+    activeEpoch: openedDocument.entry.activeEpoch,
     generation,
     workspaceFolder: runtime.state.workspaceFolder,
     ...(clientInstanceId ? { clientInstanceId } : {}),
@@ -453,7 +444,6 @@ export function didChange(
       path,
       text,
       languageId,
-      openGeneration: generation,
       dirty: true,
     },
     {
@@ -525,6 +515,7 @@ export async function switchWorkspace(runtime: LifecycleRuntime, newFolder: stri
     runtime.session.activeUriObj = null;
     runtime.session.activeEditorId = null;
     runtime.session.activeTab = null;
+    runtime.session.activeGeneration = null;
   }
   try {
     runtime.session.documentRegistry.releaseAll();

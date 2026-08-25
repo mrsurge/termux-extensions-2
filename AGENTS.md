@@ -17,7 +17,7 @@ This repository is commonly used in an unsandboxed environment.
 - Never change repository or filesystem state without explicit user approval
   for a concrete plan.
 - Preserve user changes and untracked files. Do not revert unrelated work.
-- Use `$TEMPDIR` for scratch data when it is set. Otherwise use a clearly named
+- Use `$TMPDIR` for scratch data when it is set. Otherwise use a clearly named
   workspace-local scratch directory. Do not hard-code `/tmp`.
 - Treat `android/` as read-only unless the approved plan explicitly includes
   Android changes.
@@ -113,9 +113,10 @@ Code TE2:
 - `app/apps/code_te2/host/` — host-owned backend actions
 - `app/apps/code_te2/workbench_protocol_proxy/` — WBA/code-server bridge
 
-Open-file authority is backend-owned through `ProjectSidecar.last_file`,
-`open_state_backend.py`, and editor open services. Frontend `currentPath` values
-are projections, not cross-client authority.
+Open-file authority is backend-owned through `open_state_backend.py`, bounded
+`ProjectSidecar.client_foregrounds`, and editor open services.
+`ProjectSidecar.last_file` is a one-time migration seed only. Frontend
+`currentPath` values are projections, not cross-client authority.
 
 ## Code TE2 Ownership Boundary
 
@@ -151,15 +152,25 @@ Do not move authority into a frontend for convenience.
 
 Each frontend surface uses only its own lane:
 
-- Editor: namespace `/rpc/editor`, path `/editor_ws/socket.io`
-- Explorer: namespace `/rpc/explorer`, path `/explorer_ws/socket.io`
-- Host/main page: namespace `/ui_ipc`, path `/ui_ipc_ws/socket.io`
-- Sidebar backends: namespace `/sidebar_ipc` on the app Socket.IO service
-- Code TE2 terminal: namespace `/terminal`, path `/terminal_ws/socket.io`
+- Editor: namespace `/rpc/editor`, canonical public path
+  `/api/app/code_te2/socket.io`
+- Explorer: namespace `/rpc/explorer`, canonical public path
+  `/api/app/code_te2/socket.io`
+- Host/main page: namespace `/ui_ipc`, canonical public path
+  `/api/app/code_te2/socket.io`
+- Sidebar backends: namespace `/sidebar_ipc`, canonical public path
+  `/api/app/code_te2/socket.io`
+- Code TE2 terminal: namespace `/terminal`, canonical public path
+  `/api/app/code_te2/socket.io`
 - Standalone Terminal app: raw WebSocket `/ws/app/terminal/terminal` (backend
   route `/ws/terminal`), with required `codec=msgpack-v1`
-- WBA: namespace `/wba`, path `/wba_ws/socket.io`
+- WBA: namespace `/wba`, canonical public path
+  `/api/app/code_te2/services/wba/socket.io`
 - TE2 console: namespace `/te2_console`, path `/te2_console_ws/socket.io`
+
+`/editor_ws/socket.io`, `/explorer_ws/socket.io`, `/ui_ipc_ws/socket.io`,
+`/terminal_ws/socket.io`, and `/wba_ws/socket.io` are explicit legacy request
+aliases, not the public paths for new client connections.
 
 Sidebar IPC is a backend app API lane. Stateful app frontends publish state to
 their own backend; that backend sends typed state/URL commands through Sidebar

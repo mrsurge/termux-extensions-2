@@ -10,6 +10,7 @@ import time
 from framework_shells import get_manager
 from framework_shells.orchestrator import Orchestrator
 from framework_shells.record import ShellRecord
+from app.node_toolchain import NodeToolchainError, resolve_node_toolchain
 
 from .code_te2_paths import code_te2_paths
 from .diagnostics_latency_metrics import (
@@ -703,6 +704,13 @@ async def ensure_workbench_adapter_shell(
     repo_root = Path(__file__).resolve().parents[3]
     project_root_abs = Path(project_root).resolve(strict=False)
     adapter_entry = (repo_root / "app" / "apps" / "code_te2" / "workbench_protocol_proxy" / "node_workbench_adapter" / "dist" / "server" / "server.mjs").resolve(strict=False)
+    try:
+        node_binary, _npm_binary = resolve_node_toolchain(
+            node_override_key="TE2_WORKBENCH_ADAPTER_NODE_BIN",
+            npm_override_key="TE2_WORKBENCH_ADAPTER_NPM_BIN",
+        )
+    except NodeToolchainError as exc:
+        raise RuntimeError(f"Workbench adapter Node.js runtime is unavailable: {exc}") from exc
     if not code_server_socket_path:
         raise RuntimeError("code-server UDS socket path is required")
     remote_authority = "localhost"
@@ -723,6 +731,7 @@ async def ensure_workbench_adapter_shell(
                 "INSTANCE_ID": "primary",
                 "WORKBENCH_ADAPTER_PORT": str(WORKBENCH_ADAPTER_FIXED_PORT),
                 "WORKBENCH_ADAPTER_ENTRY": str(adapter_entry),
+                "WORKBENCH_ADAPTER_NODE": str(node_binary),
                 "CODE_SERVER_HTTP": str(code_server_http),
                 "CODE_SERVER_SOCKET": str(code_server_socket_path or ""),
                 "CODE_SERVER_EXTENSIONS_JSON": str(

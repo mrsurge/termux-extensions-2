@@ -84,6 +84,14 @@ test("Electron app-view commands are strictly allowlisted", () => {
     validateElectronAppViewCommand("second_editor_ready"),
     "second_editor_ready",
   );
+  assert.equal(
+    validateElectronAppViewCommand("set_projection_probe_enabled"),
+    "set_projection_probe_enabled",
+  );
+  assert.equal(
+    validateElectronAppViewCommand("inspect_projection_probe"),
+    "inspect_projection_probe",
+  );
   assert.throws(
     () => validateElectronAppViewCommand("execute_javascript"),
     /Unsupported Electron app-view command/,

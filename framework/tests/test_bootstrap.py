@@ -227,6 +227,62 @@ class FrameworkBootstrapTests(unittest.TestCase):
         self.assertIn("--release", command.argv)
         self.assertNotIn("CARGO_TARGET_DIR", env)
 
+    def test_explicit_server_binary_precedes_packaged_release(self) -> None:
+        args = self.bootstrap._parse_args(["--server-bin", "/example/te2-server"])
+
+        with mock.patch.object(self.bootstrap, "packaged_server_path") as packaged:
+            command = self.bootstrap._server_command(args, {}, build=False)
+
+        self.assertEqual(command.argv, ["/example/te2-server"])
+        packaged.assert_not_called()
+
+    def test_binary_release_selects_verified_packaged_server(self) -> None:
+        args = self.bootstrap._parse_args([])
+
+        with mock.patch.object(
+            self.bootstrap,
+            "packaged_server_path",
+            return_value=Path("/wheel/app/release_runtime/bin/te2-server"),
+        ), mock.patch.object(self.bootstrap, "_cached_server_command") as cached:
+            command = self.bootstrap._server_command(args, {}, build=False)
+
+        self.assertEqual(command.argv, ["/wheel/app/release_runtime/bin/te2-server"])
+        self.assertTrue(command.build_already_done)
+        cached.assert_not_called()
+
+    def test_invalid_binary_release_never_falls_through_to_cargo(self) -> None:
+        args = self.bootstrap._parse_args([])
+
+        with mock.patch.object(
+            self.bootstrap,
+            "packaged_server_path",
+            side_effect=self.bootstrap.ReleaseRuntimeError("broken packaged release"),
+        ), mock.patch.object(self.bootstrap, "_cached_server_command") as cached:
+            with self.assertRaisesRegex(SystemExit, "broken packaged release"):
+                self.bootstrap._server_command(args, {}, build=False)
+
+        cached.assert_not_called()
+
+    def test_binary_release_rejects_source_build_options(self) -> None:
+        cases = (
+            ("--build-only",),
+            ("--debug",),
+            ("--force-build",),
+            ("--no-build-cache",),
+            ("--no-ferrous-framework",),
+            ("--memory-profile", "/profiles"),
+        )
+        for raw_args in cases:
+            with self.subTest(raw_args=raw_args):
+                args = self.bootstrap._parse_args(list(raw_args))
+                with mock.patch.object(
+                    self.bootstrap,
+                    "packaged_server_path",
+                    return_value=Path("/wheel/app/release_runtime/bin/te2-server"),
+                ):
+                    with self.assertRaisesRegex(SystemExit, "binary-release wheel"):
+                        self.bootstrap._server_command(args, {}, build=False)
+
     def test_debug_direct_cargo_mode_omits_release(self) -> None:
         args = self.bootstrap._parse_args(
             [
@@ -530,6 +586,10 @@ class FrameworkBootstrapTests(unittest.TestCase):
                 str(root / "data" / "apps"),
             )
             self.assertEqual((root / "runtime").stat().st_mode & 0o777, 0o700)
+            self.assertEqual(
+                env["PATH"].split(os.pathsep)[0],
+                str(Path(sys.executable).parent),
+            )
 
     def test_native_interface_discovery_returns_loopback_on_linux_or_android(self) -> None:
         addresses = self.bootstrap._interface_addresses()

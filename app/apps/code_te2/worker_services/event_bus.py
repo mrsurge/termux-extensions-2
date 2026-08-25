@@ -21,6 +21,7 @@ EventType = Literal[
     "ClientForegroundChanged",
     "DraftStateChanged",
     "DiagnosticsDetailChanged",
+    "DocumentClosed",
     "GitDiffBaseChanged",
     "GitPathRestored",
     "GitSnapshotRequested",

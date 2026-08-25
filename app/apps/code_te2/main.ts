@@ -202,7 +202,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
   window.api = api;
   const clientRole = codeTe2ClientRoleFromLocation();
   const clientIdentity = await resolveCodeTe2ClientIdentity({ role: clientRole });
-  configureCodeTe2SocketIdentity(clientIdentity);
+  configureCodeTe2SocketIdentity({ ...clientIdentity, clientRole });
   if (clientRole === 'secondary') {
     await bootSecondaryEditorRuntime(rootEl, host);
     return;

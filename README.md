@@ -54,11 +54,14 @@ under `app/apps/*/manifest.json`; there is no built-in `codex_agent` app.
 
 ## Requirements
 
-TE2's Python runtime requires Python 3.12 or newer. The standalone Terminal
-also requires Node.js and npm: its first launch installs the locked `node-pty`
-and headless xterm modules into TE2's private data root for the current Node
-ABI. Archive Manager additionally needs the platform `libarchive` shared
-library.
+TE2's Python runtime requires Python 3.12 or newer. On the supported x86-64
+Debian/Ubuntu Linux alpha, install `build-essential` before launching the
+standalone Terminal: its first launch compiles the locked `node-pty` module,
+then installs that module and the headless xterm modules into TE2's private data
+root for the current Node ABI. TE2's Linux Python dependency supplies the exact
+Node.js/npm runtime and matching headers, so a separate global Node.js install
+is not required. Archive Manager additionally needs the platform `libarchive`
+shared library.
 
 The checked-in Code TE2 frontend, WBA backend, and shared browser assets are
 already built or vendored; ordinary runtime does not install npm dependency
@@ -116,6 +119,21 @@ install or exposed as user installation entrypoints; users see them only in a
 cloned or editable source checkout.
 
 ## Install And Run
+
+For the supported x86-64 Debian/Ubuntu Linux alpha from PyPI:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y build-essential
+python -m venv ~/.local/share/te2-alpha-venv
+. ~/.local/share/te2-alpha-venv/bin/activate
+python -m pip install "te2==0.2.337"
+te2
+```
+
+`build-essential` supplies the compiler and `make` needed by the Terminal's
+first-use `node-pty` build. It is a system prerequisite, not part of TE2's
+Python environment.
 
 For a source checkout:
 
