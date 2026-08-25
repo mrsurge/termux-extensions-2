@@ -10,7 +10,7 @@ shells:
       - sh
       - -lc
       - >-
-        node "${ctx:WORKBENCH_ADAPTER_ENTRY}"
+        "${ctx:WORKBENCH_ADAPTER_NODE}" "${ctx:WORKBENCH_ADAPTER_ENTRY}"
     env:
       TE_APP_ID: ${ctx:APP_ID}
       TE2_ADAPTER_HOST: 127.0.0.1

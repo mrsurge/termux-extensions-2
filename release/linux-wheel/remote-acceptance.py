@@ -36,6 +36,22 @@ def main() -> int:
     if selected.name != "te2-server" or not selected.is_file():
         raise RuntimeError(f"bootstrap selected an invalid packaged server: {selected}")
 
+    if args.install_only:
+        result = {
+            "mode": "install-only",
+            "packagedServer": str(selected),
+            "schemaVersion": 1,
+            "te2": str(te2),
+            "venv": str(venv),
+            "wheel": wheel.name,
+        }
+        (root / "acceptance-result.json").write_text(
+            json.dumps(result, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        print(json.dumps(result, sort_keys=True))
+        return 0
+
     selected.write_bytes(b"intentional acceptance corruption\n")
     selected.chmod(0o755)
     corrupt = subprocess.run(
@@ -125,6 +141,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--wheel", required=True)
     parser.add_argument("--root", required=True)
     parser.add_argument("--python", default="python3")
+    parser.add_argument("--install-only", action="store_true")
     return parser.parse_args()
 
 

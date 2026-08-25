@@ -3,9 +3,9 @@ shells:
   app-worker:
     backend: proc
     command:
-    - sh
-    - -lc
-    - als-rs --port 12459
+    - als-rs
+    - --port
+    - '12459'
     env:
       TE_APP_ID: als-rs
       TE_APP_WORKER_PORT: '12459'

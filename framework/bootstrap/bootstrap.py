@@ -292,6 +292,13 @@ def _build_env(args: BootstrapArgs) -> dict[str, str]:
             pythonpath_parts.insert(0, path)
     env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
 
+    executable_dir = str(Path(sys.executable).parent)
+    path_parts = [part for part in env.get("PATH", "").split(os.pathsep) if part]
+    if executable_dir in path_parts:
+        path_parts.remove(executable_dir)
+    path_parts.insert(0, executable_dir)
+    env["PATH"] = os.pathsep.join(path_parts)
+
     _configure_memory_profile_env(env, args.memory_profile_dir)
 
     _ensure_framework_shells_env(env, args)

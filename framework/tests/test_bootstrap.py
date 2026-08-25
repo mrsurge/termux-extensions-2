@@ -586,6 +586,10 @@ class FrameworkBootstrapTests(unittest.TestCase):
                 str(root / "data" / "apps"),
             )
             self.assertEqual((root / "runtime").stat().st_mode & 0o777, 0o700)
+            self.assertEqual(
+                env["PATH"].split(os.pathsep)[0],
+                str(Path(sys.executable).parent),
+            )
 
     def test_native_interface_discovery_returns_loopback_on_linux_or_android(self) -> None:
         addresses = self.bootstrap._interface_addresses()

@@ -6,7 +6,9 @@ httpx
 msgspec>=0.21.1
 anyio
 fastmcp
-framework-shells @ git+https://github.com/mrsurge/framework-shells@0bf3269cd69a000015b0ac484a04004b8dc564d1
+framework-shells==0.0.63
+agent-log-server==0.2.118
+nodejs-wheel==24.16.0; sys_platform == "linux" and platform_machine == "x86_64"
 libarchive-c>=5.1
 python-socketio[client,asyncio-client]
 pyyaml

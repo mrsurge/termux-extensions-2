@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 import unittest
 from unittest.mock import AsyncMock, call, patch
 
@@ -9,6 +10,16 @@ from app.apps.code_te2 import workbench_adapter_shell_manager as manager
 class WorkbenchAdapterShellAdoptionTests(unittest.IsolatedAsyncioTestCase):
     def tearDown(self) -> None:
         manager._set_adapter_state("idle")
+
+    def test_shellspec_invokes_the_resolved_node_binary(self) -> None:
+        shellspec = (
+            Path(manager.__file__).parent / "shellspec" / "workbench_adapter.yaml"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            '"${ctx:WORKBENCH_ADAPTER_NODE}" "${ctx:WORKBENCH_ADAPTER_ENTRY}"',
+            shellspec,
+        )
+        self.assertNotIn('node "${ctx:WORKBENCH_ADAPTER_ENTRY}"', shellspec)
 
     async def test_adopts_matching_connected_session_and_publishes_ready(self) -> None:
         publish = AsyncMock()

@@ -23,6 +23,23 @@ def main() -> int:
     remote_root = f"{remote_home}/.cache/te2-release-acceptance/{digest[:16]}"
     remote_wheel = f"{remote_root}/{wheel.name}"
     remote_driver = f"{remote_root}/remote-acceptance.py"
+
+    if args.uninstall_only:
+        remote_python = f"{remote_root}/venv/bin/python"
+        _ssh(args.host, "test", "-x", remote_python)
+        _ssh(
+            args.host,
+            remote_python,
+            "-m",
+            "pip",
+            "uninstall",
+            "--yes",
+            "te2",
+        )
+        _ssh(args.host, "rm", "-rf", remote_root)
+        print(f"Removed retained wheel installation: {args.host}:{remote_root}")
+        return 0
+
     _ssh(args.host, "mkdir", "-p", remote_root)
     _scp(wheel, args.host, remote_wheel)
     _scp(REMOTE_DRIVER, args.host, remote_driver)
@@ -36,10 +53,16 @@ def main() -> int:
             remote_wheel,
             "--root",
             remote_root,
+            *(["--install-only"] if args.keep_remote else []),
         )
     except subprocess.CalledProcessError:
         print(f"Remote acceptance state retained for inspection: {args.host}:{remote_root}")
         raise
+
+    if args.keep_remote:
+        print(f"Remote wheel installation retained at: {args.host}:{remote_root}")
+        print(f"TE2 executable: {remote_root}/venv/bin/te2")
+        return 0
 
     evidence = wheel.parent / "remote-acceptance"
     evidence.mkdir(parents=True, exist_ok=True)
@@ -51,8 +74,7 @@ def main() -> int:
         json.dumps(result, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    if not args.keep_remote:
-        _ssh(args.host, "rm", "-rf", remote_root)
+    _ssh(args.host, "rm", "-rf", remote_root)
     print(evidence)
     return 0
 
@@ -63,7 +85,17 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--host", required=True, help="SSH destination with key authentication")
     parser.add_argument("--wheel", required=True)
-    parser.add_argument("--keep-remote", action="store_true")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument(
+        "--keep-remote",
+        action="store_true",
+        help="Install and verify the wheel without starting TE2, then retain the venv",
+    )
+    modes.add_argument(
+        "--uninstall-only",
+        action="store_true",
+        help="Uninstall and remove the retained venv for this exact wheel",
+    )
     return parser.parse_args()
 
 
