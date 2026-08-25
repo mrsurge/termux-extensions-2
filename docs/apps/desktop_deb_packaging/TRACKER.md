@@ -18,7 +18,7 @@ Last updated: 2026-08-25
 | Phase 4A: source/Git desktop bootstrap | Implemented and validated from a clean wheel | Python entrypoints build one fingerprinted Electron runtime and receipt-owned XDG integration; binary wheels and prebuilt release components remain separate |
 | Phase 4B: release provenance and Linux platform wheel | Implemented; audited build and clean SSH acceptance passed, publication mirror remains | Supported wheels embed the verified Rust server; source provenance alone may use Cargo |
 | Phase 4C: unified installer and Linux target | First-party native wheel graph is published and accepted from PyPI; unified installer transaction remains | Managed venv and Electron materialization compose exact clean-tag components atomically |
-| Phase 4D: final integration and publication | Linux PyPI alpha published and accepted; GitHub components, signed APKs, and unified installer remain | Final main integration, annotated tag, clean builds, PyPI, GitHub, and native-client publication remain separately evidenced |
+| Phase 4D: final integration and publication | TE2 0.2.338 Linux PyPI alpha published and accepted; GitHub components, signed APKs, and unified installer remain | Final main integration, annotated tag, clean builds, PyPI, GitHub, and native-client publication remain separately evidenced |
 | Phase 5: Termux target mode | Dependency ownership and validation architecture refined; complete graph/mapping and implementation remain | Apt-first shared foundations plus a release-local wheel tree; x86-64 container exercises transactions and physical AArch64 owns native acceptance |
 
 ## Confirmed source findings
@@ -31,7 +31,7 @@ Last updated: 2026-08-25
 | `sse-starlette` was held directly by an unmounted router | The dead `app.libs.jobs.jobs_bp` import/router was removed while the job core and handlers remain | Pruned; still transitive through MCP |
 | Framework-Shells is reproducibly pinned | `requirements.txt` uses exact validated 0.0.63 commit `0bf3269cd69a000015b0ac484a04004b8dc564d1` | Complete |
 | Framework-Shells release artifacts are native | The Linux candidate set carries the PyO3 pipe pump and Rust terminal broker in `cp39-abi3` and free-threaded `cp314-cp314t` manylinux wheels; release construction refuses a non-native wheel | Implemented and clean-install validated |
-| Agent Log Server has a fail-closed binary wheel | Exact 0.2.118 depends on Framework-Shells 0.0.63 and carries a target/version/digest-verified `als-server`; corrupt or incompatible binary provenance never falls through to Cargo | Implemented and clean-install validated |
+| Agent Log Server has a fail-closed binary wheel | Exact 0.2.119 depends on Framework-Shells 0.0.63 and carries a target/version/digest-verified `als-server`, compiled browser bundle, and vendored Socket.IO MessagePack parser; corrupt/incompatible provenance and incomplete wheels fail construction | Implemented, published, and clean-install validated |
 | ALS app-worker launch must preserve the managed venv | Bootstrap correctly prepends the active venv, but the former `sh -lc` shellspec reset `PATH` before resolving `als-rs` | Corrected to direct argv and covered by a manifest regression test |
 | Linux x86-64 owns an exact private Node runtime | `nodejs-wheel==24.16.0` supplies venv-local Node/npm and matching headers; bootstrap children, Terminal, WBA, and source Electron use the shared resolver | Implemented and clean-install validated |
 | Modern Termux excludes the Linux Node wheel | Both connected targets run Python 3.14.6 with `sys.platform == "android"` and `aarch64`; the Linux/x86-64 marker is false | Termux resolves Node/npm from its apt package mapping |
@@ -856,8 +856,24 @@ Corrective implementation evidence recorded on 2026-08-23:
   process was stopped.
 - TE2 `0.2.338` pins `agent-log-server==0.2.119`, advances every synchronized
   release-facing version, and republishes Android's seeded frontend assets.
-  Clean-tag wheel construction and full public-index Debian framework
-  acceptance remain the publication gate.
+  Annotated tag `0.2.338` identifies integrated `main` commit
+  `1617913e0a1ba940d021fb107ca1566d152ea62d`; both are pushed.
+- The clean-tag manylinux wheel has SHA-256
+  `5969579fa2034d5d633fd994654dad1e143d8327e2036fc221fb99c92832b1bd`;
+  the source archive has SHA-256
+  `c4b8a84f6cc9ec34544814e71747001ee276a734a4f1f9b4707d4605ea7dfd2d`.
+  PyPI publishes those exact immutable files without a yanked flag. Twine and
+  auditwheel checks passed, and the packaged Rust server digest is
+  `ce34a0558c7d481daad68168d4f76ce47f2138fe27bb0c5c20d66a10c26d1024`.
+- A fresh unprivileged Debian Python 3.13 venv installed `te2==0.2.338` with no
+  pip cache and `https://pypi.org/simple` as its only index. `pip check` passed;
+  exact TE2 0.2.338, ALS 0.2.119, Framework-Shells 0.0.63, and Node 24.16.0
+  resolved. The wheel-owned server passed isolated `/api/health` and discovered
+  all eight built-in apps, including `als-rs` and `code_te2`, before its exact
+  process was stopped.
+- The separately retained framework acceptance exercised ALS 0.2.119 through
+  TE2's real `als-rs` proxy: health and the compiled browser bundle were served
+  without the former 503, missing-module, or bundle-404 signatures.
 
 ## Phase 5 checklist — Termux target mode
 
@@ -956,3 +972,4 @@ Corrective implementation evidence recorded on 2026-08-23:
 | 2026-08-25 | Phase 5 Termux dependency architecture | Audited current requirements, official/TUR package availability, two live Python 3.14 Android/AArch64 environments, installed native wheel tags, and the remote container host | Termux uses apt-first shared foundations plus a release-local binary-only wheel tree without a venv; x86-64 container validates transactions and physical AArch64 validates native artifacts |
 | 2026-08-25 | Production PyPI 0.2.337 publication | Clean-tag builds, twine/auditwheel/hash checks, production uploads for TE2/FWS/ALS, and fresh public-index-only Debian framework, WBA, app-readiness, and real PTY acceptance | Passed; the Linux PyPI alpha is live and the isolated test runtime shut down cleanly; GitHub/native/installer publication remains |
 | 2026-08-25 | ALS 0.2.119 browser-runtime wheel repair | Required-member wheel guards, 62 ALS tests, typecheck/build, Rust checks, manylinux audit, exact PyPI digest verification, public-index-only install, and isolated static-runtime smoke | Passed; TE2 0.2.338 clean-tag rebuild and framework-level proxy acceptance remain |
+| 2026-08-25 | TE2 0.2.338 ALS repair publication | Synchronized clean-tag build, twine/auditwheel/provenance checks, exact PyPI hash verification, fresh public-index-only Debian install, isolated framework/app discovery, and retained-runtime ALS proxy/static-bundle checks | Passed; TE2 0.2.338 and ALS 0.2.119 are live on PyPI, while GitHub/native/installer publication remains |

@@ -158,12 +158,14 @@ The Linux first-party wheel graph is also explicit. Framework-Shells 0.0.63 is
 a native distribution, never a pure-Python publication wheel: it carries both
 the PyO3 pipe pump and Rust terminal broker. The accepted Linux wheel set has a
 `cp39-abi3` wheel for ordinary CPython and a separately tagged `cp314-cp314t`
-wheel for free-threaded CPython. Agent Log Server 0.2.118 depends on that exact
+wheel for free-threaded CPython. Agent Log Server 0.2.119 depends on that exact
 Framework-Shells version and its Linux wheel carries a target/version/digest
-verified `als-server`; source, VCS, editable, and sdist builds alone retain the
-Cargo path. TE2 depends on both exact versions. A Termux/Android wheel is not
-created by relabeling these manylinux artifacts: it requires a native Bionic
-build and a tag actually advertised by the target interpreter.
+verified `als-server`, the compiled browser bundle, and its vendored Socket.IO
+MessagePack parser. Release construction rejects a wheel missing any of those
+members; source, VCS, editable, and sdist builds alone retain the Cargo path.
+TE2 depends on both exact versions. A Termux/Android wheel is not created by
+relabeling these manylinux artifacts: it requires a native Bionic build and a
+tag actually advertised by the target interpreter.
 
 ### 1.2 The Electron build is an unpacked application directory, not a complete installer
 
