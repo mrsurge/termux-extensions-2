@@ -82,7 +82,7 @@ class ReleaseRuntimeTests(unittest.TestCase):
 
             message = str(raised.exception)
             self.assertIn("digest mismatch", message)
-            self.assertIn("te2==0.2.337", message)
+            self.assertIn("te2==0.2.338", message)
             self.assertIn("--force-reinstall", message)
 
     def test_binary_release_rejects_inconsistent_platform_tag(self) -> None:
@@ -116,10 +116,10 @@ def _binary_manifest(server: Path, *, relative: str | None = None) -> dict[str, 
         "distributionMode": "binary-release",
         "libc": "glibc",
         "minimumGlibc": "2.28",
-        "packageVersion": "0.2.337",
+        "packageVersion": "0.2.338",
         "platform": "linux",
         "platformTag": "manylinux_2_28_x86_64",
-        "releaseTag": "v0.2.337",
+        "releaseTag": "v0.2.338",
         "schemaVersion": 1,
         "serverRelativePath": relative or "bin/te2-server",
         "serverSha256": hashlib.sha256(server.read_bytes()).hexdigest(),
@@ -143,7 +143,7 @@ def _release_runtime_environment(root: Path) -> Iterator[None]:
             mock.patch.object(
                 release_runtime,
                 "_installed_package_version",
-                return_value="0.2.337",
+                return_value="0.2.338",
             )
         )
         stack.enter_context(

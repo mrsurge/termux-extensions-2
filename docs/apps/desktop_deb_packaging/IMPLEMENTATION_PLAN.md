@@ -1503,9 +1503,17 @@ native ordinary-CPython and free-threaded-CPython wheels and refuses a
 non-native release artifact. Agent Log Server then emits a platform wheel with
 its verified Rust server and exact Framework-Shells dependency. Only after
 those wheels exist does TE2 build against exact
-`framework-shells==0.0.63`, `agent-log-server==0.2.118`, and, on Linux x86-64,
+`framework-shells==0.0.63`, `agent-log-server==0.2.119`, and, on Linux x86-64,
 `nodejs-wheel==24.16.0`. Final published artifacts must be rebuilt from the
 clean synchronized tag; dirty-source candidates are acceptance inputs only.
+
+Agent Log Server's wheel is a complete runtime unit even though its source tree
+keeps the Rust server and browser assets under one nested crate. Release staging
+may ignore only repository-root distribution output; it must preserve the
+compiled `rust/crates/als-server/src/static/dist` tree and the vendored
+Socket.IO MessagePack parser. The ALS builder validates those members in both
+the raw wheel and the final repaired/copied wheel so a binary that can render
+the embedded HTML shell but cannot serve its browser runtime fails publication.
 
 1. Add an ignored distribution staging layout and one deterministic release
    builder under repository construction tooling.

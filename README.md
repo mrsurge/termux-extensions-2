@@ -127,7 +127,7 @@ sudo apt-get update
 sudo apt-get install -y build-essential
 python -m venv ~/.local/share/te2-alpha-venv
 . ~/.local/share/te2-alpha-venv/bin/activate
-python -m pip install "te2==0.2.337"
+python -m pip install "te2==0.2.338"
 te2
 ```
 

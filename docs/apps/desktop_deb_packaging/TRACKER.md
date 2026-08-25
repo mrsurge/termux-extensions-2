@@ -838,6 +838,27 @@ Corrective implementation evidence recorded on 2026-08-23:
   and emitted framed MessagePack output. The isolated framework and all child
   processes terminated cleanly after acceptance.
 
+### Phase 4E ALS browser-runtime wheel repair
+
+- Agent Log Server `0.2.119` fixes release staging so the nested compiled
+  `static/dist/codex_agent.js` tree is preserved while repository-root `dist/`
+  output remains excluded. Required-member validation now rejects both raw and
+  final wheels that omit the server binary, binary manifest, compiled browser
+  bundle, or vendored Socket.IO MessagePack parser.
+- Annotated tag `0.2.119` identifies ALS commit
+  `5496ce29d53308e0c9ea6b9472f0505f6bd5242b`. PyPI publishes the audited
+  `manylinux_2_28_x86_64` wheel with SHA-256
+  `f1bf8a5b05b5c9f2a948c880a89e3bdfbb5d2680fb219dbe2aa38d28e981ca8c`.
+- A fresh public-index-only Debian Python 3.13 venv passed `pip check`, resolved
+  the published wheel, and verified its packaged server, 880,151-byte compiled
+  browser bundle, and 10,476-byte parser. A separate isolated runtime served
+  health, the HTML shell, bundle, and parser without a 503 before its exact
+  process was stopped.
+- TE2 `0.2.338` pins `agent-log-server==0.2.119`, advances every synchronized
+  release-facing version, and republishes Android's seeded frontend assets.
+  Clean-tag wheel construction and full public-index Debian framework
+  acceptance remain the publication gate.
+
 ## Phase 5 checklist — Termux target mode
 
 - [x] Capture current Termux architecture, Python version, prefix, and repository
@@ -934,3 +955,4 @@ Corrective implementation evidence recorded on 2026-08-23:
 | 2026-08-25 | Standalone Terminal Linux prerequisite acceptance | Installed Debian `build-essential`, then built and launched the fingerprinted private Terminal runtime with wheel-owned Node/npm/headers | Passed; README now declares the prerequisite and public-PyPI acceptance must repeat against an empty data root |
 | 2026-08-25 | Phase 5 Termux dependency architecture | Audited current requirements, official/TUR package availability, two live Python 3.14 Android/AArch64 environments, installed native wheel tags, and the remote container host | Termux uses apt-first shared foundations plus a release-local binary-only wheel tree without a venv; x86-64 container validates transactions and physical AArch64 validates native artifacts |
 | 2026-08-25 | Production PyPI 0.2.337 publication | Clean-tag builds, twine/auditwheel/hash checks, production uploads for TE2/FWS/ALS, and fresh public-index-only Debian framework, WBA, app-readiness, and real PTY acceptance | Passed; the Linux PyPI alpha is live and the isolated test runtime shut down cleanly; GitHub/native/installer publication remains |
+| 2026-08-25 | ALS 0.2.119 browser-runtime wheel repair | Required-member wheel guards, 62 ALS tests, typecheck/build, Rust checks, manylinux audit, exact PyPI digest verification, public-index-only install, and isolated static-runtime smoke | Passed; TE2 0.2.338 clean-tag rebuild and framework-level proxy acceptance remain |

@@ -66,7 +66,12 @@ class CodeServerLanguageBackendTests(unittest.IsolatedAsyncioTestCase):
         calls = 0
         editor_calls: list[str | None] = []
 
-        def build_editor_snapshot(*, client_instance_id: str | None) -> JsonMap:
+        def build_editor_snapshot(
+            *,
+            client_instance_id: str | None,
+            client_role: str,
+        ) -> JsonMap:
+            _ = client_role
             editor_calls.append(client_instance_id)
             path = (
                 f"/workspace/{client_instance_id}.py"
