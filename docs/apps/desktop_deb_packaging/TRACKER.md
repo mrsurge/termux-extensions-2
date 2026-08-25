@@ -17,8 +17,8 @@ Last updated: 2026-08-25
 | Phase 3D: Cefrium IME-dismissal focus release | Core live interaction accepted repeatedly; auxiliary false-positive matrix remains | Event-driven API-30 IME animation transition; Cefrium-only and no polling/viewport inference |
 | Phase 4A: source/Git desktop bootstrap | Implemented and validated from a clean wheel | Python entrypoints build one fingerprinted Electron runtime and receipt-owned XDG integration; binary wheels and prebuilt release components remain separate |
 | Phase 4B: release provenance and Linux platform wheel | Implemented; audited build and clean SSH acceptance passed, publication mirror remains | Supported wheels embed the verified Rust server; source provenance alone may use Cargo |
-| Phase 4C: unified installer and Linux target | First-party native wheel graph, private Node foundation, corrected platform wheel, and clean-SSH live acceptance passed; installer transaction remains | Managed venv and Electron materialization compose exact clean-tag components atomically |
-| Phase 4D: final integration and publication | Planned; immutable release transaction recorded | Final main integration, annotated tag, clean builds, TestPyPI/PyPI, and GitHub publication are separately gated |
+| Phase 4C: unified installer and Linux target | First-party native wheel graph is published and accepted from PyPI; unified installer transaction remains | Managed venv and Electron materialization compose exact clean-tag components atomically |
+| Phase 4D: final integration and publication | Linux PyPI alpha published and accepted; GitHub components, signed APKs, and unified installer remain | Final main integration, annotated tag, clean builds, PyPI, GitHub, and native-client publication remain separately evidenced |
 | Phase 5: Termux target mode | Dependency ownership and validation architecture refined; complete graph/mapping and implementation remain | Apt-first shared foundations plus a release-local wheel tree; x86-64 container exercises transactions and physical AArch64 owns native acceptance |
 
 ## Confirmed source findings
@@ -675,7 +675,7 @@ Corrective implementation evidence recorded on 2026-08-23:
   `build-essential`, install it through the narrow system-package boundary,
   build the private `node-pty` runtime with the wheel-owned Node/npm/headers,
   and pass user live Terminal acceptance.
-- [ ] Rebuild these first-party candidates from the clean synchronized release
+- [x] Rebuild these first-party candidates from the clean synchronized release
   tag before any TestPyPI/PyPI/GitHub upload; current dirty-source candidates
   are validation inputs only.
 - [ ] Produce `install-te2`, `release-manifest.json`, component manifests,
@@ -778,11 +778,11 @@ Corrective implementation evidence recorded on 2026-08-23:
 
 ## Phase 4D checklist — final integration and publication
 
-- [ ] Synchronize package/Rust/app/frontend/Electron/Android versions and rebuild
+- [x] Synchronize package/Rust/app/frontend/Electron/Android versions and rebuild
   Code TE2 plus bundled Android assets before final integration.
-- [ ] Complete branch preflight, integrate into `main`, and create one immutable
+- [x] Complete branch preflight, integrate into `main`, and create one immutable
   annotated tag on the final integrated commit.
-- [ ] Build every candidate from a clean checkout of that tag.
+- [x] Build every PyPI candidate from a clean checkout of that tag.
 - [ ] Sign release APKs with separately supplied release credentials and reject
   debug/staging signatures.
 - [ ] Audit APK signer/version/assets/16 KiB alignment, wheel tags and contents,
@@ -790,12 +790,74 @@ Corrective implementation evidence recorded on 2026-08-23:
 - [ ] Populate a draft GitHub Release with the complete component set.
 - [ ] Upload the exact sdist/wheel to TestPyPI and pass the complete remote
   Debian live-acceptance sequence against the draft GitHub components.
-- [ ] Upload the immutable tested files to PyPI; any mismatch requires a new
+- [x] Upload the immutable tested files to PyPI; any mismatch requires a new
   version rather than replacement.
+- [x] Repeat the isolated Debian framework/app/Terminal smoke using only the
+  public PyPI index, a fresh venv, and empty TE2 roots.
 - [ ] Repeat the remote Debian framework/install smoke using public PyPI plus
   draft GitHub assets; any failure blocks GitHub Release publication.
-- [ ] Record tag, commit, artifact URLs/hashes, compatibility evidence, APK
+- [x] Record the PyPI tag, commit, artifact URLs/hashes, and Linux compatibility
+  evidence.
+- [ ] Record GitHub component hashes, APK
   signer fingerprints, and acceptance results.
+
+### Phase 4D PyPI publication evidence
+
+- Annotated tag `0.2.337` identifies integrated `main` commit
+  `de76b5f91ef3444043fd816608c970b74597d66c`. Framework-Shells tag `0.0.63`
+  identifies `8b6cd08`, and Agent Log Server tag `0.2.118` identifies
+  `40e5ecd`; all three tags are pushed.
+- Production PyPI publishes `te2==0.2.337`,
+  `framework-shells==0.0.63`, and `agent-log-server==0.2.118`. PyPI's JSON
+  metadata reports the exact locally audited hashes: TE2 wheel
+  `ac0cdc01b8f50d72a9495db358a8f08dddcfe3bbf22783944b56ad5cd5446f7a`
+  and sdist
+  `daac5780089e5fd66c6f4b655feac7b0112dd3d88c0d0c03d296ebcb3c64a9e8`;
+  Framework-Shells ABI3 wheel
+  `a3724409e2d2818ac23bd89ec795bab11a93d91fcc77e659fc3e0fb6845c10f8`,
+  free-threaded wheel
+  `c28337961df6251232b0617f3b608c2b75c569be9a73abef44af7345676df41d`,
+  and sdist
+  `4da24bcc16e85ea7cdc17792c77a429ae9d060510db5a159e22010184558af56`;
+  Agent Log Server wheel
+  `8f16f32bf5477d3443412785d70f9df78e570563e595868dd2779d51a95ef9e2`.
+- `twine check` passed every artifact. `auditwheel show` accepted each native
+  wheel as exact `manylinux_2_28_x86_64`. The TE2 wheel carries server SHA-256
+  `4cd2e3d94b8f5f1581b685d157d7e597f280efda9bbb91d01c1dfff22e8ccde8`
+  with matching version/source/tag provenance.
+- A fresh unprivileged Debian Python 3.13 venv installed solely from
+  `https://pypi.org/simple` with no pip cache or local wheelhouse. `pip check`
+  passed; exact TE2, ALS, Framework-Shells, and Node 24.16.0 versions resolved;
+  the wheel-owned Rust framework passed `/api/health` and app discovery; ALS,
+  Code TE2, and Terminal reached semantic readiness; WBA booted without a
+  missing Node dependency.
+- With an empty `TE2_DATA_HOME`, the Terminal bootstrap compiled and validated
+  its locked private modules using Debian `build-essential`, the PyPI graph's
+  Node/npm, and matching headers. The public framework then launched the
+  packaged broker, spawned `/bin/sh` through `node-pty`, accepted framed input,
+  and emitted framed MessagePack output. The isolated framework and all child
+  processes terminated cleanly after acceptance.
+
+### Phase 4E ALS browser-runtime wheel repair
+
+- Agent Log Server `0.2.119` fixes release staging so the nested compiled
+  `static/dist/codex_agent.js` tree is preserved while repository-root `dist/`
+  output remains excluded. Required-member validation now rejects both raw and
+  final wheels that omit the server binary, binary manifest, compiled browser
+  bundle, or vendored Socket.IO MessagePack parser.
+- Annotated tag `0.2.119` identifies ALS commit
+  `5496ce29d53308e0c9ea6b9472f0505f6bd5242b`. PyPI publishes the audited
+  `manylinux_2_28_x86_64` wheel with SHA-256
+  `f1bf8a5b05b5c9f2a948c880a89e3bdfbb5d2680fb219dbe2aa38d28e981ca8c`.
+- A fresh public-index-only Debian Python 3.13 venv passed `pip check`, resolved
+  the published wheel, and verified its packaged server, 880,151-byte compiled
+  browser bundle, and 10,476-byte parser. A separate isolated runtime served
+  health, the HTML shell, bundle, and parser without a 503 before its exact
+  process was stopped.
+- TE2 `0.2.338` pins `agent-log-server==0.2.119`, advances every synchronized
+  release-facing version, and republishes Android's seeded frontend assets.
+  Clean-tag wheel construction and full public-index Debian framework
+  acceptance remain the publication gate.
 
 ## Phase 5 checklist — Termux target mode
 
@@ -892,3 +954,5 @@ Corrective implementation evidence recorded on 2026-08-23:
 | 2026-08-25 | Phase 4C corrected platform-wheel live acceptance | Replaced the ALS login-shell launch with direct argv, rebuilt TE2's platform wheel, installed the complete local graph in a second clean hash-keyed Debian venv, and completed user live validation | Passed; the managed venv resolves ALS, Node, and the packaged Rust server correctly; clean-tag publication and the desktop installer remain |
 | 2026-08-25 | Standalone Terminal Linux prerequisite acceptance | Installed Debian `build-essential`, then built and launched the fingerprinted private Terminal runtime with wheel-owned Node/npm/headers | Passed; README now declares the prerequisite and public-PyPI acceptance must repeat against an empty data root |
 | 2026-08-25 | Phase 5 Termux dependency architecture | Audited current requirements, official/TUR package availability, two live Python 3.14 Android/AArch64 environments, installed native wheel tags, and the remote container host | Termux uses apt-first shared foundations plus a release-local binary-only wheel tree without a venv; x86-64 container validates transactions and physical AArch64 validates native artifacts |
+| 2026-08-25 | Production PyPI 0.2.337 publication | Clean-tag builds, twine/auditwheel/hash checks, production uploads for TE2/FWS/ALS, and fresh public-index-only Debian framework, WBA, app-readiness, and real PTY acceptance | Passed; the Linux PyPI alpha is live and the isolated test runtime shut down cleanly; GitHub/native/installer publication remains |
+| 2026-08-25 | ALS 0.2.119 browser-runtime wheel repair | Required-member wheel guards, 62 ALS tests, typecheck/build, Rust checks, manylinux audit, exact PyPI digest verification, public-index-only install, and isolated static-runtime smoke | Passed; TE2 0.2.338 clean-tag rebuild and framework-level proxy acceptance remain |
