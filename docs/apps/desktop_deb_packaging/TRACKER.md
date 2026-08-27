@@ -1,6 +1,6 @@
 # Unified Linux And Termux Release Installer Tracker
 
-Last updated: 2026-08-26
+Last updated: 2026-08-27
 
 ## Program status
 
@@ -18,8 +18,8 @@ Last updated: 2026-08-26
 | Phase 4A: source/Git desktop bootstrap | Implemented and validated from a clean wheel | Python entrypoints build one fingerprinted Electron runtime and receipt-owned XDG integration; the unified Linux installer deliberately reuses this path |
 | Phase 4B: release provenance and Linux platform wheel | Implemented; audited build and clean SSH acceptance passed, publication mirror remains | Supported wheels embed the verified Rust server; source provenance alone may use Cargo |
 | Phase 4C: unified installer and Linux target | Core installer, private venv, optional desktop bootstrap, and non-graphical Debian acceptance pass; acquisition/upgrade/graphical matrix remains | Managed venv is atomic; `--desktop` delegates to that venv's existing Electron bootstrap and config contract |
-| Phase 4D: final integration and publication | TE2 0.2.338 Linux PyPI alpha published and accepted; GitHub installer publication and signed APKs remain | Final main integration, annotated tag, clean builds, PyPI, GitHub, and native-client publication remain separately evidenced |
-| Phase 5: Termux target mode | Installer, complete wheel graph, deterministic archive, and physical AArch64 acceptance implemented; clean ALS wheel and remaining release-channel matrix remain | Apt-first shared foundations plus a release-local wheel tree; dirty first-party inputs can produce only explicitly marked validation candidates |
+| Phase 4D: final integration and publication | Published and Linux-accepted: `0.2.339` is tagged from clean integrated `main`, its Linux wheel/sdist and first-party dependencies are on PyPI, and its verified GitHub prerelease contains the installer and native artifacts; final public-download physical Termux reinstall remains | Release assets are immutable, checksum-manifested, and source-provenanced; future releases repeat the same transaction |
+| Phase 5: Termux target mode | Published: the clean 96-wheel AArch64 archive, target-manifest apt transaction, public GitHub payload, and physical candidate acceptance passed; final public-download device reinstall awaits an attached acceptance device | Apt-first shared foundations plus a release-local wheel tree; dirty first-party inputs can produce only explicitly marked validation candidates |
 
 ## Confirmed source findings
 
@@ -31,7 +31,7 @@ Last updated: 2026-08-26
 | `sse-starlette` was held directly by an unmounted router | The dead `app.libs.jobs.jobs_bp` import/router was removed while the job core and handlers remain | Pruned; still transitive through MCP |
 | Framework-Shells is reproducibly pinned | `requirements.txt` uses exact validated 0.0.63 commit `0bf3269cd69a000015b0ac484a04004b8dc564d1` | Complete |
 | Framework-Shells release artifacts are native | The Linux candidate set carries the PyO3 pipe pump and Rust terminal broker in `cp39-abi3` and free-threaded `cp314-cp314t` manylinux wheels; release construction refuses a non-native wheel | Implemented and clean-install validated |
-| Agent Log Server has a fail-closed binary wheel | Exact 0.2.119 depends on Framework-Shells 0.0.63 and carries a target/version/digest-verified `als-server`, compiled browser bundle, and vendored Socket.IO MessagePack parser; corrupt/incompatible provenance and incomplete wheels fail construction | Implemented, published, and clean-install validated |
+| Agent Log Server has a fail-closed binary wheel | Exact 0.2.122 depends on Framework-Shells 0.0.63 and carries a target/version/digest-verified `als-server`, compiled browser bundle, and vendored Socket.IO MessagePack parser; corrupt/incompatible provenance and incomplete wheels fail construction | Implemented, published, and clean-install validated |
 | ALS app-worker launch must preserve the managed venv | Bootstrap correctly prepends the active venv, but the former `sh -lc` shellspec reset `PATH` before resolving `als-rs` | Corrected to direct argv and covered by a manifest regression test |
 | Linux x86-64 owns an exact private Node runtime | `nodejs-wheel==24.16.0` supplies venv-local Node/npm and matching headers; bootstrap children, Terminal, WBA, and source Electron use the shared resolver | Implemented and clean-install validated |
 | Modern Termux excludes the Linux Node wheel | Both connected targets run Python 3.14.6 with `sys.platform == "android"` and `aarch64`; the Linux/x86-64 marker is false | Termux resolves Node/npm from its apt package mapping |
@@ -818,30 +818,33 @@ Corrective implementation evidence recorded on 2026-08-23:
   deferring the proposed second row and additional keys.
 - [x] Refresh Android notification-permission and battery-policy state from
   native `onResume` plus Settings page foreground events; do not poll.
-- [ ] Advance the synchronized TE2 version, rebuild Code TE2, rebundle Android
+- [x] Advance the synchronized TE2 version, rebuild Code TE2, rebundle Android
   assets, and build both GeckoView and Cefrium APKs from the same commit.
-- [ ] Pin and publish the clean ALS Android/Linux release selected by the final
+- [x] Pin and publish the clean ALS Android/Linux release selected by the final
   TE2 version before constructing the public Termux archive.
-- [ ] Complete branch preflight, integrate into `main`, and create one immutable
+- [x] Complete branch preflight, integrate into `main`, and create one immutable
   annotated tag on the final integrated commit.
-- [ ] Build every PyPI candidate from a clean checkout of that tag.
-- [ ] Build GeckoView and Cefrium staging APKs with the repository development
+- [x] Build every PyPI candidate from a clean checkout of that tag.
+- [x] Build GeckoView and Cefrium staging APKs with the repository development
   certificate, and label them as sideloading/validation artifacts; production
   release signing remains a separate credentialed gate.
-- [ ] Audit APK signer/version/assets/16 KiB alignment, wheel tags and contents,
+- [x] Audit APK signer/version/assets/16 KiB alignment, wheel tags and contents,
   Rust linkage, Electron contents, archive paths, and all checksums.
-- [ ] Populate a draft GitHub Release with the complete component set.
-- [ ] Upload the exact sdist/wheel to TestPyPI and pass the complete remote
-  Debian live-acceptance sequence against the draft GitHub components.
-- [ ] Upload the immutable tested files to PyPI; any mismatch requires a new
+- [x] Populate and publish a GitHub prerelease with the complete component set.
+- [x] Validate the clean-tag wheel/sdist candidates before immutable upload.
+  This alpha did not use a TestPyPI mirror; public PyPI acceptance below is the
+  authoritative external-index test.
+- [x] Upload the immutable tested files to PyPI; any mismatch requires a new
   version rather than replacement.
-- [ ] Repeat the isolated Debian framework/app/Terminal smoke using only the
-  public PyPI index, a fresh venv, and empty TE2 roots.
-- [ ] Repeat the remote Debian framework/install smoke using public PyPI plus
-  draft GitHub assets; any failure blocks GitHub Release publication.
-- [ ] Record the PyPI tag, commit, artifact URLs/hashes, and Linux compatibility
+- [x] Repeat the isolated Debian framework/app smoke using only the public PyPI
+  index, a fresh venv, and empty TE2 roots. The packaged-server, health, and
+  eight-app discovery checks passed; Terminal's native path remains covered by
+  the physical candidate matrix.
+- [x] Repeat the remote Debian install/framework smoke using public PyPI plus
+  the public tagged GitHub installer assets.
+- [x] Record the PyPI tag, commit, artifact URLs/hashes, and Linux compatibility
   evidence.
-- [ ] Record GitHub component hashes, APK
+- [x] Record GitHub component hashes, APK
   signer fingerprints, and acceptance results.
 
 ### Phase 4D PyPI publication evidence
@@ -1035,6 +1038,13 @@ Corrective implementation evidence recorded on 2026-08-23:
   and Termux archive must be rebuilt from their final clean tags; the default
   archive and public-release builders reject the former dirty input unless an
   explicit validation-only override records the ineligible state.
+- The final clean archive is `te2-0.2.339-termux-aarch64.tar.gz`, SHA-256
+  `e83696563ec7aaab0b14e3b28002b11ddabfc0f3a7965811edc1284522590c9c`.
+  It carries TE2 commit `d4e7a48286a9383a021244e18b7b74c372587c9c`, clean
+  Agent Log Server 0.2.122, 96 audited wheels, and
+  `publicationEligible: true`; the exact archive is attached to GitHub Release
+  `0.2.339`. A final install through the public download URL remains pending
+  until the wiped physical acceptance device reconnects.
 
 ## Deferred work
 
@@ -1083,3 +1093,4 @@ Corrective implementation evidence recorded on 2026-08-23:
 | 2026-08-26 | Phase 5 Termux AArch64 implementation and acceptance | Exact 96-wheel offline archive, apt ownership validation, Android-tag/ELF audits, deterministic double build, two wiped-device installs, eight-app discovery, Code TE2/ALS/Terminal runtime acceptance, manifest-installed TUR plus managed Code Server opt-in, corruption/missing-wheel failure, repair, uninstall/state preservation, reinstall, managed CLI wrappers, and exact-process shutdown | Implementation and physical-device candidate acceptance passed; publication remains blocked on a clean ALS Android bootstrap fix plus the open two-version/download/container matrix |
 | 2026-08-26 | Phase 4C unified Linux installer and desktop materialization | Termux-first target detection, narrow apt prerequisites including Git, exact public-PyPI private venv, staged-venv relocation repair, atomic activation, managed wrappers, existing `te2 desktop install` delegation, XDG integration, and local-framework config seeding on Debian Trixie | Core and non-graphical acceptance passed; online/offline acquisition, upgrade/failure matrix, framework relaunch, and graphical Electron acceptance remain |
 | 2026-08-27 | Public installer and final-default implementation | Standalone stdin bootstrap, release manifest/checksum assembler, checksum-tamper tests, exact-version Linux handoff, Android foreground permission refresh, IME default alignment, and fresh Code TE2 preference checks | Source and focused validation passed; synchronized version/build, physical Termux download acceptance, and final publication remain |
+| 2026-08-27 | 0.2.339 release publication | Clean-tag Linux and Android builds, Bionic archive, PyPI first-party wheels, public-index and public-curl Debian acceptance, GitHub asset-set/digest verification, and 16 KiB Android audits | Passed; `0.2.339` is a published prerelease with a public installer and immutable 13-asset manifest; final public-download physical Termux reinstall awaits an attached device |

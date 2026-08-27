@@ -124,14 +124,17 @@ cloned or editable source checkout.
 
 ## Install And Run
 
-From an unpacked, matching TE2 release-installer payload:
+From the `0.2.339` public prerelease:
 
 ```bash
-# Framework and CLI only.
-./install-te2 --yes
+# Framework and CLI only. The explicit prerelease tag is important: GitHub's
+# `latest` endpoint intentionally excludes prereleases.
+curl -fsSL https://github.com/mrsurge/termux-extensions-2/releases/download/0.2.339/install-te2 \
+  | TE2_RELEASE_TAG=0.2.339 sh -s -- --yes
 
 # Linux only: also build and register the Electron desktop client.
-./install-te2 --desktop --yes
+curl -fsSL https://github.com/mrsurge/termux-extensions-2/releases/download/0.2.339/install-te2 \
+  | TE2_RELEASE_TAG=0.2.339 sh -s -- --desktop --yes
 ```
 
 The desktop option uses the exact private venv selected by the installer; it
