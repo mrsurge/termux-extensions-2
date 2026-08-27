@@ -32,10 +32,12 @@ is accepted.
 The distribution work also recognizes four intentionally different install
 modes. Source, editable, VCS, and sdist-built installs may build and cache the
 Rust server from source. A supported PyPI platform wheel carries the validated
-GNU/Linux server, while the unified Linux installer composes that wheel with a
-separate Electron archive. The Termux archive carries the Bionic/Android
-server. Linux owns a private venv; Termux reuses its shared interpreter without
-a venv. Distribution payloads must never stage Cargo's intermediate build tree.
+GNU/Linux server and the locked Electron source inputs. The unified Linux
+installer places that wheel in a private venv and, only when `--desktop` is
+selected, invokes the installed venv's existing `te2 desktop install` bootstrap.
+The Termux archive carries the Bionic/Android server. Termux reuses its shared
+interpreter without a venv. Distribution payloads must never stage Cargo's or
+Electron's intermediate build trees.
 
 ## 1. Source-backed starting point
 
@@ -89,7 +91,7 @@ Source inspection resolves the external dependency classes as follows:
 |---|---|
 | Python 3.12+ | Core runtime |
 | platform `libarchive` shared library | Archive Manager runtime |
-| Node.js and npm | Standalone Terminal private first-use bootstrap, plus the explicit source/editable/Git Electron bootstrap; managed/binary-release desktop installs materialize prebuilt Electron |
+| Node.js and npm | Standalone Terminal private first-use bootstrap plus the explicit Electron bootstrap used by source, wheel, and unified `--desktop` installs |
 | native compiler toolchain and Node headers | Target-specific support to validate for the standalone Terminal's first-use `node-pty` bootstrap |
 | Rust and Cargo | Source/Git install framework build only; absent from prebuilt packages |
 | Git CLI | Source acquisition only; framework Git is Rust/libgit2-owned and WBA excludes VS Code Git extensions |
@@ -102,14 +104,14 @@ Source inspection resolves the external dependency classes as follows:
 
 The unified installer's target manifests own the exact validated dependency
 mapping for Linux and Termux in Phases 4 and 5. Checked-in Code TE2, WBA, and
-shared browser artifacts are already built or vendored. Managed and
-binary-release desktop installs materialize a prebuilt Electron distribution.
-Source/editable/Git Python installs may instead invoke the explicit Electron
-source bootstrap recorded in Phase 4A.
-npm therefore has exactly two installed-code owners: that opt-in source desktop
-build and the standalone Terminal's locked private first-use runtime. Elsewhere
-npm is source-regeneration tooling. A retained installed capability receives
-its external executable through the selected target's prerequisite transaction;
+shared browser artifacts are already built or vendored. Linux desktop
+materialization deliberately reuses the explicit Electron source bootstrap
+recorded in Phase 4A; a separate prebuilt Electron archive is a future download-
+size/build-time optimization, not part of the initial alpha transaction.
+npm therefore has exactly two installed-code owners: that opt-in desktop build
+and the standalone Terminal's locked private first-use runtime. Elsewhere npm is
+source-regeneration tooling. A retained installed capability receives its
+external executable through the selected target's prerequisite transaction;
 otherwise that capability is removed from the installed product.
 
 The installer must preserve the Terminal's existing per-user runtime authority
@@ -343,9 +345,9 @@ PyPI / TestPyPI
 
 GitHub Release
   install-te2
+  install_te2.py
   release-manifest.json
   te2-<version>-py3-none-<validated-linux-x86_64-tag>.whl
-  te2-desktop-<version>-linux-x86_64.tar.gz
   te2-<version>-termux-aarch64.tar.gz
   te2-<version>-gecko-release.apk
   te2-<version>-cefrium-release.apk
@@ -353,32 +355,34 @@ GitHub Release
 ```
 
 The Linux wheel published to PyPI and mirrored byte-for-byte on GitHub contains
-the Python/framework payload, validated GNU/Linux Rust server, and embedded
-release manifest. Electron remains a separate pruned archive so `pip install
-te2` does not acquire Chromium unless desktop installation is requested. The
-Termux archive contains the release-owned Python inputs and Bionic server but no
-Electron payload. The APKs contain their own synchronized frontend assets; the
-Bionic server remains a Termux input and is not embedded in either APK.
+the Python/framework payload, validated GNU/Linux Rust server, embedded release
+manifest, and locked Electron source inputs. It does not contain Chromium,
+`node_modules`, or Electron build output. The existing `te2 desktop install`
+bootstrap materializes that runtime only when requested. The Termux archive
+contains the release-owned Python inputs and Bionic server but no Electron
+payload. The APKs contain their own synchronized frontend assets; the Bionic
+server remains a Termux input and is not embedded in either APK.
 
-Tar with gzip remains the format for directory-shaped Electron and Termux
-payloads because it preserves executable modes and symlinks without another
-decompressor prerequisite. ZIP is not a release format. The installer supports
-three deterministic component-acquisition paths in this order: an explicit
-local release-component directory, a complete matching component set adjacent
-to the installer, or immutable release downloads selected by
-`release-manifest.json`. PyPI is the canonical package index for the Linux
-wheel; the GitHub mirror makes checksummed offline and installer composition
-possible. Local and downloaded components use identical checksum and embedded
-manifest validation. Offline installation assumes OS/Termux prerequisites are
-already available; it does not promise an offline apt repository.
+Tar with gzip remains the format for the directory-shaped Termux payload because
+it preserves executable modes and symlinks without another decompressor
+prerequisite. ZIP is not a release format. The completed acquisition phase will
+support three deterministic component paths in this order: an explicit local
+release-component directory, a complete matching component set adjacent to the
+installer, or immutable release downloads selected by `release-manifest.json`.
+The implemented Linux alpha path currently installs the exact manifest version
+from PyPI into its private venv; the paired Termux payload remains fully local
+and checksummed. PyPI is the canonical package index for the Linux wheel, and a
+GitHub mirror will provide offline composition. Offline installation assumes
+OS/Termux prerequisites are already available; it does not promise an offline
+apt repository.
 
 ### 2.2 Install-mode contract
 
 | Install mode | Python environment | Rust server | Electron |
 |---|---|---|---|
 | Editable/source/VCS/source-distribution install | Caller-owned environment | Built/reused through the canonical cache | Optional source build |
-| PyPI platform wheel: glibc Linux | Caller-owned environment or venv | Wheel-owned validated GNU/Linux release binary | Downloaded only by explicit desktop materialization |
-| Unified installer: glibc Linux | Release-owned private venv under the canonical TE2 data root | Exact platform-wheel binary | GitHub Release Linux x64 payload |
+| PyPI platform wheel: glibc Linux | Caller-owned environment or venv | Wheel-owned validated GNU/Linux release binary | Optional locked source bootstrap |
+| Unified installer: glibc Linux | Release-owned private venv under the canonical TE2 data root | Exact platform-wheel binary | Optional `--desktop` delegation to the installed venv's source bootstrap |
 | Unified installer: Termux | Shared Termux interpreter and repository dependencies; release-owned TE2 Python tree | Archive-owned Bionic/Android release binary | Not included |
 
 Source, editable, VCS, and sdist-built installations retain Rust source and may
@@ -409,13 +413,13 @@ Initial target: Linux `amd64`, matching the current Electron x64 build.
 Install identity: `te2-desktop`.
 
 The application payload is user-owned and versioned beneath the already
-canonical TE2 data root. The exact leaf naming is finalized during
-implementation, but the ownership shape is fixed:
+canonical TE2 data root. The implemented ownership shape is:
 
 ```text
 $TE2_DATA_HOME/install/releases/<version>/venv/...
-$TE2_DATA_HOME/install/releases/<version>/desktop/...
 $TE2_DATA_HOME/install/current -> releases/<version>
+$TE2_DATA_HOME/desktop/electron/runtimes/<fingerprint>/...
+$TE2_DATA_HOME/desktop/electron/current -> runtimes/<fingerprint>
 $HOME/.local/bin/te2
 $HOME/.local/bin/te2-desktop
 $XDG_DATA_HOME/applications/te2-desktop.desktop
@@ -425,15 +429,16 @@ $XDG_DATA_HOME/icons/hicolor/<size>/apps/te2.png
 The release builder always produces:
 
 - the Linux platform wheel containing the release Rust server;
-- the pruned Electron application directory; and
-- the version-matched manifest, XDG inputs, and checksums.
+- the locked Electron source and XDG inputs within that wheel; and
+- the version-matched manifest and checksums.
 
-The installer stages a complete version from the verified wheel and Electron
-archive, constructs and validates the private venv, validates the CLI, packaged
-Rust server, and Electron launcher, then switches the `current` pointer
-atomically. A failed update leaves the prior release usable. A versioned install
-receipt owns only installed application payloads; uninstall never deletes
-ordinary TE2 configuration, projects, or app state.
+The installer constructs and validates a staged private venv from the exact
+PyPI wheel, rewrites the venv's generated absolute interpreter paths for its
+final versioned location, publishes it, validates every managed command, and
+then switches the `current` pointer atomically. A failed update leaves the prior
+release usable. A versioned install receipt owns only installed application
+payloads; uninstall never deletes ordinary TE2 configuration, projects, or app
+state.
 
 The small user-local wrappers invoke the current private venv; the bootstrap
 resolves the exact wheel-owned prebuilt server from its manifest. Installation
@@ -441,10 +446,15 @@ writes the versioned desktop local-framework record with
 the current release's exact `te2` command and private venv. The environment
 override remains only a higher-priority source/test seam.
 
-The desktop entry launches the user-local `te2-desktop` wrapper, has a stable
-application id, uses the user-local installed icon, and does not open a
-terminal. The existing intentional Electron `--no-sandbox` launcher behavior
-remains unchanged unless a separately approved sandboxing design replaces it.
+With `--desktop`, the installer invokes the exact versioned
+`venv/bin/te2 desktop install`. That existing bootstrap owns its fingerprinted
+source build, cache, runtime publication, `te2-desktop` wrapper, desktop entry,
+icon, and receipt. The installer then seeds the existing Electron local-
+framework configuration with the stable managed `te2` wrapper and
+`install/current/venv`; an already explicit command/venv configuration is left
+untouched. The desktop entry has a stable application id, does not open a
+terminal, and retains the intentional Electron `--no-sandbox` launcher behavior
+unless a separately approved sandboxing design replaces it.
 
 The installer runs application-file operations as the user. Its Linux target
 adapter may use a narrow, explicit privileged apt step for system requirements
@@ -462,12 +472,12 @@ or editable source checkout.
 
 A raw supported-platform `pip install te2` is intentionally smaller than the
 managed desktop installation. It can launch the framework immediately from the
-wheel-owned Rust server. `te2 desktop install` then reads the wheel's release
-manifest, downloads and verifies the exact matching Electron archive, publishes
-it under the existing desktop runtime root, and installs the user-local XDG
-integration. Source/editable/VCS installs retain the existing source-build
-behavior. A binary-release install never substitutes a source build for a
-missing Electron or server asset.
+wheel-owned Rust server. `te2 desktop install` uses the wheel-owned locked
+source, the exact environment-owned Node/npm/headers, and the existing
+fingerprinted build/cache transaction to publish the runtime and XDG
+integration. Source/editable/VCS installs use the same bootstrap. A separate
+prebuilt Electron archive may be added later without changing the installer or
+local-framework configuration contracts.
 
 ### 2.4 Termux target mode
 
@@ -481,12 +491,16 @@ payload and server under the canonical TE2 data root:
 ```text
 $TE2_DATA_HOME/install/releases/<version>/python/...
 $TE2_DATA_HOME/install/releases/<version>/libexec/te2-server
-$TE2_DATA_HOME/install/releases/<version>/manifest.json
+$TE2_DATA_HOME/install/releases/<version>/target-manifest.json
+$TE2_DATA_HOME/install/releases/<version>/install-receipt.json
 $TE2_DATA_HOME/install/current -> releases/<version>
-$PREFIX/bin/te2
+$PREFIX/bin/{te2,te2-rust,fws,als-rs,als-rs-extension-adapter}
 ```
 
-The wrapper resolves the current release's exact Python tree and Bionic server.
+The receipt-owned wrappers resolve the current release's exact Python tree and
+Bionic server/runtime inputs. They are written as one atomic activation set;
+an unmanaged collision at any owned name aborts activation or removal before
+another wrapper is changed.
 Termux apt owns the shared interpreter and validated native/runtime foundations;
 it does not own TE2 application files. The absence of a venv does not mean that
 arbitrary packages already installed by pip become release dependencies. The
@@ -501,7 +515,7 @@ accepted ownership split is:
 
 This hybrid uses the active Termux interpreter without copying it, shares only
 apt-owned packages, and keeps the otherwise necessary Python payload isolated
-by release. The `$PREFIX/bin/te2` wrapper prepends the current release's Python
+by release. The managed prefix wrappers prepend the current release's Python
 tree while retaining the interpreter's ordinary apt-owned `site-packages`.
 There is no `VIRTUAL_ENV`, duplicated interpreter, or release-time dependence
 on mutable user pip state.
@@ -530,12 +544,26 @@ Framework-Shells/Agent Log Server/libarchive-c/Socket.IO/PyYAML set or for
 Pydantic/Pydantic Core. Personal third-party repositories are observations,
 not accepted installer inputs unless separately approved.
 
-The same devices already demonstrate viable Android wheel tags for native
-inputs including Framework-Shells, `aiohttp`, `msgspec`, Pydantic Core, PyYAML,
-`rpds-py`, and cryptography. Those installed artifacts are compatibility
-evidence, not publication provenance: final wheels must be reproducibly rebuilt
-from the synchronized source/dependency identities and audited before entering
-the release wheelhouse.
+TUR itself is one explicit accepted prerequisite because the managed Android
+Code Server package requires TUR's `nodejs-24`. The target manifest installs
+the official `tur-repo` subscription package during the initial apt transaction;
+its post-install refresh completes before a later user opt-in can run the
+existing Code Server dependency installer. Code Server remains confirmation-
+gated and does not own repository subscription.
+
+The physical-device build produced Android API-24 wheels for every non-apt
+native input, including Framework-Shells, `aiohttp`, `msgspec`, Pydantic Core,
+PyYAML, and `rpds-py`. Cryptography remains apt-owned. Installed development
+artifacts remain compatibility evidence, not publication provenance: final
+wheels are rebuilt from synchronized source/dependency identities and audited
+before entering the release wheelhouse.
+
+The archive builder reads embedded first-party provenance rather than trusting
+command-line commit labels alone. A dirty first-party wheel is rejected by
+default. An explicit validation-candidate flag may retain it only while marking
+the target manifest `publicationEligible: false` and listing the dirty
+component. Such an archive may be used for device acceptance but cannot enter a
+release channel.
 
 The Termux installer transaction is therefore:
 
@@ -543,8 +571,9 @@ The Termux installer transaction is therefore:
    `sys.platform`, compatible tags, and configured repository identities;
 2. load the checksummed target manifest and reject an unsupported Python
    minor, ABI, architecture, or repository requirement before mutation;
-3. present the exact apt transaction, install it directly without `sudo`, and
-   record the installed apt versions without claiming ownership of those files;
+3. present the exact apt transaction, install it directly without `sudo`
+   (including `tur-repo` before any later Code Server opt-in), and record the
+   installed apt versions without claiming ownership of those files;
 4. validate every accepted apt import, executable, version constraint, and
    required shared library;
 5. acquire and verify the complete immutable Termux archive and local
@@ -557,8 +586,9 @@ The Termux installer transaction is therefore:
    packaged server, and Terminal prerequisites from the staged release;
 8. atomically switch `current` and write a receipt separating release-owned
    paths, external apt prerequisites, source identities, tags, and digests; and
-9. on uninstall, remove only receipt-owned TE2 release paths and an unchanged
-   wrapper. Never remove apt packages or unrelated shared Python content.
+9. on uninstall, remove only receipt-owned TE2 release paths and unchanged
+   managed wrappers. Never remove apt packages or unrelated shared Python
+   content.
 
 If a dependency cannot be supplied by the accepted apt mapping or immutable
 wheelhouse without overwriting shared-prefix files, Phase 5 stops for a new
@@ -1494,9 +1524,11 @@ prior receipt; uninstall preserves modified or unrelated external files. Status
 does not require Node, and launch builds only when no valid current runtime is
 available.
 
-This remains the fallback for explicit source provenance. Official Linux
-platform wheels instead carry the Rust server and materialize the matching
-prebuilt Electron archive without npm. The Termux archive carries no Electron.
+This is the current desktop materialization path for source provenance and the
+official Linux platform wheel alike. The wheel additionally carries the verified
+Rust server, so Cargo is absent from the installed release path; its private
+`nodejs-wheel` environment supplies npm and matching headers for the explicit
+desktop build. The Termux archive carries no Electron.
 
 ### 7.2 Release provenance and platform wheels
 
@@ -1537,7 +1569,7 @@ the embedded HTML shell but cannot serve its browser runtime fails publication.
 8. Mirror the exact wheel bytes to the GitHub draft release for offline and
    installer use; PyPI and GitHub digests must agree.
 
-### 7.3 Prebuilt desktop payload and unified installer
+### 7.3 Unified installer and optional desktop materialization
 
 1. Produce the public `install-te2` entrypoint, top-level
    `release-manifest.json`, target/component manifests, release archives, and
@@ -1545,32 +1577,46 @@ the embedded HTML shell but cannot serve its browser runtime fails publication.
 2. Implement Termux-first platform detection, then apt-based glibc Linux
    detection, architecture normalization, and explicit rejection of unsupported
    kernels, libc implementations, package managers, and architectures.
-3. Implement deterministic component selection: explicit local component set,
-   complete adjacent set, then immutable PyPI/GitHub release download.
-4. Verify external checksums and every embedded
-   version/target/content/provenance manifest before activation.
-5. Produce the Linux `x86_64` Electron archive with the pruned application and
-   XDG assets, but no wheel, Rust duplicate, npm cache, or build intermediates.
-6. Add the user-owned versioned install root beneath `$TE2_DATA_HOME`, atomic
+3. Install the manifest-pinned Linux platform wheel from PyPI into a staged
+   private venv. Relocate generated venv launchers to the final versioned path
+   before atomic publication, then validate all managed commands without Cargo.
+4. Complete deterministic component selection for future offline Linux use:
+   explicit local component set, complete adjacent set, then immutable
+   PyPI/GitHub release download, with checksum and embedded-provenance
+   verification before activation.
+5. Add the user-owned versioned install root beneath `$TE2_DATA_HOME`, atomic
    `current` switching, manifest/receipt, user-local CLI/desktop wrappers, icon,
    `.desktop` entry, and private-venv handling.
-7. Install the exact platform wheel into that private venv and unfold the exact
-   matching Electron archive into the same staged release before validation.
-8. Add the narrow Linux apt prerequisite transaction for system Python/venv
-   support, native compilation prerequisites for Terminal first use,
-   SSL/runtime libraries, and platform `libarchive` after validating the exact
-   baseline mapping. Node.js/npm and their headers come from the release-owned
-   private venv. Apt must not own TE2 application files.
+6. Add the narrow Linux apt prerequisite transaction for `git`, system
+   Python/venv support, native compilation prerequisites for Terminal first use,
+   and platform `libarchive` after validating the exact baseline mapping.
+   Node.js/npm and their headers come from the release-owned private venv. Apt
+   must not own TE2 application files.
+7. Make `--desktop` invoke the exact installed venv's
+   `te2 desktop install`. Reuse its fingerprint, lock, cache, 3 GiB guard,
+   runtime publication, receipt, wrapper, icon, and `.desktop` ownership instead
+   of adding a second Electron installer.
+8. Seed the Phase 2 local-framework config with the stable managed command and
+   `current/venv` paths. Preserve existing broadcast, port, environment, and
+   fully explicit command/venv selections.
 9. Validate the existing Python Terminal bootstrap from a clean user install,
    including target-native `node-pty`, canonical data-root placement,
    fingerprint reuse, marker validation, and repair behavior.
-10. Seed and validate the Phase 2 local-framework config with the installed
-    command and private-venv paths without overwriting later user edits.
+10. Treat a separately downloaded prebuilt Electron archive as a deferred
+   startup/download optimization. It must reuse the same runtime receipt and
+   XDG contracts if introduced; it is not required by the initial alpha.
 11. Validate online download, adjacent components, explicit offline components,
     checksum failure, interrupted install, atomic upgrade, rollback, and
     receipt-owned removal on clean Debian/Ubuntu targets.
 12. Validate `te2 --help`, `/api/health`, desktop launch, app launch, assets,
     and normal shutdown without deleting ordinary TE2 user state.
+
+The implemented initial Linux slice covers steps 2, 3, 5 through 9, and the
+non-graphical portion of step 12. Its apt transaction currently validates or
+installs `git`, `build-essential`, `python3-venv`, and the available Debian
+`libarchive` runtime (`libarchive13t64` or `libarchive13`). The remaining
+component-download, checksum rejection, upgrade/rollback matrix, and graphical
+desktop acceptance stay open.
 
 The currently provisioned remote Debian Trixie environment is the mandatory
 live Linux acceptance harness, not merely a compatibility reference. Phase 4C
@@ -1612,15 +1658,16 @@ and are never recorded in repository documents, logs, or release manifests.
    and place one immutable annotated tag on the final integrated commit. If a
    merge commit is used, the tag points to that merge commit; version sync must
    already be present in it.
-3. Build wheels, sdist, Rust server, Electron archive, Termux archive, and APKs
-   from a clean checkout of that tag. Nothing is copied from a dirty development
+3. Build wheels, sdist, Rust server, Termux archive, and APKs from a clean
+   checkout of that tag. Validate the wheel-owned Electron source/bootstrap
+   inputs from that same checkout. Nothing is copied from a dirty development
    tree.
 4. Sign official APKs with the separately supplied release key. Debug/staging
    repository keys are never accepted for release APKs; no release secret or
    password enters Git, logs, manifests, or command lines.
 5. Audit APK signature identity, version, packaged asset version, and 16 KiB
-   alignment; audit wheel tags/contents, Rust linkage, Electron contents,
-   archive paths, and every checksum.
+   alignment; audit wheel tags/contents, Rust linkage, Electron source/runtime
+   bootstrap inputs, archive paths, and every checksum.
 6. Create a draft GitHub Release and upload the complete component set plus
    `release-manifest.json` and `SHA256SUMS`.
 7. Upload the exact sdist/wheel candidates to TestPyPI and run the complete
@@ -1660,8 +1707,9 @@ and are never recorded in repository documents, logs, or release manifests.
    only the verified local wheelhouse. Enforce `--no-index` and
    `--only-binary=:all:` or deterministic wheel unpacking so CMake/Cargo/Clang
    cannot become an accidental installation path.
-9. Install `$PREFIX/bin/te2` as a receipt-owned wrapper for the current
-   release's exact Python tree and server. Do not write TE2 into shared
+9. Install receipt-owned `$PREFIX/bin` wrappers for `te2`, `te2-rust`, `fws`,
+   `als-rs`, and `als-rs-extension-adapter`, all resolving the current release's
+   exact Python tree and server/runtime inputs. Do not write TE2 into shared
    `site-packages` and do not create a Termux venv.
 10. Preserve the existing Python Terminal bootstrap and canonical per-user
     `$TE2_DATA_HOME/node_runtime/terminal` runtime. Its owned first-use
@@ -1699,5 +1747,5 @@ Minimum automated validation by phase:
 Each phase is a separate implementation approval boundary. Non-APK artifact
 signing, automatic update channels, store-based Android distribution, HTTPS
 certificate management, background system services, non-apt glibc
-distributions, musl targets, and non-amd64 Electron archives are deferred unless
-separately approved.
+distributions, musl targets, prebuilt Electron download archives, and non-amd64
+Electron runtimes are deferred unless separately approved.

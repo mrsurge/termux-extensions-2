@@ -1,0 +1,65 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+yes_install=0
+for arg in "$@"; do
+    case "$arg" in
+        -y|--yes) yes_install=1 ;;
+    esac
+done
+
+is_termux=0
+case "${PREFIX:-}" in
+    */com.termux/*) is_termux=1 ;;
+esac
+if [ "$is_termux" -eq 0 ] && [ -n "${ANDROID_ROOT:-}" ] && [ -n "${PREFIX:-}" ]; then
+    is_termux=1
+fi
+
+if [ "$is_termux" -eq 1 ]; then
+    : "${PREFIX:=/data/data/com.termux/files/usr}"
+    python_bin="$PREFIX/bin/python"
+    if [ ! -x "$python_bin" ]; then
+        if [ "$yes_install" -ne 1 ]; then
+            printf '%s\n' 'TE2 needs Termux Python before it can verify the release payload.'
+            printf '%s' 'Install python and python-pip now? [y/N] '
+            read -r answer
+            case "$answer" in
+                y|Y|yes|YES) ;;
+                *) printf '%s\n' 'Installation cancelled.' >&2; exit 2 ;;
+            esac
+        fi
+        apt-get update
+        apt-get install -y python python-pip
+    fi
+    exec "$python_bin" "$script_dir/install_te2.py" --payload-root "$script_dir" "$@"
+fi
+
+if ! command -v python3 >/dev/null 2>&1; then
+    if ! command -v apt-get >/dev/null 2>&1; then
+        printf '%s\n' 'The initial glibc Linux installer supports apt-based systems only.' >&2
+        exit 2
+    fi
+    if [ "$yes_install" -ne 1 ]; then
+        printf '%s\n' 'TE2 needs Python 3 before it can create the private release environment.'
+        printf '%s' 'Install python3 and python3-venv now? [y/N] '
+        read -r answer
+        case "$answer" in
+            y|Y|yes|YES) ;;
+            *) printf '%s\n' 'Installation cancelled.' >&2; exit 2 ;;
+        esac
+    fi
+    if [ "$(id -u)" -eq 0 ]; then
+        apt-get update
+        apt-get install -y python3 python3-venv
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo apt-get update
+        sudo apt-get install -y python3 python3-venv
+    else
+        printf '%s\n' 'Installing Python 3 requires root or a configured sudo command.' >&2
+        exit 2
+    fi
+fi
+
+exec python3 "$script_dir/install_te2.py" --payload-root "$script_dir" "$@"
