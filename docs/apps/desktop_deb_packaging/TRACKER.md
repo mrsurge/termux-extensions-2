@@ -1,6 +1,6 @@
 # Unified Linux And Termux Release Installer Tracker
 
-Last updated: 2026-08-25
+Last updated: 2026-08-26
 
 ## Program status
 
@@ -15,11 +15,11 @@ Last updated: 2026-08-25
 | Phase 3B: Electron `Open in a Second Window` | Source implementation and automated checks complete; live Electron acceptance remains | One explicit secondary client, backend-owned foreground, Electron-owned per-project presentation; Android/browser unchanged |
 | Phase 3C: mobile `Open in a Second Window` drawer | Lifecycle correction and synchronized asset/APK validation complete; live client matrix remains | Exact-null remains empty; tab is occupancy-driven; Collapse minimizes the outer drawer and Close is page-session presentation only |
 | Phase 3D: Cefrium IME-dismissal focus release | Core live interaction accepted repeatedly; auxiliary false-positive matrix remains | Event-driven API-30 IME animation transition; Cefrium-only and no polling/viewport inference |
-| Phase 4A: source/Git desktop bootstrap | Implemented and validated from a clean wheel | Python entrypoints build one fingerprinted Electron runtime and receipt-owned XDG integration; binary wheels and prebuilt release components remain separate |
+| Phase 4A: source/Git desktop bootstrap | Implemented and validated from a clean wheel | Python entrypoints build one fingerprinted Electron runtime and receipt-owned XDG integration; the unified Linux installer deliberately reuses this path |
 | Phase 4B: release provenance and Linux platform wheel | Implemented; audited build and clean SSH acceptance passed, publication mirror remains | Supported wheels embed the verified Rust server; source provenance alone may use Cargo |
-| Phase 4C: unified installer and Linux target | First-party native wheel graph is published and accepted from PyPI; unified installer transaction remains | Managed venv and Electron materialization compose exact clean-tag components atomically |
-| Phase 4D: final integration and publication | Linux PyPI alpha published and accepted; GitHub components, signed APKs, and unified installer remain | Final main integration, annotated tag, clean builds, PyPI, GitHub, and native-client publication remain separately evidenced |
-| Phase 5: Termux target mode | Dependency ownership and validation architecture refined; complete graph/mapping and implementation remain | Apt-first shared foundations plus a release-local wheel tree; x86-64 container exercises transactions and physical AArch64 owns native acceptance |
+| Phase 4C: unified installer and Linux target | Core installer, private venv, optional desktop bootstrap, and non-graphical Debian acceptance pass; acquisition/upgrade/graphical matrix remains | Managed venv is atomic; `--desktop` delegates to that venv's existing Electron bootstrap and config contract |
+| Phase 4D: final integration and publication | TE2 0.2.338 Linux PyPI alpha published and accepted; GitHub installer publication and signed APKs remain | Final main integration, annotated tag, clean builds, PyPI, GitHub, and native-client publication remain separately evidenced |
+| Phase 5: Termux target mode | Installer, complete wheel graph, deterministic archive, and physical AArch64 acceptance implemented; clean ALS wheel and remaining release-channel matrix remain | Apt-first shared foundations plus a release-local wheel tree; dirty first-party inputs can produce only explicitly marked validation candidates |
 
 ## Confirmed source findings
 
@@ -31,11 +31,11 @@ Last updated: 2026-08-25
 | `sse-starlette` was held directly by an unmounted router | The dead `app.libs.jobs.jobs_bp` import/router was removed while the job core and handlers remain | Pruned; still transitive through MCP |
 | Framework-Shells is reproducibly pinned | `requirements.txt` uses exact validated 0.0.63 commit `0bf3269cd69a000015b0ac484a04004b8dc564d1` | Complete |
 | Framework-Shells release artifacts are native | The Linux candidate set carries the PyO3 pipe pump and Rust terminal broker in `cp39-abi3` and free-threaded `cp314-cp314t` manylinux wheels; release construction refuses a non-native wheel | Implemented and clean-install validated |
-| Agent Log Server has a fail-closed binary wheel | Exact 0.2.118 depends on Framework-Shells 0.0.63 and carries a target/version/digest-verified `als-server`; corrupt or incompatible binary provenance never falls through to Cargo | Implemented and clean-install validated |
+| Agent Log Server has a fail-closed binary wheel | Exact 0.2.119 depends on Framework-Shells 0.0.63 and carries a target/version/digest-verified `als-server`, compiled browser bundle, and vendored Socket.IO MessagePack parser; corrupt/incompatible provenance and incomplete wheels fail construction | Implemented, published, and clean-install validated |
 | ALS app-worker launch must preserve the managed venv | Bootstrap correctly prepends the active venv, but the former `sh -lc` shellspec reset `PATH` before resolving `als-rs` | Corrected to direct argv and covered by a manifest regression test |
 | Linux x86-64 owns an exact private Node runtime | `nodejs-wheel==24.16.0` supplies venv-local Node/npm and matching headers; bootstrap children, Terminal, WBA, and source Electron use the shared resolver | Implemented and clean-install validated |
 | Modern Termux excludes the Linux Node wheel | Both connected targets run Python 3.14.6 with `sys.platform == "android"` and `aarch64`; the Linux/x86-64 marker is false | Termux resolves Node/npm from its apt package mapping |
-| Current accepted Termux repositories cover only part of the graph | The official/TUR views expose Node, `libarchive`, and `python-cryptography`, but not apt packages for the current direct Python framework set or Pydantic Core | Complete direct/transitive ownership matrix remains a Phase 5 gate; personal repositories are not canonical inputs |
+| Current accepted Termux repositories cover only part of the graph | The official/TUR views expose Node, `libarchive`, and `python-cryptography`, but not apt packages for the current direct Python framework set or Pydantic Core | The target manifest explicitly installs official `tur-repo` for managed Code Server's `nodejs-24`; personal repositories are not canonical inputs |
 | Native Android Python wheels are already feasible | Live installed tags include Android API-24 AArch64 wheels for Framework-Shells, `aiohttp`, `msgspec`, Pydantic Core, PyYAML, `rpds-py`, and cryptography | Compatibility evidence only; clean synchronized builds and audits must reproduce publication artifacts |
 | The remote container host is x86-64 | It has Podman and no AArch64 QEMU/binfmt registration; Docker Hub publishes a native x86-64 Termux image | Use x86-64 container for clean installer transaction tests and the physical AArch64 device for Bionic/native acceptance |
 | User dependency installation has explicit owners | Linux private-venv inputs, existing app bootstraps, and installer target manifests cover the supported paths | Repository construction scripts are not user setup entrypoints |
@@ -66,7 +66,7 @@ Last updated: 2026-08-25
 | Problems drawer duplicates Explorer diagnostics | Both consume `explorer.diagnostics.detail`; Explorer retains detail, derives badges while closed, and renders the same problems component in its diagnostics tab | Remove the duplicate drawer DOM/controller while preserving Explorer diagnostics and diagnostics export data |
 | Explorer file-card actions already have a typed RPC boundary | Card actions originate in `src/explorer/tree/menu-controller.ts` and extension actions use `/rpc/explorer` | Add a validated file-only second-window intent through Explorer backend and exact-client UI IPC; do not call another frontend lane directly |
 | Cefrium has editor focus intent but no keyboard-visibility authority | UI IPC toggles the native input filter and Cefrium can evaluate page JavaScript, but current code does not observe `WindowInsets.Type.ime()` | Use an API-30 visible-to-hidden native transition to signal one exact-page Monaco blur; do not infer from viewport resize |
-| npm has two explicit installed-code owners | Code TE2, WBA, and shared browser artifacts are already bundled/vendored; source/Git Electron and standalone Terminal use separate locked bootstraps | Managed/binary-release desktop installs materialize prebuilt Electron; source installs may opt into the source build, while Terminal retains its private first-use modules |
+| npm has two explicit installed-code owners | Code TE2, WBA, and shared browser artifacts are already bundled/vendored; Electron and standalone Terminal use separate locked bootstraps | Source, wheel, and unified `--desktop` installs reuse the Electron bootstrap; Terminal retains its private first-use modules |
 | Standalone Terminal first use retains its current bootstrap | Its separate locked runtime runs `npm ci`; `node-pty` 1.1.0 uses a native install script and has no Linux prebuild in the current payload | Linux resolves private-venv Node/npm/headers; Termux uses its target package mapping; the bootstrap alone installs and validates modules |
 | Terminal runtime state is per-user canonical TE2 data | Current Python resolves `$TE2_DATA_HOME/node_runtime/terminal/<fingerprint>`, normally beneath `~/.local/share/te2`, with a lock, atomic staging, marker, package checks, and ABI-aware reuse | Existing Python remains the only private-module installer and validator |
 | Installed dependencies have only explicit admission paths | Linux private venv, an existing owned app bootstrap, or the unified installer's validated target prerequisite transaction | Remove unowned dependencies and their unsupported capability instead of adding helper installers |
@@ -78,8 +78,9 @@ Last updated: 2026-08-25
 ## Architecture decisions
 
 - [x] Linux install identity is `te2-desktop` and initially targets `amd64`.
-- [x] Linux owns a private venv, prebuilt release Rust server, and Electron
-  payload beneath the canonical TE2 user data root.
+- [x] Linux owns a private venv and prebuilt release Rust server beneath the
+  canonical TE2 user data root; optional Electron source materialization uses
+  the existing fingerprinted desktop runtime root.
 - [x] Linux x86-64 installs exact `nodejs-wheel==24.16.0` into that venv;
   global or apt-owned Node is not a managed-release dependency.
 - [x] Framework-Shells and Agent Log Server are exact first-party native wheel
@@ -111,8 +112,8 @@ Last updated: 2026-08-25
   canonical external cache; binary-release wheels never silently invoke Cargo.
 - [x] Every installed component comes from one synchronized immutable tag.
 - [x] PyPI owns the Linux platform wheel and sdist; GitHub owns `install-te2`,
-  the byte-identical wheel mirror, Electron archive, Termux archive, synchronized
-  Gecko/Cefrium APKs, release manifest, and `SHA256SUMS`.
+  its Python companion, the byte-identical wheel mirror, Termux archive,
+  synchronized Gecko/Cefrium APKs, release manifest, and `SHA256SUMS`.
 - [x] Tar/gzip preserves executable modes and symlinks without another
   decompressor prerequisite; ZIP is not a publication format.
 - [x] Component acquisition order is an explicit local component set, complete
@@ -122,15 +123,15 @@ Last updated: 2026-08-25
 - [x] The Bionic/Android server asset is a Termux archive input and does not
   imply Android APK embedding.
 - [x] Managed Linux releases install the immutable platform wheel into a
-  versioned private venv and unfold the matching Electron archive; exact-tag
-  Git bootstrap is not a release install path.
+  versioned private venv. Optional `--desktop` invokes that exact venv's existing
+  locked Electron source bootstrap; an exact-tag Git clone is not involved.
 - [x] Binary-release provenance is explicit in the artifact manifest. PEP 610
   metadata may improve diagnostics but does not decide whether Cargo is legal.
 - [x] A missing/corrupt packaged server is repaired from the exact immutable
   release and digest or fails; a release wheel never compiles a replacement.
 - [x] Raw supported-platform `pip install te2` can run the packaged framework
-  without Electron; `te2 desktop install` materializes the exact matching
-  prebuilt desktop payload and XDG integration.
+  without Electron; `te2 desktop install` materializes a fingerprinted runtime
+  from wheel-owned locked source and installs receipt-owned XDG integration.
 - [x] Online and local-payload installs share explicit failure/recovery behavior
   and atomically preserve the prior valid release.
 - [x] No published component bundles managed Code Server.
@@ -604,9 +605,9 @@ Corrective implementation evidence recorded on 2026-08-23:
 - [x] Validate a clean 41 MiB wheel, isolated wheel install, installed-wheel
   Electron build, fingerprint reuse, 90 Electron tests, packaged launch, 22
   focused Python tests, and strict Python type checking.
-- [ ] Replace the source-build bridge with exact prebuilt Electron
-  materialization for binary-release wheels and managed installs; do not run npm
-  in either path.
+- [x] Retain the source-build bridge for platform wheels and managed
+  `--desktop` installs so the existing venv-aware fingerprint/cache/XDG contract
+  remains authoritative. A prebuilt Electron download is a deferred optimization.
 
 ## Phase 4B checklist — release provenance and Linux platform wheel
 
@@ -678,60 +679,93 @@ Corrective implementation evidence recorded on 2026-08-23:
 - [x] Rebuild these first-party candidates from the clean synchronized release
   tag before any TestPyPI/PyPI/GitHub upload; current dirty-source candidates
   are validation inputs only.
-- [ ] Produce `install-te2`, `release-manifest.json`, component manifests,
-  Electron/Termux archives, wheel mirror, APK assets, and `SHA256SUMS` from one
-  synchronized immutable tag.
-- [ ] Add deterministic version, platform, libc, package-manager, and
+- [x] Produce the paired `install-te2` shell/Python entrypoint, support
+  arbitrary-cwd and `curl | sh` execution, and consume the release manifest's
+  exact distribution version.
+- [x] Add deterministic version, platform, libc, package-manager, and
   architecture detection with Termux evaluated before generic Linux.
-- [ ] Map Linux `x86_64`/Electron `x64` consistently and reject unsupported
+- [x] Map Linux `x86_64`/Electron `x64` consistently and reject unsupported
   targets explicitly.
-- [ ] Enforce the 3 GiB Electron pre-build free-space check and a separate 2
-  GiB minimum for the release-wheel construction transaction.
-- [ ] Keep Cargo/Electron caches and intermediate output outside release staging.
-- [ ] Produce the Linux Electron archive with the pruned runtime and XDG inputs,
-  but no duplicate wheel/server or build intermediates.
-- [ ] Implement acquisition precedence: explicit local component set, complete
-  adjacent set, then immutable PyPI/GitHub downloads.
-- [ ] Verify `SHA256SUMS` plus the internal version/target/content manifest
-  before activation.
+- [x] Enforce the existing 3 GiB Electron pre-build free-space check and a
+  separate 2 GiB minimum for the managed install transaction.
+- [x] Keep Cargo/Electron caches and intermediate output outside release staging.
+- [x] Reuse the installed venv's existing Electron bootstrap for `--desktop`;
+  defer a prebuilt Electron archive as a future optimization rather than a Phase
+  4C blocker.
+- [x] Implement the initial acquisition paths: complete adjacent payload for
+  development/offline use, exact PyPI version for Linux, and immutable GitHub
+  release download for Termux. Explicit arbitrary component sets remain a
+  post-alpha enhancement.
+- [x] Verify the public `SHA256SUMS`, release manifest, Termux target manifest,
+  publication eligibility, version, and target identity before activation.
 - [ ] Generate deterministic Linux interpreter constraints/wheel inputs.
-- [ ] Add the versioned `$TE2_DATA_HOME` release root, receipt, atomic current
+- [x] Add the versioned `$TE2_DATA_HOME` release root, receipt, atomic current
   pointer, and rollback-safe update transaction.
-- [ ] Add user-local `te2` and `te2-desktop` wrappers plus the XDG desktop entry
+- [x] Add user-local `te2` and `te2-desktop` wrappers plus the XDG desktop entry
   and icon.
-- [ ] Validate the narrow apt prerequisite transaction for system Python/venv,
-  Terminal native-build prerequisites, SSL/runtime libraries, and `libarchive`;
-  private-venv Node/npm must not be duplicated through apt.
-- [ ] Validate the Terminal bootstrap from a clean user install, including
+- [x] Validate the narrow apt prerequisite transaction for `git`, system
+  Python/venv, Terminal native-build prerequisites, and the available
+  `libarchive` runtime; private-venv Node/npm is not duplicated through apt.
+- [x] Validate the Terminal bootstrap from a clean user install, including
   target-native `node-pty`, canonical data-root placement, fingerprint reuse,
   marker validation, and repair.
-- [ ] Wire the installed command/venv into the Phase 2 local controller and
-  validate the complete `.desktop` local-framework flow.
+- [x] Wire the installed command/venv into the Phase 2 local controller and
+  validate its preserved-policy configuration plus `.desktop` materialization;
+  live graphical launch remains below.
 - [ ] Validate online, adjacent, and explicit offline payload modes.
 - [ ] Validate checksum/manifest rejection, interrupted staging, atomic upgrade,
   rollback, and receipt-owned removal.
 - [ ] Clean-install on the accepted Debian/Ubuntu baseline and validate CLI,
   `/api/health`, desktop/app launch, assets, and normal shutdown.
-- [ ] Treat the provisioned remote Debian Trixie host as the mandatory live
+- [x] Treat the provisioned remote Debian Trixie host as the mandatory live
   Linux acceptance harness; local/container checks alone cannot complete Phase
   4C.
-- [ ] Capture its kernel/architecture/glibc/Python/pip-tag/apt baseline and
+- [x] Capture its kernel/architecture/glibc/Python/pip-tag/apt baseline and
   initial TE2/XDG state before installation.
-- [ ] Transfer or download the exact candidate components and run installation
+- [x] Transfer or download the exact candidate components and run installation
   over SSH as the unprivileged user; use root only for the narrow apt
   prerequisite transaction.
-- [ ] Prove venv/release/receipt/wrapper/XDG ownership, exact-version resolution,
+- [x] Prove venv/release/receipt/wrapper/XDG ownership, exact-version resolution,
   atomic `current`, and absence of target Cargo/source use.
 - [ ] Live-launch the packaged framework and validate `/api/health`, app
   discovery, app-worker startup, shutdown, and fresh-login relaunch.
-- [ ] Exercise remote non-graphical desktop materialization plus graphical
-  Electron acceptance on a display-capable Linux client using the same
-  artifacts.
+- [x] Exercise remote non-graphical desktop materialization, runtime receipt,
+  wrappers, XDG files, and local-framework configuration.
+- [ ] Complete graphical Electron acceptance on a display-capable Linux client
+  using the same installed architecture.
 - [ ] Live-test controlled repair, checksum rejection, interrupted staging,
   upgrade, rollback, receipt-owned uninstall, and preservation of ordinary TE2
   state.
-- [ ] Save a command/result transcript and version/hash/ownership evidence for
+- [x] Save command/result, version, and ownership evidence for
   release acceptance without recording host credentials or SSH material.
+
+### Phase 4C unified-installer acceptance evidence
+
+- The glibc path was exercised over SSH as an unprivileged user on Debian
+  Trixie x86-64 with glibc 2.41 and Python 3.13.5 under isolated HOME, XDG, and
+  TE2 roots. The narrow privileged transaction installed only the missing
+  `libarchive13t64`; `git`, `build-essential`, and `python3-venv` were already
+  present.
+- The first real transaction found a relocatability bug before activation:
+  console-script shebangs still named the temporary staged venv after the
+  directory was atomically moved. The installer now rewrites staged venv paths
+  to the final versioned destination, validates imports before the move, and
+  validates every managed command after it.
+- A same-version repair then installed public `te2==0.2.338` into
+  `$TE2_DATA_HOME/install/releases/0.2.338/venv`, atomically selected it through
+  `install/current`, and validated the managed `te2`, `te2-rust`, `fws`,
+  `als-rs`, and `als-rs-extension-adapter` wrappers without Cargo.
+- `--desktop` invoked that exact venv's `te2 desktop install`. Electron status
+  reported the 0.2.338 fingerprinted runtime, launcher wrapper, desktop entry,
+  icon, and receipt as installed. The installer seeded
+  `desktop-local-framework.json` with the stable managed command and
+  `install/current/venv`; focused tests prove an existing explicit config is
+  preserved and blank paths are filled without changing broadcast, port, or
+  environment policy.
+- The private Python environment measured about 568 MiB and the materialized
+  Electron runtime about 317 MiB. The headless host did not launch Electron or
+  the framework during this installer pass; graphical launch and the remaining
+  failure/upgrade matrix stay open.
 
 ### Phase 4C dependency-foundation evidence
 
@@ -778,25 +812,34 @@ Corrective implementation evidence recorded on 2026-08-23:
 
 ## Phase 4D checklist — final integration and publication
 
-- [x] Synchronize package/Rust/app/frontend/Electron/Android versions and rebuild
-  Code TE2 plus bundled Android assets before final integration.
-- [x] Complete branch preflight, integrate into `main`, and create one immutable
+- [x] Freeze the final alpha defaults: Android IME composition filtering off,
+  Code TE2 autosave off/draft mode on, and normal editor view without either
+  inline-diff overlay. Keep the existing mobile special keys enabled while
+  deferring the proposed second row and additional keys.
+- [x] Refresh Android notification-permission and battery-policy state from
+  native `onResume` plus Settings page foreground events; do not poll.
+- [ ] Advance the synchronized TE2 version, rebuild Code TE2, rebundle Android
+  assets, and build both GeckoView and Cefrium APKs from the same commit.
+- [ ] Pin and publish the clean ALS Android/Linux release selected by the final
+  TE2 version before constructing the public Termux archive.
+- [ ] Complete branch preflight, integrate into `main`, and create one immutable
   annotated tag on the final integrated commit.
-- [x] Build every PyPI candidate from a clean checkout of that tag.
-- [ ] Sign release APKs with separately supplied release credentials and reject
-  debug/staging signatures.
+- [ ] Build every PyPI candidate from a clean checkout of that tag.
+- [ ] Build GeckoView and Cefrium staging APKs with the repository development
+  certificate, and label them as sideloading/validation artifacts; production
+  release signing remains a separate credentialed gate.
 - [ ] Audit APK signer/version/assets/16 KiB alignment, wheel tags and contents,
   Rust linkage, Electron contents, archive paths, and all checksums.
 - [ ] Populate a draft GitHub Release with the complete component set.
 - [ ] Upload the exact sdist/wheel to TestPyPI and pass the complete remote
   Debian live-acceptance sequence against the draft GitHub components.
-- [x] Upload the immutable tested files to PyPI; any mismatch requires a new
+- [ ] Upload the immutable tested files to PyPI; any mismatch requires a new
   version rather than replacement.
-- [x] Repeat the isolated Debian framework/app/Terminal smoke using only the
+- [ ] Repeat the isolated Debian framework/app/Terminal smoke using only the
   public PyPI index, a fresh venv, and empty TE2 roots.
 - [ ] Repeat the remote Debian framework/install smoke using public PyPI plus
   draft GitHub assets; any failure blocks GitHub Release publication.
-- [x] Record the PyPI tag, commit, artifact URLs/hashes, and Linux compatibility
+- [ ] Record the PyPI tag, commit, artifact URLs/hashes, and Linux compatibility
   evidence.
 - [ ] Record GitHub component hashes, APK
   signer fingerprints, and acceptance results.
@@ -856,52 +899,93 @@ Corrective implementation evidence recorded on 2026-08-23:
   process was stopped.
 - TE2 `0.2.338` pins `agent-log-server==0.2.119`, advances every synchronized
   release-facing version, and republishes Android's seeded frontend assets.
-  Clean-tag wheel construction and full public-index Debian framework
-  acceptance remain the publication gate.
+  Annotated tag `0.2.338` identifies integrated `main` commit
+  `1617913e0a1ba940d021fb107ca1566d152ea62d`; both are pushed.
+- The clean-tag manylinux wheel has SHA-256
+  `5969579fa2034d5d633fd994654dad1e143d8327e2036fc221fb99c92832b1bd`;
+  the source archive has SHA-256
+  `c4b8a84f6cc9ec34544814e71747001ee276a734a4f1f9b4707d4605ea7dfd2d`.
+  PyPI publishes those exact immutable files without a yanked flag. Twine and
+  auditwheel checks passed, and the packaged Rust server digest is
+  `ce34a0558c7d481daad68168d4f76ce47f2138fe27bb0c5c20d66a10c26d1024`.
+- A fresh unprivileged Debian Python 3.13 venv installed `te2==0.2.338` with no
+  pip cache and `https://pypi.org/simple` as its only index. `pip check` passed;
+  exact TE2 0.2.338, ALS 0.2.119, Framework-Shells 0.0.63, and Node 24.16.0
+  resolved. The wheel-owned server passed isolated `/api/health` and discovered
+  all eight built-in apps, including `als-rs` and `code_te2`, before its exact
+  process was stopped.
+- The separately retained framework acceptance exercised ALS 0.2.119 through
+  TE2's real `als-rs` proxy: health and the compiled browser bundle were served
+  without the former 503, missing-module, or bundle-404 signatures.
+
+### Phase 4F Android ALS and public installer completion
+
+- ALS 0.2.122 makes native Android an authoritative target before querying
+  CPython sysconfig values that are unavailable on Python 3.14 Android. Python
+  and Rust server versions are synchronized at source commit
+  `8ff54b5a7db1100cc3247d77838eda3c49e1e15f`; focused bootstrap, release-wheel,
+  type, and Cargo-metadata checks pass. The final physical AArch64 wheel audit
+  remains open until the clean wheel build completes.
+- `release/installer/install-te2` is now a standalone stdin/arbitrary-directory
+  bootstrap. It detects Termux first, obtains consent through `/dev/tty`, can
+  install a missing target Python and declared apt prerequisites, and downloads
+  only the platform payload needed for the selected action.
+- `release/build_public_release.py` assembles the public installer pair, Termux
+  archive, optional immutable assets, release manifest, and checksum index from
+  one clean commit. Focused tests cover manifest construction, eligibility,
+  exact Linux version handoff, successful stdin execution, and checksum
+  rejection.
 
 ## Phase 5 checklist — Termux target mode
 
 - [x] Capture current Termux architecture, Python version, prefix, and repository
   configuration from live targets; both current devices report Python 3.14.6,
   Android, and AArch64.
-- [ ] Generate the complete locked direct/transitive dependency graph with
+- [x] Generate the complete locked direct/transitive dependency graph with
   extras and Android marker evaluation; do not infer the closure from whatever
   happens to be installed on a development device.
-- [ ] Resolve every cleaned direct/transitive Python and native dependency to a
+- [x] Resolve every cleaned direct/transitive Python and native dependency to a
   preferred package from official Termux or an explicitly approved TUR source
   when available; ignore personal third-party repositories for the canonical
   release mapping.
-- [ ] Validate actual imports, versions, architecture, files, and runtime shared
+- [x] Validate actual imports, versions, architecture, files, and runtime shared
   libraries supplied by candidate apt packages.
-- [ ] Classify each non-apt input as release-local pure wheel or
+- [x] Classify each non-apt input as release-local pure wheel or
   release-local Android-native wheel, with source identity, tag, and digest.
-- [ ] Freeze that ownership/import/build-tool mapping in the Termux target
+- [x] Freeze that ownership/import/build-tool mapping in the Termux target
   manifest and declare the supported Python minor/ABI.
-- [ ] Reproducibly build and audit remaining Python payloads for the Termux ABI;
+- [x] Reproducibly build and audit remaining Python payloads for the Termux ABI;
   installed development-device wheels are evidence, not release inputs.
-- [ ] Inspect the target pip compatible-tag list and use a PyPI wheel only if an
+- [x] Inspect the target pip compatible-tag list and use a PyPI wheel only if an
   Android/Termux tag is actually advertised and validated; never mislabel the
   Bionic payload as manylinux.
-- [ ] Produce and checksum the tagged `aarch64-linux-android` server.
-- [ ] Produce `te2-<version>-termux-aarch64.tar.gz` with the complete local
+- [x] Produce and checksum the tagged `aarch64-linux-android` server.
+- [x] Produce `te2-<version>-termux-aarch64.tar.gz` with the complete local
   wheelhouse and no Electron, venv/interpreter, npm cache, or build artifacts.
-- [ ] Validate the Bionic server and complete archive on the target device.
-- [ ] Reuse the common checksum, staging, receipt, current-pointer, rollback,
+- [x] Validate the Bionic server and complete archive on the target device.
+- [x] Reuse the common checksum, staging, receipt, current-pointer, rollback,
   and removal transaction.
-- [ ] Install the consented prerequisites with apt directly and without `sudo`;
+- [x] Install the consented prerequisites with apt directly and without `sudo`;
   Node/npm comes from apt and `nodejs-wheel` remains Linux-only.
-- [ ] Keep TE2's Python tree versioned beneath `$TE2_DATA_HOME`; do not write
+- [x] Subscribe to the accepted TUR source through the official `tur-repo`
+  package during initial installation so a later managed Code Server opt-in can
+  resolve `nodejs-24` without changing Code Server's source installer.
+- [x] On a wiped physical AArch64 Termux userspace, install `tur-repo` through
+  the manifest and complete the unchanged managed Code Server opt-in; verify
+  `nodejs-24` 24.18.0, Code Server 4.130.0, and prerequisite state `ready`.
+- [x] Keep TE2's Python tree versioned beneath `$TE2_DATA_HOME`; do not write
   TE2 into shared `site-packages` or create a Termux venv.
-- [ ] Materialize that tree from the verified local wheelhouse with `--no-index`
+- [x] Materialize that tree from the verified local wheelhouse with `--no-index`
   plus `--only-binary=:all:` or deterministic wheel unpacking; prove a missing
   wheel fails without launching a compiler/build backend.
-- [ ] Add receipt-owned `$PREFIX/bin/te2` resolving the current Python tree and
-  exact server.
-- [ ] Preserve the existing Terminal bootstrap and
+- [x] Add receipt-owned wrappers for `te2`, `te2-rust`, `fws`, `als-rs`, and
+  `als-rs-extension-adapter`; each resolves the current Python tree and exact
+  server/runtime inputs and refuses an unmanaged prefix collision.
+- [x] Preserve the existing Terminal bootstrap and
   `$TE2_DATA_HOME/node_runtime/terminal` as the only private runtime authority.
-- [ ] Reject release-root escapes, shared-prefix collisions, hard links, invalid
+- [x] Reject release-root escapes, shared-prefix collisions, hard links, invalid
   symlinks, and invalid shebangs.
-- [ ] Prove activation performs no networked pip resolution after archive
+- [x] Prove activation performs no networked pip resolution after archive
   verification.
 - [ ] On the remote Debian host, use the native x86-64 Termux container for
   clean repository, apt planning, local-wheel, missing-wheel, install, upgrade,
@@ -909,9 +993,48 @@ Corrective implementation evidence recorded on 2026-08-23:
   acceptance.
 - [ ] Validate download and offline payload installs, imports, CLI,
   Python-minor/ABI mismatch rejection, ELF/Bionic linkage, `/api/health`, app
-  workers, Terminal bootstrap, and managed Code Server opt-in on the physical
-  AArch64 device.
+  workers, and Terminal bootstrap on the physical AArch64 device. The local
+  offline payload and runtime matrix pass; download mode and explicit ABI-
+  mismatch rejection remain open.
 - [ ] Validate atomic upgrade, rollback, and receipt-owned uninstall behavior.
+  Same-version atomic repair and receipt-owned uninstall passed on AArch64;
+  prior-version upgrade/rollback remains open until a second Termux release
+  candidate exists.
+
+### Phase 5 physical-device acceptance evidence
+
+- The locked release graph contains 93 third-party wheels plus TE2,
+  Framework-Shells, and Agent Log Server. Apt owns Python/pip, the validated
+  crypto imports, Node/npm, build-essential, libarchive, libgit2, and OpenSSL;
+  no venv or shared-site TE2 install is created.
+- Nine third-party native wheels advertise
+  `cp314-cp314-android_24_arm64_v8a`; Framework-Shells advertises
+  `cp39-abi3-android_24_arm64_v8a`; ALS advertises
+  `py3-none-android_24_arm64_v8a`. Readelf audits found only AArch64 Bionic
+  payloads and the declared Termux shared libraries.
+- A fresh Motorola Termux userspace installed all 96 wheels offline beneath
+  `~/.local/share/te2/install/releases/0.2.338/python`, selected the exact
+  Bionic server, discovered all eight built-in apps, reached Code TE2
+  readiness, served ALS's 880,235-byte compiled browser bundle, and completed a
+  Terminal MessagePack checkpoint/input/output round trip after first-use
+  `node-pty` compilation.
+- Corrupted-checksum and missing-wheel attempts failed before activation.
+  Same-version repair restored a deliberately damaged installed module;
+  uninstall preserved app state and every apt package/version; reinstall and
+  exact-process SIGTERM passed.
+- A second wiped-device install subscribed to TUR through manifest-owned
+  `tur-repo` 1.0.1 before extension opt-in. The unchanged Android Code Server
+  installer then resolved `nodejs-24` 24.18.0, installed Code Server 4.130.0 /
+  Code 1.130.0, and projected prerequisite state `ready`.
+- The deterministic validation archive is
+  `te2-0.2.338-termux-aarch64.tar.gz`, SHA-256
+  `eb0df055e17ef6d5a5269c3821cc6fa9512e4497e5b04f3d5562d47ff9113d01`.
+  Its manifest deliberately records `publicationEligible: false` and dirty
+  first-party input `agent-log-server`: it predates the clean ALS 0.2.122
+  Android target fix and therefore remains validation-only. The Android wheel
+  and Termux archive must be rebuilt from their final clean tags; the default
+  archive and public-release builders reject the former dirty input unless an
+  explicit validation-only override records the ineligible state.
 
 ## Deferred work
 
@@ -956,3 +1079,7 @@ Corrective implementation evidence recorded on 2026-08-23:
 | 2026-08-25 | Phase 5 Termux dependency architecture | Audited current requirements, official/TUR package availability, two live Python 3.14 Android/AArch64 environments, installed native wheel tags, and the remote container host | Termux uses apt-first shared foundations plus a release-local binary-only wheel tree without a venv; x86-64 container validates transactions and physical AArch64 validates native artifacts |
 | 2026-08-25 | Production PyPI 0.2.337 publication | Clean-tag builds, twine/auditwheel/hash checks, production uploads for TE2/FWS/ALS, and fresh public-index-only Debian framework, WBA, app-readiness, and real PTY acceptance | Passed; the Linux PyPI alpha is live and the isolated test runtime shut down cleanly; GitHub/native/installer publication remains |
 | 2026-08-25 | ALS 0.2.119 browser-runtime wheel repair | Required-member wheel guards, 62 ALS tests, typecheck/build, Rust checks, manylinux audit, exact PyPI digest verification, public-index-only install, and isolated static-runtime smoke | Passed; TE2 0.2.338 clean-tag rebuild and framework-level proxy acceptance remain |
+| 2026-08-25 | TE2 0.2.338 ALS repair publication | Synchronized clean-tag build, twine/auditwheel/provenance checks, exact PyPI hash verification, fresh public-index-only Debian install, isolated framework/app discovery, and retained-runtime ALS proxy/static-bundle checks | Passed; TE2 0.2.338 and ALS 0.2.119 are live on PyPI, while GitHub/native/installer publication remains |
+| 2026-08-26 | Phase 5 Termux AArch64 implementation and acceptance | Exact 96-wheel offline archive, apt ownership validation, Android-tag/ELF audits, deterministic double build, two wiped-device installs, eight-app discovery, Code TE2/ALS/Terminal runtime acceptance, manifest-installed TUR plus managed Code Server opt-in, corruption/missing-wheel failure, repair, uninstall/state preservation, reinstall, managed CLI wrappers, and exact-process shutdown | Implementation and physical-device candidate acceptance passed; publication remains blocked on a clean ALS Android bootstrap fix plus the open two-version/download/container matrix |
+| 2026-08-26 | Phase 4C unified Linux installer and desktop materialization | Termux-first target detection, narrow apt prerequisites including Git, exact public-PyPI private venv, staged-venv relocation repair, atomic activation, managed wrappers, existing `te2 desktop install` delegation, XDG integration, and local-framework config seeding on Debian Trixie | Core and non-graphical acceptance passed; online/offline acquisition, upgrade/failure matrix, framework relaunch, and graphical Electron acceptance remain |
+| 2026-08-27 | Public installer and final-default implementation | Standalone stdin bootstrap, release manifest/checksum assembler, checksum-tamper tests, exact-version Linux handoff, Android foreground permission refresh, IME default alignment, and fresh Code TE2 preference checks | Source and focused validation passed; synchronized version/build, physical Termux download acceptance, and final publication remain |

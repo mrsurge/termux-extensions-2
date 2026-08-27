@@ -1753,6 +1753,14 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         imeDismissalReducer.reset()
         activityResumed = true
+        if (
+            android.os.Build.VERSION.SDK_INT < 33 ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionDenied = false
+        }
+        updatePersistentNetworkService()
         if (::browserContainer.isInitialized) {
             ViewCompat.requestApplyInsets(browserContainer)
         }

@@ -1,0 +1,254 @@
+#!/bin/sh
+set -eu
+
+repository=${TE2_RELEASE_REPOSITORY:-mrsurge/termux-extensions-2}
+release_tag=${TE2_RELEASE_TAG:-latest}
+release_base_url=${TE2_RELEASE_BASE_URL:-}
+python_override=${TE2_INSTALL_PYTHON:-}
+yes_install=0
+action=install
+for arg in "$@"; do
+    case "$arg" in
+        -y|--yes) yes_install=1 ;;
+        --uninstall|--rollback) action=maintenance ;;
+    esac
+done
+
+is_termux=0
+case "${PREFIX:-}" in
+    */com.termux/*) is_termux=1 ;;
+esac
+if [ "$is_termux" -eq 0 ] && [ -n "${ANDROID_ROOT:-}" ] && [ -n "${PREFIX:-}" ]; then
+    is_termux=1
+fi
+
+confirm_install() {
+    message=$1
+    if [ "$yes_install" -eq 1 ]; then
+        return 0
+    fi
+    if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
+        printf '%s\n' "$message" >&2
+        printf '%s\n' 'Interactive confirmation requires a terminal; rerun with --yes.' >&2
+        exit 2
+    fi
+    printf '%s\n' "$message" >/dev/tty
+    printf '%s' 'Continue? [y/N] ' >/dev/tty
+    IFS= read -r answer </dev/tty || answer=
+    case "$answer" in
+        y|Y|yes|YES) ;;
+        *) printf '%s\n' 'Installation cancelled.' >&2; exit 2 ;;
+    esac
+}
+
+run_apt() {
+    if [ "$(id -u)" -eq 0 ]; then
+        "$@"
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo "$@"
+    else
+        printf '%s\n' 'Installing prerequisites requires root or a configured sudo command.' >&2
+        exit 2
+    fi
+}
+
+if [ -n "$python_override" ]; then
+    python_bin=$python_override
+elif [ "$is_termux" -eq 1 ]; then
+    : "${PREFIX:=/data/data/com.termux/files/usr}"
+    python_bin="$PREFIX/bin/python"
+else
+    python_bin=$(command -v python3 2>/dev/null || true)
+fi
+
+if [ ! -x "${python_bin:-}" ]; then
+    if [ "$is_termux" -eq 1 ]; then
+        if ! command -v apt-get >/dev/null 2>&1; then
+            printf '%s\n' 'Termux apt-get is required to install Python.' >&2
+            exit 2
+        fi
+        confirm_install 'TE2 needs Termux Python and pip before it can verify the release payload.'
+        apt-get update
+        apt-get install -y python python-pip
+        python_bin="$PREFIX/bin/python"
+    else
+        if ! command -v apt-get >/dev/null 2>&1; then
+            printf '%s\n' 'The initial glibc Linux installer supports apt-based systems only.' >&2
+            exit 2
+        fi
+        confirm_install 'TE2 needs Python 3 and venv support before it can verify the release payload.'
+        run_apt apt-get update
+        run_apt apt-get install -y python3 python3-venv
+        python_bin=$(command -v python3 2>/dev/null || true)
+    fi
+fi
+if [ ! -x "${python_bin:-}" ]; then
+    printf '%s\n' 'A usable Python runtime was not found after prerequisite installation.' >&2
+    exit 2
+fi
+
+script_name=$(basename -- "$0")
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd || true)
+if [ "$script_name" = "install-te2" ] \
+    && [ -n "$script_dir" ] \
+    && [ -f "$script_dir/install_te2.py" ] \
+    && [ -f "$script_dir/target-manifest.json" ]; then
+    exec "$python_bin" "$script_dir/install_te2.py" --payload-root "$script_dir" "$@"
+fi
+
+scratch=$(
+    "$python_bin" -c 'import tempfile; print(tempfile.mkdtemp(prefix="te2-installer-"))'
+)
+cleanup() {
+    "$python_bin" -c 'import shutil,sys; shutil.rmtree(sys.argv[1], ignore_errors=True)' "$scratch"
+}
+trap cleanup EXIT HUP INT TERM
+
+if [ -z "$release_base_url" ]; then
+    if [ "$release_tag" = "latest" ]; then
+        release_base_url="https://github.com/$repository/releases/latest/download"
+    else
+        release_base_url="https://github.com/$repository/releases/download/$release_tag"
+    fi
+fi
+release_base_url=${release_base_url%/}
+
+download() {
+    url=$1
+    destination=$2
+    "$python_bin" - "$url" "$destination" <<'PY'
+from pathlib import Path
+import shutil
+import sys
+from urllib.request import Request, urlopen
+
+url, destination = sys.argv[1:]
+request = Request(url, headers={"User-Agent": "TE2 release installer"})
+target = Path(destination)
+temporary = target.with_name(f".{target.name}.download")
+try:
+    with urlopen(request, timeout=60) as response, temporary.open("wb") as output:
+        shutil.copyfileobj(response, output)
+    temporary.replace(target)
+finally:
+    temporary.unlink(missing_ok=True)
+PY
+}
+
+download "$release_base_url/release-manifest.json" "$scratch/release-manifest.json"
+download "$release_base_url/SHA256SUMS" "$scratch/SHA256SUMS"
+
+verify_file() {
+    filename=$1
+    "$python_bin" - "$scratch/SHA256SUMS" "$scratch/$filename" "$filename" <<'PY'
+from pathlib import Path
+import hashlib
+import sys
+
+sums_path, payload_path, filename = map(Path, sys.argv[1:])
+expected = None
+for raw in sums_path.read_text(encoding="utf-8").splitlines():
+    digest, separator, name = raw.partition("  ")
+    if separator and name == str(filename):
+        expected = digest
+        break
+if expected is None:
+    raise SystemExit(f"Release checksum is missing for {filename}")
+actual = hashlib.sha256(payload_path.read_bytes()).hexdigest()
+if actual != expected:
+    raise SystemExit(
+        f"Release checksum mismatch for {filename}: expected={expected}, actual={actual}"
+    )
+PY
+}
+
+verify_file release-manifest.json
+
+manifest_value() {
+    key=$1
+    "$python_bin" - "$scratch/release-manifest.json" "$key" <<'PY'
+from pathlib import Path
+import json
+import re
+import sys
+
+manifest = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+if manifest.get("schemaVersion") != 1:
+    raise SystemExit("Unsupported TE2 release manifest")
+release = manifest.get("release")
+targets = manifest.get("targets")
+if not isinstance(release, dict) or not isinstance(targets, dict):
+    raise SystemExit("Malformed TE2 release manifest")
+if release.get("publicationEligible") is not True:
+    raise SystemExit("TE2 release is not publication eligible")
+version = str(release.get("version") or "")
+if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
+    raise SystemExit(f"Invalid TE2 release version: {version!r}")
+key = sys.argv[2]
+if key == "version":
+    print(version)
+elif key == "installer":
+    linux = targets.get("linux-glibc-x86_64")
+    if not isinstance(linux, dict):
+        raise SystemExit("Linux release target is missing")
+    print(linux.get("installer") or "")
+elif key == "termux_archive":
+    termux = targets.get("termux-android-aarch64")
+    if not isinstance(termux, dict):
+        raise SystemExit("Termux release target is missing")
+    print(termux.get("archive") or "")
+else:
+    raise SystemExit(f"Unsupported release manifest key: {key}")
+PY
+}
+
+version=$(manifest_value version)
+installer_name=$(manifest_value installer)
+case "$installer_name" in
+    ''|*/*|*..*) printf '%s\n' 'Release manifest has an unsafe installer filename.' >&2; exit 2 ;;
+esac
+download "$release_base_url/$installer_name" "$scratch/$installer_name"
+verify_file "$installer_name"
+
+if [ "$is_termux" -eq 0 ]; then
+    "$python_bin" "$scratch/$installer_name" \
+        --payload-root "$scratch" \
+        --release-version "$version" \
+        "$@"
+    exit $?
+fi
+
+if [ "$action" = "maintenance" ]; then
+    "$python_bin" "$scratch/$installer_name" --payload-root "$scratch" "$@"
+    exit $?
+fi
+
+archive_name=$(manifest_value termux_archive)
+case "$archive_name" in
+    ''|*/*|*..*) printf '%s\n' 'Release manifest has an unsafe Termux archive filename.' >&2; exit 2 ;;
+esac
+download "$release_base_url/$archive_name" "$scratch/$archive_name"
+verify_file "$archive_name"
+payload_root=$(
+    "$python_bin" - "$scratch/$archive_name" "$scratch/payload" <<'PY'
+from pathlib import Path
+import sys
+import tarfile
+
+archive_path, destination = map(Path, sys.argv[1:])
+destination.mkdir()
+with tarfile.open(archive_path, "r:gz") as archive:
+    members = archive.getmembers()
+    for member in members:
+        path = Path(member.name)
+        if path.is_absolute() or ".." in path.parts or member.issym() or member.islnk():
+            raise SystemExit(f"Unsafe Termux archive member: {member.name}")
+    archive.extractall(destination, members=members)
+roots = [path for path in destination.iterdir() if path.is_dir()]
+if len(roots) != 1 or not (roots[0] / "target-manifest.json").is_file():
+    raise SystemExit("Termux release archive has an invalid root")
+print(roots[0])
+PY
+)
+"$python_bin" "$scratch/$installer_name" --payload-root "$payload_root" "$@"
+exit $?

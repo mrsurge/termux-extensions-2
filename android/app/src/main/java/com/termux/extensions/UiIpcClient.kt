@@ -18,7 +18,7 @@ import java.nio.charset.StandardCharsets
 class UiIpcClient(
     private val clientId: String = "android-native",
     private val presentationClientId: String? = null,
-    private var imeContextSwitchingEnabled: Boolean = true,
+    private var imeContextSwitchingEnabled: Boolean = false,
     private val onImeContextChanged: ((Boolean, String?) -> Unit)? = null,
     private val onConnectionStateChanged: ((Boolean) -> Unit)? = null,
 ) {

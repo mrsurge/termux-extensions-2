@@ -55,20 +55,19 @@ under `app/apps/*/manifest.json`; there is no built-in `codex_agent` app.
 ## Requirements
 
 TE2's Python runtime requires Python 3.12 or newer. On the supported x86-64
-Debian/Ubuntu Linux alpha, install `build-essential` before launching the
-standalone Terminal: its first launch compiles the locked `node-pty` module,
-then installs that module and the headless xterm modules into TE2's private data
-root for the current Node ABI. TE2's Linux Python dependency supplies the exact
-Node.js/npm runtime and matching headers, so a separate global Node.js install
-is not required. Archive Manager additionally needs the platform `libarchive`
-shared library.
+Debian/Ubuntu Linux alpha, the release installer validates or installs `git`,
+`build-essential`, `python3-venv`, and the distribution's `libarchive` runtime.
+`build-essential` is needed because the standalone Terminal's first launch
+compiles the locked `node-pty` module. TE2's Linux Python dependency supplies
+the exact Node.js/npm runtime and matching headers, so a separate global Node.js
+install is not required.
 
 The checked-in Code TE2 frontend, WBA backend, and shared browser assets are
 already built or vendored; ordinary runtime does not install npm dependency
-trees for them. The final archive-based Linux release will carry a prebuilt
-Electron distribution. A source, editable, or Git/pip install instead carries
-the small locked Electron source tree and builds it only when the user runs
-`te2 desktop install` or first launches `te2-desktop`.
+trees for them. The Linux wheel carries the small locked Electron source tree
+without Chromium, `node_modules`, or build output. Electron is materialized only
+when the user runs `te2 desktop install`, launches `te2-desktop` for the first
+time, or selects the unified installer's `--desktop` option.
 
 A source or Git/pip install also needs Rust with Cargo because the launcher
 builds and caches the framework server. Building the optional desktop client
@@ -98,20 +97,25 @@ The managed Code Server Linux standalone bootstrap may require `curl` or `wget`
 when the user opts in. Its Termux path downloads the pinned package with Python
 and installs the exact package dependencies at that time.
 
-The planned installed release uses one autodetecting `install-te2` entrypoint
-with target-specific, checksummed tar/gzip archives. Detection checks Termux
-first, then supports an initial apt-based glibc Linux target. An explicit local
-payload or matching archive beside the installer supports offline application
-payload installation; otherwise the installer downloads the immutable release
-archive. Unsupported libc implementations, package managers, architectures,
-and platforms fail explicitly.
+The release tooling provides one autodetecting `install-te2` entrypoint.
+Detection checks Termux first, then supports an initial apt-based glibc Linux
+x86-64 target. Unsupported libc implementations, package managers,
+architectures, and platforms fail explicitly.
 
-Linux installs beneath the canonical TE2 data root with a private Python venv
-and prebuilt Rust/Electron payloads; apt is limited to system prerequisites.
+Linux installs the exact PyPI release into a versioned private venv beneath the
+canonical TE2 data root. It publishes a receipt, an atomic `current` pointer,
+and user-local command wrappers. `--desktop` then delegates to that venv's own
+`te2 desktop install`; the existing Electron bootstrap owns its locked source
+build, cache, runtime publication, `.desktop` file, icon, and launcher wrapper.
+The installer seeds Electron's existing local-framework configuration with the
+stable managed command and `current/venv` paths, while preserving an explicit
+user configuration.
+
 Termux reuses its shared Python interpreter and apt-supplied dependencies
 without a venv, while TE2's own Python tree and Bionic server remain versioned
-beneath the canonical TE2 data root. Both targets share manifest verification,
-receipts, atomic current-release activation, upgrade/rollback, and removal.
+beneath the canonical TE2 data root. Its target manifest includes `git` and the
+native Node/npm mapping. Both targets share receipts, atomic current-release
+activation, rollback, and removal.
 
 Repository scripts are developer/release construction tooling and may build the
 public installer and target archives. They are not copied into an ordinary
@@ -120,6 +124,21 @@ cloned or editable source checkout.
 
 ## Install And Run
 
+From an unpacked, matching TE2 release-installer payload:
+
+```bash
+# Framework and CLI only.
+./install-te2 --yes
+
+# Linux only: also build and register the Electron desktop client.
+./install-te2 --desktop --yes
+```
+
+The desktop option uses the exact private venv selected by the installer; it
+does not depend on an unrelated system Python or Node installation. Electron's
+existing 3 GiB build-space guard still applies. The installer does not launch
+the desktop application automatically.
+
 For the supported x86-64 Debian/Ubuntu Linux alpha from PyPI:
 
 ```bash
@@ -127,7 +146,7 @@ sudo apt-get update
 sudo apt-get install -y build-essential
 python -m venv ~/.local/share/te2-alpha-venv
 . ~/.local/share/te2-alpha-venv/bin/activate
-python -m pip install "te2==0.2.338"
+python -m pip install "te2==0.2.339"
 te2
 ```
 

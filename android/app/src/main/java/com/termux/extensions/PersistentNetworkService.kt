@@ -1,5 +1,6 @@
 package com.termux.extensions
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,6 +8,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.Network
@@ -39,6 +41,7 @@ internal data class AndroidClientRuntimeSnapshot(
     val cpuLockHeld: Boolean,
     val wifiLockHeld: Boolean,
     val batteryOptimizationExempt: Boolean,
+    val notificationPermissionGranted: Boolean,
     val lastError: String?,
     val runTargets: JSONObject,
 ) {
@@ -55,6 +58,7 @@ internal data class AndroidClientRuntimeSnapshot(
         put("cpuLockHeld", cpuLockHeld)
         put("wifiLockHeld", wifiLockHeld)
         put("batteryOptimizationExempt", batteryOptimizationExempt)
+        put("notificationPermissionGranted", notificationPermissionGranted)
         put("lastError", lastError ?: JSONObject.NULL)
         put("runTargets", runTargets)
     }
@@ -328,6 +332,10 @@ class PersistentNetworkService : Service() {
             cpuLockHeld = cpuWakeLock?.isHeld == true,
             wifiLockHeld = wifiLock?.isHeld == true,
             batteryOptimizationExempt = isBatteryOptimizationExempt(),
+            notificationPermissionGranted =
+                Build.VERSION.SDK_INT < 33 ||
+                    checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
+                    PackageManager.PERMISSION_GRANTED,
             lastError = control.lastError,
             runTargets = runTargetRelays.debugSnapshot(),
         )
