@@ -19,6 +19,7 @@ const frameworkBookmarksList = document.querySelector("#framework-bookmarks");
 const frameworkBookmarksEmpty = document.querySelector("#framework-bookmarks-empty");
 const settingsStatus = document.querySelector("#settings-status");
 const powerPolicyStatus = document.querySelector("#power-policy-status");
+const notificationPermissionStatus = document.querySelector("#notification-permission-status");
 const openPowerSettingsButton = document.querySelector("#open-power-settings");
 const fwsStatus = document.querySelector("#fws-status");
 const fwsFrame = document.querySelector("#fws-frame");
@@ -119,7 +120,7 @@ async function loadSettings() {
   hostInput.value = settings.frameworkHost || "127.0.0.1";
   portInput.value = String(settings.frameworkPort || 8089);
   persistentToggle.checked = !!settings.persistentNetworkNotification;
-  imeContextSwitchingToggle.checked = settings.imeContextSwitchingEnabled !== false;
+  imeContextSwitchingToggle.checked = !!settings.imeContextSwitchingEnabled;
   applyDevToolsSettings(settings);
   frameworkBookmarksSection.hidden = !supportsFrameworkBookmarks(settings);
   if (!frameworkBookmarksSection.hidden) await loadFrameworkBookmarks();
@@ -130,6 +131,13 @@ async function loadSettings() {
     runtime.batteryOptimizationExempt
       ? "Battery optimization exemption enabled"
       : "Android may suspend the remote runtime during idle",
+  );
+  setStatus(
+    notificationPermissionStatus,
+    runtime.notificationPermissionGranted ? "online" : "offline",
+    runtime.notificationPermissionGranted
+      ? "Notification permission enabled"
+      : "Notification permission disabled",
   );
   setStatus(settingsStatus, "online", "Android settings loaded");
 }
@@ -219,7 +227,7 @@ saveFrameworkBookmarkButton?.addEventListener("click", async () => {
 persistToggle(
   imeContextSwitchingToggle,
   "imeContextSwitchingEnabled",
-  (settings) => settings.imeContextSwitchingEnabled !== false,
+  (settings) => !!settings.imeContextSwitchingEnabled,
 );
 persistToggle(
   devToolsRunProfilesToggle,
@@ -268,6 +276,24 @@ openPowerSettingsButton?.addEventListener("click", async () => {
     openPowerSettingsButton.disabled = false;
   }
 });
+
+let foregroundRefresh = null;
+
+function refreshSettingsOnForeground() {
+  if (document.visibilityState === "hidden" || foregroundRefresh) return;
+  foregroundRefresh = Promise.resolve()
+    .then(() => loadSettings())
+    .catch((error) => {
+      setStatus(settingsStatus, "error", error?.message || "Failed to refresh settings");
+    })
+    .finally(() => {
+      foregroundRefresh = null;
+    });
+}
+
+window.addEventListener("pageshow", refreshSettingsOnForeground);
+window.addEventListener("focus", refreshSettingsOnForeground);
+document.addEventListener("visibilitychange", refreshSettingsOnForeground);
 
 try {
   await loadSettings();

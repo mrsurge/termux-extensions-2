@@ -99,8 +99,11 @@ def _run_linux(
             print(f"TE2 current release rolled back to {args.rollback}.")
             return 0
 
-        manifest = _load_manifest(payload)
-        version = _manifest_version(manifest)
+        version = (
+            _release_version(args.release_version)
+            if args.release_version
+            else _manifest_version(_load_manifest(payload))
+        )
         _ensure_linux_prerequisites(assume_yes=args.yes)
         _check_free_space(install_root)
         release = _materialize_linux_release(install_root, version)
@@ -128,7 +131,8 @@ def _run_linux(
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Install a verified TE2 release payload")
-    parser.add_argument("--payload-root", required=True, help=argparse.SUPPRESS)
+    parser.add_argument("--payload-root", default=".", help=argparse.SUPPRESS)
+    parser.add_argument("--release-version", help=argparse.SUPPRESS)
     parser.add_argument("--prefix", help="Target prefix; defaults to PREFIX")
     parser.add_argument("--data-home", help="Canonical TE2 data root override")
     parser.add_argument("-y", "--yes", action="store_true", help="Consent to missing apt prerequisites")
@@ -299,11 +303,10 @@ def _ensure_prerequisites(
     packages = [_mapping(item, "aptPackages item") for item in raw_packages]
     missing = [str(item["name"]) for item in packages if _dpkg_version(str(item["name"])) is None]
     if missing:
-        if not assume_yes:
-            print("TE2 needs these Termux packages: " + ", ".join(missing))
-            answer = input("Install them with apt now? [y/N] ").strip().lower()
-            if answer not in {"y", "yes"}:
-                raise SystemExit("Installation cancelled")
+        _confirm_install(
+            "TE2 needs these Termux packages: " + ", ".join(missing),
+            assume_yes=assume_yes,
+        )
         subprocess.run([str(prefix / "bin" / "apt-get"), "update"], check=True)
         subprocess.run([str(prefix / "bin" / "apt-get"), "install", "-y", *missing], check=True)
     for item in packages:
@@ -347,11 +350,10 @@ def _ensure_linux_prerequisites(*, assume_yes: bool) -> None:
     required = [*LINUX_APT_PACKAGES, libarchive_package]
     missing = [package for package in required if _dpkg_version(package) is None]
     if missing:
-        if not assume_yes:
-            print("TE2 needs these Linux packages: " + ", ".join(missing))
-            answer = input("Install them with apt now? [y/N] ").strip().lower()
-            if answer not in {"y", "yes"}:
-                raise SystemExit("Installation cancelled")
+        _confirm_install(
+            "TE2 needs these Linux packages: " + ", ".join(missing),
+            assume_yes=assume_yes,
+        )
         apt = _privileged_apt_command()
         environment = os.environ.copy()
         environment["DEBIAN_FRONTEND"] = "noninteractive"
@@ -938,10 +940,31 @@ def _replace_symlink(path: Path, target: str) -> None:
 
 def _manifest_version(manifest: Mapping[str, object]) -> str:
     distribution = _mapping(manifest.get("distribution"), "distribution")
-    version = str(distribution.get("version") or "")
+    return _release_version(str(distribution.get("version") or ""))
+
+
+def _release_version(version: str) -> str:
     if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
         raise SystemExit(f"Invalid TE2 release version: {version!r}")
     return version
+
+
+def _confirm_install(message: str, *, assume_yes: bool) -> None:
+    if assume_yes:
+        return
+    print(message)
+    prompt = "Install them with apt now? [y/N] "
+    try:
+        with open("/dev/tty", "r+", encoding="utf-8") as terminal:
+            terminal.write(prompt)
+            terminal.flush()
+            answer = terminal.readline()
+    except OSError as exc:
+        raise SystemExit(
+            "Interactive confirmation requires a terminal; rerun with --yes"
+        ) from exc
+    if answer.strip().lower() not in {"y", "yes"}:
+        raise SystemExit("Installation cancelled")
 
 
 def _payload_member(root: Path, relative: str) -> Path:

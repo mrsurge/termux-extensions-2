@@ -3,9 +3,12 @@ from __future__ import annotations
 import base64
 import hashlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
+import subprocess
+import sys
 import tarfile
 import tempfile
 from types import SimpleNamespace
@@ -27,6 +30,10 @@ def _load(name: str, path: Path):
 
 builder = _load("te2_termux_builder", ROOT / "release" / "termux" / "build_release.py")
 installer = _load("te2_installer", ROOT / "release" / "installer" / "install_te2.py")
+public_builder = _load(
+    "te2_public_release_builder",
+    ROOT / "release" / "build_public_release.py",
+)
 
 
 def _digest(payload: bytes) -> str:
@@ -49,6 +56,65 @@ def _wheel(path: Path, *, name: str = "example", version: str = "1.0", tag: str)
         for member, payload in files.items():
             archive.writestr(member, payload)
     return path
+
+
+def _termux_archive(
+    path: Path,
+    *,
+    version: str = "0.2.338",
+    source_commit: str = "a" * 40,
+    publication_eligible: bool = True,
+) -> Path:
+    manifest = {
+        "distribution": {
+            "agentLogServerVersion": "0.2.119",
+            "frameworkShellsVersion": "0.0.63",
+            "name": "te2",
+            "version": version,
+        },
+        "releaseProvenance": {
+            "dirtyFirstParty": [] if publication_eligible else ["agent-log-server"],
+            "publicationEligible": publication_eligible,
+        },
+        "schemaVersion": 1,
+        "sources": {"te2Commit": source_commit},
+    }
+    payload = (json.dumps(manifest, sort_keys=True) + "\n").encode()
+    with tarfile.open(path, "w:gz") as archive:
+        info = tarfile.TarInfo(f"te2-{version}-termux-aarch64/target-manifest.json")
+        info.size = len(payload)
+        archive.addfile(info, io.BytesIO(payload))
+    return path
+
+
+def _write_public_download_fixture(root: Path, installer_payload: bytes) -> None:
+    installer_name = "install_te2.py"
+    (root / installer_name).write_bytes(installer_payload)
+    manifest = {
+        "release": {
+            "publicationEligible": True,
+            "sourceCommit": "a" * 40,
+            "tag": "0.2.338",
+            "version": "0.2.338",
+        },
+        "schemaVersion": 1,
+        "targets": {
+            "linux-glibc-x86_64": {"installer": installer_name},
+            "termux-android-aarch64": {
+                "archive": "te2-0.2.338-termux-aarch64.tar.gz"
+            },
+        },
+    }
+    (root / "release-manifest.json").write_text(
+        json.dumps(manifest, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    lines = [
+        f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}"
+        for path in sorted(root.iterdir())
+        if path.is_file()
+    ]
+    (root / "SHA256SUMS").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 class TermuxReleaseBuilderTests(unittest.TestCase):
@@ -305,6 +371,132 @@ class LinuxInstallerTests(unittest.TestCase):
             self.assertEqual(config["broadcast"], ["tailscale0"])
             self.assertEqual(config["port"], 9010)
             self.assertEqual(config["env"], {"EXAMPLE": "value"})
+
+    def test_release_version_can_drive_linux_without_target_payload(self) -> None:
+        self.assertEqual(installer._release_version("0.2.338"), "0.2.338")
+        with self.assertRaisesRegex(SystemExit, "Invalid TE2 release version"):
+            installer._release_version("latest")
+
+
+class PublicReleaseTests(unittest.TestCase):
+    def test_builder_emits_curl_manifest_and_checksums(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            archive = _termux_archive(root / "te2-0.2.338-termux-aarch64.tar.gz")
+            output = root / "public"
+            argv = [
+                "build_public_release.py",
+                "--output",
+                str(output),
+                "--version",
+                "0.2.338",
+                "--source-commit",
+                "a" * 40,
+                "--termux-archive",
+                str(archive),
+            ]
+            with patch.object(sys, "argv", argv), patch.object(
+                public_builder,
+                "_git_output",
+                side_effect=["a" * 40, ""],
+            ):
+                self.assertEqual(public_builder.main(), 0)
+
+            manifest = json.loads(
+                (output / "release-manifest.json").read_text(encoding="utf-8")
+            )
+            self.assertTrue(manifest["release"]["publicationEligible"])
+            self.assertEqual(
+                manifest["targets"]["termux-android-aarch64"]["archive"],
+                archive.name,
+            )
+            sums = (output / "SHA256SUMS").read_text(encoding="utf-8")
+            for name in (
+                "install-te2",
+                "install_te2.py",
+                "release-manifest.json",
+                archive.name,
+            ):
+                self.assertIn(f"  {name}\n", sums)
+
+    def test_builder_rejects_ineligible_termux_archive(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            archive = _termux_archive(
+                Path(raw) / "te2-0.2.338-termux-aarch64.tar.gz",
+                publication_eligible=False,
+            )
+            manifest = public_builder._read_termux_manifest(archive)
+            with self.assertRaisesRegex(SystemExit, "not publication eligible"):
+                public_builder._validate_termux_manifest(
+                    manifest,
+                    version="0.2.338",
+                    source_commit="a" * 40,
+                    allow_ineligible=False,
+                )
+
+    def test_standalone_shell_runs_from_stdin_and_arbitrary_cwd(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            release = root / "release"
+            release.mkdir()
+            report = root / "report.json"
+            fake_installer = (
+                b"from pathlib import Path\n"
+                b"import json, os, sys\n"
+                b"Path(os.environ['TE2_TEST_REPORT']).write_text(json.dumps(sys.argv[1:]))\n"
+            )
+            _write_public_download_fixture(release, fake_installer)
+            unrelated_cwd = root / "unrelated" / "cwd"
+            unrelated_cwd.mkdir(parents=True)
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "TE2_INSTALL_PYTHON": sys.executable,
+                    "TE2_RELEASE_BASE_URL": release.as_uri(),
+                    "TE2_TEST_REPORT": str(report),
+                }
+            )
+            result = subprocess.run(
+                ["sh", "-s", "--", "--uninstall"],
+                cwd=unrelated_cwd,
+                env=environment,
+                input=(ROOT / "release" / "installer" / "install-te2").read_bytes(),
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            arguments = json.loads(report.read_text(encoding="utf-8"))
+            self.assertIn("--release-version", arguments)
+            self.assertIn("0.2.338", arguments)
+            self.assertIn("--uninstall", arguments)
+
+    def test_standalone_shell_rejects_download_checksum_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            release = root / "release"
+            release.mkdir()
+            report = root / "report.json"
+            _write_public_download_fixture(release, b"raise SystemExit('must not run')\n")
+            (release / "install_te2.py").write_text("tampered\n", encoding="utf-8")
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "TE2_INSTALL_PYTHON": sys.executable,
+                    "TE2_RELEASE_BASE_URL": release.as_uri(),
+                    "TE2_TEST_REPORT": str(report),
+                }
+            )
+            result = subprocess.run(
+                ["sh", "-s"],
+                cwd=root,
+                env=environment,
+                input=(ROOT / "release" / "installer" / "install-te2").read_bytes(),
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(b"checksum mismatch", result.stderr.lower())
+            self.assertFalse(report.exists())
 
 
 class TermuxInstallerTransactionTests(unittest.TestCase):

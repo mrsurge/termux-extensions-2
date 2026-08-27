@@ -1611,12 +1611,26 @@ the embedded HTML shell but cannot serve its browser runtime fails publication.
 12. Validate `te2 --help`, `/api/health`, desktop launch, app launch, assets,
     and normal shutdown without deleting ordinary TE2 user state.
 
-The implemented initial Linux slice covers steps 2, 3, 5 through 9, and the
-non-graphical portion of step 12. Its apt transaction currently validates or
-installs `git`, `build-essential`, `python3-venv`, and the available Debian
-`libarchive` runtime (`libarchive13t64` or `libarchive13`). The remaining
-component-download, checksum rejection, upgrade/rollback matrix, and graphical
-desktop acceptance stay open.
+The public acquisition slice now supplies a standalone POSIX `install-te2`
+entrypoint that is safe to invoke from an arbitrary working directory or over
+stdin with `curl | sh`. It detects Termux before generic Linux, uses `/dev/tty`
+for consent when stdin contains the script, installs a missing target Python and
+the narrow apt prerequisite set, downloads the release manifest and checksum
+index into a disposable Python-created directory, and verifies every selected
+asset before execution. Linux delegates to the exact PyPI version declared by
+the release manifest; Termux downloads the complete target archive and keeps
+maintenance-only operations independent of that large payload. Adjacent files
+remain the deterministic development/offline path.
+
+`release/build_public_release.py` is the only top-level release-asset assembler.
+It accepts a clean source commit plus the audited Termux archive and optional
+immutable assets, rejects an ineligible component manifest, then emits the
+public `release-manifest.json` and `SHA256SUMS` that the shell entrypoint
+consumes. The Linux apt transaction validates or installs `git`,
+`build-essential`, `python3-venv`, and the available Debian `libarchive`
+runtime (`libarchive13t64` or `libarchive13`). Two-version upgrade/rollback and
+graphical desktop acceptance remain open live gates rather than gaps in the
+acquisition format.
 
 The currently provisioned remote Debian Trixie environment is the mandatory
 live Linux acceptance harness, not merely a compatibility reference. Phase 4C
@@ -1651,35 +1665,54 @@ and are never recorded in repository documents, logs, or release manifests.
 
 ### 7.4 Final integration and publication transaction
 
-1. Synchronize every release-facing version and generated frontend asset before
+Before version synchronization, the release-default gate must prove a fresh
+install starts with Android IME composition filtering disabled, Code TE2
+autosave disabled (draft mode enabled), and neither committed nor draft inline
+diff overlays selected. Android Settings must refresh notification and battery
+policy state on foreground events. The existing mobile special-key affordance
+remains enabled; its proposed second row and additional Tab/Home/End expansion
+are explicitly deferred from this release.
+
+1. Land and tag any separately versioned first-party dependency source first,
+   then build its Linux and Android wheels from that clean tag. TE2 pins only
+   those final component versions; validation-only dirty wheels never enter the
+   public asset set.
+2. Synchronize every TE2 release-facing version and generated frontend asset before
    final integration. When Android participates, rebuild Code TE2, rebundle the
    Android assets, and build both release APK variants from those exact assets.
-2. Complete pre-release validation on the feature branch, merge it into `main`,
+3. Complete pre-release validation on the feature branch, merge it into `main`,
    and place one immutable annotated tag on the final integrated commit. If a
    merge commit is used, the tag points to that merge commit; version sync must
    already be present in it.
-3. Build wheels, sdist, Rust server, Termux archive, and APKs from a clean
+4. Build wheels, sdist, Rust server, Termux archive, and APKs from a clean
    checkout of that tag. Validate the wheel-owned Electron source/bootstrap
    inputs from that same checkout. Nothing is copied from a dirty development
    tree.
-4. Sign official APKs with the separately supplied release key. Debug/staging
-   repository keys are never accepted for release APKs; no release secret or
-   password enters Git, logs, manifests, or command lines.
-5. Audit APK signature identity, version, packaged asset version, and 16 KiB
+5. For this public alpha, build GeckoView and Cefrium **staging** APKs with the
+   repository development certificate and record that identity in the release
+   manifest. They are sideloading/validation artifacts, not store-signed
+   production APKs. A later production release remains a separate credentialed
+   gate; no release secret or password enters Git, logs, manifests, or command
+   lines.
+6. Audit APK signature identity, version, packaged asset version, and 16 KiB
    alignment; audit wheel tags/contents, Rust linkage, Electron source/runtime
    bootstrap inputs, archive paths, and every checksum.
-6. Create a draft GitHub Release and upload the complete component set plus
+7. Assemble the public component directory with
+   `release/build_public_release.py`, then create a draft GitHub Release and
+   upload the complete component set plus
    `release-manifest.json` and `SHA256SUMS`.
-7. Upload the exact sdist/wheel candidates to TestPyPI and run the complete
+8. Upload the exact sdist/wheel candidates to TestPyPI and run the complete
    remote Debian live-acceptance sequence against those candidates and the draft
    GitHub components.
-8. Upload the already-tested immutable files to PyPI. Because PyPI files cannot
+9. Upload the already-tested immutable files to PyPI. Because PyPI files cannot
    be replaced, any identity or content mismatch stops the release and requires
    a new version.
-9. Repeat the remote Debian framework/install smoke using the public PyPI wheel
+10. Repeat the remote Debian framework/install smoke using the public PyPI wheel
    against the draft GitHub Electron asset. Only after it passes may the
    already-populated GitHub Release be published.
-10. Record artifact URLs, hashes, tag, commit, wheel compatibility evidence,
+11. Run physical AArch64 Termux acceptance through the same public download
+    entrypoint and exact draft assets before making the GitHub Release public.
+12. Record artifact URLs, hashes, tag, commit, wheel compatibility evidence,
     APK signer fingerprints, and acceptance results in the release record.
 
 ## 8. Phase 5 — Termux target mode

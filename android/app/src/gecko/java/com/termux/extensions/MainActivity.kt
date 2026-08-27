@@ -1104,6 +1104,14 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         activityResumed = true
         persistentNetworkStartFailed = false
+        if (
+            android.os.Build.VERSION.SDK_INT < 33 ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            persistentNetworkPermissionDenied = false
+        }
+        updatePersistentNetworkService()
         try {
             if (::geckoSession.isInitialized) geckoSession.setActive(true)
         } catch (_: Exception) {

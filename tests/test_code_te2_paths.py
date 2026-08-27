@@ -121,6 +121,17 @@ class CodeTe2PathTests(unittest.TestCase):
         self.assertFalse((home / ".cache" / "cm6_editor").exists())
         self.assertFalse((home / ".local" / "share" / "termux-extensions-2").exists())
 
+    def test_fresh_editor_preferences_start_in_draft_mode_without_diff_overlays(self) -> None:
+        with patch.dict(os.environ, self._canonical_env(), clear=False):
+            editor = cast(
+                dict[str, object],
+                PreferencesStore().get_preferences()["editor"],
+            )
+
+        self.assertFalse(editor["autoSave"])
+        self.assertFalse(editor["showInlineDiffs"])
+        self.assertFalse(editor["showDraftDiffs"])
+
     def test_real_shape_project_sidecar_and_draft_index_survive_reload(self) -> None:
         env = self._canonical_env()
         project = "/workspace/example"
