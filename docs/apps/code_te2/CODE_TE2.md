@@ -2572,6 +2572,14 @@ Extension install and uninstall commands receive both the private
 `--user-data-dir` and `--extensions-dir`. Existing global code-server data is
 left untouched and is not imported during startup.
 
+### Open VSX marketplace installs
+
+Open VSX search and detail views use the public metadata API, but marketplace installation does not delegate extension selection to Code Server's gallery client. TE2 resolves the requested extension and exact version from Open VSX metadata, validates that the artifact and digest URLs belong to the same namespace/name/version under the Open VSX API, and accepts only the corresponding identity-preserving redirect through the Open VSX Eclipse content CDN.
+
+The VSIX and published SHA-256 are downloaded with explicit byte limits. The artifact is streamed to a temporary file, verified before use, and removed on success or failure. TE2 then invokes the existing managed-runtime local-VSIX install path with the private `--user-data-dir` and `--extensions-dir`, and verifies that the expected extension id is present after installation.
+
+This artifact-driven path is required on Termux because Node reports the Android platform and Code Server consequently classifies the gallery target as web. Its gallery client filters out workspace-only extensions before installation even when the extension's Linux/server process is usable on Termux or configurable to use a Termux `apt` language server. TE2 therefore does not hard-code language or extension exceptions and does not fall back to `publisher.name@version` gallery installation.
+
 ---
 
 ## 42) Android Cefrium Client

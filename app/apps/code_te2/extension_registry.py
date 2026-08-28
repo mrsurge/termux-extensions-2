@@ -1179,14 +1179,6 @@ def ensure_registry_and_gate() -> Registry:
 
 # ── Install / Uninstall ───────────────────────────────────────────────
 
-_MARKETPLACE_EXTENSION_ID_RE = re.compile(
-    r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}\.[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-)
-_MARKETPLACE_EXTENSION_VERSION_RE = re.compile(
-    r"^[0-9A-Za-z][0-9A-Za-z.+-]{0,127}$"
-)
-
-
 def _require_code_server_installation() -> CodeServerInstallation:
     installation = resolve_code_server_installation()
     if installation is None:
@@ -1270,7 +1262,11 @@ def _post_install_result(
     }
 
 
-def install_extension(vsix_path: str) -> dict[str, object]:
+def install_extension(
+    vsix_path: str,
+    *,
+    expected_ext_id: str | None = None,
+) -> dict[str, object]:
     """Install a VSIX extension via code-server subprocess.
 
     Steps:
@@ -1290,22 +1286,10 @@ def install_extension(vsix_path: str) -> dict[str, object]:
         raise ValueError(f"Not a .vsix file: {vsix_path}")
 
     _run_code_server_extension_install(str(vsix.resolve()))
-    return _post_install_result(vsix_stem=vsix.stem)
-
-
-def install_extension_by_id(ext_id: str, version: str) -> dict[str, object]:
-    """Install one exact Open VSX/code-server extension identifier and version."""
-    normalized_ext_id = ext_id.strip()
-    normalized_version = version.strip()
-    if not _MARKETPLACE_EXTENSION_ID_RE.fullmatch(normalized_ext_id):
-        raise ValueError("Extension ID must be a publisher.name identifier")
-    if not _MARKETPLACE_EXTENSION_VERSION_RE.fullmatch(normalized_version):
-        raise ValueError("Extension version is invalid")
-
-    _run_code_server_extension_install(
-        f"{normalized_ext_id}@{normalized_version}"
+    return _post_install_result(
+        expected_ext_id=expected_ext_id,
+        vsix_stem=vsix.stem,
     )
-    return _post_install_result(expected_ext_id=normalized_ext_id)
 
 
 def uninstall_extension(ext_id: str) -> dict[str, object]:

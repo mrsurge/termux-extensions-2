@@ -1,7 +1,11 @@
 # pyright: strict
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping, Sequence
+from pathlib import Path
+import re
+import tempfile
 from typing import cast
 from urllib.parse import quote, urlsplit
 
@@ -11,7 +15,10 @@ JsonObject = dict[str, object]
 
 _OPEN_VSX_API_BASE = "https://open-vsx.org/api"
 _MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+_MAX_VSIX_BYTES = 512 * 1024 * 1024
 _REQUEST_TIMEOUT = httpx.Timeout(12.0, connect=5.0)
+_DOWNLOAD_TIMEOUT = httpx.Timeout(120.0, connect=10.0)
+_SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
 
 class OpenVsxMarketplaceError(Exception):
@@ -101,6 +108,87 @@ def _openvsx_icon_url(
     ):
         return None
     return icon_url
+
+
+def _openvsx_artifact_url(
+    value: object,
+    *,
+    namespace: str,
+    name: str,
+    version: str,
+    suffix: str,
+) -> str | None:
+    artifact_url = _safe_external_url(value)
+    if artifact_url is None:
+        return None
+    try:
+        parsed = urlsplit(artifact_url)
+        port = parsed.port
+    except ValueError:
+        return None
+    if (
+        parsed.hostname != "open-vsx.org"
+        or port not in (None, 443)
+        or parsed.query
+        or parsed.fragment
+    ):
+        return None
+    expected_prefix = (
+        f"/api/{quote(namespace, safe='')}/{quote(name, safe='')}/"
+        f"{quote(version, safe='')}/file/"
+    )
+    filename = parsed.path.removeprefix(expected_prefix)
+    if (
+        not parsed.path.startswith(expected_prefix)
+        or not filename
+        or "/" in filename
+        or not filename.lower().endswith(suffix)
+    ):
+        return None
+    return artifact_url
+
+
+def _trusted_openvsx_response_url(
+    value: object,
+    *,
+    namespace: str,
+    name: str,
+    version: str,
+    suffix: str,
+) -> bool:
+    try:
+        parsed = urlsplit(str(value))
+        port = parsed.port
+    except ValueError:
+        return False
+    if (
+        parsed.scheme != "https"
+        or parsed.username
+        or parsed.password
+        or port not in (None, 443)
+        or parsed.query
+        or parsed.fragment
+    ):
+        return False
+    if parsed.hostname == "open-vsx.org":
+        expected_prefix = (
+            f"/api/{quote(namespace, safe='')}/{quote(name, safe='')}/"
+            f"{quote(version, safe='')}/file/"
+        )
+    elif parsed.hostname == "openvsx.eclipsecontent.org":
+        expected_prefix = (
+            f"/{quote(namespace, safe='')}/{quote(name, safe='')}/"
+            f"{quote(version, safe='')}/"
+        )
+    else:
+        return False
+    filename = parsed.path.removeprefix(expected_prefix)
+    return bool(
+        parsed.path.startswith(expected_prefix)
+        and filename
+        and "/" not in filename
+        and filename.lower().endswith(suffix)
+    )
 
 
 def _finite_number(value: object) -> int | float | None:
@@ -253,6 +341,38 @@ async def _request_json(
             await active_client.aclose()
 
 
+async def _request_bytes(
+    url: str,
+    *,
+    client: httpx.AsyncClient,
+    maximum: int,
+    namespace: str,
+    name: str,
+    version: str,
+    suffix: str,
+) -> bytes:
+    content = bytearray()
+    async with client.stream("GET", url, follow_redirects=True) as response:
+        if not _trusted_openvsx_response_url(
+            response.url,
+            namespace=namespace,
+            name=name,
+            version=version,
+            suffix=suffix,
+        ):
+            raise OpenVsxMarketplaceError(
+                "Open VSX redirected to an untrusted artifact location"
+            )
+        _ = response.raise_for_status()
+        async for chunk in response.aiter_bytes():
+            content.extend(chunk)
+            if len(content) > maximum:
+                raise OpenVsxMarketplaceError(
+                    "Open VSX response was too large"
+                )
+    return bytes(content)
+
+
 async def search_openvsx(
     *,
     query: str,
@@ -307,3 +427,153 @@ async def get_openvsx_detail(
             installed_versions=_installed_versions(installed_extensions),
         )
     }
+
+
+async def download_openvsx_vsix(
+    *,
+    ext_id: str,
+    version: str,
+    client: httpx.AsyncClient | None = None,
+) -> Path:
+    """Download and verify one exact Open VSX artifact into a temporary file."""
+    if "." not in ext_id:
+        raise OpenVsxMarketplaceError("Extension identifier is invalid")
+    namespace, name = ext_id.split(".", 1)
+    owned_client = client is None
+    active_client = client or httpx.AsyncClient(
+        timeout=_DOWNLOAD_TIMEOUT,
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "TE2-Code-Explorer/1",
+        },
+        follow_redirects=False,
+    )
+    temp_path: Path | None = None
+    try:
+        payload = await _request_json(
+            (
+                f"{_OPEN_VSX_API_BASE}/{quote(namespace, safe='')}/"
+                f"{quote(name, safe='')}/{quote(version, safe='')}"
+            ),
+            client=active_client,
+        )
+        identity = _normalize_identity(payload)
+        payload_version = _bounded_string(payload.get("version"), maximum=128)
+        if (
+            identity is None
+            or identity[2].lower() != ext_id.lower()
+            or payload_version != version
+        ):
+            raise OpenVsxMarketplaceError(
+                "Open VSX returned mismatched extension artifact metadata"
+            )
+
+        files = _as_object(payload.get("files")) or {}
+        download_url = _openvsx_artifact_url(
+            files.get("download"),
+            namespace=identity[0],
+            name=identity[1],
+            version=version,
+            suffix=".vsix",
+        )
+        sha256_url = _openvsx_artifact_url(
+            files.get("sha256"),
+            namespace=identity[0],
+            name=identity[1],
+            version=version,
+            suffix=".sha256",
+        )
+        if download_url is None or sha256_url is None:
+            raise OpenVsxMarketplaceError(
+                "Open VSX did not provide a trusted extension artifact"
+            )
+
+        digest_content = await _request_bytes(
+            sha256_url,
+            client=active_client,
+            maximum=256,
+            namespace=identity[0],
+            name=identity[1],
+            version=version,
+            suffix=".sha256",
+        )
+        try:
+            expected_sha256 = digest_content.decode("ascii").strip().lower()
+        except UnicodeDecodeError as exc:
+            raise OpenVsxMarketplaceError(
+                "Open VSX returned an invalid SHA-256"
+            ) from exc
+        if not _SHA256_RE.fullmatch(expected_sha256):
+            raise OpenVsxMarketplaceError("Open VSX returned an invalid SHA-256")
+
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            prefix="te2-openvsx-",
+            suffix=".vsix",
+            delete=False,
+        ) as temp_file:
+            temp_path = Path(temp_file.name)
+            digest = hashlib.sha256()
+            size = 0
+            async with active_client.stream(
+                "GET",
+                download_url,
+                follow_redirects=True,
+            ) as response:
+                if not _trusted_openvsx_response_url(
+                    response.url,
+                    namespace=identity[0],
+                    name=identity[1],
+                    version=version,
+                    suffix=".vsix",
+                ):
+                    raise OpenVsxMarketplaceError(
+                        "Open VSX redirected to an untrusted artifact location"
+                    )
+                _ = response.raise_for_status()
+                content_length = cast(
+                    str | None,
+                    response.headers.get("content-length"),
+                )
+                if content_length is not None:
+                    try:
+                        declared_size = int(content_length)
+                    except ValueError as exc:
+                        raise OpenVsxMarketplaceError(
+                            "Open VSX returned an invalid extension size"
+                        ) from exc
+                    if declared_size < 0 or declared_size > _MAX_VSIX_BYTES:
+                        raise OpenVsxMarketplaceError(
+                            "Open VSX extension artifact was too large"
+                        )
+                async for chunk in response.aiter_bytes():
+                    size += len(chunk)
+                    if size > _MAX_VSIX_BYTES:
+                        raise OpenVsxMarketplaceError(
+                            "Open VSX extension artifact was too large"
+                        )
+                    digest.update(chunk)
+                    _ = temp_file.write(chunk)
+
+        if digest.hexdigest() != expected_sha256:
+            raise OpenVsxMarketplaceError(
+                "Open VSX extension artifact failed SHA-256 verification"
+            )
+        verified_path = temp_path
+        temp_path = None
+        return verified_path
+    except OpenVsxMarketplaceError:
+        raise
+    except httpx.TimeoutException as exc:
+        raise OpenVsxMarketplaceError("Open VSX request timed out") from exc
+    except httpx.HTTPStatusError as exc:
+        raise OpenVsxMarketplaceError(
+            f"Open VSX request failed with status {exc.response.status_code}"
+        ) from exc
+    except httpx.RequestError as exc:
+        raise OpenVsxMarketplaceError("Open VSX is unavailable") from exc
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
+        if owned_client:
+            await active_client.aclose()

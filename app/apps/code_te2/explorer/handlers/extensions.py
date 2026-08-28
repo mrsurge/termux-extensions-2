@@ -129,12 +129,15 @@ async def handle_ext_marketplace_install(
     msg_id: str | None,
 ) -> None:
     from ... import extension_registry as extension_registry
-    from ..services.openvsx_marketplace import get_openvsx_detail
+    from ..services.openvsx_marketplace import (
+        download_openvsx_vsix,
+        get_openvsx_detail,
+    )
 
     get_extension_list = extension_registry.get_extension_list
-    install_extension_by_id = cast(
-        Callable[[str, str], JsonObject],
-        extension_registry.install_extension_by_id,
+    install_extension = cast(
+        Callable[..., JsonObject],
+        extension_registry.install_extension,
     )
 
     installed_extensions = await asyncio.to_thread(get_extension_list)
@@ -155,11 +158,18 @@ async def handle_ext_marketplace_install(
             else "This extension is not supported"
         )
 
-    result = await asyncio.to_thread(
-        install_extension_by_id,
-        params["ext_id"],
-        params["version"],
+    vsix_path = await download_openvsx_vsix(
+        ext_id=params["ext_id"],
+        version=params["version"],
     )
+    try:
+        result = await asyncio.to_thread(
+            install_extension,
+            str(vsix_path),
+            expected_ext_id=params["ext_id"],
+        )
+    finally:
+        await asyncio.to_thread(vsix_path.unlink, missing_ok=True)
     extension = _as_object(result.get("extension")) or {}
     registry_summary = _as_object(result.get("registry_summary")) or {}
     await context.emit_personal(
