@@ -17,7 +17,6 @@
 (function() {
 const CTRL_STATE_EVENT = 'android-terminalapp-ctrl-state';
 const CTRL_DESIRED_KEY = '__androidTerminalCtrlDesired';
-const CTRL_LOCKED_KEY = '__te2MobileCtrlLocked';
 
 function emitCtrlState(active) {
   try {
@@ -169,7 +168,7 @@ term.attachCustomKeyEventHandler((e) => {
   if (e.type === 'keyup') {
     term.input(input);
     clearTextInput(e.target);
-    if (window[CTRL_LOCKED_KEY] || fromImeComposition) {
+    if (fromImeComposition) {
       ensureCtrlLatched();
     } else {
       setCtrl(false);

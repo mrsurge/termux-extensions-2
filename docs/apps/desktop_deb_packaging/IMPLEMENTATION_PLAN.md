@@ -1671,6 +1671,10 @@ and are never recorded in repository documents, logs, or release manifests.
 
 ### 7.4 Final integration and publication transaction
 
+For `0.2.340`, alpha is a product-maturity label only. The GitHub object is a
+normal release, is eligible for `latest`, and must not be marked as a GitHub
+prerelease.
+
 Before version synchronization, the release-default gate must prove a fresh
 install starts with Android IME composition filtering disabled, Code TE2
 autosave disabled (draft mode enabled), and neither committed nor draft inline
