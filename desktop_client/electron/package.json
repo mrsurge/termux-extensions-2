@@ -2,7 +2,7 @@
   "name": "te2-desktop-electron",
   "productName": "TE2 Desktop",
   "private": true,
-  "version": "0.2.341",
+  "version": "0.2.342",
   "main": "dist/main.cjs",
   "scripts": {
     "build": "node build.mjs && node package.mjs",
