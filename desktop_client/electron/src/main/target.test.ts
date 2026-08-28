@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
 import { DESKTOP_SETTINGS_VERSION, type DesktopShellSettings } from "../shared/contracts";
@@ -30,6 +31,17 @@ function settings(
     ...overrides,
   };
 }
+
+test("desktop launcher bookmark selection immediately uses the persisted connection transaction", async () => {
+  const source = await readFile(
+    fileURLToPath(new URL("../../../android_shell/settings.js", import.meta.url)),
+    "utf8",
+  );
+
+  assert.match(source, /useButton\.addEventListener\("click", async \(\) =>/);
+  assert.match(source, /await connectToFramework\(\s*bookmark\.frameworkHost,/);
+  assert.doesNotMatch(source, /press Save to connect/);
+});
 
 async function withScratch(
   operation: (environment: NodeJS.ProcessEnv) => Promise<void>,

@@ -38,14 +38,50 @@ const INLINE_EDITOR_HOST_STYLE = `
 #editor-frame .monaco-editor .find-widget {
   z-index: 300;
 }
-#editor-frame[data-te2-native-renderer='cefrium'] .monaco-editor .find-widget textarea.input {
+#editor-frame[data-te2-native-renderer='cefrium'] .monaco-editor .find-widget textarea.input,
+#editor-frame[data-te2-native-renderer='cefrium'] .monaco-editor textarea.inputarea.android-ime-input {
   font-size: 16px !important;
 }
-#editor-frame .te2-mobile-special-key.te2-mobile-special-key-overlay-trigger,
-.fe-editor-container > .te2-mobile-second-window-trigger {
+.fe-editor-container > .te2-mobile-editor-overlay {
   position: absolute;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
   left: 14px;
+  right: 14px;
   bottom: 14px;
+  min-width: 0;
+  pointer-events: none;
+  z-index: 35;
+}
+.te2-mobile-editor-overlay-left,
+.te2-mobile-editor-overlay-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: auto;
+}
+.te2-mobile-editor-overlay-left {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.te2-mobile-editor-overlay-left::-webkit-scrollbar {
+  display: none;
+}
+.te2-mobile-editor-overlay-right {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+.fe-editor-container > .te2-mobile-editor-overlay-with-keyboard-recovery {
+  right: 66px;
+}
+.te2-mobile-editor-overlay .te2-mobile-special-key.te2-mobile-special-key-overlay-trigger,
+.fe-editor-container > .te2-mobile-second-window-trigger {
+  flex: 0 0 44px;
   width: 44px;
   height: 44px;
   padding: 0;
@@ -55,24 +91,24 @@ const INLINE_EDITOR_HOST_STYLE = `
   color: rgba(255, 255, 255, 0.58);
   font: 600 0.72rem/1 'JetBrains Mono Nerd', 'JetBrains Mono', monospace;
   touch-action: manipulation;
+  user-select: none;
   -webkit-tap-highlight-color: transparent;
   z-index: 35;
 }
-#editor-frame .te2-mobile-special-key.te2-mobile-special-key-save-trigger {
-  left: 66px;
-}
 .fe-editor-container > .te2-mobile-second-window-trigger {
-  left: 118px;
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
 }
-#editor-frame .te2-mobile-special-key.te2-mobile-special-key-save-trigger[hidden],
+.te2-mobile-editor-overlay .te2-mobile-special-key[hidden],
 .fe-editor-container > .te2-mobile-second-window-trigger[hidden],
-.fe-root:not(.layout-mobile) #editor-frame .te2-mobile-special-key-overlay-trigger,
+.fe-root:not(.layout-mobile) .te2-mobile-editor-overlay,
 .fe-root:not(.layout-mobile) .fe-editor-container > .te2-mobile-second-window-trigger {
   display: none;
 }
 .fe-root.layout-mobile > .te2-mobile-special-key-panel {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  display: flex;
+  flex-direction: column;
   grid-column: 1;
   grid-row: 6;
   width: 100%;
@@ -82,17 +118,26 @@ const INLINE_EDITOR_HOST_STYLE = `
   background: var(--card, #111827);
   z-index: 55;
 }
+.fe-root.layout-mobile > .te2-mobile-special-key-panel .te2-mobile-special-key-row {
+  display: grid;
+  width: 100%;
+}
+.fe-root.layout-mobile > .te2-mobile-special-key-panel .te2-mobile-special-key-primary-row {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+.fe-root.layout-mobile > .te2-mobile-special-key-panel .te2-mobile-special-key-navigation-row {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
 .fe-root > .te2-mobile-special-key-panel[hidden],
 .fe-root:not(.layout-mobile) > .te2-mobile-special-key-panel {
   display: none;
 }
-#editor-frame .te2-mobile-special-key,
 .fe-root.layout-mobile > .te2-mobile-special-key-panel .te2-mobile-special-key {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
   min-height: 44px;
-  padding: 8px 2px calc(env(safe-area-inset-bottom, 0px) + 8px);
+  padding: 8px 2px;
   border: 0;
   border-radius: 0;
   background: var(--secondary, #252a34);
@@ -102,12 +147,20 @@ const INLINE_EDITOR_HOST_STYLE = `
   user-select: none;
   -webkit-tap-highlight-color: transparent;
 }
-#editor-frame .te2-mobile-special-key.toggle,
+.fe-root.layout-mobile > .te2-mobile-special-key-panel .te2-mobile-special-key-navigation-row .te2-mobile-special-key {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+}
+.te2-mobile-editor-overlay .te2-mobile-special-key.toggle,
 .fe-root.layout-mobile > .te2-mobile-special-key-panel .te2-mobile-special-key.toggle {
   background: var(--accent, #2563eb);
   color: var(--primary-foreground, #fff);
 }
-#editor-frame .te2-mobile-special-key:focus,
+.te2-mobile-editor-overlay .te2-mobile-special-key.locked,
+.fe-root.layout-mobile > .te2-mobile-special-key-panel .te2-mobile-special-key.locked {
+  background: #6d28d9;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.46);
+}
+.te2-mobile-editor-overlay .te2-mobile-special-key:focus,
 .fe-root.layout-mobile > .te2-mobile-special-key-panel .te2-mobile-special-key:focus {
   outline: none;
 }

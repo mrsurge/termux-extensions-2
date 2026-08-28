@@ -89,7 +89,14 @@ export function createMobileSecondaryEditorController(
   shortcut.title = 'Open Second Window';
   shortcut.setAttribute('aria-label', 'Open Second Window');
   shortcut.hidden = true;
-  options.root.querySelector<HTMLElement>('.fe-editor-container')?.appendChild(shortcut);
+  const editorContainer = options.root.querySelector<HTMLElement>('.fe-editor-container');
+  const placeShortcut = (): void => {
+    const target = options.root.querySelector<HTMLElement>(
+      '.te2-mobile-editor-overlay-left',
+    ) ?? editorContainer;
+    if (target && shortcut.parentElement !== target) target.appendChild(shortcut);
+  };
+  placeShortcut();
   const pendingOpens = new Map<string, {
     resolve(path: string): void;
     reject(error: Error): void;
@@ -103,6 +110,7 @@ export function createMobileSecondaryEditorController(
   }
 
   function updateVisibility(): void {
+    placeShortcut();
     const available = mobileSecondaryTabVisible({
       supported,
       mobileLayout: isMobileLayout(),

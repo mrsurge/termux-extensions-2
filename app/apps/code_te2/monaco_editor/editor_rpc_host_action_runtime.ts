@@ -17,7 +17,10 @@ interface DisposableLike {
 
 interface EditorLike {
   addCommand?(keybinding: number, handler: () => void): void;
+  focus?(): void;
   getDomNode?(): HTMLElement | null;
+  getAction?(id: string): { run?(): unknown } | null;
+  trigger?(source: string, commandId: string, payload: unknown): void;
 }
 
 interface DiffEditorLike {

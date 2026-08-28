@@ -246,14 +246,15 @@ Current remote `main` also supplies a useful Android-owned bookmark contract.
 It stores at most 16 named host/port pairs in application-private preferences,
 validates bookmark names and framework endpoints natively, and exposes bounded
 get/upsert/delete routes to the local Settings page. Choosing a bookmark fills
-the current host/port fields; it does not retarget the client until the user
-presses Save. The active endpoint and the bookmark collection therefore remain
-separate authorities.
+the current host/port fields and immediately persists and activates that
+endpoint through the existing native Settings transaction. The active endpoint
+and the bookmark collection remain separate authorities even though bookmark
+selection is now a direct connection intent.
 
-Desktop bookmarks should mirror that behavior rather than replacing the active
-connection with a second target-selection state machine. Electron main remains
-the only desktop persistence and retarget authority. The local Settings page is
-only a projection and intent surface.
+Desktop bookmarks mirror that behavior without adding a second target-selection
+state machine. Electron main remains the only desktop persistence and retarget
+authority; both Save and bookmark selection enter the same `saveConnection`
+transaction. The local Settings page is only a projection and intent surface.
 
 ### 1.4 `main` now changes the same seams needed by the client work
 
@@ -697,16 +698,18 @@ zoomLevel
 - Upserting an existing name edits that bookmark in place. Removing a bookmark
   never changes the active connection because bookmarks are not connection
   authority.
-- Choosing a bookmark fills the editable host/port controls and requires the
-  existing Save action before any retarget occurs.
-- Save continues through the existing `saveConnection` transaction, including
+- Choosing a bookmark immediately persists and activates its endpoint through
+  the same transaction used by Save; it does not implement relay logic in the
+  renderer.
+- Save and bookmark selection continue through the existing `saveConnection`
+  transaction, including
   Run Target listener cleanup, UI IPC reconnect, instrumentation cleanup, relay
   retarget, and app-view close.
 - The Settings renderer receives only bounded get/upsert/delete results; it
   does not write configuration files directly.
 - Tests cover malformed stored entries, limit enforcement, case-insensitive
-  upsert/delete, host/IPv4/IPv6 validation, atomic writes, and repeated bookmark
-  load plus Save retargets.
+  upsert/delete, host/IPv4/IPv6 validation, atomic writes, and direct repeated
+  bookmark retargets.
 
 ### 5.2 Launcher-owned local framework action
 
@@ -1470,7 +1473,10 @@ loop, polling loop, or unverified fallback path.
   picker/dialog focus, or ordinary focus movement outside Monaco.
 - Do not add periodic IME checks or frontend viewport observers.
 - Keep the existing Cefrium `preventScroll` textarea focus policy and 16 px
-  Find/Replace focus-zoom correction intact.
+  Find/Replace focus-zoom correction intact. Apply the same Cefrium-only 16 px
+  floor to Monaco's exact `textarea.inputarea.android-ime-input`; the native
+  viewport is already locked, while the inherited 10 px editor input otherwise
+  triggers Chromium's focused-editable readability zoom.
 
 The `preventScroll` policy must cover the actual realm that owns Monaco.
 Cefrium installs it in the top-level page and in every existing or future
@@ -1714,6 +1720,30 @@ are explicitly deferred from this release.
     entrypoint and exact draft assets before making the GitHub Release public.
 12. Record artifact URLs, hashes, tag, commit, wheel compatibility evidence,
     APK signer fingerprints, and acceptance results in the release record.
+
+### 7.5 Mobile editing-key expansion
+
+The second-row mobile editing controls deferred from the 0.2.339 publication
+gate resume as a separate synchronized frontend handoff:
+
+1. Keep the key state inside each browser realm. Ctrl has off, one-shot armed,
+   and double-tap locked states; Select is a persistent Shift modifier, while
+   Alt remains one-shot. Combined keys continue through Monaco's and the
+   Terminal drawer's established synthetic-key bridges.
+2. Show the two-row dock by default. The primary row owns Ctrl, Alt, Select, and
+   arrows; the navigation row owns Tab, Home, End, Page Up, and Page Down.
+3. Replace fixed-position translucent buttons with one horizontally scrollable
+   left action rail for dock toggle, hover, context, cut/copy/paste, and the
+   existing mobile Second Window shortcut. Keep Select only in the primary key
+   row. Pin Save independently on the right and reserve Gecko's existing
+   keyboard-recovery slot so narrow mobile viewports cannot overlap the actions.
+4. Reuse Monaco hover/edit actions, the touch context menu, the backend-owned
+   save action, and the existing Terminal focus bridge. Do not add native
+   Android key handling or another clipboard implementation.
+5. Validate modifier composition, Gboard Ctrl lock, editor/Terminal routing,
+   action reuse, and default-open layout before the normal Code TE2 typecheck
+   and build. Synchronize the release-facing version, rebundle Android assets,
+   and validate both GeckoView and Cefrium APKs from that same frontend.
 
 ## 8. Phase 5 — Termux target mode
 

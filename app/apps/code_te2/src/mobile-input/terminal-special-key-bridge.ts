@@ -13,6 +13,7 @@ export interface SyntheticEditorKey {
 export interface SyntheticKeyModifiers {
   ctrl: boolean;
   alt: boolean;
+  shift?: boolean;
 }
 
 interface TerminalSpecialKeyRequestDetail {
@@ -31,7 +32,7 @@ function createKeyboardEvent(
     code: key.code,
     ctrlKey: modifiers.ctrl,
     altKey: modifiers.alt,
-    shiftKey: Boolean(key.shiftKey),
+    shiftKey: Boolean(key.shiftKey || modifiers.shift),
     bubbles: true,
     cancelable: true,
     composed: true,
