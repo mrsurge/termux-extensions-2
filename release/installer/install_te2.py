@@ -32,6 +32,7 @@ LINUX_APT_PACKAGES = ("git", "build-essential", "python3-venv")
 LINUX_LIBARCHIVE_PACKAGES = ("libarchive13t64", "libarchive13")
 LINUX_TARGET = "linux-glibc-x86_64"
 TERMUX_TARGET = "termux-android-aarch64"
+REQUIRED_SERVER_FEATURE = "ferrous-framework-native"
 
 
 def main() -> int:
@@ -292,6 +293,7 @@ def _verify_payload(payload: Path, manifest: Mapping[str, object]) -> None:
     if _sha256(server_path) != server.get("sha256"):
         raise SystemExit("TE2 server does not match target manifest")
     _validate_aarch64_elf(server_path)
+    _manifest_server_build_info(manifest)
 
 
 def _ensure_prerequisites(
@@ -613,6 +615,10 @@ def _validate_installed_tree(
     ):
         subprocess.run(command, env=env, check=True, timeout=60, stdout=subprocess.DEVNULL)
     _validate_aarch64_elf(release / "libexec" / "te2-server")
+    declared_build_info = _manifest_server_build_info(manifest)
+    actual_build_info = _inspect_server_build_info(release / "libexec" / "te2-server")
+    if actual_build_info != declared_build_info:
+        raise SystemExit("Installed TE2 server build capabilities differ from the manifest")
     _validate_aarch64_elf(python_tree / "framework_shells" / "bin" / "fws-terminal-stream-broker")
     _validate_no_links(release)
     for script_path in (python_tree / "bin").iterdir():
@@ -1014,6 +1020,42 @@ def _validate_aarch64_elf(path: Path) -> None:
         raise SystemExit(f"Expected ELF executable: {path}")
     if header[4] != 2 or header[5] != 1 or int.from_bytes(header[18:20], "little") != 183:
         raise SystemExit(f"Expected 64-bit little-endian AArch64 ELF: {path}")
+
+
+def _manifest_server_build_info(manifest: Mapping[str, object]) -> dict[str, object]:
+    server = _mapping(manifest.get("server"), "server")
+    build_info = dict(_mapping(server.get("buildInfo"), "server.buildInfo"))
+    distribution = _mapping(manifest.get("distribution"), "distribution")
+    if build_info.get("schemaVersion") != 1 or build_info.get("name") != "te2-server":
+        raise SystemExit("Manifest TE2 server build information is malformed")
+    if build_info.get("version") != distribution.get("version"):
+        raise SystemExit("Manifest TE2 server build version does not match the release")
+    target = _mapping(build_info.get("target"), "server.buildInfo.target")
+    if target.get("architecture") != "aarch64" or target.get("operatingSystem") != "android":
+        raise SystemExit("Manifest TE2 server build target is not Termux AArch64")
+    features = _string_list(build_info.get("features"), "server.buildInfo.features")
+    if REQUIRED_SERVER_FEATURE not in features:
+        raise SystemExit(
+            f"Manifest TE2 server is missing required build feature: {REQUIRED_SERVER_FEATURE}"
+        )
+    return build_info
+
+
+def _inspect_server_build_info(path: Path) -> dict[str, object]:
+    try:
+        result = subprocess.run(
+            [str(path), "--build-info"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        loaded = json.loads(result.stdout)
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"Unable to inspect installed TE2 server capabilities: {exc}") from exc
+    if not isinstance(loaded, dict):
+        raise SystemExit("Installed TE2 server returned malformed build information")
+    return loaded
 
 
 def _dpkg_version(package: str) -> str | None:

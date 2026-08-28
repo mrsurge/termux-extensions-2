@@ -22,6 +22,7 @@ FORBIDDEN_MEMBER_PARTS: Final = (
 ALLOWED_NODE_MODULES_PREFIXES: Final = (
     "app/apps/code_te2/vendor/node_socketio/node_modules/",
 )
+REQUIRED_SERVER_FEATURE: Final = "ferrous-framework-native"
 
 
 def main() -> int:
@@ -40,6 +41,10 @@ def main() -> int:
         release_tag=args.release_tag,
         platform_tag=args.platform_tag,
         minimum_glibc=args.minimum_glibc,
+    )
+    server_build_info = _validate_server_build_info(
+        server,
+        expected_version=str(wheel_manifest["packageVersion"]),
     )
     _validate_sdist(sdist)
     maximum_glibc = _maximum_glibc_reference(server)
@@ -80,6 +85,7 @@ def main() -> int:
             "size": final_sdist.stat().st_size,
         },
         "serverSha256": wheel_manifest["serverSha256"],
+        "serverBuildInfo": server_build_info,
         "sourceDateEpoch": int(args.source_date_epoch),
         "wheel": {
             "filename": final_wheel.name,
@@ -196,6 +202,32 @@ def _maximum_glibc_reference(server: Path) -> tuple[int, ...]:
     if not versions:
         raise RuntimeError("server does not expose any auditable GLIBC symbol versions")
     return max(versions)
+
+
+def _validate_server_build_info(path: Path, *, expected_version: str) -> dict[str, object]:
+    try:
+        result = subprocess.run(
+            [str(path), "--build-info"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        loaded = json.loads(result.stdout)
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Unable to inspect TE2 server build capabilities: {exc}") from exc
+    if not isinstance(loaded, dict) or loaded.get("schemaVersion") != 1:
+        raise RuntimeError("TE2 server returned malformed build information")
+    if loaded.get("name") != "te2-server" or loaded.get("version") != expected_version:
+        raise RuntimeError("TE2 server build identity does not match the wheel")
+    if loaded.get("target") != {"architecture": "x86_64", "operatingSystem": "linux"}:
+        raise RuntimeError("TE2 server build target does not match Linux x86_64")
+    features = loaded.get("features")
+    if not isinstance(features, list) or REQUIRED_SERVER_FEATURE not in features:
+        raise RuntimeError(
+            f"TE2 server is missing required build feature: {REQUIRED_SERVER_FEATURE}"
+        )
+    return loaded
 
 
 def _unique_suffix(names: list[str], suffix: str) -> str:

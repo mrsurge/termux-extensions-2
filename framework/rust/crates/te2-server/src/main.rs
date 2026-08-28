@@ -37,6 +37,7 @@ use socketioxide::SocketIo;
 use std::{
     collections::HashMap,
     env,
+    ffi::OsStr,
     net::{IpAddr, SocketAddr},
     path::PathBuf,
     sync::{Arc, RwLock as StdRwLock},
@@ -52,6 +53,12 @@ use tracing_subscriber::{EnvFilter, fmt};
 
 const APP_ID: &str = "te2";
 const APPS_EVENT_CHANNEL_CAPACITY: usize = 64;
+const BUILD_INFO_SCHEMA_VERSION: u8 = 1;
+
+#[cfg(feature = "ferrous-framework-native")]
+const BUILD_FEATURES: &[&str] = &["ferrous-framework-native"];
+#[cfg(not(feature = "ferrous-framework-native"))]
+const BUILD_FEATURES: &[&str] = &[];
 
 // Shared server state: config is immutable per process, while the reqwest
 // client owns reusable connection state for dynamic app proxying.
@@ -282,6 +289,23 @@ struct HealthResponse {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BuildInfo {
+    schema_version: u8,
+    name: &'static str,
+    version: &'static str,
+    target: BuildTarget,
+    features: &'static [&'static str],
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BuildTarget {
+    architecture: &'static str,
+    operating_system: &'static str,
+}
+
+#[derive(Serialize)]
 pub(crate) struct ApiResponse<T: Serialize> {
     pub(crate) ok: bool,
     pub(crate) data: T,
@@ -289,6 +313,9 @@ pub(crate) struct ApiResponse<T: Serialize> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    if print_build_info_if_requested()? {
+        return Ok(());
+    }
     init_tracing();
 
     // Process bootstrap owns environment-derived configuration and this server's
@@ -393,6 +420,28 @@ async fn main() -> Result<()> {
     }
     close_fws_bridge(fws_bridge_runtime).await;
     Ok(())
+}
+
+fn print_build_info_if_requested() -> Result<bool> {
+    let args = env::args_os().skip(1).collect::<Vec<_>>();
+    if args.len() != 1 || args[0] != OsStr::new("--build-info") {
+        return Ok(false);
+    }
+    println!("{}", serde_json::to_string(&build_info())?);
+    Ok(true)
+}
+
+fn build_info() -> BuildInfo {
+    BuildInfo {
+        schema_version: BUILD_INFO_SCHEMA_VERSION,
+        name: "te2-server",
+        version: env!("CARGO_PKG_VERSION"),
+        target: BuildTarget {
+            architecture: env::consts::ARCH,
+            operating_system: env::consts::OS,
+        },
+        features: BUILD_FEATURES,
+    }
 }
 
 fn build_router(state: AppState) -> Router {
@@ -764,7 +813,9 @@ async fn wait_for_shutdown_signal() {
 
 #[cfg(test)]
 mod tests {
-    use super::{remove_running_app_entry, runtime::RunningApp, upsert_running_app_entry};
+    use super::{
+        build_info, remove_running_app_entry, runtime::RunningApp, upsert_running_app_entry,
+    };
     use serde_json::Map;
     use std::collections::HashMap;
 
@@ -801,5 +852,25 @@ mod tests {
         assert_eq!(apps.get("code_te2").unwrap().shell_id, "new");
         assert!(remove_running_app_entry(&mut apps, "code_te2", Some("new")));
         assert!(!apps.contains_key("code_te2"));
+    }
+
+    #[test]
+    fn build_info_reports_release_identity_and_compiled_features() {
+        let value = serde_json::to_value(build_info()).unwrap();
+        assert_eq!(value["schemaVersion"], 1);
+        assert_eq!(value["name"], "te2-server");
+        assert_eq!(value["version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(value["target"]["architecture"], std::env::consts::ARCH);
+        assert_eq!(value["target"]["operatingSystem"], std::env::consts::OS);
+        #[cfg(feature = "ferrous-framework-native")]
+        assert!(
+            value["features"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|feature| feature == "ferrous-framework-native")
+        );
+        #[cfg(not(feature = "ferrous-framework-native"))]
+        assert_eq!(value["features"], serde_json::json!([]));
     }
 }

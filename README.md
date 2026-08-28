@@ -124,7 +124,7 @@ cloned or editable source checkout.
 
 ## Install And Run
 
-From the current `0.2.340` alpha release. The alpha label describes product
+From the current `0.2.341` alpha release. The alpha label describes product
 maturity; this is a normal GitHub Release and is available through `latest`:
 
 ```bash
@@ -137,7 +137,7 @@ curl -fsSL https://github.com/mrsurge/termux-extensions-2/releases/latest/downlo
   | sh -s -- --desktop --yes
 ```
 
-Set `TE2_RELEASE_TAG=0.2.340` and use the matching tagged download URL when an
+Set `TE2_RELEASE_TAG=0.2.341` and use the matching tagged download URL when an
 immutable pinned install is required.
 
 The desktop option uses the exact private venv selected by the installer; it
@@ -152,7 +152,7 @@ sudo apt-get update
 sudo apt-get install -y build-essential
 python -m venv ~/.local/share/te2-alpha-venv
 . ~/.local/share/te2-alpha-venv/bin/activate
-python -m pip install "te2==0.2.340"
+python -m pip install "te2==0.2.341"
 te2
 ```
 

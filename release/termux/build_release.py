@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import shutil
 import stat
+import subprocess
 import tarfile
 import tempfile
 from typing import Final
@@ -22,6 +23,7 @@ ROOT: Final = Path(__file__).resolve().parents[2]
 RELEASE_ROOT: Final = Path(__file__).resolve().parent
 TARGET_PLATFORM: Final = "android_24_arm64_v8a"
 TARGET_TRIPLE: Final = "aarch64-linux-android"
+REQUIRED_SERVER_FEATURE: Final = "ferrous-framework-native"
 MINIMUM_FREE_BYTES: Final = 2 * 1024 * 1024 * 1024
 FIRST_PARTY_REQUIRED_MEMBERS: Final = {
     "te2": (
@@ -55,6 +57,7 @@ def main() -> int:
     if not server.is_file():
         raise SystemExit(f"TE2 server does not exist: {server}")
     _validate_aarch64_elf(server)
+    server_build_info = _validate_server_build_info(server, args.version)
 
     locked = _load_lock(RELEASE_ROOT / "requirements.lock")
     expected = {
@@ -92,7 +95,13 @@ def main() -> int:
             if name == "install-te2":
                 target.chmod(0o755)
 
-        manifest = _manifest(args, wheels, server_target, dirty_first_party)
+        manifest = _manifest(
+            args,
+            wheels,
+            server_target,
+            dirty_first_party,
+            server_build_info,
+        )
         (stage / "target-manifest.json").write_text(
             json.dumps(manifest, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
@@ -295,6 +304,7 @@ def _manifest(
     wheels: list[dict[str, object]],
     server: Path,
     dirty_first_party: list[str],
+    server_build_info: dict[str, object],
 ) -> dict[str, object]:
     clean_wheels = [{key: value for key, value in wheel.items() if key != "sourcePath"} for wheel in wheels]
     return {
@@ -395,6 +405,7 @@ def _manifest(
         "schemaVersion": 1,
         "server": {
             "architecture": "aarch64",
+            "buildInfo": server_build_info,
             "filename": "libexec/te2-server",
             "libc": "bionic",
             "sha256": _sha256(server),
@@ -487,6 +498,38 @@ def _validate_aarch64_elf(path: Path) -> None:
     machine = int.from_bytes(header[18:20], "little")
     if machine != 183:
         raise RuntimeError(f"TE2 server is not AArch64 ELF (machine={machine}): {path}")
+
+
+def _validate_server_build_info(path: Path, expected_version: str) -> dict[str, object]:
+    try:
+        result = subprocess.run(
+            [str(path), "--build-info"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        loaded = json.loads(result.stdout)
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Unable to inspect TE2 server build capabilities: {exc}") from exc
+    if not isinstance(loaded, dict) or loaded.get("schemaVersion") != 1:
+        raise RuntimeError("TE2 server returned malformed build information")
+    if loaded.get("name") != "te2-server" or loaded.get("version") != expected_version:
+        raise RuntimeError("TE2 server build identity does not match the release")
+    target = loaded.get("target")
+    if not isinstance(target, dict) or target != {
+        "architecture": "aarch64",
+        "operatingSystem": "android",
+    }:
+        raise RuntimeError(f"TE2 server build target does not match Termux: {target!r}")
+    features = loaded.get("features")
+    if not isinstance(features, list) or not all(isinstance(item, str) for item in features):
+        raise RuntimeError("TE2 server build feature list is malformed")
+    if REQUIRED_SERVER_FEATURE not in features:
+        raise RuntimeError(
+            f"TE2 server is missing required build feature: {REQUIRED_SERVER_FEATURE}"
+        )
+    return loaded
 
 
 def _check_free_space(parent: Path) -> None:

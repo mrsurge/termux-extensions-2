@@ -1749,6 +1749,25 @@ gate resume as a separate synchronized frontend handoff:
    and build. Synchronize the release-facing version, rebundle Android assets,
    and validate both GeckoView and Cefrium APKs from that same frontend.
 
+### 7.6 Release server capability contract
+
+The Rust framework hard cutover makes the Ferrous native host a required server
+capability, not an optional release variation. `te2-server` therefore enables
+`ferrous-framework-native` by default and exposes one non-starting
+`--build-info` JSON report containing its package identity, target, and compiled
+feature list.
+
+Both Linux-wheel and Termux release construction execute that exact candidate
+and reject malformed identity, wrong target/version, or a missing
+`ferrous-framework-native` feature. The Termux target manifest records the
+validated report; after apt prerequisites are present, installation executes the
+staged server and requires byte-for-byte JSON equality with the declaration
+before atomic activation. ELF architecture and checksums remain separate gates.
+
+Physical Termux acceptance must launch a real app through the exact archived
+server. Launcher health and catalog discovery alone are insufficient because a
+feature-disabled server can perform both while failing every worker launch.
+
 ## 8. Phase 5 — Termux target mode
 
 1. Generate the complete direct/transitive distribution graph from the locked
@@ -1760,8 +1779,9 @@ gate resume as a separate synchronized frontend handoff:
    release-local pure wheels, release-local Android-native wheels, executables,
    shared libraries, import names, version constraints, and build-tool scope.
 4. Build and audit the remaining Android wheels for the declared target
-   interpreter plus the tagged `aarch64-linux-android` Rust server. Installed
-   device artifacts may guide the recipes but are not release inputs.
+   interpreter plus the tagged `aarch64-linux-android` Rust server. The exact
+   server must pass the Section 7.6 capability contract before archive staging.
+   Installed device artifacts may guide the recipes but are not release inputs.
 5. Produce `te2-<version>-termux-aarch64.tar.gz` with the versioned TE2 Python
    tree, complete local wheelhouse, Bionic server, target manifest, and no
    Electron assets, venv, interpreter, npm cache, or compiler intermediates.

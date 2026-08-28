@@ -34,6 +34,10 @@ public_builder = _load(
     "te2_public_release_builder",
     ROOT / "release" / "build_public_release.py",
 )
+linux_validator = _load(
+    "te2_linux_release_validator",
+    ROOT / "release" / "linux-wheel" / "validate-artifacts.py",
+)
 
 
 def _digest(payload: bytes) -> str:
@@ -115,6 +119,27 @@ def _write_public_download_fixture(root: Path, installer_payload: bytes) -> None
         if path.is_file()
     ]
     (root / "SHA256SUMS").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _server_build_info(*, feature: bool = True, version: str = "0.2.338") -> dict[str, object]:
+    return {
+        "schemaVersion": 1,
+        "name": "te2-server",
+        "version": version,
+        "target": {"architecture": "aarch64", "operatingSystem": "android"},
+        "features": ["ferrous-framework-native"] if feature else [],
+    }
+
+
+def _build_info_executable(path: Path, build_info: dict[str, object]) -> Path:
+    path.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json\n"
+        f"print(json.dumps({build_info!r}, sort_keys=True))\n",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+    return path
 
 
 class TermuxReleaseBuilderTests(unittest.TestCase):
@@ -200,14 +225,62 @@ class TermuxReleaseBuilderTests(unittest.TestCase):
                 version="0.2.338",
             )
 
-            manifest = builder._manifest(args, [], server, [])
+            build_info = _server_build_info()
+            manifest = builder._manifest(args, [], server, [], build_info)
             packages = manifest["aptPackages"]
 
             self.assertIsInstance(packages, list)
             self.assertEqual(packages[0]["name"], "tur-repo")
             self.assertEqual(packages[0]["minimumVersion"], "1.0.1")
+            self.assertEqual(manifest["server"]["buildInfo"], build_info)
             git = next(package for package in packages if package["name"] == "git")
             self.assertEqual(git["executables"], ["git"])
+
+    def test_server_build_info_requires_ferrous_native_feature(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            valid = _build_info_executable(root / "valid", _server_build_info())
+            self.assertEqual(
+                builder._validate_server_build_info(valid, "0.2.338"),
+                _server_build_info(),
+            )
+            invalid = _build_info_executable(
+                root / "invalid",
+                _server_build_info(feature=False),
+            )
+            with self.assertRaisesRegex(RuntimeError, "missing required build feature"):
+                builder._validate_server_build_info(invalid, "0.2.338")
+
+    def test_installer_rejects_manifest_without_ferrous_native_feature(self) -> None:
+        manifest = {
+            "distribution": {"version": "0.2.338"},
+            "server": {"buildInfo": _server_build_info(feature=False)},
+        }
+        with self.assertRaisesRegex(SystemExit, "missing required build feature"):
+            installer._manifest_server_build_info(manifest)
+
+    def test_linux_validator_requires_the_same_ferrous_native_feature(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            valid_info = {
+                **_server_build_info(),
+                "target": {"architecture": "x86_64", "operatingSystem": "linux"},
+            }
+            valid = _build_info_executable(root / "valid", valid_info)
+            self.assertEqual(
+                linux_validator._validate_server_build_info(
+                    valid,
+                    expected_version="0.2.338",
+                ),
+                valid_info,
+            )
+            invalid_info = {**valid_info, "features": []}
+            invalid = _build_info_executable(root / "invalid", invalid_info)
+            with self.assertRaisesRegex(RuntimeError, "missing required build feature"):
+                linux_validator._validate_server_build_info(
+                    invalid,
+                    expected_version="0.2.338",
+                )
 
 
 class LinuxInstallerTests(unittest.TestCase):
