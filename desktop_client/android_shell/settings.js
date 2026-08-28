@@ -50,6 +50,29 @@ function endpointLabel(bookmark) {
   }
 }
 
+async function connectToFramework(frameworkHost, frameworkPort, successMessage = null) {
+  setStatus(settingsStatus, "loading", "Switching framework target");
+  const settings = await desktopShellHost.saveSettings({
+    frameworkHost,
+    frameworkPort: Number(frameworkPort),
+  });
+
+  hostInput.value = settings.frameworkHost;
+  portInput.value = String(settings.frameworkPort);
+  desktopShellHost.toast(
+    successMessage
+      || (settings.connectionChanged
+        ? "Desktop connection updated"
+        : "Desktop settings saved"),
+  );
+
+  await Promise.all([
+    testFramework(),
+    refreshFrameworkShells(settings.connectionChanged),
+  ]);
+  return settings;
+}
+
 function renderFrameworkBookmarks() {
   frameworkBookmarksList.replaceChildren();
   frameworkBookmarksEmpty.hidden = frameworkBookmarks.length > 0;
@@ -65,10 +88,24 @@ function renderFrameworkBookmarks() {
     const endpoint = document.createElement("small");
     endpoint.textContent = endpointLabel(bookmark);
     useButton.append(name, endpoint);
-    useButton.addEventListener("click", () => {
-      hostInput.value = bookmark.frameworkHost;
-      portInput.value = String(bookmark.frameworkPort);
-      desktopShellHost.toast(`Loaded ${bookmark.name}; press Save to connect`);
+    useButton.addEventListener("click", async () => {
+      useButton.disabled = true;
+      try {
+        await connectToFramework(
+          bookmark.frameworkHost,
+          bookmark.frameworkPort,
+          `Connected to ${bookmark.name}`,
+        );
+      } catch (error) {
+        setStatus(
+          settingsStatus,
+          "error",
+          error?.message || "Framework switch failed",
+        );
+        desktopShellHost.toast(error?.message || "Framework switch failed");
+      } finally {
+        useButton.disabled = false;
+      }
     });
 
     const removeButton = document.createElement("button");
@@ -357,23 +394,7 @@ saveButton?.addEventListener("click", async () => {
   saveButton.disabled = true;
 
   try {
-    const settings = await desktopShellHost.saveSettings({
-      frameworkHost: hostInput.value,
-      frameworkPort: Number(portInput.value),
-    });
-
-    hostInput.value = settings.frameworkHost;
-    portInput.value = String(settings.frameworkPort);
-    desktopShellHost.toast(
-      settings.connectionChanged
-        ? "Desktop connection updated"
-        : "Desktop settings saved",
-    );
-
-    await Promise.all([
-      testFramework(),
-      refreshFrameworkShells(settings.connectionChanged),
-    ]);
+    await connectToFramework(hostInput.value, portInput.value);
   } catch (error) {
     setStatus(
       settingsStatus,

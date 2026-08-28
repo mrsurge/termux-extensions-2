@@ -66,6 +66,19 @@ function endpointLabel(bookmark) {
   return `http://${authority}:${Number(bookmark?.frameworkPort) || 0}`;
 }
 
+async function connectToFramework(frameworkHost, frameworkPort, successMessage) {
+  setStatus(settingsStatus, "loading", "Switching framework target");
+  const settings = await androidShellHost.saveSettings({
+    frameworkHost,
+    frameworkPort,
+  });
+  hostInput.value = settings.frameworkHost;
+  portInput.value = String(settings.frameworkPort);
+  androidShellHost.toast(successMessage);
+  await Promise.all([testFramework(), refreshFrameworkShells()]);
+  return settings;
+}
+
 function renderFrameworkBookmarks() {
   frameworkBookmarksList.replaceChildren();
   frameworkBookmarksEmpty.hidden = frameworkBookmarks.length > 0;
@@ -81,10 +94,22 @@ function renderFrameworkBookmarks() {
     const endpoint = document.createElement("small");
     endpoint.textContent = endpointLabel(bookmark);
     useButton.append(name, endpoint);
-    useButton.addEventListener("click", () => {
+    useButton.addEventListener("click", async () => {
       hostInput.value = bookmark.frameworkHost;
       portInput.value = String(bookmark.frameworkPort);
-      androidShellHost.toast(`Loaded ${bookmark.name}; press Save to connect`);
+      useButton.disabled = true;
+      try {
+        await connectToFramework(
+          bookmark.frameworkHost,
+          Number(bookmark.frameworkPort),
+          `Switched to ${bookmark.name}`,
+        );
+      } catch (error) {
+        setStatus(settingsStatus, "error", error?.message || "Framework switch failed");
+        androidShellHost.toast(error?.message || "Framework switch failed");
+      } finally {
+        useButton.disabled = false;
+      }
     });
 
     const removeButton = document.createElement("button");
@@ -248,14 +273,11 @@ persistToggle(
 saveButton?.addEventListener("click", async () => {
   saveButton.disabled = true;
   try {
-    const settings = await androidShellHost.saveSettings({
-      frameworkHost: hostInput.value,
-      frameworkPort: Number(portInput.value),
-    });
-    hostInput.value = settings.frameworkHost;
-    portInput.value = String(settings.frameworkPort);
-    androidShellHost.toast("Framework address saved");
-    await Promise.all([testFramework(), refreshFrameworkShells()]);
+    await connectToFramework(
+      hostInput.value,
+      Number(portInput.value),
+      "Framework address saved",
+    );
   } catch (error) {
     setStatus(settingsStatus, "error", error?.message || "Save failed");
     androidShellHost.toast(error?.message || "Save failed");

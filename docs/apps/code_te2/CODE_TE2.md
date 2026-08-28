@@ -1684,13 +1684,27 @@ There are two distinct layers:
      replacement, and recomposition newlines remain raw Android range edits.
    - The legacy rapid raw-key paste classifier cannot suppress `\n`, so a real
      Enter remains a command boundary even immediately after a fast text burst.
-   - The mobile Ctrl latch reuses the terminal helper's Gboard keycode-229
+   - The mobile Ctrl state reuses the terminal helper's Gboard keycode-229
      conversion. Monaco's adapter replays the resulting control byte as one
      synthetic Ctrl chord while bypassing helper re-entry, allowing Monaco's
-     normal keybinding service to resolve commands such as Ctrl+S.
-   - Opening the mobile special-key row also reveals a translucent Save control
-     beside the Ctrl trigger. It preserves editor focus and publishes the same
-     `editor.host.save` action used by the Ctrl+S command.
+     normal keybinding service to resolve commands such as Ctrl+S. One tap arms
+     Ctrl for the next command, a double tap locks it across dock and Gboard
+     actions, and another tap releases it; the locked state is never represented
+     by an unpaired synthetic keydown.
+   - The mobile special-key dock is visible by default and has two rows. The
+     first provides Ctrl, Alt, persistent Select/Shift, and arrow navigation;
+     the second provides Tab, Home, End, Page Up, and Page Down. Ctrl, Alt, and
+     Select combine through the same synthetic-key path, so Monaco's normal
+     Ctrl+Shift navigation and selection rules remain authoritative. When the
+     Terminal drawer owns focus, navigation keys use its established request
+     bridge instead of inventing another input path.
+   - A horizontally scrollable translucent action rail preserves editor focus
+     and exposes hover, touch context, cut/copy/paste, and the
+     client-owned Second Window shortcut. Save is pinned at the opposite edge
+     and reserves Gecko's existing keyboard-recovery slot when that control is
+     present. Save publishes the same `editor.host.save` action used by Ctrl+S.
+     The rail's Ctrl control collapses or reveals the dock and auxiliary actions;
+     it is not a second modifier authority.
 
 ### Key files
 
@@ -1701,7 +1715,8 @@ There are two distinct layers:
 | `android/.../UiIpcClient.kt` | Strict msgpack-v1 `/ui_ipc` native focus/blur consumer. |
 | `android/.../MainActivity.kt` | Wires filter, IPC client, restartInput callback. |
 | `monaco_editor/editor_mobile_ctrl_helper_utils.ts` | Adapts vendored Gboard Ctrl control bytes into Monaco keybinding chords. |
-| `monaco_editor/editor_mobile_special_keys_utils.ts` | Owns the mobile special-key row and fallback Save overlay. |
+| `monaco_editor/editor_mobile_special_keys_utils.ts` | Owns two-row mobile keys, modifier state, and the shared translucent action rail. |
+| `src/mobile-input/terminal-special-key-bridge.ts` | Carries combined Ctrl/Alt/Shift navigation to the active editor or Terminal target. |
 | `app/static/vendor/monaco-editor-core/esm/` | Committed patched Monaco artifacts; their editable VS Code source is external. |
 
 ### Publication path
@@ -2112,6 +2127,7 @@ The active Linux desktop client is the Electron shell under `desktop_client/elec
 - The app view uses the `persist:te2-framework` partition.
 - Electron keeps Chromium's automatic native Ozone backend selection; Wayland sessions are not forced through X11.
 - Development and packaged launch paths intentionally pass `--no-sandbox` because the client runs from a user-owned tree and Ubuntu AppArmor blocks the unprivileged namespace sandbox.
+- Selecting a saved framework bookmark immediately enters the same Electron-main `saveConnection` transaction as the editable Save action. The launcher projects intent only; Electron main persists the endpoint, reconnects UI IPC, clears stale Run Target state, and retargets the stable loopback relay.
 
 ### Relay and assets
 
@@ -2603,7 +2619,7 @@ Cefrium still retains validated Run Profile `devRuntime` registrations by exact 
 
 Cefrium's wrapper also omits Chromium's selection ActionMode host callback. A narrow same-package `WebContents` shim installs an application callback that delegates to Chromium's `ActionModeCallbackHelper` and enables Chromium's SurfaceControl magnifier. Native Cut/Copy/Paste/Select All and related selection actions remain Chromium-owned and do not use JavaScript editing commands.
 
-After each completed document load, an idempotent page policy wraps Monaco's exact `textarea.inputarea.android-ime-input` focus path and forces `preventScroll: true`. It patches the top realm plus every existing and future same-origin iframe realm, which gives the retained mobile secondary editor the same correction without crossing an origin boundary. Code TE2 additionally marks the editor frame from the explicit native renderer query and applies a Cefrium-only 16 px font size to the Monaco Find/Replace textarea, preventing Chromium's small-input focus zoom without changing Gecko, desktop, or ordinary editor input styling. Do not replace either correction with a broad page-wide input workaround.
+After each completed document load, an idempotent page policy wraps Monaco's exact `textarea.inputarea.android-ime-input` focus path and forces `preventScroll: true`. It patches the top realm plus every existing and future same-origin iframe realm, which gives the retained mobile secondary editor the same correction without crossing an origin boundary. Code TE2 additionally marks the editor frame from the explicit native renderer query and applies a Cefrium-only 16 px font size to both the Monaco Find/Replace textarea and the exact editor IME textarea. The native viewport is already locked against page zoom; this renderer-scoped floor prevents Chromium's focused-editable readability zoom when Monaco's hidden input would otherwise inherit its 10 px size, without changing Gecko, desktop, or ordinary editor input styling. Do not replace either correction with a broad page-wide input workaround.
 
 On Android 11/API 30 and newer, Cefrium observes root `WindowInsets.Type.ime()`
 animation state. `onPrepare` records the pre-layout visibility and `onStart`

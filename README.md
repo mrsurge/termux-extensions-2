@@ -124,18 +124,21 @@ cloned or editable source checkout.
 
 ## Install And Run
 
-From the `0.2.339` public prerelease:
+From the current `0.2.340` alpha release. The alpha label describes product
+maturity; this is a normal GitHub Release and is available through `latest`:
 
 ```bash
-# Framework and CLI only. The explicit prerelease tag is important: GitHub's
-# `latest` endpoint intentionally excludes prereleases.
-curl -fsSL https://github.com/mrsurge/termux-extensions-2/releases/download/0.2.339/install-te2 \
-  | TE2_RELEASE_TAG=0.2.339 sh -s -- --yes
+# Framework and CLI only.
+curl -fsSL https://github.com/mrsurge/termux-extensions-2/releases/latest/download/install-te2 \
+  | sh -s -- --yes
 
 # Linux only: also build and register the Electron desktop client.
-curl -fsSL https://github.com/mrsurge/termux-extensions-2/releases/download/0.2.339/install-te2 \
-  | TE2_RELEASE_TAG=0.2.339 sh -s -- --desktop --yes
+curl -fsSL https://github.com/mrsurge/termux-extensions-2/releases/latest/download/install-te2 \
+  | sh -s -- --desktop --yes
 ```
+
+Set `TE2_RELEASE_TAG=0.2.340` and use the matching tagged download URL when an
+immutable pinned install is required.
 
 The desktop option uses the exact private venv selected by the installer; it
 does not depend on an unrelated system Python or Node installation. Electron's
@@ -149,7 +152,7 @@ sudo apt-get update
 sudo apt-get install -y build-essential
 python -m venv ~/.local/share/te2-alpha-venv
 . ~/.local/share/te2-alpha-venv/bin/activate
-python -m pip install "te2==0.2.339"
+python -m pip install "te2==0.2.340"
 te2
 ```
 

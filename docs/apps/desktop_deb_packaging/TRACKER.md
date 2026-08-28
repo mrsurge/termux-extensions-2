@@ -18,7 +18,7 @@ Last updated: 2026-08-27
 | Phase 4A: source/Git desktop bootstrap | Implemented and validated from a clean wheel | Python entrypoints build one fingerprinted Electron runtime and receipt-owned XDG integration; the unified Linux installer deliberately reuses this path |
 | Phase 4B: release provenance and Linux platform wheel | Implemented; audited build and clean SSH acceptance passed, publication mirror remains | Supported wheels embed the verified Rust server; source provenance alone may use Cargo |
 | Phase 4C: unified installer and Linux target | Core installer, private venv, optional desktop bootstrap, and non-graphical Debian acceptance pass; acquisition/upgrade/graphical matrix remains | Managed venv is atomic; `--desktop` delegates to that venv's existing Electron bootstrap and config contract |
-| Phase 4D: final integration and publication | Published and Linux-accepted: `0.2.339` is tagged from clean integrated `main`, its Linux wheel/sdist and first-party dependencies are on PyPI, and its verified GitHub prerelease contains the installer and native artifacts; final public-download physical Termux reinstall remains | Release assets are immutable, checksum-manifested, and source-provenanced; future releases repeat the same transaction |
+| Phase 4D: final integration and publication | `0.2.339` is published and Linux-accepted; the synchronized `0.2.340` repeat is in progress as a normal/latest GitHub Release whose alpha label is naming only | Release assets are immutable, checksum-manifested, and source-provenanced; `0.2.340` must not be marked as a GitHub prerelease |
 | Phase 5: Termux target mode | Published: the clean 96-wheel AArch64 archive, target-manifest apt transaction, public GitHub payload, and physical candidate acceptance passed; final public-download device reinstall awaits an attached acceptance device | Apt-first shared foundations plus a release-local wheel tree; dirty first-party inputs can produce only explicitly marked validation candidates |
 
 ## Confirmed source findings
@@ -273,10 +273,11 @@ Last updated: 2026-08-27
 - [x] Recover safely from malformed stored bookmark data and write atomically.
 - [x] Add bounded Electron native get/upsert/delete request contracts.
 - [x] Add Bookmark Current, load, and remove controls to desktop Settings.
-- [x] Make bookmark selection fill fields only; require Save to connect.
-- [x] Keep Save routed through the existing `saveConnection` transaction.
+- [x] Make bookmark selection immediately persist and activate the endpoint.
+- [x] Keep both bookmark selection and Save routed through the existing
+  `saveConnection` transaction.
 - [x] Validate relay, UI IPC, Run Target, app-view, and asset behavior after
-  repeated bookmark load plus local/remote Save operations.
+  repeated direct bookmark selection plus editable local/remote Save operations.
 
 ### Phase 2A automated evidence
 
@@ -551,6 +552,9 @@ Automated evidence recorded on 2026-08-22:
 - [x] Extend the existing exact-textarea `preventScroll` page policy into
   existing and future same-origin iframe realms without touching cross-origin
   frames.
+- [x] Extend the Cefrium-only 16 px focused-input correction from Find/Replace
+  to Monaco's exact editor IME textarea so inherited 10 px styling cannot
+  trigger Chromium focused-editable zoom.
 - [x] Validate repeated dismiss-scroll-refocus typing on a live Cefrium device.
 - [ ] Validate navigation, background, dialogs, drawer, rotation, and
   editor-switch false-positive cases.
@@ -1046,6 +1050,21 @@ Corrective implementation evidence recorded on 2026-08-23:
   `0.2.339`. A final install through the public download URL remains pending
   until the wiped physical acceptance device reconnects.
 
+## Phase 4E checklist — mobile editing-key expansion
+
+- [x] Replace the boolean Ctrl latch with one-shot armed and double-tap locked
+  states that cover both dock actions and Gboard control-byte replay.
+- [x] Add persistent Select/Shift composition and a default-visible second row
+  for Tab, Home, End, Page Up, and Page Down.
+- [x] Move context into a horizontally scrollable translucent action rail with
+  hover, cut/copy/paste, and the existing Second Window shortcut; keep Select
+  only in the solid key row, pin Save at the right edge, and reserve Gecko's
+  existing keyboard-recovery slot.
+- [x] Reuse the existing Monaco action, touch context, save, and Terminal focus
+  paths without introducing native Android or clipboard authority.
+- [x] Pass focused mobile-input tests, Code TE2 typecheck/build, synchronized
+  versioning, Android asset rebundling, and GeckoView/Cefrium build validation.
+
 ## Deferred work
 
 - [ ] Linux arm64 Electron package.
@@ -1094,3 +1113,5 @@ Corrective implementation evidence recorded on 2026-08-23:
 | 2026-08-26 | Phase 4C unified Linux installer and desktop materialization | Termux-first target detection, narrow apt prerequisites including Git, exact public-PyPI private venv, staged-venv relocation repair, atomic activation, managed wrappers, existing `te2 desktop install` delegation, XDG integration, and local-framework config seeding on Debian Trixie | Core and non-graphical acceptance passed; online/offline acquisition, upgrade/failure matrix, framework relaunch, and graphical Electron acceptance remain |
 | 2026-08-27 | Public installer and final-default implementation | Standalone stdin bootstrap, release manifest/checksum assembler, checksum-tamper tests, exact-version Linux handoff, Android foreground permission refresh, IME default alignment, and fresh Code TE2 preference checks | Source and focused validation passed; synchronized version/build, physical Termux download acceptance, and final publication remain |
 | 2026-08-27 | 0.2.339 release publication | Clean-tag Linux and Android builds, Bionic archive, PyPI first-party wheels, public-index and public-curl Debian acceptance, GitHub asset-set/digest verification, and 16 KiB Android audits | Passed; `0.2.339` is a published prerelease with a public installer and immutable 13-asset manifest; final public-download physical Termux reinstall awaits an attached device |
+| 2026-08-27 | Mobile editing-key expansion | 253 Code TE2 tests, typecheck/build, two-row modifier/Terminal/Gboard coverage, synchronized 0.2.340 frontend seed, and GeckoView/Cefrium unit plus debug APK builds | Passed; the follow-up Ctrl/ghost-action/Gecko-overlap correction is frontend-built but not yet rebundled into APK assets; physical touch-layout acceptance remains a user validation gate |
+| 2026-08-27 | Bookmark activation and Cefrium focus-zoom correction | Desktop bookmark selection now uses the existing persisted retarget transaction; the Cefrium-only 16 px rule covers Monaco's exact editor IME textarea as well as Find/Replace | 254 Code TE2 tests, 91 Electron tests, both typechecks/builds, compiled-output checks, and a live locked-viewport 10 px -> 16 px -> 10 px transient style proof passed; versions and APK assets remain unchanged |

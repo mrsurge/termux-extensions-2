@@ -1,11 +1,25 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import vm from "node:vm";
 
 import { build } from "esbuild";
 
 const appRoot = path.resolve(import.meta.dirname, "..");
 let moduleSequence = 0;
+
+test("keeps Cefrium focused Monaco textareas above Chromium's small-input zoom threshold", () => {
+  const source = fs.readFileSync(
+    path.join(appRoot, "monaco_editor/inline_host.ts"),
+    "utf8",
+  );
+
+  assert.match(
+    source,
+    /#editor-frame\[data-te2-native-renderer='cefrium'\] \.monaco-editor textarea\.inputarea\.android-ime-input \{\s*font-size: 16px !important;/,
+  );
+});
 
 async function importTypeScript(relativePath) {
   const result = await build({
@@ -95,6 +109,11 @@ class FakeElement extends EventTarget {
 
   append(...children) {
     for (const child of children) {
+      if (child.parentElement) {
+        child.parentElement.children = child.parentElement.children.filter(
+          (existing) => existing !== child,
+        );
+      }
       child.parentElement = this;
       this.children.push(child);
     }
@@ -239,6 +258,8 @@ function createEditorFixture(userAgent) {
   terminalContainer.id = "terminal-container";
   const terminalInput = win.document.createElement("textarea");
   terminalContainer.append(terminalInput);
+  const editorContainer = win.document.createElement("div");
+  editorContainer.className = "fe-editor-container";
   const host = win.document.createElement("div");
   host.id = "editor-frame";
   const editorRoot = win.document.createElement("div");
@@ -252,12 +273,16 @@ function createEditorFixture(userAgent) {
   monacoHost.append(editorDom);
   editorRoot.append(monacoHost);
   host.append(editorRoot);
-  appRoot.append(host, terminalContainer);
+  editorContainer.append(host);
+  appRoot.append(editorContainer, terminalContainer);
   win.document.body.append(appRoot);
+
+  const actionRuns = [];
 
   return {
     win,
     appRoot,
+    editorContainer,
     terminalContainer,
     terminalInput,
     host,
@@ -268,7 +293,13 @@ function createEditorFixture(userAgent) {
     editor: {
       getDomNode: () => editorDom,
       focus: () => input.focus(),
+      getAction: (id) => ({
+        run: () => {
+          actionRuns.push(id);
+        },
+      }),
     },
+    actionRuns,
   };
 }
 
@@ -277,6 +308,12 @@ function pointerDown(win, target) {
     bubbles: true,
     cancelable: true,
   }));
+}
+
+function findButton(root, title) {
+  return [...root.querySelectorAll(".te2-mobile-special-key")].find(
+    (button) => button.title === title,
+  ) ?? null;
 }
 
 test("gates the special-key UI from the mobile user agent", async () => {
@@ -380,9 +417,9 @@ test("replays vendored Gboard control bytes into Monaco without recursion", asyn
       ctrlKey: event.ctrlKey,
     });
   });
-  let ctrlReleased = false;
+  const ctrlStates = [];
   fixture.win.__androidTerminalSetCtrl = (active) => {
-    ctrlReleased = active === false;
+    ctrlStates.push(active);
   };
 
   fixture.win.term.input("\u0013");
@@ -392,7 +429,7 @@ test("replays vendored Gboard control bytes into Monaco without recursion", asyn
     { type: "keydown", key: "s", code: "KeyS", ctrlKey: true },
     { type: "keyup", key: "s", code: "KeyS", ctrlKey: true },
   ]);
-  assert.equal(ctrlReleased, true);
+  assert.deepEqual(ctrlStates, [false]);
   assert.equal(fixture.win.document.activeElement, fixture.input);
 
   clearVendoredCtrlHelper(fixture.editor);
@@ -400,7 +437,56 @@ test("replays vendored Gboard control bytes into Monaco without recursion", asyn
   delete globalThis.document;
 });
 
-test("keeps modifiers sticky until one dock key consumes them", async () => {
+test("converts Gboard find, undo, and copy keycode-229 input through the vendored helper", () => {
+  const fixture = createEditorFixture(
+    "Mozilla/5.0 (Linux; Android 16) Gecko/144 Firefox/144 Mobile",
+  );
+  const source = fs.readFileSync(
+    path.join(
+      appRoot,
+      "vendor/android-terminalapp-assets-js/ctrl_key_handler.js",
+    ),
+    "utf8",
+  );
+  const controlBytes = [];
+  let keyHandler = null;
+  fixture.win.term = {
+    textarea: fixture.input,
+    attachCustomKeyEventHandler(handler) {
+      keyHandler = handler;
+    },
+    input(value) {
+      controlBytes.push(value);
+      fixture.win.__androidTerminalSetCtrl(false);
+    },
+  };
+  vm.runInNewContext(source, {
+    window: fixture.win,
+    CustomEvent: FakeCustomEvent,
+    HTMLTextAreaElement: FakeElement,
+  });
+  assert.equal(typeof keyHandler, "function");
+
+  for (const key of ["f", "z", "c"]) {
+    fixture.input.value = key;
+    fixture.input.selectionStart = 1;
+    fixture.win.__androidTerminalSetCtrl(true);
+    assert.equal(keyHandler({
+      type: "keyup",
+      keyCode: 229,
+      target: fixture.input,
+    }), false);
+    assert.equal(fixture.win.ctrl, false);
+  }
+
+  assert.deepEqual(
+    controlBytes.map((value) => value.charCodeAt(0)),
+    [6, 26, 3],
+  );
+  fixture.win.__androidTerminalCtrlCleanup?.();
+});
+
+test("provides two-row navigation, persistent selection, and Ctrl lock", async () => {
   const { bindMobileEditorSpecialKeys } = await importTypeScript(
     "monaco_editor/editor_mobile_special_keys_utils.ts",
   );
@@ -413,6 +499,9 @@ test("keeps modifiers sticky until one dock key consumes them", async () => {
   const fixture = createEditorFixture(
     "Mozilla/5.0 (Linux; Android 16) Gecko/144 Firefox/144 Mobile",
   );
+  const keyboardRecovery = fixture.win.document.createElement("button");
+  keyboardRecovery.className = "te2-android-keyboard-recovery";
+  fixture.host.append(keyboardRecovery);
   const keyEvents = [];
   const terminalKeyEvents = [];
   let contextRequests = 0;
@@ -421,6 +510,7 @@ test("keeps modifiers sticky until one dock key consumes them", async () => {
       key: event.key,
       ctrlKey: event.ctrlKey,
       altKey: event.altKey,
+      shiftKey: event.shiftKey,
     });
     event.preventDefault();
   });
@@ -436,6 +526,7 @@ test("keeps modifiers sticky until one dock key consumes them", async () => {
       key: event.key,
       ctrlKey: event.ctrlKey,
       altKey: event.altKey,
+      shiftKey: event.shiftKey,
     });
     event.preventDefault();
   });
@@ -454,20 +545,47 @@ test("keeps modifiers sticky until one dock key consumes them", async () => {
     },
   );
   assert.ok(binding);
-  const trigger = fixture.host.querySelector(
+  const trigger = fixture.editorContainer.querySelector(
     ".te2-mobile-special-key-trigger",
   );
-  const saveTrigger = fixture.host.querySelector(
+  const saveTrigger = fixture.editorContainer.querySelector(
     ".te2-mobile-special-key-save-trigger",
   );
+  const overlay = fixture.editorContainer.querySelector(
+    ".te2-mobile-editor-overlay",
+  );
   const panel = fixture.appRoot.querySelector(".te2-mobile-special-key-panel");
-  const buttons = [...panel.querySelectorAll(".te2-mobile-special-key")];
-  const [ctrl, alt, context, left] = buttons;
+  const rows = panel.querySelectorAll(".te2-mobile-special-key-row");
+  const ctrl = findButton(panel, "Control");
+  const alt = findButton(panel, "Alt");
+  const select = findButton(panel, "Toggle selection (Shift)");
+  const left = findButton(panel, "Left");
+  const tab = findButton(panel, "Tab");
+  const home = findButton(panel, "Home");
+  const end = findButton(panel, "End");
+  const pageUp = findButton(panel, "Page up");
+  const pageDown = findButton(panel, "Page down");
+  const context = findButton(overlay, "Context menu");
+  const hover = findButton(overlay, "Show hover");
+  const cut = findButton(overlay, "Cut selection");
+  const copy = findButton(overlay, "Copy selection");
+  const paste = findButton(overlay, "Paste");
 
-  pointerDown(fixture.win, trigger);
   assert.equal(panel.hidden, false);
   assert.equal(saveTrigger.hidden, false);
+  assert.equal(trigger.getAttribute("aria-expanded"), "true");
   assert.equal(panel.parentElement, fixture.appRoot);
+  assert.equal(overlay.parentElement, fixture.editorContainer);
+  assert.equal(
+    overlay.classList.contains(
+      "te2-mobile-editor-overlay-with-keyboard-recovery",
+    ),
+    true,
+  );
+  assert.equal(findButton(overlay, "Toggle selection (Shift)"), null);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].children.length, 7);
+  assert.equal(rows[1].children.length, 5);
   assert.equal(
     fixture.appRoot.classList.contains("te2-mobile-special-keys-open"),
     true,
@@ -480,58 +598,87 @@ test("keeps modifiers sticky until one dock key consumes them", async () => {
 
   pointerDown(fixture.win, ctrl);
   pointerDown(fixture.win, alt);
+  pointerDown(fixture.win, select);
   assert.equal(ctrl.classList.contains("toggle"), true);
   assert.equal(alt.classList.contains("toggle"), true);
+  assert.equal(select.classList.contains("toggle"), true);
 
   pointerDown(fixture.win, left);
   assert.deepEqual(keyEvents.at(-1), {
     key: "ArrowLeft",
     ctrlKey: true,
     altKey: true,
+    shiftKey: true,
   });
   assert.equal(ctrl.classList.contains("toggle"), false);
   assert.equal(alt.classList.contains("toggle"), false);
+  assert.equal(select.classList.contains("toggle"), true);
   assert.equal(fixture.win.document.activeElement, fixture.input);
+
+  pointerDown(fixture.win, ctrl);
+  pointerDown(fixture.win, ctrl);
+  assert.equal(ctrl.classList.contains("locked"), true);
+  fixture.win.ctrl = false;
+  fixture.win.dispatchEvent(new FakeCustomEvent(
+    "android-terminalapp-ctrl-state",
+    { detail: { active: false } },
+  ));
+  assert.equal(fixture.win.ctrl, true);
+  assert.equal(ctrl.classList.contains("locked"), true);
+  pointerDown(fixture.win, left);
+  pointerDown(fixture.win, left);
+  assert.equal(keyEvents.at(-1).ctrlKey, true);
+  assert.equal(keyEvents.at(-1).shiftKey, true);
+  assert.equal(ctrl.classList.contains("locked"), true);
+  pointerDown(fixture.win, ctrl);
+  assert.equal(ctrl.classList.contains("toggle"), false);
+  assert.equal(fixture.win.__te2MobileCtrlLocked, false);
+
+  pointerDown(fixture.win, select);
+  assert.equal(select.classList.contains("toggle"), false);
+  for (const button of [tab, home, end, pageUp, pageDown]) {
+    pointerDown(fixture.win, button);
+  }
+  assert.deepEqual(keyEvents.slice(-5).map((event) => event.key), [
+    "Tab",
+    "Home",
+    "End",
+    "PageUp",
+    "PageDown",
+  ]);
+
+  pointerDown(fixture.win, hover);
+  pointerDown(fixture.win, cut);
+  pointerDown(fixture.win, copy);
+  pointerDown(fixture.win, paste);
+  assert.deepEqual(fixture.actionRuns.slice(-4), [
+    "editor.action.showHover",
+    "editor.action.clipboardCutAction",
+    "editor.action.clipboardCopyAction",
+    "editor.action.clipboardPasteAction",
+  ]);
 
   pointerDown(fixture.win, context);
   assert.equal(contextRequests, 1);
   assert.equal(fixture.win.document.activeElement, fixture.input);
 
-  pointerDown(fixture.win, ctrl);
-  pointerDown(fixture.win, alt);
   fixture.terminalInput.focus();
   publishTerminalSpecialKeyFocus(fixture.win, true);
-  assert.equal(context.textContent, "Tab");
-  assert.equal(context.title, "Tab");
-  assert.equal(ctrl.classList.contains("toggle"), false);
-  assert.equal(alt.classList.contains("toggle"), false);
-
+  pointerDown(fixture.win, select);
   pointerDown(fixture.win, ctrl);
-  pointerDown(fixture.win, left);
-  assert.deepEqual(terminalKeyEvents.at(-1), {
-    key: "ArrowLeft",
-    ctrlKey: true,
-    altKey: false,
-  });
-  assert.equal(ctrl.classList.contains("toggle"), false);
-  assert.equal(fixture.win.document.activeElement, fixture.terminalInput);
-  assert.equal(keyEvents.length, 1);
-
-  pointerDown(fixture.win, context);
+  pointerDown(fixture.win, tab);
   assert.deepEqual(terminalKeyEvents.at(-1), {
     key: "Tab",
-    ctrlKey: false,
+    ctrlKey: true,
     altKey: false,
+    shiftKey: true,
   });
+  assert.equal(ctrl.classList.contains("toggle"), false);
+  assert.equal(select.classList.contains("toggle"), true);
   assert.equal(fixture.win.document.activeElement, fixture.terminalInput);
-  assert.equal(contextRequests, 1);
 
   fixture.input.focus();
   publishTerminalSpecialKeyFocus(fixture.win, false);
-  assert.equal(context.textContent, "Ctx");
-  assert.equal(context.title, "Context menu");
-  pointerDown(fixture.win, context);
-  assert.equal(contextRequests, 2);
 
   pointerDown(fixture.win, trigger);
   assert.equal(panel.hidden, true);
@@ -544,7 +691,7 @@ test("keeps modifiers sticky until one dock key consumes them", async () => {
   binding.dispose();
   disposeTerminalTarget();
   assert.equal(
-    fixture.host.querySelector(".te2-mobile-special-key-trigger"),
+    fixture.editorContainer.querySelector(".te2-mobile-special-key-trigger"),
     null,
   );
 });

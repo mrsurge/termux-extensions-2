@@ -200,6 +200,7 @@ interface Window {
   ['monaco-touch-selection']?: MonacoTouchSelectionGlobal;
   __androidTerminalCtrlDesired?: boolean;
   __androidTerminalSetCtrl?: (active: boolean) => void;
+  __te2MobileCtrlLocked?: boolean;
   term?: MonacoRuntimeTermShim;
   ctrl?: boolean;
 }
