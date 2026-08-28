@@ -1768,6 +1768,16 @@ Physical Termux acceptance must launch a real app through the exact archived
 server. Launcher health and catalog discovery alone are insufficient because a
 feature-disabled server can perform both while failing every worker launch.
 
+The `0.2.341` execution of this contract passed end to end. Clean-tag Linux and
+Termux builders accepted only binaries whose `--build-info` reports the exact
+target and `ferrous-framework-native`; the Termux installer repeated that check
+against the staged binary before activation. Public latest-curl acceptance then
+started a real File Explorer worker through the Ferrous native host on both a
+wiped physical AArch64 Termux device and an isolated Debian desktop install.
+The physical run additionally completed Terminal's strict MessagePack PTY flow
+and the managed Code Server opt-in, closing the gap left by the 0.2.340
+launcher-only smoke.
+
 ## 8. Phase 5 — Termux target mode
 
 1. Generate the complete direct/transitive distribution graph from the locked

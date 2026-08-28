@@ -18,8 +18,8 @@ Last updated: 2026-08-28
 | Phase 4A: source/Git desktop bootstrap | Implemented and validated from a clean wheel | Python entrypoints build one fingerprinted Electron runtime and receipt-owned XDG integration; the unified Linux installer deliberately reuses this path |
 | Phase 4B: release provenance and Linux platform wheel | Complete: audited build, clean SSH acceptance, PyPI publication, and byte-identical GitHub mirror passed | Supported wheels embed the verified Rust server; source provenance alone may use Cargo |
 | Phase 4C: unified installer and Linux target | Public acquisition, private venv, optional desktop bootstrap, and non-graphical Debian acceptance pass; upgrade/graphical matrix remains | Managed venv is atomic; `--desktop` delegates to that venv's existing Electron bootstrap and config contract |
-| Phase 4D: final integration and publication | Corrective `0.2.341` release in progress: `0.2.340` remains Linux-accepted, but its Termux server omitted the required Ferrous native feature | Release assets are immutable, so the broken Termux payload is corrected only through a new synchronized version |
-| Phase 5: Termux target mode | Corrective implementation in progress: archive construction and installation now require machine-readable Ferrous-native server capabilities before activation | Apt-first shared foundations plus a release-local wheel tree; physical acceptance must exercise the exact archived server's app-launch path |
+| Phase 4D: final integration and publication | Corrective `0.2.341` release published and accepted on public Linux/Desktop and physical Termux paths | Release assets are immutable; `0.2.340` remains historical while `0.2.341` is the normal/latest corrected release |
+| Phase 5: Termux target mode | Public `0.2.341` archive and fresh-device acceptance complete, including a real Ferrous app launch, Terminal MessagePack flow, and managed Code Server opt-in | Apt-first shared foundations plus a release-local wheel tree; every future physical acceptance must exercise the exact archived server's app-launch path |
 
 ## Confirmed source findings
 
@@ -40,7 +40,7 @@ Last updated: 2026-08-28
 | The remote container host is x86-64 | It has Podman and no AArch64 QEMU/binfmt registration; Docker Hub publishes a native x86-64 Termux image | Use x86-64 container for clean installer transaction tests and the physical AArch64 device for Bionic/native acceptance |
 | User dependency installation has explicit owners | Linux private-venv inputs, existing app bootstraps, and installer target manifests cover the supported paths | Repository construction scripts are not user setup entrypoints |
 | Global Code Server is unsupported | Code TE2 resolves only its consent-gated private managed runtime | Confirmed |
-| Release server capability was not uniformly gated | Linux explicitly built `ferrous-framework-native`, but `te2-server` defaulted to no features and the Termux archive accepted any AArch64 ELF; public `0.2.340` therefore installed a server that could serve the launcher but could not launch apps | Root cause confirmed; `0.2.341` makes Ferrous native the default and requires exact `--build-info` validation in both release targets and the Termux installer |
+| Release server capability was not uniformly gated | Linux explicitly built `ferrous-framework-native`, but `te2-server` defaulted to no features and the Termux archive accepted any AArch64 ELF; public `0.2.340` therefore installed a server that could serve the launcher but could not launch apps | Corrected and publicly accepted in `0.2.341`: Ferrous native is the default and exact `--build-info` validation gates both release targets and Termux activation |
 | Packaged framework can avoid target Cargo | The current bootstrap accepts `--server-bin` | Confirmed |
 | Bootstrap selects a verified wheel-owned server | After explicit server overrides, binary-release provenance resolves and verifies the wheel-owned executable; invalid binary provenance fails without Cargo fallback | Implemented and clean-install validated in Phase 4B |
 | Framework readiness has an identity-bearing endpoint | Rust serves `/api/health` with app/version/instance/listener metadata | Confirmed |
@@ -1100,11 +1100,51 @@ Corrective implementation evidence recorded on 2026-08-23:
   machine-readable `--build-info` capability report.
 - [x] Reject Termux and Linux release candidates missing the required capability;
   record it in the Termux manifest and revalidate the installed server.
-- [ ] Build and publish synchronized clean-tag 0.2.341 artifacts.
-- [ ] Reset the Motorola Termux userspace and pass the public curl install,
+- [x] Build and publish synchronized clean-tag 0.2.341 artifacts.
+- [x] Reset the Motorola Termux userspace and pass the public curl install,
   framework, eight-app discovery, real app launch, Terminal, and managed Code
   Server acceptance with the exact public archive.
-- [ ] Repeat public Debian framework and desktop acceptance against 0.2.341.
+- [x] Repeat public Debian framework and desktop acceptance against 0.2.341.
+
+### Phase 4H TE2 0.2.341 publication and acceptance evidence
+
+- Annotated tag `0.2.341` and both published branches resolve to integrated
+  commit `1d2af5f5c51184df2c58c098016fdf7e5a1a8715`.
+- PyPI serves the clean manylinux wheel with SHA-256
+  `14e5a31edc0209a8ef39ad4096dfa050704d473a060f45209fd1d90368c3db5c`
+  and sdist with SHA-256
+  `c4c601c4031b129505af5db75167b00ee6afd5f8ca6737e2c1005dd585f148ca`.
+  The wheel's server reports Linux/x86-64 plus
+  `ferrous-framework-native` and has SHA-256
+  `0f5e49ac3b0eee1999a1108a95ba4cbba7a6ada8466db29e1955a073d70548f2`.
+- GitHub Release `0.2.341`, titled `TE2 0.2.341 alpha`, is the normal/latest
+  non-prerelease release. All 13 API-reported asset digests match the local
+  audited set, and the public `releases/latest` checksum manifest has SHA-256
+  `475e0878a6531eb4e73b8ee31891e55d6909bbeda970e74d14840e4014cdf8b4`.
+- The corrected Termux archive has SHA-256
+  `44b146f1a4245e5d38a4a380f5206dc7d689a88c7d1c58d920c67d93eca4831d`.
+  Its exact Bionic server has SHA-256
+  `55a593d76d3874e057721f3495f4f271603ffde1bb18eecdf9d34a093555fd72`
+  and reports Android/AArch64 plus `ferrous-framework-native`.
+- A wiped Motorola installed only through the public latest-curl command,
+  returned framework health `0.2.341`, discovered all eight built-ins, and
+  started File Explorer through `source: ferrous_framework_native` to semantic
+  readiness. Terminal then completed first-use Node/`node-pty` bootstrap and a
+  strict binary MessagePack checkpoint/input/output round trip. The unchanged
+  managed-runtime opt-in moved Code Server from `missing` to `ready` and
+  reported Code Server 4.130.0 / Code 1.130.0 with Node 24.18.0.
+- A clean isolated Debian Trixie HOME installed through public latest-curl with
+  `--desktop`, selected the exact packaged server without Cargo, materialized
+  the fingerprinted Electron runtime, receipt-owned wrapper, icon, desktop
+  entry, and local-framework configuration, discovered all eight apps, and
+  started File Explorer through the Ferrous native bridge to readiness.
+- The arm64 staging APKs carry synchronized `0.2.341` assets and version code
+  20341. GeckoView SHA-256 is
+  `8c196cb3f2df4311ad22815e1a57d4b8d094d0a9b29aea5e09d30498a52b5330`;
+  Cefrium is
+  `977678cfdc9610d03cb95cff773d44a66c9d967c1f617c79178d7f12586ff7ec`.
+  Both retain the repository development certificate and passed the release
+  ZIP/native 16 KiB alignment audits.
 
 ## Phase 4E checklist — mobile editing-key expansion
 
@@ -1173,3 +1213,4 @@ Corrective implementation evidence recorded on 2026-08-23:
 | 2026-08-27 | Bookmark activation and Cefrium focus-zoom correction | Desktop bookmark selection now uses the existing persisted retarget transaction; the Cefrium-only 16 px rule covers Monaco's exact editor IME textarea as well as Find/Replace | 254 Code TE2 tests, 91 Electron tests, both typechecks/builds, compiled-output checks, and a live locked-viewport 10 px -> 16 px -> 10 px transient style proof passed; versions and APK assets remain unchanged |
 | 2026-08-28 | TE2 0.2.340 final alpha publication | Clean-tag Linux wheel/sdist, clean physical AArch64 Termux archive, synchronized GeckoView/Cefrium staging APKs, immutable 13-file GitHub set, exact PyPI/GitHub digest checks, local-wheel Debian repair/framework smoke, and public latest-curl Debian desktop/framework smoke | Passed; 0.2.340 is the normal/latest non-prerelease GitHub release and the public consumer paths resolve the audited artifacts |
 | 2026-08-28 | TE2 0.2.340 Termux capability audit | Public archive extraction, exact Motorola installed-server digest, compiled-string comparison, Linux build-script audit, public Debian server digest, and live Ferrous bridge initialization | Failed for Termux only: the archived server was built without `ferrous-framework-native`; Linux/PyPI and desktop are unaffected, and immutable 0.2.340 requires a synchronized 0.2.341 correction |
+| 2026-08-28 | TE2 0.2.341 Ferrous-native corrective release | Clean-tag Linux/Termux/APK construction, PyPI and normal/latest GitHub publication, exact 13-asset digest checks, wiped-Motorola public curl install, real app launch, Terminal MessagePack round trip, managed Code Server opt-in, and isolated Debian public desktop/framework acceptance | Passed; release construction and Termux activation now reject missing native-host capability before publication/use, and both supported public targets launched real workers through `ferrous_framework_native` |
