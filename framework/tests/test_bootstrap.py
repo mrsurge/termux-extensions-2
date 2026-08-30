@@ -569,6 +569,10 @@ class FrameworkBootstrapTests(unittest.TestCase):
             args = self.bootstrap._parse_args(["--broadcast", "all", "--port", "8123"])
             with mock.patch.dict(os.environ, explicit_roots), mock.patch.object(
                 self.bootstrap, "_reserve_local_port", return_value=49123
+            ), mock.patch.object(
+                self.bootstrap,
+                "merge_login_shell_path",
+                side_effect=lambda environment: dict(environment),
             ), mock.patch.object(self.bootstrap, "_ensure_framework_shells_env"):
                 env = self.bootstrap._build_env(args)
 

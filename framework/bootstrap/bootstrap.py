@@ -24,6 +24,7 @@ from pathlib import Path
 from types import FrameType
 from typing import Any, TextIO, cast
 
+from app.node_toolchain import merge_login_shell_path
 from app.release_runtime import ReleaseRuntimeError, packaged_server_path
 from app.te2_paths import ensure_runtime_home, resolve_te2_paths
 
@@ -255,7 +256,7 @@ def _parse_args(argv: Sequence[str] | None) -> BootstrapArgs:
 
 
 def _build_env(args: BootstrapArgs) -> dict[str, str]:
-    env = os.environ.copy()
+    env = merge_login_shell_path(os.environ)
     _sanitize_runtime_env(env)
     paths = resolve_te2_paths(env)
     ensure_runtime_home(paths.runtime_home)

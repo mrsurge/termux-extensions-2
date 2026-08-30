@@ -10,6 +10,33 @@ from app import node_toolchain
 
 
 class NodeToolchainTests(unittest.TestCase):
+    def test_login_shell_path_appends_discovered_entries_without_reordering_existing_path(self) -> None:
+        with patch.object(
+            node_toolchain,
+            "login_shell_path",
+            return_value="/login/bin:/configured/bin:/another/bin",
+        ):
+            env = node_toolchain.merge_login_shell_path(
+                {"PATH": "/venv/bin:/configured/bin", "HOME": "/home/test"}
+            )
+
+        self.assertEqual(
+            env["PATH"],
+            "/venv/bin:/configured/bin:/login/bin:/another/bin",
+        )
+
+    def test_login_shell_path_reads_marker_from_shell_output(self) -> None:
+        with patch.object(
+            node_toolchain,
+            "_run_login_shell",
+            return_value=[["shell startup noise", "__TE2_PATH__/login/bin:/usr/bin"]],
+        ):
+            resolved = node_toolchain.login_shell_path(
+                {"PATH": "/usr/bin", "SHELL": "/bin/bash"}
+            )
+
+        self.assertEqual(resolved, "/login/bin:/usr/bin")
+
     def test_explicit_toolchain_wins_without_shell_probe(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

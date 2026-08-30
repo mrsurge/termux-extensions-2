@@ -34,25 +34,32 @@ def _candidate_pair(
     return None
 
 
-def _login_shell_node_pair(environ: Mapping[str, str]) -> tuple[Path, Path] | None:
-    shell_candidates = [
+def _login_shell_candidates(environ: Mapping[str, str]) -> list[str]:
+    candidates = [
         str(environ.get("SHELL") or "").strip(),
         shutil.which("bash", path=environ.get("PATH")) or "",
         shutil.which("zsh", path=environ.get("PATH")) or "",
         shutil.which("sh", path=environ.get("PATH")) or "",
     ]
-    command = (
-        "printf '__TE2_NODE__%s\\n' \"$(command -v node 2>/dev/null)\"; "
-        "printf '__TE2_NPM__%s\\n' \"$(command -v npm 2>/dev/null)\""
-    )
+    resolved: list[str] = []
     seen: set[str] = set()
-    for raw_shell in shell_candidates:
+    for raw_shell in candidates:
         if not raw_shell:
             continue
         shell = str(_absolute_executable(raw_shell))
         if shell in seen or not _is_executable(Path(shell)):
             continue
         seen.add(shell)
+        resolved.append(shell)
+    return resolved
+
+
+def _run_login_shell(
+    environ: Mapping[str, str],
+    command: str,
+) -> list[list[str]]:
+    outputs: list[list[str]] = []
+    for shell in _login_shell_candidates(environ):
         flag = "-lic" if Path(shell).name in {"bash", "zsh"} else "-lc"
         try:
             result = subprocess.run(
@@ -65,9 +72,49 @@ def _login_shell_node_pair(environ: Mapping[str, str]) -> tuple[Path, Path] | No
             )
         except (OSError, subprocess.SubprocessError):
             continue
+        if result.returncode == 0:
+            outputs.append(result.stdout.splitlines())
+    return outputs
+
+
+def login_shell_path(environ: Mapping[str, str]) -> str | None:
+    outputs = _run_login_shell(
+        environ,
+        "printf '__TE2_PATH__%s\\n' \"$PATH\"",
+    )
+    for lines in outputs:
+        for line in lines:
+            if line.startswith("__TE2_PATH__"):
+                value = line.removeprefix("__TE2_PATH__").strip()
+                if value:
+                    return value
+    return None
+
+
+def merge_login_shell_path(environ: Mapping[str, str]) -> dict[str, str]:
+    env = dict(environ)
+    discovered = login_shell_path(env)
+    if not discovered:
+        return env
+
+    path_parts = [part for part in env.get("PATH", "").split(os.pathsep) if part]
+    for part in discovered.split(os.pathsep):
+        if part and part not in path_parts:
+            path_parts.append(part)
+    env["PATH"] = os.pathsep.join(path_parts)
+    return env
+
+
+def _login_shell_node_pair(environ: Mapping[str, str]) -> tuple[Path, Path] | None:
+    command = (
+        "printf '__TE2_NODE__%s\\n' \"$(command -v node 2>/dev/null)\"; "
+        "printf '__TE2_NPM__%s\\n' \"$(command -v npm 2>/dev/null)\""
+    )
+    outputs = _run_login_shell(environ, command)
+    for lines in outputs:
         node_value = ""
         npm_value = ""
-        for line in result.stdout.splitlines():
+        for line in lines:
             if line.startswith("__TE2_NODE__"):
                 node_value = line.removeprefix("__TE2_NODE__").strip()
             elif line.startswith("__TE2_NPM__"):
