@@ -20,6 +20,35 @@ test("Electron app navigation delegates backend readiness to the shared app shel
   assert.match(navigateSource, /loadURL\(target\.href\)/);
   assert.doesNotMatch(navigateSource, /waitUntilProjectionReady/);
 
+  const prerequisiteStart = mainSource.indexOf(
+    'if (command === "wait_for_app_prerequisites")',
+  );
+  const prerequisiteEnd = mainSource.indexOf(
+    'if (command === "release_run_target_surface")',
+    prerequisiteStart,
+  );
+  const prerequisiteSource = mainSource.slice(
+    prerequisiteStart,
+    prerequisiteEnd,
+  );
+  const reconnect = prerequisiteSource.indexOf("ensureElectronUiIpcConnected()");
+  const projectionWait = prerequisiteSource.indexOf("waitUntilProjectionReady()");
+  assert.ok(reconnect >= 0 && reconnect < projectionWait);
+  assert.doesNotMatch(prerequisiteSource, /waitUntilProjectionReady\(null\)/);
+
+  const reconnectStart = mainSource.indexOf(
+    "function ensureElectronUiIpcConnected",
+  );
+  const reconnectEnd = mainSource.indexOf(
+    "async function saveConnection",
+    reconnectStart,
+  );
+  const reconnectSource = mainSource.slice(reconnectStart, reconnectEnd);
+  assert.match(
+    reconnectSource,
+    /uiIpcClient\.connect\(configuredFrameworkOrigin\)/,
+  );
+
   const lifecycle = appShell.indexOf(
     "const appDef = await waitForAppLifecycle()",
   );

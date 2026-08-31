@@ -502,7 +502,8 @@ async function handleAppViewControl(
       : "";
     if (appId === "code_te2") {
       if (!runTargetRelays) throw new Error("Run target relay is not initialized");
-      await runTargetRelays.waitUntilProjectionReady(null);
+      ensureElectronUiIpcConnected();
+      await runTargetRelays.waitUntilProjectionReady();
     }
     return { ok: true };
   }
@@ -878,6 +879,14 @@ function connectElectronUiIpc(): void {
     },
     () => runTargetRelays?.suspendRouteProjection(),
   );
+  uiIpcClient.connect(configuredFrameworkOrigin);
+}
+
+function ensureElectronUiIpcConnected(): void {
+  if (!uiIpcClient) {
+    connectElectronUiIpc();
+    return;
+  }
   uiIpcClient.connect(configuredFrameworkOrigin);
 }
 
