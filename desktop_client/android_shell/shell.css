@@ -326,7 +326,8 @@ button {
   font-size: 0.8rem;
 }
 
-.field input {
+.field input,
+.field select {
   width: 100%;
   min-height: 42px;
   border: 1px solid var(--border);
@@ -336,7 +337,8 @@ button {
   color: var(--text);
 }
 
-.field input:focus {
+.field input:focus,
+.field select:focus {
   border-color: var(--accent);
   outline: 1px solid var(--accent);
 }

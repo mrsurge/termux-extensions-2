@@ -1,10 +1,17 @@
 package com.termux.extensions
 
+import java.net.URLEncoder
+
 private const val NATIVE_MARKER = "gv_native"
 private const val RENDERER_MARKER = "te2_renderer"
+private const val FRAMEWORK_ORIGIN_MARKER = "te2_framework_origin"
 
 /** Attach the renderer identity without disturbing unrelated query or fragment state. */
-internal fun withAndroidNativePageIdentity(rawUrl: String, renderer: String): String {
+internal fun withAndroidNativePageIdentity(
+    rawUrl: String,
+    renderer: String,
+    frameworkOrigin: String? = null,
+): String {
     require(renderer.matches(Regex("[a-z0-9_-]+"))) { "invalid Android renderer name" }
     val fragmentIndex = rawUrl.indexOf('#')
     val base = if (fragmentIndex >= 0) rawUrl.substring(0, fragmentIndex) else rawUrl
@@ -16,10 +23,14 @@ internal fun withAndroidNativePageIdentity(rawUrl: String, renderer: String): St
         .filter { it.isNotBlank() }
         .filterNot {
             val name = it.substringBefore('=')
-            name == NATIVE_MARKER || name == RENDERER_MARKER
+            name == NATIVE_MARKER || name == RENDERER_MARKER || name == FRAMEWORK_ORIGIN_MARKER
         }
         .toMutableList()
     fields += "$NATIVE_MARKER=1"
     fields += "$RENDERER_MARKER=$renderer"
+    frameworkOrigin?.trim()?.takeIf { it.isNotEmpty() }?.let {
+        val encodedOrigin = URLEncoder.encode(it, "UTF-8").replace("+", "%20")
+        fields += "$FRAMEWORK_ORIGIN_MARKER=$encodedOrigin"
+    }
     return "$path?${fields.joinToString("&")}$fragment"
 }

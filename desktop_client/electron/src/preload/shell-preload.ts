@@ -10,6 +10,9 @@ import type {
 import { unwrapNativeRequestResult } from "../shared/native-request-contracts";
 
 const bridge: DesktopBridge = {
+  notifyReady() {
+    ipcRenderer.send("te2-desktop:shell-ready");
+  },
   async request(method: NativeRequestMethod, params: Record<string, unknown> = {}) {
     const result = await ipcRenderer.invoke(
       "te2-desktop:native-request",
@@ -48,6 +51,13 @@ const bridge: DesktopBridge = {
     };
     ipcRenderer.on("te2-desktop:steer", listener);
     return () => ipcRenderer.off("te2-desktop:steer", listener);
+  },
+  onStatus(callback: (message: string) => void) {
+    const listener = (_event: Electron.IpcRendererEvent, message: string) => {
+      callback(message);
+    };
+    ipcRenderer.on("te2-desktop:status", listener);
+    return () => ipcRenderer.off("te2-desktop:status", listener);
   },
 };
 

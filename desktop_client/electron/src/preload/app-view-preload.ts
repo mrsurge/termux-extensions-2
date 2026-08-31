@@ -88,13 +88,19 @@ const electronBridge: ElectronAppViewBridge = Object.freeze({
   releaseRunTargetSurface(surfaceId: string): Promise<{ ok: true }> {
     return invokeElectron("release_run_target_surface", surfaceId);
   },
-  readSidebarPresentationState(): Promise<ElectronSidebarPresentationState> {
-    return invokeElectron("read_sidebar_presentation_state");
+  readSidebarPresentationState(
+    projectPath: string,
+  ): Promise<ElectronSidebarPresentationState> {
+    return invokeElectron("read_sidebar_presentation_state", { projectPath });
   },
   writeSidebarPresentationState(
+    projectPath: string,
     state: ElectronSidebarPresentationState,
   ): Promise<{ ok: true }> {
-    return invokeElectron("write_sidebar_presentation_state", state);
+    return invokeElectron("write_sidebar_presentation_state", {
+      projectPath,
+      state,
+    });
   },
   openSidebarMenu(
     request: ElectronSidebarMenuRequest,

@@ -174,6 +174,7 @@ class AndroidShellGateway(
                 withAndroidNativePageIdentity(
                     appUrlRewriter(absoluteFrameworkUrl(settings.frameworkBaseUrl, rawUrl)),
                     nativeRenderer,
+                    settings.frameworkBaseUrl,
                 ),
             )
         }

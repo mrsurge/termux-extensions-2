@@ -282,6 +282,74 @@ test("Electron starts, selects, and gracefully stops its exact TE2 child", async
   });
 });
 
+test("a running child keeps its exact launch configuration while next-start values change", async () => {
+  const baseOptions = controllerOptions();
+  let config = baseOptions.getLaunchConfig();
+  let probeCount = 0;
+  const selectedPorts: number[] = [];
+  const children = [fakeChild(5001), fakeChild(5002)];
+  const spawnCalls: Array<{ executable: string; args: readonly string[] }> = [];
+  const controller = new LocalFrameworkController({
+    ...baseOptions,
+    getLaunchConfig: () => config,
+    selectLocal: async (port) => {
+      selectedPorts.push(port);
+    },
+    probeFramework: async () => {
+      probeCount += 1;
+      return probeCount % 2 === 1
+        ? { kind: "free" }
+        : { kind: "te2", instanceId: "owned", version: "0.2.342" };
+    },
+    spawnFramework: ((executable: string, args: readonly string[]) => {
+      const child = children.shift();
+      if (!child) throw new Error("Unexpected extra local framework spawn");
+      spawnCalls.push({ executable, args });
+      child.stdin!.on("data", () => queueMicrotask(() => child.emitClose(0)));
+      queueMicrotask(() => hello(child));
+      return child;
+    }) as unknown as typeof spawn,
+  });
+
+  await controller.start();
+  config = {
+    ...config,
+    port: 9090,
+    command: "/opt/te2-next/bin/te2",
+    resolvedCommand: "/opt/te2-next/bin/te2",
+    broadcast: ["tailscale0"],
+  };
+
+  const running = controller.publishCurrent();
+  assert.equal(running.localOrigin, "http://127.0.0.1:8089");
+  assert.equal(running.command, "/opt/te2/bin/te2");
+  assert.deepEqual(running.broadcast, []);
+  await controller.useLocal();
+  assert.equal(selectedPorts.at(-1), 8089);
+
+  const stopped = await controller.stop();
+  assert.equal(stopped.localOrigin, "http://127.0.0.1:9090");
+  assert.equal(stopped.command, "/opt/te2-next/bin/te2");
+  assert.deepEqual(stopped.broadcast, ["tailscale0"]);
+
+  const restarted = await controller.start();
+  assert.equal(restarted.localOrigin, "http://127.0.0.1:9090");
+  assert.equal(restarted.command, "/opt/te2-next/bin/te2");
+  assert.deepEqual(spawnCalls.at(-1), {
+    executable: "/opt/te2-next/bin/te2",
+    args: [
+      "--host",
+      "127.0.0.1",
+      "--port",
+      "9090",
+      "--stdio-control",
+      "--broadcast",
+      "tailscale0",
+    ],
+  });
+  await controller.stop();
+});
+
 test("occupied non-TE2 ports fail without spawning", async () => {
   let spawned = false;
   const controller = new LocalFrameworkController(controllerOptions({

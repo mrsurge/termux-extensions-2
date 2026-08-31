@@ -1,4 +1,4 @@
-export const DESKTOP_SETTINGS_VERSION = 1;
+export const DESKTOP_SETTINGS_VERSION = 2;
 export const LOCAL_FRAMEWORK_CONFIG_VERSION = 1;
 
 export type DesktopFrameworkBookmark = {
@@ -17,6 +17,8 @@ export type DesktopShellSettings = {
   frameworkPort: number;
   frameworkBookmarks: DesktopFrameworkBookmark[];
   zoomLevel: number;
+  autostart: boolean;
+  preferredAppId: string;
 };
 
 export type LocalFrameworkCommandSource =
@@ -125,9 +127,11 @@ export type AppNavigation = {
 export type DesktopSteerAction = "home";
 
 export type DesktopBridge = {
+  notifyReady(): void;
   request(method: NativeRequestMethod, params?: Record<string, unknown>): Promise<unknown>;
   onAppNavigation(callback: (navigation: AppNavigation) => void): () => void;
   onAssetUpdated(callback: (version: string | null) => void): () => void;
   onLocalFrameworkState(callback: (state: LocalFrameworkState) => void): () => void;
   onSteer(callback: (action: DesktopSteerAction) => void): () => void;
+  onStatus(callback: (message: string) => void): () => void;
 };

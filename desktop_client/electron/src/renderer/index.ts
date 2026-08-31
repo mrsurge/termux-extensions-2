@@ -265,6 +265,8 @@ bridge.onLocalFrameworkState((state) => {
 bridge.onSteer((action) => {
   if (action === "home") showHome();
 });
+bridge.onStatus((message) => toast(message));
+bridge.notifyReady();
 
 window.addEventListener("unhandledrejection", (event) => {
   const reason = event.reason as { code?: unknown } | undefined;

@@ -28,6 +28,8 @@ function settings(
     frameworkPort: 8089,
     frameworkBookmarks: [],
     zoomLevel: 1,
+    autostart: false,
+    preferredAppId: "",
     ...overrides,
   };
 }
@@ -41,6 +43,26 @@ test("desktop launcher bookmark selection immediately uses the persisted connect
   assert.match(source, /useButton\.addEventListener\("click", async \(\) =>/);
   assert.match(source, /await connectToFramework\(\s*bookmark\.frameworkHost,/);
   assert.doesNotMatch(source, /press Save to connect/);
+});
+
+test("desktop startup settings expose one clearly associated save action", async () => {
+  const source = await readFile(
+    fileURLToPath(new URL("../../../android_shell/settings.html", import.meta.url)),
+    "utf8",
+  );
+  const startupHeading = source.indexOf("<h2>Startup</h2>");
+  const startup = source.lastIndexOf(
+    '<section class="settings-section">',
+    startupHeading,
+  );
+  const preferred = source.indexOf('id="preferred-app"', startup);
+  const save = source.indexOf('id="save-settings"', startup);
+
+  assert.ok(startup >= 0);
+  assert.ok(preferred > startup);
+  assert.ok(save > preferred);
+  assert.match(source.slice(save, save + 180), /Save connection and startup/);
+  assert.equal(source.match(/id="save-settings"/g)?.length, 1);
 });
 
 async function withScratch(
@@ -132,6 +154,35 @@ test("desktop settings recover valid bookmarks from malformed stored data", asyn
       { name: "Home", frameworkHost: "home.example", frameworkPort: 8089 },
       { name: "IPv6", frameworkHost: "[2001:db8::8]", frameworkPort: 9443 },
     ]);
+    assert.equal(loaded.autostart, false);
+    assert.equal(loaded.preferredAppId, "");
+  });
+});
+
+test("desktop settings migrate and validate preferred app startup state", async () => {
+  await withScratch(async (environment) => {
+    const path = desktopSettingsPath(environment);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, `${JSON.stringify({
+      version: 1,
+      frameworkHost: "framework.example",
+      frameworkPort: 8089,
+      autostart: true,
+      preferredAppId: "code_te2",
+    })}\n`, "utf8");
+
+    const loaded = await readDesktopSettings(environment);
+    assert.equal(loaded.version, DESKTOP_SETTINGS_VERSION);
+    assert.equal(loaded.autostart, true);
+    assert.equal(loaded.preferredAppId, "code_te2");
+
+    const written = await writeDesktopSettings(loaded, environment);
+    assert.equal(written.autostart, true);
+    assert.equal(written.preferredAppId, "code_te2");
+    await assert.rejects(
+      writeDesktopSettings({ ...loaded, preferredAppId: "bad/app" }, environment),
+      /Preferred app id is invalid/,
+    );
   });
 });
 

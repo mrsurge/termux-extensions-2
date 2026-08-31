@@ -140,6 +140,72 @@ class DesktopElectronRuntimeTests(unittest.TestCase):
         self.assertEqual(len(self.labels), 6)
         self.assertIsNotNone(electron_runtime.current_desktop_runtime(self.environ))
 
+    def test_three_runtime_fingerprints_retain_only_current_and_previous(self) -> None:
+        patches = self._patches()
+        digests = ["a" * 64, "b" * 64, "c" * 64]
+        with (
+            patches[0],
+            patches[1],
+            patches[2],
+            patches[3],
+            patches[4],
+            patch.object(electron_runtime, "_source_digest", side_effect=digests),
+        ):
+            first = electron_runtime.ensure_desktop_runtime(environ=self.environ)
+            second = electron_runtime.ensure_desktop_runtime(environ=self.environ)
+            third = electron_runtime.ensure_desktop_runtime(environ=self.environ)
+
+        base = electron_runtime.desktop_runtime_base(self.environ)
+        self.assertEqual((base / "current").resolve(), third.root)
+        self.assertEqual((base / "previous").resolve(), second.root)
+        self.assertFalse(first.root.exists())
+        retained = {path.name for path in (base / "runtimes").iterdir() if path.is_dir()}
+        self.assertEqual(retained, {second.fingerprint, third.fingerprint})
+
+    def test_cache_hit_repairs_missing_owned_desktop_entry(self) -> None:
+        patches = self._patches()
+        with patches[0], patches[1], patches[2], patches[3], patches[4]:
+            first = electron_runtime.ensure_desktop_runtime(environ=self.environ)
+            integration = electron_runtime.desktop_integration_paths(self.environ)
+            integration.desktop_entry.unlink()
+            second = electron_runtime.ensure_desktop_runtime(environ=self.environ)
+
+        self.assertEqual(first.root, second.root)
+        self.assertTrue(integration.desktop_entry.is_file())
+        self.assertEqual(len(self.labels), 3)
+
+    def test_integration_failure_restores_prior_runtime(self) -> None:
+        patches = self._patches()
+        with (
+            patches[0],
+            patches[1],
+            patches[2],
+            patches[3],
+            patches[4],
+            patch.object(
+                electron_runtime,
+                "_source_digest",
+                side_effect=["a" * 64, "b" * 64],
+            ),
+        ):
+            first = electron_runtime.ensure_desktop_runtime(environ=self.environ)
+            with patch.object(
+                electron_runtime,
+                "install_desktop_integration",
+                side_effect=electron_runtime.ElectronRuntimeError("integration failed"),
+            ):
+                with self.assertRaisesRegex(
+                    electron_runtime.ElectronRuntimeError,
+                    "integration failed",
+                ):
+                    electron_runtime.ensure_desktop_runtime(environ=self.environ)
+
+        base = electron_runtime.desktop_runtime_base(self.environ)
+        self.assertEqual((base / "current").resolve(), first.root)
+        self.assertFalse((base / "previous").exists())
+        retained = [path for path in (base / "runtimes").iterdir() if path.is_dir()]
+        self.assertEqual(retained, [first.root])
+
     def test_low_disk_blocks_build_but_not_current_status(self) -> None:
         patches = self._patches()
         with patches[0], patches[1], patches[2], patches[3], patches[4]:

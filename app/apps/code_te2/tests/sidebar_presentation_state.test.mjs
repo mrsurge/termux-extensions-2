@@ -170,6 +170,7 @@ test("Electron persistence takes precedence over origin local storage", async ()
     saveSidebarPresentationState,
   } = await importPresentationState();
   const writes = [];
+  const reads = [];
   const runtimeWindow = {
     localStorage: {
       getItem() {
@@ -180,25 +181,28 @@ test("Electron persistence takes precedence over origin local storage", async ()
       },
     },
     te2Electron: {
-      async readSidebarPresentationState() {
+      async readSidebarPresentationState(projectPath) {
+        reads.push(projectPath);
         return state({ foregroundHostId: "alpha" });
       },
-      async writeSidebarPresentationState(value) {
-        writes.push(value);
+      async writeSidebarPresentationState(projectPath, value) {
+        writes.push({ projectPath, value });
         return { ok: true };
       },
     },
   };
 
-  const loaded = await loadSidebarPresentationState(runtimeWindow);
-  await saveSidebarPresentationState(loaded, runtimeWindow);
+  const loaded = await loadSidebarPresentationState("/workspace/a", runtimeWindow);
+  await saveSidebarPresentationState(loaded, "/workspace/a", runtimeWindow);
 
   assert.equal(loaded.foregroundHostId, "alpha");
+  assert.deepEqual(reads, ["/workspace/a"]);
   assert.equal(writes.length, 1);
-  assert.deepEqual(writes[0], loaded);
+  assert.equal(writes[0].projectPath, "/workspace/a");
+  assert.equal(writes[0].value.lastAgentPresentationId, "");
 });
 
-test("legacy Code TE2 presentation identities are canonicalized and persisted once", async () => {
+test("Electron-loaded presentation state canonicalizes stable ids and clears transient ids", async () => {
   const { loadSidebarPresentationState } = await importPresentationState();
   const writes = [];
   let persisted = state({
@@ -216,7 +220,7 @@ test("legacy Code TE2 presentation identities are canonicalized and persisted on
       async readSidebarPresentationState() {
         return persisted;
       },
-      async writeSidebarPresentationState(value) {
+      async writeSidebarPresentationState(_projectPath, value) {
         writes.push(value);
         persisted = value;
         return value;
@@ -224,14 +228,142 @@ test("legacy Code TE2 presentation identities are canonicalized and persisted on
     },
   };
 
-  const first = await loadSidebarPresentationState(runtimeWindow);
-  const second = await loadSidebarPresentationState(runtimeWindow);
+  const first = await loadSidebarPresentationState("/workspace/a", runtimeWindow);
+  const second = await loadSidebarPresentationState("/workspace/a", runtimeWindow);
 
   assert.deepEqual(first.order, ["slot:code_te2:primary", "terminal"]);
   assert.equal(first.foregroundHostId, "slot:code_te2:primary");
-  assert.equal(first.lastAgentPresentationId, "frame:code_te2:primary");
+  assert.equal(first.lastAgentPresentationId, "");
   assert.equal(first.presentations["slot:code_te2:primary"], "detached");
   assert.deepEqual(second, first);
-  assert.equal(writes.length, 1);
-  assert.doesNotMatch(JSON.stringify(persisted), /file_editor_cm6/);
+  assert.equal(writes.length, 0);
+});
+
+function memoryStorage(initial = {}) {
+  const values = new Map(Object.entries(initial));
+  return {
+    getItem(key) {
+      return values.has(key) ? values.get(key) : null;
+    },
+    setItem(key, value) {
+      values.set(key, String(value));
+    },
+    removeItem(key) {
+      values.delete(key);
+    },
+    values,
+  };
+}
+
+test("browser persistence partitions by selected framework origin and project", async () => {
+  const {
+    loadSidebarPresentationState,
+    saveSidebarPresentationState,
+  } = await importPresentationState();
+  const localStorage = memoryStorage();
+  const remote = {
+    localStorage,
+    location: {
+      origin: "http://127.0.0.1:40000",
+      search: "?te2_framework_origin=http%3A%2F%2Fserver-a%3A8089",
+    },
+  };
+  const otherServer = {
+    localStorage,
+    location: {
+      origin: "http://127.0.0.1:40001",
+      search: "?te2_framework_origin=http%3A%2F%2Fserver-b%3A8089",
+    },
+  };
+
+  await saveSidebarPresentationState(
+    state({ foregroundHostId: "alpha" }),
+    "/workspace/a/",
+    remote,
+  );
+  await saveSidebarPresentationState(
+    state({ foregroundHostId: "gamma" }),
+    "/workspace/b",
+    remote,
+  );
+
+  assert.equal(
+    (await loadSidebarPresentationState("/workspace/a", remote)).foregroundHostId,
+    "alpha",
+  );
+  assert.equal(
+    (await loadSidebarPresentationState("/workspace/b", remote)).foregroundHostId,
+    "gamma",
+  );
+  assert.equal(
+    (await loadSidebarPresentationState("/workspace/a", otherServer)).foregroundHostId,
+    "",
+  );
+  assert.equal(
+    (await loadSidebarPresentationState("/workspace/a", remote)).lastAgentPresentationId,
+    "",
+  );
+});
+
+test("browser persistence rewrites transient presentation ids during load", async () => {
+  const {
+    SIDEBAR_PRESENTATION_STORAGE_KEY,
+    loadSidebarPresentationState,
+  } = await importPresentationState();
+  const key = "http://server-a:8089\u0000/workspace/a";
+  const localStorage = memoryStorage({
+    [SIDEBAR_PRESENTATION_STORAGE_KEY]: JSON.stringify({
+      version: 2,
+      projects: {
+        [key]: {
+          updatedAt: 1,
+          state: state({ lastAgentPresentationId: "transient-frame" }),
+        },
+      },
+    }),
+  });
+  const runtimeWindow = {
+    localStorage,
+    location: {
+      origin: "http://127.0.0.1:40000",
+      search: "?te2_framework_origin=http%3A%2F%2Fserver-a%3A8089",
+    },
+  };
+
+  const loaded = await loadSidebarPresentationState(
+    "/workspace/a",
+    runtimeWindow,
+  );
+  const rewritten = JSON.parse(
+    localStorage.values.get(SIDEBAR_PRESENTATION_STORAGE_KEY),
+  );
+
+  assert.equal(loaded.lastAgentPresentationId, "");
+  assert.equal(
+    rewritten.projects[key].state.lastAgentPresentationId,
+    "",
+  );
+});
+
+test("legacy browser presentation migrates into only the first project", async () => {
+  const { loadSidebarPresentationState } = await importPresentationState();
+  const localStorage = memoryStorage({
+    "te2.sidebar.presentation.v1": JSON.stringify(
+      state({ foregroundHostId: "gamma" }),
+    ),
+  });
+  const runtimeWindow = {
+    localStorage,
+    location: { origin: "http://localhost:8089", search: "" },
+  };
+
+  assert.equal(
+    (await loadSidebarPresentationState("/workspace/a", runtimeWindow)).foregroundHostId,
+    "gamma",
+  );
+  assert.equal(
+    (await loadSidebarPresentationState("/workspace/b", runtimeWindow)).foregroundHostId,
+    "",
+  );
+  assert.equal(localStorage.values.has("te2.sidebar.presentation.v1"), false);
 });

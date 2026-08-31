@@ -16,6 +16,7 @@ export const DEFAULT_HOST = "127.0.0.1";
 export const DEFAULT_PORT = 8089;
 export const MAX_FRAMEWORK_BOOKMARKS = 16;
 export const MAX_FRAMEWORK_BOOKMARK_NAME_LENGTH = 64;
+export const MAX_PREFERRED_APP_ID_LENGTH = 128;
 
 type FrameworkEndpoint = Pick<
   DesktopShellSettings,
@@ -33,6 +34,26 @@ function readPort(value: unknown): number {
   return Number.isInteger(port) && port >= 1 && port <= 65535
     ? port
     : DEFAULT_PORT;
+}
+
+export function validPreferredAppId(value: unknown): string {
+  const appId = String(value ?? "").trim();
+  if (!appId) return "";
+  if (
+    appId.length > MAX_PREFERRED_APP_ID_LENGTH
+    || !/^[A-Za-z0-9._-]+$/.test(appId)
+  ) {
+    throw new Error("Preferred app id is invalid");
+  }
+  return appId;
+}
+
+function readPreferredAppId(value: unknown): string {
+  try {
+    return validPreferredAppId(value);
+  } catch {
+    return "";
+  }
 }
 
 export function validateFrameworkPort(value: unknown): number {
@@ -193,6 +214,8 @@ export async function readDesktopSettings(
     frameworkPort: readPort(stored.frameworkPort),
     frameworkBookmarks: decodeFrameworkBookmarks(stored.frameworkBookmarks),
     zoomLevel: validZoom(stored.zoomLevel),
+    autostart: stored.autostart === true,
+    preferredAppId: readPreferredAppId(stored.preferredAppId),
   };
 }
 
@@ -207,6 +230,8 @@ export async function writeDesktopSettings(
     frameworkPort: endpoint.frameworkPort,
     frameworkBookmarks: decodeFrameworkBookmarks(settings.frameworkBookmarks),
     zoomLevel: validZoom(settings.zoomLevel),
+    autostart: settings.autostart === true,
+    preferredAppId: validPreferredAppId(settings.preferredAppId),
   };
 
   const path = desktopSettingsPath(environment);

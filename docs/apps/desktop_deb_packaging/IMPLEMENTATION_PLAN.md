@@ -5,7 +5,7 @@ architecture; each implementation phase still requires its own explicit scope.
 It does not authorize package publication, version changes, or changes under
 `android/`.
 
-This plan covers six ordered outcomes:
+This plan covers seven ordered outcomes:
 
 0. prune and make the Python/external dependency boundary reproducible;
 1. integrate and validate the current `main` client/framework baseline without
@@ -19,7 +19,9 @@ This plan covers six ordered outcomes:
    immutable target components for apt-based glibc Linux and Termux; and
 5. validate the Termux target mode against its shared Python interpreter,
    preferred repository dependencies, Bionic server, and user-owned release
-   layout.
+   layout; and
+6. harden installed upgrades, Electron startup routing, and client-local
+   Sidebar presentation continuity before the next publication transaction.
 
 Linux and Termux intentionally retain different runtime layouts behind one
 installer authority. Linux isolates Python dependencies in a user-owned virtual
@@ -1820,7 +1822,206 @@ launcher-only smoke.
     Terminal bootstrap, managed Code Server opt-in, atomic upgrade/rollback,
     receipt-owned uninstall, and preservation of external apt/user state.
 
-## 9. Validation and publication boundaries
+## 9. Phase 6 — upgrade retention, desktop startup, and Sidebar continuity
+
+Phase 6 is a post-`0.2.342` hardening phase. It is intentionally independent
+from the next version number and does not authorize a wheel, APK, tag, GitHub
+Release, or PyPI upload. Its implementation and acceptance must complete before
+the next publication transaction is scoped.
+
+### 9.1 Installed-release and Electron-runtime retention
+
+The unified installer already stages and validates a candidate before
+activation. Both Linux and Termux snapshot the old `current` link and managed
+wrapper bytes; a same-version repair also moves the existing target aside until
+the replacement is accepted. A failed activation restores those exact values.
+The missing behavior is post-success retention: the same-version backup is
+deleted immediately, prior version directories accumulate indefinitely, and
+there is no explicit single-fallback selector.
+
+The next transaction keeps these invariants:
+
+1. A candidate is fully staged and target-validated before it can affect
+   `current`, managed commands, desktop configuration, or Electron integration.
+2. A failed candidate leaves the prior active release selected, restores every
+   installer-owned global file byte-for-byte, removes only the failed staging
+   output, and does not prune or replace the previously retained fallback.
+3. After a successful **new-version** activation, the prior active release
+   becomes the one fallback. Only after the new release, managed wrappers,
+   receipt, and requested desktop integration all validate may the installer
+   prune older release directories. The retained set is therefore current plus
+   at most one prior-version fallback.
+4. A same-version repair retains its temporary `.replaced` directory only as
+   an in-transaction rollback source. Once the repaired release and all owned
+   global files validate, that duplicate is removed; the existing distinct
+   prior-version fallback is unchanged.
+5. Explicit rollback promotes the fallback to current through the same
+   validation and managed-file reconciliation path. The replaced current then
+   becomes the new single fallback, so repeated rollback does not accumulate
+   copies.
+6. Stale stage/replacement directories and releases older than the current and
+   fallback identities are pruned only while holding the install lock and only
+   after a successful transaction. Ordinary TE2 config, cache, application
+   data, Code Server, Terminal runtime, and user apps remain outside pruning.
+
+“Overwrite global files” remains bounded by ownership. A managed wrapper,
+desktop entry, icon, or receipt-owned integration file is replaced when it is
+missing, byte-identical, marked as TE2-managed, or still matches the prior
+receipt hash. An unrelated or user-modified external file remains a hard
+collision; the installer rolls back instead of overwriting it.
+
+Linux `--desktop` must also reconcile the local-framework configuration on
+every successful installed-release activation. The installer-owned `command`
+and `venvPath` fields are rewritten to the stable managed wrapper and
+`install/current/venv` paths even when an older install populated both fields.
+User launch policy remains intact: `broadcast`, `port`, and `env` are preserved.
+This deliberately replaces the current early return that treats a populated
+command/venv pair as permanently authoritative.
+
+Electron runtime publication follows the same bounded retention rule beneath
+`$TE2_DATA_HOME/desktop/electron/runtimes`: keep the current fingerprint and
+one prior active fingerprint, and prune older fingerprints only after the new
+runtime and receipt-owned XDG integration validate. A failed npm/build/package
+candidate cannot move `current` or disturb either retained runtime. Running
+`te2 desktop install` always repairs a missing owned wrapper, icon, or
+`.desktop` entry even when the current runtime fingerprint is already valid;
+runtime cache reuse must never skip integration repair.
+
+### 9.2 Electron autostart and preferred-app routing
+
+`DesktopShellSettings` currently persists only the selected framework,
+bookmarks, and zoom. The existing auto-open behavior is an environment-only
+development seam (`TE2_DESKTOP_AUTO_OPEN`, `TE2_DESKTOP_APP_ID`, and optional
+direct URL), while the launcher already discovers the real app catalog and
+opens an app through the framework `/open` transaction.
+
+The product setting becomes a versioned desktop-shell contract with:
+
+```ts
+type DesktopShellSettings = {
+  // existing fields
+  autostart: boolean;
+  preferredAppId: string;
+};
+```
+
+Migration defaults `autostart` to `false` and `preferredAppId` to an empty
+string. Settings presents `preferredAppId` as a dropdown built from the
+selected framework's current `/api/apps/catalog` response, excluding the
+synthetic native Settings entry. The control is disabled unless `autostart` is
+enabled. It stores a canonical app id rather than a URL or display label. If a
+previously selected app is absent, Settings shows that it is unavailable
+without silently selecting another app.
+
+Electron startup remains event/request-driven:
+
+1. Load and validate desktop settings, start/retarget the existing loopback
+   relay, establish native control-plane clients, and load the launcher shell.
+2. When `autostart` is false or no preferred app is configured, stop at the
+   launcher.
+3. Probe the **selected configured framework origin** through the existing
+   catalog request. This phase does not implicitly start a missing local
+   framework; the existing explicit local-framework controls retain that
+   authority.
+4. If the framework is already reachable and the preferred id is present,
+   invoke its ordinary `POST /api/apps/{id}/open` action, project the returned
+   URL through the existing relay, and navigate through the normal app shell.
+   Apps with `readiness_support` continue through the established readiness and
+   native-prerequisite path; autostart must not bypass it with a direct URL.
+5. If the probe, app open, or readiness transaction fails, keep the launcher
+   usable and report one bounded status/toast. Do not produce a main-process
+   error dialog, retry loop, or implicit target change.
+
+The environment variables may remain explicit development/test overrides, but
+they are not persisted product state and do not mutate the user's selected
+framework or preferred app.
+
+### 9.3 Sidebar extension presentation continuity
+
+This slice must preserve the existing ownership split rather than introduce a
+third state authority:
+
+- the backend Sidebar ledger owns shared surface membership;
+- each client owns dock order, foreground, and embedded/hidden/detached mode;
+- WBA already owns client-scoped extension-document reconstruction state under
+  `$TE2_DATA_HOME/code_te2/code_server/User/te2-webview-reconstruction`, keyed
+  by `(clientInstanceId, surfaceId)`.
+
+The reconstruction store already persists `acquireVsCodeApi().setState()` and
+the opaque webview's persistent Web Storage across renderer and WBA restarts.
+It must remain separate from dock presentation. The restart regression is in
+membership reconciliation: a WBA session reset calls the webview clear path,
+emits an empty workspace snapshot, Python treats that snapshot as an
+authoritative removal, and the client immediately saves presentation state
+after pruning the removed host ids. When the same stable surfaces return, their
+client preferences have already been erased.
+
+The corrected event-driven contract is:
+
+1. WBA reset/disconnect/startup publishes an explicit unavailable/reset
+   lifecycle fact, not an authoritative empty membership snapshot. Python may
+   mark extension surfaces unavailable, but it keeps their ledger identity and
+   every client's local preference while the adapter rehydrates.
+2. Only a complete post-activation workspace snapshot is authoritative for
+   removing missing extension surfaces. Explicit panel disposal, provider
+   removal, extension uninstall/disable, and a completed workspace transition
+   retain real removal semantics.
+3. Client presentation storage advances to a project-partitioned schema. The
+   partition key is the selected framework origin plus normalized project path;
+   browser/Gecko/Cefrium keep the bounded map in origin-local storage, while
+   Electron stores the same validated map in its atomic desktop state. The
+   stable `clientInstanceId` remains implied by that client-owned store.
+4. Reconciliation updates only the active project partition. Switching projects
+   parks the old project's order and hidden/detached preferences instead of
+   deleting them. The store retains a bounded most-recent project set.
+5. Durable state stores stable host ids, order, foreground/last-agent host, and
+   presentation mode. It does **not** retain the transient `presentationId`.
+   After a renderer or app-worker restart, the host creates a fresh presentation
+   identity, republishes it through the existing exact-client lane, and binds it
+   to the restored stable agent host before mentions can resolve.
+6. A complete authoritative removal prunes the removed surface from the active
+   project preference record. A transient WBA loss never does. No grace-period
+   timer or polling is introduced.
+
+Stable activity-view `surfaceId`/`hostId` values already derive from workspace,
+extension id, and view id, so this phase must reuse them. It must not mint a new
+identity from a Framework-Shell id, WBA epoch, Socket.IO sid, `windowId`, or
+presentation id.
+
+### 9.4 Phase 6 validation gates
+
+Before implementation is considered complete:
+
+1. exercise clean install, new-version upgrade, same-version repair, failure
+   before activation, failure during owned-global reconciliation, rollback, and
+   a third-version install; prove the final release set is current plus one
+   fallback and that user state survives;
+2. repeat Electron runtime activation with three distinct fingerprints and
+   prove current plus one fallback remain; delete the owned `.desktop` entry
+   and prove `te2 desktop install` repairs it without rebuilding a valid
+   current runtime;
+3. prove `command` and `venvPath` follow the newly active managed install while
+   `broadcast`, `port`, and `env` remain unchanged;
+4. validate autostart off, reachable preferred app, unavailable framework,
+   missing preferred app, app-open failure, and a readiness-enabled app. The
+   unavailable cases must leave the launcher interactive;
+5. validate browser/Gecko/Cefrium and Electron presentation restoration across
+   Code TE2 app-worker restart, WBA restart, framework restart, project switch
+   away/back, and extension uninstall/reinstall;
+6. separately prove extension-document `setState`/Web Storage continuity and
+   dock order/hidden/detached continuity so one passing layer cannot mask a
+   failure in the other; and
+7. keep all restart recovery event-driven and verify that stale transient
+   presentation ids fail closed until the new host identity is registered.
+
+The accepted Debian SSH environment remains the installed Linux transaction
+harness. Graphical Electron startup and Sidebar-detach checks still require a
+display-capable client. Native client validation uses the already-supported
+GeckoView/Cefrium paths only when implementation actually changes their shared
+frontend assets; that later scope must perform the normal synchronized frontend
+version and APK asset-bundle handoff.
+
+## 10. Validation and publication boundaries
 
 Minimum automated validation by phase:
 

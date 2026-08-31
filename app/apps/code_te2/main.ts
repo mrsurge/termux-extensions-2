@@ -1367,6 +1367,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     },
     getClientId: () => clientId,
     getWindowId: () => clientIdentity.windowId,
+    getProjectRoot: () => cachedProjectRoot || "",
   });
 
   drainPendingWatcherEvents();

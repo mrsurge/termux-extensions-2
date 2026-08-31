@@ -150,6 +150,16 @@ function childIsRunning(child: ChildProcess): boolean {
   return child.exitCode === null && child.signalCode === null;
 }
 
+function copyLaunchConfig(
+  config: LocalFrameworkConfigView,
+): LocalFrameworkConfigView {
+  return {
+    ...config,
+    broadcast: [...config.broadcast],
+    env: { ...config.env },
+  };
+}
+
 export class LocalFrameworkController {
   readonly #options: ResolvedControllerOptions;
   #state: MutableState;
@@ -158,6 +168,7 @@ export class LocalFrameworkController {
   #refreshOperation: Promise<LocalFrameworkState> | null = null;
   #startOperation: Promise<LocalFrameworkState> | null = null;
   #stopOperation: Promise<LocalFrameworkState> | null = null;
+  #activeLaunchConfig: LocalFrameworkConfigView | null = null;
   #requestSequence = 0;
 
   constructor(options: LocalFrameworkControllerOptions) {
@@ -184,7 +195,7 @@ export class LocalFrameworkController {
   }
 
   snapshot(): LocalFrameworkState {
-    const config = this.#options.getLaunchConfig();
+    const config = this.#activeLaunchConfig || this.#options.getLaunchConfig();
     const origin = localOrigin(config.port);
     return {
       supported: true,
@@ -264,7 +275,8 @@ export class LocalFrameworkController {
     let state = this.snapshot();
     if (state.phase !== "running") state = await this.refresh();
     if (state.phase !== "running") throw new Error("No TE2 framework is running locally");
-    await this.#options.selectLocal(this.#options.getLaunchConfig().port);
+    const config = this.#activeLaunchConfig || this.#options.getLaunchConfig();
+    await this.#options.selectLocal(config.port);
     return this.#publish();
   }
 
@@ -305,6 +317,7 @@ export class LocalFrameworkController {
         stdio: ["pipe", "pipe", "pipe", "pipe"],
       },
     );
+    this.#activeLaunchConfig = copyLaunchConfig(config);
     this.#child = child;
     this.#state.processId = child.pid || null;
     this.#publish();
@@ -313,7 +326,10 @@ export class LocalFrameworkController {
     this.#exitPromise = new Promise((resolve) => {
       child.once("close", (code, signal) => {
         const wasStopping = this.#state.phase === "stopping";
-        if (this.#child === child) this.#child = null;
+        if (this.#child === child) {
+          this.#child = null;
+          this.#activeLaunchConfig = null;
+        }
         this.#state.processId = null;
         if (wasStopping) {
           this.#setState({ phase: "exited", ownership: "none", error: null });

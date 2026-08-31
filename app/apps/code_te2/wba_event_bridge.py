@@ -268,6 +268,14 @@ async def _handle_webview_snapshot(ev: JsonObject) -> None:
     if not isinstance(raw_root, str) or not raw_root.strip():
         return
     project_root = str(Path(raw_root).expanduser().resolve(strict=False))
+    if ev.get("authoritative") is False:
+        reason = str(ev.get("reason") or "session_reset").strip()
+        print(
+            "[wba_event_bridge] retained extension webview membership "
+            f"project={project_root} reason={reason}",
+            flush=True,
+        )
+        return
     backend_root = _event_workspace_root({})
     surfaces = _json_object_list(ev.get("surfaces", []))
     admitted: dict[str, JsonObject] = {}

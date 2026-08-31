@@ -34,6 +34,7 @@ import {
   writeLocalFrameworkConfig,
 } from "./local-framework-config";
 import { DESKTOP_MODAL_WINDOW_POLICY } from "./modal-window-policy";
+import { resolvePreferredAppStartupUrl } from "./preferred-app-startup";
 import { RunTargetRelayManager } from "./run-target-relay";
 import { ElectronRunProfileRuntime } from "./run-profile-runtime";
 import { SecondaryEditorRegistry } from "./secondary-editor-registry";
@@ -526,10 +527,22 @@ async function handleAppViewControl(
     return { ok: true };
   }
   if (command === "read_sidebar_presentation_state") {
-    return readDesktopSidebarPresentationState();
+    const request = payload as { projectPath?: unknown } | null;
+    return readDesktopSidebarPresentationState(
+      configuredFrameworkOrigin,
+      String(request?.projectPath || ""),
+    );
   }
   if (command === "write_sidebar_presentation_state") {
-    await writeDesktopSidebarPresentationState(payload);
+    const request = payload as {
+      projectPath?: unknown;
+      state?: unknown;
+    } | null;
+    await writeDesktopSidebarPresentationState(
+      configuredFrameworkOrigin,
+      String(request?.projectPath || ""),
+      request?.state,
+    );
     return { ok: true };
   }
   if (command === "open_sidebar_menu") {
@@ -845,6 +858,7 @@ async function navigateApp(rawUrl: string): Promise<{ url: string }> {
     throw new Error("Framework app navigation must use the desktop relay origin");
   }
   target.searchParams.set("gv_native", "1");
+  target.searchParams.set("te2_framework_origin", configuredFrameworkOrigin);
   closeAppView();
   appView = createAppView();
   mainWindow?.contentView.addChildView(appView);
@@ -876,6 +890,12 @@ async function saveConnection(params: Record<string, unknown>): Promise<{
     ...settings,
     frameworkHost: String(params.frameworkHost || "").trim(),
     frameworkPort: Number(params.frameworkPort),
+    autostart: params.autostart === undefined
+      ? settings.autostart
+      : params.autostart === true,
+    preferredAppId: params.preferredAppId === undefined
+      ? settings.preferredAppId
+      : String(params.preferredAppId || "").trim(),
   };
   const previousOrigin = configuredFrameworkOrigin;
   const nextOrigin = frameworkOrigin(candidate);
@@ -937,16 +957,21 @@ async function refreshLocalFrameworkConfiguration(): Promise<LocalFrameworkConfi
 
 async function saveLocalFrameworkConfiguration(
   params: Record<string, unknown>,
-): Promise<{ config: LocalFrameworkConfigView; state: LocalFrameworkState }> {
-  if (localFrameworkController?.ownsRunningProcess()) {
-    throw new Error("Stop the Electron-owned local framework before changing its launch configuration");
-  }
+): Promise<{
+  config: LocalFrameworkConfigView;
+  state: LocalFrameworkState;
+  appliesAfterRestart: boolean;
+}> {
+  const appliesAfterRestart =
+    localFrameworkController?.ownsRunningProcess() === true;
   localFrameworkConfig = await writeLocalFrameworkConfig(params);
   if (!localFrameworkController) {
     throw new Error("Local framework controller is unavailable");
   }
-  const state = await localFrameworkController.refresh();
-  return { config: localFrameworkConfig, state };
+  const state = appliesAfterRestart
+    ? localFrameworkController.publishCurrent()
+    : await localFrameworkController.refresh();
+  return { config: localFrameworkConfig, state, appliesAfterRestart };
 }
 
 async function viewAction(params: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -1088,29 +1113,18 @@ async function automaticAssetUpdate(): Promise<void> {
 }
 
 async function autoOpenConfiguredApp(): Promise<void> {
-  if (process.env.TE2_DESKTOP_AUTO_OPEN !== "1") return;
-  const appId = process.env.TE2_DESKTOP_APP_ID?.trim() || "code_te2";
   try {
-    const direct = process.env.TE2_DESKTOP_URL?.trim();
-    let target: URL;
-    if (direct) {
-      const source = new URL(direct, `${configuredFrameworkOrigin}/`);
-      target = source.origin === configuredFrameworkOrigin
-        ? new URL(`${source.pathname}${source.search}${source.hash}`, relay.browserOrigin)
-        : source;
-    } else {
-      const result = await frameworkRequest({
-        path: `/api/apps/${encodeURIComponent(appId)}/open`,
-        method: "POST",
-        body: { params: {} },
-      }) as { url?: unknown } | undefined;
-      const source = new URL(String(result?.url || `/app/${appId}`), configuredFrameworkOrigin);
-      target = new URL(`${source.pathname}${source.search}${source.hash}`, relay.browserOrigin);
-    }
-    target.searchParams.set("gv_native", "1");
-    await navigateApp(target.href);
+    const target = await resolvePreferredAppStartupUrl({
+      settings,
+      configuredFrameworkOrigin,
+      browserFrameworkOrigin: relay.browserOrigin,
+      request: frameworkRequest,
+    });
+    if (target) await navigateApp(target);
   } catch (error) {
-    console.error(`[te2-desktop-auto-open] ${errorMessage(error)}`);
+    const message = `Preferred app was not opened: ${errorMessage(error)}`;
+    console.warn(`[te2-desktop-auto-open] ${message}`);
+    sendToShell("te2-desktop:status", message);
   }
 }
 
@@ -1216,6 +1230,14 @@ async function main(): Promise<void> {
     },
   );
   ipcMain.handle("te2-desktop:app-view-control", handleAppViewControl);
+  const shellReady = new Promise<void>((resolve) => {
+    const onShellReady = (event: IpcMainEvent) => {
+      if (!mainWindow || event.sender !== mainWindow.webContents) return;
+      ipcMain.off("te2-desktop:shell-ready", onShellReady);
+      resolve();
+    };
+    ipcMain.on("te2-desktop:shell-ready", onShellReady);
+  });
   await mainWindow.loadURL(`${SHELL_SCHEME}://${SHELL_HOST}/index.html`);
 
   console.log(
@@ -1224,7 +1246,7 @@ async function main(): Promise<void> {
     `desktop-session=${process.env.XDG_SESSION_TYPE || "unknown"}; relay=${relay.browserOrigin}`,
   );
   void automaticAssetUpdate();
-  void autoOpenConfiguredApp();
+  void shellReady.then(autoOpenConfiguredApp);
 
   const exitAfterSeconds = Number(process.env.TE2_DESKTOP_EXIT_AFTER_SECONDS || 0);
   if (Number.isFinite(exitAfterSeconds) && exitAfterSeconds > 0) {

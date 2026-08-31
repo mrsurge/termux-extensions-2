@@ -1,7 +1,12 @@
 # Termux Extensions 2 
 
 > It won't make you a professional programmer... but it'll make you feel like one.
+
 ---
+
+> **Preview alpha:** TE2 is usable today, but its interfaces, extension coverage,
+> and installation contracts are still evolving. Expect sharp edges and keep
+> important work under version control.
 
 TE2 is a local development workspace that runs the same project environment on
 Linux desktops and in Termux. Its framework launches isolated apps, owns shell
@@ -11,6 +16,35 @@ proxy, console, and debugging services.
 Code TE2 is the flagship workspace app: a Monaco-based editor with an Explorer,
 terminal surfaces, language tooling through code-server, diagnostics, drafts,
 diff/review flows, and stateful sidebar apps.
+
+## Remote-First Workspace
+
+TE2 specializes in remote multi-client project mirroring, shared drafting, and
+collaborative workflows. One framework owns the project, its open logical
+documents, drafts, language and extension services, processes, and sidebar
+membership. Each connected client keeps its own foreground document and local
+presentation, so a desktop, phone, tablet, or another browser can work against
+the same live project without screen sharing.
+
+The framework can run on a conventional Linux host or directly inside Termux on
+an Android device. A mobile device can therefore host the workspace as well as
+connect to one hosted elsewhere.
+
+The mobile and desktop clients are developed in parallel. Their layouts and
+native controls differ, but features introduced for one form factor are designed
+to remain meaningfully usable from the other rather than making mobile a
+read-only or reduced companion.
+
+Observed load times on the validated preview setups are approximately:
+
+- **Warm project restoration:** 1–2 seconds.
+- **Cold framework and project start:** about 5 seconds.
+- **Document opens:** perceptually immediate on localhost and effectively
+  immediate over ordinary remote/mobile connections. Testing has remained
+  responsive even with slow transfer speeds and poor network latency.
+
+These are practical observations, not performance guarantees. Project size,
+storage, enabled extensions, host load, and network conditions still matter.
 
 ## Architecture
 
@@ -51,6 +85,63 @@ Important roots:
 
 Integration depth varies by app. The app catalog is defined by the manifests
 under `app/apps/*/manifest.json`; there is no built-in `codex_agent` app.
+
+## VS Code Extension Compatibility
+
+Code TE2 runs VS Code extensions through its private Code Server runtime and
+WBA. Extensions can be searched and installed from the Explorer's **Open VSX**
+tab. Language and LSP extensions generally work with little or no adjustment on
+glibc Linux desktop hosts, especially when the extension bundles or can discover
+a supported native language server.
+
+Termux can run many of the same extension-host components, but a bundled glibc
+language-server executable cannot run on Android/Bionic. The usual solution is
+to install the native language server from the Termux repositories and point the
+extension's normal executable setting at it. Confirmed examples include:
+
+| Extension | Termux requirement |
+| --- | --- |
+| BasedPyright (`detachhead.basedpyright`) | Also install `ms-python.python` from the Open VSX tab. |
+| Rust Analyzer (`rust-lang.rust-analyzer`) | Install the Termux `rust-analyzer` package and configure the extension to use that executable. |
+| Clangd (`llvm-vs-code-extensions.vscode-clangd`) | Install Clang/LLVM, including `clangd`, from the Termux repositories and configure the extension to use the host-native server. |
+
+This pattern applies to many other language extensions: install the extension,
+provide a Termux-native LSP when its bundled server is incompatible, and use the
+extension's existing server-path setting. Desktop installations usually discover
+their supported server automatically.
+
+Validated UI extensions include:
+
+- Json Crack (`AykutSarac.jsoncrack-vscode`), including its editor action and
+  visualization panel;
+- Code Visualizer (`ducphamngoc.codevisualizer`), including live caret-driven
+  visualization; and
+- OpenAI Codex (`openai.chatgpt`).
+
+The Codex extension overlaps with TE2's built-in ALS-RS Codex frontend; both are
+supported, but running both presents two interfaces to the same underlying kind
+of agent workflow. On desktop, the Codex extension works without a separate CLI
+installation, while the built-in ALS-RS frontend expects the official Codex CLI
+to already be available:
+
+```bash
+npm install -g @openai/codex
+```
+
+On Termux, both the Codex extension and ALS-RS require a Termux-compatible
+`codex` executable to be installed and available on `PATH` before they start:
+
+```bash
+npm install -g @mmmbuto/codex-cli-termux@latest
+```
+
+The [`DioNanos/codex-termux`](https://github.com/DioNanos/codex-termux)
+repository was archived on August 29, 2026. Its published
+[`@mmmbuto/codex-cli-termux`](https://www.npmjs.com/package/@mmmbuto/codex-cli-termux)
+package remains installable, but the archived line should not be expected to
+receive further maintenance. The same maintainer continues the independent
+[`@mmmbuto/codex-vl`](https://www.npmjs.com/package/@mmmbuto/codex-vl)
+distribution, but its compatibility with TE2 has not yet been validated.
 
 ## Requirements
 

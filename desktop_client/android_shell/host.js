@@ -1,6 +1,8 @@
 const DEFAULT_SETTINGS = {
   frameworkHost: "127.0.0.1",
   frameworkPort: 8089,
+  autostart: false,
+  preferredAppId: "",
 };
 
 const LOCAL_SETTINGS_APP = {
@@ -81,7 +83,12 @@ function normalizeSettings(settings = {}) {
     Number.isInteger(parsedPort) && parsedPort >= 1 && parsedPort <= 65535
       ? parsedPort
       : DEFAULT_SETTINGS.frameworkPort;
-  return { frameworkHost, frameworkPort };
+  return {
+    frameworkHost,
+    frameworkPort,
+    autostart: settings.autostart === true,
+    preferredAppId: String(settings.preferredAppId || "").trim(),
+  };
 }
 
 export async function getSettings() {
@@ -95,6 +102,8 @@ export async function saveSettings(settings) {
   const result = await nativeRequest("save_settings", {
     frameworkHost: String(settings?.frameworkHost || "").trim(),
     frameworkPort: Number(settings?.frameworkPort),
+    autostart: settings?.autostart === true,
+    preferredAppId: String(settings?.preferredAppId || "").trim(),
   });
   const nextSettings = result?.settings || result;
   cachedSettings = normalizeSettings(nextSettings);

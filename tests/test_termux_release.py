@@ -405,7 +405,7 @@ class LinuxInstallerTests(unittest.TestCase):
             self.assertEqual(environment["TE2_DATA_HOME"], str(data_home))
             self.assertTrue((config_root / "desktop-local-framework.json").is_file())
 
-    def test_desktop_config_preserves_user_policy_while_filling_empty_paths(self) -> None:
+    def test_desktop_config_reconciles_managed_paths_and_preserves_user_policy(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             home = root / "home"
@@ -418,8 +418,8 @@ class LinuxInstallerTests(unittest.TestCase):
                 json.dumps(
                     {
                         "version": 1,
-                        "command": "",
-                        "venvPath": "",
+                        "command": "/old/install/bin/te2",
+                        "venvPath": "/old/install/venv",
                         "broadcast": ["tailscale0"],
                         "port": 9010,
                         "env": {"EXAMPLE": "value"},
@@ -573,7 +573,18 @@ class PublicReleaseTests(unittest.TestCase):
 
 
 class TermuxInstallerTransactionTests(unittest.TestCase):
-    def test_activation_replaces_same_version_and_preserves_other_release(self) -> None:
+    @staticmethod
+    def _staged_termux_release(releases: Path, version: str, suffix: str) -> Path:
+        staged = releases / f".{version}.stage-{suffix}"
+        (staged / "python").mkdir(parents=True)
+        (staged / "libexec").mkdir()
+        server = staged / "libexec" / "te2-server"
+        server.write_text("server", encoding="utf-8")
+        server.chmod(0o755)
+        (staged / "install-receipt.json").write_text("{}\n", encoding="utf-8")
+        return staged
+
+    def test_activation_replaces_same_version_and_retains_prior_current(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             prefix = root / "prefix"
@@ -584,6 +595,7 @@ class TermuxInstallerTransactionTests(unittest.TestCase):
             other = releases / "0.2.337"
             other.mkdir()
             (other / "install-receipt.json").write_text("{}\n", encoding="utf-8")
+            installer._replace_symlink(install / "current", "releases/0.2.337")
             old = releases / "0.2.338"
             old.mkdir()
             (old / "old").write_text("old", encoding="utf-8")
@@ -597,6 +609,7 @@ class TermuxInstallerTransactionTests(unittest.TestCase):
             installer._activate_release(install, prefix, staged, "0.2.338")
 
             self.assertEqual(os.readlink(install / "current"), "releases/0.2.338")
+            self.assertEqual(os.readlink(install / "previous"), "releases/0.2.337")
             self.assertFalse((releases / "0.2.338" / "old").exists())
             self.assertTrue(other.exists())
             wrapper = prefix / "bin" / "te2"
@@ -605,6 +618,81 @@ class TermuxInstallerTransactionTests(unittest.TestCase):
                 managed = prefix / "bin" / command
                 self.assertTrue(managed.is_file())
                 self.assertIn(installer.MANAGED_MARKER, managed.read_text(encoding="utf-8"))
+
+    def test_third_activation_and_rollback_retain_exactly_two_releases(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            prefix = root / "prefix"
+            (prefix / "bin").mkdir(parents=True)
+            install = root / "data" / "install"
+            releases = install / "releases"
+            releases.mkdir(parents=True)
+
+            for index, version in enumerate(("0.2.337", "0.2.338", "0.2.339")):
+                installer._activate_release(
+                    install,
+                    prefix,
+                    self._staged_termux_release(releases, version, str(index)),
+                    version,
+                )
+
+            self.assertEqual(os.readlink(install / "current"), "releases/0.2.339")
+            self.assertEqual(os.readlink(install / "previous"), "releases/0.2.338")
+            self.assertEqual(
+                {path.name for path in releases.iterdir() if path.is_dir()},
+                {"0.2.338", "0.2.339"},
+            )
+
+            installer._rollback(install, prefix, "0.2.338")
+
+            self.assertEqual(os.readlink(install / "current"), "releases/0.2.338")
+            self.assertEqual(os.readlink(install / "previous"), "releases/0.2.339")
+            self.assertEqual(
+                {path.name for path in releases.iterdir() if path.is_dir()},
+                {"0.2.338", "0.2.339"},
+            )
+
+    def test_activation_failure_restores_current_previous_and_wrappers(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            install = root / "install"
+            releases = install / "releases"
+            releases.mkdir(parents=True)
+            for version in ("0.2.337", "0.2.338"):
+                release = releases / version
+                (release / "venv" / "bin").mkdir(parents=True)
+                for command in installer.MANAGED_COMMANDS:
+                    executable = release / "venv" / "bin" / command
+                    executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+                    executable.chmod(0o755)
+                (release / "install-receipt.json").write_text("{}\n", encoding="utf-8")
+            installer._replace_symlink(install / "current", "releases/0.2.338")
+            installer._replace_symlink(install / "previous", "releases/0.2.337")
+            wrappers = installer._wrapper_paths_for_bin(bin_dir)
+            installer._write_linux_wrappers(wrappers, install)
+            wrapper_payloads = {path: path.read_bytes() for path in wrappers.values()}
+            staged = releases / ".0.2.339.stage-failure"
+            (staged / "venv" / "bin").mkdir(parents=True)
+
+            with patch.object(installer, "_validate_linux_release", return_value=None):
+                with self.assertRaisesRegex(RuntimeError, "desktop integration failed"):
+                    installer._activate_linux_release(
+                        install,
+                        bin_dir,
+                        staged,
+                        "0.2.339",
+                        post_activate=lambda _release: (_ for _ in ()).throw(
+                            RuntimeError("desktop integration failed")
+                        ),
+                    )
+
+            self.assertEqual(os.readlink(install / "current"), "releases/0.2.338")
+            self.assertEqual(os.readlink(install / "previous"), "releases/0.2.337")
+            self.assertFalse((releases / "0.2.339").exists())
+            for path, payload in wrapper_payloads.items():
+                self.assertEqual(path.read_bytes(), payload)
 
     def test_uninstall_removes_only_receipted_install_subtree(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

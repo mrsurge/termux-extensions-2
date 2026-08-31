@@ -52,7 +52,9 @@ We will validate at least 2 deterministic features (hover + symbols + diagnostic
 - Python: `ms-pyright` (baseline) — **validated**: open file, document symbols, hover, diagnostics.
 - TypeScript/JavaScript: built-in TS language service — **validated**: diagnostics working for `.ts`, `.js`, `.mjs`, `.tsx`, `.jsx` files. JS files get JavaScript-level strictness (lenient), TS files get full type checking.
 - C++: `llvm-vs-code-extensions.vscode-clangd` — **validated**: diagnostics on open + live diagnostics on edit (after endColumn fix). Clangd is strict about UTF-16 range validity — sentinel endColumn values like INT32_MAX cause `"utf-16 offset ... is invalid for line N"` rejection and break subsequent analysis.
-- Rust: `rust-lang.rust-analyzer` — pending.
+- Rust: `rust-lang.rust-analyzer` — **validated** on desktop and Termux when a
+  host-native `rust-analyzer` is installed and selected in the extension's
+  normal server-path configuration.
 
 ---
 
@@ -2935,15 +2937,21 @@ the extension-webview runtime and lifetime rules.
 ### Per-host presentation
 
 Each host stores versioned local presentation state: dock order, foreground host,
-last agent host/presentation tuple, and embedded/hidden/detached mode. Browser
-and GeckoView use origin-local storage. Electron uses its validated preload/main
-bridge and atomic XDG-config storage. A snapshot prunes absent membership,
-preserves surviving local order, appends new slots, and chooses a local fallback
-foreground.
+stable last-agent host, and embedded/hidden/detached mode. It is partitioned by
+the selected framework origin plus normalized project path and retains a bounded
+most-recent project map. Browser, GeckoView, and Cefrium use origin-local
+storage. Electron uses its validated preload/main bridge and atomic XDG-config
+storage. Only an authoritative complete membership snapshot prunes absent
+slots; transient WBA reset/disconnect snapshots preserve ledger membership and
+parked client preferences while the adapter rehydrates. Authoritative
+reconciliation preserves surviving local order, appends new slots, and chooses
+a local fallback foreground.
 
 `clientInstanceId` is the stable client authority. `windowId` is reload-stable
 metadata and `presentationId` identifies a transient inline/detached incarnation.
-Neither is shared Sidebar membership authority. Canonical legacy slot and
+Neither is shared Sidebar membership authority, and `presentationId` is never
+durable state. A re-created host must publish its fresh presentation identity
+before exact-client mention routing may succeed. Canonical legacy slot and
 presentation identities migrate once; canonical records win collisions.
 
 ### Exact-client Sidebar mentions

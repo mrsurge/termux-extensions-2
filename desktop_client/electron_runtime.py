@@ -478,7 +478,7 @@ def _build_runtime(
             shutil.rmtree(workspace, ignore_errors=True)
 
 
-def _publish_target(stage: Path, target: Path) -> None:
+def _publish_target(stage: Path, target: Path) -> Path | None:
     backup = target.with_name(f".{target.name}.{uuid.uuid4().hex}.backup")
     moved_existing = False
     try:
@@ -490,9 +490,7 @@ def _publish_target(stage: Path, target: Path) -> None:
         if moved_existing and backup.exists() and not target.exists():
             os.replace(backup, target)
         raise
-    finally:
-        if backup.exists():
-            shutil.rmtree(backup, ignore_errors=True)
+    return backup if moved_existing else None
 
 
 def _activate_runtime(base: Path, target: Path) -> None:
@@ -501,6 +499,54 @@ def _activate_runtime(base: Path, target: Path) -> None:
     relative = target.relative_to(base)
     temporary.symlink_to(relative, target_is_directory=True)
     os.replace(temporary, current)
+
+
+def _restore_runtime_pointer(path: Path, target: str | None) -> None:
+    if target is None:
+        path.unlink(missing_ok=True)
+        return
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    temporary.symlink_to(target, target_is_directory=True)
+    os.replace(temporary, path)
+
+
+def _runtime_pointer_fingerprint(target: str | None) -> str | None:
+    if not target:
+        return None
+    parts = Path(target).parts
+    if len(parts) != 2 or parts[0] != "runtimes":
+        return None
+    return parts[1]
+
+
+def _finalize_runtime_set(
+    base: Path,
+    *,
+    current_fingerprint: str,
+    old_current: str | None,
+    old_previous: str | None,
+) -> None:
+    old_current_fingerprint = _runtime_pointer_fingerprint(old_current)
+    old_previous_fingerprint = _runtime_pointer_fingerprint(old_previous)
+    fallback = (
+        old_current_fingerprint
+        if old_current_fingerprint and old_current_fingerprint != current_fingerprint
+        else old_previous_fingerprint
+        if old_previous_fingerprint and old_previous_fingerprint != current_fingerprint
+        else None
+    )
+    previous = base / "previous"
+    if fallback is None:
+        previous.unlink(missing_ok=True)
+    else:
+        _restore_runtime_pointer(previous, f"runtimes/{fallback}")
+
+    retained = {current_fingerprint, *([fallback] if fallback else [])}
+    runtimes = base / "runtimes"
+    for candidate in runtimes.iterdir():
+        if not candidate.is_dir() or candidate.name in retained:
+            continue
+        shutil.rmtree(candidate, ignore_errors=True)
 
 
 def ensure_desktop_runtime(
@@ -542,42 +588,70 @@ def ensure_desktop_runtime(
     lock_path = base / ".bootstrap.lock"
     with lock_path.open("a+b") as lock_file:
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-        if force or not _runtime_is_ready(target, expected):
-            _check_free_space(cache_base)
-            stage = runtimes / f".{fingerprint}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
-            try:
-                _build_runtime(
-                    node_binary=node_binary,
-                    npm_binary=npm_binary,
-                    target_stage=stage,
-                    cache_base=cache_base,
-                    environ=source,
-                )
-                (stage / RUNTIME_MARKER).write_text(
-                    json.dumps(expected, indent=2, sort_keys=True) + "\n",
-                    encoding="utf-8",
-                )
-                if not _runtime_is_ready(stage, expected):
-                    raise ElectronRuntimeError(
-                        "Electron application validation failed after packaging"
+        current = base / "current"
+        previous = base / "previous"
+        if current.exists() and not current.is_symlink():
+            raise ElectronRuntimeError(f"Electron current pointer is not a symlink: {current}")
+        if previous.exists() and not previous.is_symlink():
+            raise ElectronRuntimeError(f"Electron previous pointer is not a symlink: {previous}")
+        old_current = os.readlink(current) if current.is_symlink() else None
+        old_previous = os.readlink(previous) if previous.is_symlink() else None
+        published_backup: Path | None = None
+        published = False
+        try:
+            if force or not _runtime_is_ready(target, expected):
+                _check_free_space(cache_base)
+                stage = runtimes / f".{fingerprint}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+                try:
+                    _build_runtime(
+                        node_binary=node_binary,
+                        npm_binary=npm_binary,
+                        target_stage=stage,
+                        cache_base=cache_base,
+                        environ=source,
                     )
-                _publish_target(stage, target)
-            finally:
-                if stage.exists():
-                    shutil.rmtree(stage, ignore_errors=True)
-        _activate_runtime(base, target)
-
-    runtime = ElectronRuntime(
-        root=target,
-        executable=target / "TE2Desktop-bin",
-        launcher=target / "TE2Desktop",
-        fingerprint=fingerprint,
-        version=version,
-        identity=identity,
-    )
-    if install_integration:
-        install_desktop_integration(runtime, environ=source, home=home)
-    return runtime
+                    (stage / RUNTIME_MARKER).write_text(
+                        json.dumps(expected, indent=2, sort_keys=True) + "\n",
+                        encoding="utf-8",
+                    )
+                    if not _runtime_is_ready(stage, expected):
+                        raise ElectronRuntimeError(
+                            "Electron application validation failed after packaging"
+                        )
+                    published_backup = _publish_target(stage, target)
+                    published = True
+                finally:
+                    if stage.exists():
+                        shutil.rmtree(stage, ignore_errors=True)
+            _activate_runtime(base, target)
+            runtime = ElectronRuntime(
+                root=target,
+                executable=target / "TE2Desktop-bin",
+                launcher=target / "TE2Desktop",
+                fingerprint=fingerprint,
+                version=version,
+                identity=identity,
+            )
+            if install_integration:
+                install_desktop_integration(runtime, environ=source, home=home)
+            _finalize_runtime_set(
+                base,
+                current_fingerprint=fingerprint,
+                old_current=old_current,
+                old_previous=old_previous,
+            )
+            if published_backup is not None:
+                shutil.rmtree(published_backup, ignore_errors=True)
+            return runtime
+        except BaseException:
+            _restore_runtime_pointer(current, old_current)
+            _restore_runtime_pointer(previous, old_previous)
+            if published:
+                if target.exists():
+                    shutil.rmtree(target, ignore_errors=True)
+                if published_backup is not None and published_backup.exists():
+                    os.replace(published_backup, target)
+            raise
 
 
 def _sha256(path: Path) -> str:
@@ -598,6 +672,17 @@ def _atomic_write(path: Path, content: bytes, mode: int) -> None:
     finally:
         if temporary.exists():
             temporary.unlink()
+
+
+def _restore_file_snapshot(
+    snapshot: Mapping[Path, tuple[bytes, int] | None],
+) -> None:
+    for path, prior in snapshot.items():
+        if prior is None:
+            path.unlink(missing_ok=True)
+            continue
+        content, mode = prior
+        _atomic_write(path, content, mode)
 
 
 def _desktop_quote(path: Path) -> str:
@@ -666,23 +751,33 @@ def install_desktop_integration(
             f"{path}"
         )
 
-    for path, content, mode in outputs:
-        _atomic_write(path, content, mode)
-
-    receipt_payload = {
-        "version": 1,
-        "runtimeFingerprint": runtime.fingerprint,
-        "runtimeRoot": str(runtime.root),
-        "files": {
-            str(path): _sha256(path)
-            for path in (paths.wrapper, paths.desktop_entry, paths.icon)
-        },
+    snapshot = {
+        path: (path.read_bytes(), path.stat().st_mode & 0o777) if path.is_file() else None
+        for path in (paths.wrapper, paths.desktop_entry, paths.icon, paths.receipt)
     }
-    _atomic_write(
-        paths.receipt,
-        (json.dumps(receipt_payload, indent=2, sort_keys=True) + "\n").encode("utf-8"),
-        0o600,
-    )
+    try:
+        for path, content, mode in outputs:
+            _atomic_write(path, content, mode)
+
+        receipt_payload = {
+            "version": 1,
+            "runtimeFingerprint": runtime.fingerprint,
+            "runtimeRoot": str(runtime.root),
+            "files": {
+                str(path): _sha256(path)
+                for path in (paths.wrapper, paths.desktop_entry, paths.icon)
+            },
+        }
+        _atomic_write(
+            paths.receipt,
+            (json.dumps(receipt_payload, indent=2, sort_keys=True) + "\n").encode(
+                "utf-8"
+            ),
+            0o600,
+        )
+    except BaseException:
+        _restore_file_snapshot(snapshot)
+        raise
     return paths
 
 

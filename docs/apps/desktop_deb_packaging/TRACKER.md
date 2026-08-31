@@ -1,6 +1,6 @@
 # Unified Linux And Termux Release Installer Tracker
 
-Last updated: 2026-08-28
+Last updated: 2026-08-30
 
 ## Program status
 
@@ -20,12 +20,19 @@ Last updated: 2026-08-28
 | Phase 4C: unified installer and Linux target | Public acquisition, private venv, optional desktop bootstrap, and non-graphical Debian acceptance pass; upgrade/graphical matrix remains | Managed venv is atomic; `--desktop` delegates to that venv's existing Electron bootstrap and config contract |
 | Phase 4D: final integration and publication | `0.2.342` is published and accepted on public Linux/Desktop and physical Termux paths | Release assets are immutable; `0.2.340` remains defective historical data while `0.2.342` is the normal/latest release |
 | Phase 5: Termux target mode | Public `0.2.342` physical install acceptance is green; the full app-worker/Terminal/Code Server matrix last passed on `0.2.341` | Apt-first shared foundations plus a release-local wheel tree; every capability-changing physical acceptance must exercise the exact archived server's app-launch path |
+| Phase 6: upgrade retention, desktop startup, and Sidebar continuity | Source implementation and automated checks complete; installed/live restart matrix remains | No version or publication is authorized; retain one fallback, use normal app readiness, and distinguish transient WBA loss from authoritative membership removal |
 
 ## Confirmed source findings
 
 | Finding | Evidence | Status |
 |---|---|---|
 | Current Electron publication is an unpacked x64 directory | `desktop_client/electron/package.mjs` calls `@electron/packager` and writes a local wrapper only | Confirmed |
+| Installed-release activation has rollback but no retained-fallback/pruning policy | Linux and Termux activation snapshot `current` plus managed wrapper bytes and restore them on failure; successful replacement deletes its temporary backup and old release directories are not pruned | Confirmed |
+| Desktop integration repair and runtime retention are separate concerns | `te2 desktop install` can rewrite receipt-owned wrapper/icon/desktop files even when a runtime is reused, while fingerprinted runtime publication has no current-plus-fallback pruning policy | Confirmed |
+| Installed desktop config currently preserves stale managed paths | `_seed_desktop_local_framework_config` returns early when both `command` and `venvPath` are populated instead of reconciling them to the newly active managed release | Confirmed |
+| Electron preferred-app opening is not persisted product state | Desktop settings v1 stores target/bookmarks/zoom; auto-open currently exists only through `TE2_DESKTOP_AUTO_OPEN`/`TE2_DESKTOP_APP_ID`, while the launcher already discovers and opens apps through the framework API | Confirmed |
+| Extension webview content state already survives through a durable client/surface store | WBA stores bounded `acquireVsCodeApi` and persistent Web Storage records beneath the canonical Code TE2 data root, keyed by `(clientInstanceId, surfaceId)` | Confirmed |
+| Sidebar presentation loss is caused by transient membership pruning | WBA session reset clears webviews and emits an empty snapshot; Python removes the slots, and frontend reconciliation persists order/mode state after pruning those stable host ids | Confirmed |
 | No complete unified installer exists | Electron packaging produces an unpacked application only; no cross-target detection, component acquisition/verification, user-root transaction, receipt, or updater exists | Confirmed |
 | The Python dependency list is mostly direct runtime surface | Packaged source directly imports FastAPI, Starlette, Uvicorn, HTTPX, msgspec, AnyIO, FastMCP, Framework-Shells, Agent Log Server, libarchive-c, socketio, and PyYAML; Linux x86-64 adds the owned Node runtime wheel | Confirmed |
 | `sse-starlette` was held directly by an unmounted router | The dead `app.libs.jobs.jobs_bp` import/router was removed while the job core and handlers remain | Pruned; still transitive through MCP |
@@ -1210,6 +1217,92 @@ Corrective implementation evidence recorded on 2026-08-23:
 - [x] Pass focused mobile-input tests, Code TE2 typecheck/build, synchronized
   versioning, Android asset rebundling, and GeckoView/Cefrium build validation.
 
+## Phase 6 checklist — upgrade retention, desktop startup, and Sidebar continuity
+
+This is the next implementation phase. It has no assigned release version and
+does not authorize publication.
+
+### Phase 6A — bounded install and desktop-runtime upgrades
+
+- [x] Trace current Linux/Termux activation, same-version replacement,
+  managed-wrapper rollback, Electron fingerprint publication, integration
+  receipts, and local-framework config seeding.
+- [x] Retain the prior active installed release as the single fallback after a
+  successful new-version activation.
+- [x] On candidate failure, restore the exact prior `current` and owned global
+  files, remove only failed staging, and preserve the existing fallback.
+- [x] Treat same-version `.replaced` output as transaction-local rollback data;
+  remove it after success without displacing a distinct prior-version fallback.
+- [x] Prune old release/stage/replacement directories only after successful
+  activation and global-file validation, leaving current plus one fallback.
+- [x] Make explicit rollback rotate current/fallback through the normal
+  validation and managed-wrapper transaction without accumulating releases.
+- [x] Continue refusing unmanaged/user-modified wrapper, icon, and desktop-entry
+  collisions; “overwrite” applies only to marker/receipt-owned files.
+- [x] Reconcile installed desktop `command` and `venvPath` to the stable current
+  managed release while preserving `broadcast`, `port`, and `env`.
+- [x] Retain the current Electron runtime fingerprint plus one prior active
+  fingerprint and prune older runtimes only after XDG integration succeeds.
+- [x] Ensure `te2 desktop install` repairs a missing owned `.desktop`, wrapper,
+  or icon on a valid runtime cache hit without forcing an Electron rebuild.
+- [ ] Pass clean/new-version/same-version/failure/rollback/third-version Linux
+  transactions in the accepted Debian SSH harness and the equivalent Termux
+  transaction tests before any release work.
+
+### Phase 6B — Electron autostart and preferred app
+
+- [x] Confirm Desktop settings v1 lacks product autostart/preferred-app state,
+  the environment-only auto-open seam exists, and launcher app discovery/open
+  already uses the framework API.
+- [x] Version-migrate Desktop settings with `autostart: false` and an empty
+  canonical `preferredAppId` default.
+- [x] Populate the preferred-app dropdown from the selected framework's current
+  catalog, excluding the synthetic native Settings app.
+- [x] Disable preferred-app selection unless autostart is enabled and preserve
+  an unavailable prior id without silently changing it.
+- [x] After relay/control-plane and launcher initialization, probe only the
+  selected configured framework origin.
+- [x] If reachable, open the preferred app through its ordinary framework
+  `/open` plus app-shell/readiness path; do not navigate to a constructed direct
+  URL or implicitly start a missing local framework.
+- [x] Leave the launcher interactive with one bounded status/toast when the
+  framework, preferred app, open action, or readiness transaction is unavailable.
+- [x] Keep the connection/startup Save action visually associated with the
+  preferred-app controls. Permit launch-configuration edits while an
+  Electron-owned framework runs as next-start values, while the controller
+  retains the exact active-child launch snapshot until that child exits.
+- [ ] Cover autostart off, reachable app, remote target, missing app, unavailable
+  server, open failure, and `readiness_support` in focused Electron tests and
+  graphical live acceptance.
+  Focused Electron coverage is green; graphical startup acceptance remains.
+
+### Phase 6C — Sidebar extension preference restart continuity
+
+- [x] Separate the existing durable extension-document reconstruction store
+  from client-owned dock/presentation state and trace the restart loss to an
+  empty WBA reset snapshot being treated as authoritative removal.
+- [x] Publish WBA reset/disconnect/startup as non-authoritative availability
+  lifecycle facts; retain ledger membership and client preferences while WBA
+  rehydrates.
+- [x] Allow only a complete post-activation snapshot, explicit panel disposal,
+  provider removal, extension uninstall/disable, or completed workspace
+  transition to remove extension membership.
+- [x] Advance browser/Gecko/Cefrium and Electron presentation persistence to a
+  bounded per-framework/per-project schema that parks inactive project records.
+- [x] Persist stable host ids, order, foreground/last-agent host, and
+  embedded/hidden/detached mode without persisting transient presentation ids.
+- [x] Recreate and republish a fresh exact-client presentation identity after
+  restart before mention routing may resolve.
+- [x] Reconcile only the active project partition; do not let a transient empty
+  snapshot or a project switch erase another project's stored preferences.
+- [x] Keep authoritative uninstall/removal destructive and event-driven; add no
+  polling or timeout-based membership grace period.
+- [ ] Validate dock order, hidden/reopened state, Electron detached placement,
+  and exact-client mentions across app-worker, WBA, framework, and project
+  restarts on Electron plus browser/Gecko/Cefrium shared frontend paths.
+- [ ] Separately validate `acquireVsCodeApi`/Web Storage reconstruction across
+  the same boundaries so presentation success cannot mask content-state loss.
+
 ## Deferred work
 
 - [ ] Linux arm64 Electron package.
@@ -1264,3 +1357,6 @@ Corrective implementation evidence recorded on 2026-08-23:
 | 2026-08-28 | TE2 0.2.340 Termux capability audit | Public archive extraction, exact Motorola installed-server digest, compiled-string comparison, Linux build-script audit, public Debian server digest, and live Ferrous bridge initialization | Failed for Termux only: the archived server was built without `ferrous-framework-native`; Linux/PyPI and desktop are unaffected, and immutable 0.2.340 requires a synchronized 0.2.341 correction |
 | 2026-08-28 | TE2 0.2.341 Ferrous-native corrective release | Clean-tag Linux/Termux/APK construction, PyPI and normal/latest GitHub publication, exact 13-asset digest checks, wiped-Motorola public curl install, real app launch, Terminal MessagePack round trip, managed Code Server opt-in, and isolated Debian public desktop/framework acceptance | Passed; release construction and Termux activation now reject missing native-host capability before publication/use, and both supported public targets launched real workers through `ferrous_framework_native` |
 | 2026-08-28 | TE2 0.2.342 Open VSX compatibility release | Exact artifact-driven Open VSX install tests, clean-tag Linux/Termux/APK construction, PyPI and normal/latest GitHub publication, all 13 API digest checks, isolated public-curl Debian desktop/framework/real-worker acceptance, and user live Motorola install acceptance | Passed; Termux no longer delegates extension compatibility filtering to Code Server's Android/web gallery classification, and both supported public installation paths are green |
+| 2026-08-30 | Phase 6 architecture investigation | Traced installed activation/rollback and desktop receipts, Electron settings/catalog/readiness startup flow, WBA client-scoped reconstruction storage, Sidebar ledger reconciliation, and per-host presentation persistence | Plan refined for one retained fallback, managed config/runtime cleanup, persisted preferred-app autostart, and event-driven Sidebar restart continuity; implementation and publication remain pending |
+| 2026-08-30 | Phase 6 source implementation | Installer and Electron-runtime transaction tests, Electron settings/startup tests, Code TE2 presentation and WBA reset tests, both TypeScript checks, rebuilt host/WBA bundles, Python bridge tests, and GeckoView unit tests | Automated source gates pass; Debian/Termux installed transactions, graphical autostart, and cross-client restart/content-state acceptance remain open; no version or publication performed |
+| 2026-08-30 | Phase 6B running-framework settings correction | Moved the single connection/startup Save action beneath preferred-app selection; allowed launch-config persistence during an owned run; added an immutable active-child launch snapshot and stop/restart adoption test | Electron typecheck and all 100 tests pass; saved launch changes are explicitly next-start values and cannot relabel the active process |

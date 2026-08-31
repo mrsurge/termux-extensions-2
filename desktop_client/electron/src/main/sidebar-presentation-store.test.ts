@@ -23,23 +23,35 @@ const sampleState = {
     terminal: "hidden" as const,
   },
 };
+const frameworkOrigin = "http://100.64.0.10:8089";
+const projectPath = "/home/user/project";
 
 test("Sidebar presentation state is stored atomically under the TE2 config boundary", async () => {
   const configHome = await mkdtemp(join(tmpdir(), "te2-electron-presentation-"));
   const environment = { ...process.env, TE2_CONFIG_HOME: "", XDG_CONFIG_HOME: configHome };
 
   const written = await writeDesktopSidebarPresentationState(
+    frameworkOrigin,
+    projectPath,
     sampleState,
     environment,
   );
-  const loaded = await readDesktopSidebarPresentationState(environment);
+  const loaded = await readDesktopSidebarPresentationState(
+    frameworkOrigin,
+    projectPath,
+    environment,
+  );
   const raw = JSON.parse(
     await readFile(desktopStatePath(environment), "utf8"),
   );
 
-  assert.deepEqual(written, sampleState);
-  assert.deepEqual(loaded, sampleState);
-  assert.deepEqual(raw.sidebar, sampleState);
+  const durable = { ...sampleState, lastAgentPresentationId: "" };
+  assert.deepEqual(written, durable);
+  assert.deepEqual(loaded, durable);
+  assert.deepEqual(
+    raw.sidebar.projects[`${frameworkOrigin}\u0000${projectPath}`],
+    durable,
+  );
 });
 
 test("Sidebar presentation validation rejects unknown modes and versions", () => {
@@ -59,11 +71,15 @@ test("Sidebar presentation validation rejects unknown modes and versions", () =>
 
 test("missing presentation state resolves to an empty versioned state", async () => {
   const configHome = await mkdtemp(join(tmpdir(), "te2-electron-presentation-"));
-  const loaded = await readDesktopSidebarPresentationState({
-    ...process.env,
-    TE2_CONFIG_HOME: "",
-    XDG_CONFIG_HOME: configHome,
-  });
+  const loaded = await readDesktopSidebarPresentationState(
+    frameworkOrigin,
+    projectPath,
+    {
+      ...process.env,
+      TE2_CONFIG_HOME: "",
+      XDG_CONFIG_HOME: configHome,
+    },
+  );
 
   assert.deepEqual(loaded, {
     version: 1,
@@ -94,11 +110,15 @@ test("legacy Code TE2 identities are canonicalized and rewritten on read", async
   // Seed the historical standalone file before the unified state exists.
   await writeFile(path, `${JSON.stringify(legacy, null, 2)}\n`, "utf8");
 
-  const loaded = await readDesktopSidebarPresentationState(environment);
+  const loaded = await readDesktopSidebarPresentationState(
+    frameworkOrigin,
+    projectPath,
+    environment,
+  );
   const raw = await readFile(desktopStatePath(environment), "utf8");
 
   assert.deepEqual(loaded.order, ["slot:code_te2:primary", "terminal"]);
   assert.equal(loaded.foregroundHostId, "slot:code_te2:primary");
-  assert.equal(loaded.lastAgentPresentationId, "frame:code_te2:primary");
+  assert.equal(loaded.lastAgentPresentationId, "");
   assert.doesNotMatch(raw, /file_editor_cm6/);
 });

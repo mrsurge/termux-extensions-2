@@ -55,6 +55,36 @@ function wrapperModuleSource(wrapper) {
   );
 }
 
+test("webview reset snapshots distinguish transient loss from workspace removal", async (t) => {
+  const projectPath = process.cwd();
+  const lifecycle = [];
+  const runtime = new WebviewRuntime({
+    reconstructionStoragePath: await reconstructionStorage(t),
+    rpcIds: RPC,
+    getWorkspaceFolder: () => projectPath,
+    getExtensions: () => [],
+    activateByEvent: async () => undefined,
+    sendExtAwaitTerminalReply: () => ({
+      req: 1,
+      promise: Promise.resolve({ type: 7 }),
+    }),
+    sendExt: () => 1,
+    sendExtMixed: () => 1,
+    onLifecycleEvent: (event) => lifecycle.push(event),
+    onClientNotification: () => {},
+    log: () => {},
+  });
+
+  runtime.clear("disconnect");
+  runtime.clear("workspace_switch");
+
+  assert.equal(lifecycle.at(-2).type, "webview/snapshot");
+  assert.equal(lifecycle.at(-2).authoritative, false);
+  assert.equal(lifecycle.at(-2).reason, "disconnect");
+  assert.equal(lifecycle.at(-1).authoritative, true);
+  assert.equal(lifecycle.at(-1).reason, "workspace_switch");
+});
+
 test("mixed extension-host request uses the Code OSS one-byte argument count", () => {
   const encoded = encodeExtRequestMixedArgs({
     req: 7,

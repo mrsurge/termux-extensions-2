@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 import contextlib
 import fcntl
 import hashlib
@@ -109,7 +109,22 @@ def _run_linux(
         _check_free_space(install_root)
         release = _materialize_linux_release(install_root, version)
         try:
-            _activate_linux_release(install_root, bin_dir, release, version)
+            post_activate: Callable[[Path], None] | None = None
+            if args.desktop:
+                post_activate = lambda installed: _install_linux_desktop(
+                    installed,
+                    install_root=install_root,
+                    bin_dir=bin_dir,
+                    data_home=data_home,
+                    home=home,
+                )
+            _activate_linux_release(
+                install_root,
+                bin_dir,
+                release,
+                version,
+                post_activate=post_activate,
+            )
         except BaseException:
             if release.name.startswith(f".{version}.stage-"):
                 shutil.rmtree(release, ignore_errors=True)
@@ -119,13 +134,6 @@ def _run_linux(
     print(f"TE2 {version} installed at {installed_release}")
     print(f"Launch with: {bin_dir / 'te2'}")
     if args.desktop:
-        _install_linux_desktop(
-            installed_release,
-            install_root=install_root,
-            bin_dir=bin_dir,
-            data_home=data_home,
-            home=home,
-        )
         print(f"TE2 Desktop installed; launcher: {bin_dir / 'te2-desktop'}")
     return 0
 
@@ -639,8 +647,12 @@ def _activate_release(
     (prefix / "bin").mkdir(parents=True, exist_ok=True)
     old_wrappers = _read_managed_wrappers(wrappers, action="replace")
     old_current = os.readlink(current) if current.is_symlink() else None
+    previous = install_root / "previous"
+    old_previous = os.readlink(previous) if previous.is_symlink() else None
     if current.exists() and not current.is_symlink():
         raise SystemExit(f"TE2 current pointer is not a symbolic link: {current}")
+    if previous.exists() and not previous.is_symlink():
+        raise SystemExit(f"TE2 previous pointer is not a symbolic link: {previous}")
     backup = releases / f".{version}.replaced"
     shutil.rmtree(backup, ignore_errors=True)
     try:
@@ -649,6 +661,12 @@ def _activate_release(
         os.replace(staged, target)
         _replace_symlink(current, f"releases/{version}")
         _write_wrappers(wrappers, install_root, prefix)
+        _finalize_release_set(
+            install_root,
+            current_version=version,
+            old_current=old_current,
+            old_previous=old_previous,
+        )
         shutil.rmtree(backup, ignore_errors=True)
     except BaseException:
         if target.exists():
@@ -659,6 +677,7 @@ def _activate_release(
             current.unlink(missing_ok=True)
         else:
             _replace_symlink(current, old_current)
+        _restore_pointer(previous, old_previous)
         _restore_wrappers(old_wrappers)
         raise
 
@@ -668,6 +687,8 @@ def _activate_linux_release(
     bin_dir: Path,
     staged: Path,
     version: str,
+    *,
+    post_activate: Callable[[Path], None] | None = None,
 ) -> None:
     releases = install_root / "releases"
     target = releases / version
@@ -676,8 +697,12 @@ def _activate_linux_release(
     bin_dir.mkdir(mode=0o755, parents=True, exist_ok=True)
     old_wrappers = _read_managed_wrappers(wrappers, action="replace")
     old_current = os.readlink(current) if current.is_symlink() else None
+    previous = install_root / "previous"
+    old_previous = os.readlink(previous) if previous.is_symlink() else None
     if current.exists() and not current.is_symlink():
         raise SystemExit(f"TE2 current pointer is not a symbolic link: {current}")
+    if previous.exists() and not previous.is_symlink():
+        raise SystemExit(f"TE2 previous pointer is not a symbolic link: {previous}")
     backup = releases / f".{version}.replaced"
     shutil.rmtree(backup, ignore_errors=True)
     try:
@@ -687,6 +712,14 @@ def _activate_linux_release(
         _validate_linux_release(target, version, os.environ)
         _replace_symlink(current, f"releases/{version}")
         _write_linux_wrappers(wrappers, install_root)
+        if post_activate is not None:
+            post_activate(target)
+        _finalize_release_set(
+            install_root,
+            current_version=version,
+            old_current=old_current,
+            old_previous=old_previous,
+        )
         shutil.rmtree(backup, ignore_errors=True)
     except BaseException:
         if target.exists():
@@ -697,8 +730,60 @@ def _activate_linux_release(
             current.unlink(missing_ok=True)
         else:
             _replace_symlink(current, old_current)
+        _restore_pointer(previous, old_previous)
         _restore_wrappers(old_wrappers)
         raise
+
+
+def _pointer_version(target: str | None) -> str | None:
+    if target is None:
+        return None
+    match = re.fullmatch(r"releases/([0-9]+\.[0-9]+\.[0-9]+)", target)
+    return match.group(1) if match else None
+
+
+def _restore_pointer(path: Path, target: str | None) -> None:
+    if target is None:
+        path.unlink(missing_ok=True)
+    else:
+        _replace_symlink(path, target)
+
+
+def _finalize_release_set(
+    install_root: Path,
+    *,
+    current_version: str,
+    old_current: str | None,
+    old_previous: str | None,
+) -> None:
+    old_current_version = _pointer_version(old_current)
+    old_previous_version = _pointer_version(old_previous)
+    fallback_version = (
+        old_current_version
+        if old_current_version and old_current_version != current_version
+        else old_previous_version
+        if old_previous_version and old_previous_version != current_version
+        else None
+    )
+    previous = install_root / "previous"
+    if fallback_version is None:
+        previous.unlink(missing_ok=True)
+    else:
+        _replace_symlink(previous, f"releases/{fallback_version}")
+    _prune_release_directories(
+        install_root / "releases",
+        retained={current_version, *([fallback_version] if fallback_version else [])},
+    )
+
+
+def _prune_release_directories(releases: Path, *, retained: set[str]) -> None:
+    for candidate in releases.iterdir():
+        if not candidate.is_dir() or candidate.name in retained:
+            continue
+        if re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", candidate.name) or candidate.name.startswith(
+            "."
+        ):
+            shutil.rmtree(candidate, ignore_errors=True)
 
 
 def _wrapper_paths(prefix: Path) -> dict[str, Path]:
@@ -806,9 +891,25 @@ def _rollback(install_root: Path, prefix: Path, version: str) -> None:
     if not (release / "install-receipt.json").is_file():
         raise SystemExit(f"Installed TE2 release is unavailable: {version}")
     wrappers = _wrapper_paths(prefix)
-    _read_managed_wrappers(wrappers, action="replace")
-    _replace_symlink(install_root / "current", f"releases/{version}")
-    _write_wrappers(wrappers, install_root, prefix)
+    old_wrappers = _read_managed_wrappers(wrappers, action="replace")
+    current = install_root / "current"
+    previous = install_root / "previous"
+    old_current = os.readlink(current) if current.is_symlink() else None
+    old_previous = os.readlink(previous) if previous.is_symlink() else None
+    try:
+        _replace_symlink(current, f"releases/{version}")
+        _write_wrappers(wrappers, install_root, prefix)
+        _finalize_release_set(
+            install_root,
+            current_version=version,
+            old_current=old_current,
+            old_previous=old_previous,
+        )
+    except BaseException:
+        _restore_pointer(current, old_current)
+        _restore_pointer(previous, old_previous)
+        _restore_wrappers(old_wrappers)
+        raise
 
 
 def _rollback_linux(install_root: Path, bin_dir: Path, version: str) -> None:
@@ -818,9 +919,26 @@ def _rollback_linux(install_root: Path, bin_dir: Path, version: str) -> None:
     ).is_file():
         raise SystemExit(f"Installed TE2 release is unavailable: {version}")
     wrappers = _wrapper_paths_for_bin(bin_dir)
-    _read_managed_wrappers(wrappers, action="replace")
-    _replace_symlink(install_root / "current", f"releases/{version}")
-    _write_linux_wrappers(wrappers, install_root)
+    old_wrappers = _read_managed_wrappers(wrappers, action="replace")
+    current = install_root / "current"
+    previous = install_root / "previous"
+    old_current = os.readlink(current) if current.is_symlink() else None
+    old_previous = os.readlink(previous) if previous.is_symlink() else None
+    try:
+        _validate_linux_release(release, version, os.environ)
+        _replace_symlink(current, f"releases/{version}")
+        _write_linux_wrappers(wrappers, install_root)
+        _finalize_release_set(
+            install_root,
+            current_version=version,
+            old_current=old_current,
+            old_previous=old_previous,
+        )
+    except BaseException:
+        _restore_pointer(current, old_current)
+        _restore_pointer(previous, old_previous)
+        _restore_wrappers(old_wrappers)
+        raise
 
 
 def _uninstall(install_root: Path, prefix: Path) -> None:
@@ -864,16 +982,16 @@ def _install_linux_desktop(
         }
     )
     environment.pop("PYTHONHOME", None)
+    _seed_desktop_local_framework_config(
+        install_root=install_root,
+        bin_dir=bin_dir,
+        home=home,
+    )
     subprocess.run(
         [str(te2), "desktop", "install"],
         env=environment,
         check=True,
         timeout=30 * 60,
-    )
-    _seed_desktop_local_framework_config(
-        install_root=install_root,
-        bin_dir=bin_dir,
-        home=home,
     )
 
 
@@ -905,15 +1023,11 @@ def _seed_desktop_local_framework_config(
         if not isinstance(decoded, dict) or decoded.get("version") != 1:
             raise SystemExit(f"Desktop local-framework configuration is invalid: {path}")
         payload = dict(decoded)
-        if payload.get("command") and payload.get("venvPath"):
-            return path
         payload.setdefault("broadcast", [])
         payload.setdefault("env", {})
         payload.setdefault("port", 8089)
-        payload["command"] = payload.get("command") or str(bin_dir / "te2")
-        payload["venvPath"] = payload.get("venvPath") or str(
-            install_root / "current" / "venv"
-        )
+        payload["command"] = str(bin_dir / "te2")
+        payload["venvPath"] = str(install_root / "current" / "venv")
     else:
         payload = {
             "broadcast": [],

@@ -161,6 +161,34 @@ class WbaWebviewProjectionTests(unittest.IsolatedAsyncioTestCase):
         forget.assert_called_once_with([host_id])
         publish.assert_awaited_once()
 
+    async def test_session_reset_snapshot_retains_membership(self) -> None:
+        project = "/workspace/project"
+        reconcile = Mock()
+        publish = AsyncMock()
+        with (
+            patch.object(wba_event_bridge, "_event_workspace_root", return_value=project),
+            patch(
+                "app.apps.code_te2.ui_ipc.sidebar_window_state.reconcile_extension_webview_slots",
+                reconcile,
+            ),
+            patch(
+                "app.apps.code_te2.sidebar_window_events.publish_sidebar_window_state_changed",
+                publish,
+            ),
+        ):
+            await wba_event_bridge.dispatch_wba_pipe_event(
+                {
+                    "type": "webview/snapshot",
+                    "workspaceFolder": project,
+                    "authoritative": False,
+                    "reason": "disconnect",
+                    "surfaces": [],
+                }
+            )
+
+        reconcile.assert_not_called()
+        publish.assert_not_awaited()
+
 
 if __name__ == "__main__":
     unittest.main()

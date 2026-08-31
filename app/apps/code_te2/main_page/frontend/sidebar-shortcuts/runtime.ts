@@ -288,6 +288,8 @@ export function initSidebarShortcuts(
     typeof options.getClientId === "function" ? options.getClientId : () => "";
   const getWindowId =
     typeof options.getWindowId === "function" ? options.getWindowId : () => "";
+  const getProjectRoot =
+    typeof options.getProjectRoot === "function" ? options.getProjectRoot : () => "";
   const setMenuChecked =
     typeof options.setMenuChecked === "function"
       ? options.setMenuChecked
@@ -374,6 +376,10 @@ export function initSidebarShortcuts(
   let _presentationStateLoaded = false;
   let _presentationStateLoadPromise: Promise<void> | null = null;
   let _presentationPersistQueue: Promise<void> = Promise.resolve();
+  let _presentationProjectPath = "";
+  let _presentationLoadingProjectPath = "";
+  let _presentationProjectGeneration = 0;
+  let _pendingPresentationSlots: SidebarAppDockSlot[] | null = null;
   let _detachedPresentationIds = new Map<string, string>();
   let _detachPromises = new Map<string, Promise<boolean>>();
   let _electronSurfaceEventsUnsubscribe: (() => void) | null = null;
@@ -1428,11 +1434,12 @@ export function initSidebarShortcuts(
   }
 
   function _queuePresentationStatePersist() {
-    if (!_presentationStateLoaded) return;
+    if (!_presentationStateLoaded || !_presentationProjectPath) return;
     const snapshot = _presentationState;
+    const projectPath = _presentationProjectPath;
     _presentationPersistQueue = _presentationPersistQueue
       .catch(() => {})
-      .then(() => saveSidebarPresentationState(snapshot))
+      .then(() => saveSidebarPresentationState(snapshot, projectPath))
       .catch((error: unknown) => {
         console.warn("[Sidebar] presentation state persist failed", error);
       });
@@ -2011,22 +2018,80 @@ export function initSidebarShortcuts(
     return ordered;
   }
 
-  async function _ensurePresentationStateLoaded(): Promise<void> {
-    if (_presentationStateLoaded) return;
-    if (_presentationStateLoadPromise) return _presentationStateLoadPromise;
+  function _normalizedPresentationProject(value: unknown): string {
+    const projectPath = _normStr(value);
+    return projectPath === "/" ? projectPath : projectPath.replace(/\/+$/, "");
+  }
+
+  function _projectPathFromSlots(slots: SidebarAppDockSlot[]): string {
+    for (const slot of slots) {
+      const direct = _normalizedPresentationProject(
+        slot.projectPath || slot.project_path,
+      );
+      if (direct) return direct;
+      const webview = asRecord(slot.webviewSurface || slot.webview_surface);
+      const webviewProject = _normalizedPresentationProject(
+        webview.projectPath || webview.project_path,
+      );
+      if (webviewProject) return webviewProject;
+      const runProfile = asRecord(
+        slot.runProfileSurface || slot.run_profile_surface,
+      );
+      const runProfileProject = _normalizedPresentationProject(
+        runProfile.projectPath || runProfile.project_path,
+      );
+      if (runProfileProject) return runProfileProject;
+    }
+    return "";
+  }
+
+  async function _ensurePresentationStateLoaded(
+    requestedProject = getProjectRoot(),
+    slots: SidebarAppDockSlot[] | null = null,
+  ): Promise<void> {
+    const projectPath = _normalizedPresentationProject(requestedProject)
+      || _projectPathFromSlots(slots || _appDockSlots);
+    if (!projectPath) {
+      _presentationStateLoaded = true;
+      return;
+    }
+    if (_presentationStateLoaded && _presentationProjectPath === projectPath) return;
+    if (slots) _pendingPresentationSlots = slots;
+    if (
+      _presentationStateLoadPromise &&
+      _presentationLoadingProjectPath === projectPath
+    ) {
+      return _presentationStateLoadPromise;
+    }
+    if (_presentationStateLoaded && _presentationProjectPath) {
+      _queuePresentationStatePersist();
+    }
+    const generation = ++_presentationProjectGeneration;
+    _presentationStateLoaded = false;
+    _presentationLoadingProjectPath = projectPath;
     _presentationStateLoadPromise = (async () => {
       try {
-        _presentationState = await loadSidebarPresentationState();
+        await _presentationPersistQueue.catch(() => {});
+        const loaded = await loadSidebarPresentationState(projectPath);
+        if (generation !== _presentationProjectGeneration) return;
+        _presentationState = loaded;
       } catch (error) {
         console.warn("[Sidebar] presentation state load failed", error);
+        if (generation !== _presentationProjectGeneration) return;
         _presentationState = emptySidebarPresentationState();
       }
+      if (generation !== _presentationProjectGeneration) return;
+      _presentationProjectPath = projectPath;
+      _presentationLoadingProjectPath = "";
       _presentationStateLoaded = true;
-      _appDockSlots = _reconcilePresentationWithDockSlots(_appDockSlots, {
+      const nextSlots = _pendingPresentationSlots || _appDockSlots;
+      _pendingPresentationSlots = null;
+      _appDockSlots = _reconcilePresentationWithDockSlots(nextSlots, {
         notifyFallback: false,
       });
       _clientActiveWindowHostId = _presentationState.foregroundHostId;
       _presentationStateLoadPromise = null;
+      if (_hydrated) _applyUiPrefsHydrated();
     })();
     return _presentationStateLoadPromise;
   }
@@ -5146,6 +5211,12 @@ export function initSidebarShortcuts(
 
   function _applyAppDockLedgerPayload(payload: UnknownRecord) {
     const windows = _appDockSlotsFromLedgerPayload(payload);
+    const projectPath = _projectPathFromSlots(windows)
+      || _normalizedPresentationProject(getProjectRoot());
+    if (projectPath && projectPath !== _presentationProjectPath) {
+      void _ensurePresentationStateLoaded(projectPath, windows);
+      return;
+    }
     _appDockSlots = _reconcilePresentationWithDockSlots(windows);
     if (
       _pendingActivatedWindowHostId &&

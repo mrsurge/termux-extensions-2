@@ -25,6 +25,7 @@ const EDITOR_MODES = new Set<ElectronEditorSurfaceMode>([
 const MAX_PRESENTATION_IDS = 256;
 const MAX_ID_LENGTH = 512;
 const MAX_EDITOR_PROJECTS = 64;
+const MAX_SIDEBAR_PROJECTS = 32;
 const MIN_DOCK_SIZE = 320;
 const MAX_DOCK_SIZE = 1200;
 const LEGACY_CODE_TE2_IDENTITY =
@@ -38,12 +39,18 @@ export type ElectronDesktopIdentities = {
 export type ElectronDesktopState = {
   version: 1;
   identities: ElectronDesktopIdentities;
-  sidebar: ElectronSidebarPresentationState;
+  sidebar: ElectronSidebarPresentationStore;
   editorSurfaces: {
     secondary: {
       projects: Record<string, ElectronEditorSurfacePresentation>;
     };
   };
+};
+
+type ElectronSidebarPresentationStore = {
+  version: 2;
+  projects: Record<string, ElectronSidebarPresentationState>;
+  legacy: ElectronSidebarPresentationState | null;
 };
 
 type LegacyClientIdentity = {
@@ -172,6 +179,54 @@ export function validateDesktopSidebarPresentationState(
   };
 }
 
+function durableDesktopSidebarPresentationState(
+  value: unknown,
+): ElectronSidebarPresentationState {
+  return {
+    ...validateDesktopSidebarPresentationState(value),
+    lastAgentPresentationId: "",
+  };
+}
+
+function emptyDesktopSidebarPresentationStore(
+  legacy: ElectronSidebarPresentationState | null = null,
+): ElectronSidebarPresentationStore {
+  return { version: 2, projects: {}, legacy };
+}
+
+function validateDesktopSidebarPresentationStore(
+  value: unknown,
+): ElectronSidebarPresentationStore {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return emptyDesktopSidebarPresentationStore();
+  }
+  const raw = value as Record<string, unknown>;
+  if (raw.version === 1) {
+    return emptyDesktopSidebarPresentationStore(
+      durableDesktopSidebarPresentationState(raw),
+    );
+  }
+  if (
+    raw.version !== 2
+    || !raw.projects
+    || typeof raw.projects !== "object"
+    || Array.isArray(raw.projects)
+  ) {
+    throw new Error("Unsupported Sidebar presentation store version");
+  }
+  const projects: Record<string, ElectronSidebarPresentationState> = {};
+  for (const [key, state] of Object.entries(
+    raw.projects as Record<string, unknown>,
+  ).slice(-MAX_SIDEBAR_PROJECTS)) {
+    if (!key || key.length > 4096) continue;
+    projects[key] = durableDesktopSidebarPresentationState(state);
+  }
+  const legacy = raw.legacy === null || raw.legacy === undefined
+    ? null
+    : durableDesktopSidebarPresentationState(raw.legacy);
+  return { version: 2, projects, legacy };
+}
+
 function defaultEditorPresentation(): ElectronEditorSurfacePresentation {
   return {
     mode: "closed",
@@ -254,7 +309,7 @@ function validateDesktopState(value: unknown): ElectronDesktopState {
       primaryClientInstanceId,
       secondaryClientInstanceId,
     },
-    sidebar: validateDesktopSidebarPresentationState(raw.sidebar),
+    sidebar: validateDesktopSidebarPresentationStore(raw.sidebar),
     editorSurfaces: { secondary: { projects } },
   };
 }
@@ -269,7 +324,7 @@ function createDesktopState(
       primaryClientInstanceId,
       secondaryClientInstanceId: generatedClientId(),
     },
-    sidebar,
+    sidebar: emptyDesktopSidebarPresentationStore(sidebar),
     editorSurfaces: { secondary: { projects: {} } },
   };
 }
@@ -336,9 +391,14 @@ async function readDesktopStateUnlocked(
   environment: NodeJS.ProcessEnv,
 ): Promise<ElectronDesktopState> {
   try {
-    return validateDesktopState(
-      JSON.parse(await readFile(desktopStatePath(environment), "utf8")),
-    );
+    const decoded = JSON.parse(
+      await readFile(desktopStatePath(environment), "utf8"),
+    ) as unknown;
+    const normalized = validateDesktopState(decoded);
+    if (JSON.stringify(decoded) !== JSON.stringify(normalized)) {
+      return writeDesktopStateUnlocked(normalized, environment);
+    }
+    return normalized;
   } catch (error) {
     if (
       !error ||
@@ -391,22 +451,45 @@ export function resetDesktopIdentities(
 }
 
 export function readDesktopSidebarState(
+  frameworkOrigin: string,
+  projectPath: string,
   environment = process.env,
 ): Promise<ElectronSidebarPresentationState> {
-  return withStateLock(async () => ({
-    ...(await readDesktopStateUnlocked(environment)).sidebar,
-  }));
+  const key = desktopEditorProjectKey(frameworkOrigin, projectPath);
+  return withStateLock(async () => {
+    const state = await readDesktopStateUnlocked(environment);
+    const stored = state.sidebar.projects[key];
+    if (stored) return { ...stored, presentations: { ...stored.presentations } };
+    if (state.sidebar.legacy) {
+      const migrated = state.sidebar.legacy;
+      state.sidebar.legacy = null;
+      state.sidebar.projects[key] = migrated;
+      await writeDesktopStateUnlocked(state, environment);
+      return { ...migrated, presentations: { ...migrated.presentations } };
+    }
+    return emptyDesktopSidebarPresentationState();
+  });
 }
 
 export function writeDesktopSidebarState(
+  frameworkOrigin: string,
+  projectPath: string,
   value: unknown,
   environment = process.env,
 ): Promise<ElectronSidebarPresentationState> {
+  const key = desktopEditorProjectKey(frameworkOrigin, projectPath);
   return withStateLock(async () => {
     const state = await readDesktopStateUnlocked(environment);
-    state.sidebar = validateDesktopSidebarPresentationState(value);
+    const normalized = durableDesktopSidebarPresentationState(value);
+    delete state.sidebar.projects[key];
+    state.sidebar.projects[key] = normalized;
+    state.sidebar.projects = Object.fromEntries(
+      Object.entries(state.sidebar.projects).slice(-MAX_SIDEBAR_PROJECTS),
+    );
+    state.sidebar.legacy = null;
     const written = await writeDesktopStateUnlocked(state, environment);
-    return { ...written.sidebar };
+    const stored = written.sidebar.projects[key] || normalized;
+    return { ...stored, presentations: { ...stored.presentations } };
   });
 }
 

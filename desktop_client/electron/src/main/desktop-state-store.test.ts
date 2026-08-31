@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 
@@ -49,7 +49,12 @@ test("desktop state atomically composes identities, Sidebar state, and second-ed
       maximized: false,
     };
     await Promise.all([
-      writeDesktopSidebarState(sidebar, environment),
+      writeDesktopSidebarState(
+        "http://100.64.0.10:8089",
+        "/home/user/project",
+        sidebar,
+        environment,
+      ),
       writeSecondaryEditorPresentation(
         "http://100.64.0.10:8089",
         "/home/user/project",
@@ -58,7 +63,15 @@ test("desktop state atomically composes identities, Sidebar state, and second-ed
       ),
     ]);
 
-    assert.deepEqual(await readDesktopSidebarState(environment), sidebar);
+    const durableSidebar = { ...sidebar, lastAgentPresentationId: "" };
+    assert.deepEqual(
+      await readDesktopSidebarState(
+        "http://100.64.0.10:8089",
+        "/home/user/project",
+        environment,
+      ),
+      durableSidebar,
+    );
     assert.deepEqual(
       await readSecondaryEditorPresentation(
         "http://100.64.0.10:8089",
@@ -71,7 +84,12 @@ test("desktop state atomically composes identities, Sidebar state, and second-ed
     const raw = JSON.parse(await readFile(desktopStatePath(environment), "utf8"));
     assert.equal(raw.version, 1);
     assert.deepEqual(raw.identities, identities);
-    assert.deepEqual(raw.sidebar, sidebar);
+    assert.deepEqual(
+      raw.sidebar.projects[
+        "http://100.64.0.10:8089\u0000/home/user/project"
+      ],
+      durableSidebar,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -122,4 +140,44 @@ test("second-editor project keys retain configured-origin and project boundaries
     desktopEditorProjectKey("http://100.64.0.10:8089", "/home/user/project"),
     desktopEditorProjectKey("http://127.0.0.1:8089", "/home/user/project"),
   );
+});
+
+test("desktop state read rewrites transient Sidebar presentation ids", async () => {
+  const root = await mkdtemp(
+    join(await temporaryRoot(), "te2-electron-desktop-state-"),
+  );
+  const environment = testEnvironment(root);
+  try {
+    await readDesktopIdentities(environment);
+    const path = desktopStatePath(environment);
+    const seeded = JSON.parse(await readFile(path, "utf8"));
+    seeded.sidebar.projects[
+      "http://100.64.0.10:8089\u0000/home/user/project"
+    ] = {
+      version: 1,
+      order: ["agent"],
+      foregroundHostId: "agent",
+      lastAgentHostId: "agent",
+      lastAgentPresentationId: "transient-frame",
+      presentations: { agent: "embedded" },
+    };
+    await writeFile(path, `${JSON.stringify(seeded, null, 2)}\n`, "utf8");
+
+    const loaded = await readDesktopSidebarState(
+      "http://100.64.0.10:8089",
+      "/home/user/project",
+      environment,
+    );
+    const rewritten = JSON.parse(await readFile(path, "utf8"));
+
+    assert.equal(loaded.lastAgentPresentationId, "");
+    assert.equal(
+      rewritten.sidebar.projects[
+        "http://100.64.0.10:8089\u0000/home/user/project"
+      ].lastAgentPresentationId,
+      "",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

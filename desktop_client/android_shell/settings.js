@@ -27,6 +27,9 @@ const localFrameworkConfigPath = document.querySelector("#local-framework-config
 const saveLocalFrameworkConfigButton = document.querySelector("#save-local-framework-config");
 const addLocalFrameworkBroadcastButton = document.querySelector("#add-local-framework-broadcast");
 const addLocalFrameworkEnvironmentButton = document.querySelector("#add-local-framework-env");
+const autostartPreferredAppInput = document.querySelector("#autostart-preferred-app");
+const preferredAppSelect = document.querySelector("#preferred-app");
+const preferredAppStatus = document.querySelector("#preferred-app-status");
 let frameworkBookmarks = [];
 
 function setStatus(element, state, text) {
@@ -55,6 +58,8 @@ async function connectToFramework(frameworkHost, frameworkPort, successMessage =
   const settings = await desktopShellHost.saveSettings({
     frameworkHost,
     frameworkPort: Number(frameworkPort),
+    autostart: autostartPreferredAppInput.checked,
+    preferredAppId: preferredAppSelect.value,
   });
 
   hostInput.value = settings.frameworkHost;
@@ -69,6 +74,7 @@ async function connectToFramework(frameworkHost, frameworkPort, successMessage =
   await Promise.all([
     testFramework(),
     refreshFrameworkShells(settings.connectionChanged),
+    refreshPreferredApps(settings),
   ]);
   return settings;
 }
@@ -140,12 +146,69 @@ async function loadSettings() {
   const settings = await desktopShellHost.getSettings();
   hostInput.value = settings.frameworkHost || "127.0.0.1";
   portInput.value = String(settings.frameworkPort || 8089);
+  autostartPreferredAppInput.checked = settings.autostart === true;
+  preferredAppSelect.disabled = !autostartPreferredAppInput.checked;
+  preferredAppSelect.dataset.selected = String(settings.preferredAppId || "");
   setStatus(
     settingsStatus,
     "online",
     "Desktop settings loaded",
   );
-  await loadFrameworkBookmarks();
+  await Promise.all([
+    loadFrameworkBookmarks(),
+    refreshPreferredApps(settings),
+  ]);
+}
+
+function updatePreferredAppEnabled() {
+  preferredAppSelect.disabled = !autostartPreferredAppInput.checked;
+}
+
+async function refreshPreferredApps(settings = null) {
+  const selected = String(
+    preferredAppSelect.value
+      || preferredAppSelect.dataset.selected
+      || settings?.preferredAppId
+      || "",
+  ).trim();
+  setStatus(preferredAppStatus, "loading", "Loading framework apps");
+  const result = await desktopShellHost.getApps();
+  const apps = Array.isArray(result?.apps)
+    ? result.apps.filter((app) => app && app.local !== true && app.id !== "settings")
+    : [];
+  preferredAppSelect.replaceChildren();
+  const empty = document.createElement("option");
+  empty.value = "";
+  empty.textContent = "Select an app";
+  preferredAppSelect.appendChild(empty);
+  let selectedAvailable = !selected;
+  for (const app of apps) {
+    const appId = String(app.id || "").trim();
+    if (!appId) continue;
+    const option = document.createElement("option");
+    option.value = appId;
+    option.textContent = String(app.name || appId);
+    preferredAppSelect.appendChild(option);
+    if (appId === selected) selectedAvailable = true;
+  }
+  if (selected && !selectedAvailable) {
+    const unavailable = document.createElement("option");
+    unavailable.value = selected;
+    unavailable.textContent = `${selected} (unavailable)`;
+    preferredAppSelect.appendChild(unavailable);
+  }
+  preferredAppSelect.value = selected;
+  preferredAppSelect.dataset.selected = selected;
+  updatePreferredAppEnabled();
+  setStatus(
+    preferredAppStatus,
+    result?.online ? "online" : "offline",
+    result?.online
+      ? selected && !selectedAvailable
+        ? "The saved preferred app is not in the current framework catalog"
+        : "Framework app catalog loaded"
+      : result?.error || "Framework unavailable",
+  );
 }
 
 function createRemoveButton(row) {
@@ -415,6 +478,8 @@ testButton?.addEventListener(
   () => void testFramework(),
 );
 
+autostartPreferredAppInput?.addEventListener("change", updatePreferredAppEnabled);
+
 document
   .querySelector("#refresh-fws")
   ?.addEventListener(
@@ -443,7 +508,11 @@ saveLocalFrameworkConfigButton?.addEventListener("click", async () => {
       collectLocalFrameworkConfig(),
     );
     renderLocalFrameworkConfig(result?.config || result);
-    desktopShellHost.toast("Local framework launch configuration saved");
+    desktopShellHost.toast(
+      result?.appliesAfterRestart
+        ? "Launch configuration saved for the next framework start"
+        : "Local framework launch configuration saved",
+    );
   } catch (error) {
     setStatus(
       localFrameworkConfigStatus,

@@ -228,6 +228,7 @@ export interface SidebarShortcutsOptions {
   ) => void;
   getClientId?: () => string;
   getWindowId?: () => string;
+  getProjectRoot?: () => string;
   setMenuChecked?: (el: HTMLElement | null, checked: boolean) => void;
 }
 

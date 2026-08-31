@@ -734,7 +734,11 @@ export class WebviewRuntime {
     this.resolvingRuntimeSurfaces.clear();
     this.surfaceTransport.clear();
     if (clearProviders) this.providerWaiters.clear();
-    this.emitSnapshot(oldWorkspace);
+    this.emitSnapshot(
+      oldWorkspace,
+      reason === "workspace_switch",
+      reason,
+    );
   }
 
   snapshot(): JsonObject {
@@ -1746,7 +1750,11 @@ export class WebviewRuntime {
     };
   }
 
-  private snapshotFor(projectPath: string): JsonObject {
+  private snapshotFor(
+    projectPath: string,
+    authoritative = true,
+    reason = "snapshot",
+  ): JsonObject {
     const surfaces = [...this.surfaces.values()]
       .filter((surface) => !projectPath || surface.projectPath === projectPath)
       .map((surface) => this.publicSurface(surface));
@@ -1755,12 +1763,20 @@ export class WebviewRuntime {
       ts_ms: Date.now(),
       workspaceFolder: projectPath || null,
       workspaceId: projectPath ? stableHash(projectPath) : null,
+      authoritative,
+      reason,
       surfaces,
     };
   }
 
-  private emitSnapshot(projectPath = this.workspaceFolder()): void {
-    this.runtime.onLifecycleEvent(this.snapshotFor(projectPath));
+  private emitSnapshot(
+    projectPath = this.workspaceFolder(),
+    authoritative = true,
+    reason = "snapshot",
+  ): void {
+    this.runtime.onLifecycleEvent(
+      this.snapshotFor(projectPath, authoritative, reason),
+    );
   }
 
   private notify(

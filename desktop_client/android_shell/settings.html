@@ -31,8 +31,34 @@
           <input id="framework-port" type="number" inputmode="numeric" min="1" max="65535">
         </label>
       </div>
+    </section>
+
+    <section class="settings-section">
+      <header class="section-header">
+        <div>
+          <h2>Startup</h2>
+          <div id="preferred-app-status" class="status-line">
+            Open the launcher unless a preferred app is available.
+          </div>
+        </div>
+      </header>
+      <label class="toggle-row" for="autostart-preferred-app">
+        <span>
+          <strong>Open a preferred app at startup</strong>
+          <small>Only when the selected framework is already reachable. This will not start a local framework automatically.</small>
+        </span>
+        <input id="autostart-preferred-app" type="checkbox">
+      </label>
+      <label class="field" for="preferred-app">
+        <span>Preferred app</span>
+        <select id="preferred-app" disabled>
+          <option value="">Select an app</option>
+        </select>
+      </label>
       <div class="section-actions">
-        <button id="save-settings" class="primary-button" type="button">Save</button>
+        <button id="save-settings" class="primary-button" type="button">
+          Save connection and startup
+        </button>
       </div>
     </section>
 

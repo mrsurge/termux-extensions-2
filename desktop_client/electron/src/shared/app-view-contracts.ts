@@ -253,8 +253,11 @@ export type ElectronAppViewBridge = {
     route?: ElectronRunTargetDescriptor,
   ): Promise<{ ok: true }>;
   releaseRunTargetSurface(surfaceId: string): Promise<{ ok: true }>;
-  readSidebarPresentationState(): Promise<ElectronSidebarPresentationState>;
+  readSidebarPresentationState(
+    projectPath: string,
+  ): Promise<ElectronSidebarPresentationState>;
   writeSidebarPresentationState(
+    projectPath: string,
     state: ElectronSidebarPresentationState,
   ): Promise<{ ok: true }>;
   openSidebarMenu(
