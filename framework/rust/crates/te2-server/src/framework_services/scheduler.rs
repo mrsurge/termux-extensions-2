@@ -172,6 +172,15 @@ impl FrameworkServiceScheduler {
         self.spawn_fs(move || fs_ops::list_directory(request)).await
     }
 
+    pub(crate) async fn fs_list_directories(
+        &self,
+        request: fs_ops::FsListDirectoriesRequest,
+    ) -> Result<fs_ops::FsDirectoryListings, fs_ops::BrowseError> {
+        let _permit = self.acquire(self.inner.fs_read.clone()).await?;
+        self.spawn_fs(move || fs_ops::list_directories(request))
+            .await
+    }
+
     pub(crate) async fn fs_create_directory(
         &self,
         request: fs_ops::FsMutationRequest,

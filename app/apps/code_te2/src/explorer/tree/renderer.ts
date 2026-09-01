@@ -19,6 +19,10 @@ interface ExplorerTreeRendererDeps {
   applyAggregatedDiagnosticFlags(): void;
 }
 
+export interface ExplorerTreeRenderOptions {
+  applyAggregatedDecorations?: boolean;
+}
+
 function isTreeEntry(value: unknown): value is ExplorerTreeEntry {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -90,6 +94,11 @@ function applyTreeDepthMetadata(
 }
 
 export function createExplorerTreeRenderer(deps: ExplorerTreeRendererDeps) {
+  function applyAggregatedDecorations(): void {
+    deps.applyAggregatedGitStatusFlags();
+    deps.applyAggregatedDiagnosticFlags();
+  }
+
   function renderExplorerTree(): void {
     let treeElement = deps.getTreeElement();
     if (!treeElement) {
@@ -151,6 +160,7 @@ export function createExplorerTreeRenderer(deps: ExplorerTreeRendererDeps) {
     containerUl: HTMLElement | null,
     entries: unknown,
     parentRel: string | null = null,
+    options: ExplorerTreeRenderOptions = {},
   ): void {
     if (!(containerUl instanceof HTMLElement)) {
       return;
@@ -332,12 +342,14 @@ export function createExplorerTreeRenderer(deps: ExplorerTreeRendererDeps) {
       }
     });
 
-    deps.applyAggregatedGitStatusFlags();
-    deps.applyAggregatedDiagnosticFlags();
+    if (options.applyAggregatedDecorations !== false) {
+      applyAggregatedDecorations();
+    }
   }
 
   return {
     renderExplorerTree,
     renderEntriesInto,
+    applyAggregatedDecorations,
   };
 }

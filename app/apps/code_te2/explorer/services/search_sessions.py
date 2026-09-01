@@ -24,6 +24,7 @@ from ..contracts.search_review import (
     SearchTextRange,
 )
 from ..search import cancel_search_job, start_content_search, start_file_search
+from .render_state import build_directory_listings
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,14 @@ def _content_order_list() -> list[str]:
     return []
 
 
+def _json_object_map() -> dict[str, JsonObject]:
+    return {}
+
+
+def _string_set() -> set[str]:
+    return set()
+
+
 @dataclass(frozen=True, slots=True)
 class CachedNameItem:
     path: str
@@ -111,6 +120,9 @@ class SearchSession:
     cancelled: bool = False
     status: str = "running"
     name_items: list[CachedNameItem] = field(default_factory=_file_items_list)
+    name_shallow_listings: dict[str, JsonObject] = field(default_factory=_json_object_map)
+    name_hydrated_directories: set[str] = field(default_factory=_string_set)
+    name_results_emitted: bool = False
     content_files: dict[str, CachedContentFile] = field(default_factory=_content_file_map)
     content_order: list[str] = field(default_factory=_content_order_list)
     initial_matches_emitted: int = 0
@@ -420,10 +432,14 @@ class ExplorerSearchSessions:
                         _result_payload(session, event, result),
                     )
             else:
+                await self._hydrate_name_directory_listings(session)
+                if session.cancelled:
+                    return
                 await self._emit_personal(
                     "explorer.search.results.updated",
                     self._visible_payload(session),
                 )
+                session.name_results_emitted = True
             return
         if event.method == "search.job.done":
             _apply_search_limit_event(session, event)
@@ -437,10 +453,15 @@ class ExplorerSearchSessions:
                         _result_payload(session, event, result),
                     )
             else:
-                await self._emit_personal(
-                    "explorer.search.results.updated",
-                    self._visible_payload(session),
-                )
+                if not session.name_results_emitted:
+                    await self._hydrate_name_directory_listings(session)
+                    if session.cancelled:
+                        return
+                    await self._emit_personal(
+                        "explorer.search.results.updated",
+                        self._visible_payload(session),
+                    )
+                    session.name_results_emitted = True
             await self._emit_personal(
                 "search.job.done",
                 _done_payload(
@@ -461,6 +482,34 @@ class ExplorerSearchSessions:
                 "search.job.error",
                 _error_payload(session, event),
             )
+
+    async def _hydrate_name_directory_listings(self, session: SearchSession) -> None:
+        pending = [
+            item.relative_path
+            for item in session.name_items
+            if item.kind == "dir"
+            and item.relative_path not in session.name_hydrated_directories
+        ]
+        if not pending:
+            return
+        session.name_hydrated_directories.update(pending)
+        try:
+            listings = await build_directory_listings(
+                pending,
+                project_root=session.root,
+                project_generation=session.project_generation,
+            )
+        except Exception:
+            logger.exception(
+                "name search shallow listing batch failed searchId=%s count=%s",
+                session.search_id,
+                len(pending),
+            )
+            return
+        for listing in listings:
+            cwd = _string(listing.get("cwd"))
+            if cwd and cwd != ".":
+                session.name_shallow_listings[cwd] = listing
 
     def _apply_result(self, session: SearchSession, result: object) -> None:
         raw = _mapping(result)
@@ -511,6 +560,7 @@ class ExplorerSearchSessions:
                     }
                     for item in session.name_items
                 ],
+                "shallowListings": list(session.name_shallow_listings.values()),
                 "truncated": False,
                 "count": len(session.name_items),
                 "complete": session.complete,

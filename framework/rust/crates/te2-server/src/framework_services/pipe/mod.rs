@@ -255,6 +255,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dispatches_fs_list_directories_to_one_batch_contract_dto() {
+        let root = test_root("dispatch-batch");
+        fs::create_dir_all(root.join("src")).expect("create src");
+        fs::create_dir_all(root.join("tests")).expect("create tests");
+        fs::write(root.join("src/main.py"), "print('hello')\n").expect("write source");
+        fs::write(root.join("tests/test_main.py"), "def test_main(): pass\n").expect("write test");
+
+        let response = dispatch_request(
+            request(
+                "fs.listDirectories",
+                json!({ "paths": ["src", "tests"], "hidden": true }),
+                &root,
+            ),
+            &PipeIdentity::framework_rust(),
+            &FrameworkServiceScheduler::default(),
+            None,
+        )
+        .await;
+
+        assert_eq!(response.kind, PipeMessageKind::Response);
+        let result = response.result.expect("response result");
+        assert_eq!(
+            result.get("dto").and_then(|value| value.as_str()),
+            Some("FsDirectoryListings")
+        );
+        assert_eq!(
+            result
+                .get("listings")
+                .and_then(|value| value.as_array())
+                .map(Vec::len),
+            Some(2)
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn dispatches_fs_mutations_to_contract_dtos() {
         let root = test_root("fs-mutations");
         fs::create_dir_all(root.join("src")).expect("create src");

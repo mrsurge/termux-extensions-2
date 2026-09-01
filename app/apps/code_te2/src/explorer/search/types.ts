@@ -21,6 +21,10 @@ export interface ExplorerNameSearchItem {
 
 export interface ExplorerNameSearchResults {
   results?: ExplorerNameSearchItem[];
+  shallowListings?: Array<{
+    cwd?: string;
+    entries?: unknown[];
+  }>;
   truncated?: boolean;
   count?: number;
 }

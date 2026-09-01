@@ -2,7 +2,10 @@ use serde_json::{Value, json};
 
 use super::protocol::{PipeEnvelope, PipeError, PipeIdentity};
 use crate::framework_services::{
-    fs_ops::{BrowseError, FsListDirectoryRequest, FsMutationRequest, FsMutationResult},
+    fs_ops::{
+        BrowseError, FsListDirectoriesRequest, FsListDirectoryRequest, FsMutationRequest,
+        FsMutationResult,
+    },
     scheduler::FrameworkServiceScheduler,
 };
 
@@ -13,6 +16,7 @@ pub(super) async fn dispatch_fs_request(
 ) -> Option<PipeEnvelope> {
     match request.method.as_deref() {
         Some("fs.listDirectory") => Some(list_directory(request, responder, scheduler).await),
+        Some("fs.listDirectories") => Some(list_directories(request, responder, scheduler).await),
         Some("fs.createDirectory") => {
             Some(mutation(request, responder, scheduler, "fs.createDirectory").await)
         }
@@ -24,6 +28,48 @@ pub(super) async fn dispatch_fs_request(
         Some("fs.move") => Some(mutation(request, responder, scheduler, "fs.move").await),
         Some("fs.delete") => Some(mutation(request, responder, scheduler, "fs.delete").await),
         _ => None,
+    }
+}
+
+async fn list_directories(
+    request: &PipeEnvelope,
+    responder: &PipeIdentity,
+    scheduler: &FrameworkServiceScheduler,
+) -> PipeEnvelope {
+    let params = request.params.clone().unwrap_or_else(|| json!({}));
+    let mut params = match serde_json::from_value::<FsListDirectoriesRequest>(params) {
+        Ok(params) => params,
+        Err(error) => {
+            return PipeEnvelope::error_response(
+                request,
+                responder,
+                PipeError::new(
+                    "protocol.invalidParams",
+                    format!("invalid fs.listDirectories params: {error}"),
+                    false,
+                    None,
+                ),
+            );
+        }
+    };
+
+    if params.root.is_none() {
+        params.root.clone_from(&request.workspace_root);
+    }
+    if params.project_generation.is_none() {
+        params.project_generation = request.project_generation;
+    }
+
+    match scheduler.fs_list_directories(params).await {
+        Ok(listings) => match serde_json::to_value(listings) {
+            Ok(result) => PipeEnvelope::success_response(request, responder, result),
+            Err(error) => PipeEnvelope::error_response(
+                request,
+                responder,
+                PipeError::new("protocol.encodeFailed", error.to_string(), false, None),
+            ),
+        },
+        Err(error) => PipeEnvelope::error_response(request, responder, fs_error(error)),
     }
 }
 

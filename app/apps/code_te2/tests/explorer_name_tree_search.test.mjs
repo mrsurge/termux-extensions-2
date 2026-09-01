@@ -171,6 +171,7 @@ test('inline name search preserves the normal tree, cycles hits, and obeys clear
   const focusedDirectories = [];
   let releaseDirectoryFocus = null;
   let stickyHeadersEnabled = false;
+  let finalizedTreeDecorations = 0;
   const controller = createExplorerNameTreeSearchController({
     getTreeElement: () => tree,
     getProjectPath: () => '/workspace/project',
@@ -180,22 +181,14 @@ test('inline name search preserves the normal tree, cycles hits, and obeys clear
       if (method === 'explorer.search.run') {
         return { searchId: 'search-1', jobId: 'job-1', projectGeneration: 3 };
       }
-      if (method === 'explorer.list') {
-        return {
-          cwd: payload.rel,
-          entries: [
-            {
-              rel: `${payload.rel}/child.ts`,
-              name: 'child.ts',
-              kind: 'file',
-            },
-          ],
-        };
-      }
       return { ok: true };
     },
-    renderEntriesInto: (container, entries, parentRel) =>
-      renderer.renderEntriesInto(container, entries, parentRel),
+    renderEntriesInto: (container, entries, parentRel, options) =>
+      renderer.renderEntriesInto(container, entries, parentRel, options),
+    finalizeTreeDecorations: () => {
+      finalizedTreeDecorations += 1;
+      renderer.applyAggregatedDecorations();
+    },
     closeAdvancedSearch: () => {},
     focusDirectory: async (rel) => {
       focusedDirectories.push(rel);
@@ -256,8 +249,21 @@ test('inline name search preserves the normal tree, cycles hits, and obeys clear
       { rel: 'src', name: 'src', type: 'dir' },
       { rel: 'src/main.ts', name: 'main.ts', type: 'file' },
     ],
+    shallowListings: [
+      {
+        cwd: 'src',
+        entries: [
+          { rel: 'src/child.ts', name: 'child.ts', kind: 'file' },
+        ],
+      },
+    ],
   });
   await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(
+    requests.some(([method]) => method === 'explorer.list'),
+    false,
+  );
+  assert.equal(finalizedTreeDecorations, 1);
   assert.equal(normal.hidden, true);
   assert.ok(tree.querySelector('[data-tree-view="search"] [data-rel="src"]'));
   assert.ok(
@@ -272,7 +278,13 @@ test('inline name search preserves the normal tree, cycles hits, and obeys clear
     undefined,
   );
 
+  const renderedSearchTree = tree.querySelector('[data-tree-view="search"]');
   tree.querySelector('.fe-tree-search-next').click();
+  assert.strictEqual(
+    tree.querySelector('[data-tree-view="search"]'),
+    renderedSearchTree,
+  );
+  assert.equal(finalizedTreeDecorations, 1);
   assert.equal(
     tree.querySelector('.fe-tree-search-hit-active')?.dataset.rel,
     'src/main.ts',

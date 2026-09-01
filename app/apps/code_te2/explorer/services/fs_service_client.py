@@ -36,6 +36,15 @@ class FsDirectoryListing(TypedDict, total=False):
     entries: list[FsDirectoryEntry]
 
 
+class FsDirectoryListings(TypedDict, total=False):
+    dto: Literal["FsDirectoryListings"]
+    version: int
+    root: str
+    projectGeneration: int | None
+    listings: list[FsDirectoryListing]
+    failedPaths: list[str]
+
+
 class FsMutationResult(TypedDict, total=False):
     dto: Literal["FsMutationResult"]
     version: int
@@ -50,6 +59,20 @@ class FsMutationResult(TypedDict, total=False):
 def list_directory(rel: str) -> FsDirectoryListing:
     """Return the FS listing DTO from service.fs; no local fallback is allowed."""
     return _list_directory_via_pipe(rel)
+
+
+def list_directories(
+    rels: list[str],
+    *,
+    root: Path | None = None,
+    project_generation: int | None = None,
+) -> FsDirectoryListings:
+    """Return one bounded batch of FS listing DTOs from service.fs."""
+    return _list_directories_via_pipe(
+        rels,
+        root=root,
+        project_generation=project_generation,
+    )
 
 
 def create_directory(parent_rel: str, name: str) -> dict[str, object]:
@@ -142,6 +165,35 @@ def _list_directory_via_pipe(rel: str) -> FsDirectoryListing:
     if listing.get("dto") != "FsDirectoryListing":
         raise RuntimeError("Pipe RPC returned unexpected listing DTO")
     return listing
+
+
+def _list_directories_via_pipe(
+    rels: list[str],
+    *,
+    root: Path | None,
+    project_generation: int | None,
+) -> FsDirectoryListings:
+    root = root or _get_project_root()
+    params: JsonObject = {
+        "root": str(root),
+        "paths": [_request_path(root, rel) for rel in rels],
+        "hidden": True,
+    }
+    if project_generation is not None:
+        params["projectGeneration"] = project_generation
+    data = pipe_runtime.call(
+        "fs.listDirectories",
+        params,
+        target_nid=2100,
+        target_name="service.fs",
+        workspace_root=str(root),
+    )
+    if not isinstance(data, dict):
+        raise RuntimeError("Pipe RPC returned invalid fs.listDirectories data")
+    listings = cast(FsDirectoryListings, cast(object, data))
+    if listings.get("dto") != "FsDirectoryListings":
+        raise RuntimeError("Pipe RPC returned unexpected directory listings DTO")
+    return listings
 
 
 def _fs_mutation(method: str, params: JsonObject, *, root: str | None = None) -> FsMutationResult:

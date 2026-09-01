@@ -379,8 +379,15 @@ explorerNameSearchController = createExplorerNameTreeSearchController({
     explorerChromeController.isStickyHeadersEnabled(),
   requestExplorer: (method, payload, timeoutMs) =>
     requestExplorerRpc(method, payload, timeoutMs),
-  renderEntriesInto: (container, entries, parentRel) =>
-    explorerTreeRenderer.renderEntriesInto(container, entries, parentRel),
+  renderEntriesInto: (container, entries, parentRel, options) =>
+    explorerTreeRenderer.renderEntriesInto(
+      container,
+      entries,
+      parentRel,
+      options,
+    ),
+  finalizeTreeDecorations: () =>
+    explorerTreeRenderer.applyAggregatedDecorations(),
   closeAdvancedSearch: (reason) =>
     explorerSearchOverlayController.closeSearchOverlay(reason),
   focusDirectory: (rel) => focusDirectoryFromSearch(rel),

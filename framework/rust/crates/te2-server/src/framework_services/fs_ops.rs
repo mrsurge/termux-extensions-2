@@ -1,6 +1,7 @@
 use super::common::{expand_user_path, home_dir, normalize_lexical, path_to_string};
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashSet,
     fs, io,
     path::{Path, PathBuf},
     time::UNIX_EPOCH,
@@ -65,6 +66,33 @@ pub(crate) struct FsDirectoryListing {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) project_generation: Option<u64>,
     pub(crate) entries: Vec<FsDirectoryEntry>,
+}
+
+const MAX_DIRECTORY_LIST_BATCH: usize = 512;
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FsListDirectoriesRequest {
+    pub(crate) root: Option<String>,
+    #[serde(default)]
+    pub(crate) paths: Vec<String>,
+    pub(crate) project_generation: Option<u64>,
+    #[serde(default, deserialize_with = "super::common::deserialize_boolish")]
+    pub(crate) hidden: bool,
+    #[serde(default, deserialize_with = "super::common::deserialize_boolish")]
+    pub(crate) resolve_symlinks: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FsDirectoryListings {
+    pub(crate) dto: &'static str,
+    pub(crate) version: u16,
+    pub(crate) root: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) project_generation: Option<u64>,
+    pub(crate) listings: Vec<FsDirectoryListing>,
+    pub(crate) failed_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -201,6 +229,54 @@ pub(crate) fn list_directory(
         resolved_path: path_to_string(&resolved_path),
         project_generation: request.project_generation,
         entries,
+    })
+}
+
+pub(crate) fn list_directories(
+    request: FsListDirectoriesRequest,
+) -> Result<FsDirectoryListings, BrowseError> {
+    if request.paths.len() > MAX_DIRECTORY_LIST_BATCH {
+        return Err(BrowseError::InvalidInput(format!(
+            "directory listing batch exceeds {MAX_DIRECTORY_LIST_BATCH} paths"
+        )));
+    }
+
+    let (root, _) = resolve_list_directory_path(request.root.as_deref(), Some("."))?;
+    let root_string = path_to_string(&root);
+    let mut seen = HashSet::new();
+    let mut listings = Vec::new();
+    let mut failed_paths = Vec::new();
+
+    for path in request.paths {
+        let path = if path.is_empty() {
+            ".".to_owned()
+        } else {
+            path
+        };
+        if !seen.insert(path.clone()) {
+            continue;
+        }
+        let item_request = FsListDirectoryRequest {
+            root: Some(root_string.clone()),
+            path: Some(path.clone()),
+            project_generation: request.project_generation,
+            hidden: request.hidden,
+            resolve_symlinks: request.resolve_symlinks,
+        };
+        match list_directory(item_request) {
+            Ok(listing) => listings.push(listing),
+            Err(BrowseError::Io(_)) => failed_paths.push(path),
+            Err(error) => return Err(error),
+        }
+    }
+
+    Ok(FsDirectoryListings {
+        dto: "FsDirectoryListings",
+        version: 1,
+        root: root_string,
+        project_generation: request.project_generation,
+        listings,
+        failed_paths,
     })
 }
 
@@ -845,6 +921,47 @@ mod tests {
 
         assert!(matches!(result, Err(BrowseError::AccessDenied)));
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn list_directories_batches_deduplicated_contract_dtos() {
+        let root = test_root("fs-list-batch");
+        fs::create_dir_all(root.join("src")).expect("create src");
+        fs::create_dir_all(root.join("tests")).expect("create tests");
+        fs::write(root.join("src/main.py"), "print('hello')\n").expect("write source");
+        fs::write(root.join("tests/test_main.py"), "def test_main(): pass\n").expect("write test");
+
+        let batch = list_directories(FsListDirectoriesRequest {
+            root: Some(path_to_string(&root)),
+            paths: vec!["src".to_owned(), "tests".to_owned(), "src".to_owned()],
+            project_generation: Some(43),
+            hidden: false,
+            resolve_symlinks: false,
+        })
+        .expect("list directories");
+
+        assert_eq!(batch.dto, "FsDirectoryListings");
+        assert_eq!(batch.version, 1);
+        assert_eq!(batch.project_generation, Some(43));
+        assert_eq!(batch.listings.len(), 2);
+        assert!(batch.failed_paths.is_empty());
+        assert_eq!(batch.listings[0].entries[0].relative_path, "src/main.py");
+        assert_eq!(
+            batch.listings[1].entries[0].relative_path,
+            "tests/test_main.py"
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn list_directories_rejects_oversized_batches() {
+        let result = list_directories(FsListDirectoriesRequest {
+            paths: vec!["src".to_owned(); MAX_DIRECTORY_LIST_BATCH + 1],
+            ..FsListDirectoriesRequest::default()
+        });
+
+        assert!(matches!(result, Err(BrowseError::InvalidInput(_))));
     }
 }
 

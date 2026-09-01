@@ -5,13 +5,13 @@ import {
 } from '../rpc/contract.ts';
 import type { ExplorerTreeEntry } from '../tree/types.ts';
 import { renderExplorerTreeLabel } from '../tree/label.ts';
+import type { ExplorerTreeRenderOptions } from '../tree/renderer.ts';
 import type {
   ExplorerNameSearchItem,
   ExplorerNameSearchResults,
 } from './types.ts';
 
 const NAME_SEARCH_DEBOUNCE_MS = 500;
-const SHALLOW_LIST_CONCURRENCY = 4;
 const DIRECTORY_CENTER_SETTLE_MS = 350;
 
 type ExplorerTimer = ReturnType<typeof setTimeout> | null;
@@ -41,7 +41,9 @@ interface ExplorerNameTreeSearchControllerDeps {
     containerUl: HTMLElement | null,
     entries: unknown,
     parentRel?: string | null,
+    options?: ExplorerTreeRenderOptions,
   ): void;
+  finalizeTreeDecorations(): void;
   closeAdvancedSearch(reason: string): void;
   focusDirectory(rel: string): Promise<void>;
   toast(message: string): void;
@@ -106,6 +108,40 @@ function normalizeTreeEntries(value: unknown): ExplorerTreeEntry[] {
     (entry): entry is ExplorerTreeEntry =>
       isRecord(entry) && Boolean(normalizeRel(entry.rel || entry.path)),
   );
+}
+
+function normalizeShallowListings(
+  value: unknown,
+): Map<string, ExplorerTreeEntry[]> {
+  const listings = new Map<string, ExplorerTreeEntry[]>();
+  if (!Array.isArray(value)) return listings;
+  for (const raw of value) {
+    if (!isRecord(raw)) continue;
+    const cwd = normalizeRel(raw.cwd);
+    if (!cwd) continue;
+    listings.set(cwd, normalizeTreeEntries(raw));
+  }
+  return listings;
+}
+
+function projectionFingerprint(
+  items: readonly ExplorerNameSearchItem[],
+  listings: ReadonlyMap<string, readonly ExplorerTreeEntry[]>,
+): string {
+  return JSON.stringify([
+    items.map((item) => [item.type, item.rel, item.name]),
+    Array.from(listings, ([cwd, entries]) => [
+      cwd,
+      entries.map((entry) => [
+        entry.kind,
+        normalizeRel(entry.rel || entry.path),
+        entry.name,
+        entry.gitStatus,
+        entry.gitFlags,
+        entry.hasDraft,
+      ]),
+    ]),
+  ]);
 }
 
 function createMutableNode(
@@ -232,10 +268,8 @@ export function createExplorerNameTreeSearchController(
     projectGeneration: null,
   };
   let lastAutoScrolledQuery = '';
-  const shallowListings = new Map<string, ExplorerTreeEntry[]>();
-  const queuedDirectories: string[] = [];
-  const queuedDirectorySet = new Set<string>();
-  let activeDirectoryRequests = 0;
+  let shallowListings = new Map<string, ExplorerTreeEntry[]>();
+  let renderedProjectionFingerprint: string | null = null;
   let boundTree: HTMLElement | null = null;
 
   function getRootNode(): HTMLLIElement | null {
@@ -297,9 +331,8 @@ export function createExplorerNameTreeSearchController(
     error = null;
     activeHitIndex = 0;
     lastAutoScrolledQuery = '';
-    shallowListings.clear();
-    queuedDirectories.length = 0;
-    queuedDirectorySet.clear();
+    shallowListings = new Map();
+    renderedProjectionFingerprint = null;
   }
 
   function ensureSearchList(root: HTMLLIElement): HTMLUListElement {
@@ -330,14 +363,18 @@ export function createExplorerNameTreeSearchController(
       container,
       nodes.map((node) => node.entry),
       parent,
+      { applyAggregatedDecorations: false },
     );
+    const renderedNodes = new Map<string, HTMLLIElement>();
+    for (const child of container.children) {
+      if (child instanceof HTMLLIElement && child.dataset.rel) {
+        renderedNodes.set(child.dataset.rel, child);
+      }
+    }
     for (const node of nodes) {
       const rel = normalizeRel(node.entry.rel || node.entry.path);
       if (!rel) continue;
-      const li = Array.from(container.children).find(
-        (child): child is HTMLLIElement =>
-          child instanceof HTMLLIElement && child.dataset.rel === rel,
-      );
+      const li = renderedNodes.get(rel);
       if (!li) continue;
       li.classList.toggle('fe-tree-search-hit', node.hitIndex !== null);
       if (node.hitIndex !== null) {
@@ -445,6 +482,7 @@ export function createExplorerNameTreeSearchController(
     const list = ensureSearchList(root);
     if (error) {
       setSearchListMessage(list, error);
+      renderedProjectionFingerprint = null;
       return;
     }
     if (results.length === 0) {
@@ -452,19 +490,42 @@ export function createExplorerNameTreeSearchController(
         list,
         loading || !complete ? 'Searching…' : 'No file or folder matches',
       );
+      renderedProjectionFingerprint = null;
       return;
     }
 
+    const fingerprint = projectionFingerprint(results, shallowListings);
+    if (
+      renderedProjectionFingerprint === fingerprint &&
+      list.querySelector('[data-search-hit-index]')
+    ) {
+      return;
+    }
     const projection = buildExplorerNameTreeProjection(results, shallowListings);
-    list.replaceChildren();
-    renderProjectionNodes(list, projection, '.');
+    const nextList = document.createElement('ul');
+    nextList.className = 'fe-tree fe-tree-search-results';
+    nextList.dataset.treeView = 'search';
+    renderProjectionNodes(nextList, projection, '.');
+    list.replaceWith(nextList);
+    renderedProjectionFingerprint = fingerprint;
+    deps.finalizeTreeDecorations();
   }
 
   function scrollToCurrentHit(smooth = true): void {
     if (results.length === 0) return;
     activeHitIndex = Math.max(0, Math.min(activeHitIndex, results.length - 1));
-    render();
-    const node = getSearchList()?.querySelector<HTMLElement>(
+    const root = getRootNode();
+    if (root) renderRootChrome(root);
+    const list = getSearchList();
+    list
+      ?.querySelectorAll<HTMLElement>('[data-search-hit-index]')
+      .forEach((candidate) => {
+        candidate.classList.toggle(
+          'fe-tree-search-hit-active',
+          candidate.dataset.searchHitIndex === String(activeHitIndex),
+        );
+      });
+    const node = list?.querySelector<HTMLElement>(
       `[data-search-hit-index="${activeHitIndex}"]`,
     );
     node?.scrollIntoView({
@@ -489,51 +550,6 @@ export function createExplorerNameTreeSearchController(
       ),
     ).find((candidate) => normalizeRel(candidate.dataset.rel) === rel);
     node?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  }
-
-  function pumpDirectoryQueue(expectedGeneration: number): void {
-    while (
-      activeDirectoryRequests < SHALLOW_LIST_CONCURRENCY &&
-      queuedDirectories.length > 0
-    ) {
-      const rel = queuedDirectories.shift();
-      if (!rel) continue;
-      activeDirectoryRequests += 1;
-      void deps
-        .requestExplorer(EXPLORER_RPC_METHODS.list, { rel }, 8000)
-        .then((payload) => {
-          if (generation !== expectedGeneration) return;
-          shallowListings.set(rel, normalizeTreeEntries(payload));
-          render();
-        })
-        .catch(() => {
-          if (generation === expectedGeneration) shallowListings.set(rel, []);
-        })
-        .finally(() => {
-          activeDirectoryRequests -= 1;
-          // Superseded requests still occupied a bounded slot. Give the
-          // current generation a chance to drain when any slot is released.
-          pumpDirectoryQueue(generation);
-        });
-    }
-  }
-
-  function queueDirectoryListings(): void {
-    const expectedGeneration = generation;
-    for (const item of results) {
-      const rel = normalizeRel(item.rel);
-      if (
-        item.type !== 'dir' ||
-        !rel ||
-        shallowListings.has(rel) ||
-        queuedDirectorySet.has(rel)
-      ) {
-        continue;
-      }
-      queuedDirectorySet.add(rel);
-      queuedDirectories.push(rel);
-    }
-    pumpDirectoryQueue(expectedGeneration);
   }
 
   async function runSearch(
@@ -653,13 +669,23 @@ export function createExplorerNameTreeSearchController(
       return true;
     }
     const next = normalizeSearchItems(payload as ExplorerNameSearchResults);
+    const nextListings = normalizeShallowListings(payload.shallowListings);
+    const nextFingerprint = projectionFingerprint(next, nextListings);
+    const projectionChanged =
+      renderedProjectionFingerprint !== nextFingerprint ||
+      !getSearchList()?.querySelector('[data-search-hit-index]');
     results = next;
+    shallowListings = nextListings;
     activeHitIndex = Math.min(activeHitIndex, Math.max(0, results.length - 1));
     loading = payload.complete === false;
     complete = payload.complete !== false;
     error = null;
-    render();
-    queueDirectoryListings();
+    if (projectionChanged || results.length === 0) {
+      render();
+    } else {
+      const root = getRootNode();
+      if (root) renderRootChrome(root);
+    }
     if (
       results.length > 0 &&
       deps.isStickyHeadersEnabled() &&
@@ -676,7 +702,12 @@ export function createExplorerNameTreeSearchController(
     if (payload.kind !== 'name') return false;
     if (!visible || !matchesIdentity(payload)) return true;
     loading = true;
-    render();
+    if (results.length === 0) {
+      render();
+    } else {
+      const root = getRootNode();
+      if (root) renderRootChrome(root);
+    }
     return true;
   }
 
@@ -689,7 +720,12 @@ export function createExplorerNameTreeSearchController(
     if (!visible || !matchesIdentity(payload)) return true;
     loading = false;
     complete = true;
-    render();
+    if (results.length === 0) {
+      render();
+    } else {
+      const root = getRootNode();
+      if (root) renderRootChrome(root);
+    }
     return true;
   }
 

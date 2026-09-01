@@ -746,6 +746,15 @@ Used by review save/discard, open/jump, search highlighting, and project-switch 
   ancestor paths are expanded in a sibling result tree, and a direct directory
   hit is hydrated with only one shallow child listing. The normal tree DOM and
   its open-directory state remain intact behind that projection.
+- Shallow directory hydration is backend-composed. Python collects every direct
+  directory hit and requests one bounded `fs.listDirectories` pipe DTO from the
+  Rust filesystem service, then includes those listings in the initiating
+  client's `explorer.search.results.updated` payload. The browser must not issue
+  an `explorer.list` RPC for every hit.
+- The browser constructs the complete result projection in a detached tree,
+  attaches it once, and runs aggregate Git/diagnostic decoration once. Repeated
+  results with the same projection are idempotent, while previous/next changes
+  only the active-hit class and scroll position instead of rebuilding the tree.
 - The Explorer `...` menu retains a separate advanced search surface for the
   four non-name views: By contents, By changes, Drafts, and Diagnostics. Opening
   either search surface closes the other before it starts a progressive search.

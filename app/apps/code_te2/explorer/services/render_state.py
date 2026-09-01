@@ -78,6 +78,37 @@ async def build_directory_listing(rel: str) -> JsonObject:
     return await asyncio.to_thread(explorer_listing_from_fs_directory_listing, listing)
 
 
+async def build_directory_listings(
+    rels: list[str],
+    *,
+    project_root: Path | None = None,
+    project_generation: int | None = None,
+) -> list[JsonObject]:
+    if not rels:
+        return []
+    batch = await asyncio.to_thread(
+        fs_service_client.list_directories,
+        rels,
+        root=project_root,
+        project_generation=project_generation,
+    )
+    listings = batch.get("listings")
+    if not isinstance(listings, list):
+        return []
+    return await asyncio.to_thread(_adapt_directory_listings, listings)
+
+
+def _adapt_directory_listings(
+    listings: list[fs_service_client.FsDirectoryListing],
+) -> list[JsonObject]:
+    return [
+        explorer_listing_from_fs_directory_listing(
+            cast(_file_ops.FsDirectoryListing, cast(object, listing))
+        )
+        for listing in listings
+    ]
+
+
 async def build_bootstrap_snapshot(
     project_root: Path,
     *,
