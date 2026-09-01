@@ -868,8 +868,8 @@ export async function initExplorerUI(options: ExplorerUiInitOptions) {
   );
   const explorerMenuBtn = document.getElementById("fe-explorer-menu-btn");
   const explorerMenuDropdown = document.getElementById("fe-explorer-menu-dd");
-  const explorerMenuSearchViewsItem = document.getElementById(
-    "fe-mi-explorer-search-views",
+  const explorerSearchViewsBtn = document.getElementById(
+    "fe-explorer-search-views-btn",
   );
   const explorerMenuStickyHeadersItem = document.getElementById(
     "fe-mi-explorer-sticky-headers",
@@ -928,7 +928,7 @@ export async function initExplorerUI(options: ExplorerUiInitOptions) {
     projectMenuOpenRecentItem,
     explorerMenuBtn,
     explorerMenuDropdown,
-    explorerMenuSearchViewsItem,
+    explorerSearchViewsBtn,
     explorerMenuStickyHeadersItem,
     explorerMenuScrollActiveItem,
   });

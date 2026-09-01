@@ -183,6 +183,8 @@ test('clean expanded directory bands exclude every Git decoration', () => {
 
 test('sticky scope constraints reserve normal rows and compress inner scopes', async () => {
   const {
+    STICKY_SCOPE_END_LEAD_PX,
+    computeStickyScopePush,
     computeStickyScopeSlotLimit,
     constrainStickyScopeChain,
   } = await importTypeScript('src/explorer/chrome/sticky-scopes.ts');
@@ -199,6 +201,13 @@ test('sticky scope constraints reserve normal rows and compress inner scopes', a
   assert.deepEqual(constrainStickyScopeChain(['a', 'b', 'c'], 1), [
     ['a', 'b', 'c'],
   ]);
+
+  assert.equal(STICKY_SCOPE_END_LEAD_PX, 8);
+  assert.equal(computeStickyScopePush(384, 376, 38), 0);
+  assert.equal(computeStickyScopePush(376, 376, 38), -8);
+  assert.equal(computeStickyScopePush(371, 376, 38), -13);
+  assert.equal(computeStickyScopePush(334, 366, 38), -38);
+  assert.equal(computeStickyScopePush(300, 366, 38), -38);
 });
 
 test('compressed sticky scope renders canonical clickable path segments', async () => {

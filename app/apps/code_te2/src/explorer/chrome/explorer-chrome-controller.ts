@@ -24,7 +24,7 @@ interface ExplorerChromeBindings {
   projectMenuOpenRecentItem: HTMLElement | null;
   explorerMenuBtn: HTMLElement | null;
   explorerMenuDropdown: HTMLElement | null;
-  explorerMenuSearchViewsItem: HTMLElement | null;
+  explorerSearchViewsBtn: HTMLElement | null;
   explorerMenuStickyHeadersItem: HTMLElement | null;
   explorerMenuScrollActiveItem: HTMLElement | null;
 }
@@ -103,7 +103,7 @@ export function createExplorerChromeController(
   let projectMenuDropdown: HTMLElement | null = null;
   let explorerMenuBtn: HTMLElement | null = null;
   let explorerMenuDropdown: HTMLElement | null = null;
-  let explorerMenuSearchViewsItem: HTMLElement | null = null;
+  let explorerSearchViewsBtn: HTMLElement | null = null;
   let explorerMenuStickyHeadersItem: HTMLElement | null = null;
   let explorerMenuScrollActiveItem: HTMLElement | null = null;
   let explorerStickyHeadersEnabled: boolean | null = null;
@@ -396,7 +396,7 @@ export function createExplorerChromeController(
     projectMenuDropdown = bindings.projectMenuDropdown;
     explorerMenuBtn = bindings.explorerMenuBtn;
     explorerMenuDropdown = bindings.explorerMenuDropdown;
-    explorerMenuSearchViewsItem = bindings.explorerMenuSearchViewsItem;
+    explorerSearchViewsBtn = bindings.explorerSearchViewsBtn;
     explorerMenuStickyHeadersItem = bindings.explorerMenuStickyHeadersItem;
     explorerMenuScrollActiveItem = bindings.explorerMenuScrollActiveItem;
 
@@ -457,8 +457,10 @@ export function createExplorerChromeController(
       void deps.showProjectsDebugModal();
     });
 
-    explorerMenuSearchViewsItem?.addEventListener('click', (event) => {
+    explorerSearchViewsBtn?.addEventListener('click', (event) => {
       event.stopPropagation();
+      deps.closeDiffBaseMenus();
+      closeProjectMenu();
       closeExplorerMenu();
       deps.openSearchOverlay();
     });

@@ -343,7 +343,7 @@ test('inline name search preserves the normal tree, cycles hits, and obeys clear
   });
 });
 
-test('advanced overlay no longer advertises By name and remains reachable from Explorer menu', () => {
+test('advanced overlay no longer advertises By name and has a dedicated Explorer button', () => {
   const overlaySource = fs.readFileSync(
     path.join(appRoot, 'src/explorer/search/overlay-controller.ts'),
     'utf8',
@@ -353,7 +353,11 @@ test('advanced overlay no longer advertises By name and remains reachable from E
   for (const label of ['By contents', 'By changes', 'Drafts', 'Diagnostics']) {
     assert.match(overlaySource, new RegExp(`label:\\s*["']${label}["']`));
   }
-  assert.match(template, /id="fe-mi-explorer-search-views"/);
+  assert.match(
+    template,
+    /id="fe-explorer-search-views-btn"[^>]*>🔭<\/button>/,
+  );
+  assert.doesNotMatch(template, /id="fe-mi-explorer-search-views"/);
   assert.doesNotMatch(template, /id="fe-search-btn"/);
 });
 

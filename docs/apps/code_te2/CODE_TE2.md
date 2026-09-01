@@ -755,9 +755,10 @@ Used by review save/discard, open/jump, search highlighting, and project-switch 
   attaches it once, and runs aggregate Git/diagnostic decoration once. Repeated
   results with the same projection are idempotent, while previous/next changes
   only the active-hit class and scroll position instead of rebuilding the tree.
-- The Explorer `...` menu retains a separate advanced search surface for the
-  four non-name views: By contents, By changes, Drafts, and Diagnostics. Opening
-  either search surface closes the other before it starts a progressive search.
+- A dedicated `🔭` button beside the Explorer ellipsis opens the separate
+  advanced search surface for By contents, By changes, Drafts, and Diagnostics.
+  The ellipsis does not duplicate that action. Opening either search surface
+  closes the other before it starts a progressive search.
 - Inline name search keeps its query while files are opened. Its clear control
   cancels the active search and restores the normal tree while leaving the empty
   field focused; an empty blur closes the field. Selecting a result directory
@@ -780,6 +781,16 @@ Used by review save/discard, open/jump, search highlighting, and project-switch 
   clone dismisses Android IME and can feed a false empty `focusout` into the
   search-close rule, so replacement is reserved for an actual source-input or
   search-mode transition.
+- Sticky-scope push geometry uses the represented source directory's rendered
+  border-box bottom as the collision boundary. That box already encloses its
+  subtree and every nested margin, border, and padding. The visual push leads
+  that boundary by one lower-left card radius (currently 8 px) so the rounded
+  edge cannot bleed through. Never infer scope end from the next row or a fixed
+  ancestor-climb allowance.
+- Extremely large, deeply expanded trees may still show minor transient sticky
+  animation artifacts while browser layout and live DOM measurements settle.
+  This is a known presentation limitation, not a reason to reintroduce inferred
+  row boundaries or fixed ancestor-gap compensation.
 - Python requests a presentation window with `maxInitialMatchesTotal=50` and `maxInitialMatchesPerFile=10`.
 - Python imposes `maxMatchesTotal: 700` for broad/noisy content searches.
 - Rust reports truncation metadata with `matchLimit` and `truncatedReason: "matchLimit"` when the cap is hit.

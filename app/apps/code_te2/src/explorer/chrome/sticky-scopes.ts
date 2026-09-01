@@ -2,7 +2,7 @@
 //
 // "Sticky scopes" for the explorer tree (Monaco-ish).
 // - Shows the directory ancestry of the first visible node.
-// - Uses geometry (DOM rects) for push-up/pull-down animation between sibling scopes.
+// - Uses each scope's rendered bottom edge for push-up/pull-down animation.
 // - Sticky rows are non-interactive except for the ⋮ menu button.
 
 import type { ExplorerTreeMenuEntry } from '../tree/types.ts';
@@ -15,6 +15,9 @@ const PADDING_TOP = 8;
 const BOTTOM_SHADOW_PAD_PX = 8;
 const STICKY_MAX_VIEW_RATIO = 0.4;
 const MIN_VISIBLE_TREE_ROWS = 4;
+// Match the tree card's 8px lower-left radius so the outgoing sticky row
+// clears before the rounded source edge becomes visible.
+export const STICKY_SCOPE_END_LEAD_PX = 8;
 
 export function computeStickyScopeSlotLimit(
   viewportHeight: number,
@@ -66,11 +69,6 @@ export interface ExplorerStickyScopesDeps {
 export interface ExplorerStickyScopesApi {
   update(): void;
   destroy(): void;
-}
-
-interface NextTreeNodeAfterSubtree {
-  node: HTMLLIElement;
-  climbed: number;
 }
 
 function isElementVisibleRect(rect: DOMRect | null | undefined): boolean {
@@ -127,28 +125,23 @@ function getDirectoryChainFromNode(li: HTMLLIElement | null): HTMLLIElement[] {
   return chain;
 }
 
-function findNextTreeNodeAfterSubtree(
-  li: HTMLLIElement | null,
-): NextTreeNodeAfterSubtree | null {
-  if (!li) return null;
-  // We need the first *tree row* after this directory's entire subtree,
-  // regardless of whether that row is a dir or a file. This avoids a common
-  // edge case where the "last directory" in a scope never gets pushed out
-  // because only files follow it.
-  let cursor: HTMLLIElement | null = li;
-  let climbed = 0;
-  while (cursor) {
-    let sib: Element | null = cursor.nextElementSibling;
-    while (sib) {
-      if (sib instanceof HTMLLIElement && sib.matches('li.fe-tree-node')) {
-        return { node: sib, climbed };
-      }
-      sib = sib.nextElementSibling;
-    }
-    cursor = closestTreeNodeBySelector(cursor.parentElement, 'li.fe-tree-node');
-    climbed += 1;
+export function computeStickyScopePush(
+  scopeBottom: number,
+  stickyBottom: number,
+  rowHeight: number,
+  endLeadPx = STICKY_SCOPE_END_LEAD_PX,
+): number {
+  if (
+    !Number.isFinite(scopeBottom) ||
+    !Number.isFinite(stickyBottom) ||
+    !Number.isFinite(rowHeight) ||
+    rowHeight <= 0
+  ) {
+    return 0;
   }
-  return null;
+  const lead = Number.isFinite(endLeadPx) ? Math.max(0, endLeadPx) : 0;
+  const overlap = scopeBottom - lead - stickyBottom;
+  return overlap < 0 ? Math.max(overlap, -rowHeight) : 0;
 }
 
 function buildEntryFromLi(li: HTMLLIElement): ExplorerTreeMenuEntry {
@@ -225,12 +218,6 @@ export function createExplorerStickyScopes({
   // Fine-tune (px) to make capture/push align visually.
   // Negative values move the capture trigger *later* (requires more scrolling).
   const CAPTURE_Y_ADJUST_PX = -12;
-  // Positive values start the push-up sooner (and delay pull-down when scrolling up).
-  const PUSH_TRIGGER_ADJUST_PX = 10;
-  // When the next collision boundary comes from a *different* ancestor scope,
-  // there is a small visual gap (card spacing) that makes push start a few px
-  // late. Compensate only for those cases.
-  const CROSS_SCOPE_GAP_PX = 10;
   // Small hysteresis to prevent rapid "scope-flapping" during push transitions.
   const KEY_STABILITY_FRAMES = 2;
   function scheduleUpdate(): void {
@@ -831,20 +818,20 @@ export function createExplorerStickyScopes({
       if (rowEl) rowEl.style.height = isBottomSlot ? '100%' : '';
 
       let push = 0;
-      const nextInfo = findNextTreeNodeAfterSubtree(srcLi);
-      if (nextInfo?.node) {
-        const nextRect = nextInfo.node.getBoundingClientRect();
-        const anchorY =
-          listTop +
-          (depth + 1) * rowStepPx +
-          cumulativePush +
-          PUSH_TRIGGER_ADJUST_PX;
-        const boundaryTop =
-          nextRect.top - (nextInfo.climbed > 0 ? CROSS_SCOPE_GAP_PX : 0);
-        const overlap = boundaryTop - anchorY;
-        if (overlap < 0) {
-          push = Math.max(overlap, -rowStepPx);
-        }
+      const scopeRect = srcLi.getBoundingClientRect();
+      if (isElementVisibleRect(scopeRect)) {
+        // The directory <li> encloses its complete rendered subtree. Its
+        // border-box bottom is therefore the exact scope boundary, including
+        // every nested card margin, border, and padding. Measuring a later row
+        // after climbing ancestors accumulates unrelated gaps and makes deep
+        // cross-parent transitions push progressively late.
+        const stickyBottom =
+          listTop + (depth + 1) * rowStepPx + cumulativePush;
+        push = computeStickyScopePush(
+          scopeRect.bottom,
+          stickyBottom,
+          rowStepPx,
+        );
       }
 
       const translateY = cumulativePush + push;
