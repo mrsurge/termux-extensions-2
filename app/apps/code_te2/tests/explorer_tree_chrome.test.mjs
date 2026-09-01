@@ -282,11 +282,12 @@ test('compressed sticky scope renders canonical clickable path segments', async 
   tree.scrollTop = 300;
   document.elementsFromPoint = () => [file];
   document.elementFromPoint = () => file;
+  const openedMenuEntries = [];
 
   const sticky = createExplorerStickyScopes({
     treeElement: tree,
     drawerBodyEl: drawer,
-    openCardMenuForEntry: () => {},
+    openCardMenuForEntry: (entry) => openedMenuEntries.push(entry),
   });
   sticky.update();
   await new Promise((resolve) => window.requestAnimationFrame(resolve));
@@ -358,6 +359,23 @@ test('compressed sticky scope renders canonical clickable path segments', async 
   sourceInput.addEventListener('focusout', () => {
     sourceFocusOutCount += 1;
   });
+  stickySearchInput.focus();
+  assert.equal(document.activeElement, stickySearchInput);
+  document.elementsFromPoint = () => [feature];
+  document.elementFromPoint = () => feature;
+  sticky.update();
+  await new Promise((resolve) => window.requestAnimationFrame(resolve));
+  await new Promise((resolve) => window.requestAnimationFrame(resolve));
+  const preservedStickySearchInput = drawer.querySelector(
+    '.fe-sticky-scope-slot .fe-tree-search-input',
+  );
+  assert.strictEqual(preservedStickySearchInput, stickySearchInput);
+  assert.equal(document.activeElement, stickySearchInput);
+  assert.equal(sourceFocusOutCount, 0);
+  assert.equal(slots[0].querySelector('li')?.dataset.rel, 'src/feature');
+  slots[0].querySelector('.fe-card-menu-btn').click();
+  assert.equal(openedMenuEntries.at(-1)?.rel, 'src/feature');
+
   stickySearchInput.dispatchEvent(new window.Event('blur'));
   assert.equal(sourceFocusOutCount, 1);
 

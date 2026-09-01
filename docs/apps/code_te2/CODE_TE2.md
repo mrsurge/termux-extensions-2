@@ -774,6 +774,12 @@ Used by review save/discard, open/jump, search highlighting, and project-switch 
   centered automatically. With sticky headers disabled, typing never scrolls the
   tree away from the root query field. Previous/next controls always remain an
   explicit centered smooth-scroll action in either mode.
+- Sticky-chain or viewport recomposition must preserve the existing sticky
+  search input while it remains bound to the same authoritative root input.
+  Controls and the current menu target update in place. Replacing a focused
+  clone dismisses Android IME and can feed a false empty `focusout` into the
+  search-close rule, so replacement is reserved for an actual source-input or
+  search-mode transition.
 - Python requests a presentation window with `maxInitialMatchesTotal=50` and `maxInitialMatchesPerFile=10`.
 - Python imposes `maxMatchesTotal: 700` for broad/noisy content searches.
 - Rust reports truncation metadata with `matchLimit` and `truncatedReason: "matchLimit"` when the cap is hit.

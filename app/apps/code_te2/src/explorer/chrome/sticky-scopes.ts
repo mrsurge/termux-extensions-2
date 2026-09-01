@@ -207,6 +207,14 @@ export function createExplorerStickyScopes({
   let pendingKey = '';
   let pendingKeyFrames = 0;
   let stabilityResampleBudget = 0;
+  const stickySearchSources = new WeakMap<
+    HTMLInputElement,
+    HTMLInputElement
+  >();
+  const stickyMenuSources = new WeakMap<
+    HTMLButtonElement,
+    HTMLLIElement
+  >();
 
   // Extra early capture rows. For the explorer we want the scope to "dock"
   // exactly as it reaches the sticky stack, so keep this at 0.
@@ -437,6 +445,7 @@ export function createExplorerStickyScopes({
     input.autocomplete = 'off';
     input.spellcheck = false;
     input.value = sourceInput.value;
+    stickySearchSources.set(input, sourceInput);
     input.addEventListener('input', () => {
       sourceInput.value = input.value;
       sourceInput.dispatchEvent(new Event('input', { bubbles: true }));
@@ -543,14 +552,33 @@ export function createExplorerStickyScopes({
     menuBtn.type = 'button';
     menuBtn.className = 'fe-card-menu-btn';
     menuBtn.textContent = '⋮';
+    stickyMenuSources.set(menuBtn, menuSource);
     menuBtn.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
+      const currentMenuSource = stickyMenuSources.get(menuBtn);
       if (typeof openCardMenuForEntry === 'function') {
-        openCardMenuForEntry(buildEntryFromLi(menuSource), menuBtn);
+        if (currentMenuSource) {
+          openCardMenuForEntry(buildEntryFromLi(currentMenuSource), menuBtn);
+        }
       }
     });
     return menuBtn;
+  }
+
+  function preservesCurrentStickySearch(
+    rootSource: HTMLLIElement | null,
+    rowEl: HTMLLIElement,
+  ): boolean {
+    const sourceInput = rootSource ? sourceRootSearchInput(rootSource) : null;
+    const stickyInput = rowEl.querySelector<HTMLInputElement>(
+      '.fe-tree-search-input',
+    );
+    return Boolean(
+      sourceInput &&
+        stickyInput &&
+        stickySearchSources.get(stickyInput) === sourceInput,
+    );
   }
 
   function renderStickyRowContent(
@@ -638,6 +666,8 @@ export function createExplorerStickyScopes({
   ): void {
     const srcLi = group[0];
     const menuSource = group[group.length - 1];
+    const rootSource =
+      group.find((source) => source.classList.contains('fe-tree-root')) || null;
     const rel = menuSource?.dataset.rel || '';
     if (!srcLi || !menuSource) return;
     if (!rel) return;
@@ -753,12 +783,20 @@ export function createExplorerStickyScopes({
           ? 'active'
           : 'idle'
       }`;
-    if (rebuild || rowEl.dataset.stickyContentKey !== contentKey) {
+    const preserveSearch = preservesCurrentStickySearch(rootSource, rowEl);
+    if (
+      !preserveSearch &&
+      (rebuild || rowEl.dataset.stickyContentKey !== contentKey)
+    ) {
       rowEl.dataset.stickyContentKey = contentKey;
       renderStickyRowContent(group, rowEl);
+    } else if (preserveSearch) {
+      rowEl.dataset.stickyContentKey = contentKey;
+      const menuButton = rowEl.querySelector<HTMLButtonElement>(
+        ':scope > .fe-tree-root-actions > .fe-card-menu-btn',
+      );
+      if (menuButton) stickyMenuSources.set(menuButton, menuSource);
     }
-    const rootSource =
-      group.find((source) => source.classList.contains('fe-tree-root')) || null;
     if (rootSource) syncStickyRootSearchChrome(rootSource, rowEl);
   }
 
