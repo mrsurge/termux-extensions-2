@@ -163,6 +163,7 @@ test('inline name search preserves the normal tree, cycles hits, and obeys clear
   const normal = tree.querySelector('[data-tree-view="normal"]');
   renderer.renderEntriesInto(normal, [
     { rel: 'keep', name: 'keep', kind: 'dir' },
+    { rel: 'src', name: 'src', kind: 'dir' },
     { rel: 'README.md', name: 'README.md', kind: 'file' },
   ]);
 
@@ -321,6 +322,13 @@ test('inline name search preserves the normal tree, cycles hits, and obeys clear
   releaseDirectoryFocus();
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(controller.isVisible(), false);
+  const selectedDirectory = normal.querySelector('[data-rel="src"]');
+  assert.equal(selectedDirectory?.__scrollOptions, undefined);
+  await new Promise((resolve) => setTimeout(resolve, 375));
+  assert.deepEqual(selectedDirectory?.__scrollOptions, {
+    block: 'center',
+    behavior: 'smooth',
+  });
 });
 
 test('advanced overlay no longer advertises By name and remains reachable from Explorer menu', () => {

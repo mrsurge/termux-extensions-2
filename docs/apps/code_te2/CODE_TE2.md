@@ -757,7 +757,9 @@ Used by review save/discard, open/jump, search highlighting, and project-switch 
   `dirs` plus shallow listings, and publishes an `ExplorerRenderStateChanged`
   fact. The render-state projector broadcasts `explorer.openDirs.updated` and
   listings to every project client; each client reconciles its normal-tree DOM,
-  and the invoking client closes search only after applying its reply.
+  and the invoking client closes search only after applying its reply. It then
+  waits 350 ms for the restored tree layout to settle and smooth-centers the
+  exact directory, unless the project changed or search reopened meanwhile.
 - When Explorer sticky headers are enabled, they remain operational throughout
   search, mirror the root query controls, and permit the first direct hit to be
   centered automatically. With sticky headers disabled, typing never scrolls the

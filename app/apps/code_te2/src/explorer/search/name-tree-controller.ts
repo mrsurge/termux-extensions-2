@@ -12,6 +12,7 @@ import type {
 
 const NAME_SEARCH_DEBOUNCE_MS = 500;
 const SHALLOW_LIST_CONCURRENCY = 4;
+const DIRECTORY_CENTER_SETTLE_MS = 350;
 
 type ExplorerTimer = ReturnType<typeof setTimeout> | null;
 
@@ -479,6 +480,17 @@ export function createExplorerNameTreeSearchController(
     scrollToCurrentHit();
   }
 
+  function centerNormalTreeDirectory(rel: string): void {
+    const normal = getNormalList();
+    if (!normal) return;
+    const node = Array.from(
+      normal.querySelectorAll<HTMLLIElement>(
+        'li.fe-tree-node[data-kind="dir"]',
+      ),
+    ).find((candidate) => normalizeRel(candidate.dataset.rel) === rel);
+    node?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+
   function pumpDirectoryQueue(expectedGeneration: number): void {
     while (
       activeDirectoryRequests < SHALLOW_LIST_CONCURRENCY &&
@@ -759,10 +771,19 @@ export function createExplorerNameTreeSearchController(
   }
 
   async function handleSearchDirectoryClick(rel: string): Promise<boolean> {
-    if (!visible || query.length < 2 || !rel || rel === '.') return false;
+    const normalized = normalizeRel(rel);
+    if (!visible || query.length < 2 || !normalized || normalized === '.') {
+      return false;
+    }
+    const projectPath = deps.getProjectPath();
     try {
-      await deps.focusDirectory(rel);
+      await deps.focusDirectory(normalized);
       close('directorySelected');
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, DIRECTORY_CENTER_SETTLE_MS);
+      });
+      if (visible || deps.getProjectPath() !== projectPath) return true;
+      centerNormalTreeDirectory(normalized);
     } catch (reason) {
       deps.toast(
         reason instanceof Error && reason.message
