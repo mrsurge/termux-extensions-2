@@ -26,6 +26,13 @@ class ExplorerRenderDirectoriesPayload(TypedDict):
     directories: list[str]
 
 
+class ExplorerOpenDirectoriesPayload(TypedDict):
+    reason: str
+    directories: list[str]
+    open_directories: list[str]
+    open_directories_changed: bool
+
+
 class GitDiffBasePayload(TypedDict):
     ref: str
     refresh: bool
@@ -84,6 +91,28 @@ async def publish_explorer_directories_changed(
     payload: ExplorerRenderDirectoriesPayload = {
         "reason": reason,
         "directories": _dedupe_nonempty(directories),
+    }
+    await _publish_project_fact(
+        "ExplorerRenderStateChanged",
+        project_root,
+        source=source,
+        payload=dict(payload),
+    )
+
+
+async def publish_explorer_open_directories_changed(
+    project_root: str | Path,
+    open_directories: list[str],
+    *,
+    reason: str,
+    source: str,
+) -> None:
+    directories = _dedupe_nonempty(open_directories)
+    payload: ExplorerOpenDirectoriesPayload = {
+        "reason": reason,
+        "directories": directories,
+        "open_directories": directories,
+        "open_directories_changed": True,
     }
     await _publish_project_fact(
         "ExplorerRenderStateChanged",

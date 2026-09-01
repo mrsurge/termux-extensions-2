@@ -13,8 +13,15 @@ from ..contracts.session import (
 )
 from ..context import ExplorerSessionHandlerContext
 from ..services import file_ops as _file_ops
-from ..services.render_state import build_directory_listing, load_pruned_open_directories
-from ..services.state_facts import publish_explorer_directories_changed
+from ..services.render_state import (
+    build_directory_listing,
+    build_open_directory_listings,
+    load_pruned_open_directories,
+)
+from ..services.state_facts import (
+    publish_explorer_directories_changed,
+    publish_explorer_open_directories_changed,
+)
 from ...worker_services.event_bus import current_project_generation
 from ...project_sidecar import ProjectSidecar
 
@@ -69,10 +76,27 @@ async def handle_set_open_dirs(
     params: ExplorerOpenDirsParams,
     msg_id: str | None,
 ) -> None:
-    del msg_id
     try:
         sidecar = ProjectSidecar.load_or_create(str(context.project_root))
+        previous = sidecar.get_open_directories()
         sidecar.set_open_directories(params["dirs"])
         sidecar.save()
+        authoritative = load_pruned_open_directories(context.project_root)
     except Exception as exc:
         logger.warning("Failed to save open directories: %s", exc)
+        raise RuntimeError("Failed to save Explorer open directories") from exc
+
+    listings = await build_open_directory_listings(authoritative)
+    if msg_id is not None:
+        await context.emit_personal(
+            "explorer.openDirs.updated",
+            {"dirs": authoritative, "listings": listings},
+            msg_id,
+        )
+    if authoritative != previous:
+        await publish_explorer_open_directories_changed(
+            context.project_root,
+            authoritative,
+            reason="open_directories_set",
+            source="explorer_session:set_open_directories",
+        )

@@ -117,6 +117,7 @@ interface SaveFileOptions {
 interface SidebarShortcutsLike {
   init?: () => unknown;
   hydrate?: () => unknown;
+  setProjectRoot?: (projectPath: string) => unknown;
   applyUiPrefs?: (prefs: UnknownRecord) => unknown;
   getMentionTarget?: () => {
     clientId: string;
@@ -1105,6 +1106,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     getCachedProjectRoot: () => cachedProjectRoot,
     setCachedProjectRoot: (path: string | null) => {
       cachedProjectRoot = path;
+      void sidebarShortcuts?.setProjectRoot?.(path || '');
       void syncSecondEditorProject(path);
     },
     getCurrentPath: () => currentPath,
@@ -1297,6 +1299,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     },
     setCachedProjectRoot: (path: string | null) => {
       cachedProjectRoot = path;
+      void sidebarShortcuts?.setProjectRoot?.(path || '');
       void syncSecondEditorProject(path);
     },
   });

@@ -190,6 +190,12 @@
   pointer-events: auto;
 }
 
+.fe-sticky-scopes .fe-tree-search-btn,
+.fe-sticky-scopes .fe-tree-search-control,
+.fe-sticky-scopes .fe-tree-search-input {
+  pointer-events: auto;
+}
+
 .fe-tree li {
   display: grid;
   grid-template-columns: 20px 1fr auto; /* icon, text, menu (twisty removed) */
@@ -234,6 +240,97 @@
   overflow: hidden;
   min-width: 0; /* Add this if not present - critical for ellipsis to
     work */
+}
+
+.fe-tree-root-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fe-tree-search-btn,
+.fe-tree-search-control {
+  box-sizing: border-box;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted, #9ca3af);
+  cursor: pointer;
+  font: inherit;
+  line-height: 24px;
+  text-align: center;
+}
+
+.fe-tree-search-control:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.fe-tree-search-count {
+  width: auto;
+  min-width: 28px;
+  padding: 0 2px;
+  color: rgba(229, 231, 235, 0.65);
+  cursor: default;
+  font-size: calc(0.7rem * var(--chrome-font-scale));
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .fe-tree-search-btn:hover,
+  .fe-tree-search-control:not(:disabled):hover {
+    color: #f8fafc;
+    background: rgba(148, 163, 184, 0.12);
+  }
+}
+
+.fe-tree-search-label {
+  overflow: visible;
+}
+
+.fe-tree-search-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 26px;
+  padding: 3px 6px;
+  border: 1px solid rgba(148, 163, 184, 0.42);
+  border-radius: 3px;
+  outline: none;
+  background: #0b1220;
+  color: #e5e7eb;
+  font: inherit;
+  user-select: text;
+}
+
+.fe-tree-search-input:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.28);
+}
+
+.fe-tree-search-input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.fe-tree-search-results[hidden],
+.fe-tree-normal[hidden] {
+  display: none;
+}
+
+.fe-tree-node.fe-tree-search-hit {
+  background: rgba(139, 92, 246, 0.18);
+  border-color: rgba(167, 139, 250, 0.5);
+  box-shadow: inset 3px 0 0 rgba(139, 92, 246, 0.42);
+}
+
+.fe-tree-node.fe-tree-search-hit-active {
+  background: #172554;
+  border-color: #60a5fa;
+  box-shadow: inset 3px 0 0 #60a5fa;
 }
 
 .fe-tree-label-text {

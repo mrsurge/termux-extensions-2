@@ -235,27 +235,28 @@ export function createExplorerStickyScopes({
   }
 
   function computeRowStep(): number {
-    // Prefer measuring a "leaf" row (no child <ul>) so we don't accidentally
-    // measure an expanded directory/root that contains the entire subtree.
+    // Prefer a visible "leaf" row (no child <ul>) so a hidden normal tree
+    // cannot collapse sticky scopes while the search projection is active.
     const candidates = treeElement.querySelectorAll<HTMLLIElement>(
       'li.fe-tree-node:not(.fe-tree-root)',
     );
-    let sample: HTMLLIElement | null = null;
     for (const li of candidates) {
       const childUl = li.querySelector<HTMLUListElement>(':scope > ul.fe-tree');
-      if (!childUl) {
-        sample = li;
-        break;
-      }
+      if (childUl) continue;
+      const rect = li.getBoundingClientRect();
+      if (isElementVisibleRect(rect)) return rect.height;
     }
-    if (!sample) {
-      sample = treeElement.querySelector<HTMLLIElement>(
-        'li.fe-tree-node[data-kind="file"]',
-      );
+
+    for (const file of treeElement.querySelectorAll<HTMLLIElement>(
+      'li.fe-tree-node[data-kind="file"]',
+    )) {
+      const rect = file.getBoundingClientRect();
+      if (isElementVisibleRect(rect)) return rect.height;
     }
-    if (!sample) return 0;
-    const rect = sample.getBoundingClientRect();
-    return rect.height || 0;
+
+    // Search has a short loading/empty phase with no visible result row. Keep
+    // the established geometry instead of tearing down an enabled sticky UI.
+    return rowStepPx;
   }
 
   function computeFocusNode(offsetTopPx = 12): HTMLLIElement | null {
@@ -373,11 +374,192 @@ export function createExplorerStickyScopes({
     containerEl.appendChild(diagnostic);
   }
 
+  function sourceRootActions(
+    source: HTMLLIElement,
+  ): HTMLElement | null {
+    if (!source.classList.contains('fe-tree-root')) return null;
+    return source.querySelector<HTMLElement>(
+      ':scope > .fe-tree-root-actions',
+    );
+  }
+
+  function sourceRootSearchInput(
+    source: HTMLLIElement,
+  ): HTMLInputElement | null {
+    return source.querySelector<HTMLInputElement>(
+      ':scope > .fe-tree-text .fe-tree-search-input',
+    );
+  }
+
+  function focusStickySearchInput(rowEl: HTMLLIElement): void {
+    setTimeout(() => {
+      rowEl
+        .querySelector<HTMLInputElement>('.fe-tree-search-input')
+        ?.focus();
+    }, 0);
+  }
+
+  function createStickySearchButton(
+    source: HTMLLIElement,
+    rowEl: HTMLLIElement,
+  ): HTMLButtonElement | null {
+    const sourceButton = sourceRootActions(source)?.querySelector<HTMLButtonElement>(
+      '.fe-tree-search-btn',
+    );
+    if (!sourceButton) return null;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = sourceButton.className;
+    button.title = sourceButton.title;
+    button.setAttribute(
+      'aria-label',
+      sourceButton.getAttribute('aria-label') || sourceButton.title,
+    );
+    button.textContent = sourceButton.textContent;
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      sourceButton.click();
+      scheduleUpdate();
+      requestAnimationFrame(() => focusStickySearchInput(rowEl));
+    });
+    return button;
+  }
+
+  function createStickySearchInput(
+    sourceInput: HTMLInputElement,
+    rowEl: HTMLLIElement,
+  ): HTMLInputElement {
+    const input = document.createElement('input');
+    input.type = 'search';
+    input.className = sourceInput.className;
+    input.placeholder = sourceInput.placeholder;
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    input.value = sourceInput.value;
+    input.addEventListener('input', () => {
+      sourceInput.value = input.value;
+      sourceInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    input.addEventListener('blur', () => {
+      // The authoritative search controller is bound to the real tree. Mirror
+      // the sticky input's eventual blur so its empty-blur close rule still
+      // runs after focus genuinely leaves both search presentations.
+      sourceInput.dispatchEvent(new Event('focusout', { bubbles: true }));
+    });
+    input.addEventListener('keydown', (event) => {
+      let selector = '';
+      if (event.key === 'Escape') {
+        selector = '.fe-tree-search-clear';
+      } else if (event.altKey && event.key === 'ArrowDown') {
+        selector = '.fe-tree-search-next';
+      } else if (event.altKey && event.key === 'ArrowUp') {
+        selector = '.fe-tree-search-prev';
+      }
+      if (!selector) return;
+      event.preventDefault();
+      sourceRootActions(
+        sourceInput.closest<HTMLLIElement>('.fe-tree-root')!,
+      )
+        ?.querySelector<HTMLButtonElement>(selector)
+        ?.click();
+      focusStickySearchInput(rowEl);
+    });
+    return input;
+  }
+
+  function createStickySearchControl(
+    source: HTMLLIElement,
+    selector: string,
+    rowEl: HTMLLIElement,
+  ): HTMLElement | null {
+    const sourceControl = sourceRootActions(source)?.querySelector<HTMLElement>(
+      selector,
+    );
+    if (!sourceControl) return null;
+    if (!(sourceControl instanceof HTMLButtonElement)) {
+      const control = document.createElement('span');
+      control.className = sourceControl.className;
+      control.textContent = sourceControl.textContent;
+      return control;
+    }
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = sourceControl.className;
+    button.title = sourceControl.title;
+    button.setAttribute(
+      'aria-label',
+      sourceControl.getAttribute('aria-label') || sourceControl.title,
+    );
+    button.textContent = sourceControl.textContent;
+    button.disabled = sourceControl.disabled;
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      sourceControl.click();
+      if (selector === '.fe-tree-search-clear') {
+        focusStickySearchInput(rowEl);
+      }
+    });
+    return button;
+  }
+
+  function syncStickyRootSearchChrome(
+    source: HTMLLIElement,
+    rowEl: HTMLLIElement,
+  ): void {
+    const sourceInput = sourceRootSearchInput(source);
+    const stickyInput = rowEl.querySelector<HTMLInputElement>(
+      '.fe-tree-search-input',
+    );
+    if (sourceInput && stickyInput && stickyInput.value !== sourceInput.value) {
+      stickyInput.value = sourceInput.value;
+    }
+    for (const selector of [
+      '.fe-tree-search-count',
+      '.fe-tree-search-prev',
+      '.fe-tree-search-next',
+      '.fe-tree-search-clear',
+    ]) {
+      const sourceControl = sourceRootActions(source)?.querySelector<HTMLElement>(
+        selector,
+      );
+      const stickyControl = rowEl.querySelector<HTMLElement>(selector);
+      if (!sourceControl || !stickyControl) continue;
+      stickyControl.textContent = sourceControl.textContent;
+      if (
+        sourceControl instanceof HTMLButtonElement &&
+        stickyControl instanceof HTMLButtonElement
+      ) {
+        stickyControl.disabled = sourceControl.disabled;
+      }
+    }
+  }
+
+  function createStickyMenuButton(
+    menuSource: HTMLLIElement,
+  ): HTMLButtonElement {
+    const menuBtn = document.createElement('button');
+    menuBtn.type = 'button';
+    menuBtn.className = 'fe-card-menu-btn';
+    menuBtn.textContent = '⋮';
+    menuBtn.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof openCardMenuForEntry === 'function') {
+        openCardMenuForEntry(buildEntryFromLi(menuSource), menuBtn);
+      }
+    });
+    return menuBtn;
+  }
+
   function renderStickyRowContent(
     group: HTMLLIElement[],
     rowEl: HTMLLIElement,
   ): void {
     const menuSource = group[group.length - 1];
+    const rootSource =
+      group.find((source) => source.classList.contains('fe-tree-root')) || null;
     if (!menuSource) return;
 
     rowEl.replaceChildren();
@@ -385,9 +567,13 @@ export function createExplorerStickyScopes({
     const icon = document.createElement('span');
     icon.className = 'fe-entry-icon fe-entry-icon-dir';
 
+    const sourceInput = rootSource ? sourceRootSearchInput(rootSource) : null;
     const text = document.createElement('span');
     text.className = 'fe-tree-text';
-    if (group.length === 1) {
+    if (sourceInput) {
+      text.classList.add('fe-tree-search-label');
+      text.appendChild(createStickySearchInput(sourceInput, rowEl));
+    } else if (group.length === 1) {
       renderExplorerTreeLabel(text, getCanonicalTreeNodeName(menuSource));
     } else {
       text.classList.add('fe-sticky-scope-path');
@@ -418,18 +604,31 @@ export function createExplorerStickyScopes({
       appendDiagnosticMarker(text);
     }
 
-    const menuBtn = document.createElement('button');
-    menuBtn.className = 'fe-card-menu-btn';
-    menuBtn.textContent = '⋮';
-    menuBtn.addEventListener('click', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      if (typeof openCardMenuForEntry === 'function') {
-        openCardMenuForEntry(buildEntryFromLi(menuSource), menuBtn);
-      }
-    });
+    const menuBtn = createStickyMenuButton(menuSource);
+    const rootActions = rootSource ? sourceRootActions(rootSource) : null;
+    if (!rootActions) {
+      rowEl.append(icon, text, menuBtn);
+      return;
+    }
 
-    rowEl.append(icon, text, menuBtn);
+    const actions = document.createElement('div');
+    actions.className = 'fe-tree-root-actions';
+    if (sourceInput) {
+      for (const selector of [
+        '.fe-tree-search-count',
+        '.fe-tree-search-prev',
+        '.fe-tree-search-next',
+        '.fe-tree-search-clear',
+      ]) {
+        const control = createStickySearchControl(rootSource!, selector, rowEl);
+        if (control) actions.appendChild(control);
+      }
+    } else {
+      const searchButton = createStickySearchButton(rootSource!, rowEl);
+      if (searchButton) actions.appendChild(searchButton);
+    }
+    actions.appendChild(menuBtn);
+    rowEl.append(icon, text, actions);
   }
 
   function fillRowFromSources(
@@ -544,11 +743,23 @@ export function createExplorerStickyScopes({
         (source) =>
           `${source.dataset.rel || ''}\u0000${getCanonicalTreeNodeName(source)}`,
       )
-      .join('\u0001');
+      .join('\u0001') +
+      `\u0000rootSearch:${
+        group.some(
+          (source) =>
+            source.classList.contains('fe-tree-root') &&
+            Boolean(sourceRootSearchInput(source)),
+        )
+          ? 'active'
+          : 'idle'
+      }`;
     if (rebuild || rowEl.dataset.stickyContentKey !== contentKey) {
       rowEl.dataset.stickyContentKey = contentKey;
       renderStickyRowContent(group, rowEl);
     }
+    const rootSource =
+      group.find((source) => source.classList.contains('fe-tree-root')) || null;
+    if (rootSource) syncStickyRootSearchChrome(rootSource, rowEl);
   }
 
   function renderChain(groups: HTMLLIElement[][]): void {

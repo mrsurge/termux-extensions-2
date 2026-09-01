@@ -1,3 +1,5 @@
+import type { SidebarAppDockSlot } from "./types.ts";
+
 export const SIDEBAR_PRESENTATION_STATE_VERSION = 1 as const;
 export const SIDEBAR_PRESENTATION_STORAGE_KEY =
   "te2.sidebar.presentation.v2";
@@ -368,6 +370,39 @@ function normalizedProjectPath(value: unknown): string {
   const projectPath = normalizeId(value);
   if (!projectPath) return "";
   return projectPath === "/" ? projectPath : projectPath.replace(/\/+$/, "");
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function sidebarSlotProjectPath(slot: SidebarAppDockSlot): string {
+  const direct = normalizedProjectPath(slot.projectPath || slot.project_path);
+  if (direct) return direct;
+  const webview = objectValue(slot.webviewSurface || slot.webview_surface);
+  const webviewProject = normalizedProjectPath(
+    webview.projectPath || webview.project_path,
+  );
+  if (webviewProject) return webviewProject;
+  const runProfile = objectValue(
+    slot.runProfileSurface || slot.run_profile_surface,
+  );
+  return normalizedProjectPath(
+    runProfile.projectPath || runProfile.project_path,
+  );
+}
+
+export function projectSidebarDockSlots(
+  slots: readonly SidebarAppDockSlot[],
+  projectPath: string,
+): SidebarAppDockSlot[] {
+  const activeProject = normalizedProjectPath(projectPath);
+  return slots.filter((slot) => {
+    const slotProject = sidebarSlotProjectPath(slot);
+    return !slotProject || (!!activeProject && slotProject === activeProject);
+  });
 }
 
 function selectedFrameworkOrigin(runtimeWindow: PresentationWindow): string {

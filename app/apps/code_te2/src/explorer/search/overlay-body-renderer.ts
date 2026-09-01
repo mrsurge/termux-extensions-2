@@ -1,7 +1,6 @@
 import type { ExplorerSearchOverlayState } from "./types.ts";
 
 interface ExplorerSearchOverlayBodyRendererDeps {
-  renderNameResults(container: HTMLElement, data: unknown): void;
   renderContentResults(container: HTMLElement, data: unknown): void;
   renderChangesResults(container: HTMLElement, data: unknown): void;
   renderReviewResults(container: HTMLElement, data: unknown): void;
@@ -79,9 +78,7 @@ export function renderSearchOverlayBody(
   if (!searchResults) {
     const hint = document.createElement("div");
     hint.className = "fe-search-hint";
-    if (searchMode === "name") {
-      hint.textContent = "Type at least 2 characters to search by name.";
-    } else if (searchMode === "content") {
+    if (searchMode === "content") {
       hint.textContent = "Type at least 2 characters to search within files.";
     } else if (searchMode === "changes") {
       hint.textContent = "View all changes in the working tree.";
@@ -92,9 +89,7 @@ export function renderSearchOverlayBody(
     return;
   }
 
-  if (searchMode === "name") {
-    deps.renderNameResults(resultsContainer, searchResults);
-  } else if (searchMode === "content") {
+  if (searchMode === "content") {
     deps.renderContentResults(resultsContainer, searchResults);
   } else if (searchMode === "changes") {
     deps.renderChangesResults(resultsContainer, searchResults);

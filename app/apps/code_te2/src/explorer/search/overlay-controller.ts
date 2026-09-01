@@ -10,7 +10,7 @@ import { createExplorerReviewResultsRenderer } from "./review-results-renderer.t
 import { createExplorerSearchController } from "./controller.ts";
 import type { ActualSearchBenchmarkCase } from "./benchmark.ts";
 import { renderSearchOverlayBody } from "./overlay-body-renderer.ts";
-import { renderContentResults, renderNameResults } from "./results-renderer.ts";
+import { renderContentResults } from "./results-renderer.ts";
 import type {
   ExplorerContentSearchOptions,
   ExplorerSearchIdentity,
@@ -41,9 +41,6 @@ interface ExplorerSearchOverlayControllerDeps {
     lineNumber?: number | null,
     jumpOptions?: ExplorerJumpOptions,
   ): Promise<void>;
-  expandToPath(rel: string): Promise<unknown> | void;
-  applySetiIconToSpan(span: HTMLElement, fileName: string, kind?: string): void;
-  basename(path: string): string;
   ensureDraftDiffs(): Promise<void>;
   ensureInlineDiffs(): Promise<void>;
   renderDiagnosticsResults(container: HTMLElement): void;
@@ -71,7 +68,6 @@ interface SearchModeOption {
 }
 
 const SEARCH_MODE_OPTIONS: readonly SearchModeOption[] = [
-  { id: "name", label: "By name" },
   { id: "content", label: "By contents" },
   { id: "changes", label: "By changes" },
   { id: "review", label: "Drafts" },
@@ -129,7 +125,7 @@ export function createExplorerSearchOverlayController(
   deps: ExplorerSearchOverlayControllerDeps,
 ) {
   let searchOverlayVisible = false;
-  let searchMode: ExplorerSearchMode = "name";
+  let searchMode: ExplorerSearchMode = "content";
   let searchQuery = "";
   let searchResults: unknown = null;
   let searchLoading = false;
@@ -201,22 +197,6 @@ export function createExplorerSearchOverlayController(
       button.classList.toggle("active", button.dataset.mode === searchMode);
     }
 
-    const input = overlay.querySelector<HTMLInputElement>("#fe-search-input");
-    const inputContainer = overlay.querySelector<HTMLElement>(
-      ".fe-search-input-container",
-    );
-    if (inputContainer) {
-      inputContainer.style.display = searchMode === "name" ? "flex" : "none";
-    }
-    if (input) {
-      input.placeholder =
-        searchMode === "name"
-          ? "Search files/folders..."
-          : "Search in files...";
-      input.value = searchQuery;
-      input.style.display = searchMode === "name" ? "block" : "none";
-    }
-
     const contentWidgetHost = overlay.querySelector<HTMLElement>(
       "#fe-search-content-widget-host",
     );
@@ -237,13 +217,6 @@ export function createExplorerSearchOverlayController(
     } else if (contentWidgetHost) {
       contentWidgetHost.style.display =
         searchMode === "content" ? "block" : "none";
-    }
-
-    const clearBtn =
-      overlay.querySelector<HTMLButtonElement>(".fe-search-clear");
-    if (clearBtn) {
-      clearBtn.style.display =
-        searchQuery && searchMode === "name" ? "block" : "none";
     }
 
     const filterContainer = overlay.querySelector<HTMLElement>(
@@ -283,17 +256,6 @@ export function createExplorerSearchOverlayController(
       searchStatus,
     };
     renderSearchOverlayBody(resultsContainer, state, {
-      renderNameResults: (container, data) =>
-        renderNameResults(container, data, {
-          toast: (message) => deps.toast(message),
-          openFileAndMaybeJump: (rel, lineNumber, jumpOptions) =>
-            deps.openFileAndMaybeJump(rel, lineNumber, jumpOptions),
-          closeSearchOverlay,
-          expandToPath: (rel) => deps.expandToPath(rel),
-          applySetiIconToSpan: (span, fileName, kind) =>
-            deps.applySetiIconToSpan(span, fileName, kind),
-          basename: (path) => deps.basename(path),
-        }),
       renderContentResults: (container, data) =>
         renderContentResults(container, data, {
           toast: (message) => deps.toast(message),
@@ -341,34 +303,6 @@ export function createExplorerSearchOverlayController(
       modeContainer.appendChild(button);
     }
     header.appendChild(modeContainer);
-
-    const inputContainer = document.createElement("div");
-    inputContainer.className = "fe-search-input-container";
-
-    const input = document.createElement("input");
-    input.type = "text";
-    input.id = "fe-search-input";
-    input.addEventListener("input", (event) => {
-      const target = event.target;
-      if (target instanceof HTMLInputElement) {
-        searchController.scheduleSearch(target.value);
-      }
-    });
-    input.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") {
-        closeSearchOverlay();
-      }
-    });
-    inputContainer.appendChild(input);
-
-    const clearBtn = document.createElement("button");
-    clearBtn.textContent = "✕";
-    clearBtn.className = "fe-search-clear";
-    clearBtn.addEventListener("click", () => {
-      searchController.clearSearchResults();
-      renderSearchOverlay();
-    });
-    inputContainer.appendChild(clearBtn);
 
     const contentWidgetHost = document.createElement("div");
     contentWidgetHost.id = "fe-search-content-widget-host";
@@ -494,7 +428,6 @@ export function createExplorerSearchOverlayController(
     resultsContainer.className = "fe-search-results";
 
     overlay.appendChild(header);
-    overlay.appendChild(inputContainer);
     overlay.appendChild(contentWidgetHost);
     overlay.appendChild(changesToolbar);
     overlay.appendChild(resultsContainer);
@@ -509,10 +442,7 @@ export function createExplorerSearchOverlayController(
         contentQueryWidget.focus();
         return;
       }
-      const input = document.getElementById("fe-search-input");
-      if (input instanceof HTMLInputElement) {
-        input.focus();
-      }
+      contentQueryWidget?.focus();
     },
     hasBus: () => deps.hasExplorerRpc(),
     sendBus: (method, payload) => deps.notifyExplorer(method, payload),

@@ -18,6 +18,11 @@ import type { ExplorerTreeDecorationsController } from "../tree/decorations.ts";
 import type { ExplorerGitStatus } from "../git/footer-utils.ts";
 import type { ProblemsPanelApi } from "../search/diagnostics-renderer.ts";
 import { renderExplorerTreeLabel } from "../tree/label.ts";
+import {
+  getExplorerNormalTreeList,
+  queryExplorerNormalTreeNode,
+  reconcileExplorerNormalTreeOpenDirectories,
+} from "../tree/view-utils.ts";
 
 interface ExplorerSearchOverlayController {
   handleSearchResultsUpdated(payload: JsonObject): void;
@@ -35,6 +40,17 @@ interface ExplorerSearchOverlayController {
 
 interface ExplorerMarketplaceController {
   closeMarketplace(reason?: string): void;
+}
+
+interface ExplorerNameSearchController {
+  close(reason?: string): void;
+  render(): void;
+  isVisible(): boolean;
+  handleResultsUpdated(payload: JsonObject): boolean;
+  handleJobProgress(payload: JsonObject): boolean;
+  handleJobResult(payload: JsonObject): boolean;
+  handleJobDone(payload: JsonObject): boolean;
+  handleJobError(payload: JsonObject): boolean;
 }
 
 interface ExplorerNotificationHandlerDeps {
@@ -67,6 +83,7 @@ interface ExplorerNotificationHandlerDeps {
   treeDecorations: ExplorerTreeDecorationsController;
   getDiagnosticsPanel(): ProblemsPanelApi | null;
   searchOverlayController: ExplorerSearchOverlayController;
+  nameSearchController: ExplorerNameSearchController;
   marketplaceController: ExplorerMarketplaceController;
   renderSearchOverlay(): void;
   dispatchRemoteDraft(payload: JsonObject): void;
@@ -245,6 +262,7 @@ export function createExplorerNotificationHandler(
           nextProjectPath,
         );
         if (projectChanged) {
+          deps.nameSearchController.close("projectChanged");
           deps.searchOverlayController.closeSearchOverlay("projectChanged");
         }
         void deps.initDiffBaseFromBackend();
@@ -278,7 +296,10 @@ export function createExplorerNotificationHandler(
       }
       case EXPLORER_RPC_NOTIFICATIONS.openStateChanged: {
         const nextProjectPath = getProjectedProjectPath(payload);
-        applyProjectRootProjection(deps, nextProjectPath);
+        if (applyProjectRootProjection(deps, nextProjectPath)) {
+          deps.nameSearchController.close("projectChanged");
+          deps.searchOverlayController.closeSearchOverlay("projectChanged");
+        }
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.openDirsUpdated: {
@@ -292,7 +313,12 @@ export function createExplorerNotificationHandler(
         dirs.forEach((dir) => {
           if (dir) openDirectories.add(dir);
         });
+        reconcileExplorerNormalTreeOpenDirectories(
+          getExplorerNormalTreeList(deps.getTreeElement()),
+          dirs,
+        );
         deps.setOpenDirsInitialized(true);
+        deps.applyActiveFileMarker();
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.listUpdated: {
@@ -331,12 +357,11 @@ export function createExplorerNotificationHandler(
             }
           }
           if (!rootLi) break;
-          let childList = rootLi.querySelector<HTMLUListElement>(
-            ":scope > ul.fe-tree",
-          );
+          let childList = getExplorerNormalTreeList(treeElement);
           if (!childList) {
             childList = document.createElement("ul");
-            childList.className = "fe-tree";
+            childList.className = "fe-tree fe-tree-normal";
+            childList.dataset.treeView = "normal";
             rootLi.appendChild(childList);
           }
           deps.renderEntriesInto(childList, payload.entries);
@@ -345,7 +370,8 @@ export function createExplorerNotificationHandler(
             deps.runtimeState.setReconnectResyncPending(false);
           }
         } else {
-          const dirLi = treeElement.querySelector<HTMLLIElement>(
+          const dirLi = queryExplorerNormalTreeNode(
+            treeElement,
             `li.fe-tree-node[data-kind="dir"][data-rel="${cwd}"]`,
           );
           if (!dirLi) break;
@@ -372,6 +398,7 @@ export function createExplorerNotificationHandler(
 
         deps.notifyDirListComplete(cwd);
         deps.applyActiveFileMarker();
+        deps.nameSearchController.render();
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.treeUpdated: {
@@ -387,12 +414,11 @@ export function createExplorerNotificationHandler(
             "li.fe-tree-node.fe-tree-root",
           );
           if (rootLi) {
-            let childList = rootLi.querySelector<HTMLUListElement>(
-              ":scope > ul.fe-tree",
-            );
+            let childList = getExplorerNormalTreeList(treeElement);
             if (!childList) {
               childList = document.createElement("ul");
-              childList.className = "fe-tree";
+              childList.className = "fe-tree fe-tree-normal";
+              childList.dataset.treeView = "normal";
               rootLi.appendChild(childList);
             }
             deps.renderEntriesInto(
@@ -401,6 +427,7 @@ export function createExplorerNotificationHandler(
             );
           }
         }
+        deps.nameSearchController.render();
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.decorationsUpdated: {
@@ -486,6 +513,7 @@ export function createExplorerNotificationHandler(
       case EXPLORER_RPC_NOTIFICATIONS.projectOpened: {
         const path = getProjectedProjectPath(payload);
         if (path) {
+          deps.nameSearchController.close("projectChanged");
           deps.searchOverlayController.closeSearchOverlay("projectChanged");
           applyProjectRootProjection(deps, path, { forceReset: true });
           deps.dispatchProjectOpened(path, payload);
@@ -560,18 +588,23 @@ export function createExplorerNotificationHandler(
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.searchReset: {
+        deps.nameSearchController.close("projectChanged");
         deps.searchOverlayController.closeSearchOverlay("projectChanged");
         deps.marketplaceController.closeMarketplace("projectChanged");
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.searchResultsUpdated: {
-        deps.searchOverlayController.handleSearchResultsUpdated(payload);
+        if (!deps.nameSearchController.handleResultsUpdated(payload)) {
+          deps.searchOverlayController.handleSearchResultsUpdated(payload);
+        }
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.searchJobProgress: {
         const benchmarkObserver = getActualSearchBenchmarkObserver();
         const startedAt = benchmarkObserver ? performance.now() : 0;
-        deps.searchOverlayController.handleSearchJobProgress(payload);
+        if (!deps.nameSearchController.handleJobProgress(payload)) {
+          deps.searchOverlayController.handleSearchJobProgress(payload);
+        }
         if (benchmarkObserver) {
           benchmarkObserver.observe(
             "search.job.progress",
@@ -584,7 +617,9 @@ export function createExplorerNotificationHandler(
       case EXPLORER_RPC_NOTIFICATIONS.searchJobResult: {
         const benchmarkObserver = getActualSearchBenchmarkObserver();
         const startedAt = benchmarkObserver ? performance.now() : 0;
-        deps.searchOverlayController.handleSearchJobResult(payload);
+        if (!deps.nameSearchController.handleJobResult(payload)) {
+          deps.searchOverlayController.handleSearchJobResult(payload);
+        }
         if (benchmarkObserver) {
           benchmarkObserver.observe(
             "search.job.result",
@@ -597,7 +632,9 @@ export function createExplorerNotificationHandler(
       case EXPLORER_RPC_NOTIFICATIONS.searchJobDone: {
         const benchmarkObserver = getActualSearchBenchmarkObserver();
         const startedAt = benchmarkObserver ? performance.now() : 0;
-        deps.searchOverlayController.handleSearchJobDone(payload);
+        if (!deps.nameSearchController.handleJobDone(payload)) {
+          deps.searchOverlayController.handleSearchJobDone(payload);
+        }
         if (benchmarkObserver) {
           benchmarkObserver.observe(
             "search.job.done",
@@ -610,7 +647,9 @@ export function createExplorerNotificationHandler(
       case EXPLORER_RPC_NOTIFICATIONS.searchJobError: {
         const benchmarkObserver = getActualSearchBenchmarkObserver();
         const startedAt = benchmarkObserver ? performance.now() : 0;
-        deps.searchOverlayController.handleSearchJobError(payload);
+        if (!deps.nameSearchController.handleJobError(payload)) {
+          deps.searchOverlayController.handleSearchJobError(payload);
+        }
         if (benchmarkObserver) {
           benchmarkObserver.observe(
             "search.job.error",

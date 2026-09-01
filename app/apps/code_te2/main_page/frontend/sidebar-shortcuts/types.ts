@@ -235,6 +235,7 @@ export interface SidebarShortcutsOptions {
 export interface SidebarShortcutsRuntime {
   init: () => Promise<void>;
   hydrate: () => Promise<void> | void;
+  setProjectRoot: (projectPath: string) => Promise<void> | void;
   applyUiPrefs: (uiPrefs: UnknownRecord) => void;
   getActiveUrl: (uiPrefs: UnknownRecord) => string;
   getMentionTarget: () => SidebarMentionTarget | null;

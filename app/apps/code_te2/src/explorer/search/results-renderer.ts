@@ -1,8 +1,6 @@
 import {
   type ExplorerContentSearchFileResult,
   type ExplorerContentSearchMatch,
-  type ExplorerNameSearchItem,
-  type ExplorerNameSearchResults,
 } from "./types.ts";
 import { normalizeContentSearchResults } from "./result-model.ts";
 import { renderHighlightedSearchSnippet } from "./render-styling.ts";
@@ -16,25 +14,10 @@ interface ExplorerSearchResultsRendererDeps {
     lineNumber?: number | null,
     jumpOptions?: ExplorerJumpOptions,
   ): Promise<void>;
-  closeSearchOverlay?(): void;
-  expandToPath?(rel: string): Promise<unknown> | void;
-  applySetiIconToSpan?(
-    span: HTMLElement,
-    fileName: string,
-    kind?: string,
-  ): void;
-  basename?(path: string): string;
   loadMoreResults?(): Promise<void> | void;
   loadMoreInFile?(file: ExplorerContentSearchFileResult): Promise<void> | void;
   isGlobalMoreLoading?(): boolean;
   isFileMoreLoading?(rel: string): boolean;
-}
-
-function normalizeNameResults(data: unknown): ExplorerNameSearchResults {
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    return data as ExplorerNameSearchResults;
-  }
-  return {};
 }
 
 function splitPathForDisplay(path: string): { parent: string; name: string } {
@@ -64,71 +47,6 @@ function renderPathLabel(target: HTMLElement, path: string): void {
   nameSpan.className = "fe-search-path-name";
   nameSpan.textContent = name || path;
   target.appendChild(nameSpan);
-}
-
-export function renderNameResults(
-  container: HTMLElement,
-  data: unknown,
-  deps: ExplorerSearchResultsRendererDeps,
-): void {
-  const payload = normalizeNameResults(data);
-  const results = Array.isArray(payload.results) ? payload.results : [];
-  const list = document.createElement("div");
-  list.className = "fe-search-list";
-
-  results.forEach((item: ExplorerNameSearchItem) => {
-    const rel = item.rel || "";
-    const row = document.createElement("div");
-    row.className = "fe-search-item";
-    row.onclick = async () => {
-      if (item.type === "file") {
-        if (!rel) {
-          deps.toast("File opener not available");
-          return;
-        }
-        try {
-          await deps.openFileAndMaybeJump(rel);
-        } catch (error) {
-          deps.toast(
-            `Failed to open file: ${getErrorMessage(error, "unknown error")}`,
-          );
-        }
-        return;
-      }
-
-      if (item.type === "dir" && rel) {
-        deps.closeSearchOverlay?.();
-        await deps.expandToPath?.(rel);
-      }
-    };
-
-    const icon = document.createElement("span");
-    icon.className = "fe-search-icon";
-    if (item.type === "dir") {
-      icon.textContent = "📁";
-    } else {
-      icon.textContent = "📄";
-      deps.applySetiIconToSpan?.(icon, deps.basename?.(rel) || rel, "file");
-    }
-    row.appendChild(icon);
-
-    const name = document.createElement("span");
-    name.className = "fe-search-name";
-    renderPathLabel(name, rel);
-    row.appendChild(name);
-
-    list.appendChild(row);
-  });
-
-  container.appendChild(list);
-  if (payload.truncated) {
-    const notice = document.createElement("div");
-    notice.className = "fe-search-notice";
-    const shownCount =
-      typeof payload.count === "number" ? payload.count : results.length;
-    notice.textContent = `Showing first ${shownCount} results`;
-    container.appendChild(notice);
-  }
 }
 
 export function renderContentResults(

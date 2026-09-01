@@ -31,11 +31,13 @@ import {
   type ExplorerJumpOptions,
 } from "../host/file-open-bridge.ts";
 import { createExplorerSearchOverlayController } from "../search/overlay-controller.ts";
+import { createExplorerNameTreeSearchController } from "../search/name-tree-controller.ts";
 import { createExplorerMarketplaceController } from "../extensions/marketplace-controller.ts";
 import { getErrorMessage } from "../utils/errors.ts";
 import { createExplorerRefreshController } from "./refresh-controller.ts";
 import {
   EXPLORER_RPC_METHODS,
+  EXPLORER_RPC_NOTIFICATIONS,
   type ExplorerRpcMethod,
   isExplorerRpcNotificationMethod,
 } from "../rpc/contract.ts";
@@ -58,6 +60,11 @@ import {
 } from "../search/diagnostics-renderer.ts";
 import { installExplorerSearchBenchmarkApi } from "../search/benchmark.ts";
 import { createExplorerRuntimeState } from "../state/runtime-state.ts";
+import {
+  getExplorerDirectoryChain,
+  getExplorerNormalTreeList,
+  queryExplorerNormalTreeNode,
+} from "../tree/view-utils.ts";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -244,6 +251,9 @@ const explorerGitFooterUtils = createExplorerGitFooterUtils({
   reloadCurrentFile: () => window.__codeTe2ReloadCurrentFile?.(),
 });
 let explorerSearchOverlayController: ExplorerSearchOverlayControllerApi;
+let explorerNameSearchController: ReturnType<
+  typeof createExplorerNameTreeSearchController
+>;
 let explorerMarketplaceController: ExplorerMarketplaceControllerApi;
 const explorerDiffBaseController = createExplorerDiffBaseController({
   hasExplorerRpc: () => hasExplorerRpc(),
@@ -282,9 +292,6 @@ explorerSearchOverlayController = createExplorerSearchOverlayController({
   getProjectPath: () => explorerRuntimeState.getProjectPath() || "",
   openFileAndMaybeJump: (rel, lineNumber, jumpOptions) =>
     explorerFileOpenBridge.openFileAndMaybeJump(rel, lineNumber, jumpOptions),
-  expandToPath,
-  applySetiIconToSpan,
-  basename,
   ensureDraftDiffs: async () => {
     if (typeof window.__codeTe2EnsureDraftDiffs === "function") {
       try {
@@ -337,8 +344,10 @@ explorerSearchOverlayController = createExplorerSearchOverlayController({
 explorerMarketplaceController = createExplorerMarketplaceController({
   requestExplorer: (method, payload, timeoutMs) =>
     requestExplorerRpc(method, payload, timeoutMs),
-  closeSearchOverlay: (reason) =>
-    explorerSearchOverlayController.closeSearchOverlay(reason),
+  closeSearchOverlay: (reason) => {
+    explorerNameSearchController?.close(reason);
+    explorerSearchOverlayController.closeSearchOverlay(reason);
+  },
   confirm: (message) => window.teUI.dialog.confirm(message),
 });
 const explorerTreeDecorationsController =
@@ -362,6 +371,20 @@ const explorerTreeRenderer = createExplorerTreeRenderer({
   applySetiIconToSpan,
   applyAggregatedGitStatusFlags,
   applyAggregatedDiagnosticFlags,
+});
+explorerNameSearchController = createExplorerNameTreeSearchController({
+  getTreeElement: () => treeElement,
+  getProjectPath: () => explorerRuntimeState.getProjectPath(),
+  isStickyHeadersEnabled: () =>
+    explorerChromeController.isStickyHeadersEnabled(),
+  requestExplorer: (method, payload, timeoutMs) =>
+    requestExplorerRpc(method, payload, timeoutMs),
+  renderEntriesInto: (container, entries, parentRel) =>
+    explorerTreeRenderer.renderEntriesInto(container, entries, parentRel),
+  closeAdvancedSearch: (reason) =>
+    explorerSearchOverlayController.closeSearchOverlay(reason),
+  focusDirectory: (rel) => focusDirectoryFromSearch(rel),
+  toast,
 });
 const explorerTreeMenuController = createExplorerTreeMenuController({
   getTreeElement: () => treeElement,
@@ -392,6 +415,8 @@ const explorerTreeClickHandler = createExplorerTreeClickHandler({
   checkAutoDisableSelectMode: (rel) => checkAutoDisableSelectMode(rel),
   markDirectoryOpen: (rel, isOpen) => markDirectoryOpen(rel, isOpen),
   setEntrySelected,
+  handleSearchDirectoryClick: (rel) =>
+    explorerNameSearchController.handleSearchDirectoryClick(rel),
   openCardMenuForEntry: (entry, anchorEl) =>
     explorerTreeMenuController.openCardMenuForEntry(entry, anchorEl),
   openFile: async (rel) => {
@@ -526,6 +551,8 @@ async function expandToPath(rel: string): Promise<void> {
     treeElement = document.getElementById("fe-file-tree");
   }
   if (!treeElement) return;
+  const normalTree = getExplorerNormalTreeList(treeElement);
+  if (!normalTree) return;
 
   const segments = rel.split("/").filter(Boolean);
   if (!segments.length) return;
@@ -538,15 +565,21 @@ async function expandToPath(rel: string): Promise<void> {
     const isLastSegment = i === segments.length - 1;
 
     // Find the node at nextRel
-    let targetLi = treeElement.querySelector<HTMLLIElement>(
+    let targetLi = normalTree.querySelector<HTMLLIElement>(
       `li.fe-tree-node[data-rel="${nextRel}"]`,
     );
 
     if (!targetLi) {
       // Node not in DOM - need to expand parent first
-      const parentLi = treeElement.querySelector<HTMLLIElement>(
-        `li.fe-tree-node[data-kind="dir"][data-rel="${currentRel}"]`,
-      );
+      const parentLi =
+        currentRel === "."
+          ? treeElement.querySelector<HTMLLIElement>(
+              ":scope > li.fe-tree-node.fe-tree-root",
+            )
+          : queryExplorerNormalTreeNode(
+              treeElement,
+              `li.fe-tree-node[data-kind="dir"][data-rel="${currentRel}"]`,
+            );
 
       if (parentLi && parentLi.dataset.open !== "true") {
         parentLi.dataset.open = "true";
@@ -557,7 +590,7 @@ async function expandToPath(rel: string): Promise<void> {
       }
 
       // Try again after parent expanded
-      targetLi = treeElement.querySelector<HTMLLIElement>(
+      targetLi = normalTree.querySelector<HTMLLIElement>(
         `li.fe-tree-node[data-rel="${nextRel}"]`,
       );
 
@@ -578,6 +611,32 @@ async function expandToPath(rel: string): Promise<void> {
 
     currentRel = nextRel;
   }
+}
+
+async function focusDirectoryFromSearch(rel: string): Promise<void> {
+  const normalized = rel.replaceAll("\\", "/").replace(/^\/+|\/+$/g, "");
+  if (!normalized || normalized === ".") return;
+
+  const requestedDirectories = getExplorerDirectoryChain(normalized);
+  const projection = await requestExplorerRpc(
+    EXPLORER_RPC_METHODS.openDirsSet,
+    { dirs: requestedDirectories },
+    10000,
+  );
+  explorerNotificationHandler.handleExplorerNotification(
+    EXPLORER_RPC_NOTIFICATIONS.openDirsUpdated,
+    projection,
+  );
+  const listings = Array.isArray(projection.listings)
+    ? projection.listings.filter(isRecord)
+    : [];
+  listings.forEach((listing) => {
+    explorerNotificationHandler.handleExplorerNotification(
+      EXPLORER_RPC_NOTIFICATIONS.listUpdated,
+      listing,
+    );
+  });
+  applyActiveFileMarker();
 }
 
 function getParentRel(rel: string): string {
@@ -757,6 +816,7 @@ const explorerNotificationHandler = createExplorerNotificationHandler({
   treeDecorations: explorerTreeDecorationsController,
   getDiagnosticsPanel: () => getExplorerDiagnosticsPanel(),
   searchOverlayController: explorerSearchOverlayController,
+  nameSearchController: explorerNameSearchController,
   marketplaceController: explorerMarketplaceController,
   renderSearchOverlay,
   dispatchRemoteDraft,
@@ -801,6 +861,9 @@ export async function initExplorerUI(options: ExplorerUiInitOptions) {
   );
   const explorerMenuBtn = document.getElementById("fe-explorer-menu-btn");
   const explorerMenuDropdown = document.getElementById("fe-explorer-menu-dd");
+  const explorerMenuSearchViewsItem = document.getElementById(
+    "fe-mi-explorer-search-views",
+  );
   const explorerMenuStickyHeadersItem = document.getElementById(
     "fe-mi-explorer-sticky-headers",
   );
@@ -810,7 +873,6 @@ export async function initExplorerUI(options: ExplorerUiInitOptions) {
   treeElement = document.getElementById("fe-file-tree");
   const branchLabel = document.getElementById("fe-branch-label");
   gitSummaryEl = document.getElementById("fe-git-summary");
-  const searchBtn = document.getElementById("fe-search-btn");
   const marketplaceBtn = document.getElementById(
     "fe-extension-marketplace-btn",
   );
@@ -850,7 +912,6 @@ export async function initExplorerUI(options: ExplorerUiInitOptions) {
     drawerClose,
     drawerBackdrop,
     drawerOpenBtn,
-    searchBtn,
     marketplaceBtn,
     branchLabel,
     projectMenuBtn,
@@ -860,6 +921,7 @@ export async function initExplorerUI(options: ExplorerUiInitOptions) {
     projectMenuOpenRecentItem,
     explorerMenuBtn,
     explorerMenuDropdown,
+    explorerMenuSearchViewsItem,
     explorerMenuStickyHeadersItem,
     explorerMenuScrollActiveItem,
   });
@@ -916,6 +978,7 @@ export async function initExplorerUI(options: ExplorerUiInitOptions) {
 
   // Basic click handling: expand/collapse dirs, open files, open context menu
   if (treeElement) {
+    explorerNameSearchController.bind(treeElement);
     treeElement.addEventListener("click", (ev) => {
       void explorerTreeClickHandler.handleTreeClick(ev);
     });
@@ -971,6 +1034,7 @@ async function openFileAndMaybeJump(
 // --- Search / Review overlay wiring ---
 
 function openSearchOverlay(): void {
+  explorerNameSearchController.close("advancedSearchOpened");
   explorerMarketplaceController.closeMarketplace("searchOpened");
   explorerSearchOverlayController.openSearchOverlay();
 }

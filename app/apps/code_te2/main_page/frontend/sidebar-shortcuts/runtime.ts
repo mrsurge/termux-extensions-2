@@ -67,6 +67,7 @@ import {
   clearSidebarPresentationForeground,
   emptySidebarPresentationState,
   loadSidebarPresentationState,
+  projectSidebarDockSlots,
   reconcileSidebarPresentationState,
   reorderSidebarPresentationState,
   resolveSidebarMentionTarget,
@@ -361,6 +362,7 @@ export function initSidebarShortcuts(
   let _settingsUiMutating = false;
   let _shortcutsCache: SidebarShortcutPreference[] = [];
   let _appDockSlots: SidebarAppDockSlot[] = [];
+  let _appDockLedgerSlots: SidebarAppDockSlot[] = [];
 
   let _editingId: string | null = null;
   let _editingKey = "";
@@ -2023,34 +2025,11 @@ export function initSidebarShortcuts(
     return projectPath === "/" ? projectPath : projectPath.replace(/\/+$/, "");
   }
 
-  function _projectPathFromSlots(slots: SidebarAppDockSlot[]): string {
-    for (const slot of slots) {
-      const direct = _normalizedPresentationProject(
-        slot.projectPath || slot.project_path,
-      );
-      if (direct) return direct;
-      const webview = asRecord(slot.webviewSurface || slot.webview_surface);
-      const webviewProject = _normalizedPresentationProject(
-        webview.projectPath || webview.project_path,
-      );
-      if (webviewProject) return webviewProject;
-      const runProfile = asRecord(
-        slot.runProfileSurface || slot.run_profile_surface,
-      );
-      const runProfileProject = _normalizedPresentationProject(
-        runProfile.projectPath || runProfile.project_path,
-      );
-      if (runProfileProject) return runProfileProject;
-    }
-    return "";
-  }
-
   async function _ensurePresentationStateLoaded(
     requestedProject = getProjectRoot(),
     slots: SidebarAppDockSlot[] | null = null,
   ): Promise<void> {
-    const projectPath = _normalizedPresentationProject(requestedProject)
-      || _projectPathFromSlots(slots || _appDockSlots);
+    const projectPath = _normalizedPresentationProject(requestedProject);
     if (!projectPath) {
       _presentationStateLoaded = true;
       return;
@@ -5210,11 +5189,17 @@ export function initSidebarShortcuts(
   }
 
   function _applyAppDockLedgerPayload(payload: UnknownRecord) {
-    const windows = _appDockSlotsFromLedgerPayload(payload);
-    const projectPath = _projectPathFromSlots(windows)
-      || _normalizedPresentationProject(getProjectRoot());
+    _appDockLedgerSlots = _appDockSlotsFromLedgerPayload(payload);
+    void _applyAppDockLedgerForProject(getProjectRoot());
+  }
+
+  async function _applyAppDockLedgerForProject(
+    requestedProject: string,
+  ): Promise<void> {
+    const projectPath = _normalizedPresentationProject(requestedProject);
+    const windows = projectSidebarDockSlots(_appDockLedgerSlots, projectPath);
     if (projectPath && projectPath !== _presentationProjectPath) {
-      void _ensurePresentationStateLoaded(projectPath, windows);
+      await _ensurePresentationStateLoaded(projectPath, windows);
       return;
     }
     _appDockSlots = _reconcilePresentationWithDockSlots(windows);
@@ -5229,6 +5214,10 @@ export function initSidebarShortcuts(
     }
     if (!_hydrated) return;
     _applyUiPrefsHydrated();
+  }
+
+  function setProjectRoot(projectPath: string): Promise<void> {
+    return _applyAppDockLedgerForProject(projectPath);
   }
 
   async function hydrate() {
@@ -5677,6 +5666,7 @@ export function initSidebarShortcuts(
   return {
     init,
     hydrate,
+    setProjectRoot,
     applyUiPrefs,
     getActiveUrl,
     getMentionTarget,

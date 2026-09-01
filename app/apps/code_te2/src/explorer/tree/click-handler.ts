@@ -14,6 +14,7 @@ interface ExplorerTreeClickHandlerDeps {
   checkAutoDisableSelectMode(rel: string): void;
   markDirectoryOpen(rel: string, isOpen: boolean): void;
   setEntrySelected(rel: string, selected: boolean): void;
+  handleSearchDirectoryClick(rel: string): Promise<boolean>;
   openCardMenuForEntry(entry: ExplorerTreeMenuEntry, anchorEl: HTMLElement): void;
   openFile(rel: string): Promise<void>;
 }
@@ -172,6 +173,12 @@ export function createExplorerTreeClickHandler(
 
     if (kind === 'dir') {
       if (rel === '.') {
+        return;
+      }
+      if (
+        li.closest('ul.fe-tree[data-tree-view="search"]') &&
+        (await deps.handleSearchDirectoryClick(rel))
+      ) {
         return;
       }
       const isOpen = li.dataset.open === 'true';

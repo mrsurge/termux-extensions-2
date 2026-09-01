@@ -33,9 +33,11 @@ function installDom() {
     CSS: window.CSS,
     Element: window.Element,
     HTMLElement: window.HTMLElement,
+    HTMLButtonElement: window.HTMLButtonElement,
     HTMLLIElement: window.HTMLLIElement,
     HTMLInputElement: window.HTMLInputElement,
     HTMLUListElement: window.HTMLUListElement,
+    Event: window.Event,
     MutationObserver: window.MutationObserver,
     ResizeObserver: window.ResizeObserver,
     requestAnimationFrame: window.requestAnimationFrame.bind(window),
@@ -230,6 +232,20 @@ test('compressed sticky scope renders canonical clickable path segments', async 
   root.classList.add('fe-tree-root', 'fe-dir-has-diag-error');
   root.dataset.treeDepth = '0';
   root.dataset.depthParity = 'even';
+  let rootSearchClicks = 0;
+  const rootActions = document.createElement('div');
+  rootActions.className = 'fe-tree-root-actions';
+  const rootSearchButton = document.createElement('button');
+  rootSearchButton.className = 'fe-tree-search-btn';
+  rootSearchButton.textContent = '🔍';
+  rootSearchButton.addEventListener('click', () => {
+    rootSearchClicks += 1;
+  });
+  const rootMenuButton = document.createElement('button');
+  rootMenuButton.className = 'fe-card-menu-btn';
+  rootMenuButton.textContent = '⋮';
+  rootActions.append(rootSearchButton, rootMenuButton);
+  root.appendChild(rootActions);
   const src = createNode('src', 'src');
   src.dataset.treeDepth = '1';
   src.dataset.depthParity = 'odd';
@@ -289,11 +305,69 @@ test('compressed sticky scope renders canonical clickable path segments', async 
   assert.equal(slots[0].querySelector('li')?.dataset.open, 'true');
   assert.equal(slots[0].querySelector('li')?.dataset.treeDepth, '3');
   assert.equal(slots[0].querySelector('li')?.dataset.depthParity, 'odd');
-
   slots[0]
     .querySelector('[data-rel="src/feature"]')
     .dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
   assert.notEqual(tree.scrollTop, 300);
+  tree.scrollTop = 300;
+  sticky.update();
+  await new Promise((resolve) => window.requestAnimationFrame(resolve));
+
+  const stickySearchButton = slots[0].querySelector('.fe-tree-search-btn');
+  assert.ok(stickySearchButton);
+  stickySearchButton.click();
+  assert.equal(rootSearchClicks, 1);
+
+  const rootLabel = root.querySelector(':scope > .fe-tree-text');
+  const sourceInput = document.createElement('input');
+  sourceInput.className = 'fe-tree-search-input';
+  rootLabel.replaceChildren(sourceInput);
+  const sourceCount = document.createElement('span');
+  sourceCount.className = 'fe-tree-search-control fe-tree-search-count';
+  sourceCount.textContent = '1/2';
+  const sourcePrevious = document.createElement('button');
+  sourcePrevious.className = 'fe-tree-search-control fe-tree-search-prev';
+  sourcePrevious.textContent = '↑';
+  const sourceNext = document.createElement('button');
+  sourceNext.className = 'fe-tree-search-control fe-tree-search-next';
+  sourceNext.textContent = '↓';
+  const sourceClear = document.createElement('button');
+  sourceClear.className = 'fe-tree-search-control fe-tree-search-clear';
+  sourceClear.textContent = '✕';
+  rootActions.replaceChildren(
+    sourceCount,
+    sourcePrevious,
+    sourceNext,
+    sourceClear,
+    rootMenuButton,
+  );
+  assert.ok(
+    root.querySelector(':scope > .fe-tree-text .fe-tree-search-input'),
+  );
+  sticky.update();
+  await new Promise((resolve) => window.requestAnimationFrame(resolve));
+  await new Promise((resolve) => window.requestAnimationFrame(resolve));
+
+  const stickySearchInput = slots[0].querySelector('.fe-tree-search-input');
+  assert.ok(stickySearchInput, slots[0].outerHTML);
+  assert.equal(slots[0].querySelector('.fe-tree-search-count')?.textContent, '1/2');
+  stickySearchInput.value = 'src';
+  stickySearchInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+  assert.equal(sourceInput.value, 'src');
+  let sourceFocusOutCount = 0;
+  sourceInput.addEventListener('focusout', () => {
+    sourceFocusOutCount += 1;
+  });
+  stickySearchInput.dispatchEvent(new window.Event('blur'));
+  assert.equal(sourceFocusOutCount, 1);
+
+  file.getBoundingClientRect = () => rect(0, 0, 0, 0);
+  sticky.update();
+  await new Promise((resolve) => window.requestAnimationFrame(resolve));
+  assert.equal(drawer.querySelectorAll('.fe-sticky-scope-slot').length, 1);
+  assert.ok(
+    drawer.querySelector('.fe-sticky-scope-slot .fe-tree-search-input'),
+  );
 
   sticky.destroy();
 });

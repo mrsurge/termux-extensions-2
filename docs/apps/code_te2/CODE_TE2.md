@@ -740,6 +740,29 @@ Used by review save/discard, open/jump, search highlighting, and project-switch 
 | `search.job.error` | Terminal error notification. |
 
 ### Presentation and limits
+
+- File/folder name search is an inline Explorer-tree projection, not a search
+  overlay. The project-root label becomes the query field, direct hits and their
+  ancestor paths are expanded in a sibling result tree, and a direct directory
+  hit is hydrated with only one shallow child listing. The normal tree DOM and
+  its open-directory state remain intact behind that projection.
+- The Explorer `...` menu retains a separate advanced search surface for the
+  four non-name views: By contents, By changes, Drafts, and Diagnostics. Opening
+  either search surface closes the other before it starts a progressive search.
+- Inline name search keeps its query while files are opened. Its clear control
+  cancels the active search and restores the normal tree while leaving the empty
+  field focused; an empty blur closes the field. Selecting a result directory
+  requests `explorer.openDirs.set` with that directory and its ancestor chain.
+  The backend persists and validates that chain, returns its authoritative
+  `dirs` plus shallow listings, and publishes an `ExplorerRenderStateChanged`
+  fact. The render-state projector broadcasts `explorer.openDirs.updated` and
+  listings to every project client; each client reconciles its normal-tree DOM,
+  and the invoking client closes search only after applying its reply.
+- When Explorer sticky headers are enabled, they remain operational throughout
+  search, mirror the root query controls, and permit the first direct hit to be
+  centered automatically. With sticky headers disabled, typing never scrolls the
+  tree away from the root query field. Previous/next controls always remain an
+  explicit centered smooth-scroll action in either mode.
 - Python requests a presentation window with `maxInitialMatchesTotal=50` and `maxInitialMatchesPerFile=10`.
 - Python imposes `maxMatchesTotal: 700` for broad/noisy content searches.
 - Rust reports truncation metadata with `matchLimit` and `truncatedReason: "matchLimit"` when the cap is hit.

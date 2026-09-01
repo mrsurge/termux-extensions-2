@@ -65,6 +65,34 @@ test("ledger reconcile preserves local order and appends new slots deterministic
   assert.equal(reconciled.presentations.charlie, "embedded");
 });
 
+test("dock projection admits only the active project plus unscoped slots", async () => {
+  const { projectSidebarDockSlots } = await importPresentationState();
+  const slots = [
+    { hostId: "global-agent" },
+    {
+      hostId: "extension-a",
+      webviewSurface: { projectPath: "/workspace/a/" },
+    },
+    {
+      hostId: "run-a",
+      runProfileSurface: { projectPath: "/workspace/a" },
+    },
+    {
+      hostId: "extension-b",
+      webview_surface: { project_path: "/workspace/b" },
+    },
+  ];
+
+  assert.deepEqual(
+    projectSidebarDockSlots(slots, "/workspace/a").map((slot) => slot.hostId),
+    ["global-agent", "extension-a", "run-a"],
+  );
+  assert.deepEqual(
+    projectSidebarDockSlots(slots, "").map((slot) => slot.hostId),
+    ["global-agent"],
+  );
+});
+
 test("removing the foreground chooses its next surviving local neighbor", async () => {
   const { reconcileSidebarPresentationState } = await importPresentationState();
 

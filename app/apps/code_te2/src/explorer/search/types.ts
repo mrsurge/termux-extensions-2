@@ -16,6 +16,7 @@ export interface ExplorerSearchOverlayState {
 export interface ExplorerNameSearchItem {
   type?: string;
   rel?: string;
+  name?: string;
 }
 
 export interface ExplorerNameSearchResults {

@@ -118,16 +118,31 @@ export function createExplorerTreeRenderer(deps: ExplorerTreeRendererDeps) {
     rootLi.dataset.name = baseName;
     renderExplorerTreeLabel(text, baseName);
 
+    const actions = document.createElement('div');
+    actions.className = 'fe-tree-root-actions';
+
+    const searchBtn = document.createElement('button');
+    searchBtn.type = 'button';
+    searchBtn.className = 'fe-tree-search-btn';
+    searchBtn.title = 'Search files and folders';
+    searchBtn.setAttribute('aria-label', 'Search files and folders');
+    searchBtn.textContent = '🔍';
+
     const menuBtn = document.createElement('button');
+    menuBtn.type = 'button';
     menuBtn.className = 'fe-card-menu-btn';
     menuBtn.textContent = '⋮';
 
+    actions.appendChild(searchBtn);
+    actions.appendChild(menuBtn);
+
     const childList = document.createElement('ul');
-    childList.className = 'fe-tree';
+    childList.className = 'fe-tree fe-tree-normal';
+    childList.dataset.treeView = 'normal';
 
     rootLi.appendChild(icon);
     rootLi.appendChild(text);
-    rootLi.appendChild(menuBtn);
+    rootLi.appendChild(actions);
     rootLi.appendChild(childList);
     treeElement.appendChild(rootLi);
   }

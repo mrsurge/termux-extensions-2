@@ -15,7 +15,6 @@ interface ExplorerChromeBindings {
   drawerClose: HTMLElement | null;
   drawerBackdrop: HTMLElement | null;
   drawerOpenBtn: HTMLElement | null;
-  searchBtn: HTMLElement | null;
   marketplaceBtn: HTMLElement | null;
   branchLabel: HTMLElement | null;
   projectMenuBtn: HTMLElement | null;
@@ -25,6 +24,7 @@ interface ExplorerChromeBindings {
   projectMenuOpenRecentItem: HTMLElement | null;
   explorerMenuBtn: HTMLElement | null;
   explorerMenuDropdown: HTMLElement | null;
+  explorerMenuSearchViewsItem: HTMLElement | null;
   explorerMenuStickyHeadersItem: HTMLElement | null;
   explorerMenuScrollActiveItem: HTMLElement | null;
 }
@@ -103,6 +103,7 @@ export function createExplorerChromeController(
   let projectMenuDropdown: HTMLElement | null = null;
   let explorerMenuBtn: HTMLElement | null = null;
   let explorerMenuDropdown: HTMLElement | null = null;
+  let explorerMenuSearchViewsItem: HTMLElement | null = null;
   let explorerMenuStickyHeadersItem: HTMLElement | null = null;
   let explorerMenuScrollActiveItem: HTMLElement | null = null;
   let explorerStickyHeadersEnabled: boolean | null = null;
@@ -185,6 +186,10 @@ export function createExplorerChromeController(
 
   function setStickyHeadersEnabled(next: boolean | null): void {
     explorerStickyHeadersEnabled = next;
+  }
+
+  function isStickyHeadersEnabled(): boolean {
+    return explorerStickyHeadersEnabled === true;
   }
 
   function syncExplorerPrefsUI(): void {
@@ -391,6 +396,7 @@ export function createExplorerChromeController(
     projectMenuDropdown = bindings.projectMenuDropdown;
     explorerMenuBtn = bindings.explorerMenuBtn;
     explorerMenuDropdown = bindings.explorerMenuDropdown;
+    explorerMenuSearchViewsItem = bindings.explorerMenuSearchViewsItem;
     explorerMenuStickyHeadersItem = bindings.explorerMenuStickyHeadersItem;
     explorerMenuScrollActiveItem = bindings.explorerMenuScrollActiveItem;
 
@@ -404,7 +410,6 @@ export function createExplorerChromeController(
         toggleDrawer(true);
       }
     });
-    bindings.searchBtn?.addEventListener('click', () => deps.openSearchOverlay());
     bindings.marketplaceBtn?.addEventListener('click', () =>
       deps.openMarketplaceOverlay()
     );
@@ -450,6 +455,12 @@ export function createExplorerChromeController(
       event.stopPropagation();
       closeProjectMenu();
       void deps.showProjectsDebugModal();
+    });
+
+    explorerMenuSearchViewsItem?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      closeExplorerMenu();
+      deps.openSearchOverlay();
     });
 
     explorerMenuStickyHeadersItem?.addEventListener('click', (event) => {
@@ -498,6 +509,7 @@ export function createExplorerChromeController(
     renderBranchLabel,
     toggleDrawer,
     setStickyHeadersEnabled,
+    isStickyHeadersEnabled,
     syncExplorerPrefsUI,
     applyExplorerStickyScopesPreference,
     setStickyScopesContext,
