@@ -77,6 +77,10 @@ ESC  ≡        -     HOME  ↑     END    PGUP
 TAB  CTRL     ALT   LEFT  DOWN  RIGHT  PGDN
 ```
 
+The dock is created only for Android/mobile user agents. A `Keys` control beside
+the font-size buttons defaults on and hides or restores the dock for the current
+frontend instance. This visibility state is not persisted or shared.
+
 `≡` opens the client-local shell drawer and never sends PTY input. That soft-key
 path captures the originating pointer and suppresses interaction with newly
 revealed drawer controls for 300 ms, preventing the release/click from selecting
@@ -86,6 +90,12 @@ the active xterm helper textarea, including legacy `keyCode` and `which`
 values. Xterm therefore remains responsible for application-cursor and
 modifier-specific escape sequences; the frontend does not hard-code arrow
 bytes.
+
+Plain dash is the exception because Android xterm intentionally suppresses
+unmodified printable keydown events. The dash key inserts into the guarded
+cumulative textarea and dispatches `insertText`, using the same printable-text
+authority as Gboard. Ctrl/Alt-modified dash remains on the synthetic keyboard
+path.
 
 Ctrl and Alt are independent. One Ctrl tap arms it for one action, a second tap
 within 350 ms locks it, and a locked Ctrl survives subsequent actions until it

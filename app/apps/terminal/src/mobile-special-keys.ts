@@ -18,6 +18,15 @@ interface KeyboardEventConstructor {
   new (type: string, eventInitDict?: KeyboardEventInit): KeyboardEvent;
 }
 
+interface InputEventConstructor {
+  new (type: string, eventInitDict?: InputEventInit): InputEvent;
+}
+
+interface MobileNavigatorLike {
+  userAgent?: string;
+  userAgentData?: { mobile?: boolean };
+}
+
 export const TERMINAL_KEYS = {
   escape: { key: 'Escape', code: 'Escape', keyCode: 27 },
   dash: { key: '-', code: 'Minus', keyCode: 189 },
@@ -31,6 +40,13 @@ export const TERMINAL_KEYS = {
   right: { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 },
   pageDown: { key: 'PageDown', code: 'PageDown', keyCode: 34 },
 } as const satisfies Record<string, SyntheticTerminalKey>;
+
+export function isMobileUserAgent(navigatorLike: MobileNavigatorLike): boolean {
+  if (navigatorLike.userAgentData?.mobile === true) return true;
+  return /\b(?:Android|Mobile|iPhone|iPad|iPod)\b/i.test(
+    navigatorLike.userAgent || '',
+  );
+}
 
 export class TerminalModifierState {
   public ctrlMode: CtrlMode = 'off';
@@ -122,4 +138,20 @@ export function dispatchSyntheticTerminalKey(
 ): void {
   target.dispatchEvent(createKeyboardEvent('keydown', key, modifiers, EventConstructor));
   target.dispatchEvent(createKeyboardEvent('keyup', key, modifiers, EventConstructor));
+}
+
+export function dispatchSyntheticTerminalText(
+  target: HTMLTextAreaElement,
+  text: string,
+  EventConstructor: InputEventConstructor = InputEvent,
+): void {
+  const start = target.selectionStart ?? target.value.length;
+  const end = target.selectionEnd ?? start;
+  target.setRangeText(text, start, end, 'end');
+  target.dispatchEvent(new EventConstructor('input', {
+    data: text,
+    inputType: 'insertText',
+    bubbles: true,
+    composed: true,
+  }));
 }

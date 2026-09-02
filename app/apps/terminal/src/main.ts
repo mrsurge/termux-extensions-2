@@ -15,6 +15,8 @@ import {
 } from './terminal-lifecycle-client';
 import {
   dispatchSyntheticTerminalKey,
+  dispatchSyntheticTerminalText,
+  isMobileUserAgent,
   MINIBAR_INTERACTION_GUARD_MS,
   shouldSuppressMinibarInteraction,
   TERMINAL_KEYS,
@@ -144,6 +146,7 @@ interface UiRefs {
   listContainer: HTMLElement;
   showExited: HTMLInputElement;
   terminalContainer: HTMLElement;
+  keys: HTMLElement;
   drawerOverlay: HTMLElement;
   btnMenu: HTMLButtonElement;
   btnNew: HTMLButtonElement;
@@ -153,6 +156,7 @@ interface UiRefs {
   btnRemove: HTMLButtonElement;
   zoomOut: HTMLButtonElement;
   zoomIn: HTMLButtonElement;
+  keyToggle: HTMLButtonElement;
   title: HTMLElement;
   status: HTMLElement;
   termContainer: HTMLElement;
@@ -276,6 +280,7 @@ interface AppState {
   resizeObserver: ResizeObserver | null;
   mode: 'list' | 'terminal';
   showExited: boolean;
+  specialKeysVisible: boolean;
   modifiers: TerminalModifierState;
   ctrlFocusCleanup: (() => void) | null;
   inputBuffer: string;
@@ -663,12 +668,14 @@ function isShellAlive(record: ShellRecord | null | undefined): boolean {
 export default function initTerminalApp(root: HTMLElement, api: AppApi, host: HostBridge): void {
   const sidebarState = parseSidebarStateContext();
   const consoleBridgeReady = ensureTerminalConsoleBridge(sidebarState.consoleWorkerId);
+  const mobileSpecialKeysAvailable = isMobileUserAgent(window.navigator);
 
   const ui: UiRefs = {
     list: getRequired(root, '#ta-shell-list'),
     listContainer: getRequired(root, '#ta-list-container'),
     showExited: getRequired(root, '#ta-show-exited'),
     terminalContainer: getRequired(root, '#ta-terminal-container'),
+    keys: getRequired(root, '#ta-keys'),
     drawerOverlay: getRequired(root, '#ta-drawer-overlay'),
     btnMenu: getRequired(root, '#ta-btn-menu'),
     btnNew: getRequired(root, '#ta-btn-new'),
@@ -678,6 +685,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     btnRemove: getRequired(root, '#ta-btn-remove'),
     zoomOut: getRequired(root, '#ta-zoom-out'),
     zoomIn: getRequired(root, '#ta-zoom-in'),
+    keyToggle: getRequired(root, '#ta-key-toggle'),
     title: getRequired(root, '#ta-shell-title'),
     status: getRequired(root, '#ta-shell-status'),
     termContainer: getRequired(root, '#ta-term'),
@@ -717,6 +725,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     resizeObserver: null,
     mode: 'list',
     showExited: false,
+    specialKeysVisible: true,
     modifiers: new TerminalModifierState(),
     ctrlFocusCleanup: null,
     inputBuffer: '',
@@ -948,6 +957,22 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     requestFit(6);
   }
 
+  function syncSpecialKeysUi(): void {
+    const visible = mobileSpecialKeysAvailable && state.specialKeysVisible;
+    ui.keys.hidden = !visible;
+    ui.keyToggle.hidden = !mobileSpecialKeysAvailable;
+    ui.keyToggle.classList.toggle('toggle', visible);
+    ui.keyToggle.setAttribute('aria-pressed', String(visible));
+    ui.keyToggle.title = visible ? 'Hide special keys' : 'Show special keys';
+    requestFit(8);
+  }
+
+  function toggleSpecialKeys(): void {
+    if (!mobileSpecialKeysAvailable) return;
+    state.specialKeysVisible = !state.specialKeysVisible;
+    syncSpecialKeysUi();
+  }
+
   function setMode(mode: 'list' | 'terminal'): void {
     state.mode = mode;
     root.classList.remove('mode-list', 'mode-terminal', 'drawer-open');
@@ -1162,6 +1187,15 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     refocusTerm();
     const textarea = getTermTextarea(term);
     if (!textarea) return;
+    if (
+      key === TERMINAL_KEYS.dash
+      && !state.modifiers.ctrl
+      && !state.modifiers.alt
+    ) {
+      dispatchSyntheticTerminalText(textarea, '-');
+      consumeOneShotModifiers();
+      return;
+    }
     dispatchSyntheticTerminalKey(textarea, key, {
       ctrl: state.modifiers.ctrl,
       alt: state.modifiers.alt,
@@ -1690,6 +1724,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   });
   ui.zoomOut.addEventListener('pointerdown', softKey(() => applyFontSize(getCurrentFontSize() - FONT_SIZE_STEP)), { passive: false });
   ui.zoomIn.addEventListener('pointerdown', softKey(() => applyFontSize(getCurrentFontSize() + FONT_SIZE_STEP)), { passive: false });
+  ui.keyToggle.addEventListener('pointerdown', softKey(toggleSpecialKeys), { passive: false });
   ui.keyEsc.addEventListener('pointerdown', softKey(() => dispatchTerminalKey(TERMINAL_KEYS.escape)), { passive: false });
   ui.keyMinibar.addEventListener('pointerdown', softKey(openDrawerFromSoftKey), { passive: false });
   ui.keyDash.addEventListener('pointerdown', softKey(() => dispatchTerminalKey(TERMINAL_KEYS.dash)), { passive: false });
@@ -1705,6 +1740,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   ui.keyRight.addEventListener('pointerdown', softKey(() => dispatchTerminalKey(TERMINAL_KEYS.right)), { passive: false });
   ui.keyPageDown.addEventListener('pointerdown', softKey(() => dispatchTerminalKey(TERMINAL_KEYS.pageDown)), { passive: false });
 
+  syncSpecialKeysUi();
   setMode('list');
   void startLifecycleClient().catch((error) => {
     console.error('[terminal] lifecycle startup failed', error);

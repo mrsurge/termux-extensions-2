@@ -406,13 +406,20 @@ ESC  ≡        -     HOME  ↑     END    PGUP
 TAB  CTRL     ALT   LEFT  DOWN  RIGHT  PGDN
 ```
 
+The dock and its compact header toggle exist only for Android/mobile user
+agents. The toggle defaults on for each frontend instance and is not persisted
+or broadcast.
+
 Behavior:
 
 - `≡` opens the shell-list drawer and does not write PTY input. Its reveal path
   suppresses pointer completion over newly exposed drawer controls for one
   short transition-bounded interval; ordinary header-menu opens are immediate.
-- Navigation and `-` dispatch synthetic keydown/keyup through xterm's active
-  helper textarea so xterm remains escape-sequence authority.
+- Navigation and modified `-` dispatch synthetic keydown/keyup through xterm's
+  active helper textarea so xterm remains escape-sequence authority. Plain `-`
+  is printable Android text, so it mutates the guarded cumulative textarea and
+  dispatches `insertText` rather than using the deliberately suppressed
+  printable-keydown path.
 - Ctrl and Alt have independent visible states and can be armed together.
 - A non-modifier key receives the combined modifier state and consumes only
   one-shot modifiers.

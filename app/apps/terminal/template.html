@@ -149,6 +149,7 @@
     border: 0;
     background: var(--card);
   }
+  #ta-keys[hidden] { display: none; }
   #ta-keys .kbtn {
     box-sizing: border-box;
     width: 100%;
@@ -169,6 +170,10 @@
   #ta-keys .kbtn.toggle { background: var(--accent); color: var(--primary-foreground); }
   #ta-keys .kbtn.locked { box-shadow: inset 0 0 0 2px var(--primary); }
   #ta-keys .kbtn:focus { outline: none; }
+  #ta-key-toggle.toggle {
+    border-color: var(--primary);
+    color: var(--primary);
+  }
   .terminal-app {
     height: 100%;
     min-height: 100%;
@@ -234,6 +239,7 @@
       <div class="spacer"></div>
       <button id="ta-zoom-out" class="app-btn" type="button" tabindex="-1" title="Zoom out" aria-label="Zoom out">A−</button>
       <button id="ta-zoom-in" class="app-btn" type="button" tabindex="-1" title="Zoom in" aria-label="Zoom in">A+</button>
+      <button id="ta-key-toggle" class="app-btn" type="button" tabindex="-1" aria-pressed="true" hidden>Keys</button>
       <button id="ta-btn-stop" class="app-btn">Stop</button>
       <button id="ta-btn-kill" class="app-btn">Kill</button>
       <button id="ta-btn-remove" class="app-btn">Remove</button>
@@ -241,7 +247,7 @@
 
     <div id="ta-term" style="flex:1 1 auto; overflow:hidden;"></div>
 
-    <div id="ta-keys">
+    <div id="ta-keys" hidden>
       <button id="k-esc" class="kbtn" type="button" tabindex="-1">ESC</button>
       <button id="k-minibar" class="kbtn" type="button" tabindex="-1" aria-label="Open minibar">&#8801;</button>
       <button id="k-dash" class="kbtn" type="button" tabindex="-1">-</button>

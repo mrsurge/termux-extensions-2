@@ -111,6 +111,10 @@ Plan: `docs/apps/terminal/IMPLEMENTATION_PLAN.md`
 - [x] Add synthetic key/modifier unit tests.
 - [x] Validate Gboard and soft-key behavior live.
 - [ ] Validate physical hardware-key behavior live.
+- [x] Gate the dock and its header toggle to Android/mobile user agents.
+- [x] Keep the client-local key-dock toggle non-persisted and default-on.
+- [x] Route plain dash through Android's textarea input authority.
+- [x] Live-accept mobile gating, the non-persisted toggle, and plain dash.
 
 ## Strict Typing Cleanup
 

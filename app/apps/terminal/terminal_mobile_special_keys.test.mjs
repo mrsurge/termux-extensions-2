@@ -31,6 +31,13 @@ class FakeKeyboardEvent {
   }
 }
 
+class FakeInputEvent {
+  constructor(type, init) {
+    this.type = type;
+    Object.assign(this, init);
+  }
+}
+
 test('renders the exact two-row Terminal key layout', () => {
   const template = fs.readFileSync('template.html', 'utf8');
   const ids = [...template.matchAll(/<button id="(k-[^"]+)"/g)]
@@ -87,6 +94,14 @@ test('Alt composes with Ctrl and both one-shot modifiers are consumed', async ()
   );
 });
 
+test('recognizes only established mobile user-agent signals', async () => {
+  const { isMobileUserAgent } = await loadModule();
+  assert.equal(isMobileUserAgent({ userAgentData: { mobile: true } }), true);
+  assert.equal(isMobileUserAgent({ userAgent: 'Mozilla/5.0 (Linux; Android 16) Mobile' }), true);
+  assert.equal(isMobileUserAgent({ userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0)' }), true);
+  assert.equal(isMobileUserAgent({ userAgent: 'Mozilla/5.0 (X11; Linux x86_64)' }), false);
+});
+
 test('dispatches xterm-owned synthetic keydown and keyup with legacy fields', async () => {
   const { dispatchSyntheticTerminalKey, TERMINAL_KEYS } = await loadModule();
   const events = [];
@@ -134,6 +149,41 @@ test('dispatches xterm-owned synthetic keydown and keyup with legacy fields', as
   ]);
 });
 
+test('inserts plain dash through the textarea input authority', async () => {
+  const { dispatchSyntheticTerminalText } = await loadModule();
+  const events = [];
+  const textarea = {
+    value: '\u21dd\n\n',
+    selectionStart: 1,
+    selectionEnd: 1,
+    setRangeText(text, start, end) {
+      this.value = `${this.value.slice(0, start)}${text}${this.value.slice(end)}`;
+      this.selectionStart = start + text.length;
+      this.selectionEnd = this.selectionStart;
+    },
+    dispatchEvent(event) {
+      events.push(event);
+      return true;
+    },
+  };
+
+  dispatchSyntheticTerminalText(textarea, '-', FakeInputEvent);
+  assert.equal(textarea.value, '\u21dd-\n\n');
+  assert.deepEqual(events.map((event) => ({
+    type: event.type,
+    data: event.data,
+    inputType: event.inputType,
+    bubbles: event.bubbles,
+    composed: event.composed,
+  })), [{
+    type: 'input',
+    data: '-',
+    inputType: 'insertText',
+    bubbles: true,
+    composed: true,
+  }]);
+});
+
 test('minibar key opens only the guarded drawer and navigation is not hard-coded ANSI', () => {
   const source = fs.readFileSync('src/main.ts', 'utf8');
   assert.match(
@@ -163,6 +213,23 @@ test('show-exited filtering is client-local and defaults off', () => {
   assert.match(source, /showExited: false/);
   assert.match(source, /state\.showExited\s*\? state\.shells\s*: state\.shells\.filter/);
   assert.doesNotMatch(source, /localStorage[^\n]*showExited|showExited[^\n]*localStorage/);
+});
+
+test('special key dock and toggle are mobile-only and non-persisted', () => {
+  const template = fs.readFileSync('template.html', 'utf8');
+  const source = fs.readFileSync('src/main.ts', 'utf8');
+  assert.match(template, /id="ta-key-toggle"[^>]* hidden>Keys<\/button>/);
+  assert.match(template, /<div id="ta-keys" hidden>/);
+  assert.match(source, /specialKeysVisible: true/);
+  assert.match(source, /const mobileSpecialKeysAvailable = isMobileUserAgent\(window\.navigator\)/);
+  assert.doesNotMatch(source, /localStorage[^\n]*specialKeys|specialKeys[^\n]*localStorage/);
+});
+
+test('plain dash uses textarea input while modified dash stays keyboard-owned', () => {
+  const source = fs.readFileSync('src/main.ts', 'utf8');
+  assert.match(source, /key === TERMINAL_KEYS\.dash/);
+  assert.match(source, /dispatchSyntheticTerminalText\(textarea, '-'\)/);
+  assert.match(source, /dispatchSyntheticTerminalKey\(textarea, key/);
 });
 
 test('active terminal card is derived from client-local activeId', () => {
