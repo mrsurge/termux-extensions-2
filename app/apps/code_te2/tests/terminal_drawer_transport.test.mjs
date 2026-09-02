@@ -27,6 +27,11 @@ test('terminal drawer uses reliable control and generation-fenced history', () =
   assert.match(source, /socket\.sendBuffer\.length = 0/);
   assert.match(source, /socket\.on\('terminal:history'/);
   assert.match(source, /historyGeneration !== bindGeneration/);
+  assert.match(source, /coerceTerminalOffset\(msg\.output_offset\)/);
+  assert.match(source, /coerceTerminalBytes\(msg\.pending_bytes\)/);
+  assert.match(source, /reconcileTerminalOutput\(appliedOutputOffset, record\)/);
+  assert.doesNotMatch(source, /trimPrimedOverlap/);
+  assert.doesNotMatch(source, /msg\.stdout_text/);
   assert.match(source, /await ensureTerminalSocket\(\);\s*emitTerminalRegister/);
 });
 

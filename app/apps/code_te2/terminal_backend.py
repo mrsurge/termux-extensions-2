@@ -6,7 +6,6 @@ Provides REST endpoints and WebSocket PTY streaming for embedded terminal.
 """
 
 import asyncio
-from collections import deque
 import importlib
 import json
 import shlex
@@ -138,6 +137,11 @@ from app.apps.code_te2.terminal_shell_facts import (
     record_terminal_shell_fact,
     remove_terminal_shell_fact,
 )
+from app.apps.code_te2.terminal_screen_projection import (
+    DEFAULT_COLUMNS,
+    DEFAULT_LINES,
+    terminal_screen_projections,
+)
 from app.apps.code_te2.worker_services.run_profile_fws_bridge import (
     configure_terminal_log_stream,
     ensure_terminal_log_stream,
@@ -156,18 +160,7 @@ _terminal_sid_clients: dict[str, str] = {}
 _terminal_sid_lock = asyncio.Lock()
 _terminal_sid_bind_generations: dict[str, int] = {}
 _terminal_history_tasks: dict[str, asyncio.Task[None]] = {}
-
-
-def _read_terminal_log_tail_text(path: Path, lines: int) -> str:
-    if lines <= 0 or not path.exists():
-        return ""
-    with path.open("r", encoding="utf-8", errors="replace") as fh:
-        tail_lines = deque(fh, maxlen=lines)
-    return "".join(tail_lines)
-
-
-async def _read_terminal_log_tail_text_async(path: Path, lines: int) -> str:
-    return await asyncio.to_thread(_read_terminal_log_tail_text, path, lines)
+_terminal_output_locks: dict[str, asyncio.Lock] = {}
 
 
 def attach_terminal_socketio_server(server: socketio.AsyncServer) -> None:
@@ -337,15 +330,25 @@ async def _emit_terminal_history_to_sid(
     sid: str,
     shell_id: str,
     bind_generation: int,
+    columns: int,
+    lines: int,
 ) -> None:
     payload: JsonObject = {
         "shell_id": shell_id,
         "bind_generation": bind_generation,
-        "stdout_text": "",
+        "checkpoint_ansi": "",
+        "pending_bytes": b"",
+        "output_offset": 0,
         "ok": True,
     }
     try:
-        payload.update(await _terminal_history_data(shell_id, 2000))
+        payload.update(
+            await _terminal_history_data(
+                shell_id,
+                columns=columns,
+                lines=lines,
+            )
+        )
     except Exception as exc:
         payload["ok"] = False
         payload["error"] = str(getattr(exc, "detail", exc))
@@ -362,6 +365,8 @@ async def _start_terminal_history_task(
     sid: str,
     shell_id: str,
     bind_generation: int,
+    columns: int,
+    lines: int,
 ) -> None:
     async def run() -> None:
         try:
@@ -377,7 +382,13 @@ async def _start_terminal_history_task(
                     },
                     sid,
                 )
-            await _emit_terminal_history_to_sid(sid, shell_id, bind_generation)
+            await _emit_terminal_history_to_sid(
+                sid,
+                shell_id,
+                bind_generation,
+                columns,
+                lines,
+            )
         finally:
             async with _terminal_sid_lock:
                 current = _terminal_history_tasks.get(sid)
@@ -405,12 +416,39 @@ async def _emit_terminal_shell_list_to_sid(sid: str, project_path: str | None) -
         pass
 
 
-async def _forward_terminal_fws_chunk(shell_id: str, chunk: str) -> None:
-    await _emit_terminal_to_shell(
-        "terminal:output",
-        {"shell_id": shell_id, "data": chunk},
-        shell_id,
-    )
+async def _forward_terminal_fws_chunk(shell_id: str, _chunk: str) -> None:
+    lock = _terminal_output_locks.setdefault(shell_id, asyncio.Lock())
+    reset_required = False
+    async with lock:
+        growth = await terminal_screen_projections.consume_growth(shell_id)
+        if growth is None:
+            return
+        reset_required = growth.reset
+        if not reset_required:
+            for delta in growth.deltas:
+                await _emit_terminal_to_shell(
+                    "terminal:output",
+                    {
+                        "shell_id": shell_id,
+                        "data": delta.data,
+                        "start_offset": delta.start_offset,
+                        "end_offset": delta.end_offset,
+                    },
+                    shell_id,
+                )
+    if reset_required:
+        await _rebind_terminal_fws_stream(shell_id)
+
+
+async def _reset_terminal_fws_projection(shell_id: str) -> None:
+    await terminal_screen_projections.discard(shell_id)
+    _ = _terminal_output_locks.pop(shell_id, None)
+    await _rebind_terminal_fws_stream(shell_id)
+
+
+async def _remove_terminal_fws_projection(shell_id: str) -> None:
+    await terminal_screen_projections.discard(shell_id)
+    _ = _terminal_output_locks.pop(shell_id, None)
 
 
 async def _rebind_terminal_fws_stream(shell_id: str) -> None:
@@ -432,6 +470,8 @@ async def _rebind_terminal_fws_stream(shell_id: str) -> None:
 configure_terminal_log_stream(
     on_chunk=_forward_terminal_fws_chunk,
     on_reconnect=_rebind_terminal_fws_stream,
+    on_reset=_reset_terminal_fws_projection,
+    on_remove=_remove_terminal_fws_projection,
 )
 
 
@@ -486,6 +526,8 @@ class TerminalSocketIONamespace(socketio.AsyncNamespace):
         payload = _json_object(data)
         client_id = str(payload.get("client_id") or sid).strip() or sid
         requested_shell_id = str(payload.get("shellId") or payload.get("shell_id") or "auto").strip() or "auto"
+        columns = _as_int(payload.get("cols"), DEFAULT_COLUMNS)
+        lines = _as_int(payload.get("rows"), DEFAULT_LINES)
         history_store = get_history_store()
         mgr = await _get_terminal_manager()
         try:
@@ -523,7 +565,13 @@ class TerminalSocketIONamespace(socketio.AsyncNamespace):
             to=sid,
         )
 
-        await _start_terminal_history_task(sid, shell_id, bind_generation)
+        await _start_terminal_history_task(
+            sid,
+            shell_id,
+            bind_generation,
+            columns,
+            lines,
+        )
         _ = asyncio.create_task(
             _emit_terminal_shell_list_to_sid(sid, shell_project_path),
             name=f"terminal-shell-list-{sid}-{bind_generation}",
@@ -557,7 +605,8 @@ class TerminalSocketIONamespace(socketio.AsyncNamespace):
             elif method == "shell.history":
                 result = await _terminal_history_data(
                     str(params.get("shell_id") or ""),
-                    _as_int(params.get("tail"), 2000),
+                    columns=_as_int(params.get("cols"), DEFAULT_COLUMNS),
+                    lines=_as_int(params.get("rows"), DEFAULT_LINES),
                 )
             else:
                 raise ValueError(f"Unsupported terminal request '{method}'")
@@ -600,7 +649,11 @@ class TerminalSocketIONamespace(socketio.AsyncNamespace):
         if not shell_id:
             return
         try:
-            await _resize_editor_shell(shell_id, cols, rows)
+            resized = await _resize_editor_shell(shell_id, cols, rows)
+            if resized:
+                projection_reset = await terminal_screen_projections.resize(shell_id, cols, rows)
+                if projection_reset:
+                    await _rebind_terminal_fws_stream(shell_id)
         except Exception as exc:
             await _socket(self).emit("terminal:error", {"message": str(exc), "shell_id": shell_id}, to=sid)
 
@@ -982,6 +1035,8 @@ async def _destroy_terminal_shell_data(shell_id: str) -> JsonObject:
         sidecar.remove_terminal_shell_id(shell_id)
         sidecar.save()
     _ = remove_terminal_shell_fact(shell_id)
+    await terminal_screen_projections.discard(shell_id)
+    _ = _terminal_output_locks.pop(shell_id, None)
     if was_active:
         await close_active_terminal_sockets("terminal closed")
     if project_path:
@@ -996,7 +1051,7 @@ async def _destroy_terminal_shell_data(shell_id: str) -> JsonObject:
     }
 
 
-async def _terminal_history_data(shell_id: str, tail: int = 2000) -> JsonObject:
+async def _terminal_stdout_log_path(shell_id: str) -> Path:
     stdout_log = ""
     fact = get_terminal_shell_fact(shell_id)
     if fact is not None:
@@ -1008,12 +1063,31 @@ async def _terminal_history_data(shell_id: str, tail: int = 2000) -> JsonObject:
             raise HTTPException(status_code=404, detail="Shell not found")
         _record_terminal_manager_shell(shell_id, rec)
         stdout_log = str(rec.stdout_log or "")
-    stdout_text = (
-        await _read_terminal_log_tail_text_async(Path(stdout_log), max(0, tail))
-        if stdout_log
-        else ""
+    if not stdout_log:
+        raise HTTPException(status_code=404, detail="Terminal stdout log not found")
+    return Path(stdout_log)
+
+
+async def _terminal_history_data(
+    shell_id: str,
+    *,
+    columns: int = DEFAULT_COLUMNS,
+    lines: int = DEFAULT_LINES,
+) -> JsonObject:
+    log_path = await _terminal_stdout_log_path(shell_id)
+    checkpoint = await terminal_screen_projections.checkpoint(
+        shell_id,
+        log_path,
+        columns=columns,
+        lines=lines,
     )
-    return {"stdout_text": stdout_text}
+    return {
+        "checkpoint_ansi": checkpoint.ansi,
+        "pending_bytes": checkpoint.pending_bytes,
+        "output_offset": checkpoint.output_offset,
+        "cols": checkpoint.columns,
+        "rows": checkpoint.lines,
+    }
 
 
 @terminal_router.get('/terminal/shell-id')
@@ -1246,6 +1320,9 @@ async def terminal_resize(shell_id: str, data: JsonObject = Body(...)):
     try:
         success = await _resize_editor_shell(shell_id, cols, rows)
         if success:
+            projection_reset = await terminal_screen_projections.resize(shell_id, cols, rows)
+            if projection_reset:
+                await _rebind_terminal_fws_stream(shell_id)
             return {"ok": True, "data": {"id": shell_id, "cols": cols, "rows": rows}}
         else:
             raise HTTPException(status_code=500, detail="Failed to resize terminal")
@@ -1284,13 +1361,10 @@ async def terminal_info(shell_id: str, logs: bool = Query(False), tail: int = Qu
 @terminal_router.get('/terminal/{shell_id}/history')
 async def terminal_history(shell_id: str, tail: int = Query(2000), mgr: TerminalShellManager = Depends(get_manager_dep)):
     """
-    Return uncapped terminal stdout history as plain text.
-
-    Unlike mgr.describe(... include_logs=True ...), this reads the shell stdout log
-    directly so history preload is not constrained by FWS LOG_TAIL_BYTES.
+    Return a canonical headless-screen checkpoint for compatibility clients.
     """
-    del mgr
-    return {"ok": True, "data": await _terminal_history_data(shell_id, tail)}
+    del mgr, tail
+    return {"ok": True, "data": await _terminal_history_data(shell_id)}
 
 
 @terminal_router.websocket('/ws/terminal/{shell_id}')

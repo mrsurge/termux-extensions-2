@@ -11,4 +11,5 @@ agent-log-server==0.2.122
 nodejs-wheel==24.16.0; sys_platform == "linux" and platform_machine == "x86_64"
 libarchive-c>=5.1
 python-socketio[client,asyncio-client]
+pyte==0.8.2
 pyyaml

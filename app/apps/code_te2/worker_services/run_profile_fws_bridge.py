@@ -37,6 +37,7 @@ FWS_REQUEST_EVENT = "fws_request"
 FWS_NOTIFICATION_EVENT = "fws_notification"
 FWS_LOGS_OPEN_METHOD = "fws.logs.open"
 FWS_LOGS_CHUNK_METHOD = "fws.logs.chunk"
+FWS_LOGS_RESET_METHOD = "fws.logs.reset"
 FWS_LIFECYCLE_METHODS = frozenset(
     {
         "fws.shell.created",
@@ -89,16 +90,23 @@ _terminal_log_open_shell_id = ""
 _terminal_log_stream_ready = False
 _terminal_log_chunk_handler: Callable[[str, str], Awaitable[None]] | None = None
 _terminal_log_reconnect_handler: Callable[[str], Awaitable[None]] | None = None
+_terminal_log_reset_handler: Callable[[str], Awaitable[None]] | None = None
+_terminal_log_remove_handler: Callable[[str], Awaitable[None]] | None = None
 
 
 def configure_terminal_log_stream(
     *,
     on_chunk: Callable[[str, str], Awaitable[None]],
     on_reconnect: Callable[[str], Awaitable[None]],
+    on_reset: Callable[[str], Awaitable[None]],
+    on_remove: Callable[[str], Awaitable[None]],
 ) -> None:
     global _terminal_log_chunk_handler, _terminal_log_reconnect_handler
+    global _terminal_log_reset_handler, _terminal_log_remove_handler
     _terminal_log_chunk_handler = on_chunk
     _terminal_log_reconnect_handler = on_reconnect
+    _terminal_log_reset_handler = on_reset
+    _terminal_log_remove_handler = on_remove
 
 
 async def ensure_terminal_log_stream(shell_id: str) -> None:
@@ -267,10 +275,21 @@ async def _on_notification(payload: object) -> None:
             if handler is not None:
                 await handler(shell_id, chunk)
         return
+    if method == FWS_LOGS_RESET_METHOD:
+        shell_id = _text(params.get("shell_id")).strip()
+        stream = _text(params.get("stream")).strip()
+        if shell_id and stream == "stdout":
+            handler = _terminal_log_reset_handler
+            if handler is not None:
+                await handler(shell_id)
+        return
     if method not in FWS_LIFECYCLE_METHODS:
         return
     if method == "fws.shell.removed":
         shell_id = _text(params.get("shell_id"))
+        remove_handler = _terminal_log_remove_handler
+        if shell_id and remove_handler is not None:
+            await remove_handler(shell_id)
         if remove_terminal_shell_fact(shell_id):
             await notify_terminal_facts_changed()
         label = (

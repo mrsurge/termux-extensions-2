@@ -1,6 +1,6 @@
 # Terminal Input, Lifecycle, And Drawer Transport Plan
 
-Status: implementation in progress; Phases 1-2 source complete, Phase 2 public transport accepted
+Status: implementation in progress; Phases 1-3.5 source complete and live accepted
 Created: 2026-09-02
 
 ## Outcome
@@ -15,6 +15,8 @@ The completed slice must:
 - prevent Gboard's post-composition key echo from duplicating printable input;
 - remove terminal control, shell-list, and history HTTP requests from the Code
   TE2 frontend;
+- replace Code TE2's raw ANSI history replay with a canonical, bounded Pyte
+  screen/scrollback checkpoint plus exactly ordered live output;
 - project standalone shell membership to every connected client immediately
   after create, exit, restart, or removal;
 - keep the selected standalone terminal local to each browser client;
@@ -47,6 +49,7 @@ Primary source:
 
 - `app/apps/code_te2/main_page/frontend/host-terminal-drawer.ts`
 - `app/apps/code_te2/terminal_backend.py`
+- `app/apps/code_te2/terminal_screen_projection.py`
 - `app/apps/code_te2/terminal_shell.py`
 - the existing Code TE2 `/terminal` Socket.IO namespace
 - the existing event-driven Framework-Shells lifecycle bridge
@@ -169,6 +172,10 @@ Node-owned checkpoint/sequence stream.
    repair missed notifications.
 7. Terminal output/history hydration does not wait for shell-list decoration
    work.
+8. Code TE2 historical terminal state is reconstructed by a headless terminal
+   parser, not by replaying an arbitrary raw-log tail into browser xterm.
+9. FWS output notifications wake the projection, but the flushed stdout log and
+   its monotonically consumed byte offset are the exact output-order authority.
 
 ## Phase 1: Android Printable-Input Ownership
 
@@ -339,6 +346,57 @@ Exact create, activate, history fallback, and destroy operations may still
 inspect their one target. Compatibility REST handlers delegate to the same
 backend operations, but the drawer frontend no longer calls them.
 
+## Phase 3.5: Code TE2 Headless Screen And Scrollback Projection
+
+Replace raw terminal-history replay with one bounded Python-owned headless
+projection per retained Code TE2 terminal shell:
+
+- declare exact `pyte==0.8.2` runtime ownership;
+- use `pyte.HistoryScreen` with the existing 5,000-line scrollback limit;
+- feed raw stdout bytes through `pyte.ByteStream` so split UTF-8 input remains
+  incremental and replacement does not occur at arbitrary log-read boundaries;
+- initialize the screen from the complete raw stdout log off the asyncio loop,
+  reading it incrementally so history size does not become process memory;
+- retain only the five project-authorized terminal projections and discard a
+  projection when its shell is removed;
+- resize the projection whenever the PTY resize action succeeds; and
+- rebuild if the stdout log inode changes or its size moves behind the consumed
+  byte offset.
+
+The FWS `fws.logs.chunk` event remains the event-driven notification source, but
+its decoded text is not terminal authority. Each notification causes the
+projection to consume bytes from its last exact raw-log offset to the current
+flushed end. This makes repeated notifications harmless and removes the
+bootstrap race without polling or a textual overlap heuristic.
+
+History/bootstrap emits an ANSI checkpoint synthesized from Pyte's retained
+styled cells, scrollback, cursor position, and cursor visibility, together with
+the exact stdout byte offset represented by that checkpoint. Live output emits
+raw bytes with exact start/end offsets. The browser buffers those records until
+the matching bind-generation checkpoint arrives, drops records already covered
+by the checkpoint, trims only an exact byte-prefix crossing its offset, and then
+writes the remaining `Uint8Array` values to xterm.
+
+This is deliberately analogous to the standalone Terminal's headless-xterm
+checkpoint/live-delta split while leaving Framework-Shells as Code TE2's PTY
+owner. There is no raw-tail replay fallback.
+
+### ANSI replay acceptance
+
+Focused tests must prove that a checkpoint preserves:
+
+- carriage-return progress and prompt redraws;
+- erase-line and cursor-position sequences;
+- basic, bright, 256-color, and true-color SGR runs;
+- bold, italic, underline, strike, reverse, and blink attributes;
+- split UTF-8 input across log growth reads;
+- bounded scrollback and the exact visible cursor; and
+- live bytes that arrive before, during, and after checkpoint generation exactly
+  once.
+
+Unsupported xterm-private sequences must be explicitly characterized by tests;
+they must not silently reactivate raw historical replay.
+
 ## Phase 4: Standalone Two-Row Mobile Keys
 
 Render the exact layout:
@@ -432,7 +490,8 @@ node build.mjs
 
 Add tests that reject terminal HTTP messaging in the drawer source and exercise
 the Socket.IO command/bootstrap protocol, retained FWS facts, project switch,
-and stale-bind rejection.
+stale-bind rejection, Pyte screen serialization, byte-offset ordering, and log
+replacement/truncation recovery.
 
 ### Live acceptance
 

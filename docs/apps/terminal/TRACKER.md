@@ -1,6 +1,6 @@
 # Terminal Input, Lifecycle, And Drawer Transport Tracker
 
-Status: implementation in progress; Phases 1-3 source complete, Phase 2 public transport accepted
+Status: implementation in progress; Phases 1-3.5 source complete and live accepted
 Plan: `docs/apps/terminal/IMPLEMENTATION_PLAN.md`
 
 ## Investigation
@@ -78,6 +78,24 @@ Plan: `docs/apps/terminal/IMPLEMENTATION_PLAN.md`
 - [x] Add protocol, reconnect, and stale-bind tests.
 - [x] Apply xterm reset before asynchronous helper rebinding and live-accept refresh/reconnect.
 - [ ] Record before/after localhost drawer readiness latency.
+
+## Phase 3.5: Code TE2 Headless Screen Projection
+
+- [x] Declare exact Pyte runtime ownership in canonical requirements.
+- [x] Add a bounded per-shell `HistoryScreen`/`ByteStream` registry.
+- [x] Rebuild initial state incrementally from the complete raw stdout log off-loop.
+- [x] Treat FWS chunks as event wakeups and consume exact raw-log byte ranges.
+- [x] Emit ANSI checkpoints with represented stdout offsets.
+- [x] Emit live `Uint8Array` output with exact start/end offsets.
+- [x] Replace textual overlap guessing with bind-generation and byte-offset fencing.
+- [x] Synchronize successful PTY resize operations into the headless projection.
+- [x] Evict removed shells and bound retained state to five terminal projections.
+- [x] Recover explicitly from log replacement and truncation.
+- [x] Test carriage-return, erase-line, cursor movement, and SGR reconstruction.
+- [x] Test split UTF-8, bounded scrollback, and exact cursor placement.
+- [x] Test checkpoint-covered, crossing, repeated, and gapped live output ordering.
+- [x] Characterize unsupported xterm-private sequences without a raw replay fallback.
+- [x] Live-accept terminal drawer checkpoint rendering and input after worker reload.
 
 ## Phase 4: Two-Row Standalone Keys
 

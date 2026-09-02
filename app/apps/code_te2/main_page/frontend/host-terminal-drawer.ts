@@ -10,6 +10,13 @@ import {
   bindTerminalSpecialKeyTarget,
   publishTerminalSpecialKeyFocus,
 } from '../../src/mobile-input/terminal-special-key-bridge.ts';
+import {
+  coerceTerminalBytes,
+  coerceTerminalOffset,
+  coerceTerminalOutput,
+  reconcileTerminalOutput,
+  type TerminalOutputRecord,
+} from './terminal-output-projection.ts';
 
 /**
  * Terminal drawer for the code editor.
@@ -117,7 +124,7 @@ interface XtermTerminal {
   reset: () => void;
   scrollLines: (lines: number) => void;
   setOption?: (name: string, value: unknown) => void;
-  write: (data: string) => void;
+  write: (data: string | Uint8Array) => void;
 }
 
 interface XtermTerminalCtor {
@@ -135,6 +142,8 @@ interface TerminalRuntimeWindow extends Window {
 }
 
 type TouchMode = 'scroll' | 'select' | null;
+
+const MAX_PENDING_TERMINAL_OUTPUT_BYTES = 1024 * 1024;
 
 function asHTMLElement(value: Element | null): HTMLElement | null {
   return value instanceof HTMLElement ? value : null;
@@ -195,7 +204,9 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
   let bindGeneration = 0;
   let desiredShellId: string | null = 'auto';
   let socketRegistered = false;
-  let pendingOutput: string[] = [];
+  let pendingOutput: TerminalOutputRecord[] = [];
+  let pendingOutputBytes = 0;
+  let appliedOutputOffset = 0;
   let lastResizeSent: string | null = null;
   let fitRaf: number | null = null;
   let fitFramesRemaining = 0;
@@ -435,27 +446,40 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     }, waitMs);
   }
 
-  function flushPendingOutput(): void {
-    if (!term || !pendingOutput.length) return;
-    const chunk = pendingOutput.join('');
-    pendingOutput = [];
-    if (chunk) {
-      term.write(chunk);
+  function applyTerminalOutput(record: TerminalOutputRecord): boolean {
+    if (!term) return false;
+    const reconciliation = reconcileTerminalOutput(appliedOutputOffset, record);
+    if (reconciliation.kind === 'gap') return false;
+    if (reconciliation.kind === 'write' && reconciliation.data.byteLength) {
+      term.write(reconciliation.data);
     }
+    appliedOutputOffset = reconciliation.nextOffset;
+    return true;
   }
 
-  function trimPrimedOverlap(historyText: unknown, liveText: unknown): string {
-    const history = typeof historyText === 'string' ? historyText : '';
-    const live = typeof liveText === 'string' ? liveText : '';
-    if (!history || !live) return live;
+  function requestOutputProjectionRebind(reason: string): void {
+    console.warn('Terminal output projection requires rebind:', reason);
+    shellHistoryPrimed = false;
+    pendingOutput = [];
+    pendingOutputBytes = 0;
+    appliedOutputOffset = 0;
+    socketRegistered = false;
+    emitTerminalRegister(shellId || desiredShellId || 'auto');
+  }
 
-    const maxOverlap = Math.min(history.length, live.length, 8192);
-    for (let len = maxOverlap; len > 0; len -= 1) {
-      if (history.slice(-len) === live.slice(0, len)) {
-        return live.slice(len);
+  function flushPendingOutput(): void {
+    if (!term || !pendingOutput.length) return;
+    const queued = pendingOutput;
+    pendingOutput = [];
+    pendingOutputBytes = 0;
+    for (const record of queued) {
+      if (!applyTerminalOutput(record)) {
+        requestOutputProjectionRebind(
+          `expected byte ${appliedOutputOffset}, received ${record.startOffset}`,
+        );
+        return;
       }
     }
-    return live;
   }
 
   function updateCopyButtonState(): void {
@@ -707,6 +731,9 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     shellId = null;
     lastShellId = null;
     shellHistoryPrimed = false;
+    pendingOutput = [];
+    pendingOutputBytes = 0;
+    appliedOutputOffset = 0;
     bindGeneration = 0;
     desiredShellId = 'auto';
     socketRegistered = false;
@@ -885,6 +912,9 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
       shellId = null;
       lastShellId = null;
       shellHistoryPrimed = false;
+      pendingOutput = [];
+      pendingOutputBytes = 0;
+      appliedOutputOffset = 0;
       desiredShellId = 'auto';
       socketRegistered = false;
       console.log('Destroyed shell:', currentShellId);
@@ -910,6 +940,8 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     ws?.emit('terminal:register', {
       shellId: desiredShellId,
       client_id: 'terminal-drawer',
+      cols: getTerminalCols(),
+      rows: getTerminalRows(),
     });
     socketRegistered = false;
   }
@@ -965,6 +997,8 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
         }
         shellHistoryPrimed = false;
         pendingOutput = [];
+        pendingOutputBytes = 0;
+        appliedOutputOffset = 0;
       }
       lastShellId = receivedShellId;
       if (term) {
@@ -981,19 +1015,21 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
         ? msg.bind_generation
         : 0;
       if (historyShellId !== shellId || historyGeneration !== bindGeneration) return;
-      const priming = typeof msg.stdout_text === 'string' ? msg.stdout_text : '';
-      if (priming) {
-        term.write(priming);
-        console.log('Preloaded terminal history');
-      }
-      if (pendingOutput.length) {
-        const liveChunk = pendingOutput.join('');
-        const deduped = trimPrimedOverlap(priming, liveChunk);
-        pendingOutput = deduped ? [deduped] : [];
-      }
       if (msg.ok === false) {
-        console.warn('Failed to preload terminal history:', msg.error || 'unknown error');
+        console.error('Failed to load terminal screen checkpoint:', msg.error || 'unknown error');
+        return;
       }
+      const checkpoint = typeof msg.checkpoint_ansi === 'string' ? msg.checkpoint_ansi : '';
+      const parserPending = coerceTerminalBytes(msg.pending_bytes);
+      const checkpointOffset = coerceTerminalOffset(msg.output_offset);
+      if (checkpointOffset === null || !parserPending) {
+        requestOutputProjectionRebind('checkpoint is missing offset or parser state');
+        return;
+      }
+      if (checkpoint) term.write(checkpoint);
+      if (parserPending.byteLength) term.write(parserPending);
+      appliedOutputOffset = checkpointOffset;
+      console.log('Applied terminal screen checkpoint at byte', checkpointOffset);
       shellHistoryPrimed = true;
       flushPendingOutput();
       scheduleStartupResizeSync('history-prime');
@@ -1010,17 +1046,24 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     });
 
     socket.on('terminal:output', (msg) => {
-      if (!term) return;
-      const data = isRecord(msg) && typeof msg.data === 'string' ? msg.data : '';
-      if (data) {
-        if (!shellHistoryPrimed) {
-          pendingOutput.push(data);
-          if (pendingOutput.length > 256) {
-            pendingOutput = pendingOutput.slice(-256);
-          }
-          return;
+      if (!term || !isRecord(msg) || optionalString(msg.shell_id) !== shellId) return;
+      const record = coerceTerminalOutput(msg);
+      if (!record) {
+        requestOutputProjectionRebind('received malformed live output');
+        return;
+      }
+      if (!shellHistoryPrimed) {
+        pendingOutput.push(record);
+        pendingOutputBytes += record.data.byteLength;
+        if (pendingOutputBytes > MAX_PENDING_TERMINAL_OUTPUT_BYTES) {
+          requestOutputProjectionRebind('pending live output exceeded 1 MiB');
         }
-        term.write(data);
+        return;
+      }
+      if (!applyTerminalOutput(record)) {
+        requestOutputProjectionRebind(
+          `expected byte ${appliedOutputOffset}, received ${record.startOffset}`,
+        );
       }
     });
 
@@ -1035,6 +1078,8 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
         socketRegistered = false;
         lastResizeSent = null;
         pendingOutput = [];
+        pendingOutputBytes = 0;
+        appliedOutputOffset = 0;
       } else if (!closedShellId) {
         socketRegistered = false;
       }
@@ -1050,6 +1095,8 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
       socketRegistered = false;
       lastResizeSent = null;
       pendingOutput = [];
+      pendingOutputBytes = 0;
+      appliedOutputOffset = 0;
       emitTerminalRegister('auto');
     });
 

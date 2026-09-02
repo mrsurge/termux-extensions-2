@@ -3054,11 +3054,32 @@ requires authoritative registration again.
 
 Registration resolves and binds one shell, then emits `terminal:shell_id` with
 a monotonically increasing per-connection bind generation before starting
-history or list work. History is read off the asyncio loop and emitted
-independently as `terminal:history`. The renderer buffers a bounded amount of
-live output until history with the exact shell id and bind generation arrives,
-removes overlap, and discards stale generations. Shell-list decoration never
-gates identity, output, or writable state.
+checkpoint or list work. The browser supplies its current rows and columns in
+that registration. Shell-list decoration never gates identity, output, or
+writable state.
+
+Historical state is not a raw ANSI log tail. Python retains up to five
+per-shell `pyte.HistoryScreen` projections with 5,000 lines of scrollback and
+feeds them through `pyte.ByteStream`. Initial construction incrementally parses
+the complete raw stdout log in a worker thread; terminal output therefore does
+not block the app-worker asyncio loop or retain the complete log in memory.
+
+FWS `fws.logs.chunk` notifications are event wakeups rather than content
+authority. Framework-Shells has flushed the PTY bytes before publishing each
+event, so the projection consumes the raw log from its last exact byte offset
+to the current end. Repeated or coalesced wakeups are harmless. Log truncation,
+replacement, and explicit FWS reset force a generation-fenced rebind; removed
+shells discard their projection. There is no polling and no decoded-text or raw
+history fallback.
+
+`terminal:history` now carries a styled ANSI checkpoint synthesized from the
+headless screen, pending UTF-8/control-parser prefix bytes, and the exact stdout
+offset it represents. `terminal:output` carries raw binary bytes plus exact
+start/end offsets. The renderer buffers those records until the matching bind
+generation arrives, discards checkpoint-covered records, trims only a byte
+range that crosses the checkpoint offset, and rebinds on a real gap. This is the
+Code TE2/Pyte analogue of the standalone Terminal's headless-xterm checkpoint
+plus live-delta contract.
 
 The renderer applies shell identity, xterm reset, generation state, and pending
 output reset synchronously before starting asynchronous helper-script rebinding.
