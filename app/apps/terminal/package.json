@@ -6,7 +6,7 @@
   "scripts": {
     "build": "node build.mjs",
     "build:watch": "node build.mjs --watch",
-    "test": "node --test terminal_stream_protocol.test.mjs terminal_stream_broker.test.mjs",
+    "test": "node --test terminal_stream_protocol.test.mjs terminal_stream_broker.test.mjs terminal_lifecycle_client.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

@@ -1,6 +1,6 @@
 # Terminal Input, Lifecycle, And Drawer Transport Tracker
 
-Status: implementation in progress; Phase 1 live acceptance complete
+Status: implementation in progress; Phases 1-2 source complete, Phase 2 public transport accepted
 Plan: `docs/apps/terminal/IMPLEMENTATION_PLAN.md`
 
 ## Investigation
@@ -43,17 +43,21 @@ Plan: `docs/apps/terminal/IMPLEMENTATION_PLAN.md`
 
 ## Phase 2: Standalone Lifecycle Socket
 
-- [ ] Add Terminal-owned `sio_service.json` and manifest declaration.
-- [ ] Mount the app-worker Socket.IO server/namespace.
-- [ ] Require strict `msgpack-v1` application payloads.
-- [ ] Add one FWS reconnect snapshot and event-only lifecycle bridge.
-- [ ] Retain compact standalone terminal shell facts in memory.
-- [ ] Emit one complete revisioned list snapshot on client connect.
-- [ ] Move create/stop/kill/restart/remove/refresh commands to Socket.IO.
-- [ ] Broadcast lifecycle snapshots to every connected Terminal client.
-- [ ] Remove standalone shell-list mutation HTTP calls from the frontend.
+- [x] Add Terminal-owned `sio_service.json` and manifest declaration.
+- [x] Mount the app-worker Socket.IO server/namespace.
+- [x] Require strict `msgpack-v1` application payloads.
+- [x] Add one FWS reconnect snapshot and event-only lifecycle bridge.
+- [x] Retain compact standalone terminal shell facts in memory.
+- [x] Emit complete generation-fenced revisioned snapshots on connect.
+- [x] Move create/stop/kill/restart/remove/refresh commands to Socket.IO.
+- [x] Move Sidebar CWD/state application messaging to the same socket lane.
+- [x] Broadcast lifecycle snapshots to every connected Terminal client.
+- [x] Remove standalone application-control HTTP calls from the frontend.
+- [x] Reject in-flight requests and clear Socket.IO replay state on disconnect.
+- [x] Accept the public manifest-proxied Socket.IO route live after framework restart.
 - [ ] Add two-client create/exit/remove tests.
-- [ ] Add reconnect snapshot and stale-revision tests.
+- [ ] Complete two-client create/exit/remove live acceptance.
+- [ ] Add explicit frontend worker-generation rollover acceptance.
 
 ## Phase 3: Code TE2 Socket-Only Drawer
 
@@ -85,12 +89,25 @@ Plan: `docs/apps/terminal/IMPLEMENTATION_PLAN.md`
 
 ## Phase 5: Client-Local Active Card
 
-- [ ] Make `state.activeId` the sole standalone active-card input.
-- [ ] Rerender after restore, select, snapshot, exit, and removal.
-- [ ] Remove click-only imperative active-class mutation.
+- [x] Make `state.activeId` the sole standalone active-card input.
+- [x] Rerender after restore, select, snapshot, exit, and removal.
+- [x] Remove click-only imperative active-class mutation.
 - [ ] Add `aria-current` semantics.
 - [ ] Strengthen active styling without conflating it with process-alive status.
 - [ ] Verify two clients can display different active cards.
+
+## Phase 6: Latency Findings And Optimization
+
+- [ ] Capture standalone lifecycle connect-to-snapshot timing.
+- [ ] Capture standalone create-to-published-shell timing.
+- [ ] Capture standalone raw attach-to-checkpoint/writable timing.
+- [ ] Capture Code TE2 drawer open-to-identity/history/writable timing.
+- [ ] Separate first-use Node runtime setup from warm-shell measurements.
+- [ ] Identify the measured critical path before editing it.
+- [ ] Remove only evidenced redundant or serial work.
+- [ ] Keep the Node PTY/headless-xterm broker for this release.
+- [ ] Verify warm existing-shell readiness under one second on localhost.
+- [ ] Record before/after traces and remaining latency ownership.
 
 ## Documentation
 

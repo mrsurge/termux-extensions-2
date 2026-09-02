@@ -80,6 +80,9 @@ def _post_serving_readiness() -> None:
 
 
 async def te2_app_backend_serving() -> None:
+    from .terminal_lifecycle import start_terminal_lifecycle
+
+    start_terminal_lifecycle()
     try:
         await asyncio.to_thread(_post_serving_readiness)
     except Exception as exc:
@@ -106,7 +109,7 @@ async def _call_sidebar_rpc(
             _framework_url(),
             namespaces=[SIDEBAR_IPC_NAMESPACE],
             socketio_path=SIDEBAR_IPC_SOCKET_PATH.lstrip("/"),
-            transports=["websocket", "polling"],
+            transports=["websocket"],
         )
         register = {
             "jsonrpc": "2.0",
@@ -825,8 +828,7 @@ async def _drop_session(shell_id: str) -> None:
             await session.reader_task
 
 
-@terminal_bp.get("/sidebar/cwd")
-async def get_sidebar_cwd() -> JsonObject:
+async def _get_sidebar_cwd_payload() -> JsonObject:
     try:
         result = await _call_sidebar_rpc("sidebar.cwd.get", {}, timeout=5)
     except Exception as exc:
@@ -839,11 +841,17 @@ async def get_sidebar_cwd() -> JsonObject:
         "reason": _coerce_optional_string(result.get("reason")) or "request",
         "ts": result.get("ts") if isinstance(result.get("ts"), int) else int(time.time() * 1000),
     }
-    return _ok(payload)
+    return payload
 
 
-@terminal_bp.post("/sidebar/window/state")
-async def publish_sidebar_window_state(payload: JsonObject | None = Body(None)) -> JsonObject:
+@terminal_bp.get("/sidebar/cwd")
+async def get_sidebar_cwd() -> JsonObject:
+    return _ok(await _get_sidebar_cwd_payload())
+
+
+async def _publish_sidebar_window_state_payload(
+    payload: JsonObject | None,
+) -> JsonObject:
     """
     Backend bridge for Terminal stateful sidebar app windows.
 
@@ -922,19 +930,24 @@ async def publish_sidebar_window_state(payload: JsonObject | None = Body(None)) 
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"sidebar IPC update failed: {exc}") from exc
 
-    return _ok(
-        {
-            "sidebar": rpc_result,
-            "state": {
-                "shell_id": live_shell_id,
-                "cwd": cwd_value,
-                "reset": not bool(live_shell_id),
-                "requested_shell_id": requested_shell_id,
-                "url": url_value,
-                "query_state": query_state,
-            },
-        }
-    )
+    return {
+        "sidebar": rpc_result,
+        "state": {
+            "shell_id": live_shell_id,
+            "cwd": cwd_value,
+            "reset": not bool(live_shell_id),
+            "requested_shell_id": requested_shell_id,
+            "url": url_value,
+            "query_state": query_state,
+        },
+    }
+
+
+@terminal_bp.post("/sidebar/window/state")
+async def publish_sidebar_window_state(
+    payload: JsonObject | None = Body(None),
+) -> JsonObject:
+    return _ok(await _publish_sidebar_window_state_payload(payload))
 
 
 @terminal_bp.get("/shells")
@@ -998,34 +1011,41 @@ async def resize_shell(shell_id: str, payload: ShellResizeRequest) -> JsonObject
     return _ok({"id": shell_id, "cols": cols, "rows": rows})
 
 
-@terminal_bp.post("/shells/{shell_id}/action")
-async def shell_action(shell_id: str, payload: ShellActionRequest) -> JsonObject:
-    action = payload.action.lower().strip()
+async def _perform_shell_action(shell_id: str, action: str) -> JsonObject:
+    safe_action = action.lower().strip()
+    if not shell_id:
+        raise HTTPException(status_code=400, detail="shell_id is required")
     manager = await mgr()
     try:
         current = await manager.get_shell(shell_id)
         if current is None or not _is_supported_terminal_record(current):
             raise KeyError(shell_id)
-        if action in {"stop", "terminate"}:
+        if safe_action in {"stop", "terminate"}:
             record = await manager.terminate_shell(shell_id, force=False)
-        elif action in {"kill", "force"}:
+        elif safe_action in {"kill", "force"}:
             record = await manager.terminate_shell(shell_id, force=True)
-        elif action == "restart":
+        elif safe_action == "restart":
             await _drop_session(shell_id)
             record = await manager.restart_shell(shell_id)
         else:
-            raise HTTPException(status_code=400, detail=f"Unsupported action '{action}'")
+            raise HTTPException(status_code=400, detail=f"Unsupported action '{safe_action}'")
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Shell not found") from exc
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Shell action failed: {exc}") from exc
-    return _ok(await manager.describe(record))
+    return await manager.describe(record)
 
 
-@terminal_bp.delete("/shells/{shell_id}")
-async def delete_shell(shell_id: str) -> JsonObject:
+@terminal_bp.post("/shells/{shell_id}/action")
+async def shell_action(shell_id: str, payload: ShellActionRequest) -> JsonObject:
+    return _ok(await _perform_shell_action(shell_id, payload.action))
+
+
+async def _remove_shell_record(shell_id: str) -> None:
+    if not shell_id:
+        raise HTTPException(status_code=400, detail="shell_id is required")
     manager = await mgr()
     try:
         current = await manager.get_shell(shell_id)
@@ -1037,6 +1057,11 @@ async def delete_shell(shell_id: str) -> JsonObject:
         raise HTTPException(status_code=404, detail="Shell not found") from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to remove shell: {exc}") from exc
+
+
+@terminal_bp.delete("/shells/{shell_id}")
+async def delete_shell(shell_id: str) -> JsonObject:
+    await _remove_shell_record(shell_id)
     return _ok({"id": shell_id})
 
 
@@ -1169,3 +1194,27 @@ async def terminal_ws(websocket: WebSocket) -> None:
         _ = sender_task.cancel()
         with suppress(asyncio.CancelledError, Exception):
             await sender_task
+
+
+from .terminal_lifecycle import (
+    TERMINAL_LIFECYCLE_ASGI_APP,
+    TerminalLifecycleHandlers,
+    configure_terminal_lifecycle,
+)
+
+
+async def _lifecycle_create_shell(params: JsonObject) -> JsonObject:
+    return await _create_shell_record(CreateShellRequest.model_validate(params))
+
+
+configure_terminal_lifecycle(
+    TerminalLifecycleHandlers(
+        create_shell=_lifecycle_create_shell,
+        shell_action=_perform_shell_action,
+        remove_shell=_remove_shell_record,
+        get_sidebar_cwd=_get_sidebar_cwd_payload,
+        publish_sidebar_state=_publish_sidebar_window_state_payload,
+    )
+)
+
+SUBAPPS = [("/socket.io", TERMINAL_LIFECYCLE_ASGI_APP)]

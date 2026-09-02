@@ -4,6 +4,15 @@ import {
   getConsoleBridgeStatus,
   initConsoleBridge,
 } from 'te2-console-bridge';
+import {
+  TERMINAL_LIFECYCLE_CODEC,
+  TERMINAL_LIFECYCLE_NAMESPACE,
+  TERMINAL_LIFECYCLE_PATH,
+  TerminalLifecycleClient,
+  type TerminalLifecycleSocket,
+  type TerminalShellRecord as ShellRecord,
+  type TerminalShellSnapshot,
+} from './terminal-lifecycle-client';
 
 interface AppApi {
   get<T>(path: string): Promise<T>;
@@ -28,24 +37,6 @@ declare global {
   }
 }
 
-interface ShellStats {
-  alive?: boolean;
-  uptime?: number;
-}
-
-interface ShellLogs {
-  stdout_tail?: string[];
-}
-
-interface ShellRecord {
-  id: string;
-  label?: string;
-  status?: string;
-  cwd?: string;
-  stats?: ShellStats;
-  logs?: ShellLogs;
-}
-
 interface SidebarCwdPayload {
   cwd: string;
   reason?: string;
@@ -61,6 +52,14 @@ interface SidebarWindowStatePayload {
     url?: string;
     query_state?: Record<string, string>;
   };
+}
+
+interface LifecycleSnapshotResult {
+  snapshot: TerminalShellSnapshot;
+}
+
+interface LifecycleShellMutationResult extends LifecycleSnapshotResult {
+  shell_id: string;
 }
 
 interface ClientAttachMessage {
@@ -242,6 +241,9 @@ type SocketIoFactory = (
 
 interface AppState {
   shells: ShellRecord[];
+  shellGeneration: string;
+  shellRevision: number;
+  shellsReady: boolean;
   activeId: string | null;
   ws: ReconnectingWebSocket | null;
   wsDesiredId: string | null;
@@ -665,6 +667,9 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
 
   const state: AppState = {
     shells: [],
+    shellGeneration: '',
+    shellRevision: 0,
+    shellsReady: false,
     activeId: null,
     ws: null,
     wsDesiredId: null,
@@ -690,6 +695,59 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     encoder: new TextEncoder(),
   };
   let initialSidebarStateApplied = false;
+  let lifecycleClient: TerminalLifecycleClient | null = null;
+
+  function requireLifecycleClient(): TerminalLifecycleClient {
+    if (!lifecycleClient) {
+      throw new Error('Terminal lifecycle socket is not ready');
+    }
+    return lifecycleClient;
+  }
+
+  function applyShellSnapshot(snapshot: TerminalShellSnapshot): void {
+    if (
+      state.shellGeneration === snapshot.generation
+      && snapshot.revision < state.shellRevision
+    ) return;
+    state.shellGeneration = snapshot.generation;
+    state.shellRevision = snapshot.revision;
+    state.shellsReady = snapshot.ready;
+    state.shells = snapshot.shells;
+
+    const activeId = state.activeId;
+    if (activeId && !state.shells.some((item) => item.id === activeId)) {
+      disposeSession();
+      state.activeId = null;
+      ui.title.textContent = 'No shell selected';
+      setStatus('removed');
+      setMode('list');
+      if (sidebarState.enabled) resetSidebarShellState(activeId);
+    }
+    renderShellList();
+    void applyInitialSidebarShellState();
+  }
+
+  async function startLifecycleClient(): Promise<void> {
+    await ensureSocketIoClient();
+    const io = getSocketIoFactory();
+    if (!io) throw new Error('Socket.IO client is unavailable');
+    const socket = io(TERMINAL_LIFECYCLE_NAMESPACE, {
+      path: TERMINAL_LIFECYCLE_PATH,
+      transports: ['websocket'],
+      autoConnect: false,
+      auth: { rpcCodec: TERMINAL_LIFECYCLE_CODEC },
+    }) as unknown as TerminalLifecycleSocket;
+    lifecycleClient = new TerminalLifecycleClient(
+      socket,
+      applyShellSnapshot,
+      (connected) => {
+        if (state.mode !== 'list') return;
+        setStatus(connected ? '' : 'lifecycle disconnected');
+      },
+      (error) => console.warn('[terminal] lifecycle socket error', error),
+    );
+    lifecycleClient.start();
+  }
 
   async function concreteConsoleWorkerId(): Promise<string> {
     try {
@@ -704,7 +762,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   async function resolveNewShellCwd(): Promise<string> {
     if (!sidebarState.enabled) return '~';
     try {
-      const payload = await api.get<SidebarCwdPayload>('sidebar/cwd');
+      const payload = await requireLifecycleClient().request<SidebarCwdPayload>('sidebar.cwd.get');
       return nonEmptyString(payload.cwd) || sidebarState.initialCwd || '~';
     } catch (error) {
       console.warn('[terminal] sidebar cwd lookup failed; using local default', error);
@@ -723,7 +781,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     }
     try {
       const consoleWorkerId = await concreteConsoleWorkerId();
-      await api.post<SidebarWindowStatePayload>('sidebar/window/state', {
+      await requireLifecycleClient().request<SidebarWindowStatePayload>('sidebar.state.publish', {
         host_id: sidebarState.hostId,
         hostId: sidebarState.hostId,
         token_id: sidebarState.tokenId,
@@ -752,9 +810,12 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   async function createShell(): Promise<void> {
     try {
       const cwd = await resolveNewShellCwd();
-      const data = await api.post<ShellRecord>('shells', { cwd });
-      await listShells();
-      await selectShell(data.id);
+      const data = await requireLifecycleClient().request<LifecycleShellMutationResult>(
+        'shell.create',
+        { cwd },
+      );
+      applyShellSnapshot(data.snapshot);
+      await selectShell(data.shell_id);
       host.toast?.('New shell started');
     } catch (error) {
       console.error(error);
@@ -1139,7 +1200,6 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
       if (sidebarState.enabled) {
         resetSidebarShellState(state.activeId || undefined);
       }
-      void listShells();
       return;
     }
 
@@ -1236,7 +1296,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   }
 
   async function applyInitialSidebarShellState(): Promise<void> {
-    if (!sidebarState.enabled || initialSidebarStateApplied) return;
+    if (!sidebarState.enabled || initialSidebarStateApplied || !state.shellsReady) return;
     initialSidebarStateApplied = true;
     const requestedShellId = sidebarState.initialShellId;
     if (!requestedShellId) return;
@@ -1249,11 +1309,11 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     resetSidebarShellState(requestedShellId);
   }
 
-  async function listShells(): Promise<void> {
-    const data = await api.get<ShellRecord[]>('shells');
-    state.shells = data;
-    renderShellList();
-    await applyInitialSidebarShellState();
+  async function listShells(resync = false): Promise<void> {
+    const data = await requireLifecycleClient().request<LifecycleSnapshotResult>(
+      resync ? 'shells.resync' : 'shells.get',
+    );
+    applyShellSnapshot(data.snapshot);
   }
 
   function formatUptime(seconds?: number): string {
@@ -1268,6 +1328,10 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
 
   function renderShellList(): void {
     ui.list.innerHTML = '';
+    if (!state.shellsReady) {
+      ui.list.innerHTML = '<div style="color:var(--muted-foreground);">Loading terminals…</div>';
+      return;
+    }
     if (!state.shells.length) {
       ui.list.innerHTML = '<div style="color:var(--muted-foreground);">No shells yet.</div>';
       return;
@@ -1301,8 +1365,6 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
       }
       el.addEventListener('click', () => {
         void selectShell(rec.id);
-        Array.from(ui.list.children).forEach((child) => child.classList.remove('active'));
-        el.classList.add('active');
       });
       ui.list.appendChild(el);
     });
@@ -1339,10 +1401,12 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
       ui.title.textContent = 'No shell selected';
       setStatus(rec ? 'closed' : 'missing shell');
       setMode('list');
+      renderShellList();
       resetSidebarShellState(id);
       return;
     }
     state.activeId = id;
+    renderShellList();
     ui.title.textContent = shortId(id);
     setStatus('');
     setMode('terminal');
@@ -1422,8 +1486,11 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   async function doAction(action: string): Promise<void> {
     if (!state.activeId) return;
     try {
-      await api.post(`shells/${state.activeId}/action`, { action });
-      await listShells();
+      const result = await requireLifecycleClient().request<LifecycleShellMutationResult>(
+        'shell.action',
+        { shell_id: state.activeId, action },
+      );
+      applyShellSnapshot(result.snapshot);
     } catch (error) {
       console.error(error);
       await window.teUI.dialog.alert(
@@ -1436,7 +1503,10 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     if (!shellId) return;
     if (!(await window.teUI.dialog.confirm('Remove this shell? It will be killed if running.'))) return;
     try {
-      await api.delete(`shells/${shellId}`);
+      const result = await requireLifecycleClient().request<LifecycleShellMutationResult>(
+        'shell.remove',
+        { shell_id: shellId },
+      );
       if (state.activeId === shellId) {
         disposeSession();
         state.activeId = null;
@@ -1446,7 +1516,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
           resetSidebarShellState(shellId);
         }
       }
-      await listShells();
+      applyShellSnapshot(result.snapshot);
     } catch (error) {
       console.error(error);
       await window.teUI.dialog.alert(
@@ -1463,7 +1533,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   }, { passive: true });
 
   ui.btnNew.addEventListener('click', () => void createShell());
-  ui.btnRefresh.addEventListener('click', () => void listShells());
+  ui.btnRefresh.addEventListener('click', () => void listShells(true));
   ui.btnStop.addEventListener('click', () => void doAction('stop'));
   ui.btnKill.addEventListener('click', () => void doAction('kill'));
   ui.btnRemove.addEventListener('click', () => void removeShellById(state.activeId));
@@ -1480,5 +1550,8 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   ui.keyDown.addEventListener('pointerdown', softKey(() => queueInput('\u001b[B')), { passive: false });
 
   setMode('list');
-  void listShells();
+  void startLifecycleClient().catch((error) => {
+    console.error('[terminal] lifecycle startup failed', error);
+    setStatus('lifecycle unavailable');
+  });
 }

@@ -13,6 +13,7 @@
     "frontend_script": "static/dist/main.js?v=0.2.342"
   },
   "readiness_support": true,
+  "sio_service": "sio_service.json",
   "sidebar_state": {
     "enabled": true,
     "kind": "shell",

@@ -9,7 +9,9 @@ The Terminal app lives under `app/apps/terminal/` and is now the canonical broke
 - **Shellspec**: `shellspec/node_terminal_stream.yaml` is the only supported shellspec. Its persistent Node worker owns `node-pty`, headless xterm state, sequence assignment, and reconnect checkpoints.
 
 ## Backend Endpoints
-All responses use the `{ "ok": true, "data": ... }` envelope.
+These REST routes remain compatibility surfaces. The current frontend does not
+use them for application control and has no HTTP fallback. Responses use the
+`{ "ok": true, "data": ... }` envelope.
 
 | Method & Path | Purpose |
 | --- | --- |
@@ -20,6 +22,27 @@ All responses use the `{ "ok": true, "data": ... }` envelope.
 | `POST /api/app/terminal/shells/<id>/resize` | Resize the shell. |
 | `POST /api/app/terminal/shells/<id>/action` | `stop`, `kill`, or `restart` the shell. |
 | `DELETE /api/app/terminal/shells/<id>` | Remove a shell and its session state. |
+
+## Lifecycle Socket.IO
+
+The Terminal manifest declares `sio_service.json`, which proxies the
+websocket-only `/api/app/terminal/socket.io` path to the app worker's
+`/socket.io` mount. The logical namespace is `/terminal`.
+
+Every application payload is binary `msgpack-v1`. `terminal_request` carries a
+correlated `id`, method, and params; its acknowledgement carries the same id and
+either a result or explicit error. `terminal_snapshot` carries a complete shell
+list with a worker generation, monotonic revision, and readiness flag.
+
+One FWS `fws.dashboard.open` snapshot establishes the complete list. Thereafter
+the backend updates its bounded in-memory facts only from created, spawned,
+updated, exited, and removed lifecycle events. Reconnect obtains another full
+snapshot; there is no timer or polling loop. Worker generation fencing allows a
+long-lived frontend to accept a lower revision after an app-worker restart.
+
+The lane owns shell list/resync, create, stop/kill/restart, removal, and the
+Terminal app's Sidebar CWD/state bridge. The selected shell remains local to
+each frontend and is never part of the shared lifecycle snapshot.
 
 ## WebSocket
 The worker WebSocket endpoint is `/ws/terminal`, proxied to the browser as `/ws/app/terminal/terminal`.
@@ -40,6 +63,8 @@ sequence.
 - Reconnect requests a fresh broker checkpoint rather than replaying stdout logs.
 - Vendored Android helper scripts under `vendor/android-terminalapp-assets-js/` provide Ctrl-key and touch-to-mouse behavior.
 - The frontend keeps dead-shell history visible and suppresses unnecessary "Shell is not writable" toasts.
+- Shell-card state comes from lifecycle snapshots, while the active card comes
+  only from that frontend's local `activeId`.
 
 ### Android printable input
 

@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "routes": [
+    {
+      "id": "app_worker",
+      "description": "Websocket-only Socket.IO lifecycle and control lane for the Terminal app.",
+      "target": "app_worker",
+      "public_path": "/api/app/terminal/socket.io",
+      "upstream_path": "/socket.io/"
+    }
+  ]
+}

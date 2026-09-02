@@ -1,6 +1,6 @@
 # Terminal Input, Lifecycle, And Drawer Transport Plan
 
-Status: implementation in progress; Phase 1 source and live acceptance complete
+Status: implementation in progress; Phases 1-2 source complete, Phase 2 public transport accepted
 Created: 2026-09-02
 
 ## Outcome
@@ -336,6 +336,39 @@ standalone Terminal must not depend on Code TE2 frontend state or sockets.
 - Add `aria-current="true"` and a visually unambiguous active treatment using a
   stronger border/background/accent than hover.
 - Preserve a different active card independently in every client.
+
+## Phase 6: Terminal Latency Findings And Optimization
+
+Keep the Node `node-pty` and headless-xterm broker for this release. A Rust PTY
+broker or framework-owned callable PTY service is a separate architectural
+project, not an optimization shortcut for this release.
+
+Measure the existing boundaries independently before changing them:
+
+- standalone lifecycle socket connect to authoritative snapshot;
+- standalone create request to shell fact publication;
+- raw PTY attach to checkpoint application and writable state;
+- Code TE2 drawer open to shell identity, history/bootstrap, and writable
+  state; and
+- first-use Node runtime verification/install separately from warm starts.
+
+Use monotonic correlation timestamps and existing runtime logs or bounded debug
+instrumentation. Do not infer a Node, Python, FWS, font/helper, checkpoint, or
+renderer bottleneck from total elapsed time alone.
+
+Optimize only the measured critical path. Likely candidates include redundant
+manager metadata reads, serial shell-list decoration, helper/font loading that
+gates input readiness, checkpoint serialization, and Code TE2 history/bootstrap
+ordering. Preserve event-driven state, strict MessagePack transports, and the
+current Node broker ownership. No polling or silent fallback is permitted.
+
+Acceptance targets:
+
+- existing standalone and drawer shells become writable in under one second on
+  localhost after their frontend surface is ready;
+- noncritical shell-list decoration may settle after PTY readiness;
+- warm shell opens perform no dependency installation or global shell scan; and
+- before/after traces identify the exact reduced boundary.
 
 ## Validation
 
