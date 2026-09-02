@@ -943,7 +943,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
       if (socket.sendBuffer) socket.sendBuffer.length = 0;
     });
 
-    socket.on('terminal:shell_id', async (msg) => {
+    socket.on('terminal:shell_id', (msg) => {
       const receivedShellId = isRecord(msg) ? optionalString(msg.shell_id) : null;
       if (!receivedShellId) return;
       const receivedGeneration = isRecord(msg) && typeof msg.bind_generation === 'number'
@@ -956,13 +956,6 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
       socketRegistered = true;
       lastResizeSent = null;
       console.log('Received shell ID from server:', shellId);
-      if (term) {
-        try {
-          await bindDrawerVendoredCtrlHandler(term);
-        } catch (err) {
-          console.warn('Failed to bind vendored ctrl helper:', err);
-        }
-      }
 
       if (isNewShell) {
         try {
@@ -974,6 +967,11 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
         pendingOutput = [];
       }
       lastShellId = receivedShellId;
+      if (term) {
+        void bindDrawerVendoredCtrlHandler(term).catch((err) => {
+          console.warn('Failed to bind vendored ctrl helper:', err);
+        });
+      }
     });
 
     socket.on('terminal:history', (msg) => {

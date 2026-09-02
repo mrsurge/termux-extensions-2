@@ -327,6 +327,10 @@ the off-loop history read or shell-list projection. Live output is bounded and
 buffered only until matching history arrives; history for an obsolete shell or
 generation is discarded.
 
+The frontend finalizes identity, generation, xterm reset, and pending-output
+state synchronously. Cache-busted mobile helper rebinding starts only afterward
+and is not awaited, so history cannot flash and then be erased by a late reset.
+
 The existing Code TE2 FWS lifecycle connection now retains compact terminal
 facts from one reconnect snapshot plus lifecycle events. Shell-list rendering
 joins those facts with `ProjectSidecar` membership, titles, and active identity,

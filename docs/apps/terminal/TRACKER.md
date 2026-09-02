@@ -76,6 +76,7 @@ Plan: `docs/apps/terminal/IMPLEMENTATION_PLAN.md`
 - [x] Remove all terminal API `fetch()` calls from `host-terminal-drawer.ts`.
 - [x] Preserve project-switch rebind behavior without polling.
 - [x] Add protocol, reconnect, and stale-bind tests.
+- [x] Apply xterm reset before asynchronous helper rebinding and live-accept refresh/reconnect.
 - [ ] Record before/after localhost drawer readiness latency.
 
 ## Phase 4: Two-Row Standalone Keys

@@ -29,3 +29,13 @@ test('terminal drawer uses reliable control and generation-fenced history', () =
   assert.match(source, /historyGeneration !== bindGeneration/);
   assert.match(source, /await ensureTerminalSocket\(\);\s*emitTerminalRegister/);
 });
+
+test('terminal identity resets xterm before asynchronous helper rebinding', () => {
+  const start = source.indexOf("socket.on('terminal:shell_id'");
+  const end = source.indexOf("socket.on('terminal:history'", start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const handler = source.slice(start, end);
+  assert.match(handler, /socket\.on\('terminal:shell_id', \(msg\) =>/);
+  assert.ok(handler.indexOf('term?.reset()') < handler.indexOf('void bindDrawerVendoredCtrlHandler(term)'));
+});

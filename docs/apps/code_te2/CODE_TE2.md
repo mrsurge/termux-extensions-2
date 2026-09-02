@@ -3060,6 +3060,11 @@ live output until history with the exact shell id and bind generation arrives,
 removes overlap, and discards stale generations. Shell-list decoration never
 gates identity, output, or writable state.
 
+The renderer applies shell identity, xterm reset, generation state, and pending
+output reset synchronously before starting asynchronous helper-script rebinding.
+Otherwise a fast history event can render while the identity handler is awaiting
+the helper, then be erased by a late `term.reset()` when that await resumes.
+
 The existing Code TE2 FWS lifecycle client takes one reconnect snapshot and
 then consumes lifecycle events to maintain compact terminal shell facts. Menu
 projection joins those status/pid/log facts with `ProjectSidecar` membership,
