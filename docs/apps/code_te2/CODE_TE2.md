@@ -1708,7 +1708,7 @@ editor_wba_runtime_handlers.ts, src/extensions/provider-registry.ts,
 src/extensions/intelligence/code-navigation.ts, and
 src/server/request-dispatch.ts.
 
-## 35) Android / GeckoView IME and Monaco Text Input
+## 35) Android / GeckoView IME and Browser Text Input
 
 ### Problem
 
@@ -1716,7 +1716,7 @@ Android IME composition, especially Gboard, can fight Monaco's desktop-oriented 
 
 ### Current architecture
 
-There are two distinct layers:
+There are three distinct layers:
 
 1. **Android native focus/filter layer**
    - `FilteredGeckoView.kt` subclasses `GeckoView` and can wrap the platform `InputConnection` with `EditorInputFilter`.
@@ -1759,6 +1759,18 @@ There are two distinct layers:
      The rail's Ctrl control collapses or reveals the dock and auxiliary actions;
      it is not a second modifier authority.
 
+3. **Shared xterm Android transaction layer**
+   - The maintained `xterm-te2` fork gives Android custom mode exclusive
+     ownership of printable text through a guarded cumulative helper-textarea
+     projection.
+   - Printable keydown and xterm's upstream keypress fallback do not emit text
+     in that mode. Enter, Backspace, navigation, Ctrl/Alt combinations, and
+     other non-text terminal keys retain xterm's keydown path.
+   - A key-code-229 composition restores the projection guard if xterm cleared
+     the helper after Enter or Ctrl+C.
+   - This contract is shared by the standalone Terminal and Code TE2 terminal
+     drawer. Non-Android and screen-reader paths retain upstream xterm behavior.
+
 ### Key files
 
 | File | Role |
@@ -1771,6 +1783,7 @@ There are two distinct layers:
 | `monaco_editor/editor_mobile_special_keys_utils.ts` | Owns two-row mobile keys, modifier state, and the shared translucent action rail. |
 | `src/mobile-input/terminal-special-key-bridge.ts` | Carries combined Ctrl/Alt/Shift navigation to the active editor or Terminal target. |
 | `app/static/vendor/monaco-editor-core/esm/` | Committed patched Monaco artifacts; their editable VS Code source is external. |
+| `app/static/vendor/xterm/xterm.js` | Published shared xterm browser artifact; editable source is in the external `xterm-te2` worktree. |
 
 ### Publication path
 
