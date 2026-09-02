@@ -91,6 +91,14 @@ the character normally. The correction therefore belongs in the patched xterm
 229 when xterm has cleared the textarea. No connection, queueing, or backend
 change is part of this defect fix.
 
+A later regression probe captured the same bare-textarea rejection through an
+ordinary printable keydown rather than key code 229. Enter emitted `"\r"` and
+cleared the textarea; the next `h` arrived as key code 72, native input changed
+the bare value to `"h"`, and no xterm data event followed. The durable invariant
+is therefore broader: Enter/Control-C must reseed immediately after their clear,
+and every Android printable keydown must repair a missing guard before yielding
+to native input.
+
 A second live probe captured a separate stuck-composition failure after a
 space. Gboard produced one cumulative textarea value containing `"-"`, then
 echoed that commit as a printable `keydown`/`keypress`/`insertText` sequence.
@@ -169,6 +177,10 @@ begin immediately after xterm's ordinary Enter path clears the helper textarea:
 
 - preserve the transaction's existing internal projection;
 - on key code `229`, validate the actual helper textarea projection;
+- after Enter or Ctrl+C clears the helper, immediately reset the Android
+  transaction;
+- before yielding an ordinary printable keydown, restore the current projection
+  if the helper is unguarded;
 - restore the current guarded projection only when the textarea is unguarded;
 - route unmodified printable key events through native textarea input;
 - bypass xterm's upstream keypress emission while Android custom mode owns
@@ -185,7 +197,7 @@ Add a focused `AndroidInputTransaction` regression that reproduces:
 
 - an active Android transaction;
 - xterm clearing the helper textarea after Enter;
-- key code `229` beginning the next Gboard composition;
+- key code `229` or ordinary printable keydown beginning the next Gboard input;
 - guarded projection restoration before browser insertion; and
 - exactly one first character reaching xterm.
 

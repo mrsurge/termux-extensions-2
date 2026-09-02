@@ -9,6 +9,7 @@ Plan: `docs/apps/terminal/IMPLEMENTATION_PLAN.md`
 - [x] Capture the exact failing Gboard event sequence after a new prompt.
 - [x] Prove the reported first-character loss is not a connection race.
 - [x] Identify the cleared helper textarea plus key code `229` guard gap.
+- [x] Capture the ordinary printable-keydown guard regression after Enter.
 - [x] Capture the stuck-composition space-plus-dash event sequence.
 - [x] Prove one textarea dash was duplicated by xterm's keypress fallback.
 - [x] Establish Android textarea input as the sole printable-text authority.
@@ -28,6 +29,7 @@ Plan: `docs/apps/terminal/IMPLEMENTATION_PLAN.md`
 - [x] Bypass upstream keypress emission only in Android custom input mode.
 - [x] Preserve non-text and modified keydown handling.
 - [x] Add ordinary printable-input and Gboard commit-echo regressions.
+- [x] Reseed after Enter/Ctrl+C and restore a missing guard on printable keydown.
 - [x] Add a Terminal-level Android keypress ownership regression.
 - [x] Run the full xterm TypeScript build.
 - [x] Package the xterm UMD artifact.
@@ -39,6 +41,7 @@ Plan: `docs/apps/terminal/IMPLEMENTATION_PLAN.md`
 - [x] Build the standalone Terminal frontend.
 - [x] Force-load the rebuilt same-version asset for live acceptance.
 - [x] Repeat the exact prompt-boundary Gboard reproduction live.
+- [x] Live-accept ordinary first-character input after Enter guard reseeding.
 - [x] Repeat space plus one dash in stuck composition mode in both terminals.
 
 ## Phase 2: Standalone Lifecycle Socket

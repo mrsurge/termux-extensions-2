@@ -1766,8 +1766,9 @@ There are three distinct layers:
    - Printable keydown and xterm's upstream keypress fallback do not emit text
      in that mode. Enter, Backspace, navigation, Ctrl/Alt combinations, and
      other non-text terminal keys retain xterm's keydown path.
-   - A key-code-229 composition restores the projection guard if xterm cleared
-     the helper after Enter or Ctrl+C.
+   - Enter and Ctrl+C immediately reseed the guarded projection after xterm's
+     accessibility clear. Key-code-229 composition and ordinary printable
+     keydown also repair a missing guard before yielding to native input.
    - This contract is shared by the standalone Terminal and Code TE2 terminal
      drawer. Non-Android and screen-reader paths retain upstream xterm behavior.
 

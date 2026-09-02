@@ -75,9 +75,11 @@ printable letters, spaces, punctuation, and composition. Xterm's upstream
 duplicate text. Keydown remains authoritative for Enter, Backspace,
 navigation, modifiers, shortcuts, and other non-text terminal keys.
 
-When xterm clears its helper textarea after Enter or Ctrl+C, a following
-key-code-229 composition restores the current guard before Android inserts
-text. This prevents the first character at a new prompt from being discarded.
-Non-Android and screen-reader input retain upstream xterm behavior.
+After xterm clears its helper textarea for Enter or Ctrl+C, it immediately
+resets the Android transaction so the empty guarded projection is restored.
+Both key-code-229 composition and ordinary printable keydown also repair a
+missing guard before Android inserts text. This prevents the first character at
+a new prompt from being discarded. Non-Android and screen-reader input retain
+upstream xterm behavior.
 
 Update this document whenever the terminal app contract, shellspec, or frontend transport changes.
