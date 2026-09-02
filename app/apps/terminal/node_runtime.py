@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
-from typing import Final
+from typing import Final, cast
 import uuid
 
 from app.node_toolchain import (
@@ -103,7 +103,7 @@ def _marker_payload(fingerprint: str, identity: dict[str, str]) -> dict[str, obj
 def _runtime_is_ready(root: Path, expected: dict[str, object]) -> bool:
     marker = root / ".te2-runtime.json"
     try:
-        actual = json.loads(marker.read_text(encoding="utf-8"))
+        actual = cast(object, json.loads(marker.read_text(encoding="utf-8")))
     except (OSError, json.JSONDecodeError):
         return False
     if actual != expected:
@@ -157,8 +157,8 @@ def _install_runtime(
     identity: dict[str, str],
 ) -> None:
     stage.mkdir(parents=True, exist_ok=False)
-    shutil.copy2(PACKAGE_JSON, stage / "package.json")
-    shutil.copy2(PACKAGE_LOCK, stage / "package-lock.json")
+    _ = shutil.copy2(PACKAGE_JSON, stage / "package.json")
+    _ = shutil.copy2(PACKAGE_LOCK, stage / "package-lock.json")
     env = _toolchain_env(node_binary)
     env["NODE_ENV"] = "production"
     _run_checked(
@@ -217,7 +217,7 @@ def ensure_terminal_node_runtime() -> NodeRuntime:
         stage = base / f".{fingerprint}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
         try:
             _install_runtime(stage, node_binary, npm_binary, identity)
-            (stage / ".te2-runtime.json").write_text(
+            _ = (stage / ".te2-runtime.json").write_text(
                 json.dumps(marker_payload, indent=2, sort_keys=True) + "\n",
                 encoding="utf-8",
             )

@@ -1,5 +1,6 @@
 from collections.abc import Mapping
 import struct
+from typing import cast, final
 
 import msgspec
 
@@ -10,14 +11,14 @@ PIPE_FRAME_HEADER = struct.Struct(">I")
 
 JsonObject = dict[str, object]
 _ENCODER = msgspec.msgpack.Encoder()
-_DECODER = msgspec.msgpack.Decoder()
+_DECODER = msgspec.msgpack.Decoder(object)
 
 
 def _as_object(raw: object) -> JsonObject | None:
     if not isinstance(raw, Mapping):
         return None
     payload: JsonObject = {}
-    for key, value in raw.items():
+    for key, value in cast(Mapping[object, object], raw).items():
         if isinstance(key, str):
             payload[key] = value
     return payload
@@ -48,16 +49,20 @@ def encode_pipe_message(payload: Mapping[str, object]) -> bytes:
     return PIPE_FRAME_HEADER.pack(len(encoded)) + encoded
 
 
+@final
 class PipeFrameDecoder:
     def __init__(self, max_frame_bytes: int = MAX_TERMINAL_FRAME_BYTES) -> None:
-        self._buffer = bytearray()
-        self._max_frame_bytes = max_frame_bytes
+        self._buffer: bytearray = bytearray()
+        self._max_frame_bytes: int = max_frame_bytes
 
     def push(self, chunk: bytes | bytearray) -> list[JsonObject]:
         self._buffer.extend(chunk)
         messages: list[JsonObject] = []
         while len(self._buffer) >= PIPE_FRAME_HEADER.size:
-            (payload_length,) = PIPE_FRAME_HEADER.unpack_from(self._buffer)
+            (payload_length,) = cast(
+                tuple[int],
+                PIPE_FRAME_HEADER.unpack_from(self._buffer),
+            )
             if payload_length <= 0 or payload_length > self._max_frame_bytes:
                 raise ValueError(f"Invalid terminal pipe frame length: {payload_length}")
             frame_length = PIPE_FRAME_HEADER.size + payload_length

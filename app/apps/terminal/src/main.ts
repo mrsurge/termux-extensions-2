@@ -13,6 +13,15 @@ import {
   type TerminalShellRecord as ShellRecord,
   type TerminalShellSnapshot,
 } from './terminal-lifecycle-client';
+import {
+  dispatchSyntheticTerminalKey,
+  MINIBAR_INTERACTION_GUARD_MS,
+  shouldSuppressMinibarInteraction,
+  TERMINAL_KEYS,
+  TerminalModifierState,
+  type CtrlMode,
+  type SyntheticTerminalKey,
+} from './mobile-special-keys';
 
 interface AppApi {
   get<T>(path: string): Promise<T>;
@@ -133,6 +142,7 @@ type ServerFrame = ServerCheckpointFrame | ServerOutputFrame | ServerExitFrame |
 interface UiRefs {
   list: HTMLElement;
   listContainer: HTMLElement;
+  showExited: HTMLInputElement;
   terminalContainer: HTMLElement;
   drawerOverlay: HTMLElement;
   btnMenu: HTMLButtonElement;
@@ -146,13 +156,20 @@ interface UiRefs {
   title: HTMLElement;
   status: HTMLElement;
   termContainer: HTMLElement;
-  keyCtrl: HTMLButtonElement;
-  keyTab: HTMLButtonElement;
   keyEsc: HTMLButtonElement;
-  keyLeft: HTMLButtonElement;
+  keyMinibar: HTMLButtonElement;
+  keyDash: HTMLButtonElement;
+  keyHome: HTMLButtonElement;
   keyUp: HTMLButtonElement;
+  keyEnd: HTMLButtonElement;
+  keyPageUp: HTMLButtonElement;
+  keyTab: HTMLButtonElement;
+  keyCtrl: HTMLButtonElement;
+  keyAlt: HTMLButtonElement;
+  keyLeft: HTMLButtonElement;
   keyDown: HTMLButtonElement;
   keyRight: HTMLButtonElement;
+  keyPageDown: HTMLButtonElement;
 }
 
 interface XtermTheme {
@@ -258,7 +275,8 @@ interface AppState {
   lastResizeSent: string | null;
   resizeObserver: ResizeObserver | null;
   mode: 'list' | 'terminal';
-  ctrlActive: boolean;
+  showExited: boolean;
+  modifiers: TerminalModifierState;
   ctrlFocusCleanup: (() => void) | null;
   inputBuffer: string;
   inputBatchMode: InputBatchMode | null;
@@ -340,6 +358,9 @@ function getRuntimeWindow(): Window & {
   FitAddon?: XtermFitAddonConstructor | { FitAddon?: XtermFitAddonConstructor };
   WebFontsAddon?: XtermWebFontsAddonConstructor | XtermWebFontsAddonNamespace;
   __terminalTestingTouchToMouseLoaded?: boolean;
+  __androidTerminalCtrlDesired?: boolean;
+  __androidTerminalSetCtrl?: (active: boolean) => void;
+  __te2MobileCtrlLocked?: boolean;
   ctrl?: boolean;
   term?: VendoredCtrlTerminal | null;
 } {
@@ -349,6 +370,9 @@ function getRuntimeWindow(): Window & {
     FitAddon?: XtermFitAddonConstructor | { FitAddon?: XtermFitAddonConstructor };
     WebFontsAddon?: XtermWebFontsAddonConstructor | XtermWebFontsAddonNamespace;
     __terminalTestingTouchToMouseLoaded?: boolean;
+    __androidTerminalCtrlDesired?: boolean;
+    __androidTerminalSetCtrl?: (active: boolean) => void;
+    __te2MobileCtrlLocked?: boolean;
     ctrl?: boolean;
     term?: VendoredCtrlTerminal | null;
   };
@@ -643,6 +667,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   const ui: UiRefs = {
     list: getRequired(root, '#ta-shell-list'),
     listContainer: getRequired(root, '#ta-list-container'),
+    showExited: getRequired(root, '#ta-show-exited'),
     terminalContainer: getRequired(root, '#ta-terminal-container'),
     drawerOverlay: getRequired(root, '#ta-drawer-overlay'),
     btnMenu: getRequired(root, '#ta-btn-menu'),
@@ -656,13 +681,20 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     title: getRequired(root, '#ta-shell-title'),
     status: getRequired(root, '#ta-shell-status'),
     termContainer: getRequired(root, '#ta-term'),
-    keyCtrl: getRequired(root, '#k-ctrl'),
-    keyTab: getRequired(root, '#k-tab'),
     keyEsc: getRequired(root, '#k-esc'),
-    keyLeft: getRequired(root, '#k-left'),
+    keyMinibar: getRequired(root, '#k-minibar'),
+    keyDash: getRequired(root, '#k-dash'),
+    keyHome: getRequired(root, '#k-home'),
     keyUp: getRequired(root, '#k-up'),
+    keyEnd: getRequired(root, '#k-end'),
+    keyPageUp: getRequired(root, '#k-page-up'),
+    keyTab: getRequired(root, '#k-tab'),
+    keyCtrl: getRequired(root, '#k-ctrl'),
+    keyAlt: getRequired(root, '#k-alt'),
+    keyLeft: getRequired(root, '#k-left'),
     keyDown: getRequired(root, '#k-down'),
     keyRight: getRequired(root, '#k-right'),
+    keyPageDown: getRequired(root, '#k-page-down'),
   };
 
   const state: AppState = {
@@ -684,7 +716,8 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     lastResizeSent: null,
     resizeObserver: null,
     mode: 'list',
-    ctrlActive: false,
+    showExited: false,
+    modifiers: new TerminalModifierState(),
     ctrlFocusCleanup: null,
     inputBuffer: '',
     inputBatchMode: null,
@@ -696,6 +729,8 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   };
   let initialSidebarStateApplied = false;
   let lifecycleClient: TerminalLifecycleClient | null = null;
+  let syncingVendoredCtrl = false;
+  let minibarInteractionGuardUntil = 0;
 
   function requireLifecycleClient(): TerminalLifecycleClient {
     if (!lifecycleClient) {
@@ -923,6 +958,31 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     root.classList.add('drawer-open');
   }
 
+  function openDrawerFromSoftKey(event: Event): void {
+    if (
+      event instanceof PointerEvent
+      && event.currentTarget instanceof Element
+    ) {
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        // The capture guard below remains authoritative if capture is unavailable.
+      }
+    }
+    minibarInteractionGuardUntil = performance.now() + MINIBAR_INTERACTION_GUARD_MS;
+    openDrawer();
+  }
+
+  function suppressPrematureMinibarInteraction(event: Event): void {
+    if (!shouldSuppressMinibarInteraction(
+      minibarInteractionGuardUntil,
+      performance.now(),
+    )) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+  }
+
   function closeDrawer(): void {
     root.classList.remove('drawer-open');
   }
@@ -935,17 +995,64 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     }
   }
 
-  function setCtrlUi(active: boolean): void {
-    state.ctrlActive = active;
-    ui.keyCtrl.classList.toggle('toggle', active);
+  function syncModifierUi(): void {
+    const ctrlActive = state.modifiers.ctrl;
+    ui.keyCtrl.classList.toggle('toggle', ctrlActive);
+    ui.keyCtrl.classList.toggle('locked', state.modifiers.ctrlMode === 'locked');
+    ui.keyCtrl.setAttribute('aria-pressed', String(ctrlActive));
+    ui.keyCtrl.title = state.modifiers.ctrlMode === 'locked'
+      ? 'Control locked'
+      : 'Control';
+    ui.keyAlt.classList.toggle('toggle', state.modifiers.alt);
+    ui.keyAlt.setAttribute('aria-pressed', String(state.modifiers.alt));
+  }
+
+  async function setVendoredCtrlEnabled(active: boolean): Promise<void> {
+    const runtimeWindow = getRuntimeWindow();
+    if (typeof runtimeWindow.__androidTerminalSetCtrl === 'function') {
+      runtimeWindow.__androidTerminalSetCtrl(active);
+      return;
+    }
+    await loadHelperScript(helperUrl(active ? 'enable_ctrl_key.js' : 'disable_ctrl_key.js', true));
+  }
+
+  function setCtrlMode(mode: CtrlMode, publish = true): void {
+    state.modifiers.setCtrlMode(mode);
+    const runtimeWindow = getRuntimeWindow();
+    const active = mode !== 'off';
+    runtimeWindow.__te2MobileCtrlLocked = mode === 'locked';
+    runtimeWindow.__androidTerminalCtrlDesired = active;
+    syncModifierUi();
+    if (!publish) return;
+    syncingVendoredCtrl = true;
+    void setVendoredCtrlEnabled(active)
+      .catch((error) => {
+        console.warn('[terminal] failed to set vendored ctrl helper', error);
+      })
+      .finally(() => {
+        syncingVendoredCtrl = false;
+      });
+  }
+
+  function consumeOneShotModifiers(): void {
+    const ctrlWasArmed = state.modifiers.ctrlMode === 'armed';
+    state.modifiers.consumeOneShot();
+    if (ctrlWasArmed) {
+      setCtrlMode('off');
+      return;
+    }
+    syncModifierUi();
   }
 
   function clearCtrlMode(): void {
     const runtimeWindow = getRuntimeWindow();
+    state.modifiers.reset();
+    runtimeWindow.__te2MobileCtrlLocked = false;
+    runtimeWindow.__androidTerminalCtrlDesired = false;
     runtimeWindow.ctrl = false;
     runtimeWindow.term = null;
     clearVendoredCtrlFocusBinding();
-    setCtrlUi(false);
+    syncModifierUi();
   }
 
   function getTermTextarea(term: XtermTerminalLike | null): HTMLTextAreaElement | null {
@@ -993,33 +1100,44 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     };
   }
 
-  async function setVendoredCtrlEnabled(active: boolean): Promise<void> {
-    await loadHelperScript(helperUrl(active ? 'enable_ctrl_key.js' : 'disable_ctrl_key.js', true));
-    setCtrlUi(active);
+  function toggleCtrl(): void {
+    const mode = state.modifiers.tapCtrl();
+    setCtrlMode(mode);
   }
 
-  function toggleCtrl(): void {
-    const next = !state.ctrlActive;
-    setCtrlUi(next);
-    void setVendoredCtrlEnabled(next).catch((error) => {
-      console.warn('[terminal] failed to toggle vendored ctrl helper', error);
-      setCtrlUi(Boolean(getRuntimeWindow().ctrl));
-    });
+  function toggleAlt(): void {
+    state.modifiers.toggleAlt();
+    syncModifierUi();
   }
 
   function syncVendoredCtrlFromEvent(event: Event): void {
+    if (syncingVendoredCtrl) return;
     const detail = (event as CustomEvent<{ active?: boolean }>).detail;
-    setCtrlUi(Boolean(detail?.active));
+    const active = Boolean(detail?.active);
+    if (!active && state.modifiers.ctrlMode === 'locked') {
+      setCtrlMode('locked');
+      return;
+    }
+    state.modifiers.setCtrlMode(active ? 'armed' : 'off');
+    syncModifierUi();
   }
 
   function installVendoredCtrlStateListener(): void {
     window.addEventListener(CTRL_STATE_EVENT, syncVendoredCtrlFromEvent as EventListener);
-    setCtrlUi(Boolean(getRuntimeWindow().ctrl));
+    const runtimeWindow = getRuntimeWindow();
+    state.modifiers.setCtrlMode(
+      runtimeWindow.ctrl
+        ? (runtimeWindow.__te2MobileCtrlLocked ? 'locked' : 'armed')
+        : 'off',
+    );
+    syncModifierUi();
   }
 
   function clearVendoredCtrlRuntime(): void {
     const runtimeWindow = getRuntimeWindow();
     runtimeWindow.term = null;
+    runtimeWindow.__androidTerminalCtrlDesired = false;
+    runtimeWindow.__te2MobileCtrlLocked = false;
     runtimeWindow.ctrl = false;
   }
 
@@ -1029,13 +1147,26 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     });
   }
 
-  function softKey(handler: () => void): (ev: Event) => void {
+  function softKey(handler: (event: Event) => void): (ev: Event) => void {
     return (ev: Event) => {
       ev.preventDefault();
       ev.stopPropagation();
-      handler();
+      handler(ev);
       refocusTerm();
     };
+  }
+
+  function dispatchTerminalKey(key: SyntheticTerminalKey): void {
+    const term = state.term;
+    if (!term) return;
+    refocusTerm();
+    const textarea = getTermTextarea(term);
+    if (!textarea) return;
+    dispatchSyntheticTerminalKey(textarea, key, {
+      ctrl: state.modifiers.ctrl,
+      alt: state.modifiers.alt,
+    });
+    consumeOneShotModifiers();
   }
 
   function wsUrl(): string {
@@ -1332,16 +1463,23 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
       ui.list.innerHTML = '<div style="color:var(--muted-foreground);">Loading terminals…</div>';
       return;
     }
-    if (!state.shells.length) {
-      ui.list.innerHTML = '<div style="color:var(--muted-foreground);">No shells yet.</div>';
+    const visibleShells = state.showExited
+      ? state.shells
+      : state.shells.filter((record) => isShellAlive(record));
+    if (!visibleShells.length) {
+      ui.list.innerHTML = state.shells.length
+        ? '<div style="color:var(--muted-foreground);">No running shells.</div>'
+        : '<div style="color:var(--muted-foreground);">No shells yet.</div>';
       return;
     }
 
-    state.shells.forEach((rec) => {
+    visibleShells.forEach((rec) => {
       const alive = Boolean(rec.stats?.alive);
       const uptime = formatUptime(rec.stats?.uptime);
       const el = document.createElement('div');
-      el.className = `ta-shell-item${state.activeId === rec.id ? ' active' : ''}`;
+      const active = state.activeId === rec.id;
+      el.className = `ta-shell-item${active ? ' active' : ''}`;
+      if (active) el.setAttribute('aria-current', 'true');
       const removeMarkup = alive ? '' : '<button class="app-btn ta-shell-remove" type="button">Close</button>';
       el.innerHTML = `
         <div class="ta-status-dot ${alive ? 'ta-dot-alive' : 'ta-dot-dead'}"></div>
@@ -1539,15 +1677,33 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   ui.btnRemove.addEventListener('click', () => void removeShellById(state.activeId));
   ui.btnMenu.addEventListener('click', openDrawer);
   ui.drawerOverlay.addEventListener('click', closeDrawer);
+  for (const eventType of ['pointerdown', 'pointerup', 'click']) {
+    ui.listContainer.addEventListener(
+      eventType,
+      suppressPrematureMinibarInteraction,
+      true,
+    );
+  }
+  ui.showExited.addEventListener('change', () => {
+    state.showExited = ui.showExited.checked;
+    renderShellList();
+  });
   ui.zoomOut.addEventListener('pointerdown', softKey(() => applyFontSize(getCurrentFontSize() - FONT_SIZE_STEP)), { passive: false });
   ui.zoomIn.addEventListener('pointerdown', softKey(() => applyFontSize(getCurrentFontSize() + FONT_SIZE_STEP)), { passive: false });
+  ui.keyEsc.addEventListener('pointerdown', softKey(() => dispatchTerminalKey(TERMINAL_KEYS.escape)), { passive: false });
+  ui.keyMinibar.addEventListener('pointerdown', softKey(openDrawerFromSoftKey), { passive: false });
+  ui.keyDash.addEventListener('pointerdown', softKey(() => dispatchTerminalKey(TERMINAL_KEYS.dash)), { passive: false });
+  ui.keyHome.addEventListener('pointerdown', softKey(() => dispatchTerminalKey(TERMINAL_KEYS.home)), { passive: false });
+  ui.keyUp.addEventListener('pointerdown', softKey(() => dispatchTerminalKey(TERMINAL_KEYS.up)), { passive: false });
+  ui.keyEnd.addEventListener('pointerdown', softKey(() => dispatchTerminalKey(TERMINAL_KEYS.end)), { passive: false });
+  ui.keyPageUp.addEventListener('pointerdown', softKey(() => dispatchTerminalKey(TERMINAL_KEYS.pageUp)), { passive: false });
+  ui.keyTab.addEventListener('pointerdown', softKey(() => dispatchTerminalKey(TERMINAL_KEYS.tab)), { passive: false });
   ui.keyCtrl.addEventListener('pointerdown', softKey(toggleCtrl), { passive: false });
-  ui.keyTab.addEventListener('pointerdown', softKey(() => queueInput('\t')), { passive: false });
-  ui.keyEsc.addEventListener('pointerdown', softKey(() => queueInput('\u001b')), { passive: false });
-  ui.keyLeft.addEventListener('pointerdown', softKey(() => queueInput('\u001b[D')), { passive: false });
-  ui.keyRight.addEventListener('pointerdown', softKey(() => queueInput('\u001b[C')), { passive: false });
-  ui.keyUp.addEventListener('pointerdown', softKey(() => queueInput('\u001b[A')), { passive: false });
-  ui.keyDown.addEventListener('pointerdown', softKey(() => queueInput('\u001b[B')), { passive: false });
+  ui.keyAlt.addEventListener('pointerdown', softKey(toggleAlt), { passive: false });
+  ui.keyLeft.addEventListener('pointerdown', softKey(() => dispatchTerminalKey(TERMINAL_KEYS.left)), { passive: false });
+  ui.keyDown.addEventListener('pointerdown', softKey(() => dispatchTerminalKey(TERMINAL_KEYS.down)), { passive: false });
+  ui.keyRight.addEventListener('pointerdown', softKey(() => dispatchTerminalKey(TERMINAL_KEYS.right)), { passive: false });
+  ui.keyPageDown.addEventListener('pointerdown', softKey(() => dispatchTerminalKey(TERMINAL_KEYS.pageDown)), { passive: false });
 
   setMode('list');
   void startLifecycleClient().catch((error) => {

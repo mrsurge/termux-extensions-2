@@ -1,6 +1,6 @@
 # Terminal Input, Lifecycle, And Drawer Transport Tracker
 
-Status: implementation in progress; Phases 1-3.5 source complete and live accepted
+Status: implementation in progress; Phases 1-4 source complete and live accepted
 Plan: `docs/apps/terminal/IMPLEMENTATION_PLAN.md`
 
 ## Investigation
@@ -99,23 +99,34 @@ Plan: `docs/apps/terminal/IMPLEMENTATION_PLAN.md`
 
 ## Phase 4: Two-Row Standalone Keys
 
-- [ ] Render row one: `ESC`, `MINIBAR`, `-`, `HOME`, `UP`, `END`, `PGUP`.
-- [ ] Render row two: `TAB`, `CTRL`, `ALT`, `LEFT`, `DOWN`, `RIGHT`, `PGDN`.
-- [ ] Bind `MINIBAR` to the shell-list drawer only.
-- [ ] Add independent visible Ctrl and Alt state.
-- [ ] Support combined Ctrl+Alt synthetic key dispatch.
-- [ ] Consume only one-shot modifiers after a non-modifier action.
-- [ ] Preserve terminal textarea focus for every soft-key action.
-- [ ] Add synthetic key/modifier unit tests.
-- [ ] Validate Gboard and hardware-key behavior live.
+- [x] Render row one: `ESC`, `≡`, `-`, `HOME`, `↑`, `END`, `PGUP`.
+- [x] Render row two: `TAB`, `CTRL`, `ALT`, `LEFT`, `DOWN`, `RIGHT`, `PGDN`.
+- [x] Bind `≡` to the shell-list drawer only.
+- [x] Guard the `≡` reveal pointer from activating newly overlaid drawer items.
+- [x] Add client-local, non-persisted `Show exited` filtering to the shared list surface.
+- [x] Add independent visible Ctrl and Alt state.
+- [x] Support combined Ctrl+Alt synthetic key dispatch.
+- [x] Consume only one-shot modifiers after a non-modifier action.
+- [x] Preserve terminal textarea focus for every soft-key action.
+- [x] Add synthetic key/modifier unit tests.
+- [x] Validate Gboard and soft-key behavior live.
+- [ ] Validate physical hardware-key behavior live.
+
+## Strict Typing Cleanup
+
+- [x] Replace inferred Socket.IO `Any` values with a local typed client protocol.
+- [x] Validate Sidebar RPC responses before reading result/error fields.
+- [x] Decode MessagePack as `object` before accepting string-keyed mappings.
+- [x] Type binary frame lengths and persistent Node runtime marker JSON.
+- [x] Clear all BasedPyright warnings across `app/apps/terminal`.
 
 ## Phase 5: Client-Local Active Card
 
 - [x] Make `state.activeId` the sole standalone active-card input.
 - [x] Rerender after restore, select, snapshot, exit, and removal.
 - [x] Remove click-only imperative active-class mutation.
-- [ ] Add `aria-current` semantics.
-- [ ] Strengthen active styling without conflating it with process-alive status.
+- [x] Add `aria-current` semantics.
+- [x] Strengthen active styling without conflating it with process-alive status.
 - [ ] Verify two clients can display different active cards.
 
 ## Phase 6: Latency Findings And Optimization
@@ -143,6 +154,7 @@ Plan: `docs/apps/terminal/IMPLEMENTATION_PLAN.md`
 - [x] Standalone `npm run typecheck` passes.
 - [x] Standalone `npm test` passes.
 - [x] Standalone `npm run build` passes.
+- [x] Standalone strict BasedPyright passes with zero warnings.
 - [x] Code TE2 `npm run typecheck` passes.
 - [x] Code TE2 `node build.mjs` passes.
 - [ ] Twenty rapid first-character attempts pass on mobile.

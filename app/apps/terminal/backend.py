@@ -1,3 +1,6 @@
+# pyright: reportMissingTypeStubs=false
+from __future__ import annotations
+
 import asyncio
 from collections import deque
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -11,7 +14,7 @@ import re
 import shlex
 import shutil
 import time
-from typing import ClassVar, Literal, Protocol, TypeAlias, cast
+from typing import Annotated, ClassVar, Literal, Protocol, Self, TypeAlias, cast
 from urllib import request as urllib_request
 from urllib.parse import quote, urlencode
 import uuid
@@ -21,8 +24,8 @@ from fastapi import APIRouter, Body, HTTPException, WebSocket
 from pydantic import BaseModel, ConfigDict
 from starlette.websockets import WebSocketDisconnect
 
-from framework_shells import get_manager as _manager  # pyright: ignore[reportMissingImports,reportUnknownVariableType]
-from framework_shells.orchestrator import Orchestrator  # pyright: ignore[reportMissingImports,reportUnknownVariableType]
+from framework_shells import get_manager as _manager
+from framework_shells.orchestrator import Orchestrator
 
 from .terminal_stream_protocol import (
     TERMINAL_STREAM_CODEC,
@@ -53,6 +56,41 @@ terminal_bp = APIRouter()
 log = logging.getLogger("terminal_backend")
 
 
+class _ReadableHttpResponse(Protocol):
+    def __enter__(self) -> Self: ...
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: object | None,
+    ) -> None: ...
+
+    def read(self, amount: int | None = None) -> bytes: ...
+
+
+class _SidebarSocketIoClient(Protocol):
+    def connect(
+        self,
+        url: str,
+        *,
+        namespaces: list[str],
+        socketio_path: str,
+        transports: list[str],
+    ) -> Awaitable[None]: ...
+
+    def call(
+        self,
+        event: str,
+        data: object,
+        *,
+        namespace: str,
+        timeout: int,
+    ) -> Awaitable[object]: ...
+
+    def disconnect(self) -> Awaitable[None]: ...
+
+
 def _framework_url() -> str:
     explicit = str(os.environ.get("TE_FRAMEWORK_URL") or "").strip()
     if explicit:
@@ -75,8 +113,9 @@ def _post_serving_readiness() -> None:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib_request.urlopen(req, timeout=5) as resp:
-        resp.read()
+    response = cast(_ReadableHttpResponse, urllib_request.urlopen(req, timeout=5))
+    with response as readable:
+        _ = readable.read()
 
 
 async def te2_app_backend_serving() -> None:
@@ -102,7 +141,10 @@ async def _call_sidebar_rpc(
     safe_method = str(method or "").strip()
     if not safe_method:
         raise ValueError("method is required")
-    client = socketio.AsyncClient(reconnection=False, logger=False, engineio_logger=False)
+    client = cast(
+        _SidebarSocketIoClient,
+        socketio.AsyncClient(reconnection=False, logger=False, engineio_logger=False),
+    )
     timeout_seconds = max(1, int(timeout))
     try:
         await client.connect(
@@ -122,7 +164,12 @@ async def _call_sidebar_rpc(
                 "capabilities": ["sidebar.windows", "sidebar.cwd"],
             },
         }
-        await client.call(SIDEBAR_IPC_RPC_EVENT, register, namespace=SIDEBAR_IPC_NAMESPACE, timeout=timeout_seconds)
+        _ = await client.call(
+            SIDEBAR_IPC_RPC_EVENT,
+            register,
+            namespace=SIDEBAR_IPC_NAMESPACE,
+            timeout=timeout_seconds,
+        )
         request = {
             "jsonrpc": "2.0",
             "id": f"{APP_ID}:{int(asyncio.get_running_loop().time() * 1000)}",
@@ -135,13 +182,15 @@ async def _call_sidebar_rpc(
             namespace=SIDEBAR_IPC_NAMESPACE,
             timeout=timeout_seconds,
         )
-        if not isinstance(response, dict):
+        response_payload = _coerce_json_object(response)
+        if response_payload is None:
             raise RuntimeError("sidebar RPC returned a non-object response")
-        error = response.get("error")
-        if isinstance(error, dict):
+        error = _coerce_json_object(response_payload.get("error"))
+        if error is not None:
             raise RuntimeError(str(error.get("message") or error))
-        result = response.get("result")
-        return result if isinstance(result, dict) else {"result": result}
+        result = response_payload.get("result")
+        result_payload = _coerce_json_object(result)
+        return result_payload if result_payload is not None else {"result": result}
     finally:
         with suppress(Exception):
             await client.disconnect()
@@ -355,7 +404,7 @@ def _coerce_json_object(raw: object) -> JsonObject | None:
     if not isinstance(raw, Mapping):
         return None
     payload: JsonObject = {}
-    for key, value in raw.items():
+    for key, value in cast(Mapping[object, object], raw).items():
         if isinstance(key, str):
             payload[key] = value
     return payload
@@ -364,8 +413,10 @@ def _coerce_json_object(raw: object) -> JsonObject | None:
 def _coerce_bytes(raw: object) -> bytes | None:
     if isinstance(raw, bytes):
         return raw
-    if isinstance(raw, (bytearray, memoryview)):
+    if isinstance(raw, bytearray):
         return bytes(raw)
+    if isinstance(raw, memoryview):
+        return raw.tobytes()
     return None
 
 
@@ -592,7 +643,7 @@ async def _drop_connection(session: TerminalSession, conn_id: str) -> None:
     async with session.lock:
         connection = session.connections.pop(conn_id, None)
         if connection is not None and connection.attach_request_id:
-            session.pending_attach.pop(connection.attach_request_id, None)
+            _ = session.pending_attach.pop(connection.attach_request_id, None)
     if connection is not None:
         with suppress(asyncio.QueueFull):
             connection.queue.put_nowait(None)
@@ -630,7 +681,7 @@ async def _broadcast_live(session: TerminalSession, payload: JsonObject) -> None
         for conn_id in stale:
             connection = session.connections.pop(conn_id, None)
             if connection is not None and connection.attach_request_id:
-                session.pending_attach.pop(connection.attach_request_id, None)
+                _ = session.pending_attach.pop(connection.attach_request_id, None)
 
 
 async def _route_checkpoint(session: TerminalSession, payload: JsonObject) -> None:
@@ -945,7 +996,7 @@ async def _publish_sidebar_window_state_payload(
 
 @terminal_bp.post("/sidebar/window/state")
 async def publish_sidebar_window_state(
-    payload: JsonObject | None = Body(None),
+    payload: Annotated[JsonObject | None, Body()] = None,
 ) -> JsonObject:
     return _ok(await _publish_sidebar_window_state_payload(payload))
 

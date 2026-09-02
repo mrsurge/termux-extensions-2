@@ -1,6 +1,6 @@
 # Terminal Input, Lifecycle, And Drawer Transport Plan
 
-Status: implementation in progress; Phases 1-3.5 source complete and live accepted
+Status: implementation in progress; Phases 1-4 source complete and live accepted
 Created: 2026-09-02
 
 ## Outcome
@@ -402,13 +402,15 @@ they must not silently reactivate raw historical replay.
 Render the exact layout:
 
 ```text
-ESC  MINIBAR  -     HOME  UP    END    PGUP
+ESC  ≡        -     HOME  ↑     END    PGUP
 TAB  CTRL     ALT   LEFT  DOWN  RIGHT  PGDN
 ```
 
 Behavior:
 
-- `MINIBAR` opens the shell-list drawer and does not write PTY input.
+- `≡` opens the shell-list drawer and does not write PTY input. Its reveal path
+  suppresses pointer completion over newly exposed drawer controls for one
+  short transition-bounded interval; ordinary header-menu opens are immediate.
 - Navigation and `-` dispatch synthetic keydown/keyup through xterm's active
   helper textarea so xterm remains escape-sequence authority.
 - Ctrl and Alt have independent visible states and can be armed together.
@@ -418,9 +420,17 @@ Behavior:
   and `which`, instead of hard-coding separate modified escape sequences.
 - Soft-key pointer handling prevents focus theft and refocuses only the current
   terminal textarea.
+- The list surface shared by the initial screen and minibar has a client-local
+  `Show exited` checkbox. It defaults off, is not persisted or broadcast, and
+  filters only rendering rather than lifecycle authority.
 
 The implementation may factor a small shared synthetic-key utility, but the
 standalone Terminal must not depend on Code TE2 frontend state or sockets.
+
+The standalone Python transport boundaries must also remain strict-analysis
+clean. Untyped Socket.IO, JSON, MessagePack, and binary framing values are
+adapted to local protocols or decoded as `object`, then validated before use;
+transport payloads must not propagate inferred `Any` into lifecycle state.
 
 ## Phase 5: Client-Local Active Card
 
@@ -474,6 +484,8 @@ cd app/apps/terminal
 npm run typecheck
 npm test
 npm run build
+cd ../../..
+basedpyright app/apps/terminal
 ```
 
 Add focused frontend and backend protocol tests for input ordering, strict

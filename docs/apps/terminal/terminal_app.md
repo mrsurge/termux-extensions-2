@@ -64,7 +64,45 @@ sequence.
 - Vendored Android helper scripts under `vendor/android-terminalapp-assets-js/` provide Ctrl-key and touch-to-mouse behavior.
 - The frontend keeps dead-shell history visible and suppresses unnecessary "Shell is not writable" toasts.
 - Shell-card state comes from lifecycle snapshots, while the active card comes
-  only from that frontend's local `activeId`.
+  only from that frontend's local `activeId`. The selected card uses
+  `aria-current="true"` and a stronger inset accent independently of its
+  running/exited status.
+
+### Mobile soft keys
+
+The standalone Terminal renders two fixed seven-key rows:
+
+```text
+ESC  ≡        -     HOME  ↑     END    PGUP
+TAB  CTRL     ALT   LEFT  DOWN  RIGHT  PGDN
+```
+
+`≡` opens the client-local shell drawer and never sends PTY input. That soft-key
+path captures the originating pointer and suppresses interaction with newly
+revealed drawer controls for 300 ms, preventing the release/click from selecting
+a shell behind the key. The normal header menu button is not delayed. The
+remaining action keys dispatch synthetic `keydown` and `keyup` events through
+the active xterm helper textarea, including legacy `keyCode` and `which`
+values. Xterm therefore remains responsible for application-cursor and
+modifier-specific escape sequences; the frontend does not hard-code arrow
+bytes.
+
+Ctrl and Alt are independent. One Ctrl tap arms it for one action, a second tap
+within 350 ms locks it, and a locked Ctrl survives subsequent actions until it
+is tapped again. Alt is one-shot. A non-modifier soft key receives the combined
+Ctrl+Alt state and consumes only one-shot modifiers. Pointer handling prevents
+the dock from taking focus and restores the active terminal textarea after each
+action.
+
+The initial list and slide-in minibar are the same DOM surface. Their `Show
+exited` checkbox defaults off and exists only in the current frontend's memory;
+it neither persists nor changes the lifecycle snapshot shared with other
+clients.
+
+The TypeScript frontend is strict, and the Python Socket.IO, JSON, MessagePack,
+and binary-frame boundaries validate untrusted values before they enter
+lifecycle state. `basedpyright app/apps/terminal` is expected to report zero
+errors and zero warnings.
 
 ### Android printable input
 

@@ -40,7 +40,12 @@
     transition: border-color 120ms ease, background 120ms ease;
   }
   .ta-shell-item:hover { border-color: var(--accent); }
-  .ta-shell-item.active { border-color: var(--primary); background: rgba(80,120,255,0.08); }
+  .ta-shell-item.active {
+    border-color: var(--primary);
+    background: rgba(80,120,255,0.16);
+    box-shadow: inset 4px 0 0 var(--primary), 0 0 0 1px var(--primary);
+  }
+  .ta-shell-item.active .ta-shell-title { color: var(--primary); }
   .ta-status-dot {
     width: 10px;
     height: 10px;
@@ -120,6 +125,21 @@
   }
   .drawer-open #ta-drawer-overlay { display: block; }
   .ta-list-scroll { max-height: calc(100vh - 120px); overflow: auto; }
+  .ta-list-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+    color: var(--muted-foreground);
+    font-size: 0.85em;
+  }
+  .ta-show-exited {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    user-select: none;
+  }
   #ta-keys {
     display: grid;
     grid-template-columns: repeat(7, minmax(0, 1fr));
@@ -135,7 +155,7 @@
     min-width: 0;
     min-height: 44px;
     font-size: 0.85em;
-    padding: 8px 2px calc(env(safe-area-inset-bottom, 0px) + 8px);
+    padding: 7px 2px;
     border: 0;
     background: var(--secondary);
     color: var(--foreground);
@@ -143,7 +163,11 @@
     touch-action: manipulation;
     user-select: none;
   }
+  #ta-keys .kbtn:nth-child(n + 8) {
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 7px);
+  }
   #ta-keys .kbtn.toggle { background: var(--accent); color: var(--primary-foreground); }
+  #ta-keys .kbtn.locked { box-shadow: inset 0 0 0 2px var(--primary); }
   #ta-keys .kbtn:focus { outline: none; }
   .terminal-app {
     height: 100%;
@@ -191,7 +215,13 @@
       </div>
     </div>
     <div class="ta-list-scroll">
-      <div style="font-size:0.85em; color:var(--muted-foreground); margin-bottom:8px;">Shells</div>
+      <div class="ta-list-controls">
+        <span>Shells</span>
+        <label class="ta-show-exited">
+          <input id="ta-show-exited" type="checkbox">
+          <span>Show exited</span>
+        </label>
+      </div>
       <div id="ta-shell-list"></div>
     </div>
   </div>
@@ -212,13 +242,20 @@
     <div id="ta-term" style="flex:1 1 auto; overflow:hidden;"></div>
 
     <div id="ta-keys">
-      <button id="k-ctrl" class="kbtn" type="button" tabindex="-1">Ctrl</button>
-      <button id="k-tab" class="kbtn" type="button" tabindex="-1">Tab</button>
-      <button id="k-esc" class="kbtn" type="button" tabindex="-1">Esc</button>
+      <button id="k-esc" class="kbtn" type="button" tabindex="-1">ESC</button>
+      <button id="k-minibar" class="kbtn" type="button" tabindex="-1" aria-label="Open minibar">&#8801;</button>
+      <button id="k-dash" class="kbtn" type="button" tabindex="-1">-</button>
+      <button id="k-home" class="kbtn" type="button" tabindex="-1">HOME</button>
+      <button id="k-up" class="kbtn" type="button" tabindex="-1" aria-label="Up">&#8593;</button>
+      <button id="k-end" class="kbtn" type="button" tabindex="-1">END</button>
+      <button id="k-page-up" class="kbtn" type="button" tabindex="-1">PGUP</button>
+      <button id="k-tab" class="kbtn" type="button" tabindex="-1">TAB</button>
+      <button id="k-ctrl" class="kbtn" type="button" tabindex="-1" aria-pressed="false">CTRL</button>
+      <button id="k-alt" class="kbtn" type="button" tabindex="-1" aria-pressed="false">ALT</button>
       <button id="k-left" class="kbtn" type="button" tabindex="-1">&#8592;</button>
-      <button id="k-up" class="kbtn" type="button" tabindex="-1">&#8593;</button>
       <button id="k-down" class="kbtn" type="button" tabindex="-1">&#8595;</button>
       <button id="k-right" class="kbtn" type="button" tabindex="-1">&#8594;</button>
+      <button id="k-page-down" class="kbtn" type="button" tabindex="-1">PGDN</button>
     </div>
   </div>
   <div id="ta-drawer-overlay"></div>
