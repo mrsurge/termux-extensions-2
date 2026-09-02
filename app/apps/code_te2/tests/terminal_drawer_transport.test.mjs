@@ -1,0 +1,31 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import test from 'node:test';
+
+
+const source = fs.readFileSync(
+  path.resolve(import.meta.dirname, '../main_page/frontend/host-terminal-drawer.ts'),
+  'utf8',
+);
+
+test('terminal drawer uses no HTTP control or history requests', () => {
+  assert.doesNotMatch(source, /\bfetch\s*\(/);
+  assert.match(source, /terminalRequest(?:<[^>]+>)?\('shells\.get'/);
+  assert.match(source, /terminalRequest\('shell\.create'/);
+  assert.match(source, /terminalRequest\('shell\.activate'/);
+  assert.match(source, /terminalRequest\('shell\.title'/);
+  assert.match(source, /terminalRequest\('shell\.(?:remove|destroy)'/);
+});
+
+test('terminal drawer uses reliable control and generation-fenced history', () => {
+  assert.match(source, /socket\.emit\('terminal:request'/);
+  assert.match(source, /ws\?\.emit\('terminal:register'/);
+  assert.match(source, /ws\?\.volatile\.emit\('terminal:input'/);
+  assert.match(source, /ws\.volatile\.emit\('terminal:resize'/);
+  assert.match(source, /rejectPendingTerminalRequests\(`Terminal socket disconnected:/);
+  assert.match(source, /socket\.sendBuffer\.length = 0/);
+  assert.match(source, /socket\.on\('terminal:history'/);
+  assert.match(source, /historyGeneration !== bindGeneration/);
+  assert.match(source, /await ensureTerminalSocket\(\);\s*emitTerminalRegister/);
+});

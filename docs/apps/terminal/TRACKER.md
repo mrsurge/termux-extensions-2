@@ -1,6 +1,6 @@
 # Terminal Input, Lifecycle, And Drawer Transport Tracker
 
-Status: implementation in progress; Phases 1-2 source complete, Phase 2 public transport accepted
+Status: implementation in progress; Phases 1-3 source complete, Phase 2 public transport accepted
 Plan: `docs/apps/terminal/IMPLEMENTATION_PLAN.md`
 
 ## Investigation
@@ -61,18 +61,18 @@ Plan: `docs/apps/terminal/IMPLEMENTATION_PLAN.md`
 
 ## Phase 3: Code TE2 Socket-Only Drawer
 
-- [ ] Define typed Socket.IO command and bootstrap DTOs.
-- [ ] Move list/create/activate/title/remove from HTTP to `/terminal`.
-- [ ] Move history/bootstrap from HTTP to `/terminal`.
-- [ ] Correlate bootstrap by shell id and bind generation/request id.
-- [ ] Emit shell identity before noncritical list decoration work.
-- [ ] Keep live output buffered only until correlated history/bootstrap applies.
-- [ ] Generalize the existing FWS bridge to retain terminal shell facts.
-- [ ] Build project lists from sidecar membership plus retained FWS facts.
-- [ ] Remove sequential shell metadata scans from register/menu paths.
-- [ ] Remove all terminal API `fetch()` calls from `host-terminal-drawer.ts`.
-- [ ] Preserve project-switch rebind behavior without polling.
-- [ ] Add protocol, reconnect, and stale-bind tests.
+- [x] Define typed Socket.IO command and bootstrap DTOs.
+- [x] Move list/create/activate/title/remove from HTTP to `/terminal`.
+- [x] Move history/bootstrap from HTTP to `/terminal`.
+- [x] Correlate bootstrap by shell id and bind generation/request id.
+- [x] Emit shell identity before noncritical list decoration work.
+- [x] Keep live output buffered only until correlated history/bootstrap applies.
+- [x] Generalize the existing FWS bridge to retain terminal shell facts.
+- [x] Build project lists from sidecar membership plus retained FWS facts.
+- [x] Remove sequential shell metadata scans from register/menu paths.
+- [x] Remove all terminal API `fetch()` calls from `host-terminal-drawer.ts`.
+- [x] Preserve project-switch rebind behavior without polling.
+- [x] Add protocol, reconnect, and stale-bind tests.
 - [ ] Record before/after localhost drawer readiness latency.
 
 ## Phase 4: Two-Row Standalone Keys
@@ -112,8 +112,8 @@ Plan: `docs/apps/terminal/IMPLEMENTATION_PLAN.md`
 ## Documentation
 
 - [ ] Rewrite `docs/apps/terminal/terminal_app.md` to match current source.
-- [ ] Update `docs/apps/code_te2/CODE_TE2.md` with socket-only drawer semantics.
-- [ ] Update `.repo_memory.md` with condensed terminal invariants.
+- [x] Update `docs/apps/code_te2/CODE_TE2.md` with socket-only drawer semantics.
+- [x] Update `.repo_memory.md` with condensed terminal invariants.
 - [ ] Remove or correct any stale terminal transport statements discovered during implementation.
 
 ## Final Validation
@@ -121,8 +121,8 @@ Plan: `docs/apps/terminal/IMPLEMENTATION_PLAN.md`
 - [x] Standalone `npm run typecheck` passes.
 - [x] Standalone `npm test` passes.
 - [x] Standalone `npm run build` passes.
-- [ ] Code TE2 `npm run typecheck` passes.
-- [ ] Code TE2 `node build.mjs` passes.
+- [x] Code TE2 `npm run typecheck` passes.
+- [x] Code TE2 `node build.mjs` passes.
 - [ ] Twenty rapid first-character attempts pass on mobile.
 - [ ] Code TE2 existing-shell drawer is ready in under one second on localhost.
 - [ ] Browser network inspection shows no terminal control/history HTTP requests.

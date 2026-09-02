@@ -302,6 +302,27 @@ After this phase, `host-terminal-drawer.ts` must have no terminal API `fetch()`
 calls. Asset loading remains ordinary browser resource loading and is outside
 this messaging rule.
 
+### Implemented result
+
+The drawer now performs list, create, activate, title, remove/destroy, and
+history/bootstrap work on the existing `/terminal` Socket.IO lane. Registration
+and correlated commands use reliable emits; high-frequency input and resize
+remain volatile. Disconnect rejects pending commands and clears Socket.IO's
+send buffer so stale control intent cannot replay.
+
+Registration emits `terminal:shell_id` with a bind generation before starting
+the off-loop history read or shell-list projection. Live output is bounded and
+buffered only until matching history arrives; history for an obsolete shell or
+generation is discarded.
+
+The existing Code TE2 FWS lifecycle connection now retains compact terminal
+facts from one reconnect snapshot plus lifecycle events. Shell-list rendering
+joins those facts with `ProjectSidecar` membership, titles, and active identity,
+so menu/register paths no longer perform a manager lookup for every shell.
+Exact create, activate, history fallback, and destroy operations may still
+inspect their one target. Compatibility REST handlers delegate to the same
+backend operations, but the drawer frontend no longer calls them.
+
 ## Phase 4: Standalone Two-Row Mobile Keys
 
 Render the exact layout:

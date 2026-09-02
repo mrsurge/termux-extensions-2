@@ -441,14 +441,15 @@ class TerminalLifecycleNamespace(socketio.AsyncNamespace):
             return _error_response(request_id, exc)
 
     async def _dispatch(self, method: str, params: JsonObject) -> object:
-        handlers = _handlers
-        if handlers is None:
-            raise RuntimeError("Terminal lifecycle backend is not configured")
-
         if method == "shells.get":
             return {"snapshot": await _store.snapshot()}
         if method == "shells.resync":
             return {"snapshot": await refresh_terminal_shell_snapshot()}
+
+        handlers = _handlers
+        if handlers is None:
+            raise RuntimeError("Terminal lifecycle backend is not configured")
+
         if method == "shell.create":
             shell = await handlers.create_shell(params)
             snapshot = await _upsert_command_shell(shell)

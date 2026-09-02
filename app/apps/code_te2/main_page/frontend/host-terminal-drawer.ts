@@ -54,6 +54,12 @@ interface TerminalSocket {
   connected: boolean;
   connect: () => void;
   disconnect: () => void;
+  sendBuffer?: unknown[];
+  emit: (
+    event: string,
+    payload?: unknown,
+    acknowledgement?: (payload: unknown) => void,
+  ) => void;
   readonly volatile: {
     emit: (event: string, payload?: unknown) => void;
   };
@@ -62,6 +68,18 @@ interface TerminalSocket {
 
 interface SocketIoClient {
   (namespace: string, options?: Record<string, unknown>): TerminalSocket;
+}
+
+interface PendingTerminalRequest {
+  reject: (error: Error) => void;
+  timer: number;
+}
+
+interface TerminalRequestResponse<T> {
+  id: string;
+  ok: boolean;
+  result?: T;
+  error?: string;
 }
 
 interface XtermFitAddon {
@@ -174,6 +192,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
   let isFullscreen = false;
   let lastShellId: string | null = null;
   let shellHistoryPrimed = false;
+  let bindGeneration = 0;
   let desiredShellId: string | null = 'auto';
   let socketRegistered = false;
   let pendingOutput: string[] = [];
@@ -184,6 +203,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
   let resizeObserver: ResizeObserver | null = null;
   let startupSizing = false;
   let startupFitTimer: number | null = null;
+  const pendingTerminalRequests = new Map<string, PendingTerminalRequest>();
 
   const drawer = document.getElementById('terminal-drawer');
   const container = document.getElementById('terminal-container');
@@ -464,13 +484,61 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     }
   }
 
+  function terminalRequestId(): string {
+    if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  }
+
+  function rejectPendingTerminalRequests(message: string): void {
+    for (const pending of pendingTerminalRequests.values()) {
+      window.clearTimeout(pending.timer);
+      pending.reject(new Error(message));
+    }
+    pendingTerminalRequests.clear();
+  }
+
+  function terminalRequest<T>(
+    method: string,
+    params: Record<string, unknown> = {},
+    timeoutMs = 10000,
+  ): Promise<T> {
+    const socket = ws;
+    if (!socket?.connected) {
+      return Promise.reject(new Error('Terminal socket is disconnected'));
+    }
+    const id = terminalRequestId();
+    return new Promise<T>((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        pendingTerminalRequests.delete(id);
+        reject(new Error(`Terminal request timed out: ${method}`));
+      }, timeoutMs);
+      pendingTerminalRequests.set(id, { reject, timer });
+      socket.emit('terminal:request', { id, method, params }, (rawResponse) => {
+        const pending = pendingTerminalRequests.get(id);
+        if (!pending) return;
+        window.clearTimeout(pending.timer);
+        pendingTerminalRequests.delete(id);
+        const response = isRecord(rawResponse)
+          ? rawResponse as unknown as TerminalRequestResponse<T>
+          : null;
+        if (!response || response.id !== id) {
+          reject(new Error('Terminal response id mismatch'));
+          return;
+        }
+        if (!response.ok) {
+          reject(new Error(response.error || `Terminal request failed: ${method}`));
+          return;
+        }
+        resolve(response.result as T);
+      });
+    });
+  }
+
   async function fetchShellList(): Promise<TerminalShellListData> {
     try {
-      const res = await fetch('/api/app/code_te2/terminal/shells', { cache: 'no-store' });
-      const json: unknown = await res.json();
-      if (isRecord(json) && json.ok && json.data) return coerceShellListData(json.data);
+      return coerceShellListData(await terminalRequest<unknown>('shells.get'));
     } catch (err) {
-      console.warn('Failed to fetch terminal shells:', err);
+      console.warn('Failed to request terminal shells:', err);
     }
     return { active_shell_id: null, shells: [] };
   }
@@ -521,7 +589,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
       row.addEventListener('click', async (ev) => {
         if (ev.target === close) return;
         try {
-          await fetch(`/api/app/code_te2/terminal/shells/${encodeURIComponent(s.id)}/activate`, { method: 'POST' });
+          await terminalRequest('shell.activate', { shell_id: s.id });
         } catch (err) {
           console.warn('Failed to activate terminal shell:', err);
         } finally {
@@ -533,7 +601,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
         ev.stopPropagation();
         const closingActive = s.id === activeId;
         try {
-          await fetch(`/api/app/code_te2/terminal/${encodeURIComponent(s.id)}`, { method: 'DELETE' });
+          await terminalRequest('shell.remove', { shell_id: s.id });
         } catch (err) {
           console.warn('Failed to close terminal shell:', err);
         } finally {
@@ -558,7 +626,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
 
           if (nextLiveId && (closingActive || !backendActiveIsLive)) {
             try {
-              await fetch(`/api/app/code_te2/terminal/shells/${encodeURIComponent(nextLiveId)}/activate`, { method: 'POST' });
+              await terminalRequest('shell.activate', { shell_id: nextLiveId });
             } catch (err) {
               console.warn('Failed to activate fallback terminal shell:', err);
             }
@@ -582,11 +650,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
           return;
         }
         try {
-          await fetch(`/api/app/code_te2/terminal/shells/${encodeURIComponent(s.id)}/title`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ title: trimmed }),
-          });
+          await terminalRequest('shell.title', { shell_id: s.id, title: trimmed });
         } catch (err) {
           console.warn('Failed to set terminal title:', err);
         } finally {
@@ -637,11 +701,13 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
       try { ws.disconnect(); } catch (_) {}
       ws = null;
     }
+    rejectPendingTerminalRequests('Terminal drawer disconnected');
 
     // Force fresh history priming on next shell_id message.
     shellId = null;
     lastShellId = null;
     shellHistoryPrimed = false;
+    bindGeneration = 0;
     desiredShellId = 'auto';
     socketRegistered = false;
     if (shellToggle) {
@@ -808,31 +874,19 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
   }
 
   /**
-   * Get or create terminal shell - backend handles everything.
-   * Just connect to the WebSocket and let the server manage persistence.
-   */
-  async function getOrCreateShell(): Promise<null> {
-    // Don't set shellId yet - wait for WebSocket to tell us the real ID
-    // Return null so caller knows to use 'auto' for WebSocket URL
-    return null;
-  }
-
-  /**
    * Destroy the terminal shell permanently
    */
   async function destroyShell(): Promise<void> {
     if (!shellId) return;
 
     const currentShellId = shellId;
-    shellId = null;
-    lastShellId = null;
-    shellHistoryPrimed = false;
-    desiredShellId = 'auto';
-    socketRegistered = false;
     try {
-      await fetch(`/api/app/code_te2/terminal/${encodeURIComponent(currentShellId)}`, {
-        method: 'DELETE',
-      });
+      await terminalRequest('shell.destroy', { shell_id: currentShellId });
+      shellId = null;
+      lastShellId = null;
+      shellHistoryPrimed = false;
+      desiredShellId = 'auto';
+      socketRegistered = false;
       console.log('Destroyed shell:', currentShellId);
     } catch (err) {
       console.error('Failed to destroy terminal shell:', err);
@@ -853,7 +907,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
       socketRegistered = false;
       return;
     }
-    ws?.volatile.emit('terminal:register', {
+    ws?.emit('terminal:register', {
       shellId: desiredShellId,
       client_id: 'terminal-drawer',
     });
@@ -885,13 +939,19 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     socket.on('disconnect', (reason) => {
       console.log('Terminal Socket.IO disconnected', reason);
       socketRegistered = false;
+      rejectPendingTerminalRequests(`Terminal socket disconnected: ${String(reason || 'disconnect')}`);
+      if (socket.sendBuffer) socket.sendBuffer.length = 0;
     });
 
     socket.on('terminal:shell_id', async (msg) => {
       const receivedShellId = isRecord(msg) ? optionalString(msg.shell_id) : null;
       if (!receivedShellId) return;
-      const isNewShell = receivedShellId !== lastShellId;
+      const receivedGeneration = isRecord(msg) && typeof msg.bind_generation === 'number'
+        ? msg.bind_generation
+        : 0;
+      const isNewShell = receivedShellId !== lastShellId || receivedGeneration !== bindGeneration;
       shellId = receivedShellId;
+      bindGeneration = receivedGeneration;
       desiredShellId = receivedShellId;
       socketRegistered = true;
       lastResizeSent = null;
@@ -914,46 +974,31 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
         pendingOutput = [];
       }
       lastShellId = receivedShellId;
+    });
 
-      try {
-        await refreshShellMenu();
-      } catch (_) {}
-
-      if (term && !shellHistoryPrimed) {
-        let primed = false;
-        try {
-          let priming = '';
-          const res = await fetch(`/api/app/code_te2/terminal/${shellId}/history?tail=2000`);
-          const result: unknown = await res.json();
-          const data = isRecord(result) && isRecord(result.data) ? result.data : null;
-          if (isRecord(result) && result.ok && typeof data?.stdout_text === 'string') {
-            priming = data.stdout_text;
-            if (priming) {
-              term.write(priming);
-              console.log('Preloaded terminal history');
-            }
-          }
-          if (pendingOutput.length) {
-            const liveChunk = pendingOutput.join('');
-            const deduped = trimPrimedOverlap(priming, liveChunk);
-            pendingOutput = deduped ? [deduped] : [];
-          }
-          primed = true;
-        } catch (err) {
-          console.warn('Failed to preload terminal history:', err);
-        }
-
-        if (primed) {
-          shellHistoryPrimed = true;
-          flushPendingOutput();
-          scheduleStartupResizeSync('history-prime');
-        }
+    socket.on('terminal:history', (msg) => {
+      if (!term || !isRecord(msg)) return;
+      const historyShellId = optionalString(msg.shell_id);
+      const historyGeneration = typeof msg.bind_generation === 'number'
+        ? msg.bind_generation
+        : 0;
+      if (historyShellId !== shellId || historyGeneration !== bindGeneration) return;
+      const priming = typeof msg.stdout_text === 'string' ? msg.stdout_text : '';
+      if (priming) {
+        term.write(priming);
+        console.log('Preloaded terminal history');
       }
-
-      if (shellHistoryPrimed) {
-        flushPendingOutput();
-        scheduleStartupResizeSync('shell-bind');
+      if (pendingOutput.length) {
+        const liveChunk = pendingOutput.join('');
+        const deduped = trimPrimedOverlap(priming, liveChunk);
+        pendingOutput = deduped ? [deduped] : [];
       }
+      if (msg.ok === false) {
+        console.warn('Failed to preload terminal history:', msg.error || 'unknown error');
+      }
+      shellHistoryPrimed = true;
+      flushPendingOutput();
+      scheduleStartupResizeSync('history-prime');
     });
 
     socket.on('terminal:shell_list', (msg) => {
@@ -986,6 +1031,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
       const closedShellId = isRecord(msg) ? optionalString(msg.shell_id) : null;
       if (closedShellId && closedShellId === shellId) {
         shellId = null;
+        bindGeneration = 0;
         shellHistoryPrimed = false;
         desiredShellId = 'auto';
         socketRegistered = false;
@@ -1001,6 +1047,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
 
     socket.on('terminal:rebind_required', () => {
       shellId = null;
+      bindGeneration = 0;
       shellHistoryPrimed = false;
       socketRegistered = false;
       lastResizeSent = null;
@@ -1271,15 +1318,6 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
       installDrawerVendoredCtrlFocusBinding(term);
     }
 
-    // Refresh shell selector from backend (project-agnostic, backend-owned).
-    await refreshShellMenu();
-
-    // Create shell if doesn't exist (getOrCreateShell returns null now)
-    if (!shellId) {
-      await getOrCreateShell();  // This just prepares, doesn't return ID
-      console.log('Shell will be managed by backend via WebSocket');
-    }
-
     await ensureTerminalSocket();
     emitTerminalRegister(shellId || 'auto');
   }
@@ -1460,12 +1498,9 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     newBtn.addEventListener('click', async (ev) => {
       ev.stopPropagation();
       try {
-        await fetch('/api/app/code_te2/terminal/shells', { method: 'POST' });
+        await terminalRequest('shell.create');
       } catch (err) {
         console.warn('Failed to create new terminal shell:', err);
-      } finally {
-        await refreshShellMenu();
-        emitTerminalRegister('auto');
       }
     });
   }

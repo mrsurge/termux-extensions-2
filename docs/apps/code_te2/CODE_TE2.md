@@ -3035,3 +3035,38 @@ Presentation actions follow the normal Code TE2 rule: frontend -> own backend
 -> target backend hook -> target notification. Do not connect frontend lanes
 directly or use Sidebar state as cross-client editor/document authority. The
 general UI IPC contract is §21; WBA extension-surface reconciliation is §44.
+
+## 46) Code TE2 Terminal Drawer Transport
+
+The host terminal drawer retains its existing Framework-Shells PTY backend. Its
+browser control and bootstrap plane is the app-worker Socket.IO namespace
+`/terminal` on the canonical `/api/app/code_te2/socket.io` path; the drawer
+does not use terminal API HTTP requests.
+
+Control methods are correlated acknowledgements for `shells.get`,
+`shell.create`, `shell.activate`, `shell.title`, `shell.remove` /
+`shell.destroy`, and compatibility `shell.history`. Registration is a reliable
+`terminal:register` emit. PTY input and resize are connected-only volatile
+notifications; output, close, rebind, shell-list, and history are server events.
+Disconnect rejects pending control calls, clears the Socket.IO send buffer, and
+requires authoritative registration again.
+
+Registration resolves and binds one shell, then emits `terminal:shell_id` with
+a monotonically increasing per-connection bind generation before starting
+history or list work. History is read off the asyncio loop and emitted
+independently as `terminal:history`. The renderer buffers a bounded amount of
+live output until history with the exact shell id and bind generation arrives,
+removes overlap, and discards stale generations. Shell-list decoration never
+gates identity, output, or writable state.
+
+The existing Code TE2 FWS lifecycle client takes one reconnect snapshot and
+then consumes lifecycle events to maintain compact terminal shell facts. Menu
+projection joins those status/pid/log facts with `ProjectSidecar` membership,
+titles, and active identity. It does not run a sequential `mgr.get_shell()`
+scan for menu rendering or registration; exact mutation and missing-history
+fallback paths may validate only their target shell. Existing REST routes
+remain compatibility wrappers over the same operations and are not used by the
+host drawer.
+
+Project switch, explicit activation, active-shell close, and new-shell creation
+retain the established rebind event. There is no polling or transport fallback.
