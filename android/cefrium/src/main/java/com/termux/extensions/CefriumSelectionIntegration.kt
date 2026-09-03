@@ -44,14 +44,8 @@ internal class CefriumSelectionIntegration(
 
     private fun install(): Boolean {
         SelectionPopupController.setAllowSurfaceControlMagnifier()
-        Te2CefriumBrowserAccess.ensureWebContentsConnected(browser)
+        if (!Te2CefriumBrowserAccess.disablePageZoom(browser)) return false
         val webContents = Te2CefriumBrowserAccess.webContents(browser) ?: return false
-        if (
-            webContents.viewAndroidDelegate == null ||
-            webContents.topLevelNativeWindow == null
-        ) {
-            return false
-        }
         val controller = SelectionPopupController.fromWebContentsNoCreate(webContents)
             ?: try {
                 SelectionPopupController.fromWebContents(webContents)

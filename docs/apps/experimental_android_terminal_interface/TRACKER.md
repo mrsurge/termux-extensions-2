@@ -4,8 +4,8 @@
 
 - [x] Create `experimental/android-terminal-interface`.
 - [x] Record starting snapshot `b8c296c5`.
-- [ ] Merge the pending release baseline after it is published.
-- [ ] Confirm the branch contains the release's Terminal, Android, framework,
+- [x] Merge the pending release baseline after it is published.
+- [x] Confirm the branch contains the release's Terminal, Android, framework,
   and documentation changes before final validation.
 
 ## Planning
@@ -26,9 +26,12 @@
 ### Gesture ownership
 
 - [x] Define an explicit helper attach/dispose contract.
-- [x] Make the shared touch helper the only active mobile gesture owner.
+- [x] Make xterm's source-owned capture/classifier and the shared adapter the
+  only active mobile gesture transaction.
+- [x] Expose a disposable source-level xterm touch hook to both terminal surfaces.
 - [x] Preserve one-finger terminal scrolling.
-- [x] Preserve long-press selection.
+- [x] Preserve long-press word selection through xterm's own word-boundary
+  implementation; finger release must not collapse the selected word.
 - [x] Preserve double-tap word selection.
 - [x] Prevent handle gestures from sending PTY input or stealing IME focus.
 
@@ -94,7 +97,11 @@
 - [ ] Verify copy behavior.
 - [ ] Verify IME remains stable.
 - [ ] Verify resize/reconnect/dispose cleanup.
-- [ ] Decide whether a narrow xterm source API is required.
+- [x] Add the required narrow xterm source API and publish the rebuilt browser asset.
+- [x] Disable Cefrium main-browser pinch and double-tap zoom through the connected
+  Chromium `WebContents`.
+- [ ] Suppress the remaining Cefrium page-zoom path; live acceptance proved the
+  gesture-manager and ordinary CEF zoom controls are not comprehensive.
 
 ## Track B: AIDL And ParcelFileDescriptor Transport
 

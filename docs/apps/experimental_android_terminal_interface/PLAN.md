@@ -143,14 +143,19 @@ UID may obtain a descriptor.
 
 ### A1. Consolidate gesture ownership
 
-Make the existing `touch_to_mouse_handler.js` the single mobile gesture owner
-for both terminal surfaces. Give it an explicit attach/dispose API that receives
-the active xterm instance instead of relying on a global terminal reference.
+Use the maintained `xterm-te2` fork as the source-level mobile gesture router
+for both terminal surfaces. It owns one transparent capture surface, makes the
+scroll classification irreversible after the movement threshold, and exposes a
+synchronous disposable hook to the existing `touch_to_mouse_handler.js`
+adapter. The adapter owns selection handles/actions through public xterm APIs
+instead of relying on a global terminal reference or patching prototypes.
 
 Required behavior:
 
 - ordinary one-finger drag scrolls the terminal;
-- long press enters xterm selection;
+- long press selects the target word through xterm's own word-boundary logic,
+  then drag extends an anchored range directly through its public selection API
+  without synthetic mouse events;
 - double tap keeps the existing word-selection behavior;
 - active selection renders start and end handles;
 - dragging a handle updates only that endpoint and may cross the fixed endpoint;

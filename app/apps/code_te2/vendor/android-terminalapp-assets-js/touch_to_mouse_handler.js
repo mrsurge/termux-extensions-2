@@ -152,10 +152,14 @@ function startSelection(point) {
     hideMenu(attachment);
     const cell = clientPointToBufferCell(attachment, point.clientX, point.clientY);
     if (cell && cell.col < attachment.terminal.cols) {
-      attachment.terminal.select(cell.col, cell.row, 1);
+      gestureState.selectionAnchor = cell;
+      if (typeof attachment.terminal.selectWordAt === 'function') {
+        attachment.terminal.selectWordAt(cell.col, cell.row);
+      } else {
+        attachment.terminal.select(cell.col, cell.row, 1);
+      }
     }
   }
-  dispatchMouse('mousedown', point, gestureState.mouseTarget);
 }
 
 function getTrackedTouch(event) {
@@ -204,6 +208,7 @@ function handleTouchStart(event) {
     terminalRoot,
     mouseTarget,
     wheelTarget,
+    selectionAnchor: null,
     longPressTimer: setTimeout(() => startSelection(point), LONG_PRESS_MS),
   };
   const attachment = attachmentsByRoot.get(terminalRoot);
@@ -226,7 +231,13 @@ function handleTouchMove(event, isScrollGesture) {
     gestureState.mode = 'scroll';
   }
   if (gestureState.mode === 'select') {
-    dispatchMouse('mousemove', point, gestureState.mouseTarget);
+    const attachment = attachmentsByRoot.get(gestureState.terminalRoot);
+    const moving = attachment
+      ? clientPointToBufferCell(attachment, point.clientX, point.clientY)
+      : null;
+    if (attachment && moving && gestureState.selectionAnchor) {
+      selectThroughCell(attachment.terminal, gestureState.selectionAnchor, moving);
+    }
     event.preventDefault();
     event.stopPropagation();
     return false;
@@ -251,7 +262,6 @@ function handleTouchEnd(event, isScrollGesture) {
     gestureState.mode = 'scroll';
   }
   if (gestureState.mode === 'select') {
-    dispatchMouse('mouseup', point, gestureState.mouseTarget);
     event.preventDefault();
     event.stopPropagation();
     resetGestureState();
@@ -270,11 +280,7 @@ function handleTouchEnd(event, isScrollGesture) {
 
 function handleTouchCancel(event) {
   if (!gestureState) return true;
-  const point = getTrackedTouch(event) || gestureState.point;
   const owned = gestureState.mode === 'select' || gestureState.mode === 'scroll';
-  if (gestureState.mode === 'select') {
-    dispatchMouse('mouseup', point, gestureState.mouseTarget);
-  }
   resetGestureState();
   return !owned;
 }
@@ -296,6 +302,7 @@ function handleContextMenu(event) {
   if (!helpersEnabled() || isHandleTarget(event.target)) return;
   const isTouchContextMenu = event.pointerType === 'touch' || Boolean(gestureState);
   if (!isTouchContextMenu) return;
+  const createdGesture = !gestureState;
   if (!gestureState) {
     const terminalRoot = getTerminalRoot(event.target);
     const mouseTarget = getMouseTarget(event.target);
@@ -309,10 +316,12 @@ function handleContextMenu(event) {
       terminalRoot,
       mouseTarget,
       wheelTarget,
+      selectionAnchor: null,
       longPressTimer: null,
     };
   }
   startSelection(event);
+  if (createdGesture) resetGestureState();
   event.preventDefault();
   event.stopPropagation();
 }
@@ -613,6 +622,20 @@ function selectBetween(terminal, first, second) {
   if (length <= 0) return false;
   terminal.select(start.col, start.row, length);
   return true;
+}
+
+function selectThroughCell(terminal, anchor, moving) {
+  const cols = Math.max(1, Number(terminal.cols) || 1);
+  const clampCell = (cell) => ({
+    col: Math.min(Math.max(cell.col, 0), cols - 1),
+    row: Math.max(cell.row, 0),
+  });
+  const first = clampCell(anchor);
+  const second = clampCell(moving);
+  const start = compareCells(first, second) <= 0 ? first : second;
+  const end = start === first ? second : first;
+  const length = (end.row * cols + end.col) - (start.row * cols + start.col) + 1;
+  terminal.select(start.col, start.row, length);
 }
 
 function stopEdgeScroll() {

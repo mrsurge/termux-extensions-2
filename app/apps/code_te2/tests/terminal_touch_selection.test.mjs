@@ -109,6 +109,7 @@ function createHarness({
     selection: new Set(),
   };
   const selectCalls = [];
+  const wordSelectCalls = [];
   const scrollCalls = [];
   const pasteCalls = [];
   let selectAllCalls = 0;
@@ -159,6 +160,14 @@ function createHarness({
       currentSelection = {
         start: { x: column, y: row },
         end: { x: endColumn, y: endRow },
+      };
+      for (const callback of callbacks.selection) callback();
+    },
+    selectWordAt(column, row) {
+      wordSelectCalls.push({ column, row });
+      currentSelection = {
+        start: { x: Math.max(0, column - 2), y: row },
+        end: { x: Math.min(cols, column + 3), y: row },
       };
       for (const callback of callbacks.selection) callback();
     },
@@ -233,6 +242,7 @@ function createHarness({
     terminal,
     disposable,
     selectCalls,
+    wordSelectCalls,
     scrollCalls,
     pasteCalls,
     clipboardWrites,
@@ -390,7 +400,7 @@ test('text and blank terminal targets use the same xterm-owned scroll path', () 
   harness.disposable.dispose();
 });
 
-test('long press seeds a visible cell selection before xterm drag selection', async () => {
+test('long press retains word selection without a synthetic mouse lifecycle', async () => {
   const harness = createHarness();
   const screen = harness.root.querySelector('.xterm-screen');
   const mouseEvents = [];
@@ -405,8 +415,38 @@ test('long press seeds a visible cell selection before xterm drag selection', as
   screen.dispatchEvent(touchEvent(harness.window, 'touchend', screen, { x: 140, y: 90 }));
   harness.flushAnimationFrames();
 
-  assert.deepEqual(mouseEvents, ['mousedown', 'mouseup']);
-  assert.deepEqual(harness.selectCalls, [{ column: 4, row: 11, length: 1 }]);
+  assert.deepEqual(mouseEvents, []);
+  assert.deepEqual(harness.wordSelectCalls, [{ column: 4, row: 11 }]);
+  assert.deepEqual(harness.selectCalls, []);
+  assert.equal(harness.terminal.hasSelection(), true);
+  assert.deepEqual(harness.terminal.getSelectionPosition(), {
+    start: { x: 2, y: 11 },
+    end: { x: 7, y: 11 },
+  });
+  assert.equal(harness.menu().hidden, false);
+  harness.disposable.dispose();
+});
+
+test('dragging after long press extends the direct cell selection', async () => {
+  const harness = createHarness();
+  const screen = harness.root.querySelector('.xterm-screen');
+  const mouseEvents = [];
+  screen.addEventListener('mousedown', () => mouseEvents.push('mousedown'));
+  screen.addEventListener('mousemove', () => mouseEvents.push('mousemove'));
+  screen.addEventListener('mouseup', () => mouseEvents.push('mouseup'));
+
+  screen.dispatchEvent(touchEvent(harness.window, 'touchstart', screen, { x: 140, y: 90 }));
+  await new Promise((resolve) => setTimeout(resolve, 470));
+  screen.dispatchEvent(touchEvent(harness.window, 'touchmove', screen, { x: 160, y: 90 }));
+  screen.dispatchEvent(touchEvent(harness.window, 'touchend', screen, { x: 160, y: 90 }));
+  harness.flushAnimationFrames();
+
+  assert.deepEqual(mouseEvents, []);
+  assert.deepEqual(harness.wordSelectCalls, [{ column: 4, row: 11 }]);
+  assert.deepEqual(harness.selectCalls, [
+    { column: 4, row: 11, length: 3 },
+  ]);
+  assert.equal(harness.terminal.hasSelection(), true);
   assert.equal(harness.menu().hidden, false);
   harness.disposable.dispose();
 });

@@ -1788,10 +1788,12 @@ There are three distinct layers:
      visual viewport geometry to buffer cells, resolves handle drags two rows
      above the finger, supports endpoint crossover and wide cells, and hides the
      toolbar during terminal or handle drags.
-   - A long press seeds one selected buffer cell through xterm's public API
-     before retaining an ordinary detail-1 mouse anchor for drag extension.
-     Pending taps remain on Chromium's compatibility path, and text and blank
-     cells use the same source-owned scroll route.
+   - A long press invokes the fork's narrow public `selectWordAt` API, which
+     reuses xterm's configured separators, wrapped-line handling, and wide-cell
+     logic. Subsequent movement extends an anchored cell range directly through
+     the public selection API; no synthetic mouse lifecycle can collapse it on
+     finger release. Pending taps remain on Chromium's compatibility path, and
+     text and blank cells use the same source-owned scroll route.
 
 ### Key files
 
@@ -2713,9 +2715,9 @@ One Cefrium Inspector session is owned by each appearance of the native app-shel
 
 Cefrium still retains validated Run Profile `devRuntime` registrations by exact `surfaceId`, but reports `cachePolicy=false` and `consoleInjection=false`: Run Target listeners bypass `AndroidFrameworkRelay`, and the Cefrium API cannot mutate response headers or inject into an exact cross-origin child frame. Do not add a partial raw-HTTP parser to the byte-for-byte Run Target relay. Browser-wide Inspector ownership is independent of this instrumentation gap.
 
-Cefrium's wrapper also omits Chromium's selection ActionMode host callback. A narrow same-package `WebContents` shim installs an application callback that delegates to Chromium's `ActionModeCallbackHelper` and enables Chromium's SurfaceControl magnifier. Native Cut/Copy/Paste/Select All and related selection actions remain Chromium-owned and do not use JavaScript editing commands.
+Cefrium's wrapper also omits Chromium's selection ActionMode host callback. A narrow same-package `WebContents` shim installs an application callback that delegates to Chromium's `ActionModeCallbackHelper` and enables Chromium's SurfaceControl magnifier. The same readiness transaction disables multi-touch and double-tap zoom through Chromium's `GestureListenerManager` and resets ordinary CEF page zoom to 100%. Live acceptance proved that these controls do not suppress every Cefrium page-zoom path, so complete zoom suppression remains unresolved rather than being an established native invariant. This runs only after the main app-content browser has connected delegates and is idempotently reapplied by the existing integration retry; it does not alter Inspector or Processes browser gesture policy. Native Cut/Copy/Paste/Select All and related selection actions remain Chromium-owned and do not use JavaScript editing commands.
 
-After each completed document load, an idempotent page policy wraps Monaco's exact `textarea.inputarea.android-ime-input` focus path and forces `preventScroll: true`. It patches the top realm plus every existing and future same-origin iframe realm, which gives the retained mobile secondary editor the same correction without crossing an origin boundary. Code TE2 additionally marks the editor frame from the explicit native renderer query and applies a Cefrium-only 16 px font size to both the Monaco Find/Replace textarea and the exact editor IME textarea. The native viewport is already locked against page zoom; this renderer-scoped floor prevents Chromium's focused-editable readability zoom when Monaco's hidden input would otherwise inherit its 10 px size, without changing Gecko, desktop, or ordinary editor input styling. Do not replace either correction with a broad page-wide input workaround.
+After each completed document load, an idempotent page policy wraps Monaco's exact `textarea.inputarea.android-ime-input` focus path and forces `preventScroll: true`. It patches the top realm plus every existing and future same-origin iframe realm, which gives the retained mobile secondary editor the same correction without crossing an origin boundary. Code TE2 additionally marks the editor frame from the explicit native renderer query and applies a Cefrium-only 16 px font size to both the Monaco Find/Replace textarea and the exact editor IME textarea. This renderer-scoped floor prevents the known focused-editable readability zoom when Monaco's hidden input would otherwise inherit its 10 px size, without changing Gecko, desktop, or ordinary editor input styling; it is not a complete browser-wide zoom lock. Do not replace either correction with a broad page-wide input workaround.
 
 On Android 11/API 30 and newer, Cefrium observes root `WindowInsets.Type.ime()`
 animation state. `onPrepare` records the pre-layout visibility and `onStart`
