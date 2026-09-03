@@ -1,6 +1,6 @@
 # Unified Linux And Termux Release Installer Tracker
 
-Last updated: 2026-08-30
+Last updated: 2026-09-02
 
 ## Program status
 
@@ -18,9 +18,9 @@ Last updated: 2026-08-30
 | Phase 4A: source/Git desktop bootstrap | Implemented and validated from a clean wheel | Python entrypoints build one fingerprinted Electron runtime and receipt-owned XDG integration; the unified Linux installer deliberately reuses this path |
 | Phase 4B: release provenance and Linux platform wheel | Complete: audited build, clean SSH acceptance, PyPI publication, and byte-identical GitHub mirror passed | Supported wheels embed the verified Rust server; source provenance alone may use Cargo |
 | Phase 4C: unified installer and Linux target | Public acquisition, private venv, optional desktop bootstrap, and non-graphical Debian acceptance pass; upgrade/graphical matrix remains | Managed venv is atomic; `--desktop` delegates to that venv's existing Electron bootstrap and config contract |
-| Phase 4D: final integration and publication | `0.2.342` is published and accepted on public Linux/Desktop and physical Termux paths | Release assets are immutable; `0.2.340` remains defective historical data while `0.2.342` is the normal/latest release |
+| Phase 4D: final integration and publication | `0.2.343` is published and accepted on public Linux/Desktop; its clean Termux archive and synchronized APKs are published | Release assets are immutable; `0.2.340` remains defective historical data while `0.2.343` is the normal/latest release |
 | Phase 5: Termux target mode | Public `0.2.342` physical install acceptance is green; the full app-worker/Terminal/Code Server matrix last passed on `0.2.341` | Apt-first shared foundations plus a release-local wheel tree; every capability-changing physical acceptance must exercise the exact archived server's app-launch path |
-| Phase 6: upgrade retention, desktop startup, and Sidebar continuity | Source implementation and automated checks complete; installed/live restart matrix remains | No version or publication is authorized; retain one fallback, use normal app readiness, and distinguish transient WBA loss from authoritative membership removal |
+| Phase 6: upgrade retention, desktop startup, and Sidebar continuity | Source implementation is published in `0.2.343`; Electron and Cefrium Sidebar-persistence acceptance passed while the GeckoView/full restart matrix remains | Retain one fallback, use normal app readiness, and distinguish transient WBA loss from authoritative membership removal |
 
 ## Confirmed source findings
 
@@ -1321,17 +1321,69 @@ does not authorize publication.
 
 ### Phase 4J — TE2 0.2.343 Terminal and Sidebar persistence release
 
-- [ ] Complete Phase 6C live acceptance on Electron, GeckoView, and Cefrium.
+- [ ] Complete the remaining Phase 6C GeckoView and full restart/content-state
+  matrix. Electron and Cefrium hidden-view persistence have passed user live
+  acceptance.
 - [x] Fix the harmless Pyte `bfightmagenta` alias and run the complete imported
   Terminal lifecycle, drawer projection, mobile-input, and typing gates.
 - [x] Synchronize every release-facing version to `0.2.343`, rebuild both
   frontends, and rebundle the Android assets with version code `20343`.
-- [ ] Build and audit clean-tag Linux, Termux AArch64, GeckoView, and Cefrium
+- [x] Build and audit clean-tag Linux, Termux AArch64, GeckoView, and Cefrium
   artifacts; retain Framework-Shells `0.0.63` and Agent Log Server `0.2.123`.
-- [ ] Pass TestPyPI/isolated Debian, public PyPI, public-curl desktop, and
-  physical Termux acceptance against the exact immutable candidates.
-- [ ] Publish a normal/latest GitHub Release titled `TE2 0.2.343 alpha`, then
+- [x] Pass isolated Debian, public PyPI, and public latest-curl `--desktop`
+  acceptance against the exact immutable Linux candidates. This alpha used
+  production PyPI as its public-index gate rather than TestPyPI.
+- [ ] Repeat the public-download physical Termux install/runtime matrix against
+  the exact `0.2.343` archive. The clean AArch64 artifact and build-info audits
+  passed, but the Motorola was offline during final publication validation.
+- [x] Publish a normal/latest GitHub Release titled `TE2 0.2.343 alpha`, then
   record exact hashes and acceptance evidence in a post-release commit.
+
+### Phase 4J TE2 0.2.343 publication and acceptance evidence
+
+- Annotated tag `0.2.343` identifies integrated source commit
+  `e3b5e989b83afe00aae7c45ec5439086b502e5e6`; `main` and the release branch
+  retain that release and add this post-release evidence. The GitHub Release is
+  titled `TE2 0.2.343 alpha`, is neither a draft nor a prerelease, and is the
+  normal/latest release with 13 checksum-verified assets.
+- Production PyPI publishes `te2==0.2.343` with exact dependencies
+  `framework-shells==0.0.63` and `agent-log-server==0.2.123`. The Linux wheel
+  SHA-256 is
+  `bb4cb7dc9b5099cbf6270f76c546fac7c5f66fbf635b836f5c1dcca6d41071fd`,
+  the sdist is
+  `0f22b2e4a820deabc653d83b75f6a51bdd4ccfa979ea83b1a50c420a38e36305`,
+  and the packaged Ferrous-native server is
+  `22a20a85f34c604c3f6f1e05435456fd67fcae035ee129946b19c141e33dfe98`.
+- Agent Log Server `0.2.123` is published from clean tag commit
+  `bc97253e7bbdfdd4ccc9b96d2b6bf8a39926c656`. Its Linux wheel SHA-256 is
+  `22e8f4603b9a48dfa41554db56f890e8099372d529129b27f79688043606cf0c`
+  and its Android wheel is
+  `008c7215f34bc946dd8512f5c8fa6c27cdd5cdaf05d0324c6036119dc1f2fae8`;
+  PyPI metadata reports the same digests and neither artifact is yanked.
+- The clean 96-wheel Termux archive SHA-256 is
+  `e2f63c955c67cb8aad58fb22cda447b27151f00f95bb7a09a198d59ea4aad555`.
+  Its exact Android/AArch64 server reports version `0.2.343`, target Android,
+  architecture AArch64, and `ferrous-framework-native`; its SHA-256 is
+  `239b7ecca3297dcd4fbd0ae277c3359fd22eb6efd147c1adea3bb6902068cc6f`.
+- The synchronized staging APKs carry version code `20343` and bundled asset
+  version `0.2.343`. GeckoView SHA-256 is
+  `701d9942e9382d4d1e45c1d3b1581026f1ecd4fefa2695d949a1ca70759680f5`
+  and Cefrium is
+  `bc51086e4ed86e9edb7c63176ee222a340a353cf02b571641218952f79b3fd45`;
+  both pass the 16 KiB alignment audit and retain the repository development
+  signer. User live acceptance passed the release Cefrium Sidebar-persistence
+  behavior on the Motorola before publication.
+- Public GitHub API asset digests and sizes match the local audited 13-file
+  set. Public `SHA256SUMS` SHA-256 is
+  `9e54642310563139ae2e7298a2879350132fe91a6353dca9eded617912c9b959`,
+  and every listed payload verifies.
+- A fresh Debian Trixie public latest-curl `--desktop` install resolved TE2
+  `0.2.343`, Agent Log Server `0.2.123`, and Framework-Shells `0.0.63`, then
+  created the release-local venv, managed wrappers, fingerprinted Electron
+  runtime, integration receipt, icon, desktop entry, and local-framework
+  configuration. Separate isolated public-PyPI framework acceptance returned
+  health version `0.2.343`, discovered all eight built-ins, and launched a real
+  File Explorer worker through the Ferrous-native server.
 
 ## Deferred work
 
@@ -1390,3 +1442,4 @@ does not authorize publication.
 | 2026-08-30 | Phase 6 architecture investigation | Traced installed activation/rollback and desktop receipts, Electron settings/catalog/readiness startup flow, WBA client-scoped reconstruction storage, Sidebar ledger reconciliation, and per-host presentation persistence | Plan refined for one retained fallback, managed config/runtime cleanup, persisted preferred-app autostart, and event-driven Sidebar restart continuity; implementation and publication remain pending |
 | 2026-08-30 | Phase 6 source implementation | Installer and Electron-runtime transaction tests, Electron settings/startup tests, Code TE2 presentation and WBA reset tests, both TypeScript checks, rebuilt host/WBA bundles, Python bridge tests, and GeckoView unit tests | Automated source gates pass; Debian/Termux installed transactions, graphical autostart, and cross-client restart/content-state acceptance remain open; no version or publication performed |
 | 2026-08-30 | Phase 6B running-framework settings correction | Moved the single connection/startup Save action beneath preferred-app selection; allowed launch-config persistence during an owned run; added an immutable active-child launch snapshot and stop/restart adoption test | Electron typecheck and all 100 tests pass; saved launch changes are explicitly next-start values and cannot relabel the active process |
+| 2026-09-02 | TE2 0.2.343 Terminal and Sidebar persistence release | Clean-tag Linux/Termux/APK construction, ALS 0.2.123 Linux and Android wheels, production PyPI publication, normal/latest 13-asset GitHub Release, exact API digest checks, isolated public-PyPI framework/real-worker smoke, public latest-curl Debian desktop materialization, and user live Motorola Cefrium validation | Published and green on the completed Linux/Desktop and Cefrium gates; exact public-archive physical Termux reinstall and remaining GeckoView/full Phase 6C restart matrix stay explicitly open |
