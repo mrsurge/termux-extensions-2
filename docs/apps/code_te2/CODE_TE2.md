@@ -1773,9 +1773,14 @@ There are three distinct layers:
      drawer. Non-Android and screen-reader paths retain upstream xterm behavior.
 
 4. **Shared xterm mobile touch-selection layer**
-   - `touch_to_mouse_handler.js` is an external adapter, not an xterm source or
-     prototype patch. The standalone Terminal copy is canonical for this
-     experiment and the Code TE2 copy remains byte-identical.
+   - The maintained `xterm-te2` fork owns a transparent capture surface above
+     rendered text and blank cells, classifies movement as scrolling once, and
+     exposes the result through a synchronous disposable
+     `attachCustomTouchEventHandler` hook. Its source and build workflow are
+     recorded in `worktrees/xterm-te2/TE2_PATCH_GUIDE.md`.
+   - `touch_to_mouse_handler.js` is the embedder adapter. The standalone
+     Terminal copy is canonical for this experiment and the Code TE2 copy
+     remains byte-identical; it does not patch xterm prototypes.
    - `te2TerminalTouchSelection.attach(terminal)` uses xterm's public selection
      and paste APIs, renders body-level handles and a Copy/Paste/Select all
      toolbar, and owns deterministic disposal.
@@ -1783,8 +1788,10 @@ There are three distinct layers:
      visual viewport geometry to buffer cells, resolves handle drags two rows
      above the finger, supports endpoint crossover and wide cells, and hides the
      toolbar during terminal or handle drags.
-   - The initial Android live smoke test passed. Text-versus-whitespace gesture
-     behavior remains a separate xterm investigation.
+   - A long press seeds one selected buffer cell through xterm's public API
+     before retaining an ordinary detail-1 mouse anchor for drag extension.
+     Pending taps remain on Chromium's compatibility path, and text and blank
+     cells use the same source-owned scroll route.
 
 ### Key files
 
