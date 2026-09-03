@@ -1783,7 +1783,9 @@ There are three distinct layers:
      remains byte-identical; it does not patch xterm prototypes.
    - `te2TerminalTouchSelection.attach(terminal)` uses xterm's public selection
      and paste APIs, renders body-level handles and a Copy/Paste/Select all
-     toolbar, and owns deterministic disposal.
+     toolbar, and owns deterministic disposal. The fixed layer derives its
+     `z-index` from xterm's outer host stacking layer, so terminal controls stay
+     above terminal content without escaping over Sidebar drawers or app menus.
    - The layer uses the established Android/mobile user-agent predicate, maps
      visual viewport geometry to buffer cells, resolves handle drags three rows
      above the finger, supports endpoint crossover and wide cells, and hides the
@@ -3108,6 +3110,13 @@ per-shell `pyte.HistoryScreen` projections with 5,000 lines of scrollback and
 feeds them through `pyte.ByteStream`. Initial construction incrementally parses
 the complete raw stdout log in a worker thread; terminal output therefore does
 not block the app-worker asyncio loop or retain the complete log in memory.
+Pyte projections are not resized in place: Pyte preserves cursor rows across
+viewport changes and can thereby synthesize blank lines. A PTY resize records
+the requested dimensions and marks the retained projection stale while live raw
+deltas continue normally. Only the next history/reconnect checkpoint rebuilds
+the projection from the canonical raw log, directly at that client's requested
+dimensions and off the asyncio loop. Routine drawer, keyboard, and orientation
+resizes therefore do not replay terminal history.
 
 FWS `fws.logs.chunk` notifications are event wakeups rather than content
 authority. Framework-Shells has flushed the PTY bytes before publishing each

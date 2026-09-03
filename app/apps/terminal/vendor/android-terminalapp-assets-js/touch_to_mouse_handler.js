@@ -346,6 +346,15 @@ function handleContextMenu(event) {
   event.stopPropagation();
 }
 
+function resolveHostLayerZIndex(root) {
+  let outermostZIndex = 0;
+  for (let element = root; element && element !== document.body; element = element.parentElement) {
+    const value = Number.parseInt(window.getComputedStyle(element).zIndex, 10);
+    if (Number.isFinite(value)) outermostZIndex = value;
+  }
+  return outermostZIndex + 1;
+}
+
 function ensureHandleStyles() {
   if (document.getElementById(STYLE_ID)) return;
   const style = document.createElement('style');
@@ -358,7 +367,7 @@ function ensureHandleStyles() {
       height: 100vh;
       overflow: visible;
       pointer-events: none;
-      z-index: 2147483000;
+      z-index: 1;
     }
     .${HANDLE_CLASS} {
       position: fixed;
@@ -796,6 +805,7 @@ function attach(terminal) {
   ensureHandleStyles();
   const layer = document.createElement('div');
   layer.className = HANDLE_LAYER_CLASS;
+  layer.style.zIndex = String(resolveHostLayerZIndex(root));
   const startHandle = makeHandle('Adjust selection start');
   const endHandle = makeHandle('Adjust selection end');
   const menu = makeMenu();

@@ -73,8 +73,6 @@ class _TerminalScreen(Protocol):
     buffer: Mapping[int, _TerminalLine]
     cursor: _TerminalCursor
 
-    def resize(self, lines: int | None = None, columns: int | None = None) -> None: ...
-
 
 @final
 class _TrackedByteStream(pyte.ByteStream):
@@ -251,6 +249,7 @@ class _TerminalProjection:
         self.initialized: bool = False
         self.checkpoint_ready: bool = False
         self.parser_pending_bytes: bytes = b""
+        self.dimensions_stale: bool = False
         self.lock: asyncio.Lock = asyncio.Lock()
         self._reset_screen()
 
@@ -266,6 +265,7 @@ class _TerminalProjection:
         self.log_identity = None
         self.checkpoint_ready = False
         self.parser_pending_bytes = b""
+        self.dimensions_stale = False
 
     def _feed(self, data: bytes) -> None:
         had_parser_prefix = bool(self.parser_pending_bytes)
@@ -342,10 +342,16 @@ class _TerminalProjection:
     def _checkpoint(self, columns: int, lines: int) -> TerminalScreenCheckpoint:
         requested_columns = _bounded_dimension(columns, self.columns, 1_000)
         requested_lines = _bounded_dimension(lines, self.lines, 500)
-        if requested_columns != self.columns or requested_lines != self.lines:
+        if (
+            self.dimensions_stale
+            or requested_columns != self.columns
+            or requested_lines != self.lines
+        ):
             self.columns = requested_columns
             self.lines = requested_lines
-            self.screen.resize(lines=self.lines, columns=self.columns)
+            # Pyte's in-place resize preserves cursor rows across viewport sizes,
+            # which can synthesize blank lines. Reparse once at checkpoint time.
+            self._reset_screen()
         _deltas, _reset = self._consume_log(collect=False)
         checkpoint = TerminalScreenCheckpoint(
             ansi=_screen_checkpoint_ansi(self.screen),
@@ -370,9 +376,12 @@ class _TerminalProjection:
 
     def _resize(self, columns: int, lines: int) -> bool:
         _deltas, reset = self._consume_log(collect=False)
-        self.columns = _bounded_dimension(columns, self.columns, 1_000)
-        self.lines = _bounded_dimension(lines, self.lines, 500)
-        self.screen.resize(lines=self.lines, columns=self.columns)
+        requested_columns = _bounded_dimension(columns, self.columns, 1_000)
+        requested_lines = _bounded_dimension(lines, self.lines, 500)
+        if requested_columns != self.columns or requested_lines != self.lines:
+            self.columns = requested_columns
+            self.lines = requested_lines
+            self.dimensions_stale = True
         return reset
 
     async def resize(self, columns: int, lines: int) -> bool:

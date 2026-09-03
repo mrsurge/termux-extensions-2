@@ -186,6 +186,31 @@ class TerminalScreenProjectionTests(unittest.IsolatedAsyncioTestCase):
         _ = await registry.checkpoint("second", second_log, columns=10, lines=2)
         self.assertIsNone(await registry.consume_growth("first"))
 
+    async def test_resize_cycle_rebuilds_without_synthetic_blank_rows(self) -> None:
+        log = self.tmp_path / "terminal.log"
+        _ = log.write_bytes(
+            b"".join(f"line-{index}\r\n".encode() for index in range(30)) + b"$ "
+        )
+        registry = TerminalScreenProjectionRegistry()
+
+        _ = await registry.checkpoint("shell", log, columns=60, lines=15)
+        _ = await registry.resize("shell", 80, 24)
+        _ = await registry.checkpoint("shell", log, columns=80, lines=24)
+        _ = await registry.resize("shell", 60, 15)
+
+        with log.open("ab") as handle:
+            _ = handle.write(b"hello")
+        growth = await registry.consume_growth("shell")
+        self.assertIsNotNone(growth)
+        assert growth is not None
+        self.assertEqual([delta.data for delta in growth.deltas], [b"hello"])
+
+        checkpoint = await registry.checkpoint("shell", log, columns=60, lines=15)
+        replayed, _stream = _replay(checkpoint)
+
+        self.assertEqual(replayed.display[-1].rstrip(), "$ hello")
+        self.assertEqual((replayed.cursor.x, replayed.cursor.y), (7, 14))
+
     async def test_scrollback_is_bounded_and_private_modes_are_not_raw_replayed(self) -> None:
         log = self.tmp_path / "terminal.log"
         rows = [f"line-{index}".encode() for index in range(MAX_HISTORY_LINES + 25)]

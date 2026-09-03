@@ -27,6 +27,7 @@ function createHarness({
   wideContinuationColumns = new Set(),
   mobile = true,
   touchHook = true,
+  hostZIndex = null,
 } = {}) {
   const window = new Window({ url: 'http://127.0.0.1/apps/by-id/terminal' });
   Object.defineProperty(window.navigator, 'maxTouchPoints', {
@@ -85,7 +86,13 @@ function createHarness({
   rowsElement.appendChild(rowElement);
   screen.append(canvas, rowsElement);
   root.append(viewport, screen);
-  window.document.body.appendChild(root);
+  const host = window.document.createElement('div');
+  if (hostZIndex !== null) {
+    host.style.position = 'fixed';
+    host.style.zIndex = String(hostZIndex);
+  }
+  host.appendChild(root);
+  window.document.body.appendChild(host);
 
   const surfaceRect = {
     left: 100,
@@ -252,6 +259,7 @@ function createHarness({
     handles: () => [
       ...window.document.querySelectorAll('.te2-xterm-touch-selection-handle'),
     ],
+    layer: () => window.document.querySelector('.te2-xterm-touch-selection-layer'),
     menu: () => window.document.querySelector('.te2-xterm-touch-selection-menu'),
   };
 }
@@ -307,6 +315,13 @@ test('selection handles use viewport-adjusted xterm cell geometry', () => {
   assert.equal(harness.menu().style.left, '135px');
   assert.equal(harness.menu().style.top, '90px');
 
+  harness.disposable.dispose();
+});
+
+test('selection layer stays immediately above the terminal host stacking layer', () => {
+  const harness = createHarness({ hostZIndex: 100 });
+
+  assert.equal(harness.layer().style.zIndex, '101');
   harness.disposable.dispose();
 });
 
