@@ -140,6 +140,7 @@ interface XtermTerminal {
   select?: (column: number, row: number, length: number) => void;
   selectAll?: () => void;
   paste?: (data: string) => void;
+  attachCustomTouchEventHandler?: (handler: (event: TouchEvent, isScrollGesture: boolean) => boolean) => XtermDisposable;
   setOption?: (name: string, value: unknown) => void;
   write: (data: string | Uint8Array) => void;
 }

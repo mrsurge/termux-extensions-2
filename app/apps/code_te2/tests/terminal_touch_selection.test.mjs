@@ -26,6 +26,7 @@ function createHarness({
   },
   wideContinuationColumns = new Set(),
   mobile = true,
+  touchHook = true,
 } = {}) {
   const window = new Window({ url: 'http://127.0.0.1/apps/by-id/terminal' });
   Object.defineProperty(window.navigator, 'maxTouchPoints', {
@@ -75,7 +76,14 @@ function createHarness({
   const screen = window.document.createElement('div');
   screen.className = 'xterm-screen';
   const canvas = window.document.createElement('canvas');
-  screen.appendChild(canvas);
+  const rowsElement = window.document.createElement('div');
+  rowsElement.className = 'xterm-rows';
+  const rowElement = window.document.createElement('div');
+  const textSpan = window.document.createElement('span');
+  textSpan.textContent = 'rendered text';
+  rowElement.appendChild(textSpan);
+  rowsElement.appendChild(rowElement);
+  screen.append(canvas, rowsElement);
   root.append(viewport, screen);
   window.document.body.appendChild(root);
 
@@ -105,6 +113,7 @@ function createHarness({
   const pasteCalls = [];
   let selectAllCalls = 0;
   const disposedSubscriptions = [];
+  let touchGesture = null;
   const subscribe = (kind, callback) => {
     callbacks[kind].add(callback);
     return {
@@ -173,7 +182,44 @@ function createHarness({
       };
       for (const callback of callbacks.selection) callback();
     },
+    attachCustomTouchEventHandler(handler) {
+      const route = (event) => {
+        const point = event.touches?.[0] ?? event.changedTouches?.[0] ?? null;
+        if (event.type === 'touchstart' && point) {
+          touchGesture = {
+            identifier: point.identifier,
+            startX: point.clientX,
+            startY: point.clientY,
+            isScroll: false,
+          };
+        }
+        if (event.type === 'touchmove' && touchGesture && point && !touchGesture.isScroll) {
+          touchGesture.isScroll = Math.hypot(
+            point.clientX - touchGesture.startX,
+            point.clientY - touchGesture.startY,
+          ) > 8;
+        }
+        const isScroll = touchGesture?.isScroll === true;
+        if (handler(event, isScroll) === false) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+        if (event.type === 'touchend' || event.type === 'touchcancel') touchGesture = null;
+      };
+      for (const type of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) {
+        root.addEventListener(type, route, { passive: false });
+      }
+      return {
+        dispose() {
+          for (const type of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) {
+            root.removeEventListener(type, route);
+          }
+          disposedSubscriptions.push('touch');
+        },
+      };
+    },
   };
+  if (!touchHook) delete terminal.attachCustomTouchEventHandler;
 
   window.eval(helperSource);
   const api = window.te2TerminalTouchSelection;
@@ -183,6 +229,7 @@ function createHarness({
   return {
     window,
     root,
+    textSpan,
     terminal,
     disposable,
     selectCalls,
@@ -234,6 +281,7 @@ function touchEvent(window, type, target, { x, y, identifier = 1 } = {}) {
 
 test('standalone and Code TE2 serve one identical touch helper', () => {
   assert.equal(fs.readFileSync(terminalHelperPath, 'utf8'), helperSource);
+  assert.doesNotMatch(helperSource, /document\.addEventListener\('touch/);
 });
 
 test('selection handles use viewport-adjusted xterm cell geometry', () => {
@@ -254,6 +302,15 @@ test('selection handles use viewport-adjusted xterm cell geometry', () => {
 
 test('coarse pointers do not enable selection UI without a mobile user agent', () => {
   const harness = createHarness({ mobile: false });
+  harness.flushAnimationFrames();
+
+  assert.equal(harness.handles().length, 0);
+  assert.equal(harness.menu(), null);
+  harness.disposable.dispose();
+});
+
+test('an older xterm revision disables touch selection without aborting startup', () => {
+  const harness = createHarness({ touchHook: false });
   harness.flushAnimationFrames();
 
   assert.equal(harness.handles().length, 0);
@@ -285,6 +342,22 @@ test('selection menu owns copy, paste, and select-all actions', async () => {
   harness.disposable.dispose();
 });
 
+test('a pending tap preserves xterm compatibility mouse selection', () => {
+  const harness = createHarness();
+  const screen = harness.root.querySelector('.xterm-screen');
+
+  const started = screen.dispatchEvent(
+    touchEvent(harness.window, 'touchstart', screen, { x: 140, y: 90 }),
+  );
+  const ended = screen.dispatchEvent(
+    touchEvent(harness.window, 'touchend', screen, { x: 140, y: 90 }),
+  );
+
+  assert.equal(started, true);
+  assert.equal(ended, true);
+  harness.disposable.dispose();
+});
+
 test('one-finger movement remains wheel-backed terminal scrolling', () => {
   const harness = createHarness();
   const viewport = harness.root.querySelector('.xterm-viewport');
@@ -300,7 +373,24 @@ test('one-finger movement remains wheel-backed terminal scrolling', () => {
   harness.disposable.dispose();
 });
 
-test('long press still enters xterm mouse selection', async () => {
+test('text and blank terminal targets use the same xterm-owned scroll path', () => {
+  const harness = createHarness();
+  const viewport = harness.root.querySelector('.xterm-viewport');
+  const screen = harness.root.querySelector('.xterm-screen');
+  const wheelDeltas = [];
+  viewport.addEventListener('wheel', (event) => wheelDeltas.push(event.deltaY));
+
+  for (const target of [harness.textSpan, screen]) {
+    target.dispatchEvent(touchEvent(harness.window, 'touchstart', target, { x: 140, y: 90 }));
+    target.dispatchEvent(touchEvent(harness.window, 'touchmove', target, { x: 140, y: 120 }));
+    target.dispatchEvent(touchEvent(harness.window, 'touchend', target, { x: 140, y: 120 }));
+  }
+
+  assert.deepEqual(wheelDeltas, [-12, -12]);
+  harness.disposable.dispose();
+});
+
+test('long press seeds a visible cell selection before xterm drag selection', async () => {
   const harness = createHarness();
   const screen = harness.root.querySelector('.xterm-screen');
   const mouseEvents = [];
@@ -316,6 +406,7 @@ test('long press still enters xterm mouse selection', async () => {
   harness.flushAnimationFrames();
 
   assert.deepEqual(mouseEvents, ['mousedown', 'mouseup']);
+  assert.deepEqual(harness.selectCalls, [{ column: 4, row: 11, length: 1 }]);
   assert.equal(harness.menu().hidden, false);
   harness.disposable.dispose();
 });
@@ -396,5 +487,5 @@ test('dispose removes handles and xterm subscriptions', () => {
   harness.disposable.dispose();
 
   assert.equal(harness.handles().length, 0);
-  assert.deepEqual(harness.disposedSubscriptions.sort(), ['resize', 'scroll', 'selection']);
+  assert.deepEqual(harness.disposedSubscriptions.sort(), ['resize', 'scroll', 'selection', 'touch']);
 });

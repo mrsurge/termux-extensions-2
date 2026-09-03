@@ -258,6 +258,7 @@ interface XtermTerminalLike {
   paste?(data: string): void;
   scrollLines?(lines: number): void;
   attachCustomKeyEventHandler?(handler: (event: KeyboardEvent) => boolean): void;
+  attachCustomTouchEventHandler?(handler: (event: TouchEvent, isScrollGesture: boolean) => boolean): XtermDisposable;
   setOption?(key: string, value: unknown): void;
 }
 

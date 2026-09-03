@@ -18,7 +18,6 @@
 // TODO(b/375326606): consider contribution on
 // upstream(https://github.com/xtermjs/xterm.js/issues/3727)
 const LONG_PRESS_MS = 450;
-const MOVE_CANCEL_PX = 8;
 const WHEEL_DRAG_SCALE = 0.4;
 const DOUBLE_TAP_MS = 280;
 const DOUBLE_TAP_PX = 24;
@@ -92,39 +91,13 @@ function clearLongPress() {
   gestureState.longPressTimer = null;
 }
 
-function unlockGestureRoot() {
-  const root = gestureState?.terminalRoot;
-  const lockedStyle = gestureState?.lockedRootStyle;
-  if (!root || !lockedStyle) return;
-  root.style.touchAction = lockedStyle.touchAction;
-  root.style.webkitUserSelect = lockedStyle.webkitUserSelect;
-  root.style.userSelect = lockedStyle.userSelect;
-  root.style.webkitTouchCallout = lockedStyle.webkitTouchCallout;
-}
-
 function resetGestureState() {
   const attachment = gestureState?.terminalRoot
     ? attachmentsByRoot.get(gestureState.terminalRoot)
     : null;
   clearLongPress();
-  unlockGestureRoot();
   gestureState = null;
   if (attachment) scheduleRender(attachment);
-}
-
-function lockGestureRoot(root) {
-  if (!root) return null;
-  const lockedStyle = {
-    touchAction: root.style.touchAction,
-    webkitUserSelect: root.style.webkitUserSelect,
-    userSelect: root.style.userSelect,
-    webkitTouchCallout: root.style.webkitTouchCallout,
-  };
-  root.style.touchAction = 'none';
-  root.style.webkitUserSelect = 'none';
-  root.style.userSelect = 'none';
-  root.style.webkitTouchCallout = 'none';
-  return lockedStyle;
 }
 
 function buildPointerLike(point, fallbackTarget) {
@@ -175,7 +148,13 @@ function startSelection(point) {
   clearLongPress();
   gestureState.mode = 'select';
   const attachment = attachmentsByRoot.get(gestureState.terminalRoot);
-  if (attachment) hideMenu(attachment);
+  if (attachment) {
+    hideMenu(attachment);
+    const cell = clientPointToBufferCell(attachment, point.clientX, point.clientY);
+    if (cell && cell.col < attachment.terminal.cols) {
+      attachment.terminal.select(cell.col, cell.row, 1);
+    }
+  }
   dispatchMouse('mousedown', point, gestureState.mouseTarget);
 }
 
@@ -203,10 +182,10 @@ function maybeSelectWord(point, root) {
 }
 
 function handleTouchStart(event) {
-  if (!helpersEnabled() || isHandleTarget(event.target)) return;
+  if (!helpersEnabled() || isHandleTarget(event.target)) return true;
   if (!event.touches || event.touches.length !== 1) {
     resetGestureState();
-    return;
+    return true;
   }
   const point = event.touches[0];
   const terminalRoot = getTerminalRoot(point.target);
@@ -214,40 +193,34 @@ function handleTouchStart(event) {
   const wheelTarget = getWheelTarget(point.target);
   if (!terminalRoot || (!mouseTarget && !wheelTarget)) {
     resetGestureState();
-    return;
+    return true;
   }
 
   gestureState = {
     touchId: point.identifier,
     mode: 'pending',
-    startX: point.clientX,
-    startY: point.clientY,
     lastY: point.clientY,
     point,
     terminalRoot,
     mouseTarget,
     wheelTarget,
-    lockedRootStyle: lockGestureRoot(terminalRoot),
     longPressTimer: setTimeout(() => startSelection(point), LONG_PRESS_MS),
   };
   const attachment = attachmentsByRoot.get(terminalRoot);
   if (attachment) hideMenu(attachment);
+  return true;
 }
 
-function handleTouchMove(event) {
-  if (!helpersEnabled() || !gestureState) return;
+function handleTouchMove(event, isScrollGesture) {
+  if (!helpersEnabled() || !gestureState) return true;
   const point = getTrackedTouch(event);
-  if (!point || !event.touches || event.touches.length < 1) return;
+  if (!point || !event.touches || event.touches.length < 1) return true;
   gestureState.point = point;
-  const moved = Math.hypot(
-    point.clientX - gestureState.startX,
-    point.clientY - gestureState.startY,
-  ) > MOVE_CANCEL_PX;
 
   if (gestureState.mode === 'pending') {
-    if (!moved) {
+    if (!isScrollGesture) {
       gestureState.lastY = point.clientY;
-      return;
+      return true;
     }
     clearLongPress();
     gestureState.mode = 'scroll';
@@ -256,7 +229,7 @@ function handleTouchMove(event) {
     dispatchMouse('mousemove', point, gestureState.mouseTarget);
     event.preventDefault();
     event.stopPropagation();
-    return;
+    return false;
   }
   if (gestureState.mode === 'scroll') {
     const deltaY = (gestureState.lastY - point.clientY) * WHEEL_DRAG_SCALE;
@@ -264,24 +237,59 @@ function handleTouchMove(event) {
     dispatchWheel(deltaY, point, gestureState.wheelTarget);
     event.preventDefault();
     event.stopPropagation();
+    return false;
   }
+  return true;
 }
 
-function handleTouchEnd(event) {
-  if (!gestureState) return;
+function handleTouchEnd(event, isScrollGesture) {
+  if (!gestureState) return true;
   const point = getTrackedTouch(event);
-  if (!point) return;
+  if (!point) return true;
+  if (gestureState.mode === 'pending' && isScrollGesture) {
+    clearLongPress();
+    gestureState.mode = 'scroll';
+  }
   if (gestureState.mode === 'select') {
     dispatchMouse('mouseup', point, gestureState.mouseTarget);
     event.preventDefault();
     event.stopPropagation();
+    resetGestureState();
+    return false;
   } else if (gestureState.mode === 'scroll') {
     event.preventDefault();
     event.stopPropagation();
+    resetGestureState();
+    return false;
   } else {
     maybeSelectWord(point, gestureState.terminalRoot);
   }
   resetGestureState();
+  return true;
+}
+
+function handleTouchCancel(event) {
+  if (!gestureState) return true;
+  const point = getTrackedTouch(event) || gestureState.point;
+  const owned = gestureState.mode === 'select' || gestureState.mode === 'scroll';
+  if (gestureState.mode === 'select') {
+    dispatchMouse('mouseup', point, gestureState.mouseTarget);
+  }
+  resetGestureState();
+  return !owned;
+}
+
+function handleCustomTouchEvent(event, isScrollGesture) {
+  if (event.type === 'touchstart') {
+    return handleTouchStart(event);
+  } else if (event.type === 'touchmove') {
+    return handleTouchMove(event, isScrollGesture);
+  } else if (event.type === 'touchend') {
+    return handleTouchEnd(event, isScrollGesture);
+  } else if (event.type === 'touchcancel') {
+    return handleTouchCancel(event);
+  }
+  return true;
 }
 
 function handleContextMenu(event) {
@@ -296,14 +304,11 @@ function handleContextMenu(event) {
     gestureState = {
       touchId: null,
       mode: 'pending',
-      startX: event.clientX,
-      startY: event.clientY,
       lastY: event.clientY,
       point: event,
       terminalRoot,
       mouseTarget,
       wheelTarget,
-      lockedRootStyle: lockGestureRoot(terminalRoot),
       longPressTimer: null,
     };
   }
@@ -739,8 +744,10 @@ function attach(terminal) {
     || typeof terminal.getSelection !== 'function'
     || typeof terminal.paste !== 'function'
     || typeof terminal.selectAll !== 'function'
+    || typeof terminal.attachCustomTouchEventHandler !== 'function'
   ) {
-    throw new TypeError('The terminal selection API is unavailable');
+    console.warn('[terminal] touch selection disabled: xterm touch hook is unavailable');
+    return { dispose() {} };
   }
 
   ensureHandleStyles();
@@ -848,16 +855,16 @@ function attach(terminal) {
   attachment.publicDisposable = { dispose };
   attachments.set(terminal, attachment);
   attachmentsByRoot.set(root, attachment);
+  addDisposable(attachment, terminal.attachCustomTouchEventHandler(handleCustomTouchEvent));
+  root.addEventListener('contextmenu', handleContextMenu, eventOptions);
+  attachment.disposables.push(() => {
+    root.removeEventListener('contextmenu', handleContextMenu, eventOptions);
+  });
   scheduleRender(attachment);
   return attachment.publicDisposable;
 }
 
 const eventOptions = { capture: true, passive: false };
-document.addEventListener('touchstart', handleTouchStart, eventOptions);
-document.addEventListener('touchmove', handleTouchMove, eventOptions);
-document.addEventListener('touchend', handleTouchEnd, eventOptions);
-document.addEventListener('touchcancel', handleTouchEnd, eventOptions);
-document.addEventListener('contextmenu', handleContextMenu, eventOptions);
 
 window.te2TerminalTouchSelection = Object.freeze({ attach });
 })();
