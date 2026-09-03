@@ -1322,9 +1322,9 @@ does not authorize publication.
 ### Phase 4J — TE2 0.2.343 Terminal and Sidebar persistence release
 
 - [ ] Complete Phase 6C live acceptance on Electron, GeckoView, and Cefrium.
-- [ ] Fix the harmless Pyte `bfightmagenta` alias and run the complete imported
+- [x] Fix the harmless Pyte `bfightmagenta` alias and run the complete imported
   Terminal lifecycle, drawer projection, mobile-input, and typing gates.
-- [ ] Synchronize every release-facing version to `0.2.343`, rebuild both
+- [x] Synchronize every release-facing version to `0.2.343`, rebuild both
   frontends, and rebundle the Android assets with version code `20343`.
 - [ ] Build and audit clean-tag Linux, Termux AArch64, GeckoView, and Cefrium
   artifacts; retain Framework-Shells `0.0.63` and Agent Log Server `0.2.122`.

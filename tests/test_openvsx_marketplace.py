@@ -213,19 +213,13 @@ class MarketplaceServiceTests(unittest.IsolatedAsyncioTestCase):
 
 
 class MarketplaceInstallCommandTests(unittest.TestCase):
-    def test_install_by_id_uses_exact_code_server_spec(self) -> None:
+    def test_local_vsix_install_uses_exact_code_server_spec(self) -> None:
         installation = extension_registry.CodeServerInstallation(
             executable=Path("/opt/code-server/bin/code-server"),
             vscode_root=None,
             source="test",
         )
         completed = SimpleNamespace(returncode=0, stdout="installed", stderr="")
-        expected = {
-            "ok": True,
-            "extension": {"id": "ms-python.python", "version": "2026.4.0"},
-            "registry_summary": {"total_extensions": 1, "total_slots": 1},
-        }
-
         with (
             patch.object(
                 extension_registry,
@@ -242,24 +236,17 @@ class MarketplaceInstallCommandTests(unittest.TestCase):
                 "run",
                 return_value=completed,
             ) as run,
-            patch.object(
-                extension_registry,
-                "_post_install_result",
-                return_value=expected,
-            ) as post_install,
         ):
-            result = extension_registry.install_extension_by_id(
-                "ms-python.python",
-                "2026.4.0",
+            extension_registry._run_code_server_extension_install(
+                "/downloads/ms-python.python-2026.4.0.vsix",
             )
 
-        self.assertEqual(expected, result)
         command = run.call_args.args[0]
         self.assertEqual(
             [
                 "/opt/code-server/bin/code-server",
                 "--install-extension",
-                "ms-python.python@2026.4.0",
+                "/downloads/ms-python.python-2026.4.0.vsix",
                 "--user-data-dir",
                 str(extension_registry._CODE_SERVER_DATA_DIR),
                 "--extensions-dir",
@@ -268,7 +255,6 @@ class MarketplaceInstallCommandTests(unittest.TestCase):
             ],
             command,
         )
-        post_install.assert_called_once_with(expected_ext_id="ms-python.python")
 
 
 if __name__ == "__main__":

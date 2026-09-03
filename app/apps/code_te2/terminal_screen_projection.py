@@ -120,7 +120,6 @@ _BG_CODES: Final = {
     "brightbrown": 103,
     "brightblue": 104,
     "brightmagenta": 105,
-    "bfightmagenta": 105,
     "brightcyan": 106,
     "brightwhite": 107,
 }

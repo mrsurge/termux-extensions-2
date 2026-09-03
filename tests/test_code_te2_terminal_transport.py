@@ -142,7 +142,15 @@ class CodeTe2TerminalFactTests(unittest.IsolatedAsyncioTestCase):
         async def generation(_sid: str) -> int:
             return 7
 
-        async def start_history(_sid: str, _shell_id: str, _generation: int) -> None:
+        async def start_history(
+            _sid: str,
+            _shell_id: str,
+            _generation: int,
+            columns: int,
+            lines: int,
+        ) -> None:
+            self.assertEqual(columns, terminal_backend.DEFAULT_COLUMNS)
+            self.assertEqual(lines, terminal_backend.DEFAULT_LINES)
             events.append("history:start")
 
         async def emit_shell_list(_sid: str, _project_path: str | None) -> None:
@@ -176,7 +184,15 @@ class CodeTe2TerminalFactTests(unittest.IsolatedAsyncioTestCase):
         original_emit = terminal_backend._emit_terminal_to_sid
         emitted: list[tuple[str, dict[str, object], str]] = []
 
-        async def history(_shell_id: str, _tail: int = 2000) -> dict[str, object]:
+        async def history(
+            _shell_id: str,
+            _tail: int = 2000,
+            *,
+            columns: int,
+            lines: int,
+        ) -> dict[str, object]:
+            self.assertEqual(columns, terminal_backend.DEFAULT_COLUMNS)
+            self.assertEqual(lines, terminal_backend.DEFAULT_LINES)
             return {"stdout_text": "prompt"}
 
         async def emit(event: str, payload: dict[str, object], sid: str) -> None:
@@ -187,9 +203,21 @@ class CodeTe2TerminalFactTests(unittest.IsolatedAsyncioTestCase):
         terminal_backend._terminal_sid_shells["sid"] = "shell-a"
         terminal_backend._terminal_sid_bind_generations["sid"] = 2
         try:
-            await terminal_backend._emit_terminal_history_to_sid("sid", "shell-a", 1)
+            await terminal_backend._emit_terminal_history_to_sid(
+                "sid",
+                "shell-a",
+                1,
+                terminal_backend.DEFAULT_COLUMNS,
+                terminal_backend.DEFAULT_LINES,
+            )
             self.assertEqual(emitted, [])
-            await terminal_backend._emit_terminal_history_to_sid("sid", "shell-a", 2)
+            await terminal_backend._emit_terminal_history_to_sid(
+                "sid",
+                "shell-a",
+                2,
+                terminal_backend.DEFAULT_COLUMNS,
+                terminal_backend.DEFAULT_LINES,
+            )
         finally:
             terminal_backend._terminal_history_data = original_history
             terminal_backend._emit_terminal_to_sid = original_emit
@@ -211,13 +239,27 @@ class CodeTe2TerminalFactTests(unittest.IsolatedAsyncioTestCase):
             events.append("stream")
             await stream_gate.wait()
 
-        async def history(_sid: str, _shell_id: str, _generation: int) -> None:
+        async def history(
+            _sid: str,
+            _shell_id: str,
+            _generation: int,
+            columns: int,
+            lines: int,
+        ) -> None:
+            self.assertEqual(columns, terminal_backend.DEFAULT_COLUMNS)
+            self.assertEqual(lines, terminal_backend.DEFAULT_LINES)
             events.append("history")
 
         terminal_backend.ensure_terminal_log_stream = ensure
         terminal_backend._emit_terminal_history_to_sid = history
         try:
-            await terminal_backend._start_terminal_history_task("sid", "shell-a", 1)
+            await terminal_backend._start_terminal_history_task(
+                "sid",
+                "shell-a",
+                1,
+                terminal_backend.DEFAULT_COLUMNS,
+                terminal_backend.DEFAULT_LINES,
+            )
             task = terminal_backend._terminal_history_tasks.get("sid")
             self.assertIsNotNone(task)
             await asyncio.sleep(0)
