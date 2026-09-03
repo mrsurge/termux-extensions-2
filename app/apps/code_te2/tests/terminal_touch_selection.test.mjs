@@ -25,13 +25,32 @@ function createHarness({
     end: { x: 5, y: 12 },
   },
   wideContinuationColumns = new Set(),
+  mobile = true,
 } = {}) {
   const window = new Window({ url: 'http://127.0.0.1/apps/by-id/terminal' });
   Object.defineProperty(window.navigator, 'maxTouchPoints', {
     configurable: true,
     value: 1,
   });
+  Object.defineProperty(window.navigator, 'userAgent', {
+    configurable: true,
+    value: mobile
+      ? 'Mozilla/5.0 (Linux; Android 16) Mobile'
+      : 'Mozilla/5.0 (X11; Linux x86_64)',
+  });
+  Object.defineProperty(window.navigator, 'userAgentData', {
+    configurable: true,
+    value: { mobile },
+  });
   window.matchMedia = () => ({ matches: true });
+  const clipboardWrites = [];
+  Object.defineProperty(window.navigator, 'clipboard', {
+    configurable: true,
+    value: {
+      readText: async () => 'pasted text',
+      writeText: async (text) => { clipboardWrites.push(text); },
+    },
+  });
 
   let rafId = 0;
   const rafCallbacks = new Map();
@@ -83,6 +102,8 @@ function createHarness({
   };
   const selectCalls = [];
   const scrollCalls = [];
+  const pasteCalls = [];
+  let selectAllCalls = 0;
   const disposedSubscriptions = [];
   const subscribe = (kind, callback) => {
     callbacks[kind].add(callback);
@@ -112,6 +133,7 @@ function createHarness({
       },
     },
     hasSelection: () => Boolean(currentSelection),
+    getSelection: () => currentSelection ? 'selected text' : '',
     getSelectionPosition: () => currentSelection,
     onSelectionChange: (callback) => subscribe('selection', callback),
     onScroll: (callback) => subscribe('scroll', callback),
@@ -136,6 +158,21 @@ function createHarness({
       currentViewportY += amount;
       for (const callback of callbacks.scroll) callback(currentViewportY);
     },
+    paste(text) {
+      pasteCalls.push(text);
+    },
+    clearSelection() {
+      currentSelection = null;
+      for (const callback of callbacks.selection) callback();
+    },
+    selectAll() {
+      selectAllCalls += 1;
+      currentSelection = {
+        start: { x: 0, y: currentViewportY },
+        end: { x: cols, y: currentViewportY + rows - 1 },
+      };
+      for (const callback of callbacks.selection) callback();
+    },
   };
 
   window.eval(helperSource);
@@ -150,11 +187,15 @@ function createHarness({
     disposable,
     selectCalls,
     scrollCalls,
+    pasteCalls,
+    clipboardWrites,
+    get selectAllCalls() { return selectAllCalls; },
     disposedSubscriptions,
     flushAnimationFrames,
     handles: () => [
       ...window.document.querySelectorAll('.te2-xterm-touch-selection-handle'),
     ],
+    menu: () => window.document.querySelector('.te2-xterm-touch-selection-menu'),
   };
 }
 
@@ -204,6 +245,42 @@ test('selection handles use viewport-adjusted xterm cell geometry', () => {
   assert.equal(end.hidden, false);
   assert.equal(start.style.transform, 'translate3d(100px, 105px, 0)');
   assert.equal(end.style.transform, 'translate3d(130px, 105px, 0)');
+  assert.equal(harness.menu().hidden, false);
+  assert.equal(harness.menu().style.left, '135px');
+  assert.equal(harness.menu().style.top, '90px');
+
+  harness.disposable.dispose();
+});
+
+test('coarse pointers do not enable selection UI without a mobile user agent', () => {
+  const harness = createHarness({ mobile: false });
+  harness.flushAnimationFrames();
+
+  assert.equal(harness.handles().length, 0);
+  assert.equal(harness.menu(), null);
+  harness.disposable.dispose();
+});
+
+test('selection menu owns copy, paste, and select-all actions', async () => {
+  const harness = createHarness();
+  harness.flushAnimationFrames();
+  const menu = harness.menu();
+
+  menu.querySelector('[data-action="copy"]').click();
+  await Promise.resolve();
+  assert.deepEqual(harness.clipboardWrites, ['selected text']);
+
+  menu.querySelector('[data-action="paste"]').click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(harness.pasteCalls, ['pasted text']);
+  harness.flushAnimationFrames();
+  assert.equal(menu.hidden, true);
+
+  harness.terminal.select(2, 12, 3);
+  harness.flushAnimationFrames();
+  menu.querySelector('[data-action="selectAll"]').click();
+  await Promise.resolve();
+  assert.equal(harness.selectAllCalls, 1);
 
   harness.disposable.dispose();
 });
@@ -227,14 +304,19 @@ test('long press still enters xterm mouse selection', async () => {
   const harness = createHarness();
   const screen = harness.root.querySelector('.xterm-screen');
   const mouseEvents = [];
+  harness.flushAnimationFrames();
+  assert.equal(harness.menu().hidden, false);
   screen.addEventListener('mousedown', () => mouseEvents.push('mousedown'));
   screen.addEventListener('mouseup', () => mouseEvents.push('mouseup'));
 
   screen.dispatchEvent(touchEvent(harness.window, 'touchstart', screen, { x: 140, y: 90 }));
+  assert.equal(harness.menu().hidden, true);
   await new Promise((resolve) => setTimeout(resolve, 470));
   screen.dispatchEvent(touchEvent(harness.window, 'touchend', screen, { x: 140, y: 90 }));
+  harness.flushAnimationFrames();
 
   assert.deepEqual(mouseEvents, ['mousedown', 'mouseup']);
+  assert.equal(harness.menu().hidden, false);
   harness.disposable.dispose();
 });
 
@@ -258,14 +340,19 @@ test('dragging a handle across its peer preserves the physical moving handle', (
   harness.flushAnimationFrames();
   const [physicalStart] = harness.handles();
 
-  physicalStart.dispatchEvent(pointerEvent(harness.window, 'pointerdown', { x: 120, y: 100 }));
-  physicalStart.dispatchEvent(pointerEvent(harness.window, 'pointermove', { x: 170, y: 100 }));
+  physicalStart.getBoundingClientRect = () => ({ top: 105, height: 58 });
+
+  physicalStart.dispatchEvent(pointerEvent(harness.window, 'pointerdown', { x: 120, y: 134 }));
+  assert.equal(harness.menu().hidden, true);
+  physicalStart.dispatchEvent(pointerEvent(harness.window, 'pointermove', { x: 170, y: 140 }));
   harness.flushAnimationFrames();
 
   assert.deepEqual(harness.selectCalls.at(-1), { column: 5, row: 12, length: 2 });
   assert.equal(physicalStart.style.transform, 'translate3d(150px, 105px, 0)');
 
-  physicalStart.dispatchEvent(pointerEvent(harness.window, 'pointerup', { x: 170, y: 100 }));
+  physicalStart.dispatchEvent(pointerEvent(harness.window, 'pointerup', { x: 170, y: 140 }));
+  harness.flushAnimationFrames();
+  assert.equal(harness.menu().hidden, false);
   harness.disposable.dispose();
 });
 
@@ -274,12 +361,14 @@ test('handle mapping advances off a wide-character continuation cell', () => {
   harness.flushAnimationFrames();
   const [, end] = harness.handles();
 
-  end.dispatchEvent(pointerEvent(harness.window, 'pointerdown', { x: 150, y: 100 }));
-  end.dispatchEvent(pointerEvent(harness.window, 'pointermove', { x: 130, y: 100 }));
+  end.getBoundingClientRect = () => ({ top: 105, height: 58 });
+
+  end.dispatchEvent(pointerEvent(harness.window, 'pointerdown', { x: 150, y: 134 }));
+  end.dispatchEvent(pointerEvent(harness.window, 'pointermove', { x: 130, y: 140 }));
 
   assert.deepEqual(harness.selectCalls.at(-1), { column: 2, row: 12, length: 2 });
 
-  end.dispatchEvent(pointerEvent(harness.window, 'pointerup', { x: 130, y: 100 }));
+  end.dispatchEvent(pointerEvent(harness.window, 'pointerup', { x: 130, y: 140 }));
   harness.disposable.dispose();
 });
 
@@ -288,10 +377,12 @@ test('dragging near a screen edge scrolls by terminal rows', async () => {
   harness.flushAnimationFrames();
   const [, end] = harness.handles();
 
-  end.dispatchEvent(pointerEvent(harness.window, 'pointerdown', { x: 150, y: 100 }));
-  end.dispatchEvent(pointerEvent(harness.window, 'pointermove', { x: 150, y: 149 }));
+  end.getBoundingClientRect = () => ({ top: 105, height: 58 });
+
+  end.dispatchEvent(pointerEvent(harness.window, 'pointerdown', { x: 150, y: 134 }));
+  end.dispatchEvent(pointerEvent(harness.window, 'pointermove', { x: 150, y: 189 }));
   await new Promise((resolve) => setTimeout(resolve, 100));
-  end.dispatchEvent(pointerEvent(harness.window, 'pointerup', { x: 150, y: 149 }));
+  end.dispatchEvent(pointerEvent(harness.window, 'pointerup', { x: 150, y: 189 }));
 
   assert.ok(harness.scrollCalls.includes(1));
   harness.disposable.dispose();

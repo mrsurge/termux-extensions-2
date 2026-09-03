@@ -247,11 +247,15 @@ interface XtermTerminalLike {
   onScroll?(handler: (viewportY: number) => void): XtermDisposable;
   onSelectionChange?(handler: () => void): XtermDisposable;
   hasSelection?(): boolean;
+  getSelection?(): string;
   getSelectionPosition?(): {
     start: { x: number; y: number };
     end: { x: number; y: number };
   } | undefined;
   select?(column: number, row: number, length: number): void;
+  selectAll?(): void;
+  clearSelection?(): void;
+  paste?(data: string): void;
   scrollLines?(lines: number): void;
   attachCustomKeyEventHandler?(handler: (event: KeyboardEvent) => boolean): void;
   setOption?(key: string, value: unknown): void;

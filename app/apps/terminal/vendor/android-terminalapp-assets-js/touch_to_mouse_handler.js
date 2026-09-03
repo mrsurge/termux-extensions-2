@@ -24,8 +24,11 @@ const DOUBLE_TAP_MS = 280;
 const DOUBLE_TAP_PX = 24;
 const EDGE_SCROLL_PX = 32;
 const EDGE_SCROLL_INTERVAL_MS = 80;
+const SELECTION_DRAG_OFFSET_ROWS = 2;
+const HANDLE_HEIGHT_PX = 58;
 const HANDLE_LAYER_CLASS = 'te2-xterm-touch-selection-layer';
 const HANDLE_CLASS = 'te2-xterm-touch-selection-handle';
+const MENU_CLASS = 'te2-xterm-touch-selection-menu';
 const STYLE_ID = 'te2-xterm-touch-selection-style';
 
 let gestureState = null;
@@ -33,8 +36,14 @@ let handleDrag = null;
 const attachments = new WeakMap();
 const attachmentsByRoot = new WeakMap();
 
+function isMobileUserAgent() {
+  if (navigator.userAgentData?.mobile === true) return true;
+  return /\b(?:Android|Mobile|iPhone|iPad|iPod)\b/i.test(navigator.userAgent || '');
+}
+
 function helpersEnabled() {
-  return window.__fileEditorCm6TerminalHelpersActive !== false;
+  return isMobileUserAgent()
+    && window.__fileEditorCm6TerminalHelpersActive !== false;
 }
 
 function getPoint(event) {
@@ -94,9 +103,13 @@ function unlockGestureRoot() {
 }
 
 function resetGestureState() {
+  const attachment = gestureState?.terminalRoot
+    ? attachmentsByRoot.get(gestureState.terminalRoot)
+    : null;
   clearLongPress();
   unlockGestureRoot();
   gestureState = null;
+  if (attachment) scheduleRender(attachment);
 }
 
 function lockGestureRoot(root) {
@@ -161,6 +174,8 @@ function startSelection(point) {
   if (!gestureState || gestureState.mode === 'select') return;
   clearLongPress();
   gestureState.mode = 'select';
+  const attachment = attachmentsByRoot.get(gestureState.terminalRoot);
+  if (attachment) hideMenu(attachment);
   dispatchMouse('mousedown', point, gestureState.mouseTarget);
 }
 
@@ -215,6 +230,8 @@ function handleTouchStart(event) {
     lockedRootStyle: lockGestureRoot(terminalRoot),
     longPressTimer: setTimeout(() => startSelection(point), LONG_PRESS_MS),
   };
+  const attachment = attachmentsByRoot.get(terminalRoot);
+  if (attachment) hideMenu(attachment);
 }
 
 function handleTouchMove(event) {
@@ -312,7 +329,7 @@ function ensureHandleStyles() {
     .${HANDLE_CLASS} {
       position: fixed;
       width: 40px;
-      height: 44px;
+      height: ${HANDLE_HEIGHT_PX}px;
       margin: 0;
       padding: 0;
       border: 0;
@@ -348,11 +365,45 @@ function ensureHandleStyles() {
       border-radius: 50% 50% 50% 0;
       background: rgba(71, 137, 255, 0.94);
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.42);
-      transform: translateX(-50%) rotate(-45deg);
+      transform: translateX(-50%) rotate(135deg);
     }
     .${HANDLE_CLASS}.dragging::after {
       background: #8fbcff;
       box-shadow: 0 2px 12px rgba(45, 116, 255, 0.68);
+    }
+    .${MENU_CLASS} {
+      position: fixed;
+      display: flex;
+      align-items: stretch;
+      gap: 2px;
+      min-height: 38px;
+      padding: 3px;
+      border: 1px solid rgba(130, 163, 214, 0.42);
+      border-radius: 9px;
+      background: rgba(12, 20, 35, 0.94);
+      box-shadow: 0 7px 24px rgba(0, 0, 0, 0.48);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      pointer-events: auto;
+      touch-action: manipulation;
+      transform: translate(-50%, calc(-100% - 8px));
+    }
+    .${MENU_CLASS}[hidden] { display: none !important; }
+    .${MENU_CLASS} button {
+      min-width: 52px;
+      min-height: 38px;
+      padding: 0 10px;
+      border: 0;
+      border-radius: 6px;
+      color: #e7efff;
+      background: transparent;
+      font: 600 12px/1 ui-sans-serif, sans-serif;
+      letter-spacing: 0.01em;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .${MENU_CLASS} button:active {
+      background: rgba(91, 145, 235, 0.3);
     }
   `;
   (document.head || document.documentElement).appendChild(style);
@@ -367,6 +418,27 @@ function makeHandle(label) {
   handle.tabIndex = -1;
   handle.hidden = true;
   return handle;
+}
+
+function makeMenu() {
+  const menu = document.createElement('div');
+  menu.className = MENU_CLASS;
+  menu.setAttribute('role', 'toolbar');
+  menu.setAttribute('aria-label', 'Terminal selection actions');
+  menu.hidden = true;
+  for (const [action, label] of [
+    ['copy', 'Copy'],
+    ['paste', 'Paste'],
+    ['selectAll', 'Select all'],
+  ]) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.action = action;
+    button.textContent = label;
+    button.tabIndex = -1;
+    menu.appendChild(button);
+  }
+  return menu;
 }
 
 function getScreenGeometry(attachment) {
@@ -418,11 +490,63 @@ function setHandlePosition(handle, cell, attachment, geometry) {
   handle.setAttribute('aria-hidden', 'false');
 }
 
+function hideMenu(attachment) {
+  attachment.menu.hidden = true;
+  attachment.menu.setAttribute('aria-hidden', 'true');
+}
+
+function syncHandleLabels(attachment) {
+  attachment.startHandle.setAttribute('aria-label', 'Adjust selection start');
+  attachment.endHandle.setAttribute('aria-label', 'Adjust selection end');
+}
+
+function positionMenu(selection, attachment, geometry) {
+  if (
+    handleDrag?.attachment === attachment
+    || gestureState?.terminalRoot === attachment.root
+  ) {
+    hideMenu(attachment);
+    return;
+  }
+  const { terminal } = attachment;
+  const viewportY = Number(terminal.buffer?.active?.viewportY) || 0;
+  const viewportEnd = viewportY + terminal.rows - 1;
+  const effectiveEndRow = selection.end.col === 0 && selection.end.row > selection.start.row
+    ? selection.end.row - 1
+    : selection.end.row;
+  const firstVisibleRow = Math.max(selection.start.row, viewportY);
+  const lastVisibleRow = Math.min(effectiveEndRow, viewportEnd);
+  if (firstVisibleRow > lastVisibleRow) {
+    hideMenu(attachment);
+    return;
+  }
+  const firstColumn = firstVisibleRow === selection.start.row ? selection.start.col : 0;
+  const lastColumn = firstVisibleRow === effectiveEndRow
+    ? selection.end.col || terminal.cols
+    : terminal.cols;
+  const anchorColumn = (firstColumn + Math.max(firstColumn + 1, lastColumn)) / 2;
+  const rawX = geometry.left + anchorColumn * geometry.cellWidth;
+  const rawY = geometry.top + (firstVisibleRow - viewportY) * geometry.cellHeight;
+  const viewportLeft = window.visualViewport?.offsetLeft ?? 0;
+  const viewportTop = window.visualViewport?.offsetTop ?? 0;
+  const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
+  const menuHalfWidth = Math.max(88, attachment.menu.offsetWidth / 2);
+  const x = Math.min(
+    Math.max(rawX, viewportLeft + menuHalfWidth + 6),
+    viewportLeft + viewportWidth - menuHalfWidth - 6,
+  );
+  attachment.menu.style.left = `${x}px`;
+  attachment.menu.style.top = `${Math.max(rawY, viewportTop + 48)}px`;
+  attachment.menu.hidden = false;
+  attachment.menu.setAttribute('aria-hidden', 'false');
+}
+
 function hideHandles(attachment) {
   for (const handle of [attachment.startHandle, attachment.endHandle]) {
     handle.hidden = true;
     handle.setAttribute('aria-hidden', 'true');
   }
+  hideMenu(attachment);
 }
 
 function renderHandles(attachment) {
@@ -439,6 +563,7 @@ function renderHandles(attachment) {
   }
   setHandlePosition(attachment.startHandle, selection.start, attachment, geometry);
   setHandlePosition(attachment.endHandle, selection.end, attachment, geometry);
+  positionMenu(selection, attachment, geometry);
 }
 
 function scheduleRender(attachment) {
@@ -493,10 +618,14 @@ function stopEdgeScroll() {
 
 function updateHandleDrag() {
   if (!handleDrag) return;
+  const geometry = getScreenGeometry(handleDrag.attachment);
+  if (!geometry) return;
   const moving = clientPointToBufferCell(
     handleDrag.attachment,
     handleDrag.clientX,
-    handleDrag.clientY,
+    handleDrag.clientY
+      + handleDrag.touchOffsetY
+      - geometry.cellHeight * SELECTION_DRAG_OFFSET_ROWS,
   );
   if (!moving || compareCells(moving, handleDrag.fixed) === 0) return;
   const nextRole = compareCells(moving, handleDrag.fixed) < 0 ? 'start' : 'end';
@@ -505,6 +634,7 @@ function updateHandleDrag() {
     const previousStart = attachment.startHandle;
     attachment.startHandle = attachment.endHandle;
     attachment.endHandle = previousStart;
+    syncHandleLabels(attachment);
     handleDrag.role = nextRole;
   }
   if (selectBetween(handleDrag.attachment.terminal, moving, handleDrag.fixed)) {
@@ -553,6 +683,10 @@ function beginHandleDrag(event, attachment) {
   event.stopPropagation();
   const handle = event.currentTarget;
   const role = handle === attachment.startHandle ? 'start' : 'end';
+  const handleRect = handle.getBoundingClientRect();
+  const handleCenterY = handleRect.height > 0
+    ? handleRect.top + handleRect.height / 2
+    : event.clientY + HANDLE_HEIGHT_PX / 2;
   handleDrag = {
     attachment,
     handle,
@@ -561,14 +695,15 @@ function beginHandleDrag(event, attachment) {
     fixed: role === 'start' ? selection.end : selection.start,
     clientX: event.clientX,
     clientY: event.clientY,
+    touchOffsetY: handleCenterY - event.clientY,
     scrollDirection: 0,
     scrollTimer: null,
   };
   handle.classList.add('dragging');
+  hideMenu(attachment);
   try {
     handle.setPointerCapture(event.pointerId);
   } catch (_) {}
-  updateHandleDrag();
   updateEdgeScroll();
 }
 
@@ -588,11 +723,6 @@ function addDisposable(attachment, disposable) {
   }
 }
 
-function isTouchFirst() {
-  return Boolean(window.matchMedia?.('(pointer: coarse)').matches)
-    || Number(navigator.maxTouchPoints || 0) > 0;
-}
-
 function attach(terminal) {
   if (!terminal || typeof terminal !== 'object') {
     throw new TypeError('A terminal instance is required');
@@ -601,11 +731,14 @@ function attach(terminal) {
   if (existing) return existing.publicDisposable;
   const root = terminal.element;
   const screen = root?.querySelector?.('.xterm-screen');
-  if (!root || !screen || !isTouchFirst()) return { dispose() {} };
+  if (!root || !screen || !isMobileUserAgent()) return { dispose() {} };
   if (
     typeof terminal.select !== 'function'
     || typeof terminal.getSelectionPosition !== 'function'
     || typeof terminal.hasSelection !== 'function'
+    || typeof terminal.getSelection !== 'function'
+    || typeof terminal.paste !== 'function'
+    || typeof terminal.selectAll !== 'function'
   ) {
     throw new TypeError('The terminal selection API is unavailable');
   }
@@ -615,7 +748,8 @@ function attach(terminal) {
   layer.className = HANDLE_LAYER_CLASS;
   const startHandle = makeHandle('Adjust selection start');
   const endHandle = makeHandle('Adjust selection end');
-  layer.append(startHandle, endHandle);
+  const menu = makeMenu();
+  layer.append(startHandle, endHandle, menu);
   document.body.appendChild(layer);
 
   const attachment = {
@@ -625,6 +759,7 @@ function attach(terminal) {
     layer,
     startHandle,
     endHandle,
+    menu,
     renderRaf: null,
     resizeObserver: null,
     disposed: false,
@@ -643,6 +778,37 @@ function attach(terminal) {
     handle.addEventListener('pointercancel', finishHandleDrag);
     handle.addEventListener('lostpointercapture', finishHandleDrag);
   }
+  menu.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  menu.addEventListener('click', (event) => {
+    const button = event.target instanceof Element
+      ? event.target.closest('button[data-action]')
+      : null;
+    if (!button) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const action = button.dataset.action;
+    void (async () => {
+      try {
+        if (action === 'copy') {
+          const text = terminal.getSelection();
+          if (text) await navigator.clipboard.writeText(text);
+        } else if (action === 'paste') {
+          const text = await navigator.clipboard.readText();
+          if (text) terminal.paste(text);
+          terminal.clearSelection?.();
+        } else if (action === 'selectAll') {
+          terminal.selectAll();
+        }
+      } catch (error) {
+        console.warn(`[terminal] selection ${action || 'action'} failed`, error);
+      } finally {
+        scheduleRender(attachment);
+      }
+    })();
+  });
   addDisposable(attachment, terminal.onSelectionChange?.(() => scheduleRender(attachment)));
   addDisposable(attachment, terminal.onScroll?.(() => scheduleRender(attachment)));
   addDisposable(attachment, terminal.onResize?.(() => scheduleRender(attachment)));

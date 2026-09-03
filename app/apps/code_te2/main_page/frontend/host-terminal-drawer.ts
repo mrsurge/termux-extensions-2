@@ -120,6 +120,7 @@ interface XtermTerminal {
   };
   textarea?: HTMLTextAreaElement;
   clear: () => void;
+  clearSelection?: () => void;
   dispose: () => void;
   focus: () => void;
   getSelection?: () => string;
@@ -137,6 +138,8 @@ interface XtermTerminal {
   reset: () => void;
   scrollLines: (lines: number) => void;
   select?: (column: number, row: number, length: number) => void;
+  selectAll?: () => void;
+  paste?: (data: string) => void;
   setOption?: (name: string, value: unknown) => void;
   write: (data: string | Uint8Array) => void;
 }

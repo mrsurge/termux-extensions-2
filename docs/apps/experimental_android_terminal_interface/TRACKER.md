@@ -35,7 +35,9 @@
 ### Selection handles
 
 - [x] Render visible start and end handles for active selection.
+- [x] Orient the teardrop handles below their selection endpoints.
 - [x] Provide at least a 36 px touch target without an oversized visible handle.
+- [x] Resolve handle drags two terminal rows above the finger target.
 - [x] Position handles from xterm screen geometry and active `viewportY`.
 - [x] Update one endpoint while retaining the other.
 - [x] Support endpoint crossing.
@@ -45,6 +47,15 @@
 - [x] Hide handles for cleared, invalid, off-surface, non-touch, and disposed
   states.
 - [x] Dispose DOM, listeners, timers, and animation frames deterministically.
+
+### Selection actions
+
+- [x] Render Copy, Paste, and Select all above the visible selection.
+- [x] Keep selection actions from stealing terminal focus.
+- [x] Hide selection actions during terminal and handle drags.
+- [x] Restore selection actions after the active drag ends.
+- [x] Gate handles, selection actions, and custom touch gestures behind the
+  established Android/mobile user-agent predicate.
 
 ### Surface integration
 
@@ -66,11 +77,12 @@
 - [x] Run standalone Terminal tests: 20 passed.
 - [x] Build standalone Terminal frontend.
 - [x] Run Code TE2 typecheck.
-- [x] Run Code TE2 terminal transport/touch tests: 38 passed.
+- [x] Run Code TE2 terminal transport/touch tests: 40 passed.
 - [x] Build Code TE2 frontend.
 
 ### Live acceptance
 
+- [x] Pass the initial Android handle, drag-offset, and action-menu smoke test.
 - [ ] Standalone Terminal on GeckoView.
 - [ ] Code TE2 drawer on GeckoView.
 - [ ] Standalone Terminal on Cefrium.

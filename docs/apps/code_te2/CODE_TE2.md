@@ -1772,6 +1772,20 @@ There are three distinct layers:
    - This contract is shared by the standalone Terminal and Code TE2 terminal
      drawer. Non-Android and screen-reader paths retain upstream xterm behavior.
 
+4. **Shared xterm mobile touch-selection layer**
+   - `touch_to_mouse_handler.js` is an external adapter, not an xterm source or
+     prototype patch. The standalone Terminal copy is canonical for this
+     experiment and the Code TE2 copy remains byte-identical.
+   - `te2TerminalTouchSelection.attach(terminal)` uses xterm's public selection
+     and paste APIs, renders body-level handles and a Copy/Paste/Select all
+     toolbar, and owns deterministic disposal.
+   - The layer uses the established Android/mobile user-agent predicate, maps
+     visual viewport geometry to buffer cells, resolves handle drags two rows
+     above the finger, supports endpoint crossover and wide cells, and hides the
+     toolbar during terminal or handle drags.
+   - The initial Android live smoke test passed. Text-versus-whitespace gesture
+     behavior remains a separate xterm investigation.
+
 ### Key files
 
 | File | Role |
