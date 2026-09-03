@@ -1785,15 +1785,17 @@ There are three distinct layers:
      and paste APIs, renders body-level handles and a Copy/Paste/Select all
      toolbar, and owns deterministic disposal.
    - The layer uses the established Android/mobile user-agent predicate, maps
-     visual viewport geometry to buffer cells, resolves handle drags two rows
+     visual viewport geometry to buffer cells, resolves handle drags three rows
      above the finger, supports endpoint crossover and wide cells, and hides the
      toolbar during terminal or handle drags.
    - A long press invokes the fork's narrow public `selectWordAt` API, which
      reuses xterm's configured separators, wrapped-line handling, and wide-cell
      logic. Subsequent movement extends an anchored cell range directly through
      the public selection API; no synthetic mouse lifecycle can collapse it on
-     finger release. Pending taps remain on Chromium's compatibility path, and
-     text and blank cells use the same source-owned scroll route.
+     finger release. The adapter claims touchstart before Chromium can enter its
+     native long-press context path and blur the terminal IME; only a completed
+     tap replays a detail-1 xterm `mousedown`/`mouseup`/`click` sequence. Text
+     and blank cells use the same source-owned scroll route.
 
 ### Key files
 

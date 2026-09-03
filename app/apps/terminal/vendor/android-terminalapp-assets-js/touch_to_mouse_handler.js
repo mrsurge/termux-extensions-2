@@ -23,7 +23,7 @@ const DOUBLE_TAP_MS = 280;
 const DOUBLE_TAP_PX = 24;
 const EDGE_SCROLL_PX = 32;
 const EDGE_SCROLL_INTERVAL_MS = 80;
-const SELECTION_DRAG_OFFSET_ROWS = 2;
+const SELECTION_DRAG_OFFSET_ROWS = 3;
 const HANDLE_HEIGHT_PX = 58;
 const HANDLE_LAYER_CLASS = 'te2-xterm-touch-selection-layer';
 const HANDLE_CLASS = 'te2-xterm-touch-selection-handle';
@@ -170,19 +170,27 @@ function getTrackedTouch(event) {
 
 function maybeSelectWord(point, root) {
   const attachment = attachmentsByRoot.get(root);
-  if (!attachment) return;
+  if (!attachment) return false;
   const now = Date.now();
   const isDoubleTap = now - attachment.lastTapTime < DOUBLE_TAP_MS
     && Math.hypot(point.clientX - attachment.lastTapX, point.clientY - attachment.lastTapY)
       < DOUBLE_TAP_PX;
   if (isDoubleTap) {
-    dispatchMouse('dblclick', point, getMouseTarget(root));
+    const cell = clientPointToBufferCell(attachment, point.clientX, point.clientY);
+    if (cell && cell.col < attachment.terminal.cols) {
+      if (typeof attachment.terminal.selectWordAt === 'function') {
+        attachment.terminal.selectWordAt(cell.col, cell.row);
+      } else {
+        attachment.terminal.select(cell.col, cell.row, 1);
+      }
+    }
     attachment.lastTapTime = 0;
-    return;
+    return true;
   }
   attachment.lastTapTime = now;
   attachment.lastTapX = point.clientX;
   attachment.lastTapY = point.clientY;
+  return false;
 }
 
 function handleTouchStart(event) {
@@ -213,7 +221,7 @@ function handleTouchStart(event) {
   };
   const attachment = attachmentsByRoot.get(terminalRoot);
   if (attachment) hideMenu(attachment);
-  return true;
+  return false;
 }
 
 function handleTouchMove(event, isScrollGesture) {
@@ -231,6 +239,11 @@ function handleTouchMove(event, isScrollGesture) {
     gestureState.mode = 'scroll';
   }
   if (gestureState.mode === 'select') {
+    if (!isScrollGesture) {
+      event.preventDefault();
+      event.stopPropagation();
+      return false;
+    }
     const attachment = attachmentsByRoot.get(gestureState.terminalRoot);
     const moving = attachment
       ? clientPointToBufferCell(attachment, point.clientX, point.clientY)
@@ -272,10 +285,17 @@ function handleTouchEnd(event, isScrollGesture) {
     resetGestureState();
     return false;
   } else {
-    maybeSelectWord(point, gestureState.terminalRoot);
+    const selectedWord = maybeSelectWord(point, gestureState.terminalRoot);
+    if (!selectedWord) {
+      dispatchMouse('mousedown', point, gestureState.mouseTarget);
+      dispatchMouse('mouseup', point, gestureState.mouseTarget);
+      dispatchMouse('click', point, gestureState.mouseTarget);
+    }
+    event.preventDefault();
+    event.stopPropagation();
   }
   resetGestureState();
-  return true;
+  return false;
 }
 
 function handleTouchCancel(event) {

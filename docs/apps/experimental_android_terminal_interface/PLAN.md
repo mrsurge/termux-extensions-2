@@ -156,6 +156,8 @@ Required behavior:
 - long press selects the target word through xterm's own word-boundary logic,
   then drag extends an anchored range directly through its public selection API
   without synthetic mouse events;
+- touchstart is claimed synchronously so native long-press context handling
+  cannot blur the terminal IME; only a completed tap replays xterm mouse input;
 - double tap keeps the existing word-selection behavior;
 - active selection renders start and end handles;
 - dragging a handle updates only that endpoint and may cross the fixed endpoint;

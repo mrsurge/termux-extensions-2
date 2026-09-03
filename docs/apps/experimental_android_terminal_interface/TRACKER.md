@@ -32,6 +32,8 @@
 - [x] Preserve one-finger terminal scrolling.
 - [x] Preserve long-press word selection through xterm's own word-boundary
   implementation; finger release must not collapse the selected word.
+- [x] Claim touchstart before Cefrium's native context path can blur the IME,
+  then replay ordinary xterm mouse input only after a completed tap.
 - [x] Preserve double-tap word selection.
 - [x] Prevent handle gestures from sending PTY input or stealing IME focus.
 
@@ -40,7 +42,7 @@
 - [x] Render visible start and end handles for active selection.
 - [x] Orient the teardrop handles below their selection endpoints.
 - [x] Provide at least a 36 px touch target without an oversized visible handle.
-- [x] Resolve handle drags two terminal rows above the finger target.
+- [x] Resolve handle drags three terminal rows above the finger target.
 - [x] Position handles from xterm screen geometry and active `viewportY`.
 - [x] Update one endpoint while retaining the other.
 - [x] Support endpoint crossing.

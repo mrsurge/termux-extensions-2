@@ -352,9 +352,13 @@ test('selection menu owns copy, paste, and select-all actions', async () => {
   harness.disposable.dispose();
 });
 
-test('a pending tap preserves xterm compatibility mouse selection', () => {
+test('a pending tap replays an ordinary xterm mouse sequence after claiming touchstart', () => {
   const harness = createHarness();
   const screen = harness.root.querySelector('.xterm-screen');
+  const mouseEvents = [];
+  for (const type of ['mousedown', 'mouseup', 'click']) {
+    screen.addEventListener(type, () => mouseEvents.push(type));
+  }
 
   const started = screen.dispatchEvent(
     touchEvent(harness.window, 'touchstart', screen, { x: 140, y: 90 }),
@@ -363,8 +367,9 @@ test('a pending tap preserves xterm compatibility mouse selection', () => {
     touchEvent(harness.window, 'touchend', screen, { x: 140, y: 90 }),
   );
 
-  assert.equal(started, true);
-  assert.equal(ended, true);
+  assert.equal(started, false);
+  assert.equal(ended, false);
+  assert.deepEqual(mouseEvents, ['mousedown', 'mouseup', 'click']);
   harness.disposable.dispose();
 });
 
@@ -412,6 +417,7 @@ test('long press retains word selection without a synthetic mouse lifecycle', as
   screen.dispatchEvent(touchEvent(harness.window, 'touchstart', screen, { x: 140, y: 90 }));
   assert.equal(harness.menu().hidden, true);
   await new Promise((resolve) => setTimeout(resolve, 470));
+  screen.dispatchEvent(touchEvent(harness.window, 'touchmove', screen, { x: 141, y: 90 }));
   screen.dispatchEvent(touchEvent(harness.window, 'touchend', screen, { x: 140, y: 90 }));
   harness.flushAnimationFrames();
 
@@ -451,7 +457,7 @@ test('dragging after long press extends the direct cell selection', async () => 
   harness.disposable.dispose();
 });
 
-test('double tap still dispatches xterm word selection', () => {
+test('double tap selects a word directly without a synthetic double click', () => {
   const harness = createHarness();
   const screen = harness.root.querySelector('.xterm-screen');
   let doubleClicks = 0;
@@ -462,7 +468,8 @@ test('double tap still dispatches xterm word selection', () => {
     screen.dispatchEvent(touchEvent(harness.window, 'touchend', screen, { x: 140, y: 90 }));
   }
 
-  assert.equal(doubleClicks, 1);
+  assert.equal(doubleClicks, 0);
+  assert.deepEqual(harness.wordSelectCalls, [{ column: 4, row: 11 }]);
   harness.disposable.dispose();
 });
 
@@ -478,8 +485,8 @@ test('dragging a handle across its peer preserves the physical moving handle', (
   physicalStart.dispatchEvent(pointerEvent(harness.window, 'pointermove', { x: 170, y: 140 }));
   harness.flushAnimationFrames();
 
-  assert.deepEqual(harness.selectCalls.at(-1), { column: 5, row: 12, length: 2 });
-  assert.equal(physicalStart.style.transform, 'translate3d(150px, 105px, 0)');
+  assert.deepEqual(harness.selectCalls.at(-1), { column: 7, row: 11, length: 8 });
+  assert.equal(physicalStart.style.transform, 'translate3d(150px, 85px, 0)');
 
   physicalStart.dispatchEvent(pointerEvent(harness.window, 'pointerup', { x: 170, y: 140 }));
   harness.flushAnimationFrames();
@@ -497,7 +504,7 @@ test('handle mapping advances off a wide-character continuation cell', () => {
   end.dispatchEvent(pointerEvent(harness.window, 'pointerdown', { x: 150, y: 134 }));
   end.dispatchEvent(pointerEvent(harness.window, 'pointermove', { x: 130, y: 140 }));
 
-  assert.deepEqual(harness.selectCalls.at(-1), { column: 2, row: 12, length: 2 });
+  assert.deepEqual(harness.selectCalls.at(-1), { column: 4, row: 11, length: 8 });
 
   end.dispatchEvent(pointerEvent(harness.window, 'pointerup', { x: 130, y: 140 }));
   harness.disposable.dispose();
