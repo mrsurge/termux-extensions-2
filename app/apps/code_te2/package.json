@@ -18,7 +18,7 @@
     "test:code-inspector": "node --test tests/code_navigation_runtime.test.mjs tests/code_inspector_runtime.test.mjs",
     "test:marketplace": "node --test tests/explorer_marketplace.test.mjs",
     "test:mobile-input": "node --test tests/mobile_special_keys.test.mjs",
-    "test:transport": "node --test tests/socketio_transport.test.mjs tests/terminal_drawer_transport.test.mjs tests/terminal_output_projection.test.mjs",
+    "test:transport": "node --test tests/socketio_transport.test.mjs tests/terminal_drawer_transport.test.mjs tests/terminal_output_projection.test.mjs tests/terminal_touch_selection.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

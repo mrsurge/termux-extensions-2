@@ -1,0 +1,309 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import test from 'node:test';
+
+import { Window } from 'happy-dom';
+
+
+const codeTe2HelperPath = path.resolve(
+  import.meta.dirname,
+  '../vendor/android-terminalapp-assets-js/touch_to_mouse_handler.js',
+);
+const terminalHelperPath = path.resolve(
+  import.meta.dirname,
+  '../../terminal/vendor/android-terminalapp-assets-js/touch_to_mouse_handler.js',
+);
+const helperSource = fs.readFileSync(codeTe2HelperPath, 'utf8');
+
+function createHarness({
+  cols = 10,
+  rows = 5,
+  viewportY = 10,
+  selection = {
+    start: { x: 2, y: 12 },
+    end: { x: 5, y: 12 },
+  },
+  wideContinuationColumns = new Set(),
+} = {}) {
+  const window = new Window({ url: 'http://127.0.0.1/apps/by-id/terminal' });
+  Object.defineProperty(window.navigator, 'maxTouchPoints', {
+    configurable: true,
+    value: 1,
+  });
+  window.matchMedia = () => ({ matches: true });
+
+  let rafId = 0;
+  const rafCallbacks = new Map();
+  window.requestAnimationFrame = (callback) => {
+    const id = ++rafId;
+    rafCallbacks.set(id, callback);
+    return id;
+  };
+  window.cancelAnimationFrame = (id) => rafCallbacks.delete(id);
+  const flushAnimationFrames = () => {
+    while (rafCallbacks.size) {
+      const callbacks = [...rafCallbacks.entries()];
+      rafCallbacks.clear();
+      for (const [, callback] of callbacks) callback(window.performance.now());
+    }
+  };
+
+  const root = window.document.createElement('div');
+  root.className = 'xterm';
+  const viewport = window.document.createElement('div');
+  viewport.className = 'xterm-viewport';
+  const screen = window.document.createElement('div');
+  screen.className = 'xterm-screen';
+  const canvas = window.document.createElement('canvas');
+  screen.appendChild(canvas);
+  root.append(viewport, screen);
+  window.document.body.appendChild(root);
+
+  const surfaceRect = {
+    left: 100,
+    top: 50,
+    right: 200,
+    bottom: 150,
+    width: 100,
+    height: 100,
+    x: 100,
+    y: 50,
+    toJSON() { return this; },
+  };
+  screen.getBoundingClientRect = () => surfaceRect;
+  canvas.getBoundingClientRect = () => surfaceRect;
+
+  let currentSelection = structuredClone(selection);
+  let currentViewportY = viewportY;
+  const callbacks = {
+    resize: new Set(),
+    scroll: new Set(),
+    selection: new Set(),
+  };
+  const selectCalls = [];
+  const scrollCalls = [];
+  const disposedSubscriptions = [];
+  const subscribe = (kind, callback) => {
+    callbacks[kind].add(callback);
+    return {
+      dispose() {
+        callbacks[kind].delete(callback);
+        disposedSubscriptions.push(kind);
+      },
+    };
+  };
+  const terminal = {
+    cols,
+    rows,
+    element: root,
+    buffer: {
+      active: {
+        get viewportY() { return currentViewportY; },
+        getLine() {
+          return {
+            getCell(column) {
+              return {
+                getWidth: () => wideContinuationColumns.has(column) ? 0 : 1,
+              };
+            },
+          };
+        },
+      },
+    },
+    hasSelection: () => Boolean(currentSelection),
+    getSelectionPosition: () => currentSelection,
+    onSelectionChange: (callback) => subscribe('selection', callback),
+    onScroll: (callback) => subscribe('scroll', callback),
+    onResize: (callback) => subscribe('resize', callback),
+    select(column, row, length) {
+      selectCalls.push({ column, row, length });
+      const endLinear = row * cols + column + length;
+      let endRow = Math.floor(endLinear / cols);
+      let endColumn = endLinear % cols;
+      if (endColumn === 0 && length > 0) {
+        endRow -= 1;
+        endColumn = cols;
+      }
+      currentSelection = {
+        start: { x: column, y: row },
+        end: { x: endColumn, y: endRow },
+      };
+      for (const callback of callbacks.selection) callback();
+    },
+    scrollLines(amount) {
+      scrollCalls.push(amount);
+      currentViewportY += amount;
+      for (const callback of callbacks.scroll) callback(currentViewportY);
+    },
+  };
+
+  window.eval(helperSource);
+  const api = window.te2TerminalTouchSelection;
+  assert.equal(typeof api?.attach, 'function');
+  const disposable = api.attach(terminal);
+
+  return {
+    window,
+    root,
+    terminal,
+    disposable,
+    selectCalls,
+    scrollCalls,
+    disposedSubscriptions,
+    flushAnimationFrames,
+    handles: () => [
+      ...window.document.querySelectorAll('.te2-xterm-touch-selection-handle'),
+    ],
+  };
+}
+
+function pointerEvent(window, type, { x, y, pointerId = 1 } = {}) {
+  return new window.PointerEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    button: 0,
+    clientX: x,
+    clientY: y,
+    pointerId,
+    pointerType: 'touch',
+  });
+}
+
+function touchEvent(window, type, target, { x, y, identifier = 1 } = {}) {
+  const point = {
+    identifier,
+    target,
+    clientX: x,
+    clientY: y,
+    screenX: x,
+    screenY: y,
+  };
+  const event = new window.Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperties(event, {
+    touches: {
+      value: type === 'touchend' || type === 'touchcancel' ? [] : [point],
+    },
+    changedTouches: {
+      value: type === 'touchend' || type === 'touchcancel' ? [point] : [],
+    },
+  });
+  return event;
+}
+
+test('standalone and Code TE2 serve one identical touch helper', () => {
+  assert.equal(fs.readFileSync(terminalHelperPath, 'utf8'), helperSource);
+});
+
+test('selection handles use viewport-adjusted xterm cell geometry', () => {
+  const harness = createHarness();
+  harness.flushAnimationFrames();
+  const [start, end] = harness.handles();
+
+  assert.equal(start.hidden, false);
+  assert.equal(end.hidden, false);
+  assert.equal(start.style.transform, 'translate3d(100px, 105px, 0)');
+  assert.equal(end.style.transform, 'translate3d(130px, 105px, 0)');
+
+  harness.disposable.dispose();
+});
+
+test('one-finger movement remains wheel-backed terminal scrolling', () => {
+  const harness = createHarness();
+  const viewport = harness.root.querySelector('.xterm-viewport');
+  const screen = harness.root.querySelector('.xterm-screen');
+  const wheelDeltas = [];
+  viewport.addEventListener('wheel', (event) => wheelDeltas.push(event.deltaY));
+
+  screen.dispatchEvent(touchEvent(harness.window, 'touchstart', screen, { x: 140, y: 90 }));
+  screen.dispatchEvent(touchEvent(harness.window, 'touchmove', screen, { x: 140, y: 120 }));
+  screen.dispatchEvent(touchEvent(harness.window, 'touchend', screen, { x: 140, y: 120 }));
+
+  assert.deepEqual(wheelDeltas, [-12]);
+  harness.disposable.dispose();
+});
+
+test('long press still enters xterm mouse selection', async () => {
+  const harness = createHarness();
+  const screen = harness.root.querySelector('.xterm-screen');
+  const mouseEvents = [];
+  screen.addEventListener('mousedown', () => mouseEvents.push('mousedown'));
+  screen.addEventListener('mouseup', () => mouseEvents.push('mouseup'));
+
+  screen.dispatchEvent(touchEvent(harness.window, 'touchstart', screen, { x: 140, y: 90 }));
+  await new Promise((resolve) => setTimeout(resolve, 470));
+  screen.dispatchEvent(touchEvent(harness.window, 'touchend', screen, { x: 140, y: 90 }));
+
+  assert.deepEqual(mouseEvents, ['mousedown', 'mouseup']);
+  harness.disposable.dispose();
+});
+
+test('double tap still dispatches xterm word selection', () => {
+  const harness = createHarness();
+  const screen = harness.root.querySelector('.xterm-screen');
+  let doubleClicks = 0;
+  screen.addEventListener('dblclick', () => { doubleClicks += 1; });
+
+  for (let tap = 0; tap < 2; tap += 1) {
+    screen.dispatchEvent(touchEvent(harness.window, 'touchstart', screen, { x: 140, y: 90 }));
+    screen.dispatchEvent(touchEvent(harness.window, 'touchend', screen, { x: 140, y: 90 }));
+  }
+
+  assert.equal(doubleClicks, 1);
+  harness.disposable.dispose();
+});
+
+test('dragging a handle across its peer preserves the physical moving handle', () => {
+  const harness = createHarness();
+  harness.flushAnimationFrames();
+  const [physicalStart] = harness.handles();
+
+  physicalStart.dispatchEvent(pointerEvent(harness.window, 'pointerdown', { x: 120, y: 100 }));
+  physicalStart.dispatchEvent(pointerEvent(harness.window, 'pointermove', { x: 170, y: 100 }));
+  harness.flushAnimationFrames();
+
+  assert.deepEqual(harness.selectCalls.at(-1), { column: 5, row: 12, length: 2 });
+  assert.equal(physicalStart.style.transform, 'translate3d(150px, 105px, 0)');
+
+  physicalStart.dispatchEvent(pointerEvent(harness.window, 'pointerup', { x: 170, y: 100 }));
+  harness.disposable.dispose();
+});
+
+test('handle mapping advances off a wide-character continuation cell', () => {
+  const harness = createHarness({ wideContinuationColumns: new Set([3]) });
+  harness.flushAnimationFrames();
+  const [, end] = harness.handles();
+
+  end.dispatchEvent(pointerEvent(harness.window, 'pointerdown', { x: 150, y: 100 }));
+  end.dispatchEvent(pointerEvent(harness.window, 'pointermove', { x: 130, y: 100 }));
+
+  assert.deepEqual(harness.selectCalls.at(-1), { column: 2, row: 12, length: 2 });
+
+  end.dispatchEvent(pointerEvent(harness.window, 'pointerup', { x: 130, y: 100 }));
+  harness.disposable.dispose();
+});
+
+test('dragging near a screen edge scrolls by terminal rows', async () => {
+  const harness = createHarness();
+  harness.flushAnimationFrames();
+  const [, end] = harness.handles();
+
+  end.dispatchEvent(pointerEvent(harness.window, 'pointerdown', { x: 150, y: 100 }));
+  end.dispatchEvent(pointerEvent(harness.window, 'pointermove', { x: 150, y: 149 }));
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  end.dispatchEvent(pointerEvent(harness.window, 'pointerup', { x: 150, y: 149 }));
+
+  assert.ok(harness.scrollCalls.includes(1));
+  harness.disposable.dispose();
+});
+
+test('dispose removes handles and xterm subscriptions', () => {
+  const harness = createHarness();
+  harness.flushAnimationFrames();
+  assert.equal(harness.handles().length, 2);
+
+  harness.disposable.dispose();
+
+  assert.equal(harness.handles().length, 0);
+  assert.deepEqual(harness.disposedSubscriptions.sort(), ['resize', 'scroll', 'selection']);
+});

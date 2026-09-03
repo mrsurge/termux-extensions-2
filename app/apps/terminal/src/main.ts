@@ -224,6 +224,15 @@ interface XtermWebFontsAddonNamespace {
 interface XtermTerminalLike {
   cols: number;
   rows: number;
+  element?: HTMLElement;
+  buffer?: {
+    active?: {
+      viewportY?: number;
+      getLine?: (row: number) => {
+        getCell?: (column: number) => { getWidth?: () => number } | undefined;
+      } | undefined;
+    };
+  };
   options: { fontSize?: number };
   open(container: HTMLElement): void;
   focus(): void;
@@ -235,8 +244,21 @@ interface XtermTerminalLike {
   loadAddon(addon: XtermAddonLike): void;
   onData(handler: (data: string) => void): XtermDisposable;
   onResize(handler: (event: { cols: number; rows: number }) => void): XtermDisposable;
+  onScroll?(handler: (viewportY: number) => void): XtermDisposable;
+  onSelectionChange?(handler: () => void): XtermDisposable;
+  hasSelection?(): boolean;
+  getSelectionPosition?(): {
+    start: { x: number; y: number };
+    end: { x: number; y: number };
+  } | undefined;
+  select?(column: number, row: number, length: number): void;
+  scrollLines?(lines: number): void;
   attachCustomKeyEventHandler?(handler: (event: KeyboardEvent) => boolean): void;
   setOption?(key: string, value: unknown): void;
+}
+
+interface TerminalTouchSelectionApi {
+  attach(terminal: XtermTerminalLike): XtermDisposable;
 }
 
 type VendoredCtrlTerminal = XtermTerminalLike & {
@@ -278,6 +300,7 @@ interface AppState {
   fitFramesRemaining: number;
   lastResizeSent: string | null;
   resizeObserver: ResizeObserver | null;
+  touchSelection: XtermDisposable | null;
   mode: 'list' | 'terminal';
   showExited: boolean;
   specialKeysVisible: boolean;
@@ -363,6 +386,7 @@ function getRuntimeWindow(): Window & {
   FitAddon?: XtermFitAddonConstructor | { FitAddon?: XtermFitAddonConstructor };
   WebFontsAddon?: XtermWebFontsAddonConstructor | XtermWebFontsAddonNamespace;
   __terminalTestingTouchToMouseLoaded?: boolean;
+  te2TerminalTouchSelection?: TerminalTouchSelectionApi;
   __androidTerminalCtrlDesired?: boolean;
   __androidTerminalSetCtrl?: (active: boolean) => void;
   __te2MobileCtrlLocked?: boolean;
@@ -375,6 +399,7 @@ function getRuntimeWindow(): Window & {
     FitAddon?: XtermFitAddonConstructor | { FitAddon?: XtermFitAddonConstructor };
     WebFontsAddon?: XtermWebFontsAddonConstructor | XtermWebFontsAddonNamespace;
     __terminalTestingTouchToMouseLoaded?: boolean;
+    te2TerminalTouchSelection?: TerminalTouchSelectionApi;
     __androidTerminalCtrlDesired?: boolean;
     __androidTerminalSetCtrl?: (active: boolean) => void;
     __te2MobileCtrlLocked?: boolean;
@@ -422,6 +447,15 @@ async function ensureTouchToMouseHelper(): Promise<void> {
   if (runtimeWindow.__terminalTestingTouchToMouseLoaded) return;
   await loadHelperScript(helperUrl('touch_to_mouse_handler.js'));
   runtimeWindow.__terminalTestingTouchToMouseLoaded = true;
+}
+
+function attachTouchSelection(terminal: XtermTerminalLike): XtermDisposable | null {
+  const api = getRuntimeWindow().te2TerminalTouchSelection;
+  if (!api) {
+    console.warn('[terminal] touch selection helper unavailable');
+    return null;
+  }
+  return api.attach(terminal);
 }
 
 async function ensureSocketIoClient(): Promise<void> {
@@ -723,6 +757,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     fitFramesRemaining: 0,
     lastResizeSent: null,
     resizeObserver: null,
+    touchSelection: null,
     mode: 'list',
     showExited: false,
     specialKeysVisible: true,
@@ -1448,6 +1483,12 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     }
     state.resizeObserver = null;
     try {
+      state.touchSelection?.dispose();
+    } catch {
+      // ignore
+    }
+    state.touchSelection = null;
+    try {
       state.term?.dispose();
     } catch {
       // ignore
@@ -1608,6 +1649,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     state.term = term;
 
     await ensureTouchToMouseHelper();
+    state.touchSelection = attachTouchSelection(term);
     await bindVendoredCtrlHandler(term);
     installVendoredCtrlFocusBinding(term);
     term.onData((data) => {

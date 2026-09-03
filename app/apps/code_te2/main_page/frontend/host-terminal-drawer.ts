@@ -105,6 +105,14 @@ interface XtermTerminal {
   cols: number;
   rows: number;
   element?: HTMLElement;
+  buffer?: {
+    active?: {
+      viewportY?: number;
+      getLine?: (row: number) => {
+        getCell?: (column: number) => { getWidth?: () => number } | undefined;
+      } | undefined;
+    };
+  };
   input?: (data: string) => void;
   options: {
     fontSize?: number;
@@ -115,16 +123,30 @@ interface XtermTerminal {
   dispose: () => void;
   focus: () => void;
   getSelection?: () => string;
+  getSelectionPosition?: () => {
+    start: { x: number; y: number };
+    end: { x: number; y: number };
+  } | undefined;
   hasSelection?: () => boolean;
   loadAddon: (addon: XtermFitAddon) => void;
   onData: (handler: (data: string) => void) => void;
-  onResize: (handler: (size: { cols: number; rows: number }) => void) => void;
-  onSelectionChange: (handler: () => void) => void;
+  onResize: (handler: (size: { cols: number; rows: number }) => void) => XtermDisposable;
+  onScroll?: (handler: (viewportY: number) => void) => XtermDisposable;
+  onSelectionChange: (handler: () => void) => XtermDisposable;
   open: (container: HTMLElement) => void;
   reset: () => void;
   scrollLines: (lines: number) => void;
+  select?: (column: number, row: number, length: number) => void;
   setOption?: (name: string, value: unknown) => void;
   write: (data: string | Uint8Array) => void;
+}
+
+interface XtermDisposable {
+  dispose(): void;
+}
+
+interface TerminalTouchSelectionApi {
+  attach(terminal: XtermTerminal): XtermDisposable;
 }
 
 interface XtermTerminalCtor {
@@ -136,12 +158,11 @@ interface TerminalRuntimeWindow extends Window {
   Terminal?: XtermTerminalCtor;
   __fileEditorCm6DrawerTouchToMouseLoaded?: boolean;
   __fileEditorCm6TerminalHelpersActive?: boolean;
+  te2TerminalTouchSelection?: TerminalTouchSelectionApi;
   ctrl?: boolean;
   io?: SocketIoClient;
   term?: XtermTerminal;
 }
-
-type TouchMode = 'scroll' | 'select' | null;
 
 const MAX_PENDING_TERMINAL_OUTPUT_BYTES = 1024 * 1024;
 
@@ -212,6 +233,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
   let fitFramesRemaining = 0;
   let viewportHandlersInstalled = false;
   let resizeObserver: ResizeObserver | null = null;
+  let touchSelectionDisposable: XtermDisposable | null = null;
   let startupSizing = false;
   let startupFitTimer: number | null = null;
   const pendingTerminalRequests = new Map<string, PendingTerminalRequest>();
@@ -231,8 +253,6 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
   const copyBtn = asButtonElement(asHTMLElement(document.getElementById('terminal-copy')));
 
   let shellMenuOpen = false;
-  let touchHandlersInstalled = false;
-
   const FONT_SIZE_MIN = 10;
   const FONT_SIZE_MAX = 28;
   const FONT_SIZE_STEP = 1;
@@ -817,9 +837,17 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
   async function ensureDrawerTouchToMouseHelper(): Promise<void> {
     const runtimeWindow = getRuntimeWindow();
     if (runtimeWindow.__fileEditorCm6DrawerTouchToMouseLoaded) return;
-    runtimeWindow.__fileEditorCm6TerminalHelpersActive = false;
     await loadHelperScript(helperUrl('touch_to_mouse_handler.js'));
     runtimeWindow.__fileEditorCm6DrawerTouchToMouseLoaded = true;
+  }
+
+  function attachDrawerTouchSelection(currentTerm: XtermTerminal): XtermDisposable | null {
+    const api = getRuntimeWindow().te2TerminalTouchSelection;
+    if (!api) {
+      console.warn('Terminal touch selection helper unavailable');
+      return null;
+    }
+    return api.attach(currentTerm);
   }
 
   function sendTerminalInput(data: string): void {
@@ -1146,6 +1174,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     nextTerm.open(container);
     installViewportHandlers();
     await ensureDrawerTouchToMouseHelper();
+    touchSelectionDisposable = attachDrawerTouchSelection(nextTerm);
     await bindDrawerVendoredCtrlHandler(nextTerm);
     installDrawerVendoredCtrlFocusBinding(nextTerm);
 
@@ -1190,155 +1219,6 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     return nextTerm;
   }
 
-  function installTouchHandlers(): void {
-    if (touchHandlersInstalled) return;
-    const el = term?.element;
-    if (!el) return;
-    const terminalElement = el;
-
-    // Only enable gesture semantics on touch-first devices.
-    const isTouchFirst = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
-    if (!isTouchFirst) return;
-
-    touchHandlersInstalled = true;
-
-    const LONG_PRESS_MS = 450;
-    const MOVE_CANCEL_PX = 8;
-    const DOUBLE_TAP_MS = 280;
-    const DOUBLE_TAP_PX = 24;
-
-    let mode: TouchMode = null;
-    let startX = 0;
-    let startY = 0;
-    let lastY = 0;
-    let longPressTimer: number | null = null;
-    let scrollRemainder = 0;
-    let lastTapTime = 0;
-    let lastTapX = 0;
-    let lastTapY = 0;
-
-    function clearLongPress(): void {
-      if (longPressTimer) {
-        clearTimeout(longPressTimer);
-        longPressTimer = null;
-      }
-    }
-
-    function synthMouse(type: string, touch: Touch): void {
-      try {
-        const evt = new MouseEvent(type, {
-          bubbles: true,
-          cancelable: true,
-          clientX: touch.clientX,
-          clientY: touch.clientY,
-          button: 0,
-        });
-        terminalElement.dispatchEvent(evt);
-      } catch (_) {}
-    }
-
-    function scrollByPixels(deltaY: number): void {
-      if (!term) return;
-      const pxPerLine = Math.max(14, getCurrentFontSize() * 1.35);
-      scrollRemainder += (-deltaY) / pxPerLine;
-      const whole = scrollRemainder > 0 ? Math.floor(scrollRemainder) : Math.ceil(scrollRemainder);
-      if (whole) {
-        try { term.scrollLines(whole); } catch (_) {}
-        scrollRemainder -= whole;
-      }
-    }
-
-    terminalElement.addEventListener('touchstart', (e: TouchEvent) => {
-      if (!term) return;
-      if (e.touches.length !== 1) return;
-
-      const t = e.touches[0];
-      mode = null;
-      startX = t.clientX;
-      startY = t.clientY;
-      lastY = t.clientY;
-      scrollRemainder = 0;
-
-      clearLongPress();
-      longPressTimer = setTimeout(() => {
-        mode = 'select';
-        synthMouse('mousedown', t);
-      }, LONG_PRESS_MS);
-    }, { passive: false });
-
-    terminalElement.addEventListener('touchmove', (e: TouchEvent) => {
-      if (!term) return;
-      if (e.touches.length !== 1) {
-        clearLongPress();
-        return;
-      }
-
-      const t = e.touches[0];
-      const dx = t.clientX - startX;
-      const dyFromStart = t.clientY - startY;
-      const moved = Math.hypot(dx, dyFromStart) > MOVE_CANCEL_PX;
-
-      if (mode !== 'select' && moved) {
-        // Movement means "scroll" unless selection mode has already been entered.
-        clearLongPress();
-        mode = 'scroll';
-      }
-
-      if (mode === 'select') {
-        synthMouse('mousemove', t);
-        e.preventDefault();
-        e.stopPropagation();
-        return;
-      }
-
-      if (mode === 'scroll') {
-        const deltaY = t.clientY - lastY;
-        lastY = t.clientY;
-        scrollByPixels(deltaY);
-        e.preventDefault();
-        e.stopPropagation();
-      }
-    }, { passive: false });
-
-    terminalElement.addEventListener('touchend', (e: TouchEvent) => {
-      if (!term) return;
-      clearLongPress();
-
-      const t = e.changedTouches && e.changedTouches[0];
-      if (!t) return;
-
-      if (mode === 'select') {
-        synthMouse('mouseup', t);
-        updateCopyButtonState();
-        e.preventDefault();
-        e.stopPropagation();
-        return;
-      }
-
-      // Tap-to-focus + optional double-tap word select (synthetic dblclick).
-      const now = Date.now();
-      const isDoubleTap = (now - lastTapTime) < DOUBLE_TAP_MS
-        && Math.hypot(t.clientX - lastTapX, t.clientY - lastTapY) < DOUBLE_TAP_PX;
-
-      if (isDoubleTap) {
-        synthMouse('dblclick', t);
-        lastTapTime = 0;
-      } else {
-        lastTapTime = now;
-        lastTapX = t.clientX;
-        lastTapY = t.clientY;
-      }
-
-      emitTerminalImeIntent(true, 'touchend');
-      try { term.focus(); } catch (_) {}
-    }, { passive: false });
-
-    terminalElement.addEventListener('touchcancel', () => {
-      clearLongPress();
-      mode = null;
-    }, { passive: false });
-  }
-
   /** Open only the shared drawer shell; this must not create a PTY. */
   function openDrawer(): void {
     if (isOpen) return;
@@ -1359,6 +1239,9 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     if (!term) {
       await initTerminal();
     } else {
+      if (!touchSelectionDisposable) {
+        touchSelectionDisposable = attachDrawerTouchSelection(term);
+      }
       await bindDrawerVendoredCtrlHandler(term);
       installDrawerVendoredCtrlFocusBinding(term);
     }
@@ -1387,6 +1270,8 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     publishTerminalSpecialKeyFocus(window, false);
     emitTerminalImeIntent(false, 'drawer_close');
     setDrawerHelperFocusActive(false);
+    touchSelectionDisposable?.dispose();
+    touchSelectionDisposable = null;
     startupSizing = false;
     clearStartupFitTimer();
     lastResizeSent = null;
@@ -1413,6 +1298,8 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     
     // Dispose xterm instance
     if (term) {
+      touchSelectionDisposable?.dispose();
+      touchSelectionDisposable = null;
       term.dispose();
       term = null;
     }

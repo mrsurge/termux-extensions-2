@@ -44,3 +44,17 @@ test('terminal identity resets xterm before asynchronous helper rebinding', () =
   assert.match(handler, /socket\.on\('terminal:shell_id', \(msg\) =>/);
   assert.ok(handler.indexOf('term?.reset()') < handler.indexOf('void bindDrawerVendoredCtrlHandler(term)'));
 });
+
+test('terminal drawer has one touch owner with close and reopen lifecycle', () => {
+  assert.doesNotMatch(source, /function installTouchHandlers/);
+  assert.match(source, /touchSelectionDisposable = attachDrawerTouchSelection\(nextTerm\)/);
+  assert.match(source, /if \(!touchSelectionDisposable\) \{\s*touchSelectionDisposable = attachDrawerTouchSelection\(term\)/);
+
+  const closeStart = source.indexOf('function close(): void');
+  const destroyStart = source.indexOf('async function destroy(): Promise<void>', closeStart);
+  assert.notEqual(closeStart, -1);
+  assert.notEqual(destroyStart, -1);
+  const closeBody = source.slice(closeStart, destroyStart);
+  assert.match(closeBody, /touchSelectionDisposable\?\.dispose\(\)/);
+  assert.match(closeBody, /touchSelectionDisposable = null/);
+});
