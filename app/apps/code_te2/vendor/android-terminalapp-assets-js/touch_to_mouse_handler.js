@@ -347,12 +347,17 @@ function handleContextMenu(event) {
 }
 
 function resolveHostLayerZIndex(root) {
-  let outermostZIndex = 0;
+  let outermostZIndex = null;
   for (let element = root; element && element !== document.body; element = element.parentElement) {
     const value = Number.parseInt(window.getComputedStyle(element).zIndex, 10);
     if (Number.isFinite(value)) outermostZIndex = value;
   }
-  return outermostZIndex + 1;
+  if (outermostZIndex !== null) return outermostZIndex + 1;
+  const capture = root.querySelector('.xterm-touch-capture');
+  const captureZIndex = capture
+    ? Number.parseInt(window.getComputedStyle(capture).zIndex, 10)
+    : Number.NaN;
+  return Number.isFinite(captureZIndex) ? captureZIndex + 1 : 1;
 }
 
 function ensureHandleStyles() {
@@ -367,7 +372,7 @@ function ensureHandleStyles() {
       height: 100vh;
       overflow: visible;
       pointer-events: none;
-      z-index: 1;
+      z-index: 10;
     }
     .${HANDLE_CLASS} {
       position: fixed;
@@ -805,7 +810,6 @@ function attach(terminal) {
   ensureHandleStyles();
   const layer = document.createElement('div');
   layer.className = HANDLE_LAYER_CLASS;
-  layer.style.zIndex = String(resolveHostLayerZIndex(root));
   const startHandle = makeHandle('Adjust selection start');
   const endHandle = makeHandle('Adjust selection end');
   const menu = makeMenu();
@@ -909,6 +913,7 @@ function attach(terminal) {
   attachments.set(terminal, attachment);
   attachmentsByRoot.set(root, attachment);
   addDisposable(attachment, terminal.attachCustomTouchEventHandler(handleCustomTouchEvent));
+  layer.style.zIndex = String(resolveHostLayerZIndex(root));
   root.addEventListener('contextmenu', handleContextMenu, eventOptions);
   attachment.disposables.push(() => {
     root.removeEventListener('contextmenu', handleContextMenu, eventOptions);

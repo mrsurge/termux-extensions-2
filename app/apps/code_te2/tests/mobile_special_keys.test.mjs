@@ -483,7 +483,117 @@ test("converts Gboard find, undo, and copy keycode-229 input through the vendore
     controlBytes.map((value) => value.charCodeAt(0)),
     [6, 26, 3],
   );
+
   fixture.win.__androidTerminalCtrlCleanup?.();
+});
+
+test("converts guarded Gboard beforeinput through xterm's source input hook exactly once", () => {
+  const fixture = createEditorFixture(
+    "Mozilla/5.0 (Linux; Android 16) Chrome/151 Mobile",
+  );
+  const source = fs.readFileSync(
+    path.join(
+      appRoot,
+      "vendor/android-terminalapp-assets-js/ctrl_key_handler.js",
+    ),
+    "utf8",
+  );
+  const controlBytes = [];
+  let keyHandler = null;
+  let inputHandler = null;
+  let inputDisposed = false;
+  fixture.win.term = {
+    textarea: fixture.input,
+    attachCustomKeyEventHandler(handler) {
+      keyHandler = handler;
+    },
+    attachCustomInputEventHandler(handler) {
+      inputHandler = handler;
+      return {
+        dispose() {
+          inputDisposed = true;
+        },
+      };
+    },
+    input(value) {
+      controlBytes.push(value);
+    },
+  };
+  vm.runInNewContext(source, {
+    window: fixture.win,
+    CustomEvent: FakeCustomEvent,
+    HTMLTextAreaElement: FakeElement,
+  });
+  assert.equal(typeof keyHandler, "function");
+  assert.equal(typeof inputHandler, "function");
+
+  const cases = [
+    ["f", "insertText"],
+    ["z", "insertCompositionText"],
+    ["c", "insertText"],
+  ];
+  for (const [key, inputType] of cases) {
+    fixture.input.value = "\u21dd\n\n";
+    fixture.input.selectionStart = 1;
+    fixture.win.__androidTerminalSetCtrl(true);
+    assert.equal(keyHandler({
+      type: "keydown",
+      key: "Unidentified",
+      keyCode: 229,
+      target: fixture.input,
+    }), true);
+    assert.equal(inputHandler({
+      type: "beforeinput",
+      data: key,
+      inputType,
+      target: fixture.input,
+    }), false);
+    assert.equal(inputHandler({
+      type: "input",
+      data: key,
+      inputType,
+      target: fixture.input,
+    }), false);
+    assert.equal(keyHandler({
+      type: "keyup",
+      key: "Unidentified",
+      keyCode: 229,
+      target: fixture.input,
+    }), false);
+    assert.equal(fixture.win.ctrl, false);
+  }
+
+  assert.deepEqual(
+    controlBytes.map((value) => value.charCodeAt(0)),
+    [6, 26, 3],
+  );
+
+  fixture.win.__androidTerminalSetCtrl(true);
+  assert.equal(keyHandler({
+    type: "keydown",
+    key: "f",
+    keyCode: 70,
+    target: fixture.input,
+  }), false);
+  assert.equal(inputHandler({
+    type: "beforeinput",
+    data: "f",
+    inputType: "insertText",
+    target: fixture.input,
+  }), true);
+  assert.equal(keyHandler({
+    type: "keyup",
+    key: "f",
+    keyCode: 70,
+    target: fixture.input,
+  }), false);
+  assert.deepEqual(
+    controlBytes.map((value) => value.charCodeAt(0)),
+    [6, 26, 3, 6],
+  );
+
+  fixture.win.__androidTerminalCtrlCleanup?.();
+  assert.equal(inputDisposed, true);
 });
 
 test("provides two-row navigation, persistent selection, and Ctrl lock", async () => {

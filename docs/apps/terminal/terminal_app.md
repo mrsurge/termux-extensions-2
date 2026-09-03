@@ -104,6 +104,15 @@ Ctrl+Alt state and consumes only one-shot modifiers. Pointer handling prevents
 the dock from taking focus and restores the active terminal textarea after each
 action.
 
+Gboard Ctrl chords do not infer the pressed character from the guarded
+textarea during key-code-229 events. The shared helper registers xterm's
+source-owned `attachCustomInputEventHandler` hook and translates the final
+character in `InputEvent.data` during `beforeinput`. Xterm then cancels the
+native insertion, restores its guarded projection, and suppresses any trailing
+`input`, so one chord produces exactly one control byte. The hook survives
+terminal reset. Monaco does not expose this xterm API and retains its existing
+keyboard-event adapter.
+
 The initial list and slide-in minibar are the same DOM surface. Their `Show
 exited` checkbox defaults off and exists only in the current frontend's memory;
 it neither persists nor changes the lifecycle snapshot shared with other
@@ -127,7 +136,8 @@ After xterm clears its helper textarea for Enter or Ctrl+C, it immediately
 resets the Android transaction so the empty guarded projection is restored.
 Both key-code-229 composition and ordinary printable keydown also repair a
 missing guard before Android inserts text. This prevents the first character at
-a new prompt from being discarded. Non-Android and screen-reader input retain
-upstream xterm behavior.
+a new prompt from being discarded. A claimed custom input event resets the same
+transaction before returning control to the browser. Non-Android and
+screen-reader input retain upstream xterm behavior.
 
 Update this document whenever the terminal app contract, shellspec, or frontend transport changes.

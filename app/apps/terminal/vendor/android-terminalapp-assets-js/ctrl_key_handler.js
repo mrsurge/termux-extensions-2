@@ -69,7 +69,10 @@ if (!term || typeof term.attachCustomKeyEventHandler !== 'function') {
 }
 
 const textarea = term.textarea instanceof HTMLTextAreaElement ? term.textarea : null;
+const hasSourceInputHandler = typeof term.attachCustomInputEventHandler === 'function';
 const cleanups = [];
+let imeControlSequenceActive = false;
+let imeControlInputHandled = false;
 
 function clearTextInput(target) {
   const input = target && typeof target.value === 'string' ? target : textarea;
@@ -100,7 +103,40 @@ function suppressComposition(event) {
   clearTextInput(event.target);
 }
 
-if (textarea) {
+function keyCodeToControlInput(keyCode) {
+  if (64 <= keyCode && keyCode <= 95) {
+    return String.fromCharCode(keyCode - 64);
+  }
+  if (97 <= keyCode && keyCode <= 122) {
+    return String.fromCharCode(keyCode - 96);
+  }
+  return null;
+}
+
+function inputDataToControlInput(data) {
+  const characters = Array.from(typeof data === 'string' ? data : '');
+  if (!characters.length) return null;
+  return keyCodeToControlInput(characters[characters.length - 1].charCodeAt(0));
+}
+
+if (hasSourceInputHandler) {
+  const inputDisposable = term.attachCustomInputEventHandler((event) => {
+    if (!imeControlSequenceActive) return true;
+
+    if (!imeControlInputHandled) {
+      const input = inputDataToControlInput(event.data);
+      if (input) {
+        imeControlInputHandled = true;
+        term.input(input);
+        setCtrl(false);
+      }
+    }
+    return false;
+  });
+  if (inputDisposable && typeof inputDisposable.dispose === 'function') {
+    cleanups.push(() => inputDisposable.dispose());
+  }
+} else if (textarea) {
   const events = [
     'focus',
     'beforeinput',
@@ -135,7 +171,7 @@ window.__androidTerminalCtrlCleanup = function() {
 // keycode 64(@)-95(_) is mapped to a ctrl code
 // keycode 97(A)-122(Z) is converted to a small letter, and mapped to ctrl code
 term.attachCustomKeyEventHandler((e) => {
-  if (!ensureCtrlLatched()) {
+  if (!ensureCtrlLatched() && !imeControlSequenceActive) {
     return true;
   }
 
@@ -143,6 +179,22 @@ term.attachCustomKeyEventHandler((e) => {
   let fromImeComposition = false;
   if (keyCode === 229) {
     fromImeComposition = true;
+    if (hasSourceInputHandler) {
+      if (e.type === 'keydown') {
+        imeControlSequenceActive = true;
+        imeControlInputHandled = false;
+        // Let xterm restore its guarded Android input projection before the
+        // browser delivers beforeinput/input.
+        return true;
+      }
+      if (e.type === 'keyup') {
+        const claimed = imeControlSequenceActive;
+        imeControlSequenceActive = false;
+        imeControlInputHandled = false;
+        return !claimed;
+      }
+      return false;
+    }
     const target = e.target && typeof e.target.value === 'string' ? e.target : textarea;
     const value = typeof target?.value === 'string' ? target.value : '';
     const selectionStart = typeof target?.selectionStart === 'number'
@@ -156,12 +208,8 @@ term.attachCustomKeyEventHandler((e) => {
     keyCode = value.charCodeAt(index);
   }
 
-  let input = null;
-  if (64 <= keyCode && keyCode <= 95) {
-    input = String.fromCharCode(keyCode - 64);
-  } else if (97 <= keyCode && keyCode <= 122) {
-    input = String.fromCharCode(keyCode - 96);
-  } else {
+  const input = keyCodeToControlInput(keyCode);
+  if (!input) {
     return true;
   }
 

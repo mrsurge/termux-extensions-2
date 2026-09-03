@@ -199,6 +199,10 @@ function createHarness({
       for (const callback of callbacks.selection) callback();
     },
     attachCustomTouchEventHandler(handler) {
+      const touchCapture = window.document.createElement('div');
+      touchCapture.className = 'xterm-touch-capture';
+      touchCapture.style.zIndex = '9';
+      screen.appendChild(touchCapture);
       const route = (event) => {
         const point = event.touches?.[0] ?? event.changedTouches?.[0] ?? null;
         if (event.type === 'touchstart' && point) {
@@ -207,6 +211,7 @@ function createHarness({
             startX: point.clientX,
             startY: point.clientY,
             isScroll: false,
+            isClaimed: false,
           };
         }
         if (event.type === 'touchmove' && touchGesture && point && !touchGesture.isScroll) {
@@ -216,7 +221,8 @@ function createHarness({
           ) > 8;
         }
         const isScroll = touchGesture?.isScroll === true;
-        if (handler(event, isScroll) === false) {
+        if (handler(event, isScroll) === false) touchGesture.isClaimed = true;
+        if (touchGesture?.isClaimed) {
           event.preventDefault();
           event.stopPropagation();
         }
@@ -230,6 +236,7 @@ function createHarness({
           for (const type of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) {
             root.removeEventListener(type, route);
           }
+          touchCapture.remove();
           disposedSubscriptions.push('touch');
         },
       };
@@ -318,11 +325,14 @@ test('selection handles use viewport-adjusted xterm cell geometry', () => {
   harness.disposable.dispose();
 });
 
-test('selection layer stays immediately above the terminal host stacking layer', () => {
-  const harness = createHarness({ hostZIndex: 100 });
+test('selection layer clears xterm capture without escaping its terminal host', () => {
+  const standalone = createHarness();
+  assert.equal(standalone.layer().style.zIndex, '10');
+  standalone.disposable.dispose();
 
-  assert.equal(harness.layer().style.zIndex, '101');
-  harness.disposable.dispose();
+  const codeTe2 = createHarness({ hostZIndex: 100 });
+  assert.equal(codeTe2.layer().style.zIndex, '101');
+  codeTe2.disposable.dispose();
 });
 
 test('coarse pointers do not enable selection UI without a mobile user agent', () => {
@@ -385,6 +395,26 @@ test('a pending tap replays an ordinary xterm mouse sequence after claiming touc
   assert.equal(started, false);
   assert.equal(ended, false);
   assert.deepEqual(mouseEvents, ['mousedown', 'mouseup', 'click']);
+  harness.disposable.dispose();
+});
+
+test('a claimed touchstart keeps stationary pending moves away from native scrolling', () => {
+  const harness = createHarness();
+  const screen = harness.root.querySelector('.xterm-screen');
+
+  const started = screen.dispatchEvent(
+    touchEvent(harness.window, 'touchstart', screen, { x: 140, y: 90 }),
+  );
+  const moved = screen.dispatchEvent(
+    touchEvent(harness.window, 'touchmove', screen, { x: 140, y: 90 }),
+  );
+  const ended = screen.dispatchEvent(
+    touchEvent(harness.window, 'touchend', screen, { x: 140, y: 90 }),
+  );
+
+  assert.equal(started, false);
+  assert.equal(moved, false);
+  assert.equal(ended, false);
   harness.disposable.dispose();
 });
 

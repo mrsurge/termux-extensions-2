@@ -1737,8 +1737,8 @@ There are three distinct layers:
      replacement, and recomposition newlines remain raw Android range edits.
    - The legacy rapid raw-key paste classifier cannot suppress `\n`, so a real
      Enter remains a command boundary even immediately after a fast text burst.
-   - The mobile Ctrl state reuses the terminal helper's Gboard keycode-229
-     conversion. Monaco's adapter replays the resulting control byte as one
+   - The mobile Ctrl state reuses the terminal helper's Gboard conversion.
+     Monaco's adapter replays the resulting control byte as one
      synthetic Ctrl chord while bypassing helper re-entry, allowing Monaco's
      normal keybinding service to resolve commands such as Ctrl+S. One tap arms
      Ctrl for the next command, a double tap locks it across dock and Gboard
@@ -1769,6 +1769,13 @@ There are three distinct layers:
    - Enter and Ctrl+C immediately reseed the guarded projection after xterm's
      accessibility clear. Key-code-229 composition and ordinary printable
      keydown also repair a missing guard before yielding to native input.
+   - Xterm's disposable `attachCustomInputEventHandler` runs before its
+     `beforeinput` and `input` transaction, survives reset, and restores the
+     guarded projection when an embedder claims an event. The shared mobile
+     Ctrl helper reads Gboard's actual character from `InputEvent.data`, emits
+     one control byte, and claims any trailing input instead of inferring text
+     from the guarded textarea. Monaco retains its established key-event
+     adapter because it does not expose this xterm hook.
    - This contract is shared by the standalone Terminal and Code TE2 terminal
      drawer. Non-Android and screen-reader paths retain upstream xterm behavior.
 
@@ -1784,8 +1791,9 @@ There are three distinct layers:
    - `te2TerminalTouchSelection.attach(terminal)` uses xterm's public selection
      and paste APIs, renders body-level handles and a Copy/Paste/Select all
      toolbar, and owns deterministic disposal. The fixed layer derives its
-     `z-index` from xterm's outer host stacking layer, so terminal controls stay
-     above terminal content without escaping over Sidebar drawers or app menus.
+     `z-index` from xterm's outer host stacking layer, or from xterm's internal
+     touch-capture layer when no numbered host exists. Terminal controls remain
+     hittable without escaping over Sidebar drawers or app menus.
    - The layer uses the established Android/mobile user-agent predicate, maps
      visual viewport geometry to buffer cells, resolves handle drags three rows
      above the finger, supports endpoint crossover and wide cells, and hides the
@@ -1795,9 +1803,11 @@ There are three distinct layers:
      logic. Subsequent movement extends an anchored cell range directly through
      the public selection API; no synthetic mouse lifecycle can collapse it on
      finger release. The adapter claims touchstart before Chromium can enter its
-     native long-press context path and blur the terminal IME; only a completed
-     tap replays a detail-1 xterm `mousedown`/`mouseup`/`click` sequence. Text
-     and blank cells use the same source-owned scroll route.
+     native long-press context path and blur the terminal IME. Xterm retains that
+     ownership for the complete touch sequence, including stationary pending
+     moves before the long-press threshold; only a completed tap replays a
+     detail-1 xterm `mousedown`/`mouseup`/`click` sequence. Text and blank cells
+     use the same source-owned scroll route.
 
 ### Key files
 
@@ -1810,6 +1820,7 @@ There are three distinct layers:
 | `monaco_editor/editor_mobile_ctrl_helper_utils.ts` | Adapts vendored Gboard Ctrl control bytes into Monaco keybinding chords. |
 | `monaco_editor/editor_mobile_special_keys_utils.ts` | Owns two-row mobile keys, modifier state, and the shared translucent action rail. |
 | `src/mobile-input/terminal-special-key-bridge.ts` | Carries combined Ctrl/Alt/Shift navigation to the active editor or Terminal target. |
+| `vendor/android-terminalapp-assets-js/ctrl_key_handler.js` | Shared terminal/Monaco Ctrl state and Gboard control-character adapter. |
 | `app/static/vendor/monaco-editor-core/esm/` | Committed patched Monaco artifacts; their editable VS Code source is external. |
 | `app/static/vendor/xterm/xterm.js` | Published shared xterm browser artifact; editable source is in the external `xterm-te2` worktree. |
 
