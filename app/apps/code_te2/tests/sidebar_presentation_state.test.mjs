@@ -120,6 +120,27 @@ test("reconcile prunes stale presentation and agent identities", async () => {
   assert.equal(reconciled.lastAgentPresentationId, "");
 });
 
+test("an uninitialized ledger cannot prune durable presentation state", async () => {
+  const { reconcileSidebarPresentationState } = await importPresentationState();
+  const persisted = state({
+    presentations: {
+      alpha: "embedded",
+      beta: "hidden",
+      gamma: "detached",
+    },
+  });
+
+  const beforeSnapshot = reconcileSidebarPresentationState(
+    persisted,
+    [],
+    { authoritative: false },
+  );
+
+  assert.deepEqual(beforeSnapshot, persisted);
+  assert.equal(beforeSnapshot.presentations.beta, "hidden");
+  assert.equal(beforeSnapshot.presentations.gamma, "detached");
+});
+
 test("activation keeps foreground and last agent target as separate facts", async () => {
   const { activateSidebarPresentation } = await importPresentationState();
 
@@ -132,6 +153,28 @@ test("activation keeps foreground and last agent target as separate facts", asyn
   assert.equal(nonAgent.foregroundHostId, "gamma");
   assert.equal(nonAgent.lastAgentHostId, "alpha");
   assert.equal(nonAgent.lastAgentPresentationId, "agent-frame-2");
+});
+
+test("backend activation replay cannot reopen a locally hidden extension view", async () => {
+  const { activateSidebarPresentation } = await importPresentationState();
+  const hidden = state({
+    foregroundHostId: "alpha",
+    presentations: {
+      alpha: "embedded",
+      beta: "hidden",
+      gamma: "embedded",
+    },
+  });
+
+  const replayed = activateSidebarPresentation(hidden, "beta");
+  assert.equal(replayed.foregroundHostId, "beta");
+  assert.equal(replayed.presentations.beta, "hidden");
+
+  const explicitlyReopened = activateSidebarPresentation(hidden, "beta", {
+    revealHidden: true,
+  });
+  assert.equal(explicitlyReopened.foregroundHostId, "beta");
+  assert.equal(explicitlyReopened.presentations.beta, "embedded");
 });
 
 test("presentation mode changes preserve membership, order, and foreground", async () => {
@@ -265,6 +308,113 @@ test("Electron-loaded presentation state canonicalizes stable ids and clears tra
   assert.equal(first.presentations["slot:code_te2:primary"], "detached");
   assert.deepEqual(second, first);
   assert.equal(writes.length, 0);
+});
+
+test("Android native persistence survives a relay-origin change and partitions stable clients", async () => {
+  const {
+    loadSidebarPresentationState,
+    saveSidebarPresentationState,
+  } = await importPresentationState();
+  const records = new Map();
+  const bridge = {
+    async readSidebarPresentationState(projectPath, clientInstanceId) {
+      const key = `${clientInstanceId}\u0000${projectPath}`;
+      return records.has(key)
+        ? { found: true, state: records.get(key) }
+        : { found: false };
+    },
+    async writeSidebarPresentationState(projectPath, clientInstanceId, value) {
+      records.set(`${clientInstanceId}\u0000${projectPath}`, structuredClone(value));
+      return { ok: true };
+    },
+  };
+  const firstRelay = {
+    localStorage: memoryStorage(),
+    location: { origin: "http://127.0.0.1:40000", search: "?gv_native=1" },
+    te2AndroidPresentation: bridge,
+  };
+  const nextRelay = {
+    localStorage: memoryStorage(),
+    location: { origin: "http://127.0.0.1:41000", search: "?gv_native=1" },
+    te2AndroidPresentation: bridge,
+  };
+  const hidden = state({
+    foregroundHostId: "",
+    presentations: { alpha: "embedded", beta: "hidden", gamma: "hidden" },
+  });
+
+  await saveSidebarPresentationState(
+    hidden,
+    "/workspace/a",
+    firstRelay,
+    "client_aaaaaaaaaaaa",
+  );
+
+  const restored = await loadSidebarPresentationState(
+    "/workspace/a",
+    nextRelay,
+    "client_aaaaaaaaaaaa",
+  );
+  const otherClient = await loadSidebarPresentationState(
+    "/workspace/a",
+    nextRelay,
+    "client_bbbbbbbbbbbb",
+  );
+
+  assert.equal(restored.presentations.beta, "hidden");
+  assert.equal(restored.presentations.gamma, "hidden");
+  assert.deepEqual(otherClient.order, []);
+  assert.equal(firstRelay.localStorage.values.size, 0);
+  assert.equal(nextRelay.localStorage.values.size, 0);
+});
+
+test("Android native persistence adopts the current relay-local record once", async () => {
+  const {
+    loadSidebarPresentationState,
+    saveSidebarPresentationState,
+  } = await importPresentationState();
+  const localStorage = memoryStorage();
+  const runtimeWindow = {
+    localStorage,
+    location: {
+      origin: "http://127.0.0.1:42000",
+      search: "?te2_framework_origin=http%3A%2F%2Fserver-a%3A8089&gv_native=1",
+    },
+  };
+  const hidden = state({
+    foregroundHostId: "",
+    presentations: { alpha: "hidden", beta: "embedded", gamma: "hidden" },
+  });
+  await saveSidebarPresentationState(hidden, "/workspace/a", runtimeWindow);
+
+  let persisted = null;
+  runtimeWindow.te2AndroidPresentation = {
+    async readSidebarPresentationState() {
+      return persisted
+        ? { found: true, state: persisted }
+        : { found: false };
+    },
+    async writeSidebarPresentationState(_projectPath, _clientInstanceId, value) {
+      persisted = structuredClone(value);
+      return { ok: true };
+    },
+  };
+
+  const migrated = await loadSidebarPresentationState(
+    "/workspace/a",
+    runtimeWindow,
+    "client_aaaaaaaaaaaa",
+  );
+  localStorage.values.clear();
+  const restored = await loadSidebarPresentationState(
+    "/workspace/a",
+    runtimeWindow,
+    "client_aaaaaaaaaaaa",
+  );
+
+  assert.equal(migrated.presentations.alpha, "hidden");
+  assert.equal(restored.presentations.gamma, "hidden");
+  assert.equal(persisted.lastAgentPresentationId, "");
 });
 
 function memoryStorage(initial = {}) {

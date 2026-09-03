@@ -362,6 +362,7 @@ export function initSidebarShortcuts(
   let _settingsUiMutating = false;
   let _shortcutsCache: SidebarShortcutPreference[] = [];
   let _appDockSlots: SidebarAppDockSlot[] = [];
+  let _appDockLedgerInitialized = false;
   let _appDockLedgerSlots: SidebarAppDockSlot[] = [];
 
   let _editingId: string | null = null;
@@ -1441,7 +1442,14 @@ export function initSidebarShortcuts(
     const projectPath = _presentationProjectPath;
     _presentationPersistQueue = _presentationPersistQueue
       .catch(() => {})
-      .then(() => saveSidebarPresentationState(snapshot, projectPath))
+      .then(() =>
+        saveSidebarPresentationState(
+          snapshot,
+          projectPath,
+          window,
+          _normStr(getClientId()),
+        )
+      )
       .catch((error: unknown) => {
         console.warn("[Sidebar] presentation state persist failed", error);
       });
@@ -2001,6 +2009,7 @@ export function initSidebarShortcuts(
     const next = reconcileSidebarPresentationState(
       _presentationState,
       slots.map((slot) => _windowHostId(slot)).filter(Boolean),
+      { authoritative: _appDockLedgerInitialized },
     );
     _commitPresentationState(next);
     const ordered = _sortAppDockSlotsByPresentationOrder(slots);
@@ -2051,7 +2060,11 @@ export function initSidebarShortcuts(
     _presentationStateLoadPromise = (async () => {
       try {
         await _presentationPersistQueue.catch(() => {});
-        const loaded = await loadSidebarPresentationState(projectPath);
+        const loaded = await loadSidebarPresentationState(
+          projectPath,
+          window,
+          _normStr(getClientId()),
+        );
         if (generation !== _presentationProjectGeneration) return;
         _presentationState = loaded;
       } catch (error) {
@@ -2085,16 +2098,14 @@ export function initSidebarShortcuts(
       const hostId = _windowHostId(activeWindow);
       const prevWindowId = _clientActiveWindowHostId;
       if (_presentationStateLoaded) {
-        const currentMode = _presentationModeForHost(hostId);
-        const visibleState = setSidebarPresentationMode(
-          _presentationState,
-          hostId,
-          currentMode === "hidden" ? "embedded" : currentMode,
-        );
         _commitPresentationState(
-          activateSidebarPresentation(visibleState, hostId, {
+          activateSidebarPresentation(_presentationState, hostId, {
             agent: _slotIsAgent(activeWindow),
             presentationId: _presentationIdForHost(hostId),
+            // Backend activation replay is coordination metadata, not local
+            // presentation authority. Only an explicit local reopen action may
+            // turn a persisted hidden extension view back into an embedded one.
+            revealHidden: options.revealHidden === true,
           }),
         );
       } else {
@@ -2941,6 +2952,7 @@ export function initSidebarShortcuts(
           _setClientActiveShortcut(selected.slice("extension:".length), {
             emit: true,
             source: "extension_app_drawer",
+            revealHidden: true,
           });
         } else if (selected === "url") {
           _openUrlDialog({
@@ -3114,6 +3126,7 @@ export function initSidebarShortcuts(
           _setClientActiveShortcut(hostId, {
             emit: true,
             source: "extension_app_drawer",
+            revealHidden: true,
           });
         });
         menu.appendChild(item);
@@ -3385,6 +3398,7 @@ export function initSidebarShortcuts(
           emit: true,
           source: "header_icon",
           updateLastUsed: true,
+          revealHidden: true,
         });
         if (openDrawer) {
           setTimeout(() => {
@@ -5003,6 +5017,7 @@ export function initSidebarShortcuts(
             emit: true,
             source: "agent_dropdown",
             updateLastUsed: true,
+            revealHidden: true,
           });
           if (openDrawer)
             setTimeout(() => {
@@ -5189,6 +5204,7 @@ export function initSidebarShortcuts(
   }
 
   function _applyAppDockLedgerPayload(payload: UnknownRecord) {
+    _appDockLedgerInitialized = true;
     _appDockLedgerSlots = _appDockSlotsFromLedgerPayload(payload);
     void _applyAppDockLedgerForProject(getProjectRoot());
   }

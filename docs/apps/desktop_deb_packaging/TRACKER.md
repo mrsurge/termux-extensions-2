@@ -1297,11 +1297,41 @@ does not authorize publication.
   snapshot or a project switch erase another project's stored preferences.
 - [x] Keep authoritative uninstall/removal destructive and event-driven; add no
   polling or timeout-based membership grace period.
+- [x] Prove the Android loss is not unstable client identity: native console and
+  page workers retain the same application-private `clientInstanceId`.
+- [x] Replace GeckoView/Cefrium relay-origin Local Storage authority with one
+  shared store implementation whose per-APK application-private records are
+  keyed by client id, selected framework origin, and normalized project path.
+- [x] Reuse Gecko's page/WebExtension/native-message bridge and Cefrium's native
+  query bridge; retain browser Local Storage and Electron XDG storage.
+- [x] Attach the selected upstream framework origin to every direct/restored
+  native app URL and adopt the currently reachable relay-local record once.
+- [x] Add frontend relay-origin/client-partition regressions and shared Android
+  store validation/retention tests.
+- [x] Reproduce the cross-client restart failure with a durable Electron
+  `hidden` record and prevent backend/startup activation replay from rewriting
+  it to `embedded`; retain explicit local app-drawer reopen semantics.
+- [x] Prevent the pre-snapshot frontend empty slot list from pruning a loaded
+  presentation record before the first authoritative Sidebar ledger arrives.
 - [ ] Validate dock order, hidden/reopened state, Electron detached placement,
   and exact-client mentions across app-worker, WBA, framework, and project
   restarts on Electron plus browser/Gecko/Cefrium shared frontend paths.
 - [ ] Separately validate `acquireVsCodeApi`/Web Storage reconstruction across
   the same boundaries so presentation success cannot mask content-state loss.
+
+### Phase 4J — TE2 0.2.343 Terminal and Sidebar persistence release
+
+- [ ] Complete Phase 6C live acceptance on Electron, GeckoView, and Cefrium.
+- [ ] Fix the harmless Pyte `bfightmagenta` alias and run the complete imported
+  Terminal lifecycle, drawer projection, mobile-input, and typing gates.
+- [ ] Synchronize every release-facing version to `0.2.343`, rebuild both
+  frontends, and rebundle the Android assets with version code `20343`.
+- [ ] Build and audit clean-tag Linux, Termux AArch64, GeckoView, and Cefrium
+  artifacts; retain Framework-Shells `0.0.63` and Agent Log Server `0.2.122`.
+- [ ] Pass TestPyPI/isolated Debian, public PyPI, public-curl desktop, and
+  physical Termux acceptance against the exact immutable candidates.
+- [ ] Publish a normal/latest GitHub Release titled `TE2 0.2.343 alpha`, then
+  record exact hashes and acceptance evidence in a post-release commit.
 
 ## Deferred work
 

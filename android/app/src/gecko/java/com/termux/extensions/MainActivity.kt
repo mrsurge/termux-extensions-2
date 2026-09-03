@@ -91,6 +91,7 @@ class MainActivity : AppCompatActivity() {
     private var localAssetServer: LocalAssetServer? = null
     private lateinit var androidSettingsStore: AndroidAppSettingsStore
     private lateinit var androidDiagnostics: AndroidDiagnostics
+    private lateinit var sidebarPresentationStore: AndroidSidebarPresentationStore
     @Volatile private var lastStartupFailure: String? = null
     private var assetExtension: WebExtension? = null
     private var assetExtensionPort: WebExtension.Port? = null
@@ -408,7 +409,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun ensureGvNative(uri: Uri): Uri =
-        Uri.parse(withAndroidNativePageIdentity(uri.toString(), "gecko"))
+        Uri.parse(
+            withAndroidNativePageIdentity(
+                uri.toString(),
+                "gecko",
+                frameworkBaseUrl,
+            ),
+        )
 
     private fun createNavigationDelegate() = object : GeckoSession.NavigationDelegate {
         override fun onLoadRequest(
@@ -782,6 +789,7 @@ class MainActivity : AppCompatActivity() {
         androidDiagnostics = AndroidDiagnostics(applicationContext)
         androidDiagnostics.beginSession()
         androidSettingsStore = AndroidAppSettingsStore(applicationContext)
+        sidebarPresentationStore = AndroidSidebarPresentationStore(applicationContext)
         preservePersistedSessionUntilStartupReady =
             !prefs().getString(PREF_LAST_URL, null).isNullOrBlank()
         toolsStateStore = AndroidToolsStateStore(applicationContext)
@@ -1342,6 +1350,7 @@ class MainActivity : AppCompatActivity() {
         val appUrl = withAndroidNativePageIdentity(
             browserFrameworkBaseUrl().trimEnd('/') + "/app/" + appId,
             "gecko",
+            frameworkBaseUrl,
         )
         if (clientStartupState.gateAppNavigation(appUrl)) return
         inAppShell = true
@@ -1869,6 +1878,32 @@ class MainActivity : AppCompatActivity() {
                                                 )
                                             })
                                         }
+                                    } else if (
+                                        payload.optString("type") == "sidebar_presentation_request"
+                                    ) {
+                                        val requestId = payload.optString("requestId").trim()
+                                        if (requestId.isEmpty()) return
+                                        val response = try {
+                                            handleAndroidSidebarPresentationRequest(
+                                                this@MainActivity,
+                                                sidebarPresentationStore,
+                                                frameworkBaseUrl,
+                                                payload.optString("method"),
+                                                payload.optJSONObject("params") ?: JSONObject(),
+                                            )
+                                        } catch (error: Exception) {
+                                            JSONObject()
+                                                .put("ok", false)
+                                                .put(
+                                                    "error",
+                                                    error.message
+                                                        ?: "Sidebar presentation request failed",
+                                                )
+                                        }
+                                        response
+                                            .put("type", "sidebar_presentation_result")
+                                            .put("requestId", requestId)
+                                        source.postMessage(response)
                                     }
                                 }
 

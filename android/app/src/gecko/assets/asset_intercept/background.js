@@ -12,6 +12,7 @@ let reconnectTimer = 0;
 let frameworkBaseUrl = "";
 let clientInstanceIds = { primary: "", secondary: "" };
 const pendingIdentityResets = new Map();
+const pendingSidebarPresentationRequests = new Map();
 const devRuntimeOriginsBySurface = new Map();
 const devRuntimeLabelsBySurface = new Map();
 const devRuntimeWorkerIdBasesBySurface = new Map();
@@ -277,6 +278,38 @@ browser.runtime.onMessage.addListener((message, sender) => {
       nativePort.postMessage({ type: "client_identity_reset", requestId, role });
     });
   }
+  if (message?.type === "sidebar_presentation_request") {
+    const senderOrigin = (() => {
+      try {
+        return new URL(sender.url || "").origin;
+      } catch (_) {
+        return "";
+      }
+    })();
+    if (sender.frameId !== 0 || senderOrigin !== frameworkOrigin()) {
+      return Promise.resolve({ ok: false, error: "Sidebar presentation request origin is not trusted" });
+    }
+    if (!nativePort) {
+      return Promise.resolve({ ok: false, error: "Sidebar presentation native bridge is disconnected" });
+    }
+    const requestId = String(message.requestId || "");
+    if (!requestId) {
+      return Promise.resolve({ ok: false, error: "Sidebar presentation request id is missing" });
+    }
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        pendingSidebarPresentationRequests.delete(requestId);
+        resolve({ ok: false, error: "Sidebar presentation native request timed out" });
+      }, 10000);
+      pendingSidebarPresentationRequests.set(requestId, { resolve, timeout });
+      nativePort.postMessage({
+        type: "sidebar_presentation_request",
+        requestId,
+        method: message.method === "write" ? "write" : "read",
+        params: message.params,
+      });
+    });
+  }
   if (message?.type === "run_runtime_config") {
     const surfaceId = String(message.surfaceId || "").trim();
     const senderOrigin = (() => {
@@ -365,6 +398,13 @@ function connectNativeBridge() {
         pending.resolve(clientInstanceId
           ? { ok: true, clientInstanceId }
           : { ok: false, error: "Native client identity reset failed" });
+      } else if (message && message.type === "sidebar_presentation_result") {
+        const requestId = String(message.requestId || "");
+        const pending = pendingSidebarPresentationRequests.get(requestId);
+        if (!pending) return;
+        pendingSidebarPresentationRequests.delete(requestId);
+        clearTimeout(pending.timeout);
+        pending.resolve(message);
       }
     });
     port.onDisconnect.addListener(() => {
@@ -378,6 +418,11 @@ function connectNativeBridge() {
         pending.resolve({ ok: false, error: "Native client identity bridge disconnected" });
       }
       pendingIdentityResets.clear();
+      for (const pending of pendingSidebarPresentationRequests.values()) {
+        clearTimeout(pending.timeout);
+        pending.resolve({ ok: false, error: "Sidebar presentation native bridge disconnected" });
+      }
+      pendingSidebarPresentationRequests.clear();
       clearDevRuntimePolicies();
       scheduleNativeReconnect();
     });

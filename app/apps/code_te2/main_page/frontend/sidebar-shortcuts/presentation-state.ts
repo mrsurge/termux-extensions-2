@@ -1,4 +1,9 @@
 import type { SidebarAppDockSlot } from "./types.ts";
+import {
+  isAndroidNativePage,
+  readAndroidSidebarPresentationState,
+  writeAndroidSidebarPresentationState,
+} from "../native-client-bridge.ts";
 
 export const SIDEBAR_PRESENTATION_STATE_VERSION = 1 as const;
 export const SIDEBAR_PRESENTATION_STORAGE_KEY =
@@ -33,10 +38,23 @@ interface ElectronPresentationBridge {
   ) => Promise<unknown>;
 }
 
+interface AndroidPresentationBridge {
+  readSidebarPresentationState?: (
+    projectPath: string,
+    clientInstanceId: string,
+  ) => Promise<{ found: boolean; state?: unknown }>;
+  writeSidebarPresentationState?: (
+    projectPath: string,
+    clientInstanceId: string,
+    state: SidebarClientPresentationState,
+  ) => Promise<unknown>;
+}
+
 interface PresentationWindow {
   localStorage?: Pick<Storage, "getItem" | "setItem" | "removeItem">;
   location?: Pick<Location, "origin" | "search">;
   te2Electron?: ElectronPresentationBridge;
+  te2AndroidPresentation?: AndroidPresentationBridge;
 }
 
 interface SidebarPresentationProjectStore {
@@ -190,8 +208,10 @@ function chooseForegroundFallback(
 export function reconcileSidebarPresentationState(
   value: unknown,
   authoritativeHostIds: readonly string[],
+  options: { authoritative?: boolean } = {},
 ): SidebarClientPresentationState {
   const previous = normalizeSidebarPresentationState(value);
+  if (options.authoritative === false) return previous;
   const canonicalIds = uniqueIds(authoritativeHostIds).sort((left, right) =>
     left.localeCompare(right),
   );
@@ -251,6 +271,7 @@ export function activateSidebarPresentation(
   options: {
     agent?: boolean;
     presentationId?: string;
+    revealHidden?: boolean;
   } = {},
 ): SidebarClientPresentationState {
   const previous = normalizeSidebarPresentationState(value);
@@ -259,8 +280,13 @@ export function activateSidebarPresentation(
     return previous;
   }
   const presentationId = normalizeId(options.presentationId);
+  const presentations =
+    options.revealHidden === true && previous.presentations[normalizedHostId] === "hidden"
+      ? { ...previous.presentations, [normalizedHostId]: "embedded" as const }
+      : previous.presentations;
   return {
     ...previous,
+    presentations,
     foregroundHostId: normalizedHostId,
     lastAgentHostId: options.agent
       ? normalizedHostId
@@ -424,6 +450,25 @@ function projectStorageKey(
   return `${selectedFrameworkOrigin(runtimeWindow)}\u0000${normalizedProjectPath(projectPath)}`;
 }
 
+function androidPresentationBridge(
+  runtimeWindow: PresentationWindow,
+): AndroidPresentationBridge | null {
+  if (runtimeWindow.te2AndroidPresentation) {
+    return runtimeWindow.te2AndroidPresentation;
+  }
+  if (
+    typeof window !== "undefined" &&
+    runtimeWindow === window &&
+    isAndroidNativePage()
+  ) {
+    return {
+      readSidebarPresentationState: readAndroidSidebarPresentationState,
+      writeSidebarPresentationState: writeAndroidSidebarPresentationState,
+    };
+  }
+  return null;
+}
+
 function emptyPresentationProjectStore(): SidebarPresentationProjectStore {
   return { version: SIDEBAR_PRESENTATION_STORE_VERSION, projects: {} };
 }
@@ -471,16 +516,12 @@ function normalizePresentationProjectStore(
   };
 }
 
-export async function loadSidebarPresentationState(
+async function loadBrowserSidebarPresentationState(
   projectPath: string,
-  runtimeWindow: PresentationWindow = window,
+  runtimeWindow: PresentationWindow,
 ): Promise<SidebarClientPresentationState> {
   const normalizedProject = normalizedProjectPath(projectPath);
   if (!normalizedProject) return emptySidebarPresentationState();
-  const electronReader = runtimeWindow.te2Electron?.readSidebarPresentationState;
-  if (typeof electronReader === "function") {
-    return durableSidebarPresentationState(await electronReader(normalizedProject));
-  }
   const raw = runtimeWindow.localStorage?.getItem(
     SIDEBAR_PRESENTATION_STORAGE_KEY,
   );
@@ -490,7 +531,7 @@ export async function loadSidebarPresentationState(
     if (store.projects[key]) {
       const persisted = store.projects[key].state;
       try {
-        await saveSidebarPresentationState(
+        await saveBrowserSidebarPresentationState(
           persisted,
           normalizedProject,
           runtimeWindow,
@@ -503,7 +544,11 @@ export async function loadSidebarPresentationState(
     );
     if (legacyRaw) {
       const legacy = durableSidebarPresentationState(JSON.parse(legacyRaw));
-      await saveSidebarPresentationState(legacy, normalizedProject, runtimeWindow);
+      await saveBrowserSidebarPresentationState(
+        legacy,
+        normalizedProject,
+        runtimeWindow,
+      );
       runtimeWindow.localStorage?.removeItem(
         LEGACY_SIDEBAR_PRESENTATION_STORAGE_KEY,
       );
@@ -515,19 +560,14 @@ export async function loadSidebarPresentationState(
   }
 }
 
-export async function saveSidebarPresentationState(
+async function saveBrowserSidebarPresentationState(
   state: SidebarClientPresentationState,
   projectPath: string,
-  runtimeWindow: PresentationWindow = window,
+  runtimeWindow: PresentationWindow,
 ): Promise<void> {
   const normalizedProject = normalizedProjectPath(projectPath);
   if (!normalizedProject) return;
   const normalized = durableSidebarPresentationState(state);
-  const electronWriter = runtimeWindow.te2Electron?.writeSidebarPresentationState;
-  if (typeof electronWriter === "function") {
-    await electronWriter(normalizedProject, normalized);
-    return;
-  }
   let store = emptyPresentationProjectStore();
   const raw = runtimeWindow.localStorage?.getItem(SIDEBAR_PRESENTATION_STORAGE_KEY);
   try {
@@ -543,5 +583,74 @@ export async function saveSidebarPresentationState(
   runtimeWindow.localStorage?.setItem(
     SIDEBAR_PRESENTATION_STORAGE_KEY,
     JSON.stringify(store),
+  );
+}
+
+function hasDurablePresentationState(
+  state: SidebarClientPresentationState,
+): boolean {
+  return (
+    state.order.length > 0 ||
+    Object.keys(state.presentations).length > 0 ||
+    !!state.foregroundHostId ||
+    !!state.lastAgentHostId
+  );
+}
+
+export async function loadSidebarPresentationState(
+  projectPath: string,
+  runtimeWindow: PresentationWindow = window,
+  clientInstanceId = "",
+): Promise<SidebarClientPresentationState> {
+  const normalizedProject = normalizedProjectPath(projectPath);
+  if (!normalizedProject) return emptySidebarPresentationState();
+  const electronReader = runtimeWindow.te2Electron?.readSidebarPresentationState;
+  if (typeof electronReader === "function") {
+    return durableSidebarPresentationState(await electronReader(normalizedProject));
+  }
+  const androidBridge = androidPresentationBridge(runtimeWindow);
+  const androidReader = androidBridge?.readSidebarPresentationState;
+  if (typeof androidReader === "function" && clientInstanceId) {
+    const loaded = await androidReader(normalizedProject, clientInstanceId);
+    if (loaded.found) return durableSidebarPresentationState(loaded.state);
+    const legacy = await loadBrowserSidebarPresentationState(
+      normalizedProject,
+      runtimeWindow,
+    );
+    if (hasDurablePresentationState(legacy)) {
+      const writer = androidBridge?.writeSidebarPresentationState;
+      if (typeof writer === "function") {
+        await writer(normalizedProject, clientInstanceId, legacy);
+      }
+    }
+    return legacy;
+  }
+  return loadBrowserSidebarPresentationState(normalizedProject, runtimeWindow);
+}
+
+export async function saveSidebarPresentationState(
+  state: SidebarClientPresentationState,
+  projectPath: string,
+  runtimeWindow: PresentationWindow = window,
+  clientInstanceId = "",
+): Promise<void> {
+  const normalizedProject = normalizedProjectPath(projectPath);
+  if (!normalizedProject) return;
+  const normalized = durableSidebarPresentationState(state);
+  const electronWriter = runtimeWindow.te2Electron?.writeSidebarPresentationState;
+  if (typeof electronWriter === "function") {
+    await electronWriter(normalizedProject, normalized);
+    return;
+  }
+  const androidWriter = androidPresentationBridge(runtimeWindow)
+    ?.writeSidebarPresentationState;
+  if (typeof androidWriter === "function" && clientInstanceId) {
+    await androidWriter(normalizedProject, clientInstanceId, normalized);
+    return;
+  }
+  await saveBrowserSidebarPresentationState(
+    normalized,
+    normalizedProject,
+    runtimeWindow,
   );
 }

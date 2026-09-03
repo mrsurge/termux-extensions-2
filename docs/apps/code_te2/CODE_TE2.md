@@ -3002,15 +3002,35 @@ the extension-webview runtime and lifetime rules.
 ### Per-host presentation
 
 Each host stores versioned local presentation state: dock order, foreground host,
-stable last-agent host, and embedded/hidden/detached mode. It is partitioned by
-the selected framework origin plus normalized project path and retains a bounded
-most-recent project map. Browser, GeckoView, and Cefrium use origin-local
-storage. Electron uses its validated preload/main bridge and atomic XDG-config
-storage. Only an authoritative complete membership snapshot prunes absent
-slots; transient WBA reset/disconnect snapshots preserve ledger membership and
-parked client preferences while the adapter rehydrates. Authoritative
-reconciliation preserves surviving local order, appends new slots, and chooses
-a local fallback foreground.
+stable last-agent host, and embedded/hidden/detached mode. It retains a bounded
+most-recent project map. Ordinary browsers use stable origin-local storage, and
+Electron uses its validated preload/main bridge plus atomic XDG-config storage.
+GeckoView and Cefrium use one shared Android store implementation because their
+page origin includes a random loopback relay port; each APK retains its own
+application-private records. Those records are partitioned by stable client id,
+selected upstream framework origin, and normalized project path. Gecko uses its
+existing WebExtension/native-message bridge and Cefrium its existing
+native-query bridge. Only an authoritative
+complete membership snapshot prunes absent slots; transient WBA reset/disconnect
+snapshots preserve ledger membership and parked client preferences while the
+adapter rehydrates. Authoritative reconciliation preserves surviving local
+order, appends new slots, and chooses a local fallback foreground.
+
+The host also treats its pre-snapshot empty slot list as uninitialized, not as
+an authoritative empty ledger. Loading durable presentation state before the
+first ledger snapshot must never prune or rewrite it.
+
+Native app URLs carry `te2_framework_origin` for stable partition diagnostics.
+If no native record exists, the currently reachable relay-local record may be
+adopted once. The runtime never scans extinct random relay origins and never
+polls for presentation state.
+
+Backend `windowActivated` and legacy active-shortcut notifications are
+coordination/replay facts, not permission to change a host's presentation
+mode. In particular, startup replay must not convert `hidden` back to
+`embedded`. Only an explicit local action—selecting the extension from that
+client's app drawer or another visible local launcher—may reopen a hidden
+extension view.
 
 `clientInstanceId` is the stable client authority. `windowId` is reload-stable
 metadata and `presentationId` identifies a transient inline/detached incarnation.

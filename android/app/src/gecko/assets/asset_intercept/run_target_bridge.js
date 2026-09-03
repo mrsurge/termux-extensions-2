@@ -4,6 +4,8 @@ const RUN_TARGET_REGISTER_RESPONSE = "te2.runTarget.register.response";
 const RUN_TARGET_RELEASE = "te2.runTarget.release.request";
 const CLIENT_IDENTITY_REQUEST = "te2.clientIdentity.request";
 const CLIENT_IDENTITY_RESPONSE = "te2.clientIdentity.response";
+const SIDEBAR_PRESENTATION_REQUEST = "te2.sidebarPresentation.request";
+const SIDEBAR_PRESENTATION_RESPONSE = "te2.sidebarPresentation.response";
 
 function markBridgeAvailable() {
   if (document.documentElement) {
@@ -38,6 +40,35 @@ window.addEventListener("message", async (event) => {
     channel: RUN_TARGET_REGISTER_RESPONSE,
     requestId,
     result: result || { ok: false, error: "Native runtime registration returned no response" },
+  }, window.location.origin);
+});
+
+window.addEventListener("message", async (event) => {
+  if (
+    event.source !== window ||
+    event.origin !== window.location.origin ||
+    !event.data ||
+    event.data.channel !== SIDEBAR_PRESENTATION_REQUEST
+  ) return;
+  const requestId = String(event.data.requestId || "");
+  const method = event.data.method === "write" ? "write" : "read";
+  if (!requestId) return;
+  let result;
+  try {
+    result = await browser.runtime.sendMessage({
+      type: "sidebar_presentation_request",
+      requestId,
+      method,
+      params: event.data.params,
+      pageOrigin: window.location.origin,
+    });
+  } catch (error) {
+    result = { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+  window.postMessage({
+    channel: SIDEBAR_PRESENTATION_RESPONSE,
+    requestId,
+    result: result || { ok: false, error: "Native Sidebar presentation returned no response" },
   }, window.location.origin);
 });
 

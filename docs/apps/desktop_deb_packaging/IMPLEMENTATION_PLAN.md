@@ -1949,12 +1949,16 @@ third state authority:
 
 The reconstruction store already persists `acquireVsCodeApi().setState()` and
 the opaque webview's persistent Web Storage across renderer and WBA restarts.
-It must remain separate from dock presentation. The restart regression is in
-membership reconciliation: a WBA session reset calls the webview clear path,
-emits an empty workspace snapshot, Python treats that snapshot as an
-authoritative removal, and the client immediately saves presentation state
-after pruning the removed host ids. When the same stable surfaces return, their
-client preferences have already been erased.
+It must remain separate from dock presentation. Two restart regressions were
+identified in presentation recovery. First, a WBA session reset could emit an
+empty workspace snapshot that Python treated as authoritative removal, pruning
+stable host ids before the same surfaces returned. The frontend could repeat
+the same mistake by loading durable state and immediately reconciling it against
+its pre-snapshot, uninitialized empty slot list. Second, even after durable
+storage correctly loaded `hidden`, startup/backend `windowActivated` replay used
+the same path as an explicit local app-drawer selection and rewrote that mode
+to `embedded`. All three violate the backend-membership/client-presentation
+ownership split.
 
 The corrected event-driven contract is:
 
@@ -1966,22 +1970,39 @@ The corrected event-driven contract is:
    removing missing extension surfaces. Explicit panel disposal, provider
    removal, extension uninstall/disable, and a completed workspace transition
    retain real removal semantics.
-3. Client presentation storage advances to a project-partitioned schema. The
-   partition key is the selected framework origin plus normalized project path;
-   browser/Gecko/Cefrium keep the bounded map in origin-local storage, while
-   Electron stores the same validated map in its atomic desktop state. The
-   stable `clientInstanceId` remains implied by that client-owned store.
+3. Client presentation storage advances to a project-partitioned schema.
+   Ordinary browsers keep the bounded map in their stable origin-local storage,
+   while Electron stores the same validated map in its atomic desktop state.
+   GeckoView and Cefrium cannot use page Local Storage as durable authority:
+   their browser origin contains a random loopback relay port that can change
+   after a cold process restart. Both Android renderers therefore use one shared
+   store implementation, with application-private `SharedPreferences` records
+   in each APK partitioned by stable `clientInstanceId`, selected framework
+   origin, and normalized project path.
+   Gecko reaches it through the existing page/WebExtension/native-message path;
+   Cefrium reaches it through the existing native-query path. Neither adds a
+   socket, poller, or backend presentation authority.
 4. Reconciliation updates only the active project partition. Switching projects
    parks the old project's order and hidden/detached preferences instead of
    deleting them. The store retains a bounded most-recent project set.
 5. Durable state stores stable host ids, order, foreground/last-agent host, and
    presentation mode. It does **not** retain the transient `presentationId`.
+6. Backend activation replay may update coordination state but cannot reveal a
+   locally hidden view. Only an explicit action in that client may change
+   `hidden` to `embedded`.
+7. A host's empty slot list is non-authoritative until its first ledger
+   snapshot. It cannot prune or persist over a loaded client record.
    After a renderer or app-worker restart, the host creates a fresh presentation
    identity, republishes it through the existing exact-client lane, and binds it
    to the restored stable agent host before mentions can resolve.
 6. A complete authoritative removal prunes the removed surface from the active
    project preference record. A transient WBA loss never does. No grace-period
    timer or polling is introduced.
+7. Native app URLs carry the selected upstream framework origin separately from
+   their local relay origin. If the native store has no record, the frontend may
+   adopt the currently reachable relay-local record once. Records stranded
+   beneath an extinct random relay origin are intentionally not scanned or
+   guessed.
 
 Stable activity-view `surfaceId`/`hostId` values already derive from workspace,
 extension id, and view id, so this phase must reuse them. It must not mint a new
@@ -2005,9 +2026,10 @@ Before implementation is considered complete:
 4. validate autostart off, reachable preferred app, unavailable framework,
    missing preferred app, app-open failure, and a readiness-enabled app. The
    unavailable cases must leave the launcher interactive;
-5. validate browser/Gecko/Cefrium and Electron presentation restoration across
-   Code TE2 app-worker restart, WBA restart, framework restart, project switch
-   away/back, and extension uninstall/reinstall;
+5. validate browser, GeckoView, Cefrium, and Electron presentation restoration
+   across Code TE2 app-worker restart, WBA restart, framework restart, project
+   switch away/back, extension uninstall/reinstall, and native relay-port change
+   after a cold Android process restart;
 6. separately prove extension-document `setState`/Web Storage continuity and
    dock order/hidden/detached continuity so one passing layer cannot mask a
    failure in the other; and
@@ -2020,6 +2042,22 @@ display-capable client. Native client validation uses the already-supported
 GeckoView/Cefrium paths only when implementation actually changes their shared
 frontend assets; that later scope must perform the normal synchronized frontend
 version and APK asset-bundle handoff.
+
+### 9.5 TE2 0.2.343 release gate
+
+`0.2.343` is blocked on the complete Sidebar presentation matrix above. Once it
+passes, the release includes the imported standalone-Terminal lifecycle/input
+tranche, Code TE2 headless terminal checkpoints, the Android native presentation
+store, and the minor Pyte color-table cleanup in one synchronized handoff.
+
+The release resumes the established clean-tag workflow: synchronize Python,
+Rust, manifests, frontend query versions, Electron, and Android version code;
+rebuild Code TE2 and Terminal; rebundle the Android asset seed; build and audit
+both staging APKs; construct the Linux wheel/sdist and physical AArch64 Termux
+archive; validate immutable candidates through isolated Debian and physical
+Termux; then publish the exact files to PyPI and a normal/latest GitHub Release
+titled `TE2 0.2.343 alpha`. Publication remains forbidden until hidden/reopened
+state survives page, app-worker, WBA, framework, and native-process restarts.
 
 ## 10. Validation and publication boundaries
 

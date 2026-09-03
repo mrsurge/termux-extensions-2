@@ -66,6 +66,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var assetManager: EditorAssetManager
     private lateinit var shellGateway: AndroidShellGateway
     private lateinit var toolsStateStore: AndroidToolsStateStore
+    private lateinit var sidebarPresentationStore: AndroidSidebarPresentationStore
 
     private val editorInputFilter = EditorInputFilter()
     private val imeDismissalReducer = CefriumImeDismissalReducer()
@@ -277,6 +278,7 @@ class MainActivity : AppCompatActivity() {
         diagnostics = AndroidDiagnostics(applicationContext)
         diagnostics.beginSession()
         settingsStore = AndroidAppSettingsStore(applicationContext)
+        sidebarPresentationStore = AndroidSidebarPresentationStore(applicationContext)
         toolsStateStore = AndroidToolsStateStore(applicationContext)
         toolsState = toolsStateStore.load()
         toolsSelectedTab = toolsState.selectedTab
@@ -805,7 +807,7 @@ class MainActivity : AppCompatActivity() {
         val runtime = clientRuntimeService ?: return null
         val url = runtime.frameworkUrl(path)
         return if (isAppPath(path)) {
-            withAndroidNativePageIdentity(url, "cefrium")
+            withAndroidNativePageIdentity(url, "cefrium", frameworkBaseUrl)
         } else {
             url
         }
@@ -838,6 +840,7 @@ class MainActivity : AppCompatActivity() {
             withAndroidNativePageIdentity(
                 clientRuntimeService?.frameworkUrl("/app/$appId") ?: return,
                 "cefrium",
+                frameworkBaseUrl,
             ),
         )
     }
@@ -876,6 +879,24 @@ class MainActivity : AppCompatActivity() {
                 JSONObject()
                     .put("ok", true)
                     .put("clientInstanceId", androidClientInstanceId(applicationContext, role))
+            }
+            "te2.sidebarPresentation.read",
+            "te2.sidebarPresentation.write" -> {
+                try {
+                    handleAndroidSidebarPresentationRequest(
+                        applicationContext,
+                        sidebarPresentationStore,
+                        frameworkBaseUrl,
+                        payload.optString("method").substringAfterLast('.'),
+                        payload.optJSONObject("params") ?: JSONObject(),
+                    )
+                } catch (error: Exception) {
+                    callback.failure(
+                        400,
+                        error.message ?: "Sidebar presentation request is invalid",
+                    )
+                    return true
+                }
             }
             "te2.runTarget.register" -> {
                 val runtimeService = clientRuntimeService
