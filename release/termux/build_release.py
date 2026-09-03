@@ -126,7 +126,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--output", required=True)
     parser.add_argument("--version", required=True)
     parser.add_argument("--framework-shells-version", default="0.0.63")
-    parser.add_argument("--agent-log-server-version", default="0.2.119")
+    parser.add_argument("--agent-log-server-version", default="0.2.123")
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--framework-shells-commit", required=True)
     parser.add_argument("--agent-log-server-commit", required=True)

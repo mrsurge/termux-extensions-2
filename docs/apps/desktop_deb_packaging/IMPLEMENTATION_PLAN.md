@@ -162,7 +162,7 @@ The Linux first-party wheel graph is also explicit. Framework-Shells 0.0.63 is
 a native distribution, never a pure-Python publication wheel: it carries both
 the PyO3 pipe pump and Rust terminal broker. The accepted Linux wheel set has a
 `cp39-abi3` wheel for ordinary CPython and a separately tagged `cp314-cp314t`
-wheel for free-threaded CPython. Agent Log Server 0.2.122 depends on that exact
+wheel for free-threaded CPython. Agent Log Server 0.2.123 depends on that exact
 Framework-Shells version and its Linux wheel carries a target/version/digest
 verified `als-server`, the compiled browser bundle, and its vendored Socket.IO
 MessagePack parser. Release construction rejects a wheel missing any of those
@@ -1545,7 +1545,7 @@ native ordinary-CPython and free-threaded-CPython wheels and refuses a
 non-native release artifact. Agent Log Server then emits a platform wheel with
 its verified Rust server and exact Framework-Shells dependency. Only after
 those wheels exist does TE2 build against exact
-`framework-shells==0.0.63`, `agent-log-server==0.2.122`, and, on Linux x86-64,
+`framework-shells==0.0.63`, `agent-log-server==0.2.123`, and, on Linux x86-64,
 `nodejs-wheel==24.16.0`. Final published artifacts must be rebuilt from the
 clean synchronized tag; dirty-source candidates are acceptance inputs only.
 

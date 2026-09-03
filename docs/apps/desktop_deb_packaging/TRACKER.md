@@ -38,7 +38,7 @@ Last updated: 2026-08-30
 | `sse-starlette` was held directly by an unmounted router | The dead `app.libs.jobs.jobs_bp` import/router was removed while the job core and handlers remain | Pruned; still transitive through MCP |
 | Framework-Shells is reproducibly pinned | `requirements.txt` uses exact validated 0.0.63 commit `0bf3269cd69a000015b0ac484a04004b8dc564d1` | Complete |
 | Framework-Shells release artifacts are native | The Linux candidate set carries the PyO3 pipe pump and Rust terminal broker in `cp39-abi3` and free-threaded `cp314-cp314t` manylinux wheels; release construction refuses a non-native wheel | Implemented and clean-install validated |
-| Agent Log Server has a fail-closed binary wheel | Exact 0.2.122 depends on Framework-Shells 0.0.63 and carries a target/version/digest-verified `als-server`, compiled browser bundle, and vendored Socket.IO MessagePack parser; corrupt/incompatible provenance and incomplete wheels fail construction | Implemented, published, and clean-install validated |
+| Agent Log Server has a fail-closed binary wheel | Exact 0.2.123 depends on Framework-Shells 0.0.63 and carries a target/version/digest-verified `als-server`, compiled browser bundle, and vendored Socket.IO MessagePack parser; corrupt/incompatible provenance and incomplete wheels fail construction | Implemented and locally validated; publication is part of the synchronized 0.2.343 release |
 | ALS app-worker launch must preserve the managed venv | Bootstrap correctly prepends the active venv, but the former `sh -lc` shellspec reset `PATH` before resolving `als-rs` | Corrected to direct argv and covered by a manifest regression test |
 | Linux x86-64 owns an exact private Node runtime | `nodejs-wheel==24.16.0` supplies venv-local Node/npm and matching headers; bootstrap children, Terminal, WBA, and source Electron use the shared resolver | Implemented and clean-install validated |
 | Modern Termux excludes the Linux Node wheel | Both connected targets run Python 3.14.6 with `sys.platform == "android"` and `aarch64`; the Linux/x86-64 marker is false | Termux resolves Node/npm from its apt package mapping |
@@ -1327,7 +1327,7 @@ does not authorize publication.
 - [x] Synchronize every release-facing version to `0.2.343`, rebuild both
   frontends, and rebundle the Android assets with version code `20343`.
 - [ ] Build and audit clean-tag Linux, Termux AArch64, GeckoView, and Cefrium
-  artifacts; retain Framework-Shells `0.0.63` and Agent Log Server `0.2.122`.
+  artifacts; retain Framework-Shells `0.0.63` and Agent Log Server `0.2.123`.
 - [ ] Pass TestPyPI/isolated Debian, public PyPI, public-curl desktop, and
   physical Termux acceptance against the exact immutable candidates.
 - [ ] Publish a normal/latest GitHub Release titled `TE2 0.2.343 alpha`, then
