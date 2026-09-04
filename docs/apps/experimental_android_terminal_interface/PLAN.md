@@ -49,8 +49,10 @@ reproducible evidence explaining why the proposed production path is not viable.
 
 - Both terminal surfaces use the same vendored xterm 5.3.0 browser artifact at
   `app/static/vendor/xterm/xterm.js`.
-- Editable xterm source is in the nested `worktrees/xterm-te2` repository on its
-  `te2-android-ime` branch.
+- Editable xterm source is in the external `mrsurge/xterm-te2` repository on its
+  `te2-mobile-touch-routing` branch. The browser artifact in this branch was
+  published from source commit `1d71ed0732d592980eb0960ce3da001213d2636e`;
+  `worktrees/xterm-te2` is only the conventional local checkout path.
 - The standalone Terminal initializes xterm in
   `app/apps/terminal/src/main.ts`.
 - The Code TE2 drawer initializes xterm in
