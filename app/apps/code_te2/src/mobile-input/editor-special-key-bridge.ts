@@ -63,6 +63,26 @@ export function publishMobileEditorFocus(
   }));
 }
 
+export function bindMobileEditorFocusCapture(
+  target: EventTarget,
+  win: Window,
+  role: MobileEditorRole,
+): () => void {
+  let disposed = false;
+  const claimFocus = (): void => {
+    if (disposed) return;
+    if (currentMobileEditorOwner(win) === role) return;
+    publishMobileEditorFocus(win, role);
+  };
+  target.addEventListener('pointerdown', claimFocus, true);
+  target.addEventListener('focusin', claimFocus, true);
+  return () => {
+    disposed = true;
+    target.removeEventListener('pointerdown', claimFocus, true);
+    target.removeEventListener('focusin', claimFocus, true);
+  };
+}
+
 export function currentMobileEditorModifiers(
   win: Window,
 ): MobileEditorModifierState {

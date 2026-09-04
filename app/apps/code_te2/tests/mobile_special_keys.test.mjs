@@ -589,6 +589,41 @@ test("moves the translucent controls and key target into the focused secondary e
   binding.dispose();
 });
 
+test("captures secondary focus at the persistent editor frame", async () => {
+  const {
+    bindMobileEditorFocusCapture,
+    currentMobileEditorOwner,
+    setMobileEditorOwner,
+  } = await importMobileSpecialKeyRuntime();
+  const fixture = createEditorFixture(
+    "Mozilla/5.0 (Linux; Android 16) Gecko/144 Firefox/144 Mobile",
+    "secondary",
+  );
+  let focusEvents = 0;
+  fixture.win.addEventListener("te2:mobile-editor-focus", () => {
+    focusEvents += 1;
+  });
+
+  const dispose = bindMobileEditorFocusCapture(
+    fixture.host,
+    fixture.win,
+    "secondary",
+  );
+  assert.equal(currentMobileEditorOwner(fixture.win), "primary");
+
+  fixture.host.dispatchEvent(pointerEvent("pointerdown"));
+  assert.equal(currentMobileEditorOwner(fixture.win), "secondary");
+  assert.equal(focusEvents, 1);
+
+  fixture.host.dispatchEvent(new Event("focusin", { bubbles: true }));
+  assert.equal(focusEvents, 1);
+
+  setMobileEditorOwner(fixture.win, "primary");
+  dispose();
+  fixture.host.dispatchEvent(pointerEvent("pointerdown"));
+  assert.equal(currentMobileEditorOwner(fixture.win), "primary");
+});
+
 test("replays vendored Gboard control bytes into Monaco without recursion", async () => {
   const { rebindVendoredCtrlHelper, clearVendoredCtrlHelper } =
     await importTypeScript(

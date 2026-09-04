@@ -19,6 +19,7 @@ import {
   MOBILE_EDITOR_FOCUS_EVENT,
   MOBILE_EDITOR_MODIFIERS_CONSUMED_EVENT,
   MOBILE_EDITOR_PANEL_TOGGLE_EVENT,
+  bindMobileEditorFocusCapture,
   publishMobileEditorModifierState,
   publishMobileEditorPanelState,
   requestMobileEditorSpecialKey,
@@ -480,6 +481,11 @@ export async function bootSecondaryEditorRuntime(
   const issuesButton = root.querySelector<HTMLButtonElement>('.te2-secondary-editor-issues');
   if (!editorFrame || !title || !status || !menu || !menuButton || !issuesButton) {
     throw new Error('Second editor shell did not initialize');
+  }
+  if (presentationBridge.kind === 'mobile') {
+    inputBridgeCleanups.push(
+      bindMobileEditorFocusCapture(editorFrame, window, 'secondary'),
+    );
   }
   const titleEl = title;
   const statusEl = status;
