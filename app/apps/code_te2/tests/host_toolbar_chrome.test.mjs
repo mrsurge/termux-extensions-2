@@ -55,8 +55,9 @@ test('toolbar issue counter owns the next-issue action', async () => {
 });
 
 test('toolbar and Drafts overlay keep the intended source structure', async () => {
-  const [template, overlay, reviewRenderer, resizeManager, secondaryRuntime] = await Promise.all([
+  const [template, inlineHost, overlay, reviewRenderer, resizeManager, secondaryRuntime] = await Promise.all([
     readFile(path.join(appRoot, 'template.html'), 'utf8'),
+    readFile(path.join(appRoot, 'monaco_editor/inline_host.ts'), 'utf8'),
     readFile(path.join(appRoot, 'src/explorer/search/overlay-controller.ts'), 'utf8'),
     readFile(path.join(appRoot, 'src/explorer/search/review-results-renderer.ts'), 'utf8'),
     readFile(path.join(appRoot, 'main_page/frontend/host-resize-manager.ts'), 'utf8'),
@@ -120,6 +121,23 @@ test('toolbar and Drafts overlay keep the intended source structure', async () =
   assert.equal(desktopToolbarZ, 40);
   assert.equal(desktopSidebarZ, 50);
   assert.ok(desktopToolbarZ < desktopSidebarZ);
+  assert.match(
+    template,
+    /\.layout-desktop \.fe-editor-container\s*\{[\s\S]*?overflow:\s*visible/,
+  );
+  assert.match(
+    template,
+    /\.layout-mobile \.fe-editor-container\s*\{[\s\S]*?overflow:\s*visible/,
+  );
+  assert.match(template, /#editor-frame\s*\{[\s\S]*?overflow:\s*visible/);
+  assert.match(
+    template,
+    /\.fe-root:has\(\.fe-dropdown\.show\) \.fe-editor-container,[\s\S]*?\.fe-root\.layout-mobile:has\(\.agent-drawer\.open\) \.fe-editor-container,[\s\S]*?body:has\(> \.fe-file-tab-context-menu\) \.fe-editor-container[\s\S]*?z-index:\s*0/,
+  );
+  assert.match(
+    inlineHost,
+    /\.monaco-resizable-hover,[\s\S]*?\.overflowingOverlayWidgets > \.monaco-hover[\s\S]*?z-index:\s*300 !important/,
+  );
   assert.match(overlay, /\{ id: "review", label: "Drafts" \}/);
   assert.doesNotMatch(reviewRenderer, /badge\.textContent = 'Draft'/);
 });

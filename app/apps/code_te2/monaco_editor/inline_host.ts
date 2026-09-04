@@ -38,6 +38,10 @@ const INLINE_EDITOR_HOST_STYLE = `
 #editor-frame .monaco-editor .find-widget {
   z-index: 300;
 }
+#editor-frame .monaco-editor .monaco-resizable-hover,
+#editor-frame .monaco-editor .overflowingOverlayWidgets > .monaco-hover {
+  z-index: 300 !important;
+}
 #editor-frame[data-te2-native-renderer='cefrium'] .monaco-editor .find-widget textarea.input,
 #editor-frame[data-te2-native-renderer='cefrium'] .monaco-editor textarea.inputarea.android-ime-input {
   font-size: 16px !important;

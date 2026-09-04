@@ -873,9 +873,12 @@ theme registration is skipped (by design) to avoid caching a no-op run.
   10-pixel horizontal scrollbars for long lines.
 
 ### Z-index policy
-- The inline Monaco editor host remains at `z-index: auto`.
-- Only Monaco's `.find-widget` is raised to `z-index: 300`, above drawers and resize handles but below framework dropdowns and modals.
-- Editor-container overflow clipping remains intentional.
+
+- The inline Monaco editor host normally remains at `z-index: auto`.
+- The primary editor container and frame use visible outer overflow so Monaco's own overflow widgets and managed context-view tooltips can cross the inactive toolbar and file-tab rows. Monaco's internal overflow guard still clips editor text, canvas, and scrolling content.
+- Monaco content and glyph hovers share TE2's `z-index: 300` widget tier with the Find widget. Managed tooltips retain Monaco's higher internal context-view layer.
+- An opened host dropdown or modal, a body-owned tab/editor/Explorer context menu, or an opened mobile Explorer/Sidebar gives the complete editor container a local `z-index: 0` stacking context. This places every Monaco popup below the active host surface without focus listeners; desktop tiled side panels do not trigger that isolation.
+- Editor-container root viewport clipping remains intentional at the application shell boundary.
 
 ---
 
