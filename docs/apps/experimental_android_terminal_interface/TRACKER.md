@@ -218,5 +218,13 @@
 - [x] Complete the release Track A live-acceptance gate against the exact
   synchronized APKs on both the Motorola and Pixel. The extended text-shape and
   lifecycle torture checks above remain separately tracked where not reported.
-- [ ] Fast-forward `main`, create the immutable `0.2.344` tag, build clean Linux
+- [x] Fast-forward `main`, create the immutable `0.2.344` tag, build clean Linux
   and Termux artifacts, and publish PyPI/GitHub only after live acceptance.
+
+The normal/latest non-prerelease GitHub release and production PyPI package are
+published from tag commit `9721374144fe14e7d6cfa8fd0edd8c2366ef9843`.
+Clean Linux, deterministic physical-AArch64 Termux, GeckoView, and Cefrium
+artifacts passed their release audits. Public Debian desktop/framework/worker
+acceptance and a physical Motorola `0.2.342` to `0.2.344` managed upgrade with
+real worker launch both passed. Track B remains unimplemented and is not part of
+the release.

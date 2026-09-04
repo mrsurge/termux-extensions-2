@@ -1407,9 +1407,58 @@ does not authorize publication.
   for user Track A live acceptance.
 - [x] Pass user live acceptance with both GeckoView and Cefrium `0.2.344`
   candidates installed on both the Motorola and Pixel.
-- [ ] After acceptance, fast-forward `main`, tag the exact source, construct the
+- [x] After acceptance, fast-forward `main`, tag the exact source, construct the
   clean Linux and Termux release set with unchanged Framework-Shells `0.0.63`
   and Agent Log Server `0.2.123`, and publish the normal/latest alpha release.
+
+### Phase 4K TE2 0.2.344 publication and acceptance evidence
+
+- Annotated tag `0.2.344` identifies integrated source commit
+  `9721374144fe14e7d6cfa8fd0edd8c2366ef9843`. The feature branch, `main`, and
+  their remote counterparts identified that commit before publication; this
+  evidence commit remains intentionally outside the immutable tag.
+- Production PyPI publishes `te2==0.2.344` with exact dependencies
+  `framework-shells==0.0.63` and `agent-log-server==0.2.123`. The exact public
+  wheel SHA-256 is
+  `77828f5e45f6469a0645ba2214659913956439b82ea3e8bd5de789b409d36528`,
+  the sdist is
+  `5bbdef2343ebb5fe06b76278b0e66e4f92814e8f1e1a7423380cb6d36567084c`,
+  and the packaged Linux Ferrous-native server is
+  `f1eba2c2861ebe553bacf7745e7214816fcff13f1a461ffcdee9492b4a3afa74`.
+- The clean 96-wheel Termux archive was assembled twice on the physical Pixel
+  from a fresh shallow `0.2.344` checkout and was byte-identical both times.
+  Its SHA-256 is
+  `04707727276ee8bda14760d962e146111a92bf8d31404ffb66b5f496f810d326`;
+  its exact Bionic server is
+  `5f0ad4c236f21aca7add5cb47f4d771ad07cc3cd32bb05550e5182af58d1db51`
+  and reports Android/AArch64 plus `ferrous-framework-native`. The target
+  manifest records TE2 `97213741`, Framework-Shells
+  `8b6cd08b9c918c2bfa9928b8544db4c45ee8215a`, Agent Log Server
+  `bc97253e7bbdfdd4ccc9b96d2b6bf8a39926c656`, and the Cargo-resolved Ferrous
+  commit `673c156a0a1d108b562be5671029a7310cf04684`.
+- The clean-tag staging APKs carry version code `20344`, app revision `1.0.8`,
+  synchronized `0.2.344` assets, the repository development signer, and pass
+  the 16 KiB alignment audit. GeckoView SHA-256 is
+  `99499feea719975fefe697fa7a773141676870034b9757fed41b7e083c42f4f4`
+  and Cefrium is
+  `141757c3da8a039022da02caf562a1c964a005f99d3a223f3b4a5fe0523fad4f`.
+  User live acceptance passed the synchronized source candidates in both
+  renderers on both the Motorola and Pixel before tag construction.
+- GitHub Release `0.2.344`, titled `TE2 0.2.344 alpha`, is the normal/latest
+  release with `prerelease: false` and 13 assets. Every private-draft upload was
+  downloaded and verified before promotion; the public `SHA256SUMS` SHA-256 is
+  `278b2d23f134623c950ad76ff193d88dd88f64722e6c8b7f75eadd37b61360cd`.
+- A fresh isolated Debian latest-curl `--desktop` install materialized TE2
+  `0.2.344`, Framework-Shells `0.0.63`, Agent Log Server `0.2.123`, the managed
+  Electron runtime, integration receipt, icon, desktop entry, and launcher.
+  Its packaged framework returned health `0.2.344`, discovered all eight apps,
+  and launched a real File Explorer worker through Ferrous. The exact-tag local
+  Electron package reproduced app-asar SHA-256
+  `adc4c6906df3bbdc09a050192f54120ca5e85515fd21b0f27d94404a4a5ea98a`.
+- A public latest-curl install on the physical Motorola upgraded the managed
+  Termux release from `0.2.342` to `0.2.344`, retained `0.2.342` as its one
+  fallback, selected the exact archived server, returned health `0.2.344`,
+  discovered all eight apps, and launched a real File Explorer worker.
 
 ## Deferred work
 
@@ -1470,3 +1519,4 @@ does not authorize publication.
 | 2026-08-30 | Phase 6B running-framework settings correction | Moved the single connection/startup Save action beneath preferred-app selection; allowed launch-config persistence during an owned run; added an immutable active-child launch snapshot and stop/restart adoption test | Electron typecheck and all 100 tests pass; saved launch changes are explicitly next-start values and cannot relabel the active process |
 | 2026-09-02 | TE2 0.2.343 Terminal and Sidebar persistence release | Clean-tag Linux/Termux/APK construction, ALS 0.2.123 Linux and Android wheels, production PyPI publication, normal/latest 13-asset GitHub Release, exact API digest checks, isolated public-PyPI framework/real-worker smoke, public latest-curl Debian desktop materialization, and user live Motorola Cefrium validation | Published and green on the completed Linux/Desktop and Cefrium gates; exact public-archive physical Termux reinstall and remaining GeckoView/full Phase 6C restart matrix stay explicitly open |
 | 2026-09-04 | TE2 0.2.344 mobile Terminal release candidate | Fast-forwarded the complete Track A stack, corrected xterm source provenance, synchronized and rebuilt Code TE2/Terminal/Android/Electron outputs, passed automated browser/Python/Rust/Electron/Android gates, installed both staging APKs on Motorola and Pixel, and completed user live acceptance on both renderer variants | Accepted source is ready for immutable tag construction and clean publication builds; the separate Android FD transport investigation remains unimplemented and out of release scope |
+| 2026-09-04 | TE2 0.2.344 final publication | Clean-tag Linux/Termux/APK construction, deterministic physical-AArch64 archive assembly, production PyPI publication, private-draft download verification before normal/latest GitHub promotion, isolated public Debian desktop/framework/worker acceptance, and physical Motorola 0.2.342-to-0.2.344 upgrade/framework/worker acceptance | Passed; all supported public installation paths and the synchronized mobile Track A release are green while Track B remains documentation-only |
