@@ -2,12 +2,14 @@
 
 ## Status
 
-- Branch: `experimental/android-terminal-interface`
+- Integration branch: `feature/desktop-deb-packaging`, fast-forwarded from
+  `experimental/android-terminal-interface`
 - Starting snapshot: `b8c296c5` (`Gate Terminal mobile key dock`)
 - Implementation status: Track A source and automated validation complete;
-  Android live acceptance pending
-- Release baseline: not yet published; merge it into this branch before final
-  validation
+  synchronized `0.2.344` Android live acceptance pending
+- Release baseline: published `0.2.343` baseline is integrated; Track A targets
+  `0.2.344`. Track B remains an unimplemented investigation and is not part of
+  that release.
 
 ## Objective
 
@@ -40,8 +42,8 @@ reproducible evidence explaining why the proposed production path is not viable.
   documented adapter.
 - Do not edit generated Android asset copies by hand. Rebuild and bundle only at
   an approved publication/acceptance point.
-- Merge the pending release baseline before final validation so this branch does
-  not ship from the older `0.2.342` snapshot accidentally.
+- Preserve the integrated `0.2.343` baseline and publish Track A only through a
+  new immutable `0.2.344` release after final validation.
 
 ## Current Architecture Findings
 

@@ -19,6 +19,7 @@ Last updated: 2026-09-02
 | Phase 4B: release provenance and Linux platform wheel | Complete: audited build, clean SSH acceptance, PyPI publication, and byte-identical GitHub mirror passed | Supported wheels embed the verified Rust server; source provenance alone may use Cargo |
 | Phase 4C: unified installer and Linux target | Public acquisition, private venv, optional desktop bootstrap, and non-graphical Debian acceptance pass; upgrade/graphical matrix remains | Managed venv is atomic; `--desktop` delegates to that venv's existing Electron bootstrap and config contract |
 | Phase 4D: final integration and publication | `0.2.343` is published and accepted on public Linux/Desktop; its clean Termux archive and synchronized APKs are published | Release assets are immutable; `0.2.340` remains defective historical data while `0.2.343` is the normal/latest release |
+| Phase 4K: `0.2.344` mobile Terminal integration | Experimental branch fast-forward and pre-version source gates pass; synchronized asset/APK and live-acceptance gates remain | Publish only Track A mobile Terminal/editor work; the Android FD transport investigation remains unimplemented and out of scope |
 | Phase 5: Termux target mode | Public `0.2.342` physical install acceptance is green; the full app-worker/Terminal/Code Server matrix last passed on `0.2.341` | Apt-first shared foundations plus a release-local wheel tree; every capability-changing physical acceptance must exercise the exact archived server's app-launch path |
 | Phase 6: upgrade retention, desktop startup, and Sidebar continuity | Source implementation is published in `0.2.343`; Electron and Cefrium Sidebar-persistence acceptance passed while the GeckoView/full restart matrix remains | Retain one fallback, use normal app readiness, and distinguish transient WBA loss from authoritative membership removal |
 
@@ -1384,6 +1385,29 @@ does not authorize publication.
   configuration. Separate isolated public-PyPI framework acceptance returned
   health version `0.2.343`, discovered all eight built-ins, and launched a real
   File Explorer worker through the Ferrous-native server.
+
+### Phase 4K — TE2 0.2.344 mobile Terminal integration release
+
+- [x] Fast-forward the release branch from
+  `origin/experimental/android-terminal-interface`; the branch was exactly 11
+  commits ahead of `0.2.343` evidence commit `74bcc3f6` with no divergence.
+- [x] Verify the external xterm source branch
+  `te2-mobile-touch-routing` at
+  `1d71ed0732d592980eb0960ce3da001213d2636e` and correct the stale vendor
+  provenance references.
+- [x] Pass the pre-version gates: Code TE2 typecheck, 287 browser tests and
+  build; standalone Terminal typecheck, 22 tests and build; 8 Python terminal
+  projection tests; Electron typecheck, 100 tests and compile; GeckoView and
+  Cefrium debug unit-test tasks.
+- [x] Synchronize release-facing source metadata to `0.2.344`, retain Android
+  app revision `1.0.8`, and advance Android version code to `20344`.
+- [x] Rebuild canonical Code TE2/Terminal assets, rebundle the Android seed, and
+  prove the source and bundled copies correspond to the same versioned output.
+- [x] Build and audit Electron plus GeckoView/Cefrium staging outputs, then stop
+  for user Track A live acceptance.
+- [ ] After acceptance, fast-forward `main`, tag the exact source, construct the
+  clean Linux and Termux release set with unchanged Framework-Shells `0.0.63`
+  and Agent Log Server `0.2.123`, and publish the normal/latest alpha release.
 
 ## Deferred work
 

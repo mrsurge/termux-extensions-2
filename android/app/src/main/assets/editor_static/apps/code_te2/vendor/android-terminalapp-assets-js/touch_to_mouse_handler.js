@@ -23,7 +23,7 @@ const DOUBLE_TAP_MS = 280;
 const DOUBLE_TAP_PX = 24;
 const EDGE_SCROLL_PX = 32;
 const EDGE_SCROLL_INTERVAL_MS = 80;
-const SELECTION_DRAG_OFFSET_ROWS = 2;
+const SELECTION_DRAG_OFFSET_ROWS = 3;
 const HANDLE_HEIGHT_PX = 58;
 const HANDLE_LAYER_CLASS = 'te2-xterm-touch-selection-layer';
 const HANDLE_CLASS = 'te2-xterm-touch-selection-handle';
@@ -152,10 +152,14 @@ function startSelection(point) {
     hideMenu(attachment);
     const cell = clientPointToBufferCell(attachment, point.clientX, point.clientY);
     if (cell && cell.col < attachment.terminal.cols) {
-      attachment.terminal.select(cell.col, cell.row, 1);
+      gestureState.selectionAnchor = cell;
+      if (typeof attachment.terminal.selectWordAt === 'function') {
+        attachment.terminal.selectWordAt(cell.col, cell.row);
+      } else {
+        attachment.terminal.select(cell.col, cell.row, 1);
+      }
     }
   }
-  dispatchMouse('mousedown', point, gestureState.mouseTarget);
 }
 
 function getTrackedTouch(event) {
@@ -166,19 +170,27 @@ function getTrackedTouch(event) {
 
 function maybeSelectWord(point, root) {
   const attachment = attachmentsByRoot.get(root);
-  if (!attachment) return;
+  if (!attachment) return false;
   const now = Date.now();
   const isDoubleTap = now - attachment.lastTapTime < DOUBLE_TAP_MS
     && Math.hypot(point.clientX - attachment.lastTapX, point.clientY - attachment.lastTapY)
       < DOUBLE_TAP_PX;
   if (isDoubleTap) {
-    dispatchMouse('dblclick', point, getMouseTarget(root));
+    const cell = clientPointToBufferCell(attachment, point.clientX, point.clientY);
+    if (cell && cell.col < attachment.terminal.cols) {
+      if (typeof attachment.terminal.selectWordAt === 'function') {
+        attachment.terminal.selectWordAt(cell.col, cell.row);
+      } else {
+        attachment.terminal.select(cell.col, cell.row, 1);
+      }
+    }
     attachment.lastTapTime = 0;
-    return;
+    return true;
   }
   attachment.lastTapTime = now;
   attachment.lastTapX = point.clientX;
   attachment.lastTapY = point.clientY;
+  return false;
 }
 
 function handleTouchStart(event) {
@@ -204,11 +216,12 @@ function handleTouchStart(event) {
     terminalRoot,
     mouseTarget,
     wheelTarget,
+    selectionAnchor: null,
     longPressTimer: setTimeout(() => startSelection(point), LONG_PRESS_MS),
   };
   const attachment = attachmentsByRoot.get(terminalRoot);
   if (attachment) hideMenu(attachment);
-  return true;
+  return false;
 }
 
 function handleTouchMove(event, isScrollGesture) {
@@ -226,7 +239,18 @@ function handleTouchMove(event, isScrollGesture) {
     gestureState.mode = 'scroll';
   }
   if (gestureState.mode === 'select') {
-    dispatchMouse('mousemove', point, gestureState.mouseTarget);
+    if (!isScrollGesture) {
+      event.preventDefault();
+      event.stopPropagation();
+      return false;
+    }
+    const attachment = attachmentsByRoot.get(gestureState.terminalRoot);
+    const moving = attachment
+      ? clientPointToBufferCell(attachment, point.clientX, point.clientY)
+      : null;
+    if (attachment && moving && gestureState.selectionAnchor) {
+      selectThroughCell(attachment.terminal, gestureState.selectionAnchor, moving);
+    }
     event.preventDefault();
     event.stopPropagation();
     return false;
@@ -251,7 +275,6 @@ function handleTouchEnd(event, isScrollGesture) {
     gestureState.mode = 'scroll';
   }
   if (gestureState.mode === 'select') {
-    dispatchMouse('mouseup', point, gestureState.mouseTarget);
     event.preventDefault();
     event.stopPropagation();
     resetGestureState();
@@ -262,19 +285,22 @@ function handleTouchEnd(event, isScrollGesture) {
     resetGestureState();
     return false;
   } else {
-    maybeSelectWord(point, gestureState.terminalRoot);
+    const selectedWord = maybeSelectWord(point, gestureState.terminalRoot);
+    if (!selectedWord) {
+      dispatchMouse('mousedown', point, gestureState.mouseTarget);
+      dispatchMouse('mouseup', point, gestureState.mouseTarget);
+      dispatchMouse('click', point, gestureState.mouseTarget);
+    }
+    event.preventDefault();
+    event.stopPropagation();
   }
   resetGestureState();
-  return true;
+  return false;
 }
 
 function handleTouchCancel(event) {
   if (!gestureState) return true;
-  const point = getTrackedTouch(event) || gestureState.point;
   const owned = gestureState.mode === 'select' || gestureState.mode === 'scroll';
-  if (gestureState.mode === 'select') {
-    dispatchMouse('mouseup', point, gestureState.mouseTarget);
-  }
   resetGestureState();
   return !owned;
 }
@@ -296,6 +322,7 @@ function handleContextMenu(event) {
   if (!helpersEnabled() || isHandleTarget(event.target)) return;
   const isTouchContextMenu = event.pointerType === 'touch' || Boolean(gestureState);
   if (!isTouchContextMenu) return;
+  const createdGesture = !gestureState;
   if (!gestureState) {
     const terminalRoot = getTerminalRoot(event.target);
     const mouseTarget = getMouseTarget(event.target);
@@ -309,12 +336,28 @@ function handleContextMenu(event) {
       terminalRoot,
       mouseTarget,
       wheelTarget,
+      selectionAnchor: null,
       longPressTimer: null,
     };
   }
   startSelection(event);
+  if (createdGesture) resetGestureState();
   event.preventDefault();
   event.stopPropagation();
+}
+
+function resolveHostLayerZIndex(root) {
+  let outermostZIndex = null;
+  for (let element = root; element && element !== document.body; element = element.parentElement) {
+    const value = Number.parseInt(window.getComputedStyle(element).zIndex, 10);
+    if (Number.isFinite(value)) outermostZIndex = value;
+  }
+  if (outermostZIndex !== null) return outermostZIndex + 1;
+  const capture = root.querySelector('.xterm-touch-capture');
+  const captureZIndex = capture
+    ? Number.parseInt(window.getComputedStyle(capture).zIndex, 10)
+    : Number.NaN;
+  return Number.isFinite(captureZIndex) ? captureZIndex + 1 : 1;
 }
 
 function ensureHandleStyles() {
@@ -329,7 +372,7 @@ function ensureHandleStyles() {
       height: 100vh;
       overflow: visible;
       pointer-events: none;
-      z-index: 2147483000;
+      z-index: 10;
     }
     .${HANDLE_CLASS} {
       position: fixed;
@@ -615,6 +658,20 @@ function selectBetween(terminal, first, second) {
   return true;
 }
 
+function selectThroughCell(terminal, anchor, moving) {
+  const cols = Math.max(1, Number(terminal.cols) || 1);
+  const clampCell = (cell) => ({
+    col: Math.min(Math.max(cell.col, 0), cols - 1),
+    row: Math.max(cell.row, 0),
+  });
+  const first = clampCell(anchor);
+  const second = clampCell(moving);
+  const start = compareCells(first, second) <= 0 ? first : second;
+  const end = start === first ? second : first;
+  const length = (end.row * cols + end.col) - (start.row * cols + start.col) + 1;
+  terminal.select(start.col, start.row, length);
+}
+
 function stopEdgeScroll() {
   if (!handleDrag?.scrollTimer) return;
   clearInterval(handleDrag.scrollTimer);
@@ -856,6 +913,7 @@ function attach(terminal) {
   attachments.set(terminal, attachment);
   attachmentsByRoot.set(root, attachment);
   addDisposable(attachment, terminal.attachCustomTouchEventHandler(handleCustomTouchEvent));
+  layer.style.zIndex = String(resolveHostLayerZIndex(root));
   root.addEventListener('contextmenu', handleContextMenu, eventOptions);
   attachment.disposables.push(() => {
     root.removeEventListener('contextmenu', handleContextMenu, eventOptions);

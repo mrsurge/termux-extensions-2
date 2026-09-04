@@ -1,8 +1,10 @@
 # TE2 xterm Vendor Assets
 
 `xterm.js` and `xterm.css` are generated from the local xterm fork at
-`worktrees/xterm-te2`, branch `te2-android-ime`. That branch is based on
-upstream tag `5.3.0` (`2e02c37e528c1abc200ce401f49d0d7eae330e63`).
+`worktrees/xterm-te2`, branch `te2-mobile-touch-routing`. The currently
+published source commit is `1d71ed0732d592980eb0960ce3da001213d2636e`; that
+branch is based on upstream tag `5.3.0`
+(`2e02c37e528c1abc200ce401f49d0d7eae330e63`).
 The published source origin is `https://github.com/mrsurge/xterm-te2`.
 
 Do not edit the minified browser bundle directly. Modify and validate the fork,

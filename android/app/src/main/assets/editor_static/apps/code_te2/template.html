@@ -163,7 +163,7 @@
     grid-column: 2;
     grid-row: 3;
     position: relative;
-    overflow: hidden;
+    overflow: visible;
   }
 
   /* Sidebar becomes a full-height right rail in desktop mode. */
@@ -285,7 +285,7 @@
   .fe-root.layout-mobile {
     display: grid;
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto 1fr auto auto;
+    grid-template-rows: auto auto minmax(0, 1fr) auto auto auto;
     height: 100%;
     min-height: 0;
     min-width: 0;
@@ -312,7 +312,7 @@
     grid-column: 1;
     grid-row: 3;
     position: relative;
-    overflow: hidden;
+    overflow: visible;
   }
 
   /* Lower sidebar drawer z-index in mobile so explorer (100) can overlay it */
@@ -339,6 +339,15 @@
     max-height: 397px;
   }
 
+  .layout-mobile:has(.terminal-drawer.fullscreen) {
+    grid-template-rows: auto auto 0 minmax(0, 1fr) auto auto;
+  }
+
+  .layout-mobile .terminal-drawer.fullscreen {
+    height: auto !important;
+    min-height: 0;
+  }
+
   /* When terminal is "closed" (open class NOT present) */
   .layout-mobile .terminal-drawer:not(.open):not(.terminal-drawer--collapsed) {
     opacity: 0;
@@ -350,7 +359,7 @@
 
   /* Adjust grid when terminal is closed */
   .layout-mobile:has(.terminal-drawer:not(.open):not(.terminal-drawer--collapsed)) {
-    grid-template-rows: auto auto 1fr 0px auto;
+    grid-template-rows: auto auto minmax(0, 1fr) 0px auto auto;
   }
 
   .layout-mobile .terminal-drawer.terminal-drawer--collapsed {
@@ -370,7 +379,7 @@
   }
 
   .layout-mobile:has(.terminal-drawer.terminal-drawer--collapsed) {
-    grid-template-rows: auto auto 1fr 2px auto;
+    grid-template-rows: auto auto minmax(0, 1fr) 2px auto auto;
   }
 
   .terminal-drawer.terminal-drawer--collapsed .drawer-tab-bar {
@@ -946,8 +955,21 @@
     height: 100% !important;
     display: block;
     border: 0 !important;
-    overflow: hidden;
+    overflow: visible;
     background: #0b0f14;
+  }
+
+  /* Monaco overflow widgets may cross inactive host chrome. When a host-owned
+     surface opens, isolate the complete editor below that surface instead of
+     trying to reorder Monaco's individual popup implementations. */
+  .fe-root:has(.fe-dropdown.show) .fe-editor-container,
+  .fe-root:has(.fe-modal.show) .fe-editor-container,
+  .fe-root.layout-mobile.drawer-open .fe-editor-container,
+  .fe-root.layout-mobile:has(.agent-drawer.open) .fe-editor-container,
+  body:has(> .fe-file-tab-context-menu) .fe-editor-container,
+  body:has(> .fe-extension-editor-context-menu) .fe-editor-container,
+  body:has(> .fe-card-menu.show) .fe-editor-container {
+    z-index: 0;
   }
   #editor-frame .fh-root {
     height: 100%;

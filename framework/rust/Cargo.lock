@@ -1979,7 +1979,7 @@ dependencies = [
 
 [[package]]
 name = "te2-server"
-version = "0.2.343"
+version = "0.2.344"
 dependencies = [
  "anyhow",
  "axum",

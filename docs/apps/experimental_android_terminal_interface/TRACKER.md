@@ -79,11 +79,14 @@
 - [x] Test edge-scroll transitions.
 - [x] Test wide-cell continuation normalization.
 - [x] Run standalone Terminal typecheck.
-- [x] Run standalone Terminal tests: 20 passed.
+- [x] Run standalone Terminal tests: 22 passed after integration.
 - [x] Build standalone Terminal frontend.
 - [x] Run Code TE2 typecheck.
-- [x] Run Code TE2 terminal transport/touch tests: 40 passed.
+- [x] Run the complete Code TE2 browser suite after integration: 287 passed.
 - [x] Build Code TE2 frontend.
+- [x] Run Code TE2 terminal-screen projection tests after integration: 8 passed.
+- [x] Run Electron typecheck, all 100 tests, and compile after integration.
+- [x] Run GeckoView and Cefrium debug unit-test tasks after integration.
 
 ### Live acceptance
 
@@ -187,11 +190,31 @@
 
 ## Documentation And Handoff
 
-- [ ] Update `docs/apps/code_te2/CODE_TE2.md` after behavior is verified.
-- [ ] Update `.repo_memory.md` with concise durable conclusions.
-- [ ] Record any xterm fork/source changes and rebuild procedure.
+- [x] Update `docs/apps/code_te2/CODE_TE2.md` with the implemented Track A
+  behavior and the unresolved Cefrium zoom limitation.
+- [x] Update `.repo_memory.md` with concise Track A contracts.
+- [x] Record the xterm fork/source changes and rebuild procedure, including
+  source branch `te2-mobile-touch-routing` at
+  `1d71ed0732d592980eb0960ce3da001213d2636e`.
 - [ ] Record Android helper build and packaging procedure.
 - [ ] Record security and permission requirements.
 - [ ] Record measured latency and lifecycle results.
 - [ ] Record unresolved limitations without presenting them as completed work.
 - [ ] Commit and push only after requested acceptance boundaries are met.
+
+## TE2 0.2.344 Release Integration
+
+- [x] Fast-forward the release branch from the complete 11-commit Track A stack
+  without rebasing or creating a synthetic merge commit.
+- [x] Preserve exact first-party dependency pins: Framework-Shells `0.0.63`
+  and Agent Log Server `0.2.123`.
+- [x] Synchronize release-facing source metadata to `0.2.344` and Android
+  version code `20344`.
+- [x] Rebuild Code TE2 and standalone Terminal, then materialize a fresh Android
+  asset seed from those canonical outputs.
+- [x] Re-run Electron typecheck/tests/compile and construct the packaged
+  Electron runtime from the synchronized source candidate.
+- [x] Build and audit synchronized GeckoView and Cefrium staging APKs.
+- [ ] Complete the Track A live-acceptance matrix against those exact APKs.
+- [ ] Fast-forward `main`, create the immutable `0.2.344` tag, build clean Linux
+  and Termux artifacts, and publish PyPI/GitHub only after live acceptance.
