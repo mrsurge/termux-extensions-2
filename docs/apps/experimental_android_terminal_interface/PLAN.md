@@ -7,7 +7,7 @@
 - Starting snapshot: `b8c296c5` (`Gate Terminal mobile key dock`)
 - Implementation status: Track A is published in `0.2.344`; the isolated
   secondary-editor focus correction is synchronized and built as a `0.2.345`
-  candidate on Motorola and Pixel, awaiting live acceptance
+  candidate on Motorola and Pixel with user live acceptance complete
 - Release baseline: published `0.2.344` is integrated; the focus correction
   targets `0.2.345`. Track B remains an unimplemented investigation and is not
   part of that release.

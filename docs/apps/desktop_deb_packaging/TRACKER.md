@@ -20,7 +20,7 @@ Last updated: 2026-09-02
 | Phase 4C: unified installer and Linux target | Public acquisition, private venv, optional desktop bootstrap, and non-graphical Debian acceptance pass; upgrade/graphical matrix remains | Managed venv is atomic; `--desktop` delegates to that venv's existing Electron bootstrap and config contract |
 | Phase 4D: final integration and publication | `0.2.344` is published and accepted on public Linux/Desktop and physical Termux; its clean archive and synchronized APKs are published | Release assets are immutable; `0.2.340` remains defective historical data while `0.2.344` is the normal/latest release |
 | Phase 4K: `0.2.344` mobile Terminal integration | Complete, published, and accepted across both Android renderers on Motorola and Pixel | Track A only; the Android FD transport investigation remains unimplemented and out of scope |
-| Phase 4L: `0.2.345` mobile focus correction | Synchronized source, asset, Electron, and APK candidates pass automated gates and are installed on both devices for live acceptance | Do not tag or publish until the secondary-editor focus handoff passes live validation |
+| Phase 4L: `0.2.345` mobile focus correction | Synchronized source, asset, Electron, and APK candidates pass automated gates and live acceptance on both devices | Build publication artifacts only from the immutable accepted tag |
 | Phase 5: Termux target mode | Public `0.2.342` physical install acceptance is green; the full app-worker/Terminal/Code Server matrix last passed on `0.2.341` | Apt-first shared foundations plus a release-local wheel tree; every capability-changing physical acceptance must exercise the exact archived server's app-launch path |
 | Phase 6: upgrade retention, desktop startup, and Sidebar continuity | Source implementation is published in `0.2.343`; Electron and Cefrium Sidebar-persistence acceptance passed while the GeckoView/full restart matrix remains | Retain one fallback, use normal app readiness, and distinguish transient WBA loss from authoritative membership removal |
 
@@ -1474,7 +1474,7 @@ does not authorize publication.
   complete Code TE2 browser test suite before version synchronization.
 - [x] Synchronize release metadata and rebuild Code TE2, Electron, the Android
   asset seed, and both staging APKs at `0.2.345`.
-- [ ] Complete user live acceptance before immutable tag construction or
+- [x] Complete user live acceptance before immutable tag construction or
   publication.
 - [ ] Build and audit clean Linux/Termux/PyPI/GitHub artifacts, publish the
   normal/latest alpha release, validate public installs, and record evidence.
@@ -1489,7 +1489,8 @@ and pass the 16 KiB ZIP alignment audit. Candidate APK SHA-256 values are
 for GeckoView and
 `eebb974cac9aab83906e1a098f42d7501dd667d4778a527b2c7e39df16496904`
 for Cefrium. Both were installed successfully on Motorola and Pixel without
-launching them.
+launching them; user live acceptance subsequently passed the corrected
+secondary-editor soft-key focus handoff and synchronized theme behavior.
 
 ## Deferred work
 

@@ -239,3 +239,5 @@ the release.
 - [x] Rebundle the synchronized `0.2.345` frontend into GeckoView and Cefrium,
   build both staging APKs, install them on Motorola and Pixel, and stop for live
   acceptance before publication.
+- [x] Pass user live acceptance for the secondary-editor soft-key focus handoff
+  and synchronized editor-theme behavior on the installed candidates.
