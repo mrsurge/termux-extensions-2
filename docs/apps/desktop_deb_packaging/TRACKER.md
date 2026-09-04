@@ -1405,6 +1405,8 @@ does not authorize publication.
   prove the source and bundled copies correspond to the same versioned output.
 - [x] Build and audit Electron plus GeckoView/Cefrium staging outputs, then stop
   for user Track A live acceptance.
+- [x] Pass user live acceptance with both GeckoView and Cefrium `0.2.344`
+  candidates installed on both the Motorola and Pixel.
 - [ ] After acceptance, fast-forward `main`, tag the exact source, construct the
   clean Linux and Termux release set with unchanged Framework-Shells `0.0.63`
   and Agent Log Server `0.2.123`, and publish the normal/latest alpha release.
@@ -1467,3 +1469,4 @@ does not authorize publication.
 | 2026-08-30 | Phase 6 source implementation | Installer and Electron-runtime transaction tests, Electron settings/startup tests, Code TE2 presentation and WBA reset tests, both TypeScript checks, rebuilt host/WBA bundles, Python bridge tests, and GeckoView unit tests | Automated source gates pass; Debian/Termux installed transactions, graphical autostart, and cross-client restart/content-state acceptance remain open; no version or publication performed |
 | 2026-08-30 | Phase 6B running-framework settings correction | Moved the single connection/startup Save action beneath preferred-app selection; allowed launch-config persistence during an owned run; added an immutable active-child launch snapshot and stop/restart adoption test | Electron typecheck and all 100 tests pass; saved launch changes are explicitly next-start values and cannot relabel the active process |
 | 2026-09-02 | TE2 0.2.343 Terminal and Sidebar persistence release | Clean-tag Linux/Termux/APK construction, ALS 0.2.123 Linux and Android wheels, production PyPI publication, normal/latest 13-asset GitHub Release, exact API digest checks, isolated public-PyPI framework/real-worker smoke, public latest-curl Debian desktop materialization, and user live Motorola Cefrium validation | Published and green on the completed Linux/Desktop and Cefrium gates; exact public-archive physical Termux reinstall and remaining GeckoView/full Phase 6C restart matrix stay explicitly open |
+| 2026-09-04 | TE2 0.2.344 mobile Terminal release candidate | Fast-forwarded the complete Track A stack, corrected xterm source provenance, synchronized and rebuilt Code TE2/Terminal/Android/Electron outputs, passed automated browser/Python/Rust/Electron/Android gates, installed both staging APKs on Motorola and Pixel, and completed user live acceptance on both renderer variants | Accepted source is ready for immutable tag construction and clean publication builds; the separate Android FD transport investigation remains unimplemented and out of release scope |

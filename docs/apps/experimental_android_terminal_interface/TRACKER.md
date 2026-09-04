@@ -91,10 +91,10 @@
 ### Live acceptance
 
 - [x] Pass the initial Android handle, drag-offset, and action-menu smoke test.
-- [ ] Standalone Terminal on GeckoView.
-- [ ] Code TE2 drawer on GeckoView.
-- [ ] Standalone Terminal on Cefrium.
-- [ ] Code TE2 drawer on Cefrium.
+- [x] Standalone Terminal on GeckoView.
+- [x] Code TE2 drawer on GeckoView.
+- [x] Standalone Terminal on Cefrium.
+- [x] Code TE2 drawer on Cefrium.
 - [ ] Verify selection in scrollback.
 - [ ] Verify selection over CJK, emoji, and combining text.
 - [ ] Verify handle crossing.
@@ -215,6 +215,8 @@
 - [x] Re-run Electron typecheck/tests/compile and construct the packaged
   Electron runtime from the synchronized source candidate.
 - [x] Build and audit synchronized GeckoView and Cefrium staging APKs.
-- [ ] Complete the Track A live-acceptance matrix against those exact APKs.
+- [x] Complete the release Track A live-acceptance gate against the exact
+  synchronized APKs on both the Motorola and Pixel. The extended text-shape and
+  lifecycle torture checks above remain separately tracked where not reported.
 - [ ] Fast-forward `main`, create the immutable `0.2.344` tag, build clean Linux
   and Termux artifacts, and publish PyPI/GitHub only after live acceptance.

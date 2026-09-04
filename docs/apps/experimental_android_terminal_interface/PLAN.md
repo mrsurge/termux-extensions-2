@@ -5,8 +5,9 @@
 - Integration branch: `feature/desktop-deb-packaging`, fast-forwarded from
   `experimental/android-terminal-interface`
 - Starting snapshot: `b8c296c5` (`Gate Terminal mobile key dock`)
-- Implementation status: Track A source and automated validation complete;
-  synchronized `0.2.344` Android live acceptance pending
+- Implementation status: Track A source, automated validation, synchronized
+  APK construction, and Motorola/Pixel GeckoView/Cefrium live acceptance
+  complete; `0.2.344` release finalization is in progress
 - Release baseline: published `0.2.343` baseline is integrated; Track A targets
   `0.2.344`. Track B remains an unimplemented investigation and is not part of
   that release.
