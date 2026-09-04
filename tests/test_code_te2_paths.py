@@ -131,6 +131,35 @@ class CodeTe2PathTests(unittest.TestCase):
         self.assertFalse(editor["autoSave"])
         self.assertFalse(editor["showInlineDiffs"])
         self.assertFalse(editor["showDraftDiffs"])
+        self.assertEqual("github-dark", editor["theme"])
+
+    def test_legacy_default_theme_migrates_without_overwriting_explicit_theme(self) -> None:
+        preferences_path = self.root / "preferences.json"
+        preferences_path.write_text(
+            json.dumps({"editor": {"theme": "cm6-dark"}, "ui": {}, "projects": {}}),
+            encoding="utf-8",
+        )
+        migrated = cast(
+            dict[str, object],
+            PreferencesStore(storage_path=preferences_path).get_preferences()["editor"],
+        )
+        self.assertEqual("github-dark", migrated["theme"])
+
+        preferences_path.write_text(
+            json.dumps(
+                {
+                    "editor": {"theme": "github-dark-default"},
+                    "ui": {},
+                    "projects": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+        preserved = cast(
+            dict[str, object],
+            PreferencesStore(storage_path=preferences_path).get_preferences()["editor"],
+        )
+        self.assertEqual("github-dark-default", preserved["theme"])
 
     def test_real_shape_project_sidecar_and_draft_index_survive_reload(self) -> None:
         env = self._canonical_env()

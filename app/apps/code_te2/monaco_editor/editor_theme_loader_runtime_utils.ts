@@ -29,7 +29,7 @@ export async function loadVscodeTextmateThemesRuntime(opts: ThemeLoaderRuntimeOp
     if (!options.state.jsonCache) options.state.jsonCache = {};
     const registry = await options.ensureThemeRegistryFn();
     let themeIds = Object.keys(registry || {});
-    if (!themeIds.length) themeIds = ['github-dark-default', 'github-light-default'];
+    if (!themeIds.length) themeIds = ['github-dark', 'github-light-default'];
     for (let index = 0; index < themeIds.length; index += 1) {
       const id = themeIds[index];
       const url = options.getThemeJsonUrlFn(id);

@@ -37,7 +37,7 @@ export function createSettingsThemesController(deps: any) {
       }
     } catch (_) {}
 
-    const currentTheme = deps.getEditorViewState()?.theme || 'github-dark-default';
+    const currentTheme = deps.getEditorViewState()?.theme || 'github-dark';
     deps.themesListEl.innerHTML = '';
     const vendored = themes.filter((t: any) => t.source === 'vendored');
     const fromExts = themes.filter((t: any) => t.source === 'extension');

@@ -353,6 +353,12 @@ def _manifest(
                 "role": "WBA and Terminal Node runtime",
             },
             {
+                "executables": ["bun"],
+                "imports": [],
+                "name": "bun",
+                "role": "next-release JavaScript runtime prerequisite",
+            },
+            {
                 "executables": ["npm"],
                 "imports": [],
                 "minimumVersion": "11.19.0",

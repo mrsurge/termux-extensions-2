@@ -25,7 +25,7 @@ DEFAULT_EDITOR_PREFS: JsonDict = {
     "autoCloseBrackets": True,
     "autocompletion": True,
     "showInlayHints": True,
-    "theme": "cm6-dark",
+    "theme": "github-dark",
     "autoSave": False,
     "showInlineDiffs": False,
     "showDraftDiffs": False,
@@ -141,6 +141,9 @@ class PreferencesStore:
             editor_store = _as_dict(data.get("editor"))
             if "trackAgentEdits" in editor_store:
                 editor_store.pop("trackAgentEdits", None)
+                modified = True
+            if editor_store.get("theme") == "cm6-dark":
+                editor_store["theme"] = "github-dark"
                 modified = True
             for key, default_val in DEFAULT_EDITOR_PREFS.items():
                 if key not in editor_store:

@@ -5,11 +5,11 @@ export function resolveMonacoThemeId(
   try {
     const key = String(themeKey || '').trim();
     if (themeCache && themeCache[key]) return key;
-    if (key === 'vs-dark' || key === 'hc-black') return 'github-dark-default';
+    if (key === 'vs-dark' || key === 'hc-black') return 'github-dark';
     if (key === 'vs' || key === 'hc-light') return 'github-light-default';
     if (key.toLowerCase().includes('light')) return 'github-light-default';
-    return 'github-dark-default';
+    return 'github-dark';
   } catch (_) {
-    return 'github-dark-default';
+    return 'github-dark';
   }
 }

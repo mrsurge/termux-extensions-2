@@ -228,3 +228,14 @@ artifacts passed their release audits. Public Debian desktop/framework/worker
 acceptance and a physical Motorola `0.2.342` to `0.2.344` managed upgrade with
 real worker launch both passed. Track B remains unimplemented and is not part of
 the release.
+
+## TE2 0.2.345 Mobile Focus Correction
+
+- [x] Integrate `6e4e206a`, which claims mobile secondary-editor ownership from
+  capture-phase pointer/focus events on the persistent frame rather than a
+  disposable Monaco widget node.
+- [x] Retain the focused regression test and pass the complete Code TE2 browser
+  suite.
+- [x] Rebundle the synchronized `0.2.345` frontend into GeckoView and Cefrium,
+  build both staging APKs, install them on Motorola and Pixel, and stop for live
+  acceptance before publication.

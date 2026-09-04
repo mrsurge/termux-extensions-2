@@ -164,7 +164,7 @@ export async function bootMonacoRuntime(
     win.monaco = monacoNs || undefined;
     deps.ensureTe2DiffTheme();
 
-    try { await deps.applyMonacoTheme('github-dark-default'); } catch (_) {}
+    try { await deps.applyMonacoTheme('github-dark'); } catch (_) {}
 
     try { deps.applyBootSnapshot(); } catch (_) {}
     await deps.ensureEditorWithPrefs();

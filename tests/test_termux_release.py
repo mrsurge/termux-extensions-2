@@ -235,6 +235,12 @@ class TermuxReleaseBuilderTests(unittest.TestCase):
             self.assertEqual(manifest["server"]["buildInfo"], build_info)
             git = next(package for package in packages if package["name"] == "git")
             self.assertEqual(git["executables"], ["git"])
+            bun = next(package for package in packages if package["name"] == "bun")
+            self.assertEqual(bun["executables"], ["bun"])
+            self.assertGreater(
+                next(index for index, package in enumerate(packages) if package["name"] == "bun"),
+                0,
+            )
 
     def test_server_build_info_requires_ferrous_native_feature(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

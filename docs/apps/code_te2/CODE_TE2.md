@@ -849,9 +849,9 @@ The inline editor runtime builds Monaco options from SSOT preferences (`buildMon
 - font family (default `JetBrains Mono Nerd`)
 - font ligatures (`fontLigatures` enabled by default for the local Nerd Font)
 - theme (Monaco base: `vs` / `vs-dark`, plus official `monaco-editor-themes` ids)
-  - `github-dark-default` (preferred)
+  - `github-dark` (fresh-install default)
+  - `github-dark-default`
   - `github-light-default` (preferred)
-  - `github-dark` (legacy alias -> `github-dark-default`)
   - `github-light` (legacy alias -> `github-light-default`)
   - the nine vendored GitHub themes under
     `monaco_editor/themes/vendored/github/`

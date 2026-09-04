@@ -549,7 +549,8 @@ not accepted installer inputs unless separately approved.
 
 TUR itself is one explicit accepted prerequisite because the managed Android
 Code Server package requires TUR's `nodejs-24`. The target manifest installs
-the official `tur-repo` subscription package during the initial apt transaction;
+the official `tur-repo` subscription package during the initial apt transaction
+and includes TUR's `bun` package as a forward JavaScript-runtime prerequisite;
 its post-install refresh completes before a later user opt-in can run the
 existing Code Server dependency installer. Code Server remains confirmation-
 gated and does not own repository subscription.

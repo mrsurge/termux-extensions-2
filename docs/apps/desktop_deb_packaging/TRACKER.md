@@ -18,8 +18,9 @@ Last updated: 2026-09-02
 | Phase 4A: source/Git desktop bootstrap | Implemented and validated from a clean wheel | Python entrypoints build one fingerprinted Electron runtime and receipt-owned XDG integration; the unified Linux installer deliberately reuses this path |
 | Phase 4B: release provenance and Linux platform wheel | Complete: audited build, clean SSH acceptance, PyPI publication, and byte-identical GitHub mirror passed | Supported wheels embed the verified Rust server; source provenance alone may use Cargo |
 | Phase 4C: unified installer and Linux target | Public acquisition, private venv, optional desktop bootstrap, and non-graphical Debian acceptance pass; upgrade/graphical matrix remains | Managed venv is atomic; `--desktop` delegates to that venv's existing Electron bootstrap and config contract |
-| Phase 4D: final integration and publication | `0.2.343` is published and accepted on public Linux/Desktop; its clean Termux archive and synchronized APKs are published | Release assets are immutable; `0.2.340` remains defective historical data while `0.2.343` is the normal/latest release |
-| Phase 4K: `0.2.344` mobile Terminal integration | Experimental branch fast-forward and pre-version source gates pass; synchronized asset/APK and live-acceptance gates remain | Publish only Track A mobile Terminal/editor work; the Android FD transport investigation remains unimplemented and out of scope |
+| Phase 4D: final integration and publication | `0.2.344` is published and accepted on public Linux/Desktop and physical Termux; its clean archive and synchronized APKs are published | Release assets are immutable; `0.2.340` remains defective historical data while `0.2.344` is the normal/latest release |
+| Phase 4K: `0.2.344` mobile Terminal integration | Complete, published, and accepted across both Android renderers on Motorola and Pixel | Track A only; the Android FD transport investigation remains unimplemented and out of scope |
+| Phase 4L: `0.2.345` mobile focus correction | Synchronized source, asset, Electron, and APK candidates pass automated gates and are installed on both devices for live acceptance | Do not tag or publish until the secondary-editor focus handoff passes live validation |
 | Phase 5: Termux target mode | Public `0.2.342` physical install acceptance is green; the full app-worker/Terminal/Code Server matrix last passed on `0.2.341` | Apt-first shared foundations plus a release-local wheel tree; every capability-changing physical acceptance must exercise the exact archived server's app-launch path |
 | Phase 6: upgrade retention, desktop startup, and Sidebar continuity | Source implementation is published in `0.2.343`; Electron and Cefrium Sidebar-persistence acceptance passed while the GeckoView/full restart matrix remains | Retain one fallback, use normal app readiness, and distinguish transient WBA loss from authoritative membership removal |
 
@@ -1459,6 +1460,36 @@ does not authorize publication.
   Termux release from `0.2.342` to `0.2.344`, retained `0.2.342` as its one
   fallback, selected the exact archived server, returned health `0.2.344`,
   discovered all eight apps, and launched a real File Explorer worker.
+
+### Phase 4L — TE2 0.2.345 mobile focus correction
+
+- [x] Fast-forward the isolated upstream secondary-editor focus fix from
+  `origin/experimental/android-terminal-interface` at `6e4e206a`.
+- [x] Make the vendored vanilla `github-dark` theme the fresh editor default,
+  migrate only the obsolete `cm6-dark` seed, and preserve explicit theme
+  selections. The fixed extension-webview theme remains unchanged.
+- [x] Add TUR's `bun` package to the generated Termux target manifest as a
+  forward prerequisite and validate its installed executable.
+- [x] Pass focused preference, Termux-release, mobile-input, typecheck, and the
+  complete Code TE2 browser test suite before version synchronization.
+- [x] Synchronize release metadata and rebuild Code TE2, Electron, the Android
+  asset seed, and both staging APKs at `0.2.345`.
+- [ ] Complete user live acceptance before immutable tag construction or
+  publication.
+- [ ] Build and audit clean Linux/Termux/PyPI/GitHub artifacts, publish the
+  normal/latest alpha release, validate public installs, and record evidence.
+
+The synchronized candidates use version code `20345`, embed asset version
+`0.2.345`, and contain the exact canonical Code TE2 host SHA-256
+`65ee185d8d60a9e1d50a5152fb7140f57a89e6d46e191154deed0e87faa71a0b`.
+Both retain development signer SHA-256
+`500d5fbd6f4cb3ff755fd2fc2d23f78750d0cc14755615dc4d0b451f6335e34d`
+and pass the 16 KiB ZIP alignment audit. Candidate APK SHA-256 values are
+`a25ee5ebcc616a10c55e95f00607a5f2d96d8f2ee2182bf0f13dbd5e035151a9`
+for GeckoView and
+`eebb974cac9aab83906e1a098f42d7501dd667d4778a527b2c7e39df16496904`
+for Cefrium. Both were installed successfully on Motorola and Pixel without
+launching them.
 
 ## Deferred work
 

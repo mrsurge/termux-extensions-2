@@ -212,7 +212,7 @@ export function createSettingsRefreshController(deps: any) {
     }
 
     const currentTheme =
-      deps.getEditorViewState()?.theme || "github-dark-default";
+      deps.getEditorViewState()?.theme || "github-dark";
     try {
       const res = await fetch(
         "/api/app/code_te2/ui/monaco_editor/available_themes",

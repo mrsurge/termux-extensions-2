@@ -5,12 +5,12 @@
 - Integration branch: `feature/desktop-deb-packaging`, fast-forwarded from
   `experimental/android-terminal-interface`
 - Starting snapshot: `b8c296c5` (`Gate Terminal mobile key dock`)
-- Implementation status: Track A source, automated validation, synchronized
-  APK construction, and Motorola/Pixel GeckoView/Cefrium live acceptance
-  complete; `0.2.344` release finalization is in progress
-- Release baseline: published `0.2.343` baseline is integrated; Track A targets
-  `0.2.344`. Track B remains an unimplemented investigation and is not part of
-  that release.
+- Implementation status: Track A is published in `0.2.344`; the isolated
+  secondary-editor focus correction is synchronized and built as a `0.2.345`
+  candidate on Motorola and Pixel, awaiting live acceptance
+- Release baseline: published `0.2.344` is integrated; the focus correction
+  targets `0.2.345`. Track B remains an unimplemented investigation and is not
+  part of that release.
 
 ## Objective
 
@@ -43,8 +43,8 @@ reproducible evidence explaining why the proposed production path is not viable.
   documented adapter.
 - Do not edit generated Android asset copies by hand. Rebuild and bundle only at
   an approved publication/acceptance point.
-- Preserve the integrated `0.2.343` baseline and publish Track A only through a
-  new immutable `0.2.344` release after final validation.
+- Preserve the published `0.2.344` baseline and publish the focus correction
+  only through a new immutable `0.2.345` release after final validation.
 
 ## Current Architecture Findings
 
