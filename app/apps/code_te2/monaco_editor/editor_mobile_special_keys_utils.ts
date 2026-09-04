@@ -4,7 +4,31 @@ import {
   dispatchSyntheticEditorKey,
   requestTerminalSpecialKey,
   type SyntheticEditorKey,
+  type SyntheticKeyModifiers,
 } from '../src/mobile-input/terminal-special-key-bridge.ts';
+import {
+  MOBILE_EDITOR_MODIFIER_STATE_EVENT,
+  MOBILE_EDITOR_MODIFIERS_CONSUMED_EVENT,
+  MOBILE_EDITOR_OWNER_EVENT,
+  MOBILE_EDITOR_PANEL_STATE_EVENT,
+  MOBILE_EDITOR_PANEL_TOGGLE_EVENT,
+  MOBILE_EDITOR_SPECIAL_KEY_REQUEST_EVENT,
+  currentMobileEditorModifiers,
+  currentMobileEditorOwner,
+  currentMobileEditorPanelState,
+  markMobileEditorPanelToggleHandled,
+  markMobileEditorSpecialKeyHandled,
+  publishMobileEditorFocus,
+  publishMobileEditorModifierState,
+  publishMobileEditorModifiersConsumed,
+  publishMobileEditorPanelState,
+  requestMobileEditorPanelToggle,
+  requestMobileEditorSpecialKey,
+  type MobileEditorModifierState,
+  type MobileEditorPanelToggleDetail,
+  type MobileEditorRole,
+  type MobileEditorSpecialKeyRequestDetail,
+} from '../src/mobile-input/editor-special-key-bridge.ts';
 
 const CTRL_STATE_EVENT = 'android-terminalapp-ctrl-state';
 const OPEN_TOUCH_MENU_EVENT = 'monaco-touch-selection:open-menu';
@@ -67,7 +91,10 @@ export function dispatchMobileEditorKey(
   editor: MobileSpecialKeyEditor,
   key: MobileEditorKey,
   win: Window = window,
-  options: { useStickyModifiers?: boolean } = {},
+  options: {
+    useStickyModifiers?: boolean;
+    modifiers?: SyntheticKeyModifiers;
+  } = {},
 ): boolean {
   let input = getEditorInput(editor);
   if (!input) return false;
@@ -80,14 +107,14 @@ export function dispatchMobileEditorKey(
 
   const modifierState = activeModifierStates.get(win);
   const useStickyModifiers = options.useStickyModifiers !== false;
-  const modifiers = {
+  const modifiers = options.modifiers ?? {
     ctrl: useStickyModifiers && Boolean(modifierState?.ctrl),
     alt: useStickyModifiers && Boolean(modifierState?.alt),
     shift: useStickyModifiers && Boolean(modifierState?.shift),
   };
 
   dispatchSyntheticEditorKey(input, key, modifiers);
-  modifierState?.consumeOneShot();
+  if (!options.modifiers) modifierState?.consumeOneShot();
   return true;
 }
 
@@ -176,6 +203,16 @@ function setPressed(button: HTMLButtonElement, active: boolean): void {
   button.setAttribute('aria-pressed', String(active));
 }
 
+function mobileEditorRole(win: Window): MobileEditorRole {
+  try {
+    return new URLSearchParams(win.location.search).get('te2_editor_role') === 'secondary'
+      ? 'secondary'
+      : 'primary';
+  } catch {
+    return 'primary';
+  }
+}
+
 export function bindMobileEditorSpecialKeys(
   editor: MobileSpecialKeyEditor,
   win: Window = window,
@@ -185,9 +222,12 @@ export function bindMobileEditorSpecialKeys(
   if (!editorDom || !isMobileUserAgent(win.navigator)) return null;
   const host = editorDom.closest<HTMLElement>('#editor-frame');
   if (!host) return null;
+  const role = mobileEditorRole(win);
   const appRoot = host.closest<HTMLElement>('.fe-root');
-  if (!appRoot) return null;
-  const editorContainer = host.closest<HTMLElement>('.fe-editor-container') ?? host;
+  if (role === 'primary' && !appRoot) return null;
+  const editorContainer = role === 'secondary'
+    ? host.closest<HTMLElement>('.te2-secondary-editor-body') ?? host
+    : host.closest<HTMLElement>('.fe-editor-container') ?? host;
 
   const doc = editorDom.ownerDocument;
   const trigger = createOverlayButton(doc, 'Ctrl', 'Toggle editor special keys');
@@ -258,6 +298,18 @@ export function bindMobileEditorSpecialKeys(
   const ctrlButtons = [ctrl];
   const selectButtons = [select];
 
+  const modifierSnapshot = (): MobileEditorModifierState => ({
+    ctrl: state.ctrl,
+    ctrlLocked: state.ctrlMode === 'locked',
+    alt: state.alt,
+    shift: state.shift,
+  });
+  const publishModifierSnapshot = (): void => {
+    if (role === 'primary') {
+      publishMobileEditorModifierState(win, modifierSnapshot());
+    }
+  };
+
   const syncCtrlButtons = (): void => {
     const active = state.ctrlMode !== 'off';
     ctrlButtons.forEach((button) => {
@@ -287,14 +339,17 @@ export function bindMobileEditorSpecialKeys(
     } finally {
       syncingCtrl = false;
     }
+    publishModifierSnapshot();
   };
   const setAlt = (active: boolean): void => {
     state.alt = active;
     setPressed(alt, active);
+    publishModifierSnapshot();
   };
   const setShift = (active: boolean): void => {
     state.shift = active;
     selectButtons.forEach((button) => setPressed(button, active));
+    publishModifierSnapshot();
   };
   const initialCtrlMode: CtrlMode = ctrlWindow.ctrl
     ? (ctrlWindow.__te2MobileCtrlLocked ? 'locked' : 'armed')
@@ -318,6 +373,36 @@ export function bindMobileEditorSpecialKeys(
   setPressed(alt, false);
   selectButtons.forEach((button) => setPressed(button, false));
   activeModifierStates.set(win, state);
+  publishModifierSnapshot();
+
+  const syncOverlayOwner = (): void => {
+    overlay.hidden = currentMobileEditorOwner(win) !== role;
+  };
+  const onOwnerChanged = (): void => syncOverlayOwner();
+  const onEditorFocus = (): void => publishMobileEditorFocus(win, role);
+  win.addEventListener(MOBILE_EDITOR_OWNER_EVENT, onOwnerChanged);
+  editorDom.addEventListener('focusin', onEditorFocus);
+  editorDom.addEventListener('pointerdown', onEditorFocus);
+  syncOverlayOwner();
+  if (doc.activeElement && editorDom.contains(doc.activeElement)) {
+    onEditorFocus();
+  }
+
+  const onSpecialKeyRequest = (event: Event): void => {
+    const detail = (
+      event as CustomEvent<MobileEditorSpecialKeyRequestDetail>
+    ).detail;
+    if (!detail || detail.role !== role) return;
+    const handled = dispatchMobileEditorKey(editor, detail.key, win, {
+      useStickyModifiers: false,
+      modifiers: detail.modifiers,
+    });
+    if (handled) markMobileEditorSpecialKeyHandled(event);
+  };
+  win.addEventListener(
+    MOBILE_EDITOR_SPECIAL_KEY_REQUEST_EVENT,
+    onSpecialKeyRequest,
+  );
 
   let terminalFocused = Boolean(
     doc.activeElement
@@ -340,14 +425,57 @@ export function bindMobileEditorSpecialKeys(
       state.setCtrlMode('locked');
       return;
     }
+    const previousMode = state.ctrlMode;
     state.setCtrlMode(
       active
         ? (ctrlWindow.__te2MobileCtrlLocked ? 'locked' : 'armed')
         : 'off',
       false,
     );
+    if (role === 'primary') {
+      publishModifierSnapshot();
+    } else {
+      publishMobileEditorModifierState(win, modifierSnapshot());
+    }
+    if (role === 'secondary' && !active && previousMode === 'armed') {
+      publishMobileEditorModifiersConsumed(win, role);
+    }
   };
   win.addEventListener(CTRL_STATE_EVENT, syncCtrl);
+
+  const applyProjectedModifiers = (detail: MobileEditorModifierState): void => {
+    const nextCtrlMode: CtrlMode = detail.ctrl
+      ? (detail.ctrlLocked ? 'locked' : 'armed')
+      : 'off';
+    if (state.ctrlMode !== nextCtrlMode) state.setCtrlMode(nextCtrlMode);
+    if (state.alt !== detail.alt) state.setAlt(detail.alt);
+    if (state.shift !== Boolean(detail.shift)) state.setShift(Boolean(detail.shift));
+  };
+  const syncProjectedModifiers = (event: Event): void => {
+    if (role !== 'secondary') return;
+    const detail = (
+      event as CustomEvent<MobileEditorModifierState>
+    ).detail;
+    if (detail) applyProjectedModifiers(detail);
+  };
+  win.addEventListener(MOBILE_EDITOR_MODIFIER_STATE_EVENT, syncProjectedModifiers);
+  if (role === 'secondary') {
+    applyProjectedModifiers(currentMobileEditorModifiers(win));
+  }
+
+  const consumeSecondaryModifiers = (event: Event): void => {
+    if (role !== 'primary') return;
+    const detail = (
+      event as CustomEvent<{ role?: MobileEditorRole }>
+    ).detail;
+    if (detail?.role !== 'secondary') return;
+    state.consumeOneShot();
+    publishModifierSnapshot();
+  };
+  win.addEventListener(
+    MOBILE_EDITOR_MODIFIERS_CONSUMED_EVENT,
+    consumeSecondaryModifiers,
+  );
 
   const dispatchActiveKey = (key: MobileEditorKey): void => {
     if (terminalFocused) {
@@ -356,6 +484,17 @@ export function bindMobileEditorSpecialKeys(
         alt: state.alt,
         shift: state.shift,
       });
+      if (handled) state.consumeOneShot();
+      return;
+    }
+    const owner = currentMobileEditorOwner(win);
+    if (role === 'primary' && owner === 'secondary') {
+      const handled = requestMobileEditorSpecialKey(
+        win,
+        owner,
+        key,
+        modifierSnapshot(),
+      );
       if (handled) state.consumeOneShot();
       return;
     }
@@ -393,12 +532,35 @@ export function bindMobileEditorSpecialKeys(
       button.hidden = !open;
     });
     saveTrigger.hidden = !open;
-    appRoot.classList.toggle('te2-mobile-special-keys-open', open);
+    appRoot?.classList.toggle('te2-mobile-special-keys-open', open);
     trigger.setAttribute('aria-expanded', String(open));
+    if (role === 'primary') publishMobileEditorPanelState(win, open);
   };
 
+  const syncPanelState = (event: Event): void => {
+    if (role !== 'secondary') return;
+    const detail = (event as CustomEvent<{ open?: boolean }>).detail;
+    setPanelOpen(Boolean(detail?.open));
+  };
+  win.addEventListener(MOBILE_EDITOR_PANEL_STATE_EVENT, syncPanelState);
+
+  const handlePanelToggle = (event: Event): void => {
+    if (role !== 'primary') return;
+    const detail = (event as CustomEvent<MobileEditorPanelToggleDetail>).detail;
+    if (detail?.role !== 'secondary') return;
+    setPanelOpen(panel.hidden);
+    markMobileEditorPanelToggleHandled(event);
+  };
+  win.addEventListener(MOBILE_EDITOR_PANEL_TOGGLE_EVENT, handlePanelToggle);
+
   const cleanups = [
-    bindPointerAction(trigger, () => setPanelOpen(panel.hidden)),
+    bindPointerAction(trigger, () => {
+      if (role === 'secondary') {
+        requestMobileEditorPanelToggle(win, role);
+        return;
+      }
+      setPanelOpen(panel.hidden);
+    }),
     bindPointerAction(saveTrigger, () => {
       state.consumeOneShot();
       onSave?.();
@@ -470,9 +632,9 @@ export function bindMobileEditorSpecialKeys(
     })),
   ];
 
-  appRoot.append(panel);
+  if (role === 'primary') appRoot?.append(panel);
   editorContainer.append(overlay);
-  setPanelOpen(true);
+  setPanelOpen(currentMobileEditorPanelState(win));
 
   return {
     dispose() {
@@ -482,13 +644,30 @@ export function bindMobileEditorSpecialKeys(
         syncTerminalFocus,
       );
       win.removeEventListener(CTRL_STATE_EVENT, syncCtrl);
+      win.removeEventListener(MOBILE_EDITOR_OWNER_EVENT, onOwnerChanged);
+      win.removeEventListener(
+        MOBILE_EDITOR_SPECIAL_KEY_REQUEST_EVENT,
+        onSpecialKeyRequest,
+      );
+      win.removeEventListener(
+        MOBILE_EDITOR_MODIFIER_STATE_EVENT,
+        syncProjectedModifiers,
+      );
+      win.removeEventListener(
+        MOBILE_EDITOR_MODIFIERS_CONSUMED_EVENT,
+        consumeSecondaryModifiers,
+      );
+      win.removeEventListener(MOBILE_EDITOR_PANEL_STATE_EVENT, syncPanelState);
+      win.removeEventListener(MOBILE_EDITOR_PANEL_TOGGLE_EVENT, handlePanelToggle);
+      editorDom.removeEventListener('focusin', onEditorFocus);
+      editorDom.removeEventListener('pointerdown', onEditorFocus);
       if (activeModifierStates.get(win) === state) {
         state.setCtrlMode('off');
         state.setAlt(false);
         state.setShift(false);
         activeModifierStates.delete(win);
       }
-      appRoot.classList.remove('te2-mobile-special-keys-open');
+      appRoot?.classList.remove('te2-mobile-special-keys-open');
       const retainedSecondWindow = overlayLeft.querySelector<HTMLElement>(
         '.te2-mobile-second-window-trigger',
       );

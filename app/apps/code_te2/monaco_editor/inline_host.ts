@@ -46,7 +46,8 @@ const INLINE_EDITOR_HOST_STYLE = `
 #editor-frame[data-te2-native-renderer='cefrium'] .monaco-editor textarea.inputarea.android-ime-input {
   font-size: 16px !important;
 }
-.fe-editor-container > .te2-mobile-editor-overlay {
+.fe-editor-container > .te2-mobile-editor-overlay,
+.te2-secondary-editor-body > .te2-mobile-editor-overlay {
   position: absolute;
   display: flex;
   align-items: flex-end;
@@ -105,6 +106,7 @@ const INLINE_EDITOR_HOST_STYLE = `
   bottom: 14px;
 }
 .te2-mobile-editor-overlay .te2-mobile-special-key[hidden],
+.te2-mobile-editor-overlay[hidden],
 .fe-editor-container > .te2-mobile-second-window-trigger[hidden],
 .fe-root:not(.layout-mobile) .te2-mobile-editor-overlay,
 .fe-root:not(.layout-mobile) .fe-editor-container > .te2-mobile-second-window-trigger {

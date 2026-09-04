@@ -1754,13 +1754,28 @@ There are three distinct layers:
      Ctrl+Shift navigation and selection rules remain authoritative. When the
      Terminal drawer owns focus, navigation keys use its established request
      bridge instead of inventing another input path.
+   - The host owns one viewport-wide dock across the primary and mobile
+     secondary editors. Positive Monaco focus or pointer ownership selects the
+     target; collapse, close, or hiding the secondary surface returns ownership
+     to the primary editor. The secondary iframe receives only typed key and
+     modifier intent over its existing exact-window, exact-origin presentation
+     channel. Ctrl lock/one-shot state is projected into the focused iframe so
+     its local Gboard helper remains authoritative for native text input.
+   - Mobile layout reserves an explicit trailing grid row for that dock. Drawer
+     fullscreen collapses only the primary editor row and lets the drawer fill
+     the remaining bounded grid space; the status bar and a visible key dock
+     therefore remain inside the viewport. A dismissed dock keeps its existing
+     `hidden` behavior and its automatic row consumes no space.
    - A horizontally scrollable translucent action rail preserves editor focus
      and exposes hover, touch context, cut/copy/paste, and the
      client-owned Second Window shortcut. Save is pinned at the opposite edge
      and reserves Gecko's existing keyboard-recovery slot when that control is
      present. Save publishes the same `editor.host.save` action used by Ctrl+S.
      The rail's Ctrl control collapses or reveals the dock and auxiliary actions;
-     it is not a second modifier authority.
+     it is not a second modifier authority. Each Monaco document owns a local
+     rail in its own DOM realm; only the focused editor's rail is rendered, so
+     the controls visually move into the secondary iframe rather than being
+     reparented across documents.
 
 3. **Shared xterm Android transaction layer**
    - The maintained `xterm-te2` fork gives Android custom mode exclusive
@@ -1822,6 +1837,7 @@ There are three distinct layers:
 | `android/.../MainActivity.kt` | Wires filter, IPC client, restartInput callback. |
 | `monaco_editor/editor_mobile_ctrl_helper_utils.ts` | Adapts vendored Gboard Ctrl control bytes into Monaco keybinding chords. |
 | `monaco_editor/editor_mobile_special_keys_utils.ts` | Owns two-row mobile keys, modifier state, and the shared translucent action rail. |
+| `src/mobile-input/editor-special-key-bridge.ts` | Projects active-editor ownership, key intent, panel state, and modifiers between the mobile host and secondary iframe. |
 | `src/mobile-input/terminal-special-key-bridge.ts` | Carries combined Ctrl/Alt/Shift navigation to the active editor or Terminal target. |
 | `vendor/android-terminalapp-assets-js/ctrl_key_handler.js` | Shared terminal/Monaco Ctrl state and Gboard control-character adapter. |
 | `app/static/vendor/monaco-editor-core/esm/` | Committed patched Monaco artifacts; their editable VS Code source is external. |
@@ -2441,6 +2457,15 @@ document admission, then notifies only the invoking client's UI IPC room. The
 secondary renderer performs the canonical open, so the host reveals the tab
 only after that open succeeds, the primary foreground does not move, and no
 document content crosses the presentation `postMessage` channel.
+
+Mobile input presentation follows the same boundary. The parent retains the
+single two-row special-key dock and remembers the last positively focused
+Monaco role; Terminal focus remains a temporary independent override. Each
+editor renderer creates its own translucent action rail, but the host projects
+the active role so only the primary or secondary rail is visible. Secondary
+key requests, dock visibility, and Ctrl/Gboard state travel through validated
+same-origin messages addressed to the exact retained iframe. Hiding,
+collapsing, closing, or destroying that iframe restores primary ownership.
 
 The portable reduced header consumes the auxiliary client's exact diagnostics
 count projection and renders the same error/warning pills as the primary

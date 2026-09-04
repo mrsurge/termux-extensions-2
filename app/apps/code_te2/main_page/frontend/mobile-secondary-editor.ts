@@ -2,6 +2,26 @@ import {
   mobileSecondaryShortcutVisible,
   mobileSecondaryTabVisible,
 } from './secondary-editor-state.ts';
+import {
+  MOBILE_EDITOR_MODIFIER_STATE_EVENT,
+  MOBILE_EDITOR_OWNER_EVENT,
+  MOBILE_EDITOR_PANEL_STATE_EVENT,
+  MOBILE_EDITOR_SPECIAL_KEY_REQUEST_EVENT,
+  currentMobileEditorModifiers,
+  currentMobileEditorOwner,
+  currentMobileEditorPanelState,
+  markMobileEditorSpecialKeyHandled,
+  publishMobileEditorModifiersConsumed,
+  requestMobileEditorPanelToggle,
+  setMobileEditorOwner,
+  type MobileEditorModifierState,
+  type MobileEditorRole,
+  type MobileEditorSpecialKeyRequestDetail,
+} from '../../src/mobile-input/editor-special-key-bridge.ts';
+import type {
+  SyntheticEditorKey,
+  SyntheticKeyModifiers,
+} from '../../src/mobile-input/terminal-special-key-bridge.ts';
 
 interface NavigatorWithUaData extends Navigator {
   userAgentData?: { mobile?: boolean };
@@ -29,6 +49,21 @@ type SecondaryOpenCommand = {
   path: string;
   requestId: string;
 };
+
+type SecondaryInputCommand =
+  | {
+    type: 'inputState';
+    owner: MobileEditorRole;
+    modifiers: MobileEditorModifierState;
+    panelOpen: boolean;
+  }
+  | {
+    type: 'specialKey';
+    key: SyntheticEditorKey;
+    modifiers: SyntheticKeyModifiers;
+  };
+
+type SecondaryCommand = SecondaryOpenCommand | SecondaryInputCommand;
 
 export interface MobileSecondaryEditorController {
   readonly supported: boolean;
@@ -129,6 +164,9 @@ export function createMobileSecondaryEditorController(
     const visible = available && selected;
     options.container.hidden = !visible;
     if (frame) frame.hidden = !visible;
+    if (!visible && currentMobileEditorOwner(window) === 'secondary') {
+      setMobileEditorOwner(window, 'primary');
+    }
   }
 
   function selectFallbackTab(): void {
@@ -202,13 +240,23 @@ export function createMobileSecondaryEditorController(
     return readyPromise;
   }
 
-  function postCommand(command: SecondaryOpenCommand): void {
+  function postCommand(command: SecondaryCommand): void {
     const target = frame?.contentWindow;
     if (!target) throw new Error('Second Window editor is unavailable');
     target.postMessage({
       channel: 'te2.secondaryEditor.command',
       command,
     }, window.location.origin);
+  }
+
+  function syncInputState(): void {
+    if (!ready || !frame?.contentWindow) return;
+    postCommand({
+      type: 'inputState',
+      owner: currentMobileEditorOwner(window),
+      modifiers: currentMobileEditorModifiers(window),
+      panelOpen: currentMobileEditorPanelState(window),
+    });
   }
 
   function waitForOpenResult(requestId: string): Promise<string> {
@@ -237,6 +285,7 @@ export function createMobileSecondaryEditorController(
       readyPromise = Promise.resolve();
       resolveReady = null;
       rejectReady = null;
+      syncInputState();
     } else if (event.data.type === 'foreground') {
       applyForeground(typeof event.data.path === 'string' ? event.data.path : '');
     } else if (event.data.type === 'openResult') {
@@ -256,14 +305,23 @@ export function createMobileSecondaryEditorController(
         ));
       }
     } else if (event.data.type === 'mode' && event.data.mode === 'collapsed') {
+      setMobileEditorOwner(window, 'primary');
       closeDrawer();
     } else if (event.data.type === 'mode' && event.data.mode === 'closed') {
+      setMobileEditorOwner(window, 'primary');
       dismissed = true;
       selectFallbackTab();
       hide();
       destroyFrame('Second Window editor was closed');
       updateVisibility();
       closeDrawer();
+    } else if (event.data.type === 'inputFocus') {
+      if (options.container.hidden || frame.hidden || !populated) return;
+      setMobileEditorOwner(window, 'secondary');
+    } else if (event.data.type === 'modifiersConsumed') {
+      publishMobileEditorModifiersConsumed(window, 'secondary');
+    } else if (event.data.type === 'panelToggle') {
+      requestMobileEditorPanelToggle(window, 'secondary');
     }
   }
 
@@ -284,6 +342,9 @@ export function createMobileSecondaryEditorController(
   function hide(): void {
     options.container.hidden = true;
     if (frame) frame.hidden = true;
+    if (currentMobileEditorOwner(window) === 'secondary') {
+      setMobileEditorOwner(window, 'primary');
+    }
   }
 
   function reconcileLayout(): void {
@@ -301,6 +362,26 @@ export function createMobileSecondaryEditorController(
     attributeFilter: ['class'],
   });
   window.addEventListener('message', onMessage);
+  const onInputStateChanged = (): void => syncInputState();
+  const onSpecialKeyRequest = (event: Event): void => {
+    const detail = (
+      event as CustomEvent<MobileEditorSpecialKeyRequestDetail>
+    ).detail;
+    if (detail?.role !== 'secondary' || !ready || !frame?.contentWindow) return;
+    postCommand({
+      type: 'specialKey',
+      key: detail.key,
+      modifiers: detail.modifiers,
+    });
+    markMobileEditorSpecialKeyHandled(event);
+  };
+  window.addEventListener(MOBILE_EDITOR_OWNER_EVENT, onInputStateChanged);
+  window.addEventListener(MOBILE_EDITOR_MODIFIER_STATE_EVENT, onInputStateChanged);
+  window.addEventListener(MOBILE_EDITOR_PANEL_STATE_EVENT, onInputStateChanged);
+  window.addEventListener(
+    MOBILE_EDITOR_SPECIAL_KEY_REQUEST_EVENT,
+    onSpecialKeyRequest,
+  );
   shortcut.addEventListener('pointerdown', (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -346,6 +427,17 @@ export function createMobileSecondaryEditorController(
     destroy() {
       layoutObserver.disconnect();
       window.removeEventListener('message', onMessage);
+      window.removeEventListener(MOBILE_EDITOR_OWNER_EVENT, onInputStateChanged);
+      window.removeEventListener(
+        MOBILE_EDITOR_MODIFIER_STATE_EVENT,
+        onInputStateChanged,
+      );
+      window.removeEventListener(MOBILE_EDITOR_PANEL_STATE_EVENT, onInputStateChanged);
+      window.removeEventListener(
+        MOBILE_EDITOR_SPECIAL_KEY_REQUEST_EVENT,
+        onSpecialKeyRequest,
+      );
+      setMobileEditorOwner(window, 'primary');
       destroyFrame('Second Window editor was destroyed');
       shortcut.remove();
       dismissed = false;

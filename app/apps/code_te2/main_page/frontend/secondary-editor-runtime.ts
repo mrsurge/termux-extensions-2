@@ -15,6 +15,22 @@ import {
   type SecondaryEditorMode,
 } from './secondary-editor-state.ts';
 import { renderDiagnosticIssuePills } from './ui/diagnostic-issue-pills.ts';
+import {
+  MOBILE_EDITOR_FOCUS_EVENT,
+  MOBILE_EDITOR_MODIFIERS_CONSUMED_EVENT,
+  MOBILE_EDITOR_PANEL_TOGGLE_EVENT,
+  publishMobileEditorModifierState,
+  publishMobileEditorPanelState,
+  requestMobileEditorSpecialKey,
+  setMobileEditorOwner,
+  type MobileEditorModifierState,
+  type MobileEditorPanelToggleDetail,
+  type MobileEditorRole,
+} from '../../src/mobile-input/editor-special-key-bridge.ts';
+import type {
+  SyntheticEditorKey,
+  SyntheticKeyModifiers,
+} from '../../src/mobile-input/terminal-special-key-bridge.ts';
 
 type SecondaryMode = SecondaryEditorMode;
 
@@ -27,7 +43,18 @@ interface SecondaryPresentation {
 
 type SecondaryCommand =
   | { type: 'open'; projectPath: string; path: string; requestId?: string }
-  | { type: 'state'; projectPath: string; presentation: SecondaryPresentation };
+  | { type: 'state'; projectPath: string; presentation: SecondaryPresentation }
+  | {
+    type: 'inputState';
+    owner: MobileEditorRole;
+    modifiers: MobileEditorModifierState;
+    panelOpen: boolean;
+  }
+  | {
+    type: 'specialKey';
+    key: SyntheticEditorKey;
+    modifiers: SyntheticKeyModifiers;
+  };
 
 interface SecondaryElectronBridge {
   secondEditorReady(): Promise<{ ok: true }>;
@@ -45,6 +72,9 @@ interface SecondaryPresentationBridge {
   setMode(mode: SecondaryMode): Promise<SecondaryPresentation>;
   publishForeground(path: string): void;
   publishOpenResult(requestId: string, ok: boolean, path: string, error?: string): void;
+  publishInputFocus(): void;
+  publishModifiersConsumed(): void;
+  publishPanelToggle(): void;
   onCommand(listener: (command: SecondaryCommand) => void): () => void;
 }
 
@@ -242,6 +272,9 @@ function createPresentationBridge(): SecondaryPresentationBridge {
       },
       publishForeground() {},
       publishOpenResult() {},
+      publishInputFocus() {},
+      publishModifiersConsumed() {},
+      publishPanelToggle() {},
       onCommand(listener) {
         return electron.onSecondEditorCommand(listener);
       },
@@ -288,6 +321,24 @@ function createPresentationBridge(): SecondaryPresentationBridge {
         ok,
         path,
         error: error || '',
+      }, origin);
+    },
+    publishInputFocus() {
+      window.parent.postMessage({
+        channel: 'te2.secondaryEditor.presentation',
+        type: 'inputFocus',
+      }, origin);
+    },
+    publishModifiersConsumed() {
+      window.parent.postMessage({
+        channel: 'te2.secondaryEditor.presentation',
+        type: 'modifiersConsumed',
+      }, origin);
+    },
+    publishPanelToggle() {
+      window.parent.postMessage({
+        channel: 'te2.secondaryEditor.presentation',
+        type: 'panelToggle',
       }, origin);
     },
     onCommand(listener) {
@@ -351,6 +402,43 @@ export async function bootSecondaryEditorRuntime(
   host: SecondaryHost,
 ): Promise<void> {
   const presentationBridge = createPresentationBridge();
+  const inputBridgeCleanups: Array<() => void> = [];
+  if (presentationBridge.kind === 'mobile') {
+    const onInputFocus = (event: Event): void => {
+      const detail = (
+        event as CustomEvent<{ role?: MobileEditorRole }>
+      ).detail;
+      if (detail?.role === 'secondary') presentationBridge.publishInputFocus();
+    };
+    const onModifiersConsumed = (event: Event): void => {
+      const detail = (
+        event as CustomEvent<{ role?: MobileEditorRole }>
+      ).detail;
+      if (detail?.role === 'secondary') {
+        presentationBridge.publishModifiersConsumed();
+      }
+    };
+    const onPanelToggle = (event: Event): void => {
+      const detail = (
+        event as CustomEvent<MobileEditorPanelToggleDetail>
+      ).detail;
+      if (detail?.role === 'secondary') presentationBridge.publishPanelToggle();
+    };
+    window.addEventListener(MOBILE_EDITOR_FOCUS_EVENT, onInputFocus);
+    window.addEventListener(
+      MOBILE_EDITOR_MODIFIERS_CONSUMED_EVENT,
+      onModifiersConsumed,
+    );
+    window.addEventListener(MOBILE_EDITOR_PANEL_TOGGLE_EVENT, onPanelToggle);
+    inputBridgeCleanups.push(
+      () => window.removeEventListener(MOBILE_EDITOR_FOCUS_EVENT, onInputFocus),
+      () => window.removeEventListener(
+        MOBILE_EDITOR_MODIFIERS_CONSUMED_EVENT,
+        onModifiersConsumed,
+      ),
+      () => window.removeEventListener(MOBILE_EDITOR_PANEL_TOGGLE_EVENT, onPanelToggle),
+    );
+  }
 
   installStyle();
   // The framework injects the app template's stylesheet links and inline CSS
@@ -548,6 +636,21 @@ export async function bootSecondaryEditorRuntime(
   }
 
   async function handleNativeCommand(command: SecondaryCommand): Promise<void> {
+    if (command.type === 'inputState') {
+      setMobileEditorOwner(window, command.owner);
+      publishMobileEditorModifierState(window, command.modifiers);
+      publishMobileEditorPanelState(window, command.panelOpen);
+      return;
+    }
+    if (command.type === 'specialKey') {
+      requestMobileEditorSpecialKey(
+        window,
+        'secondary',
+        command.key,
+        command.modifiers,
+      );
+      return;
+    }
     if (command.type === 'state') {
       projectPath = command.projectPath;
       currentMode = command.presentation.mode;
@@ -631,7 +734,10 @@ export async function bootSecondaryEditorRuntime(
       host.toast(message);
     });
   });
-  window.addEventListener('pagehide', unsubscribePresentation, { once: true });
+  window.addEventListener('pagehide', () => {
+    unsubscribePresentation();
+    inputBridgeCleanups.forEach((cleanup) => cleanup());
+  }, { once: true });
 
   menuButton.addEventListener('click', (event) => {
     event.stopPropagation();

@@ -35,6 +35,27 @@ async function importTypeScript(relativePath) {
   return import(url);
 }
 
+async function importMobileSpecialKeyRuntime() {
+  const result = await build({
+    stdin: {
+      contents: `
+        export * from './monaco_editor/editor_mobile_special_keys_utils.ts';
+        export * from './src/mobile-input/editor-special-key-bridge.ts';
+      `,
+      resolveDir: appRoot,
+      sourcefile: "mobile-special-key-test-entry.ts",
+    },
+    bundle: true,
+    format: "esm",
+    platform: "browser",
+    target: "es2022",
+    write: false,
+  });
+  const source = result.outputFiles[0].text;
+  const url = `data:text/javascript;base64,${Buffer.from(source).toString("base64")}#${moduleSequence++}`;
+  return import(url);
+}
+
 class FakeClassList {
   constructor(element) {
     this.element = element;
@@ -245,21 +266,30 @@ function installDomGlobals() {
   globalThis.KeyboardEvent = FakeKeyboardEvent;
 }
 
-function createEditorFixture(userAgent) {
+function createEditorFixture(userAgent, role = "primary") {
   installDomGlobals();
   const win = new EventTarget();
   win.document = new FakeDocument();
   win.navigator = { userAgent };
   win.CustomEvent = FakeCustomEvent;
+  win.location = new URL(
+    role === "secondary"
+      ? "http://127.0.0.1/app/code_te2?te2_editor_role=secondary"
+      : "http://127.0.0.1/app/code_te2",
+  );
 
   const appRoot = win.document.createElement("div");
-  appRoot.className = "fe-root layout-mobile";
+  appRoot.className = role === "secondary"
+    ? "te2-secondary-editor"
+    : "fe-root layout-mobile";
   const terminalContainer = win.document.createElement("div");
   terminalContainer.id = "terminal-container";
   const terminalInput = win.document.createElement("textarea");
   terminalContainer.append(terminalInput);
   const editorContainer = win.document.createElement("div");
-  editorContainer.className = "fe-editor-container";
+  editorContainer.className = role === "secondary"
+    ? "te2-secondary-editor-body"
+    : "fe-editor-container";
   const host = win.document.createElement("div");
   host.id = "editor-frame";
   const editorRoot = win.document.createElement("div");
@@ -380,6 +410,101 @@ test("dispatches editor keys without moving focus", async () => {
     shiftKey: true,
   }]);
   assert.equal(fixture.win.document.activeElement, fixture.input);
+});
+
+test("moves the translucent controls and key target into the focused secondary editor", async () => {
+  const {
+    bindMobileEditorSpecialKeys,
+    currentMobileEditorModifiers,
+    publishMobileEditorFocus,
+    publishMobileEditorModifierState,
+    publishMobileEditorPanelState,
+    requestMobileEditorSpecialKey,
+    setMobileEditorOwner,
+  } = await importMobileSpecialKeyRuntime();
+  const fixture = createEditorFixture(
+    "Mozilla/5.0 (Linux; Android 16) Chrome/151 Mobile",
+    "secondary",
+  );
+  const keyEvents = [];
+  const ctrlStates = [];
+  let saveRequests = 0;
+  let panelToggleRequests = 0;
+  let modifierConsumptions = 0;
+  fixture.win.__androidTerminalSetCtrl = (active) => ctrlStates.push(active);
+  fixture.input.addEventListener("keydown", (event) => {
+    keyEvents.push({
+      key: event.key,
+      ctrlKey: event.ctrlKey,
+      altKey: event.altKey,
+      shiftKey: event.shiftKey,
+    });
+  });
+  fixture.win.addEventListener("te2:mobile-editor-panel-toggle", (event) => {
+    panelToggleRequests += 1;
+    event.detail.handled = true;
+  });
+  fixture.win.addEventListener("te2:mobile-editor-modifiers-consumed", () => {
+    modifierConsumptions += 1;
+  });
+
+  const binding = bindMobileEditorSpecialKeys(
+    fixture.editor,
+    fixture.win,
+    () => { saveRequests += 1; },
+  );
+  assert.ok(binding);
+  const overlay = fixture.editorContainer.querySelector(
+    ".te2-mobile-editor-overlay",
+  );
+  const trigger = findButton(overlay, "Toggle editor special keys");
+  const save = findButton(overlay, "Save current file");
+  assert.ok(overlay);
+  assert.equal(overlay.parentElement, fixture.editorContainer);
+  assert.equal(fixture.appRoot.querySelector(".te2-mobile-special-key-panel"), null);
+  assert.equal(overlay.hidden, true);
+
+  publishMobileEditorFocus(fixture.win, "secondary");
+  assert.equal(overlay.hidden, false);
+  publishMobileEditorPanelState(fixture.win, false);
+  assert.equal(save.hidden, true);
+  publishMobileEditorPanelState(fixture.win, true);
+  assert.equal(save.hidden, false);
+
+  publishMobileEditorModifierState(fixture.win, {
+    ctrl: true,
+    ctrlLocked: false,
+    alt: true,
+    shift: true,
+  });
+  assert.deepEqual(ctrlStates, [true]);
+  assert.equal(requestMobileEditorSpecialKey(
+    fixture.win,
+    "secondary",
+    { key: "ArrowLeft", code: "ArrowLeft", keyCode: 37 },
+    { ctrl: true, alt: true, shift: true },
+  ), true);
+  assert.deepEqual(keyEvents, [{
+    key: "ArrowLeft",
+    ctrlKey: true,
+    altKey: true,
+    shiftKey: true,
+  }]);
+  fixture.win.dispatchEvent(new FakeCustomEvent(
+    "android-terminalapp-ctrl-state",
+    { detail: { active: false } },
+  ));
+  assert.equal(currentMobileEditorModifiers(fixture.win).ctrl, false);
+  assert.equal(modifierConsumptions, 1);
+
+  pointerDown(fixture.win, save);
+  assert.equal(saveRequests, 1);
+  pointerDown(fixture.win, trigger);
+  assert.equal(panelToggleRequests, 1);
+
+  setMobileEditorOwner(fixture.win, "primary");
+  assert.equal(overlay.hidden, true);
+  binding.dispose();
 });
 
 test("replays vendored Gboard control bytes into Monaco without recursion", async () => {
