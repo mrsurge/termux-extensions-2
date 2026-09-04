@@ -198,9 +198,12 @@ class FakeElement extends EventTarget {
   }
 }
 
-class FakeDocument {
+class FakeDocument extends EventTarget {
   constructor() {
+    super();
     this.activeElement = null;
+    this.defaultView = null;
+    this.hidden = false;
     this.head = new FakeElement("head", this);
     this.body = new FakeElement("body", this);
     const appendToHead = this.head.append.bind(this.head);
@@ -270,8 +273,13 @@ function createEditorFixture(userAgent, role = "primary") {
   installDomGlobals();
   const win = new EventTarget();
   win.document = new FakeDocument();
+  win.document.defaultView = win;
   win.navigator = { userAgent };
   win.CustomEvent = FakeCustomEvent;
+  win.setTimeout = globalThis.setTimeout.bind(globalThis);
+  win.clearTimeout = globalThis.clearTimeout.bind(globalThis);
+  win.setInterval = globalThis.setInterval.bind(globalThis);
+  win.clearInterval = globalThis.clearInterval.bind(globalThis);
   win.location = new URL(
     role === "secondary"
       ? "http://127.0.0.1/app/code_te2?te2_editor_role=secondary"
@@ -333,11 +341,26 @@ function createEditorFixture(userAgent, role = "primary") {
   };
 }
 
-function pointerDown(win, target) {
-  target.dispatchEvent(new Event("pointerdown", {
+function pointerEvent(type, pointerId = 1) {
+  const event = new Event(type, {
     bubbles: true,
     cancelable: true,
-  }));
+  });
+  Object.defineProperties(event, {
+    pointerId: { value: pointerId },
+    button: { value: 0 },
+    isPrimary: { value: true },
+  });
+  return event;
+}
+
+function pointerDown(win, target, pointerId = 1) {
+  target.dispatchEvent(pointerEvent("pointerdown", pointerId));
+}
+
+function pointerTap(win, target, pointerId = 1) {
+  pointerDown(win, target, pointerId);
+  target.dispatchEvent(pointerEvent("pointerup", pointerId));
 }
 
 function findButton(root, title) {
@@ -371,6 +394,65 @@ test("gates the special-key UI from the mobile user agent", async () => {
     fixture.host.querySelector(".te2-mobile-special-key-trigger"),
     null,
   );
+});
+
+test("repeats a captured pointer hold and cancels it deterministically", async () => {
+  const {
+    bindPointerHoldRepeat,
+    POINTER_HOLD_REPEAT_DELAY_MS,
+    POINTER_HOLD_REPEAT_INTERVAL_MS,
+  } = await importTypeScript("src/mobile-input/pointer-hold-repeat.ts");
+  const win = new EventTarget();
+  const doc = new EventTarget();
+  doc.defaultView = win;
+  doc.hidden = false;
+  const button = new EventTarget();
+  button.ownerDocument = doc;
+  let capturedPointer = null;
+  button.setPointerCapture = (pointerId) => { capturedPointer = pointerId; };
+  button.hasPointerCapture = (pointerId) => capturedPointer === pointerId;
+  button.releasePointerCapture = (pointerId) => {
+    if (capturedPointer === pointerId) capturedPointer = null;
+  };
+  let nextHandle = 0;
+  const timeouts = new Map();
+  const intervals = new Map();
+  const clock = {
+    setTimeout(callback, delayMs) {
+      const handle = ++nextHandle;
+      timeouts.set(handle, { callback, delayMs });
+      return handle;
+    },
+    clearTimeout(handle) { timeouts.delete(handle); },
+    setInterval(callback, intervalMs) {
+      const handle = ++nextHandle;
+      intervals.set(handle, { callback, intervalMs });
+      return handle;
+    },
+    clearInterval(handle) { intervals.delete(handle); },
+  };
+  const calls = [];
+  const dispose = bindPointerHoldRepeat(button, {
+    start: () => calls.push("start"),
+    repeat: () => calls.push("repeat"),
+    finish: () => calls.push("finish"),
+  }, { window: win, clock });
+
+  button.dispatchEvent(pointerEvent("pointerdown", 7));
+  assert.deepEqual(calls, ["start"]);
+  assert.equal([...timeouts.values()][0].delayMs, POINTER_HOLD_REPEAT_DELAY_MS);
+  [...timeouts.values()][0].callback();
+  assert.deepEqual(calls, ["start", "repeat"]);
+  assert.equal([...intervals.values()][0].intervalMs, POINTER_HOLD_REPEAT_INTERVAL_MS);
+  [...intervals.values()][0].callback();
+  assert.deepEqual(calls, ["start", "repeat", "repeat"]);
+
+  win.dispatchEvent(pointerEvent("pointerup", 8));
+  assert.equal(calls.at(-1), "repeat");
+  button.dispatchEvent(pointerEvent("pointerup", 7));
+  assert.equal(calls.at(-1), "finish");
+  assert.equal(intervals.size, 0);
+  dispose();
 });
 
 test("dispatches editor keys without moving focus", async () => {
@@ -838,7 +920,7 @@ test("provides two-row navigation, persistent selection, and Ctrl lock", async (
   assert.equal(alt.classList.contains("toggle"), true);
   assert.equal(select.classList.contains("toggle"), true);
 
-  pointerDown(fixture.win, left);
+  pointerTap(fixture.win, left);
   assert.deepEqual(keyEvents.at(-1), {
     key: "ArrowLeft",
     ctrlKey: true,
@@ -860,8 +942,8 @@ test("provides two-row navigation, persistent selection, and Ctrl lock", async (
   ));
   assert.equal(fixture.win.ctrl, true);
   assert.equal(ctrl.classList.contains("locked"), true);
-  pointerDown(fixture.win, left);
-  pointerDown(fixture.win, left);
+  pointerTap(fixture.win, left);
+  pointerTap(fixture.win, left);
   assert.equal(keyEvents.at(-1).ctrlKey, true);
   assert.equal(keyEvents.at(-1).shiftKey, true);
   assert.equal(ctrl.classList.contains("locked"), true);

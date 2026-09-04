@@ -29,6 +29,7 @@ import {
   type MobileEditorRole,
   type MobileEditorSpecialKeyRequestDetail,
 } from '../src/mobile-input/editor-special-key-bridge.ts';
+import { bindPointerHoldRepeat } from '../src/mobile-input/pointer-hold-repeat.ts';
 
 const CTRL_STATE_EVENT = 'android-terminalapp-ctrl-state';
 const OPEN_TOUCH_MENU_EVENT = 'monaco-touch-selection:open-menu';
@@ -501,6 +502,52 @@ export function bindMobileEditorSpecialKeys(
     dispatchMobileEditorKey(editor, key, win);
   };
 
+  const bindRepeatingKey = (
+    button: HTMLButtonElement,
+    key: MobileEditorKey,
+  ): (() => void) => {
+    let target: 'terminal' | MobileEditorRole | null = null;
+    let modifiers: SyntheticKeyModifiers | null = null;
+    let handled = false;
+    const dispatch = (): void => {
+      if (!target || !modifiers) return;
+      let currentHandled = false;
+      if (target === 'terminal') {
+        currentHandled = requestTerminalSpecialKey(win, key, modifiers);
+      } else if (target === 'secondary') {
+        currentHandled = requestMobileEditorSpecialKey(
+          win,
+          target,
+          key,
+          modifiers,
+        );
+      } else {
+        currentHandled = dispatchMobileEditorKey(editor, key, win, {
+          useStickyModifiers: false,
+          modifiers,
+        });
+      }
+      handled = currentHandled || handled;
+    };
+    return bindPointerHoldRepeat(button, {
+      start() {
+        target = terminalFocused
+          ? 'terminal'
+          : (role === 'primary' ? currentMobileEditorOwner(win) : role);
+        modifiers = modifierSnapshot();
+        handled = false;
+        dispatch();
+      },
+      repeat: dispatch,
+      finish() {
+        if (handled) state.consumeOneShot();
+        target = null;
+        modifiers = null;
+        handled = false;
+      },
+    }, { window: win });
+  };
+
   const handleCtrlTap = (): void => {
     const now = Date.now();
     if (state.ctrlMode === 'locked') {
@@ -585,26 +632,26 @@ export function bindMobileEditorSpecialKeys(
       state.consumeOneShot();
       runEditCommand(editor, 'paste');
     }),
-    bindPointerAction(left, () => dispatchActiveKey({
+    bindRepeatingKey(left, {
       key: 'ArrowLeft',
       code: 'ArrowLeft',
       keyCode: 37,
-    })),
-    bindPointerAction(up, () => dispatchActiveKey({
+    }),
+    bindRepeatingKey(up, {
       key: 'ArrowUp',
       code: 'ArrowUp',
       keyCode: 38,
-    })),
-    bindPointerAction(down, () => dispatchActiveKey({
+    }),
+    bindRepeatingKey(down, {
       key: 'ArrowDown',
       code: 'ArrowDown',
       keyCode: 40,
-    })),
-    bindPointerAction(right, () => dispatchActiveKey({
+    }),
+    bindRepeatingKey(right, {
       key: 'ArrowRight',
       code: 'ArrowRight',
       keyCode: 39,
-    })),
+    }),
     bindPointerAction(tab, () => dispatchActiveKey({
       key: 'Tab',
       code: 'Tab',

@@ -6,6 +6,7 @@ import { build } from 'esbuild';
 
 
 let modulePromise;
+let repeatModulePromise;
 
 function loadModule() {
   if (!modulePromise) {
@@ -22,6 +23,33 @@ function loadModule() {
     });
   }
   return modulePromise;
+}
+
+function loadRepeatModule() {
+  if (!repeatModulePromise) {
+    repeatModulePromise = build({
+      entryPoints: ['src/pointer-hold-repeat.ts'],
+      bundle: true,
+      format: 'esm',
+      platform: 'node',
+      target: 'es2022',
+      write: false,
+    }).then((result) => {
+      const source = result.outputFiles[0].text;
+      return import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
+    });
+  }
+  return repeatModulePromise;
+}
+
+function pointerEvent(type, pointerId = 1) {
+  const event = new Event(type, { cancelable: true });
+  Object.defineProperties(event, {
+    pointerId: { value: pointerId },
+    button: { value: 0 },
+    isPrimary: { value: true },
+  });
+  return event;
 }
 
 class FakeKeyboardEvent {
@@ -149,6 +177,56 @@ test('dispatches xterm-owned synthetic keydown and keyup with legacy fields', as
   ]);
 });
 
+test('repeats directional pointer holds and stops on cancellation', async () => {
+  const {
+    bindPointerHoldRepeat,
+    POINTER_HOLD_REPEAT_DELAY_MS,
+    POINTER_HOLD_REPEAT_INTERVAL_MS,
+  } = await loadRepeatModule();
+  const win = new EventTarget();
+  const doc = new EventTarget();
+  doc.defaultView = win;
+  doc.hidden = false;
+  const button = new EventTarget();
+  button.ownerDocument = doc;
+  button.setPointerCapture = () => {};
+  button.hasPointerCapture = () => false;
+  button.releasePointerCapture = () => {};
+  let nextHandle = 0;
+  const timeouts = new Map();
+  const intervals = new Map();
+  const clock = {
+    setTimeout(callback, delayMs) {
+      const handle = ++nextHandle;
+      timeouts.set(handle, { callback, delayMs });
+      return handle;
+    },
+    clearTimeout(handle) { timeouts.delete(handle); },
+    setInterval(callback, intervalMs) {
+      const handle = ++nextHandle;
+      intervals.set(handle, { callback, intervalMs });
+      return handle;
+    },
+    clearInterval(handle) { intervals.delete(handle); },
+  };
+  const calls = [];
+  const dispose = bindPointerHoldRepeat(button, {
+    start: () => calls.push('start'),
+    repeat: () => calls.push('repeat'),
+    finish: () => calls.push('finish'),
+  }, { window: win, clock });
+
+  button.dispatchEvent(pointerEvent('pointerdown', 4));
+  assert.equal([...timeouts.values()][0].delayMs, POINTER_HOLD_REPEAT_DELAY_MS);
+  [...timeouts.values()][0].callback();
+  assert.equal([...intervals.values()][0].intervalMs, POINTER_HOLD_REPEAT_INTERVAL_MS);
+  [...intervals.values()][0].callback();
+  win.dispatchEvent(new Event('blur'));
+  assert.deepEqual(calls, ['start', 'repeat', 'repeat', 'finish']);
+  assert.equal(intervals.size, 0);
+  dispose();
+});
+
 test('inserts plain dash through the textarea input authority', async () => {
   const { dispatchSyntheticTerminalText } = await loadModule();
   const events = [];
@@ -228,8 +306,19 @@ test('special key dock and toggle are mobile-only and non-persisted', () => {
 test('plain dash uses textarea input while modified dash stays keyboard-owned', () => {
   const source = fs.readFileSync('src/main.ts', 'utf8');
   assert.match(source, /key === TERMINAL_KEYS\.dash/);
-  assert.match(source, /dispatchSyntheticTerminalText\(textarea, '-'\)/);
-  assert.match(source, /dispatchSyntheticTerminalKey\(textarea, key/);
+  assert.match(source, /dispatchSyntheticTerminalText\(target\.textarea, '-'\)/);
+  assert.match(source, /dispatchSyntheticTerminalKey\(target\.textarea, key/);
+});
+
+test('binds hold repetition only to the four directional soft keys', () => {
+  const source = fs.readFileSync('src/main.ts', 'utf8');
+  for (const key of ['Up', 'Left', 'Down', 'Right']) {
+    assert.match(
+      source,
+      new RegExp(`bindRepeatingTerminalKey\\(ui\\.key${key}, TERMINAL_KEYS\\.${key.toLowerCase()}\\)`),
+    );
+  }
+  assert.doesNotMatch(source, /bindRepeatingTerminalKey\(ui\.key(?:Home|End|PageUp|PageDown)/);
 });
 
 test('active terminal card is derived from client-local activeId', () => {

@@ -1754,6 +1754,13 @@ There are three distinct layers:
      Ctrl+Shift navigation and selection rules remain authoritative. When the
      Terminal drawer owns focus, navigation keys use its established request
      bridge instead of inventing another input path.
+   - The four arrow buttons repeat after a 420 ms hold delay at a 55 ms cadence.
+     Pointer capture preserves the gesture if the finger drifts outside the
+     button, while release, cancellation, lost capture, window blur, document
+     hiding, or runtime disposal stops it synchronously. The focused target and
+     Ctrl/Alt/Shift state are snapshotted at pointer-down. One-shot modifiers
+     apply to the complete hold gesture and are consumed once at its end;
+     locked Ctrl and persistent Select/Shift retain their established behavior.
    - The host owns one viewport-wide dock across the primary and mobile
      secondary editors. Positive Monaco focus or pointer ownership selects the
      target; collapse, close, or hiding the secondary surface returns ownership
@@ -1838,6 +1845,7 @@ There are three distinct layers:
 | `monaco_editor/editor_mobile_ctrl_helper_utils.ts` | Adapts vendored Gboard Ctrl control bytes into Monaco keybinding chords. |
 | `monaco_editor/editor_mobile_special_keys_utils.ts` | Owns two-row mobile keys, modifier state, and the shared translucent action rail. |
 | `src/mobile-input/editor-special-key-bridge.ts` | Projects active-editor ownership, key intent, panel state, and modifiers between the mobile host and secondary iframe. |
+| `src/mobile-input/pointer-hold-repeat.ts` | Owns deterministic directional-key hold timing, pointer capture, and cancellation. |
 | `src/mobile-input/terminal-special-key-bridge.ts` | Carries combined Ctrl/Alt/Shift navigation to the active editor or Terminal target. |
 | `vendor/android-terminalapp-assets-js/ctrl_key_handler.js` | Shared terminal/Monaco Ctrl state and Gboard control-character adapter. |
 | `app/static/vendor/monaco-editor-core/esm/` | Committed patched Monaco artifacts; their editable VS Code source is external. |

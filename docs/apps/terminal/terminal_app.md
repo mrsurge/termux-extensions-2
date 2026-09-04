@@ -104,6 +104,13 @@ Ctrl+Alt state and consumes only one-shot modifiers. Pointer handling prevents
 the dock from taking focus and restores the active terminal textarea after each
 action.
 
+The four directional keys repeat after a 420 ms hold delay at a 55 ms cadence.
+The gesture captures its exact xterm/textarea target and modifier state at
+pointer-down, emits once immediately, and consumes one-shot Ctrl/Alt only when
+the gesture ends. Pointer release/cancel, lost capture, window blur, document
+hiding, or frontend disposal stops repetition. Other action keys remain
+single-dispatch controls.
+
 Gboard Ctrl chords do not infer the pressed character from the guarded
 textarea during key-code-229 events. The shared helper registers xterm's
 source-owned `attachCustomInputEventHandler` hook and translates the final

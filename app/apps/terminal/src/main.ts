@@ -22,8 +22,10 @@ import {
   TERMINAL_KEYS,
   TerminalModifierState,
   type CtrlMode,
+  type TerminalKeyModifiers,
   type SyntheticTerminalKey,
 } from './mobile-special-keys';
+import { bindPointerHoldRepeat } from './pointer-hold-repeat';
 
 interface AppApi {
   get<T>(path: string): Promise<T>;
@@ -1222,26 +1224,73 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     };
   }
 
-  function dispatchTerminalKey(key: SyntheticTerminalKey): void {
+  function resolveTerminalKeyTarget(): {
+    term: XtermTerminalLike;
+    textarea: HTMLTextAreaElement;
+  } | null {
     const term = state.term;
-    if (!term) return;
-    refocusTerm();
+    if (!term) return null;
     const textarea = getTermTextarea(term);
-    if (!textarea) return;
+    return textarea ? { term, textarea } : null;
+  }
+
+  function dispatchTerminalKeyToTarget(
+    target: { term: XtermTerminalLike; textarea: HTMLTextAreaElement },
+    key: SyntheticTerminalKey,
+    modifiers: TerminalKeyModifiers,
+  ): boolean {
+    try { target.term.focus(); } catch (_) {}
     if (
       key === TERMINAL_KEYS.dash
-      && !state.modifiers.ctrl
-      && !state.modifiers.alt
+      && !modifiers.ctrl
+      && !modifiers.alt
     ) {
-      dispatchSyntheticTerminalText(textarea, '-');
-      consumeOneShotModifiers();
-      return;
+      dispatchSyntheticTerminalText(target.textarea, '-');
+      return true;
     }
-    dispatchSyntheticTerminalKey(textarea, key, {
+    dispatchSyntheticTerminalKey(target.textarea, key, modifiers);
+    return true;
+  }
+
+  function dispatchTerminalKey(key: SyntheticTerminalKey): void {
+    const target = resolveTerminalKeyTarget();
+    if (!target) return;
+    const handled = dispatchTerminalKeyToTarget(target, key, {
       ctrl: state.modifiers.ctrl,
       alt: state.modifiers.alt,
     });
-    consumeOneShotModifiers();
+    if (handled) consumeOneShotModifiers();
+  }
+
+  function bindRepeatingTerminalKey(
+    button: HTMLButtonElement,
+    key: SyntheticTerminalKey,
+  ): () => void {
+    let target: ReturnType<typeof resolveTerminalKeyTarget> = null;
+    let modifiers: TerminalKeyModifiers | null = null;
+    let handled = false;
+    const dispatch = (): void => {
+      if (!target || !modifiers) return;
+      handled = dispatchTerminalKeyToTarget(target, key, modifiers) || handled;
+    };
+    return bindPointerHoldRepeat(button, {
+      start() {
+        target = resolveTerminalKeyTarget();
+        modifiers = {
+          ctrl: state.modifiers.ctrl,
+          alt: state.modifiers.alt,
+        };
+        handled = false;
+        dispatch();
+      },
+      repeat: dispatch,
+      finish() {
+        if (handled) consumeOneShotModifiers();
+        target = null;
+        modifiers = null;
+        handled = false;
+      },
+    }, { window });
   }
 
   function wsUrl(): string {
@@ -1777,16 +1826,21 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   ui.keyMinibar.addEventListener('pointerdown', softKey(openDrawerFromSoftKey), { passive: false });
   ui.keyDash.addEventListener('pointerdown', softKey(() => dispatchTerminalKey(TERMINAL_KEYS.dash)), { passive: false });
   ui.keyHome.addEventListener('pointerdown', softKey(() => dispatchTerminalKey(TERMINAL_KEYS.home)), { passive: false });
-  ui.keyUp.addEventListener('pointerdown', softKey(() => dispatchTerminalKey(TERMINAL_KEYS.up)), { passive: false });
   ui.keyEnd.addEventListener('pointerdown', softKey(() => dispatchTerminalKey(TERMINAL_KEYS.end)), { passive: false });
   ui.keyPageUp.addEventListener('pointerdown', softKey(() => dispatchTerminalKey(TERMINAL_KEYS.pageUp)), { passive: false });
   ui.keyTab.addEventListener('pointerdown', softKey(() => dispatchTerminalKey(TERMINAL_KEYS.tab)), { passive: false });
   ui.keyCtrl.addEventListener('pointerdown', softKey(toggleCtrl), { passive: false });
   ui.keyAlt.addEventListener('pointerdown', softKey(toggleAlt), { passive: false });
-  ui.keyLeft.addEventListener('pointerdown', softKey(() => dispatchTerminalKey(TERMINAL_KEYS.left)), { passive: false });
-  ui.keyDown.addEventListener('pointerdown', softKey(() => dispatchTerminalKey(TERMINAL_KEYS.down)), { passive: false });
-  ui.keyRight.addEventListener('pointerdown', softKey(() => dispatchTerminalKey(TERMINAL_KEYS.right)), { passive: false });
   ui.keyPageDown.addEventListener('pointerdown', softKey(() => dispatchTerminalKey(TERMINAL_KEYS.pageDown)), { passive: false });
+  const disposeRepeatingKeys = [
+    bindRepeatingTerminalKey(ui.keyUp, TERMINAL_KEYS.up),
+    bindRepeatingTerminalKey(ui.keyLeft, TERMINAL_KEYS.left),
+    bindRepeatingTerminalKey(ui.keyDown, TERMINAL_KEYS.down),
+    bindRepeatingTerminalKey(ui.keyRight, TERMINAL_KEYS.right),
+  ];
+  window.addEventListener('pagehide', () => {
+    disposeRepeatingKeys.forEach((dispose) => dispose());
+  }, { once: true });
 
   syncSpecialKeysUi();
   setMode('list');
