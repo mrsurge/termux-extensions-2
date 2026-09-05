@@ -136,12 +136,10 @@ npm install -g @mmmbuto/codex-cli-termux@latest
 ```
 
 The [`DioNanos/codex-termux`](https://github.com/DioNanos/codex-termux)
-repository was archived on August 29, 2026. Its published
+repository publishes the Termux-compatible
 [`@mmmbuto/codex-cli-termux`](https://www.npmjs.com/package/@mmmbuto/codex-cli-termux)
-package remains installable, but the archived line should not be expected to
-receive further maintenance. The same maintainer continues the independent
-[`@mmmbuto/codex-vl`](https://www.npmjs.com/package/@mmmbuto/codex-vl)
-distribution, but its compatibility with TE2 has not yet been validated.
+package used above. The maintainer currently updates it for major Codex
+releases.
 
 ## Requirements
 
