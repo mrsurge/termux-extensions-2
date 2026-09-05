@@ -241,3 +241,15 @@ the release.
   acceptance before publication.
 - [x] Pass user live acceptance for the secondary-editor soft-key focus handoff
   and synchronized editor-theme behavior on the installed candidates.
+- [x] Publish the immutable `0.2.345` tag through production PyPI and a
+  normal/latest 13-asset GitHub Release after clean Linux, Termux, Electron,
+  APK, public Debian, and physical Motorola acceptance.
+
+The published correction is tag commit
+`234981e4b892bc579074f7c4c8050f7353c4c9fb`. Clean GeckoView and Cefrium APK
+SHA-256 values are respectively
+`a3d4cdf6baed0cdfbb1f9804f3b976e2e39d058606365fb11b5e8a88f9893fae` and
+`20aaf1625a6b299567e13b3bd6a02ea151fe78923d4953441bb7252d13f214b9`.
+The physical Motorola exact-archive upgrade retained `0.2.344` as its sole
+fallback, installed the newly declared TUR Bun prerequisite, and passed
+framework discovery plus a real File Explorer worker launch.
