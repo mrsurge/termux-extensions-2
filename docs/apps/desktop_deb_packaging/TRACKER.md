@@ -1,6 +1,6 @@
 # Unified Linux And Termux Release Installer Tracker
 
-Last updated: 2026-09-02
+Last updated: 2026-09-05
 
 ## Program status
 
@@ -21,6 +21,7 @@ Last updated: 2026-09-02
 | Phase 4D: final integration and publication | `0.2.344` is published and accepted on public Linux/Desktop and physical Termux; its clean archive and synchronized APKs are published | Release assets are immutable; `0.2.340` remains defective historical data while `0.2.344` is the normal/latest release |
 | Phase 4K: `0.2.344` mobile Terminal integration | Complete, published, and accepted across both Android renderers on Motorola and Pixel | Track A only; the Android FD transport investigation remains unimplemented and out of scope |
 | Phase 4L: `0.2.345` mobile focus correction | Synchronized source, asset, Electron, and APK candidates pass automated gates and live acceptance on both devices | Build publication artifacts only from the immutable accepted tag |
+| Phase 4M: `0.2.346` MCP/Codex compatibility release | Source preparation in progress with exact FastMCP and Agent Log Server pins | Validate ALS 0.2.124 on Linux and Android, then publish only clean immutable-tag artifacts |
 | Phase 5: Termux target mode | Public `0.2.342` physical install acceptance is green; the full app-worker/Terminal/Code Server matrix last passed on `0.2.341` | Apt-first shared foundations plus a release-local wheel tree; every capability-changing physical acceptance must exercise the exact archived server's app-launch path |
 | Phase 6: upgrade retention, desktop startup, and Sidebar continuity | Source implementation is published in `0.2.343`; Electron and Cefrium Sidebar-persistence acceptance passed while the GeckoView/full restart matrix remains | Retain one fallback, use normal app readiness, and distinguish transient WBA loss from authoritative membership removal |
 
@@ -40,7 +41,7 @@ Last updated: 2026-09-02
 | `sse-starlette` was held directly by an unmounted router | The dead `app.libs.jobs.jobs_bp` import/router was removed while the job core and handlers remain | Pruned; still transitive through MCP |
 | Framework-Shells is reproducibly pinned | `requirements.txt` uses exact validated 0.0.63 commit `0bf3269cd69a000015b0ac484a04004b8dc564d1` | Complete |
 | Framework-Shells release artifacts are native | The Linux candidate set carries the PyO3 pipe pump and Rust terminal broker in `cp39-abi3` and free-threaded `cp314-cp314t` manylinux wheels; release construction refuses a non-native wheel | Implemented and clean-install validated |
-| Agent Log Server has a fail-closed binary wheel | Exact 0.2.123 depends on Framework-Shells 0.0.63 and carries a target/version/digest-verified `als-server`, compiled browser bundle, and vendored Socket.IO MessagePack parser; corrupt/incompatible provenance and incomplete wheels fail construction | Implemented and locally validated; publication is part of the synchronized 0.2.343 release |
+| Agent Log Server has a fail-closed binary wheel | Exact 0.2.124 depends on Framework-Shells 0.0.63 and carries a target/version/digest-verified `als-server`, compiled browser bundle, and vendored Socket.IO MessagePack parser; corrupt/incompatible provenance and incomplete wheels fail construction | Implemented for 0.2.123; 0.2.124 publication validation is Phase 4M |
 | ALS app-worker launch must preserve the managed venv | Bootstrap correctly prepends the active venv, but the former `sh -lc` shellspec reset `PATH` before resolving `als-rs` | Corrected to direct argv and covered by a manifest regression test |
 | Linux x86-64 owns an exact private Node runtime | `nodejs-wheel==24.16.0` supplies venv-local Node/npm and matching headers; bootstrap children, Terminal, WBA, and source Electron use the shared resolver | Implemented and clean-install validated |
 | Modern Termux excludes the Linux Node wheel | Both connected targets run Python 3.14.6 with `sys.platform == "android"` and `aarch64`; the Linux/x86-64 marker is false | Termux resolves Node/npm from its apt package mapping |
@@ -1531,6 +1532,29 @@ does not authorize publication.
   `0.2.345`, retained `0.2.344` as its sole fallback, installed TUR `bun`
   `1.4.1`, selected the archived server, returned health `0.2.345`, discovered
   all eight apps, and launched a real File Explorer worker.
+
+### Phase 4M — TE2 0.2.346 MCP/Codex compatibility release
+
+- [x] Confirm upstream Agent Log Server `0.2.124` source at commit `f59a37d`
+  pins `fastmcp==3.4.7` and carries the Codex app-server protocol, provider
+  usage, and composer-focus corrections.
+- [x] Pin TE2 itself to `fastmcp==3.4.7` so the conversation-scoped
+  `agent-pty-blocks` stdio server retains the MCP 1 compatibility API.
+- [x] Advance TE2's Agent Log Server dependency and Termux release default to
+  exact `agent-log-server==0.2.124`.
+- [x] Pass ALS Python, frontend, Rust, and binary-wheel contract source gates.
+- [ ] Pass binary-wheel and live MCP startup gates for Linux x86-64 and Android
+  AArch64 artifacts.
+- [x] Pass TE2 dependency, Python, frontend, Electron, Rust, Android unit/APK,
+  asset-version, signer, and 16 KiB alignment gates at synchronized `0.2.346`.
+- [x] Complete user live acceptance of the synchronized Android clients before
+  constructing the immutable TE2 tag.
+- [ ] Build the Linux wheel/sdist, deterministic Termux archive, APKs, and
+  public release manifest from clean immutable tags; publish ALS then TE2 to
+  PyPI and promote the verified normal/latest GitHub release.
+- [ ] Pass fresh public-index Debian desktop/framework/worker/MCP acceptance
+  and physical Termux exact-archive framework/worker/MCP acceptance, then record
+  immutable hashes and receipts.
 
 ## Deferred work
 

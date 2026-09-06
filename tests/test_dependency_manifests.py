@@ -8,7 +8,8 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FRAMEWORK_SHELLS_REQUIREMENT = "framework-shells==0.0.63"
-AGENT_LOG_SERVER_REQUIREMENT = "agent-log-server==0.2.123"
+AGENT_LOG_SERVER_REQUIREMENT = "agent-log-server==0.2.124"
+FASTMCP_REQUIREMENT = "fastmcp==3.4.7"
 NODEJS_WHEEL_REQUIREMENT = (
     'nodejs-wheel==24.16.0; sys_platform == "linux" '
     'and platform_machine == "x86_64"'
@@ -32,6 +33,7 @@ class DependencyManifestTests(unittest.TestCase):
         self.assertIn("websockets", requirements)
         self.assertNotIn("uvicorn[standard]", requirements)
         self.assertNotIn("sse-starlette", requirements)
+        self.assertIn(FASTMCP_REQUIREMENT, requirements)
         self.assertIn(FRAMEWORK_SHELLS_REQUIREMENT, requirements)
         self.assertIn(AGENT_LOG_SERVER_REQUIREMENT, requirements)
         self.assertIn(NODEJS_WHEEL_REQUIREMENT, requirements)

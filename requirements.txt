@@ -5,9 +5,9 @@ websockets
 httpx
 msgspec>=0.21.1
 anyio
-fastmcp
+fastmcp==3.4.7
 framework-shells==0.0.63
-agent-log-server==0.2.123
+agent-log-server==0.2.124
 nodejs-wheel==24.16.0; sys_platform == "linux" and platform_machine == "x86_64"
 libarchive-c>=5.1
 python-socketio[client,asyncio-client]
