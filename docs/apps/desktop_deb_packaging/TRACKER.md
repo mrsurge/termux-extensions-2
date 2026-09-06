@@ -1543,18 +1543,63 @@ does not authorize publication.
 - [x] Advance TE2's Agent Log Server dependency and Termux release default to
   exact `agent-log-server==0.2.124`.
 - [x] Pass ALS Python, frontend, Rust, and binary-wheel contract source gates.
-- [ ] Pass binary-wheel and live MCP startup gates for Linux x86-64 and Android
+- [x] Pass binary-wheel and live MCP startup gates for Linux x86-64 and Android
   AArch64 artifacts.
 - [x] Pass TE2 dependency, Python, frontend, Electron, Rust, Android unit/APK,
   asset-version, signer, and 16 KiB alignment gates at synchronized `0.2.346`.
 - [x] Complete user live acceptance of the synchronized Android clients before
   constructing the immutable TE2 tag.
-- [ ] Build the Linux wheel/sdist, deterministic Termux archive, APKs, and
+- [x] Build the Linux wheel/sdist, deterministic Termux archive, APKs, and
   public release manifest from clean immutable tags; publish ALS then TE2 to
   PyPI and promote the verified normal/latest GitHub release.
-- [ ] Pass fresh public-index Debian desktop/framework/worker/MCP acceptance
+- [x] Pass fresh public-index Debian desktop/framework/worker/MCP acceptance
   and physical Termux exact-archive framework/worker/MCP acceptance, then record
   immutable hashes and receipts.
+
+### Phase 4M TE2 0.2.346 publication and acceptance evidence
+
+- Annotated TE2 tag `0.2.346` identifies integrated source commit
+  `c72c18432ce73c6d6f15a8bb448bba4952afbffb`; annotated Agent Log Server tag
+  `0.2.124` identifies upstream commit
+  `f59a37d82c3ce4578974214b1ab292d261cc8bae`.
+- Production PyPI publishes `te2==0.2.346` with exact dependencies
+  `framework-shells==0.0.63`, `agent-log-server==0.2.124`, and
+  `fastmcp==3.4.7`. Its Linux wheel SHA-256 is
+  `b4f776a6b42090c687469b0882db5c6466fbcd1ab0913df34cb064213e980192`,
+  its sdist is
+  `00b7f10a973d5da6072893f9013cff8987571fac8b5be428b524c9ce508d9b53`,
+  and the packaged Ferrous-native server is
+  `ec8540d0161ccdffe12ca55ff9048718bf8851419ac8acb7a0837017abdbc929`.
+- Agent Log Server `0.2.124` is published from the same clean tag for Linux and
+  Android. The Linux wheel SHA-256 is
+  `e2b3b19c1b6c35483742a53a91c9883f2d3fab78fb1caae359f27f509d65ecd4`;
+  the Android wheel is
+  `a1701cf7d1cddf9e0b31b6a657d7edd76facb83670b33110afd2aadd35fc143e`.
+- GitHub Release `0.2.346`, titled `TE2 0.2.346 alpha`, is the normal/latest
+  release with `prerelease: false`. All 13 private-draft assets were downloaded
+  and compared byte-for-byte before promotion; public `SHA256SUMS` is
+  `996b9793cca184562b43d4650e2950b4a317862d496a38794a5f907ccf2abacb`.
+- The clean 96-wheel Termux archive reproduced byte-for-byte across two builds.
+  Its SHA-256 is
+  `81bafaa7012cbabd4fde8b50ef6dd0907448e4a17925a5847e4f30501218d292`,
+  and its Ferrous-native Android/AArch64 server is
+  `15ece56be33934a8234bff4d80b23553c7bfd63ad30a310c261a22b85c586535`.
+- The synchronized APKs carry version code `20346`, asset version `0.2.346`,
+  the repository development signer, and valid 16 KiB alignment. GeckoView
+  SHA-256 is
+  `52eefb47304e5b3cdd564bc2fd2bb5d8aa363474d30c8c4af0c87f8bf688ffef`;
+  Cefrium is
+  `a857ff2efcd95dec99237e3c55f906206d18f4b395db73ab10ec085c78e7954f`.
+- Fresh public latest-curl Debian acceptance installed the private venv and
+  receipt-owned Electron integration, selected TE2 `0.2.346`, returned health
+  `0.2.346`, discovered all eight apps, launched a real File Explorer worker,
+  and completed an `agent-pty-blocks` MCP initialize/ping/tool-list exchange
+  with MCP `1.29.1` and all required tools present.
+- Physical Motorola latest-curl acceptance upgraded `0.2.345` to `0.2.346`,
+  retained `0.2.345` as the sole fallback, retained TUR Bun `1.4.1`, selected
+  the archived Ferrous-native server, discovered all eight apps, launched a
+  real File Explorer worker, and completed the same MCP exchange. Both
+  acceptance runtimes were terminated cleanly afterward.
 
 ## Deferred work
 
@@ -1617,3 +1662,4 @@ does not authorize publication.
 | 2026-09-04 | TE2 0.2.344 mobile Terminal release candidate | Fast-forwarded the complete Track A stack, corrected xterm source provenance, synchronized and rebuilt Code TE2/Terminal/Android/Electron outputs, passed automated browser/Python/Rust/Electron/Android gates, installed both staging APKs on Motorola and Pixel, and completed user live acceptance on both renderer variants | Accepted source is ready for immutable tag construction and clean publication builds; the separate Android FD transport investigation remains unimplemented and out of release scope |
 | 2026-09-04 | TE2 0.2.344 final publication | Clean-tag Linux/Termux/APK construction, deterministic physical-AArch64 archive assembly, production PyPI publication, private-draft download verification before normal/latest GitHub promotion, isolated public Debian desktop/framework/worker acceptance, and physical Motorola 0.2.342-to-0.2.344 upgrade/framework/worker acceptance | Passed; all supported public installation paths and the synchronized mobile Track A release are green while Track B remains documentation-only |
 | 2026-09-04 | TE2 0.2.345 mobile focus correction publication | Clean-tag Linux/Termux/APK/Electron construction, deterministic physical-AArch64 archive assembly, production PyPI publication, private-draft round-trip verification, public Debian desktop/framework/worker acceptance, and physical Motorola 0.2.344-to-0.2.345 upgrade with TUR Bun and real-worker acceptance | Passed; 0.2.345 is the normal/latest release and the corrected mobile focus, fresh GitHub Dark preference, and supported install paths are green |
+| 2026-09-05 | TE2 0.2.346 MCP/Codex compatibility publication | Clean-tag Linux and Android ALS wheels, synchronized TE2 Linux/Termux/APK construction, deterministic physical-AArch64 archive assembly, exact PyPI hash verification, private-draft round-trip verification, public Debian desktop/framework/worker/MCP acceptance, and physical Motorola 0.2.345-to-0.2.346 upgrade/framework/worker/MCP acceptance | Passed; 0.2.346 is the normal/latest release, FastMCP is pinned to the validated MCP 1-compatible line, ALS 0.2.124 is live on both supported targets, and all acceptance runtimes shut down cleanly |
