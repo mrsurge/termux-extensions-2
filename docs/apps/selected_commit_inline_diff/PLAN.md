@@ -13,8 +13,9 @@ The branch started from upstream main at `a95cb8e6` (TE2 0.2.346).
 1. **Mobile touch handles during inline diff transitions.** Fix handle geometry
    when switching between plain and inline diff editors, including switching
    back without a page refresh.
-2. **Explorer Git commit selector.** Investigate the reported selector bug after
-   the user supplies its detailed reproduction and expected behavior.
+2. **Explorer Git commit selector.** External commits must update a HEAD-following
+   selector through Git facts, without first opening By changes. Show HEAD and
+   the latest commit as one choice; preserve explicitly selected older baselines.
 3. **Draft overlay links.** Make links in the Drafts overlay activate the intended
    draft-versus-disk inline comparison instead of the current model-versus-disk
    behavior. Trace the existing baseline and navigation contracts before editing.
@@ -34,6 +35,9 @@ The branch started from upstream main at `a95cb8e6` (TE2 0.2.346).
 - Android builds, APK seed updates, and release version changes are separate
   publication steps, not implicit requirements for each frontend fix.
 - Later items remain pending investigation and detailed user requirements.
+- The Explorer selector chooses the comparison baseline for By changes and,
+  in the upcoming editor work, inline commit diffs. It is not a checkout command.
+  Detached-HEAD workflows and checkout/history navigation are outside this branch.
 
 ## Validation
 

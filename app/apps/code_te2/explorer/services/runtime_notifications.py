@@ -12,6 +12,7 @@ from types import TracebackType
 from typing import Protocol, cast
 
 from .file_ops import mark_draft_cache_dirty, mark_git_cache_dirty
+from .git_diff_base import project_diff_base
 from .state_facts import publish_draft_state_changed, publish_review_state_changed
 from ..transport.connection_manager import manager
 from ...worker_services.event_bus import (
@@ -22,6 +23,7 @@ from ...worker_services.event_bus import (
     record_stale_drop,
 )
 from ...worker_services import git_service as worker_git_service
+from ...stores import get_history_store
 
 logger = logging.getLogger(__name__)
 AsyncNoArg = Callable[[], Awaitable[None]]
@@ -128,6 +130,14 @@ async def broadcast_git_status_update(
             project,
             project_generation=project_generation,
         )
+        base_ref = get_history_store().get_diff_base(normalized_project)
+        diff_base: dict[str, object] | None = None
+        try:
+            diff_base = await asyncio.to_thread(project_diff_base, project, base_ref, snapshot)
+        except Exception as exc:
+            logger.warning("Failed to resolve comparison base for %s: %s", project, exc)
+        if get_history_store().get_diff_base(normalized_project) != base_ref:
+            return
         if _is_stale_git_generation(project, project_generation):
             record_stale_drop("runtime_notifications:git_refresh_after_work", "GitSnapshotRequested")
             mark_git_cache_dirty(project)
@@ -163,6 +173,8 @@ async def broadcast_git_status_update(
             "hasHead": snapshot["hasHead"],
             "head": snapshot["head"],
         }
+        if diff_base is not None:
+            status_payload["diffBase"] = diff_base
         # Git snapshot completion is a typed control-plane fact; Explorer and
         # editor-side projectors decide how to publish it to their own lanes.
         await publish_worker_event(

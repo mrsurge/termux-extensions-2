@@ -99,6 +99,7 @@ interface ExplorerNotificationHandlerDeps {
   setGitControlsEnabled(enabled: boolean, showInit?: boolean): void;
   renderGitSummary(): void;
   setGitDiffBaseRef(ref: string): void;
+  applyGitDiffBaseSnapshot?(value: unknown): void;
   updateDiffBaseButtons(): void;
   toggleDrawer(open?: boolean): void;
 }
@@ -521,8 +522,11 @@ export function createExplorerNotificationHandler(
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.gitStatusUpdated: {
+        const project = getNonEmptyString(payload.projectPath);
+        if (project && project !== deps.runtimeState.getProjectPath()) break;
         console.log("[GIT_STATUS_DEBUG] Received:", payload);
         deps.runtimeState.setGitStatus(coerceGitStatus(payload));
+        if (payload.diffBase) deps.applyGitDiffBaseSnapshot?.(payload.diffBase);
         deps.renderBranchLabel();
         deps.renderGitSummary();
         deps.setGitControlsEnabled(true, false);

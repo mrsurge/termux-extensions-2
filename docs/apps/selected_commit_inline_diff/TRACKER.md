@@ -4,7 +4,7 @@
 
 - [x] Fetch upstream and create branch from latest main.
 - [x] Fix mobile touch-handle alignment across inline diff transitions.
-- [ ] Fix Explorer Git commit selector (details pending).
+- [x] Fix Explorer Git commit selector (user live acceptance confirmed).
 - [ ] Correct Drafts overlay links to summon draft-versus-disk inline diff.
 - [ ] Investigate and implement selected-Explorer-commit inline comparisons.
 - [ ] Complete combined acceptance and prepare branch for merge.
@@ -39,11 +39,28 @@ generation. The copied UMD and fork output have identical SHA-256:
 `8155695674a48b867bffd6f745628754ce7b0b83f053aba6d30aedab87cc790e`.
 The user confirmed the fix works live. No APK build or version bump was needed.
 
-## Next: Explorer Commit Selector
+## Completed: Explorer Commit Selector
 
-Await the detailed reproduction. Trace the selected-commit state and consumers
-before deciding whether the fault is presentation, persistence, or baseline
-selection. Record the concrete fix and acceptance here.
+External commits updated Explorer status but left the baseline label stale.
+Opening By changes resolved the baseline again and repaired the label. The
+GitSnapshotChanged projector carried status/decorations but no baseline metadata;
+the dropdown also presented both HEAD and its commit as separate checked rows.
+
+- [x] Project resolved baseline metadata with the existing Git snapshot fact.
+- [x] Resolve HEAD against the snapshot's exact hash, caching immutable metadata.
+- [x] Preserve explicit historical comparison selections after a new commit.
+- [x] Present the latest commit once, with HEAD-following selection semantics.
+- [x] Guard initialization replies against newer projections and reject status
+  notifications belonging to another project.
+- [x] Pass two backend tests, two frontend tests, typecheck, and host build.
+- [x] Receive user confirmation that the selector fix works live.
+
+Historical selection retention is covered by the focused tests. The user's
+acceptance confirms the live fix overall; a separate live historical-selection
+matrix was not reported.
+
+The legacy payload mode named `detached` denotes an explicit comparison ref;
+this work adds no detached-HEAD checkout workflow.
 
 ## Pending: Draft Links And Selected Commit Diff
 

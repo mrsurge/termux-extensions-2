@@ -30,8 +30,26 @@ interface ExplorerCommitChoice {
 
 interface ExplorerDiffBaseOption {
   ref: string;
+  hash?: string;
   short?: string;
   summary?: string;
+}
+
+export function buildDiffBaseOptions(
+  commits: readonly ExplorerCommitChoice[],
+): ExplorerDiffBaseOption[] {
+  const [head, ...history] = commits.filter(commit => commit.hash);
+  return [
+    {
+      ref: 'HEAD', hash: head?.hash,
+      short: head?.short_hash ? `${head.short_hash} (HEAD)` : 'HEAD',
+      summary: head?.summary || 'Latest commit',
+    },
+    ...history.map(commit => ({
+      ref: commit.hash!, hash: commit.hash,
+      short: commit.short_hash, summary: commit.summary,
+    })),
+  ];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -73,6 +91,7 @@ export function createExplorerDiffBaseController(
   };
   let gitBaseButton: HTMLButtonElement | null = null;
   let gitBaseDropdown: HTMLElement | null = null;
+  let projectionRevision = 0;
 
   function getDiffBase(): ExplorerDiffBaseInfo {
     return gitDiffBase;
@@ -83,10 +102,24 @@ export function createExplorerDiffBaseController(
   }
 
   function setDiffBaseRef(ref: string): void {
+    projectionRevision += 1;
     gitDiffBase = {
       ...gitDiffBase,
       ref,
+      commit: ref === gitDiffBase.ref ? gitDiffBase.commit : null,
     };
+  }
+
+  function applySnapshot(value: unknown): void {
+    projectionRevision += 1;
+    const previous = gitDiffBase;
+    gitDiffBase = normalizeDiffBase(value);
+    updateButtons();
+    applyGitControlsForState(deps.getEditorState());
+    if (previous.ref !== gitDiffBase.ref || previous.commit?.hash !== gitDiffBase.commit?.hash) {
+      if (deps.isChangesMode()) void deps.refreshChangesResults(true);
+      closeMenus();
+    }
   }
 
   function updateButtons(): void {
@@ -120,9 +153,10 @@ export function createExplorerDiffBaseController(
   }
 
   async function initFromBackend(): Promise<void> {
+    const revision = projectionRevision;
     try {
       const data = await requestExplorerRpc(EXPLORER_RPC_METHODS.gitDiffBaseGet, {});
-      if (!data) return;
+      if (!data || revision !== projectionRevision) return;
       gitDiffBase = normalizeDiffBase(data);
       updateButtons();
       applyGitControlsForState(deps.getEditorState());
@@ -167,19 +201,12 @@ export function createExplorerDiffBaseController(
       return;
     }
 
-    const options: ExplorerDiffBaseOption[] = [
-      { ref: 'HEAD', short: 'HEAD', summary: 'Working tree' },
-      ...commits.map((commit) => ({
-        ref: commit.hash || '',
-        short: commit.short_hash,
-        summary: commit.summary,
-      })),
-    ].filter((option) => option.ref);
+    const options = buildDiffBaseOptions(commits);
 
     const currentHash = gitDiffBase.commit?.hash;
     const currentRef = gitDiffBase.ref || 'HEAD';
     const hasCurrent = options.some(
-      (option) => option.ref === currentHash || option.ref === currentRef,
+      (option) => option.hash === currentHash || option.ref === currentRef,
     );
     if (!hasCurrent && gitDiffBase.commit?.hash) {
       options.unshift({
@@ -194,8 +221,8 @@ export function createExplorerDiffBaseController(
       item.className = 'fe-dd-item';
       const isCurrent =
         (option.ref === 'HEAD' && currentRef === 'HEAD') ||
-        (option.ref !== 'HEAD' &&
-          (option.ref === currentRef || option.ref === currentHash));
+        (currentRef !== 'HEAD' &&
+          (option.ref === currentRef || option.hash === currentHash));
       if (isCurrent) {
         item.classList.add('fe-menu-item-checked');
       }
@@ -284,6 +311,7 @@ export function createExplorerDiffBaseController(
     getDiffBase,
     setDiffBase,
     setDiffBaseRef,
+    applySnapshot,
     updateButtons,
     hydrateFromEditorState,
     initFromBackend,

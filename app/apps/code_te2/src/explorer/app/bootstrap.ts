@@ -839,6 +839,7 @@ const explorerNotificationHandler = createExplorerNotificationHandler({
   setGitControlsEnabled,
   renderGitSummary,
   setGitDiffBaseRef: (ref) => explorerDiffBaseController.setDiffBaseRef(ref),
+  applyGitDiffBaseSnapshot: (value) => explorerDiffBaseController.applySnapshot(value),
   updateDiffBaseButtons,
   toggleDrawer: (open) => explorerChromeController.toggleDrawer(open),
 });
