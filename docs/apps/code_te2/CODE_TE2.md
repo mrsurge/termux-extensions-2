@@ -1658,10 +1658,19 @@ editor_touch_menu_utils.ts initializes the helper after editor DOM readiness.
 It passes the current mobile flag plus leading and navigation tools; it does not
 rely on an implicit all-tools default. inline_host.ts loads the UMD asset.
 
-The repository contains deployment artifacts, not a rebuildable local source
-worktree. Update these assets only from an approved external source publication
-and validate touch handles, wrapped lines, configuration changes, and the menu
-on a target device.
+The editable fork on this development device is `worktrees/monaco-touch-selection`
+(remote `mrsurge/monaco-touch-selection`). Run its `npm run build` and copy
+`dist/index.umd.cjs` to the vendored `monaco-touch-selection.patched.umd.js`.
+The historical `monaco-touch-selection-patched` directory is not the current
+source. Validate touch handles, wrapped lines, configuration changes, and the
+menu on a target device after publication.
+
+Handle coordinates use Monaco's `getScrolledVisiblePosition`, which already
+includes the gutter. Never subtract a cached margin width: editor recreation
+can change when the gutter first becomes measurable. The overlay sits at the
+editor origin, with document-coordinate handles and a matching negative scroll
+translation initialized during selection sync. Layout and content-size events
+resync selection geometry after inline diff changes.
 
 ## 33) Diagnostics owner-keyed markers
 
