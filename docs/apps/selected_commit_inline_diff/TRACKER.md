@@ -135,6 +135,22 @@ Initial source findings:
   ordinary Git snapshot refresh separately so unchanged refs still refresh
   changed working-tree results without polling.
 
+## Historical Changes Enumeration Follow-Up
+
+- [x] Identify Rust `git.worktreeChanges.get` echoing the selected base while
+  enumerating only HEAD dirty status.
+- [x] Enumerate non-HEAD comparisons directly from selected tree to worktree,
+  preserving the established HEAD status path and existing result limits.
+- [x] Cover committed additions/modifications/deletions in a clean checkout,
+  files dirty against HEAD but equal to the historical base, untracked files,
+  and truncation. Verify the Python overlay passes the same ref to enumeration
+  and hunk retrieval.
+- [x] Receive live acceptance after the user restarts the Rust framework.
+
+The index-combining diff retained net-zero historical changes in the regression
+test, so enumeration deliberately uses the direct tree-to-worktree comparison.
+No frontend or Android change is required for this follow-up.
+
 ## Backlog: DevTools Through TE2 MCP
 
 - [ ] Investigate existing native DevTools transports and expose exact-target

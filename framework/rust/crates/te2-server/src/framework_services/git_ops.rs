@@ -920,6 +920,55 @@ pub(crate) fn git_worktree_changes(
         });
     };
     let limit = request.limit.unwrap_or(20_000).min(100_000);
+    // Status is relative to HEAD, so it cannot enumerate a historical comparison.
+    // Compare disk directly; merging index deltas can retain net-zero changes.
+    if base != "HEAD" {
+        let tree = tree_for_rev(&repo, &base)?;
+        let mut options = DiffOptions::new();
+        options.include_untracked(true).recurse_untracked_dirs(true);
+        let diff = repo.diff_tree_to_workdir(Some(&tree), Some(&mut options))?;
+        let mut changes = Vec::new();
+        let mut truncated = false;
+        for delta in diff.deltas() {
+            let code = match delta.status() {
+                Delta::Unmodified | Delta::Ignored => continue,
+                Delta::Added => "A",
+                Delta::Deleted => "D",
+                Delta::Renamed => "R",
+                Delta::Copied => "C",
+                Delta::Untracked => "??",
+                Delta::Conflicted => "U",
+                Delta::Typechange => "T",
+                _ => "M",
+            };
+            let Some(path) = delta.new_file().path().or_else(|| delta.old_file().path()) else {
+                continue;
+            };
+            if changes.len() >= limit {
+                truncated = true;
+                break;
+            }
+            changes.push(GitWorktreeChange {
+                path: path_to_string(path),
+                code: code.to_owned(),
+                original_path: if matches!(delta.status(), Delta::Renamed | Delta::Copied) {
+                    delta.old_file().path().map(path_to_string)
+                } else {
+                    None
+                },
+            });
+        }
+        return Ok(GitWorktreeChanges {
+            dto: "GitWorktreeChanges",
+            version: 1,
+            root: repo_root_string(&repo, &root),
+            project_generation: request.project_generation,
+            base,
+            is_repository: true,
+            changes,
+            truncated,
+        });
+    }
     let mut options = StatusOptions::new();
     options
         .show(StatusShow::IndexAndWorkdir)
@@ -2455,6 +2504,93 @@ mod tests {
         assert_eq!(diff.files[0].relative_path, "tracked.txt");
         assert_eq!(diff.files[0].content_suppressed, None);
 
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn git_worktree_changes_uses_selected_commit_for_clean_files() {
+        let root = test_root("historical-worktree-changes");
+        let repo = Repository::init(&root).expect("init repo");
+        for name in [
+            "modified.txt",
+            "deleted.txt",
+            "unchanged.txt",
+            "reverted.txt",
+        ] {
+            fs::write(root.join(name), "base\n").expect("write base file");
+        }
+        commit_all(&repo, "base");
+        let base = repo
+            .head()
+            .expect("head")
+            .target()
+            .expect("oid")
+            .to_string();
+        fs::write(root.join("modified.txt"), "committed change\n").expect("modify");
+        fs::write(root.join("reverted.txt"), "head version\n").expect("modify reverted");
+        fs::write(root.join("added.txt"), "committed addition\n").expect("add");
+        fs::remove_file(root.join("deleted.txt")).expect("delete");
+        let mut index = repo.index().expect("index");
+        index
+            .remove_path(Path::new("deleted.txt"))
+            .expect("stage deletion");
+        index.write().expect("write index");
+        commit_all(&repo, "new head");
+        assert!(
+            git_worktree_changes(provider_request(&root))
+                .expect("clean HEAD")
+                .changes
+                .is_empty()
+        );
+
+        let mut request = provider_request(&root);
+        request.base = Some(base);
+        let historical = git_worktree_changes(request.clone()).expect("historical changes");
+        let paths: BTreeSet<_> = historical
+            .changes
+            .iter()
+            .map(|entry| entry.path.as_str())
+            .collect();
+        assert_eq!(
+            paths,
+            BTreeSet::from(["added.txt", "deleted.txt", "modified.txt", "reverted.txt"])
+        );
+        assert!(
+            historical
+                .changes
+                .iter()
+                .any(|entry| entry.path == "deleted.txt" && entry.code.trim() == "D")
+        );
+        assert!(!historical.truncated);
+
+        // Dirty against HEAD but equal to the selected commit must not be listed.
+        fs::write(root.join("reverted.txt"), "base\n").expect("restore old content");
+        let historical = git_worktree_changes(request.clone()).expect("historical after edit");
+        assert!(
+            !historical
+                .changes
+                .iter()
+                .any(|entry| entry.path == "reverted.txt")
+        );
+        assert!(
+            git_worktree_changes(provider_request(&root))
+                .expect("dirty HEAD")
+                .changes
+                .iter()
+                .any(|entry| entry.path == "reverted.txt")
+        );
+        fs::write(root.join("untracked.txt"), "untracked\n").expect("untracked");
+        assert!(
+            git_worktree_changes(request.clone())
+                .expect("with untracked")
+                .changes
+                .iter()
+                .any(|entry| entry.path == "untracked.txt" && entry.code == "??")
+        );
+        request.limit = Some(1);
+        let limited = git_worktree_changes(request).expect("limited");
+        assert_eq!(limited.changes.len(), 1);
+        assert!(limited.truncated);
         let _ = fs::remove_dir_all(root);
     }
 

@@ -885,6 +885,10 @@ theme registration is skipped (by design) to avoid caching a no-op run.
 - Editor comparison notifications fence older baselines by ref and monotonic
   revision; path and mode checks reject obsolete responses. By changes uses
   correlated, generation-fenced requests and refreshes on Git/selection facts.
+- Historical By changes candidates come from Rust's direct selected-tree-to-
+  worktree diff, not HEAD dirty status. Clean-against-HEAD files remain eligible;
+  files equal to the selected baseline are excluded even when dirty against HEAD.
+  HEAD retains its existing status semantics and result limits remain bounded.
 - Diff editor children hide vertical scrollbar chrome but retain automatic
   10-pixel horizontal scrollbars for long lines.
 
