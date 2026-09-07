@@ -213,13 +213,22 @@ authority. Android bundled-asset publication is separate and requires explicit
 approval.
 
 The primary Android application is the GeckoView `:app` module. The isolated
-`:cefrium` application module evaluates Cefrium without applying its
+Cefrium client at `android/cefrium` evaluates Cefrium without applying its
 resource-generating Gradle plugin to Gecko variants. It reuses shared Android
 source and packaged assets but owns its activity, layout, manifest, and stable
 loopback relay. Check for at least 2 GB of free disk before either Android
-build. Validate the new module with `:cefrium:testDebugUnitTest` and
-`:cefrium:assembleDebug`; retain `:app:testGeckoDebugUnitTest` and
-`:app:assembleGeckoDebug` as the primary-renderer comparison.
+build.
+
+`android/cefrium` is its own standalone Gradle build now (own wrapper,
+`settings.gradle.kts`), not a `:cefrium` subproject of `android/`: Cefrium
+0.8.0+ requires AGP 9.4+/Gradle 9.7.1+/JDK 25, and Gradle resolves one AGP
+version per build, so it cannot share an invocation with `:app`'s AGP
+8.9.1/JDK 17. Validate it from its own directory:
+`cd android/cefrium && ./gradlew testDebugUnitTest assembleDebug` (needs
+JDK 25 and an SDK with `platforms;android-37`). Retain
+`:app:testGeckoDebugUnitTest` and `:app:assembleGeckoDebug` (from `android/`)
+as the primary-renderer comparison. See `android/cefrium/README.md` for the
+full migration/toolchain notes.
 
 For Rust framework work, preserve the target cache and validate proportionally
 with Cargo formatting/check/tests. Do not delete `framework/rust/target/` as a
