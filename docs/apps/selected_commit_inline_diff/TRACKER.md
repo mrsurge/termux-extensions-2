@@ -31,8 +31,9 @@ the rollback point.
 Validation: four native progressive-change tests; three Python session tests and
 one historical routing test; five comparison-baseline and two selector tests;
 ten frontend comparison/baseline/selector tests. TypeScript checking and the
-frontend bundle build pass. Targeted BasedPyright has no errors (three existing
-warnings). No Android/version changes or shared-framework restart performed.
+frontend bundle build pass. That phase's limited BasedPyright check had no errors
+and three warnings; it was not a branch-wide audit. The complete audit below
+supersedes that typing result. No Android/version changes or shared-framework restart performed.
 The additional pytest-based name-search hydration test was not run because
 pytest is not installed in the active Python environment.
 Deployment requires the updated Rust framework plus Code TE2 worker/frontend;
@@ -241,3 +242,26 @@ No frontend or Android change is required for this follow-up.
 
 Requested during cold-start diff debugging; remains separate from the planned
 historical-worktree phases.
+
+## Branch-Wide Type Checking And Correction
+
+- [x] Preserve the implementation snapshot in local commit `0b44fa46` before cleanup.
+- [x] Audit every branch-changed Python file, including tests: initial 31-file
+  audit reported 23 errors and 165 warnings.
+- [x] Replace incomplete/dynamic test fixtures with typed DTOs and validated
+  object mappings; supply required handler parameters and typed callbacks.
+- [x] Separate host comparison commands from baseline reads and outbound UI IPC
+  notifications from namespace dispatch, breaking the reported import cycles.
+  Preserve notification encoding, exact-client rooms, and public emitter imports.
+- [x] Remove the unused HEAD-reader callback from selected-baseline plumbing.
+- [x] Recheck all branch Python files plus cleanup dependencies/new tests:
+  39 files, zero errors, zero warnings, no diagnostic suppressions added.
+- [x] Pass Code TE2 `npm run typecheck` and Rust
+  `cargo check -p te2-server --tests`.
+- [x] Pass 24 targeted Python regressions: historical changes/decorations (8),
+  comparison baselines (5), progressive sessions (3), selector (2), UI IPC
+  contract (3), and extracted notification/host-command contract (3).
+
+This pass changes no frontend assets, Android files, or versions and performs
+no shared-runtime restart. The user validated the runtime after cleanup and
+approved committing and pushing the completed pass.

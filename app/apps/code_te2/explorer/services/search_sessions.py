@@ -30,12 +30,12 @@ logger = logging.getLogger(__name__)
 
 class AsyncPipeEventQueue:
     def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
-        self._loop = loop
+        self._loop: asyncio.AbstractEventLoop = loop
         self._queue: asyncio.Queue[PipeEnvelope] = asyncio.Queue()
 
     def put_nowait(self, item: PipeEnvelope) -> object:
         try:
-            self._loop.call_soon_threadsafe(self._queue.put_nowait, item)
+            _ = self._loop.call_soon_threadsafe(self._queue.put_nowait, item)
         except RuntimeError:
             return None
         return None
@@ -427,7 +427,7 @@ class ExplorerSearchSessions:
             self._active_search_id = None
         for job_id, mapped_search_id in list(self._job_to_search.items()):
             if mapped_search_id == search_id or (session is not None and job_id == session.job_id):
-                self._job_to_search.pop(job_id, None)
+                _ = self._job_to_search.pop(job_id, None)
 
     def _session_for_request(
         self,

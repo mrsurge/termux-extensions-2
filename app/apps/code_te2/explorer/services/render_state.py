@@ -370,7 +370,7 @@ async def _handle_client_foreground_changed_event(event: WorkerEvent) -> None:
     client_foreground = client_foreground_payload_from_event(event)
     if open_state is None or client_foreground is None:
         return
-    await emit_client_explorer_rpc_notification(
+    _ = await emit_client_explorer_rpc_notification(
         client_foreground["clientInstanceId"],
         "explorer.activeFile.updated",
         {

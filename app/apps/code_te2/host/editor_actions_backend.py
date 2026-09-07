@@ -10,7 +10,6 @@ from ..monaco_editor.editor_backend_services.contracts import JsonMap
 from ..monaco_editor.editor_ws import (
     editor_runtime_active_project,
     editor_runtime_emit_room_event,
-    editor_runtime_git_head_text,
     editor_runtime_is_under_project,
     editor_runtime_normalize_abs_path,
     editor_runtime_read_disk_text,
@@ -101,7 +100,6 @@ async def handle_host_editor_git_baselines_request(
         normalize_abs_path=editor_runtime_normalize_abs_path,
         is_under_project=editor_runtime_is_under_project,
         read_disk_text=editor_runtime_read_disk_text,
-        git_head_text=editor_runtime_git_head_text,
     )
     await editor_runtime_emit_room_event(
         "editor:git_baselines",

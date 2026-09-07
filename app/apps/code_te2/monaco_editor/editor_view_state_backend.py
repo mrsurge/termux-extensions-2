@@ -14,7 +14,6 @@ ActiveProjectFn = Callable[[], str | None]
 NormalizeAbsPathFn = Callable[[str], str | None]
 IsUnderProjectFn = Callable[[str, str], bool]
 ReadDiskTextFn = Callable[[str], str]
-GitHeadTextFn = Callable[[str, str], str | None]
 GetCachedDocumentFn = Callable[[str, str], dict[str, object] | None]
 ComputeDraftDiffFn = Callable[[str, str, str], dict[str, object]]
 compute_draft_diff: ComputeDraftDiffFn = cast(ComputeDraftDiffFn, _compute_draft_diff)
@@ -111,7 +110,6 @@ def build_editor_git_baselines_payload(
     normalize_abs_path: NormalizeAbsPathFn,
     is_under_project: IsUnderProjectFn,
     read_disk_text: ReadDiskTextFn,
-    git_head_text: GitHeadTextFn,
 ) -> JsonMap:
     project = _active_project_or_raise(active_project)
     path = _resolve_required_path(

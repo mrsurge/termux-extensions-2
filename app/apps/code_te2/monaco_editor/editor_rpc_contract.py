@@ -171,17 +171,17 @@ class JsonRpcErrorEnvelope(TypedDict):
 class EditorRpcProtocolError(Exception):
     def __init__(self, code: int, message: str, *, data: dict[str, object] | None = None) -> None:
         super().__init__(message)
-        self.code = code
-        self.message = message
-        self.data = data or {}
+        self.code: int = code
+        self.message: str = message
+        self.data: dict[str, object] = data or {}
 
 
 class EditorRpcDispatchError(Exception):
     def __init__(self, code: int, message: str, *, data: dict[str, object] | None = None) -> None:
         super().__init__(message)
-        self.code = code
-        self.message = message
-        self.data = data or {}
+        self.code: int = code
+        self.message: str = message
+        self.data: dict[str, object] = data or {}
 
 
 def coerce_jsonrpc_request_envelope(payload: object) -> JsonRpcRequestEnvelope | None:

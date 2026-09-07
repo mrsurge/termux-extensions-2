@@ -86,17 +86,17 @@ async def handle_editor_preference_update_request(
             "preferences": preferences,
             "source_client": request_source_client or source_client,
         }
-        asyncio.create_task(
+        _ = asyncio.create_task(
             editor_runtime_emit_room_event(
                 "editor:prefs_changed",
                 room_payload,
             )
         )
         try:
-            from ..ui_ipc.ui_ipc_ws import emit_ui_ipc_rpc_notification
+            from ..ui_ipc.notifications import emit_ui_ipc_rpc_notification
             from ..ui_ipc.rpc_contract import UI_IPC_RPC_NOTIFICATION_PREFERENCES_CHANGED
 
-            asyncio.create_task(
+            _ = asyncio.create_task(
                 emit_ui_ipc_rpc_notification(
                     UI_IPC_RPC_NOTIFICATION_PREFERENCES_CHANGED,
                     room_payload,

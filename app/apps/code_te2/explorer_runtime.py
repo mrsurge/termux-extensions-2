@@ -86,7 +86,7 @@ from .worker_services.event_bus import current_project_generation
 class ExplorerDispatcher:
     def __init__(self, websocket: ExplorerConnection) -> None:
         self.websocket: ExplorerConnection = websocket
-        self.client_instance_id = websocket.client_instance_id
+        self.client_instance_id: str = websocket.client_instance_id
         self.project_root: Path = get_project_root()
         self._job_tracking: ExplorerJobTrackingRuntime | None = None
         self._tracked_job_ids: set[str] = set()

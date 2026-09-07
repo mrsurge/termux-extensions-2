@@ -4,7 +4,7 @@ import os
 import time
 from pathlib import Path
 from collections.abc import Awaitable, Mapping
-from typing import Optional, Protocol, cast
+from typing import Protocol, cast
 
 from ..stores import get_history_store, get_preferences_store
 from ..client_presentation import client_presentation_room
@@ -106,7 +106,7 @@ _project_switch_seq = 0
 _LAST_SAVE_SHA: dict[str, str] = {}
 
 
-def _coerce_generation(raw: object) -> Optional[int]:
+def _coerce_generation(raw: object) -> int | None:
     try:
         if raw is None or raw == "":
             return None
@@ -119,7 +119,7 @@ def _coerce_generation(raw: object) -> Optional[int]:
         return None
 
 
-def editor_runtime_active_project() -> Optional[str]:
+def editor_runtime_active_project() -> str | None:
     return _active_project()
 
 
@@ -127,7 +127,7 @@ def editor_runtime_is_under_project(project: str, abs_path: str) -> bool:
     return _is_under_project(project, abs_path)
 
 
-def editor_runtime_coerce_generation(raw: object) -> Optional[int]:
+def editor_runtime_coerce_generation(raw: object) -> int | None:
     return _coerce_generation(raw)
 
 
@@ -141,7 +141,7 @@ def _runtime_meta() -> RuntimeMeta:
     }
 
 
-def _active_project() -> Optional[str]:
+def _active_project() -> str | None:
     project = _history_store.get_active_project()
     if not project:
         return None
@@ -152,7 +152,7 @@ def _active_project() -> Optional[str]:
         return project
 
 
-def _normalize_abs_path(path: str) -> Optional[str]:
+def _normalize_abs_path(path: str) -> str | None:
     if not path.strip():
         return None
     try:
@@ -238,8 +238,8 @@ async def _emit_project_switch_notification(
 
     print(
         "[project_switch] emit "
-        f"phase={phase} project={project} switchId={payload['switchId']} "
-        f"status={status or ''} adapterStatus={adapter_status or ''}",
+        + f"phase={phase} project={project} switchId={payload['switchId']} "
+        + f"status={status or ''} adapterStatus={adapter_status or ''}",
         flush=True,
     )
 
@@ -309,7 +309,7 @@ def _notify_draft_state_changed_safe(project: str) -> None:
         pass
 
 
-def editor_runtime_normalize_abs_path(path: str) -> Optional[str]:
+def editor_runtime_normalize_abs_path(path: str) -> str | None:
     return _normalize_abs_path(path)
 
 
@@ -402,7 +402,7 @@ def editor_runtime_git_head_text(project: str, abs_path: str) -> str | None:
 
 def editor_runtime_record_file_activity(project: str, abs_path: str, *, scroll_line: float | None = None) -> None:
     if scroll_line is not None:
-        _history_store.update_file_scroll_line(project, abs_path, scroll_line)
+        _ = _history_store.update_file_scroll_line(project, abs_path, scroll_line)
 
 
 def editor_runtime_get_cached_document(project: str, abs_path: str) -> dict[str, object] | None:
@@ -428,7 +428,7 @@ async def editor_runtime_request_save_snapshot(
         return await asyncio.wait_for(fut, timeout=timeout_s)
     finally:
         if _SAVE_SNAPSHOT_WAITING.get(request_id) is waiting:
-            _SAVE_SNAPSHOT_WAITING.pop(request_id, None)
+            _ = _SAVE_SNAPSHOT_WAITING.pop(request_id, None)
 
 
 def editor_runtime_resolve_save_snapshot_response(data: dict[str, object]) -> None:
@@ -461,7 +461,7 @@ async def editor_runtime_request_issues_dump(
         return await asyncio.wait_for(fut, timeout=timeout_s)
     finally:
         if _ISSUES_DUMP_WAITING.get(request_id) is waiting:
-            _ISSUES_DUMP_WAITING.pop(request_id, None)
+            _ = _ISSUES_DUMP_WAITING.pop(request_id, None)
 
 
 def editor_runtime_build_connect_snapshot(
@@ -646,7 +646,7 @@ async def _emit_ui_ipc_editor_notification(
     client_instance_id: str | None = None,
 ) -> None:
     try:
-        from ..ui_ipc.ui_ipc_ws import emit_ui_ipc_rpc_notification
+        from ..ui_ipc.notifications import emit_ui_ipc_rpc_notification
 
         await emit_ui_ipc_rpc_notification(
             method,
@@ -711,7 +711,7 @@ async def editor_runtime_handle_scroll_state(source_client: str, data: dict[str,
             line = int(line)
         if path and _is_under_project(project, path) and isinstance(line, (int, float)) and line and line > 0:
             try:
-                _history_store.update_file_scroll_line(project, path, float(line))
+                _ = _history_store.update_file_scroll_line(project, path, float(line))
             except Exception:
                 pass
 
@@ -745,7 +745,7 @@ async def editor_runtime_handle_issues_dump_response(source_client: str, data: d
     waiting = _ISSUES_DUMP_WAITING.get(request_id)
     if waiting is None or waiting[0] != source_client:
         return
-    _ISSUES_DUMP_WAITING.pop(request_id, None)
+    _ = _ISSUES_DUMP_WAITING.pop(request_id, None)
 
     response_payload: dict[str, object] = {"requestId": request_id, "dump": data.get("dump")}
     future = waiting[1]
@@ -928,7 +928,7 @@ async def handle_external_file_change(changed_abs_path: str) -> bool:
     # Suppress watcher event triggered by our own save
     suppressed_sha = _LAST_SAVE_SHA.get(active_norm)
     if suppressed_sha and suppressed_sha == disk_sha:
-        _LAST_SAVE_SHA.pop(active_norm, None)
+        _ = _LAST_SAVE_SHA.pop(active_norm, None)
         return False
 
     # Check against cached draft / last known SHA
@@ -1001,7 +1001,7 @@ async def broadcast_git_baselines_for_active_file() -> bool:
         return False
 
     from ..comparison_backend import comparison_state, selected_baseline
-    from ..ui_ipc.ui_ipc_ws import emit_ui_ipc_rpc_notification
+    from ..ui_ipc.notifications import emit_ui_ipc_rpc_notification
     from ..ui_ipc.rpc_contract import UI_IPC_RPC_NOTIFICATION_COMPARISON_CHANGED
     revision = time.monotonic_ns() // 1000
     ref = _history_store.get_diff_base(project) or "HEAD"
@@ -1042,7 +1042,7 @@ async def broadcast_git_baselines_for_active_file() -> bool:
         return False
 
 
-def _git_head_text(project_root: str, abs_path: str) -> Optional[str]:
+def _git_head_text(project_root: str, abs_path: str) -> str | None:
     """Return the file content at HEAD (or None if untracked / no commits)."""
 
     try:

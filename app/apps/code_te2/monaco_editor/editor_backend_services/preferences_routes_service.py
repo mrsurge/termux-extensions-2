@@ -142,7 +142,7 @@ async def handle_update_preference(
                         notify_draft_state_changed,
                     )
 
-                    history_store.clear_cached_document(project_path, current_file)
+                    _ = history_store.clear_cached_document(project_path, current_file)
                     notify_draft_state_changed(project_path)
                 except Exception as exc:
                     print(f"[PREFERENCE] Failed to clear cache on autosave enable: {exc}", file=sys.stderr)
@@ -177,7 +177,7 @@ async def handle_update_preference(
             editor_updates["autoSave"] = False
         elif key == "autoSave" and bool(value):
             editor_updates["showDraftDiffs"] = False
-        preferences_store.update_preferences(editor=editor_updates)
+        _ = preferences_store.update_preferences(editor=editor_updates)
 
         if key in ("showInlineDiffs", "showDraftDiffs", "autoSave", "comparisonMode"):
             refresh_active_diffs()

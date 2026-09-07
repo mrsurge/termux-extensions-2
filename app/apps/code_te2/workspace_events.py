@@ -115,7 +115,7 @@ async def publish_file_change_batch(
 
     for abs_path in [*created_abs, *changed_abs]:
         try:
-            await handle_external_file_change(abs_path)
+            _ = await handle_external_file_change(abs_path)
         except Exception as exc:
             logger.debug("[workspace_events] external file change publish failed: %s", exc)
 
@@ -246,7 +246,7 @@ async def _handle_git_snapshot_requested_event(event: WorkerEvent) -> None:
     key = project
     existing = _git_snapshot_debounce_tasks.get(key)
     if existing is not None and not existing.done():
-        existing.cancel()
+        _ = existing.cancel()
         record_coalesced_event("workspace_events:git_snapshot_debounce", event["type"])
     _git_snapshot_debounce_tasks[key] = asyncio.create_task(
         _debounced_git_snapshot(project, generation),
@@ -272,14 +272,14 @@ async def _debounced_git_snapshot(project: str, generation: int | None) -> None:
     finally:
         task = _git_snapshot_debounce_tasks.get(project)
         if task is asyncio.current_task():
-            _git_snapshot_debounce_tasks.pop(project, None)
+            _ = _git_snapshot_debounce_tasks.pop(project, None)
 
 
 async def _handle_comparison_changed_event(event: WorkerEvent) -> None:
     from .monaco_editor.editor_ws import broadcast_git_baselines_for_active_file
     project = event.get("project_root")
     if project and event.get("project_generation") == current_project_generation(project):
-        await broadcast_git_baselines_for_active_file()
+        _ = await broadcast_git_baselines_for_active_file()
 
 
 async def _handle_git_snapshot_changed_event(event: WorkerEvent) -> None:
@@ -302,7 +302,7 @@ async def _handle_git_snapshot_changed_event(event: WorkerEvent) -> None:
     # Editor git-baseline refresh is now a projector for the git snapshot fact;
     # Explorer git notifications are emitted by the render-state projector.
     try:
-        await broadcast_git_baselines_for_active_file()
+        _ = await broadcast_git_baselines_for_active_file()
     except Exception as exc:
         logger.warning(
             "Failed to push git baselines after status update for %s: %s",

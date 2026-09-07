@@ -1,11 +1,11 @@
 """Shared comparison selection and mode-aware editor baseline materialization."""
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import cast
 
 from .stores import get_history_store, get_preferences_store
 from .worker_services import git_service
@@ -13,11 +13,12 @@ from .worker_services import git_service
 
 def comparison_mode(project: str) -> str:
     prefs = get_preferences_store().get_preferences(project).get("editor", {})
-    if not isinstance(prefs, dict):
+    if not isinstance(prefs, Mapping):
         return "plain"
-    if prefs.get("showDraftDiffs") and not prefs.get("autoSave"):
+    editor = cast(Mapping[str, object], prefs)
+    if editor.get("showDraftDiffs") and not editor.get("autoSave"):
         return "disk"
-    return "commit" if prefs.get("showInlineDiffs") else "plain"
+    return "commit" if editor.get("showInlineDiffs") else "plain"
 
 
 def comparison_state(project: str, *, commits: bool = False) -> dict[str, object]:
@@ -62,35 +63,3 @@ def selected_baseline(project: str, path: str, read_disk_text: Callable[[str], s
         "head_content": head,
         "head_sha256": hashlib.sha256(head.encode()).hexdigest() if head is not None else None,
     }
-
-
-async def handle_comparison_request(data: dict[str, object], source_client: str) -> dict[str, object]:
-    from .explorer.services.state_facts import publish_git_diff_base_changed
-    from .monaco_editor.editor_preferences_backend import handle_editor_preference_update_request
-    from .monaco_editor.editor_ws import editor_runtime_active_project
-
-    project = editor_runtime_active_project()
-    if not project or data.get("projectPath") != project:
-        raise ValueError("stale_project_path")
-    ref = data.get("ref")
-    if ref is not None:
-        if not isinstance(ref, str) or not ref.strip():
-            raise ValueError("invalid comparison ref")
-        commit = await asyncio.to_thread(git_service.get_commit_info, Path(project), ref)
-        if not commit:
-            raise ValueError("comparison commit not found")
-        if editor_runtime_active_project() != project:
-            raise ValueError("stale_project_path")
-        ref = "HEAD" if ref == "HEAD" else commit.hash
-        get_history_store().set_diff_base(project, ref)
-        await publish_git_diff_base_changed(project, ref=ref, refresh=True, source="host_comparison")
-    mode = data.get("mode")
-    if mode is not None:
-        if editor_runtime_active_project() != project:
-            raise ValueError("stale_project_path")
-        if mode not in ("plain", "commit", "disk"):
-            raise ValueError("invalid comparison mode")
-        await handle_editor_preference_update_request(
-            {"key": "comparisonMode", "value": mode}, source_client=source_client,
-        )
-    return await asyncio.to_thread(comparison_state, project, commits=data.get("commits") is True)

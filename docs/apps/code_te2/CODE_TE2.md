@@ -906,6 +906,12 @@ theme registration is skipped (by design) to avoid caching a no-op run.
   off the asyncio loop. Disk comparison performs no Git blob/commit reads;
   commit comparison resolves the shared history-store ref to an immutable hash
   before reading through the existing Rust `git.headBlob` `rev` parameter.
+- Host comparison commands live in `host/comparison_actions_backend.py`, keeping
+  baseline reads independent of editor runtime/preference dispatch. Outbound
+  UI IPC encoding/emission lives in `ui_ipc/notifications.py`; `ui_ipc_ws.py`
+  re-exports its emitter for existing callers. Editor runtime and preferences
+  import the outbound module directly rather than the namespace request layer,
+  avoiding a dependency cycle without changing routing or wire encoding.
 - The far-left status control combines filename, mode, and the shared Explorer
   selector. `ui.host.comparison` is the host control lane; `GitDiffBaseChanged`
   and `GitSnapshotChanged` project updates without reopening the active file.
