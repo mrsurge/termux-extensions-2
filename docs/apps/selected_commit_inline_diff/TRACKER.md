@@ -64,8 +64,47 @@ this work adds no detached-HEAD checkout workflow.
 
 ## Pending: Draft Links And Selected Commit Diff
 
+### Cold-Start Diff Regression Investigation
+
+- [x] Confirm enabled commit-diff preferences with a plain editor in Cefrium.
+- [x] Confirm a manual baseline request creates the missing diff editor.
+- [x] Add bounded `[InlineDiffInit]` startup stages and catch asynchronous
+  snapshot initialization failures. No retry or startup-order changes yet.
+- [x] Retain the latest 64 stages in `window.__te2InlineDiffInitTrace` because
+  volatile console delivery dropped most of the first cold-launch trace.
+- [x] Capture a cold launch with the instrumented frontend and identify the
+  failed stage before implementing the correction.
+- [x] Fix native timer receiver loss in the baseline debounce dependencies;
+  report scheduling failures instead of swallowing them.
+- [x] Pass a receiver-sensitive regression test covering cold scheduling,
+  superseding requests, and immediate requests.
+- [x] Receive cold-launch live acceptance of the timer fix.
+
+The retained trace reaches baseline scheduling but not its timer callback.
+Calling a raw Window timer as an options-object method throws `Illegal
+invocation`, reproduced in both clients. The debounce helper swallowed that
+exception; immediate preference toggles bypass scheduling and therefore worked.
+The dependencies now call `window.setTimeout`/`window.clearTimeout` through
+wrappers. This establishes the cold-start defect, not why the older Electron
+build avoided the path.
+
+The user reports working diffs after a framework restart and manual setting
+reload. Keep the remaining cold-start restoration failure separate from the
+earlier DevTools/worker startup investigation. The older Electron frontend is
+the working same-server control; the branch-specific trigger remains unproven.
+
 Clarify the existing draft-versus-disk and model-versus-disk distinctions in
 source, then correct the Drafts overlay action. For selected-commit comparisons,
 define how commit changes, file changes, unavailable baselines, and reconnects
 affect the inline view before implementation. Do not infer those policies from
 the old experiment alone.
+
+## Backlog: DevTools Through TE2 MCP
+
+- [ ] Investigate existing native DevTools transports and expose exact-target
+  debugging through TE2 MCP independently of volatile console logging.
+- [ ] Define renderer capabilities, nested worker/session routing, cold-start
+  capture, evaluation/actions, bounded events, and connection cleanup.
+- [ ] Obtain approval for the implementation scope before native/MCP changes.
+
+Requested during cold-start diff debugging; does not supersede that fix.

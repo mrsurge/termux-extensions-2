@@ -29,7 +29,8 @@ export function requestGitBaselinesDebounced(opts: GitBaselineRequestDebounceOpt
     }, Number(o.debounceMs || 180));
     if (typeof o.setTimerFn === 'function') o.setTimerFn(next);
     return true;
-  } catch (_) {
+  } catch (error) {
+    console.warn('[GitBaselines] request scheduling failed', error);
     return false;
   }
 }

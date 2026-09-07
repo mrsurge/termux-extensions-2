@@ -51,6 +51,23 @@ The branch started from upstream main at `a95cb8e6` (TE2 0.2.346).
   commit and current file, including rapid file/commit changes and missing paths.
   Final behavior for exceptional cases is to be determined during investigation.
 
+## Follow-Up: DevTools Through TE2 MCP
+
+Expose native-client DevTools through TE2 MCP for direct, target-specific
+debugging rather than relying on volatile console telemetry. Investigate the
+existing Cefrium CDP, GeckoView inspector, and Electron integration before
+choosing the API and transport. Include target discovery, page/frame/worker
+evaluation, runtime exceptions, worker startup/debugger state, and bounded
+network/event capture, with explicit capability reporting per renderer.
+
+The transport must preserve target/session identity and protocol routing,
+including nested workers, reconnects, cancellation, and clean detach. Inspection
+must not silently pause workers or require the native overlay to be open.
+Provide explicit debugging actions, not an artificially read-only interface.
+Agree on the concrete implementation and security scope after investigation.
+This is a backlog item, not authorization to change Android or MCP now; finish
+the cold-start inline-diff regression first.
+
 ## Source References
 
 - Touch fork: `worktrees/monaco-touch-selection/src/index.ts`.
