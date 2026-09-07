@@ -16,13 +16,45 @@ The branch started from upstream main at `a95cb8e6` (TE2 0.2.346).
 2. **Explorer Git commit selector.** External commits must update a HEAD-following
    selector through Git facts, without first opening By changes. Show HEAD and
    the latest commit as one choice; preserve explicitly selected older baselines.
-3. **Draft overlay links.** Make links in the Drafts overlay activate the intended
-   draft-versus-disk inline comparison instead of the current model-versus-disk
-   behavior. Trace the existing baseline and navigation contracts before editing.
-4. **Selected-commit inline comparison.** Experiment with making the inline commit
-   diff use the currently selected Explorer commit. Establish the selection's
-   authority, baseline loading, and update behavior from current source and the
-   user's detailed requirements before choosing an implementation.
+3. **Unified comparison workflow (combines the two remaining items).** Share the
+   Explorer comparison selector with the editor and a new status-bar drop-up,
+   and correct Drafts navigation as part of the same phase. Investigate existing
+   authority and event paths before approving the concrete implementation.
+
+## Unified Comparison Workflow
+
+- Keep one backend-owned, project-scoped comparison selection, shared by the
+  Explorer selectors, By changes, and inline commit comparisons. The status-bar
+  drop-up mirrors and changes that same selector state, not a separate copy.
+- Put the status control at the far left, before extension contributions.
+  Show the active filename without its path and the comparison state:
+  `file @ HEAD · hash`, `file @ hash`, `file @ disk`, or the filename in plain
+  mode. Breadcrumbs already provide the path.
+- Highlight historical/non-HEAD selection yellow in both the status control
+  and Explorer selectors. Preserve HEAD-following versus pinned-ref semantics.
+  Disk mode labels the actual disk comparison rather than suggesting Git data
+  is being displayed; the menu can still expose the retained shared Git ref.
+- The drop-up combines the existing commit choices with mutually exclusive
+  plain, selected-commit, and draft-versus-disk modes. Use existing custom menu
+  components, not native browser dropdowns or dialogs.
+- Draft-versus-disk turns autosave off. Clicking a Drafts result applies draft
+  mode and disk comparison before opening/jumping to that file. Commit and
+  draft inline comparison must not both be enabled by this workflow.
+- Disk comparison loads no Git baseline/content. Commit comparison loads the
+  selected commit as the original and keeps the current editable file as the
+  modified model; this is not checkout or historical-file replacement.
+- Keep By changes current from Git facts and comparison-selection events, just
+  as Drafts stays current. Reopening an overlay must not be required to repair
+  its state. No polling or frontend-to-frontend authority shortcuts.
+- Fence baseline results against project, file, mode, and selected-ref changes.
+  HEAD movement invalidates HEAD comparisons but does not unpin older refs.
+  Keep baseline work off the critical file-open completion path.
+- Investigate missing historical paths, unborn repositories, cold restoration,
+  reconnect, and multiple client surfaces before finalizing error behavior.
+
+The combined control is especially important on mobile: Explorer is hidden when
+closed and occupies the screen when open, so comparison state and selection
+must also be available while editing.
 
 ## Constraints
 

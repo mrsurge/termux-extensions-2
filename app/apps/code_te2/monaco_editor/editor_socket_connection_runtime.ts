@@ -2,6 +2,7 @@ import { EDITOR_RPC_NOTIFICATIONS } from './editor_rpc_contract.ts';
 import { buildInlineDiffScrollbarOptions } from './editor_diff_scrollbar_options.ts';
 import { acceptDocumentProjection } from './editor_document_revision_runtime.ts';
 import { traceInlineDiffInit } from './editor_inline_diff_init_trace.ts';
+import { updateComparisonBaselineFence } from './editor_git_baseline_runtime.ts';
 
 interface EditorSocketLike {
   on(eventName: string, handler: (payload: unknown) => void): void;
@@ -426,6 +427,13 @@ export function registerEditorSocketConnectionHandlers(
 
   if (deps.rpcNotifications) {
     deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.stateSsot, handleSsotSnapshot);
+    deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.comparisonChanged, (payload) => {
+      const project = typeof payload.projectPath === 'string' ? payload.projectPath : '';
+      if (!project || !deps.getCurrentPath()?.startsWith(project + '/')) return;
+      if (typeof payload.ref === 'string' && typeof payload.revision === 'number') {
+        updateComparisonBaselineFence(payload.ref, payload.revision);
+      }
+    });
     deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.fileOpened, handleOpenPayload);
     deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.fileJumpToLine, (payload) => deps.handleJumpToLine(payload));
     deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.prefsChanged, handlePrefsChangedPayload);

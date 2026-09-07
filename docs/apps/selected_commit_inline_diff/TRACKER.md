@@ -5,9 +5,9 @@
 - [x] Fetch upstream and create branch from latest main.
 - [x] Fix mobile touch-handle alignment across inline diff transitions.
 - [x] Fix Explorer Git commit selector (user live acceptance confirmed).
-- [ ] Correct Drafts overlay links to summon draft-versus-disk inline diff.
-- [ ] Investigate and implement selected-Explorer-commit inline comparisons.
-- [ ] Complete combined acceptance and prepare branch for merge.
+- [x] Correct Drafts overlay links to summon draft-versus-disk inline diff.
+- [x] Investigate and implement selected-Explorer-commit inline comparisons.
+- [x] Complete combined acceptance and prepare branch for merge.
 
 ## Completed: Mobile Touch Geometry
 
@@ -62,7 +62,7 @@ matrix was not reported.
 The legacy payload mode named `detached` denotes an explicit comparison ref;
 this work adds no detached-HEAD checkout workflow.
 
-## Pending: Draft Links And Selected Commit Diff
+## Completed: Cold-Start Diff Restoration
 
 ### Cold-Start Diff Regression Investigation
 
@@ -93,11 +93,47 @@ reload. Keep the remaining cold-start restoration failure separate from the
 earlier DevTools/worker startup investigation. The older Electron frontend is
 the working same-server control; the branch-specific trigger remains unproven.
 
-Clarify the existing draft-versus-disk and model-versus-disk distinctions in
-source, then correct the Drafts overlay action. For selected-commit comparisons,
-define how commit changes, file changes, unavailable baselines, and reconnects
-affect the inline view before implementation. Do not infer those policies from
-the old experiment alone.
+## Completed: Unified Comparison Workflow
+
+- [x] Combine Drafts navigation and selected-commit comparisons into one phase.
+- [x] Record shared Explorer/status selector and matching yellow non-HEAD state.
+- [x] Trace selector authority, baseline loading, preference mutations, status
+  contributions, and overlay refresh facts; approve concrete implementation.
+- [x] Add far-left filename/comparison status control and custom drop-up that
+  mirrors and updates the existing Explorer commit selector.
+- [x] Apply matching historical-ref highlighting to Explorer selectors.
+- [x] Project selected commit baselines to the editor with stale-result fences.
+- [x] Make disk comparison avoid Git baseline reads and turn autosave off.
+- [x] Make Drafts clicks select draft-versus-disk before opening the target.
+- [x] Refresh By changes from Git and comparison-selection events, no polling.
+- [x] Pass focused validation and receive user live acceptance of the combined
+  workflow. The user reported acceptance complete; individual live scenarios
+  were not separately enumerated.
+
+Implementation validation: receiver-sensitive cold-start coverage retained;
+focused tests cover exact-commit reads, disk mode making zero Git reads,
+selection changes during materialization, unborn repositories, atomic preference
+updates, shared-status menu commands, obsolete mode/ref/revision rejection, and
+out-of-order By changes replies. Typecheck, frontend build, and 19 focused tests
+passed. The user confirmed complete live acceptance. No shared framework
+restart, APK build, or release-version change was required by this implementation.
+
+Initial source findings:
+
+- `explorer/handlers/git.py` persists the selector through the existing history
+  store and publishes `GitDiffBaseChanged`. Reuse that authority for host intent.
+- `monaco_editor/editor_view_state_backend.py` and the active-file broadcaster
+  in `editor_ws.py` hard-code HEAD and read Git even for a disk comparison.
+  Both request and push paths need the same mode-aware baseline builder.
+- `src/explorer/search/review-results-renderer.ts` currently enables both draft
+  and commit diff helpers sequentially; replace that with one coherent mode
+  action before navigation.
+- `main_page/frontend/ui/extension-activity.ts` owns the current status bar.
+  Keep the new comparison control outside extension-owned content containers.
+- `GitDiffBaseChanged` already reaches Explorer render-state projection, and
+  the selector controller refreshes By changes for selection changes. Audit
+  ordinary Git snapshot refresh separately so unchanged refs still refresh
+  changed working-tree results without polling.
 
 ## Backlog: DevTools Through TE2 MCP
 

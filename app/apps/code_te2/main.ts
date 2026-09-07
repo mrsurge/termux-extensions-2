@@ -12,6 +12,7 @@ import { createConsoleDrawer } from './main_page/frontend/host-console-drawer.ts
 import { createProblemsState } from './src/diagnostics/problems-panel.ts';
 import { installDiagnosticsLatencyProbe } from './src/diagnostics/latency-probe.ts';
 import { createExtensionActivityPanel } from './main_page/frontend/ui/extension-activity.ts';
+import { installComparisonStatus } from './main_page/frontend/ui/comparison-status.ts';
 import { createCodeInspectorPanel } from './main_page/frontend/ui/code-inspector.ts';
 import { getConsoleBridgeStatus, initConsoleBridge } from './main_page/frontend/console_bridge.js';
 import { HOME_DIR, HOME_PREFIX, simplifyAbsolute, toAbsolute, parentDir, basename, formatDisplayPath, formatDisplayDirectory, detectLanguageFromFilename, setMenuChecked, FONT_SCALE_PRESETS, requireEl } from './main_page/frontend/core/utils.ts';
@@ -1124,6 +1125,11 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
   });
 
   editorStateController.installWindowHooks();
+  installComparisonStatus({
+    getState: () => editorState,
+    getPath: () => currentPath || '',
+    request: payload => uiIpcConnections.requestUiIpc(UI_IPC_RPC_METHODS.hostComparison, payload),
+  });
 
   // ---------- WebSocket management ----------
   const fileSyncHandler = createFileSyncHandler({

@@ -25,6 +25,7 @@ import {
 } from "../tree/view-utils.ts";
 
 interface ExplorerSearchOverlayController {
+  fetchChangesResults(force?: boolean): Promise<void> | void;
   handleSearchResultsUpdated(payload: JsonObject): void;
   handleSearchJobProgress(payload: JsonObject): void;
   handleSearchJobResult(payload: JsonObject): void;
@@ -527,12 +528,17 @@ export function createExplorerNotificationHandler(
         console.log("[GIT_STATUS_DEBUG] Received:", payload);
         deps.runtimeState.setGitStatus(coerceGitStatus(payload));
         if (payload.diffBase) deps.applyGitDiffBaseSnapshot?.(payload.diffBase);
+        if (deps.searchOverlayController.isVisible() && deps.searchOverlayController.getSearchMode() === 'changes') {
+          void deps.searchOverlayController.fetchChangesResults(true);
+        }
         deps.renderBranchLabel();
         deps.renderGitSummary();
         deps.setGitControlsEnabled(true, false);
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.gitDiffBaseUpdated: {
+        const project = getNonEmptyString(payload.projectPath);
+        if (project && project !== deps.runtimeState.getProjectPath()) break;
         const ref = getNonEmptyString(payload.ref);
         if (ref) {
           deps.setGitDiffBaseRef(ref);
@@ -542,7 +548,9 @@ export function createExplorerNotificationHandler(
             deps.updateDiffBaseButtons();
           }
           if (deps.searchOverlayController.isVisible()) {
-            deps.renderSearchOverlay();
+            if (deps.searchOverlayController.getSearchMode() === 'changes') {
+              void deps.searchOverlayController.fetchChangesResults(true);
+            } else deps.renderSearchOverlay();
           }
         }
         break;

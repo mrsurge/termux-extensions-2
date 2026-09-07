@@ -53,6 +53,7 @@ from .editor_rpc_contract import (
     EDITOR_RPC_NOTIFICATION_FIND_COMMAND,
     EDITOR_RPC_NOTIFICATION_EDIT_COMMAND,
     EDITOR_RPC_NOTIFICATION_GIT_BASELINES,
+    EDITOR_RPC_NOTIFICATION_COMPARISON_CHANGED,
     EDITOR_RPC_NOTIFICATION_ISSUES_COMMAND,
     EDITOR_RPC_NOTIFICATION_ISSUES_DUMP_REQUEST,
     EDITOR_RPC_NOTIFICATION_MIRROR_UPDATED,
@@ -607,6 +608,7 @@ def _rpc_notification_for_legacy_event(event_name: str) -> EditorRpcNotification
         "editor:open": EDITOR_RPC_NOTIFICATION_FILE_OPENED,
         "editor:jump_to_line": EDITOR_RPC_NOTIFICATION_FILE_JUMP_TO_LINE,
         "editor:git_baselines": EDITOR_RPC_NOTIFICATION_GIT_BASELINES,
+        "editor:comparison_changed": EDITOR_RPC_NOTIFICATION_COMPARISON_CHANGED,
         "editor:mirror": EDITOR_RPC_NOTIFICATION_MIRROR_UPDATED,
         "editor:cache_state": EDITOR_RPC_NOTIFICATION_CACHE_STATE,
         "editor:draft_state": EDITOR_RPC_NOTIFICATION_DRAFT_STATE,
@@ -998,6 +1000,19 @@ async def broadcast_git_baselines_for_active_file() -> bool:
         print("[git_baselines_push] no active project, skipping", flush=True)
         return False
 
+    from ..comparison_backend import comparison_state, selected_baseline
+    from ..ui_ipc.ui_ipc_ws import emit_ui_ipc_rpc_notification
+    from ..ui_ipc.rpc_contract import UI_IPC_RPC_NOTIFICATION_COMPARISON_CHANGED
+    revision = time.monotonic_ns() // 1000
+    ref = _history_store.get_diff_base(project) or "HEAD"
+    await editor_runtime_emit_room_event("editor:comparison_changed", {"projectPath": project, "ref": ref, "revision": revision})
+    comparison = await asyncio.to_thread(comparison_state, project)
+    if _active_project() != project:
+        return False
+    await emit_ui_ipc_rpc_notification(UI_IPC_RPC_NOTIFICATION_COMPARISON_CHANGED, comparison)
+    if comparison.get("mode") == "plain":
+        return False
+
     foregrounds = list_client_foregrounds(project, reason="git_baselines_push")
     if not foregrounds:
         print("[git_baselines_push] no client foregrounds, skipping", flush=True)
@@ -1011,24 +1026,10 @@ async def broadcast_git_baselines_for_active_file() -> bool:
                 continue
             payload = payloads.get(active_norm)
             if payload is None:
-                disk = _read_disk_text(active_norm)
-                disk_sha = hashlib.sha256(disk.encode("utf-8")).hexdigest()
-                head = _git_head_text(project, active_norm)
-                head_sha = (
-                    hashlib.sha256(head.encode("utf-8")).hexdigest()
-                    if isinstance(head, str)
-                    else None
-                )
-                payload = cast(dict[str, object], {
-                    "path": active_norm,
-                    "tracked": bool(head is not None),
-                    "base_ref": "HEAD",
-                    "disk_content": disk,
-                    "disk_sha256": disk_sha,
-                    "head_content": head,
-                    "head_sha256": head_sha,
-                })
+                payload = await asyncio.to_thread(selected_baseline, project, active_norm, _read_disk_text)
                 payloads[active_norm] = payload
+            if _active_project() != project:
+                return False
             await editor_runtime_emit_room_event(
                 "editor:git_baselines",
                 payload,

@@ -34,6 +34,7 @@ UI_IPC_RPC_METHOD_HOST_BOOT_SNAPSHOT_GET: Final = "ui.host.bootSnapshot.get"
 UI_IPC_RPC_METHOD_HOST_LANGUAGE_BACKEND_SET: Final = "ui.host.languageBackend.set"
 UI_IPC_RPC_METHOD_HOST_EDITOR_JUMP_TO_LINE: Final = "ui.host.editor.jumpToLine"
 UI_IPC_RPC_METHOD_HOST_EDITOR_GIT_BASELINES_GET: Final = "ui.host.editor.gitBaselines.get"
+UI_IPC_RPC_METHOD_HOST_COMPARISON: Final = "ui.host.comparison"
 UI_IPC_RPC_METHOD_HOST_EDITOR_FIND: Final = "ui.host.editor.find"
 UI_IPC_RPC_METHOD_HOST_EDITOR_ISSUES_COMMAND: Final = "ui.host.editor.issues.command"
 UI_IPC_RPC_METHOD_HOST_EDITOR_ISSUES_DUMP: Final = "ui.host.editor.issues.dump"
@@ -71,6 +72,7 @@ UiIpcRpcMethod = Literal[
     "ui.host.languageBackend.set",
     "ui.host.editor.jumpToLine",
     "ui.host.editor.gitBaselines.get",
+    "ui.host.comparison",
     "ui.host.editor.find",
     "ui.host.editor.issues.command",
     "ui.host.editor.issues.dump",
@@ -114,6 +116,7 @@ UI_IPC_RPC_NOTIFICATION_FILE_TABS_DECORATIONS_CHANGED: Final = (
 UI_IPC_RPC_NOTIFICATION_PROJECT_SWITCHING: Final = "ui.project.switching"
 UI_IPC_RPC_NOTIFICATION_PROJECT_SWITCHED: Final = "ui.project.switched"
 UI_IPC_RPC_NOTIFICATION_PREFERENCES_CHANGED: Final = "ui.preferences.changed"
+UI_IPC_RPC_NOTIFICATION_COMPARISON_CHANGED: Final = "ui.comparison.changed"
 UI_IPC_RPC_NOTIFICATION_TERMINAL_OPEN: Final = "ui.terminal.open"
 UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOWS_CHANGED: Final = "ui.sidebar.windows.changed"
 UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOW_ACTIVATED: Final = "ui.sidebar.window.activated"
@@ -147,6 +150,7 @@ UiIpcRpcNotification = Literal[
     "ui.project.switching",
     "ui.project.switched",
     "ui.preferences.changed",
+    "ui.comparison.changed",
     "ui.terminal.open",
     "ui.sidebar.windows.changed",
     "ui.sidebar.window.activated",
@@ -157,6 +161,7 @@ UiIpcRpcNotification = Literal[
 ]
 
 ALLOWED_REQUEST_METHODS: Final[set[str]] = {
+    UI_IPC_RPC_METHOD_HOST_COMPARISON,
     UI_IPC_RPC_METHOD_HOST_FILE_OPEN,
     UI_IPC_RPC_METHOD_HOST_FILE_SAVE,
     UI_IPC_RPC_METHOD_HOST_DRAFT_DISCARD,
@@ -193,6 +198,7 @@ ALLOWED_REQUEST_METHODS: Final[set[str]] = {
 }
 
 ALLOWED_NOTIFICATION_METHODS: Final[set[str]] = {
+    UI_IPC_RPC_NOTIFICATION_COMPARISON_CHANGED,
     UI_IPC_RPC_NOTIFICATION_EDITOR_SAVE,
     UI_IPC_RPC_NOTIFICATION_EDITOR_FOCUS,
     UI_IPC_RPC_NOTIFICATION_EDITOR_BLUR,

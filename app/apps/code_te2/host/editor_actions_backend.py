@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+import asyncio
 from pathlib import Path
 
 from ..explorer.services.file_ops import get_project_root
@@ -93,7 +94,7 @@ async def handle_host_editor_git_baselines_request(
 ) -> JsonMap:
     project = _active_project_or_raise()
     path = _resolve_editor_path(data, project, source_name)
-    payload = build_editor_git_baselines_payload(
+    payload = await asyncio.to_thread(build_editor_git_baselines_payload,
         {**data, "path": path},
         source_client=source_name,
         active_project=editor_runtime_active_project,

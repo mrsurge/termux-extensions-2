@@ -184,6 +184,7 @@ def register_workspace_event_bus_handlers() -> None:
     subscribe_worker_event("WorkspaceFilesChanged", _handle_workspace_files_changed_event)
     subscribe_worker_event("GitSnapshotRequested", _handle_git_snapshot_requested_event)
     subscribe_worker_event("GitSnapshotChanged", _handle_git_snapshot_changed_event)
+    subscribe_worker_event("GitDiffBaseChanged", _handle_comparison_changed_event)
     subscribe_worker_event("WatcherErrorRaised", _handle_watcher_error_raised_event)
     _event_bus_handlers_registered = True
 
@@ -272,6 +273,13 @@ async def _debounced_git_snapshot(project: str, generation: int | None) -> None:
         task = _git_snapshot_debounce_tasks.get(project)
         if task is asyncio.current_task():
             _git_snapshot_debounce_tasks.pop(project, None)
+
+
+async def _handle_comparison_changed_event(event: WorkerEvent) -> None:
+    from .monaco_editor.editor_ws import broadcast_git_baselines_for_active_file
+    project = event.get("project_root")
+    if project and event.get("project_generation") == current_project_generation(project):
+        await broadcast_git_baselines_for_active_file()
 
 
 async def _handle_git_snapshot_changed_event(event: WorkerEvent) -> None:

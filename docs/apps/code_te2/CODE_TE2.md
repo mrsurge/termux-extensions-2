@@ -863,12 +863,28 @@ theme registration is skipped (by design) to avoid caching a no-op run.
 
 ### Diff mode behavior
 - Git diff mode uses Monaco DiffEditor in inline mode (not side-by-side).
-- Draft diff mode is a custom overlay (decorations + view zones).
+- Draft-versus-disk uses the inline DiffEditor with disk as its original model.
+  Existing draft annotations still style the stock inline view where applicable.
 - Minimap is forced off in diff mode to avoid layout artifacts.
 - File switches clear the previous diff pair, complete the visible Monaco open,
   then issue a non-blocking `editor.gitBaselines.get` request. Its returned
-  disk/HEAD payload is applied only while its path is still active; original
+  mode-aware disk/selected-commit payload is applied only while its path is still active; original
   models are not retained as per-tab authority.
+- `comparison_backend.py` materializes both request and Git-fact push baselines
+  off the asyncio loop. Disk comparison performs no Git blob/commit reads;
+  commit comparison resolves the shared history-store ref to an immutable hash
+  before reading through the existing Rust `git.headBlob` `rev` parameter.
+- The far-left status control combines filename, mode, and the shared Explorer
+  selector. `ui.host.comparison` is the host control lane; `GitDiffBaseChanged`
+  and `GitSnapshotChanged` project updates without reopening the active file.
+  Historical comparison selections are yellow in both selectors. This is a
+  baseline selection, not checkout or replacement of the editable document.
+- `comparisonMode` is a command, not a separate persisted preference. It updates
+  the established `showInlineDiffs`/`showDraftDiffs` flags atomically; disk mode
+  also sets `autoSave: false`. Drafts links apply disk mode before navigation.
+- Editor comparison notifications fence older baselines by ref and monotonic
+  revision; path and mode checks reject obsolete responses. By changes uses
+  correlated, generation-fenced requests and refreshes on Git/selection facts.
 - Diff editor children hide vertical scrollbar chrome but retain automatic
   10-pixel horizontal scrollbars for long lines.
 

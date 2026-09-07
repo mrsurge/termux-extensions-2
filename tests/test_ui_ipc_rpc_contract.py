@@ -10,6 +10,16 @@ from app.apps.code_te2.ui_ipc.rpc_contract import (
 
 
 class UiIpcRpcContractTests(unittest.TestCase):
+    def test_comparison_request_and_projection_are_allowed(self):
+        self.assertIsNotNone(parse_ui_ipc_rpc_request({
+            'jsonrpc': '2.0', 'id': 'comparison', 'method': 'ui.host.comparison',
+            'params': {'projectPath': '/project', 'mode': 'disk'},
+        }))
+        self.assertIsNotNone(parse_ui_ipc_rpc_notification({
+            'jsonrpc': '2.0', 'method': 'ui.comparison.changed',
+            'params': {'projectPath': '/project'},
+        }))
+
     def test_second_editor_open_is_an_allowed_notification(self) -> None:
         parsed = parse_ui_ipc_rpc_notification(
             {

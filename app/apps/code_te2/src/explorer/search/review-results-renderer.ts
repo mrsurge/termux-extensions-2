@@ -92,7 +92,6 @@ export function createExplorerReviewResultsRenderer(
 
   async function enableDiffViews(): Promise<void> {
     await deps.ensureDraftDiffs();
-    await deps.ensureInlineDiffs();
   }
 
   function renderReviewResults(container: HTMLElement, data: unknown): void {

@@ -53,6 +53,7 @@ export function createEditorStateController(deps: EditorStateControllerDeps) {
     deps.setEditorState(nextState);
     deps.setCachedProjectRoot(typeof nextState?.activeProject === 'string' ? nextState.activeProject : null);
     runtimeWindow().__codeTe2EditorState = nextState;
+    window.dispatchEvent(new CustomEvent('code-te2:comparison-host-state', { detail: nextState }));
     return nextState;
   }
 
@@ -108,7 +109,7 @@ export function createEditorStateController(deps: EditorStateControllerDeps) {
       if (!forceOn) return true;
       if (deps.getEditorViewState()?.showInlineDiffs) return true;
       try {
-        return await deps.updatePreference('showInlineDiffs', true);
+        return await deps.updatePreference('comparisonMode', 'commit');
       } catch (err) {
         console.warn('Auto-enable inline diffs failed:', err);
         return false;
@@ -117,9 +118,8 @@ export function createEditorStateController(deps: EditorStateControllerDeps) {
 
     rw.__codeTe2EnsureDraftDiffs = async function ensureDraftDiffsEnabled(forceOn = true) {
       if (!forceOn) return true;
-      if (deps.getEditorViewState()?.showDraftDiffs) return true;
       try {
-        return await deps.updatePreference('showDraftDiffs', true);
+        return await deps.updatePreference('comparisonMode', 'disk');
       } catch (err) {
         console.warn('Auto-enable draft diffs failed:', err);
         return false;

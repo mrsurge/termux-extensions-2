@@ -240,6 +240,7 @@ export function createExplorerSearchOverlayController(
     if (headButton) {
       headButton.textContent = `${formatDiffBaseLabel(deps.getGitDiffBase(), false)} ▾`;
       headButton.disabled = deps.getGitDiffBase().mode === "none";
+      headButton.classList.toggle('comparison-historical', deps.getGitDiffBase().ref !== 'HEAD');
     }
 
     const resultsContainer =
@@ -508,11 +509,6 @@ export function createExplorerSearchOverlayController(
   function handleSearchResultsUpdated(payload: unknown): void {
     const typedPayload = getSearchResultsPayload(payload);
     const payloadMode = typedPayload?.mode;
-
-    if (typedPayload && payloadMode === "changes" && typedPayload.base) {
-      deps.setGitDiffBase(normalizeDiffBase(typedPayload.base));
-      deps.onGitDiffBaseChanged();
-    }
 
     if (
       payloadMode &&

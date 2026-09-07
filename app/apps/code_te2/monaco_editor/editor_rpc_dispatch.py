@@ -1,5 +1,6 @@
 # pyright: strict
 from __future__ import annotations
+import asyncio
 
 import time
 from collections.abc import Awaitable, Callable
@@ -253,7 +254,7 @@ async def dispatch_editor_rpc_request(
         )
 
     if method == EDITOR_RPC_METHOD_GIT_BASELINES_GET:
-        return build_editor_git_baselines_payload(
+        return await asyncio.to_thread(build_editor_git_baselines_payload,
             params,
             source_client=source_client,
             active_project=active_project,

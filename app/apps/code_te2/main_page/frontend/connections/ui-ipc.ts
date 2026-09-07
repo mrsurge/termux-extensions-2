@@ -341,6 +341,8 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
             dispatchWindowCustomEvent('code-te2:project-switched', params);
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.adapterState) {
             dispatchWindowCustomEvent('code-te2:adapter-state', params);
+          } else if (method === UI_IPC_RPC_NOTIFICATIONS.comparisonChanged) {
+            dispatchWindowCustomEvent('code-te2:comparison-changed', params);
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.preferencesChanged) {
             dispatchWindowCustomEvent('code-te2:preferences-changed', params);
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.terminalOpen) {

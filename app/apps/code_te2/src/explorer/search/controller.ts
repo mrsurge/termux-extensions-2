@@ -174,6 +174,7 @@ export function createExplorerSearchController(
   }
 
   function cancelActiveSearch(reason: string): void {
+    changesGeneration++;
     const identity = deps.getSearchIdentity();
     if (!hasCancelableIdentity(identity)) {
       return;
@@ -374,6 +375,7 @@ export function createExplorerSearchController(
     scheduleSearch(deps.getSearchQuery());
   }
 
+  let changesGeneration = 0;
   async function fetchChangesResults(force = false): Promise<void> {
     if (deps.getSearchMode() !== "changes") return;
     if (deps.getSearchLoading() && !force) return;
@@ -386,6 +388,8 @@ export function createExplorerSearchController(
     }
 
     cancelActiveSearch("modeChanged");
+    const generation = changesGeneration;
+    const project = deps.getProjectPath();
     deps.setLastKnownProjectPath(deps.getProjectPath());
     deps.setSearchLoading(true);
     deps.setSearchError(null);
@@ -400,8 +404,11 @@ export function createExplorerSearchController(
     }
 
     try {
-      deps.sendBus(EXPLORER_RPC_METHODS.searchRun, { mode: "changes" });
+      const result = await deps.requestBus(EXPLORER_RPC_METHODS.searchRun, { mode: "changes" });
+      if (generation !== changesGeneration || project !== deps.getProjectPath() || deps.getSearchMode() !== 'changes') return;
+      handleSearchResultsUpdated(result);
     } catch (error) {
+      if (generation !== changesGeneration || project !== deps.getProjectPath()) return;
       deps.setSearchLoading(false);
       deps.setSearchError(getErrorMessage(error, "Changes lookup failed"));
       deps.renderSearchOverlay();

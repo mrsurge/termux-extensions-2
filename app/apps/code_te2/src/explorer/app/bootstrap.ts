@@ -294,12 +294,11 @@ explorerSearchOverlayController = createExplorerSearchOverlayController({
     explorerFileOpenBridge.openFileAndMaybeJump(rel, lineNumber, jumpOptions),
   ensureDraftDiffs: async () => {
     if (typeof window.__codeTe2EnsureDraftDiffs === "function") {
-      try {
-        await window.__codeTe2EnsureDraftDiffs(true);
-      } catch {
-        /* ignore */
-      }
+      const result: unknown = await window.__codeTe2EnsureDraftDiffs(true);
+      if (result !== false) return;
     }
+    toast('Unable to enable draft-versus-disk comparison');
+    throw new Error('Draft comparison mode was not applied');
   },
   ensureInlineDiffs: async () => {
     if (typeof window.__codeTe2EnsureInlineDiffs === "function") {

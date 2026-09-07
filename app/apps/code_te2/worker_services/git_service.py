@@ -807,8 +807,8 @@ def is_git_repository(project_root: Path) -> bool:
     return bool(get_snapshot(project_root)["isRepository"])
 
 
-def read_head_blob_text(project_root: Path, rel_path: str) -> str | None:
-    """Return UTF-8 text for a file at HEAD, or None when absent/untracked."""
+def read_head_blob_text(project_root: Path, rel_path: str, *, rev: str = "HEAD") -> str | None:
+    """Read a Git blob through the existing pipe; HEAD remains the default."""
     normalized_rel = rel_path.strip().replace("\\", "/")
     if not normalized_rel:
         return None
@@ -820,6 +820,7 @@ def read_head_blob_text(project_root: Path, rel_path: str) -> str | None:
         {
             "root": root_str,
             "relativePath": normalized_rel,
+            "rev": rev,
         },
         target_nid=2200,
         target_name="service.git",

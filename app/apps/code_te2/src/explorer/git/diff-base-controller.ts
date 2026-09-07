@@ -126,6 +126,10 @@ export function createExplorerDiffBaseController(
     if (!gitBaseButton) return;
     gitBaseButton.textContent = `${formatDiffBaseLabel(gitDiffBase, true)} ▾`;
     gitBaseButton.disabled = gitDiffBase.mode === 'none';
+    gitBaseButton.classList.toggle('comparison-historical', gitDiffBase.ref !== 'HEAD');
+    document.querySelectorAll('#fe-search-base-btn').forEach(button => {
+      button.classList.toggle('comparison-historical', gitDiffBase.ref !== 'HEAD');
+    });
   }
 
   function applyGitControlsForState(state: unknown): void {
@@ -177,11 +181,7 @@ export function createExplorerDiffBaseController(
   async function changeDiffBase(ref: string): Promise<void> {
     if (!ref || !deps.hasExplorerRpc()) return;
     try {
-      deps.notifyExplorer(EXPLORER_RPC_METHODS.gitDiffBaseSet, { ref });
-      if (deps.isChangesMode()) {
-        await deps.refreshChangesResults(true);
-      }
-      deps.reloadCurrentFile();
+      await requestExplorerRpc(EXPLORER_RPC_METHODS.gitDiffBaseSet, { ref });
     } catch (error) {
       deps.toast(getErrorMessage(error, 'Failed to update diff base'));
     }

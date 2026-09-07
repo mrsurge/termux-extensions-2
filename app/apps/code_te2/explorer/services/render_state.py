@@ -281,6 +281,7 @@ async def _handle_git_diff_base_changed_event(event: WorkerEvent) -> None:
         project,
         "explorer.git.diffBase.updated",
         {
+            "projectPath": project,
             "ref": ref,
             "refresh": payload.get("refresh") is True,
         },

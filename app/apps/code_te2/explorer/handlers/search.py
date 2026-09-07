@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import asyncio
 
 from .. import search as search_service
 from ..contracts.search_review import (
@@ -23,7 +24,7 @@ async def handle_search_run(
 
     result: SearchRunResult
     if mode == "changes":
-        result = search_service.search_by_changes(context.project_root)
+        result = await asyncio.to_thread(search_service.search_by_changes, context.project_root)
     else:
         raise RuntimeError("name/content search must use progressive search sessions")
 

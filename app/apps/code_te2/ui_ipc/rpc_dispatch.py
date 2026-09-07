@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from .rpc_contract import (
+    UI_IPC_RPC_METHOD_HOST_COMPARISON,
     UI_IPC_RPC_METHOD_HOST_BOOT_SNAPSHOT_GET,
     UI_IPC_RPC_METHOD_HOST_LANGUAGE_BACKEND_SET,
     UI_IPC_RPC_METHOD_HOST_CODE_INSPECTOR_COMMAND,
@@ -189,6 +190,10 @@ async def dispatch_ui_ipc_rpc_request(
             params,
             source_name=source_name,
         )
+
+    if method == UI_IPC_RPC_METHOD_HOST_COMPARISON:
+        from ..comparison_backend import handle_comparison_request
+        return await handle_comparison_request(params, source_name)
 
     if method == UI_IPC_RPC_METHOD_HOST_EDITOR_GIT_BASELINES_GET:
         return await handle_host_editor_git_baselines_request(

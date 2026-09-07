@@ -43,6 +43,9 @@ interface MonacoRefLike {
 }
 
 interface GitBaselinePayloadLike {
+  comparison_mode?: unknown;
+  comparison_revision?: unknown;
+  base_ref?: unknown;
   path?: unknown;
   tracked?: unknown;
   head_content?: unknown;
@@ -167,6 +170,15 @@ function scheduleLineChangeDebug(diffEditor: MonacoDiffEditorLike | null, deps: 
   } catch (_) {}
 }
 
+let comparisonRevision = 0;
+let comparisonRef: string | null = null;
+
+export function updateComparisonBaselineFence(ref: string, revision: number): void {
+  if (revision < comparisonRevision) return;
+  comparisonRevision = revision;
+  comparisonRef = ref;
+}
+
 export function applyGitBaselines(
   deps: EditorGitBaselineRuntimeDeps,
   payload: GitBaselinePayloadLike | null | undefined,
@@ -182,6 +194,15 @@ export function applyGitBaselines(
       console.log('[GitBaselines] skip: path mismatch', payloadPath, currentPath);
       return;
     }
+
+    const showCommitDiff = deps.getShowInlineDiffs();
+    const showDiskDraftDiff = deps.getShowDraftDiffs();
+    const mode = showCommitDiff ? 'commit' : showDiskDraftDiff ? 'disk' : 'plain';
+    if (payload?.comparison_mode && payload.comparison_mode !== mode) return;
+    const revision = typeof payload?.comparison_revision === 'number' ? payload.comparison_revision : 0;
+    if (revision && revision < comparisonRevision) return;
+    if (mode === 'commit' && comparisonRef && payload?.base_ref !== comparisonRef) return;
+    if (revision) comparisonRevision = revision;
 
     const monacoRef = deps.getMonaco();
     if (!monacoRef) {
@@ -218,8 +239,6 @@ export function applyGitBaselines(
       }
     } catch (_) {}
 
-    const showCommitDiff = deps.getShowInlineDiffs();
-    const showDiskDraftDiff = deps.getShowDraftDiffs();
     if (!showCommitDiff && !showDiskDraftDiff) {
       deps.disposeGitBaselines();
       if (deps.getDiffEditor()) deps.ensurePlainEditorWithPrefs();
@@ -234,13 +253,10 @@ export function applyGitBaselines(
 
     const hasGitDiff = !!(tracked && head != null && headSha && diskSha && headSha !== diskSha);
     const liveModel = deps.getModel();
-    if (!hasGitDiff) {
-      head = liveModel && typeof liveModel.getValue === 'function' ? liveModel.getValue() : '';
-    }
 
     const language = deps.languageFromPath(currentPath);
-    const nextHeadModel = updateOrCreateModel(monacoRef, deps.getGitHeadModel(), head || '', language);
-    deps.setGitHeadModel(nextHeadModel);
+    const nextHeadModel = showCommitDiff ? updateOrCreateModel(monacoRef, deps.getGitHeadModel(), head || '', language) : null;
+    if (nextHeadModel) deps.setGitHeadModel(nextHeadModel);
     const nextDiskModel = updateOrCreateModel(monacoRef, deps.getGitDiskModel(), disk, language);
     deps.setGitDiskModel(nextDiskModel);
     const originalModel = showCommitDiff ? nextHeadModel : nextDiskModel;
