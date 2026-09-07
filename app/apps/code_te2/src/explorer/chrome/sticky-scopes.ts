@@ -149,7 +149,7 @@ function buildEntryFromLi(li: HTMLLIElement): ExplorerTreeMenuEntry {
     rel: li.dataset.rel || '',
     name: getCanonicalTreeNodeName(li),
     kind: li.dataset.kind || 'dir',
-    gitStatus: li.dataset.gitStatus || '',
+    gitStatus: li.dataset.actualGitStatus || '',
   };
 }
 
@@ -161,6 +161,7 @@ function copyExplorerVisualClasses(
   destLi.className = 'fe-tree-node fe-sticky-scope';
   srcLi.classList.forEach((cls) => {
     if (cls === 'fe-tree-root') destLi.classList.add(cls);
+    if (cls === 'fe-actual-git-warning') destLi.classList.add(cls);
     if (cls === 'fe-draft') destLi.classList.add(cls);
     if (cls.startsWith('fe-git-')) destLi.classList.add(cls);
     if (cls.startsWith('fe-dir-has-')) destLi.classList.add(cls);
@@ -367,6 +368,11 @@ export function createExplorerStickyScopes({
     diagnostic.className = 'fe-diag-mark';
     diagnostic.setAttribute('aria-hidden', 'true');
     containerEl.appendChild(diagnostic);
+    const warning = document.createElement('span');
+    warning.className = 'fe-actual-git-mark';
+    warning.setAttribute('aria-label', 'Uncommitted changes against HEAD');
+    warning.title = 'Uncommitted descendant changes against HEAD';
+    containerEl.appendChild(warning);
   }
 
   function sourceRootActions(
@@ -722,6 +728,8 @@ export function createExplorerStickyScopes({
     }
 
     copyExplorerVisualClasses(menuSource, rowEl);
+    rowEl.dataset.actualGitStatus = menuSource.dataset.actualGitStatus || '';
+    rowEl.dataset.actualGitFlags = menuSource.dataset.actualGitFlags || '';
     rowEl.dataset.kind = 'dir';
     rowEl.dataset.rel = rel;
     rowEl.dataset.name = getCanonicalTreeNodeName(menuSource);

@@ -19,6 +19,7 @@ interface FileExplorerOpenResponse {
 }
 
 interface ExplorerTreeMenuControllerDeps {
+  isHistoricalComparison?(): boolean;
   getTreeElement(): HTMLElement | null;
   getSelectedEntries(): Set<string>;
   getProjectPath(): string | null;
@@ -298,6 +299,7 @@ export function createExplorerTreeMenuController(
     const items: ExplorerTreeMenuItem[] = [];
     const isDir = entry.kind === 'dir';
     const isFile = entry.kind === 'file';
+    const historical = Boolean(deps.isHistoricalComparison?.());
     const gitStatus = entry.gitStatus || '';
 
     if (deps.isInSelectMode(entry.rel)) {
@@ -318,7 +320,7 @@ export function createExplorerTreeMenuController(
       items.push({
         label: `Stage selected (${count})`,
         type: 'batchStage',
-        disabled: count === 0,
+        disabled: count === 0 || historical,
       });
       items.push({
         label: `Unstage selected (${count})`,
@@ -372,7 +374,7 @@ export function createExplorerTreeMenuController(
         gitStatus === 'untracked' ||
         gitStatus === 'added')
     ) {
-      items.push({ label: 'Stage', type: 'stage' });
+      items.push({ label: 'Stage', type: 'stage', disabled: historical });
     }
     if (
       isFile &&
@@ -381,7 +383,7 @@ export function createExplorerTreeMenuController(
       items.push({ label: 'Unstage', type: 'unstage' });
     }
     if (isFile && gitStatus && gitStatus !== 'clean') {
-      items.push({ label: 'Restore…', type: 'restore' });
+      items.push({ label: 'Restore…', type: 'restore', disabled: historical });
     }
 
     if (isDir) {
@@ -390,13 +392,13 @@ export function createExplorerTreeMenuController(
         `li.fe-tree-node[data-kind="dir"][data-rel="${entry.rel}"]`,
       );
       const hasDirtyDescendants =
-        Boolean(dirLi?.classList.contains('fe-dir-has-modified')) ||
-        Boolean(dirLi?.classList.contains('fe-dir-has-untracked'));
+        Boolean(dirLi?.dataset.actualGitFlags?.split(',').includes('modified')) ||
+        Boolean(dirLi?.dataset.actualGitFlags?.split(',').includes('untracked'));
       const hasStagedDescendants = Boolean(
-        dirLi?.classList.contains('fe-dir-has-staged'),
+        dirLi?.dataset.actualGitFlags?.split(',').includes('staged'),
       );
       if (hasDirtyDescendants) {
-        items.push({ label: 'Stage All in Folder…', type: 'stageDir' });
+        items.push({ label: 'Stage All in Folder…', type: 'stageDir', disabled: historical });
       }
       if (hasStagedDescendants) {
         items.push({ label: 'Unstage All in Folder…', type: 'unstageDir' });
@@ -532,6 +534,10 @@ export function createExplorerTreeMenuController(
     entry: ExplorerTreeMenuEntry,
     actionType: ExplorerTreeMenuActionType,
   ): Promise<void> {
+    if (deps.isHistoricalComparison?.() && ['stage', 'batchStage', 'stageDir', 'restore'].includes(actionType)) {
+      deps.toast('Return to HEAD view before staging or restoring');
+      return;
+    }
     const rel = entry.rel;
     switch (actionType) {
       case 'enableSelectMode':

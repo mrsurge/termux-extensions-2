@@ -437,6 +437,8 @@ export function createExplorerNotificationHandler(
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.gitDecorationsUpdated: {
+        const project = getNonEmptyString(payload.projectPath);
+        if (project && project !== deps.runtimeState.getProjectPath()) break;
         deps.treeDecorations.applyGitDecorations(payload);
         break;
       }

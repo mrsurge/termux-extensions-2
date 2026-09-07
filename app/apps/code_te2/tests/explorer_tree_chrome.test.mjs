@@ -398,3 +398,25 @@ test('compressed sticky scope renders canonical clickable path segments', async 
 
   sticky.destroy();
 });
+
+test('historical decorations and actual warning metadata remain independent', async () => {
+  const win = installDom();
+  const { createExplorerTreeDecorationsController } = await importTypeScript('src/explorer/tree/decorations.ts');
+  const root = document.createElement('ul');
+  root.innerHTML = '<li class="fe-tree-node" data-kind="file" data-rel="clean.py"></li><li class="fe-tree-node" data-kind="file" data-rel="dirty.py"></li>';
+  document.body.append(root);
+  const controller = createExplorerTreeDecorationsController({ getTreeElement: () => root, setTreeElement() {} });
+  controller.applyGitDecorations({
+    nodes: { 'clean.py': { gitStatus: 'modified', gitFlags: ['modified'] } },
+    actualNodes: { 'dirty.py': { gitStatus: 'staged_modified', gitFlags: ['staged_modified'] } },
+  });
+  const clean = root.children[0], dirty = root.children[1];
+  assert.ok(clean.classList.contains('fe-git-modified'));
+  assert.ok(!clean.classList.contains('fe-actual-git-warning'));
+  assert.equal(dirty.dataset.actualGitStatus, 'staged_modified');
+  assert.ok(dirty.classList.contains('fe-actual-git-warning'));
+  assert.ok(!dirty.classList.contains('fe-git-modified'));
+  controller.applyGitDecorations({ nodes: {}, actualNodes: {} });
+  assert.ok(!dirty.classList.contains('fe-actual-git-warning'));
+  assert.equal(dirty.dataset.actualGitStatus, '');
+});

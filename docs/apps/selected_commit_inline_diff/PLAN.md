@@ -154,7 +154,8 @@ large-history/slow-client responsiveness measurements remain open.
   used by rename/save/path operations.
 - Keep actual state available for every displayed document. The active-document
   status bar shows applicable `Modified 🚨` and `Staged changes exist 🚨`
-  indicators, including both when appropriate, regardless of comparison mode.
+  indicators, including both when appropriate, only with a non-HEAD selection.
+  Returning to HEAD hides all warning labels without clearing actual Git state.
   Draft status remains separately identified. Final wording/layout is subject
   to live acceptance.
 - Project external edits, staging, unstaging, commits, and HEAD movement through
@@ -164,6 +165,9 @@ large-history/slow-client responsiveness measurements remain open.
 
 ### Phase 3: Guarded Historical Restore
 
+- Phase 2 safety prerequisite (approved and implemented): stage/commit/reset
+  are blocked in historical view, and Restore is temporarily blocked there.
+  Missing historical files remain in By changes, not synthetic tree entries.
 - Disable Explorer stage/commit controls in non-HEAD comparison views and enforce
   the same restriction in backend actions, including bulk and overlay entry
   points. Check canonical selection when executing, not a client-supplied flag.

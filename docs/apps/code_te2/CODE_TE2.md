@@ -924,6 +924,38 @@ theme registration is skipped (by design) to avoid caching a no-op run.
 - Diff editor children hide vertical scrollbar chrome but retain automatic
   10-pixel horizontal scrollbars for long lines.
 
+Historical Explorer appearance is separate from actual Git safety state:
+
+- `explorer/services/git_comparison.py` retains one project/ref comparison map.
+  `runtime_notifications.py` resolves the selected immutable commit, enumerates
+  through `git.worktreeChanges.get`, and aggregates both selected and actual
+  ancestor decorations off-loop. Ref, refresh-revision, and supplied project
+  generation fences reject obsolete results before cache/publication.
+- `GitSnapshotChanged.decorations.statuses` stays actual HEAD/index status for
+  existing consumers. `nodes` supplies selected-comparison appearance;
+  `actualNodes` supplies independent action/warning metadata. Selection facts
+  schedule the existing Git refresh; no polling is added. Directory hydration
+  reads the comparison cache only. Historical files absent on disk remain in
+  By changes rather than synthetic normal-tree entries.
+- Enumeration is capped at 100,000 paths. Reaching that cap or failing to
+  resolve the comparison publishes empty historical decorations plus an explicit
+  `comparisonError` exposed on the tree; it never substitutes HEAD colors.
+- File tabs retain actual colors. Host boot and file-tab decoration events carry
+  `gitActual` for recent documents; active-file status shows separate modified
+  and staged warnings only with a non-HEAD comparison selection. These derive from actual
+  unstaged/untracked and staged lists, not drafts or historical appearance.
+- Explorer warning spans use CSS-generated icons, keeping label text and
+  canonical names clean, including sticky/compressed scopes.
+  The selector gates their visibility through `explorer-historical-view`;
+  returning to HEAD hides warnings without clearing underlying actual state.
+- Only `source: explorer_tree` navigation can enable commit diff based on a
+  cached historical path lookup. It performs no Git reads; explicit Drafts
+  navigation retains its disk-diff choice.
+- Historical stage/commit/reset and Restore are blocked at the UI/backend
+  boundary, with a second canonical-selection check immediately before the
+  off-loop mutation. Safe source-pinned historical Restore is pending Phase 3;
+  these guards do not serialize external Git operations.
+
 ### Z-index policy
 
 - The inline Monaco editor host normally remains at `z-index: auto`.

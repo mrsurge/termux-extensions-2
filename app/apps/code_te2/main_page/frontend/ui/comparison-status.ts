@@ -17,7 +17,10 @@ export function installComparisonStatus(deps: {
   button.className = 'comparison-status-button';
   button.setAttribute('aria-haspopup', 'menu');
   button.setAttribute('aria-expanded', 'false');
-  root.append(button);
+  const warning = document.createElement('span');
+  warning.className = 'comparison-actual-state';
+  root.append(button, warning);
+  let actual: Data = {};
   let base: Data = {};
   let mode = 'plain';
   let project = '';
@@ -41,6 +44,13 @@ export function installComparisonStatus(deps: {
     button.title = mode === 'commit' ? `Compare against ${ref}${commit.subject ? ': ' + commit.subject : ''}` : 'Editor comparison mode';
     button.classList.toggle('comparison-historical', mode === 'commit' && ref !== 'HEAD');
     button.disabled = !project;
+    const path = deps.getPath();
+    const flags = actual[path.startsWith(project + '/') ? path.slice(project.length + 1) : ''];
+    warning.textContent = project && ref !== 'HEAD' && Array.isArray(flags) ? [
+      flags.includes('modified') ? 'Modified 🚨' : '',
+      flags.includes('staged') ? 'Staged changes exist 🚨' : '',
+    ].filter(Boolean).join(' · ') : '';
+    warning.title = 'Actual worktree/index state against HEAD; independent of comparison and drafts';
   }
 
   function apply(value: unknown): void {
@@ -54,7 +64,8 @@ export function installComparisonStatus(deps: {
   function hydrate(): void {
     const state = record(deps.getState());
     const nextProject = String(state.activeProject || '');
-    if (nextProject !== project) { close(); project = nextProject; base = {}; }
+    if (nextProject !== project) { close(); project = nextProject; base = {}; actual = {}; }
+    if (state.gitActual) actual = record(state.gitActual);
     if (state.gitDiffBase) base = record(state.gitDiffBase);
     const prefs = record(record(state.preferences).editor);
     mode = prefs.showDraftDiffs && !prefs.autoSave ? 'disk' : prefs.showInlineDiffs ? 'commit' : 'plain';
@@ -129,6 +140,13 @@ export function installComparisonStatus(deps: {
   document.addEventListener('keydown', event => { if (event.key === 'Escape') close(); });
   window.addEventListener('resize', close);
   window.addEventListener('code-te2:comparison-host-state', hydrate);
+  window.addEventListener('code-te2:file-tabs-decorations-changed', event => {
+    if (!(event instanceof CustomEvent)) return;
+    const data = record(event.detail);
+    if (data.projectPath !== project) return;
+    actual = record(data.gitActual);
+    render();
+  });
   window.addEventListener('code-te2:comparison-changed', event => {
     if (event instanceof CustomEvent) { close(); apply(event.detail); }
   });

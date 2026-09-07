@@ -40,15 +40,32 @@ older Rust binaries do not expose `search.changes.start`. User live acceptance
 confirmed the updated deployment works; dedicated large-history/slow-client
 timing measurements remain a follow-up, not a claimed measurement.
 
-## Planned Phase 2: Historical Styling And Actual-State Warnings
+## Phase 2: Historical Styling And Actual-State Warnings
 
-- [ ] Separate selected-comparison decorations from actual HEAD/index status.
-- [ ] Project historical card/ancestor styling and modified-file diff navigation.
-- [ ] Add structural warning badges; never insert them into path/name values.
-- [ ] Display active-document actual modified/staged state in the status bar,
+- [x] Separate selected-comparison decorations from actual HEAD/index status.
+- [x] Project historical card/ancestor styling and modified-file diff navigation.
+- [x] Add structural warning badges; never insert them into path/name values.
+- [x] Display active-document actual modified/staged state in the status bar,
   keeping drafts distinct and all document projections event-driven.
-- [ ] Test mixed states, external Git actions, sticky scopes, and reconnect.
+- [x] Test mixed states, ref supersession, structural labels/sticky scopes,
+  backend guards, and tree-only diff navigation; preserve boot warning state.
+- [ ] Live external Git actions, reconnect, and mobile layout acceptance.
 - [ ] Obtain live acceptance.
+
+Approved safety adjustment: stage/commit/reset are disabled in historical view
+and backend-rejected; historical Restore is disabled until Phase 3. Handlers
+check selection again inside the off-loop mutation closure. This does not lock
+out external Git processes or provide Phase 3 transactional restore guarantees.
+
+User refinement: all actual-state warning labels are historical-only. Returning
+the shared selector to HEAD hides Explorer/sticky and status-bar warnings while
+preserving the underlying Git metadata. Regression tests cover both directions.
+
+Validation: seven new backend tests, five comparison-baseline tests, two
+selector tests, and 21 frontend tests pass. Typecheck and frontend build pass.
+No Android/version changes or shared-framework restart. Live acceptance pending.
+The attempted `test_file_tabs_projection.py` discovery matched no tests; it is
+not counted as validation.
 
 ## Planned Phase 3: Guarded Historical Restore
 

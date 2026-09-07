@@ -29,7 +29,11 @@ export function renderExplorerTreeLabel(
   diagnostic.className = 'fe-diag-mark';
   diagnostic.setAttribute('aria-hidden', 'true');
 
-  container.append(label, diagnostic);
+  const warning = document.createElement('span');
+  warning.className = 'fe-actual-git-mark';
+  warning.setAttribute('aria-label', 'Uncommitted changes against HEAD');
+  warning.title = 'Uncommitted changes against HEAD (worktree or index)';
+  container.append(label, diagnostic, warning);
 }
 
 export function getTreeNodeDiagnosticSeverity(

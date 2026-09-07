@@ -99,6 +99,7 @@ export function createExplorerDiffBaseController(
 
   function setDiffBase(next: ExplorerDiffBaseInfo): void {
     gitDiffBase = next;
+    applyGitControlsForState(deps.getEditorState());
   }
 
   function setDiffBaseRef(ref: string): void {
@@ -108,6 +109,7 @@ export function createExplorerDiffBaseController(
       ref,
       commit: ref === gitDiffBase.ref ? gitDiffBase.commit : null,
     };
+    applyGitControlsForState(deps.getEditorState());
   }
 
   function applySnapshot(value: unknown): void {
@@ -134,6 +136,7 @@ export function createExplorerDiffBaseController(
 
   function applyGitControlsForState(state: unknown): void {
     const projectExists = hasActiveProject(state);
+    document.body.classList.toggle('explorer-historical-view', projectExists && gitDiffBase.mode !== 'none' && gitDiffBase.ref !== 'HEAD');
     if (!projectExists) {
       deps.setGitControlsEnabled(false, false);
     } else if (gitDiffBase.mode === 'none') {

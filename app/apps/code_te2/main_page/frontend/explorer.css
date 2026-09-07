@@ -1917,3 +1917,10 @@
   background: rgba(250, 204, 21, 0.18);
   color: #fef08a;
 }
+
+/* Structural warning markers never become part of canonical file names. */
+.fe-actual-git-mark { display: none; margin-left: 0.3em; flex-shrink: 0; }
+.explorer-historical-view .fe-actual-git-warning > .fe-tree-text > .fe-actual-git-mark { display: inline; }
+
+.comparison-actual-state { min-width: 0; overflow: hidden; text-overflow: ellipsis; margin-left: 0.6em; color: #e5b567; white-space: nowrap; }
+.fe-actual-git-mark::before { content: '🚨'; }

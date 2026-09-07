@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TypedDict, cast
 
 from .project_sidecar import ProjectSidecar
+from .explorer.services.git_comparison import actual_flags
 from .ui_ipc.rpc_contract import (
     UI_IPC_RPC_NOTIFICATION_FILE_TABS_DECORATIONS_CHANGED,
 )
@@ -37,6 +38,7 @@ class FileTabDecoration(TypedDict):
 
 
 class FileTabsDecorationProjection(TypedDict):
+    gitActual: dict[str, list[str]]
     projectPath: str
     items: list[FileTabDecoration]
 
@@ -172,8 +174,11 @@ def _build_projection_sync(
                 },
             }
         )
+    flags = actual_flags(git_service.get_cached_snapshot(Path(normalized_project)))
+    wanted = {str(Path(item["path"]).relative_to(normalized_project)) for item in items if Path(item["path"]).is_relative_to(normalized_project)}
     return {
         "projectPath": normalized_project,
+        "gitActual": {rel: value for rel, value in flags.items() if rel in wanted},
         "items": items,
     }
 
@@ -195,6 +200,7 @@ async def build_file_tabs_projection(
     )
     return {
         "projectPath": projection["projectPath"],
+        "gitActual": projection["gitActual"],
         "items": [
             {
                 "path": item["path"],

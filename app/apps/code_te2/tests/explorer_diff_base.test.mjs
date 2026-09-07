@@ -23,7 +23,10 @@ test('latest commit is one HEAD choice followed by historical commits', () => {
 });
 
 test('Git projections advance HEAD metadata and preserve a pinned selection', () => {
-  globalThis.document = { querySelectorAll: () => [] };
+  const classes = new Set();
+  globalThis.document = { querySelectorAll: () => [], body: { classList: {
+    toggle(name, enabled) { if (enabled) classes.add(name); else classes.delete(name); },
+  } } };
   let refreshed = 0;
   const controller = createExplorerDiffBaseController({
     getEditorState: () => ({ activeProject: '/p', activeProjectExists: true }),
@@ -33,11 +36,14 @@ test('Git projections advance HEAD metadata and preserve a pinned selection', ()
   controller.applySnapshot({ ref: 'HEAD', mode: 'head', commit: { hash: 'a', short: 'a' } });
   controller.applySnapshot({ ref: 'HEAD', mode: 'head', commit: { hash: 'b', short: 'b' } });
   assert.equal(controller.getDiffBase().commit.hash, 'b');
+  assert.ok(!classes.has('explorer-historical-view'));
   controller.applySnapshot({ ref: 'a', mode: 'detached', commit: { hash: 'a', short: 'a' } });
   const before = refreshed;
   controller.applySnapshot({ ref: 'a', mode: 'detached', commit: { hash: 'a', short: 'a' } });
   assert.equal(controller.getDiffBase().ref, 'a');
+  assert.ok(classes.has('explorer-historical-view'));
   assert.equal(refreshed, before);
   controller.setDiffBaseRef('HEAD');
   assert.equal(controller.getDiffBase().commit, null);
+  assert.ok(!classes.has('explorer-historical-view'));
 });

@@ -6,13 +6,14 @@ import json
 import logging
 import os
 import urllib.request
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from types import TracebackType
 from typing import Protocol, cast
 
 from .file_ops import mark_draft_cache_dirty, mark_git_cache_dirty
 from .git_diff_base import project_diff_base
+from . import git_comparison
 from .state_facts import publish_draft_state_changed, publish_review_state_changed
 from ..transport.connection_manager import manager
 from ...worker_services.event_bus import (
@@ -46,6 +47,7 @@ _explorer_event_loop: asyncio.AbstractEventLoop | None = None
 _draft_forward_tasks: DebounceTasks = {}
 _draft_decorations_tasks: DebounceTasks = {}
 _git_status_tasks: DebounceTasks = {}
+_git_refresh_revision = 0
 
 
 def set_explorer_event_loop(loop: asyncio.AbstractEventLoop) -> None:
@@ -109,6 +111,9 @@ async def broadcast_git_status_update(
     project_generation: int | None = None,
     source: str = "runtime_notifications",
 ) -> None:
+    global _git_refresh_revision
+    _git_refresh_revision += 1
+    revision = _git_refresh_revision
     project = Path(project_path)
     normalized_project = str(project.expanduser().resolve(strict=False))
     try:
@@ -136,6 +141,27 @@ async def broadcast_git_status_update(
             diff_base = await asyncio.to_thread(project_diff_base, project, base_ref, snapshot)
         except Exception as exc:
             logger.warning("Failed to resolve comparison base for %s: %s", project, exc)
+        comparison = git_comparison.Comparison(base_ref, dict(snapshot["statuses"]))
+        comparison_error = None
+        if base_ref != "HEAD":
+            try:
+                commit = diff_base.get("commit") if diff_base else None
+                commit_data = cast(dict[str, object], commit) if isinstance(commit, dict) else {}
+                commit_hash = commit_data.get("hash")
+                if not isinstance(commit_hash, str):
+                    raise ValueError("Historical comparison commit is unavailable")
+                comparison = await asyncio.to_thread(git_comparison.compute, project, base_ref, commit_hash)
+            except Exception as exc:
+                comparison = git_comparison.Comparison(base_ref, {})
+                comparison_error = str(exc)
+        nodes, actual_nodes = await asyncio.to_thread(
+            lambda: (
+                _git_tree_decorations(comparison.statuses),
+                _git_tree_decorations(git_comparison.actual_statuses(snapshot)),
+            ),
+        )
+        if revision != _git_refresh_revision:
+            return
         if get_history_store().get_diff_base(normalized_project) != base_ref:
             return
         if _is_stale_git_generation(project, project_generation):
@@ -155,9 +181,13 @@ async def broadcast_git_status_update(
             snapshot["unstaged"],
             snapshot["untracked"],
         )
+        git_comparison.install(project, comparison)
         decorations_payload: dict[str, object] = {
             "statuses": snapshot["statuses"],
-            "nodes": _git_tree_decorations(snapshot["statuses"]),
+            "nodes": nodes,
+            "actualNodes": actual_nodes,
+            "comparisonRef": base_ref,
+            "comparisonError": comparison_error,
             "projectPath": normalized_project,
         }
         status_payload: dict[str, object] = {
@@ -227,7 +257,7 @@ def schedule_git_status_update(
     _ = _post_to_explorer_loop(_schedule)
 
 
-def _git_tree_decorations(statuses: dict[str, worker_git_service.GitPathStatus]) -> dict[str, object]:
+def _git_tree_decorations(statuses: Mapping[str, str]) -> dict[str, object]:
     from .file_ops import build_git_tree_decorations
 
     return cast(dict[str, object], build_git_tree_decorations(statuses))

@@ -18,7 +18,7 @@ test('status mirrors shared selection and sends mode/ref intent through host RPC
     const base = { ref: 'abc12345', mode: 'detached', commit: { short: 'abc12345' } };
     installComparisonStatus({
       getPath: () => '/project/folder/file.py',
-      getState: () => ({ activeProject: '/project', gitDiffBase: base, preferences: { editor: { showInlineDiffs: true } } }),
+      getState: () => ({ activeProject: '/project', gitActual: { 'folder/file.py': ['modified', 'staged'] }, gitDiffBase: base, preferences: { editor: { showInlineDiffs: true } } }),
       request: async payload => {
         calls.push(payload);
         return { projectPath: '/project', mode: payload.mode || 'commit', diffBase: base, commits: [] };
@@ -27,6 +27,12 @@ test('status mirrors shared selection and sends mode/ref intent through host RPC
     const button = win.document.querySelector('.comparison-status-button');
     assert.equal(button.textContent, 'file.py @ abc12345 ▴');
     assert.ok(button.classList.contains('comparison-historical'));
+    const warning = win.document.querySelector('.comparison-actual-state');
+    assert.equal(warning.textContent, 'Modified 🚨 · Staged changes exist 🚨');
+    win.dispatchEvent(new win.CustomEvent('code-te2:file-tabs-decorations-changed', { detail: { projectPath: '/other', gitActual: {} } }));
+    assert.ok(warning.textContent.includes('Modified'));
+    win.dispatchEvent(new win.CustomEvent('code-te2:file-tabs-decorations-changed', { detail: { projectPath: '/project', gitActual: { 'folder/file.py': ['staged'] } } }));
+    assert.equal(warning.textContent, 'Staged changes exist 🚨');
     button.click();
     await Promise.resolve(); await Promise.resolve();
     const options = [...win.document.querySelectorAll('[role="menuitemradio"]')];
@@ -35,6 +41,10 @@ test('status mirrors shared selection and sends mode/ref intent through host RPC
     await Promise.resolve(); await Promise.resolve();
     assert.deepEqual(calls.at(-1), { projectPath: '/project', mode: 'disk' });
     assert.equal(button.textContent, 'file.py @ disk ▴');
+    win.dispatchEvent(new win.CustomEvent('code-te2:comparison-changed', { detail: { projectPath: '/project', mode: 'disk', diffBase: { ref: 'HEAD' } } }));
+    assert.equal(warning.textContent, '');
+    win.dispatchEvent(new win.CustomEvent('code-te2:comparison-changed', { detail: { projectPath: '/project', mode: 'disk', diffBase: base } }));
+    assert.equal(warning.textContent, 'Staged changes exist 🚨');
     assert.ok(!button.classList.contains('comparison-historical'));
     win.dispatchEvent(new win.CustomEvent('code-te2:comparison-changed', { detail: { projectPath: '/other', mode: 'commit', diffBase: base } }));
     assert.equal(button.textContent, 'file.py @ disk ▴');

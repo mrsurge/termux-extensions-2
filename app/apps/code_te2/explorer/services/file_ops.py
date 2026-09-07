@@ -23,6 +23,9 @@ class DraftCacheEntry(TypedDict):
     timestamp: float
 
 
+from .git_comparison import cached_statuses, actual_statuses
+
+
 class ExplorerEntry(TypedDict):
     name: str
     rel: str
@@ -33,6 +36,8 @@ class ExplorerEntry(TypedDict):
     ext: str
     gitStatus: str
     gitFlags: list[str]
+    actualGitStatus: str
+    actualGitFlags: list[str]
     isExecutable: bool
     isSymlink: bool
     hasDraft: bool
@@ -145,7 +150,8 @@ def explorer_listing_from_fs_directory_listing(listing: FsDirectoryListing) -> d
         raise ValueError("dir outside project root")
 
     draft_files, draft_dirs = _get_draft_index_snapshot(root)
-    status_map = worker_git_service.get_cached_statuses(root)
+    actual_status_map = actual_statuses(worker_git_service.get_cached_snapshot(root))
+    status_map = cached_statuses(root)
     entries: list[ExplorerEntry] = []
 
     for raw_entry in listing.get("entries", []):
@@ -173,6 +179,8 @@ def explorer_listing_from_fs_directory_listing(listing: FsDirectoryListing) -> d
                 "ext": Path(name).suffix.lstrip(".") if kind == "file" else "",
                 "gitStatus": git_status,
                 "gitFlags": git_flags,
+                "actualGitStatus": _derive_git_status(rel_path, kind, actual_status_map),
+                "actualGitFlags": _derive_git_flags(rel_path, kind, actual_status_map),
                 "isExecutable": bool(mode & stat.S_IXUSR),
                 "isSymlink": bool(raw_entry.get("isSymlink")),
                 "hasDraft": has_draft,

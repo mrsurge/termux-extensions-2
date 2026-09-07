@@ -36,7 +36,7 @@ function buildMenuEntry(node: HTMLLIElement): ExplorerTreeMenuEntry | null {
     rel,
     name: getNodeName(node),
     kind: getNodeKind(node),
-    gitStatus: node.dataset.gitStatus || '',
+    gitStatus: node.dataset.actualGitStatus || '',
   };
 }
 

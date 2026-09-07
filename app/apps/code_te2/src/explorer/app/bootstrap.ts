@@ -242,6 +242,7 @@ const explorerFileOpenBridge = createExplorerFileOpenBridge({
   toast,
 });
 const explorerGitFooterUtils = createExplorerGitFooterUtils({
+  isHistoricalComparison: () => (explorerDiffBaseController.getDiffBase().ref || "HEAD") !== "HEAD",
   getGitSummaryElement: () => gitSummaryEl,
   getGitStatus: () => explorerRuntimeState.getGitStatus(),
   getGitButtons: () => gitButtons,
@@ -393,6 +394,7 @@ explorerNameSearchController = createExplorerNameTreeSearchController({
   toast,
 });
 const explorerTreeMenuController = createExplorerTreeMenuController({
+  isHistoricalComparison: () => (explorerDiffBaseController.getDiffBase().ref || "HEAD") !== "HEAD",
   getTreeElement: () => treeElement,
   getSelectedEntries: () => selectedEntries,
   getProjectPath: () => explorerRuntimeState.getProjectPath(),
@@ -426,7 +428,7 @@ const explorerTreeClickHandler = createExplorerTreeClickHandler({
   openCardMenuForEntry: (entry, anchorEl) =>
     explorerTreeMenuController.openCardMenuForEntry(entry, anchorEl),
   openFile: async (rel) => {
-    await explorerFileOpenBridge.openFileAndMaybeJump(rel);
+    await explorerFileOpenBridge.openFileAndMaybeJump(rel, null, { source: "explorer_tree" });
   },
 });
 

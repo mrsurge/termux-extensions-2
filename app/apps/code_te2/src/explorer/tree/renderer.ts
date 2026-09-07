@@ -225,6 +225,9 @@ export function createExplorerTreeRenderer(deps: ExplorerTreeRendererDeps) {
       li.dataset.kind = kind;
       li.dataset.name = name;
       applyTreeDepthMetadata(li, kind, childTreeDepth);
+      li.dataset.actualGitStatus = entry.actualGitStatus || '';
+      li.dataset.actualGitFlags = (entry.actualGitFlags || []).join(',');
+      li.classList.toggle('fe-actual-git-warning', Boolean(entry.actualGitStatus && entry.actualGitStatus !== 'clean' && entry.actualGitStatus !== 'ignored'));
 
       if (typeof entry.gitStatus === 'string' && entry.gitStatus) {
         li.dataset.gitStatus = entry.gitStatus;

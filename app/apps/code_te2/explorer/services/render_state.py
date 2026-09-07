@@ -277,6 +277,9 @@ async def _handle_git_diff_base_changed_event(event: WorkerEvent) -> None:
     ref = payload.get("ref")
     if not isinstance(ref, str) or not ref:
         return
+    from .runtime_notifications import schedule_git_status_update
+
+    schedule_git_status_update(project, project_generation=event.get("project_generation"), source="comparison_selection")
     await emit_project_explorer_rpc_notification(
         project,
         "explorer.git.diffBase.updated",

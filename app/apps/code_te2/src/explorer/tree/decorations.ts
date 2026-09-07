@@ -275,6 +275,21 @@ export function createExplorerTreeDecorationsController(
       delete li.dataset.gitFlags;
     });
 
+    if (isRecord(payload) && typeof payload.comparisonError === 'string') {
+      root.dataset.comparisonError = payload.comparisonError;
+      root.title = payload.comparisonError;
+    } else {
+      delete root.dataset.comparisonError;
+      root.removeAttribute('title');
+    }
+    const actualNodes = isRecord(payload) && isRecord(payload.actualNodes) ? payload.actualNodes : nodes;
+    root.querySelectorAll<HTMLLIElement>('li.fe-tree-node').forEach(li => {
+      const value = actualNodes[li.dataset.rel || '.'];
+      const actual = isRecord(value) ? value : {};
+      li.dataset.actualGitStatus = typeof actual.gitStatus === 'string' ? actual.gitStatus : '';
+      li.dataset.actualGitFlags = Array.isArray(actual.gitFlags) ? actual.gitFlags.filter((flag): flag is string => typeof flag === 'string').join(',') : '';
+      li.classList.toggle('fe-actual-git-warning', Boolean(li.dataset.actualGitStatus && !['clean', 'ignored'].includes(li.dataset.actualGitStatus)));
+    });
     Object.entries(nodes).forEach(([rel, decoration]) => {
       if (!isRecord(decoration)) return;
       const status =

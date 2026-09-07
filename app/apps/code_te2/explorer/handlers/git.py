@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+from functools import partial
 import logging
 from typing import Protocol, cast
 
@@ -25,6 +26,7 @@ from ..services.state_facts import (
 )
 from ..services.tracked_jobs import forget_tracked_job, remember_tracked_job
 from ..services.file_ops import mark_git_cache_dirty
+from ..services.git_comparison import require_head, head_action
 from ...worker_services import git_service as worker_git_service
 
 logger = logging.getLogger(__name__)
@@ -51,11 +53,11 @@ async def handle_git_stage(
     msg_id: str | None,
 ) -> None:
     del msg_id
-    _ = await asyncio.to_thread(
-        worker_git_service.stage_paths,
+    require_head(context.project_root)
+    _ = await asyncio.to_thread(head_action, context.project_root, partial(worker_git_service.stage_paths,
         context.project_root,
         params["paths"],
-    )
+    ))
     await _mark_dirty_and_refresh(context)
 
 
@@ -79,7 +81,8 @@ async def handle_git_stage_all(
     msg_id: str | None,
 ) -> None:
     del params, msg_id
-    _ = await asyncio.to_thread(worker_git_service.stage_all, context.project_root)
+    require_head(context.project_root)
+    _ = await asyncio.to_thread(head_action, context.project_root, partial(worker_git_service.stage_all, context.project_root))
     await _mark_dirty_and_refresh(context)
 
 
@@ -99,12 +102,12 @@ async def handle_git_restore(
     msg_id: str | None,
 ) -> None:
     del msg_id
-    await asyncio.to_thread(
-        worker_git_service.restore_path,
+    require_head(context.project_root)
+    await asyncio.to_thread(head_action, context.project_root, partial(worker_git_service.restore_path,
         context.project_root,
         params["path"],
         params["commit"],
-    )
+    ))
     mark_git_cache_dirty(context.project_root)
     await publish_git_path_restored(
         context.project_root,
@@ -120,12 +123,12 @@ async def handle_git_commit(
     msg_id: str | None,
 ) -> None:
     del msg_id
-    _ = await asyncio.to_thread(
-        worker_git_service.commit_changes,
+    require_head(context.project_root)
+    _ = await asyncio.to_thread(head_action, context.project_root, partial(worker_git_service.commit_changes,
         context.project_root,
         params["message"],
         params["amend"],
-    )
+    ))
     await _mark_dirty_and_refresh(context)
     await publish_git_diff_base_changed(
         context.project_root,
@@ -187,11 +190,11 @@ async def handle_git_reset(
     msg_id: str | None,
 ) -> None:
     del msg_id
-    _ = await asyncio.to_thread(
-        worker_git_service.reset_hard,
+    require_head(context.project_root)
+    _ = await asyncio.to_thread(head_action, context.project_root, partial(worker_git_service.reset_hard,
         context.project_root,
         params["commit"],
-    )
+    ))
     _ = await _mark_dirty_and_refresh(context)
 
 
