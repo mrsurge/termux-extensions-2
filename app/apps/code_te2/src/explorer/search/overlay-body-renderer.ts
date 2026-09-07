@@ -1,6 +1,7 @@
 import type { ExplorerSearchOverlayState } from "./types.ts";
 
 interface ExplorerSearchOverlayBodyRendererDeps {
+  loadChangesPage?(offset: number): void;
   renderContentResults(container: HTMLElement, data: unknown): void;
   renderChangesResults(container: HTMLElement, data: unknown): void;
   renderReviewResults(container: HTMLElement, data: unknown): void;
@@ -22,6 +23,39 @@ export function renderSearchOverlayBody(
 
   if (searchMode === "diagnostics") {
     deps.renderDiagnosticsResults?.(resultsContainer);
+    return;
+  }
+
+  if (searchMode === 'changes') {
+    let body = resultsContainer.querySelector<HTMLElement>(':scope > .fe-changes-progressive-body');
+    if (!body) {
+      resultsContainer.replaceChildren();
+      body = document.createElement('div');
+      body.className = 'fe-changes-progressive-body';
+      resultsContainer.append(body);
+    }
+    resultsContainer.querySelector(':scope > .fe-changes-progress')?.remove();
+    const progress = document.createElement('div');
+    progress.className = 'fe-changes-progress fe-search-status';
+    const data = searchResults && typeof searchResults === 'object' ? searchResults as Record<string, unknown> : {};
+    const count = Array.isArray(data.changes) ? data.changes.length : 0;
+    progress.textContent = searchError || (data.complete ? (count ? `Showing files ${Number(data.offset || 0) + 1}-${Number(data.offset || 0) + count} of ${data.total || count}` : 'No changed files') : searchStatus?.message || 'Enumerating changed files');
+    if (data.complete && typeof data.nextOffset === 'number') {
+      const next = document.createElement('button');
+      next.type = 'button'; next.textContent = 'Next 40 files';
+      next.onclick = () => deps.loadChangesPage?.(Number(data.nextOffset));
+      progress.append(next);
+    }
+    if (searchError || (data.complete && Number(data.offset) > 0)) {
+      const first = document.createElement('button');
+      first.type = 'button'; first.textContent = 'First page';
+      first.onclick = () => deps.loadChangesPage?.(0);
+      progress.append(first);
+    }
+    if (data.truncated) progress.append(' · Enumeration limit reached; result is truncated.');
+    resultsContainer.prepend(progress);
+    if (searchResults) deps.renderChangesResults(body, searchResults);
+    else body.replaceChildren();
     return;
   }
 
@@ -51,9 +85,7 @@ export function renderSearchOverlayBody(
     const loading = document.createElement("div");
     loading.className = "fe-search-loading";
     loading.textContent =
-      searchMode === "changes"
-        ? "Loading changes…"
-        : searchMode === "review"
+      searchMode === "review"
           ? "Loading drafts…"
           : "Searching…";
     resultsContainer.appendChild(loading);
@@ -80,8 +112,6 @@ export function renderSearchOverlayBody(
     hint.className = "fe-search-hint";
     if (searchMode === "content") {
       hint.textContent = "Type at least 2 characters to search within files.";
-    } else if (searchMode === "changes") {
-      hint.textContent = "View all changes in the working tree.";
     } else if (searchMode === "review") {
       hint.textContent = "Review unsaved draft edits across files.";
     }
@@ -91,8 +121,6 @@ export function renderSearchOverlayBody(
 
   if (searchMode === "content") {
     deps.renderContentResults(resultsContainer, searchResults);
-  } else if (searchMode === "changes") {
-    deps.renderChangesResults(resultsContainer, searchResults);
   } else if (searchMode === "review") {
     deps.renderReviewResults(resultsContainer, searchResults);
   }

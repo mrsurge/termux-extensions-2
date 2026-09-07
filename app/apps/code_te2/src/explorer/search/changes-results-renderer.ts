@@ -19,12 +19,14 @@ interface ExplorerChangeHunk extends ExplorerDiffHunkLike {
 }
 
 interface ExplorerChangeEntry extends ExplorerDiffChangeLike {
+  error?: string;
   rel?: string;
   statusText?: string;
   hunks?: ExplorerChangeHunk[];
 }
 
 interface ExplorerChangesPayload {
+  complete?: boolean;
   git?: boolean;
   changes?: ExplorerChangeEntry[];
   base?: ExplorerDiffBaseInfo;
@@ -86,6 +88,7 @@ export function createExplorerChangesResultsRenderer(
 ) {
   let lastChangesData: ExplorerChangesPayload | null = null;
   let lastChangesContainer: HTMLElement | null = null;
+  const renderedGroups = new WeakMap<ExplorerChangeEntry, HTMLElement>();
 
   function renderChangesResults(container: HTMLElement, data: unknown): void {
     lastChangesContainer = container;
@@ -164,7 +167,7 @@ export function createExplorerChangesResultsRenderer(
     data: ExplorerChangesPayload,
     wasOriginallyEmpty: boolean,
   ): void {
-    container.innerHTML = '';
+    container.querySelectorAll(':scope > .fe-search-empty, :scope > .fe-search-changes-note').forEach(node => node.remove());
     if (data.git === false) {
       container.innerHTML =
         '<div class="fe-search-empty">Open a Git project to view changes.</div>';
@@ -183,23 +186,31 @@ export function createExplorerChangesResultsRenderer(
         deps.getGitDiffBase().ref ||
         'HEAD';
       note.textContent = `Comparing against ${ref}`;
-      container.appendChild(note);
+      container.prepend(note);
     }
 
     if (!entries.length) {
       const empty = document.createElement('div');
       empty.className = 'fe-search-empty';
       empty.textContent = wasOriginallyEmpty
-        ? 'Working tree is clean.'
+        ? data.complete === false ? 'Waiting for diffs…' : 'No changes against the selected commit.'
         : 'No matching changes found.';
       container.appendChild(empty);
+      container.querySelector(':scope > .fe-search-changes')?.remove();
       return;
     }
 
-    const list = document.createElement('div');
+    const list = container.querySelector<HTMLElement>(':scope > .fe-search-changes') || document.createElement('div');
     list.className = 'fe-search-changes';
+    const keep = new Set<HTMLElement>();
+    const place = (group: HTMLElement, index: number): void => {
+      keep.add(group);
+      if (list.children[index] !== group) list.insertBefore(group, list.children[index] || null);
+    };
 
-    entries.forEach((change) => {
+    entries.forEach((change, index) => {
+      const cached = renderedGroups.get(change);
+      if (cached) { place(cached, index); return; }
       const rel = change.rel || '';
       const group = document.createElement('div');
       group.className = 'fe-search-file-group fe-search-change-group';
@@ -321,10 +332,17 @@ export function createExplorerChangesResultsRenderer(
         group.appendChild(hunksContainer);
       }
 
-      list.appendChild(group);
+      if (change.error) {
+        const notice = document.createElement('div');
+        notice.className = 'fe-search-error'; notice.textContent = change.error;
+        group.append(notice);
+      }
+      renderedGroups.set(change, group);
+      place(group, index);
     });
 
-    container.appendChild(list);
+    for (const child of [...list.children]) if (!keep.has(child as HTMLElement)) child.remove();
+    if (list.parentElement !== container) container.appendChild(list);
   }
 
   return {

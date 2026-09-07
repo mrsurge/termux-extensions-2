@@ -733,6 +733,7 @@ Used by review save/discard, open/jump, search highlighting, and project-switch 
 |---|---|
 | `search.files.start` | Start file-name search. |
 | `search.content.start` | Start content search. |
+| `search.changes.start` | Start one bounded progressive selected-commit diff page. |
 | `search.job.cancel` | Cancel an active search job. |
 | `search.job.progress` | Progress/count notification from Rust to the initiating pipe lane. |
 | `search.job.result` | Progressive result notification. |
@@ -740,6 +741,37 @@ Used by review save/discard, open/jump, search highlighting, and project-switch 
 | `search.job.error` | Terminal error notification. |
 
 ### Presentation and limits
+
+- By changes uses the same start/result/done/error/cancel job lifecycle. The
+  start acknowledgement does not wait for Git enumeration or hunk generation.
+  Rust `framework_services/search_changes.rs` runs that work on the scheduler's
+  bounded blocking search lane; the editor file-open/Git lanes remain separate.
+- Each changes job resolves the requested comparison to an immutable commit,
+  sends one metadata result followed by individual file results, and finishes
+  with `search.job.done`. HEAD browsing retains HEAD status enumeration; a
+  historical ref uses selected-tree-to-worktree enumeration. Every hunk reads
+  the pinned baseline, and continuation rejects HEAD movement in HEAD view.
+- One page contains at most 40 files. Next-page navigation replaces the page,
+  rather than accumulating unlimited diff bodies; First page restarts it.
+  The existing 20,000-candidate enumeration bound is explicitly reported as
+  truncation. A serialized file preview over 256 KiB retains its summary and
+  shows an omitted-body notice; existing binary/minified/whole-file suppression
+  remains in the Git provider.
+- `changesOffset` on `explorer.search.run` is accepted only for the cached,
+  completed current session's next offset. Python supplies its pinned hash and
+  opaque snapshot token to Rust. The token fingerprints sorted candidate paths,
+  status codes, sizes, and modification times. A changed token requires refresh;
+  it is a continuation guard, not an atomic filesystem snapshot or content hash.
+- Python retains only comparison/continuation metadata for these pages, not a
+  second cache of hunk bodies. A bounded early-event buffer plus ordered startup
+  delivery handles events arriving before the correlated start reply. Late-start
+  jobs are cancelled after supersede/disconnect/project change. Cancellation is
+  cooperative between Git operations, not interruption inside a libgit2 call.
+- The frontend fences results by correlation/project/mode and reuses existing
+  file-group DOM while appending results. Closing, changing comparison, switching
+  projects, and disconnect discard obsolete jobs through the established event
+  lifecycle. Git/selection facts refresh the visible first page; there is no
+  polling or monolithic Python diff RPC fallback.
 
 - File/folder name search is an inline Explorer-tree projection, not a search
   overlay. The project-root label becomes the query field, direct hits and their

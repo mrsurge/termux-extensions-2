@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, TypedDict, cast, override
+from typing import Literal, NotRequired, TypedDict, cast, override
 
 JsonObject = dict[str, object]
 SearchMode = Literal["name", "content", "changes"]
@@ -19,6 +19,7 @@ class ExplorerSearchReviewContractError(Exception):
 
 
 class SearchRunParams(TypedDict):
+    changesOffset: NotRequired[int]
     mode: SearchMode
     query: str
     correlationId: str
@@ -231,6 +232,9 @@ class ReviewDiscardResult(TypedDict):
 
 def parse_search_run_params(payload: object) -> SearchRunParams:
     envelope = _as_object(payload)
+    offset = envelope.get("changesOffset", 0)
+    if isinstance(offset, bool) or not isinstance(offset, int) or not 0 <= offset <= 20_000:
+        raise ExplorerSearchReviewContractError("invalid changesOffset")
     mode = _parse_search_mode(envelope.get("mode"))
     query_value = envelope.get("query")
     if query_value is None:
@@ -245,6 +249,7 @@ def parse_search_run_params(payload: object) -> SearchRunParams:
         "correlationId": _coerce_string(
             envelope.get("correlationId"), "search:run correlationId"
         ),
+        "changesOffset": offset,
         "isRegex": _coerce_bool(envelope.get("isRegex"), default=False),
         "isCaseSensitive": _coerce_bool(
             envelope.get("isCaseSensitive"), default=False

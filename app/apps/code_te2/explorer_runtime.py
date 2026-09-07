@@ -960,27 +960,16 @@ class ExplorerDispatcher:
             ExplorerSearchReviewContractError,
             parse_search_run_params,
         )
-        from .explorer.handlers.search import (
-            handle_search_run as handle_search_run_request,
-        )
 
         try:
             params = parse_search_run_params(payload)
         except ExplorerSearchReviewContractError as exc:
             return await self.send_error(exc.message, msg_id)
 
-        if params["mode"] in ("name", "content"):
-            search_sessions = self._search_session_service()
-            if search_sessions is None:
-                return await self.send_error("Explorer search session service is unavailable", msg_id)
-            await search_sessions.run(params, msg_id)
-            return
-
-        await handle_search_run_request(
-            self._build_search_review_context(),
-            params,
-            msg_id,
-        )
+        search_sessions = self._search_session_service()
+        if search_sessions is None:
+            return await self.send_error("Explorer search session service is unavailable", msg_id)
+        await search_sessions.run(params, msg_id)
 
     async def handle_search_more(self, payload: JsonObject, msg_id: str | None) -> None:
         from .explorer.contracts.search_review import (

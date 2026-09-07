@@ -8,6 +8,69 @@
 - [x] Correct Drafts overlay links to summon draft-versus-disk inline diff.
 - [x] Investigate and implement selected-Explorer-commit inline comparisons.
 - [x] Complete combined acceptance and prepare branch for merge.
+- [x] Commit/push the accepted historical enumeration correction: `ba51875d`.
+- [x] Record the historical-worktree follow-up direction and four phases.
+
+Original branch goals and Phase 1 are live-accepted; later phases remain
+planned. The accepted snapshot above remains
+the rollback point.
+
+## Phase 1: Progressive By Changes
+
+- [x] Trace timeout ownership: eight-second frontend request waits for the old
+  complete enumeration-plus-hunks Python operation. Live timings remain pending.
+- [x] Define the job, streamed summaries/hunks, bounded retention/continuation,
+  immutable comparison identity, cancellation, and reconnect contract.
+- [x] Implement through existing Rust pipe and app socket surfaces, no polling.
+- [x] Test bounded pages/large bodies, cancellation, stale continuation, native
+  pipe ordering, early-event and delayed-ack races, historical content, and DOM
+  preservation. Python does not retain hunk bodies.
+- [ ] Live slow-client/large-history timings and active-editor responsiveness.
+- [x] Obtain live acceptance: user confirmed progressive By Changes works.
+
+Validation: four native progressive-change tests; three Python session tests and
+one historical routing test; five comparison-baseline and two selector tests;
+ten frontend comparison/baseline/selector tests. TypeScript checking and the
+frontend bundle build pass. Targeted BasedPyright has no errors (three existing
+warnings). No Android/version changes or shared-framework restart performed.
+The additional pytest-based name-search hydration test was not run because
+pytest is not installed in the active Python environment.
+Deployment requires the updated Rust framework plus Code TE2 worker/frontend;
+older Rust binaries do not expose `search.changes.start`. User live acceptance
+confirmed the updated deployment works; dedicated large-history/slow-client
+timing measurements remain a follow-up, not a claimed measurement.
+
+## Planned Phase 2: Historical Styling And Actual-State Warnings
+
+- [ ] Separate selected-comparison decorations from actual HEAD/index status.
+- [ ] Project historical card/ancestor styling and modified-file diff navigation.
+- [ ] Add structural warning badges; never insert them into path/name values.
+- [ ] Display active-document actual modified/staged state in the status bar,
+  keeping drafts distinct and all document projections event-driven.
+- [ ] Test mixed states, external Git actions, sticky scopes, and reconnect.
+- [ ] Obtain live acceptance.
+
+## Planned Phase 3: Guarded Historical Restore
+
+- [ ] Gate stage/commit in historical view in both UI and backend, including bulk
+  and overlay routes.
+- [ ] Define source-pinned restore, draft reconciliation, and stale-state checks.
+- [ ] Implement staged-file warning plus explicit path-scoped unstage offer.
+- [ ] Make deletion-from-an-absent-historical-path an explicit confirmation.
+- [ ] Reuse existing restore ownership without checkout, staging, or committing.
+- [ ] Test cancellation, external races, staged-only content, draft safety,
+  backend guard bypass attempts, and cross-client projection.
+- [ ] Obtain live acceptance.
+
+## Planned Phase 4: Overlay Restore And Collapsing
+
+- [ ] Reuse guarded restore in each By changes file header.
+- [ ] Choose/document the changed-line threshold for initially collapsed diffs.
+- [ ] Integrate progressive summaries/hunks and preserve compatible expansion.
+- [ ] Test touch/desktop action separation, accessibility, and large-tree cost.
+- [ ] Obtain live acceptance.
+
+See `PLAN.md` for the action matrix, boundaries, and unresolved policy details.
 
 ## Completed: Mobile Touch Geometry
 
@@ -159,4 +222,5 @@ No frontend or Android change is required for this follow-up.
   capture, evaluation/actions, bounded events, and connection cleanup.
 - [ ] Obtain approval for the implementation scope before native/MCP changes.
 
-Requested during cold-start diff debugging; does not supersede that fix.
+Requested during cold-start diff debugging; remains separate from the planned
+historical-worktree phases.

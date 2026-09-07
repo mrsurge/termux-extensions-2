@@ -672,6 +672,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dispatches_progressive_changes_and_routes_ordered_results() {
+        let root = test_root("changes-progressive");
+        git2::Repository::init(&root).unwrap();
+        fs::write(root.join("new.txt"), "one line\n").unwrap();
+        let scheduler = FrameworkServiceScheduler::default();
+        let sink = Arc::new(TestSink::default());
+        let response = tokio::time::timeout(Duration::from_secs(1), dispatch_request(
+            targeted_request("search.changes.start", json!({"dto":"SearchChangesRequest","version":1,"correlationId":"changes-test"}), &root, 2300, "service.search"),
+            &PipeIdentity { nid:2300, name:"service.search".into() }, &scheduler, Some(sink.clone()),
+        )).await.expect("start must acknowledge without waiting for hunks");
+        assert_eq!(response.kind, PipeMessageKind::Response);
+        assert_eq!(response.result.as_ref().unwrap()["kind"], "changes");
+        for _ in 0..100 {
+            if sink
+                .frames
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|e| e.method.as_deref() == Some("search.job.done"))
+            {
+                break;
+            }
+            sleep(Duration::from_millis(25)).await;
+        }
+        let frames = sink.frames.lock().unwrap();
+        let results: Vec<_> = frames
+            .iter()
+            .filter(|e| e.method.as_deref() == Some("search.job.result"))
+            .collect();
+        assert_eq!(results.len(), 2, "metadata then one file: {frames:?}");
+        assert_eq!(
+            results[0].params.as_ref().unwrap()["result"]["metadata"]["total"],
+            1
+        );
+        assert_eq!(
+            results[1].params.as_ref().unwrap()["result"]["change"]["rel"],
+            "new.txt"
+        );
+        assert_eq!(results[1].target_nid, Some(1100));
+        assert_eq!(
+            frames.last().unwrap().method.as_deref(),
+            Some("search.job.done")
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn dispatches_search_content_start_and_routes_result_notifications() {
         let root = test_root("search-progressive");
         for index in 0..20 {

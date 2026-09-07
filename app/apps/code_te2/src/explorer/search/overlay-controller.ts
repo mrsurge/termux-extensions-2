@@ -257,6 +257,7 @@ export function createExplorerSearchOverlayController(
       searchStatus,
     };
     renderSearchOverlayBody(resultsContainer, state, {
+      loadChangesPage: offset => { void searchController.fetchChangesResults(true, offset); },
       renderContentResults: (container, data) =>
         renderContentResults(container, data, {
           toast: (message) => deps.toast(message),

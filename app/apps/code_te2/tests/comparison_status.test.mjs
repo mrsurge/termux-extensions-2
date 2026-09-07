@@ -51,25 +51,78 @@ test('By changes ignores superseded requests and responses after closing', async
   const result = await build({ entryPoints: [new URL('../src/explorer/search/controller.ts', import.meta.url).pathname], bundle: true, format: 'esm', platform: 'node', write: false });
   const { createExplorerSearchController } = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
   const replies = [];
-  const rendered = [];
+  const requests = [];
+  let results = null;
+  let identity = {};
+  let visible = true;
   const deps = new Proxy({
     getSearchMode: () => 'changes', getSearchLoading: () => false,
-    getProjectPath: () => '/project', getSearchIdentity: () => ({}),
-    getSearchOverlayVisible: () => true, hasBus: () => true,
-    requestBus: () => new Promise(resolve => replies.push(resolve)),
-    setSearchResults: payload => rendered.push(payload),
+    getProjectPath: () => '/project', getSearchIdentity: () => identity,
+    setSearchIdentity: value => { identity = value; },
+    getSearchOverlayVisible: () => visible, hasBus: () => true,
+    requestBus: (method, params) => {
+      if (!method.endsWith('.run')) return Promise.resolve({});
+      requests.push(params);
+      return new Promise(resolve => replies.push(resolve));
+    },
+    getSearchResults: () => results,
+    setSearchResults: payload => { results = payload; },
   }, { get: (target, key) => target[key] || (() => {}) });
   const controller = createExplorerSearchController(deps);
   const first = controller.fetchChangesResults(true);
   const second = controller.fetchChangesResults(true);
-  replies[1]({ mode: 'changes', results: ['new'] });
+  const packet = (index, result) => ({ kind: 'changes', root: '/project', correlationId: requests[index].correlationId, result });
+  // Streaming may precede the correlated start reply.
+  controller.handleSearchJobResult(packet(1, { metadata: { total: 45, offset: 0, nextOffset: 40 } }));
+  controller.handleSearchJobResult(packet(1, { change: { rel: 'new' } }));
+  replies[1](packet(1));
   await second;
-  replies[0]({ mode: 'changes', results: ['old'] });
+  replies[0](packet(0));
   await first;
-  assert.deepEqual(rendered, [{ mode: 'changes', results: ['new'] }]);
+  controller.handleSearchJobResult(packet(0, { change: { rel: 'old' } }));
+  assert.deepEqual(results.changes, [{ rel: 'new' }]);
+  controller.handleSearchJobDone(packet(1));
+  assert.equal(results.complete, true);
   const third = controller.fetchChangesResults(true);
   controller.cancelActiveSearch('closed');
-  replies[2]({ mode: 'changes', results: ['closed'] });
+  visible = false;
+  replies[2](packet(2));
   await third;
-  assert.equal(rendered.length, 1);
+  controller.handleSearchJobResult(packet(2, { change: { rel: 'closed' } }));
+  assert.equal(results, null);
+});
+
+test('progressive changes retain existing diff DOM and expose bounded continuation', async () => {
+  const win = new Window();
+  const saved = new Map();
+  for (const key of ['window', 'document', 'Node', 'HTMLElement', 'HTMLInputElement']) {
+    saved.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+    Object.defineProperty(globalThis, key, { configurable: true, value: key === 'window' ? win : win[key] });
+  }
+  try {
+    const bundled = await build({ stdin: { contents: `export { createExplorerChangesResultsRenderer } from './src/explorer/search/changes-results-renderer.ts'; export { renderSearchOverlayBody } from './src/explorer/search/overlay-body-renderer.ts';`, resolveDir: process.cwd() }, bundle: true, format: 'esm', platform: 'node', write: false });
+    const { createExplorerChangesResultsRenderer, renderSearchOverlayBody } = await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString('base64')}`);
+    const renderer = createExplorerChangesResultsRenderer({ getGitDiffBase: () => ({ ref: 'HEAD', mode: 'head' }), ensureInlineDiffs: async () => {}, openFileAndMaybeJump: async () => {} });
+    const container = win.document.createElement('div');
+    win.document.body.append(container);
+    const pages = [];
+    const deps = { renderChangesResults: renderer.renderChangesResults, loadChangesPage: offset => pages.push(offset) };
+    const first = { rel: 'a.py', hunks: [{ oldStart: 1, newStart: 1, lines: [{ type: 'add', text: 'new line' }] }] };
+    const state = { searchMode: 'changes', searchResults: { git: true, changes: [first], complete: false } };
+    renderSearchOverlayBody(container, state, deps);
+    const group = container.querySelector('.fe-search-change-group');
+    assert.ok(group);
+    state.searchResults = { ...state.searchResults, changes: [first, { rel: 'b.py', hunks: [] }], complete: true, nextOffset: 40, total: 45, offset: 0 };
+    renderSearchOverlayBody(container, state, deps);
+    assert.equal(container.querySelector('.fe-search-change-group'), group);
+    assert.equal(container.querySelectorAll('.fe-search-change-group').length, 2);
+    container.querySelector('.fe-changes-progress button').click();
+    assert.deepEqual(pages, [40]);
+  } finally {
+    win.happyDOM.abort();
+    for (const [key, descriptor] of saved) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+  }
 });

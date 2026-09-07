@@ -28,6 +28,33 @@ pub(super) async fn dispatch_search_request(
         "search.content.start" => {
             Some(search_content_start(request, responder, scheduler, event_sink).await)
         }
+        "search.changes.start" => {
+            let params = serde_json::from_value::<
+                crate::framework_services::search_changes::ChangesRequest,
+            >(request.params.clone().unwrap_or_else(|| json!({})));
+            Some(match params {
+                Ok(mut params) => {
+                    if params.root.is_none() {
+                        params.root.clone_from(&request.workspace_root);
+                    }
+                    if params.project_generation.is_none() {
+                        params.project_generation = request.project_generation;
+                    }
+                    encode_result(
+                        request,
+                        responder,
+                        scheduler
+                            .start_changes_job(params, request.clone(), event_sink)
+                            .await,
+                    )
+                }
+                Err(error) => PipeEnvelope::error_response(
+                    request,
+                    responder,
+                    PipeError::new("protocol.invalidParams", error.to_string(), false, None),
+                ),
+            })
+        }
         "search.job.cancel" => Some(search_job_cancel(request, responder, scheduler).await),
         "search.benchmark.run" => Some(search_benchmark_run(request, responder, scheduler).await),
         _ => None,

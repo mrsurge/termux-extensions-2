@@ -23,7 +23,7 @@ from ..contracts.search_review import (
     SearchRunParams,
     SearchTextRange,
 )
-from ..search import cancel_search_job, start_content_search, start_file_search
+from ..search import cancel_search_job, start_changes_search, start_content_search, start_file_search
 from .render_state import build_directory_listings
 
 logger = logging.getLogger(__name__)
@@ -46,7 +46,7 @@ class AsyncPipeEventQueue:
 
 PipeEventQueue = AsyncPipeEventQueue
 PipeNotificationListener: TypeAlias = pipe_runtime.PipeNotificationListener
-SearchKind = Literal["name", "content"]
+SearchKind = Literal["name", "content", "changes"]
 GetProjectRoot = Callable[[], Path]
 SearchRange: TypeAlias = tuple[int, int]
 
@@ -116,6 +116,7 @@ class SearchSession:
     project_generation: int | None
     correlation_id: str
     query: str
+    changes_metadata: dict[str, object] = field(default_factory=dict)
     complete: bool = False
     cancelled: bool = False
     status: str = "running"
@@ -171,6 +172,10 @@ class ExplorerSearchSessions:
         self._queue: PipeEventQueue | None = None
         self._listener: PipeNotificationListener | None = None
         self._pump_task: asyncio.Task[None] | None = None
+        self._pending_correlation: str = ""
+        self._early_events: list[PipeEnvelope] = []
+        self._run_generation: int = 0
+        self._event_lock: asyncio.Lock = asyncio.Lock()
 
     async def start(self) -> None:
         if self._listener is not None:
@@ -200,14 +205,42 @@ class ExplorerSearchSessions:
         self._queue = None
 
     async def run(self, params: SearchRunParams, reply_to: str | None) -> None:
-        await self.cancel_active(reason="superseded")
+        from ...stores import get_history_store
         mode = params["mode"]
-        if mode == "changes":
-            raise RuntimeError("changes search is not part of service.search progressive sessions")
         root = self._get_project_root()
+        selected_ref = ""
+        if mode == "changes":
+            selected_ref = get_history_store().get_diff_base(str(root)) or "HEAD"
+        continuation: dict[str, object] = {}
+        offset = params.get("changesOffset", 0)
+        if mode == "changes" and offset:
+            previous = self._sessions.get(self._active_search_id or "")
+            if (
+                previous is None or not previous.complete or previous.kind != "changes"
+                or previous.root != root or previous.query != selected_ref
+                or previous.changes_metadata.get("nextOffset") != offset
+            ):
+                raise RuntimeError("stale changes continuation; refresh results")
+            continuation = dict(previous.changes_metadata)
+        launch_generation = self._run_generation + 1
+        await self.cancel_active(reason="superseded")
+        if launch_generation != self._run_generation:
+            raise RuntimeError("search superseded during cancellation")
         project_generation = _ensure_project_generation(root)
         correlation_id = params["correlationId"] or _correlation_id(reply_to)
-        if mode == "name":
+        self._pending_correlation = correlation_id
+        self._early_events.clear()
+        if mode == "changes":
+            started = await start_changes_search(
+                root,
+                project_generation=project_generation,
+                correlation_id=correlation_id,
+                base=_string(continuation.get("baseHash")) or selected_ref,
+                offset=offset,
+                head_view=selected_ref == "HEAD",
+                snapshot_token=_string(continuation.get("snapshotToken")) or None,
+            )
+        elif mode == "name":
             started = await start_file_search(
                 root,
                 params["query"],
@@ -221,6 +254,15 @@ class ExplorerSearchSessions:
                 project_generation=project_generation,
                 correlation_id=correlation_id,
             )
+        if launch_generation != self._run_generation:
+            _ = await cancel_search_job(
+                root=root,
+                search_id=_required_string(started.get("searchId"), "searchId"),
+                job_id=_required_string(started.get("jobId"), "jobId"),
+                project_generation=project_generation,
+                reason="superseded",
+            )
+            raise RuntimeError("search superseded before startup completed")
         search_id = _required_string(started.get("searchId") or started.get("jobId"), "searchId")
         job_id = _required_string(started.get("jobId") or started.get("opId"), "jobId")
         session = SearchSession(
@@ -230,16 +272,25 @@ class ExplorerSearchSessions:
             root=root,
             project_generation=project_generation,
             correlation_id=correlation_id,
-            query=params["query"],
+            query=selected_ref if mode == "changes" else params["query"],
         )
-        self._sessions[search_id] = session
-        self._job_to_search[job_id] = search_id
-        self._active_search_id = search_id
-        await self._emit_personal(
-            "explorer.search.started",
-            _started_payload(session, started),
-            reply_to,
-        )
+        # Preserve early-result order while the start acknowledgement yields.
+        async with self._event_lock:
+            if launch_generation != self._run_generation:
+                _ = await self._cancel_session(session, reason="superseded")
+                return
+            self._sessions[search_id] = session
+            self._job_to_search[job_id] = search_id
+            self._active_search_id = search_id
+            early, self._early_events = self._early_events, []
+            self._pending_correlation = ""
+            await self._emit_personal(
+                "explorer.search.started",
+                _started_payload(session, started),
+                reply_to,
+            )
+            for envelope in early:
+                await self._handle_pipe_event_locked(envelope)
 
     async def more(self, params: SearchMoreParams, reply_to: str | None) -> None:
         session = self._session_for_request(params["searchId"], params["projectGeneration"])
@@ -300,6 +351,9 @@ class ExplorerSearchSessions:
         )
 
     async def cancel_active(self, *, reason: str) -> None:
+        self._run_generation += 1
+        self._pending_correlation = ""
+        self._early_events.clear()
         search_id = self._active_search_id
         if not search_id:
             return
@@ -326,6 +380,9 @@ class ExplorerSearchSessions:
         await self._emit_personal("explorer.search.cancelled", result, reply_to)
 
     def cancel_for_project_switch(self) -> None:
+        self._run_generation += 1
+        self._pending_correlation = ""
+        self._early_events.clear()
         sessions = list(self._sessions.values())
         for session in sessions:
             session.cancelled = True
@@ -405,12 +462,21 @@ class ExplorerSearchSessions:
                 logger.exception("search pipe event handling failed")
 
     async def _handle_pipe_event(self, envelope: PipeEnvelope) -> None:
+        async with self._event_lock:
+            await self._handle_pipe_event_locked(envelope)
+
+    async def _handle_pipe_event_locked(self, envelope: PipeEnvelope) -> None:
         event = _pipe_search_event(envelope)
         search_id = event.search_id
         job_id = event.job_id
         if not search_id and job_id:
             search_id = self._job_to_search.get(job_id, "")
         session = self._sessions.get(search_id)
+        if session is None and event.correlation_id and event.correlation_id == self._pending_correlation:
+            if len(self._early_events) >= 64:
+                raise RuntimeError("search startup event buffer exceeded")
+            self._early_events.append(envelope)
+            return
         if session is None or session.cancelled:
             return
         if not _matches_session(session, event):
@@ -423,6 +489,20 @@ class ExplorerSearchSessions:
             )
             return
         if event.method == "search.job.result":
+            if session.kind == "changes":
+                raw = _copy_object(event.raw_result)
+                if isinstance(raw.get("metadata"), dict):
+                    metadata = _copy_object(raw["metadata"])
+                    if isinstance(metadata.get("base"), dict):
+                        base = _copy_object(metadata["base"])
+                        base["ref"] = session.query
+                        if base.get("mode") != "none":
+                            base["mode"] = "head" if session.query == "HEAD" else "detached"
+                        metadata["base"] = base
+                    session.changes_metadata = metadata
+                    raw["metadata"] = metadata
+                await self._emit_personal("search.job.result", _result_payload(session, event, raw))
+                return
             self._apply_result(session, event.raw_result)
             if session.kind == "content":
                 result = self._next_content_result_payload(session)
@@ -452,7 +532,7 @@ class ExplorerSearchSessions:
                         "search.job.result",
                         _result_payload(session, event, result),
                     )
-            else:
+            elif session.kind == "name":
                 if not session.name_results_emitted:
                     await self._hydrate_name_directory_listings(session)
                     if session.cancelled:

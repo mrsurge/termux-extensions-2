@@ -91,6 +91,7 @@ enum SearchJobEvent {
 enum SearchJobKind {
     Files,
     Content,
+    Changes,
 }
 
 impl SearchJobKind {
@@ -98,6 +99,7 @@ impl SearchJobKind {
         match self {
             Self::Files => "files",
             Self::Content => "content",
+            Self::Changes => "changes",
         }
     }
 
@@ -105,6 +107,7 @@ impl SearchJobKind {
         match self {
             Self::Files => "File search started",
             Self::Content => "Content search started",
+            Self::Changes => "Changes search started",
         }
     }
 }
@@ -947,6 +950,51 @@ impl FrameworkServiceScheduler {
         };
         self.finish_search_job(result, context, entry, false, event_tx)
             .await;
+    }
+
+    pub(crate) async fn start_changes_job(
+        &self,
+        mut params: super::search_changes::ChangesRequest,
+        request: PipeEnvelope,
+        sink: Option<Arc<dyn PipeEventSink>>,
+    ) -> Result<search_ops::SearchJobStarted, search_ops::SearchProviderError> {
+        let root = search_ops::resolved_root_string(params.root.as_deref())?;
+        params.root = Some(root.clone());
+        let (started, context, entry) = self
+            .prepare_search_job(
+                SearchJobKind::Changes,
+                root,
+                params.project_generation,
+                params.correlation_id.clone(),
+                request,
+                sink,
+            )
+            .await?;
+        let scheduler = self.clone();
+        tokio::spawn(async move {
+            let (tx, rx) = mpsc::channel(SEARCH_EVENT_QUEUE_CAPACITY);
+            spawn_search_event_emitter(context.clone(), rx);
+            let result_tx = tx.clone();
+            let cancelled = Arc::clone(&entry.cancelled);
+            let producer_cancelled = Arc::clone(&entry.cancelled);
+            let metrics = Arc::clone(&context.event_metrics);
+            let result = scheduler
+                .search_read(move || {
+                    super::search_changes::run(params, producer_cancelled, move |value| {
+                        send_required_search_event_blocking(
+                            &result_tx,
+                            SearchJobEvent::Result(value),
+                            &cancelled,
+                            &metrics,
+                        )
+                    })
+                })
+                .await;
+            scheduler
+                .finish_search_job(result, context, entry, false, tx)
+                .await;
+        });
+        Ok(started)
     }
 
     async fn finish_search_job(
