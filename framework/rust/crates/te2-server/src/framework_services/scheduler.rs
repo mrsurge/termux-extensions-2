@@ -451,6 +451,13 @@ impl FrameworkServiceScheduler {
             .await
     }
 
+    pub(crate) async fn git_restore_preview(
+        &self,
+        request: git_ops::GitProviderRequest,
+    ) -> Result<git_ops::GitRestorePreview, git_ops::GitProviderError> {
+        self.git_read(move || git_ops::git_restore_preview(request)).await
+    }
+
     pub(crate) async fn git_restore(
         &self,
         request: git_ops::GitProviderRequest,

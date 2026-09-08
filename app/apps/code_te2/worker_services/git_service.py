@@ -426,6 +426,34 @@ def restore_path(project_root: Path, path: str, commit: str = "HEAD") -> None:
     )
 
 
+class GitRestorePreview(TypedDict):
+    path: str
+    commit: str
+    state: str
+    staged: bool
+    delete: bool
+
+
+def preview_restore(project_root: Path, path: str, commit: str) -> GitRestorePreview:
+    raw = _call_git_provider("git.restore.preview", project_root, {"paths": [path], "rev": commit})
+    if not isinstance(raw, dict):
+        raise ValueError("Invalid restore preview")
+    value = cast(dict[str, object], raw)
+    path_value, commit_value, state = value.get("path"), value.get("commit"), value.get("state")
+    staged, delete = value.get("staged"), value.get("delete")
+    if not isinstance(path_value, str) or not isinstance(commit_value, str) or not isinstance(state, str) or not isinstance(staged, bool) or not isinstance(delete, bool):
+        raise ValueError("Invalid restore preview fields")
+    return {"path": path_value, "commit": commit_value, "state": state, "staged": staged, "delete": delete}
+
+
+def apply_guarded_restore(project_root: Path, preview: GitRestorePreview, *, unstage: bool = False) -> None:
+    operation = "unstage" if unstage else "restore"
+    _ = _coerce_mutation(_call_git_provider(f"git.{operation}", project_root, {
+        "paths": [preview["path"]], "rev": preview["commit"],
+        "expectedRestoreState": preview["state"],
+    }), expected_operation=operation)
+
+
 def reset_hard(project_root: Path, commit: str = "HEAD") -> GitStatus:
     """Hard reset through service.git and return a fresh status."""
     _ = _coerce_mutation(

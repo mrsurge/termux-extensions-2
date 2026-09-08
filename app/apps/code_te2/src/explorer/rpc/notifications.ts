@@ -558,7 +558,7 @@ export function createExplorerNotificationHandler(
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.gitRestored: {
-        deps.reloadCurrentFile();
+        if (payload.editorProjected !== true) deps.reloadCurrentFile();
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.jobProgress: {

@@ -165,8 +165,20 @@ large-history/slow-client responsiveness measurements remain open.
 
 ### Phase 3: Guarded Historical Restore
 
+- Approved draft policy: offer an explicit combined discard-draft-and-restore
+  confirmation. A newer draft arriving during mutation must survive and produce
+  a warning rather than being silently discarded by the refresh.
+- The implementation uses prepare/unstage/apply on existing Explorer RPC, with
+  captured project identity and bounded, expiring, single-use backend tokens.
+  Rust preview fingerprints pin HEAD/source/index/disk; Python pins draft state
+  and comparison/project generation. Unstage is a separate accepted mutation;
+  cancelling the subsequent restore does not silently restage the file.
+- Initial supported scope is regular files up to 32 MiB, opened at the repository
+  root. Reject conflicts, symlinks, directories, and submodules. Renames require
+  individual path operations. The final check/write interval is not exclusive
+  against arbitrary external filesystem/Git processes.
 - Phase 2 safety prerequisite (approved and implemented): stage/commit/reset
-  are blocked in historical view, and Restore is temporarily blocked there.
+  are blocked in historical view; Phase 3 replaces the temporary Restore block.
   Missing historical files remain in By changes, not synthetic tree entries.
 - Disable Explorer stage/commit controls in non-HEAD comparison views and enforce
   the same restriction in backend actions, including bulk and overlay entry

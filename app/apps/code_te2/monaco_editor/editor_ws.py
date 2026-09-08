@@ -368,17 +368,16 @@ async def editor_runtime_reload_disk_content_if_active(
     if not project or not target or not _is_under_project(project, target):
         return False
 
+    foregrounds = [foreground for foreground in list_client_foregrounds(project, reason="disk_content_reload")
+                   if _normalize_abs_path(foreground["path"] or "") == target]
+    if not foregrounds:
+        return False
     payload = _read_file_payload(project, target)
     payload["source"] = source
     payload["reason"] = "discard_external"
     payload["request_id"] = request_id or f"draft_discard_{int(time.time() * 1000)}"
     emitted = False
-    for foreground in list_client_foregrounds(
-        project,
-        reason="disk_content_reload",
-    ):
-        if _normalize_abs_path(foreground["path"] or "") != target:
-            continue
+    for foreground in foregrounds:
         await editor_runtime_emit_room_event(
             "editor:open",
             payload,
@@ -895,6 +894,9 @@ async def handle_external_file_change(changed_abs_path: str) -> bool:
       - broadcasts editor:open with reason="external_change"
     Returns True if a reload was broadcast, False otherwise.
     """
+    from ..restore_activity import is_restoring
+    if is_restoring(changed_abs_path):
+        return False
     project = _active_project()
     if not project:
         return False

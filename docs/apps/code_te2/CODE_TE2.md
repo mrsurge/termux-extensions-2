@@ -957,10 +957,34 @@ Historical Explorer appearance is separate from actual Git safety state:
 - Only `source: explorer_tree` navigation can enable commit diff based on a
   cached historical path lookup. It performs no Git reads; explicit Drafts
   navigation retains its disk-diff choice.
-- Historical stage/commit/reset and Restore are blocked at the UI/backend
+- Historical stage/commit/reset are blocked at the UI/backend
   boundary, with a second canonical-selection check immediately before the
-  off-loop mutation. Safe source-pinned historical Restore is pending Phase 3;
-  these guards do not serialize external Git operations.
+  off-loop mutation; these guards do not serialize external Git operations.
+- `explorer.git.restore` uses prepare/unstage/apply phases and a required captured
+  `projectPath`. `explorer/services/guarded_restore.py` owns up to 64 single-use
+  five-minute confirmation tokens bound to client, project generation, path,
+  comparison ref, immutable source, and draft revision. Rust
+  `git.restore.preview` fingerprints HEAD/index/worktree and guarded restore
+  checks that fingerprint again before writing, with index updates disabled.
+  Staged files require explicit path-scoped unstaging followed by fresh restore
+  confirmation. Missing source paths require explicit deletion confirmation.
+- Restore confirmation explicitly includes draft discard. Clear only the
+  confirmed draft state after Git succeeds; retain edits that arrive during the
+  mutation and report that retention. `restore_activity.py` prevents the ordinary
+  external-change watcher from independently clearing drafts during the owned
+  operation; the existing save-SHA guard handles delayed self-write events.
+  Backend document reload/close and `GitPathRestored` drive editor/WBA projection;
+  `editorProjected` prevents Explorer from reloading an unrelated foreground.
+  Accepted operations finish their projection even if the requesting socket
+  disconnects. Directory relists remain project/generation fenced.
+- A restored document that fails the existing editor admission policy closes
+  its shared tab membership with an explicit result message; restoring other
+  files does not attempt to load them into a foreground editor.
+- Guarded restore initially supports repository-root projects and regular files
+  up to 32 MiB; conflicts, symlinks, directories, and submodules fail closed.
+  Rename paths are independent, not an automatic two-path operation. State
+  checks cannot make the final write exclusive against arbitrary external Git
+  or filesystem processes. Old clients must reload to obtain confirmation tokens.
 
 ### Z-index policy
 

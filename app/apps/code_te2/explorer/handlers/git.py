@@ -20,10 +20,7 @@ from ..contracts.git import (
     GitRestoreParams,
 )
 from ..context import ExplorerGitHandlerContext
-from ..services.state_facts import (
-    publish_git_diff_base_changed,
-    publish_git_path_restored,
-)
+from ..services.state_facts import publish_git_diff_base_changed
 from ..services.tracked_jobs import forget_tracked_job, remember_tracked_job
 from ..services.file_ops import mark_git_cache_dirty
 from ..services.git_comparison import require_head, head_action
@@ -101,20 +98,19 @@ async def handle_git_restore(
     params: GitRestoreParams,
     msg_id: str | None,
 ) -> None:
-    del msg_id
-    require_head(context.project_root)
-    await asyncio.to_thread(head_action, context.project_root, partial(worker_git_service.restore_path,
-        context.project_root,
-        params["path"],
-        params["commit"],
-    ))
-    mark_git_cache_dirty(context.project_root)
-    await publish_git_path_restored(
-        context.project_root,
-        path=params["path"],
-        source="explorer_git:restore",
-    )
-    await context.broadcast_git_status()
+    from ..services import guarded_restore
+    phase = params.get("phase")
+    if phase is not None and params.get("projectPath") != str(context.project_root.resolve()):
+        raise ValueError("Project changed; confirm Restore again")
+    if phase == "prepare":
+        result = await guarded_restore.prepare(context.project_root, context.client_instance_id, params["path"])
+    elif phase in {"unstage", "apply"}:
+        result = await guarded_restore.execute(context.project_root, context.client_instance_id, params["path"],
+            params.get("token", ""), unstage=phase == "unstage", discard_draft=params.get("discardDraft", False))
+    else:
+        require_head(context.project_root)
+        raise ValueError("Restore requires confirmation; reload the client")
+    await context.emit_personal("explorer.git.restore.result", result, msg_id)
 
 
 async def handle_git_commit(

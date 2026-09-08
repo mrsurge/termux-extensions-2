@@ -342,6 +342,7 @@ class ExplorerDispatcher:
 
     def _build_git_context(self) -> ExplorerGitHandlerContext:
         return ExplorerGitHandlerContext(
+            client_instance_id=self.client_instance_id,
             project_root=self.project_root,
             tracked_job_ids=self._tracked_job_ids,
             emit_personal=self.emit_personal,

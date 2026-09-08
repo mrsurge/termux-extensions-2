@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TypedDict, cast, override
+from typing import NotRequired, TypedDict, cast, override
 
 JsonObject = dict[str, object]
 
@@ -27,6 +27,10 @@ class GitPathListParams(TypedDict):
 class GitRestoreParams(TypedDict):
     path: str
     commit: str
+    phase: NotRequired[str]
+    token: NotRequired[str]
+    discardDraft: NotRequired[bool]
+    projectPath: NotRequired[str]
 
 
 class GitCommitParams(TypedDict):
@@ -94,9 +98,16 @@ def parse_git_restore_params(payload: object) -> GitRestoreParams:
         envelope.get("path"),
         missing_message="Restore requires path",
     )
+    phase = _parse_optional_string(envelope.get("phase"))
+    if phase not in {"prepare", "unstage", "apply"}:
+        raise ExplorerGitContractError("Restore requires confirmation; reload the client")
     return {
         "path": path,
         "commit": _parse_optional_string(envelope.get("commit")) or "HEAD",
+        "phase": phase,
+        "projectPath": _parse_required_string(envelope.get("projectPath"), missing_message="Restore requires projectPath"),
+        "token": _parse_optional_string(envelope.get("token")) or "",
+        "discardDraft": envelope.get("discardDraft") is True,
     }
 
 

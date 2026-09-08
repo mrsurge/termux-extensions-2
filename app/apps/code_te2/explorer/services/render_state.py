@@ -301,7 +301,7 @@ async def _handle_git_path_restored_event(event: WorkerEvent) -> None:
     await emit_project_explorer_rpc_notification(
         project,
         "explorer.git.restored",
-        {"path": path},
+        {"path": path, "editorProjected": event["payload"].get("editorProjected") is True},
     )
 
 
@@ -482,7 +482,7 @@ async def _handle_workspace_files_changed_event(event: WorkerEvent) -> None:
 
 async def _handle_explorer_render_state_changed_event(event: WorkerEvent) -> None:
     project = event.get("project_root")
-    if not project:
+    if not project or _is_stale_project_event(event, project):
         return
     payload = event["payload"]
     if payload.get("open_directories_changed") is True:
@@ -493,11 +493,12 @@ async def _handle_explorer_render_state_changed_event(event: WorkerEvent) -> Non
         )
     for rel in event_payload_list(event, "directories"):
         try:
-            await emit_project_explorer_rpc_notification(
-                project,
-                "explorer.list.updated",
-                await build_directory_listing(rel),
-            )
+            listings = await build_directory_listings([rel], project_root=Path(project),
+                project_generation=event.get("project_generation"))
+            if _is_stale_project_event(event, project):
+                return
+            for listing in listings:
+                await emit_project_explorer_rpc_notification(project, "explorer.list.updated", listing)
         except Exception as exc:
             logger.debug(
                 "[explorer_render_state] skipped changed directory listing project=%s rel=%s error=%s",

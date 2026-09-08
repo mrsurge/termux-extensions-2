@@ -11,8 +11,8 @@
 - [x] Commit/push the accepted historical enumeration correction: `ba51875d`.
 - [x] Record the historical-worktree follow-up direction and four phases.
 
-Original branch goals and Phase 1 are live-accepted; later phases remain
-planned. The accepted snapshot above remains
+Original branch goals and Phases 1–3 are live-accepted,
+while Phase 4 remains planned. The accepted snapshot above remains
 the rollback point.
 
 ## Phase 1: Progressive By Changes
@@ -50,11 +50,11 @@ timing measurements remain a follow-up, not a claimed measurement.
   keeping drafts distinct and all document projections event-driven.
 - [x] Test mixed states, ref supersession, structural labels/sticky scopes,
   backend guards, and tree-only diff navigation; preserve boot warning state.
-- [ ] Live external Git actions, reconnect, and mobile layout acceptance.
-- [ ] Obtain live acceptance.
+- [x] Live external Git actions, reconnect, and mobile layout acceptance.
+- [x] Obtain live acceptance (user confirmed both Phase 2 checks).
 
-Approved safety adjustment: stage/commit/reset are disabled in historical view
-and backend-rejected; historical Restore is disabled until Phase 3. Handlers
+Phase 2 safety adjustment: stage/commit/reset were disabled in historical view
+and backend-rejected; historical Restore stayed disabled until Phase 3. Handlers
 check selection again inside the off-loop mutation closure. This does not lock
 out external Git processes or provide Phase 3 transactional restore guarantees.
 
@@ -64,21 +64,57 @@ preserving the underlying Git metadata. Regression tests cover both directions.
 
 Validation: seven new backend tests, five comparison-baseline tests, two
 selector tests, and 21 frontend tests pass. Typecheck and frontend build pass.
-No Android/version changes or shared-framework restart. Live acceptance pending.
+No Android/version changes or shared-framework restart. User live acceptance complete.
 The attempted `test_file_tabs_projection.py` discovery matched no tests; it is
 not counted as validation.
 
-## Planned Phase 3: Guarded Historical Restore
+## Phase 3: Guarded Historical Restore
 
-- [ ] Gate stage/commit in historical view in both UI and backend, including bulk
+- [x] Gate stage/commit in historical view in both UI and backend, including bulk
   and overlay routes.
-- [ ] Define source-pinned restore, draft reconciliation, and stale-state checks.
-- [ ] Implement staged-file warning plus explicit path-scoped unstage offer.
-- [ ] Make deletion-from-an-absent-historical-path an explicit confirmation.
-- [ ] Reuse existing restore ownership without checkout, staging, or committing.
-- [ ] Test cancellation, external races, staged-only content, draft safety,
+- [x] Define source-pinned restore, draft reconciliation, and stale-state checks.
+- [x] Implement staged-file warning plus explicit path-scoped unstage offer.
+- [x] Make deletion-from-an-absent-historical-path an explicit confirmation.
+- [x] Reuse existing restore ownership without changing checkout, staging, or committing.
+- [x] Test cancellation, external races, staged-only content, draft safety,
   backend guard bypass attempts, and cross-client projection.
-- [ ] Obtain live acceptance.
+- [x] Obtain live acceptance after the user restarted the updated Rust framework.
+
+User-approved draft policy: offer explicit discard-draft-and-restore, not a
+mandatory separate discard. The dialog identifies the source commit; staged
+files receive a separate unstage confirmation and then a fresh restore token.
+Tokens are exact-client/project/path scoped, single-use, capped at 64, and expire
+after five minutes. No expiration polling is introduced.
+
+Implementation: existing `explorer.git.restore` now supports prepare/unstage/apply
+phases with captured `projectPath`. Python retains confirmation metadata and
+draft revisions; Rust `git.restore.preview` fingerprints source/HEAD/index/disk
+and guarded `git.restore` preserves the index. A backend-owned operation survives
+caller cancellation. New drafts arriving during the write are retained with an
+explicit result warning; restored files use existing backend editor and WBA
+projection, not a generic frontend active-file reload. Deletions close canonical
+membership only when no newer draft needs preservation. Directory relists now
+carry explicit project/generation fences.
+
+Initial safe scope: regular files, repository-root projects, and source/worktree
+files up to 32 MiB. Conflicts, symlinks, directories, and submodules are rejected.
+Renames are treated as individual paths, not an implicit two-path transaction.
+Checks detect stale confirmation; they cannot lock arbitrary external Git or
+filesystem processes out of the final check/write interval.
+
+Validation: six native guarded-restore tests, seventeen new backend tests, and six
+new UI confirmation tests pass. Existing historical, comparison, progressive,
+UI IPC, and Explorer menu regressions also pass. Full branch Python audit and
+frontend typecheck/build results are recorded below. No Android/version changes
+or shared-runtime restart. Live testing needs the updated Rust framework, Code
+TE2 worker, and rebuilt frontend; old clients must reload before using Restore.
+
+Final static validation: all 45 branch-changed Python files (including tests)
+pass BasedPyright with zero errors/warnings. Code TE2 `npm run typecheck` and
+`node build.mjs` pass; the generated host bundle is updated. Targeted regression
+coverage totals 41 Python tests, 11 frontend tests, and 6 native restore tests.
+No suppression directives were added. The user confirmed runtime acceptance
+after restarting the updated Rust framework.
 
 ## Planned Phase 4: Overlay Restore And Collapsing
 
