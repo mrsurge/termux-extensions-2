@@ -142,6 +142,60 @@ was not separately reported.
 
 See `PLAN.md` for the action matrix, boundaries, and unresolved policy details.
 
+## Follow-Up: Duplicate Changes Enumeration
+
+- [x] Trace selector notification, snapshot application, and status notification
+  independently forcing the same By changes enumeration.
+- [x] Remove implicit search side effects from snapshot application. The initial
+  status-only refresh design is superseded by independent projection below.
+- [x] Pass seven focused selector/notification/progressive regression tests.
+- [x] Complete frontend typecheck/build; publish updated host bundle.
+- [x] Obtain initial historical-selection acceptance; HEAD follow-up recorded below.
+
+The initial frontend correction passed historical selection but live testing
+still showed duplicate enumeration on return to HEAD. A temporary bounded probe
+confirmed two actual search requests, each driven by a Git snapshot, roughly
+one second apart. The probe was stopped after capture.
+
+- [x] Remove the Python selector handler's redundant direct status broadcast and
+  cache invalidation; its comparison fact projector remains the sole owner.
+- [x] Pass nine Python tests, including HEAD/historical fact-only selection and
+  invalid-ref rejection without persistence or publication.
+- [x] Pass BasedPyright on the changed Python handler/test with zero errors/warnings.
+- [x] Include the HEAD correction in the final live-accepted scheduling snapshot.
+
+No Rust, Android, polling, or transport changes. Normal overlay open and
+explicit continuation remain unchanged. Backend fix requires reloading the
+Code TE2 worker, not restarting the shared framework.
+
+### Independent Comparison Projections
+
+Live follow-up exposed head-of-line blocking: comparison and snapshot subscribers
+awaited complete editor-baseline reads, and the status-only search trigger waited
+for historical decorations. Both waits were unnecessary dependencies.
+
+- [x] Add a bounded LatestProjection runner: one active read and one latest pending
+  callback, with superseded-output fences rather than cancelling native threads.
+- [x] Make baseline subscribers schedule and return; selection completion does
+  not schedule the same baseline again.
+- [x] Start By changes from the selection notification immediately. Echo its
+  selectionRevision into selectionOnly completion snapshots for exact deduplication.
+- [x] Unify watcher Git scheduling; retain pending worktree invalidations even
+  when newer selection work replaces a pending projection.
+- [x] Preserve save/restore mutation ordering; do not parallelize the fact bus.
+- [x] Pass 43 Python and 14 frontend regressions, including deliberately stalled
+  work, unrelated fact delivery, rapid replacement, and project-generation fencing.
+- [x] Complete branch-wide BasedPyright audit: 50 changed Python files,
+  zero errors and zero warnings, including tests.
+- [x] Pass frontend typecheck and rebuild the host bundle.
+- [x] User confirmed improved live behavior and approved this snapshot for commit.
+
+The exhaustive rapid-selector/HEAD matrix and quantitative latency measurements
+were not separately reported during live acceptance.
+
+This is Python/frontend projection scheduling, not multiprocessing or a framework
+transport rewrite. There is no Rust/Android build or shared-framework restart.
+
 ## Completed: Mobile Touch Geometry
 
 Date: 2026-09-06.

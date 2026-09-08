@@ -262,10 +262,6 @@ const explorerDiffBaseController = createExplorerDiffBaseController({
   toast,
   setGitControlsEnabled,
   reloadCurrentFile,
-  isChangesMode: () =>
-    explorerSearchOverlayController?.getSearchMode() === "changes",
-  refreshChangesResults: (force = false) =>
-    explorerSearchOverlayController?.fetchChangesResults(force),
   getEditorState: () => window.__codeTe2EditorState || null,
 });
 const explorerChromeController = createExplorerChromeController({

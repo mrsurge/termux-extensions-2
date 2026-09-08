@@ -1,10 +1,11 @@
 # pyright: strict
 from __future__ import annotations
 
-import asyncio
 import logging
 from pathlib import Path
 from typing import TypedDict, cast
+
+from .worker_services.latest_projection import LatestProjection, Current
 
 from .worker_services.event_bus import (
     WorkerEvent,
@@ -14,7 +15,6 @@ from .worker_services.event_bus import (
     event_payload_list,
     publish as publish_worker_event,
     publish_threadsafe as publish_worker_event_threadsafe,
-    record_coalesced_event,
     record_stale_drop,
     subscribe as subscribe_worker_event,
 )
@@ -35,8 +35,8 @@ _watcher_batch_by_project: dict[str, WatcherFilesPayload] = {}
 _watcher_error_by_project: dict[str, dict[str, object]] = {}
 _git_decorations_by_project: dict[str, dict[str, object]] = {}
 _git_status_by_project: dict[str, dict[str, object]] = {}
-_git_snapshot_debounce_tasks: dict[str, asyncio.Task[None]] = {}
 _event_bus_handlers_registered = False
+_baseline_projection = LatestProjection("code_te2_baseline_projection")
 
 
 def _normalize_project_path(project_path: str) -> str:
@@ -239,51 +239,39 @@ async def _handle_watcher_error_raised_event(event: WorkerEvent) -> None:
 
 
 async def _handle_git_snapshot_requested_event(event: WorkerEvent) -> None:
+    from .explorer.services.runtime_notifications import schedule_git_status_update
+
     project = event.get("project_root")
-    if not project:
-        return
-    generation = event.get("project_generation")
-    key = project
-    existing = _git_snapshot_debounce_tasks.get(key)
-    if existing is not None and not existing.done():
-        _ = existing.cancel()
-        record_coalesced_event("workspace_events:git_snapshot_debounce", event["type"])
-    _git_snapshot_debounce_tasks[key] = asyncio.create_task(
-        _debounced_git_snapshot(project, generation),
-        name="code_te2_git_snapshot_refresh",
-    )
-
-
-async def _debounced_git_snapshot(project: str, generation: int | None) -> None:
-    try:
-        await asyncio.sleep(0.5)
-        if generation is not None and current_project_generation(project) != generation:
-            record_stale_drop("workspace_events:git_snapshot_debounce", "GitSnapshotRequested")
-            return
-        from .explorer.services.runtime_notifications import broadcast_git_status_update
-
-        await broadcast_git_status_update(
-            project,
-            project_generation=generation,
-            source="workspace_events:GitSnapshotRequested",
+    if project:
+        schedule_git_status_update(
+            project, project_generation=event.get("project_generation"),
+            source="workspace_events:GitSnapshotRequested", require_connection=False,
         )
-    except asyncio.CancelledError:
-        pass
-    finally:
-        task = _git_snapshot_debounce_tasks.get(project)
-        if task is asyncio.current_task():
-            _ = _git_snapshot_debounce_tasks.pop(project, None)
+
+
+def _schedule_baselines(event: WorkerEvent) -> None:
+    project = event.get("project_root")
+    generation = event.get("project_generation")
+    if not project or (generation is not None and generation != current_project_generation(project)):
+        return
+
+    async def project_baselines(current: Current) -> None:
+        from .monaco_editor.editor_ws import broadcast_git_baselines_for_active_file
+
+        def valid() -> bool:
+            return current() and current_project_generation(project) == generation
+
+        if valid():
+            _ = await broadcast_git_baselines_for_active_file(is_current=valid)
+
+    _baseline_projection.submit(project_baselines)
 
 
 async def _handle_comparison_changed_event(event: WorkerEvent) -> None:
-    from .monaco_editor.editor_ws import broadcast_git_baselines_for_active_file
-    project = event.get("project_root")
-    if project and event.get("project_generation") == current_project_generation(project):
-        _ = await broadcast_git_baselines_for_active_file()
+    _schedule_baselines(event)
 
 
 async def _handle_git_snapshot_changed_event(event: WorkerEvent) -> None:
-    from .monaco_editor.editor_ws import broadcast_git_baselines_for_active_file
 
     project = event.get("project_root")
     if not project:
@@ -299,16 +287,9 @@ async def _handle_git_snapshot_changed_event(event: WorkerEvent) -> None:
     _git_decorations_by_project[normalized_project] = dict(decorations)
     _git_status_by_project[normalized_project] = dict(status)
 
-    # Editor git-baseline refresh is now a projector for the git snapshot fact;
-    # Explorer git notifications are emitted by the render-state projector.
-    try:
-        _ = await broadcast_git_baselines_for_active_file()
-    except Exception as exc:
-        logger.warning(
-            "Failed to push git baselines after status update for %s: %s",
-            normalized_project,
-            exc,
-        )
+    # Selection already scheduled baselines independently of decoration completion.
+    if status.get("selectionOnly") is not True:
+        _schedule_baselines(event)
 
 
 def get_workspace_event_snapshot(project_path: str) -> dict[str, object]:

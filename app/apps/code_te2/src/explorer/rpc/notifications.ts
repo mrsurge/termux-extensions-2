@@ -219,6 +219,7 @@ function getJobProgressDetail(
 export function createExplorerNotificationHandler(
   deps: ExplorerNotificationHandlerDeps,
 ) {
+  let selectionRefresh: { project: string; revision: string } | null = null;
   function handleExplorerNotification(
     method: ExplorerRpcNotificationMethod,
     payload: JsonObject,
@@ -530,7 +531,10 @@ export function createExplorerNotificationHandler(
         console.log("[GIT_STATUS_DEBUG] Received:", payload);
         deps.runtimeState.setGitStatus(coerceGitStatus(payload));
         if (payload.diffBase) deps.applyGitDiffBaseSnapshot?.(payload.diffBase);
-        if (deps.searchOverlayController.isVisible() && deps.searchOverlayController.getSearchMode() === 'changes') {
+        const selectedRefresh = payload.selectionOnly === true &&
+          selectionRefresh?.project === deps.runtimeState.getProjectPath() &&
+          selectionRefresh.revision === payload.selectionRevision;
+        if (!selectedRefresh && deps.searchOverlayController.isVisible() && deps.searchOverlayController.getSearchMode() === 'changes') {
           void deps.searchOverlayController.fetchChangesResults(true);
         }
         deps.renderBranchLabel();
@@ -551,7 +555,12 @@ export function createExplorerNotificationHandler(
           }
           if (deps.searchOverlayController.isVisible()) {
             if (deps.searchOverlayController.getSearchMode() === 'changes') {
-              void deps.searchOverlayController.fetchChangesResults(true);
+              const revision = getNonEmptyString(payload.selectionRevision);
+              const currentProject = deps.runtimeState.getProjectPath() || '';
+              if (!revision || selectionRefresh?.project !== currentProject || selectionRefresh.revision !== revision) {
+                selectionRefresh = revision ? { project: currentProject, revision } : null;
+                void deps.searchOverlayController.fetchChangesResults(true);
+              }
             } else deps.renderSearchOverlay();
           }
         }

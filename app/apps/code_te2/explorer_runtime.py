@@ -220,7 +220,7 @@ class ExplorerDispatcher:
     ) -> None:
         from .explorer.services.runtime_notifications import broadcast_git_status_update
 
-        await broadcast_git_status_update(
+        _ = await broadcast_git_status_update(
             project_root,
             project_generation=current_project_generation(project_root),
             source=source,
@@ -234,7 +234,7 @@ class ExplorerDispatcher:
         """
         from .explorer.services.runtime_notifications import broadcast_git_status_update
 
-        await broadcast_git_status_update(
+        _ = await broadcast_git_status_update(
             self.project_root,
             project_generation=current_project_generation(self.project_root),
             source="explorer_runtime:broadcast_git_decorations",

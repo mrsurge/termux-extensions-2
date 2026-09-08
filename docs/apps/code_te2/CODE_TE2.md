@@ -895,6 +895,27 @@ theme registration is skipped (by design) to avoid caching a no-op run.
 
 ### Diff mode behavior
 
+- `git.diffBase.updated` starts visible By changes enumeration immediately from
+  the persisted selection. Each selection fact carries an opaque
+  `selectionRevision`, echoed in its completion snapshot. The frontend skips
+  only a matching `selectionOnly` snapshot after it has initiated that search;
+  actual worktree/index snapshots still refresh, even with the same selection.
+  Snapshot application itself remains presentation-only. Overlay open and paging
+  are unchanged. Pending worktree invalidations survive coalescing with selection.
+  The Python selector handler only validates/persists and publishes
+  `GitDiffBaseChanged`; its render-state projector owns cache invalidation and
+  scheduled Git refresh. A direct handler broadcast duplicates that fact path,
+  especially when HEAD computation finishes before the scheduled refresh.
+- `worker_services/latest_projection.py` bounds each scheduled projection to one
+  running read and the latest pending callback. Baseline and Git-decoration
+  runners are independent; comparison/snapshot subscribers return after
+  scheduling, so native reads no longer hold the serial fact dispatcher. Running
+  thread-backed work is not cancelled on supersession: validity callbacks stop
+  obsolete publication after awaits. Project-generation and selected-ref checks
+  remain in force. Selection snapshots do not schedule a second baseline pass.
+  Workspace-file facts use the existing GitSnapshotRequested owner rather than
+  two separately timed refresh queues. This does not parallelize mutation facts.
+
 - By changes file headers use the same `src/explorer/tree/restore-action.ts`
   guarded whole-file Restore flow as tree menus. Hunk header buttons collapse
   their bodies independently. Each hunk initially displays at most 50 lines

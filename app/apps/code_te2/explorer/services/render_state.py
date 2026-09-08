@@ -279,7 +279,12 @@ async def _handle_git_diff_base_changed_event(event: WorkerEvent) -> None:
         return
     from .runtime_notifications import schedule_git_status_update
 
-    schedule_git_status_update(project, project_generation=event.get("project_generation"), source="comparison_selection")
+    selection_revision = payload.get("selectionRevision")
+    schedule_git_status_update(
+        project, project_generation=event.get("project_generation"), source="comparison_selection",
+        selection_revision=selection_revision if isinstance(selection_revision, str) else None,
+        delay=0,
+    )
     await emit_project_explorer_rpc_notification(
         project,
         "explorer.git.diffBase.updated",
@@ -287,6 +292,7 @@ async def _handle_git_diff_base_changed_event(event: WorkerEvent) -> None:
             "projectPath": project,
             "ref": ref,
             "refresh": payload.get("refresh") is True,
+            "selectionRevision": selection_revision,
         },
     )
 
@@ -471,13 +477,7 @@ async def _handle_workspace_files_changed_event(event: WorkerEvent) -> None:
             payload=cast(JsonObject, cast(object, payload)),
         )
     )
-    from .runtime_notifications import schedule_git_status_update
-
-    schedule_git_status_update(
-        project,
-        project_generation=event.get("project_generation"),
-        source="explorer_render_state:WorkspaceFilesChanged",
-    )
+    # workspace_events projects this same fact into GitSnapshotRequested.
 
 
 async def _handle_explorer_render_state_changed_event(event: WorkerEvent) -> None:

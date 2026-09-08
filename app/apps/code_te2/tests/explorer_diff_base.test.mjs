@@ -38,11 +38,10 @@ test('Git projections advance HEAD metadata and preserve a pinned selection', ()
   assert.equal(controller.getDiffBase().commit.hash, 'b');
   assert.ok(!classes.has('explorer-historical-view'));
   controller.applySnapshot({ ref: 'a', mode: 'detached', commit: { hash: 'a', short: 'a' } });
-  const before = refreshed;
   controller.applySnapshot({ ref: 'a', mode: 'detached', commit: { hash: 'a', short: 'a' } });
   assert.equal(controller.getDiffBase().ref, 'a');
   assert.ok(classes.has('explorer-historical-view'));
-  assert.equal(refreshed, before);
+  assert.equal(refreshed, 0, 'snapshot application is presentation-only');
   controller.setDiffBaseRef('HEAD');
   assert.equal(controller.getDiffBase().commit, null);
   assert.ok(!classes.has('explorer-historical-view'));

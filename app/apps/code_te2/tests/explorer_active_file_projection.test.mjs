@@ -89,3 +89,42 @@ test('Explorer silently reveals each exact-client active file exactly once', asy
     { path: 'src/b.ts', options: { silent: true } },
   ]);
 });
+
+test('selector notification plus Git snapshot starts exactly one changes refresh', async () => {
+  const { createExplorerNotificationHandler } = await importNotifications();
+  let visible = true;
+  let ref = 'HEAD';
+  let metadata;
+  let reads = 0;
+  const searches = [];
+  const handler = createExplorerNotificationHandler({
+    runtimeState: { getProjectPath: () => '/workspace', setGitStatus() {} },
+    setGitDiffBaseRef: value => { ref = value; },
+    initDiffBaseFromBackend: async () => { reads++; },
+    updateDiffBaseButtons() {},
+    applyGitDiffBaseSnapshot: value => { metadata = value; },
+    searchOverlayController: {
+      isVisible: () => visible, getSearchMode: () => 'changes',
+      fetchChangesResults: async () => searches.push({ ref, metadata }),
+    },
+    renderBranchLabel() {}, renderGitSummary() {}, setGitControlsEnabled() {},
+  });
+  handler.handleExplorerNotification('explorer.git.diffBase.updated', { projectPath: '/workspace', ref: 'old', refresh: true, selectionRevision: 's1' });
+  assert.equal(reads, 1);
+  assert.equal(searches.length, 1, 'start without waiting for baseline or decoration work');
+  const diffBase = { ref: 'old', mode: 'detached', commit: { hash: 'abc' } };
+  handler.handleExplorerNotification('explorer.git.status.updated', { projectPath: '/workspace', diffBase, selectionRevision: 's1', selectionOnly: true });
+  assert.deepEqual(searches, [{ ref: 'old', metadata: undefined }]);
+  handler.handleExplorerNotification('explorer.git.diffBase.updated', { projectPath: '/workspace', ref: 'old', selectionRevision: 's1' });
+  assert.equal(searches.length, 1, 'duplicate selection projection does not rerun');
+  handler.handleExplorerNotification('explorer.git.status.updated', { projectPath: '/workspace', diffBase });
+  assert.equal(searches.length, 2, 'later real Git facts still refresh unchanged selectors');
+  handler.handleExplorerNotification('explorer.git.diffBase.updated', { projectPath: '/workspace', ref: 'HEAD', selectionRevision: 's2' });
+  assert.equal(searches.length, 3, 'HEAD starts immediately too');
+  handler.handleExplorerNotification('explorer.git.status.updated', { projectPath: '/workspace', diffBase: { ref: 'HEAD' }, selectionRevision: 's2', selectionOnly: true });
+  assert.equal(searches.length, 3, 'HEAD completion does not start a second search');
+  visible = false;
+  handler.handleExplorerNotification('explorer.git.status.updated', { projectPath: '/workspace', diffBase });
+  handler.handleExplorerNotification('explorer.git.status.updated', { projectPath: '/other', diffBase });
+  assert.equal(searches.length, 3, 'hidden overlays and other projects do not refresh');
+});

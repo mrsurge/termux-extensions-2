@@ -99,7 +99,7 @@ class HistoricalActionTests(unittest.IsolatedAsyncioTestCase):
         async def emit(event: WorkerEvent) -> None:
             events.append(event)
         with patch.object(runtime, 'mark_git_cache_dirty'), patch.object(git_service, 'get_snapshot', return_value=snapshot), patch.object(runtime, 'get_history_store', return_value=history), patch.object(runtime, 'project_diff_base', return_value={'commit': {'hash': 'a' * 40}}), patch.object(comparison, 'compute', return_value=comparison.Comparison('old', {'historical.py': 'modified'})), patch.object(runtime, 'publish_worker_event', emit):
-            await runtime.broadcast_git_status_update('/project')
+            _ = await runtime.broadcast_git_status_update('/project')
             self.assertEqual(len(events), 1)
             payload = object_map(events[0]['payload']['decorations'])
             self.assertEqual(payload['statuses'], {'actual.py': 'staged'})
@@ -108,6 +108,6 @@ class HistoricalActionTests(unittest.IsolatedAsyncioTestCase):
             events.clear()
             history.refs = ['old', 'new']
             with patch.object(comparison, 'install') as install:
-                await runtime.broadcast_git_status_update('/project')
+                _ = await runtime.broadcast_git_status_update('/project')
                 install.assert_not_called()
                 self.assertEqual(events, [])

@@ -17,8 +17,6 @@ interface ExplorerDiffBaseControllerDeps {
   toast(message: string): void;
   setGitControlsEnabled(enabled: boolean, showInit?: boolean): void;
   reloadCurrentFile(): void;
-  isChangesMode(): boolean;
-  refreshChangesResults(force?: boolean): Promise<void> | void;
   getEditorState(): unknown;
 }
 
@@ -119,7 +117,6 @@ export function createExplorerDiffBaseController(
     updateButtons();
     applyGitControlsForState(deps.getEditorState());
     if (previous.ref !== gitDiffBase.ref || previous.commit?.hash !== gitDiffBase.commit?.hash) {
-      if (deps.isChangesMode()) void deps.refreshChangesResults(true);
       closeMenus();
     }
   }

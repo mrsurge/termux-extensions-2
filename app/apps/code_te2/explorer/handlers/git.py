@@ -223,8 +223,7 @@ async def handle_git_set_diff_base(
         refresh=False,
         source="explorer_git:set_diff_base",
     )
-    mark_git_cache_dirty(context.project_root)
-    await context.broadcast_git_status()
+    # The comparison fact projector owns cache invalidation and Git refresh.
 
 
 async def handle_git_get_diff_base(

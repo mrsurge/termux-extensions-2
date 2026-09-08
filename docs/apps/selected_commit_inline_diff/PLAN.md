@@ -227,6 +227,16 @@ large-history/slow-client responsiveness measurements remain open.
 These phases do not authorize an Android, release-version, or transport rewrite.
 Existing state authority and native control-plane boundaries remain in force.
 
+### Follow-Up Correction: Comparison Scheduling
+
+Comparison intent must not await baseline or decoration materialization before
+By changes can begin. Keep serial fact delivery, but schedule independent bounded
+latest-only read projections. Selection notifications trigger enumeration;
+selectionRevision/selectionOnly completion metadata prevents a second enumeration
+without suppressing real worktree invalidations. A native read already running
+finishes under a stale-output fence; replacing pending work must not create an
+unbounded thread backlog. Mutation ordering remains untouched.
+
 ### Later Investigation: Shared Text Edits
 
 Investigate a Rust-owned guarded text-edit operation reusable by per-hunk Restore

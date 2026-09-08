@@ -3,7 +3,7 @@ import asyncio
 import os
 import time
 from pathlib import Path
-from collections.abc import Awaitable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Protocol, cast
 
 from ..stores import get_history_store, get_preferences_store
@@ -989,7 +989,7 @@ async def handle_external_file_change(changed_abs_path: str) -> bool:
     return True
 
 
-async def broadcast_git_baselines_for_active_file() -> bool:
+async def broadcast_git_baselines_for_active_file(*, is_current: Callable[[], bool] = lambda: True) -> bool:
     """Push fresh baselines for each client's active document.
 
     Called when git state changes (commits, checkouts, etc.) so the diff
@@ -998,7 +998,7 @@ async def broadcast_git_baselines_for_active_file() -> bool:
     """
     print("[git_baselines_push] broadcast_git_baselines_for_active_file called", flush=True)
     project = _active_project()
-    if not project:
+    if not project or not is_current():
         print("[git_baselines_push] no active project, skipping", flush=True)
         return False
 
@@ -1009,9 +1009,11 @@ async def broadcast_git_baselines_for_active_file() -> bool:
     ref = _history_store.get_diff_base(project) or "HEAD"
     await editor_runtime_emit_room_event("editor:comparison_changed", {"projectPath": project, "ref": ref, "revision": revision})
     comparison = await asyncio.to_thread(comparison_state, project)
-    if _active_project() != project:
+    if _active_project() != project or not is_current() or (_history_store.get_diff_base(project) or "HEAD") != ref:
         return False
     await emit_ui_ipc_rpc_notification(UI_IPC_RPC_NOTIFICATION_COMPARISON_CHANGED, comparison)
+    if not is_current():
+        return False
     if comparison.get("mode") == "plain":
         return False
 
@@ -1023,6 +1025,8 @@ async def broadcast_git_baselines_for_active_file() -> bool:
     try:
         payloads: dict[str, dict[str, object]] = {}
         for foreground in foregrounds:
+            if not is_current():
+                return False
             active_norm = _normalize_abs_path(foreground["path"] or "")
             if not active_norm or not _is_under_project(project, active_norm):
                 continue
@@ -1030,7 +1034,7 @@ async def broadcast_git_baselines_for_active_file() -> bool:
             if payload is None:
                 payload = await asyncio.to_thread(selected_baseline, project, active_norm, _read_disk_text)
                 payloads[active_norm] = payload
-            if _active_project() != project:
+            if _active_project() != project or not is_current() or (_history_store.get_diff_base(project) or "HEAD") != ref:
                 return False
             await editor_runtime_emit_room_event(
                 "editor:git_baselines",
