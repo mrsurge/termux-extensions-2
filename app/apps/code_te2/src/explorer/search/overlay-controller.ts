@@ -1,4 +1,5 @@
 import type { JsonObject } from "../../rpc/transport.ts";
+import { restoreExplorerFile } from "../tree/restore-action.ts";
 import type { ExplorerJumpOptions } from "../host/file-open-bridge.ts";
 import type { ExplorerRpcMethod } from "../rpc/contract.ts";
 import { createExplorerChangesResultsRenderer } from "./changes-results-renderer.ts";
@@ -158,6 +159,12 @@ export function createExplorerSearchOverlayController(
   > | null = null;
 
   const changesResultsRenderer = createExplorerChangesResultsRenderer({
+    restoreFile: (rel) => restoreExplorerFile({
+      getProjectPath: () => deps.getProjectPath(),
+      requestExplorer: (method, payload) => deps.requestExplorer(method, payload),
+      toast: (message) => deps.toast(message),
+      getErrorMessage: (error, fallback) => error instanceof Error ? error.message : fallback,
+    }, rel, rel.split('/').pop() || rel),
     getGitDiffBase: () => deps.getGitDiffBase(),
     ensureInlineDiffs: () => deps.ensureInlineDiffs(),
     openFileAndMaybeJump: (rel, lineNumber, jumpOptions) =>

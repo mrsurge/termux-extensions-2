@@ -1924,3 +1924,51 @@
 
 .comparison-actual-state { min-width: 0; overflow: hidden; text-overflow: ellipsis; margin-left: 0.6em; color: #e5b567; white-space: nowrap; }
 .fe-actual-git-mark::before { content: '🚨'; }
+
+/* By Changes hunk blinds are local presentation, not diff truncation. */
+.fe-search-change-restore {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 7px 10px;
+  color: inherit;
+  background: rgba(148, 163, 184, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.fe-search-hunk-toggle {
+  display: block;
+  width: 100%;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  min-height: 36px;
+}
+.fe-search-hunk-toggle::before { content: '\25BE'; margin-right: 8px; }
+.fe-search-hunk-toggle[aria-expanded='false']::before { content: '\25B8'; }
+.fe-search-hunk-body[hidden],
+.fe-search-diff-rows.is-blinded > .fe-search-diff-row:nth-child(n+51) { display: none; }
+.fe-search-hunk-blind {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-height: 40px;
+  border: 0;
+  border-top: 1px solid rgba(148, 163, 184, 0.25);
+  background: #080b10;
+  color: #cbd5e1;
+  cursor: pointer;
+}
+.fe-search-hunk-blind.is-blinded::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 32px;
+  background: linear-gradient(transparent, #080b10);
+  pointer-events: none;
+}
+.fe-search-hunk-toggle:focus-visible,
+.fe-search-hunk-blind:focus-visible,
+.fe-search-change-restore:focus-visible { outline: 2px solid #7dd3fc; outline-offset: -2px; }

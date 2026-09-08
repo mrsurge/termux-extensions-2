@@ -212,18 +212,30 @@ large-history/slow-client responsiveness measurements remain open.
 
 - Add a restore control to each file header, using Phase 3's exact operation and
   confirmations. Label its source clearly; no separate destructive shortcut.
-- Make file diff sections collapsible. Start large results collapsed above a
-  documented changed-line threshold, chosen during implementation/UX review.
+- Each hunk initially shows up to 50 displayed diff lines, including context.
+  Longer hunks have a dark gradient blind and a button to reveal all remaining
+  lines or retract to 50. The hunk header separately collapses its entire body.
 - Keep file summaries, warnings, progress, and controls available while collapsed.
   Integrate lazy hunk delivery with Phase 1 where useful; expansion must not
   recreate the whole job or lose the selected comparison identity.
-- Preserve user expansion choices across compatible streamed updates; invalidate
-  them deliberately on a new project/comparison rather than mixing old content.
+- Expansion is ephemeral DOM state only. Preserve existing rendered groups during
+  progressive append; newly rendered results start with fresh controls. No
+  persistent or backend expansion registry is introduced.
 - Validate touch/desktop targets, header clicks versus restore clicks, keyboard
   accessibility, streamed totals, and large-result rendering cost.
 
 These phases do not authorize an Android, release-version, or transport rewrite.
 Existing state authority and native control-plane boundaries remain in force.
+
+### Later Investigation: Shared Text Edits
+
+Investigate a Rust-owned guarded text-edit operation reusable by per-hunk Restore
+and content Find/Replace. Feature logic would produce exact edits rather than
+round-tripping through textual patch syntax or an external patch process.
+Verify revision/hash checks, encoding and line-ending preservation, draft versus
+disk ownership, and existing editor/WBA/Git projection before implementation.
+Per-hunk Restore must preserve edits outside the selected hunk, unlike the
+explicit whole-file discard-and-restore operation. This is not part of Phase 4.
 
 ## Follow-Up: DevTools Through TE2 MCP
 

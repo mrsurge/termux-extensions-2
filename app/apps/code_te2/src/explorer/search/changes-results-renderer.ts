@@ -33,6 +33,7 @@ interface ExplorerChangesPayload {
 }
 
 interface ExplorerChangesResultsRendererDeps {
+  restoreFile(rel: string): Promise<void>;
   getGitDiffBase(): ExplorerDiffBaseInfo;
   ensureInlineDiffs(): Promise<void>;
   openFileAndMaybeJump(
@@ -247,6 +248,19 @@ export function createExplorerChangesResultsRenderer(
       statusText.textContent = change.statusText || '';
       meta.appendChild(statusText);
       header.appendChild(meta);
+      const restore = document.createElement('button');
+      restore.type = 'button';
+      restore.className = 'fe-search-change-restore';
+      restore.textContent = 'Restore...';
+      restore.setAttribute('aria-label', `Restore ${rel} from selected commit`);
+      restore.onclick = async (event) => {
+        event.stopPropagation();
+        if (restore.disabled) return;
+        restore.disabled = true;
+        try { await deps.restoreFile(rel); }
+        finally { restore.disabled = false; }
+      };
+      header.appendChild(restore);
       group.appendChild(header);
 
       const hunks = Array.isArray(change.hunks) ? change.hunks : [];
@@ -258,8 +272,9 @@ export function createExplorerChangesResultsRenderer(
           const hunkBlock = document.createElement('div');
           hunkBlock.className = 'fe-search-hunk';
 
-          const hunkHeader = document.createElement('div');
-          hunkHeader.className = 'fe-search-hunk-header';
+          const hunkHeader = document.createElement('button');
+          hunkHeader.type = 'button';
+          hunkHeader.className = 'fe-search-hunk-header fe-search-hunk-toggle';
           hunkHeader.textContent = formatHunkHeader(hunk);
           hunkHeader.dataset.line = String(
             Number(hunk.newStart || hunk.oldStart || 1),
@@ -268,6 +283,14 @@ export function createExplorerChangesResultsRenderer(
 
           const diffRows = document.createElement('div');
           diffRows.className = 'fe-search-diff-rows';
+          hunkHeader.setAttribute('aria-expanded', 'true');
+          const body = document.createElement('div');
+          body.className = 'fe-search-hunk-body';
+          hunkHeader.onclick = (event) => {
+            event.stopPropagation();
+            body.hidden = !body.hidden;
+            hunkHeader.setAttribute('aria-expanded', String(!body.hidden));
+          };
 
           let oldLine = typeof hunk.oldStart === 'number' ? hunk.oldStart : 0;
           let newLine = typeof hunk.newStart === 'number' ? hunk.newStart : 0;
@@ -325,7 +348,27 @@ export function createExplorerChangesResultsRenderer(
             diffRows.appendChild(row);
           });
 
-          hunkBlock.appendChild(diffRows);
+          body.appendChild(diffRows);
+          if (lines.length > 50) {
+            diffRows.classList.add('is-blinded');
+            const blind = document.createElement('button');
+            blind.type = 'button';
+            blind.className = 'fe-search-hunk-blind';
+            const updateBlind = (): void => {
+              const clipped = diffRows.classList.contains('is-blinded');
+              blind.textContent = clipped ? `Show remaining ${lines.length - 50} lines` : 'Show first 50 lines';
+              blind.setAttribute('aria-expanded', String(!clipped));
+              blind.classList.toggle('is-blinded', clipped);
+            };
+            blind.onclick = (event) => {
+              event.stopPropagation();
+              diffRows.classList.toggle('is-blinded');
+              updateBlind();
+            };
+            updateBlind();
+            body.appendChild(blind);
+          }
+          hunkBlock.appendChild(body);
           hunksContainer.appendChild(hunkBlock);
         });
 

@@ -11,8 +11,8 @@
 - [x] Commit/push the accepted historical enumeration correction: `ba51875d`.
 - [x] Record the historical-worktree follow-up direction and four phases.
 
-Original branch goals and Phases 1–3 are live-accepted,
-while Phase 4 remains planned. The accepted snapshot above remains
+Original branch goals and Phases 1–4 are live-accepted.
+The accepted snapshot above remains
 the rollback point.
 
 ## Phase 1: Progressive By Changes
@@ -116,13 +116,29 @@ coverage totals 41 Python tests, 11 frontend tests, and 6 native restore tests.
 No suppression directives were added. The user confirmed runtime acceptance
 after restarting the updated Rust framework.
 
-## Planned Phase 4: Overlay Restore And Collapsing
+## Phase 4: Overlay Restore And Hunk Blinds
 
-- [ ] Reuse guarded restore in each By changes file header.
-- [ ] Choose/document the changed-line threshold for initially collapsed diffs.
-- [ ] Integrate progressive summaries/hunks and preserve compatible expansion.
-- [ ] Test touch/desktop action separation, accessibility, and large-tree cost.
-- [ ] Obtain live acceptance.
+- [x] Reuse guarded restore in each By changes file header.
+- [x] Use the approved 50 displayed lines per hunk, with a dark fade/reveal blind.
+- [x] Add independently collapsible hunk headers with ephemeral DOM state.
+- [x] Preserve existing rendered controls during progressive result append.
+- [x] Complete focused tests and frontend typecheck/build.
+- [ ] Live-check touch/desktop targets, visual fade, and large-result behavior.
+- [x] Obtain live acceptance (user confirmed the live test looks good).
+
+Whole-file Restore shares `tree/restore-action.ts` with the Explorer menu;
+confirmation and backend mutation contracts are unchanged. Blinds hide rows,
+not diff data, so initial diff construction cost is not reduced. Controls stop
+click propagation, expose expanded state, and Restore is disabled while pending.
+Per-hunk Restore/shared text edits/Find-and-Replace remain a later investigation.
+
+Validation: 12 focused frontend tests pass, including blind boundary/retraction,
+header collapse, pending Restore protection, navigation separation, progressive
+DOM retention, and existing guarded confirmation regressions. `npm run typecheck`
+and `node build.mjs` pass; host JS and Explorer CSS publication are updated.
+No Python/Rust/Android changes, version bump, or runtime restart was needed.
+User live acceptance passed; the full touch/desktop and large-result matrix
+was not separately reported.
 
 See `PLAN.md` for the action matrix, boundaries, and unresolved policy details.
 

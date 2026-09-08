@@ -894,6 +894,16 @@ Note: TE2 loads Monaco first (`editor.main.js`), then registers official themes 
 theme registration is skipped (by design) to avoid caching a no-op run.
 
 ### Diff mode behavior
+
+- By changes file headers use the same `src/explorer/tree/restore-action.ts`
+  guarded whole-file Restore flow as tree menus. Hunk header buttons collapse
+  their bodies independently. Each hunk initially displays at most 50 lines
+  including context; larger hunks offer a dark fade/blind control to snap fully
+  open or retract. This is visual clipping, not backend truncation or deferred
+  diff construction. Expansion lives only in the rendered DOM; progressive
+  appends preserve existing groups, while fresh results recreate controls.
+  Restore, collapse, and blind clicks never initiate file navigation. Error
+  notices and file summaries remain outside collapsed hunk bodies.
 - Git diff mode uses Monaco DiffEditor in inline mode (not side-by-side).
 - Draft-versus-disk uses the inline DiffEditor with disk as its original model.
   Existing draft annotations still style the stock inline view where applicable.

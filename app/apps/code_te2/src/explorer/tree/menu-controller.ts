@@ -1,3 +1,4 @@
+import { restoreExplorerFile } from './restore-action.ts';
 import type { JsonObject } from '../../rpc/transport.ts';
 import type { ExplorerJumpOptions } from '../host/file-open-bridge.ts';
 import {
@@ -907,42 +908,7 @@ export function createExplorerTreeMenuController(
         if (!ensureExplorerRpc()) {
           return;
         }
-        try {
-          const project = deps.getProjectPath();
-          if (!project) throw new Error('Open a project before restoring');
-          let preview = await deps.requestExplorer(EXPLORER_RPC_METHODS.gitRestore, { path: rel, phase: 'prepare', projectPath: project });
-          const request = async (phase: 'unstage' | 'apply'): Promise<JsonObject> => {
-            if (project !== deps.getProjectPath()) throw new Error('Project changed; confirm Restore again');
-            if (typeof preview.token !== 'string' || typeof preview.path !== 'string') throw new Error('Invalid restore confirmation');
-            return deps.requestExplorer(EXPLORER_RPC_METHODS.gitRestore, {
-              path: preview.path, phase, token: preview.token, discardDraft: preview.hasDraft === true, projectPath: project,
-            });
-          };
-          if (preview.staged === true) {
-            const unstage = await window.teUI.dialog.confirm(
-              `${entry.name} has staged changes. Unstage only this file before restoring?\n\nStaged-only contents may differ from disk and will no longer be retained in the index. This step does not change the working file or its draft.`,
-            );
-            if (!unstage) return;
-            preview = await request('unstage');
-          }
-          if (typeof preview.commit !== 'string') throw new Error('Missing source commit');
-          const source = `${preview.ref === 'HEAD' ? 'HEAD' : 'commit'} ${preview.commit.slice(0, 10)}`;
-          const action = preview.delete === true
-            ? `${entry.name} does not exist in ${source}. Delete the working file?`
-            : `Restore ${entry.name} from ${source}? This replaces its current disk contents.`;
-          const draft = preview.hasDraft === true ? '\n\nThis will also DISCARD this file\'s unsaved draft.' : '';
-          const confirmed = await window.teUI.dialog.confirm(
-            `${action}${draft}\n\nExisting edits can be lost. HEAD and the index will not be changed.`,
-          );
-          if (!confirmed) return;
-          const result = await request('apply');
-          deps.toast(result.draftRetained === true
-            ? 'Disk restored; a draft changed during Restore or could not be cleared, so it was kept. Review it before saving.'
-            : result.editorClosed === true ? 'Restored on disk. The tab was closed because the restored file is not supported by the editor.'
-            : preview.delete === true ? 'Historical deletion applied' : `Restored from ${source}`);
-        } catch (error) {
-          deps.toast(deps.getErrorMessage(error, 'Restore failed'));
-        }
+        await restoreExplorerFile(deps, rel, entry.name);
         return;
       }
       default:
