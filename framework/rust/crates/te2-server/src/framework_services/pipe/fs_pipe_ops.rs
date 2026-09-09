@@ -20,6 +20,9 @@ pub(super) async fn dispatch_fs_request(
             Some(compute_text_edits(request, responder, scheduler).await)
         }
         Some("fs.textEdits.reverseHunk") => Some(reverse_hunk(request, responder, scheduler).await),
+        Some("fs.textEdits.prepareReplace") => {
+            Some(prepare_replace(request, responder, scheduler).await)
+        }
         Some("fs.textEdits.prepareHunk") => Some(prepare_hunk(request, responder, scheduler).await),
         Some("fs.listDirectory") => Some(list_directory(request, responder, scheduler).await),
         Some("fs.listDirectories") => Some(list_directories(request, responder, scheduler).await),
@@ -201,6 +204,51 @@ async fn prepare_hunk(
         }
     };
     match scheduler.prepare_hunk(params).await {
+        Ok(result) => match serde_json::to_value(result) {
+            Ok(value) => PipeEnvelope::success_response(request, responder, value),
+            Err(_) => PipeEnvelope::error_response(
+                request,
+                responder,
+                PipeError::new(
+                    "protocol.encodeFailed",
+                    "Unable to encode text edits",
+                    false,
+                    None,
+                ),
+            ),
+        },
+        Err(error) => PipeEnvelope::error_response(
+            request,
+            responder,
+            PipeError::new(error.code(), "Text-edit validation failed", false, None),
+        ),
+    }
+}
+
+async fn prepare_replace(
+    request: &PipeEnvelope,
+    responder: &PipeIdentity,
+    scheduler: &FrameworkServiceScheduler,
+) -> PipeEnvelope {
+    use crate::framework_services::search_replacements::PrepareReplaceRequest;
+    let params = match serde_json::from_value::<PrepareReplaceRequest>(
+        request.params.clone().unwrap_or(Value::Null),
+    ) {
+        Ok(params) => params,
+        Err(_) => {
+            return PipeEnvelope::error_response(
+                request,
+                responder,
+                PipeError::new(
+                    "protocol.invalidParams",
+                    "Invalid text-edit request",
+                    false,
+                    None,
+                ),
+            );
+        }
+    };
+    match scheduler.prepare_replace(params).await {
         Ok(result) => match serde_json::to_value(result) {
             Ok(value) => PipeEnvelope::success_response(request, responder, value),
             Err(_) => PipeEnvelope::error_response(

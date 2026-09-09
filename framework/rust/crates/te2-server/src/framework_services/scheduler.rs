@@ -168,18 +168,30 @@ impl FrameworkServiceScheduler {
         mut request: super::text_edit_disk::DiskEditsRequest,
     ) -> Result<super::text_edit_disk::DiskEditsResult, super::text_edit_ops::EditError> {
         use super::{text_edit_disk, text_edit_ops::EditError};
-        let permit = self.acquire(self.inner.fs_write.clone()).await.map_err(|_| EditError::Unavailable)?;
+        let permit = self
+            .acquire(self.inner.fs_write.clone())
+            .await
+            .map_err(|_| EditError::Unavailable)?;
         let root = request.root.clone();
         request.root = tokio::task::spawn_blocking(move || std::fs::canonicalize(root))
-            .await.map_err(|_| EditError::Unavailable)?.map_err(|_| EditError::InvalidPath)?
-            .to_string_lossy().into_owned();
-        let guard = self.repo_lock(request.root.clone()).await.lock_owned().await;
+            .await
+            .map_err(|_| EditError::Unavailable)?
+            .map_err(|_| EditError::InvalidPath)?
+            .to_string_lossy()
+            .into_owned();
+        let guard = self
+            .repo_lock(request.root.clone())
+            .await
+            .lock_owned()
+            .await;
         // Retain ownership until the native write finishes even if the request
         // future is dropped. Never release a lock around a still-running write.
         tokio::task::spawn_blocking(move || {
             let (_permit, _guard) = (permit, guard);
             text_edit_disk::apply(request)
-        }).await.map_err(|_| EditError::Unavailable)?
+        })
+        .await
+        .map_err(|_| EditError::Unavailable)?
     }
 
     pub(crate) async fn compute_text_edits(
@@ -234,6 +246,26 @@ impl FrameworkServiceScheduler {
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
             hunk_edits::prepare(request)
+        })
+        .await
+        .map_err(|_| EditError::Unavailable)?
+    }
+
+    pub(crate) async fn prepare_replace(
+        &self,
+        request: super::search_replacements::PrepareReplaceRequest,
+    ) -> Result<super::search_replacements::PreparedReplaceResult, super::text_edit_ops::EditError>
+    {
+        use super::{search_replacements, text_edit_ops::EditError};
+        // Pure CPU work shares the bounded read lane, never the mutation lock.
+        // Keep its permit inside the blocking closure even if the caller leaves.
+        let permit = self
+            .acquire(self.inner.fs_read.clone())
+            .await
+            .map_err(|_| EditError::Unavailable)?;
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            search_replacements::prepare(request)
         })
         .await
         .map_err(|_| EditError::Unavailable)?
@@ -531,7 +563,8 @@ impl FrameworkServiceScheduler {
         &self,
         request: git_ops::GitProviderRequest,
     ) -> Result<git_ops::GitRestorePreview, git_ops::GitProviderError> {
-        self.git_read(move || git_ops::git_restore_preview(request)).await
+        self.git_read(move || git_ops::git_restore_preview(request))
+            .await
     }
 
     pub(crate) async fn git_restore(

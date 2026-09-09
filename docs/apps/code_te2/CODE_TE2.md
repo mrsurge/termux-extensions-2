@@ -819,6 +819,59 @@ Explorer Restore RPC uses hunkPrepare/hunkApply phases; the per-hunk button warn
 that the entire unsaved draft will be discarded, while only the selected disk
 hunk is changed. Staged/index contents are never modified by this action.
 
+#### Search Replacement Preparation
+
+`explorer.search.replace` uses the Explorer lane with `prepare` and `apply`
+phases. Preparation selects `relativePath` plus `matchIndexes` from the current
+client-owned retained `searchId`/`projectGeneration`, not frontend-supplied edits.
+The session retains the original query and case/word/regex options. Each selected
+hit must carry one consistent `editTarget` hash and exact UTF-8 byte range.
+
+Python calls Rust `fs.textEdits.prepareReplace` with `PrepareReplaceRequest` v1:
+root/path, expectedSha256, query/options, replacement, and selected byte ranges.
+Rust reads one guarded disk snapshot, rejects a changed hash, verifies each range
+against the same search matcher, and returns `PreparedReplaceResult` v1 containing
+path/sourceSha256/edits without writing. Single-line BOM/transcoded hits remain
+display-only. Literal replacement is literal, including an empty string. Regex
+capture expansion supports `$0`, `$1`, `${name}`, `$name`, `$$`, and `$&`; expansion
+is bounded during construction. This is the current producer grammar, not a
+claim of complete Monaco replacement-pattern parity (case transforms, for example,
+are not implemented).
+
+Preparation is bounded to 700 distinct ranges, 375 KiB input/output and 750 KiB
+aggregate edit text. It runs in the scheduler's bounded blocking filesystem-read
+lane. Python rechecks session validity after the read, then creates a normal
+guarded text-edit consent. Apply consumes the token with explicit `discardDraft`;
+the existing disk-write, revision and result-projection contracts above apply.
+
+By contents uses `replacement-controller.ts` for ephemeral selection, dismissed
+files and replacement state. A twisty exposes a multiline replacement input;
+empty input means deletion. Static hit/file controls work without hover. Show All
+fetches one `explorer.search.more` window from `global:0` with both limits set to
+700; it reveals retained results rather than running another search. Select All
+also reveals all; file selection reveals and selects that file's retained hits.
+Checkboxes are created only for desktop user agents, not mobile user agents at
+any viewport width. Mobile selection uses an inset highlight without reserving
+checkbox space. Mobile-UA long press enters selection mode, movement cancels it, and later taps
+toggle hits instead of opening files. File-header long press also enters selection
+and reveals/selects the group. While selecting, header taps clear a fully selected
+group or reveal/select all retained hits if any is unselected. The long-press
+release click is guarded for both headers and hits.
+
+Replace All/Selected/File/Hit operate on retained indexes, excluding dismissed
+files. Hidden in-scope hits require a separate warning. Explicitly revealing them
+first avoids that warning, but never bypasses draft consent. Display-only targets
+reject replacement rather than being silently skipped. Actions wait for search
+completion. Search identity is rechecked around asynchronous reads/dialogs.
+
+Multi-file batches prepare and apply one file at a time, respecting the existing
+64-confirmation capacity. Each draft-bearing file has its own discard/cancel
+dialog. Outcomes are reported per file; errors stop remaining work and uncertain
+writes are never retried. Successful writes dismiss that file's now-stale result
+snapshot, including its unselected hits. Refresh results explicitly reruns the
+query for current disk identities. Successful earlier files are never rolled back.
+User live acceptance and broader end-to-end concurrency validation remain pending.
+
 #### Progressive Results
 
 - By changes uses the same start/result/done/error/cancel job lifecycle. The

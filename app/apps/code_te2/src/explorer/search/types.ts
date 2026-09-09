@@ -29,7 +29,14 @@ export interface ExplorerNameSearchResults {
   count?: number;
 }
 
+export interface ContentEditTarget {
+  sourceSha256: string;
+  startByte: number;
+  endByte: number;
+}
+
 export interface ExplorerContentSearchMatch {
+  editTarget?: ContentEditTarget;
   line?: number;
   column?: number;
   text?: string;
@@ -111,6 +118,7 @@ export interface ExplorerSearchIdentity {
 }
 
 export interface SearchContentDtoMatch {
+  editTarget?: ContentEditTarget;
   lineNumber?: number;
   columnNumber?: number;
   lineText?: string;

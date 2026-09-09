@@ -291,14 +291,19 @@ within its explicitly selected scope.
   rendered rows and not additional matches beyond the cap. Disclose truncation.
 - Provide Show All and Select All at the results top; Select All also shows all.
   Provide Replace Selected and Replace All. There is no Replace Visible action.
-- Each file header has a checkbox, Replace All in File, Show All in File when
+- Each file header has a desktop-UA-only checkbox, Replace All in File, Show All in File when
   presentation hides retained hits, and a `×` dismiss-file control. Dismissed
   files are excluded from selection and replacement for the current search.
-- Each hit has a checkbox and an individual Replace control. Selecting a file
+- Each hit has a desktop-UA-only checkbox and an individual Replace control. Selecting a file
   reveals and selects all retained hits for that file. Counters count occurrences.
 - Checkboxes are translucent until selection is active. On mobile user agents,
-  long press enters selection mode with a small hint; subsequent taps toggle
-  selection instead of navigating. Desktop checkboxes remain directly usable.
+  long press on a hit or file header enters selection mode with a small hint;
+  header long press reveals/selects the file group. While selecting, a header
+  tap clears a fully selected group or reveals/selects every retained hit if
+  any is unselected. Subsequent hit taps toggle
+  selection instead of navigating. Mobile UAs never render checkboxes or reserve
+  space for them, regardless of viewport width. An inset highlight marks selection
+  without reducing text width. Desktop checkboxes remain directly usable.
 - Replace controls are persistent/touch-accessible, never hover-only, and appear
   when replacement mode is expanded. Empty replacement is valid deletion.
 - Add the replace-field caret/twisty to the vendored search widget and inset the

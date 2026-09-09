@@ -103,3 +103,42 @@ async def prepare_hunk(project: Path, path: str, commit: str, source: str, index
     if not isinstance(start, int) or isinstance(start, bool) or not isinstance(end, int) or isinstance(end, bool) or not 0 <= start <= end or not isinstance(expected, str) or not isinstance(replacement, str):
         raise ValueError('Invalid prepared hunk range')
     return (ExactEdit(start, end, expected, replacement),)
+
+
+async def prepare_replacement(
+    project: Path, path: str, source: str, query: str, replacement: str,
+    ranges: tuple[tuple[int, int], ...], *, is_regex: bool,
+    is_case_sensitive: bool, is_whole_words: bool,
+) -> tuple[ExactEdit, ...]:
+    """Ask Rust to validate selected occurrences and expand regex captures."""
+    raw = await pipe_runtime.call_async('fs.textEdits.prepareReplace', {
+        'dto': 'PrepareReplaceRequest', 'version': 1, 'root': str(project),
+        'path': path, 'expectedSha256': _hash(source), 'query': query,
+        'replacement': replacement, 'isRegex': is_regex,
+        'isCaseSensitive': is_case_sensitive, 'isWholeWords': is_whole_words,
+        'ranges': [{'startByte': start, 'endByte': end} for start, end in ranges],
+    }, target_nid=2100, target_name='service.fs', workspace_root=str(project),
+        origin_name='code_te2.explorer.text_edits')
+    value = _mapping(raw)
+    if (value.get('dto') != 'PreparedReplaceResult' or type(value.get('version')) is not int
+            or value.get('version') != 1 or value.get('path') != path
+            or _hash(value.get('sourceSha256')) != _hash(source)):
+        raise ValueError('Invalid prepared replacement identity')
+    rows = value.get('edits')
+    if not isinstance(rows, list) or len(cast(list[object], rows)) != len(ranges):
+        raise ValueError('Invalid prepared replacement count')
+    wanted = set(ranges)
+    edits: list[ExactEdit] = []
+    for row in cast(list[object], rows):
+        edit = _mapping(row)
+        start, end = edit.get('startByte'), edit.get('endByte')
+        expected, inserted = edit.get('expectedText'), edit.get('replacement')
+        if (type(start) is not int or type(end) is not int
+                or (start, end) not in wanted or not isinstance(expected, str)
+                or not isinstance(inserted, str) or len(expected.encode('utf-8')) != end - start):
+            raise ValueError('Invalid prepared replacement range')
+        wanted.remove((start, end))
+        edits.append(ExactEdit(start, end, expected, inserted))
+    if wanted:
+        raise ValueError('Missing prepared replacement range')
+    return tuple(edits)

@@ -67,31 +67,61 @@ The latest accepted progressive-discovery snapshot is `d9bf1bcb`.
   TypeScript and focused Basedpyright checks pass; host bundle rebuilt.
 - [x] User live acceptance passed for Restore hunk after framework restart and client asset refresh.
   Find/Replace remains the next implementation slice, not completed by this work.
-- [ ] Implement Find/Replace through By contents using the shared operation;
+- [x] Implement Find/Replace through By contents using the shared operation;
   define selected-match/file and bulk replacement scope explicitly.
-- [ ] Fix the prerequisite single-line occurrence enumeration: ContentSink uses
-  matcher.find once per line. Add all matches plus exact disk snapshot/byte-offset
-  identity; preserve multiline, case/word/regex and query cancellation semantics.
+- [x] Add Rust read-only `fs.textEdits.prepareReplace`: pinned disk hash,
+  existing search matchers, selected occurrence verification, bounded capture
+  expansion and exact edits; six producer/pipe tests pass.
+- [x] Add per-file Explorer `search.replace` prepare/apply RPC using retained
+  hit indexes/query options, post-read session fencing, and existing guarded
+  draft-discard consent/apply. Forty Python transport/guard tests pass;
+  focused production/test Basedpyright is clean.
+- [x] Wire replacement UI and multi-file outcome orchestration. Respect the
+  existing 64 pending-confirmation bound; do not preallocate 700 per-file tokens.
+  The replacement input documents the supported producer grammar; complete
+  Monaco replacement case-transform parity is not claimed by this checkpoint.
+- [x] Fix single-line occurrence enumeration in the shared serial/progressive
+  ContentSink using matcher.find_iter, including caps within a matching line.
+  Seven content-search tests pass (four benchmarks intentionally skipped) and a
+  DOM regression verifies distinct same-line results and occurrence counts.
+- [x] Add optional exact disk snapshot/absolute byte-offset identity for supported
+  replacement hits; preserve multiline, case/word/regex and cancellation semantics.
+  Rust searches one bounded UTF-8 snapshot; per-hit editTarget contains its
+  SHA-256 and byte range. Python cache/projection and frontend normalization retain
+  identity. Lossy/unsupported and single-line BOM results remain display-only.
+  Eight Rust content tests pass (four benchmarks skipped), two frontend tests
+  pass, and two Python contract tests pass via direct invocation (the active
+  Python lacks pytest). TypeScript/Basedpyright pass; host bundle rebuilt.
 - [x] Record agreed occurrence semantics: each match is a separate logical hit,
   even on the same line (three occurrences means three independently displayed
   results with distinct exact ranges and a disk snapshot identity).
-- [ ] Make counters/caps count occurrences and prevent line-based deduplication.
+- [x] Make counters/caps count occurrences and prevent line-based deduplication.
   Single-hit replacement must address only the selected occurrence; bulk must
   include every occurrence within its explicitly selected scope.
-- [ ] Test repeated same-line matches, independent replacement of a later hit,
+- [x] Test repeated same-line matches, independent replacement of a later hit,
   accurate counters, and complete inclusion of in-scope hits in bulk replacement.
 - [x] Approve bounded Replace All over retained results (current cap 700), not
   rendered-only hits or matches beyond the cap; dismissed files are excluded.
-- [ ] Add replacement-mode twisty/inset, valid empty replacements, and persistent
+- [x] Add replacement-mode twisty/inset, valid empty replacements, and persistent
   touch-accessible per-hit/per-file/global replacement controls (not hover-only).
-- [ ] Add top Show All, Select All (also reveals all), and Replace Selected;
+- [x] Add top Show All, Select All (also reveals all), and Replace Selected;
   file headers get Show All in File and `×` dismissal. No Replace Visible.
-- [ ] Add translucent hit/file checkboxes, mobile-UA long-press selection mode
-  with hint, tap-to-toggle while selecting, and reveal/select-all on file selection.
-- [ ] Warn about hidden retained hits before Replace All unless shown first;
+- [x] Add desktop-UA-only translucent hit/file checkboxes, mobile-UA gesture-only selection
+  with hint and long-press entry on hits and file headers. Header taps clear a
+  fully selected group or reveal/select all when any retained hit is unselected.
+- [x] Omit checkbox DOM and spacing entirely on mobile UAs at every width;
+  inset highlights retain selection feedback. Sixteen frontend tests pass,
+  including wide mobile and narrow desktop UA cases.
+- [x] User live acceptance passed for Find/Replace, including gesture-only
+  mobile selection, file-header long press, and full/partial group toggling.
+- [x] Warn about hidden retained hits before Replace All unless shown first;
   always retain the separate draft-discard confirmation and truncation disclosure.
-- [ ] Test bounded scopes, file dismissal, hidden-hit warnings, mobile selection,
+- [x] Test bounded scopes, file dismissal, hidden-hit warnings, mobile selection,
   empty replacements, stale result identity, and per-file partial outcomes.
+- [x] Validate 12 frontend regression tests, including 700 rendered hits, 70-file
+  sequential prepare/apply, selected-hit identity, hidden warnings, draft
+  cancellation, failure stop, and mobile long-press/scroll separation.
+  Successful-file results are dismissed as stale; Refresh results reruns search.
 - [ ] Preserve autosave preferences, newer drafts, and staged/index safety.
   Both actions explicitly save to disk; no silent draft discard, staging, or commit.
 - [ ] Project accepted edits through existing backend facts to all affected

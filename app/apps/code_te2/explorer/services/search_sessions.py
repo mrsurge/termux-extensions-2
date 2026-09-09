@@ -16,11 +16,14 @@ from app.libs.pipe_protocol import PipeEnvelope
 from ...worker_services.event_bus import current_project_generation, next_project_generation
 from ..context import EmitPersonal
 from ..contracts.search_review import (
+    ContentEditTarget,
+    parse_content_edit_target,
     JsonObject,
     SearchContentMatch,
     SearchMoreInFileParams,
     SearchMoreParams,
     SearchRunParams,
+    SearchReplaceParams,
     SearchTextRange,
 )
 from ..search import cancel_search_job, start_changes_search, start_content_search, start_file_search
@@ -97,6 +100,7 @@ class CachedContentMatch:
     match_text: str
     line_ranges: tuple[SearchRange, ...] = ()
     snippet_ranges: tuple[SearchRange, ...] = ()
+    edit_target: ContentEditTarget | None = None
 
 
 @dataclass(slots=True)
@@ -116,6 +120,9 @@ class SearchSession:
     project_generation: int | None
     correlation_id: str
     query: str
+    is_regex: bool = False
+    is_case_sensitive: bool = False
+    is_whole_words: bool = False
     changes_metadata: dict[str, object] = field(default_factory=dict)
     complete: bool = False
     cancelled: bool = False
@@ -273,6 +280,9 @@ class ExplorerSearchSessions:
             project_generation=project_generation,
             correlation_id=correlation_id,
             query=selected_ref if mode == "changes" else params["query"],
+            is_regex=params['isRegex'],
+            is_case_sensitive=params['isCaseSensitive'],
+            is_whole_words=params['isWholeWords'],
         )
         # Preserve early-result order while the start acknowledgement yields.
         async with self._event_lock:
@@ -291,6 +301,41 @@ class ExplorerSearchSessions:
             )
             for envelope in early:
                 await self._handle_pipe_event_locked(envelope)
+
+    async def replace(self, params: SearchReplaceParams, client: str) -> JsonObject:
+        from ...worker_services.text_edit_service import prepare_replacement
+        from . import guarded_text_edits
+
+        session = self._session_for_request(params['searchId'], params['projectGeneration'])
+        path = params['relativePath']
+        if params['phase'] == 'apply':
+            return await guarded_text_edits.execute(session.root, client, path,
+                params['token'], discard_draft=params['discardDraft'])
+        cached = session.content_files.get(path)
+        if cached is None:
+            raise ValueError('Search file is no longer available')
+        ranges: list[tuple[int, int]] = []
+        source: str | None = None
+        # Clients select retained occurrences by index; they never supply disk
+        # coordinates, expected text, hashes or a patch to the mutation path.
+        for index in params['matchIndexes']:
+            if index >= len(cached.matches):
+                raise ValueError('Search hit is no longer available')
+            target = cached.matches[index].edit_target
+            if target is None:
+                raise ValueError('This search hit is display-only')
+            if source is not None and source != target['sourceSha256']:
+                raise ValueError('Search file has mixed snapshots; search again')
+            source = target['sourceSha256']
+            ranges.append((target['startByte'], target['endByte']))
+        if source is None:
+            raise ValueError('Select at least one search hit')
+        edits = await prepare_replacement(session.root, path, source, session.query,
+            params['replacement'], tuple(ranges), is_regex=session.is_regex,
+            is_case_sensitive=session.is_case_sensitive, is_whole_words=session.is_whole_words)
+        # A new query/project may supersede this session during the Rust read.
+        _ = self._session_for_request(session.search_id, session.project_generation)
+        return guarded_text_edits.prepare(session.root, client, path, source, edits)
 
     async def more(self, params: SearchMoreParams, reply_to: str | None) -> None:
         session = self._session_for_request(params["searchId"], params["projectGeneration"])
@@ -772,6 +817,7 @@ def _content_window(
 
 def _project_match(match: CachedContentMatch) -> SearchContentMatch:
     return {
+        "editTarget": match.edit_target,
         "line": match.line,
         "column": match.column,
         "text": match.text,
@@ -1022,6 +1068,7 @@ def _content_match(value: object) -> CachedContentMatch | None:
     if line_number is None or column_number is None:
         return None
     return CachedContentMatch(
+        edit_target=parse_content_edit_target(raw.get("editTarget")),
         line=line_number,
         column=max(0, column_number - 1),
         text=_string(raw.get("lineText")),
@@ -1034,6 +1081,7 @@ def _content_match(value: object) -> CachedContentMatch | None:
 
 def _provider_match_payload(match: CachedContentMatch) -> JsonObject:
     return {
+        "editTarget": match.edit_target,
         "lineNumber": match.line,
         "columnNumber": match.column + 1,
         "lineText": match.text,

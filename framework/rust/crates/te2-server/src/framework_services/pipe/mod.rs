@@ -215,6 +215,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn replace_prepare_pipe_is_read_only_and_snapshot_fenced() {
+        use crate::framework_services::text_edit_ops::sha256;
+        let root = test_root("replace-prepare");
+        fs::write(root.join("file.txt"), "cat cat").unwrap();
+        let scheduler = FrameworkServiceScheduler::default();
+        let responder = PipeIdentity { nid: 2100, name: "service.fs".into() };
+        let params = json!({"dto":"PrepareReplaceRequest", "version":1,
+            "root":root.to_str().unwrap(), "path":"file.txt", "expectedSha256":sha256("cat cat"),
+            "query":"cat", "replacement":"dog", "isRegex":false, "isCaseSensitive":true,
+            "isWholeWords":false, "ranges":[{"startByte":4,"endByte":7}]});
+        let response = dispatch_request(request("fs.textEdits.prepareReplace", params.clone(), &root),
+            &responder, &scheduler, None).await;
+        assert_eq!(response.result.as_ref().unwrap()["edits"][0]["replacement"], "dog");
+        assert_eq!(fs::read_to_string(root.join("file.txt")).unwrap(), "cat cat");
+        fs::write(root.join("file.txt"), "new cat").unwrap();
+        let response = dispatch_request(request("fs.textEdits.prepareReplace", params, &root),
+            &responder, &scheduler, None).await;
+        assert_eq!(response.error.unwrap().code, "textEdit.staleContent");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn computes_text_edits_without_writing_and_reports_stale_content() {
         use crate::framework_services::text_edit_ops::sha256;
         let root = test_root("text-edits");

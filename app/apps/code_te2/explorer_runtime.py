@@ -972,6 +972,21 @@ class ExplorerDispatcher:
             return await self.send_error("Explorer search session service is unavailable", msg_id)
         await search_sessions.run(params, msg_id)
 
+    async def handle_search_replace(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.search_review import (
+            ExplorerSearchReviewContractError, parse_search_replace_params,
+        )
+
+        sessions = self._search_session_service()
+        if sessions is None:
+            return await self.send_error('Explorer search session service is unavailable', msg_id)
+        try:
+            params = parse_search_replace_params(payload)
+            result = await sessions.replace(params, self.client_instance_id)
+        except (ValueError, ExplorerSearchReviewContractError) as exc:
+            return await self.send_error(str(exc), msg_id)
+        await self.emit_personal('explorer.search.replace.result', result, msg_id)
+
     async def handle_search_more(self, payload: JsonObject, msg_id: str | None) -> None:
         from .explorer.contracts.search_review import (
             ExplorerSearchReviewContractError,

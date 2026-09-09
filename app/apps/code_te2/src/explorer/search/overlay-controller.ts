@@ -12,6 +12,7 @@ import { createExplorerSearchController } from "./controller.ts";
 import type { ActualSearchBenchmarkCase } from "./benchmark.ts";
 import { renderSearchOverlayBody } from "./overlay-body-renderer.ts";
 import { renderContentResults } from "./results-renderer.ts";
+import { createContentReplacementController } from './replacement-controller.ts';
 import type {
   ExplorerContentSearchOptions,
   ExplorerSearchIdentity,
@@ -158,6 +159,17 @@ export function createExplorerSearchOverlayController(
     typeof createExplorerContentQueryWidget
   > | null = null;
 
+  const replacementController = createContentReplacementController({
+    data: () => searchResults,
+    identity: () => searchIdentity,
+    ready: () => searchMode === 'content' && searchStatus?.status === 'done',
+    render: () => renderSearchOverlay(),
+    request: (method, payload) => deps.requestExplorer(method, payload, 30000),
+    confirm: message => window.teUI.dialog.confirm(message),
+    toast: message => deps.toast(message),
+    refresh: () => searchController.refreshCurrentSearch(),
+  });
+
   const changesResultsRenderer = createExplorerChangesResultsRenderer({
     restoreHunk: (rel, identity) => restoreExplorerHunk({
       getProjectPath: () => deps.getProjectPath(),
@@ -273,6 +285,7 @@ export function createExplorerSearchOverlayController(
       loadChangesPage: offset => { void searchController.fetchChangesResults(true, offset); },
       renderContentResults: (container, data) =>
         renderContentResults(container, data, {
+          replacement: replacementController,
           toast: (message) => deps.toast(message),
           openFileAndMaybeJump: (rel, lineNumber, jumpOptions) =>
             deps.openFileAndMaybeJump(rel, lineNumber, jumpOptions),
@@ -324,6 +337,7 @@ export function createExplorerSearchOverlayController(
     contentWidgetHost.className = "fe-search-content-widget-host";
 
     contentQueryWidget = createExplorerContentQueryWidget(contentWidgetHost, {
+      onReplacementChanged: (open, text) => replacementController.setReplacement(open, text),
       onOptionsChanged: (next) => {
         searchQuery = next.query;
         contentSearchOptions = {

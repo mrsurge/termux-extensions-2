@@ -1,4 +1,5 @@
 import type {
+  ContentEditTarget,
   ExplorerContentSearchFileResult,
   ExplorerContentSearchMatch,
   ExplorerContentSearchResults,
@@ -26,6 +27,16 @@ function nullableStringValue(value: unknown): string | null | undefined {
   return stringValue(value);
 }
 
+function editTarget(value: unknown): ContentEditTarget | undefined {
+  if (!isRecord(value)) return undefined;
+  const { sourceSha256, startByte, endByte } = value;
+  if (typeof sourceSha256 !== "string" || !/^[a-f0-9]{64}$/.test(sourceSha256)
+    || typeof startByte !== "number" || !Number.isSafeInteger(startByte)
+    || typeof endByte !== "number" || !Number.isSafeInteger(endByte)
+    || startByte < 0 || endByte < startByte || endByte > 375 * 1024) return undefined;
+  return { sourceSha256, startByte, endByte };
+}
+
 function normalizeDtoMatch(
   match: SearchContentDtoMatch,
 ): ExplorerContentSearchMatch {
@@ -42,6 +53,7 @@ function normalizeDtoMatch(
     text: lineText,
     snippet,
     matchText: stringValue(match.matchText),
+    editTarget: editTarget(match.editTarget),
     lineRanges: Array.isArray(match.lineRanges) ? match.lineRanges : undefined,
     snippetRanges: Array.isArray(match.snippetRanges)
       ? match.snippetRanges
@@ -78,6 +90,7 @@ function normalizeProjectedFile(
         text: stringValue(match.text),
         snippet: stringValue(match.snippet) || stringValue(match.text) || "",
         matchText: stringValue(match.matchText),
+        editTarget: editTarget(match.editTarget),
         lineRanges: Array.isArray(match.lineRanges)
           ? match.lineRanges
           : undefined,
