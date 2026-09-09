@@ -43,7 +43,6 @@ from .rpc_contract import (
     UI_IPC_RPC_NOTIFICATION_RUN_TARGET_ROUTES_CHANGED,
     UiIpcRpcProtocolError,
     build_jsonrpc_error,
-    build_jsonrpc_notification,
     build_jsonrpc_result,
     parse_ui_ipc_rpc_notification,
     parse_ui_ipc_rpc_request,
@@ -51,7 +50,10 @@ from .rpc_contract import (
 from .rpc_dispatch import dispatch_ui_ipc_rpc_request
 from .sidebar_rpc_contract import SIDEBAR_IPC_RPC_NAMESPACE
 from ..host.run_target_service import set_run_target_routes_emitter
-from ..socketio_runtime import emit_code_te2_socketio
+from .notifications import (
+    emit_ui_ipc_rpc_notification as emit_ui_ipc_rpc_notification,
+    encode_ui_ipc_notification as _encode_ui_ipc_notification,
+)
 from ..file_tabs_projection import (
     set_file_tabs_projection_emitter,
 )
@@ -140,42 +142,6 @@ def _namespace(ns: object) -> SocketIONamespace:
 
 def _encode_ui_ipc_envelope(envelope: object, *, method: str | None = None) -> bytes:
     return encode_frontend_rpc_message(envelope, lane="ui_ipc", method=method)
-
-
-def _encode_ui_ipc_notification(method: str, params: JsonObject) -> bytes:
-    return _encode_ui_ipc_envelope(build_jsonrpc_notification(method, params), method=method)
-
-
-async def emit_ui_ipc_rpc_notification(
-    method: str,
-    params: JsonObject,
-    *,
-    skip_sid: str | None = None,
-    to_sid: str | None = None,
-    room: str = "ui_ipc",
-    client_instance_id: str | None = None,
-) -> None:
-    envelope = _encode_ui_ipc_notification(method, params)
-    target_room = (
-        client_presentation_room(client_instance_id)
-        if client_instance_id is not None
-        else room
-    )
-    if to_sid:
-        await emit_code_te2_socketio(
-            UI_IPC_RPC_NOTIFICATION_EVENT,
-            envelope,
-            namespace="/ui_ipc",
-            to=to_sid,
-        )
-    else:
-        await emit_code_te2_socketio(
-            UI_IPC_RPC_NOTIFICATION_EVENT,
-            envelope,
-            namespace="/ui_ipc",
-            room=target_room,
-            skip_sid=skip_sid,
-        )
 
 
 async def _emit_run_target_routes_to_native(projection: JsonObject) -> None:
@@ -309,7 +275,7 @@ class UIIPCNamespace(socketio.AsyncNamespace):
 
     async def on_disconnect(self, sid: object, reason: object | None = None) -> None:
         sid_text = _sid(sid)
-        _BROWSER_CLIENT_BY_SID.pop(sid_text, None)
+        _ = _BROWSER_CLIENT_BY_SID.pop(sid_text, None)
         ns = _namespace(self)
         room = "sidebar_ipc" if ns.namespace == "/sidebar_ipc" else "ui_ipc"
         print(f"[{room}] disconnect sid={sid_text} reason={reason}", flush=True)

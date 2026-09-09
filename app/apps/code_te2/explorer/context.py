@@ -78,6 +78,7 @@ class ExplorerGitHandlerContext:
     broadcast: Broadcast
     broadcast_git_status: AsyncNoArg
     broadcast_git_decorations: AsyncNoArg
+    client_instance_id: str = ""
 
 
 @dataclass(frozen=True)

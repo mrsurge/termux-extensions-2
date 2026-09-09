@@ -277,12 +277,22 @@ async def _handle_git_diff_base_changed_event(event: WorkerEvent) -> None:
     ref = payload.get("ref")
     if not isinstance(ref, str) or not ref:
         return
+    from .runtime_notifications import schedule_git_status_update
+
+    selection_revision = payload.get("selectionRevision")
+    schedule_git_status_update(
+        project, project_generation=event.get("project_generation"), source="comparison_selection",
+        selection_revision=selection_revision if isinstance(selection_revision, str) else None,
+        delay=0,
+    )
     await emit_project_explorer_rpc_notification(
         project,
         "explorer.git.diffBase.updated",
         {
+            "projectPath": project,
             "ref": ref,
             "refresh": payload.get("refresh") is True,
+            "selectionRevision": selection_revision,
         },
     )
 
@@ -297,7 +307,7 @@ async def _handle_git_path_restored_event(event: WorkerEvent) -> None:
     await emit_project_explorer_rpc_notification(
         project,
         "explorer.git.restored",
-        {"path": path},
+        {"path": path, "editorProjected": event["payload"].get("editorProjected") is True},
     )
 
 
@@ -366,7 +376,7 @@ async def _handle_client_foreground_changed_event(event: WorkerEvent) -> None:
     client_foreground = client_foreground_payload_from_event(event)
     if open_state is None or client_foreground is None:
         return
-    await emit_client_explorer_rpc_notification(
+    _ = await emit_client_explorer_rpc_notification(
         client_foreground["clientInstanceId"],
         "explorer.activeFile.updated",
         {
@@ -467,18 +477,12 @@ async def _handle_workspace_files_changed_event(event: WorkerEvent) -> None:
             payload=cast(JsonObject, cast(object, payload)),
         )
     )
-    from .runtime_notifications import schedule_git_status_update
-
-    schedule_git_status_update(
-        project,
-        project_generation=event.get("project_generation"),
-        source="explorer_render_state:WorkspaceFilesChanged",
-    )
+    # workspace_events projects this same fact into GitSnapshotRequested.
 
 
 async def _handle_explorer_render_state_changed_event(event: WorkerEvent) -> None:
     project = event.get("project_root")
-    if not project:
+    if not project or _is_stale_project_event(event, project):
         return
     payload = event["payload"]
     if payload.get("open_directories_changed") is True:
@@ -489,11 +493,12 @@ async def _handle_explorer_render_state_changed_event(event: WorkerEvent) -> Non
         )
     for rel in event_payload_list(event, "directories"):
         try:
-            await emit_project_explorer_rpc_notification(
-                project,
-                "explorer.list.updated",
-                await build_directory_listing(rel),
-            )
+            listings = await build_directory_listings([rel], project_root=Path(project),
+                project_generation=event.get("project_generation"))
+            if _is_stale_project_event(event, project):
+                return
+            for listing in listings:
+                await emit_project_explorer_rpc_notification(project, "explorer.list.updated", listing)
         except Exception as exc:
             logger.debug(
                 "[explorer_render_state] skipped changed directory listing project=%s rel=%s error=%s",

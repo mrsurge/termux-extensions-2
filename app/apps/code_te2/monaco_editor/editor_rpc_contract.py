@@ -79,6 +79,7 @@ EDITOR_RPC_NOTIFICATION_FILE_OPENED: Final = "editor.file.opened"
 EDITOR_RPC_NOTIFICATION_FILE_JUMP_TO_LINE: Final = "editor.file.jumpToLine"
 EDITOR_RPC_NOTIFICATION_MIRROR_UPDATED: Final = "editor.mirror.updated"
 EDITOR_RPC_NOTIFICATION_GIT_BASELINES: Final = "editor.gitBaselines.updated"
+EDITOR_RPC_NOTIFICATION_COMPARISON_CHANGED: Final = "editor.comparison.changed"
 EDITOR_RPC_NOTIFICATION_DRAFT_DIFF: Final = "editor.draftDiff.updated"
 EDITOR_RPC_NOTIFICATION_PREFS_CHANGED: Final = "editor.prefs.changed"
 EDITOR_RPC_NOTIFICATION_CACHE_STATE: Final = "editor.cache.state"
@@ -109,6 +110,7 @@ EditorRpcNotification = Literal[
     "editor.file.jumpToLine",
     "editor.mirror.updated",
     "editor.gitBaselines.updated",
+    "editor.comparison.changed",
     "editor.draftDiff.updated",
     "editor.prefs.changed",
     "editor.cache.state",
@@ -169,17 +171,17 @@ class JsonRpcErrorEnvelope(TypedDict):
 class EditorRpcProtocolError(Exception):
     def __init__(self, code: int, message: str, *, data: dict[str, object] | None = None) -> None:
         super().__init__(message)
-        self.code = code
-        self.message = message
-        self.data = data or {}
+        self.code: int = code
+        self.message: str = message
+        self.data: dict[str, object] = data or {}
 
 
 class EditorRpcDispatchError(Exception):
     def __init__(self, code: int, message: str, *, data: dict[str, object] | None = None) -> None:
         super().__init__(message)
-        self.code = code
-        self.message = message
-        self.data = data or {}
+        self.code: int = code
+        self.message: str = message
+        self.data: dict[str, object] = data or {}
 
 
 def coerce_jsonrpc_request_envelope(payload: object) -> JsonRpcRequestEnvelope | None:

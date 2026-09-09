@@ -29,7 +29,14 @@ export interface ExplorerNameSearchResults {
   count?: number;
 }
 
+export interface ContentEditTarget {
+  sourceSha256: string;
+  startByte: number;
+  endByte: number;
+}
+
 export interface ExplorerContentSearchMatch {
+  editTarget?: ContentEditTarget;
   line?: number;
   column?: number;
   text?: string;
@@ -111,6 +118,7 @@ export interface ExplorerSearchIdentity {
 }
 
 export interface SearchContentDtoMatch {
+  editTarget?: ContentEditTarget;
   lineNumber?: number;
   columnNumber?: number;
   lineText?: string;
@@ -182,6 +190,21 @@ export interface SearchJobProgressPayload {
   sequence?: number;
 }
 
+export interface SearchChangesDtoResult {
+  metadata?: {
+    mode: "changes";
+    git: boolean;
+    total: number;
+    offset: number;
+    nextOffset: number | null;
+    baseHash?: string;
+    snapshotToken?: string;
+    truncated?: boolean;
+    base?: Record<string, unknown>;
+  };
+  change?: Record<string, unknown>;
+}
+
 export interface SearchJobResultPayload {
   dto?: "SearchJobResult";
   version?: number;
@@ -192,7 +215,7 @@ export interface SearchJobResultPayload {
   projectGeneration?: number;
   correlationId?: string;
   sequence?: number;
-  result?: SearchContentDtoResult;
+  result?: SearchContentDtoResult | SearchChangesDtoResult;
 }
 
 export interface SearchJobDonePayload {

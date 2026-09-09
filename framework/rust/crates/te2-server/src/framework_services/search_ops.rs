@@ -279,6 +279,12 @@ pub(crate) struct SearchContentFile {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SearchContentMatch {
+    #[serde(skip)]
+    start_byte: usize,
+    #[serde(skip)]
+    end_byte: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) edit_target: Option<ContentEditTarget>,
     pub(crate) line_number: u64,
     pub(crate) column_number: usize,
     pub(crate) line_text: String,
@@ -286,6 +292,14 @@ pub(crate) struct SearchContentMatch {
     pub(crate) match_text: String,
     pub(crate) line_ranges: Vec<SearchTextRange>,
     pub(crate) snippet_ranges: Vec<SearchTextRange>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ContentEditTarget {
+    source_sha256: String,
+    start_byte: usize,
+    end_byte: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -893,7 +907,7 @@ pub(crate) fn search_content_with_options(
             matches: Vec::new(),
             cap_reached: false,
         };
-        match searcher.search_path(&matcher, path, &mut sink) {
+        match search_content_snapshot(&root, &relative_path, path, &mut searcher, &mut sink) {
             Ok(()) => {}
             Err(error) if error.kind() == io::ErrorKind::Interrupted && sink.cap_reached => {
                 set_truncation_reason(&mut truncated_reason, effective_cap_reason);
@@ -1078,6 +1092,13 @@ fn search_content_multiline_with_options(
             continue;
         }
 
+        // Lossy display text must never authorize an edit of the original bytes.
+        if bytes.len() <= super::text_edit_ops::MAX_TEXT_BYTES {
+            if let Ok(exact) = std::str::from_utf8(&bytes) {
+                attach_edit_targets(exact, &mut matches);
+            }
+        }
+
         let matches_returned = matches.len();
         match_count += matches_returned;
         counts.files_matched += 1;
@@ -1178,23 +1199,29 @@ impl Sink for ContentSink<'_> {
             ));
         }
         let line_bytes = strip_line_ending(mat.bytes());
-        let Some(found) = self
-            .matcher
-            .find(line_bytes)
-            .map_err(|error| io::Error::other(error.to_string()))?
-        else {
-            return Ok(true);
-        };
         let line_text = String::from_utf8_lossy(line_bytes).into_owned();
-        let match_text = String::from_utf8_lossy(&line_bytes[found]).into_owned();
-        self.matches.push(content_match_dto(
-            mat.line_number().unwrap_or(0),
-            &line_text,
-            found.start(),
-            found.end(),
-            match_text,
-            self.context_chars,
-        ));
+        // The searcher reports matching lines, not occurrences. Enumerate every
+        // occurrence here so serial/progressive counts and per-hit actions agree.
+        // The matcher owns zero-width advancement; never hand-roll that loop.
+        self.matcher
+            .find_iter(line_bytes, |found| {
+                let match_text = String::from_utf8_lossy(&line_bytes[found]).into_owned();
+                let mut hit = content_match_dto(
+                    mat.line_number().unwrap_or(0),
+                    &line_text,
+                    found.start(),
+                    found.end(),
+                    match_text,
+                    self.context_chars,
+                );
+                hit.start_byte = mat.absolute_byte_offset() as usize + found.start();
+                hit.end_byte = mat.absolute_byte_offset() as usize + found.end();
+                self.matches.push(hit);
+                !self
+                    .max_matches_per_file
+                    .is_some_and(|cap| self.matches.len() >= cap)
+            })
+            .map_err(|error| io::Error::other(error.to_string()))?;
         if self
             .max_matches_per_file
             .is_some_and(|max_matches| self.matches.len() >= max_matches)
@@ -1209,7 +1236,45 @@ impl Sink for ContentSink<'_> {
     }
 }
 
-fn build_content_matcher(
+// Search the same bounded snapshot that supplies replacement identity. Larger,
+// non-UTF8, and unsupported paths retain the existing read-only search behavior.
+fn search_content_snapshot(
+    root: &Path,
+    relative: &str,
+    path: &Path,
+    searcher: &mut Searcher,
+    sink: &mut ContentSink<'_>,
+) -> io::Result<()> {
+    if let Ok(content) = super::text_edit_disk::snapshot(root, relative) {
+        // Keep upstream BOM/transcoding behavior on the display-only path.
+        if !content.starts_with('\u{feff}') {
+            let result = searcher.search_slice(sink.matcher, content.as_bytes(), &mut *sink);
+            attach_edit_targets(&content, &mut sink.matches);
+            return result;
+        }
+    }
+    searcher.search_path(sink.matcher, path, sink)
+}
+
+fn attach_edit_targets(content: &str, matches: &mut [SearchContentMatch]) {
+    if matches.is_empty() {
+        return;
+    }
+    let hash = super::text_edit_ops::sha256(content);
+    for hit in matches {
+        // This also rejects non-character-boundary regex ranges, rather than
+        // converting lossy display strings into mutation instructions.
+        if content.get(hit.start_byte..hit.end_byte) == Some(hit.match_text.as_str()) {
+            hit.edit_target = Some(ContentEditTarget {
+                source_sha256: hash.clone(),
+                start_byte: hit.start_byte,
+                end_byte: hit.end_byte,
+            });
+        }
+    }
+}
+
+pub(super) fn build_content_matcher(
     request: &SearchContentRequest,
 ) -> Result<grep_regex::RegexMatcher, SearchProviderError> {
     let mut builder = RegexMatcherBuilder::new();
@@ -1223,7 +1288,7 @@ fn build_content_matcher(
         .map_err(|error| SearchProviderError::InvalidRegex(error.to_string()))
 }
 
-fn build_multiline_content_matcher(
+pub(super) fn build_multiline_content_matcher(
     request: &SearchContentRequest,
 ) -> Result<Regex, SearchProviderError> {
     let pattern = multiline_content_pattern(request);
@@ -1260,7 +1325,7 @@ fn normalize_search_newlines(query: &str) -> String {
     query.replace("\r\n", "\n").replace('\r', "\n")
 }
 
-fn is_multiline_query(query: &str) -> bool {
+pub(super) fn is_multiline_query(query: &str) -> bool {
     query.contains('\n') || query.contains('\r')
 }
 
@@ -1279,6 +1344,9 @@ fn content_match_dto(
     let snippet_match_start = match_start.saturating_sub(start);
     let snippet_match_end = snippet_match_start + match_end.saturating_sub(match_start);
     SearchContentMatch {
+        start_byte: match_start,
+        end_byte: match_end,
+        edit_target: None,
         line_number,
         column_number: match_start + 1,
         line_text: line_text.to_owned(),
@@ -1315,6 +1383,9 @@ fn content_multiline_match_dto(
         .to_owned();
     let match_text = text.get(match_start..match_end).unwrap_or("").to_owned();
     SearchContentMatch {
+        start_byte: match_start,
+        end_byte: match_end,
+        edit_target: None,
         line_number: line_number_at_offset(text, match_start),
         column_number: match_start.saturating_sub(line_start) + 1,
         line_text,
@@ -1486,7 +1557,7 @@ fn is_too_large(path: &Path, max_file_size_bytes: u64) -> bool {
         .unwrap_or(true)
 }
 
-fn strip_line_ending(bytes: &[u8]) -> &[u8] {
+pub(super) fn strip_line_ending(bytes: &[u8]) -> &[u8] {
     bytes
         .strip_suffix(b"\r\n")
         .or_else(|| bytes.strip_suffix(b"\n"))
@@ -1896,6 +1967,109 @@ mod tests {
             emitted_file_count as f64 / seconds,
         );
 
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn content_search_edit_targets_match_exact_snapshot_bytes() {
+        let root = test_root("edit-targets");
+        let content = "\u{732b}\r\nimport import\r\n";
+        write_file(&root, "hits.txt", content);
+        let result = search_content(content_request(&root)).unwrap();
+        let hits = &result.files[0].matches;
+        assert_eq!(hits.len(), 2);
+        for (hit, start) in hits.iter().zip([5, 12]) {
+            let target = hit.edit_target.as_ref().unwrap();
+            assert_eq!(
+                target.source_sha256,
+                super::super::text_edit_ops::sha256(content)
+            );
+            assert_eq!(target.start_byte, start);
+            assert_eq!(&content[target.start_byte..target.end_byte], "import");
+        }
+        // A later write must not mutate the previously delivered identity.
+        write_file(&root, "hits.txt", "import changed");
+        assert_ne!(
+            hits[0].edit_target.as_ref().unwrap().source_sha256,
+            super::super::text_edit_ops::sha256("import changed")
+        );
+        write_file(&root, "hits.txt", "\u{feff}import");
+        let result = search_content(content_request(&root)).unwrap();
+        assert!(result.files[0].matches[0].edit_target.is_none());
+        fs::write(root.join("hits.txt"), b"\xff import").unwrap();
+        let result = search_content(content_request(&root)).unwrap();
+        assert!(result.files[0].matches[0].edit_target.is_none());
+        write_file(&root, "hits.txt", content);
+        let mut request = content_request(&root);
+        request.query = "\u{732b}\nimport".into();
+        let result = search_content(request).unwrap();
+        let target = result.files[0].matches[0].edit_target.as_ref().unwrap();
+        assert_eq!(
+            &content[target.start_byte..target.end_byte],
+            "\u{732b}\r\nimport"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn content_search_same_line_occurrences_have_distinct_ranges() {
+        let root = test_root("same-line-hits");
+        write_file(&root, "hits.txt", "import import import\r\n");
+        let result = search_content(content_request(&root)).unwrap();
+        assert_eq!(result.match_count, 3);
+        let hits = &result.files[0].matches;
+        assert_eq!(
+            hits.iter().map(|hit| hit.column_number).collect::<Vec<_>>(),
+            vec![1, 8, 15]
+        );
+        assert!(
+            hits.iter()
+                .all(|hit| hit.line_number == 1 && hit.match_text == "import")
+        );
+        let mut capped = content_request(&root);
+        capped.max_matches_total = Some(2);
+        let result = search_content(capped.clone()).unwrap();
+        assert_eq!(result.match_count, 2);
+        assert!(result.truncated);
+        let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let sink_count = count.clone();
+        let result = search_content_with_options(
+            capped,
+            SearchRunOptions {
+                content_result: Some(Arc::new(move |page| {
+                    assert!(
+                        page.files
+                            .iter()
+                            .flat_map(|file| &file.matches)
+                            .all(|hit| hit.edit_target.is_some())
+                    );
+                    sink_count.fetch_add(page.match_count, Ordering::Relaxed);
+                    true
+                })),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(result.match_count, 2);
+        assert_eq!(count.load(Ordering::Relaxed), 2);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn content_search_repeated_unicode_and_zero_width_are_bounded() {
+        let root = test_root("same-line-unicode");
+        write_file(&root, "hits.txt", "猫 猫\n");
+        let mut request = content_request(&root);
+        request.query = "猫".into();
+        let result = search_content(request.clone()).unwrap();
+        assert_eq!(result.match_count, 2);
+        assert_eq!(result.files[0].matches[1].column_number, 5);
+        request.query = r"\b".into();
+        request.is_regex = true;
+        request.max_matches_total = Some(3);
+        let result = search_content(request).unwrap();
+        assert_eq!(result.match_count, 3);
+        assert!(result.truncated);
         let _ = fs::remove_dir_all(root);
     }
 

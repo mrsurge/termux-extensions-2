@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TypedDict, cast, override
+from typing import NotRequired, TypedDict, cast, override
 
 JsonObject = dict[str, object]
 
@@ -27,6 +27,12 @@ class GitPathListParams(TypedDict):
 class GitRestoreParams(TypedDict):
     path: str
     commit: str
+    phase: NotRequired[str]
+    token: NotRequired[str]
+    discardDraft: NotRequired[bool]
+    projectPath: NotRequired[str]
+    hunkIndex: NotRequired[int]
+    sourceSha256: NotRequired[str]
 
 
 class GitCommitParams(TypedDict):
@@ -94,10 +100,26 @@ def parse_git_restore_params(payload: object) -> GitRestoreParams:
         envelope.get("path"),
         missing_message="Restore requires path",
     )
-    return {
+    phase = _parse_optional_string(envelope.get("phase"))
+    if phase not in {"prepare", "unstage", "apply", "hunkPrepare", "hunkApply"}:
+        raise ExplorerGitContractError("Restore requires confirmation; reload the client")
+    result: GitRestoreParams = {
         "path": path,
         "commit": _parse_optional_string(envelope.get("commit")) or "HEAD",
+        "phase": phase,
+        "projectPath": _parse_required_string(envelope.get("projectPath"), missing_message="Restore requires projectPath"),
+        "token": _parse_optional_string(envelope.get("token")) or "",
+        "discardDraft": envelope.get("discardDraft") is True,
     }
+    if phase == 'hunkPrepare':
+        index = envelope.get('hunkIndex')
+        source = envelope.get('sourceSha256')
+        commit = result['commit']
+        if not isinstance(index, int) or isinstance(index, bool) or index < 0 or not isinstance(source, str) or len(source) != 64 or any(c not in '0123456789abcdefABCDEF' for c in source) or len(commit) != 40 or any(c not in '0123456789abcdefABCDEF' for c in commit):
+            raise ExplorerGitContractError('Invalid hunk snapshot identity')
+        result['hunkIndex'] = index
+        result['sourceSha256'] = source
+    return result
 
 
 def parse_git_commit_params(payload: object) -> GitCommitParams:

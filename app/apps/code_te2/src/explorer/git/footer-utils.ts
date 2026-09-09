@@ -34,6 +34,7 @@ export interface ExplorerGitStatus {
 interface ExplorerGitFooterUtilsDeps {
   getGitSummaryElement(): HTMLElement | null;
   getGitStatus(): ExplorerGitStatus | null;
+  isHistoricalComparison?(): boolean;
   getGitButtons(): ExplorerGitButtons | null;
   hasExplorerBus(): boolean;
   sendExplorerBus(method: ExplorerRpcMethod, payload: JsonObject): void;
@@ -142,10 +143,10 @@ export function createExplorerGitFooterUtils(
       } else if (key === 'reset') {
         const visible = enabled && !showInit;
         button.style.display = visible ? 'inline-block' : 'none';
-        button.disabled = !visible;
+        button.disabled = !visible || Boolean(deps.isHistoricalComparison?.());
       } else {
         button.style.display = showInit ? 'none' : 'inline-block';
-        button.disabled = !enabled || showInit;
+        button.disabled = !enabled || showInit || (Boolean(deps.isHistoricalComparison?.()) && (key === 'stage' || key === 'commit'));
       }
     }
   }

@@ -1,4 +1,5 @@
 import type { JsonObject } from "../../rpc/transport.ts";
+import { restoreExplorerFile, restoreExplorerHunk } from "../tree/restore-action.ts";
 import type { ExplorerJumpOptions } from "../host/file-open-bridge.ts";
 import type { ExplorerRpcMethod } from "../rpc/contract.ts";
 import { createExplorerChangesResultsRenderer } from "./changes-results-renderer.ts";
@@ -11,6 +12,7 @@ import { createExplorerSearchController } from "./controller.ts";
 import type { ActualSearchBenchmarkCase } from "./benchmark.ts";
 import { renderSearchOverlayBody } from "./overlay-body-renderer.ts";
 import { renderContentResults } from "./results-renderer.ts";
+import { createContentReplacementController } from './replacement-controller.ts';
 import type {
   ExplorerContentSearchOptions,
   ExplorerSearchIdentity,
@@ -157,7 +159,30 @@ export function createExplorerSearchOverlayController(
     typeof createExplorerContentQueryWidget
   > | null = null;
 
+  const replacementController = createContentReplacementController({
+    data: () => searchResults,
+    identity: () => searchIdentity,
+    ready: () => searchMode === 'content' && searchStatus?.status === 'done',
+    render: () => renderSearchOverlay(),
+    request: (method, payload) => deps.requestExplorer(method, payload, 30000),
+    confirm: message => window.teUI.dialog.confirm(message),
+    toast: message => deps.toast(message),
+    refresh: () => searchController.refreshCurrentSearch(),
+  });
+
   const changesResultsRenderer = createExplorerChangesResultsRenderer({
+    restoreHunk: (rel, identity) => restoreExplorerHunk({
+      getProjectPath: () => deps.getProjectPath(),
+      requestExplorer: (method, payload) => deps.requestExplorer(method, payload),
+      toast: (message) => deps.toast(message),
+      getErrorMessage: (error, fallback) => error instanceof Error ? error.message : fallback,
+    }, rel, identity),
+    restoreFile: (rel) => restoreExplorerFile({
+      getProjectPath: () => deps.getProjectPath(),
+      requestExplorer: (method, payload) => deps.requestExplorer(method, payload),
+      toast: (message) => deps.toast(message),
+      getErrorMessage: (error, fallback) => error instanceof Error ? error.message : fallback,
+    }, rel, rel.split('/').pop() || rel),
     getGitDiffBase: () => deps.getGitDiffBase(),
     ensureInlineDiffs: () => deps.ensureInlineDiffs(),
     openFileAndMaybeJump: (rel, lineNumber, jumpOptions) =>
@@ -240,6 +265,7 @@ export function createExplorerSearchOverlayController(
     if (headButton) {
       headButton.textContent = `${formatDiffBaseLabel(deps.getGitDiffBase(), false)} ▾`;
       headButton.disabled = deps.getGitDiffBase().mode === "none";
+      headButton.classList.toggle('comparison-historical', deps.getGitDiffBase().ref !== 'HEAD');
     }
 
     const resultsContainer =
@@ -256,8 +282,10 @@ export function createExplorerSearchOverlayController(
       searchStatus,
     };
     renderSearchOverlayBody(resultsContainer, state, {
+      loadChangesPage: offset => { void searchController.fetchChangesResults(true, offset); },
       renderContentResults: (container, data) =>
         renderContentResults(container, data, {
+          replacement: replacementController,
           toast: (message) => deps.toast(message),
           openFileAndMaybeJump: (rel, lineNumber, jumpOptions) =>
             deps.openFileAndMaybeJump(rel, lineNumber, jumpOptions),
@@ -309,6 +337,7 @@ export function createExplorerSearchOverlayController(
     contentWidgetHost.className = "fe-search-content-widget-host";
 
     contentQueryWidget = createExplorerContentQueryWidget(contentWidgetHost, {
+      onReplacementChanged: (open, text) => replacementController.setReplacement(open, text),
       onOptionsChanged: (next) => {
         searchQuery = next.query;
         contentSearchOptions = {
@@ -508,11 +537,6 @@ export function createExplorerSearchOverlayController(
   function handleSearchResultsUpdated(payload: unknown): void {
     const typedPayload = getSearchResultsPayload(payload);
     const payloadMode = typedPayload?.mode;
-
-    if (typedPayload && payloadMode === "changes" && typedPayload.base) {
-      deps.setGitDiffBase(normalizeDiffBase(typedPayload.base));
-      deps.onGitDiffBaseChanged();
-    }
 
     if (
       payloadMode &&

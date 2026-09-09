@@ -163,7 +163,7 @@ async def _start_project_watchexec_if_needed(project_root: Path) -> None:
         )
         if watcher_config["mode"] == "watchexec" and watcher_config["watchexec_available"]:
             ensure_watchexec_shell = _get_ensure_watchexec_shell()
-            await ensure_watchexec_shell(
+            _ = await ensure_watchexec_shell(
                 str(project_root),
                 watcher_config["poll_interval_ms"],
             )
@@ -206,7 +206,7 @@ async def _broadcast_project_git_state(
     try:
         from .runtime_notifications import broadcast_git_status_update
 
-        await broadcast_git_status_update(
+        _ = await broadcast_git_status_update(
             project_root,
             project_generation=project_generation,
             source="project_switch:replay",

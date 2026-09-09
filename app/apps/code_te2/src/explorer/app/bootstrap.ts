@@ -242,6 +242,7 @@ const explorerFileOpenBridge = createExplorerFileOpenBridge({
   toast,
 });
 const explorerGitFooterUtils = createExplorerGitFooterUtils({
+  isHistoricalComparison: () => (explorerDiffBaseController.getDiffBase().ref || "HEAD") !== "HEAD",
   getGitSummaryElement: () => gitSummaryEl,
   getGitStatus: () => explorerRuntimeState.getGitStatus(),
   getGitButtons: () => gitButtons,
@@ -261,10 +262,6 @@ const explorerDiffBaseController = createExplorerDiffBaseController({
   toast,
   setGitControlsEnabled,
   reloadCurrentFile,
-  isChangesMode: () =>
-    explorerSearchOverlayController?.getSearchMode() === "changes",
-  refreshChangesResults: (force = false) =>
-    explorerSearchOverlayController?.fetchChangesResults(force),
   getEditorState: () => window.__codeTe2EditorState || null,
 });
 const explorerChromeController = createExplorerChromeController({
@@ -294,12 +291,11 @@ explorerSearchOverlayController = createExplorerSearchOverlayController({
     explorerFileOpenBridge.openFileAndMaybeJump(rel, lineNumber, jumpOptions),
   ensureDraftDiffs: async () => {
     if (typeof window.__codeTe2EnsureDraftDiffs === "function") {
-      try {
-        await window.__codeTe2EnsureDraftDiffs(true);
-      } catch {
-        /* ignore */
-      }
+      const result: unknown = await window.__codeTe2EnsureDraftDiffs(true);
+      if (result !== false) return;
     }
+    toast('Unable to enable draft-versus-disk comparison');
+    throw new Error('Draft comparison mode was not applied');
   },
   ensureInlineDiffs: async () => {
     if (typeof window.__codeTe2EnsureInlineDiffs === "function") {
@@ -394,6 +390,7 @@ explorerNameSearchController = createExplorerNameTreeSearchController({
   toast,
 });
 const explorerTreeMenuController = createExplorerTreeMenuController({
+  isHistoricalComparison: () => (explorerDiffBaseController.getDiffBase().ref || "HEAD") !== "HEAD",
   getTreeElement: () => treeElement,
   getSelectedEntries: () => selectedEntries,
   getProjectPath: () => explorerRuntimeState.getProjectPath(),
@@ -427,7 +424,7 @@ const explorerTreeClickHandler = createExplorerTreeClickHandler({
   openCardMenuForEntry: (entry, anchorEl) =>
     explorerTreeMenuController.openCardMenuForEntry(entry, anchorEl),
   openFile: async (rel) => {
-    await explorerFileOpenBridge.openFileAndMaybeJump(rel);
+    await explorerFileOpenBridge.openFileAndMaybeJump(rel, null, { source: "explorer_tree" });
   },
 });
 
@@ -839,6 +836,7 @@ const explorerNotificationHandler = createExplorerNotificationHandler({
   setGitControlsEnabled,
   renderGitSummary,
   setGitDiffBaseRef: (ref) => explorerDiffBaseController.setDiffBaseRef(ref),
+  applyGitDiffBaseSnapshot: (value) => explorerDiffBaseController.applySnapshot(value),
   updateDiffBaseButtons,
   toggleDrawer: (open) => explorerChromeController.toggleDrawer(open),
 });

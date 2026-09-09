@@ -1,6 +1,8 @@
 import { EDITOR_RPC_NOTIFICATIONS } from './editor_rpc_contract.ts';
 import { buildInlineDiffScrollbarOptions } from './editor_diff_scrollbar_options.ts';
 import { acceptDocumentProjection } from './editor_document_revision_runtime.ts';
+import { traceInlineDiffInit } from './editor_inline_diff_init_trace.ts';
+import { updateComparisonBaselineFence } from './editor_git_baseline_runtime.ts';
 
 interface EditorSocketLike {
   on(eventName: string, handler: (payload: unknown) => void): void;
@@ -164,7 +166,21 @@ export function registerEditorSocketConnectionHandlers(
   socket: EditorSocketLike,
   deps: EditorSocketConnectionDeps,
 ): void {
+  let snapshotSequence = 0;
   const handleSsotSnapshot = (snapshot: unknown): void => {
+    const sequence = ++snapshotSequence;
+    let stage = 'snapshot';
+    const trace = (nextStage: string): void => {
+      stage = nextStage;
+      traceInlineDiffInit(stage, {
+        sequence,
+        stage,
+        path: deps.getCurrentPath(),
+        commit: deps.getShowInlineDiffs(),
+        draft: deps.getShowDraftDiffs(),
+        hasDiffEditor: !!deps.getDiffEditor(),
+      });
+    };
     try {
       const snapshotRecord = asRecord(snapshot);
       const snapshotFile = asRecord(snapshotRecord && snapshotRecord.file);
@@ -175,11 +191,15 @@ export function registerEditorSocketConnectionHandlers(
         console.log((t != null ? ('t=' + t + 'ms ') : '') + 'now=' + Date.now(), '[editor:ssot] rx', { hasFile: !!snapshotFile, currentPath: snapshotRecord && snapshotRecord.currentPath });
       } catch (_) {}
       deps.setCachedPrefs(snapshot);
+      trace('preferences-applied');
       if (snapshotFile) {
         const file = snapshotFile;
-        deps.ensureEditorWithPrefs().then(async () => {
+        trace('ensure-editor');
+        void deps.ensureEditorWithPrefs().then(async () => {
+          trace('editor-ready');
           const snapshotPath = asString(file.path);
           if (!acceptDocumentProjection(snapshotPath, file.document_revision)) {
+            traceInlineDiffInit('revision-rejected', { sequence, path: snapshotPath, revision: file.document_revision });
             console.warn('[editor:ssot] rejected stale or unfenced document projection', {
               path: snapshotPath,
               document_revision: file.document_revision,
@@ -191,6 +211,7 @@ export function registerEditorSocketConnectionHandlers(
           const activePath = deps.getCurrentPath();
           if (!activePath) return;
           const ssotGeneration = deps.wbBumpGeneration(activePath, 'ssot');
+          trace('generation-ready');
           try { deps.bcUpdatePath(activePath, true); } catch (_) {}
           const lang = deps.languageFromPath(activePath);
           const activeModel = deps.getModel();
@@ -205,6 +226,7 @@ export function registerEditorSocketConnectionHandlers(
             applyModelLifecycle(deps, snapshotContent, lang, activePath);
           }
           deps.ensureTouchSelection('ssot');
+          trace('model-and-touch-ready');
           deps.setLastContentSha256(asString(file.content_sha256) || deps.getLastContentSha256());
           deps.emitToHost('editor_cache_state', {
             path: activePath,
@@ -231,6 +253,7 @@ export function registerEditorSocketConnectionHandlers(
           } else {
             deps.clearDraftDiffDecorations();
           }
+          trace('draft-state-ready');
           try {
             const readyModel = deps.getModel();
             deps.emitModelReady({
@@ -243,6 +266,7 @@ export function registerEditorSocketConnectionHandlers(
           } catch (_) {}
           deps.updateDebug('ws=ssot');
           deps.requestGitBaselines({ reason: 'ssot' });
+          trace('baseline-request-scheduled');
           let languageOpenPromise: Promise<unknown> | null = null;
           try {
             const requestId = file && file.request_id ? String(file.request_id) : ('diag_' + Date.now() + '_ssot');
@@ -275,6 +299,13 @@ export function registerEditorSocketConnectionHandlers(
           } catch (error) {
             console.warn('[AgentEditReview] document state request failed after ssot open', error);
           }
+        }).catch((error: unknown) => {
+          traceInlineDiffInit('snapshot-failed', { sequence, stage, error: String(error), stack: error instanceof Error ? error.stack : undefined });
+          console.error('[InlineDiffInit] snapshot initialization failed', {
+            sequence,
+            stage,
+            path: deps.getCurrentPath(),
+          }, error);
         });
       } else {
         deps.clearActiveModel('ssot_empty');
@@ -396,6 +427,13 @@ export function registerEditorSocketConnectionHandlers(
 
   if (deps.rpcNotifications) {
     deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.stateSsot, handleSsotSnapshot);
+    deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.comparisonChanged, (payload) => {
+      const project = typeof payload.projectPath === 'string' ? payload.projectPath : '';
+      if (!project || !deps.getCurrentPath()?.startsWith(project + '/')) return;
+      if (typeof payload.ref === 'string' && typeof payload.revision === 'number') {
+        updateComparisonBaselineFence(payload.ref, payload.revision);
+      }
+    });
     deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.fileOpened, handleOpenPayload);
     deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.fileJumpToLine, (payload) => deps.handleJumpToLine(payload));
     deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.prefsChanged, handlePrefsChangedPayload);

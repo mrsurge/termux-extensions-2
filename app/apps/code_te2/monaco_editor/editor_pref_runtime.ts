@@ -2,6 +2,7 @@ import { getShowInlineDiffsFlag, getShowDraftDiffsFlag, getUseTrueInlineViewFlag
 import { localMirrorDebounceMs, mirrorHotWindowMs, gitBaselineDebounceMs, gitBaselineApplyIdleMs } from './editor_timing_policy_utils.ts';
 import { requestGitBaselinesDebounced } from './editor_git_baseline_request_utils.ts';
 import { EDITOR_RPC_METHODS } from './editor_rpc_contract.ts';
+import { traceInlineDiffInit } from './editor_inline_diff_init_trace.ts';
 
 interface EditorPrefRuntimeDeps {
   getCachedPrefs(): unknown;
@@ -74,8 +75,15 @@ export function createEditorPrefRuntime(deps: EditorPrefRuntimeDeps) {
     }, waitMs);
   }
 
-  function emitGitBaselineRequestNow(): boolean {
+  function emitGitBaselineRequestNow(reason: string): boolean {
     const currentPath = deps.getCurrentPath();
+    const traceStartup = reason === 'ssot';
+    if (traceStartup) traceInlineDiffInit('baseline-request-gate', {
+      path: currentPath,
+      connected: deps.isRpcConnected(),
+      commit: getShowInlineDiffs(),
+      draft: getShowDraftDiffs(),
+    });
     if (!deps.isRpcConnected()) return false;
     if (!currentPath) return false;
 
@@ -91,13 +99,16 @@ export function createEditorPrefRuntime(deps: EditorPrefRuntimeDeps) {
       { timeoutMs: 12000 },
     ).then(
       (payload) => {
+        if (traceStartup) traceInlineDiffInit('baseline-response', { requestedPath: currentPath, activePath: deps.getCurrentPath() });
         try {
           deps.applyGitBaselines(payload);
+          if (traceStartup) traceInlineDiffInit('baseline-applied', { path: deps.getCurrentPath(), hasDiffEditor: !!deps.getDiffEditor() });
         } catch (error) {
           console.warn('[Monaco] editor.gitBaselines.get apply failed', error);
         }
       },
       (error) => {
+        if (traceStartup) traceInlineDiffInit('baseline-request-failed', { path: currentPath, error: String(error) });
         console.warn('[Monaco] editor.gitBaselines.get failed', error);
       },
     );
@@ -105,16 +116,18 @@ export function createEditorPrefRuntime(deps: EditorPrefRuntimeDeps) {
   }
 
   function requestGitBaselines(opts?: { immediate?: boolean; reason?: string }): boolean {
+    const reason = opts?.reason || 'unknown';
+    traceInlineDiffInit('baseline-scheduled', { reason, immediate: !!opts?.immediate, path: deps.getCurrentPath() });
     return requestGitBaselinesDebounced({
       immediate: !!(opts && opts.immediate),
       reason: (opts && opts.reason) ? String(opts.reason) : 'unknown',
       timer: gitBaselineDebounceTimer,
       setTimerFn(timer: ReturnType<typeof setTimeout> | null) { gitBaselineDebounceTimer = timer; },
       noteRequestFn: deps.noteGitBaselineRequest,
-      emitNowFn: emitGitBaselineRequestNow,
+      emitNowFn: () => emitGitBaselineRequestNow(reason),
       debounceMs: getGitBaselineDebounceMs(),
-      setTimeoutFn: setTimeout,
-      clearTimeoutFn: clearTimeout,
+      setTimeoutFn: (callback, delayMs) => window.setTimeout(callback, delayMs),
+      clearTimeoutFn: (timer) => window.clearTimeout(timer),
     });
   }
 

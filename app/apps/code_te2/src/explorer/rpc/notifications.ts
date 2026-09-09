@@ -25,6 +25,7 @@ import {
 } from "../tree/view-utils.ts";
 
 interface ExplorerSearchOverlayController {
+  fetchChangesResults(force?: boolean): Promise<void> | void;
   handleSearchResultsUpdated(payload: JsonObject): void;
   handleSearchJobProgress(payload: JsonObject): void;
   handleSearchJobResult(payload: JsonObject): void;
@@ -99,6 +100,7 @@ interface ExplorerNotificationHandlerDeps {
   setGitControlsEnabled(enabled: boolean, showInit?: boolean): void;
   renderGitSummary(): void;
   setGitDiffBaseRef(ref: string): void;
+  applyGitDiffBaseSnapshot?(value: unknown): void;
   updateDiffBaseButtons(): void;
   toggleDrawer(open?: boolean): void;
 }
@@ -169,12 +171,10 @@ function coerceGitStatus(payload: JsonObject): ExplorerGitStatus {
 function applyProjectRootProjection(
   deps: ExplorerNotificationHandlerDeps,
   nextProjectPath: string | null,
-  options: { forceReset?: boolean } = {},
 ): boolean {
   if (!nextProjectPath) return false;
   const prevProjectPath = deps.runtimeState.getProjectPath() || "";
   const projectChanged =
-    options.forceReset === true ||
     (!!prevProjectPath && prevProjectPath !== nextProjectPath);
   deps.runtimeState.setProjectPath(nextProjectPath);
   if (!projectChanged) {
@@ -217,6 +217,7 @@ function getJobProgressDetail(
 export function createExplorerNotificationHandler(
   deps: ExplorerNotificationHandlerDeps,
 ) {
+  let selectionRefresh: { project: string; revision: string } | null = null;
   function handleExplorerNotification(
     method: ExplorerRpcNotificationMethod,
     payload: JsonObject,
@@ -435,6 +436,8 @@ export function createExplorerNotificationHandler(
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.gitDecorationsUpdated: {
+        const project = getNonEmptyString(payload.projectPath);
+        if (project && project !== deps.runtimeState.getProjectPath()) break;
         deps.treeDecorations.applyGitDecorations(payload);
         break;
       }
@@ -513,22 +516,37 @@ export function createExplorerNotificationHandler(
       case EXPLORER_RPC_NOTIFICATIONS.projectOpened: {
         const path = getProjectedProjectPath(payload);
         if (path) {
-          deps.nameSearchController.close("projectChanged");
-          deps.searchOverlayController.closeSearchOverlay("projectChanged");
-          applyProjectRootProjection(deps, path, { forceReset: true });
+          // Direct completion and the queued switch fact can both arrive here.
+          // Reset only on a real project transition: a late completion must not
+          // erase listings or Git title state already projected for this project.
+          if (applyProjectRootProjection(deps, path)) {
+            deps.nameSearchController.close("projectChanged");
+            deps.searchOverlayController.closeSearchOverlay("projectChanged");
+          }
           deps.dispatchProjectOpened(path, payload);
         }
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.gitStatusUpdated: {
+        const project = getNonEmptyString(payload.projectPath);
+        if (project && project !== deps.runtimeState.getProjectPath()) break;
         console.log("[GIT_STATUS_DEBUG] Received:", payload);
         deps.runtimeState.setGitStatus(coerceGitStatus(payload));
+        if (payload.diffBase) deps.applyGitDiffBaseSnapshot?.(payload.diffBase);
+        const selectedRefresh = payload.selectionOnly === true &&
+          selectionRefresh?.project === deps.runtimeState.getProjectPath() &&
+          selectionRefresh.revision === payload.selectionRevision;
+        if (!selectedRefresh && deps.searchOverlayController.isVisible() && deps.searchOverlayController.getSearchMode() === 'changes') {
+          void deps.searchOverlayController.fetchChangesResults(true);
+        }
         deps.renderBranchLabel();
         deps.renderGitSummary();
         deps.setGitControlsEnabled(true, false);
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.gitDiffBaseUpdated: {
+        const project = getNonEmptyString(payload.projectPath);
+        if (project && project !== deps.runtimeState.getProjectPath()) break;
         const ref = getNonEmptyString(payload.ref);
         if (ref) {
           deps.setGitDiffBaseRef(ref);
@@ -538,13 +556,20 @@ export function createExplorerNotificationHandler(
             deps.updateDiffBaseButtons();
           }
           if (deps.searchOverlayController.isVisible()) {
-            deps.renderSearchOverlay();
+            if (deps.searchOverlayController.getSearchMode() === 'changes') {
+              const revision = getNonEmptyString(payload.selectionRevision);
+              const currentProject = deps.runtimeState.getProjectPath() || '';
+              if (!revision || selectionRefresh?.project !== currentProject || selectionRefresh.revision !== revision) {
+                selectionRefresh = revision ? { project: currentProject, revision } : null;
+                void deps.searchOverlayController.fetchChangesResults(true);
+              }
+            } else deps.renderSearchOverlay();
           }
         }
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.gitRestored: {
-        deps.reloadCurrentFile();
+        if (payload.editorProjected !== true) deps.reloadCurrentFile();
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.jobProgress: {

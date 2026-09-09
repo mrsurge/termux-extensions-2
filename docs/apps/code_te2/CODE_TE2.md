@@ -733,6 +733,7 @@ Used by review save/discard, open/jump, search highlighting, and project-switch 
 |---|---|
 | `search.files.start` | Start file-name search. |
 | `search.content.start` | Start content search. |
+| `search.changes.start` | Start one bounded progressive selected-commit diff page. |
 | `search.job.cancel` | Cancel an active search job. |
 | `search.job.progress` | Progress/count notification from Rust to the initiating pipe lane. |
 | `search.job.result` | Progressive result notification. |
@@ -740,6 +741,173 @@ Used by review save/discard, open/jump, search highlighting, and project-switch 
 | `search.job.error` | Terminal error notification. |
 
 ### Presentation and limits
+
+#### Guarded Text-Edit Foundation (Phase 5)
+
+`service.fs` (NID 2100) exposes `fs.textEdits.compute` through the existing
+framework pipe. This is a pure computation, not a disk/draft mutation API.
+The required `TextEditsRequest` v1 contains `content`, `expectedSha256`, and
+`edits` with `startByte`, `endByte`, `expectedText`, and `replacement`.
+Unknown fields are rejected. Ranges address the original UTF-8 snapshot;
+Monaco UTF-16 coordinates must be converted by the producer. Regex replacement
+expansion is a producer responsibility; replacements here are literal strings.
+
+The Rust primitive verifies the full-content SHA-256 and expected range text,
+rejects invalid Unicode boundaries and overlaps (including ambiguous insertions
+at one position), and builds the result once from unmodified source slices.
+Untouched BOM/newline bytes are preserved; non-UTF-8 support is not implied by
+this string DTO. Content/output are capped at 375 KiB, edit count at 10,000,
+and aggregate expected/replacement text at 750 KiB. It runs on the bounded
+blocking filesystem read lane and retains its permit if its caller disconnects.
+
+`TextEditsResult` v1 returns `content`, `sourceSha256`, `contentSha256`, `changed`,
+and `appliedEdits` (excluding individually unchanged replacements). Stable
+`textEdit.*` error codes distinguish stale content, bad ranges, overlap, limits,
+and invalid expected text. No source content appears in error messages.
+Hunk Restore now uses this foundation; Find/Replace integration remains pending.
+Both will use disk content and direct disk writes regardless of autosave mode.
+Python must obtain draft-discard consent and fence draft revisions before sending
+mutations. Draft-aware search and replacement-as-draft are not part of Phase 5.
+
+`fs.textEdits.apply` accepts `DiskEditsRequest` v1: `root`, relative `path`,
+`expectedSha256`, and the same exact edits. Rust reads bounded strict UTF-8 disk
+content (no lossy decoding), validates all edits, stages output beside the file,
+preserves permissions, fsyncs, rechecks content/identity, and atomically replaces.
+Missing/special files, symlink path components, hardlinks, `.git` components,
+and traversal are rejected. No-op edits do not replace the inode. The result
+reports directory-fsync status separately because failure there is post-commit.
+Same-canonical-root edit transactions serialize through the scheduler and retain
+their lock through a running blocking write even on caller disconnect. Arbitrary
+external processes still have a final check-to-rename race; this is not filesystem
+compare-and-swap. Find/Replace producers and controls remain pending.
+
+`worker_services/text_edit_service.py` provides the typed asynchronous Python
+adapter. It validates response DTO versions, exact path/source identity, hashes,
+and field types rather than casting the transport reply into a trusted DTO.
+It does not retry timeouts or convert a post-commit directory-sync failure into
+a failed write. This adapter is internal; no Explorer mutation endpoint exposes
+it directly.
+
+`explorer/services/guarded_text_edits.py` owns internal prepare/execute transactions.
+Backend producers supply immutable exact edits and the source hash. Confirmations
+are client/project/path/generation/revision bound, expire after five minutes, and
+are bounded to 64 entries with 750 KiB edit-text payloads each. Hunk producers may
+also bind the selector; replacement is independent of Git comparison selection.
+Execution requires explicit draft-discard consent when applicable. The accepted
+task survives caller disconnect and shares `restore_activity.active_paths` with
+whole-file Restore. Failure/no-op leaves drafts untouched; a successful write
+clears only the confirmed revision and retains any newer draft. The shared
+`guarded_restore.project_disk_result` projects through existing editor, Git, WBA,
+and Explorer paths, rechecking revision before publishing clean cache state.
+Explorer Restore hunkPrepare/hunkApply phases use this transaction. Uncertain pipe timeouts are not retried;
+multi-file outcome reporting remains part of the subsequent Find/Replace integration.
+
+The internal `fs.textEdits.reverseHunk` computation accepts `ReverseHunkRequest`
+v1 (`baseline`, `content`, `expectedSha256`, `hunkIndex`) and returns
+`ReverseHunkResult` v1 with both buffer hashes and exact edits. It uses libgit2
+buffer diffing with three context lines and no interhunk merging. Original
+buffer slices, not the display rows that strip line endings, supply replacement
+bytes. Both buffers are bounded to 375 KiB and NUL content is rejected. It runs
+off-loop under the read semaphore and never writes. The disk-bound companion
+`fs.textEdits.prepareHunk` accepts a full immutable commit ID, root/path, disk hash,
+and index, reads the Git blob and guarded disk snapshot in Rust, and returns the
+exact edit. Moving refs are rejected. By Changes attaches action identity only
+when canonical buffer-hunk coordinates and display lines agree. Missing disk
+files, unsupported text, or ambiguous grouping remain display-only. Preparation
+also verifies the selector still resolves to the captured commit. The existing
+Explorer Restore RPC uses hunkPrepare/hunkApply phases; the per-hunk button warns
+that the entire unsaved draft will be discarded, while only the selected disk
+hunk is changed. Staged/index contents are never modified by this action.
+
+#### Search Replacement Preparation
+
+`explorer.search.replace` uses the Explorer lane with `prepare` and `apply`
+phases. Preparation selects `relativePath` plus `matchIndexes` from the current
+client-owned retained `searchId`/`projectGeneration`, not frontend-supplied edits.
+The session retains the original query and case/word/regex options. Each selected
+hit must carry one consistent `editTarget` hash and exact UTF-8 byte range.
+
+Python calls Rust `fs.textEdits.prepareReplace` with `PrepareReplaceRequest` v1:
+root/path, expectedSha256, query/options, replacement, and selected byte ranges.
+Rust reads one guarded disk snapshot, rejects a changed hash, verifies each range
+against the same search matcher, and returns `PreparedReplaceResult` v1 containing
+path/sourceSha256/edits without writing. Single-line BOM/transcoded hits remain
+display-only. Literal replacement is literal, including an empty string. Regex
+capture expansion supports `$0`, `$1`, `${name}`, `$name`, `$$`, and `$&`; expansion
+is bounded during construction. This is the current producer grammar, not a
+claim of complete Monaco replacement-pattern parity (case transforms, for example,
+are not implemented).
+
+Preparation is bounded to 700 distinct ranges, 375 KiB input/output and 750 KiB
+aggregate edit text. It runs in the scheduler's bounded blocking filesystem-read
+lane. Python rechecks session validity after the read, then creates a normal
+guarded text-edit consent. Apply consumes the token with explicit `discardDraft`;
+the existing disk-write, revision and result-projection contracts above apply.
+
+By contents uses `replacement-controller.ts` for ephemeral selection, dismissed
+files and replacement state. A twisty exposes a multiline replacement input;
+empty input means deletion. Static hit/file controls work without hover. Show All
+fetches one `explorer.search.more` window from `global:0` with both limits set to
+700; it reveals retained results rather than running another search. Select All
+also reveals all; file selection reveals and selects that file's retained hits.
+Checkboxes are created only for desktop user agents, not mobile user agents at
+any viewport width. Mobile selection uses an inset highlight without reserving
+checkbox space. Mobile-UA long press enters selection mode, movement cancels it, and later taps
+toggle hits instead of opening files. File-header long press also enters selection
+and reveals/selects the group. While selecting, header taps clear a fully selected
+group or reveal/select all retained hits if any is unselected. The long-press
+release click is guarded for both headers and hits.
+
+Replace All/Selected/File/Hit operate on retained indexes, excluding dismissed
+files. Hidden in-scope hits require a separate warning. Explicitly revealing them
+first avoids that warning, but never bypasses draft consent. Display-only targets
+reject replacement rather than being silently skipped. Actions wait for search
+completion. Search identity is rechecked around asynchronous reads/dialogs.
+
+Multi-file batches prepare and apply one file at a time, respecting the existing
+64-confirmation capacity. Each draft-bearing file has its own discard/cancel
+dialog. Outcomes are reported per file; errors stop remaining work and uncertain
+writes are never retried. Successful writes dismiss that file's now-stale result
+snapshot, including its unselected hits. Refresh results explicitly reruns the
+query for current disk identities. Successful earlier files are never rolled back.
+User live acceptance and broader end-to-end concurrency validation remain pending.
+
+#### Progressive Results
+
+- By changes uses the same start/result/done/error/cancel job lifecycle. The
+  start acknowledgement does not wait for Git enumeration or hunk generation.
+  Rust `framework_services/search_changes.rs` runs that work on the scheduler's
+  bounded blocking search lane; the editor file-open/Git lanes remain separate.
+- Each changes job resolves the requested comparison to an immutable commit.
+  The first page emits discovery metadata without a total, then confirmed file
+  diffs while later candidates are still unchecked. Final metadata supplies the
+  exact bounded total and continuation token before `search.job.done`. Existing
+  frontend metadata merging preserves file DOM during this final update.
+  HEAD browsing retains HEAD status enumeration; historical discovery uses
+  index-backed candidates with per-path selected-tree-to-disk verification.
+  Every hunk reads the pinned baseline. Continuations validate the full token
+  before emitting any results and reject HEAD movement in HEAD view.
+- One page contains at most 40 files. Next-page navigation replaces the page,
+  rather than accumulating unlimited diff bodies; First page restarts it.
+  The existing 20,000-candidate enumeration bound is explicitly reported as
+  truncation. A serialized file preview over 256 KiB retains its summary and
+  shows an omitted-body notice; existing binary/minified/whole-file suppression
+  remains in the Git provider.
+- `changesOffset` on `explorer.search.run` is accepted only for the cached,
+  completed current session's next offset. Python supplies its pinned hash and
+  opaque snapshot token to Rust. The token fingerprints ordered confirmed paths,
+  status codes, sizes, and modification times. A changed token requires refresh;
+  it is a continuation guard, not an atomic filesystem snapshot or content hash.
+- Python retains only comparison/continuation metadata for these pages, not a
+  second cache of hunk bodies. A bounded early-event buffer plus ordered startup
+  delivery handles events arriving before the correlated start reply. Late-start
+  jobs are cancelled after supersede/disconnect/project change. Cancellation is
+  cooperative between Git operations, not interruption inside a libgit2 call.
+- The frontend fences results by correlation/project/mode and reuses existing
+  file-group DOM while appending results. Closing, changing comparison, switching
+  projects, and disconnect discard obsolete jobs through the established event
+  lifecycle. Git/selection facts refresh the visible first page; there is no
+  polling or monolithic Python diff RPC fallback.
 
 - File/folder name search is an inline Explorer-tree projection, not a search
   overlay. The project-root label becomes the query field, direct hits and their
@@ -862,15 +1030,133 @@ Note: TE2 loads Monaco first (`editor.main.js`), then registers official themes 
 theme registration is skipped (by design) to avoid caching a no-op run.
 
 ### Diff mode behavior
+
+- `git.diffBase.updated` starts visible By changes enumeration immediately from
+  the persisted selection. Each selection fact carries an opaque
+  `selectionRevision`, echoed in its completion snapshot. The frontend skips
+  only a matching `selectionOnly` snapshot after it has initiated that search;
+  actual worktree/index snapshots still refresh, even with the same selection.
+  Snapshot application itself remains presentation-only. Overlay open and paging
+  are unchanged. Pending worktree invalidations survive coalescing with selection.
+  The Python selector handler only validates/persists and publishes
+  `GitDiffBaseChanged`; its render-state projector owns cache invalidation and
+  scheduled Git refresh. A direct handler broadcast duplicates that fact path,
+  especially when HEAD computation finishes before the scheduled refresh.
+- `worker_services/latest_projection.py` bounds each scheduled projection to one
+  running read and the latest pending callback. Baseline and Git-decoration
+  runners are independent; comparison/snapshot subscribers return after
+  scheduling, so native reads no longer hold the serial fact dispatcher. Running
+  thread-backed work is not cancelled on supersession: validity callbacks stop
+  obsolete publication after awaits. Project-generation and selected-ref checks
+  remain in force. Selection snapshots do not schedule a second baseline pass.
+  Workspace-file facts use the existing GitSnapshotRequested owner rather than
+  two separately timed refresh queues. This does not parallelize mutation facts.
+
+- By changes file headers use the same `src/explorer/tree/restore-action.ts`
+  guarded whole-file Restore flow as tree menus. Hunk header buttons collapse
+  their bodies independently. Each hunk initially displays at most 50 lines
+  including context; larger hunks offer a dark fade/blind control to snap fully
+  open or retract. This is visual clipping, not backend truncation or deferred
+  diff construction. Expansion lives only in the rendered DOM; progressive
+  appends preserve existing groups, while fresh results recreate controls.
+  Restore, collapse, and blind clicks never initiate file navigation. Error
+  notices and file summaries remain outside collapsed hunk bodies.
 - Git diff mode uses Monaco DiffEditor in inline mode (not side-by-side).
-- Draft diff mode is a custom overlay (decorations + view zones).
+- Draft-versus-disk uses the inline DiffEditor with disk as its original model.
+  Existing draft annotations still style the stock inline view where applicable.
 - Minimap is forced off in diff mode to avoid layout artifacts.
 - File switches clear the previous diff pair, complete the visible Monaco open,
   then issue a non-blocking `editor.gitBaselines.get` request. Its returned
-  disk/HEAD payload is applied only while its path is still active; original
+  mode-aware disk/selected-commit payload is applied only while its path is still active; original
   models are not retained as per-tab authority.
+- `comparison_backend.py` materializes both request and Git-fact push baselines
+  off the asyncio loop. Disk comparison performs no Git blob/commit reads;
+  commit comparison resolves the shared history-store ref to an immutable hash
+  before reading through the existing Rust `git.headBlob` `rev` parameter.
+- Host comparison commands live in `host/comparison_actions_backend.py`, keeping
+  baseline reads independent of editor runtime/preference dispatch. Outbound
+  UI IPC encoding/emission lives in `ui_ipc/notifications.py`; `ui_ipc_ws.py`
+  re-exports its emitter for existing callers. Editor runtime and preferences
+  import the outbound module directly rather than the namespace request layer,
+  avoiding a dependency cycle without changing routing or wire encoding.
+- The far-left status control combines filename, mode, and the shared Explorer
+  selector. `ui.host.comparison` is the host control lane; `GitDiffBaseChanged`
+  and `GitSnapshotChanged` project updates without reopening the active file.
+  Historical comparison selections are yellow in both selectors. This is a
+  baseline selection, not checkout or replacement of the editable document.
+- `comparisonMode` is a command, not a separate persisted preference. It updates
+  the established `showInlineDiffs`/`showDraftDiffs` flags atomically; disk mode
+  also sets `autoSave: false`. Drafts links apply disk mode before navigation.
+- Editor comparison notifications fence older baselines by ref and monotonic
+  revision; path and mode checks reject obsolete responses. By changes uses
+  correlated, generation-fenced requests and refreshes on Git/selection facts.
+- Historical candidates are the union of selected-tree-to-index deltas and
+  current index/worktree status paths, not just HEAD dirty paths. Only these
+  candidates undergo direct selected-tree-to-disk comparison, with literal
+  pathspecs. The same visitor powers collected Explorer decorations and streamed
+  By changes files; those consumers still schedule independently, without a
+  shared cache or waiting for each other's full projection.
+  Clean-against-HEAD files remain eligible;
+  files equal to the selected baseline are excluded even when dirty against HEAD.
+  HEAD retains its existing status semantics and result limits remain bounded.
 - Diff editor children hide vertical scrollbar chrome but retain automatic
   10-pixel horizontal scrollbars for long lines.
+
+Historical Explorer appearance is separate from actual Git safety state:
+
+- `explorer/services/git_comparison.py` retains one project/ref comparison map.
+  `runtime_notifications.py` resolves the selected immutable commit, enumerates
+  through `git.worktreeChanges.get`, and aggregates both selected and actual
+  ancestor decorations off-loop. Ref, refresh-revision, and supplied project
+  generation fences reject obsolete results before cache/publication.
+- `GitSnapshotChanged.decorations.statuses` stays actual HEAD/index status for
+  existing consumers. `nodes` supplies selected-comparison appearance;
+  `actualNodes` supplies independent action/warning metadata. Selection facts
+  schedule the existing Git refresh; no polling is added. Directory hydration
+  reads the comparison cache only. Historical files absent on disk remain in
+  By changes rather than synthetic normal-tree entries.
+- Enumeration is capped at 100,000 paths. Reaching that cap or failing to
+  resolve the comparison publishes empty historical decorations plus an explicit
+  `comparisonError` exposed on the tree; it never substitutes HEAD colors.
+- File tabs retain actual colors. Host boot and file-tab decoration events carry
+  `gitActual` for recent documents; active-file status shows separate modified
+  and staged warnings only with a non-HEAD comparison selection. These derive from actual
+  unstaged/untracked and staged lists, not drafts or historical appearance.
+- Explorer warning spans use CSS-generated icons, keeping label text and
+  canonical names clean, including sticky/compressed scopes.
+  The selector gates their visibility through `explorer-historical-view`;
+  returning to HEAD hides warnings without clearing underlying actual state.
+- Only `source: explorer_tree` navigation can enable commit diff based on a
+  cached historical path lookup. It performs no Git reads; explicit Drafts
+  navigation retains its disk-diff choice.
+- Historical stage/commit/reset are blocked at the UI/backend
+  boundary, with a second canonical-selection check immediately before the
+  off-loop mutation; these guards do not serialize external Git operations.
+- `explorer.git.restore` uses prepare/unstage/apply phases and a required captured
+  `projectPath`. `explorer/services/guarded_restore.py` owns up to 64 single-use
+  five-minute confirmation tokens bound to client, project generation, path,
+  comparison ref, immutable source, and draft revision. Rust
+  `git.restore.preview` fingerprints HEAD/index/worktree and guarded restore
+  checks that fingerprint again before writing, with index updates disabled.
+  Staged files require explicit path-scoped unstaging followed by fresh restore
+  confirmation. Missing source paths require explicit deletion confirmation.
+- Restore confirmation explicitly includes draft discard. Clear only the
+  confirmed draft state after Git succeeds; retain edits that arrive during the
+  mutation and report that retention. `restore_activity.py` prevents the ordinary
+  external-change watcher from independently clearing drafts during the owned
+  operation; the existing save-SHA guard handles delayed self-write events.
+  Backend document reload/close and `GitPathRestored` drive editor/WBA projection;
+  `editorProjected` prevents Explorer from reloading an unrelated foreground.
+  Accepted operations finish their projection even if the requesting socket
+  disconnects. Directory relists remain project/generation fenced.
+- A restored document that fails the existing editor admission policy closes
+  its shared tab membership with an explicit result message; restoring other
+  files does not attempt to load them into a foreground editor.
+- Guarded restore initially supports repository-root projects and regular files
+  up to 32 MiB; conflicts, symlinks, directories, and submodules fail closed.
+  Rename paths are independent, not an automatic two-path operation. State
+  checks cannot make the final write exclusive against arbitrary external Git
+  or filesystem processes. Old clients must reload to obtain confirmation tokens.
 
 ### Z-index policy
 
@@ -1658,10 +1944,19 @@ editor_touch_menu_utils.ts initializes the helper after editor DOM readiness.
 It passes the current mobile flag plus leading and navigation tools; it does not
 rely on an implicit all-tools default. inline_host.ts loads the UMD asset.
 
-The repository contains deployment artifacts, not a rebuildable local source
-worktree. Update these assets only from an approved external source publication
-and validate touch handles, wrapped lines, configuration changes, and the menu
-on a target device.
+The editable fork on this development device is `worktrees/monaco-touch-selection`
+(remote `mrsurge/monaco-touch-selection`). Run its `npm run build` and copy
+`dist/index.umd.cjs` to the vendored `monaco-touch-selection.patched.umd.js`.
+The historical `monaco-touch-selection-patched` directory is not the current
+source. Validate touch handles, wrapped lines, configuration changes, and the
+menu on a target device after publication.
+
+Handle coordinates use Monaco's `getScrolledVisiblePosition`, which already
+includes the gutter. Never subtract a cached margin width: editor recreation
+can change when the gutter first becomes measurable. The overlay sits at the
+editor origin, with document-coordinate handles and a matching negative scroll
+translation initialized during selection sync. Layout and content-size events
+resync selection geometry after inline diff changes.
 
 ## 33) Diagnostics owner-keyed markers
 

@@ -3,6 +3,7 @@ import { requestExplorerRpc } from "../rpc/client.ts";
 import { EXPLORER_RPC_METHODS } from "../rpc/contract.ts";
 
 export interface ExplorerJumpOptions {
+  source?: string;
   column?: number;
   focus?: boolean;
   scrollToTop?: boolean;
@@ -10,6 +11,7 @@ export interface ExplorerJumpOptions {
 }
 
 interface ExplorerFileOpenOptions {
+  source?: string;
   line?: number;
   column?: number;
   focus?: boolean;
@@ -29,6 +31,7 @@ function toOpenOptions(
   jumpOptions: ExplorerJumpOptions,
 ): ExplorerFileOpenOptions {
   const openOptions: ExplorerFileOpenOptions = {};
+  if (jumpOptions.source) openOptions.source = jumpOptions.source;
   if (typeof lineNumber === "number" && lineNumber >= 1) {
     openOptions.line = lineNumber;
   }

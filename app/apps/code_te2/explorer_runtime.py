@@ -86,7 +86,7 @@ from .worker_services.event_bus import current_project_generation
 class ExplorerDispatcher:
     def __init__(self, websocket: ExplorerConnection) -> None:
         self.websocket: ExplorerConnection = websocket
-        self.client_instance_id = websocket.client_instance_id
+        self.client_instance_id: str = websocket.client_instance_id
         self.project_root: Path = get_project_root()
         self._job_tracking: ExplorerJobTrackingRuntime | None = None
         self._tracked_job_ids: set[str] = set()
@@ -220,7 +220,7 @@ class ExplorerDispatcher:
     ) -> None:
         from .explorer.services.runtime_notifications import broadcast_git_status_update
 
-        await broadcast_git_status_update(
+        _ = await broadcast_git_status_update(
             project_root,
             project_generation=current_project_generation(project_root),
             source=source,
@@ -234,7 +234,7 @@ class ExplorerDispatcher:
         """
         from .explorer.services.runtime_notifications import broadcast_git_status_update
 
-        await broadcast_git_status_update(
+        _ = await broadcast_git_status_update(
             self.project_root,
             project_generation=current_project_generation(self.project_root),
             source="explorer_runtime:broadcast_git_decorations",
@@ -342,6 +342,7 @@ class ExplorerDispatcher:
 
     def _build_git_context(self) -> ExplorerGitHandlerContext:
         return ExplorerGitHandlerContext(
+            client_instance_id=self.client_instance_id,
             project_root=self.project_root,
             tracked_job_ids=self._tracked_job_ids,
             emit_personal=self.emit_personal,
@@ -960,27 +961,31 @@ class ExplorerDispatcher:
             ExplorerSearchReviewContractError,
             parse_search_run_params,
         )
-        from .explorer.handlers.search import (
-            handle_search_run as handle_search_run_request,
-        )
 
         try:
             params = parse_search_run_params(payload)
         except ExplorerSearchReviewContractError as exc:
             return await self.send_error(exc.message, msg_id)
 
-        if params["mode"] in ("name", "content"):
-            search_sessions = self._search_session_service()
-            if search_sessions is None:
-                return await self.send_error("Explorer search session service is unavailable", msg_id)
-            await search_sessions.run(params, msg_id)
-            return
+        search_sessions = self._search_session_service()
+        if search_sessions is None:
+            return await self.send_error("Explorer search session service is unavailable", msg_id)
+        await search_sessions.run(params, msg_id)
 
-        await handle_search_run_request(
-            self._build_search_review_context(),
-            params,
-            msg_id,
+    async def handle_search_replace(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.search_review import (
+            ExplorerSearchReviewContractError, parse_search_replace_params,
         )
+
+        sessions = self._search_session_service()
+        if sessions is None:
+            return await self.send_error('Explorer search session service is unavailable', msg_id)
+        try:
+            params = parse_search_replace_params(payload)
+            result = await sessions.replace(params, self.client_instance_id)
+        except (ValueError, ExplorerSearchReviewContractError) as exc:
+            return await self.send_error(str(exc), msg_id)
+        await self.emit_personal('explorer.search.replace.result', result, msg_id)
 
     async def handle_search_more(self, payload: JsonObject, msg_id: str | None) -> None:
         from .explorer.contracts.search_review import (

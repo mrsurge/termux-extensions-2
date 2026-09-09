@@ -215,6 +215,95 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn replace_prepare_pipe_is_read_only_and_snapshot_fenced() {
+        use crate::framework_services::text_edit_ops::sha256;
+        let root = test_root("replace-prepare");
+        fs::write(root.join("file.txt"), "cat cat").unwrap();
+        let scheduler = FrameworkServiceScheduler::default();
+        let responder = PipeIdentity { nid: 2100, name: "service.fs".into() };
+        let params = json!({"dto":"PrepareReplaceRequest", "version":1,
+            "root":root.to_str().unwrap(), "path":"file.txt", "expectedSha256":sha256("cat cat"),
+            "query":"cat", "replacement":"dog", "isRegex":false, "isCaseSensitive":true,
+            "isWholeWords":false, "ranges":[{"startByte":4,"endByte":7}]});
+        let response = dispatch_request(request("fs.textEdits.prepareReplace", params.clone(), &root),
+            &responder, &scheduler, None).await;
+        assert_eq!(response.result.as_ref().unwrap()["edits"][0]["replacement"], "dog");
+        assert_eq!(fs::read_to_string(root.join("file.txt")).unwrap(), "cat cat");
+        fs::write(root.join("file.txt"), "new cat").unwrap();
+        let response = dispatch_request(request("fs.textEdits.prepareReplace", params, &root),
+            &responder, &scheduler, None).await;
+        assert_eq!(response.error.unwrap().code, "textEdit.staleContent");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn computes_text_edits_without_writing_and_reports_stale_content() {
+        use crate::framework_services::text_edit_ops::sha256;
+        let root = test_root("text-edits");
+        fs::write(root.join("unchanged.txt"), "disk").unwrap();
+        let scheduler = FrameworkServiceScheduler::default();
+        let responder = PipeIdentity {
+            nid: 2100,
+            name: "service.fs".into(),
+        };
+        let response = dispatch_request(
+            request("fs.textEdits.reverseHunk", json!({"dto":"ReverseHunkRequest",
+                "version":1,"baseline":"old\r\n","content":"new\r\n",
+                "expectedSha256":sha256("new\r\n"),"hunkIndex":0}), &root),
+            &responder, &scheduler, None,
+        ).await;
+        assert_eq!(response.kind, PipeMessageKind::Response);
+        let edit = &response.result.as_ref().unwrap()["edits"][0];
+        assert_eq!(edit["replacement"], "old\r\n");
+        assert_eq!(edit["expectedText"], "new\r\n");
+        assert_eq!(fs::read_to_string(root.join("unchanged.txt")).unwrap(), "disk");
+        let params = json!({"dto":"TextEditsRequest","version":1,
+            "content":"draft text","expectedSha256":sha256("draft text"),
+            "edits":[{"startByte":0,"endByte":5,"expectedText":"draft","replacement":"new"}]});
+        // Repeating pure computation is safe; persistence is a different operation.
+        for _ in 0..2 {
+            let response = dispatch_request(
+                request("fs.textEdits.compute", params.clone(), &root),
+                &responder,
+                &scheduler,
+                None,
+            )
+            .await;
+            assert_eq!(response.kind, PipeMessageKind::Response);
+            assert_eq!(response.result.as_ref().unwrap()["content"], "new text");
+            assert_eq!(
+                fs::read_to_string(root.join("unchanged.txt")).unwrap(),
+                "disk"
+            );
+        }
+        let mut stale = params.clone();
+        stale["expectedSha256"] = json!(sha256("old"));
+        let response = dispatch_request(
+            request("fs.textEdits.compute", stale, &root),
+            &responder,
+            &scheduler,
+            None,
+        )
+        .await;
+        assert_eq!(response.error.unwrap().code, "textEdit.staleContent");
+        let mut invalid = params;
+        invalid["path"] = json!("unchanged.txt");
+        let response = dispatch_request(
+            request("fs.textEdits.compute", invalid, &root),
+            &responder,
+            &scheduler,
+            None,
+        )
+        .await;
+        assert_eq!(response.error.unwrap().code, "protocol.invalidParams");
+        assert_eq!(
+            fs::read_to_string(root.join("unchanged.txt")).unwrap(),
+            "disk"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn dispatches_fs_list_directory_to_contract_dto() {
         let root = test_root("dispatch");
         fs::write(root.join("main.py"), "print('hello')\n").expect("write file");
@@ -668,6 +757,53 @@ mod tests {
                 .is_some_and(|value| value >= 1)
         );
 
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn dispatches_progressive_changes_and_routes_ordered_results() {
+        let root = test_root("changes-progressive");
+        git2::Repository::init(&root).unwrap();
+        fs::write(root.join("new.txt"), "one line\n").unwrap();
+        let scheduler = FrameworkServiceScheduler::default();
+        let sink = Arc::new(TestSink::default());
+        let response = tokio::time::timeout(Duration::from_secs(1), dispatch_request(
+            targeted_request("search.changes.start", json!({"dto":"SearchChangesRequest","version":1,"correlationId":"changes-test"}), &root, 2300, "service.search"),
+            &PipeIdentity { nid:2300, name:"service.search".into() }, &scheduler, Some(sink.clone()),
+        )).await.expect("start must acknowledge without waiting for hunks");
+        assert_eq!(response.kind, PipeMessageKind::Response);
+        assert_eq!(response.result.as_ref().unwrap()["kind"], "changes");
+        for _ in 0..100 {
+            if sink
+                .frames
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|e| e.method.as_deref() == Some("search.job.done"))
+            {
+                break;
+            }
+            sleep(Duration::from_millis(25)).await;
+        }
+        let frames = sink.frames.lock().unwrap();
+        let results: Vec<_> = frames
+            .iter()
+            .filter(|e| e.method.as_deref() == Some("search.job.result"))
+            .collect();
+        assert_eq!(results.len(), 3, "discovery, file, final metadata: {frames:?}");
+        assert_eq!(
+            results[2].params.as_ref().unwrap()["result"]["metadata"]["total"],
+            1
+        );
+        assert_eq!(
+            results[1].params.as_ref().unwrap()["result"]["change"]["rel"],
+            "new.txt"
+        );
+        assert_eq!(results[1].target_nid, Some(1100));
+        assert_eq!(
+            frames.last().unwrap().method.as_deref(),
+            Some("search.job.done")
+        );
         let _ = fs::remove_dir_all(root);
     }
 

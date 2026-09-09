@@ -85,6 +85,7 @@ DISPATCHER_MESSAGE_TYPE_BY_RPC_METHOD: dict[str, str] = {
     "explorer.search.more": "search:more",
     "explorer.search.moreInFile": "search:moreInFile",
     "explorer.search.run": "search:run",
+    "explorer.search.replace": "search:replace",
     "explorer.watcher.config.get": "watcher:getConfig",
     "explorer.watcher.limit.raise": "watcher:raiseLimit",
     "explorer.watcher.mode.set": "watcher:setMode",

@@ -90,6 +90,9 @@ def get_runtime_metadata() -> JsonObject:
 
 
 def build_state_payload(deps: StatePayloadDeps) -> JsonObject:
+    from ...explorer.services.git_comparison import actual_flags
+    from ...worker_services import git_service
+
     project_path = deps.history.get_active_project()
     project_exists = bool(project_path and Path(project_path).is_dir())
     project_label = deps.format_label(project_path)
@@ -125,10 +128,14 @@ def build_state_payload(deps: StatePayloadDeps) -> JsonObject:
 
     editor_prefs = deps.preferences.get_preferences(project_path)
     runtime_meta = get_runtime_metadata()
+    flags = actual_flags(git_service.get_cached_snapshot(Path(project_path))) if project_path else {}
+    recent_paths = {str(entry.get("path") or "") for entry in recents}
+    visible_flags = {rel: value for rel, value in flags.items() if str(Path(project_path or "") / rel) in recent_paths}
     diff_base_info = build_diff_base_payload(deps, project_path if project_exists else None)
 
     return {
         "activeProject": project_path,
+        "gitActual": visible_flags,
         "activeProjectLabel": project_label,
         "activeProjectExists": project_exists,
         "activeProjectMessage": project_message,

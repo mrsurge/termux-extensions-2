@@ -70,6 +70,7 @@ export const EDITOR_RPC_NOTIFICATIONS = {
   fileJumpToLine: "editor.file.jumpToLine",
   mirrorUpdated: "editor.mirror.updated",
   gitBaselines: "editor.gitBaselines.updated",
+  comparisonChanged: "editor.comparison.changed",
   draftDiff: "editor.draftDiff.updated",
   prefsChanged: "editor.prefs.changed",
   cacheState: "editor.cache.state",

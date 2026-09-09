@@ -6,8 +6,10 @@ import { normalizeContentSearchResults } from "./result-model.ts";
 import { renderHighlightedSearchSnippet } from "./render-styling.ts";
 import { getErrorMessage } from "../utils/errors.ts";
 import type { ExplorerJumpOptions } from "../host/file-open-bridge.ts";
+import type { ContentReplacementController } from './replacement-controller.ts';
 
 interface ExplorerSearchResultsRendererDeps {
+  replacement?: ContentReplacementController;
   toast(message: string): void;
   openFileAndMaybeJump(
     rel: string,
@@ -54,7 +56,8 @@ export function renderContentResults(
   data: unknown,
   deps: ExplorerSearchResultsRendererDeps,
 ): void {
-  const payload = normalizeContentSearchResults(data);
+  const payload = deps.replacement?.view(data) || normalizeContentSearchResults(data);
+  deps.replacement?.toolbar(container);
   const results = Array.isArray(payload.results) ? payload.results : [];
   const list = document.createElement("div");
   list.className = "fe-search-list";
@@ -84,9 +87,10 @@ export function renderContentResults(
         ? `${matches.length} of ${fileTotal}`
         : `${matches.length}`;
     fileHeader.appendChild(fileMeta);
+    deps.replacement?.header(fileHeader, fileResult);
     fileGroup.appendChild(fileHeader);
 
-    matches.forEach((match: ExplorerContentSearchMatch) => {
+    matches.forEach((match: ExplorerContentSearchMatch, index: number) => {
       const matchRow = document.createElement("div");
       matchRow.className = "fe-search-match";
       matchRow.onclick = async () => {
@@ -134,6 +138,7 @@ export function renderContentResults(
         column: snippetText === match.text ? match.column : null,
       });
       matchRow.appendChild(snippet);
+      deps.replacement?.hit(matchRow, fileResult, index);
 
       fileGroup.appendChild(matchRow);
     });

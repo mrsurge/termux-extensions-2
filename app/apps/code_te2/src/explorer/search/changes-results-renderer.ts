@@ -8,6 +8,7 @@ import {
 } from './utils.ts';
 import { renderHighlightedDiffText } from './render-styling.ts';
 import type { ExplorerJumpOptions } from '../host/file-open-bridge.ts';
+import type { HunkRestoreIdentity } from '../tree/restore-action.ts';
 
 interface ExplorerChangeLine {
   type?: string;
@@ -16,21 +17,26 @@ interface ExplorerChangeLine {
 
 interface ExplorerChangeHunk extends ExplorerDiffHunkLike {
   lines?: ExplorerChangeLine[];
+  restore?: HunkRestoreIdentity;
 }
 
 interface ExplorerChangeEntry extends ExplorerDiffChangeLike {
+  error?: string;
   rel?: string;
   statusText?: string;
   hunks?: ExplorerChangeHunk[];
 }
 
 interface ExplorerChangesPayload {
+  complete?: boolean;
   git?: boolean;
   changes?: ExplorerChangeEntry[];
   base?: ExplorerDiffBaseInfo;
 }
 
 interface ExplorerChangesResultsRendererDeps {
+  restoreFile(rel: string): Promise<void>;
+  restoreHunk(rel: string, identity: HunkRestoreIdentity): Promise<void>;
   getGitDiffBase(): ExplorerDiffBaseInfo;
   ensureInlineDiffs(): Promise<void>;
   openFileAndMaybeJump(
@@ -86,6 +92,7 @@ export function createExplorerChangesResultsRenderer(
 ) {
   let lastChangesData: ExplorerChangesPayload | null = null;
   let lastChangesContainer: HTMLElement | null = null;
+  const renderedGroups = new WeakMap<ExplorerChangeEntry, HTMLElement>();
 
   function renderChangesResults(container: HTMLElement, data: unknown): void {
     lastChangesContainer = container;
@@ -164,7 +171,7 @@ export function createExplorerChangesResultsRenderer(
     data: ExplorerChangesPayload,
     wasOriginallyEmpty: boolean,
   ): void {
-    container.innerHTML = '';
+    container.querySelectorAll(':scope > .fe-search-empty, :scope > .fe-search-changes-note').forEach(node => node.remove());
     if (data.git === false) {
       container.innerHTML =
         '<div class="fe-search-empty">Open a Git project to view changes.</div>';
@@ -183,23 +190,31 @@ export function createExplorerChangesResultsRenderer(
         deps.getGitDiffBase().ref ||
         'HEAD';
       note.textContent = `Comparing against ${ref}`;
-      container.appendChild(note);
+      container.prepend(note);
     }
 
     if (!entries.length) {
       const empty = document.createElement('div');
       empty.className = 'fe-search-empty';
       empty.textContent = wasOriginallyEmpty
-        ? 'Working tree is clean.'
+        ? data.complete === false ? 'Waiting for diffs…' : 'No changes against the selected commit.'
         : 'No matching changes found.';
       container.appendChild(empty);
+      container.querySelector(':scope > .fe-search-changes')?.remove();
       return;
     }
 
-    const list = document.createElement('div');
+    const list = container.querySelector<HTMLElement>(':scope > .fe-search-changes') || document.createElement('div');
     list.className = 'fe-search-changes';
+    const keep = new Set<HTMLElement>();
+    const place = (group: HTMLElement, index: number): void => {
+      keep.add(group);
+      if (list.children[index] !== group) list.insertBefore(group, list.children[index] || null);
+    };
 
-    entries.forEach((change) => {
+    entries.forEach((change, index) => {
+      const cached = renderedGroups.get(change);
+      if (cached) { place(cached, index); return; }
       const rel = change.rel || '';
       const group = document.createElement('div');
       group.className = 'fe-search-file-group fe-search-change-group';
@@ -236,6 +251,19 @@ export function createExplorerChangesResultsRenderer(
       statusText.textContent = change.statusText || '';
       meta.appendChild(statusText);
       header.appendChild(meta);
+      const restore = document.createElement('button');
+      restore.type = 'button';
+      restore.className = 'fe-search-change-restore';
+      restore.textContent = 'Restore...';
+      restore.setAttribute('aria-label', `Restore ${rel} from selected commit`);
+      restore.onclick = async (event) => {
+        event.stopPropagation();
+        if (restore.disabled) return;
+        restore.disabled = true;
+        try { await deps.restoreFile(rel); }
+        finally { restore.disabled = false; }
+      };
+      header.appendChild(restore);
       group.appendChild(header);
 
       const hunks = Array.isArray(change.hunks) ? change.hunks : [];
@@ -247,16 +275,40 @@ export function createExplorerChangesResultsRenderer(
           const hunkBlock = document.createElement('div');
           hunkBlock.className = 'fe-search-hunk';
 
-          const hunkHeader = document.createElement('div');
-          hunkHeader.className = 'fe-search-hunk-header';
+          const hunkHeader = document.createElement('button');
+          hunkHeader.type = 'button';
+          hunkHeader.className = 'fe-search-hunk-header fe-search-hunk-toggle';
           hunkHeader.textContent = formatHunkHeader(hunk);
           hunkHeader.dataset.line = String(
             Number(hunk.newStart || hunk.oldStart || 1),
           );
           hunkBlock.appendChild(hunkHeader);
+          const identity = hunk.restore;
+          if (identity && typeof identity.commit === 'string' && typeof identity.sourceSha256 === 'string' && Number.isInteger(identity.hunkIndex)) {
+            const restoreHunk = document.createElement('button');
+            restoreHunk.type = 'button';
+            restoreHunk.className = 'fe-search-change-restore';
+            restoreHunk.textContent = 'Restore hunk...';
+            restoreHunk.onclick = async (event) => {
+              event.stopPropagation();
+              if (restoreHunk.disabled) return;
+              restoreHunk.disabled = true;
+              try { await deps.restoreHunk(rel, identity); }
+              finally { restoreHunk.disabled = false; }
+            };
+            hunkBlock.appendChild(restoreHunk);
+          }
 
           const diffRows = document.createElement('div');
           diffRows.className = 'fe-search-diff-rows';
+          hunkHeader.setAttribute('aria-expanded', 'true');
+          const body = document.createElement('div');
+          body.className = 'fe-search-hunk-body';
+          hunkHeader.onclick = (event) => {
+            event.stopPropagation();
+            body.hidden = !body.hidden;
+            hunkHeader.setAttribute('aria-expanded', String(!body.hidden));
+          };
 
           let oldLine = typeof hunk.oldStart === 'number' ? hunk.oldStart : 0;
           let newLine = typeof hunk.newStart === 'number' ? hunk.newStart : 0;
@@ -314,17 +366,44 @@ export function createExplorerChangesResultsRenderer(
             diffRows.appendChild(row);
           });
 
-          hunkBlock.appendChild(diffRows);
+          body.appendChild(diffRows);
+          if (lines.length > 50) {
+            diffRows.classList.add('is-blinded');
+            const blind = document.createElement('button');
+            blind.type = 'button';
+            blind.className = 'fe-search-hunk-blind';
+            const updateBlind = (): void => {
+              const clipped = diffRows.classList.contains('is-blinded');
+              blind.textContent = clipped ? `Show remaining ${lines.length - 50} lines` : 'Show first 50 lines';
+              blind.setAttribute('aria-expanded', String(!clipped));
+              blind.classList.toggle('is-blinded', clipped);
+            };
+            blind.onclick = (event) => {
+              event.stopPropagation();
+              diffRows.classList.toggle('is-blinded');
+              updateBlind();
+            };
+            updateBlind();
+            body.appendChild(blind);
+          }
+          hunkBlock.appendChild(body);
           hunksContainer.appendChild(hunkBlock);
         });
 
         group.appendChild(hunksContainer);
       }
 
-      list.appendChild(group);
+      if (change.error) {
+        const notice = document.createElement('div');
+        notice.className = 'fe-search-error'; notice.textContent = change.error;
+        group.append(notice);
+      }
+      renderedGroups.set(change, group);
+      place(group, index);
     });
 
-    container.appendChild(list);
+    for (const child of [...list.children]) if (!keep.has(child as HTMLElement)) child.remove();
+    if (list.parentElement !== container) container.appendChild(list);
   }
 
   return {

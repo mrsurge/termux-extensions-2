@@ -91,6 +91,7 @@ enum SearchJobEvent {
 enum SearchJobKind {
     Files,
     Content,
+    Changes,
 }
 
 impl SearchJobKind {
@@ -98,6 +99,7 @@ impl SearchJobKind {
         match self {
             Self::Files => "files",
             Self::Content => "content",
+            Self::Changes => "changes",
         }
     }
 
@@ -105,6 +107,7 @@ impl SearchJobKind {
         match self {
             Self::Files => "File search started",
             Self::Content => "Content search started",
+            Self::Changes => "Changes search started",
         }
     }
 }
@@ -160,6 +163,114 @@ impl Default for FrameworkServiceScheduler {
 }
 
 impl FrameworkServiceScheduler {
+    pub(crate) async fn apply_text_edits(
+        &self,
+        mut request: super::text_edit_disk::DiskEditsRequest,
+    ) -> Result<super::text_edit_disk::DiskEditsResult, super::text_edit_ops::EditError> {
+        use super::{text_edit_disk, text_edit_ops::EditError};
+        let permit = self
+            .acquire(self.inner.fs_write.clone())
+            .await
+            .map_err(|_| EditError::Unavailable)?;
+        let root = request.root.clone();
+        request.root = tokio::task::spawn_blocking(move || std::fs::canonicalize(root))
+            .await
+            .map_err(|_| EditError::Unavailable)?
+            .map_err(|_| EditError::InvalidPath)?
+            .to_string_lossy()
+            .into_owned();
+        let guard = self
+            .repo_lock(request.root.clone())
+            .await
+            .lock_owned()
+            .await;
+        // Retain ownership until the native write finishes even if the request
+        // future is dropped. Never release a lock around a still-running write.
+        tokio::task::spawn_blocking(move || {
+            let (_permit, _guard) = (permit, guard);
+            text_edit_disk::apply(request)
+        })
+        .await
+        .map_err(|_| EditError::Unavailable)?
+    }
+
+    pub(crate) async fn compute_text_edits(
+        &self,
+        request: super::text_edit_ops::TextEditsRequest,
+    ) -> Result<super::text_edit_ops::TextEditsResult, super::text_edit_ops::EditError> {
+        use super::text_edit_ops::{self, EditError};
+        // Pure CPU work shares the bounded read lane, never the mutation lock.
+        // Keep its permit inside the blocking closure even if the caller leaves.
+        let permit = self
+            .acquire(self.inner.fs_read.clone())
+            .await
+            .map_err(|_| EditError::Unavailable)?;
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            text_edit_ops::compute(request)
+        })
+        .await
+        .map_err(|_| EditError::Unavailable)?
+    }
+
+    pub(crate) async fn reverse_hunk(
+        &self,
+        request: super::hunk_edits::ReverseHunkRequest,
+    ) -> Result<super::hunk_edits::ReverseHunkResult, super::text_edit_ops::EditError> {
+        use super::{hunk_edits, text_edit_ops::EditError};
+        // Pure CPU work shares the bounded read lane, never the mutation lock.
+        // Keep its permit inside the blocking closure even if the caller leaves.
+        let permit = self
+            .acquire(self.inner.fs_read.clone())
+            .await
+            .map_err(|_| EditError::Unavailable)?;
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            hunk_edits::reverse(request)
+        })
+        .await
+        .map_err(|_| EditError::Unavailable)?
+    }
+
+    pub(crate) async fn prepare_hunk(
+        &self,
+        request: super::hunk_edits::PrepareHunkRequest,
+    ) -> Result<super::hunk_edits::ReverseHunkResult, super::text_edit_ops::EditError> {
+        use super::{hunk_edits, text_edit_ops::EditError};
+        // Pure CPU work shares the bounded read lane, never the mutation lock.
+        // Keep its permit inside the blocking closure even if the caller leaves.
+        let permit = self
+            .acquire(self.inner.fs_read.clone())
+            .await
+            .map_err(|_| EditError::Unavailable)?;
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            hunk_edits::prepare(request)
+        })
+        .await
+        .map_err(|_| EditError::Unavailable)?
+    }
+
+    pub(crate) async fn prepare_replace(
+        &self,
+        request: super::search_replacements::PrepareReplaceRequest,
+    ) -> Result<super::search_replacements::PreparedReplaceResult, super::text_edit_ops::EditError>
+    {
+        use super::{search_replacements, text_edit_ops::EditError};
+        // Pure CPU work shares the bounded read lane, never the mutation lock.
+        // Keep its permit inside the blocking closure even if the caller leaves.
+        let permit = self
+            .acquire(self.inner.fs_read.clone())
+            .await
+            .map_err(|_| EditError::Unavailable)?;
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            search_replacements::prepare(request)
+        })
+        .await
+        .map_err(|_| EditError::Unavailable)?
+    }
+
     pub(crate) fn run_targets(&self) -> &run_target_ops::RunTargetRegistry {
         &self.inner.run_targets
     }
@@ -445,6 +556,14 @@ impl FrameworkServiceScheduler {
         request: git_ops::GitProviderRequest,
     ) -> Result<git_ops::GitMutationResult, git_ops::GitProviderError> {
         self.git_mutation(request.clone(), move || git_ops::git_unstage(request))
+            .await
+    }
+
+    pub(crate) async fn git_restore_preview(
+        &self,
+        request: git_ops::GitProviderRequest,
+    ) -> Result<git_ops::GitRestorePreview, git_ops::GitProviderError> {
+        self.git_read(move || git_ops::git_restore_preview(request))
             .await
     }
 
@@ -947,6 +1066,51 @@ impl FrameworkServiceScheduler {
         };
         self.finish_search_job(result, context, entry, false, event_tx)
             .await;
+    }
+
+    pub(crate) async fn start_changes_job(
+        &self,
+        mut params: super::search_changes::ChangesRequest,
+        request: PipeEnvelope,
+        sink: Option<Arc<dyn PipeEventSink>>,
+    ) -> Result<search_ops::SearchJobStarted, search_ops::SearchProviderError> {
+        let root = search_ops::resolved_root_string(params.root.as_deref())?;
+        params.root = Some(root.clone());
+        let (started, context, entry) = self
+            .prepare_search_job(
+                SearchJobKind::Changes,
+                root,
+                params.project_generation,
+                params.correlation_id.clone(),
+                request,
+                sink,
+            )
+            .await?;
+        let scheduler = self.clone();
+        tokio::spawn(async move {
+            let (tx, rx) = mpsc::channel(SEARCH_EVENT_QUEUE_CAPACITY);
+            spawn_search_event_emitter(context.clone(), rx);
+            let result_tx = tx.clone();
+            let cancelled = Arc::clone(&entry.cancelled);
+            let producer_cancelled = Arc::clone(&entry.cancelled);
+            let metrics = Arc::clone(&context.event_metrics);
+            let result = scheduler
+                .search_read(move || {
+                    super::search_changes::run(params, producer_cancelled, move |value| {
+                        send_required_search_event_blocking(
+                            &result_tx,
+                            SearchJobEvent::Result(value),
+                            &cancelled,
+                            &metrics,
+                        )
+                    })
+                })
+                .await;
+            scheduler
+                .finish_search_job(result, context, entry, false, tx)
+                .await;
+        });
+        Ok(started)
     }
 
     async fn finish_search_job(

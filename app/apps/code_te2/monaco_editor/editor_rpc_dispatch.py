@@ -1,5 +1,6 @@
 # pyright: strict
 from __future__ import annotations
+import asyncio
 
 import time
 from collections.abc import Awaitable, Callable
@@ -43,7 +44,6 @@ from .editor_backend_services.contracts import RuntimeMeta
 from ..open_state_backend import ClientForegroundPayload, SidecarOpenStatePayload
 from .editor_view_state_backend import (
     GetCachedDocumentFn,
-    GitHeadTextFn,
     ReadDiskTextFn,
     RecordFileActivityFn,
     build_editor_draft_diff_payload,
@@ -85,7 +85,6 @@ async def dispatch_editor_rpc_request(
     runtime_meta: RuntimeMetaFn,
     read_file_payload: ReadFilePayloadFn,
     read_disk_text: ReadDiskTextFn,
-    git_head_text: GitHeadTextFn,
     get_cached_document: GetCachedDocumentFn,
     record_sidecar_open_file: RecordSidecarOpenFileFn,
     emit_open_state_changed: EmitOpenStateChangedFn,
@@ -253,14 +252,13 @@ async def dispatch_editor_rpc_request(
         )
 
     if method == EDITOR_RPC_METHOD_GIT_BASELINES_GET:
-        return build_editor_git_baselines_payload(
+        return await asyncio.to_thread(build_editor_git_baselines_payload,
             params,
             source_client=source_client,
             active_project=active_project,
             normalize_abs_path=normalize_abs_path,
             is_under_project=is_under_project,
             read_disk_text=read_disk_text,
-            git_head_text=git_head_text,
         )
 
     if method == EDITOR_RPC_METHOD_DRAFT_DIFF_GET:

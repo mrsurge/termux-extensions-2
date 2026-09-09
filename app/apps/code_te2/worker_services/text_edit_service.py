@@ -1,0 +1,144 @@
+# pyright: strict
+"""Typed disk-edit transport; callers own draft consent and result projection."""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import cast
+
+from app.libs import pipe_runtime
+
+
+@dataclass(frozen=True)
+class ExactEdit:
+    start_byte: int
+    end_byte: int
+    expected_text: str
+    replacement: str
+
+
+@dataclass(frozen=True)
+class DiskEditResult:
+    path: str
+    content: str
+    source_sha256: str
+    content_sha256: str
+    changed: bool
+    applied_edits: int
+    directory_synced: bool
+
+
+def _mapping(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise ValueError("Invalid disk-edit result object")
+    return cast(dict[str, object], value)
+
+
+def _hash(value: object) -> str:
+    if not isinstance(value, str) or len(value) != 64 or any(c not in '0123456789abcdefABCDEF' for c in value):
+        raise ValueError("Invalid disk-edit hash")
+    return value.lower()
+
+
+def _result(raw: object, path: str, source_sha256: str) -> DiskEditResult:
+    value = _mapping(raw)
+    edit = _mapping(value.get('edit'))
+    if (value.get('dto') != 'DiskEditsResult' or type(value.get('version')) is not int
+            or value.get('version') != 1 or value.get('path') != path
+            or edit.get('dto') != 'TextEditsResult' or type(edit.get('version')) is not int
+            or edit.get('version') != 1):
+        raise ValueError("Unexpected disk-edit result identity")
+    content, changed = edit.get('content'), edit.get('changed')
+    count, synced = edit.get('appliedEdits'), value.get('directorySynced')
+    if (not isinstance(content, str) or not isinstance(changed, bool)
+            or not isinstance(count, int) or isinstance(count, bool) or count < 0
+            or not isinstance(synced, bool)):
+        raise ValueError("Invalid disk-edit result fields")
+    source = _hash(edit.get('sourceSha256'))
+    output = _hash(edit.get('contentSha256'))
+    if source != _hash(source_sha256):
+        raise ValueError("Unexpected disk-edit source identity")
+    return DiskEditResult(path, content, source, output, changed, count, synced)
+
+
+async def apply_disk_edits(
+    project: Path, path: str, source_sha256: str, edits: tuple[ExactEdit, ...],
+) -> DiskEditResult:
+    """Apply once through Rust. A timeout is not permission to retry a mutation."""
+    expected = _hash(source_sha256)
+    # The async pipe adapter moves its blocking wait off the app event loop.
+    # No autosave/draft field is sent: this operation always targets disk.
+    raw = await pipe_runtime.call_async(
+        'fs.textEdits.apply',
+        {'dto': 'DiskEditsRequest', 'version': 1, 'root': str(project),
+         'path': path, 'expectedSha256': expected,
+         'edits': [{'startByte': edit.start_byte, 'endByte': edit.end_byte,
+                    'expectedText': edit.expected_text, 'replacement': edit.replacement}
+                   for edit in edits]},
+        target_nid=2100, target_name='service.fs', workspace_root=str(project),
+        origin_name='code_te2.explorer.text_edits',
+    )
+    return _result(raw, path, expected)
+
+
+async def prepare_hunk(project: Path, path: str, commit: str, source: str, index: int) -> tuple[ExactEdit, ...]:
+    raw = await pipe_runtime.call_async('fs.textEdits.prepareHunk', {
+        'dto': 'PrepareHunkRequest', 'version': 1, 'root': str(project), 'path': path,
+        'commit': commit, 'expectedSha256': _hash(source), 'hunkIndex': index,
+    }, target_nid=2100, target_name='service.fs', workspace_root=str(project),
+        origin_name='code_te2.explorer.text_edits')
+    value = _mapping(raw)
+    if value.get('dto') != 'ReverseHunkResult' or type(value.get('version')) is not int or value.get('version') != 1 or _hash(value.get('sourceSha256')) != _hash(source):
+        raise ValueError('Invalid prepared hunk identity')
+    _ = _hash(value.get('baselineSha256'))
+    edits = value.get('edits')
+    if not isinstance(edits, list):
+        raise ValueError('Invalid prepared hunk edits')
+    rows = cast(list[object], edits)
+    if len(rows) != 1:
+        raise ValueError('Invalid prepared hunk edits')
+    edit = _mapping(rows[0])
+    start, end = edit.get('startByte'), edit.get('endByte')
+    expected, replacement = edit.get('expectedText'), edit.get('replacement')
+    if not isinstance(start, int) or isinstance(start, bool) or not isinstance(end, int) or isinstance(end, bool) or not 0 <= start <= end or not isinstance(expected, str) or not isinstance(replacement, str):
+        raise ValueError('Invalid prepared hunk range')
+    return (ExactEdit(start, end, expected, replacement),)
+
+
+async def prepare_replacement(
+    project: Path, path: str, source: str, query: str, replacement: str,
+    ranges: tuple[tuple[int, int], ...], *, is_regex: bool,
+    is_case_sensitive: bool, is_whole_words: bool,
+) -> tuple[ExactEdit, ...]:
+    """Ask Rust to validate selected occurrences and expand regex captures."""
+    raw = await pipe_runtime.call_async('fs.textEdits.prepareReplace', {
+        'dto': 'PrepareReplaceRequest', 'version': 1, 'root': str(project),
+        'path': path, 'expectedSha256': _hash(source), 'query': query,
+        'replacement': replacement, 'isRegex': is_regex,
+        'isCaseSensitive': is_case_sensitive, 'isWholeWords': is_whole_words,
+        'ranges': [{'startByte': start, 'endByte': end} for start, end in ranges],
+    }, target_nid=2100, target_name='service.fs', workspace_root=str(project),
+        origin_name='code_te2.explorer.text_edits')
+    value = _mapping(raw)
+    if (value.get('dto') != 'PreparedReplaceResult' or type(value.get('version')) is not int
+            or value.get('version') != 1 or value.get('path') != path
+            or _hash(value.get('sourceSha256')) != _hash(source)):
+        raise ValueError('Invalid prepared replacement identity')
+    rows = value.get('edits')
+    if not isinstance(rows, list) or len(cast(list[object], rows)) != len(ranges):
+        raise ValueError('Invalid prepared replacement count')
+    wanted = set(ranges)
+    edits: list[ExactEdit] = []
+    for row in cast(list[object], rows):
+        edit = _mapping(row)
+        start, end = edit.get('startByte'), edit.get('endByte')
+        expected, inserted = edit.get('expectedText'), edit.get('replacement')
+        if (type(start) is not int or type(end) is not int
+                or (start, end) not in wanted or not isinstance(expected, str)
+                or not isinstance(inserted, str) or len(expected.encode('utf-8')) != end - start):
+            raise ValueError('Invalid prepared replacement range')
+        wanted.remove((start, end))
+        edits.append(ExactEdit(start, end, expected, inserted))
+    if wanted:
+        raise ValueError('Missing prepared replacement range')
+    return tuple(edits)

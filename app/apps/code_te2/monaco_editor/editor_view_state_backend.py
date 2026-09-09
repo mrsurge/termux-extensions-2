@@ -14,7 +14,6 @@ ActiveProjectFn = Callable[[], str | None]
 NormalizeAbsPathFn = Callable[[str], str | None]
 IsUnderProjectFn = Callable[[str, str], bool]
 ReadDiskTextFn = Callable[[str], str]
-GitHeadTextFn = Callable[[str, str], str | None]
 GetCachedDocumentFn = Callable[[str, str], dict[str, object] | None]
 ComputeDraftDiffFn = Callable[[str, str, str], dict[str, object]]
 compute_draft_diff: ComputeDraftDiffFn = cast(ComputeDraftDiffFn, _compute_draft_diff)
@@ -111,7 +110,6 @@ def build_editor_git_baselines_payload(
     normalize_abs_path: NormalizeAbsPathFn,
     is_under_project: IsUnderProjectFn,
     read_disk_text: ReadDiskTextFn,
-    git_head_text: GitHeadTextFn,
 ) -> JsonMap:
     project = _active_project_or_raise(active_project)
     path = _resolve_required_path(
@@ -120,20 +118,9 @@ def build_editor_git_baselines_payload(
         normalize_abs_path=normalize_abs_path,
         is_under_project=is_under_project,
     )
-    disk = read_disk_text(path)
-    disk_sha = hashlib.sha256(disk.encode("utf-8")).hexdigest()
-    head = git_head_text(project, path)
-    head_sha = hashlib.sha256(head.encode("utf-8")).hexdigest() if isinstance(head, str) else None
-    return {
-        "path": path,
-        "tracked": bool(head is not None),
-        "base_ref": "HEAD",
-        "disk_content": disk,
-        "disk_sha256": disk_sha,
-        "head_content": head,
-        "head_sha256": head_sha,
-        "source_client": source_client,
-    }
+    from ..comparison_backend import selected_baseline
+
+    return {**selected_baseline(project, path, read_disk_text), "source_client": source_client}
 
 
 def build_editor_draft_diff_payload(

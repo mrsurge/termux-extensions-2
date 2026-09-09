@@ -1,0 +1,71 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { readFile } from 'node:fs/promises';
+import { build } from 'esbuild';
+import { Window } from 'happy-dom';
+const bundled = await build({ entryPoints: ['src/explorer/search/changes-results-renderer.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
+const { createExplorerChangesResultsRenderer } = await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString('base64')}`);
+test('blinds and Restore isolate actions and retain controls during streaming', async () => {
+  const win = new Window();
+  Object.assign(globalThis, { window: win, document: win.document, HTMLElement: win.HTMLElement, HTMLInputElement: win.HTMLInputElement });
+  try {
+    const opens = [], restores = [];
+    let finish;
+    const renderer = createExplorerChangesResultsRenderer({ getGitDiffBase: () => ({ ref: 'HEAD', mode: 'head' }), ensureInlineDiffs: async () => {}, openFileAndMaybeJump: async (...args) => opens.push(args), restoreFile: rel => { restores.push(rel); return new Promise(resolve => { finish = resolve; }); } });
+    const container = document.createElement('div'); document.body.append(container);
+    const make = (rel, n) => ({ rel, error: 'Preview warning', hunks: [{ oldStart: 1, newStart: 1, lines: Array.from({ length: n }, (_, i) => ({ type: 'add', text: `line ${i}` })) }] });
+    const first = make('a.py', 53);
+    renderer.renderChangesResults(container, { changes: [first], complete: false });
+    const group = container.querySelector('.fe-search-change-group');
+    const blind = group.querySelector('.fe-search-hunk-blind'), header = group.querySelector('.fe-search-hunk-toggle'), rows = group.querySelector('.fe-search-diff-rows');
+    assert.equal(rows.children.length, 53);
+    assert.equal(blind.textContent, 'Show remaining 3 lines');
+    assert.ok(rows.classList.contains('is-blinded'));
+    blind.click(); assert.equal(rows.classList.contains('is-blinded'), false);
+    header.click(); assert.equal(group.querySelector('.fe-search-hunk-body').hidden, true);
+    assert.equal(header.getAttribute('aria-expanded'), 'false');
+    assert.ok(group.querySelector('.fe-search-error'));
+    renderer.renderChangesResults(container, { changes: [first, make('b.py', 50)], complete: true });
+    assert.equal(container.querySelector('.fe-search-change-group'), group);
+    assert.equal(group.querySelector('.fe-search-hunk-body').hidden, true);
+    assert.equal(container.querySelectorAll('.fe-search-hunk-blind').length, 1);
+    header.click(); assert.equal(rows.classList.contains('is-blinded'), false);
+    blind.click(); assert.ok(rows.classList.contains('is-blinded'));
+    const restore = group.querySelector('.fe-search-change-restore'); restore.click(); restore.click();
+    assert.deepEqual(restores, ['a.py']); assert.equal(restore.disabled, true);
+    finish(); await Promise.resolve(); assert.equal(restore.disabled, false);
+    assert.equal(opens.length, 0);
+    rows.children[2].click(); await Promise.resolve(); await Promise.resolve();
+    assert.equal(opens[0][1], 3); assert.equal(opens[0][2].focus, false);
+    renderer.renderChangesResults(container, { changes: [make('a.py', 53)] });
+    assert.notEqual(container.querySelector('.fe-search-change-group'), group);
+    const css = await readFile('main_page/frontend/explorer.css', 'utf8');
+    assert.match(css, /is-blinded > \.fe-search-diff-row:nth-child\(n\+51\).*\{ display: none; \}/);
+  } finally { win.happyDOM.abort(); }
+});
+
+test('hunk Restore uses its captured snapshot and does not navigate or collapse', async () => {
+  const win = new Window();
+  Object.assign(globalThis, { window: win, document: win.document, HTMLElement: win.HTMLElement, HTMLInputElement: win.HTMLInputElement });
+  try {
+    const calls = [];
+    const identity = { commit: 'a'.repeat(40), sourceSha256: 'b'.repeat(64), hunkIndex: 2 };
+    const renderer = createExplorerChangesResultsRenderer({
+      getGitDiffBase: () => ({ ref: 'HEAD', mode: 'head' }),
+      ensureInlineDiffs: async () => {}, openFileAndMaybeJump: async () => assert.fail('unexpected navigation'),
+      restoreFile: async () => assert.fail('unexpected whole-file restore'),
+      restoreHunk: async (rel, captured) => calls.push({ rel, captured }),
+    });
+    const container = document.createElement('div');
+    renderer.renderChangesResults(container, { changes: [{ rel: 'file.py', hunks: [
+      { oldStart: 1, newStart: 1, restore: identity, lines: [{ type: 'add', text: 'new' }] },
+      { oldStart: 10, newStart: 10, lines: [{ type: 'add', text: 'other' }] },
+    ] }] });
+    const actions = container.querySelectorAll('.fe-search-hunk .fe-search-change-restore');
+    assert.equal(actions.length, 1);
+    actions[0].click(); actions[0].click();
+    await Promise.resolve();
+    assert.deepEqual(calls, [{ rel: 'file.py', captured: identity }]);
+    assert.equal(container.querySelector('.fe-search-hunk-body').hidden, false);
+  } finally { win.happyDOM.abort(); }
+});

@@ -119,6 +119,18 @@ pub(crate) struct GitProviderRequest {
     pub(crate) depth: Option<usize>,
     #[serde(default)]
     pub(crate) rebase: Option<bool>,
+    #[serde(default)]
+    pub(crate) expected_restore_state: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct GitRestorePreview {
+    pub(crate) path: String,
+    pub(crate) commit: String,
+    pub(crate) state: String,
+    pub(crate) staged: bool,
+    pub(crate) delete: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -726,6 +738,9 @@ pub(crate) fn git_unstage(
 ) -> Result<GitMutationResult, GitProviderError> {
     let (repo, root) = repo_from_request(&request)?;
     let paths = required_relative_paths(&repo, &root, &request)?;
+    if request.expected_restore_state.is_some() {
+        check_restore_state(&request)?;
+    }
     if let Ok(head) = repo.revparse_single("HEAD") {
         let path_refs = paths.iter().map(String::as_str).collect::<Vec<_>>();
         repo.reset_default(Some(&head), path_refs)?;
@@ -744,6 +759,26 @@ pub(crate) fn git_restore(
 ) -> Result<GitMutationResult, GitProviderError> {
     let (repo, root) = repo_from_request(&request)?;
     let paths = required_relative_paths(&repo, &root, &request)?;
+    if request.rev.is_some() || request.expected_restore_state.is_some() {
+        let preview = check_restore_state(&request)?;
+        if preview.staged || request.staged.unwrap_or(false) {
+            return Err(GitProviderError::Unsupported("Unstage this file before restoring".into()));
+        }
+        if preview.delete {
+            match fs::remove_file(repo_workdir(&repo, &root).join(&preview.path)) {
+                Ok(()) => (),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+                Err(error) => return Err(error.into()),
+            }
+        } else {
+            let commit = repo.find_commit(Oid::from_str(&preview.commit)?)?;
+            let tree = commit.tree()?;
+            let mut checkout = CheckoutBuilder::new();
+            checkout.force().update_index(false).path(&preview.path);
+            repo.checkout_tree(tree.as_object(), Some(&mut checkout))?;
+        }
+        return Ok(mutation_result(&repo, &root, "restore", paths));
+    }
     let _ = repo
         .revparse_single("HEAD")
         .map_err(|_| GitProviderError::NoHead)?;
@@ -759,6 +794,89 @@ pub(crate) fn git_restore(
     }
     repo.checkout_head(Some(&mut checkout))?;
     Ok(mutation_result(&repo, &root, "restore", paths))
+}
+
+fn check_restore_state(request: &GitProviderRequest) -> Result<GitRestorePreview, GitProviderError> {
+    let preview = git_restore_preview(request.clone())?;
+    if request.expected_restore_state.as_deref() != Some(preview.state.as_str()) {
+        return Err(GitProviderError::Unsupported("Restore state changed; confirm again".into()));
+    }
+    Ok(preview)
+}
+
+pub(crate) fn git_restore_preview(request: GitProviderRequest) -> Result<GitRestorePreview, GitProviderError> {
+    let (repo, root) = repo_from_request(&request)?;
+    let paths = required_relative_paths(&repo, &root, &request)?;
+    if paths.len() != 1 {
+        return Err(GitProviderError::Unsupported("Guarded restore requires exactly one file".into()));
+    }
+    let path = &paths[0];
+    let workdir = repo_workdir(&repo, &root);
+    if repo.is_bare() || fs::canonicalize(&workdir)? != root {
+        return Err(GitProviderError::Unsupported("Open the repository root before using guarded Restore".into()));
+    }
+    let mut cursor = workdir.clone();
+    for component in Path::new(path).components() {
+        if component.as_os_str().to_str().is_some_and(|part| part.eq_ignore_ascii_case(".git")) {
+            return Err(GitProviderError::InvalidPath(path.clone()));
+        }
+        cursor.push(component);
+        match fs::symlink_metadata(&cursor) {
+            Ok(meta) if meta.file_type().is_symlink() => return Err(GitProviderError::InvalidPath(path.clone())),
+            Ok(meta) if cursor == workdir.join(path) && !meta.is_file() => return Err(GitProviderError::InvalidPath(path.clone())),
+            Ok(_) => (),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+            Err(error) => return Err(error.into()),
+        }
+    }
+    let head = repo.head()?.peel_to_commit()?;
+    let commit = repo.revparse_single(request.rev.as_deref().unwrap_or("HEAD"))?.peel_to_commit()?;
+    let tree = commit.tree()?;
+    let source = match tree.get_path(Path::new(path)) {
+        Ok(entry) => Some(entry),
+        Err(error) if error.code() == ErrorCode::NotFound => None,
+        Err(error) => return Err(error.into()),
+    };
+    if source.as_ref().is_some_and(|entry| !matches!(entry.filemode(), 0o100644 | 0o100755)) {
+        return Err(GitProviderError::Unsupported("Restore supports regular files only".into()));
+    }
+    if let Some(entry) = source.as_ref() {
+        if repo.odb()?.read_header(entry.id())?.0 > 32 * 1024 * 1024 {
+            return Err(GitProviderError::Unsupported("Guarded restore supports files up to 32 MiB".into()));
+        }
+    }
+    let index = repo.index()?;
+    let mut index_state = String::new();
+    for entry in index.iter().filter(|entry| entry.path == path.as_bytes()) {
+        if entry.flags & 0x3000 != 0 || !matches!(entry.mode, 0o100644 | 0o100755) {
+            return Err(GitProviderError::Unsupported("Resolve conflicts/special index entries before restoring".into()));
+        }
+        index_state.push_str(&format!("{}:{}:{}:{};", entry.id, entry.mode, entry.flags, entry.flags_extended));
+    }
+    let status = repo.status_file(Path::new(path)).or_else(|error| {
+        if error.code() == ErrorCode::NotFound { Ok(Status::CURRENT) } else { Err(error) }
+    })?;
+    if status.contains(Status::CONFLICTED) {
+        return Err(GitProviderError::Unsupported("Resolve this file's conflict first".into()));
+    }
+    let disk = match fs::metadata(workdir.join(path)) {
+        Ok(meta) => {
+            if meta.len() > 32 * 1024 * 1024 {
+                return Err(GitProviderError::Unsupported("Guarded restore supports files up to 32 MiB".into()));
+            }
+            let bytes = fs::read(workdir.join(path))?;
+            format!("{}:{}:{:?}:{:?}", Oid::hash_object(git2::ObjectType::Blob, &bytes)?, meta.len(), meta.modified()?, meta.permissions())
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => "absent".into(),
+        Err(error) => return Err(error.into()),
+    };
+    let fingerprint = format!("{}:{}:{}:{}:{}", path, head.id(), commit.id(), index_state, disk);
+    Ok(GitRestorePreview {
+        path: path.clone(), commit: commit.id().to_string(),
+        state: Oid::hash_object(git2::ObjectType::Blob, fingerprint.as_bytes())?.to_string(),
+        staged: status.intersects(Status::INDEX_NEW | Status::INDEX_MODIFIED | Status::INDEX_DELETED | Status::INDEX_RENAMED | Status::INDEX_TYPECHANGE),
+        delete: source.is_none(),
+    })
 }
 
 pub(crate) fn git_reset_hard(
@@ -905,6 +1023,15 @@ pub(crate) fn git_remote_list(
 pub(crate) fn git_worktree_changes(
     request: GitProviderRequest,
 ) -> Result<GitWorktreeChanges, GitProviderError> {
+    git_worktree_changes_visit(request, || true, |_| true)
+}
+
+/// Visit confirmed changes before checking later candidates. Returning false stops IO.
+pub(crate) fn git_worktree_changes_visit(
+    request: GitProviderRequest,
+    active: impl Fn() -> bool,
+    mut visit: impl FnMut(&GitWorktreeChange) -> bool,
+) -> Result<GitWorktreeChanges, GitProviderError> {
     let root = request_root(&request)?;
     let base = request.base.clone().unwrap_or_else(|| "HEAD".to_owned());
     let Some(repo) = discover_repo(&root)? else {
@@ -920,6 +1047,100 @@ pub(crate) fn git_worktree_changes(
         });
     };
     let limit = request.limit.unwrap_or(20_000).min(100_000);
+    // Status is relative to HEAD, so it cannot enumerate a historical comparison.
+    // Compare disk directly; merging index deltas can retain net-zero changes.
+    if base != "HEAD" {
+        let tree = tree_for_rev(&repo, &base)?;
+        // Use index OIDs/stat data to narrow disk comparisons. The union is only
+        // a candidate set: direct comparison below removes staged/net-zero deltas.
+        let index = repo.index()?;
+        let staged = repo.diff_tree_to_index(Some(&tree), Some(&index), None)?;
+        let mut candidates = BTreeSet::new();
+        for delta in staged.deltas() {
+            for path in [delta.old_file().path(), delta.new_file().path()]
+                .into_iter()
+                .flatten()
+            {
+                candidates.insert(path.to_path_buf());
+            }
+        }
+        let mut status_options = StatusOptions::new();
+        status_options
+            .show(StatusShow::IndexAndWorkdir)
+            .include_untracked(true)
+            .recurse_untracked_dirs(true);
+        for entry in repo.statuses(Some(&mut status_options))?.iter() {
+            if let Some(path) = status_path(&entry) {
+                candidates.insert(PathBuf::from(path));
+            }
+        }
+        let mut changes = Vec::new();
+        let mut seen = BTreeSet::new();
+        let mut truncated = false;
+        for candidate in candidates {
+            if !active() {
+                break;
+            }
+            let mut options = DiffOptions::new();
+            options
+                .include_untracked(true)
+                .recurse_untracked_dirs(true)
+                .disable_pathspec_match(true)
+                .pathspec(&candidate);
+            let diff = repo.diff_tree_to_workdir(Some(&tree), Some(&mut options))?;
+            for delta in diff.deltas() {
+                let code = match delta.status() {
+                    Delta::Unmodified | Delta::Ignored => continue,
+                    Delta::Added => "A",
+                    Delta::Deleted => "D",
+                    Delta::Renamed => "R",
+                    Delta::Copied => "C",
+                    Delta::Untracked => "??",
+                    Delta::Conflicted => "U",
+                    Delta::Typechange => "T",
+                    _ => "M",
+                };
+                let Some(path) = delta.new_file().path().or_else(|| delta.old_file().path()) else {
+                    continue;
+                };
+                // File/directory transitions can make literal candidate prefixes
+                // overlap. Emit each direct-diff path/status only once.
+                if !seen.insert((path.to_path_buf(), code)) {
+                    continue;
+                }
+                if changes.len() >= limit {
+                    truncated = true;
+                    break;
+                }
+                let change = GitWorktreeChange {
+                    path: path_to_string(path),
+                    code: code.to_owned(),
+                    original_path: if matches!(delta.status(), Delta::Renamed | Delta::Copied) {
+                        delta.old_file().path().map(path_to_string)
+                    } else {
+                        None
+                    },
+                };
+                if !visit(&change) {
+                    return Err(GitProviderError::Git("comparison cancelled".into()));
+                }
+                changes.push(change);
+            }
+            if truncated {
+                break;
+            }
+        }
+        return Ok(GitWorktreeChanges {
+            dto: "GitWorktreeChanges",
+            version: 1,
+            root: repo_root_string(&repo, &root),
+            project_generation: request.project_generation,
+            base,
+            is_repository: true,
+            changes,
+            truncated,
+        });
+    }
     let mut options = StatusOptions::new();
     options
         .show(StatusShow::IndexAndWorkdir)
@@ -931,6 +1152,9 @@ pub(crate) fn git_worktree_changes(
     let mut changes = Vec::new();
     let mut truncated = false;
     for entry in statuses.iter() {
+        if !active() {
+            break;
+        }
         if changes.len() >= limit {
             truncated = true;
             break;
@@ -942,11 +1166,15 @@ pub(crate) fn git_worktree_changes(
         let Some(path) = status_path(&entry) else {
             continue;
         };
-        changes.push(GitWorktreeChange {
+        let change = GitWorktreeChange {
             path,
             code: status_short_code(status).to_owned(),
             original_path: status_original_path(&entry),
-        });
+        };
+        if !visit(&change) {
+            return Err(GitProviderError::Git("comparison cancelled".into()));
+        }
+        changes.push(change);
     }
     Ok(GitWorktreeChanges {
         dto: "GitWorktreeChanges",
@@ -2357,6 +2585,127 @@ mod tests {
     }
 
     #[test]
+    fn guarded_restore_preserves_head_index_and_binary_content() {
+        let root = test_root("guarded-restore");
+        let repo = Repository::init(&root).unwrap();
+        let original = b"old\0content\r\n";
+        fs::write(root.join("file"), original).unwrap();
+        commit_all(&repo, "old");
+        let old = repo.head().unwrap().target().unwrap();
+        fs::write(root.join("file"), b"new").unwrap();
+        commit_all(&repo, "new");
+        let head = repo.head().unwrap().target().unwrap();
+        let index = fs::read(repo.path().join("index")).unwrap();
+        let mut request = provider_request(&root);
+        request.paths = Some(vec!["file".into()]);
+        request.rev = Some(old.to_string());
+        let preview = git_restore_preview(request.clone()).unwrap();
+        request.expected_restore_state = Some(preview.state);
+        git_restore(request).unwrap();
+        assert_eq!(fs::read(root.join("file")).unwrap(), original);
+        assert_eq!(repo.head().unwrap().target().unwrap(), head);
+        assert_eq!(fs::read(repo.path().join("index")).unwrap(), index);
+    }
+
+    #[test]
+    fn guarded_restore_rejects_stale_worktree_and_stale_head() {
+        let root = test_root("guarded-stale");
+        let repo = Repository::init(&root).unwrap();
+        fs::write(root.join("file"), "base").unwrap();
+        commit_all(&repo, "base");
+        let mut request = provider_request(&root);
+        request.paths = Some(vec!["file".into()]);
+        request.rev = Some("HEAD".into());
+        request.expected_restore_state = Some(git_restore_preview(request.clone()).unwrap().state);
+        fs::write(root.join("file"), "external edit").unwrap();
+        assert!(git_restore(request.clone()).is_err());
+        assert_eq!(fs::read_to_string(root.join("file")).unwrap(), "external edit");
+        request.expected_restore_state = Some(git_restore_preview(request.clone()).unwrap().state);
+        commit_all(&repo, "changed HEAD");
+        assert!(git_restore(request).is_err());
+    }
+
+    #[test]
+    fn guarded_restore_requires_separate_path_scoped_unstage() {
+        let root = test_root("guarded-unstage");
+        let repo = Repository::init(&root).unwrap();
+        for path in ["file", "other"] { fs::write(root.join(path), "base").unwrap(); }
+        commit_all(&repo, "base");
+        for path in ["file", "other"] { fs::write(root.join(path), "staged").unwrap(); }
+        let mut index = repo.index().unwrap();
+        index.add_all(["*"], IndexAddOption::DEFAULT, None).unwrap();
+        index.write().unwrap();
+        fs::write(root.join("file"), "unstaged").unwrap();
+        let other = index.get_path(Path::new("other"), 0).unwrap().id;
+        let mut request = provider_request(&root);
+        request.paths = Some(vec!["file".into()]); request.rev = Some("HEAD".into());
+        let preview = git_restore_preview(request.clone()).unwrap();
+        assert!(preview.staged);
+        request.expected_restore_state = Some(preview.state);
+        assert!(git_restore(request.clone()).is_err());
+        git_unstage(request.clone()).unwrap();
+        assert_eq!(fs::read_to_string(root.join("file")).unwrap(), "unstaged");
+        assert_eq!(repo.index().unwrap().get_path(Path::new("other"), 0).unwrap().id, other);
+        assert!(git_restore(request.clone()).is_err());
+        request.expected_restore_state = Some(git_restore_preview(request.clone()).unwrap().state);
+        git_restore(request).unwrap();
+        assert_eq!(fs::read_to_string(root.join("file")).unwrap(), "base");
+    }
+
+    #[test]
+    fn guarded_restore_deletes_absent_source_without_touching_index() {
+        let root = test_root("guarded-delete");
+        let repo = Repository::init(&root).unwrap();
+        fs::write(root.join("keep"), "base").unwrap(); commit_all(&repo, "base");
+        let old = repo.head().unwrap().target().unwrap();
+        fs::write(root.join("file"), "added").unwrap(); commit_all(&repo, "add");
+        let index = fs::read(repo.path().join("index")).unwrap();
+        let mut request = provider_request(&root);
+        request.paths = Some(vec!["file".into()]); request.rev = Some(old.to_string());
+        let preview = git_restore_preview(request.clone()).unwrap(); assert!(preview.delete);
+        request.expected_restore_state = Some(preview.state); git_restore(request).unwrap();
+        assert!(!root.join("file").exists());
+        assert_eq!(fs::read(repo.path().join("index")).unwrap(), index);
+    }
+
+    #[test]
+    fn guarded_restore_rejects_unsafe_paths() {
+        let root = test_root("guarded-paths"); let repo = Repository::init(&root).unwrap();
+        fs::write(root.join("file"), "base").unwrap(); commit_all(&repo, "base");
+        fs::create_dir(root.join("directory")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("file", root.join("link")).unwrap();
+        for path in ["../outside", ".git/config", "directory"] {
+            let mut request = provider_request(&root); request.paths = Some(vec![path.into()]);
+            assert!(git_restore_preview(request).is_err(), "{path}");
+        }
+        let mut nested = provider_request(&root.join("directory"));
+        nested.paths = Some(vec!["file".into()]);
+        assert!(git_restore_preview(nested).is_err());
+        #[cfg(unix)] {
+            let mut request = provider_request(&root); request.paths = Some(vec!["link".into()]);
+            assert!(git_restore_preview(request).is_err());
+        }
+    }
+
+    #[test]
+    fn guarded_restore_rejects_conflicted_index_entries() {
+        let root = test_root("guarded-conflict");
+        let repo = Repository::init(&root).unwrap();
+        fs::write(root.join("file"), "base").unwrap();
+        commit_all(&repo, "base");
+        let mut index = repo.index().unwrap();
+        let mut entry = index.get_path(Path::new("file"), 0).unwrap();
+        index.remove_path(Path::new("file")).unwrap();
+        entry.flags = (entry.flags & !0x3000) | 0x1000;
+        index.add(&entry).unwrap();
+        index.write().unwrap();
+        let mut request = provider_request(&root);
+        request.paths = Some(vec!["file".into()]);
+        assert!(git_restore_preview(request).is_err());
+    }
+
+    #[test]
     fn git_summary_uses_git2_repository_data() {
         let root = test_root("summary");
         let repo = Repository::init(&root).expect("init repo");
@@ -2455,6 +2804,129 @@ mod tests {
         assert_eq!(diff.files[0].relative_path, "tracked.txt");
         assert_eq!(diff.files[0].content_suppressed, None);
 
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn historical_candidates_match_direct_disk_comparison() {
+        let root = test_root("historical-candidates");
+        let repo = Repository::init(&root).unwrap();
+        for name in ["literal[1].txt", "literal1.txt", "staged.txt", "removed.txt", "unchanged.txt"] {
+            fs::write(root.join(name), "base\n").unwrap();
+        }
+        commit_all(&repo, "base");
+        let base = repo.head().unwrap().target().unwrap().to_string();
+        fs::write(root.join("literal[1].txt"), "changed\n").unwrap();
+        fs::write(root.join("staged.txt"), "staged version\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("staged.txt")).unwrap();
+        index.remove_path(Path::new("removed.txt")).unwrap();
+        index.write().unwrap();
+        // Index changes are candidates, not proof of a disk difference.
+        fs::write(root.join("staged.txt"), "base\n").unwrap();
+        fs::write(root.join("new.txt"), "untracked\n").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("unchanged.txt", root.join("link")).unwrap();
+        let tree = tree_for_rev(&repo, &base).unwrap();
+        let mut options = DiffOptions::new();
+        options.include_untracked(true).recurse_untracked_dirs(true);
+        let oracle = repo.diff_tree_to_workdir(Some(&tree), Some(&mut options)).unwrap();
+        let expected: BTreeSet<_> = oracle.deltas().filter_map(|d| {
+            d.new_file().path().or_else(|| d.old_file().path()).map(path_to_string)
+        }).collect();
+        let result = git_worktree_changes(GitProviderRequest { base: Some(base), ..provider_request(&root) }).unwrap();
+        let actual: BTreeSet<_> = result.changes.iter().map(|c| c.path.clone()).collect();
+        assert_eq!(actual, expected);
+        assert!(!actual.contains("staged.txt"));
+        assert!(!actual.contains("removed.txt"));
+        assert!(!actual.contains("literal1.txt"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn git_worktree_changes_uses_selected_commit_for_clean_files() {
+        let root = test_root("historical-worktree-changes");
+        let repo = Repository::init(&root).expect("init repo");
+        for name in [
+            "modified.txt",
+            "deleted.txt",
+            "unchanged.txt",
+            "reverted.txt",
+        ] {
+            fs::write(root.join(name), "base\n").expect("write base file");
+        }
+        commit_all(&repo, "base");
+        let base = repo
+            .head()
+            .expect("head")
+            .target()
+            .expect("oid")
+            .to_string();
+        fs::write(root.join("modified.txt"), "committed change\n").expect("modify");
+        fs::write(root.join("reverted.txt"), "head version\n").expect("modify reverted");
+        fs::write(root.join("added.txt"), "committed addition\n").expect("add");
+        fs::remove_file(root.join("deleted.txt")).expect("delete");
+        let mut index = repo.index().expect("index");
+        index
+            .remove_path(Path::new("deleted.txt"))
+            .expect("stage deletion");
+        index.write().expect("write index");
+        commit_all(&repo, "new head");
+        assert!(
+            git_worktree_changes(provider_request(&root))
+                .expect("clean HEAD")
+                .changes
+                .is_empty()
+        );
+
+        let mut request = provider_request(&root);
+        request.base = Some(base);
+        let historical = git_worktree_changes(request.clone()).expect("historical changes");
+        let paths: BTreeSet<_> = historical
+            .changes
+            .iter()
+            .map(|entry| entry.path.as_str())
+            .collect();
+        assert_eq!(
+            paths,
+            BTreeSet::from(["added.txt", "deleted.txt", "modified.txt", "reverted.txt"])
+        );
+        assert!(
+            historical
+                .changes
+                .iter()
+                .any(|entry| entry.path == "deleted.txt" && entry.code.trim() == "D")
+        );
+        assert!(!historical.truncated);
+
+        // Dirty against HEAD but equal to the selected commit must not be listed.
+        fs::write(root.join("reverted.txt"), "base\n").expect("restore old content");
+        let historical = git_worktree_changes(request.clone()).expect("historical after edit");
+        assert!(
+            !historical
+                .changes
+                .iter()
+                .any(|entry| entry.path == "reverted.txt")
+        );
+        assert!(
+            git_worktree_changes(provider_request(&root))
+                .expect("dirty HEAD")
+                .changes
+                .iter()
+                .any(|entry| entry.path == "reverted.txt")
+        );
+        fs::write(root.join("untracked.txt"), "untracked\n").expect("untracked");
+        assert!(
+            git_worktree_changes(request.clone())
+                .expect("with untracked")
+                .changes
+                .iter()
+                .any(|entry| entry.path == "untracked.txt" && entry.code == "??")
+        );
+        request.limit = Some(1);
+        let limited = git_worktree_changes(request).expect("limited");
+        assert_eq!(limited.changes.len(), 1);
+        assert!(limited.truncated);
         let _ = fs::remove_dir_all(root);
     }
 

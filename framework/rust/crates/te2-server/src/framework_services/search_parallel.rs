@@ -221,7 +221,7 @@ pub(super) fn search_content_parallel_with_options(
                 matches: Vec::new(),
                 cap_reached: false,
             };
-            match searcher.search_path(matcher.as_ref(), path, &mut sink) {
+            match search_content_snapshot(&root, &relative_path, path, &mut searcher, &mut sink) {
                 Ok(()) => {}
                 Err(error) if error.kind() == io::ErrorKind::Interrupted && sink.cap_reached => {
                     set_parallel_truncation(&truncated_reason, effective_cap_reason);

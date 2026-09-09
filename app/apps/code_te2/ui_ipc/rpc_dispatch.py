@@ -1,7 +1,10 @@
 # pyright: strict
 from __future__ import annotations
 
+from typing import assert_never
+
 from .rpc_contract import (
+    UI_IPC_RPC_METHOD_HOST_COMPARISON,
     UI_IPC_RPC_METHOD_HOST_BOOT_SNAPSHOT_GET,
     UI_IPC_RPC_METHOD_HOST_LANGUAGE_BACKEND_SET,
     UI_IPC_RPC_METHOD_HOST_CODE_INSPECTOR_COMMAND,
@@ -36,7 +39,6 @@ from .rpc_contract import (
     UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_CREATE,
     UI_IPC_RPC_METHOD_HOST_STATE_FILE_SCROLL_UPDATE,
     UiIpcRpcMethod,
-    build_jsonrpc_error,
 )
 from ..boot_snapshot_backend import handle_boot_snapshot_request
 from ..host.code_server_backend import handle_host_language_backend_set_request
@@ -190,6 +192,10 @@ async def dispatch_ui_ipc_rpc_request(
             source_name=source_name,
         )
 
+    if method == UI_IPC_RPC_METHOD_HOST_COMPARISON:
+        from ..host.comparison_actions_backend import handle_comparison_request
+        return await handle_comparison_request(params, source_name)
+
     if method == UI_IPC_RPC_METHOD_HOST_EDITOR_GIT_BASELINES_GET:
         return await handle_host_editor_git_baselines_request(
             params,
@@ -282,11 +288,4 @@ async def dispatch_ui_ipc_rpc_request(
 
         return await handle_ui_sidebar_active_shortcut_set_request(params)
 
-    raise RuntimeError(
-        build_jsonrpc_error(
-            request_id=None,
-            code=-32601,
-            message="Unknown UI IPC RPC method",
-            data={"method": method},
-        )["error"]["message"]
-    )
+    assert_never(method)

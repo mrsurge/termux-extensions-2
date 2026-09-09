@@ -99,3 +99,16 @@ test('inline diff scrollbars keep vertical chrome hidden and horizontal overflow
     },
   });
 });
+
+test('obsolete comparison revisions, refs and modes never reach Monaco', async () => {
+  const { applyGitBaselines, updateComparisonBaselineFence } = await importTypeScript('monaco_editor/editor_git_baseline_runtime.ts');
+  updateComparisonBaselineFence('new-ref', 20);
+  let reads = 0;
+  const deps = { getCurrentPath: () => '/p/a', getShowInlineDiffs: () => true, getShowDraftDiffs: () => false, getMonaco: () => { reads++; return null; } };
+  applyGitBaselines(deps, { path: '/p/a', comparison_mode: 'commit', comparison_revision: 10, base_ref: 'new-ref' });
+  applyGitBaselines(deps, { path: '/p/a', comparison_mode: 'commit', comparison_revision: 30, base_ref: 'old-ref' });
+  applyGitBaselines(deps, { path: '/p/a', comparison_mode: 'disk', comparison_revision: 30 });
+  assert.equal(reads, 0);
+  applyGitBaselines(deps, { path: '/p/a', comparison_mode: 'commit', comparison_revision: 30, base_ref: 'new-ref' });
+  assert.equal(reads, 1);
+});

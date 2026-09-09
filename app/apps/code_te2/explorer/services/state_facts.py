@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from uuid import uuid4
 from typing import TypedDict
 
 from ...worker_services.event_bus import (
@@ -36,6 +37,7 @@ class ExplorerOpenDirectoriesPayload(TypedDict):
 class GitDiffBasePayload(TypedDict):
     ref: str
     refresh: bool
+    selectionRevision: str
 
 
 class GitPathRestoredPayload(TypedDict):
@@ -129,7 +131,7 @@ async def publish_git_diff_base_changed(
     refresh: bool,
     source: str,
 ) -> None:
-    payload: GitDiffBasePayload = {"ref": ref, "refresh": refresh}
+    payload: GitDiffBasePayload = {"ref": ref, "refresh": refresh, "selectionRevision": uuid4().hex}
     await _publish_project_fact(
         "GitDiffBaseChanged",
         project_root,

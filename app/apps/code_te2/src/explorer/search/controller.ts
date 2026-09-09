@@ -174,7 +174,11 @@ export function createExplorerSearchController(
   }
 
   function cancelActiveSearch(reason: string): void {
+    changesGeneration++;
     const identity = deps.getSearchIdentity();
+    if (deps.getSearchMode() === 'changes') {
+      deps.setSearchIdentity({ ...EMPTY_SEARCH_IDENTITY, correlationId: nextCorrelationId() });
+    }
     if (!hasCancelableIdentity(identity)) {
       return;
     }
@@ -374,7 +378,8 @@ export function createExplorerSearchController(
     scheduleSearch(deps.getSearchQuery());
   }
 
-  async function fetchChangesResults(force = false): Promise<void> {
+  let changesGeneration = 0;
+  async function fetchChangesResults(force = false, offset = 0): Promise<void> {
     if (deps.getSearchMode() !== "changes") return;
     if (deps.getSearchLoading() && !force) return;
 
@@ -385,11 +390,17 @@ export function createExplorerSearchController(
       return;
     }
 
-    cancelActiveSearch("modeChanged");
+    if (offset === 0) cancelActiveSearch("modeChanged");
+    else changesGeneration++;
+    const generation = changesGeneration;
+    const project = deps.getProjectPath();
+    const correlationId = nextCorrelationId();
+    deps.setSearchIdentity({ ...EMPTY_SEARCH_IDENTITY, correlationId, root: project });
     deps.setLastKnownProjectPath(deps.getProjectPath());
     deps.setSearchLoading(true);
     deps.setSearchError(null);
-    setSearchStatus(null);
+    deps.setSearchResults(null);
+    setSearchStatus({ status: 'running', message: 'Enumerating changed files' });
     deps.renderSearchOverlay();
 
     if (!deps.hasBus()) {
@@ -400,8 +411,18 @@ export function createExplorerSearchController(
     }
 
     try {
-      deps.sendBus(EXPLORER_RPC_METHODS.searchRun, { mode: "changes" });
+      const result = await deps.requestBus(EXPLORER_RPC_METHODS.searchRun, { mode: "changes", correlationId, changesOffset: offset });
+      if (generation !== changesGeneration || project !== deps.getProjectPath() || deps.getSearchMode() !== 'changes') {
+        if (isRecord(result)) cancelSearchIdentity({
+          ...EMPTY_SEARCH_IDENTITY, correlationId, root: project,
+          searchId: stringValue(result.searchId), jobId: stringValue(result.jobId),
+          projectGeneration: numberValue(result.projectGeneration),
+        }, 'superseded');
+        return;
+      }
+      setSearchIdentityFromPayload(result);
     } catch (error) {
+      if (generation !== changesGeneration || project !== deps.getProjectPath()) return;
       deps.setSearchLoading(false);
       deps.setSearchError(getErrorMessage(error, "Changes lookup failed"));
       deps.renderSearchOverlay();
@@ -586,6 +607,25 @@ export function createExplorerSearchController(
   function handleSearchJobResult(payload: SearchJobResultPayload): void {
     if (!isActiveSearchPayload(payload)) return;
     setSearchIdentityFromPayload(payload);
+    if (payload.kind === 'changes') {
+      if (!deps.getSearchOverlayVisible() || deps.getSearchMode() !== 'changes' || payload.root !== deps.getProjectPath()) return;
+      const part: unknown = payload.result;
+      if (!isRecord(part)) return;
+      const previous = deps.getSearchResults();
+      const current: Record<string, unknown> = isRecord(previous) ? previous : { mode: 'changes', changes: [] };
+      if (isRecord(part.metadata)) Object.assign(current, part.metadata);
+      if (isRecord(part.change)) {
+        const changes = Array.isArray(current.changes) ? current.changes : [];
+        if (changes.length >= 40) return;
+        current.changes = [...changes, part.change];
+      }
+      current.complete = false;
+      deps.setSearchResults(current);
+      deps.setSearchLoading(false);
+      setSearchStatus({ status: 'running', message: `Loading diffs: ${Array.isArray(current.changes) ? current.changes.length : 0} files` });
+      deps.renderSearchOverlay();
+      return;
+    }
     if (payload.result) {
       setSearchIdentityFromPayload(payload.result);
       deps.setSearchResults(
@@ -602,6 +642,11 @@ export function createExplorerSearchController(
 
   function handleSearchJobDone(payload: SearchJobDonePayload): void {
     if (!isActiveSearchPayload(payload)) return;
+    if (payload.kind === 'changes') {
+      if (!deps.getSearchOverlayVisible() || deps.getSearchMode() !== 'changes' || payload.root !== deps.getProjectPath()) return;
+      const current = deps.getSearchResults();
+      if (isRecord(current)) deps.setSearchResults({ ...current, complete: true });
+    }
     setSearchIdentityFromPayload(payload);
     const limit =
       typeof payload.matchLimit === "number"

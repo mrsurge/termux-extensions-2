@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, TypedDict, cast, override
+from typing import Literal, NotRequired, TypedDict, cast, override
 
 JsonObject = dict[str, object]
 SearchMode = Literal["name", "content", "changes"]
@@ -19,6 +19,7 @@ class ExplorerSearchReviewContractError(Exception):
 
 
 class SearchRunParams(TypedDict):
+    changesOffset: NotRequired[int]
     mode: SearchMode
     query: str
     correlationId: str
@@ -41,6 +42,45 @@ class SearchMoreParams(TypedDict):
     projectGeneration: int
     cursor: str
     limit: SearchMoreLimit
+
+
+class SearchReplaceParams(TypedDict):
+    phase: Literal['prepare', 'apply']
+    searchId: str
+    projectGeneration: int
+    relativePath: str
+    matchIndexes: list[int]
+    replacement: str
+    token: str
+    discardDraft: bool
+
+
+def parse_search_replace_params(payload: object) -> SearchReplaceParams:
+    raw = _as_object(payload)
+    phase = raw.get('phase')
+    generation = raw.get('projectGeneration')
+    indexes = raw.get('matchIndexes', [])
+    replacement = raw.get('replacement', '')
+    discard = raw.get('discardDraft', False)
+    if (phase not in ('prepare', 'apply') or type(generation) is not int or generation < 0
+            or not isinstance(indexes, list) or len(cast(list[object], indexes)) > 700
+            or not isinstance(replacement, str) or len(replacement.encode('utf-8')) > 375 * 1024
+            or type(discard) is not bool):
+        raise ExplorerSearchReviewContractError('Invalid replacement request')
+    selected: list[int] = []
+    for index in cast(list[object], indexes):
+        if type(index) is not int or not 0 <= index < 700 or index in selected:
+            raise ExplorerSearchReviewContractError('Invalid replacement match index')
+        selected.append(index)
+    if phase == 'prepare' and not selected:
+        raise ExplorerSearchReviewContractError('Select at least one match')
+    return {'phase': phase,
+        'searchId': _required_string(raw.get('searchId'), 'searchId'),
+        'projectGeneration': generation,
+        'relativePath': _required_string(raw.get('relativePath'), 'relativePath'),
+        'matchIndexes': selected, 'replacement': replacement,
+        'token': _required_string(raw.get('token'), 'token') if phase == 'apply' else '',
+        'discardDraft': discard}
 
 
 class SearchMoreInFileParams(TypedDict):
@@ -93,7 +133,37 @@ class SearchNameResult(TypedDict):
     count: int
 
 
+class ContentEditTarget(TypedDict):
+    sourceSha256: str
+    startByte: int
+    endByte: int
+
+
+def parse_content_edit_target(value: object) -> ContentEditTarget | None:
+    # Display columns can be lossy or relative. Only provider-issued exact byte
+    # identity is retained for replacement, including valid zero-width matches.
+    if not isinstance(value, dict):
+        return None
+    raw = cast(dict[str, object], value)
+    digest = raw.get("sourceSha256")
+    start = raw.get("startByte")
+    end = raw.get("endByte")
+    if (
+        not isinstance(digest, str)
+        or len(digest) != 64
+        or any(char not in "0123456789abcdef" for char in digest)
+        or type(start) is not int
+        or type(end) is not int
+        or start < 0
+        or end < start
+        or end > 375 * 1024
+    ):
+        return None
+    return {"sourceSha256": digest, "startByte": start, "endByte": end}
+
+
 class SearchContentMatch(TypedDict):
+    editTarget: NotRequired[ContentEditTarget | None]
     line: int
     column: int
     text: str
@@ -231,6 +301,9 @@ class ReviewDiscardResult(TypedDict):
 
 def parse_search_run_params(payload: object) -> SearchRunParams:
     envelope = _as_object(payload)
+    offset = envelope.get("changesOffset", 0)
+    if isinstance(offset, bool) or not isinstance(offset, int) or not 0 <= offset <= 20_000:
+        raise ExplorerSearchReviewContractError("invalid changesOffset")
     mode = _parse_search_mode(envelope.get("mode"))
     query_value = envelope.get("query")
     if query_value is None:
@@ -245,6 +318,7 @@ def parse_search_run_params(payload: object) -> SearchRunParams:
         "correlationId": _coerce_string(
             envelope.get("correlationId"), "search:run correlationId"
         ),
+        "changesOffset": offset,
         "isRegex": _coerce_bool(envelope.get("isRegex"), default=False),
         "isCaseSensitive": _coerce_bool(
             envelope.get("isCaseSensitive"), default=False

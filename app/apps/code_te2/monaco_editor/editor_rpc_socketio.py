@@ -46,7 +46,6 @@ from .editor_ws import (
     editor_runtime_emit_open_state_changed,
     editor_runtime_emit_room_event,
     editor_runtime_get_cached_document,
-    editor_runtime_git_head_text,
     editor_runtime_handle_breadcrumb_navigate,
     editor_runtime_handle_issues_dump_response,
     editor_runtime_handle_model_ready,
@@ -67,11 +66,11 @@ from .editor_ws import (
 class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
     async def _emit_to_sid(self, sid: str, event_name: str, payload: bytes) -> None:
         emit_to_room = cast(Callable[..., Awaitable[object]], self.emit)
-        await emit_to_room(event_name, payload, room=sid)
+        _ = await emit_to_room(event_name, payload, room=sid)
 
     async def _emit_to_room(self, room: str, event_name: str, payload: bytes) -> None:
         emit_to_room = cast(Callable[..., Awaitable[object]], self.emit)
-        await emit_to_room(event_name, payload, room=room)
+        _ = await emit_to_room(event_name, payload, room=room)
 
     async def _publish_result_notification(self, sid: str, method: str, result: object) -> None:
         if not isinstance(result, dict):
@@ -123,8 +122,8 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
         assert identity is not None
         register_editor_client(sid, identity)
         enter_room = cast(Callable[..., Awaitable[object]], self.enter_room)
-        await enter_room(sid, "code_te2")
-        await enter_room(sid, client_presentation_room(identity["clientInstanceId"]))
+        _ = await enter_room(sid, "code_te2")
+        _ = await enter_room(sid, client_presentation_room(identity["clientInstanceId"]))
         snapshot = editor_runtime_build_connect_snapshot(
             client_instance_id=identity["clientInstanceId"],
             client_role=identity["clientRole"],
@@ -155,12 +154,13 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
                 pass
 
     async def on_disconnect(self, sid: str, reason: object | None = None) -> None:
+        del reason
         identity = unregister_editor_client(sid)
         try:
             leave_room = cast(Callable[..., Awaitable[object]], self.leave_room)
-            await leave_room(sid, "code_te2")
+            _ = await leave_room(sid, "code_te2")
             if identity is not None:
-                await leave_room(
+                _ = await leave_room(
                     sid,
                     client_presentation_room(identity["clientInstanceId"]),
                 )
@@ -191,7 +191,7 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
             request = coerce_jsonrpc_request_envelope(decoded)
             if request is None:
                 notification = coerce_jsonrpc_notification_envelope(decoded)
-                await dispatch_editor_rpc_request(
+                _ = await dispatch_editor_rpc_request(
                     notification["method"],
                     notification["params"],
                     source_client=source_client,
@@ -201,7 +201,6 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
                     runtime_meta=editor_runtime_meta,
                     read_file_payload=editor_runtime_read_file_payload,
                     read_disk_text=editor_runtime_read_disk_text,
-                    git_head_text=editor_runtime_git_head_text,
                     get_cached_document=editor_runtime_get_cached_document,
                     record_sidecar_open_file=editor_runtime_record_sidecar_open_file,
                     emit_open_state_changed=editor_runtime_emit_open_state_changed,
@@ -232,7 +231,6 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
                 runtime_meta=editor_runtime_meta,
                 read_file_payload=editor_runtime_read_file_payload,
                 read_disk_text=editor_runtime_read_disk_text,
-                git_head_text=editor_runtime_git_head_text,
                 get_cached_document=editor_runtime_get_cached_document,
                 record_sidecar_open_file=editor_runtime_record_sidecar_open_file,
                 emit_open_state_changed=editor_runtime_emit_open_state_changed,

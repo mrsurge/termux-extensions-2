@@ -597,6 +597,7 @@ def register_logical_document_reconciler_handlers() -> None:
         return
     subscribe_worker_event("OpenStateChanged", _reconciler.handle_open_state)
     subscribe_worker_event("DraftStateChanged", _reconciler.handle_draft_state)
+    subscribe_worker_event("GitPathRestored", _reconciler.handle_draft_state)
     subscribe_worker_event("WorkspaceFilesChanged", _reconciler.handle_workspace_files)
     subscribe_worker_event("AdapterStateChanged", _reconciler.handle_adapter_state)
     subscribe_worker_event(

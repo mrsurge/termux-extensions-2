@@ -73,6 +73,7 @@ export const EXPLORER_RPC_METHODS = {
   searchMore: "explorer.search.more",
   searchMoreInFile: "explorer.search.moreInFile",
   searchRun: "explorer.search.run",
+  searchReplace: "explorer.search.replace",
   watcherConfigGet: "explorer.watcher.config.get",
   watcherLimitRaise: "explorer.watcher.limit.raise",
   watcherModeSet: "explorer.watcher.mode.set",

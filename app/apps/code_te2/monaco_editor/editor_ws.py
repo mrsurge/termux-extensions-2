@@ -3,8 +3,8 @@ import asyncio
 import os
 import time
 from pathlib import Path
-from collections.abc import Awaitable, Mapping
-from typing import Optional, Protocol, cast
+from collections.abc import Awaitable, Callable, Mapping
+from typing import Protocol, cast
 
 from ..stores import get_history_store, get_preferences_store
 from ..client_presentation import client_presentation_room
@@ -53,6 +53,7 @@ from .editor_rpc_contract import (
     EDITOR_RPC_NOTIFICATION_FIND_COMMAND,
     EDITOR_RPC_NOTIFICATION_EDIT_COMMAND,
     EDITOR_RPC_NOTIFICATION_GIT_BASELINES,
+    EDITOR_RPC_NOTIFICATION_COMPARISON_CHANGED,
     EDITOR_RPC_NOTIFICATION_ISSUES_COMMAND,
     EDITOR_RPC_NOTIFICATION_ISSUES_DUMP_REQUEST,
     EDITOR_RPC_NOTIFICATION_MIRROR_UPDATED,
@@ -105,7 +106,7 @@ _project_switch_seq = 0
 _LAST_SAVE_SHA: dict[str, str] = {}
 
 
-def _coerce_generation(raw: object) -> Optional[int]:
+def _coerce_generation(raw: object) -> int | None:
     try:
         if raw is None or raw == "":
             return None
@@ -118,7 +119,7 @@ def _coerce_generation(raw: object) -> Optional[int]:
         return None
 
 
-def editor_runtime_active_project() -> Optional[str]:
+def editor_runtime_active_project() -> str | None:
     return _active_project()
 
 
@@ -126,7 +127,7 @@ def editor_runtime_is_under_project(project: str, abs_path: str) -> bool:
     return _is_under_project(project, abs_path)
 
 
-def editor_runtime_coerce_generation(raw: object) -> Optional[int]:
+def editor_runtime_coerce_generation(raw: object) -> int | None:
     return _coerce_generation(raw)
 
 
@@ -140,7 +141,7 @@ def _runtime_meta() -> RuntimeMeta:
     }
 
 
-def _active_project() -> Optional[str]:
+def _active_project() -> str | None:
     project = _history_store.get_active_project()
     if not project:
         return None
@@ -151,7 +152,7 @@ def _active_project() -> Optional[str]:
         return project
 
 
-def _normalize_abs_path(path: str) -> Optional[str]:
+def _normalize_abs_path(path: str) -> str | None:
     if not path.strip():
         return None
     try:
@@ -237,8 +238,8 @@ async def _emit_project_switch_notification(
 
     print(
         "[project_switch] emit "
-        f"phase={phase} project={project} switchId={payload['switchId']} "
-        f"status={status or ''} adapterStatus={adapter_status or ''}",
+        + f"phase={phase} project={project} switchId={payload['switchId']} "
+        + f"status={status or ''} adapterStatus={adapter_status or ''}",
         flush=True,
     )
 
@@ -308,7 +309,7 @@ def _notify_draft_state_changed_safe(project: str) -> None:
         pass
 
 
-def editor_runtime_normalize_abs_path(path: str) -> Optional[str]:
+def editor_runtime_normalize_abs_path(path: str) -> str | None:
     return _normalize_abs_path(path)
 
 
@@ -367,17 +368,16 @@ async def editor_runtime_reload_disk_content_if_active(
     if not project or not target or not _is_under_project(project, target):
         return False
 
+    foregrounds = [foreground for foreground in list_client_foregrounds(project, reason="disk_content_reload")
+                   if _normalize_abs_path(foreground["path"] or "") == target]
+    if not foregrounds:
+        return False
     payload = _read_file_payload(project, target)
     payload["source"] = source
     payload["reason"] = "discard_external"
     payload["request_id"] = request_id or f"draft_discard_{int(time.time() * 1000)}"
     emitted = False
-    for foreground in list_client_foregrounds(
-        project,
-        reason="disk_content_reload",
-    ):
-        if _normalize_abs_path(foreground["path"] or "") != target:
-            continue
+    for foreground in foregrounds:
         await editor_runtime_emit_room_event(
             "editor:open",
             payload,
@@ -401,7 +401,7 @@ def editor_runtime_git_head_text(project: str, abs_path: str) -> str | None:
 
 def editor_runtime_record_file_activity(project: str, abs_path: str, *, scroll_line: float | None = None) -> None:
     if scroll_line is not None:
-        _history_store.update_file_scroll_line(project, abs_path, scroll_line)
+        _ = _history_store.update_file_scroll_line(project, abs_path, scroll_line)
 
 
 def editor_runtime_get_cached_document(project: str, abs_path: str) -> dict[str, object] | None:
@@ -427,7 +427,7 @@ async def editor_runtime_request_save_snapshot(
         return await asyncio.wait_for(fut, timeout=timeout_s)
     finally:
         if _SAVE_SNAPSHOT_WAITING.get(request_id) is waiting:
-            _SAVE_SNAPSHOT_WAITING.pop(request_id, None)
+            _ = _SAVE_SNAPSHOT_WAITING.pop(request_id, None)
 
 
 def editor_runtime_resolve_save_snapshot_response(data: dict[str, object]) -> None:
@@ -460,7 +460,7 @@ async def editor_runtime_request_issues_dump(
         return await asyncio.wait_for(fut, timeout=timeout_s)
     finally:
         if _ISSUES_DUMP_WAITING.get(request_id) is waiting:
-            _ISSUES_DUMP_WAITING.pop(request_id, None)
+            _ = _ISSUES_DUMP_WAITING.pop(request_id, None)
 
 
 def editor_runtime_build_connect_snapshot(
@@ -607,6 +607,7 @@ def _rpc_notification_for_legacy_event(event_name: str) -> EditorRpcNotification
         "editor:open": EDITOR_RPC_NOTIFICATION_FILE_OPENED,
         "editor:jump_to_line": EDITOR_RPC_NOTIFICATION_FILE_JUMP_TO_LINE,
         "editor:git_baselines": EDITOR_RPC_NOTIFICATION_GIT_BASELINES,
+        "editor:comparison_changed": EDITOR_RPC_NOTIFICATION_COMPARISON_CHANGED,
         "editor:mirror": EDITOR_RPC_NOTIFICATION_MIRROR_UPDATED,
         "editor:cache_state": EDITOR_RPC_NOTIFICATION_CACHE_STATE,
         "editor:draft_state": EDITOR_RPC_NOTIFICATION_DRAFT_STATE,
@@ -644,7 +645,7 @@ async def _emit_ui_ipc_editor_notification(
     client_instance_id: str | None = None,
 ) -> None:
     try:
-        from ..ui_ipc.ui_ipc_ws import emit_ui_ipc_rpc_notification
+        from ..ui_ipc.notifications import emit_ui_ipc_rpc_notification
 
         await emit_ui_ipc_rpc_notification(
             method,
@@ -709,7 +710,7 @@ async def editor_runtime_handle_scroll_state(source_client: str, data: dict[str,
             line = int(line)
         if path and _is_under_project(project, path) and isinstance(line, (int, float)) and line and line > 0:
             try:
-                _history_store.update_file_scroll_line(project, path, float(line))
+                _ = _history_store.update_file_scroll_line(project, path, float(line))
             except Exception:
                 pass
 
@@ -743,7 +744,7 @@ async def editor_runtime_handle_issues_dump_response(source_client: str, data: d
     waiting = _ISSUES_DUMP_WAITING.get(request_id)
     if waiting is None or waiting[0] != source_client:
         return
-    _ISSUES_DUMP_WAITING.pop(request_id, None)
+    _ = _ISSUES_DUMP_WAITING.pop(request_id, None)
 
     response_payload: dict[str, object] = {"requestId": request_id, "dump": data.get("dump")}
     future = waiting[1]
@@ -893,6 +894,9 @@ async def handle_external_file_change(changed_abs_path: str) -> bool:
       - broadcasts editor:open with reason="external_change"
     Returns True if a reload was broadcast, False otherwise.
     """
+    from ..restore_activity import is_restoring
+    if is_restoring(changed_abs_path):
+        return False
     project = _active_project()
     if not project:
         return False
@@ -926,7 +930,7 @@ async def handle_external_file_change(changed_abs_path: str) -> bool:
     # Suppress watcher event triggered by our own save
     suppressed_sha = _LAST_SAVE_SHA.get(active_norm)
     if suppressed_sha and suppressed_sha == disk_sha:
-        _LAST_SAVE_SHA.pop(active_norm, None)
+        _ = _LAST_SAVE_SHA.pop(active_norm, None)
         return False
 
     # Check against cached draft / last known SHA
@@ -985,7 +989,7 @@ async def handle_external_file_change(changed_abs_path: str) -> bool:
     return True
 
 
-async def broadcast_git_baselines_for_active_file() -> bool:
+async def broadcast_git_baselines_for_active_file(*, is_current: Callable[[], bool] = lambda: True) -> bool:
     """Push fresh baselines for each client's active document.
 
     Called when git state changes (commits, checkouts, etc.) so the diff
@@ -994,8 +998,23 @@ async def broadcast_git_baselines_for_active_file() -> bool:
     """
     print("[git_baselines_push] broadcast_git_baselines_for_active_file called", flush=True)
     project = _active_project()
-    if not project:
+    if not project or not is_current():
         print("[git_baselines_push] no active project, skipping", flush=True)
+        return False
+
+    from ..comparison_backend import comparison_state, selected_baseline
+    from ..ui_ipc.notifications import emit_ui_ipc_rpc_notification
+    from ..ui_ipc.rpc_contract import UI_IPC_RPC_NOTIFICATION_COMPARISON_CHANGED
+    revision = time.monotonic_ns() // 1000
+    ref = _history_store.get_diff_base(project) or "HEAD"
+    await editor_runtime_emit_room_event("editor:comparison_changed", {"projectPath": project, "ref": ref, "revision": revision})
+    comparison = await asyncio.to_thread(comparison_state, project)
+    if _active_project() != project or not is_current() or (_history_store.get_diff_base(project) or "HEAD") != ref:
+        return False
+    await emit_ui_ipc_rpc_notification(UI_IPC_RPC_NOTIFICATION_COMPARISON_CHANGED, comparison)
+    if not is_current():
+        return False
+    if comparison.get("mode") == "plain":
         return False
 
     foregrounds = list_client_foregrounds(project, reason="git_baselines_push")
@@ -1006,29 +1025,17 @@ async def broadcast_git_baselines_for_active_file() -> bool:
     try:
         payloads: dict[str, dict[str, object]] = {}
         for foreground in foregrounds:
+            if not is_current():
+                return False
             active_norm = _normalize_abs_path(foreground["path"] or "")
             if not active_norm or not _is_under_project(project, active_norm):
                 continue
             payload = payloads.get(active_norm)
             if payload is None:
-                disk = _read_disk_text(active_norm)
-                disk_sha = hashlib.sha256(disk.encode("utf-8")).hexdigest()
-                head = _git_head_text(project, active_norm)
-                head_sha = (
-                    hashlib.sha256(head.encode("utf-8")).hexdigest()
-                    if isinstance(head, str)
-                    else None
-                )
-                payload = cast(dict[str, object], {
-                    "path": active_norm,
-                    "tracked": bool(head is not None),
-                    "base_ref": "HEAD",
-                    "disk_content": disk,
-                    "disk_sha256": disk_sha,
-                    "head_content": head,
-                    "head_sha256": head_sha,
-                })
+                payload = await asyncio.to_thread(selected_baseline, project, active_norm, _read_disk_text)
                 payloads[active_norm] = payload
+            if _active_project() != project or not is_current() or (_history_store.get_diff_base(project) or "HEAD") != ref:
+                return False
             await editor_runtime_emit_room_event(
                 "editor:git_baselines",
                 payload,
@@ -1041,7 +1048,7 @@ async def broadcast_git_baselines_for_active_file() -> bool:
         return False
 
 
-def _git_head_text(project_root: str, abs_path: str) -> Optional[str]:
+def _git_head_text(project_root: str, abs_path: str) -> str | None:
     """Return the file content at HEAD (or None if untracked / no commits)."""
 
     try:

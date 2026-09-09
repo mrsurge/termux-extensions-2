@@ -187,6 +187,21 @@ async def handle_editor_open(
     if "scroll_to_top" in params:
         open_payload["scroll_to_top"] = params["scroll_to_top"]
 
+    if params["source"] == "explorer_tree":
+        from ..services.git_comparison import is_historical_change
+        from ...monaco_editor.editor_preferences_backend import handle_editor_preference_update_request
+
+        root = context.project_root.resolve()
+        try:
+            rel = Path(abs_path).resolve().relative_to(root).as_posix()
+        except ValueError:
+            rel = ""
+        if is_historical_change(root, rel):
+            _ = await handle_editor_preference_update_request(
+                {"key": "comparisonMode", "value": "commit"},
+                source_client=context.client_instance_id,
+            )
+
     request_id = msg_id if isinstance(msg_id, str) and msg_id else _make_request_id()
     emit_editor_open = _get_emit_editor_open_from_backend()
     _ = await emit_editor_open(

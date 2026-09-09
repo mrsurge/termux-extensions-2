@@ -11,6 +11,7 @@ import { createExplorerSearchWidgetServices } from './vscode_widget_vendor/searc
 import type { ExplorerContentSearchOptions } from './types.ts';
 
 interface ExplorerContentQueryWidgetDeps {
+  onReplacementChanged?(expanded: boolean, text: string): void;
   onOptionsChanged(options: ExplorerContentQueryWidgetState): void;
   onEscape(): void;
 }
@@ -57,6 +58,26 @@ export function createExplorerContentQueryWidget(
   const searchContainer = document.createElement('div');
   searchContainer.className = 'search-container input-box';
   searchWidget.appendChild(searchContainer);
+
+  const replaceToggle = document.createElement('button');
+  replaceToggle.type = 'button'; replaceToggle.className = 'fe-search-replace-toggle';
+  replaceToggle.textContent = '▸'; replaceToggle.title = 'Toggle replacement';
+  replaceToggle.setAttribute('aria-label', 'Toggle replacement');
+  replaceToggle.setAttribute('aria-expanded', 'false');
+  searchWidget.prepend(replaceToggle);
+  const replaceInput = document.createElement('textarea');
+  replaceInput.className = 'fe-search-replace-input'; replaceInput.hidden = true;
+  replaceInput.rows = 1; replaceInput.placeholder = 'Replace (empty deletes matches)';
+  replaceInput.title = 'Literal text normally. Regex mode supports $0/$&, $1, ${name}, and $$ for a literal dollar sign.';
+  replaceInput.setAttribute('aria-label', 'Replacement text');
+  searchContainer.after(replaceInput);
+  replaceToggle.onclick = () => {
+    replaceInput.hidden = !replaceInput.hidden;
+    replaceToggle.textContent = replaceInput.hidden ? '▸' : '▾';
+    replaceToggle.setAttribute('aria-expanded', String(!replaceInput.hidden));
+    deps.onReplacementChanged?.(!replaceInput.hidden, replaceInput.value);
+  };
+  replaceInput.oninput = () => deps.onReplacementChanged?.(!replaceInput.hidden, replaceInput.value);
 
   const queryDetails = document.createElement('div');
   queryDetails.className = 'query-details more';

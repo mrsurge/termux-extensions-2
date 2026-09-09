@@ -420,6 +420,19 @@
   padding: 0;
 }
 
+.fe-search-content-widget .search-widget { position: relative; padding-left: 24px; }
+.fe-search-replace-toggle { position: absolute; left: 0; top: 0; width: 24px; min-height: 30px; border: 0; background: transparent; color: inherit; }
+.fe-search-replace-input { box-sizing: border-box; width: 100%; min-height: 30px; resize: vertical; margin: 5px 0; background: var(--vscode-input-background, #202329); color: inherit; border: 1px solid #5557; font: inherit; font-size: 16px; padding: 5px 8px; }
+.fe-search-replace-input[hidden] { display: none; }
+.fe-search-replace-actions { display: flex; flex-wrap: wrap; gap: 5px; padding: 6px 0; }
+.fe-search-action { flex: 0 0 auto; min-height: 28px; padding: 3px 7px; color: inherit; background: #8882; border: 1px solid #8884; border-radius: 3px; }
+.fe-search-action:disabled { opacity: .35; }
+.fe-search-select { flex: 0 0 auto; width: 18px; height: 18px; margin: 3px 6px 3px 0; accent-color: #58a6ff; }
+.fe-search-selected { box-shadow: inset 0 0 0 2px #58a6ff99; }
+.fe-search-replace-report { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; overflow: auto; font: inherit; padding: 8px; border-left: 2px solid #58a6ff; }
+.fe-search-file-header { flex-wrap: wrap; gap: 4px; }
+.fe-search-match > .fe-search-snippet { min-width: 0; flex: 1; }
+
 .fe-search-content-widget .search-widget .search-container,
 .fe-search-content-widget .search-widget .replace-container,
 .fe-search-content-widget .query-details {
@@ -1917,3 +1930,58 @@
   background: rgba(250, 204, 21, 0.18);
   color: #fef08a;
 }
+
+/* Structural warning markers never become part of canonical file names. */
+.fe-actual-git-mark { display: none; margin-left: 0.3em; flex-shrink: 0; }
+.explorer-historical-view .fe-actual-git-warning > .fe-tree-text > .fe-actual-git-mark { display: inline; }
+
+.comparison-actual-state { min-width: 0; overflow: hidden; text-overflow: ellipsis; margin-left: 0.6em; color: #e5b567; white-space: nowrap; }
+.fe-actual-git-mark::before { content: '🚨'; }
+
+/* By Changes hunk blinds are local presentation, not diff truncation. */
+.fe-search-change-restore {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 7px 10px;
+  color: inherit;
+  background: rgba(148, 163, 184, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.fe-search-hunk-toggle {
+  display: block;
+  width: 100%;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  min-height: 36px;
+}
+.fe-search-hunk-toggle::before { content: '\25BE'; margin-right: 8px; }
+.fe-search-hunk-toggle[aria-expanded='false']::before { content: '\25B8'; }
+.fe-search-hunk-body[hidden],
+.fe-search-diff-rows.is-blinded > .fe-search-diff-row:nth-child(n+51) { display: none; }
+.fe-search-hunk-blind {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-height: 40px;
+  border: 0;
+  border-top: 1px solid rgba(148, 163, 184, 0.25);
+  background: #080b10;
+  color: #cbd5e1;
+  cursor: pointer;
+}
+.fe-search-hunk-blind.is-blinded::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 32px;
+  background: linear-gradient(transparent, #080b10);
+  pointer-events: none;
+}
+.fe-search-hunk-toggle:focus-visible,
+.fe-search-hunk-blind:focus-visible,
+.fe-search-change-restore:focus-visible { outline: 2px solid #7dd3fc; outline-offset: -2px; }

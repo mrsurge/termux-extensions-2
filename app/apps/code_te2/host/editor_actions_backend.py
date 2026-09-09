@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+import asyncio
 from pathlib import Path
 
 from ..explorer.services.file_ops import get_project_root
@@ -9,7 +10,6 @@ from ..monaco_editor.editor_backend_services.contracts import JsonMap
 from ..monaco_editor.editor_ws import (
     editor_runtime_active_project,
     editor_runtime_emit_room_event,
-    editor_runtime_git_head_text,
     editor_runtime_is_under_project,
     editor_runtime_normalize_abs_path,
     editor_runtime_read_disk_text,
@@ -93,14 +93,13 @@ async def handle_host_editor_git_baselines_request(
 ) -> JsonMap:
     project = _active_project_or_raise()
     path = _resolve_editor_path(data, project, source_name)
-    payload = build_editor_git_baselines_payload(
+    payload = await asyncio.to_thread(build_editor_git_baselines_payload,
         {**data, "path": path},
         source_client=source_name,
         active_project=editor_runtime_active_project,
         normalize_abs_path=editor_runtime_normalize_abs_path,
         is_under_project=editor_runtime_is_under_project,
         read_disk_text=editor_runtime_read_disk_text,
-        git_head_text=editor_runtime_git_head_text,
     )
     await editor_runtime_emit_room_event(
         "editor:git_baselines",

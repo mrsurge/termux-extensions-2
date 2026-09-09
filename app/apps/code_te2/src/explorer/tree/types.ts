@@ -7,6 +7,8 @@ export interface ExplorerTreeEntry {
   kind?: ExplorerTreeEntryKind | string;
   gitStatus?: string;
   gitFlags?: string[];
+  actualGitStatus?: string;
+  actualGitFlags?: string[];
   hasDraft?: boolean;
 }
 

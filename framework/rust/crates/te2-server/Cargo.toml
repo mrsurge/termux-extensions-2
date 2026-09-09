@@ -29,6 +29,7 @@ regex.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 serde_yaml.workspace = true
 socketioxide.workspace = true
 socket2.workspace = true
