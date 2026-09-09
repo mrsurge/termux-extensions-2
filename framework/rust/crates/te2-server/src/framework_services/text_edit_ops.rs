@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 pub(crate) const MAX_TEXT_BYTES: usize = 375 * 1024;
 const MAX_EDITS: usize = 10_000;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct TextEdit {
     // Offsets are UTF-8 bytes in the original snapshot, never evolving offsets

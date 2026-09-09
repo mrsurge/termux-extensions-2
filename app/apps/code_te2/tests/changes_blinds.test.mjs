@@ -43,3 +43,29 @@ test('blinds and Restore isolate actions and retain controls during streaming', 
     assert.match(css, /is-blinded > \.fe-search-diff-row:nth-child\(n\+51\).*\{ display: none; \}/);
   } finally { win.happyDOM.abort(); }
 });
+
+test('hunk Restore uses its captured snapshot and does not navigate or collapse', async () => {
+  const win = new Window();
+  Object.assign(globalThis, { window: win, document: win.document, HTMLElement: win.HTMLElement, HTMLInputElement: win.HTMLInputElement });
+  try {
+    const calls = [];
+    const identity = { commit: 'a'.repeat(40), sourceSha256: 'b'.repeat(64), hunkIndex: 2 };
+    const renderer = createExplorerChangesResultsRenderer({
+      getGitDiffBase: () => ({ ref: 'HEAD', mode: 'head' }),
+      ensureInlineDiffs: async () => {}, openFileAndMaybeJump: async () => assert.fail('unexpected navigation'),
+      restoreFile: async () => assert.fail('unexpected whole-file restore'),
+      restoreHunk: async (rel, captured) => calls.push({ rel, captured }),
+    });
+    const container = document.createElement('div');
+    renderer.renderChangesResults(container, { changes: [{ rel: 'file.py', hunks: [
+      { oldStart: 1, newStart: 1, restore: identity, lines: [{ type: 'add', text: 'new' }] },
+      { oldStart: 10, newStart: 10, lines: [{ type: 'add', text: 'other' }] },
+    ] }] });
+    const actions = container.querySelectorAll('.fe-search-hunk .fe-search-change-restore');
+    assert.equal(actions.length, 1);
+    actions[0].click(); actions[0].click();
+    await Promise.resolve();
+    assert.deepEqual(calls, [{ rel: 'file.py', captured: identity }]);
+    assert.equal(container.querySelector('.fe-search-hunk-body').hidden, false);
+  } finally { win.happyDOM.abort(); }
+});

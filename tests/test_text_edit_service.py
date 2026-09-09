@@ -7,6 +7,7 @@ from app.libs import pipe_runtime
 from unittest.mock import patch
 
 from app.apps.code_te2.worker_services import text_edit_service as service
+from app.apps.code_te2.explorer.contracts.git import parse_git_restore_params, ExplorerGitContractError
 
 
 def result() -> dict[str, object]:
@@ -18,6 +19,24 @@ def result() -> dict[str, object]:
 
 
 class TextEditServiceTests(unittest.IsolatedAsyncioTestCase):
+    def test_hunk_rpc_requires_snapshot_identity(self) -> None:
+        payload: dict[str, object] = {'phase': 'hunkPrepare', 'path': 'file.py',
+            'projectPath': '/project', 'commit': 'c' * 40, 'sourceSha256': 'a' * 64, 'hunkIndex': 0}
+        self.assertEqual(parse_git_restore_params(payload).get('hunkIndex'), 0)
+        for key, value in [('commit', 'HEAD'), ('sourceSha256', ''), ('hunkIndex', True), ('hunkIndex', -1)]:
+            with self.subTest(key=key), self.assertRaises(ExplorerGitContractError):
+                _ = parse_git_restore_params({**payload, key: value})
+    async def test_prepare_hunk_uses_pinned_framework_read(self) -> None:
+        async def call(method: str, params: object, **kwargs: object) -> object:
+            self.assertEqual(method, 'fs.textEdits.prepareHunk')
+            self.assertEqual(kwargs['target_nid'], 2100)
+            self.assertEqual(cast(dict[str, object], params)['commit'], 'c' * 40)
+            return {'dto': 'ReverseHunkResult', 'version': 1, 'sourceSha256': 'a' * 64,
+                    'baselineSha256': 'b' * 64, 'edits': [{'startByte': 0, 'endByte': 3,
+                     'expectedText': 'new', 'replacement': 'old'}]}
+        with patch.object(pipe_runtime, 'call_async', new=call):
+            edits = await service.prepare_hunk(Path('/project'), 'file.py', 'c' * 40, 'a' * 64, 0)
+        self.assertEqual(edits, (service.ExactEdit(0, 3, 'new', 'old'),))
     async def test_routes_once_without_draft_or_autosave_fields(self) -> None:
         calls: list[tuple[str, object, dict[str, object]]] = []
 

@@ -8,6 +8,7 @@ import {
 } from './utils.ts';
 import { renderHighlightedDiffText } from './render-styling.ts';
 import type { ExplorerJumpOptions } from '../host/file-open-bridge.ts';
+import type { HunkRestoreIdentity } from '../tree/restore-action.ts';
 
 interface ExplorerChangeLine {
   type?: string;
@@ -16,6 +17,7 @@ interface ExplorerChangeLine {
 
 interface ExplorerChangeHunk extends ExplorerDiffHunkLike {
   lines?: ExplorerChangeLine[];
+  restore?: HunkRestoreIdentity;
 }
 
 interface ExplorerChangeEntry extends ExplorerDiffChangeLike {
@@ -34,6 +36,7 @@ interface ExplorerChangesPayload {
 
 interface ExplorerChangesResultsRendererDeps {
   restoreFile(rel: string): Promise<void>;
+  restoreHunk(rel: string, identity: HunkRestoreIdentity): Promise<void>;
   getGitDiffBase(): ExplorerDiffBaseInfo;
   ensureInlineDiffs(): Promise<void>;
   openFileAndMaybeJump(
@@ -280,6 +283,21 @@ export function createExplorerChangesResultsRenderer(
             Number(hunk.newStart || hunk.oldStart || 1),
           );
           hunkBlock.appendChild(hunkHeader);
+          const identity = hunk.restore;
+          if (identity && typeof identity.commit === 'string' && typeof identity.sourceSha256 === 'string' && Number.isInteger(identity.hunkIndex)) {
+            const restoreHunk = document.createElement('button');
+            restoreHunk.type = 'button';
+            restoreHunk.className = 'fe-search-change-restore';
+            restoreHunk.textContent = 'Restore hunk...';
+            restoreHunk.onclick = async (event) => {
+              event.stopPropagation();
+              if (restoreHunk.disabled) return;
+              restoreHunk.disabled = true;
+              try { await deps.restoreHunk(rel, identity); }
+              finally { restoreHunk.disabled = false; }
+            };
+            hunkBlock.appendChild(restoreHunk);
+          }
 
           const diffRows = document.createElement('div');
           diffRows.className = 'fe-search-diff-rows';

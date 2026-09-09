@@ -98,11 +98,26 @@ async def handle_git_restore(
     params: GitRestoreParams,
     msg_id: str | None,
 ) -> None:
-    from ..services import guarded_restore
+    from ..services import guarded_restore, guarded_text_edits
+    from ...worker_services.text_edit_service import prepare_hunk
+    from ..services.git_comparison import selected_ref
     phase = params.get("phase")
     if phase is not None and params.get("projectPath") != str(context.project_root.resolve()):
         raise ValueError("Project changed; confirm Restore again")
-    if phase == "prepare":
+    if phase == 'hunkPrepare':
+        ref = selected_ref(context.project_root)
+        info = await asyncio.to_thread(worker_git_service.get_commit_info, context.project_root, ref)
+        if info is None or info.hash != params['commit']:
+            raise ValueError('Comparison changed; reopen the changes overlay')
+        edits = await prepare_hunk(context.project_root, params['path'], params['commit'],
+            params.get('sourceSha256', ''), params.get('hunkIndex', -1))
+        result = guarded_text_edits.prepare(context.project_root, context.client_instance_id,
+            params['path'], params.get('sourceSha256', ''), edits, comparison=ref)
+        result.update({'commit': params['commit'], 'ref': ref})
+    elif phase == 'hunkApply':
+        result = await guarded_text_edits.execute(context.project_root, context.client_instance_id,
+            params['path'], params.get('token', ''), discard_draft=params.get('discardDraft', False))
+    elif phase == "prepare":
         result = await guarded_restore.prepare(context.project_root, context.client_instance_id, params["path"])
     elif phase in {"unstage", "apply"}:
         result = await guarded_restore.execute(context.project_root, context.client_instance_id, params["path"],

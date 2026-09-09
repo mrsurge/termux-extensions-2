@@ -43,17 +43,30 @@ The latest accepted progressive-discovery snapshot is `d9bf1bcb`.
   single-use client/project/path/revision confirmations, explicit discard consent,
   newer-draft preservation, and disconnect-owned execution. Whole-file Restore
   and exact edits share path ownership and the existing result projection.
-- [ ] Wire backend hunk/match producers and Explorer prepare/apply RPC actions
-  to this transaction; no frontend mutation endpoint is exposed yet.
+- [x] Wire hunk preparation and Explorer hunkPrepare/hunkApply through guarded consent.
+- [ ] Wire Find/Replace producers and controls through the same transaction.
 - [x] Pass 35 Python adapter/transaction/whole-file Restore tests and focused
   Basedpyright checks, including cancellation, project changes, stale consent,
   write failure, no-op, and concurrent drafts.
 - [x] Add strict Python `worker_services/text_edit_service.py` pipe adapter;
   validate response DTO/version/path/hash/types and never retry uncertain writes.
   Five adapter tests pass; adapter and tests pass Basedpyright without warnings.
-  This is internal transport only, not yet an Explorer mutation endpoint.
-- [ ] Implement per-hunk Restore against the selected baseline, preserving every
+  Explorer hunk actions enter via guarded consent rather than direct transport.
+- [x] Implement per-hunk Restore against the selected baseline, preserving every
   unrelated edit rather than invoking whole-file discard-and-restore.
+- [x] Add pure Rust reverse-hunk generation from exact buffers with libgit2
+  boundaries, preserving line endings/EOF/Unicode and unrelated hunks. This is
+  exposed internally as `fs.textEdits.reverseHunk`, used by disk-bound preparation.
+- [x] Validate three reverse-hunk tests plus 17 existing text-edit/pipe/disk
+  tests (one Android hard-link fixture remains skipped). Pipe coverage verifies
+  exact CRLF payloads and no write during reverse-hunk generation.
+- [x] Bind actionable hunk identities to pinned baseline and disk hashes, source
+  buffers through framework reads, and connect Explorer confirmation controls.
+- [x] Validate 4 hunk-generation/preparation tests, 5 progressive-change tests,
+  37 Python transport/consent/Restore tests, and 5 frontend regression tests.
+  TypeScript and focused Basedpyright checks pass; host bundle rebuilt.
+- [x] User live acceptance passed for Restore hunk after framework restart and client asset refresh.
+  Find/Replace remains the next implementation slice, not completed by this work.
 - [ ] Implement Find/Replace through By contents using the shared operation;
   define selected-match/file and bulk replacement scope explicitly.
 - [ ] Preserve autosave preferences, newer drafts, and staged/index safety.

@@ -94,6 +94,11 @@ fn read(path: &Path) -> Result<(String, Metadata), EditError> {
     Ok((text, meta))
 }
 
+pub(crate) fn snapshot(root: &Path, relative: &str) -> Result<String, EditError> {
+    let path = target(root, relative)?;
+    read(&path).map(|(content, _)| content)
+}
+
 fn same_file(a: &Metadata, b: &Metadata) -> bool {
     #[cfg(unix)]
     {

@@ -79,3 +79,27 @@ async def apply_disk_edits(
         origin_name='code_te2.explorer.text_edits',
     )
     return _result(raw, path, expected)
+
+
+async def prepare_hunk(project: Path, path: str, commit: str, source: str, index: int) -> tuple[ExactEdit, ...]:
+    raw = await pipe_runtime.call_async('fs.textEdits.prepareHunk', {
+        'dto': 'PrepareHunkRequest', 'version': 1, 'root': str(project), 'path': path,
+        'commit': commit, 'expectedSha256': _hash(source), 'hunkIndex': index,
+    }, target_nid=2100, target_name='service.fs', workspace_root=str(project),
+        origin_name='code_te2.explorer.text_edits')
+    value = _mapping(raw)
+    if value.get('dto') != 'ReverseHunkResult' or type(value.get('version')) is not int or value.get('version') != 1 or _hash(value.get('sourceSha256')) != _hash(source):
+        raise ValueError('Invalid prepared hunk identity')
+    _ = _hash(value.get('baselineSha256'))
+    edits = value.get('edits')
+    if not isinstance(edits, list):
+        raise ValueError('Invalid prepared hunk edits')
+    rows = cast(list[object], edits)
+    if len(rows) != 1:
+        raise ValueError('Invalid prepared hunk edits')
+    edit = _mapping(rows[0])
+    start, end = edit.get('startByte'), edit.get('endByte')
+    expected, replacement = edit.get('expectedText'), edit.get('replacement')
+    if not isinstance(start, int) or isinstance(start, bool) or not isinstance(end, int) or isinstance(end, bool) or not 0 <= start <= end or not isinstance(expected, str) or not isinstance(replacement, str):
+        raise ValueError('Invalid prepared hunk range')
+    return (ExactEdit(start, end, expected, replacement),)

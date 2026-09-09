@@ -8,6 +8,36 @@ interface RestoreDeps {
   getErrorMessage(error: unknown, fallback: string): string;
 }
 
+export interface HunkRestoreIdentity {
+  commit: string;
+  sourceSha256: string;
+  hunkIndex: number;
+}
+
+export async function restoreExplorerHunk(deps: RestoreDeps, rel: string, identity: HunkRestoreIdentity): Promise<void> {
+  try {
+    const project = deps.getProjectPath();
+    if (!project) throw new Error('Open a project before restoring');
+    const preview = await deps.requestExplorer(EXPLORER_RPC_METHODS.gitRestore, {
+      path: rel, phase: 'hunkPrepare', projectPath: project, ...identity,
+    });
+    if (typeof preview.token !== 'string') throw new Error('Invalid hunk confirmation');
+    const draft = preview.hasDraft === true ? "\n\nThis will DISCARD this file's entire unsaved draft." : '';
+    const confirmed = await window.teUI.dialog.confirm(
+      `Restore this hunk in ${rel} from commit ${identity.commit.slice(0, 10)} directly to disk?${draft}\n\nOther disk hunks, HEAD, and the index will remain unchanged.`,
+    );
+    if (!confirmed) return;
+    if (project !== deps.getProjectPath()) throw new Error('Project changed; confirm again');
+    const result = await deps.requestExplorer(EXPLORER_RPC_METHODS.gitRestore, {
+      path: rel, phase: 'hunkApply', projectPath: project, token: preview.token,
+      discardDraft: preview.hasDraft === true,
+    });
+    deps.toast(result.draftRetained === true ? 'Hunk restored on disk; a newer draft was retained. Review before saving.' : 'Hunk restored on disk');
+  } catch (error) {
+    deps.toast(deps.getErrorMessage(error, 'Hunk Restore failed'));
+  }
+}
+
 export async function restoreExplorerFile(deps: RestoreDeps, rel: string, name: string): Promise<void> {
   try {
     const project = deps.getProjectPath();

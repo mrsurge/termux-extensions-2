@@ -201,6 +201,44 @@ impl FrameworkServiceScheduler {
         .map_err(|_| EditError::Unavailable)?
     }
 
+    pub(crate) async fn reverse_hunk(
+        &self,
+        request: super::hunk_edits::ReverseHunkRequest,
+    ) -> Result<super::hunk_edits::ReverseHunkResult, super::text_edit_ops::EditError> {
+        use super::{hunk_edits, text_edit_ops::EditError};
+        // Pure CPU work shares the bounded read lane, never the mutation lock.
+        // Keep its permit inside the blocking closure even if the caller leaves.
+        let permit = self
+            .acquire(self.inner.fs_read.clone())
+            .await
+            .map_err(|_| EditError::Unavailable)?;
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            hunk_edits::reverse(request)
+        })
+        .await
+        .map_err(|_| EditError::Unavailable)?
+    }
+
+    pub(crate) async fn prepare_hunk(
+        &self,
+        request: super::hunk_edits::PrepareHunkRequest,
+    ) -> Result<super::hunk_edits::ReverseHunkResult, super::text_edit_ops::EditError> {
+        use super::{hunk_edits, text_edit_ops::EditError};
+        // Pure CPU work shares the bounded read lane, never the mutation lock.
+        // Keep its permit inside the blocking closure even if the caller leaves.
+        let permit = self
+            .acquire(self.inner.fs_read.clone())
+            .await
+            .map_err(|_| EditError::Unavailable)?;
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            hunk_edits::prepare(request)
+        })
+        .await
+        .map_err(|_| EditError::Unavailable)?
+    }
+
     pub(crate) fn run_targets(&self) -> &run_target_ops::RunTargetRegistry {
         &self.inner.run_targets
     }

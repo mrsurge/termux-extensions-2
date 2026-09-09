@@ -764,7 +764,7 @@ blocking filesystem read lane and retains its permit if its caller disconnects.
 and `appliedEdits` (excluding individually unchanged replacements). Stable
 `textEdit.*` error codes distinguish stale content, bad ranges, overlap, limits,
 and invalid expected text. No source content appears in error messages.
-This foundation does not yet connect to hunk Restore or Find/Replace controls.
+Hunk Restore now uses this foundation; Find/Replace integration remains pending.
 Both will use disk content and direct disk writes regardless of autosave mode.
 Python must obtain draft-discard consent and fence draft revisions before sending
 mutations. Draft-aware search and replacement-as-draft are not part of Phase 5.
@@ -779,7 +779,7 @@ reports directory-fsync status separately because failure there is post-commit.
 Same-canonical-root edit transactions serialize through the scheduler and retain
 their lock through a running blocking write even on caller disconnect. Arbitrary
 external processes still have a final check-to-rename race; this is not filesystem
-compare-and-swap. Explorer hunk/match producers and RPC controls are not wired yet.
+compare-and-swap. Find/Replace producers and controls remain pending.
 
 `worker_services/text_edit_service.py` provides the typed asynchronous Python
 adapter. It validates response DTO versions, exact path/source identity, hashes,
@@ -799,8 +799,25 @@ whole-file Restore. Failure/no-op leaves drafts untouched; a successful write
 clears only the confirmed revision and retains any newer draft. The shared
 `guarded_restore.project_disk_result` projects through existing editor, Git, WBA,
 and Explorer paths, rechecking revision before publishing clean cache state.
-No frontend RPC exposes these methods yet. Uncertain pipe timeouts are not retried;
+Explorer Restore hunkPrepare/hunkApply phases use this transaction. Uncertain pipe timeouts are not retried;
 multi-file outcome reporting remains part of the subsequent Find/Replace integration.
+
+The internal `fs.textEdits.reverseHunk` computation accepts `ReverseHunkRequest`
+v1 (`baseline`, `content`, `expectedSha256`, `hunkIndex`) and returns
+`ReverseHunkResult` v1 with both buffer hashes and exact edits. It uses libgit2
+buffer diffing with three context lines and no interhunk merging. Original
+buffer slices, not the display rows that strip line endings, supply replacement
+bytes. Both buffers are bounded to 375 KiB and NUL content is rejected. It runs
+off-loop under the read semaphore and never writes. The disk-bound companion
+`fs.textEdits.prepareHunk` accepts a full immutable commit ID, root/path, disk hash,
+and index, reads the Git blob and guarded disk snapshot in Rust, and returns the
+exact edit. Moving refs are rejected. By Changes attaches action identity only
+when canonical buffer-hunk coordinates and display lines agree. Missing disk
+files, unsupported text, or ambiguous grouping remain display-only. Preparation
+also verifies the selector still resolves to the captured commit. The existing
+Explorer Restore RPC uses hunkPrepare/hunkApply phases; the per-hunk button warns
+that the entire unsaved draft will be discarded, while only the selected disk
+hunk is changed. Staged/index contents are never modified by this action.
 
 #### Progressive Results
 

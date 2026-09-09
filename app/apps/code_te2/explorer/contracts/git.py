@@ -31,6 +31,8 @@ class GitRestoreParams(TypedDict):
     token: NotRequired[str]
     discardDraft: NotRequired[bool]
     projectPath: NotRequired[str]
+    hunkIndex: NotRequired[int]
+    sourceSha256: NotRequired[str]
 
 
 class GitCommitParams(TypedDict):
@@ -99,9 +101,9 @@ def parse_git_restore_params(payload: object) -> GitRestoreParams:
         missing_message="Restore requires path",
     )
     phase = _parse_optional_string(envelope.get("phase"))
-    if phase not in {"prepare", "unstage", "apply"}:
+    if phase not in {"prepare", "unstage", "apply", "hunkPrepare", "hunkApply"}:
         raise ExplorerGitContractError("Restore requires confirmation; reload the client")
-    return {
+    result: GitRestoreParams = {
         "path": path,
         "commit": _parse_optional_string(envelope.get("commit")) or "HEAD",
         "phase": phase,
@@ -109,6 +111,15 @@ def parse_git_restore_params(payload: object) -> GitRestoreParams:
         "token": _parse_optional_string(envelope.get("token")) or "",
         "discardDraft": envelope.get("discardDraft") is True,
     }
+    if phase == 'hunkPrepare':
+        index = envelope.get('hunkIndex')
+        source = envelope.get('sourceSha256')
+        commit = result['commit']
+        if not isinstance(index, int) or isinstance(index, bool) or index < 0 or not isinstance(source, str) or len(source) != 64 or any(c not in '0123456789abcdefABCDEF' for c in source) or len(commit) != 40 or any(c not in '0123456789abcdefABCDEF' for c in commit):
+            raise ExplorerGitContractError('Invalid hunk snapshot identity')
+        result['hunkIndex'] = index
+        result['sourceSha256'] = source
+    return result
 
 
 def parse_git_commit_params(payload: object) -> GitCommitParams:

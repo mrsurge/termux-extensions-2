@@ -224,6 +224,17 @@ mod tests {
             nid: 2100,
             name: "service.fs".into(),
         };
+        let response = dispatch_request(
+            request("fs.textEdits.reverseHunk", json!({"dto":"ReverseHunkRequest",
+                "version":1,"baseline":"old\r\n","content":"new\r\n",
+                "expectedSha256":sha256("new\r\n"),"hunkIndex":0}), &root),
+            &responder, &scheduler, None,
+        ).await;
+        assert_eq!(response.kind, PipeMessageKind::Response);
+        let edit = &response.result.as_ref().unwrap()["edits"][0];
+        assert_eq!(edit["replacement"], "old\r\n");
+        assert_eq!(edit["expectedText"], "new\r\n");
+        assert_eq!(fs::read_to_string(root.join("unchanged.txt")).unwrap(), "disk");
         let params = json!({"dto":"TextEditsRequest","version":1,
             "content":"draft text","expectedSha256":sha256("draft text"),
             "edits":[{"startByte":0,"endByte":5,"expectedText":"draft","replacement":"new"}]});
