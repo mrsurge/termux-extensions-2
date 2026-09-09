@@ -144,6 +144,23 @@ See `PLAN.md` for the action matrix, boundaries, and unresolved policy details.
 
 ## Follow-Up: Duplicate Changes Enumeration
 
+### Follow-Up: Progressive Historical Discovery
+
+- [x] Locate the remaining delay inside Rust enumeration, not Python scheduling.
+- [x] Replace whole-tree content comparison with index-backed candidate discovery
+  and literal-path disk verification shared by decorations and search.
+- [x] Stream the first page's confirmed diffs before later candidates are checked;
+  publish final totals/token afterward, retaining guarded continuation pages.
+- [x] Add ordering, net-zero/staged/literal-path, pipe, and Python metadata tests.
+- [x] Remove temporary Python/Rust timing instrumentation; add ownership comments.
+- [x] Pass 69 Rust framework-service tests (4 benchmark tests ignored), 12 Python
+  regressions, and BasedPyright with zero errors/warnings.
+- [x] Obtain user live acceptance: user confirmed the progressive discovery fix works.
+
+The fast candidate metadata pass still precedes file validation. HEAD retains
+its existing index-backed status discovery; no claim of a streamed libgit2
+directory walk is made. No Android/frontend asset changes or automatic restart.
+
 - [x] Trace selector notification, snapshot application, and status notification
   independently forcing the same By changes enumeration.
 - [x] Remove implicit search side effects from snapshot application. The initial

@@ -1023,6 +1023,15 @@ pub(crate) fn git_remote_list(
 pub(crate) fn git_worktree_changes(
     request: GitProviderRequest,
 ) -> Result<GitWorktreeChanges, GitProviderError> {
+    git_worktree_changes_visit(request, || true, |_| true)
+}
+
+/// Visit confirmed changes before checking later candidates. Returning false stops IO.
+pub(crate) fn git_worktree_changes_visit(
+    request: GitProviderRequest,
+    active: impl Fn() -> bool,
+    mut visit: impl FnMut(&GitWorktreeChange) -> bool,
+) -> Result<GitWorktreeChanges, GitProviderError> {
     let root = request_root(&request)?;
     let base = request.base.clone().unwrap_or_else(|| "HEAD".to_owned());
     let Some(repo) = discover_repo(&root)? else {
@@ -1042,39 +1051,84 @@ pub(crate) fn git_worktree_changes(
     // Compare disk directly; merging index deltas can retain net-zero changes.
     if base != "HEAD" {
         let tree = tree_for_rev(&repo, &base)?;
-        let mut options = DiffOptions::new();
-        options.include_untracked(true).recurse_untracked_dirs(true);
-        let diff = repo.diff_tree_to_workdir(Some(&tree), Some(&mut options))?;
+        // Use index OIDs/stat data to narrow disk comparisons. The union is only
+        // a candidate set: direct comparison below removes staged/net-zero deltas.
+        let index = repo.index()?;
+        let staged = repo.diff_tree_to_index(Some(&tree), Some(&index), None)?;
+        let mut candidates = BTreeSet::new();
+        for delta in staged.deltas() {
+            for path in [delta.old_file().path(), delta.new_file().path()]
+                .into_iter()
+                .flatten()
+            {
+                candidates.insert(path.to_path_buf());
+            }
+        }
+        let mut status_options = StatusOptions::new();
+        status_options
+            .show(StatusShow::IndexAndWorkdir)
+            .include_untracked(true)
+            .recurse_untracked_dirs(true);
+        for entry in repo.statuses(Some(&mut status_options))?.iter() {
+            if let Some(path) = status_path(&entry) {
+                candidates.insert(PathBuf::from(path));
+            }
+        }
         let mut changes = Vec::new();
+        let mut seen = BTreeSet::new();
         let mut truncated = false;
-        for delta in diff.deltas() {
-            let code = match delta.status() {
-                Delta::Unmodified | Delta::Ignored => continue,
-                Delta::Added => "A",
-                Delta::Deleted => "D",
-                Delta::Renamed => "R",
-                Delta::Copied => "C",
-                Delta::Untracked => "??",
-                Delta::Conflicted => "U",
-                Delta::Typechange => "T",
-                _ => "M",
-            };
-            let Some(path) = delta.new_file().path().or_else(|| delta.old_file().path()) else {
-                continue;
-            };
-            if changes.len() >= limit {
-                truncated = true;
+        for candidate in candidates {
+            if !active() {
                 break;
             }
-            changes.push(GitWorktreeChange {
-                path: path_to_string(path),
-                code: code.to_owned(),
-                original_path: if matches!(delta.status(), Delta::Renamed | Delta::Copied) {
-                    delta.old_file().path().map(path_to_string)
-                } else {
-                    None
-                },
-            });
+            let mut options = DiffOptions::new();
+            options
+                .include_untracked(true)
+                .recurse_untracked_dirs(true)
+                .disable_pathspec_match(true)
+                .pathspec(&candidate);
+            let diff = repo.diff_tree_to_workdir(Some(&tree), Some(&mut options))?;
+            for delta in diff.deltas() {
+                let code = match delta.status() {
+                    Delta::Unmodified | Delta::Ignored => continue,
+                    Delta::Added => "A",
+                    Delta::Deleted => "D",
+                    Delta::Renamed => "R",
+                    Delta::Copied => "C",
+                    Delta::Untracked => "??",
+                    Delta::Conflicted => "U",
+                    Delta::Typechange => "T",
+                    _ => "M",
+                };
+                let Some(path) = delta.new_file().path().or_else(|| delta.old_file().path()) else {
+                    continue;
+                };
+                // File/directory transitions can make literal candidate prefixes
+                // overlap. Emit each direct-diff path/status only once.
+                if !seen.insert((path.to_path_buf(), code)) {
+                    continue;
+                }
+                if changes.len() >= limit {
+                    truncated = true;
+                    break;
+                }
+                let change = GitWorktreeChange {
+                    path: path_to_string(path),
+                    code: code.to_owned(),
+                    original_path: if matches!(delta.status(), Delta::Renamed | Delta::Copied) {
+                        delta.old_file().path().map(path_to_string)
+                    } else {
+                        None
+                    },
+                };
+                if !visit(&change) {
+                    return Err(GitProviderError::Git("comparison cancelled".into()));
+                }
+                changes.push(change);
+            }
+            if truncated {
+                break;
+            }
         }
         return Ok(GitWorktreeChanges {
             dto: "GitWorktreeChanges",
@@ -1098,6 +1152,9 @@ pub(crate) fn git_worktree_changes(
     let mut changes = Vec::new();
     let mut truncated = false;
     for entry in statuses.iter() {
+        if !active() {
+            break;
+        }
         if changes.len() >= limit {
             truncated = true;
             break;
@@ -1109,11 +1166,15 @@ pub(crate) fn git_worktree_changes(
         let Some(path) = status_path(&entry) else {
             continue;
         };
-        changes.push(GitWorktreeChange {
+        let change = GitWorktreeChange {
             path,
             code: status_short_code(status).to_owned(),
             original_path: status_original_path(&entry),
-        });
+        };
+        if !visit(&change) {
+            return Err(GitProviderError::Git("comparison cancelled".into()));
+        }
+        changes.push(change);
     }
     Ok(GitWorktreeChanges {
         dto: "GitWorktreeChanges",
@@ -2743,6 +2804,42 @@ mod tests {
         assert_eq!(diff.files[0].relative_path, "tracked.txt");
         assert_eq!(diff.files[0].content_suppressed, None);
 
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn historical_candidates_match_direct_disk_comparison() {
+        let root = test_root("historical-candidates");
+        let repo = Repository::init(&root).unwrap();
+        for name in ["literal[1].txt", "literal1.txt", "staged.txt", "removed.txt", "unchanged.txt"] {
+            fs::write(root.join(name), "base\n").unwrap();
+        }
+        commit_all(&repo, "base");
+        let base = repo.head().unwrap().target().unwrap().to_string();
+        fs::write(root.join("literal[1].txt"), "changed\n").unwrap();
+        fs::write(root.join("staged.txt"), "staged version\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("staged.txt")).unwrap();
+        index.remove_path(Path::new("removed.txt")).unwrap();
+        index.write().unwrap();
+        // Index changes are candidates, not proof of a disk difference.
+        fs::write(root.join("staged.txt"), "base\n").unwrap();
+        fs::write(root.join("new.txt"), "untracked\n").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("unchanged.txt", root.join("link")).unwrap();
+        let tree = tree_for_rev(&repo, &base).unwrap();
+        let mut options = DiffOptions::new();
+        options.include_untracked(true).recurse_untracked_dirs(true);
+        let oracle = repo.diff_tree_to_workdir(Some(&tree), Some(&mut options)).unwrap();
+        let expected: BTreeSet<_> = oracle.deltas().filter_map(|d| {
+            d.new_file().path().or_else(|| d.old_file().path()).map(path_to_string)
+        }).collect();
+        let result = git_worktree_changes(GitProviderRequest { base: Some(base), ..provider_request(&root) }).unwrap();
+        let actual: BTreeSet<_> = result.changes.iter().map(|c| c.path.clone()).collect();
+        assert_eq!(actual, expected);
+        assert!(!actual.contains("staged.txt"));
+        assert!(!actual.contains("removed.txt"));
+        assert!(!actual.contains("literal1.txt"));
         let _ = fs::remove_dir_all(root);
     }
 

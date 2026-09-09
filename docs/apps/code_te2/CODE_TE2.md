@@ -746,11 +746,15 @@ Used by review save/discard, open/jump, search highlighting, and project-switch 
   start acknowledgement does not wait for Git enumeration or hunk generation.
   Rust `framework_services/search_changes.rs` runs that work on the scheduler's
   bounded blocking search lane; the editor file-open/Git lanes remain separate.
-- Each changes job resolves the requested comparison to an immutable commit,
-  sends one metadata result followed by individual file results, and finishes
-  with `search.job.done`. HEAD browsing retains HEAD status enumeration; a
-  historical ref uses selected-tree-to-worktree enumeration. Every hunk reads
-  the pinned baseline, and continuation rejects HEAD movement in HEAD view.
+- Each changes job resolves the requested comparison to an immutable commit.
+  The first page emits discovery metadata without a total, then confirmed file
+  diffs while later candidates are still unchecked. Final metadata supplies the
+  exact bounded total and continuation token before `search.job.done`. Existing
+  frontend metadata merging preserves file DOM during this final update.
+  HEAD browsing retains HEAD status enumeration; historical discovery uses
+  index-backed candidates with per-path selected-tree-to-disk verification.
+  Every hunk reads the pinned baseline. Continuations validate the full token
+  before emitting any results and reject HEAD movement in HEAD view.
 - One page contains at most 40 files. Next-page navigation replaces the page,
   rather than accumulating unlimited diff bodies; First page restarts it.
   The existing 20,000-candidate enumeration bound is explicitly reported as
@@ -759,7 +763,7 @@ Used by review save/discard, open/jump, search highlighting, and project-switch 
   remains in the Git provider.
 - `changesOffset` on `explorer.search.run` is accepted only for the cached,
   completed current session's next offset. Python supplies its pinned hash and
-  opaque snapshot token to Rust. The token fingerprints sorted candidate paths,
+  opaque snapshot token to Rust. The token fingerprints ordered confirmed paths,
   status codes, sizes, and modification times. A changed token requires refresh;
   it is a continuation guard, not an atomic filesystem snapshot or content hash.
 - Python retains only comparison/continuation metadata for these pages, not a
@@ -954,8 +958,13 @@ theme registration is skipped (by design) to avoid caching a no-op run.
 - Editor comparison notifications fence older baselines by ref and monotonic
   revision; path and mode checks reject obsolete responses. By changes uses
   correlated, generation-fenced requests and refreshes on Git/selection facts.
-- Historical By changes candidates come from Rust's direct selected-tree-to-
-  worktree diff, not HEAD dirty status. Clean-against-HEAD files remain eligible;
+- Historical candidates are the union of selected-tree-to-index deltas and
+  current index/worktree status paths, not just HEAD dirty paths. Only these
+  candidates undergo direct selected-tree-to-disk comparison, with literal
+  pathspecs. The same visitor powers collected Explorer decorations and streamed
+  By changes files; those consumers still schedule independently, without a
+  shared cache or waiting for each other's full projection.
+  Clean-against-HEAD files remain eligible;
   files equal to the selected baseline are excluded even when dirty against HEAD.
   HEAD retains its existing status semantics and result limits remain bounded.
 - Diff editor children hide vertical scrollbar chrome but retain automatic

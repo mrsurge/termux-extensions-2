@@ -90,17 +90,60 @@ pub(crate) fn run(
         }
     }
     check()?;
-    let listing = git_ops::git_worktree_changes(git_ops::GitProviderRequest {
-        base: Some(if head_view {
-            "HEAD".into()
-        } else {
-            pinned.clone()
-        }),
-        ..provider.clone()
-    })
-    .map_err(map_error)?;
-    let mut entries = listing.changes;
-    entries.sort_by(|a, b| (a.code == "??", &a.path).cmp(&(b.code == "??", &b.path)));
+    let offset = request.offset.unwrap_or(0);
+    let base = json!({"ref": requested_base, "mode": if pinned == "HEAD" {"none"} else if head_view {"head"} else {"detached"}, "commit": commit.as_ref().map(|c| json!({"hash": c.hash, "short": c.short_hash, "subject": c.summary}))});
+    // Discovery has no exact total yet. Publish ownership before the first file,
+    // then stream each confirmed diff without waiting for later candidate checks.
+    if offset == 0
+        && !emit(
+            json!({"metadata":{"mode":"changes","git":true,"base":base,"baseHash":pinned,"offset":0,"nextOffset":null}}),
+        )
+    {
+        return Err(SearchProviderError::Cancelled);
+    }
+    check()?;
+    let mut delivered = 0;
+    let mut delivery_error = None;
+    let listing_result = git_ops::git_worktree_changes_visit(
+        git_ops::GitProviderRequest {
+            base: Some(if head_view {
+                "HEAD".into()
+            } else {
+                pinned.clone()
+            }),
+            ..provider.clone()
+        },
+        || !cancelled.load(Ordering::Relaxed),
+        |entry| {
+            if cancelled.load(Ordering::Relaxed) {
+                return false;
+            }
+            if offset != 0 || delivered >= 40 {
+                return true;
+            }
+            match render_change(entry, &provider, &pinned, &root) {
+                Ok(change) => {
+                    if cancelled.load(Ordering::Relaxed) || !emit(json!({"change":change})) {
+                        delivery_error = Some(SearchProviderError::Cancelled);
+                        return false;
+                    }
+                    delivered += 1;
+                    true
+                }
+                Err(error) => {
+                    delivery_error = Some(error);
+                    false
+                }
+            }
+        },
+    );
+    if let Some(error) = delivery_error {
+        return Err(error);
+    }
+    check()?;
+    let listing = listing_result.map_err(map_error)?;
+    // Keep discovery order identical for streamed files and subsequent pages.
+    let entries = listing.changes;
     let mut hash = DefaultHasher::new();
     pinned.hash(&mut hash);
     for entry in &entries {
@@ -122,61 +165,72 @@ pub(crate) fn run(
             "comparison_changed: refresh the result before continuing".into(),
         ));
     }
-    let offset = request.offset.unwrap_or(0);
     if offset > entries.len() || (offset > 0 && request.snapshot_token.is_none()) {
         return Err(SearchProviderError::Search(
             "Invalid changes continuation".into(),
         ));
     }
     let end = (offset + 40).min(entries.len());
-    let base = json!({"ref": requested_base, "mode": if pinned == "HEAD" {"none"} else if head_view {"head"} else {"detached"}, "commit": commit.as_ref().map(|c| json!({"hash": c.hash, "short": c.short_hash, "subject": c.summary}))});
     let meta = json!({"mode":"changes", "git":listing.is_repository, "base":base, "baseHash":pinned, "snapshotToken":token, "offset":offset, "nextOffset": if end < entries.len() {Some(end)} else {None}, "total":entries.len(), "truncated":listing.truncated});
     if !emit(json!({"metadata":meta})) {
         return Err(SearchProviderError::Cancelled);
     }
-    for entry in &entries[offset..end] {
-        check()?;
-        let hunks = git_ops::git_diff_hunks(git_ops::GitProviderRequest {
-            base: Some(pinned.clone()),
-            relative_path: Some(entry.path.clone()),
-            ..provider.clone()
-        });
-        check()?;
-        let status = entry.code.trim().chars().next().unwrap_or('?');
-        let status_text = match status {
-            'M' => "Modified",
-            'A' => "Added",
-            'D' => "Deleted",
-            'R' => "Renamed",
-            'C' => "Copied",
-            'U' => "Conflict",
-            'T' => "Type changed",
-            _ => "Untracked",
-        };
-        let mut change = json!({"rel":entry.path,"path":Path::new(&root).join(&entry.path).to_string_lossy(),"label":Path::new(&entry.path).file_name().unwrap_or_default().to_string_lossy(),"status":status.to_string(),"statusCode":entry.code,"statusText":status_text,"renamedFrom":entry.original_path,"hunks":[]});
-        match hunks {
-            Ok(result) => {
-                change["summary"] = json!(result.summary);
-                change["hunks"] = json!(result.hunks);
+    // Continuations emit only after the complete snapshot token has been validated.
+    if offset > 0 {
+        for entry in &entries[offset..end] {
+            check()?;
+            if !emit(json!({"change":render_change(entry, &provider, &pinned, &root)?})) {
+                return Err(SearchProviderError::Cancelled);
             }
-            Err(error) => {
-                change["error"] = json!(format!("Diff unavailable: {error:?}"));
-            }
-        }
-        if serde_json::to_vec(&change)
-            .map_err(|e| SearchProviderError::Search(e.to_string()))?
-            .len()
-            > 256 * 1024
-        {
-            change["hunks"] = json!([]);
-            change["error"] =
-                json!("Diff body exceeds the 256 KiB preview limit; open the file to inspect it.");
-        }
-        if !emit(json!({"change":change})) {
-            return Err(SearchProviderError::Cancelled);
         }
     }
     Ok(json!({"filesScanned":entries.len(),"fileCount":end-offset,"truncated":listing.truncated}))
+}
+
+// Each body is materialized only when its confirmed path reaches the output page.
+fn render_change(
+    entry: &git_ops::GitWorktreeChange,
+    provider: &git_ops::GitProviderRequest,
+    pinned: &str,
+    root: &str,
+) -> Result<Value, SearchProviderError> {
+    let hunks = git_ops::git_diff_hunks(git_ops::GitProviderRequest {
+        base: Some(pinned.to_owned()),
+        relative_path: Some(entry.path.clone()),
+        ..provider.clone()
+    });
+    let status = entry.code.trim().chars().next().unwrap_or('?');
+    let status_text = match status {
+        'M' => "Modified",
+        'A' => "Added",
+        'D' => "Deleted",
+        'R' => "Renamed",
+        'C' => "Copied",
+        'U' => "Conflict",
+        'T' => "Type changed",
+        _ => "Untracked",
+    };
+    let mut change = json!({"rel":entry.path,"path":Path::new(&root).join(&entry.path).to_string_lossy(),"label":Path::new(&entry.path).file_name().unwrap_or_default().to_string_lossy(),"status":status.to_string(),"statusCode":entry.code,"statusText":status_text,"renamedFrom":entry.original_path,"hunks":[]});
+    match hunks {
+        Ok(result) => {
+            change["summary"] = json!(result.summary);
+            change["hunks"] = json!(result.hunks);
+        }
+        Err(error) => {
+            change["error"] = json!(format!("Diff unavailable: {error:?}"));
+        }
+    }
+    if serde_json::to_vec(&change)
+        .map_err(|e| SearchProviderError::Search(e.to_string()))?
+        .len()
+        > 256 * 1024
+    {
+        change["hunks"] = json!([]);
+        change["error"] =
+            json!("Diff body exceeds the 256 KiB preview limit; open the file to inspect it.");
+    }
+
+    Ok(change)
 }
 
 #[cfg(test)]
@@ -228,8 +282,9 @@ mod tests {
         })
         .unwrap();
         let events = events.into_inner();
-        assert_eq!(events.len(), 41);
-        let meta = &events[0]["metadata"];
+        assert_eq!(events.len(), 42);
+        assert!(events[0]["metadata"].get("total").is_none());
+        let meta = &events.last().unwrap()["metadata"];
         assert_eq!(meta["total"], 45);
         assert_eq!(meta["nextOffset"], 40);
         assert!(events[1]["change"]["hunks"].is_array());
@@ -298,7 +353,7 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(events.borrow()[0]["metadata"]["total"], 1);
+        assert_eq!(events.borrow().last().unwrap()["metadata"]["total"], 1);
         assert_eq!(events.borrow()[0]["metadata"]["base"]["mode"], "detached");
         let text = events.borrow()[1]["change"]["hunks"].to_string();
         assert!(text.contains("old text") && text.contains("new text"));
@@ -323,6 +378,49 @@ mod tests {
         assert_eq!(large["hunks"], json!([]));
         assert!(large["error"].as_str().unwrap().contains("256 KiB"));
         assert!(serde_json::to_vec(large).unwrap().len() < 256 * 1024);
+    }
+
+    #[test]
+    fn historical_first_result_precedes_later_candidate_validation() {
+        let fixture = Fixture::new("discovery-order");
+        let repo = git2::Repository::init(&fixture.0).unwrap();
+        let sig = git2::Signature::now("Test", "test@example.invalid").unwrap();
+        let mut index = repo.index().unwrap();
+        for name in ["a.txt", "z.txt"] {
+            fs::write(fixture.0.join(name), "base\n").unwrap();
+            index.add_path(Path::new(name)).unwrap();
+        }
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let base = repo
+            .commit(Some("HEAD"), &sig, &sig, "base", &tree, &[])
+            .unwrap();
+        for name in ["a.txt", "z.txt"] {
+            fs::write(fixture.0.join(name), "changed\n").unwrap();
+            index.add_path(Path::new(name)).unwrap();
+        }
+        index.write().unwrap();
+        let events = RefCell::new(Vec::new());
+        run(
+            ChangesRequest {
+                base: Some(base.to_string()),
+                ..fixture.request()
+            },
+            Arc::new(AtomicBool::new(false)),
+            |event| {
+                // If discovery were batched, z.txt would already be confirmed.
+                // Changing it here proves the first file arrives before that check.
+                if event["change"]["rel"] == "a.txt" {
+                    fs::write(fixture.0.join("z.txt"), "base\n").unwrap();
+                }
+                events.borrow_mut().push(event);
+                true
+            },
+        )
+        .unwrap();
+        let events = events.borrow();
+        assert!(events.iter().any(|e| e["change"]["rel"] == "a.txt"));
+        assert!(!events.iter().any(|e| e["change"]["rel"] == "z.txt"));
+        assert_eq!(events.last().unwrap()["metadata"]["total"], 1);
     }
 
     #[test]

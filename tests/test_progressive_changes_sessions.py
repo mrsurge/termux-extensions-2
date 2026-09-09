@@ -78,6 +78,20 @@ class ProgressiveChangesSessionsTest(IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(RuntimeError, 'stale changes continuation'):
             await self.manager.run(parse_search_run_params({'mode': 'changes', 'changesOffset': 80}), None)
 
+    async def test_discovery_metadata_can_be_completed_after_file_delivery(self) -> None:
+        async def start(_method: str, _params: dict[str, object], **_kwargs: object) -> object:
+            await self.manager.receive(self.event('search.job.result', result={'metadata': {'baseHash': 'abc', 'nextOffset': None}}))
+            await self.manager.receive(self.event('search.job.result', result={'change': {'rel': 'first.txt', 'hunks': []}}))
+            await self.manager.receive(self.event('search.job.result', result={'metadata': {'baseHash': 'abc', 'snapshotToken': 'final', 'total': 41, 'nextOffset': 40}}))
+            await self.manager.receive(self.event('search.job.done'))
+            return {'searchId': 'c1', 'jobId': 'c1'}
+        with patch('app.apps.code_te2.explorer.search._call_search_provider', new=start):
+            await self.manager.run(parse_search_run_params({'mode': 'changes', 'correlationId': 'c1'}), 'reply')
+        session = self.manager.session('c1')
+        self.assertEqual(session.changes_metadata['snapshotToken'], 'final')
+        self.assertEqual(session.changes_metadata['nextOffset'], 40)
+        self.assertEqual([e[0] for e in self.emitted], ['explorer.search.started', 'search.job.result', 'search.job.result', 'search.job.result', 'search.job.done'])
+
     async def test_cancel_during_start_releases_late_job_without_publication(self) -> None:
         entered, release = asyncio.Event(), asyncio.Event()
         async def start(_method: str, _params: dict[str, object], **_kwargs: object) -> object:

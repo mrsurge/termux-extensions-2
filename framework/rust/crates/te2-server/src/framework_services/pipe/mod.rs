@@ -701,9 +701,9 @@ mod tests {
             .iter()
             .filter(|e| e.method.as_deref() == Some("search.job.result"))
             .collect();
-        assert_eq!(results.len(), 2, "metadata then one file: {frames:?}");
+        assert_eq!(results.len(), 3, "discovery, file, final metadata: {frames:?}");
         assert_eq!(
-            results[0].params.as_ref().unwrap()["result"]["metadata"]["total"],
+            results[2].params.as_ref().unwrap()["result"]["metadata"]["total"],
             1
         );
         assert_eq!(
