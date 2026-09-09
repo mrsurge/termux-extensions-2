@@ -69,6 +69,29 @@ The latest accepted progressive-discovery snapshot is `d9bf1bcb`.
   Find/Replace remains the next implementation slice, not completed by this work.
 - [ ] Implement Find/Replace through By contents using the shared operation;
   define selected-match/file and bulk replacement scope explicitly.
+- [ ] Fix the prerequisite single-line occurrence enumeration: ContentSink uses
+  matcher.find once per line. Add all matches plus exact disk snapshot/byte-offset
+  identity; preserve multiline, case/word/regex and query cancellation semantics.
+- [x] Record agreed occurrence semantics: each match is a separate logical hit,
+  even on the same line (three occurrences means three independently displayed
+  results with distinct exact ranges and a disk snapshot identity).
+- [ ] Make counters/caps count occurrences and prevent line-based deduplication.
+  Single-hit replacement must address only the selected occurrence; bulk must
+  include every occurrence within its explicitly selected scope.
+- [ ] Test repeated same-line matches, independent replacement of a later hit,
+  accurate counters, and complete inclusion of in-scope hits in bulk replacement.
+- [x] Approve bounded Replace All over retained results (current cap 700), not
+  rendered-only hits or matches beyond the cap; dismissed files are excluded.
+- [ ] Add replacement-mode twisty/inset, valid empty replacements, and persistent
+  touch-accessible per-hit/per-file/global replacement controls (not hover-only).
+- [ ] Add top Show All, Select All (also reveals all), and Replace Selected;
+  file headers get Show All in File and `×` dismissal. No Replace Visible.
+- [ ] Add translucent hit/file checkboxes, mobile-UA long-press selection mode
+  with hint, tap-to-toggle while selecting, and reveal/select-all on file selection.
+- [ ] Warn about hidden retained hits before Replace All unless shown first;
+  always retain the separate draft-discard confirmation and truncation disclosure.
+- [ ] Test bounded scopes, file dismissal, hidden-hit warnings, mobile selection,
+  empty replacements, stale result identity, and per-file partial outcomes.
 - [ ] Preserve autosave preferences, newer drafts, and staged/index safety.
   Both actions explicitly save to disk; no silent draft discard, staging, or commit.
 - [ ] Project accepted edits through existing backend facts to all affected

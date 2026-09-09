@@ -276,6 +276,40 @@ Per-hunk Restore preserves all disk edits outside the exact selected hunk.
 Neither operation changes autosave settings, stages, or commits. Draft preflight
 belongs to Python; guarded persistence belongs to Rust.
 
+Every match occurrence is a separate logical hit, including multiple occurrences
+on the same line. Three matches on one line must produce three independently
+addressable results, each with its own exact range and disk snapshot identity.
+The UI must display each hit independently rather than deduplicating by line.
+Counters and result caps count occurrences, not matching lines. Single-hit
+replacement targets only that occurrence; bulk replacement includes every hit
+within its explicitly selected scope.
+
+#### Approved Bounded Replacement UI
+
+- Preserve the existing 700-occurrence search cap. Replace All targets every
+  retained hit in the completed search set, excluding dismissed files, not merely
+  rendered rows and not additional matches beyond the cap. Disclose truncation.
+- Provide Show All and Select All at the results top; Select All also shows all.
+  Provide Replace Selected and Replace All. There is no Replace Visible action.
+- Each file header has a checkbox, Replace All in File, Show All in File when
+  presentation hides retained hits, and a `×` dismiss-file control. Dismissed
+  files are excluded from selection and replacement for the current search.
+- Each hit has a checkbox and an individual Replace control. Selecting a file
+  reveals and selects all retained hits for that file. Counters count occurrences.
+- Checkboxes are translucent until selection is active. On mobile user agents,
+  long press enters selection mode with a small hint; subsequent taps toggle
+  selection instead of navigating. Desktop checkboxes remain directly usable.
+- Replace controls are persistent/touch-accessible, never hover-only, and appear
+  when replacement mode is expanded. Empty replacement is valid deletion.
+- Add the replace-field caret/twisty to the vendored search widget and inset the
+  search/replace area so its controls are not squeezed against the screen edge.
+- Warn before Replace All when its scope includes hidden/unrendered retained
+  hits. Showing all removes that visibility warning, not the independent draft
+  discard confirmation. No extra dirty-HEAD warning is added.
+- Reuse existing literal/regex/case/word/multiline semantics. Apply exact edits
+  atomically per file; report partial failures explicitly without rolling back
+  successful files. Selection/expansion/dismissal are ephemeral to the search.
+
 #### Implementation And Test Sequence
 
 1. Define and test the guarded text-edit primitive independently of UI and IO:
@@ -293,6 +327,9 @@ belongs to Python; guarded persistence belongs to Rust.
    actual backend matcher rather than independently rerunning JavaScript regexes.
    Verify literal and regex replacements, captures, multiline LF/CRLF, Unicode,
    zero-width matches, overlapping ranges, result caps, and file filters.
+   Add regressions for repeated matches on one line: distinct displayed hits and
+   ranges, accurate occurrence counts, independent replacement of a later hit,
+   and inclusion of all in-scope occurrences in bulk replacement.
 5. Add By contents replacement controls and explicit replacement scope. Test
    selected replacement and bulk behavior against authoritative match sets,
    not just the currently rendered or truncated preview rows.
