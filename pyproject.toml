@@ -15,6 +15,9 @@ te2 = "app.cli.run_rust_framework:main"
 te2-rust = "app.cli.run_rust_framework:main"
 te2-desktop = "desktop_client.electron_cli:main"
 
+[tool.pytest.ini_options]
+addopts = ["--ignore=worktrees"]
+
 [tool.setuptools]
 include-package-data = true
 

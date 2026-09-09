@@ -220,18 +220,37 @@ mod tests {
         let root = test_root("replace-prepare");
         fs::write(root.join("file.txt"), "cat cat").unwrap();
         let scheduler = FrameworkServiceScheduler::default();
-        let responder = PipeIdentity { nid: 2100, name: "service.fs".into() };
+        let responder = PipeIdentity {
+            nid: 2100,
+            name: "service.fs".into(),
+        };
         let params = json!({"dto":"PrepareReplaceRequest", "version":1,
             "root":root.to_str().unwrap(), "path":"file.txt", "expectedSha256":sha256("cat cat"),
             "query":"cat", "replacement":"dog", "isRegex":false, "isCaseSensitive":true,
             "isWholeWords":false, "ranges":[{"startByte":4,"endByte":7}]});
-        let response = dispatch_request(request("fs.textEdits.prepareReplace", params.clone(), &root),
-            &responder, &scheduler, None).await;
-        assert_eq!(response.result.as_ref().unwrap()["edits"][0]["replacement"], "dog");
-        assert_eq!(fs::read_to_string(root.join("file.txt")).unwrap(), "cat cat");
+        let response = dispatch_request(
+            request("fs.textEdits.prepareReplace", params.clone(), &root),
+            &responder,
+            &scheduler,
+            None,
+        )
+        .await;
+        assert_eq!(
+            response.result.as_ref().unwrap()["edits"][0]["replacement"],
+            "dog"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("file.txt")).unwrap(),
+            "cat cat"
+        );
         fs::write(root.join("file.txt"), "new cat").unwrap();
-        let response = dispatch_request(request("fs.textEdits.prepareReplace", params, &root),
-            &responder, &scheduler, None).await;
+        let response = dispatch_request(
+            request("fs.textEdits.prepareReplace", params, &root),
+            &responder,
+            &scheduler,
+            None,
+        )
+        .await;
         assert_eq!(response.error.unwrap().code, "textEdit.staleContent");
         let _ = fs::remove_dir_all(root);
     }
@@ -247,16 +266,26 @@ mod tests {
             name: "service.fs".into(),
         };
         let response = dispatch_request(
-            request("fs.textEdits.reverseHunk", json!({"dto":"ReverseHunkRequest",
+            request(
+                "fs.textEdits.reverseHunk",
+                json!({"dto":"ReverseHunkRequest",
                 "version":1,"baseline":"old\r\n","content":"new\r\n",
-                "expectedSha256":sha256("new\r\n"),"hunkIndex":0}), &root),
-            &responder, &scheduler, None,
-        ).await;
+                "expectedSha256":sha256("new\r\n"),"hunkIndex":0}),
+                &root,
+            ),
+            &responder,
+            &scheduler,
+            None,
+        )
+        .await;
         assert_eq!(response.kind, PipeMessageKind::Response);
         let edit = &response.result.as_ref().unwrap()["edits"][0];
         assert_eq!(edit["replacement"], "old\r\n");
         assert_eq!(edit["expectedText"], "new\r\n");
-        assert_eq!(fs::read_to_string(root.join("unchanged.txt")).unwrap(), "disk");
+        assert_eq!(
+            fs::read_to_string(root.join("unchanged.txt")).unwrap(),
+            "disk"
+        );
         let params = json!({"dto":"TextEditsRequest","version":1,
             "content":"draft text","expectedSha256":sha256("draft text"),
             "edits":[{"startByte":0,"endByte":5,"expectedText":"draft","replacement":"new"}]});
@@ -790,7 +819,11 @@ mod tests {
             .iter()
             .filter(|e| e.method.as_deref() == Some("search.job.result"))
             .collect();
-        assert_eq!(results.len(), 3, "discovery, file, final metadata: {frames:?}");
+        assert_eq!(
+            results.len(),
+            3,
+            "discovery, file, final metadata: {frames:?}"
+        );
         assert_eq!(
             results[2].params.as_ref().unwrap()["result"]["metadata"]["total"],
             1

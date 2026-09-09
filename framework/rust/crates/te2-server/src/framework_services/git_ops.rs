@@ -762,7 +762,9 @@ pub(crate) fn git_restore(
     if request.rev.is_some() || request.expected_restore_state.is_some() {
         let preview = check_restore_state(&request)?;
         if preview.staged || request.staged.unwrap_or(false) {
-            return Err(GitProviderError::Unsupported("Unstage this file before restoring".into()));
+            return Err(GitProviderError::Unsupported(
+                "Unstage this file before restoring".into(),
+            ));
         }
         if preview.delete {
             match fs::remove_file(repo_workdir(&repo, &root).join(&preview.path)) {
@@ -796,85 +798,145 @@ pub(crate) fn git_restore(
     Ok(mutation_result(&repo, &root, "restore", paths))
 }
 
-fn check_restore_state(request: &GitProviderRequest) -> Result<GitRestorePreview, GitProviderError> {
+fn check_restore_state(
+    request: &GitProviderRequest,
+) -> Result<GitRestorePreview, GitProviderError> {
     let preview = git_restore_preview(request.clone())?;
     if request.expected_restore_state.as_deref() != Some(preview.state.as_str()) {
-        return Err(GitProviderError::Unsupported("Restore state changed; confirm again".into()));
+        return Err(GitProviderError::Unsupported(
+            "Restore state changed; confirm again".into(),
+        ));
     }
     Ok(preview)
 }
 
-pub(crate) fn git_restore_preview(request: GitProviderRequest) -> Result<GitRestorePreview, GitProviderError> {
+pub(crate) fn git_restore_preview(
+    request: GitProviderRequest,
+) -> Result<GitRestorePreview, GitProviderError> {
     let (repo, root) = repo_from_request(&request)?;
     let paths = required_relative_paths(&repo, &root, &request)?;
     if paths.len() != 1 {
-        return Err(GitProviderError::Unsupported("Guarded restore requires exactly one file".into()));
+        return Err(GitProviderError::Unsupported(
+            "Guarded restore requires exactly one file".into(),
+        ));
     }
     let path = &paths[0];
     let workdir = repo_workdir(&repo, &root);
     if repo.is_bare() || fs::canonicalize(&workdir)? != root {
-        return Err(GitProviderError::Unsupported("Open the repository root before using guarded Restore".into()));
+        return Err(GitProviderError::Unsupported(
+            "Open the repository root before using guarded Restore".into(),
+        ));
     }
     let mut cursor = workdir.clone();
     for component in Path::new(path).components() {
-        if component.as_os_str().to_str().is_some_and(|part| part.eq_ignore_ascii_case(".git")) {
+        if component
+            .as_os_str()
+            .to_str()
+            .is_some_and(|part| part.eq_ignore_ascii_case(".git"))
+        {
             return Err(GitProviderError::InvalidPath(path.clone()));
         }
         cursor.push(component);
         match fs::symlink_metadata(&cursor) {
-            Ok(meta) if meta.file_type().is_symlink() => return Err(GitProviderError::InvalidPath(path.clone())),
-            Ok(meta) if cursor == workdir.join(path) && !meta.is_file() => return Err(GitProviderError::InvalidPath(path.clone())),
+            Ok(meta) if meta.file_type().is_symlink() => {
+                return Err(GitProviderError::InvalidPath(path.clone()));
+            }
+            Ok(meta) if cursor == workdir.join(path) && !meta.is_file() => {
+                return Err(GitProviderError::InvalidPath(path.clone()));
+            }
             Ok(_) => (),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
             Err(error) => return Err(error.into()),
         }
     }
     let head = repo.head()?.peel_to_commit()?;
-    let commit = repo.revparse_single(request.rev.as_deref().unwrap_or("HEAD"))?.peel_to_commit()?;
+    let commit = repo
+        .revparse_single(request.rev.as_deref().unwrap_or("HEAD"))?
+        .peel_to_commit()?;
     let tree = commit.tree()?;
     let source = match tree.get_path(Path::new(path)) {
         Ok(entry) => Some(entry),
         Err(error) if error.code() == ErrorCode::NotFound => None,
         Err(error) => return Err(error.into()),
     };
-    if source.as_ref().is_some_and(|entry| !matches!(entry.filemode(), 0o100644 | 0o100755)) {
-        return Err(GitProviderError::Unsupported("Restore supports regular files only".into()));
+    if source
+        .as_ref()
+        .is_some_and(|entry| !matches!(entry.filemode(), 0o100644 | 0o100755))
+    {
+        return Err(GitProviderError::Unsupported(
+            "Restore supports regular files only".into(),
+        ));
     }
     if let Some(entry) = source.as_ref() {
         if repo.odb()?.read_header(entry.id())?.0 > 32 * 1024 * 1024 {
-            return Err(GitProviderError::Unsupported("Guarded restore supports files up to 32 MiB".into()));
+            return Err(GitProviderError::Unsupported(
+                "Guarded restore supports files up to 32 MiB".into(),
+            ));
         }
     }
     let index = repo.index()?;
     let mut index_state = String::new();
     for entry in index.iter().filter(|entry| entry.path == path.as_bytes()) {
         if entry.flags & 0x3000 != 0 || !matches!(entry.mode, 0o100644 | 0o100755) {
-            return Err(GitProviderError::Unsupported("Resolve conflicts/special index entries before restoring".into()));
+            return Err(GitProviderError::Unsupported(
+                "Resolve conflicts/special index entries before restoring".into(),
+            ));
         }
-        index_state.push_str(&format!("{}:{}:{}:{};", entry.id, entry.mode, entry.flags, entry.flags_extended));
+        index_state.push_str(&format!(
+            "{}:{}:{}:{};",
+            entry.id, entry.mode, entry.flags, entry.flags_extended
+        ));
     }
     let status = repo.status_file(Path::new(path)).or_else(|error| {
-        if error.code() == ErrorCode::NotFound { Ok(Status::CURRENT) } else { Err(error) }
+        if error.code() == ErrorCode::NotFound {
+            Ok(Status::CURRENT)
+        } else {
+            Err(error)
+        }
     })?;
     if status.contains(Status::CONFLICTED) {
-        return Err(GitProviderError::Unsupported("Resolve this file's conflict first".into()));
+        return Err(GitProviderError::Unsupported(
+            "Resolve this file's conflict first".into(),
+        ));
     }
     let disk = match fs::metadata(workdir.join(path)) {
         Ok(meta) => {
             if meta.len() > 32 * 1024 * 1024 {
-                return Err(GitProviderError::Unsupported("Guarded restore supports files up to 32 MiB".into()));
+                return Err(GitProviderError::Unsupported(
+                    "Guarded restore supports files up to 32 MiB".into(),
+                ));
             }
             let bytes = fs::read(workdir.join(path))?;
-            format!("{}:{}:{:?}:{:?}", Oid::hash_object(git2::ObjectType::Blob, &bytes)?, meta.len(), meta.modified()?, meta.permissions())
-        },
+            format!(
+                "{}:{}:{:?}:{:?}",
+                Oid::hash_object(git2::ObjectType::Blob, &bytes)?,
+                meta.len(),
+                meta.modified()?,
+                meta.permissions()
+            )
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => "absent".into(),
         Err(error) => return Err(error.into()),
     };
-    let fingerprint = format!("{}:{}:{}:{}:{}", path, head.id(), commit.id(), index_state, disk);
+    let fingerprint = format!(
+        "{}:{}:{}:{}:{}",
+        path,
+        head.id(),
+        commit.id(),
+        index_state,
+        disk
+    );
     Ok(GitRestorePreview {
-        path: path.clone(), commit: commit.id().to_string(),
+        path: path.clone(),
+        commit: commit.id().to_string(),
         state: Oid::hash_object(git2::ObjectType::Blob, fingerprint.as_bytes())?.to_string(),
-        staged: status.intersects(Status::INDEX_NEW | Status::INDEX_MODIFIED | Status::INDEX_DELETED | Status::INDEX_RENAMED | Status::INDEX_TYPECHANGE),
+        staged: status.intersects(
+            Status::INDEX_NEW
+                | Status::INDEX_MODIFIED
+                | Status::INDEX_DELETED
+                | Status::INDEX_RENAMED
+                | Status::INDEX_TYPECHANGE,
+        ),
         delete: source.is_none(),
     })
 }
@@ -2619,7 +2681,10 @@ mod tests {
         request.expected_restore_state = Some(git_restore_preview(request.clone()).unwrap().state);
         fs::write(root.join("file"), "external edit").unwrap();
         assert!(git_restore(request.clone()).is_err());
-        assert_eq!(fs::read_to_string(root.join("file")).unwrap(), "external edit");
+        assert_eq!(
+            fs::read_to_string(root.join("file")).unwrap(),
+            "external edit"
+        );
         request.expected_restore_state = Some(git_restore_preview(request.clone()).unwrap().state);
         commit_all(&repo, "changed HEAD");
         assert!(git_restore(request).is_err());
@@ -2629,23 +2694,35 @@ mod tests {
     fn guarded_restore_requires_separate_path_scoped_unstage() {
         let root = test_root("guarded-unstage");
         let repo = Repository::init(&root).unwrap();
-        for path in ["file", "other"] { fs::write(root.join(path), "base").unwrap(); }
+        for path in ["file", "other"] {
+            fs::write(root.join(path), "base").unwrap();
+        }
         commit_all(&repo, "base");
-        for path in ["file", "other"] { fs::write(root.join(path), "staged").unwrap(); }
+        for path in ["file", "other"] {
+            fs::write(root.join(path), "staged").unwrap();
+        }
         let mut index = repo.index().unwrap();
         index.add_all(["*"], IndexAddOption::DEFAULT, None).unwrap();
         index.write().unwrap();
         fs::write(root.join("file"), "unstaged").unwrap();
         let other = index.get_path(Path::new("other"), 0).unwrap().id;
         let mut request = provider_request(&root);
-        request.paths = Some(vec!["file".into()]); request.rev = Some("HEAD".into());
+        request.paths = Some(vec!["file".into()]);
+        request.rev = Some("HEAD".into());
         let preview = git_restore_preview(request.clone()).unwrap();
         assert!(preview.staged);
         request.expected_restore_state = Some(preview.state);
         assert!(git_restore(request.clone()).is_err());
         git_unstage(request.clone()).unwrap();
         assert_eq!(fs::read_to_string(root.join("file")).unwrap(), "unstaged");
-        assert_eq!(repo.index().unwrap().get_path(Path::new("other"), 0).unwrap().id, other);
+        assert_eq!(
+            repo.index()
+                .unwrap()
+                .get_path(Path::new("other"), 0)
+                .unwrap()
+                .id,
+            other
+        );
         assert!(git_restore(request.clone()).is_err());
         request.expected_restore_state = Some(git_restore_preview(request.clone()).unwrap().state);
         git_restore(request).unwrap();
@@ -2656,34 +2733,44 @@ mod tests {
     fn guarded_restore_deletes_absent_source_without_touching_index() {
         let root = test_root("guarded-delete");
         let repo = Repository::init(&root).unwrap();
-        fs::write(root.join("keep"), "base").unwrap(); commit_all(&repo, "base");
+        fs::write(root.join("keep"), "base").unwrap();
+        commit_all(&repo, "base");
         let old = repo.head().unwrap().target().unwrap();
-        fs::write(root.join("file"), "added").unwrap(); commit_all(&repo, "add");
+        fs::write(root.join("file"), "added").unwrap();
+        commit_all(&repo, "add");
         let index = fs::read(repo.path().join("index")).unwrap();
         let mut request = provider_request(&root);
-        request.paths = Some(vec!["file".into()]); request.rev = Some(old.to_string());
-        let preview = git_restore_preview(request.clone()).unwrap(); assert!(preview.delete);
-        request.expected_restore_state = Some(preview.state); git_restore(request).unwrap();
+        request.paths = Some(vec!["file".into()]);
+        request.rev = Some(old.to_string());
+        let preview = git_restore_preview(request.clone()).unwrap();
+        assert!(preview.delete);
+        request.expected_restore_state = Some(preview.state);
+        git_restore(request).unwrap();
         assert!(!root.join("file").exists());
         assert_eq!(fs::read(repo.path().join("index")).unwrap(), index);
     }
 
     #[test]
     fn guarded_restore_rejects_unsafe_paths() {
-        let root = test_root("guarded-paths"); let repo = Repository::init(&root).unwrap();
-        fs::write(root.join("file"), "base").unwrap(); commit_all(&repo, "base");
+        let root = test_root("guarded-paths");
+        let repo = Repository::init(&root).unwrap();
+        fs::write(root.join("file"), "base").unwrap();
+        commit_all(&repo, "base");
         fs::create_dir(root.join("directory")).unwrap();
         #[cfg(unix)]
         std::os::unix::fs::symlink("file", root.join("link")).unwrap();
         for path in ["../outside", ".git/config", "directory"] {
-            let mut request = provider_request(&root); request.paths = Some(vec![path.into()]);
+            let mut request = provider_request(&root);
+            request.paths = Some(vec![path.into()]);
             assert!(git_restore_preview(request).is_err(), "{path}");
         }
         let mut nested = provider_request(&root.join("directory"));
         nested.paths = Some(vec!["file".into()]);
         assert!(git_restore_preview(nested).is_err());
-        #[cfg(unix)] {
-            let mut request = provider_request(&root); request.paths = Some(vec!["link".into()]);
+        #[cfg(unix)]
+        {
+            let mut request = provider_request(&root);
+            request.paths = Some(vec!["link".into()]);
             assert!(git_restore_preview(request).is_err());
         }
     }
@@ -2811,7 +2898,13 @@ mod tests {
     fn historical_candidates_match_direct_disk_comparison() {
         let root = test_root("historical-candidates");
         let repo = Repository::init(&root).unwrap();
-        for name in ["literal[1].txt", "literal1.txt", "staged.txt", "removed.txt", "unchanged.txt"] {
+        for name in [
+            "literal[1].txt",
+            "literal1.txt",
+            "staged.txt",
+            "removed.txt",
+            "unchanged.txt",
+        ] {
             fs::write(root.join(name), "base\n").unwrap();
         }
         commit_all(&repo, "base");
@@ -2830,11 +2923,23 @@ mod tests {
         let tree = tree_for_rev(&repo, &base).unwrap();
         let mut options = DiffOptions::new();
         options.include_untracked(true).recurse_untracked_dirs(true);
-        let oracle = repo.diff_tree_to_workdir(Some(&tree), Some(&mut options)).unwrap();
-        let expected: BTreeSet<_> = oracle.deltas().filter_map(|d| {
-            d.new_file().path().or_else(|| d.old_file().path()).map(path_to_string)
-        }).collect();
-        let result = git_worktree_changes(GitProviderRequest { base: Some(base), ..provider_request(&root) }).unwrap();
+        let oracle = repo
+            .diff_tree_to_workdir(Some(&tree), Some(&mut options))
+            .unwrap();
+        let expected: BTreeSet<_> = oracle
+            .deltas()
+            .filter_map(|d| {
+                d.new_file()
+                    .path()
+                    .or_else(|| d.old_file().path())
+                    .map(path_to_string)
+            })
+            .collect();
+        let result = git_worktree_changes(GitProviderRequest {
+            base: Some(base),
+            ..provider_request(&root)
+        })
+        .unwrap();
         let actual: BTreeSet<_> = result.changes.iter().map(|c| c.path.clone()).collect();
         assert_eq!(actual, expected);
         assert!(!actual.contains("staged.txt"));

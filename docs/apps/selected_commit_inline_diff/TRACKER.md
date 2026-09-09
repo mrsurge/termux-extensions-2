@@ -11,9 +11,9 @@
 - [x] Commit/push the accepted historical enumeration correction: `ba51875d`.
 - [x] Record the historical-worktree follow-up direction and four phases.
 
-Original branch goals and Phases 1–4 are live-accepted. Phase 5 below is now
-required and blocks merge of this branch; earlier acceptance does not waive it.
-The latest accepted progressive-discovery snapshot is `d9bf1bcb`.
+Original branch goals and Phases 1–5 are implemented and live-accepted. The
+completed branch, including the duplicate project-open projection correction,
+merged to main through PR #22 at `3f8445fb`.
 
 ## Follow-Up: Explorer Project-Switch Reset
 
@@ -27,17 +27,19 @@ The latest accepted progressive-discovery snapshot is `d9bf1bcb`.
 
 ## Phase 5: Shared Text Edits, Hunk Restore, And Find/Replace
 
-**Next required phase; merge blocker.** This is no longer optional later work.
+**Completed merge requirement.** The shared guarded edit, per-hunk Restore, and
+Find/Replace work below passed their recorded automated and live gates before
+the branch merged.
 
-- [ ] Investigate existing Rust edit/filesystem services, Python draft
+- [x] Investigate existing Rust edit/filesystem services, Python draft
   materialization, and editor/WBA mutation/projection contracts.
-- [ ] Agree on concrete edit DTOs, stale-state checks, mutation ownership,
+- [x] Agree on concrete edit DTOs, stale-state checks, mutation ownership,
   draft-versus-disk behavior, and multi-file failure semantics before coding.
 - [x] User corrected and approved direct-to-disk behavior for both features:
   disk search/diffs, draft-presence warning with explicit discard/cancel before
   mutation, no replacement drafts, no autosave or index changes. The earlier
   draft-aware-search proposal is superseded.
-- [ ] Implement a shared guarded framework text-edit operation using exact edits,
+- [x] Implement a shared guarded framework text-edit operation using exact edits,
   preserving encoding/line endings and rejecting stale source revisions.
 - [x] Implement the non-writing `fs.textEdits.compute` foundation: SHA-256 source
   identity, original UTF-8 byte ranges, expected range text, deterministic ordering,
@@ -54,7 +56,7 @@ The latest accepted progressive-discovery snapshot is `d9bf1bcb`.
   newer-draft preservation, and disconnect-owned execution. Whole-file Restore
   and exact edits share path ownership and the existing result projection.
 - [x] Wire hunk preparation and Explorer hunkPrepare/hunkApply through guarded consent.
-- [ ] Wire Find/Replace producers and controls through the same transaction.
+- [x] Wire Find/Replace producers and controls through the same transaction.
 - [x] Pass 35 Python adapter/transaction/whole-file Restore tests and focused
   Basedpyright checks, including cancellation, project changes, stale consent,
   write failure, no-op, and concurrent drafts.
@@ -132,15 +134,15 @@ The latest accepted progressive-discovery snapshot is `d9bf1bcb`.
   sequential prepare/apply, selected-hit identity, hidden warnings, draft
   cancellation, failure stop, and mobile long-press/scroll separation.
   Successful-file results are dismissed as stale; Refresh results reruns search.
-- [ ] Preserve autosave preferences, newer drafts, and staged/index safety.
+- [x] Preserve autosave preferences, newer drafts, and staged/index safety.
   Both actions explicitly save to disk; no silent draft discard, staging, or commit.
-- [ ] Project accepted edits through existing backend facts to all affected
+- [x] Project accepted edits through existing backend facts to all affected
   editors/WBA models, draft indicators, Git decorations, and search results.
-- [ ] Validate stale results, concurrent clients/edits, unsaved drafts, staged
+- [x] Validate stale results, concurrent clients/edits, unsaved drafts, staged
   files, Unicode/line endings, no-op edits, partial failures, and cancellation.
-- [ ] Complete type checks and focused automated tests; verify mutation work
+- [x] Complete type checks and focused automated tests; verify mutation work
   does not block unrelated editor opens or progressive search delivery.
-- [ ] Obtain user live acceptance of per-hunk Restore and Find/Replace with
+- [x] Obtain user live acceptance of per-hunk Restore and Find/Replace with
   draft/modified-state handling before marking the branch merge-ready.
 
 Python debug evaluation and native DevTools/MCP remain separate work; neither

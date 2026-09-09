@@ -8,10 +8,10 @@ Restore inline commit comparisons against the commit selected in the Explorer,
 while fixing related mobile touch, commit selection, and draft navigation bugs.
 The branch started from upstream main at `a95cb8e6` (TE2 0.2.346).
 
-The original scope and historical file-enumeration correction have passed live
-acceptance. Commit `ba51875d` is the pushed checkpoint before the follow-up
-direction below. Phase 1 is implemented and live-accepted; remaining phases begin
-with source-backed investigation and concrete implementation/validation scope.
+The original scope, historical file-enumeration correction, and follow-up
+Phases 1–5 passed automated and user live acceptance. Commit `ba51875d` was the
+checkpoint before that follow-up, and the completed branch was merged to main
+through PR #22 at `3f8445fb`.
 
 ## Scope And Sequence
 
@@ -239,10 +239,10 @@ unbounded thread backlog. Mutation ordering remains untouched.
 
 ### Phase 5: Shared Text Edits, Hunk Restore, And Find/Replace
 
-**Required next phase and branch merge blocker.** Deliver all three parts:
-the shared framework edit method, per-hunk Restore, and content Find/Replace.
-This replaces the former optional later-investigation scope. Implementation
-details still require source investigation and concrete-plan approval.
+**Completed merge requirement.** This phase delivered all three parts: the
+shared framework edit method, per-hunk Restore, and content Find/Replace. It
+replaced the former optional later-investigation scope and passed the source,
+automated, and live-acceptance gates recorded in the tracker.
 
 Investigate a Rust-owned guarded text-edit operation reusable by per-hunk Restore
 and content Find/Replace. Feature logic would produce exact edits rather than
@@ -259,11 +259,11 @@ drafts for matching or create replacement drafts. Newer drafts must not be
 silently discarded. Rust validates the disk snapshot and preserves unrelated
 bytes and index entries; existing facts project accepted changes to editors/WBA.
 
-Define replacement scope, multi-file partial-failure reporting, cancellation,
-encoding/line-ending preservation, and concurrent-client guards. Validate both
-features against live draft and modified-file workflows, plus type checks,
-automated regressions, and responsiveness checks. The branch is not merge-ready
-until this phase receives user live acceptance.
+Replacement scope, multi-file partial-failure reporting, cancellation,
+encoding/line-ending preservation, and concurrent-client guards are bounded by
+the contracts below. Both features were validated against draft and modified-file
+workflows, type checks, automated regressions, and user live acceptance before
+the branch merged.
 
 #### Approved Search And Replacement Authority
 

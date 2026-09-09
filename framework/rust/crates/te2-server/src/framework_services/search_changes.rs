@@ -216,7 +216,9 @@ fn render_change(
             change["summary"] = json!(result.summary);
             change["hunks"] = json!(result.hunks);
             if !result.hunks.is_empty()
-                && let Ok(actions) = super::hunk_edits::restore_metadata(&root, &entry.path, pinned, &result.hunks) {
+                && let Ok(actions) =
+                    super::hunk_edits::restore_metadata(&root, &entry.path, pinned, &result.hunks)
+            {
                 for (index, action) in actions.into_iter().enumerate() {
                     if let Some(action) = action {
                         change["hunks"][index]["restore"] = action;
@@ -277,16 +279,27 @@ mod tests {
         index.write().unwrap();
         let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
         let sig = git2::Signature::now("Test", "test@example.invalid").unwrap();
-        let commit = repo.commit(Some("HEAD"), &sig, &sig, "base", &tree, &[]).unwrap();
+        let commit = repo
+            .commit(Some("HEAD"), &sig, &sig, "base", &tree, &[])
+            .unwrap();
         fs::write(fixture.0.join("file.txt"), "new\nkeep\n").unwrap();
         let events = RefCell::new(Vec::new());
-        run(fixture.request(), Arc::new(AtomicBool::new(false)), |event| {
-            events.borrow_mut().push(event); true
-        }).unwrap();
+        run(
+            fixture.request(),
+            Arc::new(AtomicBool::new(false)),
+            |event| {
+                events.borrow_mut().push(event);
+                true
+            },
+        )
+        .unwrap();
         let events = events.into_inner();
         let action = &events[1]["change"]["hunks"][0]["restore"];
         assert_eq!(action["commit"], commit.to_string(), "{}", events[1]);
-        assert_eq!(action["sourceSha256"], super::super::text_edit_ops::sha256("new\nkeep\n"));
+        assert_eq!(
+            action["sourceSha256"],
+            super::super::text_edit_ops::sha256("new\nkeep\n")
+        );
         assert_eq!(action["hunkIndex"], 0);
     }
 

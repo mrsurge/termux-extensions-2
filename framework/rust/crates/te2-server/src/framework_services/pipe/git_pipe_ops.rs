@@ -91,9 +91,13 @@ pub(super) async fn dispatch_git_request(
             .await,
         ),
         "git.restore.preview" => Some(
-            provider_request(request, responder, scheduler,
+            provider_request(
+                request,
+                responder,
+                scheduler,
                 |scheduler, params| async move { scheduler.git_restore_preview(params).await },
-            ).await,
+            )
+            .await,
         ),
         "git.restore" => Some(
             provider_request(
