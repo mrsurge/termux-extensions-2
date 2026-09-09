@@ -215,6 +215,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn computes_text_edits_without_writing_and_reports_stale_content() {
+        use crate::framework_services::text_edit_ops::sha256;
+        let root = test_root("text-edits");
+        fs::write(root.join("unchanged.txt"), "disk").unwrap();
+        let scheduler = FrameworkServiceScheduler::default();
+        let responder = PipeIdentity {
+            nid: 2100,
+            name: "service.fs".into(),
+        };
+        let params = json!({"dto":"TextEditsRequest","version":1,
+            "content":"draft text","expectedSha256":sha256("draft text"),
+            "edits":[{"startByte":0,"endByte":5,"expectedText":"draft","replacement":"new"}]});
+        // Repeating pure computation is safe; persistence is a different operation.
+        for _ in 0..2 {
+            let response = dispatch_request(
+                request("fs.textEdits.compute", params.clone(), &root),
+                &responder,
+                &scheduler,
+                None,
+            )
+            .await;
+            assert_eq!(response.kind, PipeMessageKind::Response);
+            assert_eq!(response.result.as_ref().unwrap()["content"], "new text");
+            assert_eq!(
+                fs::read_to_string(root.join("unchanged.txt")).unwrap(),
+                "disk"
+            );
+        }
+        let mut stale = params.clone();
+        stale["expectedSha256"] = json!(sha256("old"));
+        let response = dispatch_request(
+            request("fs.textEdits.compute", stale, &root),
+            &responder,
+            &scheduler,
+            None,
+        )
+        .await;
+        assert_eq!(response.error.unwrap().code, "textEdit.staleContent");
+        let mut invalid = params;
+        invalid["path"] = json!("unchanged.txt");
+        let response = dispatch_request(
+            request("fs.textEdits.compute", invalid, &root),
+            &responder,
+            &scheduler,
+            None,
+        )
+        .await;
+        assert_eq!(response.error.unwrap().code, "protocol.invalidParams");
+        assert_eq!(
+            fs::read_to_string(root.join("unchanged.txt")).unwrap(),
+            "disk"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn dispatches_fs_list_directory_to_contract_dto() {
         let root = test_root("dispatch");
         fs::write(root.join("main.py"), "print('hello')\n").expect("write file");

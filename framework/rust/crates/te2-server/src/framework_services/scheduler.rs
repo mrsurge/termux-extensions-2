@@ -163,6 +163,44 @@ impl Default for FrameworkServiceScheduler {
 }
 
 impl FrameworkServiceScheduler {
+    pub(crate) async fn apply_text_edits(
+        &self,
+        mut request: super::text_edit_disk::DiskEditsRequest,
+    ) -> Result<super::text_edit_disk::DiskEditsResult, super::text_edit_ops::EditError> {
+        use super::{text_edit_disk, text_edit_ops::EditError};
+        let permit = self.acquire(self.inner.fs_write.clone()).await.map_err(|_| EditError::Unavailable)?;
+        let root = request.root.clone();
+        request.root = tokio::task::spawn_blocking(move || std::fs::canonicalize(root))
+            .await.map_err(|_| EditError::Unavailable)?.map_err(|_| EditError::InvalidPath)?
+            .to_string_lossy().into_owned();
+        let guard = self.repo_lock(request.root.clone()).await.lock_owned().await;
+        // Retain ownership until the native write finishes even if the request
+        // future is dropped. Never release a lock around a still-running write.
+        tokio::task::spawn_blocking(move || {
+            let (_permit, _guard) = (permit, guard);
+            text_edit_disk::apply(request)
+        }).await.map_err(|_| EditError::Unavailable)?
+    }
+
+    pub(crate) async fn compute_text_edits(
+        &self,
+        request: super::text_edit_ops::TextEditsRequest,
+    ) -> Result<super::text_edit_ops::TextEditsResult, super::text_edit_ops::EditError> {
+        use super::text_edit_ops::{self, EditError};
+        // Pure CPU work shares the bounded read lane, never the mutation lock.
+        // Keep its permit inside the blocking closure even if the caller leaves.
+        let permit = self
+            .acquire(self.inner.fs_read.clone())
+            .await
+            .map_err(|_| EditError::Unavailable)?;
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            text_edit_ops::compute(request)
+        })
+        .await
+        .map_err(|_| EditError::Unavailable)?
+    }
+
     pub(crate) fn run_targets(&self) -> &run_target_ops::RunTargetRegistry {
         &self.inner.run_targets
     }

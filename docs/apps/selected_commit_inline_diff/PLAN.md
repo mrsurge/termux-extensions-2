@@ -237,7 +237,12 @@ without suppressing real worktree invalidations. A native read already running
 finishes under a stale-output fence; replacing pending work must not create an
 unbounded thread backlog. Mutation ordering remains untouched.
 
-### Later Investigation: Shared Text Edits
+### Phase 5: Shared Text Edits, Hunk Restore, And Find/Replace
+
+**Required next phase and branch merge blocker.** Deliver all three parts:
+the shared framework edit method, per-hunk Restore, and content Find/Replace.
+This replaces the former optional later-investigation scope. Implementation
+details still require source investigation and concrete-plan approval.
 
 Investigate a Rust-owned guarded text-edit operation reusable by per-hunk Restore
 and content Find/Replace. Feature logic would produce exact edits rather than
@@ -245,7 +250,55 @@ round-tripping through textual patch syntax or an external patch process.
 Verify revision/hash checks, encoding and line-ending preservation, draft versus
 disk ownership, and existing editor/WBA/Git projection before implementation.
 Per-hunk Restore must preserve edits outside the selected hunk, unlike the
-explicit whole-file discard-and-restore operation. This is not part of Phase 4.
+explicit whole-file discard-and-restore operation. This extends Phase 4.
+
+Both per-hunk Restore and Find/Replace write directly to disk regardless of
+existing autosave preferences. Python checks draft presence/revision and obtains
+explicit discard consent before dispatching a mutation. It does not materialize
+drafts for matching or create replacement drafts. Newer drafts must not be
+silently discarded. Rust validates the disk snapshot and preserves unrelated
+bytes and index entries; existing facts project accepted changes to editors/WBA.
+
+Define replacement scope, multi-file partial-failure reporting, cancellation,
+encoding/line-ending preservation, and concurrent-client guards. Validate both
+features against live draft and modified-file workflows, plus type checks,
+automated regressions, and responsiveness checks. The branch is not merge-ready
+until this phase receives user live acceptance.
+
+#### Approved Search And Replacement Authority
+
+By contents is the only Find/Replace home; reuse existing disk search options
+and multiline semantics. The earlier draft-aware-search policy is superseded
+by the user's explicit direct-to-disk decision. Both features stop for a draft
+warning offering discard/cancel before dispatch. No extra dirty-HEAD warning
+is required for Find/Replace; hunk Restore may show it as informational context.
+Per-hunk Restore preserves all disk edits outside the exact selected hunk.
+Neither operation changes autosave settings, stages, or commits. Draft preflight
+belongs to Python; guarded persistence belongs to Rust.
+
+#### Implementation And Test Sequence
+
+1. Define and test the guarded text-edit primitive independently of UI and IO:
+   exact original-text offsets, explicit UTF-8/UTF-16 conversion boundaries,
+   expected content identity, overlap rejection, deterministic edit ordering,
+   no-op behavior, and byte/line-ending preservation for supported encodings.
+2. Integrate with existing Python draft ownership and Rust disk services:
+   validate draft revision plus disk base, preserve permissions/index state,
+   and publish accepted changes through established editor/WBA/Git facts.
+   Specify per-file atomicity and report partial multi-file outcomes explicitly.
+3. Add per-hunk Restore using the selected immutable baseline and exact current
+   content. Tests must prove unrelated edits survive, stale hunks fail safely,
+   and draft-bearing/staged files obey the established safety rules.
+4. Add disk-snapshot replacement planning to By contents. Reuse the
+   actual backend matcher rather than independently rerunning JavaScript regexes.
+   Verify literal and regex replacements, captures, multiline LF/CRLF, Unicode,
+   zero-width matches, overlapping ranges, result caps, and file filters.
+5. Add By contents replacement controls and explicit replacement scope. Test
+   selected replacement and bulk behavior against authoritative match sets,
+   not just the currently rendered or truncated preview rows.
+6. Exercise concurrent clients, edits during confirmation, project switches,
+   cancellation before/after mutation, partial failures, and projection order.
+   Run Rust/Python/frontend type and test suites, then obtain live acceptance.
 
 ## Follow-Up: DevTools Through TE2 MCP
 

@@ -7,13 +7,57 @@
 - [x] Fix Explorer Git commit selector (user live acceptance confirmed).
 - [x] Correct Drafts overlay links to summon draft-versus-disk inline diff.
 - [x] Investigate and implement selected-Explorer-commit inline comparisons.
-- [x] Complete combined acceptance and prepare branch for merge.
+- [x] Complete combined acceptance of the original branch goals.
 - [x] Commit/push the accepted historical enumeration correction: `ba51875d`.
 - [x] Record the historical-worktree follow-up direction and four phases.
 
-Original branch goals and Phases 1–4 are live-accepted.
-The accepted snapshot above remains
-the rollback point.
+Original branch goals and Phases 1–4 are live-accepted. Phase 5 below is now
+required and blocks merge of this branch; earlier acceptance does not waive it.
+The latest accepted progressive-discovery snapshot is `d9bf1bcb`.
+
+## Phase 5: Shared Text Edits, Hunk Restore, And Find/Replace
+
+**Next required phase; merge blocker.** This is no longer optional later work.
+
+- [ ] Investigate existing Rust edit/filesystem services, Python draft
+  materialization, and editor/WBA mutation/projection contracts.
+- [ ] Agree on concrete edit DTOs, stale-state checks, mutation ownership,
+  draft-versus-disk behavior, and multi-file failure semantics before coding.
+- [x] User corrected and approved direct-to-disk behavior for both features:
+  disk search/diffs, draft-presence warning with explicit discard/cancel before
+  mutation, no replacement drafts, no autosave or index changes. The earlier
+  draft-aware-search proposal is superseded.
+- [ ] Implement a shared guarded framework text-edit operation using exact edits,
+  preserving encoding/line endings and rejecting stale source revisions.
+- [x] Implement the non-writing `fs.textEdits.compute` foundation: SHA-256 source
+  identity, original UTF-8 byte ranges, expected range text, deterministic ordering,
+  overlap/boundary rejection, literal replacements, and bounded output.
+- [x] Pass 10 primitive/pipe tests, including exhaustive boundary-range checks
+  on a Unicode/CRLF fixture and proof that repeated computation never writes disk.
+- [x] Add Rust-owned `fs.textEdits.apply`: bounded strict UTF-8 reads, exact
+  snapshot checks, same-root serialization, permission-preserving atomic writes,
+  and unchanged Git index. External writers retain a check-to-rename race.
+- [x] Pass 17 focused primitive/pipe/disk tests; Android skips the separate
+  hard-link fixture because its sandbox prohibits creating hard links.
+- [ ] Add Python draft transaction coordination before exposing disk writes to
+  Explorer actions; successful computation alone must never authorize a write.
+- [ ] Implement per-hunk Restore against the selected baseline, preserving every
+  unrelated edit rather than invoking whole-file discard-and-restore.
+- [ ] Implement Find/Replace through By contents using the shared operation;
+  define selected-match/file and bulk replacement scope explicitly.
+- [ ] Preserve autosave preferences, newer drafts, and staged/index safety.
+  Both actions explicitly save to disk; no silent draft discard, staging, or commit.
+- [ ] Project accepted edits through existing backend facts to all affected
+  editors/WBA models, draft indicators, Git decorations, and search results.
+- [ ] Validate stale results, concurrent clients/edits, unsaved drafts, staged
+  files, Unicode/line endings, no-op edits, partial failures, and cancellation.
+- [ ] Complete type checks and focused automated tests; verify mutation work
+  does not block unrelated editor opens or progressive search delivery.
+- [ ] Obtain user live acceptance of per-hunk Restore and Find/Replace with
+  draft/modified-state handling before marking the branch merge-ready.
+
+Python debug evaluation and native DevTools/MCP remain separate work; neither
+replaces or precedes this required phase by default.
 
 ## Phase 1: Progressive By Changes
 

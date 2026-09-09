@@ -15,6 +15,10 @@ pub(super) async fn dispatch_fs_request(
     scheduler: &FrameworkServiceScheduler,
 ) -> Option<PipeEnvelope> {
     match request.method.as_deref() {
+        Some("fs.textEdits.apply") => Some(apply_text_edits(request, responder, scheduler).await),
+        Some("fs.textEdits.compute") => {
+            Some(compute_text_edits(request, responder, scheduler).await)
+        }
         Some("fs.listDirectory") => Some(list_directory(request, responder, scheduler).await),
         Some("fs.listDirectories") => Some(list_directories(request, responder, scheduler).await),
         Some("fs.createDirectory") => {
@@ -28,6 +32,101 @@ pub(super) async fn dispatch_fs_request(
         Some("fs.move") => Some(mutation(request, responder, scheduler, "fs.move").await),
         Some("fs.delete") => Some(mutation(request, responder, scheduler, "fs.delete").await),
         _ => None,
+    }
+}
+
+async fn apply_text_edits(
+    request: &PipeEnvelope,
+    responder: &PipeIdentity,
+    scheduler: &FrameworkServiceScheduler,
+) -> PipeEnvelope {
+    use crate::framework_services::text_edit_disk::DiskEditsRequest;
+    let params = match serde_json::from_value::<DiskEditsRequest>(
+        request.params.clone().unwrap_or(Value::Null),
+    ) {
+        Ok(params) => params,
+        Err(_) => {
+            return PipeEnvelope::error_response(
+                request,
+                responder,
+                PipeError::new(
+                    "protocol.invalidParams",
+                    "Invalid disk-edit request",
+                    false,
+                    None,
+                ),
+            );
+        }
+    };
+    match scheduler.apply_text_edits(params).await {
+        Ok(result) => match serde_json::to_value(result) {
+            Ok(value) => PipeEnvelope::success_response(request, responder, value),
+            Err(_) => PipeEnvelope::error_response(
+                request,
+                responder,
+                PipeError::new(
+                    "protocol.encodeFailed",
+                    "Unable to encode disk edits",
+                    false,
+                    None,
+                ),
+            ),
+        },
+        Err(error) => PipeEnvelope::error_response(
+            request,
+            responder,
+            PipeError::new(
+                error.code(),
+                "Disk-edit validation or write failed",
+                false,
+                None,
+            ),
+        ),
+    }
+}
+
+async fn compute_text_edits(
+    request: &PipeEnvelope,
+    responder: &PipeIdentity,
+    scheduler: &FrameworkServiceScheduler,
+) -> PipeEnvelope {
+    use crate::framework_services::text_edit_ops::TextEditsRequest;
+    let params = match serde_json::from_value::<TextEditsRequest>(
+        request.params.clone().unwrap_or(Value::Null),
+    ) {
+        Ok(params) => params,
+        Err(_) => {
+            return PipeEnvelope::error_response(
+                request,
+                responder,
+                PipeError::new(
+                    "protocol.invalidParams",
+                    "Invalid text-edit request",
+                    false,
+                    None,
+                ),
+            );
+        }
+    };
+    match scheduler.compute_text_edits(params).await {
+        Ok(result) => match serde_json::to_value(result) {
+            Ok(value) => PipeEnvelope::success_response(request, responder, value),
+            Err(_) => PipeEnvelope::error_response(
+                request,
+                responder,
+                PipeError::new(
+                    "protocol.encodeFailed",
+                    "Unable to encode text edits",
+                    false,
+                    None,
+                ),
+            ),
+        },
+        Err(error) => PipeEnvelope::error_response(
+            request,
+            responder,
+            PipeError::new(error.code(), "Text-edit validation failed", false, None),
+        ),
     }
 }
 

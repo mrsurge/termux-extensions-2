@@ -742,6 +742,47 @@ Used by review save/discard, open/jump, search highlighting, and project-switch 
 
 ### Presentation and limits
 
+#### Guarded Text-Edit Foundation (Phase 5)
+
+`service.fs` (NID 2100) exposes `fs.textEdits.compute` through the existing
+framework pipe. This is a pure computation, not a disk/draft mutation API.
+The required `TextEditsRequest` v1 contains `content`, `expectedSha256`, and
+`edits` with `startByte`, `endByte`, `expectedText`, and `replacement`.
+Unknown fields are rejected. Ranges address the original UTF-8 snapshot;
+Monaco UTF-16 coordinates must be converted by the producer. Regex replacement
+expansion is a producer responsibility; replacements here are literal strings.
+
+The Rust primitive verifies the full-content SHA-256 and expected range text,
+rejects invalid Unicode boundaries and overlaps (including ambiguous insertions
+at one position), and builds the result once from unmodified source slices.
+Untouched BOM/newline bytes are preserved; non-UTF-8 support is not implied by
+this string DTO. Content/output are capped at 375 KiB, edit count at 10,000,
+and aggregate expected/replacement text at 750 KiB. It runs on the bounded
+blocking filesystem read lane and retains its permit if its caller disconnects.
+
+`TextEditsResult` v1 returns `content`, `sourceSha256`, `contentSha256`, `changed`,
+and `appliedEdits` (excluding individually unchanged replacements). Stable
+`textEdit.*` error codes distinguish stale content, bad ranges, overlap, limits,
+and invalid expected text. No source content appears in error messages.
+This foundation does not yet connect to hunk Restore or Find/Replace controls.
+Both will use disk content and direct disk writes regardless of autosave mode.
+Python must obtain draft-discard consent and fence draft revisions before sending
+mutations. Draft-aware search and replacement-as-draft are not part of Phase 5.
+
+`fs.textEdits.apply` accepts `DiskEditsRequest` v1: `root`, relative `path`,
+`expectedSha256`, and the same exact edits. Rust reads bounded strict UTF-8 disk
+content (no lossy decoding), validates all edits, stages output beside the file,
+preserves permissions, fsyncs, rechecks content/identity, and atomically replaces.
+Missing/special files, symlink path components, hardlinks, `.git` components,
+and traversal are rejected. No-op edits do not replace the inode. The result
+reports directory-fsync status separately because failure there is post-commit.
+Same-canonical-root edit transactions serialize through the scheduler and retain
+their lock through a running blocking write even on caller disconnect. Arbitrary
+external processes still have a final check-to-rename race; this is not filesystem
+compare-and-swap. Python preflight and result projection are not wired yet.
+
+#### Progressive Results
+
 - By changes uses the same start/result/done/error/cancel job lifecycle. The
   start acknowledgement does not wait for Git enumeration or hunk generation.
   Rust `framework_services/search_changes.rs` runs that work on the scheduler's

@@ -10,6 +10,8 @@ pub(crate) mod search_ops;
 pub(crate) mod search_changes;
 pub(crate) mod settings_ops;
 pub(crate) mod state_ops;
+pub(crate) mod text_edit_ops;
+pub(crate) mod text_edit_disk;
 
 use axum::Router;
 
