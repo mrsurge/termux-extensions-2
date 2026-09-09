@@ -88,7 +88,7 @@ async def execute(project: Path, client: str, path: str, token: str, *, unstage:
     if not unstage and intent.draft and not discard_draft:
         raise ValueError("Explicit draft-discard confirmation required")
     key = (str(intent.project), path)
-    if key in _busy:
+    if key in _busy or str(intent.project / path) in active_paths:
         raise ValueError("This file already has a restore operation in progress")
     _busy.add(key)
     operation = asyncio.create_task(_execute_owned(intent, path, unstage, key), name='guarded_git_restore')
@@ -144,6 +144,15 @@ def _disk_sha(path: str) -> str:
 
 
 async def _project_result(intent: RestoreIntent, absolute: str, revision: int, newer_draft: bool, disk_sha: str | None) -> bool:
+    return await project_disk_result(intent.project, intent.preview['path'], intent.generation,
+        absolute, revision, newer_draft, disk_sha, deleted=intent.preview['delete'])
+
+
+async def project_disk_result(
+    project_root: Path, relative_path: str, generation: int, absolute: str,
+    revision: int, newer_draft: bool, disk_sha: str | None, *, deleted: bool = False,
+) -> bool:
+    """Shared post-write projection; never clear drafts from an external-change event."""
     from ...monaco_editor.editor_backend_services.document_open_policy import DocumentOpenRejectedError
     from ...monaco_editor.editor_ws import (
         editor_runtime_emit_room_event,
@@ -155,21 +164,23 @@ async def _project_result(intent: RestoreIntent, absolute: str, revision: int, n
     from ...open_state_events import publish_document_closed
     from .file_ops import mark_draft_cache_dirty, mark_git_cache_dirty
 
-    project = str(intent.project)
+    project = str(project_root)
     editor_closed = False
     if disk_sha is not None:
         editor_runtime_record_save_sha(absolute, disk_sha)
-    mark_draft_cache_dirty(intent.project)
-    mark_git_cache_dirty(intent.project)
+    mark_draft_cache_dirty(project_root)
+    mark_git_cache_dirty(project_root)
     editor_runtime_notify_draft_state_changed(project)
-    if not newer_draft:
+    # Earlier fact delivery may have yielded to a fresh editor draft. Do not
+    # publish a clean state for that newer revision.
+    if not newer_draft and get_history_store().get_document_revision(project, absolute) == revision:
         await editor_runtime_emit_room_event('editor:cache_state', {
             'path': absolute, 'state': 'clean', 'unsaved': False,
             'reason': 'discard_external', 'document_revision': revision,
         })
         current = get_history_store().get_document_revision(project, absolute) == revision
-        close_membership = intent.preview['delete'] and current
-        if not intent.preview['delete'] and current and get_history_store().get_active_project() == project:
+        close_membership = deleted and current
+        if not deleted and current and get_history_store().get_active_project() == project:
             try:
                 _ = await editor_runtime_reload_disk_content_if_active(absolute, source='historical_restore')
             except DocumentOpenRejectedError:
@@ -180,10 +191,10 @@ async def _project_result(intent: RestoreIntent, absolute: str, revision: int, n
             if removed:
                 _ = get_history_store().remove_file(project, absolute)
                 await publish_document_closed(state, closed_path=absolute, affected_foregrounds=foregrounds,
-                    source='historical_restore', project_generation=intent.generation)
+                    source='historical_restore', project_generation=generation)
     # Let WBA reconcile background documents, without the external-change path clearing newer drafts.
-    await publish(build_event('GitPathRestored', project_root=project, project_generation=intent.generation,
-        source='guarded_restore', payload={'path': intent.preview['path'], 'editorProjected': True}))
-    await publish(build_event('ExplorerRenderStateChanged', project_root=project, project_generation=intent.generation,
-        source='guarded_restore', payload={'reason': 'git_restore', 'directories': [str(Path(intent.preview['path']).parent)]}))
+    await publish(build_event('GitPathRestored', project_root=project, project_generation=generation,
+        source='guarded_restore', payload={'path': relative_path, 'editorProjected': True}))
+    await publish(build_event('ExplorerRenderStateChanged', project_root=project, project_generation=generation,
+        source='guarded_restore', payload={'reason': 'git_restore', 'directories': [str(Path(relative_path).parent)]}))
     return editor_closed

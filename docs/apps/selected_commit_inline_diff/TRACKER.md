@@ -39,8 +39,19 @@ The latest accepted progressive-discovery snapshot is `d9bf1bcb`.
   and unchanged Git index. External writers retain a check-to-rename race.
 - [x] Pass 17 focused primitive/pipe/disk tests; Android skips the separate
   hard-link fixture because its sandbox prohibits creating hard links.
-- [ ] Add Python draft transaction coordination before exposing disk writes to
-  Explorer actions; successful computation alone must never authorize a write.
+- [x] Add internal Python draft transaction coordination: bounded expiring,
+  single-use client/project/path/revision confirmations, explicit discard consent,
+  newer-draft preservation, and disconnect-owned execution. Whole-file Restore
+  and exact edits share path ownership and the existing result projection.
+- [ ] Wire backend hunk/match producers and Explorer prepare/apply RPC actions
+  to this transaction; no frontend mutation endpoint is exposed yet.
+- [x] Pass 35 Python adapter/transaction/whole-file Restore tests and focused
+  Basedpyright checks, including cancellation, project changes, stale consent,
+  write failure, no-op, and concurrent drafts.
+- [x] Add strict Python `worker_services/text_edit_service.py` pipe adapter;
+  validate response DTO/version/path/hash/types and never retry uncertain writes.
+  Five adapter tests pass; adapter and tests pass Basedpyright without warnings.
+  This is internal transport only, not yet an Explorer mutation endpoint.
 - [ ] Implement per-hunk Restore against the selected baseline, preserving every
   unrelated edit rather than invoking whole-file discard-and-restore.
 - [ ] Implement Find/Replace through By contents using the shared operation;

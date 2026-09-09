@@ -779,7 +779,28 @@ reports directory-fsync status separately because failure there is post-commit.
 Same-canonical-root edit transactions serialize through the scheduler and retain
 their lock through a running blocking write even on caller disconnect. Arbitrary
 external processes still have a final check-to-rename race; this is not filesystem
-compare-and-swap. Python preflight and result projection are not wired yet.
+compare-and-swap. Explorer hunk/match producers and RPC controls are not wired yet.
+
+`worker_services/text_edit_service.py` provides the typed asynchronous Python
+adapter. It validates response DTO versions, exact path/source identity, hashes,
+and field types rather than casting the transport reply into a trusted DTO.
+It does not retry timeouts or convert a post-commit directory-sync failure into
+a failed write. This adapter is internal; no Explorer mutation endpoint exposes
+it directly.
+
+`explorer/services/guarded_text_edits.py` owns internal prepare/execute transactions.
+Backend producers supply immutable exact edits and the source hash. Confirmations
+are client/project/path/generation/revision bound, expire after five minutes, and
+are bounded to 64 entries with 750 KiB edit-text payloads each. Hunk producers may
+also bind the selector; replacement is independent of Git comparison selection.
+Execution requires explicit draft-discard consent when applicable. The accepted
+task survives caller disconnect and shares `restore_activity.active_paths` with
+whole-file Restore. Failure/no-op leaves drafts untouched; a successful write
+clears only the confirmed revision and retains any newer draft. The shared
+`guarded_restore.project_disk_result` projects through existing editor, Git, WBA,
+and Explorer paths, rechecking revision before publishing clean cache state.
+No frontend RPC exposes these methods yet. Uncertain pipe timeouts are not retried;
+multi-file outcome reporting remains part of the subsequent Find/Replace integration.
 
 #### Progressive Results
 
