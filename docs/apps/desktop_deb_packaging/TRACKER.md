@@ -1,6 +1,6 @@
 # Unified Linux And Termux Release Installer Tracker
 
-Last updated: 2026-09-05
+Last updated: 2026-09-09
 
 ## Program status
 
@@ -21,7 +21,8 @@ Last updated: 2026-09-05
 | Phase 4D: final integration and publication | `0.2.344` is published and accepted on public Linux/Desktop and physical Termux; its clean archive and synchronized APKs are published | Release assets are immutable; `0.2.340` remains defective historical data while `0.2.344` is the normal/latest release |
 | Phase 4K: `0.2.344` mobile Terminal integration | Complete, published, and accepted across both Android renderers on Motorola and Pixel | Track A only; the Android FD transport investigation remains unimplemented and out of scope |
 | Phase 4L: `0.2.345` mobile focus correction | Synchronized source, asset, Electron, and APK candidates pass automated gates and live acceptance on both devices | Build publication artifacts only from the immutable accepted tag |
-| Phase 4M: `0.2.346` MCP/Codex compatibility release | Source preparation in progress with exact FastMCP and Agent Log Server pins | Validate ALS 0.2.124 on Linux and Android, then publish only clean immutable-tag artifacts |
+| Phase 4M: `0.2.346` MCP/Codex compatibility release | Complete, published, and accepted on Linux and physical Termux | Immutable normal/latest release; retain exact FastMCP 3.4.7, Agent Log Server 0.2.124, and Framework-Shells 0.0.63 pins |
+| Phase 4N: `0.2.347` comparison and search release | Integrated source, synchronized frontend assets, Electron package, and both Android staging APKs pass automated gates; live acceptance and clean-tag publication remain | Publish only after native-client acceptance, then rebuild every public artifact from the immutable tag |
 | Phase 5: Termux target mode | Public `0.2.342` physical install acceptance is green; the full app-worker/Terminal/Code Server matrix last passed on `0.2.341` | Apt-first shared foundations plus a release-local wheel tree; every capability-changing physical acceptance must exercise the exact archived server's app-launch path |
 | Phase 6: upgrade retention, desktop startup, and Sidebar continuity | Source implementation is published in `0.2.343`; Electron and Cefrium Sidebar-persistence acceptance passed while the GeckoView/full restart matrix remains | Retain one fallback, use normal app readiness, and distinguish transient WBA loss from authoritative membership removal |
 
@@ -1600,6 +1601,28 @@ does not authorize publication.
   the archived Ferrous-native server, discovered all eight apps, launched a
   real File Explorer worker, and completed the same MCP exchange. Both
   acceptance runtimes were terminated cleanly afterward.
+
+### Phase 4N — TE2 0.2.347 comparison and search release
+
+- [x] Integrate the selected-commit comparison, progressive historical changes,
+  guarded Restore, bounded Find/Replace, and duplicate project-open projection
+  fixes from merged PR 22.
+- [x] Normalize the merged Rust source, exclude nested worktree test packages
+  from root pytest discovery, and pass Python, Rust, Code TE2, Terminal, and
+  Electron source gates.
+- [x] Synchronize package, Rust, app/catalog, Electron, Android, frontend URL,
+  and Android asset versions at `0.2.347` / version code `20347`.
+- [x] Rebuild Code TE2, WBA, Terminal, and Electron outputs; publish the exact
+  rebuilt frontend into the Android asset seed.
+- [x] Build both signed staging APKs and verify embedded version, asset version,
+  development signer, and 16 KiB alignment.
+- [ ] Complete user live acceptance on GeckoView and Cefrium before constructing
+  the immutable source tag.
+- [ ] Build the Linux wheel/sdist and deterministic physical-AArch64 Termux
+  archive from the clean immutable tag, reusing published Agent Log Server
+  `0.2.124` and Framework-Shells `0.0.63` wheels.
+- [ ] Publish TE2 to PyPI, assemble and byte-verify the normal/latest GitHub
+  release, then pass fresh public Debian and physical Termux acceptance.
 
 ## Deferred work
 
