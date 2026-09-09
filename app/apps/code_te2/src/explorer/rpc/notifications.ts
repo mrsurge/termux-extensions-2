@@ -171,12 +171,10 @@ function coerceGitStatus(payload: JsonObject): ExplorerGitStatus {
 function applyProjectRootProjection(
   deps: ExplorerNotificationHandlerDeps,
   nextProjectPath: string | null,
-  options: { forceReset?: boolean } = {},
 ): boolean {
   if (!nextProjectPath) return false;
   const prevProjectPath = deps.runtimeState.getProjectPath() || "";
   const projectChanged =
-    options.forceReset === true ||
     (!!prevProjectPath && prevProjectPath !== nextProjectPath);
   deps.runtimeState.setProjectPath(nextProjectPath);
   if (!projectChanged) {
@@ -518,9 +516,13 @@ export function createExplorerNotificationHandler(
       case EXPLORER_RPC_NOTIFICATIONS.projectOpened: {
         const path = getProjectedProjectPath(payload);
         if (path) {
-          deps.nameSearchController.close("projectChanged");
-          deps.searchOverlayController.closeSearchOverlay("projectChanged");
-          applyProjectRootProjection(deps, path, { forceReset: true });
+          // Direct completion and the queued switch fact can both arrive here.
+          // Reset only on a real project transition: a late completion must not
+          // erase listings or Git title state already projected for this project.
+          if (applyProjectRootProjection(deps, path)) {
+            deps.nameSearchController.close("projectChanged");
+            deps.searchOverlayController.closeSearchOverlay("projectChanged");
+          }
           deps.dispatchProjectOpened(path, payload);
         }
         break;

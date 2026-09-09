@@ -15,6 +15,16 @@ Original branch goals and Phases 1–4 are live-accepted. Phase 5 below is now
 required and blocks merge of this branch; earlier acceptance does not waive it.
 The latest accepted progressive-discovery snapshot is `d9bf1bcb`.
 
+## Follow-Up: Explorer Project-Switch Reset
+
+- [x] Inspect the Gecko failure: root-only tree and pending Explorer Git title
+  while the editor and toolbar retain the current project/branch.
+- [x] Remove forced same-project reset from project-open completion. The direct
+  reply and queued switch-fact notification must not erase arrived projections.
+- [x] Cover early, late, and duplicate completion orderings, retaining tree,
+  Git title, active marker, and open directories; real project changes still reset.
+- [x] User live acceptance after frontend asset refresh.
+
 ## Phase 5: Shared Text Edits, Hunk Restore, And Find/Replace
 
 **Next required phase; merge blocker.** This is no longer optional later work.
