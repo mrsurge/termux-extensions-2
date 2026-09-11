@@ -6,21 +6,42 @@ Android implementation.
 
 The module is isolated because the `com.cefrium` Gradle plugin generates
 Chromium resource classes for every variant in the module that applies it.
-Keeping it in `:cefrium` prevents those generated resources and the large CEF
-runtime from entering Gecko builds.
+Keeping it out of the `:app` build also prevents the large CEF runtime from
+entering Gecko builds.
 
 ## Build
 
-The module pins the Cefrium SDK and Gradle plugin to `0.7.1`, targets arm64, and
-requires Android API 29 or newer. The `0.7.1` patch release is required for its
-iframe WebSocket and scheduling-latency correction.
+The module pins the Cefrium SDK and Gradle plugin to `0.8.0`, targets arm64, and
+requires Android API 29 or newer.
+
+**`0.8.0` is a required move, not a choice.** The Cefrium Maven registry
+(`https://codeberg.org/api/packages/cefrium/maven`) only ever serves the latest
+release; `0.7.1` has been pruned and no longer resolves
+(`Plugin [id: 'com.cefrium', version: '0.7.1'] was not found`). Cefrium is beta
+with limited maintainer bandwidth and does not keep old versions installable, so
+this module must track whatever is current upstream.
+
+**`:cefrium` is no longer a subproject of the root `android/` Gradle build.**
+Cefrium `0.8.0` ships Chromium 152's Java 25 (class-file 69) bytecode, which
+requires **AGP 9.4+ / Gradle 9.7.1+ / JDK 25 / compileSdk 37**. Gradle resolves
+one version per plugin id for an entire build, so `:cefrium` cannot request AGP
+9.4 while `:app` (GeckoView, still AGP 8.9.1) stays on the classpath at 8.9.1 in
+the same invocation -- confirmed by reproducing it: `Error resolving plugin
+[id: 'com.android.application', version: '9.4.0'] > ... already on the
+classpath with a different version (8.9.1)`. `android/cefrium` is therefore its
+own root Gradle project now, with its own wrapper (Gradle 9.7.1) and its own
+`settings.gradle.kts`; it still compiles the shared `android/app/src/main`
+sources via relative `sourceSets` (see "Toolchain notes" below for a real trap
+in that setup under AGP 9's built-in Kotlin).
 
 Check free space before starting Gradle and stop if less than 2 GB is available:
 
 ```bash
 df -Pk .
-cd android
-./termux-sdk-env.sh ./gradlew :cefrium:testDebugUnitTest :cefrium:assembleDebug
+cd android/cefrium
+export JAVA_HOME=<a JDK 25 install>      # e.g. Temurin 25; javac must read class-69
+export ANDROID_HOME=<an SDK with platforms;android-37 + build-tools;37.0.0>
+./gradlew testDebugUnitTest assembleDebug
 ```
 
 The debug APK is written to:
@@ -28,6 +49,63 @@ The debug APK is written to:
 ```text
 android/cefrium/build/outputs/apk/debug/cefrium-debug.apk
 ```
+
+## Toolchain notes (0.8.0 migration)
+
+Migrating this module from `0.7.1`/AGP 8.9.1 to `0.8.0`/AGP 9.4.0 surfaced a
+few non-obvious traps, recorded here so nobody has to rediscover them:
+
+- **AGP 9 built-in Kotlin needs an explicit `kotlin.srcDir`, not just
+  `java.srcDir`.** This module reuses `android/app/src/main/java` via
+  `sourceSets["main"]` (see `build.gradle.kts`). Under the old
+  `org.jetbrains.kotlin.android` plugin, registering that path with
+  `java.srcDir(...)` was enough -- KGP fed Android's `java.srcDirs` to the
+  Kotlin compiler too. AGP 9's built-in Kotlin support does **not** do that:
+  without also calling `kotlin.srcDir("../app/src/main/java")`, the shared
+  `.kt` files are silently excluded from compilation, and every symbol they
+  define (e.g. `PersistentNetworkService`, `AndroidDevRuntimeSurface`) shows up
+  as "Unresolved reference" scattered across `MainActivity.kt` and friends --
+  with zero errors reported *in* the missing files themselves, since they were
+  never fed to the compiler at all. This is easy to misdiagnose as many small
+  compile bugs instead of one root cause.
+- **`android:extractNativeLibs` in the manifest is gone; use
+  `packaging { jniLibs { useLegacyPackaging = true } }`** in the build script
+  (already the case here) -- AGP 9 rejects the manifest attribute outright.
+- Do **not** `exclude group: 'org.jspecify'` anywhere in `configurations` --
+  newer `androidx` artifacts need it, and AGP 9 consumers that inherited an old
+  exclusion (e.g. copy-pasted from a pre-0.8.0 Cefrium sample) will fail
+  resource/annotation processing.
+- `compose-bom` needs bumping to a release that ships `compileSdk 37`-compatible
+  artifacts (this module uses `2026.08.00`); an older BOM pinned for
+  `compileSdk 36` will not resolve cleanly against the new SDK level.
+- The parent `android/gradle.properties`'s
+  `android.aapt2FromMavenOverride=/data/data/com.termux/files/usr/bin/aapt2` is
+  Termux-on-device-only and does not apply to this standalone build (see this
+  module's own `gradle.properties`) -- building from a desktop host with that
+  override in scope fails looking for a nonexistent binary.
+
+### Reliance on Cefrium internals (not public API)
+
+Two integration points in this module reach past Cefrium's public
+`com.cefrium.*` surface. They still work against `0.8.0`, but neither is a
+documented, versioned contract, so a future Cefrium release could silently
+break them without a deprecation notice:
+
+- **`com/cefrium/Te2CefriumBrowserAccess.kt`** declares itself in Cefrium's own
+  `com.cefrium` package specifically to reach `CefriumBrowser`'s
+  package-private `getWebContents()` and `connectWebContentsInternal()` (the
+  SDK source marks `getWebContents()` "Package-private -- internal use only,
+  not part of the public API"). Used to wire up the native selection
+  ActionMode/magnifier via `CefriumSelectionIntegration.kt` and Chromium's own
+  `org.chromium.content_public.browser.ActionModeCallbackHelper`.
+- **`CefriumDevToolsRuntime.kt`** imports `org.chromium.chrome.browser.DevToolsServer`
+  directly -- a Chromium/Chrome-layer class bundled in the AAR, not a Cefrium
+  API, that Cefrium itself only uses internally for its own DevTools bridging.
+
+If Cefrium ever wants to formalize either surface (a supported selection/
+ActionMode integration hook, or a supported way to reach an app-scoped
+DevTools/CDP endpoint), this module is the concrete external use case to design
+against. Filed upstream as SDK feedback alongside this migration.
 
 ## Runtime Shape
 
