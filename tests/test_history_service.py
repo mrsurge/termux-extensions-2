@@ -30,11 +30,55 @@ def response(action: str, params: object) -> dict[str, object]:
                          "snapshotId": "a" * 64, "offset": values["offset"],
                          "commits": [{"id": "b" * 40, "parentIds": [], "subject": "root",
                                       "author": "Test", "timestamp": 123}], "complete": True}}
+    if action.endswith("files"):
+        return {"dto": "GitHistoryFilesResult", "version": 1, "sessionId": session,
+                "page": {"dto": "GitHistoryFilesPage", "version": 1, "commitId": values["commitId"], "parentId": None,
+                         "offset": 0, "totalFiles": 1, "nextOffset": None,
+                         "files": [{"index": 0, "status": "added", "oldPath": None, "newPath": "test.py",
+                                    "oldBlob": None, "newBlob": "d" * 40,
+                                    "counts": {"state": "ready", "additions": 1, "deletions": 0}}]}}
+    if action.endswith("blob"):
+        return {"dto": "GitHistoryBlobResult", "version": 1, "sessionId": session,
+                "pair": {"dto": "GitHistoryBlobPair", "version": 1, "commitId": values["commitId"], "parentId": None,
+                         "index": values["index"], "original": {"state": "absent"},
+                         "modified": {"state": "text", "path": "test.py", "id": "d" * 40, "text": "hello\n"}}}
     return {"dto": "GitHistoryClosed", "version": 1, "sessionId": session}
 
 
 @final
 class HistoryServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_lazy_files_and_blob_pair_decode_without_advancing_graph(self) -> None:
+        async def fake(method: str, params: object = None, **_kwargs: object) -> object:
+            return response(method, params)
+        with patch.object(pipe_runtime, "call_async", fake):
+            async with history.history_session(Path("/project"), 9) as session:
+                files = await session.files("b" * 40)
+                self.assertEqual(files.files[0].counts.additions, 1)
+                self.assertIsNone(files.parent_id)
+                pair = await session.blob_pair("b" * 40, files.files[0])
+                self.assertEqual(pair.original.state, "absent")
+                self.assertEqual(pair.modified.text, "hello\n")
+                self.assertEqual(session.offset, 0)
+
+    async def test_unknown_counts_are_not_zero_and_invalid_continuation_rejected(self) -> None:
+        bad = False
+        async def fake(method: str, params: object = None, **_kwargs: object) -> object:
+            data = response(method, params)
+            if method.endswith("files"):
+                page = mapping(data["page"])
+                page["files"] = [{"index": 0, "status": "added", "oldPath": None, "newPath": "test.py",
+                                  "oldBlob": None, "newBlob": "d" * 40, "counts": {"state": "binary"}}]
+                if bad:
+                    page["nextOffset"] = 0
+            return data
+        with patch.object(pipe_runtime, "call_async", fake):
+            async with history.history_session(Path("/project"), 9) as session:
+                files = await session.files("b" * 40)
+                self.assertIsNone(files.files[0].counts.additions)
+                bad = True
+                with self.assertRaisesRegex(ValueError, "continuation"):
+                    _ = await session.files("b" * 40)
+
     async def test_async_transport_and_context_closes(self) -> None:
         calls: list[str] = []
         async def fake(method: str, params: object = None, **kwargs: object) -> object:

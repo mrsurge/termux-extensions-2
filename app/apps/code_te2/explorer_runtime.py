@@ -80,6 +80,7 @@ from .explorer.services.session_bootstrap import (
 )
 from .explorer.transport.rpc_contract import build_jsonrpc_notification
 from .worker_services.event_bus import current_project_generation
+from .explorer.services.history_projection import ExplorerHistory
 
 # --- Dispatcher ---
 
@@ -92,6 +93,7 @@ class ExplorerDispatcher:
         self._tracked_job_ids: set[str] = set()
         self._search_sessions: object | None = None
         self._bootstrap_task: asyncio.Task[None] | None = None
+        self._history: ExplorerHistory = ExplorerHistory(lambda: self.project_root, self.emit_personal)
 
     async def initialize(self) -> None:
         bootstrap = await bootstrap_explorer_session(
@@ -122,6 +124,7 @@ class ExplorerDispatcher:
         )
 
     async def cleanup(self) -> None:
+        await self._history.dispose()
         if self._bootstrap_task is not None:
             _ = self._bootstrap_task.cancel()
             try:
@@ -360,6 +363,7 @@ class ExplorerDispatcher:
         )
 
     def _set_project_root(self, project_root: Path) -> None:
+        self._history.invalidate_project()
         search_sessions = self._search_session_service()
         if search_sessions is not None:
             search_sessions.cancel_for_project_switch()
@@ -955,6 +959,32 @@ class ExplorerDispatcher:
         self.project_root = switch_result.project_root
 
     # --- Search & Review (State Events) ---
+
+    async def handle_history_open(self, payload: JsonObject, msg_id: str | None) -> None:
+        if payload:
+            raise ValueError("History open takes no parameters")
+        await self.emit_personal("explorer.history.result", self._history.open(), msg_id)
+
+    async def handle_history_close(self, payload: JsonObject, msg_id: str | None) -> None:
+        generation = payload.get("generation")
+        if type(generation) is not int or generation != self._history.revision:
+            raise ValueError("Stale History generation")
+        await self._history.close()
+        await self.emit_personal("explorer.history.result", {"closed": True}, msg_id)
+
+    async def handle_history_more(self, payload: JsonObject, msg_id: str | None) -> None:
+        generation = payload.get("generation")
+        if type(generation) is not int:
+            raise ValueError("History more requires generation")
+        await self.emit_personal("explorer.history.result", await self._history.more(generation), msg_id)
+
+    async def handle_history_files(self, payload: JsonObject, msg_id: str | None) -> None:
+        generation = payload.get("generation")
+        commit = payload.get("commitId")
+        offset = payload.get("offset", 0)
+        if type(generation) is not int or not isinstance(commit, str) or type(offset) is not int:
+            raise ValueError("History files requires generation, commitId and integer offset")
+        await self.emit_personal("explorer.history.result", await self._history.files(generation, commit, offset), msg_id)
 
     async def handle_search_run(self, payload: JsonObject, msg_id: str | None) -> None:
         from .explorer.contracts.search_review import (

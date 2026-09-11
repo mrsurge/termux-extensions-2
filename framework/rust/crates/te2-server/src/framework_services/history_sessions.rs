@@ -33,9 +33,22 @@ pub(crate) struct Request {
     pub(crate) session_id: String,
     pub(crate) limit: Option<usize>,
     pub(crate) offset: Option<usize>,
+    pub(crate) commit_id: Option<String>,
+    pub(crate) index: Option<usize>,
 }
 
 enum Command {
+    Files {
+        commit: String,
+        offset: usize,
+        limit: usize,
+        reply: ReplySender,
+    },
+    Blob {
+        commit: String,
+        index: usize,
+        reply: ReplySender,
+    },
     Page {
         limit: usize,
         offset: usize,
@@ -115,6 +128,9 @@ impl HistorySessions {
         match method {
             "git.historyGraph.open" => self.open(owner, params).await,
             "git.historyGraph.next" => self.next(owner, params).await,
+            "git.historyGraph.files" | "git.historyGraph.blob" => {
+                self.detail(method, owner, params).await
+            }
             "git.historyGraph.close" => {
                 let mut entries = self
                     .entries
@@ -134,7 +150,11 @@ impl HistorySessions {
     }
 
     async fn open(&self, owner: Owner, params: Request) -> Reply {
-        if params.limit.is_some() || params.offset.is_some() {
+        if params.limit.is_some()
+            || params.offset.is_some()
+            || params.commit_id.is_some()
+            || params.index.is_some()
+        {
             return Err("Open takes no page fields".into());
         }
         if !std::path::Path::new(&owner.root).is_absolute() {
@@ -190,6 +210,9 @@ impl HistorySessions {
     }
 
     async fn next(&self, owner: Owner, params: Request) -> Reply {
+        if params.commit_id.is_some() || params.index.is_some() {
+            return Err("Graph next takes no file fields".into());
+        }
         let limit = params.limit.unwrap_or(DEFAULT_PAGE_SIZE);
         if limit == 0 || limit > MAX_PAGE_SIZE {
             return Err("Invalid history page size".into());
@@ -228,6 +251,59 @@ impl HistorySessions {
         pending.accepted = response.is_ok();
         response
     }
+
+    async fn detail(&self, method: &str, owner: Owner, params: Request) -> Reply {
+        let commit = params.commit_id.ok_or("History detail requires commitId")?;
+        let (reply, result) = oneshot::channel();
+        let command = if method == "git.historyGraph.files" {
+            let limit = params.limit.unwrap_or(40);
+            if limit == 0 || limit > super::history_files::PAGE_LIMIT || params.index.is_some() {
+                return Err("Invalid history files request".into());
+            }
+            Command::Files {
+                commit,
+                offset: params.offset.unwrap_or(0),
+                limit,
+                reply,
+            }
+        } else {
+            if params.offset.is_some() || params.limit.is_some() {
+                return Err("Blob request takes no page fields".into());
+            }
+            Command::Blob {
+                commit,
+                index: params.index.ok_or("Blob request requires index")?,
+                reply,
+            }
+        };
+        let entry = self
+            .entries
+            .lock()
+            .map_err(|_| "History registry unavailable")?
+            .get(&params.session_id)
+            .cloned()
+            .ok_or("History session missing or expired")?;
+        if entry.owner != owner {
+            return Err("History owner mismatch".into());
+        }
+        if entry.finished.load(Ordering::Acquire) || entry.cancelled.load(Ordering::Relaxed) {
+            return Err("History session closed".into());
+        }
+        if entry.busy.swap(true, Ordering::AcqRel) {
+            return Err("History request already pending".into());
+        }
+        let mut pending = Pending {
+            entry: entry.clone(),
+            accepted: false,
+        };
+        entry
+            .commands
+            .try_send(command)
+            .map_err(|_| "History worker unavailable")?;
+        let response = result.await.map_err(|_| "History worker stopped")?;
+        pending.accepted = response.is_ok();
+        response
+    }
 }
 
 fn run(
@@ -253,14 +329,49 @@ fn run(
     };
     if reply.send(Ok(json!({"dto":"GitHistoryOpened", "version":1, "sessionId":session, "snapshot":reader.snapshot()}))).is_err() { return; }
     let mut expected_offset = 0;
+    let mut file_reader: Option<super::history_files::FileReader<'_>> = None;
     // This is one idle lease, not periodic polling. Close wakes the channel;
     // the timer bounds orphaned workers after a lost Python process/transport.
     while !entry.cancelled.load(Ordering::Relaxed) {
-        let Ok(Command::Page {
+        let command = match commands.recv_timeout(IDLE_TIMEOUT) {
+            Ok(command) => command,
+            Err(_) => break,
+        };
+        let command = match command {
+            Command::Files {
+                commit,
+                offset,
+                limit,
+                reply,
+            } => {
+                let result = details(&repo, &mut file_reader, &commit, &entry.cancelled)
+                    .and_then(|reader| reader.page(offset, limit, &entry.cancelled))
+                    .map(|page| json!({"dto":"GitHistoryFilesResult", "version":1, "sessionId":session, "page":page}));
+                if reply.send(result).is_err() {
+                    break;
+                }
+                continue;
+            }
+            Command::Blob {
+                commit,
+                index,
+                reply,
+            } => {
+                let result = details(&repo, &mut file_reader, &commit, &entry.cancelled)
+                    .and_then(|reader| reader.pair(index, &entry.cancelled))
+                    .map(|pair| json!({"dto":"GitHistoryBlobResult", "version":1, "sessionId":session, "pair":pair}));
+                if reply.send(result).is_err() {
+                    break;
+                }
+                continue;
+            }
+            command => command,
+        };
+        let Command::Page {
             limit,
             offset,
             reply,
-        }) = commands.recv_timeout(IDLE_TIMEOUT)
+        } = command
         else {
             break;
         };
@@ -282,6 +393,25 @@ fn run(
     }
 }
 
+fn details<'a, 'repo>(
+    repo: &'repo git2::Repository,
+    cache: &'a mut Option<super::history_files::FileReader<'repo>>,
+    commit: &str,
+    cancelled: &AtomicBool,
+) -> Result<&'a super::history_files::FileReader<'repo>, String> {
+    if cache
+        .as_ref()
+        .is_none_or(|reader| reader.commit_id != commit)
+    {
+        *cache = Some(super::history_files::FileReader::new(
+            repo, commit, cancelled,
+        )?);
+    }
+    cache
+        .as_ref()
+        .ok_or_else(|| "History files unavailable".into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -294,7 +424,11 @@ mod tests {
             .tempdir_in(scratch)
             .unwrap();
         let repo = git2::Repository::init(dir.path()).unwrap();
-        let tree = repo.treebuilder(None).unwrap().write().unwrap();
+        let mut builder = repo.treebuilder(None).unwrap();
+        builder
+            .insert("test.py", repo.blob(b"hello\n").unwrap(), 0o100644)
+            .unwrap();
+        let tree = builder.write().unwrap();
         let tree = repo.find_tree(tree).unwrap();
         let sig = git2::Signature::now("Test", "test@example.invalid").unwrap();
         repo.commit(Some("HEAD"), &sig, &sig, "root", &tree, &[])
@@ -313,6 +447,8 @@ mod tests {
             session_id: id.into(),
             limit: None,
             offset,
+            commit_id: None,
+            index: None,
         }
     }
     #[tokio::test]
@@ -343,6 +479,21 @@ mod tests {
             .unwrap();
         assert_eq!(page["page"]["commits"].as_array().unwrap().len(), 1);
         assert_eq!(page["page"]["complete"], true);
+        let mut files_request = request("one", None);
+        files_request.commit_id = Some(opened["snapshot"]["headId"].as_str().unwrap().into());
+        let files = registry
+            .dispatch("git.historyGraph.files", owner.clone(), files_request)
+            .await
+            .unwrap();
+        assert_eq!(files["page"]["files"][0]["counts"]["additions"], 1);
+        let mut blob_request = request("one", None);
+        blob_request.commit_id = Some(opened["snapshot"]["headId"].as_str().unwrap().into());
+        blob_request.index = Some(0);
+        let blob = registry
+            .dispatch("git.historyGraph.blob", owner.clone(), blob_request)
+            .await
+            .unwrap();
+        assert_eq!(blob["pair"]["modified"]["text"], "hello\n");
         registry
             .dispatch(
                 "git.historyGraph.close",

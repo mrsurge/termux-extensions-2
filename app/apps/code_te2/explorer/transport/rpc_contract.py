@@ -18,6 +18,11 @@ EXPLORER_RPC_NOTIFICATION_EVENT = "rpc.notify"
 JsonObject = dict[str, object]
 
 DISPATCHER_MESSAGE_TYPE_BY_RPC_METHOD: dict[str, str] = {
+    "explorer.history.open": "history:open",
+    "explorer.history.refresh": "history:open",
+    "explorer.history.more": "history:more",
+    "explorer.history.files": "history:files",
+    "explorer.history.close": "history:close",
     "explorer.dir.create": "explorer:createDir",
     "explorer.entries.copy": "explorer:batchCopy",
     "explorer.entries.delete": "explorer:batchDelete",

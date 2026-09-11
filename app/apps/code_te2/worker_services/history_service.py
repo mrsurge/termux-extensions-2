@@ -1,5 +1,5 @@
 # pyright: strict
-"""Async, exact-generation History transport. No statistics or working-file state."""
+"""Async, exact-generation History transport; Rust owns Git content and counts."""
 from __future__ import annotations
 
 import asyncio
@@ -81,6 +81,89 @@ class HistoryPage:
     complete: bool
 
 
+@dataclass(frozen=True)
+class HistoryCounts:
+    state: str
+    additions: int | None
+    deletions: int | None
+
+
+@dataclass(frozen=True)
+class HistoryFile:
+    index: int
+    status: str
+    old_path: str | None
+    new_path: str | None
+    old_blob: str | None
+    new_blob: str | None
+    counts: HistoryCounts
+
+
+@dataclass(frozen=True)
+class HistoryFilesPage:
+    commit_id: str
+    parent_id: str | None
+    offset: int
+    files: tuple[HistoryFile, ...]
+    next_offset: int | None
+    total_files: int
+
+
+@dataclass(frozen=True)
+class HistoryBlobSide:
+    state: str
+    path: str | None
+    identity: str | None
+    text: str | None
+
+
+@dataclass(frozen=True)
+class HistoryBlobPair:
+    commit_id: str
+    parent_id: str | None
+    index: int
+    original: HistoryBlobSide
+    modified: HistoryBlobSide
+
+
+def _optional_str(value: object) -> str | None:
+    return None if value is None else _str(value)
+
+
+def _optional_oid(value: object) -> str | None:
+    return None if value is None else _oid(value)
+
+
+def _nonnegative(value: object) -> int:
+    number = _int(value)
+    if number < 0:
+        raise ValueError("Negative History integer")
+    return number
+
+
+def _counts(value: object) -> HistoryCounts:
+    data = _map(value)
+    state = _str(data.get("state"))
+    if state == "ready":
+        return HistoryCounts(state, _nonnegative(data.get("additions")), _nonnegative(data.get("deletions")))
+    if state not in {"binary", "tooLarge", "unavailable"}:
+        raise ValueError("Invalid History count state")
+    return HistoryCounts(state, None, None)
+
+
+def _side(value: object) -> HistoryBlobSide:
+    data = _map(value)
+    state = _str(data.get("state"))
+    if state == "absent":
+        return HistoryBlobSide(state, None, None, None)
+    if state not in {"text", "binary", "tooLarge", "invalidUtf8", "unsupported"}:
+        raise ValueError("Invalid History blob state")
+    text = _str(data.get("text")) if state == "text" else None
+    if text is not None and len(text.encode("utf-8")) > 375 * 1024:
+        raise ValueError("History blob exceeds size bound")
+    return HistoryBlobSide(state, _str(data.get("path")), _oid(data.get("id")), text)
+
+
 class HistorySession:
     def __init__(self, root: Path, generation: int) -> None:
         if not root.is_absolute():
@@ -152,6 +235,53 @@ class HistorySession:
             result = HistoryPage(self.offset, tuple(commits), complete)
             self.offset += len(commits)
             return result
+
+    async def files(self, commit_id: str, offset: int = 0, limit: int = 40) -> HistoryFilesPage:
+        commit_id = _oid(commit_id)
+        offset = _nonnegative(offset)
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("Invalid History file page size")
+        async with self._lock:
+            if self.closed or self.snapshot is None:
+                raise ValueError("History session is not open")
+            raw = self._reply(await self._call("files", {"commitId": commit_id, "offset": offset, "limit": limit}), "GitHistoryFilesResult")
+            data = _contract(raw.get("page"), "GitHistoryFilesPage")
+            if data.get("commitId") != commit_id or _nonnegative(data.get("offset")) != offset:
+                raise ValueError("History files identity mismatch")
+            files: list[HistoryFile] = []
+            for item in _list(data.get("files")):
+                file = _map(item)
+                index = _nonnegative(file.get("index"))
+                status = _str(file.get("status"))
+                if index != offset + len(files) or status not in {"added", "deleted", "modified", "renamed", "copied", "typeChanged", "unsupported"}:
+                    raise ValueError("Invalid History file identity/status")
+                files.append(HistoryFile(index, status, _optional_str(file.get("oldPath")), _optional_str(file.get("newPath")),
+                                         _optional_oid(file.get("oldBlob")), _optional_oid(file.get("newBlob")), _counts(file.get("counts"))))
+            total = _nonnegative(data.get("totalFiles"))
+            next_value = data.get("nextOffset")
+            next_offset = None if next_value is None else _nonnegative(next_value)
+            end = offset + len(files)
+            if len(files) > limit or end > total or next_offset != (end if end < total else None) or (end < total and not files):
+                raise ValueError("Invalid History file continuation")
+            return HistoryFilesPage(commit_id, _optional_oid(data.get("parentId")), offset, tuple(files), next_offset, total)
+
+    async def blob_pair(self, commit_id: str, file: HistoryFile) -> HistoryBlobPair:
+        commit_id = _oid(commit_id)
+        index = _nonnegative(file.index)
+        async with self._lock:
+            if self.closed or self.snapshot is None:
+                raise ValueError("History session is not open")
+            raw = self._reply(await self._call("blob", {"commitId": commit_id, "index": index}), "GitHistoryBlobResult")
+            data = _contract(raw.get("pair"), "GitHistoryBlobPair")
+            if data.get("commitId") != commit_id or _nonnegative(data.get("index")) != index:
+                raise ValueError("History blob identity mismatch")
+            original = _side(data.get("original"))
+            modified = _side(data.get("modified"))
+            # A rebuilt native file list must still match the exact row the user
+            # selected; never display a different pair merely because its index fits.
+            if (original.identity, modified.identity, original.path, modified.path) != (file.old_blob, file.new_blob, file.old_path, file.new_path):
+                raise ValueError("History blob pair no longer matches selected file")
+            return HistoryBlobPair(commit_id, _optional_oid(data.get("parentId")), index, original, modified)
 
     async def close(self) -> None:
         self.closed = True

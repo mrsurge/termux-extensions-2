@@ -1034,8 +1034,8 @@ inside libgit2 still have the limitations below.
 identities and closes on context exit. Cancelled opening waits for admission to
 settle before closing; an uncertain/lost transport is ultimately bounded by the
 native idle lease. It never retries page advancement. The legacy synchronous
-Git adapter remains unchanged. Explorer lifecycle/fact routing, statistics and
-historical blob-pair integration remain pending; no frontend uses these calls yet.
+Git adapter remains unchanged. Explorer lifecycle/fact routing remains pending;
+no frontend uses these calls yet.
 
 Snapshot capture records commit-valued local/remote branches and tags plus HEAD,
 sorts their identities, and pins the traversal roots. Annotated tags peel to
@@ -1057,6 +1057,92 @@ It cannot interrupt libgit2 inside a step, including initial topology preparatio
 A failed or cancelled page invalidates the reader, preventing a retry from
 silently skipping already-consumed rows. The owner must discard that generation.
 First-page timing and native memory measurements remain acceptance requirements.
+
+### Lazy Historical File Reads
+
+`history_files.rs` supplies `git.historyGraph.files` and `.blob` through the same
+owner-checked sessions. Files takes a full immutable `commitId`, offset and limit
+(40 default, 100 maximum). Blob takes that commit and its file index. The worker
+retains one commit's tree diff for reuse and replaces it when another commit is
+requested; it does not retain text bodies across calls. These operations never
+advance the metadata graph cursor.
+
+The comparison is the commit's first parent, or an absent tree at a root commit.
+Rename detection is shared by the summaries and blob-pair reader with libgit2's
+rename candidate limit set to 200. Beyond that limit, heuristic rename matches
+may remain separate additions/deletions. A commit exceeding 20,000 changed files
+fails explicitly. Native tree enumeration/rename matching precedes the first file
+page; per-file patches/counts are computed only for the requested page, not for
+the entire commit or graph. The statistics producer below schedules aggregation.
+
+File summaries return status, old/new paths and blob IDs, plus counts with ready,
+binary, tooLarge or unavailable states. Blob sides are absent, text, binary,
+tooLarge, invalidUtf8 or unsupported (including gitlinks). Returned text is strict
+UTF-8, at most 375 KiB per side. The reader checks the Git object header before
+loading a blob body. This does not claim a bound on all internal libgit2 diff or
+rename allocations. Non-UTF-8 paths fail explicitly rather than becoming a wrong
+file identity. Worktree/draft content is not read as either displayed side.
+
+The Python adapter validates typed file pages and continuation offsets. Its
+`blob_pair` accepts the selected `HistoryFile`, then verifies returned blob IDs
+and old/new paths against that row as well as commit/index/session identities.
+It cannot silently substitute a different file after a native list rebuild.
+The second-editor content lifecycle and UI projection are still unimplemented.
+
+### Progressive Statistics Producer
+
+`explorer/services/history_statistics.py` owns one generation-local producer,
+with one native file page in flight at a time. Call `retain` only after graph
+rows have been published. It reconciles at most 500 retained commit descriptors;
+this is a statistics work-set bound, not a cap on reachable repository history.
+Completed retained commits are deduplicated; pruning removes pending/completed
+state, and there is no cross-generation cache or polling timer.
+
+Each 40-file read executes in Rust through the typed session adapter. Python
+adds the small returned integers and publishes one cumulative update before
+requesting another page, yielding between pages. The session lock is released
+between reads, allowing queued interactive History requests to proceed. This
+does not preempt a native page already in flight.
+
+Updates carry generation, commit ID, processed/total files, known additions and
+deletions, and unknown-file count. State is computing, ready, incomplete or error.
+Known sums are never presented as complete totals when some file counts are
+unavailable. Failed commits do not become clean or retry automatically. A read
+failure does not prevent processing later retained commits.
+
+The owner supplies the asynchronous publication callback and must dispose this
+producer before closing its native session. Disposal and retention checks fence
+late results, including a read which completes after cancellation. Publication
+failures propagate through the producer task (`settled`/`dispose`) and a done
+callback observes/logs them even when no caller is awaiting completion.
+
+### Explorer History Projection
+
+`explorer/services/history_projection.py` owns one native session per requesting
+Explorer connection. `explorer.history.open` and `.refresh` acknowledge with a
+connection-local generation immediately; native initialization runs separately.
+`explorer.history.updated` publishes generation-fenced snapshot, page, statistics,
+or error notifications through `emit_personal`, never a broadcast. Typed
+dataclass payloads currently retain snake_case field names inside the envelope;
+the eventual frontend adapter must normalize these explicitly.
+
+`explorer.history.more` and `.files` require that generation; files also takes
+`commitId` and an optional offset. `.close` requires the current generation.
+Graph pages are published before scheduling counts for their rows. Statistics
+retain only the latest 500 commit descriptors, not every paginated row. Superseded
+initialization, reads and publication cannot populate the next generation.
+
+Disconnect cleanup disposes the controller and unsubscribes its fact handlers.
+Project changes invalidate it synchronously. Async exit-stack ordering stops the
+statistics producer before closing the native session. Opening a replacement
+waits for prior cleanup without blocking the fact handler or initial RPC ack.
+
+`GitSnapshotChanged` schedules a new generation only when the current project's
+nonempty HEAD changes; repeated facts for that pending HEAD coalesce. Ordinary
+worktree changes do not refresh immutable history. Other branch/tag tip changes
+and a HEAD becoming absent still require explicit refresh: the complete ref-fact
+invalidation contract remains pending. There is no polling. Production History
+UI mounting and secondary-editor historical content routing remain unimplemented.
 
 ---
 

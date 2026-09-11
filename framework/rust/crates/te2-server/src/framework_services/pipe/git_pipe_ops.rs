@@ -17,7 +17,11 @@ pub(super) async fn dispatch_git_request(
     event_sink: Option<Arc<dyn PipeEventSink>>,
 ) -> Option<PipeEnvelope> {
     match request.method.as_deref()? {
-        method @ ("git.historyGraph.open" | "git.historyGraph.next" | "git.historyGraph.close") => {
+        method @ ("git.historyGraph.open"
+        | "git.historyGraph.next"
+        | "git.historyGraph.close"
+        | "git.historyGraph.files"
+        | "git.historyGraph.blob") => {
             let result = match serde_json::from_value::<
                 crate::framework_services::history_sessions::Request,
             >(request.params.clone().unwrap_or_else(|| json!({})))

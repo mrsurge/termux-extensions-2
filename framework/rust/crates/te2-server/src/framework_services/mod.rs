@@ -4,6 +4,7 @@ pub(crate) mod fs_ops;
 pub(crate) mod git_ops;
 pub(crate) mod hunk_edits;
 pub(crate) mod history_graph;
+pub(crate) mod history_files;
 pub(crate) mod history_sessions;
 mod net;
 pub(crate) mod pipe;

@@ -70,6 +70,22 @@
   and primary-open latency measurements remain pending.
 - [ ] Typed paged graph/ref snapshots with parent IDs and deterministic topology.
 - [ ] Progressive statistics, lazy file summaries and bounded historical blob pairs.
+- [x] Generation-local statistics producer: one 40-file native page in flight,
+  cumulative publication before the next read, bounded/deduplicated retained
+  work set, explicit incomplete/error states and late-result fencing.
+  Five producer tests plus six transport tests pass; strict Basedpyright clean.
+- [x] Connect the producer to an Explorer-owned History session, exact-client
+  notifications, HEAD-fact refresh, disconnect and project-switch teardown.
+  Open/refresh acknowledge before native reads; more/files/close fence generation.
+- [ ] Complete invalidation for non-HEAD branch/tag tips and HEAD disappearance;
+  these currently require explicit refresh rather than polling.
+- [x] Lazy file-page counts and bounded historical blob pairs through the existing
+  History session: first-parent/root comparison, shared rename pairing, explicit
+  absent/binary/oversized/encoding states and typed Python decoding. Commit-wide
+  stats scheduling is wired; frontend mounting remains pending.
+- [x] File/blob checkpoint validation: 14 filtered native tests, six Python tests,
+  strict Basedpyright (zero errors/warnings) and whitespace checks pass. Includes
+  session detail dispatch and a worktree-content mismatch proving Git blob output.
 - [ ] First-parent/root/rename/binary semantics and limits, explicitly represented.
 - [ ] Cancellation, stale-generation rejection, bounded caches and event refresh.
 - [ ] Rust/Python contract tests and strict typing; measure primary-open interference.
@@ -105,5 +121,8 @@
 Current checkpoint: standalone upstream-derived view foundation is implemented;
 it is not mounted/imported by the application entry point yet. The browser tree
 constructor is supplied to the host explicitly; production asset wiring remains
-part of Phase 4. Next is Phase 2's real Rust/Python reads, not WBA integration.
+part of Phase 4. Native reads, statistics and Explorer backend projection are
+implemented. Fifteen Python tests cover transport, producer and connection
+lifecycle. Remaining Phase 2 work includes full ref invalidation and performance
+acceptance; secondary historical content and frontend mounting follow, not WBA.
 No restarts, APK asset publication or version changes.
