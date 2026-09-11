@@ -11,8 +11,11 @@ from unittest.mock import patch
 from app.apps.code_te2 import boot_snapshot_backend, project_sidecar
 from app.apps.code_te2.history_store import HistoryStore
 from app.apps.code_te2.host import secondary_content_backend as backend
+from app.apps.code_te2.host import history_activation
+from app.apps.code_te2.host.history_handoff import handoffs
 from app.apps.code_te2.host.secondary_content_state import HistoricalContent
 from app.apps.code_te2.open_state_backend import (
+    ClientForegroundPayload, SidecarOpenStatePayload,
     read_client_foreground, read_sidecar_open_state, write_client_document_open,
 )
 from app.apps.code_te2.worker_services import event_bus
@@ -56,6 +59,25 @@ class SecondaryContentBackendTests(unittest.IsolatedAsyncioTestCase):
     def tearDown(self) -> None:
         backend.close_secondary_content(CLIENT)
         backend.close_secondary_content(PRIMARY)
+
+    async def test_ticket_activation_uses_secondary_identity_and_publishes_after_commit(self) -> None:
+        seen: list[ClientForegroundPayload] = []
+
+        async def publish(_state: SidecarOpenStatePayload, foreground: ClientForegroundPayload,
+                          **_kwargs: object) -> None:
+            self.assertIsNotNone(backend.secondary_content_projection(CLIENT, "secondary", self.project, None))
+            seen.append(foreground)
+
+        ticket = handoffs.issue(PRIMARY, self.project, 1, CONTENT, lambda: True)
+        with self.assertRaises(PermissionError):
+            await history_activation.activate_history_ticket(PRIMARY, "primary", ticket)
+        with patch.object(history_activation, "publish_client_foreground_changed", new=publish):
+            await history_activation.activate_history_ticket(CLIENT, "secondary", ticket)
+            with self.assertRaises(ValueError):
+                await history_activation.activate_history_ticket(CLIENT, "secondary", ticket)
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(seen[0]["clientInstanceId"], CLIENT)
+        self.assertEqual(read_client_foreground(self.project, PRIMARY)["path"], self.path)
 
     def test_activation_preserves_disk_membership_and_primary(self) -> None:
         sidecar = project_sidecar.ProjectSidecar.load_or_create(self.project)

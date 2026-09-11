@@ -132,6 +132,7 @@ interface ElectronSecondEditorBridge {
   openSecondEditor?: (
     projectPath: string,
     path: string,
+    historyTicket?: string,
   ) => Promise<{ ok: true; presentation: ElectronSecondEditorPresentation }>;
   syncSecondEditorProject?: (
     projectPath: string,
@@ -979,18 +980,18 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     }
   }
 
-  async function openInSecondWindow(targetPath = currentPath): Promise<void> {
+  async function openInSecondWindow(targetPath = currentPath, historyTicket?: string): Promise<void> {
     const electronAvailable = typeof electronSecondEditor?.openSecondEditor === 'function';
     if (!electronAvailable && !mobileSecondEditor.supported) {
       host.toast('A second editor window is unavailable in this client');
       return;
     }
-    if (!cachedProjectRoot || !targetPath) {
+    if (!cachedProjectRoot || (!targetPath && !historyTicket)) {
       host.toast('Open a project file before opening a second window');
       return;
     }
     try {
-      if (hostUiPrefsRuntime.latestSnapshot()?.webWorkersEnabled !== true) {
+      if (!historyTicket && hostUiPrefsRuntime.latestSnapshot()?.webWorkersEnabled !== true) {
         const ready = secondaryAdapterReady
           || await hostStateRuntime.ensureWorkbenchAdapterReady();
         if (!ready) {
@@ -1003,10 +1004,11 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
         const result = await electronSecondEditor.openSecondEditor(
           cachedProjectRoot,
           targetPath,
+          historyTicket,
         );
         applySecondaryEditorPresentation(result.presentation);
       } else {
-        await mobileSecondEditor.open(cachedProjectRoot, targetPath);
+        await mobileSecondEditor.open(cachedProjectRoot, targetPath, historyTicket);
       }
     } catch (error) {
       host.toast(`Second window failed: ${(error as Error)?.message || String(error)}`);
@@ -1023,11 +1025,13 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
       : '';
     const activeProject = (cachedProjectRoot || '').trim().replace(/\/+$/, '');
     const targetPath = typeof detail.path === 'string' ? detail.path.trim() : '';
-    if (!projectPath || projectPath !== activeProject || !targetPath) {
+    const ticket = typeof detail.historyTicket === 'string' && /^[0-9a-f]{48}$/.test(detail.historyTicket)
+      ? detail.historyTicket : undefined;
+    if (!projectPath || projectPath !== activeProject || (!targetPath && !ticket)) {
       host.toast('Second window request no longer matches the active project');
       return;
     }
-    void openInSecondWindow(targetPath);
+    void openInSecondWindow(targetPath, ticket);
   }
 
   window.addEventListener(

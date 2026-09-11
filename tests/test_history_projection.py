@@ -11,10 +11,35 @@ from app.libs import pipe_runtime
 from app.libs.pipe_protocol import PipeEnvelope
 from app.apps.code_te2.explorer.services.history_projection import ExplorerHistory
 from tests.test_history_service import response, mapping
+from app.apps.code_te2.worker_services import event_bus
+from app.apps.code_te2.host.history_handoff import handoffs
 
 
 @final
 class HistoryProjectionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_selected_native_row_handoff_is_fenced_by_session_lifetime(self) -> None:
+        async def fake(method: str, params: object = None, **_kwargs: object) -> object:
+            return response(method, params)
+
+        async def emit(method: str, payload: dict[str, object], reply_to: str | None = None) -> None:
+            del method, payload, reply_to
+
+        with patch.object(pipe_runtime, "call_async", fake), patch.object(event_bus, "current_project_generation", return_value=1):
+            controller = ExplorerHistory(lambda: Path('/project'), emit)
+            _ = controller.open()
+            try:
+                ticket = await controller.prepare_open(controller.revision, 'b' * 40, 0, 'primary')
+                content = handoffs.take(ticket, '/project', 1)
+                self.assertEqual(content.pair.modified.text, 'hello\n')
+                self.assertEqual(content.pair.modified.path, 'test.py')
+                with self.assertRaises(ValueError):
+                    _ = await controller.prepare_open(controller.revision, 'c' * 40, 0, 'primary')
+                ticket = await controller.prepare_open(controller.revision, 'b' * 40, 0, 'primary')
+            finally:
+                await controller.dispose()
+            with self.assertRaises(ValueError):
+                _ = handoffs.take(ticket, '/project', 1)
+
     async def test_early_native_invalidation_reopens_without_wba_facts(self) -> None:
         pages = asyncio.Event()
         opens = 0

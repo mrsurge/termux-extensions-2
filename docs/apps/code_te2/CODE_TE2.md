@@ -1182,8 +1182,7 @@ Trusted backend callers prepare a token, obtain the validated immutable pair,
 and commit it. Commit clears only that secondary foreground using the existing
 sidecar write; it neither saves nor discards drafts nor removes shared recents.
 Existing edit persistence remains authoritative, with no additional flush step.
-The caller must publish the returned foreground fact after committing; the History
-file-click producer is not wired yet.
+The activation caller publishes the returned foreground fact after committing.
 
 Host boot snapshots project `secondaryContent` on the event loop after shared
 and off-loop snapshot construction. Foreground notifications carry the same
@@ -1195,9 +1194,82 @@ content. An existing null secondary foreground prevents legacy file revival.
 
 Tests cover actual sidecar draft preservation, disk/recents/primary isolation,
 project and supersession rejection, old-fact handling and private boot projection.
-The read-only renderer, producer routing and native presentation acknowledgements
-remain pending. No production path activates historical content yet, and WBA
-facade disposal/end-to-end renderer behavior has not been validated.
+The `explorer.history.openFile` route validates generation/retained commit/index,
+rereads the exact native file descriptor, validates its blob pair and issues an
+opaque backend capability. `host/history_handoff.py` retains at most 32 bounded
+pairs, one outstanding per invoking client. Tickets expire after 60 seconds, are
+single-use, and reject project-generation or source-session invalidation. Expired
+entries are pruned on issuance; no polling task is introduced.
+
+The existing exact-client `ui.host.secondEditor.open` notification carries only
+`projectPath` and `historyTicket`. Mobile presentation and Electron's validated
+primary-only `open_second_editor` IPC forward a `history` command to their own
+secondary. That renderer redeems through `ui.host.history.open`; authenticated
+secondary role is required. `history_activation.py` commits the retained pair
+and publishes the existing foreground fact, separate from the state module to
+avoid a circular import. The secondary page defers a kind-switch reload until
+in-flight presentation commands are acknowledged. History opening bypasses WBA
+readiness and never uses `hostFileOpen` or a fabricated disk path.
+
+The graph UI is not mounted yet, so user-click activation and WBA facade
+disposal/end-to-end native behavior still require acceptance. Handoff tests cover
+single use, capacity, expiry, supersession, project/session fencing, secondary
+role enforcement and publication after descriptor commitment.
+
+The standalone `monaco_editor/historical_diff_view.ts` now consumes the strict
+`main_page/frontend/secondary-history-content.ts` decoder. It owns a diff control
+and two `te2-history:` models with per-view identities, readOnly/domReadOnly and
+originalEditable=false. Binary, oversized, invalid UTF-8 and unsupported sides
+render explicit status instead of fabricated empty diffs. Abort/dispose releases
+the owned control/models/DOM; syntax preparation failures cannot mount late.
+
+The secondary runtime supplies
+an isolated syntax-only Monaco realm and lexical setup, not a working-editor realm
+with installed intelligence providers. The pinned standalone diff implementation
+accepts global configuration options despite omitting them from the constructor
+interface; the options use the intersection with IGlobalEditorOptions to disable
+semantic highlighting. Semantic rendering, inlay hints, CodeLens, lightbulbs,
+suggestions, links and hover are disabled. These settings alone are not proof of
+zero provider traffic in a reused working-editor realm. Ten DOM/fake-Monaco tests
+validate ownership/options; real renderer and native acceptance remain pending.
+
+`historical_monaco_boot.ts` provides a fresh-realm syntax-only bootstrap. The
+Monaco bootstrap build script now supports `basicLanguagesOnly`, separately
+loading existing basic/Monarch contributions without TS/JSON/CSS/HTML language
+service contributions. Existing normal worker/code-server modes retain their
+behavior. Historical boot permits only the `editorWorkerService` worker used for
+diff computation, reuses Gecko's module-worker transport, awaits the stylesheet,
+and resolves languages by filename/longest extension with plaintext fallback.
+It does not load the WBA-backed TextMate runtime. Four focused bootstrap tests
+use dependency stubs; actual secondary browser acceptance remains outstanding.
+The generated bootstrap is published by scripts/build_monaco_bootstrap_bundle.mjs,
+not by editing its bundle, and requires no VS Code compilation.
+
+Secondary runtime now branches on its private host snapshot before editor boot.
+The working module is one-shot and has no complete public teardown/reboot
+lifecycle, so working/historical kind changes reload only the secondary page
+after backend commitment. Historical-to-historical revisions abort and replace
+the disposable renderer in place; duplicate snapshots retain it. Page disposal
+fences pending mounts. Facts received during cold boot trigger a fresh snapshot,
+and newer facts fence older snapshot replies. Null working foregrounds with
+historical content do not trigger automatic presentation close.
+
+Historical mode hides working menus/issues and rejects Save, Save As, draft
+discard and the working special-key dispatch path. A historical title identifies
+the file and commit without publishing a fabricated working foreground. A separate
+validated mobile presentation message carries only kind/label/commit and keeps
+the drawer populated independently of working-file ownership. Historical menus
+offer Find and Copy Selection. The special-key allowlist maps navigation and
+Shift-selection to Monaco core commands, supports Ctrl+F/A/C and Ctrl+Home/End,
+and rejects mutation/unknown commands. Focus listeners retain the selected diff
+side across menu focus and are disposed with the view. Clipboard failures surface
+through the host toast; no working-model fallback is allowed.
+
+Graph mounting/click activation and mobile touch-selection
+affordances still require integration. Six lifecycle tests cover boot,
+reconnect reuse, replacement, cross-kind reload, failure retry and disposal;
+real secondary-client acceptance remains pending.
+
 ## 7) Monaco asset pipeline (pinned VS Code build)
 
 The Monaco editor runtime uses the pinned VS Code `monaco-editor-core` ESM output:

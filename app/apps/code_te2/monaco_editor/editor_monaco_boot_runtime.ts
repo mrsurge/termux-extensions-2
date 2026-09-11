@@ -40,7 +40,7 @@ function isGeckoRuntime(win: WindowWithMonacoBoot): boolean {
 // Gecko rejects a module worker when the Android asset WebExtension redirects
 // its entry module to the APK loopback server. A same-origin Blob entrypoint can
 // import the normal worker URL, whose module fetch may follow that local redirect.
-function createGeckoModuleWorker(
+export function createGeckoModuleWorker(
   win: WindowWithMonacoBoot,
   WorkerRef: WorkerCtorLike,
   URLRef: typeof URL,

@@ -22,6 +22,7 @@ DISPATCHER_MESSAGE_TYPE_BY_RPC_METHOD: dict[str, str] = {
     "explorer.history.refresh": "history:open",
     "explorer.history.more": "history:more",
     "explorer.history.files": "history:files",
+    "explorer.history.openFile": "history:open_file",
     "explorer.history.close": "history:close",
     "explorer.dir.create": "explorer:createDir",
     "explorer.entries.copy": "explorer:batchCopy",

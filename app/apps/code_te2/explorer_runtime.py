@@ -986,6 +986,19 @@ class ExplorerDispatcher:
             raise ValueError("History files requires generation, commitId and integer offset")
         await self.emit_personal("explorer.history.result", await self._history.files(generation, commit, offset), msg_id)
 
+    async def handle_history_open_file(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .ui_ipc.notifications import emit_ui_ipc_rpc_notification
+        from .ui_ipc.rpc_contract import UI_IPC_RPC_NOTIFICATION_HOST_SECOND_EDITOR_OPEN
+
+        generation, commit, index = payload.get("generation"), payload.get("commitId"), payload.get("index")
+        if type(generation) is not int or not isinstance(commit, str) or type(index) is not int or index < 0:
+            raise ValueError("History open requires generation, commitId and file index")
+        ticket = await self._history.prepare_open(generation, commit, index, self.client_instance_id)
+        await emit_ui_ipc_rpc_notification(UI_IPC_RPC_NOTIFICATION_HOST_SECOND_EDITOR_OPEN,
+            {"projectPath": str(self.project_root), "historyTicket": ticket},
+            client_instance_id=self.client_instance_id)
+        await self.emit_personal("explorer.history.result", {"ok": True}, msg_id)
+
     async def handle_search_run(self, payload: JsonObject, msg_id: str | None) -> None:
         from .explorer.contracts.search_review import (
             ExplorerSearchReviewContractError,

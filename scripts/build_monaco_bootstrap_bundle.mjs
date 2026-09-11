@@ -96,11 +96,19 @@ await build({
 import * as monacoNs from "@te2-monaco-main";
 
 let languageContributionsPromise = null;
+let basicLanguageContributionsPromise = null;
+
+function ensureBasicLanguageContributions() {
+  if (!basicLanguageContributionsPromise) {
+    basicLanguageContributionsPromise = import("@te2-contrib-basic");
+  }
+  return basicLanguageContributionsPromise;
+}
 
 function ensureLanguageContributions() {
   if (!languageContributionsPromise) {
     languageContributionsPromise = Promise.all([
-      import("@te2-contrib-basic"),
+      ensureBasicLanguageContributions(),
       import("@te2-contrib-typescript"),
       import("@te2-contrib-json"),
       import("@te2-contrib-css"),
@@ -113,6 +121,9 @@ function ensureLanguageContributions() {
 export async function loadMonaco(options = {}) {
   if (options.languageWorkersEnabled === true) {
     await ensureLanguageContributions();
+  } else if (options.basicLanguagesOnly === true) {
+    // Historical viewers need lexical tokens, never worker language services.
+    await ensureBasicLanguageContributions();
   }
   return monacoNs;
 }

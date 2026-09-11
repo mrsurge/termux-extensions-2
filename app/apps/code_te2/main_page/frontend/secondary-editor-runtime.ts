@@ -1,4 +1,7 @@
 import { bootInlineEditorHost } from '../../monaco_editor/inline_host.ts';
+import { bootHistoricalDiff } from '../../monaco_editor/historical_monaco_boot.ts';
+import type { HistoricalDiffView } from '../../monaco_editor/historical_diff_view.ts';
+import { SecondaryContentLifecycle } from './secondary-content-lifecycle.ts';
 import {
   UI_IPC_RPC_METHODS,
   UI_IPC_RPC_NOTIFICATIONS,
@@ -13,6 +16,7 @@ import {
   secondaryEditorActivePath,
   type SecondaryEditorHostState,
   type SecondaryEditorMode,
+  type SecondaryContentPresentation,
 } from './secondary-editor-state.ts';
 import { renderDiagnosticIssuePills } from './ui/diagnostic-issue-pills.ts';
 import {
@@ -22,6 +26,7 @@ import {
   bindMobileEditorFocusCapture,
   publishMobileEditorModifierState,
   publishMobileEditorPanelState,
+  publishMobileEditorModifiersConsumed,
   requestMobileEditorSpecialKey,
   setMobileEditorOwner,
   type MobileEditorModifierState,
@@ -43,6 +48,7 @@ interface SecondaryPresentation {
 }
 
 type SecondaryCommand =
+  | { type: 'history'; projectPath: string; ticket: string; requestId?: string }
   | { type: 'open'; projectPath: string; path: string; requestId?: string }
   | { type: 'state'; projectPath: string; presentation: SecondaryPresentation }
   | {
@@ -72,6 +78,7 @@ interface SecondaryPresentationBridge {
   ready(): Promise<void>;
   setMode(mode: SecondaryMode): Promise<SecondaryPresentation>;
   publishForeground(path: string): void;
+  publishContent(content: SecondaryContentPresentation): void;
   publishOpenResult(requestId: string, ok: boolean, path: string, error?: string): void;
   publishInputFocus(): void;
   publishModifiersConsumed(): void;
@@ -201,6 +208,7 @@ const STYLE = `
   box-shadow: 0 10px 28px rgba(0, 0, 0, .45);
 }
 .te2-secondary-editor-menu[hidden] { display: none; }
+.te2-secondary-editor button[hidden] { display: none !important; }
 .te2-secondary-editor-menu button {
   justify-content: start;
   width: 100%;
@@ -272,6 +280,7 @@ function createPresentationBridge(): SecondaryPresentationBridge {
         return (await electron.setSecondEditorMode(mode)).presentation;
       },
       publishForeground() {},
+      publishContent() {},
       publishOpenResult() {},
       publishInputFocus() {},
       publishModifiersConsumed() {},
@@ -312,6 +321,11 @@ function createPresentationBridge(): SecondaryPresentationBridge {
         channel: 'te2.secondaryEditor.presentation',
         type: 'foreground',
         path,
+      }, origin);
+    },
+    publishContent(content) {
+      window.parent.postMessage({
+        channel: 'te2.secondaryEditor.presentation', type: 'content', content,
       }, origin);
     },
     publishOpenResult(requestId, ok, path, error) {
@@ -464,6 +478,8 @@ export async function bootSecondaryEditorRuntime(
         <button type="button" data-action="save">Save</button>
         <button type="button" data-action="save-as">Save As…</button>
         <button type="button" data-action="discard">Discard Draft…</button>
+        <button type="button" data-action="history-find" hidden>Find</button>
+        <button type="button" data-action="history-copy" hidden>Copy Selection</button>
       </div>
     </header>
     <div class="te2-secondary-editor-body">
@@ -497,6 +513,46 @@ export async function bootSecondaryEditorRuntime(
   let editorReady = false;
   let nativeReadySent = false;
   let busy = false;
+  let bootComplete = false;
+  let pendingStateRefresh = false;
+  let stateReadEpoch = 0;
+  let historicalView: HistoricalDiffView | null = null;
+  let commandsInFlight = 0;
+  let reloadPending = false;
+  const reloadWhenSettled = (): void => {
+    if (reloadPending && commandsInFlight === 0) {
+      reloadPending = false;
+      window.setTimeout(() => window.location.reload(), 0);
+    }
+  };
+  const contentLifecycle = new SecondaryContentLifecycle({
+    // Reload only this secondary realm, after the authoritative content changed.
+    reload: () => { reloadPending = true; reloadWhenSettled(); },
+    mount: async (content, signal) => {
+      historicalView = null;
+      currentPath = '';
+      menu.hidden = true;
+      for (const button of menu.querySelectorAll<HTMLButtonElement>('[data-action]')) {
+        button.hidden = !button.dataset.action?.startsWith('history-');
+      }
+      issuesButtonEl.hidden = true;
+      const path = content.modified.path || content.original.path || '';
+      titleEl.textContent = `${basename(path)} @ ${content.commitId.slice(0, 8)}`;
+      titleEl.title = path;
+      presentationBridge.publishContent({
+        kind: 'historicalDiff', label: basename(path), commitId: content.commitId,
+      });
+      setStatus('Loading historical comparison...');
+      const view = await bootHistoricalDiff(editorFrame, content, signal);
+      if (!signal.aborted) {
+        historicalView = view;
+        setStatus('Read-only historical comparison');
+        editorReady = true;
+        void publishPresentationReady();
+      }
+      return view;
+    },
+  });
 
   function setStatus(message: string): void {
     statusEl.textContent = message;
@@ -512,21 +568,25 @@ export async function bootSecondaryEditorRuntime(
     titleEl.textContent = label;
     titleEl.title = path || label;
     presentationBridge.publishForeground(path);
+    presentationBridge.publishContent(path ? { kind: 'workingFile', label } : { kind: 'empty' });
   }
 
-  function applyHostState(state: HostState): void {
+  async function applyHostState(state: HostState): Promise<void> {
     projectPath = stringValue(state.activeProject);
-    setCurrentPath(secondaryEditorActivePath(state));
+    const result = await contentLifecycle.apply(state.secondaryContent);
+    if (result === 'working') setCurrentPath(secondaryEditorActivePath(state));
   }
 
   async function requestHostState(): Promise<HostState> {
+    const epoch = ++stateReadEpoch;
     const reply = await connection.request(
       UI_IPC_RPC_METHODS.hostBootSnapshotGet,
       { scope: 'hostState' },
       8_000,
     );
     const state = hostStateFromReply(reply);
-    applyHostState(state);
+    // A newer fact or snapshot request supersedes this asynchronous read.
+    if (epoch === stateReadEpoch) await applyHostState(state);
     return state;
   }
 
@@ -542,7 +602,7 @@ export async function bootSecondaryEditorRuntime(
   }
 
   async function save(targetPath = ''): Promise<void> {
-    if (busy || !currentPath) return;
+    if (contentLifecycle.historical || busy || !currentPath) return;
     busy = true;
     setStatus('Saving…');
     try {
@@ -575,7 +635,7 @@ export async function bootSecondaryEditorRuntime(
   }
 
   async function saveAs(): Promise<void> {
-    if (!currentPath || busy) return;
+    if (contentLifecycle.historical || !currentPath || busy) return;
     const choice = await window.teFilePicker?.saveFile({
       title: 'Save As',
       startPath: toAbsolute(parentDir(currentPath), null, HOME_DIR),
@@ -590,7 +650,7 @@ export async function bootSecondaryEditorRuntime(
   }
 
   async function discardDraft(): Promise<void> {
-    if (!currentPath || busy) return;
+    if (contentLifecycle.historical || !currentPath || busy) return;
     if (!(await window.teUI.dialog.confirm(`Discard the draft for ${basename(currentPath)}?`))) {
       return;
     }
@@ -649,6 +709,13 @@ export async function bootSecondaryEditorRuntime(
       return;
     }
     if (command.type === 'specialKey') {
+      if (contentLifecycle.historical) {
+        // Read-only command allowlist; never reuse working-model key dispatch.
+        if (await historicalView?.specialKey(command.key, command.modifiers)) {
+          publishMobileEditorModifiersConsumed(window, 'secondary');
+        }
+        return;
+      }
       requestMobileEditorSpecialKey(
         window,
         'secondary',
@@ -674,6 +741,13 @@ export async function bootSecondaryEditorRuntime(
     if (command.projectPath !== projectPath) {
       throw new Error('Second editor project changed before the file could open');
     }
+    if (command.type === 'history') {
+      await connection.request(UI_IPC_RPC_METHODS.hostHistoryOpen, { ticket: command.ticket }, 8_000);
+      // Acknowledge before snapshot application schedules this realm's reload.
+      if (command.requestId) presentationBridge.publishOpenResult(command.requestId, true, 'historical');
+      await requestHostState();
+      return;
+    }
     await connection.request(
       UI_IPC_RPC_METHODS.hostFileOpen,
       { path: command.path, source: 'secondary_editor' },
@@ -687,28 +761,42 @@ export async function bootSecondaryEditorRuntime(
     params: JsonObject,
   ): void {
     if (method === UI_IPC_RPC_NOTIFICATIONS.editorReady) {
+      if (contentLifecycle.historical) return;
       editorReady = true;
       void publishPresentationReady();
     } else if (method === UI_IPC_RPC_NOTIFICATIONS.editorSave) {
       void save();
     } else if (method === UI_IPC_RPC_NOTIFICATIONS.hostActiveFileChanged) {
+      ++stateReadEpoch;
+      if (!bootComplete) {
+        pendingStateRefresh = true;
+        return;
+      }
       const nextPath = secondaryEditorActivePath({
         clientForeground: asRecord(params.clientForeground),
         currentPath: stringValue(params.path),
       });
-      const shouldClosePresentation = !!currentPath && !nextPath;
-      setCurrentPath(nextPath);
-      if (shouldClosePresentation) void setMode('closed');
+      const shouldClosePresentation = !!currentPath && !nextPath && params.secondaryContent == null;
+      void applyHostState({
+        activeProject: projectPath,
+        clientForeground: { path: nextPath },
+        secondaryContent: params.secondaryContent,
+      }).then(() => {
+        if (shouldClosePresentation) void setMode('closed');
+      }).catch((error) => setStatus(`Content unavailable: ${errorMessage(error)}`));
     } else if (method === UI_IPC_RPC_NOTIFICATIONS.projectSwitching) {
       setStatus('Switching project…');
     } else if (method === UI_IPC_RPC_NOTIFICATIONS.projectSwitched) {
-      void requestHostState().then(() => setStatus('')).catch((error) => {
+      void requestHostState().then(() => {
+        if (!contentLifecycle.historical) setStatus('');
+      }).catch((error) => {
         console.warn('[second_editor] project state refresh failed', error);
       });
     } else if (method === UI_IPC_RPC_NOTIFICATIONS.editorNotify) {
       const message = stringValue(params.message) || stringValue(params.text);
       if (message) host.toast(message);
     } else if (method === UI_IPC_RPC_NOTIFICATIONS.editorDiagnosticsCounts) {
+      if (contentLifecycle.historical) return;
       const counts = renderDiagnosticIssuePills(issuesButtonEl, params);
       issuesButtonEl.disabled = counts.total === 0;
     }
@@ -717,7 +805,9 @@ export async function bootSecondaryEditorRuntime(
   const connection = createUiIpcRpcConnection({
     ensureSocketIoLoaded,
     onConnect: () => {
-      if (editorReady) void requestHostState();
+      if (bootComplete) void requestHostState().catch((error) => {
+        setStatus(`State unavailable: ${errorMessage(error)}`);
+      });
     },
     onDisconnect: (reason) => setStatus(`Reconnecting${reason ? `: ${reason}` : '…'}`),
     onConnectError: (error) => {
@@ -728,19 +818,25 @@ export async function bootSecondaryEditorRuntime(
   });
 
   const unsubscribePresentation = presentationBridge.onCommand((command) => {
+    ++commandsInFlight;
     void handleNativeCommand(command).then(() => {
       if (command.type === 'open' && command.requestId) {
-        presentationBridge.publishOpenResult(command.requestId, true, currentPath);
+        presentationBridge.publishOpenResult(command.requestId, true, command.path);
       }
     }).catch((error) => {
       const message = errorMessage(error);
-      if (command.type === 'open' && command.requestId) {
+      if ((command.type === 'open' || command.type === 'history') && command.requestId) {
         presentationBridge.publishOpenResult(command.requestId, false, currentPath, message);
       }
       host.toast(message);
+    }).finally(() => {
+      --commandsInFlight;
+      reloadWhenSettled();
     });
   });
   window.addEventListener('pagehide', () => {
+    contentLifecycle.dispose();
+    historicalView = null;
     unsubscribePresentation();
     inputBridgeCleanups.forEach((cleanup) => cleanup());
   }, { once: true });
@@ -773,6 +869,8 @@ export async function bootSecondaryEditorRuntime(
     if (action === 'save') void save();
     else if (action === 'save-as') void saveAs();
     else if (action === 'discard') void discardDraft();
+    else if (action === 'history-find') void historicalView?.find().catch((error) => host.toast(errorMessage(error)));
+    else if (action === 'history-copy') void historicalView?.copy().catch((error) => host.toast(errorMessage(error)));
   });
   root.querySelector('.te2-secondary-editor-close')?.addEventListener('click', () => {
     void closeSecondaryEditor();
@@ -794,9 +892,14 @@ export async function bootSecondaryEditorRuntime(
     20_000,
   );
   const fullSnapshot = nestedRecord(fullSnapshotReply, 'snapshot');
-  applyHostState(asRecord(fullSnapshot.host_state) as HostState);
-  await bootInlineEditorHost(editorFrame, {
-    ensureSocketIoLoaded,
-    bootSnapshot: fullSnapshot,
-  });
+  await applyHostState(asRecord(fullSnapshot.host_state) as HostState);
+  if (!contentLifecycle.historical) {
+    await bootInlineEditorHost(editorFrame, {
+      ensureSocketIoLoaded,
+      bootSnapshot: fullSnapshot,
+    });
+  }
+  bootComplete = true;
+  // Facts during asynchronous cold boot are reconciled from a fresh snapshot.
+  if (pendingStateRefresh) await requestHostState();
 }

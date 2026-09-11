@@ -112,14 +112,44 @@
   close/project switch clear it, while older queued facts cannot erase it.
   Six integration tests plus eleven existing recents tests pass; strict typing
   is clean. Existing atomic edit persistence is reused, without a save/flush step.
-  No History file-click producer calls this hook yet; renderer/native wiring and
-  end-to-end WBA facade disposal acceptance remain pending.
-- [ ] Separate content kind from native/drawer presentation mode.
-- [ ] Exact-client backend descriptor ownership and own-lane notifications.
-- [ ] Generalize mobile pending-open acknowledgements and Electron validated IPC.
+  The History openFile handoff now calls this hook. End-to-end WBA facade
+  disposal acceptance remains pending.
+- [x] Standalone historical diff renderer and strict content decoder. Immutable
+  non-file model URIs, read-only controls, unavailable-file states and abort/dispose
+  cleanup have ten focused tests; six existing graph-pane tests also pass.
+  Full frontend typecheck/build pass. The component is not mounted: isolated
+  realm boot, lexical provider wiring and live content switching remain pending.
+- [x] Separate content kind from native/drawer presentation mode.
+- [x] Exact-client backend descriptor ownership and own-lane notifications.
+- [x] Generalize mobile pending-open acknowledgements and Electron validated IPC.
+  History openFile resolves a native row and creates a bounded one-use ticket;
+  exact-primary notification/native command leads to secondary-owned redemption.
+  Reload waits for presentation command completion. Working paths and historical
+  content remain distinct; no WBA readiness gate for immutable views. Python
+  suite: 36 passing tests; Electron typecheck/compile and 100 tests pass. Frontend
+  typecheck/build and 30 focused tests pass. Native live acceptance remains.
 - [ ] Preserve drafts/shared membership while replacing secondary working content.
 - [ ] Dedicated syntax-only read-only diff boot; no WBA/editing participation.
+- [x] Add standalone fresh-realm syntax bootstrap: basic/Monarch language
+  contributions only, editor-worker allowlist, Gecko worker transport reuse,
+  stylesheet readiness/retry and language detection. Four focused stubbed boot
+  tests pass (14 with renderer tests). Generated bootstrap rebuilt from source.
+  Host mounting and actual browser/network acceptance are still pending.
+- [x] Resolve working/history realm-switch strategy: approved secondary-only
+  page reload on content-kind changes; historical revisions reuse the realm.
+- [x] Connect secondary host boot/foreground snapshots to the historical renderer.
+  Abortable lifecycle, duplicate snapshot reuse, stale snapshot fencing, cold-boot
+  fact reconciliation and working-action gates are implemented. Six lifecycle
+  tests pass (20 with renderer/bootstrap tests). Native presentation metadata,
+  read-only mobile controls and user-triggered activation remain pending.
 - [ ] Capability-gate menus/mobile controls; retain copy/find/selection/navigation.
+- [x] Add separate validated mobile content-population metadata, without fake
+  working paths. Read-only menus expose Find/Copy; special keys support cursor,
+  Shift-selection, Find/Copy/Select All and document bounds through an explicit
+  allowlist. Diff-side focus survives menu focus. Electron content IPC, touch
+  handles, and actual History activation remain pending.
+  Thirty focused tests and the full frontend typecheck/build pass. Browser/native
+  acceptance remains pending; Android assets and source were not changed.
 - [ ] Reconnect, project switch, collapse, fullscreen, detach and disposal tests.
 - [ ] Record future UI extension integration seam without implementing it.
 

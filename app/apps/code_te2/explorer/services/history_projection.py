@@ -201,3 +201,27 @@ class ExplorerHistory:
             if revision != self._revision:
                 raise ValueError("Stale History files")
             return {"generation": revision, "page": cast(dict[str, object], asdict(page))}
+
+    async def prepare_open(self, revision: int, commit: str, index: int, owner: str) -> str:
+        from ...host.history_handoff import handoffs
+        from ...host.secondary_content_state import HistoricalContent
+
+        async with self._commands:
+            session = await self._get(revision)
+            if not any(row.identity == commit for row in self._retained):
+                raise ValueError("History commit is no longer retained")
+            # Resolve the native row, not client-supplied blob IDs or disk paths.
+            page = await session.files(commit, index, 1)
+            if not page.files:
+                raise ValueError("History file is no longer available")
+            pair = await session.blob_pair(commit, page.files[0])
+            snapshot = session.snapshot
+            if revision != self._revision or session.closed or snapshot is None:
+                raise ValueError("History selection was superseded")
+            project = self._project
+            generation = self._project_generation
+            if project is None or generation is None:
+                raise ValueError("History project is unavailable")
+            return handoffs.issue(owner, str(project), generation,
+                HistoricalContent(snapshot.identity, pair),
+                lambda: revision == self._revision and not self._closed and not session.closed)

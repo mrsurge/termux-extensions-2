@@ -160,8 +160,9 @@ const electronBridge: ElectronAppViewBridge = Object.freeze({
   openSecondEditor(
     projectPath: string,
     path: string,
+    historyTicket?: string,
   ): Promise<{ ok: true; presentation: ElectronEditorSurfacePresentation }> {
-    return invokeElectron("open_second_editor", { projectPath, path });
+    return invokeElectron("open_second_editor", { projectPath, path, historyTicket });
   },
   syncSecondEditorProject(
     projectPath: string,
