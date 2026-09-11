@@ -17,6 +17,17 @@
 - [x] Record hashes/revision and produce reproducible graph/type/test adaptations
   and patch series; full pane and CSS remain preserved but not integrated.
 - [ ] Resolve pane import closure without fake workbench services or a lookalike rewrite.
+- [x] Approved bounded base-tree dependency transplant: 164 exact pinned runtime
+  inputs plus upstream license, third-party notices and compiler configuration.
+  Independent in-memory build verifies every hash and the exact dependency closure.
+- [x] Exercise actual upstream CompressibleAsyncDataTree lazy expansion, collapse,
+  selection and settled disposal in a DOM test without workbench services.
+- [x] Tree checkpoint validation: 15 graph/tree tests, full frontend TypeScript,
+  frontend build and tracked whitespace checks pass. No mounted UI or bundle
+  payload change yet; the additional dependency source remains uncommitted.
+- [x] Resolve immediate teardown while upstream active-node debounce is pending:
+  reproducible source patch uses RunOnceScheduler rather than an unobserved
+  Delayer promise. Immediate disposal now passes without a grace timer.
 - [ ] Run retained upstream cases; add SVG and pagination/expanded-row lane tests.
 - [x] First graph checkpoint: 11 unchanged upstream test bodies plus SVG
   expanded-row, append-only merge pagination, and hash/patch reproduction tests

@@ -1,0 +1,47 @@
+--- a/abstractTree.ts
++++ b/abstractTree.ts
+@@ -21,7 +21,7 @@
+ import { ICollapseStateChangeEvent, ITreeContextMenuEvent, ITreeDragAndDrop, ITreeEvent, ITreeFilter, ITreeModel, ITreeModelSpliceEvent, ITreeMouseEvent, ITreeNavigator, ITreeNode, ITreeRenderer, TreeDragOverBubble, TreeError, TreeFilterResult, TreeMouseEventTarget, TreeVisibility } from './tree.js';
+ import { Action } from '../../../common/actions.js';
+ import { distinct, equals, insertInto, range } from '../../../common/arrays.js';
+-import { Delayer, disposableTimeout, timeout } from '../../../common/async.js';
++import { RunOnceScheduler, disposableTimeout, timeout } from '../../../common/async.js';
+ import { Codicon } from '../../../common/codicons.js';
+ import { ThemeIcon } from '../../../common/themables.js';
+ import { SetMap } from '../../../common/map.js';
+@@ -3221,21 +3221,23 @@
+ 		// want to run this once. It also doesn't matter if it runs on the next tick since it's only
+ 		// a nice to have UI feature.
+ 		const activeNodesEmitter = this.modelDisposables.add(new Emitter<ITreeNode<T, TFilterData>[]>());
+-		const activeNodesDebounce = this.modelDisposables.add(new Delayer(0));
+-		this.modelDisposables.add(Event.any(onDidModelSplice, this.focus.onDidChange, this.selection.onDidChange)(() => {
+-			activeNodesDebounce.trigger(() => {
+-				const set = new Set<ITreeNode<T, TFilterData>>();
++		// This fire-and-forget update must cancel without an unobserved promise
++		// rejection when the history pane closes in the same event turn.
++		const activeNodesDebounce = this.modelDisposables.add(new RunOnceScheduler(() => {
++			const set = new Set<ITreeNode<T, TFilterData>>();
+ 
+-				for (const node of this.focus.getNodes()) {
+-					set.add(node as ITreeNode<T, TFilterData>);
+-				}
++			for (const node of this.focus.getNodes()) {
++				set.add(node as ITreeNode<T, TFilterData>);
++			}
+ 
+-				for (const node of this.selection.getNodes()) {
+-					set.add(node as ITreeNode<T, TFilterData>);
+-				}
++			for (const node of this.selection.getNodes()) {
++				set.add(node as ITreeNode<T, TFilterData>);
++			}
+ 
+-				activeNodesEmitter.fire([...set.values()]);
+-			});
++			activeNodesEmitter.fire([...set.values()]);
++		}, 0));
++		this.modelDisposables.add(Event.any(onDidModelSplice, this.focus.onDidChange, this.selection.onDidChange)(() => {
++			activeNodesDebounce.schedule();
+ 		}));
+ 
+ 		this.onDidChangeActiveNodesRelay.input = activeNodesEmitter.event;

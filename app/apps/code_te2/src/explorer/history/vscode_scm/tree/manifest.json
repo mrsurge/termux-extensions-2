@@ -1,0 +1,676 @@
+{
+  "revision": "591199df409fbf59b4b52d5ad4ee0470152a9b31",
+  "entry": "src/vs/base/browser/ui/tree/asyncDataTree.ts",
+  "files": [
+    {
+      "file": "src/vs/base/browser/browser.ts",
+      "sha256": "f7c74086baeb30e2aa4b3c806d494f7d2b2c7092b43ef10b4302c35d1d126684"
+    },
+    {
+      "file": "src/vs/base/browser/canIUse.ts",
+      "sha256": "c686e21f655ac66fed5598b7b3bd216d34a44806ad50f250052c4f47b321758f"
+    },
+    {
+      "file": "src/vs/base/browser/cssValue.ts",
+      "sha256": "079241970029edfd1cfc257eaf85bbdd07dafb34fbdc1d619997493327456c16"
+    },
+    {
+      "file": "src/vs/base/browser/dnd.ts",
+      "sha256": "7f963c8d10a1969d4ef6795884d0a3de40361bb489c0f2e29ecebe1bd80256ba"
+    },
+    {
+      "file": "src/vs/base/browser/dom.ts",
+      "sha256": "4c6f46805192755cf9482f9d86bdc07c200ef1653c80202c28d93e0f3d1e6e56"
+    },
+    {
+      "file": "src/vs/base/browser/domSanitize.ts",
+      "sha256": "b66a19452979860d0a1ebf068bc57192b9cb9a64de11f86ddd4a3dab1365bc76"
+    },
+    {
+      "file": "src/vs/base/browser/domStylesheets.ts",
+      "sha256": "378703610aecc86a73529791ad78b2ec1e36068b50824d04536a82e2ea7727f2"
+    },
+    {
+      "file": "src/vs/base/browser/dompurify/dompurify.js",
+      "sha256": "5b8fea1f9ac0cd6c3bec0b3bb3576c62c69f068e851a2238f56111cf68469154"
+    },
+    {
+      "file": "src/vs/base/browser/event.ts",
+      "sha256": "e4cdde1517f01fcc5561eddb36f2a2de4a48c4b61f481ae6536cee3f398ed775"
+    },
+    {
+      "file": "src/vs/base/browser/fastDomNode.ts",
+      "sha256": "356cefee4ff31666d61e78ac9cd7fc297504e66121fbe5aacf79eb639a87bed4"
+    },
+    {
+      "file": "src/vs/base/browser/formattedTextRenderer.ts",
+      "sha256": "3991b4d9c77a70f7750244eba4b7736d8586d32198e14673b814a365339b57d4"
+    },
+    {
+      "file": "src/vs/base/browser/globalPointerMoveMonitor.ts",
+      "sha256": "b605496cf09d8414215405a2a4ae78b05edb312af62bbde60ec1aa57868ee900"
+    },
+    {
+      "file": "src/vs/base/browser/iframe.ts",
+      "sha256": "f5b589a741cd7a0bf76a828a5087494e4851bc368c4b4525f1751f45bcdc5586"
+    },
+    {
+      "file": "src/vs/base/browser/keyboardEvent.ts",
+      "sha256": "75a179cde32b2054bcfa924d92ac01b9dd30d768430371afa7cbf12d3b697964"
+    },
+    {
+      "file": "src/vs/base/browser/markdownRenderer.ts",
+      "sha256": "2686060084b1d4f9de0ea4196b3f23802394236a6dce19897370a7c44d07d51e"
+    },
+    {
+      "file": "src/vs/base/browser/mouseEvent.ts",
+      "sha256": "d6e2d495acbddbeb1a4529dac46ccbe4706d3a6ddc1126cf43f1214fd6966782"
+    },
+    {
+      "file": "src/vs/base/browser/touch.ts",
+      "sha256": "be8810bc679d6e6f19bc2cb720e0fcc051c4a3972b43e8772978cbab85e726c0"
+    },
+    {
+      "file": "src/vs/base/browser/ui/actionbar/actionViewItems.ts",
+      "sha256": "6f6dff3fcfb1a720acaa024b1b6d639f357b6eeb31eb00aa3ed31065160a2239"
+    },
+    {
+      "file": "src/vs/base/browser/ui/actionbar/actionbar.css",
+      "sha256": "3a5cae01eb88bf009d995c205f525f553102e56c946486429ea24ffaccc263a3"
+    },
+    {
+      "file": "src/vs/base/browser/ui/actionbar/actionbar.ts",
+      "sha256": "ef0848aaff3a0d3b932fe83c0ef8acf80120caed406d7c02a6872e524f7bdeb7"
+    },
+    {
+      "file": "src/vs/base/browser/ui/aria/aria.css",
+      "sha256": "f684c3c5beccb27afc61a66c1dadc4d78900041f27879bff9186e992b4c2b5de"
+    },
+    {
+      "file": "src/vs/base/browser/ui/aria/aria.ts",
+      "sha256": "bea3c43aad4b897f792cde17423a317fb0288d4a40da2e08e909048b17cde659"
+    },
+    {
+      "file": "src/vs/base/browser/ui/contextview/contextview.css",
+      "sha256": "5730822c82bcb49ccf6c92a20f1428d5281b009392ce8512626bb2e6e1bbdd7a"
+    },
+    {
+      "file": "src/vs/base/browser/ui/contextview/contextview.ts",
+      "sha256": "0bdca4ef1756231fc2c79cea5cc3dd2f52c2e973cf1d79877b00b45454f70e66"
+    },
+    {
+      "file": "src/vs/base/browser/ui/dnd/dnd.css",
+      "sha256": "f9eaf6734b2d7737cdb6095d8dd120a53705456a820131e07213d36bc5d6c73f"
+    },
+    {
+      "file": "src/vs/base/browser/ui/dnd/dnd.ts",
+      "sha256": "4a01ea0ba550a3a5cc7f7080882cce16ec879d77257fe70eb7d8663e915839c8"
+    },
+    {
+      "file": "src/vs/base/browser/ui/findinput/findInput.css",
+      "sha256": "549fbde7e4af0e00ce08f18b804ea93b0581e549e8e7bdb963ddf1b077fc9058"
+    },
+    {
+      "file": "src/vs/base/browser/ui/findinput/findInput.ts",
+      "sha256": "c4b146d23ef3abb019414668f4f6049d22c6383d5b67ecdb7c5929525c65a153"
+    },
+    {
+      "file": "src/vs/base/browser/ui/findinput/findInputToggles.ts",
+      "sha256": "365c25b690456ca064044658eaed4b9a31bed0095e7cad5bbf982a22c70f702d"
+    },
+    {
+      "file": "src/vs/base/browser/ui/hover/hover.ts",
+      "sha256": "52c55d15cc33361a5b502953ce5e29ab97f90706d81db4fa125534c12723c641"
+    },
+    {
+      "file": "src/vs/base/browser/ui/hover/hoverDelegate2.ts",
+      "sha256": "273d24a00478a538c51e28ebd622f9f49a6000a56534c0d7c773190874380860"
+    },
+    {
+      "file": "src/vs/base/browser/ui/hover/hoverDelegateFactory.ts",
+      "sha256": "a63eeffc13509a6d735009d22c9fe0afb24255c1f1e659e8ebd26320052e3cfa"
+    },
+    {
+      "file": "src/vs/base/browser/ui/iconLabel/iconLabels.ts",
+      "sha256": "c3aa4fdc888c14bd4a6817150546242a65a85ab45eff5411b28df2cd4a85dac8"
+    },
+    {
+      "file": "src/vs/base/browser/ui/inputbox/inputBox.css",
+      "sha256": "4647cdbad0884bf07826b3c85487de4a70b7f6bc865079d852c1981fd4e0eb05"
+    },
+    {
+      "file": "src/vs/base/browser/ui/inputbox/inputBox.ts",
+      "sha256": "4790d32df22fcedc16e8c9fc105cf73919d75b77b5f620b9bac7e6a3d83c89d2"
+    },
+    {
+      "file": "src/vs/base/browser/ui/list/list.css",
+      "sha256": "7221839be4fa74bd8a1f2f0511a7d73affda39ab9a8994fe70e927ce5255cb8e"
+    },
+    {
+      "file": "src/vs/base/browser/ui/list/list.ts",
+      "sha256": "5fa957346c6555fe5285998797c6415bb7877f2788ac0c04b1126dac5bc8a556"
+    },
+    {
+      "file": "src/vs/base/browser/ui/list/listView.ts",
+      "sha256": "3ffd61f343d5ac8e4c87c165dc7840499984462a615617b8a34200b1eee6b48f"
+    },
+    {
+      "file": "src/vs/base/browser/ui/list/listWidget.ts",
+      "sha256": "573a1ef69f9a8537600b87805f15fef13684ca609b70b91f884d6adaedf943a1"
+    },
+    {
+      "file": "src/vs/base/browser/ui/list/rangeMap.ts",
+      "sha256": "b9712d5a2e0a861b008972602fc3559aa8e22f82a0c4c84be6b0d97d720f477a"
+    },
+    {
+      "file": "src/vs/base/browser/ui/list/rowCache.ts",
+      "sha256": "1af8317e82f0e7d674e2d89af6b556dbd2b1d6313521ef533b31f33b837a748e"
+    },
+    {
+      "file": "src/vs/base/browser/ui/list/splice.ts",
+      "sha256": "7bc1e2ce70bd3a7c108e1176747a7759e12ae36bf173191ed3f7c85b7f6e58b3"
+    },
+    {
+      "file": "src/vs/base/browser/ui/scrollbar/abstractScrollbar.ts",
+      "sha256": "c00bc12b4d84525d09abe82c358cbec04a867e8952f0c24cc207d73925dcb8ac"
+    },
+    {
+      "file": "src/vs/base/browser/ui/scrollbar/horizontalScrollbar.ts",
+      "sha256": "a3997391015784b5339ac6b2487d85bc9faa3ced8224e2db7853b779234c82b4"
+    },
+    {
+      "file": "src/vs/base/browser/ui/scrollbar/media/scrollbars.css",
+      "sha256": "5bc752f3d9ab28388ada84c0a1a2a577934b6b8e249410dcceabb42bc42b9d6f"
+    },
+    {
+      "file": "src/vs/base/browser/ui/scrollbar/scrollableElement.ts",
+      "sha256": "53cb1776f6979a85ac79de3184d89a49fbe8d903655894d48f58a7d24b19a556"
+    },
+    {
+      "file": "src/vs/base/browser/ui/scrollbar/scrollbarArrow.ts",
+      "sha256": "415f0dd24fd9c865d7523c659c20a5851a04b4230ee4322584236c9752a7adfa"
+    },
+    {
+      "file": "src/vs/base/browser/ui/scrollbar/scrollbarState.ts",
+      "sha256": "f3cc8772ec057b3b55be2b69f1e502bbb43b9886c102d94fe107ca9fe6c29608"
+    },
+    {
+      "file": "src/vs/base/browser/ui/scrollbar/scrollbarVisibilityController.ts",
+      "sha256": "0ab0846077e264b46644e1501961bf4d1a4224b9e7e0d3a15eb6c6fbd3cfbea0"
+    },
+    {
+      "file": "src/vs/base/browser/ui/scrollbar/verticalScrollbar.ts",
+      "sha256": "d5afe1b30aa2b7f51a26c86e02b3cda72d977d43d7bc5fa7f33e2113b25304f8"
+    },
+    {
+      "file": "src/vs/base/browser/ui/selectBox/selectBox.css",
+      "sha256": "235b23cbdfa1c80770cf074359f50a474331f990d5844138fa442f4912d0cdcb"
+    },
+    {
+      "file": "src/vs/base/browser/ui/selectBox/selectBox.ts",
+      "sha256": "bb64630278f53e52748a4578da4926a9ae7bd2dda787ebe2db0a525892fe0ee3"
+    },
+    {
+      "file": "src/vs/base/browser/ui/selectBox/selectBoxCustom.css",
+      "sha256": "4460624ed3be903b3950716aa43a4960685fe0adb1b0717bce59d866261bc84c"
+    },
+    {
+      "file": "src/vs/base/browser/ui/selectBox/selectBoxCustom.ts",
+      "sha256": "be321a709899c1a60495c997491213111847d7e58b68371bdc0bccbd4913cf33"
+    },
+    {
+      "file": "src/vs/base/browser/ui/selectBox/selectBoxNative.ts",
+      "sha256": "814699b9eded13ce7bdcab3df8fb835b01e6c1886a6fb8743cbff9d2320e84db"
+    },
+    {
+      "file": "src/vs/base/browser/ui/toggle/toggle.css",
+      "sha256": "4f977fa1db1e2e65d699635e947301ce103012ecb674a0c8ca13f2c45b51a581"
+    },
+    {
+      "file": "src/vs/base/browser/ui/toggle/toggle.ts",
+      "sha256": "1c038b5becf98afb7ccf996455da994a66c7b05b250ecbb98bb746997d3d1598"
+    },
+    {
+      "file": "src/vs/base/browser/ui/tree/abstractTree.ts",
+      "sha256": "53c31b78727c9a2611f8923dc11934cd9c6c12be4f130fe9734553b081fd4c51"
+    },
+    {
+      "file": "src/vs/base/browser/ui/tree/asyncDataTree.ts",
+      "sha256": "2d51b90ada98ed6cbe265e675a127eecf33cfb1b65a151440e799963e982c813"
+    },
+    {
+      "file": "src/vs/base/browser/ui/tree/compressedObjectTreeModel.ts",
+      "sha256": "5d694d81ed4ec28759834b1e59d7eadf3d2e0d03da2bd22107c804bb08e1c707"
+    },
+    {
+      "file": "src/vs/base/browser/ui/tree/indexTreeModel.ts",
+      "sha256": "d610e6d5d0a7a730417b1bd83c8bdd788b6c2bc323e8190e4d46123b58cc2a72"
+    },
+    {
+      "file": "src/vs/base/browser/ui/tree/media/tree.css",
+      "sha256": "1c39fca16b94a9ab9745e2cafe59a62b395ec87ef611e655e486bc07f9af880d"
+    },
+    {
+      "file": "src/vs/base/browser/ui/tree/objectTree.ts",
+      "sha256": "2842adf89e20788e9e73f0006319ce1d8235fcbd2f66eb90f75c7d93f39a0bd5"
+    },
+    {
+      "file": "src/vs/base/browser/ui/tree/objectTreeModel.ts",
+      "sha256": "26caac56a44d60de704186bb32b39ca4c0e3e4b3d15567c04682e602c7798f0e"
+    },
+    {
+      "file": "src/vs/base/browser/ui/tree/tree.ts",
+      "sha256": "d46d64a293189f11903e9f4d5fe48e1732ec88032f24c0afa02b622e2f3e65e0"
+    },
+    {
+      "file": "src/vs/base/browser/ui/widget.ts",
+      "sha256": "19724519fd46421c934f981f6334a8b2d8c78090900cc5c5a31eaf7038762fea"
+    },
+    {
+      "file": "src/vs/base/browser/window.ts",
+      "sha256": "8003fc60f1f022d1ae4abfa8773385399ab5a7413dccbffb825f1c0c8bdef13b"
+    },
+    {
+      "file": "src/vs/base/common/actions.ts",
+      "sha256": "977d86453c24eb61ff9105dd61e119672fddd872b702b6ba02cba12b948119a1"
+    },
+    {
+      "file": "src/vs/base/common/arrays.ts",
+      "sha256": "9bbf37c45aad1c6dfce7d496cac8cbc86db36a9257782f5ec5e8201bc0f4cb1b"
+    },
+    {
+      "file": "src/vs/base/common/arraysFind.ts",
+      "sha256": "b170eb4ef83d61dabeb8aaa3355b006a95f575c6e5a9bba3176ac67f8b446a8b"
+    },
+    {
+      "file": "src/vs/base/common/assert.ts",
+      "sha256": "d7795e3c2824192be8c2e60273188f806a743053dba06c0f9b3f889b80b40755"
+    },
+    {
+      "file": "src/vs/base/common/async.ts",
+      "sha256": "2cbb26ecb97b92cfbbc28a055375a1bf663f739790d140648fd77877f116f467"
+    },
+    {
+      "file": "src/vs/base/common/buffer.ts",
+      "sha256": "5f374d79479cb42c15ea1c4bbf54f8fcf88a17541c8e2192a533aecb8698319c"
+    },
+    {
+      "file": "src/vs/base/common/cache.ts",
+      "sha256": "42019b6f65cb6d0d10a74b8d74e5aa3e7099dc018044337ef826f8d76f925591"
+    },
+    {
+      "file": "src/vs/base/common/cancellation.ts",
+      "sha256": "0ed0f0be5f9ac280fe1e45c0e81568825283d2c8dd17d2c2b03c21c1912a8c3b"
+    },
+    {
+      "file": "src/vs/base/common/charCode.ts",
+      "sha256": "ddb45e08c0f66a253a52ca5eaafc705687ceda45229ce5c9a1aa64d0fb34e510"
+    },
+    {
+      "file": "src/vs/base/common/codicons.ts",
+      "sha256": "d04131ebd16e5152d4205c880120bd7ea425f9fbc6db75e1ea016b6e0568e83e"
+    },
+    {
+      "file": "src/vs/base/common/codiconsLibrary.ts",
+      "sha256": "70b9182e1e4e8d31ae6c16bf0d7ebf4130f8b205d25c8a76ca8f48b17d099ed1"
+    },
+    {
+      "file": "src/vs/base/common/codiconsUtil.ts",
+      "sha256": "b2b8f53a786fc6f5bc1c7b80e37b1738a8d2fbd53d995d5961dc2e7856893e46"
+    },
+    {
+      "file": "src/vs/base/common/collections.ts",
+      "sha256": "2b47c9d4b99ca6451ffe2a07fb8bde4875056c04f75000fcffc6e0e785cef736"
+    },
+    {
+      "file": "src/vs/base/common/color.ts",
+      "sha256": "d311a25f118e04c7f178ae204666c068d51777e277ebe0f51d5cee8da955c5f7"
+    },
+    {
+      "file": "src/vs/base/common/decorators.ts",
+      "sha256": "4ce8a8f3e28c50f7753f90012e44ede4c64930ca56e0c26ed4f3249dfba9a72a"
+    },
+    {
+      "file": "src/vs/base/common/decorators/cancelPreviousCalls.ts",
+      "sha256": "651e601166c89f65a3b0287a239faf97a75b4b28ef4c71378ae36f5aceca21ab"
+    },
+    {
+      "file": "src/vs/base/common/diff/diff.ts",
+      "sha256": "2d3e5aa13a5cb0ecb128006719da069c11c410d9aff5d47c2490d205fc3cc289"
+    },
+    {
+      "file": "src/vs/base/common/diff/diffChange.ts",
+      "sha256": "9efcc35d063dc81f2d269515d9f3d5bf80e7b67df36a6ea5ab0e81b9b516fdf4"
+    },
+    {
+      "file": "src/vs/base/common/equals.ts",
+      "sha256": "62a7350742a35570062837d8ef3df1889d4faf48dd66b614162e6418aa36414c"
+    },
+    {
+      "file": "src/vs/base/common/errors.ts",
+      "sha256": "1b2751b7137809f739fbcf268a9684c95e72e66a81fb6ca563cb4bc110116cc0"
+    },
+    {
+      "file": "src/vs/base/common/event.ts",
+      "sha256": "7e2b195cea1014bcb90ac5348d15e6a08770f3961509ce4d4262fa85217792fc"
+    },
+    {
+      "file": "src/vs/base/common/extpath.ts",
+      "sha256": "80390319cccc4b33e867cc4fffa3d43aa9212e3fca6a3899b466c0e13521c0e4"
+    },
+    {
+      "file": "src/vs/base/common/filters.ts",
+      "sha256": "1a5b17451625c1a09066ffeed42078590a617e4792650b7ce8cd0875ef2981b7"
+    },
+    {
+      "file": "src/vs/base/common/functional.ts",
+      "sha256": "976c27e04b82913ad0e068cce30d74212c2c86a86f866038156b6fd9dca27610"
+    },
+    {
+      "file": "src/vs/base/common/hash.ts",
+      "sha256": "485178fcf4234bbd2339c9f8f41dc2b19eb77d14a46f94132ad2c42f506455b0"
+    },
+    {
+      "file": "src/vs/base/common/history.ts",
+      "sha256": "59161efa435b0c3eb5bbf9aa61a60db0fb23ed1b5b1fd427c593c6c2b729ce92"
+    },
+    {
+      "file": "src/vs/base/common/htmlContent.ts",
+      "sha256": "42238344a7d13a8d77e8177ad9623293d9c818095ce9ebab90884d23be96748f"
+    },
+    {
+      "file": "src/vs/base/common/iconLabels.ts",
+      "sha256": "8b6420cf996d4ab4a13b68e9446576462749b39ccdfede6b9ddccb8bccff29c6"
+    },
+    {
+      "file": "src/vs/base/common/idGenerator.ts",
+      "sha256": "e862ee5185320ae452d89a513282ce30c4276952a51c85d7c6dfdc8d93223d0c"
+    },
+    {
+      "file": "src/vs/base/common/iterator.ts",
+      "sha256": "a787d959a2904785ea351dba98bffdcd37fcb367c0eb97f065277add1ce86aa6"
+    },
+    {
+      "file": "src/vs/base/common/keyCodes.ts",
+      "sha256": "cf4ace06add73d93e6836ca45ea30a72fc4996a80e4c7e1638769a3fb157b723"
+    },
+    {
+      "file": "src/vs/base/common/keybindings.ts",
+      "sha256": "749f01eb9b25924d268fd330cb0963996725f5a0050264a1bb774bea72ee9ea4"
+    },
+    {
+      "file": "src/vs/base/common/lazy.ts",
+      "sha256": "c24572ac4d39148c814f914e69c9fc40a7ce66836ef9eda65f80ce47f2357893"
+    },
+    {
+      "file": "src/vs/base/common/lifecycle.ts",
+      "sha256": "5749e4fa9a5c051f004d487f277ebd74abe7c81d0a377bad0e7694bd2c1c9586"
+    },
+    {
+      "file": "src/vs/base/common/linkedList.ts",
+      "sha256": "fc6120f8be8fb3198daf3c214eedd777001a608a6721642ce7f7e888fd9c0df1"
+    },
+    {
+      "file": "src/vs/base/common/map.ts",
+      "sha256": "ae3b7a006ee8b5ff5f08cc64de480587be83fa807145951ef26d6f7003f0cd76"
+    },
+    {
+      "file": "src/vs/base/common/marked/marked.js",
+      "sha256": "75746ae6ff08f4e9b94090ed018e5ac1bf7dbb7e8fcdb4ec48784bd6569d9fda"
+    },
+    {
+      "file": "src/vs/base/common/marshalling.ts",
+      "sha256": "5f853ab37f0c9a4793ade19ec2c5a4232ca8aa3707be497b7fbda492d0b327d2"
+    },
+    {
+      "file": "src/vs/base/common/marshallingIds.ts",
+      "sha256": "3048bf85eed631d42e32ef8684a64019bcc5befe9e7eb94de445fd4c66cb9acd"
+    },
+    {
+      "file": "src/vs/base/common/mime.ts",
+      "sha256": "8d56e89a2587006a4495161c998f6a59cf2c20db1d1abe62c1cf2dcdaf7a9c21"
+    },
+    {
+      "file": "src/vs/base/common/naturalLanguage/korean.ts",
+      "sha256": "6ad935008176d4009a55fadb1773f115dc9a88ea4bea433c49474398d4f026de"
+    },
+    {
+      "file": "src/vs/base/common/navigator.ts",
+      "sha256": "f24493334cab9736ff889b8d3ee64472a2014193514c91e859cc45d6ac141168"
+    },
+    {
+      "file": "src/vs/base/common/network.ts",
+      "sha256": "059af1f9d8671226e6636bed2a28a6d91a15c1a26f5c826336ce0dedacb3cafb"
+    },
+    {
+      "file": "src/vs/base/common/normalization.ts",
+      "sha256": "aa201593d5b34cdbc04f45bbc8e115cdf079d7ac4b566fa280dea671bd335fd0"
+    },
+    {
+      "file": "src/vs/base/common/numbers.ts",
+      "sha256": "25444b03da864a8f21df7a7b3b384bb38f2a70460aba7011e3d301246235c166"
+    },
+    {
+      "file": "src/vs/base/common/objects.ts",
+      "sha256": "a28e18641bfd0d918ac8ae89251820eb6ebd7abde966d4eac44d382489aabf1a"
+    },
+    {
+      "file": "src/vs/base/common/observable.ts",
+      "sha256": "2789ae708aa659732c5f7aa2ff2d6d6ca36e913ad07d321cb16525a9418fc6ec"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/base.ts",
+      "sha256": "4f66e7a2867608e3555dc02871cf6a45681ebf0fb60ba64d61619e63caba4301"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/changeTracker.ts",
+      "sha256": "c84d7cdaba852e9cdc1da2ea7e397b7fd38b13239b1dcb41ffdfddef0372f3ec"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/commonFacade/cancellation.ts",
+      "sha256": "953efad5e35be59e9bde653a3321203acddd426985501bd228298d0dd3747aad"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/commonFacade/deps.ts",
+      "sha256": "8676718612b9c9ecccd0b701c4afdecc56a290785821621df31a504d06deaa1d"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/debugLocation.ts",
+      "sha256": "9997049ec028cb4b16823b047e687e0a036a926909afa31b05a0a62a46f921da"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/debugName.ts",
+      "sha256": "c189ccb5af926454e6544da951f62c86a2ebd323b72d7012ac4644696487ff63"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/experimental/utils.ts",
+      "sha256": "8ab49ef66bac79bc9d95f855eda8a789f7c4de2d35fc3618e2fcc9bcc12fadf7"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/index.ts",
+      "sha256": "b390ff838fecf7183dd161030107740f6631308d684984d823051d2762f931a1"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/logging/consoleObservableLogger.ts",
+      "sha256": "c28481bcc671bacc76c317578645fb7f597726b5e05d6331d1e4a659ef6789ae"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/logging/debugGetDependencyGraph.ts",
+      "sha256": "38569729ed77f3f9cab9fafa1b3ebce7997c6ce48f32394b06cfb02563309f6d"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/logging/debugger/debuggerRpc.ts",
+      "sha256": "3a2b1bb3a1109c2049cf75eb40a4b3b3840fb25a2b26cff199cbff29496afe52"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/logging/debugger/devToolsLogger.ts",
+      "sha256": "e98831cfdaf1b138aa7a90b39976070a2ce0955f8f87afb1e784044999d52d05"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/logging/debugger/rpc.ts",
+      "sha256": "42b7194b4a69759f982e654680459212d3747e6d5345046666e513be9a61c230"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/logging/debugger/utils.ts",
+      "sha256": "dcd6d1fca50c3239144d45a5d053e1293769a98a6ed44da7e09d84088c922cb3"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/logging/logging.ts",
+      "sha256": "145ed349d1b498418d17a71baeb44d07740fa0f2512060ff1c4b81b599d8efc7"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/map.ts",
+      "sha256": "d8d0de89cfa83f7756f141387afb513d8463a1e75e4ff9e51981610bc6419fce"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/observables/baseObservable.ts",
+      "sha256": "52abe21ddc6a3cdc117a83d1b581fefa23d901365f51a676add325c1947e0d25"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/observables/constObservable.ts",
+      "sha256": "1418d6cb4b9227b7062a36ff454b2595d090ded5d9c6f59497c2bff4c7803586"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/observables/derived.ts",
+      "sha256": "526d7f71676220361b2072879f97efdaa5dc834f73815d6008beeccdbbea7d61"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/observables/derivedImpl.ts",
+      "sha256": "35042039fe1675d6b3f61f65beecd5fb803249ef16eb6b9e9f05e29af0d8123f"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/observables/lazyObservableValue.ts",
+      "sha256": "24e3acca8dbf3be09ad943fe98bdd837219f380bd2579f6b2cf61d4b59c07ffd"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/observables/observableFromEvent.ts",
+      "sha256": "29e8b425569c520b8c01e379b075805b4fd37d4657b5e05f927cfeca9a71ddbe"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/observables/observableSignal.ts",
+      "sha256": "e5a506e8f6eb95806b028bf88404574f70a71e9b4981cdf83c1bf1dde33bccb4"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/observables/observableSignalFromEvent.ts",
+      "sha256": "038a0c075663a4df41a0afe6574506f4ac1d2a4ac79614174f6a3c4411233cf8"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/observables/observableValue.ts",
+      "sha256": "7fc6638016f296c6de3b60f401c70c89baa4d15da2558c1f75c3901f195c80f9"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/observables/observableValueOpts.ts",
+      "sha256": "5c6663467cebd5b6dee1b5e8d1b6897d6ec6b24ed8c17436285f9877d338e47a"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/reactions/autorun.ts",
+      "sha256": "66c7d46f8302d9289313a147867555c5b8361bd0e33e85bc14931a31470e70b0"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/reactions/autorunImpl.ts",
+      "sha256": "fee3dd32f467a8af34e8d44cd6513718efd47e4de651c01059840b0624e5eee5"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/set.ts",
+      "sha256": "618aed6da12746aefa4e082ffab5dda3f198c5a015d89acfa6c170cffa7d4e38"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/transaction.ts",
+      "sha256": "329d852ced6fbe47c88f2d12c78b5c2f2fd8b369af519425052b196c7cf61010"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/utils/promise.ts",
+      "sha256": "2c5f7a3c9536baf5b332af57255d84658a5d3df90c91bbcedc9ceaceb7de403e"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/utils/runOnChange.ts",
+      "sha256": "452e367a8a604698f397f149cbf4796f16027211ac4d9cd08789c6cbb09e1d20"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/utils/utils.ts",
+      "sha256": "6bfa91f3db8a890af499d8a57aa23c3390f34226e20d9453c2870654441c17a7"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/utils/utilsCancellation.ts",
+      "sha256": "a9818704b05c2aaec992ff222926c3e9a4ed32325b4284ad824598a697dcadb2"
+    },
+    {
+      "file": "src/vs/base/common/observableInternal/utils/valueWithChangeEvent.ts",
+      "sha256": "754910861dbaa88fe0ea553e652049ce55ce1193a359b6bdd68903544cbd550e"
+    },
+    {
+      "file": "src/vs/base/common/path.ts",
+      "sha256": "3ee9852efa3c404fbb5b8015b9633f5b17b38b9ed619cfbbc38a89d2169dbacf"
+    },
+    {
+      "file": "src/vs/base/common/platform.ts",
+      "sha256": "af4a70c0fbeee0c4e7ade099b43dcc5dcd5e5f2cd46aec53cd7f0b1c41cb3c7f"
+    },
+    {
+      "file": "src/vs/base/common/process.ts",
+      "sha256": "c72b499f137a9f52134cd816db076f02712b7ee279f2957b53740639f80d9083"
+    },
+    {
+      "file": "src/vs/base/common/range.ts",
+      "sha256": "bb80da92d56616343b1c5f54353c0aea48fe73555a3af90013d59fb0139a31a4"
+    },
+    {
+      "file": "src/vs/base/common/resources.ts",
+      "sha256": "82570f3078e3313bad252f8995da8ace9560574ae983b408dd4cdf450bbd7e50"
+    },
+    {
+      "file": "src/vs/base/common/scrollable.ts",
+      "sha256": "d4a854a492bc686758c9dfe46599648099e81768d8bbcd1f54ba99917525277b"
+    },
+    {
+      "file": "src/vs/base/common/stopwatch.ts",
+      "sha256": "e56bb28c1a532616d5e85ff3576d2cfaa57d0a42f8382999e6e13859869bfae8"
+    },
+    {
+      "file": "src/vs/base/common/stream.ts",
+      "sha256": "85d62100a2eea468dc23b35ea16439f2a383b618878a24b1352e302fb15773e9"
+    },
+    {
+      "file": "src/vs/base/common/strings.ts",
+      "sha256": "a924339256aa8edc48500b75d01f56c685be19c8d485d29584151856361bbc7c"
+    },
+    {
+      "file": "src/vs/base/common/symbols.ts",
+      "sha256": "bf83fa91c9eac09fd8f8da74111f12784978ff154d00c48f11c8bcce04f348d2"
+    },
+    {
+      "file": "src/vs/base/common/themables.ts",
+      "sha256": "b0ca99912396a08c83efd070fd8ddfadc37e7debf798d1c87f36fcaa077de183"
+    },
+    {
+      "file": "src/vs/base/common/types.ts",
+      "sha256": "0a17b8d00093ff63b8387508fcacfe82dfb1838ddcc44bd8315eabfd48c32076"
+    },
+    {
+      "file": "src/vs/base/common/uint.ts",
+      "sha256": "0b1102ade974b21bd46bd789027c2dd7959366202e9b87287b13be0a8cf3b05a"
+    },
+    {
+      "file": "src/vs/base/common/uri.ts",
+      "sha256": "91bf39a5b8401917eaffe6142b90a704efa91b5e6d83c32d8b7aafd5479a0dc3"
+    },
+    {
+      "file": "src/vs/nls.ts",
+      "sha256": "c61721dd9da42360a9bb671c6a79c912c380d631e1a93d82c129497e1dce4e6e"
+    }
+  ],
+  "supportFiles": [
+    {
+      "file": "LICENSE.txt",
+      "sha256": "9480271317925265e806a9a196aaa33410a962fa9d4d1e248a4a5187bc8c9df9"
+    },
+    {
+      "file": "ThirdPartyNotices.txt",
+      "sha256": "00860feaf9ce3371670e5c399153b760a5f4f1a242e0b7a13be938d11f15b0a4"
+    },
+    {
+      "file": "src/tsconfig.base.json",
+      "sha256": "aa7b7a94cd521c0a7a009190e7ad578e14b3ac40113560a857291c61e4050e48"
+    }
+  ]
+}

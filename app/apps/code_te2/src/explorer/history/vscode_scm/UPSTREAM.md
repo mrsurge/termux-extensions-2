@@ -61,7 +61,7 @@ NOT integrated or imported yet. The following work is still required:
 | Dependency family | Planned treatment |
 | --- | --- |
 | Graph/history types | Use the adapted literal files already present. |
-| WorkbenchCompressibleAsyncDataTree, node identity, labels and resource tree | Audit exported Monaco primitives and exact upstream dependency closure; preserve actual row/data-source implementation when patching the pane. Not yet resolved. |
+| WorkbenchCompressibleAsyncDataTree, node identity, labels and resource tree | Approved exact base CompressibleAsyncDataTree runtime dependency copy under tree/upstream. No exported Monaco tree available. Workbench wrapper is omitted; pane row/data-source and labels/resource-tree integration still pending. |
 | ViewPane/instantiation/context keys/menu services | Replace the outer workbench registration with the existing Explorer overlay lifecycle; remove unsupported commands via an explicit patch. No fake workbench service container. |
 | SCM history provider/observables | Bind typed backend-projected graph state and cancellation; no extension-host provider for this read-only view. |
 | Editor service/open dispatch | Route captured historical identities through Explorer backend to the secondary host, never open a working file as a substitute. |
@@ -72,3 +72,31 @@ NOT integrated or imported yet. The following work is still required:
 Further exact dependency copies must be pinned and added to the manifest. A
 materially larger workbench transplant requires scope review; do not quietly
 replace the preserved pane with a newly invented lookalike.
+
+## Base Tree Dependency Checkpoint
+
+`tree/manifest.json` pins the 164 runtime inputs of the actual upstream
+`src/vs/base/browser/ui/tree/asyncDataTree.ts` entry to the same revision.
+`tree/upstream` contains those unchanged files, the original license and full
+third-party notices (including the bundled DOMPurify notice), and upstream
+compiler configuration. No files are resolved from the developer checkout.
+
+`node tree/build.mjs` verifies hashes, bundles in memory, and rejects new or
+unused runtime dependencies. It explicitly retains upstream legacy-decorator
+and field-initialization semantics instead of inheriting TE2's compiler defaults.
+This script does not publish a generated artifact or import the tree into TE2.
+Raw sources are excluded from TE2's TypeScript project; the future integration
+must expose a narrow typed contract rather than propagate unchecked values.
+
+`tests/scm_tree.test.mjs` instantiates the real compressible async tree in a DOM
+harness, checks lazy commit-child loading, selection, collapse and disposal.
+The test disposes immediately with a zero-delay active-node update pending.
+`tree/patches/0001-disposable-active-node-debounce.patch` replaces the unobserved
+Delayer promise with upstream RunOnceScheduler: next-tick coalescing remains,
+but disposal cancels a timer rather than rejecting an ignored promise. The build
+applies this patch with zero fuzz in temporary storage and uses the adapted
+module in memory. Original hashes remain verified and originals are unchanged.
+No production grace timer or global cancellation-error suppressor is introduced.
+
+The upstream SCM pane and stylesheet still require their own explicit adaptation
+patch. This checkpoint is a dependency foundation, not a working History tab.
