@@ -17,6 +17,37 @@ pub(super) async fn dispatch_git_request(
     event_sink: Option<Arc<dyn PipeEventSink>>,
 ) -> Option<PipeEnvelope> {
     match request.method.as_deref()? {
+        method @ ("git.historyGraph.open" | "git.historyGraph.next" | "git.historyGraph.close") => {
+            let result = match serde_json::from_value::<
+                crate::framework_services::history_sessions::Request,
+            >(request.params.clone().unwrap_or_else(|| json!({})))
+            {
+                Ok(params) => {
+                    scheduler
+                        .history_sessions
+                        .dispatch(
+                            method,
+                            crate::framework_services::history_sessions::Owner {
+                                nid: request.origin_nid,
+                                name: request.origin_name.clone(),
+                                root: request.workspace_root.clone().unwrap_or_default(),
+                                generation: request.project_generation,
+                            },
+                            params,
+                        )
+                        .await
+                }
+                Err(error) => Err(format!("Invalid history params: {error}")),
+            };
+            Some(match result {
+                Ok(value) => PipeEnvelope::success_response(request, responder, value),
+                Err(message) => PipeEnvelope::error_response(
+                    request,
+                    responder,
+                    PipeError::new("git.historyGraph.error", message, false, None),
+                ),
+            })
+        }
         "git.snapshot.get" => Some(snapshot(request, responder, scheduler).await),
         "git.headBlob" => Some(
             provider_request(

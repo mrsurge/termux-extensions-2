@@ -108,6 +108,40 @@ lanes and framework pipe services, not WBA or a new HTTP/polling transport.
 Ref changes refresh the graph through existing Git facts with coalescing and stale
 result fences. Disk/draft changes do not invalidate immutable historical blobs.
 
+## Phase 2 Investigation: Read Scheduling And Transport
+
+The existing `git_history` in `framework_services/git_ops.rs` calls
+`revwalk.push_head()`, collects at most 500 commits, and returns no parent IDs or
+continuation state. Leave that menu API unchanged. New History metadata must not
+call file diff/statistics computation before publishing its first graph page.
+
+The current `scheduler.git_history` uses the ordinary `git_read` semaphore and
+`spawn_blocking`. The latter keeps native work off Tokio, but does not prevent
+long history/statistics work from occupying permits needed by editor baselines.
+History admission therefore needs a bounded independent read budget. Cancellation
+must be checked after admission as well as during traversal; dropping an async
+wait alone does not stop a started blocking operation.
+
+The progressive Changes job is the existing example for bounded event queues,
+cooperative cancellation and job completion. Reuse those mechanisms where their
+contracts fit, without pretending History is a content-search result or changing
+the existing search DTOs. Keep History on `service.git` and the Explorer lane.
+
+`worker_services/git_service.py` still calls synchronous `pipe_runtime.call`.
+The new History adapter must instead use the existing `pipe_runtime.call_async`
+pattern in `worker_services/text_edit_service.py`, validating typed replies at
+the boundary. Python owns generation and client routing, not native traversal.
+
+Implementation order: metadata/ref snapshot and pagination; cancellable stats and
+lazy file summaries; bounded pinned blob pairs; then Python lifecycle/projection.
+Tests must distinguish native traversal cost from queue wait and first-page
+publication. In particular, verify topological-walk startup cost before claiming
+that bounded page size alone provides bounded first-page latency. The internal
+`history_graph.rs` reader implements pinned metadata and retained traversal.
+`history_sessions.rs` now exposes metadata-only open/next/close through the Git
+pipe with its own bounded worker admission and typed asynchronous Python adapter.
+Statistics and Explorer event/projection integration remain subsequent work.
+
 ## Second Editor Source Map And Required Changes
 
 Paths below are relative to the repository root.

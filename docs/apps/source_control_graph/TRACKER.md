@@ -48,6 +48,26 @@
 
 ## Phase 2: Framework Reads
 
+- [x] Inspect current Git pipe dispatch, scheduler and Python adapters. Existing
+  `git.history` remains the bounded HEAD-menu contract. New reads must use
+  `pipe_runtime.call_async`, not the legacy synchronous adapter.
+- [ ] Implement metadata-only graph generation and pagination first; test pinned
+  refs/parent order and traversal cancellation before adding statistics.
+- [x] Internal native GraphReader: pinned ref/HEAD metadata, retained revwalk,
+  bounded pages, exact parent order, and failure/cancellation invalidation.
+  Native topology preparation latency remains to be measured.
+- [x] Five native reader tests pass: merge/page equivalence, pinned refs,
+  detached/empty history, annotated/non-commit tags and disconnected roots,
+  cancellation, input bounds and failed partial-page invalidation.
+- [ ] Keep background history/statistics admission separate from interactive
+  Git baseline reads; verify cancellation while queued as well as while running.
+- [x] Metadata session admission is separate and rejects at four workers rather
+  than queueing. Open/next/close Git pipe operations bind owner/root/generation,
+  fence offsets, cancel dropped waits and expire abandoned idle workers.
+- [x] Strict asynchronous Python session adapter and context-owned cleanup.
+  Ten filtered Rust tests (including legacy history), four Python tests and
+  Basedpyright pass with zero errors/warnings. Statistics, Explorer event wiring
+  and primary-open latency measurements remain pending.
 - [ ] Typed paged graph/ref snapshots with parent IDs and deterministic topology.
 - [ ] Progressive statistics, lazy file summaries and bounded historical blob pairs.
 - [ ] First-parent/root/rename/binary semantics and limits, explicitly represented.

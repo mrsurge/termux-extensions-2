@@ -971,7 +971,7 @@ User live acceptance and broader end-to-end concurrency validation remain pendin
 
 The isolated component under `src/explorer/history/vscode_scm/` is implemented
 but not yet imported by the application entry point or mounted as an Explorer
-tab. It is not a WBA feature. Rust Git reads, Python projection, production asset
+tab. It is not a WBA feature. Python projection, production asset
 wiring and historical second-editor routing remain subsequent integration work.
 
 `UPSTREAM.md`, the manifests and patch series record the exact VS Code revision,
@@ -1003,6 +1003,60 @@ fix unobserved active-node debounce and refresh-cleanup rejections; there is no
 global error suppressor or production grace timer. DOM tests exercise the actual
 tree, including mouse/touch/keyboard events, expanded-row retention, retries,
 in-flight disposal, and stylesheet scope. Device acceptance awaits UI integration.
+
+### Native Graph Reader Foundation
+
+`framework_services/history_graph.rs` contains the metadata-only reader.
+`history_sessions.rs` owns the repository and reader on a retained blocking
+worker between page requests. One revwalk supplies successive pages without
+offset rescans. The scheduler owns this registry separately from interactive
+Git read permits; at most four history workers exist, including idle sessions.
+Admission rejects at capacity instead of accumulating queued workers.
+
+The existing `service.git` pipe now supports `git.historyGraph.open`, `.next`
+and `.close`. Params are strict version 1 plus `sessionId`; next additionally
+requires the expected `offset` and accepts `limit`. Root and project generation
+come from the envelope. Sessions bind the exact origin NID/name, root spelling
+and generation; IDs are caller-generated bounded alphanumeric/hyphen strings,
+not snapshot fingerprints. Open returns `GitHistoryOpened` with metadata only;
+next returns `GitHistoryPageResult`; close returns `GitHistoryClosed`.
+
+Each worker has one bounded command slot, rejects overlapping requests, and
+invalidates its traversal after an unexpected offset or dropped request wait.
+Close sets cancellation and wakes the channel. A single five-minute idle lease
+expires abandoned sessions; it is not a polling loop. Finished registry entries
+are pruned on admission and explicit close. Native traversal memory and time
+inside libgit2 still have the limitations below.
+
+`worker_services/history_service.py` provides the typed asynchronous adapter and
+`history_session` context manager. It uses existing `pipe_runtime.call_async`
+(which offloads the synchronous pipe wait), validates DTO/session/snapshot/offset
+identities and closes on context exit. Cancelled opening waits for admission to
+settle before closing; an uncertain/lost transport is ultimately bounded by the
+native idle lease. It never retries page advancement. The legacy synchronous
+Git adapter remains unchanged. Explorer lifecycle/fact routing, statistics and
+historical blob-pair integration remain pending; no frontend uses these calls yet.
+
+Snapshot capture records commit-valued local/remote branches and tags plus HEAD,
+sorts their identities, and pins the traversal roots. Annotated tags peel to
+commits; tree/blob tags are excluded. Empty repositories and detached HEAD are
+explicit. A SHA-256 metadata fingerprint is not a session authorization token or
+a repository identity. Ref capture is not an atomic Git transaction; later ref
+changes require a new generation rather than modifying the retained reader.
+
+Pages contain ordered parent IDs and commit metadata, never file diffs/stats or
+worktree content. They accept 1-500 commits, with 100 as the intended default.
+At an exact page boundary, completion may require one final empty page, avoiding
+lookahead work solely to calculate a total. Capture rejects more than 4,096
+commit refs, metadata fields over 16 KiB, or commits with more than 128 parents.
+These are explicit errors, not silently missing graph edges. Output is bounded;
+libgit2's internal topological state is not proven bounded by the page size.
+
+Cancellation is checked during ref capture and around every native walk step.
+It cannot interrupt libgit2 inside a step, including initial topology preparation.
+A failed or cancelled page invalidates the reader, preventing a retry from
+silently skipping already-consumed rows. The owner must discard that generation.
+First-page timing and native memory measurements remain acceptance requirements.
 
 ---
 
