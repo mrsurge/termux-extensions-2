@@ -170,8 +170,9 @@ for historical text. Do not retain historical models in WBA's working set or
 ProjectSidecar recents. They do not consume the 12 working-file slots.
 
 Opening history replaces the secondary view, not the user's underlying file.
-Before releasing a working view, preserve/flush its pending draft through existing
-lifecycle guarantees; never implicitly save or discard it. Keep shared documents
+Working edits already use the existing atomic persistence path, in both autosave
+and draft mode. Do not introduce another save/flush transaction when replacing
+the view; never implicitly save or discard its draft. Keep shared documents
 retained for other clients. Fence late editor/WBA notifications and release only
 the secondary facade. Leaving historical mode disposes both read-only models and
 listeners before resuming ordinary editing. One latest request wins per client.

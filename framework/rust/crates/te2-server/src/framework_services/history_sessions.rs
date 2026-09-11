@@ -579,7 +579,8 @@ mod tests {
     #[tokio::test]
     async fn capacity_is_bounded_without_queuing_new_workers() {
         let (_dir, owner) = fixture();
-        let registry = HistorySessions::default();
+        let scheduler = super::super::scheduler::FrameworkServiceScheduler::default();
+        let registry = &scheduler.history_sessions;
         for id in 0..MAX_SESSIONS {
             registry
                 .dispatch(
@@ -599,6 +600,20 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(error, "History capacity reached");
+        // Filling History's admission budget must not consume the independent
+        // baseline-read permits used by primary editor opens.
+        let baseline = tokio::time::timeout(
+            Duration::from_secs(3),
+            scheduler.git_head_blob(super::super::git_ops::GitProviderRequest {
+                root: Some(owner.root.clone()),
+                relative_path: Some("test.py".into()),
+                ..Default::default()
+            }),
+        )
+        .await
+        .expect("History admission blocked a baseline read")
+        .unwrap();
+        assert!(baseline.found);
         for id in 0..MAX_SESSIONS {
             registry
                 .dispatch(

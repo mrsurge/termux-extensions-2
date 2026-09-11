@@ -28,6 +28,7 @@ from .open_state_backend import read_client_foreground, read_sidecar_open_state
 from .run_profile_state import build_run_profile_state_projection
 from .project_sidecar import ProjectSidecar
 from .history_store import HistoryStore
+from .host.secondary_content_backend import secondary_content_projection
 from .stores import get_history_store, get_preferences_store
 
 log = logging.getLogger(__name__)
@@ -403,12 +404,13 @@ async def handle_boot_snapshot_request(
     scope = str((_data or {}).get("scope") or "").strip()
     if scope == "hostState":
         host_state = await asyncio.to_thread(_build_host_state_payload)
-        return await asyncio.to_thread(
+        response = await asyncio.to_thread(
             _overlay_client_foreground,
             {"ok": True, "snapshot": {"host_state": host_state}},
             client_instance_id=client_instance_id,
             client_role=client_role,
         )
+        return _overlay_secondary_content(response, client_instance_id, client_role)
 
     global _boot_snapshot_task
     task = _boot_snapshot_task
@@ -438,7 +440,27 @@ async def handle_boot_snapshot_request(
             snapshot["run_profile_state"] = await build_run_profile_state_projection(
                 {"path": path} if isinstance(path, str) and path else {"path": ""}
             )
-        return client_snapshot
+        return _overlay_secondary_content(client_snapshot, client_instance_id, client_role)
     finally:
         if task.done() and _boot_snapshot_task is task:
             _boot_snapshot_task = None
+
+
+def _overlay_secondary_content(response: JsonMap, client_id: str, role: ClientRole) -> JsonMap:
+    # The shared/off-loop boot cache must never own this per-client descriptor.
+    raw = response.get("snapshot")
+    if not isinstance(raw, dict):
+        return response
+    snapshot = dict(cast(dict[str, object], raw))
+    raw_host = snapshot.get("host_state")
+    if not isinstance(raw_host, dict):
+        return response
+    host = dict(cast(dict[str, object], raw_host))
+    project = host.get("activeProject")
+    path = host.get("currentPath")
+    host["secondaryContent"] = secondary_content_projection(
+        client_id, role, project if isinstance(project, str) else "",
+        path if isinstance(path, str) else None,
+    )
+    snapshot["host_state"] = host
+    return {**response, "snapshot": snapshot}

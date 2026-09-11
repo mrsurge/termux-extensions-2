@@ -10,6 +10,10 @@ from .monaco_editor.editor_rpc_contract import EDITOR_RPC_NOTIFICATION_OPEN_STAT
 from .monaco_editor.editor_rpc_emit import emit_editor_rpc_notification
 from .frontend_rpc_codec import encode_frontend_rpc_message
 from .open_state_backend import ClientForegroundPayload, SidecarOpenStatePayload
+from .host.secondary_content_backend import (
+    reconcile_secondary_foreground,
+    secondary_content_projection,
+)
 from .ui_ipc.rpc_contract import (
     UI_IPC_RPC_NOTIFICATION_EVENT,
     UI_IPC_RPC_NOTIFICATION_HOST_ACTIVE_FILE_CHANGED,
@@ -80,10 +84,10 @@ async def publish_open_state_changed(
 
     print(
         "[open_state] publish "
-        f"source={source or ''} "
-        f"project={project} "
-        f"openFile={open_state.get('openFile')} "
-        f"revision={open_state.get('revision')}",
+        + f"source={source or ''} "
+        + f"project={project} "
+        + f"openFile={open_state.get('openFile')} "
+        + f"revision={open_state.get('revision')}",
         flush=True,
     )
     await publish_worker_event(
@@ -227,6 +231,7 @@ async def _handle_client_foreground_changed_event(event: WorkerEvent) -> None:
     client_foreground = client_foreground_payload_from_event(event)
     if open_state is None or client_foreground is None:
         return
+    reconcile_secondary_foreground(client_foreground)
     source = _event_text(event, "source") or event["source"]
     request_id = _event_text(event, "request_id") or event.get("correlation_id")
     await _emit_host_active_file_changed(
@@ -374,6 +379,10 @@ async def _emit_host_active_file_changed(
             "rel": rel,
             "openState": dict(open_state),
             "clientForeground": dict(client_foreground),
+            "secondaryContent": secondary_content_projection(
+                client_foreground["clientInstanceId"], client_foreground["clientRole"],
+                project, abs_path,
+            ),
         }
         if isinstance(source, str) and source:
             payload["source"] = source

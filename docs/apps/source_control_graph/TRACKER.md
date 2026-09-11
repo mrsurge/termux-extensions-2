@@ -51,7 +51,7 @@
 - [x] Inspect current Git pipe dispatch, scheduler and Python adapters. Existing
   `git.history` remains the bounded HEAD-menu contract. New reads must use
   `pipe_runtime.call_async`, not the legacy synchronous adapter.
-- [ ] Implement metadata-only graph generation and pagination first; test pinned
+- [x] Implement metadata-only graph generation and pagination first; test pinned
   refs/parent order and traversal cancellation before adding statistics.
 - [x] Internal native GraphReader: pinned ref/HEAD metadata, retained revwalk,
   bounded pages, exact parent order, and failure/cancellation invalidation.
@@ -68,8 +68,8 @@
   Ten filtered Rust tests (including legacy history), four Python tests and
   Basedpyright pass with zero errors/warnings. Statistics, Explorer event wiring
   and primary-open latency measurements remain pending.
-- [ ] Typed paged graph/ref snapshots with parent IDs and deterministic topology.
-- [ ] Progressive statistics, lazy file summaries and bounded historical blob pairs.
+- [x] Typed paged graph/ref snapshots with parent IDs and deterministic topology.
+- [x] Progressive statistics, lazy file summaries and bounded historical blob pairs.
 - [x] Generation-local statistics producer: one 40-file native page in flight,
   cumulative publication before the next read, bounded/deduplicated retained
   work set, explicit incomplete/error states and late-result fencing.
@@ -94,12 +94,26 @@
 - [x] File/blob checkpoint validation: 14 filtered native tests, six Python tests,
   strict Basedpyright (zero errors/warnings) and whitespace checks pass. Includes
   session detail dispatch and a worktree-content mismatch proving Git blob output.
-- [ ] First-parent/root/rename/binary semantics and limits, explicitly represented.
+- [x] First-parent/root/rename/binary semantics and limits, explicitly represented.
 - [ ] Cancellation, stale-generation rejection, bounded caches and event refresh.
 - [ ] Rust/Python contract tests and strict typing; measure primary-open interference.
+- [x] Add opt-in read-only native scheduling benchmark and strengthen the
+  full-History-capacity baseline-isolation regression. Twenty native tests pass;
+  the ignored benchmark was separately run three times. Results and limitations
+  are recorded in PERFORMANCE.md; end-to-end primary-open acceptance remains.
 
 ## Phase 3: Second-Window Content Lifecycle
 
+- [x] Internal typed backend content-state foundation with bounded exact-client
+  slots, immutable historical pairs, latest-request tokens, project-generation
+  fencing and close/recreate protection. Eight state-machine tests pass.
+- [x] Backend historical commit hook clears only the secondary foreground;
+  boot snapshots and foreground facts carry personal content projection. Explicit
+  close/project switch clear it, while older queued facts cannot erase it.
+  Six integration tests plus eleven existing recents tests pass; strict typing
+  is clean. Existing atomic edit persistence is reused, without a save/flush step.
+  No History file-click producer calls this hook yet; renderer/native wiring and
+  end-to-end WBA facade disposal acceptance remain pending.
 - [ ] Separate content kind from native/drawer presentation mode.
 - [ ] Exact-client backend descriptor ownership and own-lane notifications.
 - [ ] Generalize mobile pending-open acknowledgements and Electron validated IPC.
@@ -131,6 +145,7 @@ it is not mounted/imported by the application entry point yet. The browser tree
 constructor is supplied to the host explicitly; production asset wiring remains
 part of Phase 4. Native reads, statistics and Explorer backend projection are
 implemented. Seventeen Python tests cover transport, producer and connection
-lifecycle. Remaining Phase 2 work includes performance
-acceptance; secondary historical content and frontend mounting follow, not WBA.
+lifecycle. Native timing evidence is recorded in PERFORMANCE.md. End-to-end
+performance acceptance remains; secondary historical content and frontend mounting
+follow, not WBA.
 No restarts, APK asset publication or version changes.

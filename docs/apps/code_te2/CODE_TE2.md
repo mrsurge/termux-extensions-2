@@ -1162,8 +1162,42 @@ unsupported/network filesystems do not gain an implicit polling fallback.
 The existing session idle lease also bounds abandoned watches. Production History
 UI mounting and secondary-editor historical content routing remain unimplemented.
 
+`history_performance.rs` contains an ignored, explicit-root read-only benchmark
+of watched History startup, first-page traversal, and scheduler baseline reads
+before/during/after file-statistics work. It emits test-only JSON, not production
+logs. Reproduction, Termux measurements, and the distinction from full frontend
+open latency are in `docs/apps/source_control_graph/PERFORMANCE.md`.
+
 ---
 
+### Secondary History Content State Foundation
+
+`host/secondary_content_state.py` separates working-file and immutable History
+blob-pair content from window presentation. Event-loop-owned state is bounded to
+64 exact-client slots; admission fails rather than evicting another client.
+Monotonic tokens fence superseded reads, close/recreate and project generations.
+
+`host/secondary_content_backend.py` now owns the worker-local state instance.
+Trusted backend callers prepare a token, obtain the validated immutable pair,
+and commit it. Commit clears only that secondary foreground using the existing
+sidecar write; it neither saves nor discards drafts nor removes shared recents.
+Existing edit persistence remains authoritative, with no additional flush step.
+The caller must publish the returned foreground fact after committing; the History
+file-click producer is not wired yet.
+
+Host boot snapshots project `secondaryContent` on the event loop after shared
+and off-loop snapshot construction. Foreground notifications carry the same
+exact-client descriptor. Foreground revision fencing ignores queued facts older
+than the historical commit; newer working-file facts remove historical content.
+Explicit secondary close and ProjectSwitchStarted clear retained state. Client
+disconnect alone does not clear it; worker restart does not persist historical
+content. An existing null secondary foreground prevents legacy file revival.
+
+Tests cover actual sidecar draft preservation, disk/recents/primary isolation,
+project and supersession rejection, old-fact handling and private boot projection.
+The read-only renderer, producer routing and native presentation acknowledgements
+remain pending. No production path activates historical content yet, and WBA
+facade disposal/end-to-end renderer behavior has not been validated.
 ## 7) Monaco asset pipeline (pinned VS Code build)
 
 The Monaco editor runtime uses the pinned VS Code `monaco-editor-core` ESM output:
