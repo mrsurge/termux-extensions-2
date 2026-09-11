@@ -1,0 +1,35 @@
+{
+  "revision": "591199df409fbf59b4b52d5ad4ee0470152a9b31",
+  "files": [
+    {
+      "file": "browser/scmHistory.ts",
+      "source": "src/vs/workbench/contrib/scm/browser/scmHistory.ts",
+      "sha256": "d5618af64b8d2a9425ed419e504625f1f5a5844ae998ace4d45891568bf42447"
+    },
+    {
+      "file": "browser/scmHistoryViewPane.ts",
+      "source": "src/vs/workbench/contrib/scm/browser/scmHistoryViewPane.ts",
+      "sha256": "e924d6bf3f917c37bb66318679ef19294934662036d22ae41c38bf664390c883"
+    },
+    {
+      "file": "common/history.ts",
+      "source": "src/vs/workbench/contrib/scm/common/history.ts",
+      "sha256": "b71dcc641490e4cc38f7ddf0ab82f5316871912775daef9c6e61e9f854fc5af4"
+    },
+    {
+      "file": "browser/media/scm.css",
+      "source": "src/vs/workbench/contrib/scm/browser/media/scm.css",
+      "sha256": "564511843b0e4a593b3303dd7594482d952a827e480da0fb53f85b920c0a3fe0"
+    },
+    {
+      "file": "test/browser/scmHistory.test.ts",
+      "source": "src/vs/workbench/contrib/scm/test/browser/scmHistory.test.ts",
+      "sha256": "d1135a19345f4f441a75c7b30ca18257e58be67747c691394888140ea1b0d166"
+    },
+    {
+      "file": "LICENSE.txt",
+      "source": "LICENSE.txt",
+      "sha256": "9480271317925265e806a9a196aaa33410a962fa9d4d1e248a4a5187bc8c9df9"
+    }
+  ]
+}
