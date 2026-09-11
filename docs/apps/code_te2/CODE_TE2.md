@@ -967,6 +967,45 @@ User live acceptance and broader end-to-end concurrency validation remain pendin
 
 ---
 
+## 6.7) Source Control History Component Foundation
+
+The isolated component under `src/explorer/history/vscode_scm/` is implemented
+but not yet imported by the application entry point or mounted as an Explorer
+tab. It is not a WBA feature. Rust Git reads, Python projection, production asset
+wiring and historical second-editor routing remain subsequent integration work.
+
+`UPSTREAM.md`, the manifests and patch series record the exact VS Code revision,
+original hashes and reproducible adaptations. The graph algorithm, SVG geometry,
+commit/ref grouping and continuation geometry derive from the preserved upstream
+files. `tree/build.mjs` builds the actual base CompressibleAsyncDataTree from 164
+pinned dependencies, retaining upstream compiler semantics. Both dependency CSS
+and adapted history styles are scoped to `.te2-scm-history`.
+
+`HistoryTreeHost` is the TE2-owned replacement for outer workbench service wiring.
+It receives the real constructor through `tree-contract.ts`, summary rows, a
+typed asynchronous child reader, and file-open/load-more/error callbacks. It owns
+one immutable history generation and its own DOM, not project state or files.
+Mouse and touch share upstream's single pointer event; Enter activates file or
+continuation rows. Load-more and retries are guarded against duplicate execution.
+
+`SCMHistoryTreeDataSource` enumerates commit rows without loading their files.
+Expansion passes an immutable commit ID and its first parent (explicitly null
+for roots) to the reader. It caches summaries only for retained commits in that
+generation, avoiding duplicate Git reads when upstream refreshes expanded nodes
+after a root metadata update. Failed reads evict cache entries and show retry
+rows, never false empty commits; pending/binary/unavailable counts never mean zero.
+No document text is part of these row contracts.
+
+Disposal cancels native refresh promises before destroying their render-event
+sources, aborts the reader, drops subscriptions/cache and removes the owned DOM.
+Late reads cannot render into a replacement host. Two explicit upstream patches
+fix unobserved active-node debounce and refresh-cleanup rejections; there is no
+global error suppressor or production grace timer. DOM tests exercise the actual
+tree, including mouse/touch/keyboard events, expanded-row retention, retries,
+in-flight disposal, and stylesheet scope. Device acceptance awaits UI integration.
+
+---
+
 ## 7) Monaco asset pipeline (pinned VS Code build)
 
 The Monaco editor runtime uses the pinned VS Code `monaco-editor-core` ESM output:

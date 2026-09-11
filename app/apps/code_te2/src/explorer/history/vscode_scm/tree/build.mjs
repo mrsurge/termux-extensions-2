@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { build } from 'esbuild';
+import { build, transform } from 'esbuild';
 import { execFileSync } from 'node:child_process';
 
 const root = import.meta.dirname;
@@ -25,13 +25,18 @@ export async function buildTree() {
   const scratchRoot = process.env.TMPDIR || path.join(root, '.patch-scratch');
   fs.mkdirSync(scratchRoot, { recursive: true });
   const scratch = fs.mkdtempSync(path.join(scratchRoot, 'scm-tree-'));
-  const relativeTree = 'src/vs/base/browser/ui/tree/abstractTree.ts';
-  let patchedTree;
+  const adaptations = [
+    ['abstractTree.ts', '0001-disposable-active-node-debounce.patch'],
+    ['asyncDataTree.ts', '0002-observe-refresh-cleanup.patch'],
+  ];
+  const patched = new Map();
   try {
-    const target = path.join(scratch, 'abstractTree.ts');
-    execFileSync('patch', ['--batch', '--fuzz=0', '--output', target,
-      path.join(source, relativeTree), path.join(root, 'patches/0001-disposable-active-node-debounce.patch')]);
-    patchedTree = fs.readFileSync(target, 'utf8');
+    for (const [filename, patch] of adaptations) {
+      const original = path.join(source, 'src/vs/base/browser/ui/tree', filename);
+      const target = path.join(scratch, filename);
+      execFileSync('patch', ['--batch', '--fuzz=0', '--output', target, original, path.join(root, 'patches', patch)]);
+      patched.set(original, fs.readFileSync(target, 'utf8'));
+    }
   } finally {
     fs.rmSync(scratch, { recursive: true, force: true });
     if (!process.env.TMPDIR) fs.rmdirSync(scratchRoot);
@@ -47,9 +52,10 @@ export async function buildTree() {
     } },
     outdir: path.join(root, 'dist'), logLevel: 'silent',
     plugins: [{ name: 'pinned-tree-adaptation', setup(builder) {
-      builder.onLoad({ filter: /\/abstractTree\.ts$/ }, args => {
-        if (args.path !== path.join(source, relativeTree)) throw Error('Unexpected tree source');
-        return { contents: patchedTree, loader: 'ts', resolveDir: path.dirname(args.path) };
+      builder.onLoad({ filter: /\/(abstractTree|asyncDataTree)\.ts$/ }, args => {
+        const contents = patched.get(args.path);
+        if (contents === undefined) throw Error('Unexpected tree source');
+        return { contents, loader: 'ts', resolveDir: path.dirname(args.path) };
       });
     } }],
   });
@@ -57,6 +63,19 @@ export async function buildTree() {
     if (!expected.delete(path.resolve(input))) throw Error(`Unpinned tree dependency: ${input}`);
   }
   if (expected.size) throw Error(`Unused pinned tree dependencies: ${[...expected].join(', ')}`);
+  // The standalone tree shares Monaco class names. Scope its stylesheet so
+  // mounting History cannot restyle the primary editor or other lists.
+  for (let index = 0; index < result.outputFiles.length; index++) {
+    const file = result.outputFiles[index];
+    if (!file.path.endsWith('.css')) continue;
+    const scoped = await transform(`.te2-scm-history {\n${file.text}\n}`, {
+      loader: 'css', target: ['chrome109', 'firefox115'], minify: true,
+    });
+    const contents = new TextEncoder().encode(scoped.code);
+    result.outputFiles[index] = { path: file.path, contents, text: scoped.code, hash: crypto.createHash('sha256').update(contents).digest('hex') };
+    const outputKey = Object.keys(result.metafile.outputs).find(key => path.resolve(key) === file.path);
+    if (outputKey) result.metafile.outputs[outputKey].bytes = contents.length;
+  }
   return result;
 }
 

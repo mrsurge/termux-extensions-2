@@ -61,7 +61,10 @@ It does not own:
   - Params: `{ reason? }`.
 - `sidebar.file.open`
   - External/sidebar-originated request to open a file through backend host file-open hooks.
-  - Params: `{ path? , abs? , rel? , line? , column? , source? , request_id? }`.
+  - Params: `{ path? , abs? , rel? , line? , column? , source? , request_id?, target: { clientId, hostId } }`.
+  - The target must identify the connected host client and its currently active,
+    registered presentation. The backend derives the presentation ID and routes
+    editor/open-state updates only to that client.
 - `sidebar.file.edit`
   - External/sidebar-originated edit/open signal, gated by `trackAgentSidebarEdits` where applicable.
   - Params: `{ path? , abs? , rel? , line? , column? , source? , conversation_id? }`.

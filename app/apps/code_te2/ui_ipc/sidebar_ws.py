@@ -730,10 +730,26 @@ async def _dispatch_sidebar_rpc_request(ns: SidebarNamespace, sid: str, method: 
         await emit_sidebar_cwd_set(ns, reason=reason or "authoritative")
         return {"ok": True}
     if method == SIDEBAR_IPC_RPC_METHOD_FILE_OPEN:
+        from .sidebar_file_open_routing import resolve_sidebar_file_open_target
+        from .sidebar_window_state import get_sidebar_window_state
+
+        live_host_client_ids = {
+            client_id
+            for host_sid, client_id in _client_ids_by_sid.items()
+            if host_sid in _registered_hosts and client_id
+        }
+        target_client_id, routed_params = resolve_sidebar_file_open_target(
+            params,
+            sidebar_state=_json_object(get_sidebar_window_state()),
+            live_host_client_ids=live_host_client_ids,
+            registered_presentations=dict(_client_presentations),
+            active_windows=dict(_client_active_windows),
+            requester_app_id=_norm(_app_ids_by_sid.get(sid)),
+        )
         await route_backend_open_request(
             ns,
-            params,
-            source_name="sidebar_ipc_rpc",
+            routed_params,
+            source_name=target_client_id,
             log_prefix="[sidebar_ipc_rpc] file_open",
             request_prefix="sidebar_rpc",
         )

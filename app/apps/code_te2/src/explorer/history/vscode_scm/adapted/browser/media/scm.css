@@ -1,0 +1,164 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.te2-scm-history .monaco-list-row .history-item .monaco-icon-label {
+	flex-grow: 1;
+	align-items: center;
+}
+
+.te2-scm-history .monaco-list-row .history-item {
+	display: flex;
+	align-items: center;
+}
+
+.te2-scm-history .monaco-list-row .monaco-tl-twistie:not(.collapsed) + .monaco-tl-contents > .history-item > .graph-container > svg > path:last-of-type {
+	stroke-width: 3px;
+}
+
+.te2-scm-history .monaco-list-row .history-item > .graph-container {
+	display: flex;
+	flex-shrink: 0;
+	height: 22px;
+}
+
+.te2-scm-history .monaco-list-row .history-item > .graph-container.current > .graph > circle:last-child,
+.te2-scm-history .monaco-list-row .history-item > .graph-container.incoming-changes > .graph > circle:last-child,
+.te2-scm-history .monaco-list-row .history-item > .graph-container.outgoing-changes > .graph > circle:last-child {
+	fill: var(--vscode-sideBar-background);
+}
+
+.te2-scm-history .monaco-list-row:hover .history-item > .graph-container.current > .graph > circle:last-child,
+.te2-scm-history .monaco-list-row:hover .history-item > .graph-container.incoming-changes > .graph > circle:last-child,
+.te2-scm-history .monaco-list-row:hover .history-item > .graph-container.outgoing-changes > .graph > circle:last-child {
+	fill: var(--vscode-list-hoverBackground);
+}
+
+.te2-scm-history .monaco-list-row .history-item > .graph-container > .graph > circle {
+	stroke: var(--vscode-sideBar-background);
+}
+
+.te2-scm-history .monaco-list-row:hover .history-item > .graph-container > .graph > circle:first-of-type {
+	stroke: transparent;
+}
+
+.te2-scm-history .monaco-list-row:hover .history-item > .graph-container > .graph > circle:nth-of-type(2) {
+	stroke: var(--vscode-list-hoverBackground);
+}
+
+.te2-scm-history .monaco-list-row.focused.selected .history-item > .graph-container > .graph > circle:first-of-type {
+	stroke: transparent !important;
+}
+
+.te2-scm-history.scm-history-view > .monaco-list:focus .monaco-list-row.selected .history-item > .graph-container > .graph > circle:nth-of-type(2) {
+	stroke: var(--vscode-list-activeSelectionBackground);
+}
+
+.te2-scm-history.scm-history-view > .monaco-list:focus .monaco-list-row.selected .history-item > .graph-container.incoming-changes > .graph > circle:last-child,
+.te2-scm-history.scm-history-view > .monaco-list:focus .monaco-list-row.selected .history-item > .graph-container.outgoing-changes > .graph > circle:last-child {
+	fill: var(--vscode-list-activeSelectionBackground);
+}
+
+.te2-scm-history.scm-history-view > .monaco-list .monaco-list-row.focused .history-item > .graph-container > .graph > circle:nth-of-type(2) {
+	stroke: var(--vscode-list-inactiveSelectionBackground);
+}
+
+.te2-scm-history.scm-history-view > .monaco-list .monaco-list-row.focused .history-item > .graph-container.incoming-changes > .graph > circle:last-child,
+.te2-scm-history.scm-history-view > .monaco-list .monaco-list-row.focused .history-item > .graph-container.outgoing-changes > .graph > circle:last-child {
+	fill: var(--vscode-list-inactiveSelectionBackground);
+}
+
+.te2-scm-history .monaco-list-row .history-item > .label-container {
+	display: flex;
+	flex-shrink: 0;
+	margin-left: 4px;
+	gap: 4px;
+}
+
+.te2-scm-history .monaco-list-row .history-item > .label-container > .label {
+	display: flex;
+	align-items: center;
+	border-radius: 10px;
+	line-height: 18px;
+}
+
+.te2-scm-history .monaco-list-row .history-item > .label-container > .label > .count {
+	font-size: 12px;
+	margin-left: 0;
+	padding-left: 4px;
+}
+
+.te2-scm-history .monaco-list-row .history-item > .label-container > .label > .codicon {
+	color: inherit !important;
+	padding: 1px;
+}
+
+.te2-scm-history .monaco-list-row .history-item > .label-container > .label > .codicon.codicon-git-branch {
+	font-size: 12px;
+	padding: 3px;
+}
+
+.te2-scm-history .monaco-list-row .history-item > .label-container > .label > .description {
+	font-size: 12px;
+	padding-right: 4px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	max-width: 100px;
+}
+
+.te2-scm-history .monaco-list-row .history-item-change {
+	display: flex;
+	align-items: center;
+}
+
+.te2-scm-history .monaco-list-row .history-item-change > .graph-placeholder {
+	position: absolute;
+	height: 22px;
+}
+
+.te2-scm-history .monaco-list-row .history-item-change > .label-container {
+	display: flex;
+	flex: 1;
+	overflow: hidden;
+}
+
+.te2-scm-history .monaco-list-row .history-item-change > .label-container > .monaco-icon-label {
+	flex-grow: 1;
+}
+
+.te2-scm-history .history-item-load-more {
+	display: flex;
+	height: 22px;
+}
+
+.te2-scm-history .history-item-load-more .graph-placeholder {
+	mask-image: linear-gradient(black, transparent);
+}
+
+.te2-scm-history .history-item-load-more .history-item-placeholder {
+	flex-grow: 1;
+}
+
+.te2-scm-history .history-item-load-more .history-item-placeholder .monaco-highlighted-label {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: var(--vscode-textLink-foreground)
+}
+
+.te2-scm-history .history-item-load-more .history-item-placeholder .monaco-highlighted-label .codicon {
+	font-size: 12px;
+	color: var(--vscode-textLink-foreground)
+}
+
+.te2-scm-history .history-item-load-more .history-item-placeholder.shimmer {
+	padding: 2px 0;
+}
+
+.te2-scm-history .history-item-load-more .history-item-placeholder.shimmer .monaco-icon-label-container {
+	height: 18px;
+	background: var(--vscode-scmGraph-historyItemHoverDefaultLabelBackground);
+	border-radius: 2px;
+	opacity: 0.5;
+}

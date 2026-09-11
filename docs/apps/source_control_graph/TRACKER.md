@@ -16,7 +16,8 @@
 - [x] Copy complete graph, history types, view pane, CSS, tests and license.
 - [x] Record hashes/revision and produce reproducible graph/type/test adaptations
   and patch series; full pane and CSS remain preserved but not integrated.
-- [ ] Resolve pane import closure without fake workbench services or a lookalike rewrite.
+- [x] Resolve standalone pane import closure with the real base tree and typed
+  native adapters, without fake workbench services or a replacement graph.
 - [x] Approved bounded base-tree dependency transplant: 164 exact pinned runtime
   inputs plus upstream license, third-party notices and compiler configuration.
   Independent in-memory build verifies every hash and the exact dependency closure.
@@ -24,11 +25,23 @@
   selection and settled disposal in a DOM test without workbench services.
 - [x] Tree checkpoint validation: 15 graph/tree tests, full frontend TypeScript,
   frontend build and tracked whitespace checks pass. No mounted UI or bundle
-  payload change yet; the additional dependency source remains uncommitted.
+  payload change yet; dependency checkpoint committed as `1a40d647`.
 - [x] Resolve immediate teardown while upstream active-node debounce is pending:
   reproducible source patch uses RunOnceScheduler rather than an unobserved
   Delayer promise. Immediate disposal now passes without a grace timer.
-- [ ] Run retained upstream cases; add SVG and pagination/expanded-row lane tests.
+- [x] First pane adaptation patch: file-row renderer retains literal upstream
+  lane geometry with typed native filename/count rendering and explicit unknown
+  count states. Test row reuse, escaping, disposal and exact geometry retention.
+- [x] Adapt commit/ref and load-more rows, data source and outer pane lifecycle.
+  The typed constructor boundary is exercised against the actual upstream tree.
+- [x] Scope history and generated base-tree CSS; preserve literal upstream originals.
+- [x] Test mouse/touch/keyboard routing, cached expansion across stats updates,
+  failure/retry and in-flight disposal. Return upstream's refresh cleanup promise
+  so native cancellation does not orphan a rejection.
+- [x] Standalone pane validation: all 23 graph/tree/pane tests, full frontend
+  TypeScript, frontend build and whitespace checks pass. Device acceptance awaits
+  the production History-tab integration; no live surface is mounted yet.
+- [x] Run retained upstream cases; add SVG and pagination/expanded-row lane tests.
 - [x] First graph checkpoint: 11 unchanged upstream test bodies plus SVG
   expanded-row, append-only merge pagination, and hash/patch reproduction tests
   pass (14 total). Browser TypeScript and frontend build pass; no mounted UI yet.
@@ -69,8 +82,8 @@
 - [ ] Update technical manual and durable memory with implemented contracts.
 - [ ] User live acceptance; commit/push when requested.
 
-First implementation checkpoint: exact upstream files and an independently
-testable adapted graph module are present. The module is not mounted/imported
-by the application yet. Pane dependency closure and History tab integration
-remain open; see the vendor UPSTREAM.md ledger. No restarts, APK asset publication
-or version changes.
+Current checkpoint: standalone upstream-derived view foundation is implemented;
+it is not mounted/imported by the application entry point yet. The browser tree
+constructor is supplied to the host explicitly; production asset wiring remains
+part of Phase 4. Next is Phase 2's real Rust/Python reads, not WBA integration.
+No restarts, APK asset publication or version changes.

@@ -1,0 +1,14 @@
+/* TE2-only label adapters around the scoped upstream graph/tree styles. */
+.te2-scm-history { height: 100%; min-width: 0; }
+.te2-scm-history .history-item,
+.te2-scm-history .history-item-change { width: 100%; min-width: 0; height: 22px; gap: 4px; }
+.te2-scm-history .history-subject,
+.te2-scm-history .history-file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.te2-scm-history .history-description { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .7; }
+.te2-scm-history .history-commit-statistics,
+.te2-scm-history .history-file-statistics { flex: none; margin-left: auto; padding-right: 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.te2-scm-history [data-state="pending"],
+.te2-scm-history [data-state="unavailable"] { opacity: .65; }
+.te2-scm-history .history-item-current { font-weight: 600; }
+.te2-scm-history .history-load-label { text-align: center; cursor: pointer; }
+.te2-scm-history [aria-busy="true"] .history-load-label { cursor: progress; }

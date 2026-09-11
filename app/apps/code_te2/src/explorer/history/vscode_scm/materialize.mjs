@@ -8,7 +8,7 @@ const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'u
 const scratchRoot = process.env.TMPDIR || path.join(root, '.materialize-scratch');
 fs.mkdirSync(scratchRoot, { recursive: true });
 const scratch = fs.mkdtempSync(path.join(scratchRoot, 'te2-scm-'));
-const adapted = ['browser/scmHistory.ts', 'common/history.ts', 'test/browser/scmHistory.test.ts'];
+const adapted = ['browser/scmHistory.ts', 'browser/scmHistoryViewPane.ts', 'browser/media/scm.css', 'common/history.ts', 'test/browser/scmHistory.test.ts'];
 try {
   for (const entry of manifest.files) {
     const bytes = fs.readFileSync(path.join(root, 'upstream', entry.file));
