@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -11,6 +12,7 @@ from typing import cast
 from uuid import uuid4
 
 from app.libs import pipe_runtime
+from app.libs.pipe_protocol import PipeEnvelope
 
 
 def _map(value: object) -> dict[str, object]:
@@ -175,6 +177,44 @@ class HistorySession:
         self.offset: int = 0
         self.closed: bool = False
         self._lock: asyncio.Lock = asyncio.Lock()
+        self._listener: pipe_runtime.PipeNotificationListener | None = None
+        self._changed: asyncio.Future[str | None] | None = None
+        self._change_lock: threading.Lock = threading.Lock()
+        self._change_queued: bool = False
+
+    def put_nowait(self, item: PipeEnvelope) -> object:
+        # Filter before scheduling on the loop: other sessions and an event
+        # burst must not grow an unbounded cross-thread callback queue.
+        data = item.params
+        if (item.origin_nid != 2200 or item.origin_name != "service.git"
+                or item.workspace_root != self.root or item.project_generation != self.generation
+                or not isinstance(data, dict)):
+            return None
+        values = cast(dict[str, object], data)
+        version = values.get("version")
+        if values.get("sessionId") != self.session_id or type(version) is not int or version != 1:
+            return None
+        error = values.get("error")
+        message = (None if error is None else error[:512] if isinstance(error, str)
+                   else "Invalid History watcher error payload")
+        with self._change_lock:
+            future = self._changed
+            if self._change_queued or future is None or self.closed:
+                return None
+            self._change_queued = True
+        def deliver() -> None:
+            if not future.done() and not self.closed:
+                future.set_result(message)
+        try:
+            _ = future.get_loop().call_soon_threadsafe(deliver)
+        except RuntimeError:
+            pass
+        return None
+
+    async def wait_changed(self) -> str | None:
+        if self._changed is None:
+            raise ValueError("History watcher is not initialized")
+        return await asyncio.shield(self._changed)
 
     async def _call(self, action: str, fields: dict[str, object] | None = None) -> object:
         params: dict[str, object] = {"version": 1, "sessionId": self.session_id}
@@ -196,6 +236,10 @@ class HistorySession:
     async def open(self) -> HistorySnapshot:
         if self.closed or self.snapshot is not None:
             raise ValueError("History session cannot be reopened")
+        # Register before native admission: watcher-before-snapshot invalidations
+        # can legitimately precede the correlated open reply.
+        self._changed = asyncio.get_running_loop().create_future()
+        self._listener = pipe_runtime.add_notification_listener(self, methods={"git.historyGraph.changed"})
         raw = self._reply(await self._call("open"), "GitHistoryOpened")
         data = _contract(raw.get("snapshot"), "GitHistorySnapshot")
         refs: list[HistoryRef] = []
@@ -285,6 +329,11 @@ class HistorySession:
 
     async def close(self) -> None:
         self.closed = True
+        if self._listener is not None:
+            pipe_runtime.remove_notification_listener(self._listener)
+            self._listener = None
+        if self._changed is not None and not self._changed.done():
+            _ = self._changed.cancel()
         _ = self._reply(await self._call("close"), "GitHistoryClosed")
 
 

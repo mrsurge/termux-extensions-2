@@ -144,8 +144,10 @@ Lazy file-page counts and bounded blob pairs now share that session path.
 The generation-local statistics producer schedules bounded native file pages and
 publishes cumulative counts. Explorer connection-owned routes now project pages
 and statistics, fence generations and dispose on disconnect/project change.
-HEAD-change facts refresh asynchronously; complete branch/tag-ref invalidation
-and performance acceptance remain pending before claiming Phase 2 complete.
+Native History-session watches resolve Git/common directories through libgit2
+and publish bounded invalidations over the existing pipe. They replace the
+WBA-dependent ref path, including linked worktrees and non-IPC watcher modes.
+Performance acceptance remains pending before claiming Phase 2 complete.
 
 ## Second Editor Source Map And Required Changes
 

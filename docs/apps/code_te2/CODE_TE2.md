@@ -971,7 +971,7 @@ User live acceptance and broader end-to-end concurrency validation remain pendin
 
 The isolated component under `src/explorer/history/vscode_scm/` is implemented
 but not yet imported by the application entry point or mounted as an Explorer
-tab. It is not a WBA feature. Python projection, production asset
+tab. It is not a WBA feature. Python projection is implemented; production asset
 wiring and historical second-editor routing remain subsequent integration work.
 
 `UPSTREAM.md`, the manifests and patch series record the exact VS Code revision,
@@ -1137,11 +1137,29 @@ Project changes invalidate it synchronously. Async exit-stack ordering stops the
 statistics producer before closing the native session. Opening a replacement
 waits for prior cleanup without blocking the fact handler or initial RPC ack.
 
-`GitSnapshotChanged` schedules a new generation only when the current project's
-nonempty HEAD changes; repeated facts for that pending HEAD coalesce. Ordinary
-worktree changes do not refresh immutable history. Other branch/tag tip changes
-and a HEAD becoming absent still require explicit refresh: the complete ref-fact
-invalidation contract remains pending. There is no polling. Production History
+History ref invalidation is owned by Rust `history_watch.rs`, independently of
+WBA, workspace watcher mode, and Python Git facts. libgit2 resolves `path()` and
+`commondir()` so linked-worktree HEAD and shared refs outside the worktree are
+both watched. Native `notify` uses inotify on Linux/Android; no polling fallback
+is instantiated. Metadata-root and ref-directory watches are nonrecursive and
+bounded to 4096 directories per admitted session. Objects/logs/worktree contents
+are never recursively watched. HEAD, packed-refs, shallow, and heads/remotes/tags
+changes invalidate; locks, index and access events do not.
+
+Watches precede snapshot construction. A capacity-one channel coalesces events
+into one `git.historyGraph.changed` pipe notification per immutable session.
+Pipe writes run outside the OS callback. Python registers its filtered listener
+before admission, validates sender/root/generation/session, and retains one
+notification even if it precedes the open reply. Normal invalidation disposes
+statistics and closes the old session before scheduling its replacement. This
+also handles A -> B -> A by taking a fresh snapshot, not comparing stale HEAD
+facts. Project/disconnect cleanup removes listeners and cancels scheduled refresh.
+
+Watch admission failure fails History open explicitly. Runtime watch error or
+overflow emits `watcherError` and leaves explicit Refresh available, without an
+automatic retry loop. Native-filesystem event availability remains a prerequisite;
+unsupported/network filesystems do not gain an implicit polling fallback.
+The existing session idle lease also bounds abandoned watches. Production History
 UI mounting and secondary-editor historical content routing remain unimplemented.
 
 ---

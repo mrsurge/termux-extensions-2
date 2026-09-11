@@ -31,11 +31,9 @@ class ExplorerHistory:
         self._retained: deque[HistoryCommit] = deque(maxlen=500)
         self._project: Path | None = None
         self._project_generation: int | None = None
-        self._head: str | None = None
-        self._wanted_head: str | None = None
         self._closed: bool = False
         self._commands: asyncio.Lock = asyncio.Lock()
-        event_bus.subscribe("GitSnapshotChanged", self.on_fact)
+        self._ref_refresh: asyncio.Handle | None = None
         event_bus.subscribe("ProjectSwitchStarted", self.on_fact)
 
     @property
@@ -51,6 +49,7 @@ class ExplorerHistory:
     def open(self) -> dict[str, object]:
         if self._closed:
             raise ValueError("History connection is closed")
+        self._cancel_ref_refresh()
         previous = self._task
         self._revision += 1
         revision = self._revision
@@ -65,6 +64,7 @@ class ExplorerHistory:
         return {"generation": revision, "status": "opening"}
 
     def invalidate_project(self) -> None:
+        self._cancel_ref_refresh()
         self._revision += 1
         self._project = None
         if self._task is not None:
@@ -88,7 +88,6 @@ class ExplorerHistory:
 
     async def dispose(self) -> None:
         self._closed = True
-        event_bus.unsubscribe("GitSnapshotChanged", self.on_fact)
         event_bus.unsubscribe("ProjectSwitchStarted", self.on_fact)
         await self.close()
 
@@ -98,15 +97,17 @@ class ExplorerHistory:
         if event["type"] == "ProjectSwitchStarted":
             self.invalidate_project()
             return
-        if event["project_root"] != str(self._project) or event["project_generation"] != self._project_generation:
-            return
-        status = event_bus.event_payload_object(event, "status")
-        head_value = status.get("head")
-        if not isinstance(head_value, dict):
-            return
-        head = cast(dict[str, object], head_value).get("full")
-        if isinstance(head, str) and head != self._head and head != self._wanted_head:
-            self._wanted_head = head
+
+    def _cancel_ref_refresh(self) -> None:
+        if self._ref_refresh is not None:
+            self._ref_refresh.cancel()
+            self._ref_refresh = None
+
+    def _refresh_refs(self, revision: int) -> None:
+        self._ref_refresh = None
+        # Coalesce one event-loop delivery batch without timers or Git reads in
+        # the fact handler. A project switch/close cancels this scheduled intent.
+        if revision == self._revision and self._project == self._root() and not self._closed:
             _ = self.open()
 
     async def _notify(self, revision: int, kind: str, payload: dict[str, object]) -> None:
@@ -131,8 +132,6 @@ class ExplorerHistory:
                 self._session = session
                 snapshot = session.snapshot
                 assert snapshot is not None
-                self._head = snapshot.head_id
-                self._wanted_head = snapshot.head_id
                 async def publish(update: HistoryStatisticsUpdate) -> None:
                     # These are typed dataclasses, not unchecked transport objects.
                     await self._notify(revision, "statistics", {"statistics": cast(dict[str, object], asdict(update))})
@@ -144,7 +143,13 @@ class ExplorerHistory:
                 _ = await self._page(revision, session)
                 if not ready.done():
                     ready.set_result(session)
-                _ = await asyncio.Event().wait()
+                error = await session.wait_changed()
+                if error is not None:
+                    await self._notify(revision, "watcherError", {"error": error})
+                    _ = await asyncio.Event().wait()
+            # Close the old producer/watcher before scheduling replacement.
+            if revision == self._revision:
+                self._ref_refresh = asyncio.get_running_loop().call_soon(self._refresh_refs, revision)
         except asyncio.CancelledError:
             raise
         except Exception as error:

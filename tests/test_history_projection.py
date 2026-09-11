@@ -8,13 +8,63 @@ from typing import final
 from unittest.mock import patch
 
 from app.libs import pipe_runtime
+from app.libs.pipe_protocol import PipeEnvelope
 from app.apps.code_te2.explorer.services.history_projection import ExplorerHistory
-from app.apps.code_te2.worker_services import event_bus
-from tests.test_history_service import response
+from tests.test_history_service import response, mapping
 
 
 @final
 class HistoryProjectionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_early_native_invalidation_reopens_without_wba_facts(self) -> None:
+        pages = asyncio.Event()
+        opens = 0
+        async def fake(method: str, params: object = None, **_kwargs: object) -> object:
+            nonlocal opens
+            if method.endswith("open"):
+                opens += 1
+                if opens == 1:
+                    event = PipeEnvelope(kind="notification", method="git.historyGraph.changed",
+                        origin_nid=2200, origin_name="service.git", workspace_root="/project",
+                        project_generation=0, params={"version": 1,
+                            "sessionId": mapping(params)["sessionId"], "error": None})
+                    for _ in range(10):
+                        _ = pipe_runtime.accept_notification(event)
+            return response(method, params)
+        async def emit(method: str, payload: dict[str, object], reply_to: str | None = None) -> None:
+            del method, reply_to
+            if payload["kind"] == "page" and payload["generation"] == 2:
+                pages.set()
+        with patch.object(pipe_runtime, "call_async", fake):
+            controller = ExplorerHistory(lambda: Path("/project"), emit)
+            _ = controller.open()
+            _ = await asyncio.wait_for(pages.wait(), 2)
+            self.assertEqual(opens, 2)
+            await controller.dispose()
+
+    async def test_watcher_error_is_visible_without_retry_loop(self) -> None:
+        error_seen = asyncio.Event()
+        opens = 0
+        async def fake(method: str, params: object = None, **_kwargs: object) -> object:
+            nonlocal opens
+            if method.endswith("open"):
+                opens += 1
+                _ = pipe_runtime.accept_notification(PipeEnvelope(kind="notification",
+                    method="git.historyGraph.changed", origin_nid=2200, origin_name="service.git",
+                    workspace_root="/project", project_generation=0,
+                    params={"version": 1, "sessionId": mapping(params)["sessionId"], "error": "overflow"}))
+            return response(method, params)
+        async def emit(method: str, payload: dict[str, object], reply_to: str | None = None) -> None:
+            del method, reply_to
+            if payload["kind"] == "watcherError":
+                self.assertEqual(payload["error"], "overflow")
+                error_seen.set()
+        with patch.object(pipe_runtime, "call_async", fake):
+            controller = ExplorerHistory(lambda: Path("/project"), emit)
+            _ = controller.open()
+            _ = await asyncio.wait_for(error_seen.wait(), 2)
+            self.assertEqual(opens, 1)
+            await controller.dispose()
+
     async def test_graph_precedes_stats_and_dispose_closes_native_session(self) -> None:
         calls: list[str] = []
         notices: list[dict[str, object]] = []
@@ -68,36 +118,6 @@ class HistoryProjectionTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(all(n["generation"] == second["generation"] for n in notices))
             with self.assertRaises(ValueError):
                 _ = await controller.more(1)
-            await controller.dispose()
-
-    async def test_head_fact_coalesces_and_disk_status_does_not_refresh(self) -> None:
-        page = asyncio.Event()
-        opens = 0
-        async def fake(method: str, params: object = None, **_kwargs: object) -> object:
-            nonlocal opens
-            if method.endswith("open"):
-                opens += 1
-            return response(method, params)
-        async def emit(method: str, payload: dict[str, object], reply_to: str | None = None) -> None:
-            del method, reply_to
-            if payload["kind"] == "page":
-                page.set()
-        with patch.object(pipe_runtime, "call_async", fake):
-            controller = ExplorerHistory(lambda: Path("/project"), emit)
-            _ = controller.open()
-            _ = await asyncio.wait_for(page.wait(), 2)
-            def fact(head: str) -> event_bus.WorkerEvent:
-                return event_bus.build_event("GitSnapshotChanged", project_root="/project",
-                    payload={"status": {"head": {"full": head}}}, source="test")
-            await controller.on_fact(fact("b" * 40))
-            self.assertEqual(opens, 1)
-            page.clear()
-            await controller.on_fact(fact("c" * 40))
-            revision = controller.revision
-            await controller.on_fact(fact("c" * 40))
-            self.assertEqual(controller.revision, revision)
-            _ = await asyncio.wait_for(page.wait(), 2)
-            self.assertEqual(opens, 2)
             await controller.dispose()
 
     async def test_project_change_fences_existing_projection(self) -> None:

@@ -47,6 +47,24 @@ def response(action: str, params: object) -> dict[str, object]:
 
 @final
 class HistoryServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_native_notifications_are_exact_session_and_generation(self) -> None:
+        from app.libs.pipe_protocol import PipeEnvelope
+        async def fake(method: str, params: object = None, **_kwargs: object) -> object:
+            return response(method, params)
+        with patch.object(pipe_runtime, "call_async", fake):
+            async with history.history_session(Path("/project"), 9) as session:
+                for identity, generation in [("wrong", 9), (session.session_id, 10)]:
+                    _ = pipe_runtime.accept_notification(PipeEnvelope(kind="notification",
+                        method="git.historyGraph.changed", origin_nid=2200, origin_name="service.git",
+                        workspace_root="/project", project_generation=generation,
+                        params={"version": 1, "sessionId": identity, "error": "wrong event"}))
+                _ = pipe_runtime.accept_notification(PipeEnvelope(kind="notification",
+                    method="git.historyGraph.changed", origin_nid=2200, origin_name="service.git",
+                    workspace_root="/project", project_generation=9,
+                    params={"version": 1, "sessionId": session.session_id, "error": None}))
+                self.assertIsNone(await asyncio.wait_for(session.wait_changed(), 2))
+            self.assertTrue(session.closed)
+
     async def test_lazy_files_and_blob_pair_decode_without_advancing_graph(self) -> None:
         async def fake(method: str, params: object = None, **_kwargs: object) -> object:
             return response(method, params)

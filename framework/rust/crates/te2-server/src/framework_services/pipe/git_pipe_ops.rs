@@ -27,9 +27,40 @@ pub(super) async fn dispatch_git_request(
             >(request.params.clone().unwrap_or_else(|| json!({})))
             {
                 Ok(params) => {
+                    let changed = event_sink.clone().map(|sink| {
+                        let request = request.clone();
+                        let responder = responder.clone();
+                        let session_id = params.session_id.clone();
+                        Arc::new(move |result: Result<(), String>| {
+                            let mut envelope =
+                                PipeEnvelope::success_response(&request, &responder, json!(null));
+                            envelope.kind = super::protocol::PipeMessageKind::Notification;
+                            envelope.id = None;
+                            envelope.result = None;
+                            envelope.method = Some("git.historyGraph.changed".into());
+                            envelope.params = Some(json!({"version":1, "sessionId":session_id,
+                                "error":result.err()}));
+                            if let Err(error) = sink.send(envelope) {
+                                tracing::warn!(%error, "History ref notification failed");
+                            }
+                        })
+                            as crate::framework_services::history_watch::Changed
+                    });
+                    if method == "git.historyGraph.open" && changed.is_none() {
+                        return Some(PipeEnvelope::error_response(
+                            request,
+                            responder,
+                            PipeError::new(
+                                "git.historyGraph.error",
+                                "History requires a pipe event sink",
+                                false,
+                                None,
+                            ),
+                        ));
+                    }
                     scheduler
                         .history_sessions
-                        .dispatch(
+                        .dispatch_watched(
                             method,
                             crate::framework_services::history_sessions::Owner {
                                 nid: request.origin_nid,
@@ -38,6 +69,7 @@ pub(super) async fn dispatch_git_request(
                                 generation: request.project_generation,
                             },
                             params,
+                            changed,
                         )
                         .await
                 }

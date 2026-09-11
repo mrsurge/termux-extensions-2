@@ -114,7 +114,18 @@ impl Drop for Finished {
 }
 
 impl HistorySessions {
+    #[cfg(test)]
     pub(crate) async fn dispatch(&self, method: &str, owner: Owner, params: Request) -> Reply {
+        self.dispatch_watched(method, owner, params, None).await
+    }
+
+    pub(crate) async fn dispatch_watched(
+        &self,
+        method: &str,
+        owner: Owner,
+        params: Request,
+        changed: Option<super::history_watch::Changed>,
+    ) -> Reply {
         if params.version != 1
             || params.session_id.is_empty()
             || params.session_id.len() > 128
@@ -126,7 +137,7 @@ impl HistorySessions {
             return Err("Invalid history session contract".into());
         }
         match method {
-            "git.historyGraph.open" => self.open(owner, params).await,
+            "git.historyGraph.open" => self.open(owner, params, changed).await,
             "git.historyGraph.next" => self.next(owner, params).await,
             "git.historyGraph.files" | "git.historyGraph.blob" => {
                 self.detail(method, owner, params).await
@@ -149,7 +160,12 @@ impl HistorySessions {
         }
     }
 
-    async fn open(&self, owner: Owner, params: Request) -> Reply {
+    async fn open(
+        &self,
+        owner: Owner,
+        params: Request,
+        changed: Option<super::history_watch::Changed>,
+    ) -> Reply {
         if params.limit.is_some()
             || params.offset.is_some()
             || params.commit_id.is_some()
@@ -195,7 +211,7 @@ impl HistorySessions {
             .spawn(move || {
                 let _permit = permit;
                 let _finished = Finished(entry.finished.clone());
-                run(owner, session, entry, rx, reply);
+                run(owner, session, entry, rx, reply, changed);
             });
         if let Err(error) = spawned {
             self.entries
@@ -312,11 +328,22 @@ fn run(
     entry: Arc<Entry>,
     commands: mpsc::Receiver<Command>,
     reply: ReplySender,
+    changed: Option<super::history_watch::Changed>,
 ) {
     let repo = match git2::Repository::open(&owner.root) {
         Ok(repo) => repo,
         Err(error) => {
             let _ = reply.send(Err(error.to_string()));
+            return;
+        }
+    };
+    let _watcher = match changed
+        .map(|callback| super::history_watch::HistoryWatch::new(&repo, callback))
+        .transpose()
+    {
+        Ok(watcher) => watcher,
+        Err(error) => {
+            let _ = reply.send(Err(format!("History watcher unavailable: {error}")));
             return;
         }
     };
@@ -451,6 +478,38 @@ mod tests {
             index: None,
         }
     }
+    #[tokio::test]
+    async fn history_watched_session_releases_watch_on_close() {
+        let (_dir, owner) = fixture();
+        let registry = HistorySessions::default();
+        let (tx, rx) = mpsc::channel();
+        let callback = Arc::new(move |result| {
+            let _ = tx.send(result);
+        });
+        let _ = registry
+            .dispatch_watched(
+                "git.historyGraph.open",
+                owner.clone(),
+                request("watched", None),
+                Some(callback),
+            )
+            .await
+            .unwrap();
+        let repo = git2::Repository::open(&owner.root).unwrap();
+        let head = repo.head().unwrap().target().unwrap();
+        repo.reference("refs/tags/watched", head, true, "test")
+            .unwrap();
+        assert_eq!(rx.recv_timeout(Duration::from_secs(3)).unwrap(), Ok(()));
+        let _ = registry
+            .dispatch("git.historyGraph.close", owner, request("watched", None))
+            .await
+            .unwrap();
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_secs(3)),
+            Err(mpsc::RecvTimeoutError::Disconnected)
+        ));
+    }
+
     #[tokio::test]
     async fn open_page_close_and_generation_ownership() {
         let (_dir, owner) = fixture();

@@ -75,10 +75,18 @@
   work set, explicit incomplete/error states and late-result fencing.
   Five producer tests plus six transport tests pass; strict Basedpyright clean.
 - [x] Connect the producer to an Explorer-owned History session, exact-client
-  notifications, HEAD-fact refresh, disconnect and project-switch teardown.
+  notifications, native-ref refresh, disconnect and project-switch teardown.
   Open/refresh acknowledge before native reads; more/files/close fence generation.
-- [ ] Complete invalidation for non-HEAD branch/tag tips and HEAD disappearance;
-  these currently require explicit refresh rather than polling.
+- [x] Replace the interim HEAD/workspace-fact path with native History metadata
+  watches, including linked-worktree/common Git dirs and non-IPC watcher modes.
+  Watches precede snapshots; exact-session notifications coalesce bursts and
+  handle HEAD/branch/ref changes without comparing stale HEAD state.
+- [x] Bound metadata-directory watches and notifications; ignore access/index/
+  object/log/lock/worktree noise. Errors/overflow are explicit, not polling.
+- [x] Native watcher validation on Termux: 20 filtered Rust tests pass, including
+  linked-worktree shared refs, atomic replacement, new directories, early
+  invalidation, error/overflow classification and teardown. Seventeen Python
+  tests pass; strict Basedpyright reports zero errors/warnings. No live restart.
 - [x] Lazy file-page counts and bounded historical blob pairs through the existing
   History session: first-parent/root comparison, shared rename pairing, explicit
   absent/binary/oversized/encoding states and typed Python decoding. Commit-wide
@@ -122,7 +130,7 @@ Current checkpoint: standalone upstream-derived view foundation is implemented;
 it is not mounted/imported by the application entry point yet. The browser tree
 constructor is supplied to the host explicitly; production asset wiring remains
 part of Phase 4. Native reads, statistics and Explorer backend projection are
-implemented. Fifteen Python tests cover transport, producer and connection
-lifecycle. Remaining Phase 2 work includes full ref invalidation and performance
+implemented. Seventeen Python tests cover transport, producer and connection
+lifecycle. Remaining Phase 2 work includes performance
 acceptance; secondary historical content and frontend mounting follow, not WBA.
 No restarts, APK asset publication or version changes.
