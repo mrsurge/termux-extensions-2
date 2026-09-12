@@ -25,6 +25,7 @@ import {
 } from "../tree/view-utils.ts";
 
 interface ExplorerSearchOverlayController {
+  handleHistoryUpdated(payload: JsonObject): void;
   fetchChangesResults(force?: boolean): Promise<void> | void;
   handleSearchResultsUpdated(payload: JsonObject): void;
   handleSearchJobProgress(payload: JsonObject): void;
@@ -242,6 +243,9 @@ export function createExplorerNotificationHandler(
     }
 
     switch (method) {
+      case EXPLORER_RPC_NOTIFICATIONS.historyUpdated:
+        deps.searchOverlayController.handleHistoryUpdated(payload);
+        break;
       case EXPLORER_RPC_NOTIFICATIONS.prefsUiUpdated: {
         const ui = isRecord(payload.ui) ? payload.ui : null;
         const next = ui?.explorerStickyHeaders;

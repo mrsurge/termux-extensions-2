@@ -5,13 +5,14 @@
 
 import { SWIMLANE_WIDTH, renderSCMHistoryItemGraph, renderSCMHistoryGraphPlaceholder, getHistoryItemIndex, historyItemHoverLabelForeground, historyItemHoverDefaultLabelBackground } from './scmHistory.ts';
 import type { ISCMHistoryItem, ISCMHistoryItemRef, ISCMHistoryItemViewModel, ISCMHistoryItemGraphNode } from '../common/history.ts';
-import { appendElement, renderFileSummary, renderCounts, groupBy, historyIconId } from '../../pane-platform.ts';
+import { appendElement, renderFileSummary, renderCounts, groupBy, historyIconId, type HistoryFileIconResolver } from '../../pane-platform.ts';
 import type { HistoryFileRow, HistoryFileTemplate, HistoryCommitRow, HistoryCommitTemplate, HistoryLoadMoreRow, HistoryLoadMoreTemplate, HistoryRow, HistoryTreeInput, HistoryChildrenReader, HistoryFileSummary, HistoryErrorRow } from '../../pane-platform.ts';
 import { asCssVariable, foreground } from '../../platform.ts';
 
 // Standalone rows/data source from the preserved pane. Workbench registrations,
 // command services and editor dispatch are replaced by the typed TE2 host.
 export class HistoryItemChangeRenderer {
+	constructor(private readonly resolveIcon?: HistoryFileIconResolver) { }
 	static readonly TEMPLATE_ID = 'history-item-change';
 	get templateId(): string { return HistoryItemChangeRenderer.TEMPLATE_ID; }
 
@@ -29,7 +30,7 @@ export class HistoryItemChangeRenderer {
 	renderElement(node: { readonly element: HistoryFileRow }, _index: number, templateData: HistoryFileTemplate): void {
 		const { historyItemViewModel, graphColumns } = node.element;
 		this._renderGraphPlaceholder(templateData, historyItemViewModel, graphColumns);
-		renderFileSummary(templateData, node.element);
+		renderFileSummary(templateData, node.element, this.resolveIcon);
 	}
 
 	renderCompressedElements(): never {
@@ -38,11 +39,11 @@ export class HistoryItemChangeRenderer {
 
 	private _renderGraphPlaceholder(templateData: HistoryFileTemplate, historyItemViewModel: ISCMHistoryItemViewModel, graphColumns: ISCMHistoryItemGraphNode[]): void {
 		const graphPlaceholderSvgWidth = SWIMLANE_WIDTH * (graphColumns.length + 1);
-		const marginLeft = graphPlaceholderSvgWidth - 16 /* .monaco-tl-indent left */;
-		templateData.rowElement.style.marginLeft = `${marginLeft}px`;
-
+		// The standalone tree has no workbench indent/twisty gutter. Graphs are
+		// ordinary first-column content, sharing the commit row's exact origin.
+		templateData.rowElement.style.marginLeft = '';
 		templateData.graphPlaceholder.textContent = '';
-		templateData.graphPlaceholder.style.left = `${-1 * marginLeft}px`;
+		templateData.graphPlaceholder.style.left = '';
 		templateData.graphPlaceholder.style.width = `${graphPlaceholderSvgWidth}px`;
 		templateData.graphPlaceholder.appendChild(renderSCMHistoryGraphPlaceholder(graphColumns, getHistoryItemIndex(historyItemViewModel)));
 	}
@@ -171,7 +172,7 @@ export class HistoryItemLoadMoreRenderer {
 		templateData.graphPlaceholder.textContent = '';
 		templateData.graphPlaceholder.style.width = `${SWIMLANE_WIDTH * (element.element.graphColumns.length + 1)}px`;
 		templateData.graphPlaceholder.appendChild(renderSCMHistoryGraphPlaceholder(element.element.graphColumns));
-		templateData.historyItemPlaceholderLabel.textContent = { idle: 'Load More...', loading: 'Loading...', error: 'Retry loading more' }[element.element.state];
+		templateData.historyItemPlaceholderLabel.textContent = { idle: 'Scroll for more history', loading: 'Loading...', error: 'Retry loading more' }[element.element.state];
 		templateData.element.setAttribute('aria-busy', String(element.element.state === 'loading'));
 	}
 
@@ -242,6 +243,7 @@ export class SCMHistoryTreeDataSource {
 			children.push(...historyItemChanges.map(change => ({
 				path: change.path,
 				previousPath: change.previousPath,
+				status: change.status,
 				counts: change.counts,
 				historyItemViewModel: inputOrElement.historyItemViewModel,
 				graphColumns: inputOrElement.historyItemViewModel.outputSwimlanes,

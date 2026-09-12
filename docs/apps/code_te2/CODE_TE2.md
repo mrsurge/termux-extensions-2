@@ -969,10 +969,47 @@ User live acceptance and broader end-to-end concurrency validation remain pendin
 
 ## 6.7) Source Control History Component Foundation
 
-The isolated component under `src/explorer/history/vscode_scm/` is implemented
-but not yet imported by the application entry point or mounted as an Explorer
-tab. It is not a WBA feature. Python projection is implemented; production asset
-wiring and historical second-editor routing remain subsequent integration work.
+The component under `src/explorer/history/vscode_scm/` is mounted in the advanced
+Explorer History tab. It is not a WBA feature. Its controller consumes the
+Explorer history notification/RPC lane independently of the search scheduler.
+The production build verifies and bundles the real upstream tree into the existing
+`host.js` and `host.css`; no additional runtime script is requested.
+
+Open acknowledgements and early notifications are reconciled by generation;
+reconnect starts fresh, and leaving the tab closes its session (including an
+open acknowledged after disposal). Metadata and statistics update the same tree,
+preserving expanded children. Commit expansion reads native file pages lazily;
+file clicks pass the pinned generation/commit/native index to `history.openFile`.
+The controller bounds presentation to 500 commits, 500 files per expansion and
+2,000 indexed summaries per generation. File-limit failures are explicit, not
+silently truncated results. Native-device acceptance remains pending.
+
+History establishes a missing restored-project fact generation before admission,
+using the worker event bus rather than storing a private generation-zero fallback.
+The native five-minute idle lease publishes an exact-session expiry notification.
+Python stops queued statistics and closes that session; the frontend discards its
+actionable rows and offers Refresh. Late statistics cannot revive it. There is no
+keepalive, polling, or automatic replay of a selected file against a new snapshot.
+
+The standalone pane removes the visible twisty/indent gutter; whole-row expansion
+and keyboard/ARIA semantics remain owned by the actual upstream tree. File graphs
+are in-flow first-column content, not negative-offset workbench overlays. File
+rows use the file tabs' filename-aware vendored Seti resolver, with a generic
+Codicon fallback, and a green A from native `added` status. Late icon resolution
+cannot mutate a recycled row. Numeric
+addition/deletion pills share a host-wide digit width which grows with observed
+counts. Selected rows use a square 2px light-blue inset border/dark-gray fill;
+the History font is 12px while graph rows retain their 22px height.
+Count pills are 16px tall with 10px text and a `currentColor` border, leaving
+vertical breathing room without changing row geometry. Refresh History uses
+the same dark-gray background as selected rows.
+selection remains local to this tree/client.
+
+The tree's own scroll event requests a page within three 22px rows of the end.
+Requests are single-flight and require row-count advancement before another
+automatic request; errors require explicit retry. Layout can fill an undersized
+viewport. The continuation row retains keyboard/click access as a fallback,
+without a timer or DOM intersection sentinel for virtualized rows.
 
 `UPSTREAM.md`, the manifests and patch series record the exact VS Code revision,
 original hashes and reproducible adaptations. The graph algorithm, SVG geometry,
@@ -1002,7 +1039,7 @@ Late reads cannot render into a replacement host. Two explicit upstream patches
 fix unobserved active-node debounce and refresh-cleanup rejections; there is no
 global error suppressor or production grace timer. DOM tests exercise the actual
 tree, including mouse/touch/keyboard events, expanded-row retention, retries,
-in-flight disposal, and stylesheet scope. Device acceptance awaits UI integration.
+in-flight disposal, and stylesheet scope. Device acceptance remains pending.
 
 ### Native Graph Reader Foundation
 
@@ -1074,6 +1111,19 @@ may remain separate additions/deletions. A commit exceeding 20,000 changed files
 fails explicitly. Native tree enumeration/rename matching precedes the first file
 page; per-file patches/counts are computed only for the requested page, not for
 the entire commit or graph. The statistics producer below schedules aggregation.
+
+Line counts have a separate 16 MiB-per-side native budget. Both object headers
+are checked before constructing a zero-context libgit2 patch; counting does not
+materialize preview strings or impose preview UTF-8 admission. Large generated
+text can therefore have exact line counts while its editor preview remains
+blocked by the unchanged 375 KiB limit. Binary/unsupported/over-budget counts
+remain explicit. These bounds do not make libgit2 diff allocation or execution
+interruptible within an individual patch operation.
+
+The frontend preserves known totals for incomplete/error statistics as starred
+numeric pills, with a partial-total tooltip identifying uncounted files or an
+interrupted calculation. An unknown file never turns the entire known sum into
+Unavailable, and partial sums are never labeled as complete.
 
 File summaries return status, old/new paths and blob IDs, plus counts with ready,
 binary, tooLarge or unavailable states. Blob sides are absent, text, binary,
@@ -1160,7 +1210,7 @@ overflow emits `watcherError` and leaves explicit Refresh available, without an
 automatic retry loop. Native-filesystem event availability remains a prerequisite;
 unsupported/network filesystems do not gain an implicit polling fallback.
 The existing session idle lease also bounds abandoned watches. Production History
-UI mounting and secondary-editor historical content routing remain unimplemented.
+UI mounting and secondary-editor historical content routing are connected.
 
 `history_performance.rs` contains an ignored, explicit-root read-only benchmark
 of watched History startup, first-page traversal, and scheduler baseline reads
@@ -1211,7 +1261,7 @@ avoid a circular import. The secondary page defers a kind-switch reload until
 in-flight presentation commands are acknowledged. History opening bypasses WBA
 readiness and never uses `hostFileOpen` or a fabricated disk path.
 
-The graph UI is not mounted yet, so user-click activation and WBA facade
+The graph UI now invokes this handoff. User-click activation and WBA facade
 disposal/end-to-end native behavior still require acceptance. Handoff tests cover
 single use, capacity, expiry, supersession, project/session fencing, secondary
 role enforcement and publication after descriptor commitment.
@@ -1265,7 +1315,7 @@ and rejects mutation/unknown commands. Focus listeners retain the selected diff
 side across menu focus and are disposed with the view. Clipboard failures surface
 through the host toast; no working-model fallback is allowed.
 
-Graph mounting/click activation and mobile touch-selection
+Graph mounting/click activation is connected; mobile touch-selection
 affordances still require integration. Six lifecycle tests cover boot,
 reconnect reuse, replacement, cross-kind reload, failure retry and disposal;
 real secondary-client acceptance remains pending.

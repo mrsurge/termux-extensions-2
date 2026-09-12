@@ -289,7 +289,7 @@ export function createExplorerSearchController(
     preparedPayload?: JsonObject,
   ): Promise<void> {
     const mode = deps.getSearchMode();
-    if (mode === "changes" || mode === "review") return;
+    if (mode === "changes" || mode === "review" || mode === "history") return;
     if (!deps.getProjectPath()) {
       deps.setSearchError("No project open");
       deps.setSearchLoading(false);
@@ -337,7 +337,7 @@ export function createExplorerSearchController(
     preparedPayload?: JsonObject,
   ): void {
     const mode = deps.getSearchMode();
-    if (mode === "changes" || mode === "review") return;
+    if (mode === "changes" || mode === "review" || mode === "history") return;
     deps.setSearchQuery(query);
     clearTimer();
     syncSearchHighlight(query);
@@ -474,7 +474,7 @@ export function createExplorerSearchController(
       return;
     }
 
-    if (mode === "diagnostics") {
+    if (mode === "diagnostics" || mode === "history") {
       deps.setSearchLoading(false);
       deps.setSearchError(null);
       setSearchStatus(null);

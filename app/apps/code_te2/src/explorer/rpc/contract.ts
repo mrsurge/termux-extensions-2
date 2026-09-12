@@ -7,6 +7,11 @@ import type {
 export const EXPLORER_RPC_NAMESPACE = RPC_NAMESPACES.explorer;
 
 export const EXPLORER_RPC_METHODS = {
+  historyOpen: 'explorer.history.open',
+  historyMore: 'explorer.history.more',
+  historyFiles: 'explorer.history.files',
+  historyClose: 'explorer.history.close',
+  historyOpenFile: 'explorer.history.openFile',
   dirCreate: "explorer.dir.create",
   entriesCopy: "explorer.entries.copy",
   entriesDelete: "explorer.entries.delete",
@@ -80,6 +85,7 @@ export const EXPLORER_RPC_METHODS = {
 } as const;
 
 export const EXPLORER_RPC_NOTIFICATIONS = {
+  historyUpdated: 'explorer.history.updated',
   autosaveContent: "explorer.autosave.content",
   diagnosticsDetail: "explorer.diagnostics.detail",
   draftContent: "explorer.draft.content",

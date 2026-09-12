@@ -11,6 +11,10 @@ export interface HistoryTreeRenderer {
   disposeTemplate(template: unknown): void;
 }
 export interface HistoryTree {
+  readonly scrollTop: number;
+  readonly scrollHeight: number;
+  readonly renderHeight: number;
+  onDidScroll(listener: (event: { readonly scrollTopChanged: boolean }) => void): TreeDisposable;
   setInput(input: HistoryTreeInput): Promise<void>;
   updateChildren(input: HistoryTreeInput | HistoryRow, recursive: boolean, rerender: boolean): Promise<void>;
   layout(height: number, width: number): void;

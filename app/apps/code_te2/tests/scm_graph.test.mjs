@@ -13,14 +13,19 @@ async function load(file) {
 await load('adapted/test/browser/scmHistory.test.ts');
 const graph = await load('adapted/browser/scmHistory.ts');
 const { HistoryItemChangeRenderer } = await load('adapted/browser/scmHistoryViewPane.ts');
-test('file-row graph geometry remains the literal upstream implementation', () => {
+test('file-row SVG stays upstream-owned while standalone layout removes workbench offsets', () => {
   const extract = file => {
     const source = fs.readFileSync(path.join(root, file), 'utf8');
     const start = source.indexOf('\tprivate _renderGraphPlaceholder(');
     return source.slice(start, source.indexOf('\n\tdisposeTemplate(', start))
       .replace('HistoryItemChangeTemplate', 'HistoryFileTemplate');
   };
-  assert.equal(extract('adapted/browser/scmHistoryViewPane.ts'), extract('upstream/browser/scmHistoryViewPane.ts'));
+  const adapted = extract('adapted/browser/scmHistoryViewPane.ts');
+  const original = extract('upstream/browser/scmHistoryViewPane.ts');
+  const renderCall = 'renderSCMHistoryGraphPlaceholder(graphColumns, getHistoryItemIndex(historyItemViewModel))';
+  assert.ok(adapted.includes(renderCall) && original.includes(renderCall));
+  assert.ok(adapted.includes("style.marginLeft = ''"));
+  assert.ok(adapted.includes("style.left = ''"));
 });
 test('upstream file row preserves lanes on reuse and displays unknown counts honestly', () => {
   const win = new Window(); globalThis.document = win.document;

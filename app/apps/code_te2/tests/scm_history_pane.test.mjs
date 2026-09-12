@@ -82,7 +82,7 @@ test('commit and load-more templates retain graph, grouped refs and recycled sta
     assert.equal(moreTemplate.graphPlaceholder.querySelectorAll('path').length, 2);
     assert.equal(moreTemplate.element.getAttribute('aria-busy'), String(state === 'loading'));
   }
-  assert.equal(moreTemplate.historyItemPlaceholderLabel.textContent, 'Load More...');
+  assert.equal(moreTemplate.historyItemPlaceholderLabel.textContent, 'Scroll for more history');
   more.disposeTemplate(moreTemplate);
 });
 
@@ -224,7 +224,10 @@ test('base-tree and history styles are bounded to the history host', async () =>
   function visit(rules) {
     for (const rule of rules) {
       if (rule.type === win.CSSRule.STYLE_RULE) {
-        assert.match(rule.selectorText, /\.te2-scm-history/, rule.selectorText);
+        // The controller's explicit Refresh control sits outside the virtual tree.
+        if (!['.fe-history-refresh', '.fe-history-refresh:focus-visible'].includes(rule.selectorText)) {
+          assert.match(rule.selectorText, /\.te2-scm-history/, rule.selectorText);
+        }
         selectors++;
       }
       if ('cssRules' in rule) visit(rule.cssRules);
@@ -232,4 +235,89 @@ test('base-tree and history styles are bounded to the history host', async () =>
   }
   visit(sheet.cssRules);
   assert.ok(selectors > 30, 'checks the generated dependency CSS, not an empty stylesheet');
+});
+
+test('file rows keep graph in flow and render recycled codicons, added status and count pills', () => {
+  const outer = win.document.createElement('div');
+  const container = win.document.createElement('div'); outer.append(container);
+  const renderer = new pane.HistoryItemChangeRenderer();
+  const template = renderer.renderTemplate(container);
+  const owner = commitRows()[0].historyItemViewModel;
+  const file = { type: 'historyItemChangeViewModel', historyItemViewModel: owner,
+    graphColumns: owner.outputSwimlanes, path: 'new.py', status: 'added',
+    counts: { state: 'ready', additions: 1000, deletions: 2 } };
+  renderer.renderElement({ element: file }, 0, template);
+  assert.equal(outer.style.marginLeft, ''); assert.equal(template.graphPlaceholder.style.left, '');
+  assert.ok(template.label.querySelector('.codicon-file'));
+  assert.equal(template.label.querySelector('.history-file-added').textContent, 'A');
+  assert.equal(template.statistics.querySelector('.history-additions').textContent, '+1000');
+  assert.equal(template.statistics.querySelector('.history-deletions').textContent, '-2');
+  renderer.renderElement({ element: { ...file, status: 'modified', path: 'old.py' } }, 1, template);
+  assert.equal(template.label.querySelector('.history-file-added'), null);
+  assert.equal(template.label.querySelectorAll('.codicon').length, 1);
+  renderer.disposeTemplate(template);
+});
+
+test('scroll prefetch is three rows early, single-flight, and waits for page advancement', async () => {
+  const container = win.document.createElement('div'); win.document.body.append(container);
+  const rows = graph.toISCMHistoryItemViewModelArray(Array.from({ length: 30 }, (_, i) => ({
+    id: `commit-${i}`, parentIds: i < 29 ? [`commit-${i + 1}`] : [], subject: `Commit ${i}`, message: ''
+  }))).map(historyItemViewModel => ({ type: 'historyItemViewModel', historyItemViewModel, counts: { state: 'pending' } }));
+  const more = { type: 'historyItemLoadMore', state: 'idle', graphColumns: [] };
+  let calls = 0, finish;
+  const host = new hostModule.HistoryTreeHost(container, upstream.CompressibleAsyncDataTree,
+    { type: 'historyRoot', id: 'scroll', rows: [...rows, more] }, async () => [], {
+      openFile: async () => {}, onError: assert.fail,
+      loadMore: () => { calls++; return new Promise(resolve => { finish = resolve; }); }
+    });
+  try {
+    await host.ready; host.layout(110, 600); await tick();
+    assert.equal(calls, 0);
+    host.tree.scrollTop = host.tree.scrollHeight - host.tree.renderHeight - 65;
+    await tick(); assert.equal(calls, 1);
+    host.tree.scrollTop += 1; await tick(); assert.equal(calls, 1);
+    finish(); await tick(); assert.equal(calls, 1, 'no loop if an acknowledgement arrives before the next page');
+    assert.equal(container.querySelectorAll('.history-item').length > 0, true);
+  } finally { host.dispose(); container.remove(); }
+});
+
+test('file icon resolver receives basename and late SVG cannot alter a recycled row', async () => {
+  const outer = win.document.createElement('div');
+  const container = win.document.createElement('div'); outer.append(container);
+  const names = [], resolvers = [];
+  const renderer = new pane.HistoryItemChangeRenderer(name => {
+    names.push(name); return new Promise(resolve => resolvers.push(resolve));
+  });
+  const template = renderer.renderTemplate(container);
+  const owner = commitRows()[0].historyItemViewModel;
+  const row = { type: 'historyItemChangeViewModel', historyItemViewModel: owner,
+    graphColumns: owner.outputSwimlanes, path: 'src/first.py', counts: { state: 'pending' } };
+  renderer.renderElement({ element: row }, 0, template);
+  renderer.renderElement({ element: { ...row, path: 'lib/second.mjs' } }, 1, template);
+  resolvers[0]({ svg: '<svg data-icon="python"></svg>', color: '#abcdef' });
+  await tick(); assert.equal(template.label.querySelector('svg'), null);
+  resolvers[1]({ svg: '<svg data-icon="javascript"></svg>', color: '#fedcba' });
+  await tick();
+  assert.deepEqual(names, ['first.py', 'second.mjs']);
+  assert.equal(template.label.querySelector('svg').dataset.icon, 'javascript');
+  assert.equal(template.label.querySelectorAll('svg').length, 1);
+  renderer.disposeTemplate(template);
+});
+
+test('partial commit totals retain numeric pills and disclose unknown files', () => {
+  const renderer = new pane.HistoryItemRenderer();
+  const container = win.document.createElement('div');
+  const template = renderer.renderTemplate(container);
+  renderer.renderElement({ element: { ...commitRows()[0], counts: {
+    state: 'partial', additions: 42, deletions: 7, unknownFiles: 2
+  } } }, 0, template);
+  assert.equal(template.statistics.dataset.state, 'partial');
+  assert.equal(template.statistics.textContent, '+42* -7*');
+  assert.match(template.statistics.title, /2 file/);
+  renderer.renderElement({ element: { ...commitRows()[0], counts: {
+    state: 'ready', additions: 50, deletions: 7
+  } } }, 0, template);
+  assert.equal(template.statistics.title, '');
+  assert.equal(template.statistics.textContent, '+50 -7');
+  renderer.disposeTemplate(template);
 });

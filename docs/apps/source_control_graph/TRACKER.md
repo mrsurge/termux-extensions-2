@@ -155,13 +155,39 @@
 
 ## Phase 4: Explorer History Tab
 
-- [ ] Integrate upstream-derived graph view beside existing advanced-search tabs.
-- [ ] Expand commit headers to file +/- summaries with continuous graph lanes.
-- [ ] Stream metadata/stats without waiting for full-history enumeration.
-- [ ] Route file clicks to pinned historical diff in second window only.
-- [ ] No document bodies or Git mutation controls in the graph tab.
+- [x] Integrate upstream-derived graph view beside existing advanced-search tabs.
+- [x] Expand commit headers to file +/- summaries with continuous graph lanes.
+- [x] Stream metadata/stats without waiting for full-history enumeration.
+- [x] Route file clicks to pinned historical diff in second window only.
+- [x] No document bodies or Git mutation controls in the graph tab.
+- [x] Generation-fenced controller handles early notifications, reconnect,
+  replacement and disposal during open. Production builds the verified upstream
+  tree into host.js/host.css. Twenty focused tests, full typecheck and build pass.
+  Current bounds: 500 commits, 500 files per expansion, 2,000 indexed summaries.
+  Source integration is complete; device/live acceptance remains Phase 5.
 
 ## Phase 5: Acceptance
+
+- [x] Compact count pills to 16px inside unchanged 22px rows, with matching
+  green/red text-color borders; Refresh History uses the selected-row dark gray.
+
+- [x] Second live refinement: 12px History type, dark selection fill with a 2px
+  inset blue border, filename-aware vendored icons with recycled-row fencing,
+  and partial numeric totals rather than commit-wide Unavailable. Native count
+  budget is independently bounded at 16 MiB per side; previews retain 375 KiB.
+  Six native file tests and 33 frontend tests pass; TypeScript passes. Live
+  device acceptance remains pending after framework/frontend refresh.
+
+- [x] First live refinement: remove twisty/workbench offsets, align graph origins,
+  add native added-file status, Codicons, aligned numeric pills and local selection
+  styling. Prefetch history three rows before the bottom through upstream scroll
+  events with single-flight/advancement fences. New device acceptance pending.
+- [x] Fix restored-project generation for historical file handoff. Publish native
+  idle expiry and stop stale statistics/rows instead of leaving dead file actions.
+  Six native session tests and 18 Python tests pass; strict Basedpyright is clean.
+  Twenty-three frontend tests, TypeScript, frontend build and upstream patch
+  reproduction pass. Native formatting is clean; no runtime restart was performed.
+  Comments document the affected ownership/lifecycle/layout systems.
 
 - [ ] Regression/type/contract tests and bounded performance/memory evidence.
 - [ ] Gecko and Cefrium mobile touch/keys/drawer/fullscreen acceptance.
@@ -170,12 +196,10 @@
 - [ ] Update technical manual and durable memory with implemented contracts.
 - [ ] User live acceptance; commit/push when requested.
 
-Current checkpoint: standalone upstream-derived view foundation is implemented;
-it is not mounted/imported by the application entry point yet. The browser tree
-constructor is supplied to the host explicitly; production asset wiring remains
-part of Phase 4. Native reads, statistics and Explorer backend projection are
-implemented. Seventeen Python tests cover transport, producer and connection
-lifecycle. Native timing evidence is recorded in PERFORMANCE.md. End-to-end
-performance acceptance remains; secondary historical content and frontend mounting
-follow, not WBA.
+Current checkpoint: `d1d26119` is pushed. History is now mounted in the advanced
+Explorer overlay, with native metadata/statistics, expandable file summaries and
+file-click historical secondary handoff. This mounting slice remains uncommitted
+pending review/live testing. Native timing evidence is recorded in PERFORMANCE.md.
+End-to-end device/performance acceptance and historical mobile touch-selection
+integration remain open; History is not a WBA feature.
 No restarts, APK asset publication or version changes.

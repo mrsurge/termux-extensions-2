@@ -9,12 +9,16 @@ export interface HistoryFileRow {
   readonly graphColumns: ISCMHistoryItemGraphNode[];
   readonly path: string;
   readonly previousPath?: string;
+  readonly status?: string;
   readonly counts: HistoryCounts;
 }
 
 export type HistoryCounts =
   | { readonly state: 'ready'; readonly additions: number; readonly deletions: number }
+  | { readonly state: 'partial'; readonly additions: number; readonly deletions: number; readonly unknownFiles: number }
   | { readonly state: 'pending' | 'binary' | 'unavailable' };
+
+export type HistoryFileIconResolver = (name: string) => Promise<{ svg?: string; color?: string } | null>;
 
 export interface HistoryCommitRow {
   readonly type: 'historyItemViewModel';
@@ -55,6 +59,7 @@ export interface HistoryLoadMoreTemplate {
 export interface HistoryFileSummary {
   readonly path: string;
   readonly previousPath?: string;
+  readonly status?: string;
   readonly counts: HistoryCounts;
 }
 
@@ -95,16 +100,50 @@ export function appendElement(parent: HTMLElement, className: string): HTMLEleme
   return element;
 }
 
-export function renderFileSummary(template: HistoryFileTemplate, row: HistoryFileRow): void {
+export function renderFileSummary(template: HistoryFileTemplate, row: HistoryFileRow, resolveIcon?: HistoryFileIconResolver): void {
   // Use text nodes, never HTML: Git path strings are untrusted display content.
-  template.label.textContent = row.path;
+  const icon = template.label.ownerDocument.createElement('span');
+  icon.className = 'history-file-icon codicon codicon-file';
+  icon.setAttribute('aria-hidden', 'true');
+  const name = template.label.ownerDocument.createElement('span');
+  name.className = 'history-file-path';
+  name.textContent = row.path;
+  template.label.replaceChildren(icon, name);
+  // The production host supplies the same vendored filename resolver as tabs.
+  // A recycled row detaches this icon, fencing any late asynchronous resolution.
+  if (resolveIcon) void resolveIcon(row.path.split('/').at(-1) || row.path).then(resolved => {
+    if (icon.parentElement !== template.label || !resolved?.svg) return;
+    icon.className = 'history-file-icon';
+    icon.innerHTML = resolved.svg; // Trusted vendored SVG, never a Git path string.
+    icon.style.color = resolved.color || '';
+  }).catch(() => {}); // Generic Codicon remains when the icon catalog is unavailable.
+  if (row.status === 'added') {
+    const added = template.label.ownerDocument.createElement('span');
+    added.className = 'history-file-added';
+    added.textContent = 'A';
+    added.title = 'Added in this commit';
+    template.label.append(added);
+  }
   template.label.title = row.previousPath ? `${row.previousPath} -> ${row.path}` : row.path;
   renderCounts(template.statistics, row.counts);
 }
 
 export function renderCounts(target: HTMLElement, counts: HistoryCounts): void {
   target.dataset.state = counts.state;
-  target.textContent = counts.state === 'ready'
-    ? `+${counts.additions} -${counts.deletions}`
-    : { pending: 'Loading', binary: 'Binary', unavailable: 'Unavailable' }[counts.state];
+  // Separate numeric cells share a host-owned width, so recycled rows and
+  // progressively arriving statistics never shift the additions/deletions columns.
+  target.replaceChildren();
+  target.title = counts.state === 'partial'
+    ? `Partial total: ${counts.unknownFiles} file(s) uncounted or counting interrupted. Known text changes only.` : '';
+  if (counts.state === 'ready' || counts.state === 'partial') {
+    const suffix = counts.state === 'partial' ? '*' : '';
+    const plus = appendElement(target, 'history-additions');
+    plus.textContent = `+${counts.additions}${suffix}`;
+    target.append(' ');
+    const minus = appendElement(target, 'history-deletions');
+    minus.textContent = `-${counts.deletions}${suffix}`;
+  } else {
+    const label = appendElement(target, 'history-count-state');
+    label.textContent = { pending: 'Loading', binary: 'Binary', unavailable: 'Unavailable' }[counts.state];
+  }
 }

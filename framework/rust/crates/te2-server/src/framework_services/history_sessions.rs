@@ -211,7 +211,7 @@ impl HistorySessions {
             .spawn(move || {
                 let _permit = permit;
                 let _finished = Finished(entry.finished.clone());
-                run(owner, session, entry, rx, reply, changed);
+                run(owner, session, entry, rx, reply, changed, IDLE_TIMEOUT);
             });
         if let Err(error) = spawned {
             self.entries
@@ -329,6 +329,7 @@ fn run(
     commands: mpsc::Receiver<Command>,
     reply: ReplySender,
     changed: Option<super::history_watch::Changed>,
+    idle_timeout: Duration,
 ) {
     let repo = match git2::Repository::open(&owner.root) {
         Ok(repo) => repo,
@@ -338,6 +339,7 @@ fn run(
         }
     };
     let _watcher = match changed
+        .clone()
         .map(|callback| super::history_watch::HistoryWatch::new(&repo, callback))
         .transpose()
     {
@@ -360,9 +362,17 @@ fn run(
     // This is one idle lease, not periodic polling. Close wakes the channel;
     // the timer bounds orphaned workers after a lost Python process/transport.
     while !entry.cancelled.load(Ordering::Relaxed) {
-        let command = match commands.recv_timeout(IDLE_TIMEOUT) {
+        let command = match commands.recv_timeout(idle_timeout) {
             Ok(command) => command,
-            Err(_) => break,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                // Expiry releases the native worker but must also invalidate
+                // browser rows. Reuse the exact-session notification, no polling.
+                if let Some(callback) = &changed {
+                    callback(Err("History session expired".into()));
+                }
+                break;
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
         };
         let command = match command {
             Command::Files {
@@ -442,6 +452,41 @@ fn details<'a, 'repo>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn idle_expiry_publishes_terminal_session_notification() {
+        let (_dir, owner) = fixture();
+        let (commands, receiver) = mpsc::sync_channel(1);
+        let entry = Arc::new(Entry {
+            owner: owner.clone(),
+            commands,
+            cancelled: Arc::new(AtomicBool::new(false)),
+            finished: Arc::new(AtomicBool::new(false)),
+            busy: AtomicBool::new(false),
+        });
+        let (reply, opened) = oneshot::channel();
+        let (notice, notices) = mpsc::channel();
+        let callback: super::super::history_watch::Changed = Arc::new(move |result| {
+            let _ = notice.send(result);
+        });
+        let worker = std::thread::spawn(move || {
+            run(
+                owner,
+                "idle-test".into(),
+                entry,
+                receiver,
+                reply,
+                Some(callback),
+                Duration::from_millis(25),
+            );
+        });
+        assert!(opened.blocking_recv().unwrap().is_ok());
+        assert_eq!(
+            notices.recv_timeout(Duration::from_secs(2)).unwrap(),
+            Err("History session expired".into())
+        );
+        worker.join().unwrap();
+    }
+
     fn fixture() -> (tempfile::TempDir, Owner) {
         let scratch = std::env::var_os("TMPDIR")
             .map(std::path::PathBuf::from)

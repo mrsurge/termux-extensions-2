@@ -1,5 +1,5 @@
 import { HistoryItemRenderer, HistoryItemChangeRenderer, HistoryItemLoadMoreRenderer, HistoryItemErrorRenderer, ListDelegate, SCMHistoryTreeDataSource } from './adapted/browser/scmHistoryViewPane.ts';
-import type { HistoryChildrenReader, HistoryFileRow, HistoryRow, HistoryTreeInput } from './pane-platform.ts';
+import type { HistoryChildrenReader, HistoryCounts, HistoryFileIconResolver, HistoryFileRow, HistoryRow, HistoryTreeInput } from './pane-platform.ts';
 import type { HistoryTree, HistoryTreeConstructor, TreeDisposable } from './tree-contract.ts';
 import { applyGraphColors } from './platform.ts';
 import './adapted/browser/media/scm.css';
@@ -32,20 +32,28 @@ export class HistoryTreeHost implements TreeDisposable {
   private loadingMore = false;
   private readonly retrying = new Set<string>();
   private updateRevision = 0;
+  private countWidth = 4;
+  private autoLoadFailed = false;
+  private requestedRowCount = -1;
 
-  constructor(container: HTMLElement, Tree: HistoryTreeConstructor, input: HistoryTreeInput, readChildren: HistoryChildrenReader, private readonly actions: HistoryTreeActions) {
+  constructor(container: HTMLElement, Tree: HistoryTreeConstructor, input: HistoryTreeInput, readChildren: HistoryChildrenReader, private readonly actions: HistoryTreeActions, resolveIcon?: HistoryFileIconResolver) {
     this.input = { ...input };
     this.element = container.ownerDocument.createElement('div');
     this.element.className = 'te2-scm-history scm-history-view';
     applyGraphColors(this.element);
     container.appendChild(this.element);
-    this.source = new SCMHistoryTreeDataSource(readChildren, error => {
+    this.sizeCounts(input.rows.filter(row => row.type === 'historyItemViewModel').map(row => row.counts));
+    this.source = new SCMHistoryTreeDataSource(async (comparison, signal) => {
+      const files = await readChildren(comparison, signal);
+      if (!this.disposed) this.sizeCounts(files.map(file => file.counts));
+      return files;
+    }, error => {
       if (!this.disposed) this.actions.onError(error);
     });
     try {
       this.tree = new Tree('TE2 history', this.element, new ListDelegate(),
         { isIncompressible: () => true },
-        [new HistoryItemRenderer(), new HistoryItemChangeRenderer(), new HistoryItemLoadMoreRenderer(), new HistoryItemErrorRenderer()], this.source, {
+        [new HistoryItemRenderer(), new HistoryItemChangeRenderer(resolveIcon), new HistoryItemLoadMoreRenderer(), new HistoryItemErrorRenderer()], this.source, {
           compressionEnabled: false, expandOnlyOnTwistieClick: false,
           identityProvider: { getId: rowId },
           accessibilityProvider: {
@@ -72,9 +80,30 @@ export class HistoryTreeHost implements TreeDisposable {
         event.preventDefault(); this.activate(row);
       }
     }));
+    // Use upstream's scroll event, not a timer or a DOM sentinel (rows are
+    // virtualized). At most one page is requested within three rows of the end.
+    this.subscriptions.push(this.tree.onDidScroll(event => {
+      if (event.scrollTopChanged) this.maybeLoadMore();
+    }));
     this.ready = this.tree.setInput(this.input).catch(error => {
       if (!this.disposed) { this.dispose(); throw error; }
     });
+  }
+
+  private sizeCounts(counts: readonly HistoryCounts[]): void {
+    for (const count of counts) {
+      if (count.state === 'ready' || count.state === 'partial') this.countWidth = Math.max(this.countWidth,
+        String(count.additions).length + 3, String(count.deletions).length + 3);
+    }
+    this.element.style.setProperty('--history-count-width', `${this.countWidth}ch`);
+  }
+
+  private maybeLoadMore(): void {
+    if (this.disposed || this.loadingMore || this.autoLoadFailed || this.tree.renderHeight <= 0
+      || this.requestedRowCount === this.input.rows.length) return;
+    const row = this.input.rows.at(-1);
+    if (row?.type === 'historyItemLoadMore'
+      && this.tree.scrollHeight - this.tree.scrollTop - this.tree.renderHeight <= 3 * 22) this.activate(row);
   }
 
   private activate(row: HistoryRow): void {
@@ -93,10 +122,17 @@ export class HistoryTreeHost implements TreeDisposable {
       }).catch(error => { if (!this.disposed) this.actions.onError(error); });
     } else if (!this.loadingMore && row.state !== 'loading') {
       this.loadingMore = true;
+      this.autoLoadFailed = false;
+      this.requestedRowCount = this.input.rows.length;
       void Promise.resolve().then(() => {
         if (!this.disposed) return this.actions.loadMore();
-      }).catch(error => { if (!this.disposed) this.actions.onError(error); })
-        .finally(() => { this.loadingMore = false; });
+      }).catch(error => {
+        this.autoLoadFailed = true;
+        if (!this.disposed) this.actions.onError(error);
+      }).finally(() => {
+        this.loadingMore = false;
+        this.maybeLoadMore();
+      });
     }
   }
 
@@ -104,15 +140,16 @@ export class HistoryTreeHost implements TreeDisposable {
     if (this.disposed) return;
     const revision = ++this.updateRevision;
     this.input.rows = rows;
+    this.sizeCounts(rows.filter(row => row.type === 'historyItemViewModel').map(row => row.counts));
     await this.ready;
     if (this.disposed || revision !== this.updateRevision) return;
     // Root-only refresh retains expanded file children; no new Git read per row.
-    try { await this.tree.updateChildren(this.input, false, true); }
+    try { await this.tree.updateChildren(this.input, false, true); this.maybeLoadMore(); }
     catch (error) { if (!this.disposed) throw error; }
   }
 
   layout(height: number, width: number): void {
-    if (!this.disposed) this.tree.layout(height, width);
+    if (!this.disposed) { this.tree.layout(height, width); this.maybeLoadMore(); }
   }
 
   dispose(): void {

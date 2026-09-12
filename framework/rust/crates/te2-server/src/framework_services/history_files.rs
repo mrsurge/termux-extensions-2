@@ -4,6 +4,9 @@ use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 const TEXT_LIMIT: usize = 375 * 1024;
+// Counting is not preview admission. Allow bounded generated sources without
+// sending large text to Python/Monaco; each native read still handles one file.
+const COUNT_LIMIT: usize = 16 * 1024 * 1024;
 const FILE_LIMIT: usize = 20_000;
 pub(crate) const PAGE_LIMIT: usize = 100;
 
@@ -134,7 +137,7 @@ impl<'repo> FileReader<'repo> {
             .transpose()
             .map_err(|e| e.to_string())?;
         let mut options = DiffOptions::new();
-        options.context_lines(3).max_size(TEXT_LIMIT as i64);
+        options.context_lines(0).max_size(COUNT_LIMIT as i64);
         let mut diff = repo
             .diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), Some(&mut options))
             .map_err(|e| e.to_string())?;
@@ -213,6 +216,52 @@ impl<'repo> FileReader<'repo> {
         })
     }
 
+    fn counts(&self, index: usize, cancelled: &AtomicBool) -> Result<Counts, String> {
+        let delta = self
+            .diff
+            .get_delta(index)
+            .ok_or("History file index out of range")?;
+        let odb = self.repo.odb().map_err(|e| e.to_string())?;
+        // Inspect both headers before libgit2 allocates a patch. Do not use
+        // side()/pair(): their UTF-8 strings and 375 KiB cap belong to previews.
+        for file in [delta.old_file(), delta.new_file()] {
+            check(cancelled)?;
+            if file.id().is_zero() {
+                continue;
+            }
+            if file.mode() == git2::FileMode::Commit {
+                return Ok(Counts::Unavailable);
+            }
+            let (size, kind) = odb.read_header(file.id()).map_err(|e| e.to_string())?;
+            if kind != git2::ObjectType::Blob {
+                return Ok(Counts::Unavailable);
+            }
+            if size > COUNT_LIMIT {
+                return Ok(Counts::TooLarge);
+            }
+        }
+        let patch = Patch::from_diff(&self.diff, index).map_err(|e| e.to_string())?;
+        check(cancelled)?;
+        let delta = self
+            .diff
+            .get_delta(index)
+            .ok_or("History file index out of range")?;
+        if delta.old_file().is_binary() || delta.new_file().is_binary() {
+            return Ok(Counts::Binary);
+        }
+        let (additions, deletions) = match patch {
+            Some(patch) => {
+                let (_, additions, deletions) = patch.line_stats().map_err(|e| e.to_string())?;
+                (additions, deletions)
+            }
+            None => (0, 0), // Pure rename/mode-only changes contain no text edits.
+        };
+        Ok(Counts::Ready {
+            additions,
+            deletions,
+        })
+    }
+
     pub(crate) fn page(
         &self,
         offset: usize,
@@ -234,28 +283,7 @@ impl<'repo> FileReader<'repo> {
             let new_path = path(&delta.new_file())?;
             let old_blob = blob_id(delta.old_file());
             let new_blob = blob_id(delta.new_file());
-            // Reject large/binary/unsupported inputs before asking libgit2 for
-            // a text patch. Never compute every file's counts to serve page one.
-            let pair = self.pair(index, cancelled)?;
-            let counts = match (&pair.original, &pair.modified) {
-                (BlobSide::TooLarge { .. }, _) | (_, BlobSide::TooLarge { .. }) => Counts::TooLarge,
-                (BlobSide::Binary { .. }, _) | (_, BlobSide::Binary { .. }) => Counts::Binary,
-                (BlobSide::Unsupported { .. } | BlobSide::InvalidUtf8 { .. }, _)
-                | (_, BlobSide::Unsupported { .. } | BlobSide::InvalidUtf8 { .. }) => {
-                    Counts::Unavailable
-                }
-                _ => match Patch::from_diff(&self.diff, index).map_err(|e| e.to_string())? {
-                    Some(patch) => {
-                        let (_, additions, deletions) =
-                            patch.line_stats().map_err(|e| e.to_string())?;
-                        Counts::Ready {
-                            additions,
-                            deletions,
-                        }
-                    }
-                    None => Counts::Unavailable,
-                },
-            };
+            let counts = self.counts(index, cancelled)?;
             let status = match delta.status() {
                 Delta::Added => "added",
                 Delta::Deleted => "deleted",
@@ -402,7 +430,17 @@ mod tests {
         let reader = FileReader::new(&repo, &id.to_string(), &cancel).unwrap();
         let page = reader.page(0, 40, &cancel).unwrap();
         assert!(matches!(page.files[0].counts, Counts::Binary));
-        assert!(matches!(page.files[1].counts, Counts::TooLarge));
+        assert!(matches!(
+            page.files[1].counts,
+            Counts::Ready {
+                additions: 1,
+                deletions: 0
+            }
+        ));
+        assert!(matches!(
+            reader.pair(1, &cancel).unwrap().modified,
+            BlobSide::TooLarge { .. }
+        ));
         assert!(matches!(
             reader.pair(2, &cancel).unwrap().modified,
             BlobSide::InvalidUtf8 { .. }
@@ -412,5 +450,40 @@ mod tests {
         cancel.store(true, Ordering::Relaxed);
         assert!(reader.page(0, 40, &cancel).is_err());
         assert!(reader.pair(0, &cancel).is_err());
+    }
+
+    #[test]
+    fn large_generated_text_counts_independently_of_preview_admission() {
+        let (_dir, repo) = repo();
+        let before = format!("{}\n", "x".repeat(1024 * 1024));
+        let after = format!("{}\nextra line\n", "y".repeat(1024 * 1024));
+        let parent = commit(&repo, &[("bundle.js", before.as_bytes())], &[]);
+        let id = commit(&repo, &[("bundle.js", after.as_bytes())], &[parent]);
+        let cancel = AtomicBool::new(false);
+        let reader = FileReader::new(&repo, &id.to_string(), &cancel).unwrap();
+        let page = reader.page(0, 1, &cancel).unwrap();
+        assert!(matches!(
+            page.files[0].counts,
+            Counts::Ready {
+                additions: 2,
+                deletions: 1
+            }
+        ));
+        let pair = reader.pair(0, &cancel).unwrap();
+        assert!(matches!(pair.original, BlobSide::TooLarge { .. }));
+        assert!(matches!(pair.modified, BlobSide::TooLarge { .. }));
+    }
+
+    #[test]
+    fn count_budget_still_rejects_oversized_blobs() {
+        let (_dir, repo) = repo();
+        let bytes = vec![b'x'; COUNT_LIMIT + 1];
+        let id = commit(&repo, &[("huge.js", &bytes)], &[]);
+        let cancel = AtomicBool::new(false);
+        let reader = FileReader::new(&repo, &id.to_string(), &cancel).unwrap();
+        assert!(matches!(
+            reader.page(0, 1, &cancel).unwrap().files[0].counts,
+            Counts::TooLarge
+        ));
     }
 }

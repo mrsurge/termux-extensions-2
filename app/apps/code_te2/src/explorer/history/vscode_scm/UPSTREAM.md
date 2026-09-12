@@ -153,4 +153,18 @@ No production grace timer or global cancellation-error suppressor is introduced.
 The isolated pane tests cover refs, row recycling, mouse/touch/keyboard intent,
 single-flight load-more, first-parent/root reads, retained expanded children,
 failure/retry, in-flight disposal and stylesheet scope. This is a standalone view
-foundation, not a working production History tab or completed framework protocol.
+foundation. The production History controller now mounts it in the advanced
+Explorer overlay and supplies the Rust/Python History protocol.
+
+`patches/0005-standalone-row-geometry.patch` removes the workbench-specific
+negative file-graph offsets, carries native file status into summaries, and
+updates the continuation label for scroll loading. The graph algorithm/SVG
+geometry remains upstream. `history-tree-host.css` hides the twisty/indent gutter
+only in this tree; upstream whole-row expansion and keyboard/ARIA remain intact.
+The host uses the real `onDidScroll`/scroll dimensions for bounded prefetch;
+`pane-platform.ts` owns Codicons, added badges and numeric pill presentation.
+
+`patches/0006-file-icon-resolver.patch` adds a typed optional icon resolver to
+the adapted file renderer. Production supplies the existing filename-aware
+vendored catalog; standalone tests can supply a deterministic resolver. The
+adapter fences late results by exact icon-node ownership when rows are recycled.

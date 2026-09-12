@@ -1,4 +1,5 @@
 import type { JsonObject } from "../../rpc/transport.ts";
+import { ExplorerHistoryController } from '../history/controller.ts';
 import { restoreExplorerFile, restoreExplorerHunk } from "../tree/restore-action.ts";
 import type { ExplorerJumpOptions } from "../host/file-open-bridge.ts";
 import type { ExplorerRpcMethod } from "../rpc/contract.ts";
@@ -74,6 +75,7 @@ const SEARCH_MODE_OPTIONS: readonly SearchModeOption[] = [
   { id: "changes", label: "By changes" },
   { id: "review", label: "Drafts" },
   { id: "diagnostics", label: "Diagnostics" },
+  { id: "history", label: "History" },
 ];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -86,7 +88,7 @@ function isExplorerSearchMode(value: unknown): value is ExplorerSearchMode {
     value === "content" ||
     value === "changes" ||
     value === "review" ||
-    value === "diagnostics"
+    value === "diagnostics" || value === "history"
   );
 }
 
@@ -126,6 +128,7 @@ function getReviewEntriesPayload(
 export function createExplorerSearchOverlayController(
   deps: ExplorerSearchOverlayControllerDeps,
 ) {
+  const historyController = new ExplorerHistoryController((method, payload) => deps.requestExplorer(method, payload));
   let searchOverlayVisible = false;
   let searchMode: ExplorerSearchMode = "content";
   let searchQuery = "";
@@ -210,6 +213,7 @@ export function createExplorerSearchOverlayController(
 
     overlay.style.display = searchOverlayVisible ? "flex" : "none";
     if (!searchOverlayVisible) {
+      historyController.dispose();
       return;
     }
 
@@ -273,6 +277,11 @@ export function createExplorerSearchOverlayController(
     if (!resultsContainer) {
       return;
     }
+    if (searchMode === 'history') {
+      historyController.mount(resultsContainer);
+      return;
+    }
+    historyController.dispose();
 
     const state: ExplorerSearchOverlayState = {
       searchMode,
@@ -467,6 +476,7 @@ export function createExplorerSearchOverlayController(
     toast: (message) => deps.toast(message),
     renderSearchOverlay,
     focusSearchInput: () => {
+      if (searchMode === 'history') return;
       if (searchMode === "content" && contentQueryWidget) {
         contentQueryWidget.focus();
         return;
@@ -628,6 +638,8 @@ export function createExplorerSearchOverlayController(
   }
 
   return {
+    handleHistoryUpdated: (payload: JsonObject) => historyController.notify(payload),
+    reconnectHistory: () => historyController.reconnect(),
     openSearchOverlay: () => searchController.openSearchOverlay(),
     fetchChangesResults: (force = false) =>
       searchController.fetchChangesResults(force),

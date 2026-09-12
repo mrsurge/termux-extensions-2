@@ -2,3 +2,5 @@
 0002-file-row-renderer.patch
 0003-pane-rows-and-data-source.patch
 0004-scoped-history-styles.patch
+0005-standalone-row-geometry.patch
+0006-file-icon-resolver.patch

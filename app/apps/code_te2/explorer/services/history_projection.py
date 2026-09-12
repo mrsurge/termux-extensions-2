@@ -57,6 +57,10 @@ class ExplorerHistory:
             _ = previous.cancel()
         self._project = self._root()
         self._project_generation = event_bus.current_project_generation(self._project)
+        # A restored project can open History before search or project-switch
+        # initializes the fact epoch. Use the same worker-owned generation here.
+        if self._project_generation is None:
+            self._project_generation = event_bus.next_project_generation(self._project)
         self._retained.clear()
         self._ready = asyncio.get_running_loop().create_future()
         self._task = asyncio.create_task(self._run(revision, self._project, previous, self._ready))
@@ -145,7 +149,14 @@ class ExplorerHistory:
                     ready.set_result(session)
                 error = await session.wait_changed()
                 if error is not None:
-                    await self._notify(revision, "watcherError", {"error": error})
+                    kind = "expired" if error == "History session expired" else "watcherError"
+                    if kind == "expired":
+                        # Stop queued statistics before they can issue reads to
+                        # the expired native worker; retain only the refresh UI.
+                        await stats.dispose()
+                    await self._notify(revision, kind, {"error": error})
+                    if kind == "expired":
+                        return  # The exit stack closes this session exactly once.
                     _ = await asyncio.Event().wait()
             # Close the old producer/watcher before scheduling replacement.
             if revision == self._revision:

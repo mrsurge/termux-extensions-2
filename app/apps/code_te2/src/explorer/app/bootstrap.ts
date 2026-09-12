@@ -995,7 +995,10 @@ export async function initExplorerUI(options: ExplorerUiInitOptions) {
       if (!isExplorerRpcNotificationMethod(method)) return;
       explorerNotificationHandler.handleExplorerNotification(method, payload);
     },
-    handleReconnect: () => explorerRefreshController.handleReconnect(),
+    handleReconnect: () => {
+      explorerRefreshController.handleReconnect();
+      explorerSearchOverlayController.reconnectHistory();
+    },
     refreshExplorer: () => explorerRefreshController.refreshExplorer(),
   });
 
