@@ -51,6 +51,7 @@ function harness(overrides = {}) {
             setModel(pair) { this.pair = pair; },
             dispose() { this.disposed++; },
             layout() { calls.push('layout'); },
+            updateOptions(value) { Object.assign(this.config, value); },
             getOriginalEditor() { return { onDidFocusEditorWidget() { return { dispose() {} }; } }; },
             getModifiedEditor() { return {
               onDidFocusEditorWidget() { return { dispose() {} }; },
@@ -68,6 +69,21 @@ function harness(overrides = {}) {
   };
   return { window, container, controller, models, controls, calls, options };
 }
+
+test('appearance updates and two-sided touch attachment preserve immutability', async () => {
+  const attached = [];
+  const h = harness({ appearance: { fontSize: 18 }, attachTouch: control => attached.push(control) });
+  const view = await mountHistoricalDiffView(h.options);
+  assert.equal(attached.length, 2);
+  assert.equal(h.controls[0].config.fontSize, 18);
+  view.updateAppearance({ fontSize: 21, readOnly: false, domReadOnly: false });
+  assert.equal(h.controls[0].config.fontSize, 21);
+  assert.equal(h.controls[0].config.readOnly, true);
+  assert.equal(h.controls[0].config.originalEditable, false);
+  view.dispose();
+  view.updateAppearance({ fontSize: 30 });
+  assert.equal(h.controls[0].config.fontSize, 21);
+});
 
 test('historical special keys navigate but cannot dispatch mutations', async () => {
   const h = harness();

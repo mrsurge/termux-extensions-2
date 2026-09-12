@@ -12,6 +12,7 @@ export interface HistoricalDiffView {
   specialKey(key: SyntheticEditorKey, modifiers: SyntheticKeyModifiers): Promise<boolean>;
   copy(): Promise<void>;
   layout(): void;
+  updateAppearance(options: Monaco.editor.IEditorOptions): void;
   dispose(): void;
 }
 
@@ -24,6 +25,8 @@ export interface HistoricalDiffViewOptions {
   /** TextMate/lexical setup only. Never install language intelligence here. */
   prepareSyntax(languageId: string, path: string): Promise<void>;
   sideBySide?: boolean;
+  appearance?: Monaco.editor.IEditorOptions;
+  attachTouch?(editor: Monaco.editor.IStandaloneCodeEditor): void;
 }
 
 let viewSequence = 0;
@@ -66,6 +69,7 @@ export async function mountHistoricalDiffView(options: HistoricalDiffViewOptions
     dispose,
     focus: () => activeControl()?.focus(),
     layout: () => editor?.layout(),
+    updateAppearance: (appearance) => editor?.updateOptions({ ...appearance, readOnly: true, domReadOnly: true, originalEditable: false }),
     async find() { await activeControl()?.getAction('actions.find')?.run(); },
     async copy() {
       const control = activeControl();
@@ -126,6 +130,7 @@ export async function mountHistoricalDiffView(options: HistoricalDiffViewOptions
     // although its published constructor type omits IGlobalEditorOptions.
     const editorOptions: Monaco.editor.IStandaloneDiffEditorConstructionOptions
       & Monaco.editor.IGlobalEditorOptions = {
+      ...options.appearance,
       readOnly: true, domReadOnly: true, originalEditable: false,
       renderSideBySide: options.sideBySide ?? false, automaticLayout: true,
       'semanticHighlighting.enabled': false, renderValidationDecorations: 'off',
@@ -141,6 +146,9 @@ export async function mountHistoricalDiffView(options: HistoricalDiffViewOptions
     listeners.push(editor.getOriginalEditor().onDidFocusEditorWidget(() => { originalFocused = true; }));
     listeners.push(editor.getModifiedEditor().onDidFocusEditorWidget(() => { originalFocused = false; }));
     editor.setModel({ original, modified });
+    // Each helper owns its listeners/handles until its corresponding control disposes.
+    options.attachTouch?.(editor.getOriginalEditor());
+    options.attachTouch?.(editor.getModifiedEditor());
     return view;
   } catch (error) {
     dispose();

@@ -1,6 +1,5 @@
 import { bootInlineEditorHost } from '../../monaco_editor/inline_host.ts';
-import { bootHistoricalDiff } from '../../monaco_editor/historical_monaco_boot.ts';
-import type { HistoricalDiffView } from '../../monaco_editor/historical_diff_view.ts';
+import { bootHistoricalDiff, type HistoricalEditorView } from '../../monaco_editor/historical_monaco_boot.ts';
 import { SecondaryContentLifecycle } from './secondary-content-lifecycle.ts';
 import {
   UI_IPC_RPC_METHODS,
@@ -94,7 +93,7 @@ interface SecondaryHost {
   toast(message: string, kind?: unknown): void;
 }
 
-type HostState = SecondaryEditorHostState;
+type HostState = SecondaryEditorHostState & { preferences?: unknown };
 
 const STYLE = `
 .te2-secondary-editor {
@@ -516,7 +515,11 @@ export async function bootSecondaryEditorRuntime(
   let bootComplete = false;
   let pendingStateRefresh = false;
   let stateReadEpoch = 0;
-  let historicalView: HistoricalDiffView | null = null;
+  let historicalView: HistoricalEditorView | null = null;
+  // Snapshots seed appearance; live preference facts supersede reads in flight
+  // and are retained while a historical view is still mounting.
+  let historicalPreferences: unknown = {};
+  let preferenceEpoch = 0;
   let commandsInFlight = 0;
   let reloadPending = false;
   const reloadWhenSettled = (): void => {
@@ -543,9 +546,10 @@ export async function bootSecondaryEditorRuntime(
         kind: 'historicalDiff', label: basename(path), commitId: content.commitId,
       });
       setStatus('Loading historical comparison...');
-      const view = await bootHistoricalDiff(editorFrame, content, signal);
+      const view = await bootHistoricalDiff(editorFrame, content, signal, historicalPreferences);
       if (!signal.aborted) {
         historicalView = view;
+        view.updatePreferences(historicalPreferences);
         setStatus('Read-only historical comparison');
         editorReady = true;
         void publishPresentationReady();
@@ -572,6 +576,10 @@ export async function bootSecondaryEditorRuntime(
   }
 
   async function applyHostState(state: HostState): Promise<void> {
+    if (state.preferences !== undefined) {
+      historicalPreferences = state.preferences;
+      historicalView?.updatePreferences(historicalPreferences);
+    }
     projectPath = stringValue(state.activeProject);
     const result = await contentLifecycle.apply(state.secondaryContent);
     if (result === 'working') setCurrentPath(secondaryEditorActivePath(state));
@@ -579,12 +587,14 @@ export async function bootSecondaryEditorRuntime(
 
   async function requestHostState(): Promise<HostState> {
     const epoch = ++stateReadEpoch;
+    const prefsEpoch = preferenceEpoch;
     const reply = await connection.request(
       UI_IPC_RPC_METHODS.hostBootSnapshotGet,
       { scope: 'hostState' },
       8_000,
     );
     const state = hostStateFromReply(reply);
+    if (prefsEpoch !== preferenceEpoch) delete state.preferences;
     // A newer fact or snapshot request supersedes this asynchronous read.
     if (epoch === stateReadEpoch) await applyHostState(state);
     return state;
@@ -760,7 +770,13 @@ export async function bootSecondaryEditorRuntime(
     method: UiIpcRpcNotificationMethod,
     params: JsonObject,
   ): void {
-    if (method === UI_IPC_RPC_NOTIFICATIONS.editorReady) {
+    if (method === UI_IPC_RPC_NOTIFICATIONS.preferencesChanged) {
+      if (params.preferences !== undefined) {
+        ++preferenceEpoch;
+        historicalPreferences = params.preferences;
+        historicalView?.updatePreferences(historicalPreferences);
+      }
+    } else if (method === UI_IPC_RPC_NOTIFICATIONS.editorReady) {
       if (contentLifecycle.historical) return;
       editorReady = true;
       void publishPresentationReady();
@@ -886,13 +902,16 @@ export async function bootSecondaryEditorRuntime(
   });
 
   await connection.connect();
+  const bootPreferenceEpoch = preferenceEpoch;
   const fullSnapshotReply = await connection.request(
     UI_IPC_RPC_METHODS.hostBootSnapshotGet,
     {},
     20_000,
   );
   const fullSnapshot = nestedRecord(fullSnapshotReply, 'snapshot');
-  await applyHostState(asRecord(fullSnapshot.host_state) as HostState);
+  const initialHostState = asRecord(fullSnapshot.host_state) as HostState;
+  if (bootPreferenceEpoch !== preferenceEpoch) delete initialHostState.preferences;
+  await applyHostState(initialHostState);
   if (!contentLifecycle.historical) {
     await bootInlineEditorHost(editorFrame, {
       ensureSocketIoLoaded,

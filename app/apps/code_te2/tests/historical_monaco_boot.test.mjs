@@ -14,10 +14,14 @@ async function loadBoot() {
       builder.onResolve({ filter: /monaco\.bootstrap\.bundle\.js$/ }, () => ({ path: 'monaco', namespace: 'fixture' }));
       builder.onResolve({ filter: /editor_monaco_boot_runtime\.ts$/ }, () => ({ path: 'gecko', namespace: 'fixture' }));
       builder.onResolve({ filter: /historical_diff_view\.ts$/ }, () => ({ path: 'view', namespace: 'fixture' }));
+      builder.onResolve({ filter: /historical_appearance\.ts$/ }, () => ({ path: 'appearance', namespace: 'fixture' }));
+      builder.onResolve({ filter: /inline_host\.ts$/ }, () => ({ path: 'touch', namespace: 'fixture' }));
       builder.onLoad({ filter: /.*/, namespace: 'fixture' }, ({ path: fixture }) => ({ contents: {
         monaco: `export async function loadMonaco(options) { globalThis.__historyBoot.calls.push(options); return globalThis.__historyBoot.monaco; }`,
         gecko: `export function createGeckoModuleWorker(...args) { globalThis.__historyBoot.gecko.push(args[4]); return {}; }`,
-        view: `export async function mountHistoricalDiffView(options) { globalThis.__historyBoot.views.push(options); return { dispose() {} }; }`,
+        view: `export async function mountHistoricalDiffView(options) { globalThis.__historyBoot.views.push(options); return { dispose() {}, updateAppearance(value) { globalThis.__historyBoot.appearances.push(value); } }; }`,
+        appearance: `export function historicalAppearance(value) { return { appearance: value, theme: 'vs-dark' }; } export function createHistoricalThemeApplier() { return async () => {}; }`,
+        touch: `export async function ensureHistoricalTouchAssets() { globalThis.__historyBoot.touchLoads++; }`,
       }[fixture], loader: 'js' }));
     } }],
   });
@@ -27,7 +31,7 @@ async function loadBoot() {
 async function fixture(run) {
   const win = new Window();
   const saved = new Map(['window', 'document', 'Worker', '__historyBoot'].map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
-  const state = { calls: [], gecko: [], workers: [], views: [], monaco: {
+  const state = { calls: [], gecko: [], workers: [], views: [], appearances: [], touchLoads: 0, monaco: {
     editor: { setTheme() {} },
     languages: { getLanguages: () => [
       { id: 'typescript', extensions: ['.ts'] },
@@ -66,6 +70,28 @@ test('syntax boot loads only lexical contributions and refuses language workers'
     assert.equal(state.views[0].languageForPath('/src/unknown.xyz'), 'plaintext');
     await bootHistoricalDiff(container, {}, abort.signal);
     assert.equal(state.calls.length, 1);
+  });
+});
+
+test('mobile boot attaches read-only tools to the exact control and accepts live preferences', async () => {
+  await fixture(async (win, state) => {
+    Object.defineProperty(win.navigator, 'userAgent', { value: 'Android Mobile' });
+    const attached = [];
+    win['monaco-touch-selection'] = { editorTouchSelectionHelp: (...args) => attached.push(args) };
+    const { bootHistoricalDiff } = await loadBoot();
+    const mounting = bootHistoricalDiff(win.document.createElement('div'), {}, new AbortController().signal, { fontScale: 1.5 });
+    win.document.querySelector('link').dispatchEvent(new win.Event('load'));
+    const view = await mounting;
+    assert.equal(state.touchLoads, 1);
+    const control = {};
+    state.views[0].attachTouch(control);
+    assert.deepEqual(attached, [[control, { mobile: true, historicalReadOnly: true }]]);
+    assert.equal(win.monaco, state.monaco);
+    view.updatePreferences({ fontScale: 2 });
+    assert.deepEqual(state.appearances.at(-1), { fontScale: 2 });
+    view.dispose();
+    view.updatePreferences({ fontScale: 3 });
+    assert.deepEqual(state.appearances.at(-1), { fontScale: 2 });
   });
 });
 

@@ -128,8 +128,9 @@
   content remain distinct; no WBA readiness gate for immutable views. Python
   suite: 36 passing tests; Electron typecheck/compile and 100 tests pass. Frontend
   typecheck/build and 30 focused tests pass. Native live acceptance remains.
-- [ ] Preserve drafts/shared membership while replacing secondary working content.
-- [ ] Dedicated syntax-only read-only diff boot; no WBA/editing participation.
+- [x] Preserve drafts/shared membership while replacing secondary working content
+  (mobile live acceptance passed; desktop verification remains below).
+- [x] Dedicated syntax-only read-only diff boot; no WBA/editing participation.
 - [x] Add standalone fresh-realm syntax bootstrap: basic/Monarch language
   contributions only, editor-worker allowlist, Gecko worker transport reuse,
   stylesheet readiness/retry and language detection. Four focused stubbed boot
@@ -142,7 +143,7 @@
   fact reconciliation and working-action gates are implemented. Six lifecycle
   tests pass (20 with renderer/bootstrap tests). Native presentation metadata,
   read-only mobile controls and user-triggered activation remain pending.
-- [ ] Capability-gate menus/mobile controls; retain copy/find/selection/navigation.
+- [x] Capability-gate menus/mobile controls; retain copy/find/selection/navigation.
 - [x] Add separate validated mobile content-population metadata, without fake
   working paths. Read-only menus expose Find/Copy; special keys support cursor,
   Shift-selection, Find/Copy/Select All and document bounds through an explicit
@@ -150,7 +151,8 @@
   handles, and actual History activation remain pending.
   Thirty focused tests and the full frontend typecheck/build pass. Browser/native
   acceptance remains pending; Android assets and source were not changed.
-- [ ] Reconnect, project switch, collapse, fullscreen, detach and disposal tests.
+- [x] Mobile reconnect, project switch, collapse, fullscreen and disposal acceptance.
+- [ ] Desktop reconnect, project switch, dock/detach and disposal acceptance.
 - [ ] Record future UI extension integration seam without implementing it.
 
 ## Phase 4: Explorer History Tab
@@ -167,6 +169,11 @@
   Source integration is complete; device/live acceptance remains Phase 5.
 
 ## Phase 5: Acceptance
+
+User live acceptance is complete for GeckoView and Cefrium, including historical
+editor continuity. Desktop has not yet been tested. Earlier implementation
+checkpoint notes saying mobile acceptance was pending are superseded by this
+acceptance record; they are not outstanding mobile blockers.
 
 - [x] Resolve upstream/base reference roles natively using VS Code precedence:
   configured remote base, bounded creation-reflog evidence, then remote symbolic
@@ -224,16 +231,66 @@
   Comments document the affected ownership/lifecycle/layout systems.
 
 - [ ] Regression/type/contract tests and bounded performance/memory evidence.
-- [ ] Gecko and Cefrium mobile touch/keys/drawer/fullscreen acceptance.
+- [x] Gecko and Cefrium mobile touch/keys/drawer/fullscreen acceptance.
 - [ ] Electron local/remote dock/detach and read-only acceptance.
-- [ ] Validate unsaved drafts survive replacement and primary editor is untouched.
-- [ ] Update technical manual and durable memory with implemented contracts.
-- [ ] User live acceptance; commit/push when requested.
+- [x] Mobile: unsaved drafts survive replacement and primary editor is untouched.
+- [ ] Desktop: unsaved drafts survive replacement and primary editor is untouched.
+- [x] Update technical manual and durable memory with implemented contracts.
+- [x] User mobile live acceptance; approved for checkpoint commit/push.
+- [ ] User desktop live acceptance.
 
-Current checkpoint: `d1d26119` is pushed. History is now mounted in the advanced
-Explorer overlay, with native metadata/statistics, expandable file summaries and
-file-click historical secondary handoff. This mounting slice remains uncommitted
-pending review/live testing. Native timing evidence is recorded in PERFORMANCE.md.
-End-to-end device/performance acceptance and historical mobile touch-selection
-integration remain open; History is not a WBA feature.
+## Historical Editor Continuity
+
+- [x] Inherit font size/family, theme, line numbers and wrapping from host preferences.
+- [x] Apply live preference facts and fence stale theme loads/snapshot replies.
+- [x] Add source-level `historicalReadOnly` touch mode with Copy, Select Word,
+  Select All, Find and Close; no editing tools or custom editing islands.
+- [x] Attach mobile-UA helpers to both diff controls with control-owned disposal;
+  preserve working menus, syntax-only isolation and existing special keys.
+- [x] Rebuild/publish touch UMD and production frontend bundle; 29 focused tests
+  and frontend typecheck pass. No VS Code/Monaco compilation was needed.
+- [x] GeckoView/Cefrium live acceptance: initial/live fonts and themes, selection
+  handles, Copy/Find, historical replacement/disposal and unchanged working-editor
+  behavior.
+- [ ] Desktop appearance, Copy/Find and historical replacement/disposal acceptance.
+
+Historical editor continuity and graph presentation are mobile live-accepted and
+approved for checkpoint publication. Desktop acceptance and remaining performance
+evidence stay open. Native timing evidence is recorded in PERFORMANCE.md.
+History is not a WBA feature.
 No restarts, APK asset publication or version changes.
+
+## Follow-Up Refinements
+
+User-requested candidates for this branch. Investigate and scope each slice before
+implementation; this list does not mark the features as implemented or require
+every candidate to ship together.
+
+### By Changes Presentation And Actions
+
+- [ ] Start files collapsed, showing file headers and added/deleted line counts;
+  expand a header to reveal its diff lines.
+- [ ] Preserve the tail of long file paths rather than the beginning.
+- [ ] Use filename-aware vendored Codicons.
+- [ ] Investigate stage/commit controls, retaining existing HEAD-only mutation
+  guardrails and keeping the History tab read-only.
+
+### File Icons
+
+- [ ] Fix `.mjs` detection so it uses the JavaScript icon instead of generic File.
+
+### Command Palette
+
+- [ ] Provide keyboard-shortcut access.
+- [ ] Provide an extra-key control for mobile access.
+
+### Themes
+
+- [ ] Investigate WBA/extension-provided themes and their editor integration.
+
+### Mobile Input
+
+- [ ] Investigate Android keyboard spacebar-slide cursor navigation.
+- [ ] Install a focused probe for GeckoView-specific typing jank: missed keys
+  and erratic cursor placement. Cefrium is not exhibiting the reported behavior;
+  preserve its working input path while identifying the Gecko-specific cause.

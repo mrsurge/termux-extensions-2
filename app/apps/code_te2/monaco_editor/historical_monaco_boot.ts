@@ -2,6 +2,13 @@ import type * as Monaco from '../../../static/vendor/monaco-editor-core/esm/vs/e
 import { loadMonaco } from '../../../static/vendor/monaco-editor-core/te2-lang/bootstrap/monaco.bootstrap.bundle.js';
 import { createGeckoModuleWorker } from './editor_monaco_boot_runtime.ts';
 import { mountHistoricalDiffView, type HistoricalDiffView } from './historical_diff_view.ts';
+import { historicalAppearance, createHistoricalThemeApplier } from './historical_appearance.ts';
+import { ensureHistoricalTouchAssets } from './inline_host.ts';
+import { isMobileUserAgent } from './editor_mobile_special_keys_utils.ts';
+
+export interface HistoricalEditorView extends HistoricalDiffView {
+  updatePreferences(preferences: unknown): void;
+}
 
 const CSS_URL = '/api/app/code_te2/ui/monaco_vscode/lang/bootstrap/monaco.bootstrap.bundle.css?raw=1';
 const WORKER_URL = '/api/app/code_te2/ui/monaco_vscode/esm/vs/editor/common/services/editorWebWorkerMain.bundle.js';
@@ -41,16 +48,33 @@ async function loadSyntaxMonaco(): Promise<typeof Monaco> {
 
 export async function bootHistoricalDiff(
   container: HTMLElement, content: unknown, signal: AbortSignal,
-): Promise<HistoricalDiffView> {
+  preferences: unknown = {},
+): Promise<HistoricalEditorView> {
   if (!loading) {
     loading = loadSyntaxMonaco().catch((error: unknown) => { loading = null; throw error; });
   }
   const monaco = await loading;
   signal.throwIfAborted();
-  monaco.editor.setTheme('vs-dark');
+  const mobile = isMobileUserAgent(window.navigator);
+  if (mobile) await ensureHistoricalTouchAssets(container);
+  signal.throwIfAborted();
+  // The maintained helper resolves EditorOption from the exact loaded namespace.
+  Object.assign(window, { monaco });
+  const lifetime = new AbortController();
+  const abort = () => lifetime.abort();
+  signal.addEventListener('abort', abort, { once: true });
+  const applyTheme = createHistoricalThemeApplier(monaco, lifetime.signal);
+  const initial = historicalAppearance(preferences);
   const languages = monaco.languages.getLanguages();
-  return mountHistoricalDiffView({
+  let view: HistoricalDiffView;
+  try { view = await mountHistoricalDiffView({
     container, content, monaco, signal,
+    appearance: initial.appearance,
+    attachTouch: mobile ? (control) => {
+      const helper = window['monaco-touch-selection']?.editorTouchSelectionHelp;
+      if (!helper) throw new Error('Historical touch selection unavailable');
+      helper(control, { mobile: true, historicalReadOnly: true });
+    } : undefined,
     languageForPath(path) {
       const basename = path.split('/').pop() || '';
       const filenameMatch = languages.find((language) => language.filenames?.includes(basename));
@@ -71,5 +95,23 @@ export async function bootHistoricalDiff(
     // Basic-language onLanguage hooks load the existing Monarch tokenizer when
     // createModel selects its language; no workbench grammar calls are needed.
     prepareSyntax: async () => {},
-  });
+  }); } catch (error) {
+    lifetime.abort();
+    signal.removeEventListener('abort', abort);
+    throw error;
+  }
+  const updatePreferences = (value: unknown): void => {
+    if (lifetime.signal.aborted) return;
+    const next = historicalAppearance(value);
+    view.updateAppearance(next.appearance);
+    void applyTheme(next.theme).catch((error: unknown) => {
+      if (!lifetime.signal.aborted) console.warn('[historical-editor] Theme unavailable', error);
+    });
+  };
+  updatePreferences(preferences);
+  return { ...view, updatePreferences, dispose() {
+    lifetime.abort();
+    signal.removeEventListener('abort', abort);
+    view.dispose();
+  } };
 }

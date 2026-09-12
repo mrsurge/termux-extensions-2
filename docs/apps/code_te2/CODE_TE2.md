@@ -1364,10 +1364,38 @@ and rejects mutation/unknown commands. Focus listeners retain the selected diff
 side across menu focus and are disposed with the view. Clipboard failures surface
 through the host toast; no working-model fallback is allowed.
 
-Graph mounting/click activation is connected; mobile touch-selection
-affordances still require integration. Six lifecycle tests cover boot,
+Graph mounting/click activation and mobile touch-selection are connected.
+Six lifecycle tests cover boot,
 reconnect reuse, replacement, cross-kind reload, failure retry and disposal;
 real secondary-client acceptance remains pending.
+
+Historical appearance now comes from `host_state.preferences` at boot/reconnect and
+`ui.preferences.changed` on the existing host lane. The secondary retains the newest
+preference projection while a view mounts and fences older snapshot replies.
+`historical_appearance.ts` reuses normal font scaling/family and theme registry,
+URL and VS Code-theme conversion helpers. It applies only font, line-number and
+wrap options; read-only, syntax-only and provider restrictions remain fixed.
+Theme requests are revision- and disposal-fenced, so slow previous selections
+cannot overwrite the current view. No polling, WBA traffic or extra backend
+preference authority is introduced.
+
+Mobile-UA historical boot loads the maintained touch helper and shared editor
+presentation CSS (including the Cefrium Find-input font floor), assigning the
+same Monaco namespace for its EditorOption lookup. The source fork at
+`worktrees/monaco-touch-selection/src/index.ts` accepts `historicalReadOnly: true`:
+its main tools are Copy, Select Word, Select All, Find and Close; custom main,
+leading and navigation tool callbacks cannot add editing actions. Both diff
+controls attach helpers, and Monaco disposal removes each helper's handles,
+menus, observers and listeners. Working-editor defaults are unchanged.
+Build with `npm run build` in that fork and publish `dist/index.umd.cjs` to the
+existing `static/vendor/monaco-touch-selection/monaco-touch-selection.patched.umd.js`.
+The stylesheet is unchanged. This does not require rebuilding VS Code/Monaco.
+The historical mode source is committed in the maintained touch fork as `e5f22e7`.
+
+Regression coverage includes appearance allowlisting, out-of-order theme delivery,
+view disposal, mobile attachment, immutable diff options, and the deployed touch
+bundle's restricted/default menus. GeckoView and Cefrium live acceptance passed
+for this refinement; desktop acceptance remains pending.
 
 ## 7) Monaco asset pipeline (pinned VS Code build)
 

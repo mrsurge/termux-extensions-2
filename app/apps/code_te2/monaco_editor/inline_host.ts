@@ -291,6 +291,17 @@ function ensureInlineScriptAsset(id: string, src: string): Promise<HTMLScriptEle
   });
 }
 
+export async function ensureHistoricalTouchAssets(editorFrame: HTMLElement): Promise<void> {
+  // Share presentation CSS (including Cefrium's Find input floor), not working
+  // editor markup, providers, or boot state.
+  markNativeRenderer(editorFrame);
+  ensureInlineStyleAsset(INLINE_EDITOR_HOST_STYLE_ID, INLINE_EDITOR_HOST_STYLE);
+  const style = INLINE_EDITOR_STYLE_ASSETS[0];
+  ensureInlineStylesheetAsset(style.id, style.href);
+  const script = INLINE_EDITOR_SCRIPT_ASSETS[0];
+  await ensureInlineScriptAsset(script.id, script.src);
+}
+
 async function ensureInlineEditorAssetsLoaded(
   ensureSocketIoLoaded?: (() => Promise<unknown>) | null,
 ): Promise<void> {
