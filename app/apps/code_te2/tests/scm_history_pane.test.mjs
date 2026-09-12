@@ -9,19 +9,22 @@ const root = path.resolve(import.meta.dirname, '../src/explorer/history/vscode_s
 const win = new Window();
 const names = ['window', 'document', 'navigator', 'customElements', 'HTMLElement', 'SVGElement', 'Element', 'Node', 'MutationObserver', 'ResizeObserver', 'MouseEvent', 'KeyboardEvent', 'UIEvent'];
 const previous = new Map(names.map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
-let upstream, pane, graph, hostModule;
+let upstream, pane, graph, hostModule, details;
 let treeCss;
 async function load(entry) {
   const built = await build({ entryPoints: [path.join(root, entry)], bundle: true, write: false, format: 'esm', target: 'es2022', loader: { '.css': 'empty' } });
   return import(`data:text/javascript;base64,${Buffer.from(built.outputFiles[0].text + '\n//# sourceURL=' + entry).toString('base64')}`);
 }
 before(async () => {
+  // Happy DOM inherits the host OS (Android on Termux); pin desktop by default.
+  Object.defineProperty(win.navigator, 'userAgent', { configurable: true, value: 'Mozilla/5.0 (X11; Linux x86_64)' });
   for (const name of names) Object.defineProperty(globalThis, name, { configurable: true, value: win[name] });
   const result = await buildTree();
   const js = result.outputFiles.find(file => file.path.endsWith('.js'));
   treeCss = result.outputFiles.find(file => file.path.endsWith('.css')).text;
   upstream = await import(`data:text/javascript;base64,${Buffer.from(js.text + '\n//# sourceURL=upstream-scm-tree.mjs').toString('base64')}`);
   pane = await load('adapted/browser/scmHistoryViewPane.ts');
+  details = await load('commit-details.ts');
   graph = await load('adapted/browser/scmHistory.ts');
   hostModule = await load('history-tree-host.ts');
 });
@@ -304,20 +307,63 @@ test('file icon resolver receives basename and late SVG cannot alter a recycled 
   renderer.disposeTemplate(template);
 });
 
-test('partial commit totals retain numeric pills and disclose unknown files', () => {
+test('partial commit totals live in details, not commit headers', () => {
   const renderer = new pane.HistoryItemRenderer();
   const container = win.document.createElement('div');
   const template = renderer.renderTemplate(container);
-  renderer.renderElement({ element: { ...commitRows()[0], counts: {
-    state: 'partial', additions: 42, deletions: 7, unknownFiles: 2
-  } } }, 0, template);
-  assert.equal(template.statistics.dataset.state, 'partial');
-  assert.equal(template.statistics.textContent, '+42* -7*');
-  assert.match(template.statistics.title, /2 file/);
-  renderer.renderElement({ element: { ...commitRows()[0], counts: {
-    state: 'ready', additions: 50, deletions: 7
-  } } }, 0, template);
-  assert.equal(template.statistics.title, '');
-  assert.equal(template.statistics.textContent, '+50 -7');
+  const row = { ...commitRows()[0], counts: { state: 'partial', additions: 42, deletions: 7, unknownFiles: 2 } };
+  renderer.renderElement({ element: row }, 0, template);
+  assert.equal(container.querySelector('.history-commit-statistics'), null);
+  const info = win.document.createElement('div'); details.renderHistoryDetails(info, row);
+  const stats = info.querySelector('.history-commit-statistics');
+  assert.equal(stats.textContent, '+42* -7*'); assert.match(stats.title, /2 file/);
+  details.renderHistoryDetails(info, { ...row, counts: { state: 'ready', additions: 50, deletions: 7 } });
+  assert.equal(info.querySelector('.history-commit-statistics').textContent, '+50 -7');
   renderer.disposeTemplate(template);
+});
+
+test('mobile UA gets a details child in wide layouts and totals rerender without more file reads', async () => {
+  const oldUA = Object.getOwnPropertyDescriptor(win.navigator, 'userAgent');
+  Object.defineProperty(win.navigator, 'userAgent', { configurable: true, value: 'Android Mobile' });
+  const container = win.document.createElement('div'); win.document.body.append(container);
+  let reads = 0;
+  const rows = commitRows();
+  const host = new hostModule.HistoryTreeHost(container, upstream.CompressibleAsyncDataTree,
+    { type: 'historyRoot', id: 'mobile', rows }, async () => { reads++; return []; },
+    { openFile: async () => assert.fail('details cannot open a file'), loadMore: async () => {}, onError: assert.fail });
+  try {
+    await host.ready; host.layout(400, 1500); await host.tree.expand(rows[0]);
+    assert.equal(container.querySelectorAll('.history-item-details').length, 1);
+    assert.equal(container.querySelectorAll('.history-item .history-commit-statistics').length, 0);
+    assert.equal(container.querySelectorAll('.history-item-details svg').length, 1);
+    await host.updateRows(rows.map(row => ({ ...row, counts: { state: 'ready', additions: 11, deletions: 2 } })));
+    assert.equal(reads, 1);
+    assert.equal(container.querySelector('.history-item-details .history-commit-statistics').textContent, '+11 -2');
+    container.querySelector('.history-item').dispatchEvent(new win.MouseEvent('pointerover', { bubbles: true }));
+    assert.equal(container.querySelector('.history-details-hover'), null);
+  } finally {
+    host.dispose(); container.remove();
+    if (oldUA) Object.defineProperty(win.navigator, 'userAgent', oldUA); else delete win.navigator.userAgent;
+  }
+});
+
+test('desktop hover exposes live totals without expanding or reading files and disposes cleanly', async () => {
+  const container = win.document.createElement('div'); win.document.body.append(container);
+  const rows = commitRows(); let reads = 0;
+  const host = new hostModule.HistoryTreeHost(container, upstream.CompressibleAsyncDataTree,
+    { type: 'historyRoot', id: 'desktop', rows }, async () => { reads++; return []; },
+    { openFile: async () => {}, loadMore: async () => {}, onError: assert.fail });
+  try {
+    await host.ready; host.layout(400, 320);
+    const anchor = container.querySelector('.history-item');
+    anchor.dispatchEvent(new win.MouseEvent('pointerover', { bubbles: true }));
+    assert.ok(container.querySelector('.history-details-hover'), JSON.stringify({ ua: win.navigator.userAgent, anchor: anchor.dataset.commitId, hover: Boolean(host.hover), connected: anchor.isConnected, element: anchor instanceof Element }));
+    assert.equal(reads, 0); assert.equal(host.tree.isCollapsed(rows[0]), true);
+    const replacement = rows.map(row => ({ ...row, counts: { state: 'ready', additions: 15, deletions: 3 } }));
+    await host.updateRows(replacement);
+    assert.equal(container.querySelector('.history-details-hover .history-commit-statistics').textContent, '+15 -3');
+    await host.tree.expand(replacement[0]);
+    assert.equal(container.querySelector('.history-item-details'), null);
+    host.dispose(); assert.equal(container.querySelector('.history-details-hover'), null);
+  } finally { host.dispose(); container.remove(); }
 });

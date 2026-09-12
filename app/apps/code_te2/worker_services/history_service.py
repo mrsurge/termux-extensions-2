@@ -65,6 +65,8 @@ class HistorySnapshot:
     head_id: str | None
     head_ref: str | None
     refs: tuple[HistoryRef, ...]
+    upstream_ref: HistoryRef | None = None
+    base_ref: HistoryRef | None = None
 
 
 @dataclass(frozen=True)
@@ -248,9 +250,20 @@ class HistorySession:
             refs.append(HistoryRef(_str(ref.get("name")), _oid(ref.get("commitId"))))
         head = data.get("headId")
         head_ref = data.get("headRef")
+        # Roles must name the exact captured ref/OID, never a frontend guess or
+        # a fresh lookup against refs that moved after native snapshot capture.
+        def role(value: object) -> HistoryRef | None:
+            if value is None:
+                return None
+            raw_ref = _map(value)
+            result = HistoryRef(_str(raw_ref.get("name")), _oid(raw_ref.get("commitId")))
+            if result not in refs:
+                raise ValueError("History role is outside the captured refs")
+            return result
         self.snapshot = HistorySnapshot(
             _oid(data.get("snapshotId"), 64), None if head is None else _oid(head),
             None if head_ref is None else _str(head_ref), tuple(refs),
+            role(data.get("upstreamRef")), role(data.get("baseRef")),
         )
         return self.snapshot
 

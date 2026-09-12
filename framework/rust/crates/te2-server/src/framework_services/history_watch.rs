@@ -53,6 +53,8 @@ mod tests {
             git.join("HEAD"),
             common.join("packed-refs"),
             common.join("shallow"),
+            common.join("config"),
+            git.join("config.worktree"),
             common.join("refs/heads/nested/branch"),
             common.join("refs/remotes/origin/main"),
             common.join("refs/tags/v1"),
@@ -98,6 +100,38 @@ mod tests {
         repo.reference("refs/tags/new-tag", oid, true, "test")
             .unwrap();
         assert_eq!(rx.recv_timeout(Duration::from_secs(3)).unwrap(), Ok(()));
+    }
+
+    #[test]
+    fn history_watch_detects_role_config_and_current_branch_reflog_changes() {
+        let root = std::env::var_os("TMPDIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::env::current_dir().unwrap());
+        let temp = tempfile::Builder::new()
+            .prefix("history-role-watch-")
+            .tempdir_in(root)
+            .unwrap();
+        let repo = git2::Repository::init(temp.path()).unwrap();
+        let oid = commit(&repo);
+        {
+            let (_watch, rx) = watch(&repo);
+            repo.config()
+                .unwrap()
+                .set_str("branch.main.vscode-merge-base", "origin/other")
+                .unwrap();
+            assert_eq!(rx.recv_timeout(Duration::from_secs(3)).unwrap(), Ok(()));
+        }
+        let name = repo.head().unwrap().name().unwrap().to_owned();
+        repo.reference_ensure_log(&name).unwrap();
+        {
+            let (_watch, rx) = watch(&repo);
+            let mut log = repo.reflog(&name).unwrap();
+            let sig = git2::Signature::now("Test", "test@example.invalid").unwrap();
+            log.append(oid, &sig, Some("branch: Created from origin/other"))
+                .unwrap();
+            log.write().unwrap();
+            assert_eq!(rx.recv_timeout(Duration::from_secs(3)).unwrap(), Ok(()));
+        }
     }
 
     #[test]
@@ -148,7 +182,12 @@ fn relevant(path: &Path, git: &Path, common: &Path) -> bool {
         let parts: Vec<_> = relative.iter().filter_map(|p| p.to_str()).collect();
         matches!(
             parts.as_slice(),
-            [] | ["HEAD"] | ["packed-refs"] | ["shallow"] | ["refs"]
+            [] | ["HEAD"]
+                | ["packed-refs"]
+                | ["shallow"]
+                | ["refs"]
+                | ["config"]
+                | ["config.worktree"]
         ) || parts.len() >= 2
             && parts[0] == "refs"
             && matches!(parts[1], "heads" | "tags" | "remotes")
@@ -159,11 +198,39 @@ impl HistoryWatch {
     pub(crate) fn new(repo: &git2::Repository, changed: Changed) -> Result<Self, String> {
         let git = repo.path().canonicalize().map_err(|e| e.to_string())?;
         let common = repo.commondir().canonicalize().map_err(|e| e.to_string())?;
+        // Role evidence is scoped to HEAD and its branch, not every reflog.
+        // Repository config lives under the already watched metadata roots.
+        // Changes to external/global included config require explicit Refresh.
+        let mut role_paths = vec![git.join("logs/HEAD")];
+        if let Ok(head) = repo.head() {
+            if let Some(name) = head.name().filter(|name| name.starts_with("refs/heads/")) {
+                role_paths.push(common.join("logs").join(name));
+            }
+        }
+        let role_directories: Vec<_> = role_paths
+            .iter()
+            .flat_map(|path| {
+                path.ancestors()
+                    .skip(1)
+                    .take_while(|ancestor| *ancestor != git && *ancestor != common)
+                    .filter(|ancestor| ancestor.is_dir())
+                    .map(Path::to_path_buf)
+                    .collect::<Vec<_>>()
+            })
+            .collect();
         let (tx, rx) = mpsc::sync_channel(1);
         let event_git = git.clone();
         let event_common = common.clone();
         let mut watcher = notify::recommended_watcher(move |result: notify::Result<Event>| {
-            let signal = classify(result, &event_git, &event_common);
+            let role_change = result.as_ref().is_ok_and(|event| {
+                !matches!(event.kind, EventKind::Access(_))
+                    && event
+                        .paths
+                        .iter()
+                        .any(|path| role_paths.iter().any(|role| role.starts_with(path)))
+            });
+            let signal = classify(result, &event_git, &event_common)
+                .or_else(|| role_change.then_some(Ok(())));
             // Never block the OS callback or retain an unbounded event history.
             if let Some(signal) = signal {
                 let _ = tx.try_send(signal);
@@ -172,8 +239,10 @@ impl HistoryWatch {
         .map_err(|e| e.to_string())?;
         let mut seen = BTreeSet::new();
         let mut pending = vec![git.clone(), common.clone()];
+        pending.extend(role_directories);
         // Nonrecursive metadata-root watches catch atomic replacement and creation
-        // of refs directories. Enumerate only ref directories, never objects/logs.
+        // of refs directories. Enumerate ref directories plus exact role-evidence
+        // ancestors above, never the object store or the full reflog tree.
         while let Some(path) = pending.pop() {
             if !seen.insert(path.clone()) {
                 continue;

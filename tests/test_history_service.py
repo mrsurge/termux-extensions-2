@@ -47,6 +47,34 @@ def response(action: str, params: object) -> dict[str, object]:
 
 @final
 class HistoryServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_roles_are_decoded_only_from_captured_refs(self) -> None:
+        async def fake(method: str, params: object = None, **_kwargs: object) -> object:
+            data = response(method, params)
+            if method.endswith("open"):
+                snapshot = mapping(data["snapshot"])
+                remote = {"name": "refs/remotes/origin/topic", "commitId": "c" * 40}
+                base = {"name": "refs/remotes/origin/trunk", "commitId": "d" * 40}
+                snapshot.update(refs=[remote, base], upstreamRef=remote, baseRef=base)
+            return data
+
+        with patch.object(pipe_runtime, "call_async", fake):
+            async with history.history_session(Path('/project'), 1) as session:
+                assert session.snapshot is not None
+                self.assertEqual(session.snapshot.upstream_ref, history.HistoryRef('refs/remotes/origin/topic', 'c' * 40))
+                self.assertEqual(session.snapshot.base_ref, history.HistoryRef('refs/remotes/origin/trunk', 'd' * 40))
+
+    async def test_role_outside_snapshot_is_rejected(self) -> None:
+        async def fake(method: str, params: object = None, **_kwargs: object) -> object:
+            data = response(method, params)
+            if method.endswith("open"):
+                mapping(data["snapshot"])["baseRef"] = {"name": "refs/remotes/origin/trunk", "commitId": "d" * 40}
+            return data
+
+        with patch.object(pipe_runtime, "call_async", fake):
+            with self.assertRaisesRegex(ValueError, 'outside the captured refs'):
+                async with history.history_session(Path('/project'), 1):
+                    self.fail('Invalid role accepted')
+
     async def test_native_notifications_are_exact_session_and_generation(self) -> None:
         from app.libs.pipe_protocol import PipeEnvelope
         async def fake(method: str, params: object = None, **_kwargs: object) -> object:

@@ -168,6 +168,40 @@
 
 ## Phase 5: Acceptance
 
+- [x] Resolve upstream/base reference roles natively using VS Code precedence:
+  configured remote base, bounded creation-reflog evidence, then remote symbolic
+  HEAD. Pin roles to captured refs and include them in snapshot identity; no Git
+  configuration writes or ancestry changes. Typed Python/frontends validate and
+  project current/upstream/base colors into the existing upstream graph.
+  Repository config/worktree config and exact role reflogs invalidate snapshots;
+  external/global included config changes require explicit Refresh.
+  Validation: 32 native History tests passed (opt-in benchmark skipped), 22
+  Python tests and 39 frontend tests passed. TypeScript, strict Basedpyright,
+  frontend build and formatting pass. Framework restart/live acceptance pending.
+
+- [x] Compact commit headers now show named local heads and grouped remote/tag
+  badges with upstream lane colors; active local refs force the active lane color.
+  Commit totals move to a mobile-UA expansion child with horizontally scrollable
+  full ref names, or a desktop dynamic hover/focus panel. File counts are unchanged.
+  Live totals rerender without new file reads; desktop hover does not expand.
+  Source comments and reproducible upstream patch 0007 record the adaptation.
+  Thirty-nine focused tests, frontend typecheck/build and patch reproduction pass.
+  Native/device live acceptance remains pending.
+
+- [x] Follow up multi-ref ordering: seed captured tips by committer date rather
+  than OID order, retaining pure topological traversal. Full branches/remotes/tags
+  500-commit comparison matches Git; add stale-branch/current-feature regression.
+  All seven native graph tests pass. Live framework restart/acceptance pending.
+
+- [x] Tighten count columns using the actual 10px pill font and exact box spacing.
+  Idle expiry now refreshes once when visible, deferring to visibility events
+  while backgrounded/offscreen and leaving failed refreshes explicit.
+- [x] Match VS Code's Git `--topo-order` convention by dropping libgit2 TIME
+  sorting. Read-only 500-commit HEAD comparison matches Git; native paged
+  interleaved-date regression added. New live acceptance remains pending.
+  Six native graph tests, nine controller tests and ten pane tests pass;
+  frontend typecheck/build and native formatting pass. No runtime restart.
+
 - [x] Compact count pills to 16px inside unchanged 22px rows, with matching
   green/red text-color borders; Refresh History uses the selected-row dark gray.
 

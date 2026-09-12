@@ -18,6 +18,7 @@ export interface HistoryTree {
   setInput(input: HistoryTreeInput): Promise<void>;
   updateChildren(input: HistoryTreeInput | HistoryRow, recursive: boolean, rerender: boolean): Promise<void>;
   layout(height: number, width: number): void;
+  rerender(): void;
   expand(element: HistoryRow): Promise<boolean>;
   collapse(element: HistoryRow): boolean;
   isCollapsed(element: HistoryRow): boolean;
@@ -28,6 +29,7 @@ export interface HistoryTree {
   cancelAllRefreshPromises(includeSubTrees: boolean): void;
   onPointer(listener: (event: { readonly element: HistoryRow | null; readonly browserEvent: UIEvent }) => void): TreeDisposable;
   onKeyDown(listener: (event: KeyboardEvent) => void): TreeDisposable;
+  onDidChangeFocus(listener: (event: { readonly elements: HistoryRow[] }) => void): TreeDisposable;
   dispose(): void;
 }
 export interface HistoryTreeConstructor {

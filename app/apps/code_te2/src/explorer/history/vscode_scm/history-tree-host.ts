@@ -1,5 +1,6 @@
 import { HistoryItemRenderer, HistoryItemChangeRenderer, HistoryItemLoadMoreRenderer, HistoryItemErrorRenderer, ListDelegate, SCMHistoryTreeDataSource } from './adapted/browser/scmHistoryViewPane.ts';
-import type { HistoryChildrenReader, HistoryCounts, HistoryFileIconResolver, HistoryFileRow, HistoryRow, HistoryTreeInput } from './pane-platform.ts';
+import type { HistoryChildrenReader, HistoryCommitRow, HistoryCounts, HistoryFileIconResolver, HistoryFileRow, HistoryRow, HistoryTreeInput } from './pane-platform.ts';
+import { HistoryDetailsRenderer, HistoryDetailsHover } from './commit-details.ts';
 import type { HistoryTree, HistoryTreeConstructor, TreeDisposable } from './tree-contract.ts';
 import { applyGraphColors } from './platform.ts';
 import './adapted/browser/media/scm.css';
@@ -14,6 +15,7 @@ export interface HistoryTreeActions {
 function rowId(row: HistoryRow): string {
   if (row.type === 'historyItemLoadMore') return 'load-more';
   if (row.type === 'historyItemError') return `error:${rowId(row.owner)}`;
+  if (row.type === 'historyItemDetails') return `details:${rowId(row.owner)}`;
   const item = row.historyItemViewModel.historyItem;
   return JSON.stringify(row.type === 'historyItemViewModel'
     ? [row.type, item.id, item.parentIds]
@@ -32,9 +34,11 @@ export class HistoryTreeHost implements TreeDisposable {
   private loadingMore = false;
   private readonly retrying = new Set<string>();
   private updateRevision = 0;
-  private countWidth = 4;
+  private countWidth = 2;
   private autoLoadFailed = false;
   private requestedRowCount = -1;
+  private readonly currentRows = new Map<string, HistoryCommitRow>();
+  private readonly hover: HistoryDetailsHover | null;
 
   constructor(container: HTMLElement, Tree: HistoryTreeConstructor, input: HistoryTreeInput, readChildren: HistoryChildrenReader, private readonly actions: HistoryTreeActions, resolveIcon?: HistoryFileIconResolver) {
     this.input = { ...input };
@@ -42,6 +46,10 @@ export class HistoryTreeHost implements TreeDisposable {
     this.element.className = 'te2-scm-history scm-history-view';
     applyGraphColors(this.element);
     container.appendChild(this.element);
+    // UA, not viewport width: touch details must remain available in landscape.
+    const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(container.ownerDocument.defaultView?.navigator.userAgent || '');
+    for (const row of input.rows) if (row.type === 'historyItemViewModel') this.currentRows.set(row.historyItemViewModel.historyItem.id, row);
+    this.hover = mobile ? null : new HistoryDetailsHover(this.element, id => this.currentRows.get(id));
     this.sizeCounts(input.rows.filter(row => row.type === 'historyItemViewModel').map(row => row.counts));
     this.source = new SCMHistoryTreeDataSource(async (comparison, signal) => {
       const files = await readChildren(comparison, signal);
@@ -49,11 +57,11 @@ export class HistoryTreeHost implements TreeDisposable {
       return files;
     }, error => {
       if (!this.disposed) this.actions.onError(error);
-    });
+    }, mobile);
     try {
       this.tree = new Tree('TE2 history', this.element, new ListDelegate(),
         { isIncompressible: () => true },
-        [new HistoryItemRenderer(), new HistoryItemChangeRenderer(resolveIcon), new HistoryItemLoadMoreRenderer(), new HistoryItemErrorRenderer()], this.source, {
+        [new HistoryItemRenderer(), new HistoryItemChangeRenderer(resolveIcon), new HistoryItemLoadMoreRenderer(), new HistoryItemErrorRenderer(), new HistoryDetailsRenderer(id => this.currentRows.get(id))], this.source, {
           compressionEnabled: false, expandOnlyOnTwistieClick: false,
           identityProvider: { getId: rowId },
           accessibilityProvider: {
@@ -61,11 +69,12 @@ export class HistoryTreeHost implements TreeDisposable {
             getAriaLabel: row => row.type === 'historyItemViewModel'
               ? `${row.historyItemViewModel.historyItem.subject}, ${row.historyItemViewModel.historyItem.author ?? ''}`
               : row.type === 'historyItemChangeViewModel' ? row.path
+                : row.type === 'historyItemDetails' ? 'Commit totals and branch heads'
                 : row.type === 'historyItemError' ? 'Could not load files. Retry' : 'Load more history',
           },
         });
     } catch (error) {
-      this.source.dispose(); this.element.remove(); throw error;
+      this.source.dispose(); this.hover?.dispose(); this.element.remove(); throw error;
     }
     // Upstream onPointer combines mouse and touch. Do not install a second tap
     // handler, which would dispatch a file open twice on mobile.
@@ -80,10 +89,14 @@ export class HistoryTreeHost implements TreeDisposable {
         event.preventDefault(); this.activate(row);
       }
     }));
+    this.subscriptions.push(this.tree.onDidChangeFocus(event => {
+      const row = event.elements[0];
+      this.hover?.show(row?.type === 'historyItemViewModel' ? row.historyItemViewModel.historyItem.id : null);
+    }));
     // Use upstream's scroll event, not a timer or a DOM sentinel (rows are
     // virtualized). At most one page is requested within three rows of the end.
     this.subscriptions.push(this.tree.onDidScroll(event => {
-      if (event.scrollTopChanged) this.maybeLoadMore();
+      if (event.scrollTopChanged) { this.hover?.hide(); this.maybeLoadMore(); }
     }));
     this.ready = this.tree.setInput(this.input).catch(error => {
       if (!this.disposed) { this.dispose(); throw error; }
@@ -93,9 +106,10 @@ export class HistoryTreeHost implements TreeDisposable {
   private sizeCounts(counts: readonly HistoryCounts[]): void {
     for (const count of counts) {
       if (count.state === 'ready' || count.state === 'partial') this.countWidth = Math.max(this.countWidth,
-        String(count.additions).length + 3, String(count.deletions).length + 3);
+        String(count.additions).length + (count.state === 'partial' ? 2 : 1),
+        String(count.deletions).length + (count.state === 'partial' ? 2 : 1));
     }
-    this.element.style.setProperty('--history-count-width', `${this.countWidth}ch`);
+    this.element.style.setProperty('--history-count-width', `calc(${this.countWidth}ch + 10px)`);
   }
 
   private maybeLoadMore(): void {
@@ -107,7 +121,7 @@ export class HistoryTreeHost implements TreeDisposable {
   }
 
   private activate(row: HistoryRow): void {
-    if (this.disposed || row.type === 'historyItemViewModel') return;
+    if (this.disposed || row.type === 'historyItemViewModel' || row.type === 'historyItemDetails') return;
     if (row.type === 'historyItemError') {
       const key = rowId(row.owner);
       if (this.retrying.has(key)) return;
@@ -140,11 +154,18 @@ export class HistoryTreeHost implements TreeDisposable {
     if (this.disposed) return;
     const revision = ++this.updateRevision;
     this.input.rows = rows;
+    this.currentRows.clear();
+    for (const row of rows) if (row.type === 'historyItemViewModel') this.currentRows.set(row.historyItemViewModel.historyItem.id, row);
     this.sizeCounts(rows.filter(row => row.type === 'historyItemViewModel').map(row => row.counts));
     await this.ready;
     if (this.disposed || revision !== this.updateRevision) return;
     // Root-only refresh retains expanded file children; no new Git read per row.
-    try { await this.tree.updateChildren(this.input, false, true); this.maybeLoadMore(); }
+    try {
+      await this.tree.updateChildren(this.input, false, true);
+      // Details resolve current projection by ID. Rerender visible children only;
+      // updating a total must not re-read the commit's file pages.
+      this.tree.rerender(); this.hover?.refresh(); this.maybeLoadMore();
+    }
     catch (error) { if (!this.disposed) throw error; }
   }
 
@@ -158,6 +179,7 @@ export class HistoryTreeHost implements TreeDisposable {
     // Cancel native refresh waiters before disposing their render-event source.
     this.tree.cancelAllRefreshPromises(true);
     this.source.dispose();
+    this.hover?.dispose(); this.currentRows.clear();
     for (const subscription of this.subscriptions) subscription.dispose();
     this.tree.dispose();
     this.element.remove();

@@ -50,7 +50,9 @@
    arrive. State labels span the same area; unavailable is never rendered as zero. */
 .te2-scm-history .history-commit-statistics,
 .te2-scm-history .history-file-statistics {
-  display: grid; grid-template-columns: repeat(2, var(--history-count-width, 4ch));
+  /* ch uses the pill font; 10px in the shared width covers padding/border/margins. */
+  font-size: 10px;
+  display: grid; grid-template-columns: repeat(2, var(--history-count-width, calc(2ch + 10px)));
   gap: 3px; align-items: center; height: 22px; font-variant-numeric: tabular-nums;
 }
 .te2-scm-history .history-additions,
@@ -63,3 +65,27 @@
 .te2-scm-history .history-additions { color: #a4e8b4; background: #254a33; }
 .te2-scm-history .history-deletions { color: #ffc0b9; background: #64342f; }
 .te2-scm-history .history-count-state { grid-column: 1 / -1; text-align: right; }
+
+/* Compact headers expose local names plus grouped remote/tag pills. Totals move
+   to mobile expansion or desktop hover; row height and upstream lanes stay fixed. */
+.te2-scm-history { position: relative; }
+.te2-scm-history .history-item > .label-container { max-width: 55%; overflow: hidden; }
+.te2-scm-history .history-item > .label-container > .label { min-width: 0; }
+.te2-scm-history .history-item > .label-container > .label > .description { max-width: 160px; text-overflow: ellipsis; white-space: nowrap; }
+.te2-scm-history .history-item-details { display: flex; height: 22px; width: 100%; min-width: 0; align-items: center; gap: 4px; }
+.te2-scm-history .history-item-details > .graph-placeholder { flex: none; height: 22px; }
+.te2-scm-history .history-detail-body { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
+.te2-scm-history .history-detail-counts { margin-left: 0; }
+.te2-scm-history .history-detail-refs { display: flex; gap: 8px; overflow-x: auto; white-space: nowrap; min-width: 0; }
+.te2-scm-history .history-detail-ref { flex: none; }
+/* This tooltip is owned by the History host and cannot escape over host menus.
+   All names are real text, wrapping here; mobile details scroll full names inline. */
+.te2-scm-history .history-details-hover {
+  position: absolute; z-index: 5; left: 4px; right: 4px; box-sizing: border-box;
+  max-height: 80%; overflow: auto; padding: 10px; border: 1px solid #596575;
+  border-radius: 4px; background: #252b33; color: #e2e8ee; box-shadow: 0 3px 10px #0008;
+}
+.te2-scm-history .history-hover-title { white-space: pre-wrap; overflow-wrap: anywhere; margin-bottom: 6px; }
+.te2-scm-history .history-details-hover .history-detail-body { align-items: flex-start; }
+.te2-scm-history .history-details-hover .history-detail-refs { flex-wrap: wrap; white-space: normal; overflow: visible; }
+.te2-scm-history .history-details-hover .history-detail-ref { flex-shrink: 1; overflow-wrap: anywhere; max-width: 100%; }

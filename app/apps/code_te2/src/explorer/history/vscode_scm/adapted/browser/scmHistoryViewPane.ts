@@ -67,8 +67,7 @@ export class HistoryItemRenderer {
 		const label = appendElement(element, 'history-subject');
 		const description = appendElement(element, 'history-description');
 		const labelContainer = appendElement(element, 'label-container');
-		const statistics = appendElement(element, 'history-commit-statistics');
-		return { element, graphContainer, label, description, labelContainer, statistics };
+		return { element, graphContainer, label, description, labelContainer };
 	}
 
 	renderElement(node: { readonly element: HistoryCommitRow }, _index: number, templateData: HistoryCommitTemplate): void {
@@ -82,8 +81,7 @@ export class HistoryItemRenderer {
 		templateData.label.textContent = historyItem.subject;
 		templateData.label.classList.toggle('history-item-current', historyItemViewModel.kind === 'HEAD');
 		templateData.description.textContent = [historyItem.displayId ?? historyItem.id.slice(0, 8), historyItem.author].filter(Boolean).join(' ');
-		templateData.element.title = [historyItem.message, historyItem.id, historyItem.author].filter(Boolean).join('\n');
-		renderCounts(templateData.statistics, node.element.counts);
+		templateData.element.dataset.commitId = historyItem.id;
 		this._renderBadges(historyItem, templateData);
 	}
 
@@ -100,14 +98,12 @@ export class HistoryItemRenderer {
 			const references = historyItem.references ?
 				historyItem.references.slice(0) : [];
 
-			// If the first reference is colored, we render it
-			// separately since we have to show the description
-			// for the first colored reference.
-			if (references.length > 0 && references[0].color) {
-				this._renderBadge([references[0]], true, templateData);
-
-				// Remove the rendered reference from the collection
-				references.splice(0, 1);
+			// Name local branch heads inline; keep remote/tag groups compact.
+			for (let i = 0; i < references.length;) {
+				if (historyIconId(references[i].icon) === 'git-branch') {
+					this._renderBadge([references[i]], true, templateData);
+					references.splice(i, 1);
+				} else i++;
 			}
 
 			// Group history item references by color
@@ -188,6 +184,7 @@ export class ListDelegate {
 			case 'historyItemChangeViewModel': return HistoryItemChangeRenderer.TEMPLATE_ID;
 			case 'historyItemLoadMore': return HistoryItemLoadMoreRenderer.TEMPLATE_ID;
 			case 'historyItemError': return 'history-item-error';
+			case 'historyItemDetails': return 'history-item-details';
 		}
 	}
 }
@@ -195,7 +192,7 @@ export class ListDelegate {
 export class SCMHistoryTreeDataSource {
 	private readonly abort = new AbortController();
 	private readonly fileReads = new Map<string, Promise<readonly HistoryFileSummary[]>>();
-	constructor(private readonly readChildren: HistoryChildrenReader, private readonly onReadError: (error: unknown) => void = () => {}) { }
+	constructor(private readonly readChildren: HistoryChildrenReader, private readonly onReadError: (error: unknown) => void = () => {}, private readonly mobile = false) { }
 
 	private comparisonKey(row: HistoryCommitRow): string {
 		const item = row.historyItemViewModel.historyItem;
@@ -216,6 +213,7 @@ export class SCMHistoryTreeDataSource {
 			for (const key of this.fileReads.keys()) if (!retained.has(key)) this.fileReads.delete(key);
 			children.push(...inputOrElement.rows);
 		} else if (inputOrElement.type === 'historyItemViewModel') {
+			if (this.mobile) children.push({ type: 'historyItemDetails', owner: inputOrElement });
 			const historyItem = inputOrElement.historyItemViewModel.historyItem;
 			// Like upstream, ordinary commit children compare against the first parent.
 			// Root commits explicitly name an absent parent, never HEAD or disk.
@@ -237,7 +235,7 @@ export class SCMHistoryTreeDataSource {
 				if (this.abort.signal.aborted) return children;
 				// A failed read is not an empty commit. Keep an explicit retry row;
 				// do not send expected service failures to upstream's global handler.
-				return [{ type: 'historyItemError', owner: inputOrElement, graphColumns: inputOrElement.historyItemViewModel.outputSwimlanes }];
+				return [...children, { type: 'historyItemError', owner: inputOrElement, graphColumns: inputOrElement.historyItemViewModel.outputSwimlanes }];
 			}
 			if (this.abort.signal.aborted) return children;
 			children.push(...historyItemChanges.map(change => ({

@@ -168,3 +168,10 @@ The host uses the real `onDidScroll`/scroll dimensions for bounded prefetch;
 the adapted file renderer. Production supplies the existing filename-aware
 vendored catalog; standalone tests can supply a deterministic resolver. The
 adapter fences late results by exact icon-node ownership when rows are recycled.
+
+`patches/0007-branch-details-presentation.patch` names local heads inline and
+retains grouped remote/tag badges, removes header totals, and admits a mobile-only
+details child. `commit-details.ts` renders that child with unchanged upstream SVG
+lanes and owns the desktop live hover alternative. The controller supplies real
+ref categories/icons and upstream color-map inputs; no ancestry algorithm changes
+or fabricated fork edges are involved.

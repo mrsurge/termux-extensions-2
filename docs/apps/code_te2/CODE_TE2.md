@@ -988,8 +988,10 @@ History establishes a missing restored-project fact generation before admission,
 using the worker event bus rather than storing a private generation-zero fallback.
 The native five-minute idle lease publishes an exact-session expiry notification.
 Python stops queued statistics and closes that session; the frontend discards its
-actionable rows and offers Refresh. Late statistics cannot revive it. There is no
-keepalive, polling, or automatic replay of a selected file against a new snapshot.
+actionable rows and automatically refreshes once when History is visible.
+Document visibility and intersection events defer refresh while backgrounded or
+offscreen. A failed refresh requires explicit retry; disposal removes observers.
+There is no polling or automatic replay of a file against the new snapshot.
 
 The standalone pane removes the visible twisty/indent gutter; whole-row expansion
 and keyboard/ARIA semantics remain owned by the actual upstream tree. File graphs
@@ -1003,7 +1005,41 @@ the History font is 12px while graph rows retain their 22px height.
 Count pills are 16px tall with 10px text and a `currentColor` border, leaving
 vertical breathing room without changing row geometry. Refresh History uses
 the same dark-gray background as selected rows.
+Their shared columns also measure `ch` at 10px and reserve only the widest signed
+count (including partial markers) plus 10px for padding, border and margins.
 selection remains local to this tree/client.
+
+Commit headers show local branch names and grouped cloud/tag pills, not total
+counts. Snapshot ref names are classified into local/remote/tag icons and passed
+through upstream's color map; the active local ref uses the upstream active-ref
+color even before a fork. Native upstream/base reference roles receive the
+upstream remote/base colors; other labels inherit their actual lane color,
+without inventing a new graph edge.
+
+`history_roles.rs` resolves the current branch's configured upstream (including
+a local `remote = .` upstream), and a distinct remote base. Base precedence is a
+valid `branch.<name>.vscode-merge-base` remote, unique branch-creation reflog
+evidence (or oldest matching HEAD checkout), then symbolic HEAD of `origin` or
+the first configured remote. A local creation source contributes its remote
+upstream. No main/master name is assumed, no Git setting is written, and a base
+identical to upstream is omitted. Detached HEAD has neither role.
+
+Role refs must exist in the captured ref/OID set. Their identities contribute to
+the snapshot hash and typed Python/frontend adapters reject out-of-snapshot
+roles. Reflog evidence is bounded to 1 MiB and 4,096 entries per log; unavailable
+or ambiguous evidence falls through to the symbolic remote-HEAD fallback.
+Repository config/config.worktree and the exact HEAD/current-branch reflogs
+invalidate History through the native watcher. External/global included Git
+config changes require explicit Refresh; there is no broad config-tree watcher.
+
+Mobile UA (independent of width) expansion inserts one 22px details child before
+file rows. Its SVG continues the parent lanes, its totals use the latest commit
+projection, and its full branch/ref names scroll horizontally. Desktop omits that
+child and lazily creates a host-local hover/focus panel with full names and totals.
+The existing statistics stream updates both surfaces; neither hover nor a totals
+rerender reads Git files again. Scroll/Escape/leave/disposal remove desktop hover
+DOM. `commit-details.ts` owns these presentation-only surfaces; file counts and
+historical-open behavior remain unchanged.
 
 The tree's own scroll event requests a page within three 22px rows of the end.
 Requests are single-flight and require row-count advancement before another
@@ -1042,6 +1078,19 @@ tree, including mouse/touch/keyboard events, expanded-row retention, retries,
 in-flight disposal, and stylesheet scope. Device acceptance remains pending.
 
 ### Native Graph Reader Foundation
+
+Commit traversal follows the pinned VS Code Git extension's `--topo-order`
+convention: libgit2 `Sort::TOPOLOGICAL` without `Sort::TIME`. Adding TIME
+interleaves independent branch histories by timestamp. A paged fixture compares
+interleaved branch dates with Git itself; a read-only 500-commit HEAD probe on
+this repository matched Git exactly without the TIME flag. Root/ref selection
+and equal-time ties can still differ when comparing different viewers' scopes.
+The captured unique tip OIDs are seeded newest-first by committer date (pushed
+oldest-first because libgit2 prepends). Hash order is not traversal priority.
+This keeps inactive branch tips from preceding the current feature/main chain
+while preserving branch-contiguous topology. A multi-ref regression covers old
+branches, main, the current feature, remote refs and duplicate tag tips. A
+read-only 500-commit branches/remotes/tags probe matched Git's full order.
 
 `framework_services/history_graph.rs` contains the metadata-only reader.
 `history_sessions.rs` owns the repository and reader on a retained blocking

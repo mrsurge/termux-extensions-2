@@ -9,7 +9,9 @@ checkpoint is underway; see TRACKER.md for completed work and remaining scope.
 
 Add a read-only History tab beside By contents, By changes, Drafts, and
 Diagnostics in the Explorer overlay. Commit headers show the real ancestry graph,
-subject/hash/ref labels and numeric additions/deletions. Expand a commit to see
+subject/hash/local-branch labels and grouped remote/tag badges. Commit totals
+are shown in a mobile-UA expanded details row or a desktop hover/focus panel,
+not the compact header. Expand a commit to see
 file names and per-file numeric additions/deletions, with graph lanes continuing
 through those rows. There is NO document text or inline hunk body in this tab.
 

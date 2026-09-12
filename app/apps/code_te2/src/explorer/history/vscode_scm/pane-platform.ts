@@ -38,7 +38,12 @@ export interface HistoryErrorRow {
   readonly graphColumns: ISCMHistoryItemGraphNode[];
 }
 
-export type HistoryRow = HistoryCommitRow | HistoryFileRow | HistoryLoadMoreRow | HistoryErrorRow;
+export interface HistoryDetailsRow {
+  readonly type: 'historyItemDetails';
+  readonly owner: HistoryCommitRow;
+}
+
+export type HistoryRow = HistoryCommitRow | HistoryFileRow | HistoryLoadMoreRow | HistoryErrorRow | HistoryDetailsRow;
 
 export interface HistoryCommitTemplate {
   readonly element: HTMLElement;
@@ -46,7 +51,6 @@ export interface HistoryCommitTemplate {
   readonly label: HTMLElement;
   readonly description: HTMLElement;
   readonly labelContainer: HTMLElement;
-  readonly statistics: HTMLElement;
 }
 
 export interface HistoryLoadMoreTemplate {

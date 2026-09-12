@@ -1,8 +1,8 @@
 import { CompressibleAsyncDataTree } from 'te2-scm-tree';
 import { getIcon as getSetiIcon } from '/static/vendor/seti-icons/seti-icons.js';
 import { HistoryTreeHost } from './vscode_scm/history-tree-host.ts';
-import { toISCMHistoryItemViewModelArray } from './vscode_scm/adapted/browser/scmHistory.ts';
-import type { ISCMHistoryItem } from './vscode_scm/adapted/common/history.ts';
+import { toISCMHistoryItemViewModelArray, historyItemRefColor, historyItemRemoteRefColor, historyItemBaseRefColor } from './vscode_scm/adapted/browser/scmHistory.ts';
+import type { ISCMHistoryItem, ISCMHistoryItemRef } from './vscode_scm/adapted/common/history.ts';
 import type { HistoryCounts, HistoryFileSummary, HistoryCommitRow, HistoryLoadMoreRow } from './vscode_scm/pane-platform.ts';
 import { EXPLORER_RPC_METHODS as RPC, type ExplorerRpcMethod } from '../rpc/contract.ts';
 import type { JsonObject } from '../../rpc/transport.ts';
@@ -42,10 +42,16 @@ export class ExplorerHistoryController {
   private statistics = new Map<string, HistoryCounts>();
   private indices = new Map<string, number>();
   private head: string | undefined;
-  private refs = new Map<string, { id: string; name: string }[]>();
+  private headRef: string | undefined;
+  private upstreamRef: ISCMHistoryItemRef | undefined;
+  private baseRef: ISCMHistoryItemRef | undefined;
+  private refs = new Map<string, ISCMHistoryItemRef[]>();
   private complete = false;
   private pending: JsonObject[] = [];
   private expired = false;
+  private visibility: IntersectionObserver | null = null;
+  private intersectsViewport = false;
+  private readonly onVisibility = () => this.refreshExpired();
 
   constructor(private readonly request: (method: ExplorerRpcMethod, payload: JsonObject) => Promise<JsonObject>) {}
 
@@ -64,7 +70,27 @@ export class ExplorerHistoryController {
     this.body.style.cssText = 'flex:1;min-height:0;overflow:hidden';
     this.root.append(refresh, this.status, this.body); container.append(this.root);
     this.resize = new ResizeObserver(() => this.layout()); this.resize.observe(this.body);
+    // Native lease expiry is one event, not a keepalive loop. A backgrounded
+    // app or offscreen Explorer defers reacquisition until it is actually visible.
+    this.root.ownerDocument.addEventListener('visibilitychange', this.onVisibility);
+    if (typeof IntersectionObserver !== 'undefined') {
+      this.visibility = new IntersectionObserver(entries => {
+        this.intersectsViewport = entries.some(entry => entry.isIntersecting);
+        this.refreshExpired();
+      });
+      this.visibility.observe(this.root);
+    }
     void this.open();
+  }
+
+  private refreshExpired(): void {
+    if (!this.expired || !this.root || this.root.ownerDocument.hidden) return;
+    const box = this.root.getBoundingClientRect();
+    const view = this.root.ownerDocument.defaultView;
+    const visible = this.visibility ? this.intersectsViewport : Boolean(view
+      && box.width > 0 && box.height > 0 && box.bottom > 0 && box.right > 0
+      && box.top < view.innerHeight && box.left < view.innerWidth);
+    if (visible) void this.open(); // open clears expired synchronously; failures stay explicit.
   }
 
   private message(error: unknown): void {
@@ -74,9 +100,10 @@ export class ExplorerHistoryController {
     if (this.body) this.tree?.layout(this.body.clientHeight, this.body.clientWidth);
   }
   private reset(): void {
+    this.upstreamRef = undefined; this.baseRef = undefined;
     this.expired = false;
     this.tree?.dispose(); this.tree = null;
-    this.commits = []; this.statistics.clear(); this.indices.clear(); this.refs.clear(); this.head = undefined; this.complete = false;
+    this.commits = []; this.statistics.clear(); this.indices.clear(); this.refs.clear(); this.head = undefined; this.headRef = undefined; this.complete = false;
   }
   private async open(): Promise<void> {
     const epoch = ++this.epoch;
@@ -112,11 +139,25 @@ export class ExplorerHistoryController {
       if (payload.kind === 'snapshot') {
         const snapshot = record(payload.snapshot);
         this.head = typeof snapshot.head_id === 'string' ? snapshot.head_id : undefined;
+        this.headRef = typeof snapshot.head_ref === 'string' ? snapshot.head_ref : undefined;
         for (const raw of array(snapshot.refs)) {
           const ref = record(raw), id = text(ref.commit_id), name = text(ref.name);
           const refs = this.refs.get(id) || [];
-          refs.push({ id: name, name }); this.refs.set(id, refs);
+          const local = name.startsWith('refs/heads/'), remote = name.startsWith('refs/remotes/');
+          refs.push({ id: name, revision: id, name: name.replace(/^refs\/(heads|remotes|tags)\//, ''),
+            category: local ? 'local' : remote ? 'remote' : 'tag',
+            icon: { id: local ? 'git-branch' : remote ? 'cloud' : 'tag' } });
+          this.refs.set(id, refs);
         }
+        const role = (value: unknown): ISCMHistoryItemRef | undefined => {
+          if (value == null) return undefined;
+          const ref = record(value);
+          const found = this.refs.get(text(ref.commit_id))?.find(item => item.id === text(ref.name));
+          if (!found) throw Error('History role is outside the snapshot');
+          return found;
+        };
+        this.upstreamRef = role(snapshot.upstream_ref);
+        this.baseRef = role(snapshot.base_ref);
       } else if (payload.kind === 'page') {
         const page = record(payload.page);
         if (number(page.offset) !== this.commits.length) throw Error('History page order changed; refresh History');
@@ -139,19 +180,28 @@ export class ExplorerHistoryController {
           : { state: item.state === 'computing' ? 'pending' : 'unavailable' });
         this.render();
       } else if (payload.kind === 'expired') {
-        // Native idle expiry is terminal for these row identities. Keep Refresh
-        // explicit instead of replaying a file click against a different snapshot.
+        // Discard expired identities, then refresh once when visible. Never
+        // replay a file click against the replacement snapshot.
         this.reset();
         this.expired = true;
-        this.message('History session expired. Refresh History to continue.');
+        this.message('History paused; refreshing when visible.');
+        this.refreshExpired();
       } else if (payload.kind === 'error' || payload.kind === 'watcherError') this.message(payload.error);
     } catch (error) { this.message(error); }
   }
 
   private render(): void {
     if (!this.body) return;
-    const models = toISCMHistoryItemViewModelArray(this.commits, undefined,
-      this.head ? { id: 'HEAD', name: 'HEAD', revision: this.head } : undefined);
+    // Match VS Code's current/upstream/base role colors. Rust resolved these
+    // roles; other refs still inherit the lane rather than inventing a fork.
+    const colorMap = new Map<string, string | undefined>();
+    for (const refs of this.refs.values()) for (const ref of refs) colorMap.set(ref.id, undefined);
+    if (this.headRef) colorMap.set(this.headRef, historyItemRefColor);
+    if (this.upstreamRef) colorMap.set(this.upstreamRef.id, historyItemRemoteRefColor);
+    if (this.baseRef && this.baseRef.id !== this.upstreamRef?.id) colorMap.set(this.baseRef.id, historyItemBaseRefColor);
+    const models = toISCMHistoryItemViewModelArray(this.commits, colorMap,
+      this.head ? { id: this.headRef || 'HEAD', name: this.headRef || 'HEAD', revision: this.head } : undefined,
+      this.upstreamRef, this.baseRef);
     const rows: (HistoryCommitRow | HistoryLoadMoreRow)[] = models.map(historyItemViewModel => ({
       type: 'historyItemViewModel', historyItemViewModel,
       counts: this.statistics.get(historyItemViewModel.historyItem.id) || { state: 'pending' },
@@ -206,6 +256,9 @@ export class ExplorerHistoryController {
     const generation = this.generation;
     ++this.epoch; this.reset(); this.pending = []; this.generation = -1;
     this.resize?.disconnect(); this.resize = null;
+    this.visibility?.disconnect(); this.visibility = null;
+    this.root.ownerDocument.removeEventListener('visibilitychange', this.onVisibility);
+    this.intersectsViewport = false;
     this.root.remove(); this.root = null; this.body = null; this.status = null;
     if (generation >= 0) void this.request(RPC.historyClose, { generation }).catch(() => {});
   }

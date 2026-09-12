@@ -1,6 +1,8 @@
 //! Metadata-only, pinned history traversal. The caller owns the blocking worker
 //! and keeps this reader alive between page requests; no offset rescans or stats.
-use git2::{ErrorCode, Oid, Repository, Revwalk, Sort};
+#[cfg(test)]
+use git2::Oid;
+use git2::{ErrorCode, Repository, Revwalk, Sort};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{
@@ -57,6 +59,8 @@ pub(crate) struct GraphSnapshot {
     pub(crate) snapshot_id: String,
     pub(crate) head_id: Option<String>,
     pub(crate) head_ref: Option<String>,
+    pub(crate) upstream_ref: Option<GraphRef>,
+    pub(crate) base_ref: Option<GraphRef>,
     pub(crate) refs: Vec<GraphRef>,
 }
 
@@ -144,11 +148,20 @@ impl<'repo> GraphReader<'repo> {
             }
             Err(error) => return Err(error.into()),
         };
+        let (upstream_ref, base_ref) =
+            super::history_roles::resolve(repo, &refs, head_ref.as_deref());
+        // Role changes also replace snapshot identity, even when no tip moved.
         // Length-prefixed fields avoid collisions between arbitrary ref names.
         let mut hash = Sha256::new();
-        for field in std::iter::once("te2-history-v1")
+        for field in std::iter::once("te2-history-v2-roles")
             .chain(head_id.as_deref())
             .chain(head_ref.as_deref())
+            .chain(std::iter::once(
+                upstream_ref.as_ref().map_or("", |r| r.name.as_str()),
+            ))
+            .chain(std::iter::once(
+                base_ref.as_ref().map_or("", |r| r.name.as_str()),
+            ))
             .chain(
                 refs.iter()
                     .flat_map(|r| [r.name.as_str(), r.commit_id.as_str()]),
@@ -163,13 +176,27 @@ impl<'repo> GraphReader<'repo> {
             snapshot_id: format!("{:x}", hash.finalize()),
             head_id,
             head_ref,
+            upstream_ref,
+            base_ref,
             refs,
         };
         let mut walk = repo.revwalk()?;
-        walk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
+        // VS Code's Git history provider uses --topo-order: keep branch runs
+        // together instead of time-ordering every available topological tip.
+        walk.set_sorting(Sort::TOPOLOGICAL)?;
+        // Git seeds --topo-order from newest tips, then follows branch runs.
+        // libgit2 push prepends, so feed oldest first. Hash order alone makes
+        // stale branches appear newest and changes which lane continues HEAD.
+        // Resolve only captured OIDs: never reread moving refs after the snapshot.
+        let mut ordered_tips = Vec::with_capacity(tips.len());
         for tip in &tips {
             check(cancelled)?;
-            walk.push(*tip)?;
+            ordered_tips.push((repo.find_commit(*tip)?.time().seconds(), *tip));
+        }
+        ordered_tips.sort_unstable();
+        for (_, tip) in ordered_tips {
+            check(cancelled)?;
+            walk.push(tip)?;
         }
         Ok(Self {
             repo,
@@ -257,10 +284,13 @@ mod tests {
         (dir, repo)
     }
     fn commit(repo: &Repository, name: &str, parents: &[Oid]) -> Oid {
+        commit_at(repo, name, parents, 100)
+    }
+    fn commit_at(repo: &Repository, name: &str, parents: &[Oid], time: i64) -> Oid {
         let tree_id = repo.treebuilder(None).unwrap().write().unwrap();
         let tree = repo.find_tree(tree_id).unwrap();
-        let sig =
-            git2::Signature::new("Test", "test@example.invalid", &git2::Time::new(100, 0)).unwrap();
+        let sig = git2::Signature::new("Test", "test@example.invalid", &git2::Time::new(time, 0))
+            .unwrap();
         let parents: Vec<_> = parents
             .iter()
             .map(|id| repo.find_commit(*id).unwrap())
@@ -285,6 +315,74 @@ mod tests {
                 return rows;
             }
         }
+    }
+    #[test]
+    fn interleaved_branch_dates_match_git_topo_order_across_pages() {
+        let (dir, repo) = repository();
+        let root = commit_at(&repo, "root", &[], 1);
+        let left = commit_at(&repo, "left", &[root], 2);
+        let right = commit_at(&repo, "right", &[root], 3);
+        let left_tip = commit_at(&repo, "left tip", &[left], 4);
+        let right_tip = commit_at(&repo, "right tip", &[right], 5);
+        let merge = commit_at(&repo, "merge", &[left_tip, right_tip], 6);
+        repo.reference("refs/heads/main", merge, true, "test")
+            .unwrap();
+        repo.set_head("refs/heads/main").unwrap();
+        // Git is a test oracle only; production retains its native paged walk.
+        let output = std::process::Command::new("git")
+            .current_dir(dir.path())
+            .args(["rev-list", "--topo-order", "HEAD"])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let expected = String::from_utf8(output.stdout).unwrap();
+        let mut reader = GraphReader::new(&repo, &AtomicBool::new(false)).unwrap();
+        let actual: Vec<_> = drain(&mut reader, 2)
+            .into_iter()
+            .map(|row| row.id)
+            .collect();
+        assert_eq!(actual, expected.lines().collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn stale_branch_tips_do_not_precede_current_feature_extension() {
+        let (dir, repo) = repository();
+        let root = commit_at(&repo, "root", &[], 1);
+        let stale = commit_at(&repo, "old abandoned branch", &[root], 2);
+        let main = commit_at(&repo, "main", &[root], 10);
+        let feature = commit_at(&repo, "current feature", &[main], 20);
+        let other = commit_at(&repo, "other branch", &[root], 5);
+        for (name, id) in [
+            ("refs/heads/old", stale),
+            ("refs/heads/main", main),
+            ("refs/heads/feature", feature),
+            ("refs/remotes/origin/other", other),
+            ("refs/tags/old", stale),
+        ] {
+            repo.reference(name, id, true, "test").unwrap();
+        }
+        repo.set_head("refs/heads/feature").unwrap();
+        let output = std::process::Command::new("git")
+            .current_dir(dir.path())
+            .args([
+                "rev-list",
+                "--topo-order",
+                "--branches",
+                "--remotes",
+                "--tags",
+            ])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let expected = String::from_utf8(output.stdout).unwrap();
+        let mut reader = GraphReader::new(&repo, &AtomicBool::new(false)).unwrap();
+        let rows = drain(&mut reader, 1);
+        assert_eq!(rows[0].id, feature.to_string());
+        assert_eq!(rows[1].id, main.to_string());
+        assert_eq!(
+            rows.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
+            expected.lines().collect::<Vec<_>>()
+        );
     }
     #[test]
     fn pages_preserve_merge_topology_parent_order_and_ref_snapshot() {

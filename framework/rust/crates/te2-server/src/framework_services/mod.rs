@@ -6,6 +6,7 @@ pub(crate) mod history_files;
 pub(crate) mod history_graph;
 #[cfg(test)]
 mod history_performance;
+mod history_roles;
 pub(crate) mod history_sessions;
 pub(crate) mod history_watch;
 pub(crate) mod hunk_edits;
