@@ -196,6 +196,8 @@ Spinner / Status indicator (host UI):
 - Every WBA protocol actor, including language intelligence, commands, messages, and webviews, receives its resolved nid through named runtime-adapter fields. The generated config for the pinned managed Code Server runtime is production authority; `RPC_DEFAULTS` is only the matching 4.130 no-config fallback.
 - The installed WBA MessagePack codec is one self-contained bundled ESM file at `workbench_protocol_proxy/node_workbench_adapter/dist/protocol/messagepack-codec.mjs`.
 
+Disconnect cleanup explicitly clears Socket.IO `sendBuffer`; WBA recovery remains disabled. Code TE2 console records use `$TE2_CACHE_HOME/code_te2`, while project diagnostics are under `.code_te2/diagnostics`. Startup does not probe or import `.code_cm6` or other retired CM6 roots.
+
 ## 0.7) Relay Boundaries
 
 Several relays participate in a native client session, but they have separate
@@ -224,6 +226,8 @@ client-runtime pattern in its own process.
 ---
 
 ## 1) Key files (where to look)
+
+Shared UI source lives in `main_page/frontend/ui/component-runtime/` (synchronous document-aware JSX, refs, ownership/disposal, small projections; no VDOM or durable state authority) and `main_page/frontend/ui/modal-kit/`. `ui/modal-kit/jsx-runtime.ts` is the compatibility re-export. Async `teUI.dialog` stays inline on browser/Android; Electron uses portable child-window IPC and same-origin portal adoption. Listbox popups belong to the active dialog layer. Retain CM6 JSON fields in Run Profiles/Settings. Android per-app settings use `SharedPreferences`, not framework Settings APIs; relay retargeting stays in `PersistentNetworkService.configure`.
 
 ### Monaco editor runtime (worker)
 - `app/apps/code_te2/monaco_editor/inline_host.ts`
@@ -721,6 +725,8 @@ Used by review save/discard, open/jump, search highlighting, and project-switch 
 
 ## 6.6) Search system (progressive Rust pipe provider)
 
+Comparison scheduling source anchors: `handle_git_set_diff_base` only persists/validates and publishes `GitDiffBaseChanged`. Separate `LatestProjection` runners fence active and newest pending reads without cancelling underlying `to_thread` work. The retired `search:query` event and temporary `changes_timing` logs are not part of the production path.
+
 ### Ownership
 - Rust framework service: `service.search`
 - Python pipe wrapper/client: `explorer/search.py`
@@ -1076,6 +1082,8 @@ fix unobserved active-node debounce and refresh-cleanup rejections; there is no
 global error suppressor or production grace timer. DOM tests exercise the actual
 tree, including mouse/touch/keyboard events, expanded-row retention, retries,
 in-flight disposal, and stylesheet scope. Device acceptance remains pending.
+
+The SCM upstream source is pinned to code-server VS Code revision `591199df409fbf59b4b52d5ad4ee0470152a9b31`. The editable `vscode-te2-diff` fork does not contain SCM; its absence must not trigger a hand-written substitute. Native lifecycle methods are `git.historyGraph.open/next/close` on `service.git`.
 
 ### Native Graph Reader Foundation
 
@@ -1434,6 +1442,8 @@ Fix:
 ---
 
 ## 8) UI "knobs" (what you can safely tune)
+
+Fresh editor preferences use `github-dark`; the old `cm6-dark` seed migrates once, while explicit themes remain authoritative. Baseline debounce dependencies must wrap `window.setTimeout` and `window.clearTimeout`. Passing native methods unbound through an options object changes their receiver and can throw `Illegal invocation`, leaving enabled inline diff preferences stranded in a plain editor.
 
 ### Preferences -> Monaco options mapping
 The inline editor runtime builds Monaco options from SSOT preferences (`buildMonacoOptionsFromPrefs()`):
@@ -2122,6 +2132,8 @@ Console observability is framework-owned. Browser producers and drawer clients u
 
 The old worker-owned `/ui_ipc` console relay has been removed from the live source path. `ui_ipc` does not handle `console:*` events.
 
+Console eval wraps results with `Promise.resolve`, maps JavaScript `undefined` to `null`, and races the Python timeout plus two seconds. Disconnect rejects pending evaluations; teardown removes owned listeners/sockets and pending work.
+
 ### Architecture overview
 
 ```text
@@ -2437,6 +2449,8 @@ src/extensions/intelligence/code-navigation.ts, and
 src/server/request-dispatch.ts.
 
 ## 35) Android / GeckoView IME and Browser Text Input
+
+The published editable xterm source checkpoint is branch `te2-mobile-touch-routing` at `1d71ed0732d592980eb0960ce3da001213d2636e`, based on xterm 5.3.0. Its source-owned capture surface and shared adapter must be published together. Android IME context switching defaults false. Settings refresh notification/power state on foreground events, and both activities resynchronize PersistentNetworkService in `onResume` after permission changes, without polling.
 
 ### Problem
 
@@ -2976,6 +2990,8 @@ The Run Profiles modal is `main_page/frontend/ui/run-profiles-modal.ts`. It uses
 ## 38) Native clients and secondary-editor integration
 
 The active Linux desktop client is the Electron shell under `desktop_client/electron/`. `desktop_client/ui.py` remains a GTK/WebKit behavioral reference, not the current runtime.
+
+Electron settings v2 persists opt-in `autostart` and canonical `preferredAppId`. Launcher readiness triggers a catalog lookup against only the selected configured framework and then ordinary app-open/readiness. Missing framework/app/readiness leaves the launcher interactive; startup never implicitly launches a missing framework.
 
 ### Runtime shape
 
@@ -3923,3 +3939,374 @@ host drawer.
 
 Project switch, explicit activation, active-shell close, and new-shell creation
 retain the established rebind event. There is no polling or transport fallback.
+
+## 47) Framework Runtime And Deployment Reference
+
+### Generic Worker Module Identity
+
+Built-in backend module identity comes from package path rather than public app id. Explicit `TE2_APP_ROUTER` is authoritative; legacy `<app_id>_bp` exists only for unconverted out-of-tree apps. The legacy watcher bridge and `te2.onFilesChanged` API are removed, not compatibility mechanisms.
+
+### Framework Runtime And State
+
+- Rust owns framework filesystem, Git, search, bookmarks, settings, state, app
+  lifecycle, proxying, shell orchestration, and the loaded-app/running-app index.
+  Ordinary request, WebSocket, proxy, and Socket.IO handling never rediscovers
+  FWS metadata or scans `/proc`; only explicit reload/reconciliation may do so.
+
+- The Rust server uses a multi-threaded Tokio runtime. Each app-worker bridge
+  has a bounded 256-frame nonblocking queue and dedicated blocking writer:
+  dispatch encodes/enqueues only, preserves accepted-frame order, and reports
+  saturation, closure, or writer failure without blocking a Tokio worker.
+
+- `app.libs.jobs` is a core-only persisted job manager/handler registry. Its
+  unmounted FastAPI/SSE router and global `/api/jobs` surface were removed.
+  TE2 does not directly declare `sse-starlette`; MCP may still pull it in.
+
+- App manifests are the catalog contract. Semantic backend readiness opts in
+  with `readiness_support: true` and publishes at
+  `/api/apps/{app_id}/readiness`.
+
+- Framework-readiness shells use one app-scoped
+  `/api/apps/events?app_id=...` SSE stream. Do not restore serialized boot GETs
+  or `/ws/apps` as an application-shell gate.
+
+- Framework settings, generic state, and bookmarks have canonical config/data
+  roots. TE2-owned per-app durable state is under
+  `$TE2_DATA_HOME/app_state/<app_id>`; `$TE2_DATA_HOME/apps/<app_id>` remains
+  user-app source, never an app-state partition.
+
+- The JetBrains Mono webfont payload contains only the published WOFF2 Regular,
+  Italic, Bold, and BoldItalic faces. Do not restore release archives, TTFs,
+  variable/no-ligature/proportional variants, or unused weights.
+
+- Legacy-root recovery is only the standalone dry-run-first
+  `te2 migrate-legacy-roots` command. `--apply` requires a stopped framework,
+  locks, validates an allowlist, stages atomic replacements, and records a
+  versioned one-time receipt. Startup never invokes it.
+
+- Canonical `TE2_*_HOME` overrides are final roots. Otherwise resolve XDG bases
+  plus `/te2`, with `$HOME` fallback for cache/data/config and a private
+  `te2-$UID` runtime directory. Bootstrap exports resolved roots to Rust and
+  workers; Android storage is separate.
+
+### Network Exposure
+
+- The Rust framework is loopback-only by default. Bootstrap resolves
+  `--broadcast` once into exact bind hosts and immutable Rust exposure policy;
+  invalid selectors fail before binding. `te2 --list-interfaces` emits Linux /
+  Termux structured JSON using `getifaddrs`.
+
+- Exact IP/CIDR selectors filter peer addresses; interface selectors filter the
+  accepted socket's local destination. Loopback is always allowed. One outer
+  Axum middleware protects HTTP, SSE, raw WebSockets, Socket.IO, app proxy,
+  console, and MCP routes.
+
+- Public bind addresses are distinct from the loopback `TE_FRAMEWORK_URL` given
+  to app workers, Framework-Shells, console, and MCP. IPv4 and IPv6 wildcard
+  listeners use separate sockets.
+
+### Build And Installation Contracts
+
+- Package/CLI metadata is `pyproject.toml`; Python runtime requirements are in
+  `requirements.txt`. Release versioning synchronizes package/Rust, Code TE2
+  version asset, app manifests, versioned frontend URLs, launcher, and shipped
+  Electron distribution. Dependency/protocol schema versions are separate.
+
+- Generated bundles, vendor trees, Android asset copies, and release candidates
+  are publication output, not editable source unless an approved task explicitly
+  targets them. Build wheels from clean isolated staging; never package the
+  working directory, bytecode caches, profiler output, or build intermediates.
+
+- Framework builds are optimized by default; `--debug` is opt-in. Cache builds
+  use one cross-process lock for build/validation/atomic publish/pruning; retain
+  incremental Cargo artifacts but only the chosen validated final binary.
+
+- Supported framework source is `framework/` (bootstrap/runtime bridge,
+  `tests/`, Rust workspace), and active Electron source is
+  `desktop_client/electron/`. Launcher/server settings use `TE2_SERVER_*`,
+  bridge settings use `TE2_RUNTIME_BRIDGE_*`, and Electron smoke settings use
+  `TE2_DESKTOP_*`; no experimental-name aliases remain.
+
+- Rust app-worker launch explicitly supplies matching loopback
+  `TE_FRAMEWORK_URL` and `TE_PORT`, independent of shellspecs/parent environment.
+
+- Code TE2, WBA, and browser vendor artefacts are checked-in built/vendored
+  inputs. Terminal first-use bootstrap and source-desktop bootstrap are the only
+  installed `npm ci` owners; no global npm application package is required.
+
+- Linux x86_64 installs exact `nodejs-wheel==24.16.0` in the private Python
+  environment. The shared resolver prefers sibling Node/npm, exports the
+  package's matching Node headers, prepends that environment for framework
+  children, and gives WBA the exact resolved Node executable. Termux retains a
+  separately validated native package mapping.
+
+- The supported Debian/Ubuntu Linux alpha requires `build-essential` for the
+  standalone Terminal's first-use `node-pty` native build. The private Python
+  environment still owns exact Node/npm and matching headers through
+  `nodejs-wheel`; users must not install a second global Node runtime for this.
+
+- Framework-Shells 0.0.63 release wheels are native: ordinary CPython uses
+  `cp39-abi3`, free-threaded CPython uses its exact `cp314-cp314t` tag, and
+  both carry the PyO3 pump plus Rust terminal broker. Agent Log Server 0.2.124
+  depends on that exact version and its platform wheel carries a verified
+  `als-server`, compiled browser bundle, and vendored Socket.IO MessagePack
+  parser. Release construction rejects incomplete wheel payloads. Neither
+  release path silently degrades to pure Python or Cargo.
+
+- TE2 pins `fastmcp==3.4.7`. FastMCP 4 selects MCP 2 and removes the
+  `mcp.server.fastmcp` API used by the current conversation-scoped
+  `agent-pty-blocks` stdio server; do not relax the pin until that server has a
+  tested MCP 2 migration.
+
+- Memory profiling is explicit through `te2 --memory-profile OUTPUT_DIR` and
+  relies on Heaptrack plus opt-in process-separated Python/Node snapshots.
+  Production retains the platform allocator; do not attribute extension-host or
+  language-server growth to Rust without process-separated evidence.
+
+- Supported x86_64 GNU/Linux TE2 binary-release wheels carry the audited
+  optimized Rust server plus explicit target/version/source/digest provenance.
+  Bootstrap verifies the payload after explicit server overrides and never
+  falls through to Cargo when binary-release provenance is missing, corrupt, or
+  incompatible; only source-build provenance retains the canonical fingerprinted
+  Cargo path. Final publication artifacts are clean synchronized-tag builds;
+  dirty candidates are validation inputs only.
+
+- `te2-server` enables the canonical `ferrous-framework-native` host by
+  default. Every Linux and Termux release candidate must pass its non-starting
+  machine-readable `--build-info` identity/target/feature contract. Termux
+  records that report in the target manifest and executes the staged binary to
+  confirm exact equality before activation; ELF shape and checksums alone are
+  insufficient.
+
+- Termux managed releases use the active Termux Python without a venv. Only
+  target-manifest-approved apt packages are shared; TE2, Framework-Shells,
+  Agent Log Server, and every non-apt Python input live in a versioned
+  release-local Python tree materialized from a verified binary-only wheelhouse.
+  `nodejs-wheel` remains Linux x86_64-only and Termux obtains Node/npm from apt.
+  A native x86_64 Termux container may validate clean installer transactions,
+  but physical AArch64 Termux remains authoritative for Android wheel tags,
+  ELF/Bionic linkage, the server, app workers, and Terminal acceptance.
+
+- The Termux archive carries one exact audited wheel inventory: 93 locked
+  third-party wheels plus TE2, Framework-Shells, and Agent Log Server (96
+  wheels total). Its
+  installer atomically manages the versioned release tree, `current` pointer,
+  receipt, and the `te2`, `te2-rust`, `fws`, `als-rs`, and
+  `als-rs-extension-adapter` wrappers. Repair and uninstall preserve TE2 state;
+  unmanaged wrapper collisions fail before mutation.
+
+- Termux archive construction is deterministic and publication-gated. Dirty
+  first-party inputs are rejected by default; the explicit validation-only
+  override records the dirty component and `publicationEligible: false` in the
+  manifest. Never promote such a candidate to a release.
+
+- Physical AArch64 Termux acceptance covers exact packaged-server selection,
+  all eight built-in apps, an actual app-worker launch through that server, ALS
+  static/proxy delivery, Terminal's first-use native
+  `node-pty` bootstrap and strict MessagePack PTY flow, corrupt/missing-wheel
+  rejection, same-version repair, uninstall state preservation, and SIGTERM.
+  ALS 0.2.122 includes the clean Android packaged-target fix and is published
+  with the matching AArch64 wheel.
+
+- Termux target manifests explicitly install the official `tur-repo`
+  subscription package during the initial apt transaction. Managed Android Code
+  Server retains its own confirmation-gated dependency installer and expects
+  TUR's `nodejs-24`; do not duplicate or bypass that source installer.
+
+- Termux target manifests also install TUR's `bun` package and validate its
+  executable as a forward JavaScript-runtime prerequisite; current WBA and
+  Terminal ownership remains on the separately declared Node/npm runtime.
+
+- The public release installer detects Termux before generic Linux. Its initial
+  Linux target is apt-based glibc x86_64; it installs the manifest-pinned PyPI
+  release into a staged versioned private venv, relocates generated venv paths
+  before atomic publication, validates every managed command, and exposes them
+  through user-local wrappers following `install/current`.
+
+- Linux `install-te2 --desktop` delegates to that exact venv's existing
+  `te2 desktop install` command. The established Electron bootstrap owns its
+  fingerprint/cache, 3 GiB guard, runtime, receipt, wrapper, icon, and desktop
+  entry. The installer seeds the existing local-framework config with stable
+  managed command/venv paths while preserving explicit user policy and paths.
+
+- The Linux prerequisite transaction is limited to `git`, `build-essential`,
+  `python3-venv`, and the available Debian `libarchive` runtime. Termux's
+  target manifest also includes `git`; Termux continues to obtain Node/npm
+  from apt and never installs `nodejs-wheel`.
+
+- Installed-release activation retains exactly current plus one prior-version
+  fallback after successful validation; same-version replacements remain
+  transaction-local and explicit rollback rotates the pair. Candidate failure
+  restores the exact prior pointers and managed files before pruning. Linux
+  desktop activation rewrites managed `command`/`venvPath` while preserving
+  user `broadcast`, `port`, and `env`. Electron runtime publication likewise
+  retains current plus one prior fingerprint, and a valid cache hit still repairs
+  missing receipt-owned wrapper, icon, and desktop-entry files.
+
+## 48) Standalone Terminal Contracts
+
+The standalone Terminal is a separate app from Code TE2's Python/Pyte drawer (section 46). Its Node/headless-xterm ownership and local UI controls are preserved here for shared-input maintenance.
+
+- The standalone terminal supports only the Node shellspec. Browser traffic is
+  strict one-object-per-frame MessagePack; FWS pipe traffic is length-prefixed
+  MessagePack. Node owns pty, headless xterm, 5,000-row scrollback, sequence,
+  and reconnect checkpoints. There is no JSON/base64 shell fallback.
+
+- Standalone Terminal lifecycle/control uses websocket-only `/terminal` at
+  `/api/app/terminal/socket.io` with strict MessagePack payloads. One FWS
+  snapshot plus lifecycle events owns generation-fenced revisioned shell-list
+  projection; frontend selection remains client-local. The frontend has no
+  application-control HTTP fallback or lifecycle polling.
+
+- Standalone Terminal soft keys are two fixed seven-key rows: `ESC`, `≡`, `-`,
+  `HOME`, `↑`, `END`, `PGUP`, then `TAB`, `CTRL`, `ALT`, `LEFT`, `DOWN`,
+  `RIGHT`, `PGDN`. `≡` only opens the shell drawer and has a 300 ms capture
+  guard against activating newly overlaid controls. Other action keys use
+  synthetic keydown/keyup on xterm's active textarea so xterm owns escape
+  translation. Ctrl is one-shot with double-tap lock; Alt is independently
+  one-shot; combined modifiers are supported. Standalone Python transport
+  ingress decodes to `object` and validates mappings rather than propagating
+  inferred `Any`.
+
+- Standalone Terminal directional soft keys emit immediately, repeat after
+  420 ms every 55 ms, and retain the exact xterm/textarea plus Ctrl/Alt snapshot
+  for the complete pointer hold. Release/cancel/lost capture, window blur,
+  document hiding, or disposal stops repetition; one-shot modifiers are
+  consumed once when the gesture ends.
+
+- The standalone key dock and its header `Keys` toggle are Android/mobile-only;
+  visibility defaults on and is client-local/non-persisted. Plain dash uses a
+  guarded textarea `insertText` event because Android xterm suppresses
+  printable keydown, while modified dash remains keyboard-event-owned.
+
+- The standalone Terminal's initial list and minibar share one client-local
+  `Show exited` checkbox. It defaults off, is not persisted or broadcast, and
+  filters only rendered cards while preserving the authoritative shell snapshot.
+
+- A standalone Terminal card is active only when it matches that frontend's
+  client-local `activeId`; `aria-current` and the selected accent are separate
+  from shared shell alive/exited status.
+
+## 49) Historical Release Provenance
+
+These are recorded release-time provenance and acceptance facts, moved from repository memory without re-running release verification. Statements such as "latest", "current", or "green" describe the publication checkpoint, not today's release catalog. Digests and immutable tags remain historical evidence; source manifests and current release tooling own future publication.
+
+- Historical production PyPI release `te2==0.2.342` was published from annotated tag
+  `0.2.342` at integrated main commit
+  `e4243671490fe3361a93770cd283ceb5051f19c8`. It pins exact first-party
+  dependencies `framework-shells==0.0.63` and
+  `agent-log-server==0.2.122`. The Linux wheel SHA-256 is
+  `3faf0440474b49e8bde0fba6ac3dc0400d98903fff25d938c99a34638e8ac5ca`;
+  the sdist is
+  `2ba1d3c63e4f0204d05373bbf74268c38c46d6e2e75d50a0d92ac96cdefaaf31`,
+  and the packaged Ferrous-native server is
+  `ea5fb1d7307bbf998a01ae8d84852a296dd89f77225468adb968be083ef10ab5`.
+  Public latest-curl Debian acceptance selected the packaged Ferrous-native
+  server, returned health 0.2.342, discovered all eight apps, started a real
+  worker, and materialized the receipt-owned Electron desktop integration.
+
+- Historical GitHub Release `0.2.342` used `alpha` only in its title and
+  `prerelease: false`. Its 13 API-reported asset digests
+  match the audited set; public `SHA256SUMS` is
+  `43aab1e620c89c1a9542a6c9545f80acf5c7bc236f778ae6aca44407088ea516`.
+  The Termux archive SHA-256 is
+  `c27f4f63364cc242ae5d6dbeba6918be99ef8e5b7a5744face56ed8b2e039b22`;
+  its Ferrous-native Android/AArch64 server is
+  `3a2c9ef2bfb2bf0c65629e1356e4122cf8d6e3eb30cd9b2b45920eeaa692fd1f`.
+  Physical Motorola public-install live acceptance is green. The APKs carry
+  version code 20342 and synchronized 0.2.342 assets; GeckoView SHA-256 is
+  `6c5b12f0b8818245d02b8c14481360b0e186d925e7643bd3f1c2c637412cf681`
+  and Cefrium is
+  `d6991ee38d8977f03e1de9b5c28a9821ee88d739c0ce605a61c87e53ab250485`.
+  They remain development-certificate sideloading artifacts. Immutable 0.2.340
+  contains a defective Termux server without Ferrous native support and must
+  never be reused or replaced in place.
+
+- Production PyPI release `te2==0.2.345` is published from annotated tag
+  `0.2.345` at integrated main commit
+  `234981e4b892bc579074f7c4c8050f7353c4c9fb`. It pins exact first-party
+  dependencies `framework-shells==0.0.63` and
+  `agent-log-server==0.2.123`. The Linux wheel SHA-256 is
+  `06bf65412f09bfde20c7ebcbf314e4927beaeb820de50b8b4e16ac4ac600267d`,
+  the sdist is
+  `5271b6a792d6c0c5291c585d2175863924304d33e7e272f7625267b05c294c40`,
+  and the packaged Ferrous-native server is
+  `4f0b95f291844ff25a1b504c9856fe04e4d1b010829a5b294bc50944ab16ac8a`.
+  Agent Log Server 0.2.123 is published for Linux and Android from clean tag
+  commit `bc97253e7bbdfdd4ccc9b96d2b6bf8a39926c656`.
+
+- GitHub Release `0.2.345`, titled `TE2 0.2.345 alpha`, is the normal/latest
+  release with `prerelease: false`. All 13 draft assets were downloaded and
+  checksum-verified before promotion; public `SHA256SUMS` is
+  `2570412eab97b6367475271130ea362b2861bbeb59d1bef7e1c03c5f6c55797e`.
+  The clean 96-wheel Termux archive SHA-256 is
+  `d7d6ffa136e03db462884e1e4f66648bd730496fa501995564117644dc4ec4ac`;
+  its Ferrous-native Android/AArch64 server is
+  `09a3352a00690255df01e4eeb2204d4cba2a10b6e25ee560f179902a50bb3766`.
+  The APKs carry version code 20345 and synchronized 0.2.345 assets;
+  GeckoView SHA-256 is
+  `a3d4cdf6baed0cdfbb1f9804f3b976e2e39d058606365fb11b5e8a88f9893fae`
+  and Cefrium is
+  `20aaf1625a6b299567e13b3bd6a02ea151fe78923d4953441bb7252d13f214b9`.
+  Public latest-curl Debian desktop/framework/real-worker acceptance is green.
+  Physical Motorola exact-archive acceptance upgraded `0.2.344` to `0.2.345`,
+  retained the former as fallback, installed TUR Bun 1.4.1, and passed framework
+  discovery plus real-worker launch.
+
+- Production PyPI release `te2==0.2.346` is published from annotated tag
+  `0.2.346` at integrated main commit
+  `c72c18432ce73c6d6f15a8bb448bba4952afbffb`. It pins exact first-party
+  dependencies `framework-shells==0.0.63` and
+  `agent-log-server==0.2.124`, plus `fastmcp==3.4.7`. The Linux wheel
+  SHA-256 is
+  `b4f776a6b42090c687469b0882db5c6466fbcd1ab0913df34cb064213e980192`,
+  the sdist is
+  `00b7f10a973d5da6072893f9013cff8987571fac8b5be428b524c9ce508d9b53`,
+  and the packaged Ferrous-native server is
+  `ec8540d0161ccdffe12ca55ff9048718bf8851419ac8acb7a0837017abdbc929`.
+  Agent Log Server 0.2.124 is published for Linux and Android from clean tag
+  commit `f59a37d82c3ce4578974214b1ab292d261cc8bae`.
+
+- GitHub Release `0.2.346`, titled `TE2 0.2.346 alpha`, is the normal/latest
+  release with `prerelease: false`. All 13 private-draft assets were downloaded
+  and checksum-verified before promotion; public `SHA256SUMS` is
+  `996b9793cca184562b43d4650e2950b4a317862d496a38794a5f907ccf2abacb`.
+  The clean 96-wheel Termux archive SHA-256 is
+  `81bafaa7012cbabd4fde8b50ef6dd0907448e4a17925a5847e4f30501218d292`;
+  its Ferrous-native Android/AArch64 server is
+  `15ece56be33934a8234bff4d80b23553c7bfd63ad30a310c261a22b85c586535`.
+  The APKs carry version code 20346 and synchronized 0.2.346 assets; GeckoView
+  SHA-256 is
+  `52eefb47304e5b3cdd564bc2fd2bb5d8aa363474d30c8c4af0c87f8bf688ffef`
+  and Cefrium is
+  `a857ff2efcd95dec99237e3c55f906206d18f4b395db73ab10ec085c78e7954f`.
+  Public latest-curl Debian desktop/framework/real-worker/MCP acceptance is
+  green. Physical Motorola acceptance upgraded `0.2.345` to `0.2.346`,
+  retained the former as its sole fallback, and passed framework discovery,
+  real-worker launch, and MCP initialize/ping/tool-list validation.
+
+- Production release `te2==0.2.347` is published from annotated tag
+  `0.2.347` at integrated main commit
+  `cce287ca3c90fb85d4eedd16b894fc3ad95f9b01`. It retains exact
+  `framework-shells==0.0.63` and `agent-log-server==0.2.124` dependencies.
+  The Linux wheel SHA-256 is
+  `bf898090af9da3f3dbda707451d6fa400676e77543e61b14be71deb3b9c190ba`,
+  the sdist is
+  `8faf3f7da49ad347b90fd0df7c8228b4a29ec47e271a66819325e11e18e535b3`,
+  and the packaged Ferrous-native server is
+  `dcd6d1b5e98a014bb34007ddbad8cbdaf995cc09ad87eb29f341dc03f5a80806`.
+
+- GitHub Release `0.2.347`, titled `TE2 0.2.347 alpha`, is normal/latest and
+  not a prerelease. All 13 draft assets passed API-digest and authenticated
+  byte-for-byte round-trip verification before promotion; public `SHA256SUMS`
+  is `7ea1bcd3b0d91544374a91d47945e5bad3c879ef537ff0e3a92574dbb505ac98`.
+  The deterministic 96-wheel Termux archive is
+  `d8c7e0b541140a6d55e252bd871ec2616297ce6f5e9a6c466103eb2cfebaea36`;
+  its Android/AArch64 Ferrous server is
+  `8e461e4d5468125078a3385287a16a34b90b86f8883dae60dd2cd081a707cd0a`.
+  GeckoView APK SHA-256 is
+  `d366a39b19631e2da103938ce86e89213479e7b89cd6abfb240a6e1d96033a8d`
+  and Cefrium is
+  `64d48aea138126a9fc26beaa86f299db2f852141a16dd90d8926817741af3736`.
+  Public Debian desktop/framework/worker acceptance and physical Motorola
+  archive/APK plus live framework/worker acceptance are green.
