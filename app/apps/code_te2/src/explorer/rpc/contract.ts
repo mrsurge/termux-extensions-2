@@ -50,6 +50,7 @@ export const EXPLORER_RPC_METHODS = {
   gitInit: "explorer.git.init",
   gitPull: "explorer.git.pull",
   gitPush: "explorer.git.push",
+  gitFetch: "explorer.git.fetch",
   gitReset: "explorer.git.reset",
   gitRestore: "explorer.git.restore",
   gitStage: "explorer.git.stage",

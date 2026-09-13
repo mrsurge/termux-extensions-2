@@ -142,12 +142,20 @@ async def start_changes_search(
             "projectGeneration": project_generation, "correlationId": correlation_id,
             "base": base, "headView": head_view, "offset": offset,
             "snapshotToken": snapshot_token,
+            "projection": True,
         },
         root=root,
         project_generation=project_generation,
         correlation_id=correlation_id,
     )
     return _json_object(data)
+
+
+async def refresh_changes_paths(root: Path, base: str, paths: list[str]) -> JsonObject:
+    """Read exact disk paths on the native search lane, not the Python event bus."""
+    return _json_object(await _call_search_provider(
+        "search.changes.paths", {"root": str(root), "base": base, "paths": paths}, root=root,
+    ))
 
 
 async def cancel_search_job(

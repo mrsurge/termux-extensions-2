@@ -9,6 +9,7 @@ from typing import Protocol, cast
 
 from ..contracts.git import (
     GitCommitParams,
+    GitFetchParams,
     GitDiffBaseParams,
     GitJobCancelParams,
     GitListCommitsParams,
@@ -135,6 +136,16 @@ async def handle_git_commit(
 ) -> None:
     del msg_id
     require_head(context.project_root)
+    if params.get("projectPath") and params.get("projectPath") != str(context.project_root):
+        raise ValueError("Project changed; start Commit again")
+    if params.get("stageAll"):
+        # Stage must finish before commit. Refuse to broaden a staged selection
+        # created by another client while the commit prompt was open.
+        status = await asyncio.to_thread(worker_git_service.get_status, context.project_root)
+        if status.staged:
+            raise ValueError("Staged selection changed; start Commit again")
+        _ = await asyncio.to_thread(head_action, context.project_root,
+            partial(worker_git_service.stage_all, context.project_root))
     _ = await asyncio.to_thread(head_action, context.project_root, partial(worker_git_service.commit_changes,
         context.project_root,
         params["message"],
@@ -147,6 +158,12 @@ async def handle_git_commit(
         refresh=True,
         source="explorer_git:commit",
     )
+
+
+async def handle_git_fetch(context: ExplorerGitHandlerContext, params: GitFetchParams, msg_id: str | None) -> None:
+    await asyncio.to_thread(worker_git_service.fetch_remote, context.project_root, params["remote"])
+    await _mark_dirty_and_refresh(context)
+    await context.emit_personal("explorer.git.fetch.result", {"ok": True}, msg_id)
 
 
 async def handle_git_push(

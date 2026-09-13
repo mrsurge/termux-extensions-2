@@ -1,4 +1,6 @@
 import type { ExplorerSearchOverlayState } from "./types.ts";
+import { installScrollExpansion } from './scroll-expansion.ts';
+import { totalChangeStatistics } from './change-statistics.ts';
 
 interface ExplorerSearchOverlayBodyRendererDeps {
   loadChangesPage?(offset: number): void;
@@ -13,6 +15,7 @@ export function renderSearchOverlayBody(
   state: ExplorerSearchOverlayState,
   deps: ExplorerSearchOverlayBodyRendererDeps,
 ): void {
+  installScrollExpansion(resultsContainer);
   const {
     searchMode,
     searchLoading,
@@ -35,26 +38,66 @@ export function renderSearchOverlayBody(
       resultsContainer.append(body);
     }
     resultsContainer.querySelector(':scope > .fe-changes-progress')?.remove();
+    resultsContainer.querySelector(':scope > .fe-changes-more')?.remove();
     const progress = document.createElement('div');
     progress.className = 'fe-changes-progress fe-search-status';
     const data = searchResults && typeof searchResults === 'object' ? searchResults as Record<string, unknown> : {};
-    const count = Array.isArray(data.changes) ? data.changes.length : 0;
-    progress.textContent = searchError || (data.complete ? (count ? `Showing files ${Number(data.offset || 0) + 1}-${Number(data.offset || 0) + count} of ${data.total || count}` : 'No changed files') : searchStatus?.message || 'Enumerating changed files');
-    if (data.complete && typeof data.nextOffset === 'number') {
-      const next = document.createElement('button');
-      next.type = 'button'; next.textContent = 'Next 40 files';
-      next.onclick = () => deps.loadChangesPage?.(Number(data.nextOffset));
-      progress.append(next);
+    const all: unknown[] = Array.isArray(data.changes) ? data.changes : [];
+    data.recentChanges ??= { paths: [] };
+    const shown = typeof data.shown === 'number' ? data.shown : 40;
+    const key = (item: unknown): unknown => item && typeof item === 'object' ? (item as Record<string, unknown>).rel : undefined;
+    const present = new Set(all.map(key));
+    const revealed = new Set((Array.isArray(data.revealedPaths) ? data.revealedPaths : []).filter(path => present.has(path)));
+    for (const item of all) {
+      if (revealed.size >= shown) break;
+      revealed.add(key(item));
     }
-    if (searchError || (data.complete && Number(data.offset) > 0)) {
+    data.revealedPaths = [...revealed];
+    const visible = all.filter(item => revealed.has(key(item)));
+    const count = visible.length;
+    const label = document.createElement('span');
+    label.textContent = searchError || (data.complete ? (count ? `Showing ${count} of ${data.total || all.length} changed files` : 'No changed files') : searchStatus?.message || 'Enumerating changed files');
+    const heading = document.createElement('div');
+    heading.className = 'fe-changes-progress-heading';
+    heading.append(label);
+    progress.append(heading);
+    const totals = totalChangeStatistics(all);
+    const summary = document.createElement('span');
+    summary.className = 'fe-changes-total';
+    const partial = !data.complete || data.truncated || data.refreshRequired || searchError || totals.unknown > 0;
+    summary.title = 'Tracked changes against the selected commit; untracked additions are separate. Totals include retained files not yet shown.';
+    if (partial) summary.append('Partial ');
+    for (const [kind, value, sign] of [['added', totals.added, '+'], ['deleted', totals.deleted, '-']] as const) {
+      const pill = document.createElement('span');
+      pill.className = `fe-search-change-count is-${kind}`;
+      pill.textContent = `${sign}${value}`;
+      summary.append(pill);
+    }
+    if (totals.untrackedFiles) summary.append(` · Untracked +${totals.untrackedAdded}`);
+    if (totals.unknown) summary.append(` · ${totals.unknown} unavailable`);
+    if (data.refreshRequired) progress.append(' · Refresh required to reconcile remaining changes.');
+    if (count < all.length) {
+      const next = document.createElement('button');
+      next.type = 'button'; next.textContent = 'Show more files'; next.className = 'fe-btn fe-btn-sm';
+      next.dataset.scrollMore = 'changes';
+      next.onclick = () => {
+        if (!next.isConnected) return;
+        data.shown = shown + 40;
+        renderSearchOverlayBody(resultsContainer, state, deps);
+      };
+      body.after(next);
+      next.classList.add('fe-changes-more');
+    }
+    if (searchError || data.refreshRequired || data.complete) {
       const first = document.createElement('button');
-      first.type = 'button'; first.textContent = 'First page';
+      first.type = 'button'; first.textContent = 'Refresh results'; first.className = 'fe-btn fe-btn-sm';
       first.onclick = () => deps.loadChangesPage?.(0);
       progress.append(first);
     }
     if (data.truncated) progress.append(' · Enumeration limit reached; result is truncated.');
+    heading.append(summary);
     resultsContainer.prepend(progress);
-    if (searchResults) deps.renderChangesResults(body, searchResults);
+    if (searchResults) deps.renderChangesResults(body, { ...data, changes: visible });
     else body.replaceChildren();
     return;
   }

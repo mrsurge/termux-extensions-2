@@ -256,6 +256,15 @@ pub(super) async fn dispatch_git_request(
             )
             .await,
         ),
+        "git.fetch" => Some(
+            provider_request(
+                request,
+                responder,
+                scheduler,
+                |scheduler, params| async move { scheduler.git_fetch(params).await },
+            )
+            .await,
+        ),
         "git.pull" => Some(
             provider_request(
                 request,

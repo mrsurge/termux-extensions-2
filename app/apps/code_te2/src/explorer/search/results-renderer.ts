@@ -149,6 +149,7 @@ export function renderContentResults(
       const moreButton = document.createElement("button");
       moreButton.type = "button";
       moreButton.className = "fe-search-more-btn";
+      moreButton.dataset.scrollMore = 'file';
       const loading = deps.isFileMoreLoading?.(rel) === true;
       moreButton.disabled = loading;
       moreButton.textContent = loading
@@ -204,6 +205,7 @@ export function renderContentResults(
     const moreButton = document.createElement("button");
     moreButton.type = "button";
     moreButton.className = "fe-search-more-btn fe-search-more-btn-global";
+    moreButton.dataset.scrollMore = 'global';
     const loading = deps.isGlobalMoreLoading?.() === true;
     moreButton.disabled = loading;
     moreButton.textContent = loading

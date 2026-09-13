@@ -63,6 +63,7 @@ DISPATCHER_MESSAGE_TYPE_BY_RPC_METHOD: dict[str, str] = {
     "explorer.git.job.cancel": "git:jobCancel",
     "explorer.git.pull": "git:pull",
     "explorer.git.push": "git:push",
+    "explorer.git.fetch": "git:fetch",
     "explorer.git.reset": "git:reset",
     "explorer.git.restore": "git:restore",
     "explorer.git.stage": "git:stage",

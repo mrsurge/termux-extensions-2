@@ -627,6 +627,14 @@ impl FrameworkServiceScheduler {
             .await
     }
 
+    pub(crate) async fn git_fetch(
+        &self,
+        request: git_ops::GitProviderRequest,
+    ) -> Result<git_ops::GitMutationResult, git_ops::GitProviderError> {
+        self.git_network(request.clone(), move || git_ops::git_fetch(request))
+            .await
+    }
+
     pub(crate) async fn git_pull(
         &self,
         request: git_ops::GitProviderRequest,
@@ -1303,6 +1311,14 @@ impl FrameworkServiceScheduler {
     {
         let _permit = self.acquire(self.inner.fs_write.clone()).await?;
         self.spawn_fs(operation).await
+    }
+
+    pub(crate) async fn refresh_changes_paths(
+        &self,
+        request: super::search_changes::ChangesPathsRequest,
+    ) -> Result<serde_json::Value, search_ops::SearchProviderError> {
+        self.search_read(move || super::search_changes::refresh_paths(request))
+            .await
     }
 
     async fn search_read<T>(

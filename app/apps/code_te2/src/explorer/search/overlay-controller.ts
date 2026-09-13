@@ -32,6 +32,7 @@ import { formatDiffBaseLabel, type ExplorerDiffBaseInfo } from "./utils.ts";
 type ExplorerSearchTimer = ReturnType<typeof setTimeout> | null;
 
 interface ExplorerSearchOverlayControllerDeps {
+  hasStagedChanges(): boolean;
   commitStagedChanges(): Promise<void>;
   toast(message: string): void;
   hasExplorerRpc(): boolean;
@@ -131,7 +132,8 @@ function getReviewEntriesPayload(
 export function createExplorerSearchOverlayController(
   deps: ExplorerSearchOverlayControllerDeps,
 ) {
-  const historyController = new ExplorerHistoryController((method, payload) => deps.requestExplorer(method, payload));
+  const historyController = new ExplorerHistoryController((method, payload) =>
+    deps.requestExplorer(method, payload, method === EXPLORER_RPC_METHODS.gitFetch ? 120000 : undefined));
   let searchOverlayVisible = false;
   let searchMode: ExplorerSearchMode = "content";
   let searchQuery = "";
@@ -177,6 +179,17 @@ export function createExplorerSearchOverlayController(
   });
 
   const changesResultsRenderer = createExplorerChangesResultsRenderer({
+    remoteAction: async (action) => {
+      const project = deps.getProjectPath();
+      if (action !== 'fetch' && !(await window.teUI.dialog.confirm(`Are you sure you want to ${action} changes ${action === 'pull' ? 'from' : 'to'} remote?`))) return;
+      if (project !== deps.getProjectPath() || (action !== 'fetch' && deps.getGitDiffBase().ref !== 'HEAD')) return;
+      try {
+        await deps.requestExplorer(action === 'fetch' ? EXPLORER_RPC_METHODS.gitFetch
+          : action === 'push' ? EXPLORER_RPC_METHODS.gitPush : EXPLORER_RPC_METHODS.gitPull, {}, 120000);
+        if (action === 'fetch') deps.toast('Remote references fetched.');
+      } catch (error) { deps.toast(error instanceof Error ? error.message : 'Git operation failed'); }
+    },
+    hasStagedChanges: () => deps.hasStagedChanges(),
     commitStagedChanges: () => deps.commitStagedChanges(),
     stageFile: async (rel) => {
       if ((deps.getGitDiffBase().ref || 'HEAD') !== 'HEAD') return;

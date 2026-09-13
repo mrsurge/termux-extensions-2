@@ -355,3 +355,71 @@ but do not isolate the fault to Gboard, Gecko, our app, or the system IME servic
 
 Implementation, APK build/install and further live experiments require a separate
 approved slice. No native changes are authorized by this deferred plan alone.
+
+### Live Search Projection And Scroll Expansion
+
+- [x] Retain a bounded, session-owned By Changes object projection in Python,
+  including results not yet revealed by scrolling. Existing file facts update
+  affected objects; do not enumerate the whole repository for each file event.
+- [x] Apply updates to rendered rows without replacing unrelated DOM, selection,
+  expansion or scroll state. Unrendered results are revealed from the latest
+  projection, not from stale page snapshots.
+- [x] Use one-way append-only scroll expansion ("live Egyptian scroll, out only")
+  in both By Changes and By Contents. Trigger before the bottom, serialize load
+  requests, retain manual controls for recovery, and stop at retained limits.
+  This is not a virtualized two-way window or transcript treadmill.
+- [x] Keep full invalidation for comparison/project changes, HEAD movement and
+  recovery. Fence late reads by session/project identity and coalesce file facts
+  without losing updates received during an in-flight read. No polling.
+- [x] Cover unseen-file updates, insertion/removal, repeated events, late results,
+  scroll loading and lifecycle cleanup with typed backend/frontend tests.
+- [ ] Live acceptance: modify/save/restore a rendered file and an unrevealed
+  file, scroll both views, switch comparison/project during work, and verify
+  unrelated rows retain expansion and position. Directory-only watcher batches
+  and retained-limit overflow require explicit recovery, not guessed deltas.
+- Retention is capped at 700 file objects with the existing 256 KiB per-preview
+  serialization limit; this is not a measured Python heap/RSS budget. Memory
+  introspection remains part of the deferred diagnostics branch.
+
+### Git Action Controls
+
+- [x] Retain real Git +/- statistics for suppressed tracked text previews,
+  including oversized lines and whole-file deletions; keep preview/editor limits.
+- [x] Live acceptance of large-file counts after framework rebuild/restart.
+- [x] Use native file summaries for tracked and untracked pills even when the
+  preview body is absent; preview warnings do not invalidate known statistics.
+- [x] Right-align tracked +/- totals beside the shown-file count, independently
+  of rendered rows. Label untracked additions separately, and incomplete,
+  truncated, stale or unavailable projections as partial.
+- [x] Match History's dark/blue MRU styling on file headers only. Clicks replace
+  the highlighted set; each live delta replaces it with its updated file group,
+  retaining selection for rows that are not yet rendered.
+- [x] Live acceptance of totals and click/live-batch MRU replacement.
+
+- [x] By Changes offers Stage and commit all when the index is empty, otherwise
+  Commit selected (the staged index, not row selection). Sequence the operation
+  in the backend; retain HEAD-only and project/comparison guards.
+- [x] Add Push/Pull/Fetch controls using styled SVGs inside fe-btn buttons, with
+  accessible names and existing confirmation/error handling. Do not use emoji.
+- [x] History has separate Refresh and Fetch controls at opposite ends of its
+  action row. Fetch updates refs; Refresh only rebuilds the graph projection.
+- [ ] Live acceptance of empty-index/staged-index commit labels, stage failures,
+  remote controls and History refresh/fetch. No remote mutation was run against
+  the user's repository during automated validation.
+
+### Deferred Backend And Native Diagnostics Branch
+
+- [ ] Audit project_sidecar.py and related Python modules for legacy LSP symbols
+  and no-op paths. Verify callers before removal; do not recreate WBA ownership.
+- [ ] Investigate remaining backend scheduling/blocking pain points using bounded
+  runtime evidence before changing process or language architecture.
+- [ ] Design opt-in Python evaluation/reflection through the existing framework
+  control plane, including retained search-session counts and memory diagnostics.
+  Distinguish serialized payload size, Python object allocation and process RSS;
+  do not report dictionary lengths as memory usage.
+- [ ] Consolidate Android reflection and flagged native logging with the deferred
+  Gecko IME diagnostics above. Reuse existing console/ADB transport, bound trace
+  retention, and keep capture off by default.
+
+These investigations belong to the next branch; no new debug endpoint, Android
+implementation, runtime restart or language rewrite is authorized here.

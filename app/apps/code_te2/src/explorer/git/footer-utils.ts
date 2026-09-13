@@ -244,16 +244,19 @@ export function createExplorerGitFooterUtils(
 
   // Both surfaces share one commit prompt; reject context changes while it is open.
   let commitPromptOpen = false;
-  async function commitStagedChanges(): Promise<void> {
+  async function commitStagedChanges(stageIfEmpty = false): Promise<void> {
     if (commitPromptOpen || deps.isHistoricalComparison?.()) return;
     const project = deps.getProjectPath?.();
-    if (!deps.getGitStatus()?.staged?.length) {
+    const stageAll = stageIfEmpty && !deps.getGitStatus()?.staged?.length;
+    if (!stageAll && !deps.getGitStatus()?.staged?.length) {
       deps.toast('No staged changes to commit.');
       return;
     }
     commitPromptOpen = true;
     try {
-      const message = await window.teUI.dialog.prompt('Commit staged changes: commit message');
+      const message = await window.teUI.dialog.prompt(stageAll
+        ? 'Stage and commit all disk changes (including untracked files): commit message'
+        : 'Commit staged changes: commit message');
       if (!message) return;
       if (project !== deps.getProjectPath?.() || deps.isHistoricalComparison?.()) {
         deps.toast('Project or comparison changed; start Commit again.');
@@ -261,7 +264,8 @@ export function createExplorerGitFooterUtils(
       }
       const trimmed = message.trim();
       if (!trimmed) { deps.toast('Commit message cannot be empty.'); return; }
-      safeSend(EXPLORER_RPC_METHODS.gitCommit, { message: trimmed, amend: false });
+      safeSend(EXPLORER_RPC_METHODS.gitCommit, { message: trimmed, amend: false,
+        ...(stageIfEmpty ? { stageAll, projectPath: project || '' } : {}) });
     } finally { commitPromptOpen = false; }
   }
 

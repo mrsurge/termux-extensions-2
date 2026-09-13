@@ -9,6 +9,8 @@ import {
 import { renderHighlightedDiffText, highlightFilterMatches } from './render-styling.ts';
 import type { ExplorerJumpOptions } from '../host/file-open-bridge.ts';
 import type { HunkRestoreIdentity } from '../tree/restore-action.ts';
+import { gitActionButton } from '../git/action-button.ts';
+import { changeStatistics } from './change-statistics.ts';
 
 interface ExplorerChangeLine {
   type?: string;
@@ -31,6 +33,7 @@ interface ExplorerChangeEntry extends ExplorerDiffChangeLike {
 }
 
 interface ExplorerChangesPayload {
+  recentChanges?: { paths: string[] };
   complete?: boolean;
   git?: boolean;
   changes?: ExplorerChangeEntry[];
@@ -38,6 +41,8 @@ interface ExplorerChangesPayload {
 }
 
 interface ExplorerChangesResultsRendererDeps {
+  remoteAction?(action: 'push' | 'pull' | 'fetch'): Promise<void>;
+  hasStagedChanges?(): boolean;
   stageFile?(rel: string): Promise<void>;
   commitStagedChanges?(): Promise<void>;
   getFileIcon?(name: string): Promise<{ svg?: string; color?: string } | null>;
@@ -216,7 +221,7 @@ export function createExplorerChangesResultsRenderer(
       const commit = document.createElement('button');
       commit.className = 'fe-search-changes-commit';
       commit.type = 'button';
-      commit.textContent = 'Commit staged changes';
+      commit.textContent = deps.hasStagedChanges?.() === false ? 'Stage and commit all' : 'Commit selected';
       commit.disabled = !headView();
       commit.title = 'Commit all staged changes in this project, not just the displayed files';
       commit.onclick = async () => {
@@ -226,6 +231,17 @@ export function createExplorerChangesResultsRenderer(
         finally { commit.disabled = !headView(); }
       };
       actions.appendChild(commit);
+      }
+      if (deps.remoteAction) for (const action of ['push', 'pull', 'fetch'] as const) {
+        const button = gitActionButton(document, action, `${action[0].toUpperCase()}${action.slice(1)} remote`);
+        button.disabled = action !== 'fetch' && !headView();
+        button.onclick = async () => {
+          if (button.disabled) return;
+          button.disabled = true;
+          try { await deps.remoteAction?.(action); }
+          finally { button.disabled = action !== 'fetch' && !headView(); }
+        };
+        actions.append(button);
       }
       container.prepend(actions);
     }
@@ -257,6 +273,8 @@ export function createExplorerChangesResultsRenderer(
     list.className = 'fe-search-changes';
     const keep = new Set<HTMLElement>();
     const place = (group: HTMLElement, index: number): void => {
+      group.querySelector('.fe-search-change-header')?.classList.toggle('is-recent',
+        data.recentChanges?.paths.includes(group.dataset.rel || '') === true);
       keep.add(group);
       if (list.children[index] !== group) list.insertBefore(group, list.children[index] || null);
     };
@@ -270,7 +288,11 @@ export function createExplorerChangesResultsRenderer(
         place(cached, index); return;
       }
       const rel = change.rel || '';
+      const previous = [...list.children].find(child => (child as HTMLElement).dataset.rel === rel);
+      const expansion = previous ? [...previous.querySelectorAll<HTMLButtonElement>('[aria-expanded]')]
+        .map(button => button.getAttribute('aria-expanded') === 'true') : [];
       const group = document.createElement('div');
+      group.dataset.rel = rel;
       group.className = 'fe-search-file-group fe-search-change-group';
       group.dataset.line = String(firstDiffLine(change) || 1);
       group.onclick = async (event) => {
@@ -292,6 +314,15 @@ export function createExplorerChangesResultsRenderer(
 
       const header = document.createElement('div');
       header.className = 'fe-search-file-header fe-search-change-header';
+      // A local click replaces the live batch highlight, without selecting hunks
+      // or changing shared Git state. Capture also covers header action buttons.
+      header.addEventListener('click', () => {
+        if (!lastChangesData?.recentChanges) return;
+        lastChangesData.recentChanges.paths = [rel];
+        list.querySelectorAll<HTMLElement>('.fe-search-change-group').forEach(row => {
+          row.querySelector('.fe-search-change-header')?.classList.toggle('is-recent', row.dataset.rel === rel);
+        });
+      }, true);
 
       // File expansion is presentation-only; diff rows retain navigation and Restore owns its action.
       const toggle = document.createElement('button');
@@ -341,22 +372,13 @@ export function createExplorerChangesResultsRenderer(
       statusText.classList.toggle('is-added', untracked);
       meta.appendChild(statusText);
       const hunks = Array.isArray(change.hunks) ? change.hunks : [];
-      // Counts describe the available diff, never infer line counts from hunk context lengths.
-      let added = 0;
-      let deleted = 0;
-      for (const hunk of hunks) for (const line of hunk.lines || []) {
-        if (isAddLineType(line.type)) added += 1;
-        if (isDeleteLineType(line.type)) deleted += 1;
-      }
-      if (untracked && change.summary) {
-        added = change.summary.added ?? added;
-        deleted = change.summary.deleted ?? deleted;
-      }
+      const stats = changeStatistics(change);
+      const { added, deleted } = stats || { added: 0, deleted: 0 };
       for (const [kind, count, sign] of [['added', added, '+'], ['deleted', deleted, '-']] as const) {
         const pill = document.createElement('span');
         pill.className = `fe-search-change-count is-${kind}`;
-        pill.textContent = change.error ? `${sign}?` : `${sign}${count}`;
-        pill.title = change.error ? 'Line count unavailable for this preview' : `${count} ${kind} lines`;
+        pill.textContent = stats ? `${sign}${count}` : `${sign}?`;
+        pill.title = stats ? `${count} ${kind} lines` : 'Line count unavailable for this preview';
         meta.appendChild(pill);
       }
       toggle.appendChild(meta);
@@ -545,6 +567,11 @@ export function createExplorerChangesResultsRenderer(
         fileBody.append(notice);
       }
       group.appendChild(fileBody);
+      // A new file snapshot replaces only its own DOM. Preserve presentation,
+      // never reuse old diff actions or their guarded edit identities.
+      group.querySelectorAll<HTMLButtonElement>('[aria-expanded]').forEach((button, index) => {
+        if (expansion[index] && button.getAttribute('aria-expanded') === 'false') button.click();
+      });
       labelRestore(group);
       renderedGroups.set(change, group);
       place(group, index);

@@ -839,6 +839,11 @@ class ExplorerDispatcher:
 
         await handle_git_commit(self._build_git_context(), params, msg_id)
 
+    async def handle_git_fetch(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.git import parse_git_fetch_params
+        from .explorer.handlers.git import handle_git_fetch
+        await handle_git_fetch(self._build_git_context(), parse_git_fetch_params(payload), msg_id)
+
     async def handle_git_push(self, payload: JsonObject, msg_id: str | None) -> None:
         from .explorer.contracts.git import parse_git_push_params
         from .explorer.handlers.git import handle_git_push

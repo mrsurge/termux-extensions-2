@@ -888,32 +888,32 @@ User live acceptance and broader end-to-end concurrency validation remain pendin
   The first page emits discovery metadata without a total, then confirmed file
   diffs while later candidates are still unchecked. Final metadata supplies the
   exact bounded total and continuation token before `search.job.done`. Existing
-  frontend metadata merging preserves file DOM and local expansion during this final update. Compact gapless file headers expose per-file Stage (`+`) and a shared Commit staged changes action through existing Explorer RPCs; both are HEAD-only. Restore remains confirmation-gated, labeled `×` at HEAD and `Restore` in history. There is no hunk staging. The shared commit prompt rejects project/comparison changes before dispatch. Untracked files retain real Git +/- statistics without bodies and follow tracked results across pagination; bodyless preview headers open the file directly. Status labels use `M` and green `A` for modified/untracked.
+  frontend metadata merging preserves file DOM and local expansion during this final update. Compact gapless file headers expose per-file Stage (`+`) and a shared Stage and commit all action when the index is empty, otherwise Commit selected (the index), through existing Explorer RPCs; both are HEAD-only. Restore remains confirmation-gated, labeled `×` at HEAD and `Restore` in history. There is no hunk staging. The shared commit prompt rejects project/comparison changes before dispatch; the backend waits for staging and stops if staging fails. SVG fe-btn Push/Pull/Fetch controls reuse Git services. Fetch updates origin refs without merging; History separates Fetch from its local Refresh button. Untracked files retain real Git +/- statistics without bodies and follow tracked results across pagination; bodyless preview headers open the file directly. Status labels use `M` and green `A` for modified/untracked.
   HEAD browsing retains HEAD status enumeration; historical discovery uses
   index-backed candidates with per-path selected-tree-to-disk verification.
   Every hunk reads the pinned baseline. Continuations validate the full token
   before emitting any results and reject HEAD movement in HEAD view.
-- One page contains at most 40 files. Next-page navigation replaces the page,
-  rather than accumulating unlimited diff bodies; First page restarts it. File headers start collapsed with preview +/- counts, basename-resolved vendored icons and tail-clipped paths. Header toggles reveal bodies without navigation; diff rows navigate and Restore remains independent. Unavailable previews show unknown counts rather than fabricated totals.
-  The existing 20,000-candidate enumeration bound is explicitly reported as
+- Code TE2 retains at most 700 file objects and initially reveals 40 rows;
+  scrolling reveals another 40 without rerunning Git or evicting revealed rows. File headers start collapsed with preview +/- counts, basename-resolved vendored icons and tail-clipped paths. Header toggles reveal bodies without navigation; diff rows navigate and Restore remains independent. Unavailable previews show unknown counts rather than fabricated totals.
+  The projection's 700-result enumeration bound is explicitly reported as
   truncation. A serialized file preview over 256 KiB retains its summary and
   shows an omitted-body notice; existing binary/minified/whole-file suppression
-  remains in the Git provider.
-- `changesOffset` on `explorer.search.run` is accepted only for the cached,
-  completed current session's next offset. Python supplies its pinned hash and
-  opaque snapshot token to Rust. The token fingerprints ordered confirmed paths,
-  status codes, sizes, and modification times. A changed token requires refresh;
-  it is a continuation guard, not an atomic filesystem snapshot or content hash.
-- Python retains only comparison/continuation metadata for these pages, not a
-  second cache of hunk bodies. A bounded early-event buffer plus ordered startup
+  remains in the Git provider. Suppressed text diffs retain Git insertion/deletion statistics against the same selected base, including oversized tracked lines and deleted files; the renderer uses these summaries even with preview warnings. Editor admission limits remain independent. The shown-file heading right-aligns retained tracked +/- totals, labels untracked additions separately, and marks incomplete/truncated/stale or unavailable projections partial. Totals do not depend on rendered rows. Header-only client-local MRU matches History styling: a click replaces selection; each live delta replaces it with the updated path group, including unrendered rows. Initial enumeration does not highlight files as live edits.
+- Native callers can still use fingerprinted 40-file continuation pages, but
+  Code TE2 requests a bounded projection instead. Python retains all file objects;
+  WorkspaceFilesChanged/FileSaved enqueue exact paths, read in batches of eight
+  through search.changes.paths. No full enumeration runs on routine file facts.
+  Broad directory events, overflow or failed reads expose explicit recovery.
+- Python retains comparison metadata and up to 700 file previews, including
+  not-yet-rendered results. A bounded early-event buffer plus ordered startup
   delivery handles events arriving before the correlated start reply. Late-start
   jobs are cancelled after supersede/disconnect/project change. Cancellation is
   cooperative between Git operations, not interruption inside a libgit2 call.
 - The frontend fences results by correlation/project/mode and reuses existing
   file-group DOM while appending results. Closing, changing comparison, switching
   projects, and disconnect discard obsolete jobs through the established event
-  lifecycle. Git/selection facts refresh the visible first page; there is no
-  polling or monolithic Python diff RPC fallback.
+  lifecycle. Comparison/HEAD changes refresh; path facts replace only affected
+  objects. By Contents also expands on early scroll; neither view uses polling.
 
 - File/folder name search is an inline Explorer-tree projection, not a search
   overlay. The project-root label becomes the query field, direct hits and their

@@ -38,12 +38,18 @@ class GitRestoreParams(TypedDict):
 class GitCommitParams(TypedDict):
     message: str
     amend: bool
+    stageAll: NotRequired[bool]
+    projectPath: NotRequired[str]
 
 
 class GitPushParams(TypedDict):
     remote: str
     branch: str | None
     force: bool
+
+
+class GitFetchParams(TypedDict):
+    remote: str
 
 
 class GitPullParams(TypedDict):
@@ -131,7 +137,14 @@ def parse_git_commit_params(payload: object) -> GitCommitParams:
     return {
         "message": message,
         "amend": _coerce_bool(envelope.get("amend"), default=False),
+        "stageAll": envelope.get("stageAll") is True,
+        "projectPath": _parse_optional_string(envelope.get("projectPath")) or "",
     }
+
+
+def parse_git_fetch_params(payload: object) -> GitFetchParams:
+    envelope = _as_object(payload)
+    return {"remote": _parse_optional_string(envelope.get("remote")) or "origin"}
 
 
 def parse_git_push_params(payload: object) -> GitPushParams:

@@ -282,7 +282,8 @@ const explorerChromeController = createExplorerChromeController({
   initStickyScopes: (deps) => createExplorerStickyScopes(deps),
 });
 explorerSearchOverlayController = createExplorerSearchOverlayController({
-  commitStagedChanges: () => explorerGitFooterUtils.commitStagedChanges(),
+  hasStagedChanges: () => Boolean(explorerRuntimeState.getGitStatus()?.staged?.length),
+  commitStagedChanges: () => explorerGitFooterUtils.commitStagedChanges(true),
   toast,
   hasExplorerRpc: () => hasExplorerRpc(),
   notifyExplorer: (method, payload) => notifyExplorer(method, payload),

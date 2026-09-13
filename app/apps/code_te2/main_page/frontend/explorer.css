@@ -1536,6 +1536,17 @@
 .fe-search-change-count.is-added { color: #86efac; }
 .fe-search-change-count.is-deleted { color: #fca5a5; }
 
+/* Totals follow the entire retained projection while only rows scroll into DOM. */
+.fe-changes-progress { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.fe-changes-progress-heading { display: flex; align-items: flex-start; gap: 8px; width: 100%; }
+.fe-changes-total { margin-left: auto; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 4px; font-variant-numeric: tabular-nums; text-align: right; }
+/* Match History selection exactly, but isolate the accent to the file header. */
+.fe-search-change-header.is-recent {
+  outline: none !important;
+  box-shadow: inset 0 0 0 2px #9bd5f5 !important;
+  background: #343c46 !important; color: #e2e8ee !important; border-radius: 0;
+}
+
 .fe-search-change-path {
   flex: 1;
   min-width: 0;

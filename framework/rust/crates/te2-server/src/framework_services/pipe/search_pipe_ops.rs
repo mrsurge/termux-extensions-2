@@ -28,6 +28,28 @@ pub(super) async fn dispatch_search_request(
         "search.content.start" => {
             Some(search_content_start(request, responder, scheduler, event_sink).await)
         }
+        "search.changes.paths" => {
+            let params = serde_json::from_value::<
+                crate::framework_services::search_changes::ChangesPathsRequest,
+            >(request.params.clone().unwrap_or_else(|| json!({})));
+            Some(match params {
+                Ok(mut params) => {
+                    if params.root.is_none() {
+                        params.root.clone_from(&request.workspace_root);
+                    }
+                    encode_result(
+                        request,
+                        responder,
+                        scheduler.refresh_changes_paths(params).await,
+                    )
+                }
+                Err(error) => PipeEnvelope::error_response(
+                    request,
+                    responder,
+                    PipeError::new("protocol.invalidParams", error.to_string(), false, None),
+                ),
+            })
+        }
         "search.changes.start" => {
             let params = serde_json::from_value::<
                 crate::framework_services::search_changes::ChangesRequest,

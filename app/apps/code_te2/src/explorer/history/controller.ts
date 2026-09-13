@@ -6,6 +6,7 @@ import type { ISCMHistoryItem, ISCMHistoryItemRef } from './vscode_scm/adapted/c
 import type { HistoryCounts, HistoryFileSummary, HistoryCommitRow, HistoryLoadMoreRow } from './vscode_scm/pane-platform.ts';
 import { EXPLORER_RPC_METHODS as RPC, type ExplorerRpcMethod } from '../rpc/contract.ts';
 import type { JsonObject } from '../../rpc/transport.ts';
+import { gitActionButton } from '../git/action-button.ts';
 
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error('Invalid History response');
@@ -60,15 +61,28 @@ export class ExplorerHistoryController {
     container.replaceChildren();
     this.root = container.ownerDocument.createElement('section');
     this.root.style.cssText = 'height:100%;min-height:180px;display:flex;flex-direction:column';
-    const refresh = container.ownerDocument.createElement('button');
-    refresh.className = 'fe-history-refresh';
-    refresh.textContent = 'Refresh History'; refresh.type = 'button';
+    const toolbar = container.ownerDocument.createElement('div');
+    toolbar.style.cssText = 'display:flex;justify-content:space-between;padding:4px';
+    const refresh = gitActionButton(container.ownerDocument, 'refresh', 'Refresh History');
     refresh.onclick = () => { void this.open(); };
+    const fetch = gitActionButton(container.ownerDocument, 'fetch', 'Fetch remote references');
+    fetch.onclick = async () => {
+      if (fetch.disabled) return;
+      const epoch = this.epoch;
+      fetch.disabled = true;
+      try {
+        await this.request(RPC.gitFetch, {});
+        if (epoch === this.epoch && this.root) await this.open();
+      } catch (error) {
+        if (epoch === this.epoch && this.status) this.status.textContent = error instanceof Error ? error.message : 'Fetch failed';
+      } finally { fetch.disabled = false; }
+    };
+    toolbar.append(refresh, fetch);
     this.status = container.ownerDocument.createElement('div');
     this.status.setAttribute('role', 'status');
     this.body = container.ownerDocument.createElement('div');
     this.body.style.cssText = 'flex:1;min-height:0;overflow:hidden';
-    this.root.append(refresh, this.status, this.body); container.append(this.root);
+    this.root.append(toolbar, this.status, this.body); container.append(this.root);
     this.resize = new ResizeObserver(() => this.layout()); this.resize.observe(this.body);
     // Native lease expiry is one event, not a keepalive loop. A backgrounded
     // app or offscreen Explorer defers reacquisition until it is actually visible.
