@@ -49,11 +49,13 @@ function getDetails(fileName) {
 
   let extension = fileName.slice(fileName.indexOf('.'));
   while (extension !== '') {
+    // Seti's vendored table predates ES modules; share the JS icon and theme color.
+    const lookup = extension.toLowerCase() === '.mjs' ? '.js' : extension;
     if (
       defs.extensions &&
-      Object.prototype.hasOwnProperty.call(defs.extensions, extension)
+      Object.prototype.hasOwnProperty.call(defs.extensions, lookup)
     ) {
-      return defs.extensions[extension];
+      return defs.extensions[lookup];
     }
     // look for next "."
     extension = extension.slice(1);
@@ -78,4 +80,3 @@ export async function getIcon(fileName, theme = defaultTheme) {
   const color = (theme && theme[colorKey]) || theme.white || null;
   return { svg, colorKey, color, iconName };
 }
-

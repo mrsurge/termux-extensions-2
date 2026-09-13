@@ -888,7 +888,7 @@ User live acceptance and broader end-to-end concurrency validation remain pendin
   The first page emits discovery metadata without a total, then confirmed file
   diffs while later candidates are still unchecked. Final metadata supplies the
   exact bounded total and continuation token before `search.job.done`. Existing
-  frontend metadata merging preserves file DOM and local expansion during this final update. Compact gapless file headers expose per-file Stage (`+`) and a shared Commit staged changes action through existing Explorer RPCs; both are HEAD-only. Restore remains confirmation-gated, labeled `×` at HEAD and `Restore` in history. There is no hunk staging. The shared commit prompt rejects project/comparison changes before dispatch.
+  frontend metadata merging preserves file DOM and local expansion during this final update. Compact gapless file headers expose per-file Stage (`+`) and a shared Commit staged changes action through existing Explorer RPCs; both are HEAD-only. Restore remains confirmation-gated, labeled `×` at HEAD and `Restore` in history. There is no hunk staging. The shared commit prompt rejects project/comparison changes before dispatch. Untracked files retain real Git +/- statistics without bodies and follow tracked results across pagination; bodyless preview headers open the file directly. Status labels use `M` and green `A` for modified/untracked.
   HEAD browsing retains HEAD status enumeration; historical discovery uses
   index-backed candidates with per-path selected-tree-to-disk verification.
   Every hunk reads the pinned baseline. Continuations validate the full token

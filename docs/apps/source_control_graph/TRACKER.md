@@ -290,13 +290,19 @@ every candidate to ship together.
   literal filter matches in paths/diff text with By Contents `fe-search-hit`
   styling while retaining syntax and intraline diff spans.
 - [ ] Live acceptance of staging/commit controls and compact headers.
+- [x] Preserve real untracked line statistics while suppressing full bodies;
+  make bodyless preview headers open the file directly. Stable tracked-first
+  ordering is shared by streaming and continuation pages. Modified is `M`;
+  untracked is green `A`. Rust and frontend regression coverage added.
+- [ ] Live acceptance after framework restart of untracked counts/order/navigation.
 - [x] Live acceptance of collapsed headers, narrow-screen path tails and file icons.
   Focused renderer tests cover toggle/navigation isolation, counts, icon lookup,
   streaming retention and existing Restore/hunk blinds behavior.
 
 ### File Icons
 
-- [ ] Fix `.mjs` detection so it uses the JavaScript icon instead of generic File.
+- [x] Fix `.mjs` detection in the shared Seti wrapper so it uses the JavaScript
+  SVG and color instead of generic File, including compound and uppercase suffixes.
 
 ### Command Palette
 

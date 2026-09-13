@@ -698,7 +698,13 @@ pub(crate) fn git_diff_hunks(
     // Whole-file and minified-style diffs keep rows addressable without copying
     // pathological line bodies into Python or browser memory.
     let (hunks, added, deleted) = if suppression.is_some() {
-        (Vec::new(), 0, 0)
+        // Untracked previews omit bodies, not their actual Git line statistics.
+        if status == "untracked" {
+            let stats = diff.stats()?;
+            (Vec::new(), stats.insertions(), stats.deletions())
+        } else {
+            (Vec::new(), 0, 0)
+        }
     } else {
         diff_hunks_for_path(&diff)?
     };
@@ -3108,6 +3114,8 @@ mod tests {
         let untracked_hunks = git_diff_hunks(untracked_hunks_request).expect("untracked hunks");
         assert_eq!(untracked_hunks.relative_path, "new.txt");
         assert!(untracked_hunks.hunks.is_empty());
+        assert_eq!(untracked_hunks.summary.added, 2);
+        assert_eq!(untracked_hunks.summary.deleted, 0);
         assert!(!untracked_hunks.summary.tracked);
         assert_eq!(untracked_hunks.summary.status.as_deref(), Some("untracked"));
         assert_eq!(untracked_hunks.summary.content_suppressed, Some(true));

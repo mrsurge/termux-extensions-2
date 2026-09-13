@@ -205,3 +205,30 @@ test('shared commit prompt rejects project/comparison changes and duplicate invo
   const third = api.commitStagedChanges(); finish(' message '); await third;
   assert.deepEqual(sent, [['explorer.git.commit', { message: 'message', amend: false }]]);
 });
+
+test('untracked summary counts and file links survive omitted bodies with compact status labels', async () => {
+  const win = new Window();
+  Object.assign(globalThis, { window: win, document: win.document, HTMLElement: win.HTMLElement, HTMLInputElement: win.HTMLInputElement });
+  try {
+    const opens = [];
+    const renderer = createExplorerChangesResultsRenderer({
+      getGitDiffBase: () => ({ ref: 'HEAD' }), ensureInlineDiffs: async () => assert.fail('no baseline required'),
+      openFileAndMaybeJump: async (...args) => opens.push(args), restoreFile: async () => {}, restoreHunk: async () => {},
+    });
+    const container = document.createElement('div');
+    renderer.renderChangesResults(container, { changes: [
+      { rel: 'new.txt', status: '?', statusText: 'Untracked', summary: { added: 3, deleted: 0, contentSuppressed: true }, hunks: [] },
+      { rel: 'old.txt', status: 'M', statusText: 'Modified', hunks: [] },
+    ] });
+    assert.equal(container.querySelector('.fe-search-change-count.is-added').textContent, '+3');
+    const labels = container.querySelectorAll('.fe-search-change-status-text');
+    assert.equal(labels[0].textContent, 'A'); assert.ok(labels[0].classList.contains('is-added'));
+    assert.equal(labels[1].textContent, 'M');
+    const header = container.querySelector('.fe-search-change-toggle');
+    assert.equal(header.getAttribute('aria-label'), 'Open new.txt');
+    assert.equal(header.hasAttribute('aria-expanded'), false);
+    header.click(); await Promise.resolve();
+    assert.deepEqual(opens, [['new.txt', 1, { focus: false }]]);
+    assert.equal(container.querySelector('.fe-search-change-body').hidden, true);
+  } finally { win.happyDOM.abort(); }
+});

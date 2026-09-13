@@ -118,7 +118,8 @@ pub(crate) fn run(
             if cancelled.load(Ordering::Relaxed) {
                 return false;
             }
-            if offset != 0 || delivered >= 40 {
+            // Keep tracked results progressive; untracked files belong after every tracked path.
+            if offset != 0 || delivered >= 40 || entry.code.trim() == "??" {
                 return true;
             }
             match render_change(entry, &provider, &pinned, &root) {
@@ -143,7 +144,9 @@ pub(crate) fn run(
     check()?;
     let listing = listing_result.map_err(map_error)?;
     // Keep discovery order identical for streamed files and subsequent pages.
-    let entries = listing.changes;
+    let mut entries = listing.changes;
+    // Stable partition also defines continuation order and its snapshot fingerprint.
+    entries.sort_by_key(|entry| entry.code.trim() == "??");
     let mut hash = DefaultHasher::new();
     pinned.hash(&mut hash);
     for entry in &entries {
@@ -172,17 +175,21 @@ pub(crate) fn run(
     }
     let end = (offset + 40).min(entries.len());
     let meta = json!({"mode":"changes", "git":listing.is_repository, "base":base, "baseHash":pinned, "snapshotToken":token, "offset":offset, "nextOffset": if end < entries.len() {Some(end)} else {None}, "total":entries.len(), "truncated":listing.truncated});
-    if !emit(json!({"metadata":meta})) {
+    if offset > 0 && !emit(json!({"metadata":meta})) {
         return Err(SearchProviderError::Cancelled);
     }
     // Continuations emit only after the complete snapshot token has been validated.
-    if offset > 0 {
-        for entry in &entries[offset..end] {
+    {
+        let start = if offset == 0 { delivered } else { offset };
+        for entry in &entries[start..end] {
             check()?;
             if !emit(json!({"change":render_change(entry, &provider, &pinned, &root)?})) {
                 return Err(SearchProviderError::Cancelled);
             }
         }
+    }
+    if offset == 0 && !emit(json!({"metadata":meta})) {
+        return Err(SearchProviderError::Cancelled);
     }
     Ok(json!({"filesScanned":entries.len(),"fileCount":end-offset,"truncated":listing.truncated}))
 }
@@ -301,6 +308,47 @@ mod tests {
             super::super::text_edit_ops::sha256("new\nkeep\n")
         );
         assert_eq!(action["hunkIndex"], 0);
+    }
+
+    #[test]
+    fn untracked_results_follow_tracked_and_keep_counts_without_bodies() {
+        let fixture = Fixture::new("untracked-order");
+        let repo = git2::Repository::init(&fixture.0).unwrap();
+        fs::write(fixture.0.join("z.txt"), "old\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("z.txt")).unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let sig = git2::Signature::now("Test", "test@example.invalid").unwrap();
+        let commit = repo
+            .commit(Some("HEAD"), &sig, &sig, "base", &tree, &[])
+            .unwrap();
+        fs::write(fixture.0.join("z.txt"), "new\n").unwrap();
+        fs::write(fixture.0.join("a.txt"), "one\ntwo\n").unwrap();
+        for base in ["HEAD".to_owned(), commit.to_string()] {
+            let events = RefCell::new(Vec::new());
+            run(
+                ChangesRequest {
+                    base: Some(base),
+                    ..fixture.request()
+                },
+                Arc::new(AtomicBool::new(false)),
+                |event| {
+                    events.borrow_mut().push(event);
+                    true
+                },
+            )
+            .unwrap();
+            let events = events.into_inner();
+            let changes: Vec<_> = events
+                .iter()
+                .filter_map(|event| event.get("change"))
+                .collect();
+            assert_eq!(changes[0]["rel"], "z.txt");
+            assert_eq!(changes[1]["rel"], "a.txt");
+            assert_eq!(changes[1]["summary"]["added"], 2);
+            assert_eq!(changes[1]["hunks"], json!([]));
+        }
     }
 
     #[test]

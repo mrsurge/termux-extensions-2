@@ -21,6 +21,9 @@ interface ExplorerChangeHunk extends ExplorerDiffHunkLike {
 }
 
 interface ExplorerChangeEntry extends ExplorerDiffChangeLike {
+  status?: string;
+  statusCode?: string;
+  summary?: { added?: number; deleted?: number; contentSuppressed?: boolean; displayText?: string };
   error?: string;
   rel?: string;
   statusText?: string;
@@ -331,7 +334,11 @@ export function createExplorerChangesResultsRenderer(
       meta.className = 'fe-search-change-meta';
       const statusText = document.createElement('span');
       statusText.className = 'fe-search-change-status-text';
-      statusText.textContent = change.statusText || '';
+      const untracked = change.status === '?' || change.statusCode?.trim() === '??' || change.statusText === 'Untracked';
+      const modified = change.status === 'M' || change.statusText === 'Modified';
+      statusText.textContent = untracked ? 'A' : modified ? 'M' : change.statusText || '';
+      statusText.title = change.statusText || '';
+      statusText.classList.toggle('is-added', untracked);
       meta.appendChild(statusText);
       const hunks = Array.isArray(change.hunks) ? change.hunks : [];
       // Counts describe the available diff, never infer line counts from hunk context lengths.
@@ -340,6 +347,10 @@ export function createExplorerChangesResultsRenderer(
       for (const hunk of hunks) for (const line of hunk.lines || []) {
         if (isAddLineType(line.type)) added += 1;
         if (isDeleteLineType(line.type)) deleted += 1;
+      }
+      if (untracked && change.summary) {
+        added = change.summary.added ?? added;
+        deleted = change.summary.deleted ?? deleted;
       }
       for (const [kind, count, sign] of [['added', added, '+'], ['deleted', deleted, '-']] as const) {
         const pill = document.createElement('span');
@@ -382,6 +393,17 @@ export function createExplorerChangesResultsRenderer(
       };
       header.appendChild(restore);
       group.appendChild(header);
+
+      // Bodyless previews navigate from the header; they have nothing to expand.
+      if (!hunks.length) {
+        toggle.removeAttribute('aria-expanded');
+        toggle.setAttribute('aria-label', `Open ${rel}`);
+        toggle.title = `Open ${rel}`;
+        toggle.onclick = async event => {
+          event.stopPropagation();
+          await deps.openFileAndMaybeJump(rel, 1, { focus: false });
+        };
+      }
 
       if (hunks.length) {
         const hunksContainer = document.createElement('div');
