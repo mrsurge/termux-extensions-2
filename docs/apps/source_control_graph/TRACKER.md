@@ -289,12 +289,12 @@ every candidate to ship together.
   open files, hunks and blinds without requesting more results. Highlight active
   literal filter matches in paths/diff text with By Contents `fe-search-hit`
   styling while retaining syntax and intraline diff spans.
-- [ ] Live acceptance of staging/commit controls and compact headers.
+- [x] Live acceptance of staging/commit controls and compact headers.
 - [x] Preserve real untracked line statistics while suppressing full bodies;
   make bodyless preview headers open the file directly. Stable tracked-first
   ordering is shared by streaming and continuation pages. Modified is `M`;
   untracked is green `A`. Rust and frontend regression coverage added.
-- [ ] Live acceptance after framework restart of untracked counts/order/navigation.
+- [x] Live acceptance after framework restart of untracked counts/order/navigation.
 - [x] Live acceptance of collapsed headers, narrow-screen path tails and file icons.
   Focused renderer tests cover toggle/navigation isolation, counts, icon lookup,
   streaming retention and existing Restore/hunk blinds behavior.
@@ -306,16 +306,79 @@ every candidate to ship together.
 
 ### Command Palette
 
-- [ ] Provide keyboard-shortcut access.
-- [ ] Provide an extra-key control for mobile access.
+Next implementation slice, followed by the spacebar-slide investigation below.
+
+- [x] Provide Ctrl+Shift+P access to Monaco's Command Palette and Ctrl+Shift+O
+  access to its existing document-symbol picker. Retain F1 as an existing alias.
+- [x] Provide second-row Shift (one-shot), Cmd and Esc mobile controls;
+  retain sticky Sel independently and preserve primary/secondary key routing.
+  Enter stays on the virtual keyboard; do not duplicate it in the dock.
+
+#### Shift And Palette Input Investigation
+
+- [x] Initial source inspection: `Sel` already toggles sticky Shift in
+  `monaco_editor/editor_mobile_special_keys_utils.ts`; the shared synthetic-key
+  bridge carries `shiftKey`. The fork's standalone commands action is
+  `editor.action.quickCommand`, currently bound to F1 rather than Ctrl+Shift+P.
+- [x] Identify the focus conflict: `dispatchMobileEditorKey()` resolves the
+  editor textarea and explicitly focuses it before dispatch. Reusing that path
+  unchanged would steal focus from the palette's own input.
+- [x] Investigate physical/Gboard input plus sticky Ctrl/Shift, including stuck
+  composition and 229 events. Distinguish modifier flags used for commands from
+  shifted printable text: synthetic key events must not be assumed to perform
+  native text insertion, keyboard-layout transformation or IME composition.
+- [x] Design Ctrl+Shift+P and the mobile palette button to invoke the existing
+  action in the focused editor realm (primary/secondary), not a duplicate palette.
+- [x] Route extra-key navigation, selection, Enter/Escape and repeat to the
+  active palette when visible; preserve its focus/visible selection and Gboard
+  input. Restore normal editor/terminal routing on dismissal. Check whether
+  palette commands need its keybinding service or explicit action dispatch.
+- [x] Automated coverage for one-shot Shift with Ctrl-byte replay, P/O actions,
+  palette focus/caret navigation, committed capitalization, composition bypass,
+  and the existing mobile Ctrl/229, sticky Sel, repeat and secondary-routing suite.
+- [ ] Live acceptance: ordinary/Gboard typing, one-shot Shift, Ctrl+Shift+P/O,
+  palette navigation/Enter/Esc, both working editor realms and terminal focus.
+  Historical read-only command restrictions remain unchanged.
+
+Implementation preserves the vendored composition guard. The Ctrl-byte adapter
+captures extra-key Shift/Alt before replay; it does not equate sticky Sel with
+text/chord Shift. Plain Shift transforms only safely cancellable `insertText`
+input via Unicode uppercase, not guessed punctuation mappings or active IME
+composition. Revisit broader keyboard-layout behavior only with focused evidence.
+
+Source references: `src/mobile-input/terminal-special-key-bridge.ts`,
+`src/mobile-input/editor-special-key-bridge.ts` and
+`monaco_editor/editor_mobile_special_keys_utils.ts` under `app/apps/code_te2`;
+`worktrees/vscode-te2-diff/src/vs/editor/standalone/browser/quickAccess/standaloneCommandsQuickAccess.ts`.
+
+### Symbol Index In Code Inspector
+
+This remains in this branch, after Command Palette access and the spacebar-slide
+investigation, before wrap-up. It is not deferred.
+
+- [ ] Add a symbol index to the Code Inspector tab/drawer. Start by evaluating
+  the existing WBA `vscode.documentSymbols` / `documentSymbols` provider path;
+  confirm document-versus-workspace scope before extending the contract.
+- [ ] Present symbol names/kinds/hierarchy with navigation to the correct
+  document/range. Follow current document/client identity, reject stale responses
+  after file/project changes, and reuse existing inspector/navigation lanes.
+- [ ] Add an entry to the maintained Monaco touch-extension inspection menu
+  that opens the index. Choose a suitable vendored symbol codicon or styled SVG
+  during implementation; do not use file-type icons as an assumed symbol catalog.
+- [ ] Cover provider-unavailable, empty results, refreshed symbols and mobile
+  menu/drawer navigation; live acceptance before closing the branch.
 
 ### Themes
 
-- [ ] Investigate WBA/extension-provided themes and their editor integration.
+Deferred to **WBA And Extension-Provided Themes** under **Deferred Work For A
+Follow-Up Branch**. This is not a remaining blocker for this branch.
 
 ### Mobile Input
 
-- [ ] Investigate Android keyboard spacebar-slide cursor navigation.
+- [ ] After Command Palette access, investigate Android keyboard spacebar-slide
+  cursor navigation. Establish what cursor/selection events reach the hidden
+  textarea before choosing any source or native changes; preserve composition
+  and Ctrl/229 guards. Follow this with the Symbol Index slice, then wrap-up.
 - [x] Capture GeckoView textarea/input events and compare with Cefrium. Missing
   intended characters were absent from captured DOM key/input events; no 229 or
   composition events appeared in the explicit 229 capture. The simple typing
@@ -323,38 +386,9 @@ every candidate to ship together.
 - [x] Test temporary nonzero/on-screen textarea geometry and bypass the vendored
   Ctrl helper, including focus-time rebindings. Neither resolved the drops;
   overrides were restored. Cefrium registered the comparison input correctly.
-- [ ] Deferred: Gecko native IME instrumentation described below. No root cause
-  or production fix is established; preserve both renderers' current input paths.
-
-### Deferred Gecko Native IME Diagnostics
-
-Status: deferred at user request. A device restart cleared the problem. The user
-reports that cache clearing and force-quitting Gboard or the app did not clear it
-while the device remained running. Gboard suggestions flashed/disappeared near
-missed input. These observations justify inspecting the Android/Gecko IME boundary,
-but do not isolate the fault to Gboard, Gecko, our app, or the system IME service.
-
-- [ ] Design debug-variant console/ADB evaluation or reflection access to the
-  live Gecko activity, view, input connection and existing IME filter state.
-  Reuse the Android native console worker rather than adding a network listener.
-- [ ] Add runtime flags for enabling/disabling bounded trace capture and optional
-  print/logcat output; expose snapshot, export and clear operations. Diagnostics
-  must remain off by default and avoid per-keystroke console/socket flooding.
-- [ ] Trace input-connection creation/replacement/closure, focus transitions,
-  restartInput, selection/cursor notifications, batch edits, commit/composition,
-  deletion and sendKeyEvent calls, including arguments and returned outcomes.
-- [ ] Correlate native records with the textarea probe using connection identity,
-  sequence and timestamps. Capture text only through an explicit diagnostic flag.
-- [ ] Provide explicit debug actions/flags for controlled IME/filter experiments,
-  with reported prior/current state and restoration. Observation alone must not
-  restart input, clear composition or otherwise erase the reproducing state.
-- [ ] Validate disabled-path overhead, bounded retention, cleanup and debug-only
-  exposure. Confirm normal typing and Ctrl/229 handling are unchanged.
-- [ ] On recurrence, capture native and DOM evidence before restarting anything;
-  compare Cefrium as needed before deciding whether a fix should be Gecko-gated.
-
-Implementation, APK build/install and further live experiments require a separate
-approved slice. No native changes are authorized by this deferred plan alone.
+Gecko native IME instrumentation is deferred under **Deferred Work For A
+Follow-Up Branch**. No root cause or production fix is established; preserve
+both renderers' current input paths. It is separate from spacebar-slide navigation.
 
 ### Live Search Projection And Scroll Expansion
 
@@ -407,7 +441,37 @@ approved slice. No native changes are authorized by this deferred plan alone.
   remote controls and History refresh/fetch. No remote mutation was run against
   the user's repository during automated validation.
 
-### Deferred Backend And Native Diagnostics Branch
+## Deferred Work For A Follow-Up Branch
+
+### WBA And Extension-Provided Themes
+
+Status: deferred at user request. Existing theme-loading/conversion machinery
+is a starting point, not proof of complete VS Code theme compatibility. This
+is non-trivial integration work, not a quick additional picker option.
+
+- [ ] Audit the installed-extension theme catalog and resource delivery path.
+  Reuse existing WBA/extension metadata and editor preferences rather than adding
+  a parallel catalog or treating a theme extension as executable theme code.
+- [ ] Inspect the pinned Code Server/VS Code theme services for theme JSON/JSONC,
+  relative includes, inheritance, token colors and semantic-token rules. Identify
+  which semantics the current TE2 loader/converter already supports and which
+  require explicit adaptation; do not assume raw JSON is a resolved theme.
+- [ ] Define consistent application to Monaco, TextMate and both working and
+  historical secondary editors, including theme changes, missing/uninstalled
+  themes and stale asynchronous loads. Keep native OTA/APK asset rules intact.
+- [ ] Decide separately whether extension webviews should follow editor themes.
+  Their current WBA contract uses a fixed GitHub Dark palette; changing editor
+  selection must not silently change that contract or imply whole-shell theming.
+- [ ] Add fixture-based compatibility/lifecycle tests before implementation is
+  declared complete. No theme implementation or runtime behavior change is
+  authorized by this deferred entry.
+
+Starting references: CODE_TE2.md sections 26 (Themes, TextMate palette, and
+retokenization) and 44 (UI VSIX); monaco_editor/editor_theme_loader_runtime_utils.ts,
+editor_theme_apply_runtime_utils.ts, editor_theme_convert_utils.ts and
+editor_textmate_runtime.ts under app/apps/code_te2. Recheck source on resumption.
+
+### Backend And Native Diagnostics
 
 - [ ] Audit project_sidecar.py and related Python modules for legacy LSP symbols
   and no-op paths. Verify callers before removal; do not recreate WBA ownership.
@@ -418,8 +482,39 @@ approved slice. No native changes are authorized by this deferred plan alone.
   Distinguish serialized payload size, Python object allocation and process RSS;
   do not report dictionary lengths as memory usage.
 - [ ] Consolidate Android reflection and flagged native logging with the deferred
-  Gecko IME diagnostics above. Reuse existing console/ADB transport, bound trace
+  Gecko IME diagnostics below. Reuse existing console/ADB transport, bound trace
   retention, and keep capture off by default.
 
 These investigations belong to the next branch; no new debug endpoint, Android
 implementation, runtime restart or language rewrite is authorized here.
+
+
+### Deferred Gecko Native IME Diagnostics
+
+Status: deferred at user request. A device restart cleared the problem. The user
+reports that cache clearing and force-quitting Gboard or the app did not clear it
+while the device remained running. Gboard suggestions flashed/disappeared near
+missed input. These observations justify inspecting the Android/Gecko IME boundary,
+but do not isolate the fault to Gboard, Gecko, our app, or the system IME service.
+
+- [ ] Design debug-variant console/ADB evaluation or reflection access to the
+  live Gecko activity, view, input connection and existing IME filter state.
+  Reuse the Android native console worker rather than adding a network listener.
+- [ ] Add runtime flags for enabling/disabling bounded trace capture and optional
+  print/logcat output; expose snapshot, export and clear operations. Diagnostics
+  must remain off by default and avoid per-keystroke console/socket flooding.
+- [ ] Trace input-connection creation/replacement/closure, focus transitions,
+  restartInput, selection/cursor notifications, batch edits, commit/composition,
+  deletion and sendKeyEvent calls, including arguments and returned outcomes.
+- [ ] Correlate native records with the textarea probe using connection identity,
+  sequence and timestamps. Capture text only through an explicit diagnostic flag.
+- [ ] Provide explicit debug actions/flags for controlled IME/filter experiments,
+  with reported prior/current state and restoration. Observation alone must not
+  restart input, clear composition or otherwise erase the reproducing state.
+- [ ] Validate disabled-path overhead, bounded retention, cleanup and debug-only
+  exposure. Confirm normal typing and Ctrl/229 handling are unchanged.
+- [ ] On recurrence, capture native and DOM evidence before restarting anything;
+  compare Cefrium as needed before deciding whether a fix should be Gecko-gated.
+
+Implementation, APK build/install and further live experiments require a separate
+approved slice. No native changes are authorized by this deferred plan alone.

@@ -1,4 +1,5 @@
 const HELPER_BASE_URL = '/apps/code_te2/vendor/android-terminalapp-assets-js';
+import { currentMobileEditorModifiers, publishMobileEditorModifiersConsumed } from '../src/mobile-input/editor-special-key-bridge.ts';
 
 interface MonacoTermShimState {
   editor: MonacoRuntimeEditorLike | null;
@@ -14,6 +15,7 @@ interface ControlChordLike {
   code: string;
   keyCode: number;
   shiftKey: boolean;
+  altKey?: boolean;
 }
 
 const state: MonacoTermShimState = {
@@ -130,6 +132,7 @@ function buildKeyboardEvent(type: 'keydown' | 'keyup', chord: ControlChordLike):
     key: chord.key,
     code: chord.code,
     ctrlKey: true,
+    altKey: Boolean(chord.altKey),
     shiftKey: !!chord.shiftKey,
     bubbles: true,
     cancelable: true,
@@ -146,6 +149,9 @@ function dispatchControlInput(data: string): void {
 
   const input = state.input || getEditorInputArea(state.editor);
   if (!input) return;
+  // Control bytes erase modifier identity. Preserve the one-shot modifier
+  // snapshot before replay/consumption; sticky Sel remains navigation-only.
+  const modifiers = currentMobileEditorModifiers(window);
 
   try { state.editor?.focus?.(); } catch (_) {}
 
@@ -154,11 +160,15 @@ function dispatchControlInput(data: string): void {
     for (let index = 0; index < text.length; index += 1) {
       const chord = controlCharToChord(text.charAt(index));
       if (!chord) continue;
+      chord.shiftKey ||= Boolean(modifiers.shiftArmed);
+      chord.altKey = modifiers.alt;
       try { input.dispatchEvent(buildKeyboardEvent('keydown', chord)); } catch (_) {}
       try { input.dispatchEvent(buildKeyboardEvent('keyup', chord)); } catch (_) {}
     }
   } finally {
     state.replayingControlChord = false;
+    publishMobileEditorModifiersConsumed(window,
+      new URLSearchParams(window.location.search).get('te2_editor_role') === 'secondary' ? 'secondary' : 'primary');
     if (typeof window.__androidTerminalSetCtrl === 'function') {
       window.__androidTerminalSetCtrl(false);
     } else {

@@ -20,6 +20,7 @@ export type MobileEditorRole = 'primary' | 'secondary';
 
 export interface MobileEditorModifierState extends SyntheticKeyModifiers {
   ctrlLocked: boolean;
+  shiftArmed?: boolean;
 }
 
 export interface MobileEditorSpecialKeyRequestDetail {

@@ -389,7 +389,9 @@ test("gates the special-key UI from the mobile user agent", async () => {
   );
 
   const fixture = createEditorFixture("Mozilla/5.0 (X11; Linux x86_64)");
-  assert.equal(bindMobileEditorSpecialKeys(fixture.editor, fixture.win), null);
+  const keyboardBinding = bindMobileEditorSpecialKeys(fixture.editor, fixture.win);
+  assert.equal(typeof keyboardBinding?.dispose, 'function');
+  keyboardBinding.dispose();
   assert.equal(
     fixture.host.querySelector(".te2-mobile-special-key-trigger"),
     null,
@@ -937,7 +939,8 @@ test("provides two-row navigation, persistent selection, and Ctrl lock", async (
   assert.equal(findButton(overlay, "Toggle selection (Shift)"), null);
   assert.equal(rows.length, 2);
   assert.equal(rows[0].children.length, 7);
-  assert.equal(rows[1].children.length, 5);
+  assert.equal(rows[1].children.length, 8);
+  assert.equal(findButton(panel, "Enter"), null);
   assert.equal(
     fixture.appRoot.classList.contains("te2-mobile-special-keys-open"),
     true,

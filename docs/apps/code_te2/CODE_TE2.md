@@ -2488,11 +2488,11 @@ There are three distinct layers:
      by an unpaired synthetic keydown.
    - The mobile special-key dock is visible by default and has two rows. The
      first provides Ctrl, Alt, persistent Select/Shift, and arrow navigation;
-     the second provides Tab, Home, End, Page Up, and Page Down. Ctrl, Alt, and
-     Select combine through the same synthetic-key path, so Monaco's normal
-     Ctrl+Shift navigation and selection rules remain authoritative. When the
-     Terminal drawer owns focus, navigation keys use its established request
-     bridge instead of inventing another input path.
+     the second provides one-shot Shift, Tab, Home, End, Page Up/Down, Cmd and Esc. Enter remains on the virtual keyboard, not duplicated in the dock.
+     Ctrl+Shift+P/O invoke Monaco's existing command/symbol quick pick. Extra keys preserve focused quick-input fields; caret defaults are explicit because synthetic keys do not perform native text navigation.
+     One-shot Shift is separate from sticky Sel, composes with modifiers and is carried through guarded Ctrl-byte reconstruction. It uppercases only cancellable committed insertText, never active composition or guessed punctuation layouts.
+     The implementation is in editor_quick_input_keys.ts and editor_mobile_special_keys_utils.ts; existing editor realms own their actions. Historical command restrictions stay unchanged.
+     When the Terminal drawer owns focus, navigation keys still use its established request bridge rather than another input path.
    - The four arrow buttons repeat after a 420 ms hold delay at a 55 ms cadence.
      Pointer capture preserves the gesture if the finger drifts outside the
      button, while release, cancellation, lost capture, window blur, document

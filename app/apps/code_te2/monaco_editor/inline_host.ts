@@ -132,7 +132,7 @@ const INLINE_EDITOR_HOST_STYLE = `
   grid-template-columns: repeat(7, minmax(0, 1fr));
 }
 .fe-root.layout-mobile > .te2-mobile-special-key-panel .te2-mobile-special-key-navigation-row {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(8, minmax(0, 1fr));
 }
 .fe-root > .te2-mobile-special-key-panel[hidden],
 .fe-root:not(.layout-mobile) > .te2-mobile-special-key-panel {
