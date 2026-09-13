@@ -1,8 +1,10 @@
 import type { JsonObject } from "../../rpc/transport.ts";
+import { getIcon as getSetiIcon } from '/static/vendor/seti-icons/seti-icons.js';
 import { ExplorerHistoryController } from '../history/controller.ts';
 import { restoreExplorerFile, restoreExplorerHunk } from "../tree/restore-action.ts";
 import type { ExplorerJumpOptions } from "../host/file-open-bridge.ts";
 import type { ExplorerRpcMethod } from "../rpc/contract.ts";
+import { EXPLORER_RPC_METHODS } from '../rpc/contract.ts';
 import { createExplorerChangesResultsRenderer } from "./changes-results-renderer.ts";
 import {
   createExplorerContentQueryWidget,
@@ -30,6 +32,7 @@ import { formatDiffBaseLabel, type ExplorerDiffBaseInfo } from "./utils.ts";
 type ExplorerSearchTimer = ReturnType<typeof setTimeout> | null;
 
 interface ExplorerSearchOverlayControllerDeps {
+  commitStagedChanges(): Promise<void>;
   toast(message: string): void;
   hasExplorerRpc(): boolean;
   notifyExplorer(method: ExplorerRpcMethod, payload: JsonObject): void;
@@ -72,9 +75,9 @@ interface SearchModeOption {
 
 const SEARCH_MODE_OPTIONS: readonly SearchModeOption[] = [
   { id: "content", label: "By contents" },
-  { id: "changes", label: "By changes" },
   { id: "review", label: "Drafts" },
   { id: "diagnostics", label: "Diagnostics" },
+  { id: "changes", label: "By changes" },
   { id: "history", label: "History" },
 ];
 
@@ -174,6 +177,13 @@ export function createExplorerSearchOverlayController(
   });
 
   const changesResultsRenderer = createExplorerChangesResultsRenderer({
+    commitStagedChanges: () => deps.commitStagedChanges(),
+    stageFile: async (rel) => {
+      if ((deps.getGitDiffBase().ref || 'HEAD') !== 'HEAD') return;
+      if (!deps.hasExplorerRpc()) { deps.toast('Explorer connection unavailable.'); return; }
+      deps.notifyExplorer(EXPLORER_RPC_METHODS.gitStage, { paths: [rel] });
+    },
+    getFileIcon: getSetiIcon,
     restoreHunk: (rel, identity) => restoreExplorerHunk({
       getProjectPath: () => deps.getProjectPath(),
       requestExplorer: (method, payload) => deps.requestExplorer(method, payload),

@@ -204,6 +204,30 @@ Actual UI VSIX relocation needs a separate approved design and acceptance pass.
 
 ## Phases And Validation
 
+### Deferred Native IME Debugging Side Slice
+
+GeckoView's intermittent missed-key issue is currently not reproducible after a
+device restart. The completed browser probes and negative geometry/Ctrl-bypass
+experiments are recorded in TRACKER.md under Deferred Gecko Native IME Diagnostics.
+They do not establish a native or system-level root cause.
+
+A future debug-APK slice should extend the existing Android native console
+command path with runtime state inspection/evaluation (including targeted reflection
+if necessary), ADB/logcat visibility, and flag-controlled bounded IME tracing.
+Observe connection identity/lifecycle, focus and restartInput, cursor/selection,
+batch edits, commits/composition, deletion and key-event calls. Timestamp native
+records for comparison with the actual hidden textarea's events and offsets.
+Keep trace-only operation separate from explicitly invoked state-changing debug
+actions. Do not introduce automatic keyboard recovery or reset the bad state
+merely by enabling observation. Raw-text capture and print output are opt-in;
+release behavior remains unchanged and no new network debug port is required.
+
+This work is deferred, not an implemented feature or a new History merge blocker.
+Its concrete Kotlin/API scope, build/install and live validation need separate
+approval. Keep these tasks in the plan/tracker, not condensed repository memory.
+
+### History Delivery And Validation
+
 1. Vendor exact upstream files and attribution; prove adapted graph output with
    upstream tests and document the minimal pane dependency closure.
 2. Add bounded Rust graph/stat/blob DTOs and Python adapters, including streaming,

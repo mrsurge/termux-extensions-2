@@ -888,13 +888,13 @@ User live acceptance and broader end-to-end concurrency validation remain pendin
   The first page emits discovery metadata without a total, then confirmed file
   diffs while later candidates are still unchecked. Final metadata supplies the
   exact bounded total and continuation token before `search.job.done`. Existing
-  frontend metadata merging preserves file DOM during this final update.
+  frontend metadata merging preserves file DOM and local expansion during this final update. Compact gapless file headers expose per-file Stage (`+`) and a shared Commit staged changes action through existing Explorer RPCs; both are HEAD-only. Restore remains confirmation-gated, labeled `×` at HEAD and `Restore` in history. There is no hunk staging. The shared commit prompt rejects project/comparison changes before dispatch.
   HEAD browsing retains HEAD status enumeration; historical discovery uses
   index-backed candidates with per-path selected-tree-to-disk verification.
   Every hunk reads the pinned baseline. Continuations validate the full token
   before emitting any results and reject HEAD movement in HEAD view.
 - One page contains at most 40 files. Next-page navigation replaces the page,
-  rather than accumulating unlimited diff bodies; First page restarts it.
+  rather than accumulating unlimited diff bodies; First page restarts it. File headers start collapsed with preview +/- counts, basename-resolved vendored icons and tail-clipped paths. Header toggles reveal bodies without navigation; diff rows navigate and Restore remains independent. Unavailable previews show unknown counts rather than fabricated totals.
   The existing 20,000-candidate enumeration bound is explicitly reported as
   truncation. A serialized file preview over 256 KiB retains its summary and
   shows an omitted-body notice; existing binary/minified/whole-file suppression

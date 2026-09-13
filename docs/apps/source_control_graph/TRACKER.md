@@ -268,12 +268,31 @@ every candidate to ship together.
 
 ### By Changes Presentation And Actions
 
-- [ ] Start files collapsed, showing file headers and added/deleted line counts;
+- [x] Start files collapsed, showing file headers and added/deleted line counts;
   expand a header to reveal its diff lines.
-- [ ] Preserve the tail of long file paths rather than the beginning.
-- [ ] Use filename-aware vendored Codicons.
-- [ ] Investigate stage/commit controls, retaining existing HEAD-only mutation
+- [x] Preserve the tail of long file paths rather than the beginning.
+- [x] Use filename-aware vendored file icons (the same Seti resolver as History,
+  with a Codicon fallback).
+- [x] Investigate stage/commit controls, retaining existing HEAD-only mutation
   guardrails and keeping the History tab read-only.
+  Existing `git/footer-utils.ts` owns Stage All/Unstage All/Commit intent and
+  historical disablement.
+- [x] Add per-file `+` Stage and shared Commit staged changes in By Changes,
+  reusing Explorer commands and the shared commit prompt. No hunk staging.
+  Historical views disable stage/commit and label Restore explicitly; HEAD
+  uses `×`. Existing Restore confirmations remain intact. Commit rejects
+  project/comparison changes while its prompt is open.
+- [x] Compact By Changes file headers and remove inter-file spacing.
+- [x] Align hunk Restore beside its line header; green Stage/Commit and red
+  Restore controls. Place By Changes immediately before History (last tab).
+- [x] Add left-aligned Expand All beside Commit for the displayed result page;
+  open files, hunks and blinds without requesting more results. Highlight active
+  literal filter matches in paths/diff text with By Contents `fe-search-hit`
+  styling while retaining syntax and intraline diff spans.
+- [ ] Live acceptance of staging/commit controls and compact headers.
+- [x] Live acceptance of collapsed headers, narrow-screen path tails and file icons.
+  Focused renderer tests cover toggle/navigation isolation, counts, icon lookup,
+  streaming retention and existing Restore/hunk blinds behavior.
 
 ### File Icons
 
@@ -291,6 +310,42 @@ every candidate to ship together.
 ### Mobile Input
 
 - [ ] Investigate Android keyboard spacebar-slide cursor navigation.
-- [ ] Install a focused probe for GeckoView-specific typing jank: missed keys
-  and erratic cursor placement. Cefrium is not exhibiting the reported behavior;
-  preserve its working input path while identifying the Gecko-specific cause.
+- [x] Capture GeckoView textarea/input events and compare with Cefrium. Missing
+  intended characters were absent from captured DOM key/input events; no 229 or
+  composition events appeared in the explicit 229 capture. The simple typing
+  trace retained textarea focus without replacement or programmatic cursor writes.
+- [x] Test temporary nonzero/on-screen textarea geometry and bypass the vendored
+  Ctrl helper, including focus-time rebindings. Neither resolved the drops;
+  overrides were restored. Cefrium registered the comparison input correctly.
+- [ ] Deferred: Gecko native IME instrumentation described below. No root cause
+  or production fix is established; preserve both renderers' current input paths.
+
+### Deferred Gecko Native IME Diagnostics
+
+Status: deferred at user request. A device restart cleared the problem. The user
+reports that cache clearing and force-quitting Gboard or the app did not clear it
+while the device remained running. Gboard suggestions flashed/disappeared near
+missed input. These observations justify inspecting the Android/Gecko IME boundary,
+but do not isolate the fault to Gboard, Gecko, our app, or the system IME service.
+
+- [ ] Design debug-variant console/ADB evaluation or reflection access to the
+  live Gecko activity, view, input connection and existing IME filter state.
+  Reuse the Android native console worker rather than adding a network listener.
+- [ ] Add runtime flags for enabling/disabling bounded trace capture and optional
+  print/logcat output; expose snapshot, export and clear operations. Diagnostics
+  must remain off by default and avoid per-keystroke console/socket flooding.
+- [ ] Trace input-connection creation/replacement/closure, focus transitions,
+  restartInput, selection/cursor notifications, batch edits, commit/composition,
+  deletion and sendKeyEvent calls, including arguments and returned outcomes.
+- [ ] Correlate native records with the textarea probe using connection identity,
+  sequence and timestamps. Capture text only through an explicit diagnostic flag.
+- [ ] Provide explicit debug actions/flags for controlled IME/filter experiments,
+  with reported prior/current state and restoration. Observation alone must not
+  restart input, clear composition or otherwise erase the reproducing state.
+- [ ] Validate disabled-path overhead, bounded retention, cleanup and debug-only
+  exposure. Confirm normal typing and Ctrl/229 handling are unchanged.
+- [ ] On recurrence, capture native and DOM evidence before restarting anything;
+  compare Cefrium as needed before deciding whether a fix should be Gecko-gated.
+
+Implementation, APK build/install and further live experiments require a separate
+approved slice. No native changes are authorized by this deferred plan alone.
