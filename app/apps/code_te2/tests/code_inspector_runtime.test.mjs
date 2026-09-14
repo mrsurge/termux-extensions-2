@@ -50,6 +50,49 @@ function createEditorState() {
   };
 }
 
+test('document symbols preserve hierarchy and selection locations through WBA', async () => {
+  const { createEditorCodeInspectorRuntime } = await importTypeScript('monaco_editor/editor_code_inspector_runtime.ts');
+  const state = createEditorState(), projections = [], calls = [];
+  const range = { startLineNumber: 2, startColumn: 1, endLineNumber: 20, endColumn: 1 };
+  const selectionRange = { startLineNumber: 3, startColumn: 7, endLineNumber: 3, endColumn: 12 };
+  const runtime = createEditorCodeInspectorRuntime({
+    getEditor: () => state.editor, getCurrentPath: () => '/workspace/main.rs',
+    editorWorkbenchCall: async (method, params) => {
+      calls.push({ method, params });
+      return { ok: true, result: [{ name: 'Example', kind: 4, range, selectionRange,
+        children: [{ name: 'run', kind: 5, range: selectionRange }] }] };
+    }, publishProjection: p => { projections.push(p); return true; },
+    replaceHighlights() {}, logError: () => assert.fail('unexpected error'),
+  });
+  runtime.start('symbols'); await settle();
+  assert.equal(calls[0].method, 'symbols');
+  const result = projections.at(-1);
+  assert.equal(result.mode, 'symbols'); assert.equal(result.status, 'ready');
+  assert.equal(result.summary.count, 2);
+  assert.equal(result.tree[0].label, 'Example');
+  assert.deepEqual(result.tree[0].selectionRange, selectionRange);
+  assert.equal(result.tree[0].children[0].path, '/workspace/main.rs');
+  runtime.dispose();
+});
+
+test('document symbols reject changed model versions and handle empty/unsupported replies', async () => {
+  const { createEditorCodeInspectorRuntime } = await importTypeScript('monaco_editor/editor_code_inspector_runtime.ts');
+  const state = createEditorState(), projections = [];
+  let resolve, response;
+  const runtime = createEditorCodeInspectorRuntime({
+    getEditor: () => state.editor, getCurrentPath: () => '/workspace/main.rs',
+    editorWorkbenchCall: () => response ?? new Promise(done => { resolve = done; }),
+    publishProjection: p => { projections.push(p); return true; }, replaceHighlights() {}, logError() {},
+  });
+  runtime.start('symbols'); state.setVersion(5);
+  resolve({ ok: true, result: [] }); await settle();
+  assert.equal(projections.length, 1);
+  response = Promise.resolve({ ok: true, result: [] }); runtime.start('symbols'); await settle();
+  assert.equal(projections.at(-1).status, 'empty');
+  response = Promise.resolve({ unsupported: true, result: [] }); runtime.start('symbols'); await settle();
+  assert.equal(projections.at(-1).status, 'unsupported'); runtime.dispose();
+});
+
 test("goes directly to the first definition without replacing the drawer projection", async () => {
   const { createEditorCodeInspectorRuntime } = await importTypeScript(
     "monaco_editor/editor_code_inspector_runtime.ts",

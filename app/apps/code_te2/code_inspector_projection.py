@@ -5,7 +5,7 @@ from copy import deepcopy
 from typing import Literal, TypedDict
 
 CodeInspectorStatus = Literal["loading", "ready", "empty", "unsupported", "error"]
-CodeInspectorMode = Literal["references", "implementations", "callHierarchy"]
+CodeInspectorMode = Literal["references", "implementations", "callHierarchy", "symbols"]
 JsonObject = dict[str, object]
 
 

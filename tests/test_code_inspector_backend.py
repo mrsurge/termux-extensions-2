@@ -28,6 +28,12 @@ def projection(
 
 
 class CodeInspectorProjectionTests(unittest.IsolatedAsyncioTestCase):
+    def test_symbols_projection_mode(self) -> None:
+        value = projection()
+        value["mode"] = "symbols"
+        result = code_inspector_backend._coerce_projection(value)
+        self.assertEqual(result["mode"], "symbols")
+
     @override
     def setUp(self) -> None:
         _ = code_inspector_projection.clear_code_inspector_projection_state()

@@ -3379,7 +3379,7 @@ The visible frontend open path does not wait for WBA background hydration. `edit
 
 ## 40) Code Inspector And Navigation
 
-Code Inspector is a backend-retained bottom-drawer projection for References, Implementations, and Call Hierarchy. It is not a direct frontend-to-frontend channel and does not add a new socket or HTTP endpoint.
+Code Inspector is a backend-retained bottom-drawer projection for References, Implementations, Call Hierarchy and Document Symbols. It is not a direct frontend-to-frontend channel and does not add a new socket or HTTP endpoint.
 
 ### Flow
 
@@ -3403,7 +3403,7 @@ Key backend files:
 
 WBA performs Code OSS document-selector scoring/order, semantic provider dispatch, reference/implementation merge-sort-deduplication, and lazy call-hierarchy session management. Reference and implementation locations are enriched with source previews capped at 240 characters; preview reads are deduplicated per file with bounded concurrency. The editor replaces the active file preview from Monaco's live model so unsaved text remains authoritative.
 
-Lazy call-hierarchy expansion and release return through backend-mediated editor commands. Browser reload does not release a WBA call-hierarchy session; project switch, adapter reset, replacement, or worker teardown invalidates it.
+Lazy call-hierarchy expansion and release return through backend-mediated editor commands. Browser reload does not release a WBA call-hierarchy session; project switch, adapter reset, replacement, or worker teardown invalidates it. Document Symbols uses the existing `symbols` -> `vscode.documentSymbols` WBA route against the open document (including its draft overlay). The touch inspection island exposes a structural SVG action. `src/code-inspector/document-symbols.ts` preserves provider hierarchy and one-based selection ranges, maps zero-based VS Code SymbolKind to vendored codicons, and bounds snapshots to 2,000 visited entries / 32 levels with explicit truncation. Invalid ranges are not converted into first-line jumps. Clicking a row navigates to its selection range through existing host file navigation without force-refreshing the model; the twisty expands independently. Rerun the action to refresh the snapshot. Requests reject changed paths, versions and replaced models; existing project/adapter resets clear retained state. Historical syntax-only views remain outside WBA inspection.
 
 Go to Definition is intentionally separate from the retained Code Inspector drawer mode. It is a direct editor-to-WBA action that invokes selector-ordered definition providers, returns the first canonical target, and navigates through backend-owned `editor.open` with `focus: false` and centered reveal.
 

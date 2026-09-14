@@ -1,4 +1,5 @@
 import type { CodeInspectorMode } from './editor_touch_menu_utils.ts';
+import { documentSymbolTree } from '../src/code-inspector/document-symbols.ts';
 
 type JsonObject = Record<string, unknown>;
 type CodeInspectorStatus = 'loading' | 'ready' | 'empty' | 'unsupported' | 'error';
@@ -73,6 +74,7 @@ const MODE_LABELS: Record<CodeInspectorMode, string> = {
   callHierarchy: 'Call hierarchy',
   references: 'References',
   implementations: 'Implementations',
+  symbols: 'Document symbols',
 };
 const LOCATION_PREVIEW_MAX_CHARS = 240;
 const LOCATION_PREVIEW_LEADING_CONTEXT = 40;
@@ -175,7 +177,7 @@ function projectionFromValue(value: unknown): CodeInspectorProjection | null {
   const mode = value.mode;
   const status = value.status;
   if (
-    mode !== 'references' &&
+    mode !== 'symbols' && mode !== 'references' &&
     mode !== 'implementations' &&
     mode !== 'callHierarchy'
   ) {
@@ -503,6 +505,8 @@ export function createEditorCodeInspectorRuntime(
     requestSequence = Math.max(requestSequence + 1, Date.now());
     const requestId = `code_inspector_${Date.now()}_${requestSequence}`;
     const target = buildTarget(editor, path, position);
+    const sourceModel = editor.getModel?.();
+    if (mode === 'symbols') target.symbol = basename(path);
     publish({
       revision: 0,
       requestId,
@@ -515,7 +519,7 @@ export function createEditorCodeInspectorRuntime(
       error: null,
     });
 
-    const method = mode === 'references'
+    const method = mode === 'symbols' ? 'symbols' : mode === 'references'
       ? 'references'
       : mode === 'implementations'
         ? 'implementations'
@@ -531,18 +535,20 @@ export function createEditorCodeInspectorRuntime(
         },
         { timeoutMs: 20000 },
       ));
-      if (!isCurrent(requestId, target)) return;
+      if (!isCurrent(requestId, target) || deps.getEditor()?.getModel?.() !== sourceModel) return;
       const items = asArray(reply.result);
       const unsupported = reply.unsupported === true;
+      const symbols = mode === 'symbols' ? documentSymbolTree(items, path) : null;
       const tree = mode === 'callHierarchy'
         ? items.map((item, index) => callNode(item, `root:${index}`, 'incoming'))
-        : locationTree(items, path, editor.getModel?.() ?? null);
+        : symbols?.tree ?? locationTree(items, path, editor.getModel?.() ?? null);
       const summary: JsonObject = {
         label: MODE_LABELS[mode],
-        count: items.length,
+        count: symbols?.count ?? items.length,
       };
+      if (symbols) summary.truncated = symbols.truncated;
       if (mode === 'callHierarchy') summary.direction = 'incoming';
-      else summary.fileCount = tree.length;
+      else if (mode !== 'symbols') summary.fileCount = tree.length;
       publishRevision({
         status: unsupported
           ? 'unsupported'

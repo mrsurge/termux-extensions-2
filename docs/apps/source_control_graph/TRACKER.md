@@ -336,7 +336,7 @@ Next implementation slice, followed by the spacebar-slide investigation below.
 - [x] Automated coverage for one-shot Shift with Ctrl-byte replay, P/O actions,
   palette focus/caret navigation, committed capitalization, composition bypass,
   and the existing mobile Ctrl/229, sticky Sel, repeat and secondary-routing suite.
-- [ ] Live acceptance: ordinary/Gboard typing, one-shot Shift, Ctrl+Shift+P/O,
+- [x] Live acceptance: ordinary/Gboard typing, one-shot Shift, Ctrl+Shift+P/O,
   palette navigation/Enter/Esc, both working editor realms and terminal focus.
   Historical read-only command restrictions remain unchanged.
 
@@ -353,20 +353,22 @@ Source references: `src/mobile-input/terminal-special-key-bridge.ts`,
 
 ### Symbol Index In Code Inspector
 
-This remains in this branch, after Command Palette access and the spacebar-slide
-investigation, before wrap-up. It is not deferred.
+This remains in this branch, immediately after Command Palette access per the
+updated user ordering. Spacebar-slide investigation follows, then wrap-up.
 
-- [ ] Add a symbol index to the Code Inspector tab/drawer. Start by evaluating
-  the existing WBA `vscode.documentSymbols` / `documentSymbols` provider path;
-  confirm document-versus-workspace scope before extending the contract.
-- [ ] Present symbol names/kinds/hierarchy with navigation to the correct
+- [x] Add a document symbol index through the existing WBA `symbols` ->
+  `vscode.documentSymbols` provider path, not a new workspace-wide index.
+- [x] Present symbol names/kinds/hierarchy with navigation to the correct
   document/range. Follow current document/client identity, reject stale responses
   after file/project changes, and reuse existing inspector/navigation lanes.
-- [ ] Add an entry to the maintained Monaco touch-extension inspection menu
-  that opens the index. Choose a suitable vendored symbol codicon or styled SVG
-  during implementation; do not use file-type icons as an assumed symbol catalog.
-- [ ] Cover provider-unavailable, empty results, refreshed symbols and mobile
-  menu/drawer navigation; live acceptance before closing the branch.
+- [x] Add a structural SVG entry to the existing touch inspection island and
+  vendored symbol-kind codicons to drawer rows. No touch-fork rebuild required.
+- [x] Cover empty/unsupported responses, stale versions, hierarchy/ranges,
+  bounded snapshots and click/twisty isolation with focused tests. Python mode
+  validation and basedpyright checks pass.
+- [x] Live acceptance after app-worker restart and asset reload: menu opens
+  document index, classes expand, row selection jumps precisely without reload,
+  and reopening the action reflects current draft-backed symbols.
 
 ### Themes
 
@@ -378,7 +380,8 @@ Follow-Up Branch**. This is not a remaining blocker for this branch.
 - [ ] After Command Palette access, investigate Android keyboard spacebar-slide
   cursor navigation. Establish what cursor/selection events reach the hidden
   textarea before choosing any source or native changes; preserve composition
-  and Ctrl/229 guards. Follow this with the Symbol Index slice, then wrap-up.
+  and Ctrl/229 guards. Symbol Index is now scheduled first; this is the final
+  planned investigation before wrap-up.
 - [x] Capture GeckoView textarea/input events and compare with Cefrium. Missing
   intended characters were absent from captured DOM key/input events; no 229 or
   composition events appeared in the explicit 229 capture. The simple typing

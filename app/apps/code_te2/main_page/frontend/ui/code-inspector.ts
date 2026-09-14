@@ -1,3 +1,4 @@
+import { symbolIcon } from '../../../src/code-inspector/document-symbols.ts';
 type JsonObject = Record<string, unknown>;
 
 interface CodeInspectorPanelDeps {
@@ -189,6 +190,10 @@ export function createCodeInspectorPanel(
       : nodeType === 'call'
         ? '☎'
         : '·';
+    if (nodeType === 'symbol') {
+      icon.textContent = '';
+      icon.classList.add('codicon', `codicon-${symbolIcon(node.kind)}`);
+    }
 
     const label = document.createElement('span');
     label.className = 'code-inspector-label';
@@ -220,7 +225,8 @@ export function createCodeInspectorPanel(
       const location = locationFromNode(node);
       if (!location) return;
       void deps.openFile(location.path, {
-        forceRefresh: true,
+        // A symbol jump is navigation, not a forced reload of its draft/model.
+        forceRefresh: nodeType !== 'symbol',
         line: location.line,
         column: location.column,
         focus: false,
@@ -304,6 +310,7 @@ export function createCodeInspectorPanel(
     summary.textContent = current && Number.isFinite(count)
       ? `${label}${label ? ' · ' : ''}${count} result${count === 1 ? '' : 's'}`
       : label;
+    if (summaryData.truncated === true) summary.append(' · Index truncated');
 
     const nodes = current ? asArray(current.tree) : [];
     tree.replaceChildren(...nodes.map((node) => renderNode(node, 0)));

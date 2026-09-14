@@ -12,7 +12,7 @@ interface MentionPayload {
   content?: string;
 }
 
-export type CodeInspectorMode = 'callHierarchy' | 'references' | 'implementations';
+export type CodeInspectorMode = 'callHierarchy' | 'references' | 'implementations' | 'symbols';
 
 interface MentionRequestDeps {
   getEditor(): MonacoRuntimeEditorLike | null;
@@ -154,6 +154,14 @@ export function ensureTouchSelection(reason: string, deps: MentionRequestDeps): 
                 action: () => {
                   closeMenu();
                   deps.inspectCode?.('callHierarchy');
+                },
+              },
+              {
+                name: 'document symbols',
+                innerHTML: '<span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="3" y="3" width="6" height="6" rx="1"/><path d="M6 9v11M6 14h7M6 20h7"/><rect x="13" y="11" width="8" height="5" rx="1"/><rect x="13" y="18" width="8" height="4" rx="1"/></svg></span>',
+                action: () => {
+                  closeMenu();
+                  deps.inspectCode?.('symbols');
                 },
               },
               {
