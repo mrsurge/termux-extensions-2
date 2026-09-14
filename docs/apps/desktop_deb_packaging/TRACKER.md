@@ -1,6 +1,6 @@
 # Unified Linux And Termux Release Installer Tracker
 
-Last updated: 2026-09-09
+Last updated: 2026-09-14
 
 ## Program status
 
@@ -22,7 +22,8 @@ Last updated: 2026-09-09
 | Phase 4K: `0.2.344` mobile Terminal integration | Complete, published, and accepted across both Android renderers on Motorola and Pixel | Track A only; the Android FD transport investigation remains unimplemented and out of scope |
 | Phase 4L: `0.2.345` mobile focus correction | Synchronized source, asset, Electron, and APK candidates pass automated gates and live acceptance on both devices | Build publication artifacts only from the immutable accepted tag |
 | Phase 4M: `0.2.346` MCP/Codex compatibility release | Complete, published, and accepted on Linux and physical Termux | Immutable normal/latest release; retain exact FastMCP 3.4.7, Agent Log Server 0.2.124, and Framework-Shells 0.0.63 pins |
-| Phase 4N: `0.2.347` comparison and search release | Integrated source, synchronized frontend assets, Electron package, and both Android staging APKs pass automated and live native-client gates; clean-tag publication remains | Rebuild every public artifact from the immutable tag before publication |
+| Phase 4N: `0.2.347` comparison and search release | Complete, published, and accepted on Linux and physical Termux | Immutable normal/latest release at its publication checkpoint; retain its audited artifact set as historical evidence |
+| Phase 4O: `0.2.349` source-control and desktop-connect release | Complete, published, and accepted on Linux and physical Termux | Immutable normal/latest release; `0.2.348` remains an unpublished immutable candidate and must not be moved or reused |
 | Phase 5: Termux target mode | Public `0.2.342` physical install acceptance is green; the full app-worker/Terminal/Code Server matrix last passed on `0.2.341` | Apt-first shared foundations plus a release-local wheel tree; every capability-changing physical acceptance must exercise the exact archived server's app-launch path |
 | Phase 6: upgrade retention, desktop startup, and Sidebar continuity | Source implementation is published in `0.2.343`; Electron and Cefrium Sidebar-persistence acceptance passed while the GeckoView/full restart matrix remains | Retain one fallback, use normal app readiness, and distinguish transient WBA loss from authoritative membership removal |
 
@@ -1692,11 +1693,61 @@ does not authorize publication.
   not publish or move it after the Agent Log Server dependency changed.
 - [x] Build, runtime-validate, and publish clean Linux and Android Agent Log
   Server `0.2.125` wheels from commit `3adc3b1d696fc99be00409eb94028d1e34164dd3`.
-- [ ] Build the TE2 Linux wheel/sdist and deterministic physical-AArch64 Termux
+- [x] Build the TE2 Linux wheel/sdist and deterministic physical-AArch64 Termux
   archive from immutable tag `0.2.349`, retaining Framework-Shells `0.0.63`.
-- [ ] Publish TE2 to PyPI, assemble and byte-verify the normal/latest GitHub
+- [x] Publish TE2 to PyPI, assemble and byte-verify the normal/latest GitHub
   release titled `TE2 0.2.349 alpha`, then pass fresh public Debian and physical
   Termux acceptance.
+
+### Phase 4O TE2 0.2.349 publication and acceptance evidence
+
+- Annotated tag `0.2.349` identifies integrated source commit
+  `7e248c0212e6d573de28a835b871f644ec79fc22`. The feature branch, `main`,
+  and both remote refs identified that commit before publication; this evidence
+  commit remains intentionally outside the immutable tag. Pushed tag `0.2.348`
+  remains an unpublished immutable candidate.
+- Production PyPI publishes `te2==0.2.349` with exact dependencies
+  `framework-shells==0.0.63`, `agent-log-server==0.2.125`, and
+  `fastmcp==3.4.7`. The public Linux wheel SHA-256 is
+  `423b1f566bad60ae56e91e40bda78fc2ccf0e54ddca2649459787d3c88ba0e0c`,
+  the sdist is
+  `fc3666d2a6fc0b6b6607c987971635b71e11014e92caac3a2d1b429cc9f4688f`,
+  and the packaged Linux Ferrous-native server is
+  `40dfdf821d4e613f2d51c17df51929229892873a3156008fa935e0f2250bf04b`.
+- Agent Log Server `0.2.125` is published from clean tag commit
+  `3adc3b1d696fc99be00409eb94028d1e34164dd3`. Its Android wheel SHA-256 is
+  `6f0d7d0e50dfad7090ca55f2f2535da76a90b3f51f487dc63f578068d11c01fd`
+  and its Linux wheel is
+  `15ae6280ca676aa9234a02099559c6fc2fd67400ea807a1a6d72354ed0774e42`.
+- The clean 96-wheel Termux archive reproduced byte-for-byte across two builds
+  on the physical Pixel. Its SHA-256 is
+  `11ba859e5e2b93a217d00db6c2fc267f5356f1cd2f08c0ef8f6f00a953fc377e`;
+  its exact Android/AArch64 server is
+  `ce3f5425ba12ce3c13f675bc17b8c79af4e63a14edfe3752a003fc4346834782`
+  and reports `ferrous-framework-native`.
+- The synchronized staging APKs carry version code `20349`, asset version
+  `0.2.349`, the repository development signer, and valid 16 KiB alignment.
+  GeckoView SHA-256 is
+  `c939e146fd80eceafa90916e9b803e741d2309c7e715220c25b41379742d1dfc`;
+  Cefrium is
+  `3b790bbb3686de61a0932fbd5af9984cb8f1a574ffcd665e64227e1a421a9513`.
+  User live acceptance passed both exact candidates on the Motorola before tag
+  construction.
+- GitHub Release `0.2.349`, titled `TE2 0.2.349 alpha`, is the normal/latest
+  release with `prerelease: false` and 13 assets. Every private-draft upload was
+  downloaded and compared byte-for-byte before promotion; public
+  `SHA256SUMS` SHA-256 is
+  `1c4e863b15775fd5c61056dddfed8c5338e9377724cf5499acb8f0d742ec9b1c`.
+- Fresh public latest-curl Debian `--desktop` acceptance installed TE2
+  `0.2.349`, Agent Log Server `0.2.125`, Framework-Shells `0.0.63`, FastMCP
+  `3.4.7`, and the receipt-owned Electron integration. The packaged framework
+  returned health `0.2.349`, discovered all eight apps, and launched a real
+  File Explorer worker through Ferrous to ready/HTTP 200 before clean shutdown.
+- Physical Motorola public latest-curl acceptance upgraded `0.2.347` to
+  `0.2.349`, retained `0.2.347` as its sole fallback, selected the exact
+  archived Ferrous-native server, returned health `0.2.349`, and discovered all
+  eight apps. Real File Explorer and ALS-RS workers both reached ready/HTTP 200
+  from the isolated acceptance runtime.
 
 ## Deferred work
 
@@ -1762,3 +1813,4 @@ does not authorize publication.
 | 2026-09-05 | TE2 0.2.346 MCP/Codex compatibility publication | Clean-tag Linux and Android ALS wheels, synchronized TE2 Linux/Termux/APK construction, deterministic physical-AArch64 archive assembly, exact PyPI hash verification, private-draft round-trip verification, public Debian desktop/framework/worker/MCP acceptance, and physical Motorola 0.2.345-to-0.2.346 upgrade/framework/worker/MCP acceptance | Passed; 0.2.346 is the normal/latest release, FastMCP is pinned to the validated MCP 1-compatible line, ALS 0.2.124 is live on both supported targets, and all acceptance runtimes shut down cleanly |
 | 2026-09-09 | TE2 0.2.347 comparison/search release candidate | Integrated PR 22, synchronized all release-facing versions and Android assets, passed Python/Rust/Code TE2/Terminal/Electron/Android gates, audited both staging APKs, installed both on Pixel, and completed user live acceptance | Accepted; immutable tag construction and clean-tag Linux/Termux/APK publication builds may proceed |
 | 2026-09-09 | TE2 0.2.347 comparison/search publication | Clean-tag Linux/Termux/APK construction, deterministic physical-AArch64 archive assembly, production PyPI publication, private-draft API and round-trip verification, public Debian desktop/framework/worker acceptance, and physical Motorola archive/APK installation plus live framework/worker acceptance | Passed; 0.2.347 is the normal/latest release and all supported public artifacts match the audited immutable-tag set |
+| 2026-09-14 | TE2 0.2.349 source-control and desktop-connect publication | Clean-tag Linux/Termux/APK/Electron construction, ALS 0.2.125 Linux and Android wheels, deterministic physical-AArch64 archive assembly, production PyPI publication, private-draft byte-for-byte verification, public Debian desktop/framework/worker acceptance, and physical Motorola upgrade plus File Explorer/ALS-RS worker acceptance | Passed; 0.2.349 is the normal/latest non-prerelease release, all 13 public assets match the audited immutable-tag set, and both supported installation paths resolve ALS 0.2.125 |

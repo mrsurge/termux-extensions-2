@@ -4310,3 +4310,34 @@ These are recorded release-time provenance and acceptance facts, moved from repo
   `64d48aea138126a9fc26beaa86f299db2f852141a16dd90d8926817741af3736`.
   Public Debian desktop/framework/worker acceptance and physical Motorola
   archive/APK plus live framework/worker acceptance are green.
+
+- Production release `te2==0.2.349` is published from annotated tag
+  `0.2.349` at integrated main commit
+  `7e248c0212e6d573de28a835b871f644ec79fc22`. It pins exact dependencies
+  `framework-shells==0.0.63`, `agent-log-server==0.2.125`, and
+  `fastmcp==3.4.7`. The Linux wheel SHA-256 is
+  `423b1f566bad60ae56e91e40bda78fc2ccf0e54ddca2649459787d3c88ba0e0c`,
+  the sdist is
+  `fc3666d2a6fc0b6b6607c987971635b71e11014e92caac3a2d1b429cc9f4688f`,
+  and the packaged Linux Ferrous-native server is
+  `40dfdf821d4e613f2d51c17df51929229892873a3156008fa935e0f2250bf04b`.
+  Agent Log Server 0.2.125 is published for Linux and Android from clean tag
+  commit `3adc3b1d696fc99be00409eb94028d1e34164dd3`.
+
+- GitHub Release `0.2.349`, titled `TE2 0.2.349 alpha`, was promoted as the
+  normal/latest release with `prerelease: false` after all 13 private-draft
+  assets were downloaded and compared byte-for-byte. Public `SHA256SUMS`
+  SHA-256 is
+  `1c4e863b15775fd5c61056dddfed8c5338e9377724cf5499acb8f0d742ec9b1c`.
+  The deterministic 96-wheel Termux archive is
+  `11ba859e5e2b93a217d00db6c2fc267f5356f1cd2f08c0ef8f6f00a953fc377e`;
+  its Android/AArch64 Ferrous server is
+  `ce3f5425ba12ce3c13f675bc17b8c79af4e63a14edfe3752a003fc4346834782`.
+  GeckoView APK SHA-256 is
+  `c939e146fd80eceafa90916e9b803e741d2309c7e715220c25b41379742d1dfc`
+  and Cefrium is
+  `3b790bbb3686de61a0932fbd5af9984cb8f1a574ffcd665e64227e1a421a9513`.
+  Public Debian acceptance installed the desktop integration and launched a
+  real File Explorer worker. Physical Motorola acceptance upgraded from
+  0.2.347 with one fallback and launched real File Explorer and ALS-RS workers;
+  both targets reported health 0.2.349 and all eight built-in apps.
