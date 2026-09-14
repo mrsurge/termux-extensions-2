@@ -375,6 +375,18 @@ updated user ordering. Spacebar-slide investigation follows, then wrap-up.
 Deferred to **WBA And Extension-Provided Themes** under **Deferred Work For A
 Follow-Up Branch**. This is not a remaining blocker for this branch.
 
+### Final Shared Toast Refinement
+
+- [x] Spacebar-slide checkpoint pushed in the root repo and Monaco fork before
+  this supplementary slice (`26f0b31d`, `6459120cbb2`).
+- [x] Add global shared-toast click/tap-to-copy with keyboard access, original
+  message-only copying, local feedback and unchanged close/expiry behavior.
+  Clipboard fallback must not focus another textarea or disturb editor IME state.
+- [x] Validate clipboard success/failure/fallback, repeated clicks, close action,
+  auto-expiry and focus preservation (five shared-script DOM tests).
+- [x] Live acceptance after asset update: toast body copies its message in
+  Android/desktop, preserves editor focus, and close still only dismisses.
+
 ### Mobile Input
 
 - [x] Capture Android spacebar-slide signals: GeckoView emits selectionchange

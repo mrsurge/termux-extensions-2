@@ -226,6 +226,16 @@ This work is deferred, not an implemented feature or a new History merge blocker
 Its concrete Kotlin/API scope, build/install and live validation need separate
 approval. Keep these tasks in the plan/tracker, not condensed repository memory.
 
+### Shared Toast Copy
+
+Final supplementary shared-UI scope: `app/static/js/te_ui.js` owns global toast
+copy-on-click/tap. Use a native message button for keyboard activation; preserve
+close/expiry behavior, copy only original plain text, and show local status rather
+than recursive feedback toasts. Prefer Clipboard API with a temporary copy-event
+fallback for HTTP contexts, never a focus-stealing helper textarea. Validate
+failure, focus, repeated activation and disposal with DOM tests. Native assets
+remain a separate publication step; no APK edits or version bump in this slice.
+
 ### Android Spacebar-Slide Cursor Synchronization
 
 The live GeckoView probe recorded native `selectionchange` events moving the
