@@ -3,6 +3,7 @@ import { desktopShellHost } from "./host.js";
 const hostInput = document.querySelector("#framework-host");
 const portInput = document.querySelector("#framework-port");
 const saveButton = document.querySelector("#save-settings");
+const connectButton = document.querySelector("#connect-framework");
 const testButton = document.querySelector("#test-framework");
 const frameworkBookmarkNameInput = document.querySelector("#framework-bookmark-name");
 const saveFrameworkBookmarkButton = document.querySelector("#save-framework-bookmark");
@@ -77,6 +78,19 @@ async function connectToFramework(frameworkHost, frameworkPort, successMessage =
     refreshPreferredApps(settings),
   ]);
   return settings;
+}
+
+async function connectFromFields(button, failureMessage) {
+  button.disabled = true;
+  try {
+    await connectToFramework(hostInput.value, portInput.value);
+  } catch (error) {
+    const message = error?.message || failureMessage;
+    setStatus(settingsStatus, "error", message);
+    desktopShellHost.toast(message);
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function renderFrameworkBookmarks() {
@@ -453,25 +467,15 @@ async function updateAssets() {
   }
 }
 
-saveButton?.addEventListener("click", async () => {
-  saveButton.disabled = true;
+saveButton?.addEventListener(
+  "click",
+  () => void connectFromFields(saveButton, "Save failed"),
+);
 
-  try {
-    await connectToFramework(hostInput.value, portInput.value);
-  } catch (error) {
-    setStatus(
-      settingsStatus,
-      "error",
-      error?.message || "Save failed",
-    );
-
-    desktopShellHost.toast(
-      error?.message || "Save failed",
-    );
-  } finally {
-    saveButton.disabled = false;
-  }
-});
+connectButton?.addEventListener(
+  "click",
+  () => void connectFromFields(connectButton, "Connection failed"),
+);
 
 testButton?.addEventListener(
   "click",

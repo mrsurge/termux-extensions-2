@@ -295,6 +295,15 @@ button {
   gap: 12px;
 }
 
+.framework-connection-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(100px, 160px) auto;
+  align-items: end;
+}
+
+.framework-connect-button {
+  min-height: 42px;
+}
+
 .asset-details {
   display: grid;
   gap: 10px;
@@ -525,6 +534,11 @@ button {
 
   .field-grid {
     grid-template-columns: minmax(0, 1fr) 112px;
+  }
+
+  .framework-connect-button {
+    grid-column: 1 / -1;
+    justify-self: end;
   }
 
   .launcher-root,

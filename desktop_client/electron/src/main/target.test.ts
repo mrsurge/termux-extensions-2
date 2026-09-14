@@ -45,6 +45,27 @@ test("desktop launcher bookmark selection immediately uses the persisted connect
   assert.doesNotMatch(source, /press Save to connect/);
 });
 
+test("desktop settings expose an immediate manual framework connection action", async () => {
+  const [html, source] = await Promise.all([
+    readFile(
+      fileURLToPath(new URL("../../../android_shell/settings.html", import.meta.url)),
+      "utf8",
+    ),
+    readFile(
+      fileURLToPath(new URL("../../../android_shell/settings.js", import.meta.url)),
+      "utf8",
+    ),
+  ]);
+
+  const host = html.indexOf('id="framework-host"');
+  const port = html.indexOf('id="framework-port"');
+  const connect = html.indexOf('id="connect-framework"');
+  assert.ok(host >= 0 && port > host && connect > port);
+  assert.match(html.slice(connect, connect + 180), />\s*Connect\s*</);
+  assert.match(source, /connectButton\?\.addEventListener\([\s\S]*connectFromFields\(connectButton, "Connection failed"\)/);
+  assert.match(source, /await connectToFramework\(hostInput\.value, portInput\.value\)/);
+});
+
 test("desktop startup settings expose one clearly associated save action", async () => {
   const source = await readFile(
     fileURLToPath(new URL("../../../android_shell/settings.html", import.meta.url)),
