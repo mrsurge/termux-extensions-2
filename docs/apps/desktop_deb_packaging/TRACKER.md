@@ -1680,9 +1680,9 @@ does not authorize publication.
   rebuilt frontend into the Android asset seed.
 - [x] Pass maintained Python, Rust, Code TE2, Terminal, and Electron source
   gates before constructing native artifacts.
-- [ ] Build and validate the Electron archive and both signed staging APKs from
-  the release candidate.
-- [ ] Complete native live acceptance before constructing the immutable source
+- [x] Build and validate the packaged Electron application and both signed
+  staging APKs from the release candidate.
+- [x] Complete native live acceptance before constructing the immutable source
   tag.
 - [ ] Build the Linux wheel/sdist and deterministic physical-AArch64 Termux
   archive from the clean immutable tag, retaining Agent Log Server `0.2.124`
