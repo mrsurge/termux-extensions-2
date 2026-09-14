@@ -1,0 +1,17 @@
+--- a/asyncDataTree.ts
++++ b/asyncDataTree.ts
+@@ -1119,12 +1119,11 @@
+ 		node.refreshPromise = cancelablePromise;
+ 		this.subTreeRefreshPromises.set(node, cancelablePromise);
+ 
+-		cancelablePromise.finally(() => {
++		// Return the cleanup chain so cancellation/error rejection has an owner.
++		return cancelablePromise.finally(() => {
+ 			node.refreshPromise = undefined;
+ 			this.subTreeRefreshPromises.delete(node);
+ 		});
+-
+-		return cancelablePromise;
+ 	}
+ 
+ 	private async doRefreshNode(node: IAsyncDataTreeNode<TInput, T>, recursive: boolean, viewStateContext?: IAsyncDataTreeViewStateContext<TInput, T>): Promise<IAsyncDataTreeNode<TInput, T>[]> {

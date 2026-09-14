@@ -25,6 +25,7 @@ grep-searcher.workspace = true
 ignore.workspace = true
 ipnet.workspace = true
 libc.workspace = true
+notify.workspace = true
 regex.workspace = true
 reqwest.workspace = true
 serde.workspace = true

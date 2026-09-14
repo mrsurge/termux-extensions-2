@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import { commonPrefixLength, commonSuffixLength } from '../../../../../base/common/strings.js';
+import { Selection } from '../../../../common/core/selection.js';
 export const _debugComposition = false;
 const ANDROID_IME_LINE_PREFIX = '\u21dd';
 const ANDROID_IME_LINE_SUFFIX = '\n\n';
@@ -145,6 +146,66 @@ export class TextAreaState {
             positionDelta: 0
         };
     }
+    static deduceAndroidCompositionInput(previousState, currentState) {
+        if (!previousState) {
+            // This is the EMPTY state
+            return {
+                text: '',
+                replacePrevCharCnt: 0,
+                replaceNextCharCnt: 0,
+                positionDelta: 0
+            };
+        }
+        if (_debugComposition) {
+            console.log('------------------------deduceAndroidCompositionInput');
+            console.log(`PREVIOUS STATE: ${previousState.toString()}`);
+            console.log(`CURRENT STATE: ${currentState.toString()}`);
+        }
+        if (previousState.value === currentState.value) {
+            return {
+                text: '',
+                replacePrevCharCnt: 0,
+                replaceNextCharCnt: 0,
+                positionDelta: currentState.selectionEnd - previousState.selectionEnd
+            };
+        }
+        const prefixLength = Math.min(commonPrefixLength(previousState.value, currentState.value), previousState.selectionEnd);
+        const suffixLength = Math.min(commonSuffixLength(previousState.value, currentState.value), previousState.value.length - previousState.selectionEnd);
+        const previousValue = previousState.value.substring(prefixLength, previousState.value.length - suffixLength);
+        const currentValue = currentState.value.substring(prefixLength, currentState.value.length - suffixLength);
+        const previousSelectionStart = previousState.selectionStart - prefixLength;
+        const previousSelectionEnd = previousState.selectionEnd - prefixLength;
+        const currentSelectionStart = currentState.selectionStart - prefixLength;
+        const currentSelectionEnd = currentState.selectionEnd - prefixLength;
+        if (_debugComposition) {
+            console.log(`AFTER DIFFING PREVIOUS STATE: <${previousValue}>, selectionStart: ${previousSelectionStart}, selectionEnd: ${previousSelectionEnd}`);
+            console.log(`AFTER DIFFING CURRENT STATE: <${currentValue}>, selectionStart: ${currentSelectionStart}, selectionEnd: ${currentSelectionEnd}`);
+        }
+        return {
+            text: currentValue,
+            replacePrevCharCnt: previousSelectionEnd,
+            replaceNextCharCnt: previousValue.length - previousSelectionEnd,
+            positionDelta: currentSelectionEnd - currentValue.length
+        };
+    }
+    // Selection-only IME gestures use the same guarded line as text edits, but
+    // must not manufacture an edit or allow the prefix/suffix into model columns.
+    static deduceAndroidImeSelection(previousState, currentState) {
+        const line = previousState.androidModelLineNumber;
+        if (line === undefined || currentState.androidModelLineNumber !== line
+            || previousState.value !== currentState.value
+            || !TextAreaState._readAndroidImeLineProjection(currentState)
+            || (previousState.selectionStart === currentState.selectionStart && previousState.selectionEnd === currentState.selectionEnd)) {
+            return null;
+        }
+        const start = ANDROID_IME_LINE_PREFIX.length;
+        const end = currentState.value.length - ANDROID_IME_LINE_SUFFIX.length;
+        if (currentState.selectionStart < start || currentState.selectionStart > end
+            || currentState.selectionEnd < start || currentState.selectionEnd > end) {
+            return null;
+        }
+        return new Selection(line, currentState.selectionStart - start + 1, line, currentState.selectionEnd - start + 1);
+    }
     static deduceAndroidImeLineEdit(previousState, currentState) {
         const modelLineNumber = previousState.androidModelLineNumber;
         if (modelLineNumber === undefined
@@ -183,4 +244,3 @@ export class TextAreaState {
         return new TextAreaState(screenReaderContentState.value, screenReaderContentState.selectionStart, screenReaderContentState.selectionEnd, screenReaderContentState.selection, screenReaderContentState.newlineCountBeforeSelection);
     }
 }
-//# sourceMappingURL=textAreaEditContextState.js.map

@@ -28,6 +28,7 @@ const SEARCH_EVENT_QUEUE_CAPACITY: usize = 256;
 #[derive(Clone)]
 pub(crate) struct FrameworkServiceScheduler {
     inner: Arc<SchedulerInner>,
+    pub(crate) history_sessions: Arc<super::history_sessions::HistorySessions>,
 }
 
 struct SchedulerInner {
@@ -145,6 +146,7 @@ struct SearchJobContext {
 impl Default for FrameworkServiceScheduler {
     fn default() -> Self {
         Self {
+            history_sessions: Arc::new(super::history_sessions::HistorySessions::default()),
             inner: Arc::new(SchedulerInner {
                 fs_read: Arc::new(Semaphore::new(FS_READ_PERMITS)),
                 fs_write: Arc::new(Semaphore::new(FS_WRITE_PERMITS)),
@@ -622,6 +624,14 @@ impl FrameworkServiceScheduler {
         request: git_ops::GitProviderRequest,
     ) -> Result<git_ops::GitMutationResult, git_ops::GitProviderError> {
         self.git_mutation(request.clone(), move || git_ops::git_init(request))
+            .await
+    }
+
+    pub(crate) async fn git_fetch(
+        &self,
+        request: git_ops::GitProviderRequest,
+    ) -> Result<git_ops::GitMutationResult, git_ops::GitProviderError> {
+        self.git_network(request.clone(), move || git_ops::git_fetch(request))
             .await
     }
 
@@ -1301,6 +1311,14 @@ impl FrameworkServiceScheduler {
     {
         let _permit = self.acquire(self.inner.fs_write.clone()).await?;
         self.spawn_fs(operation).await
+    }
+
+    pub(crate) async fn refresh_changes_paths(
+        &self,
+        request: super::search_changes::ChangesPathsRequest,
+    ) -> Result<serde_json::Value, search_ops::SearchProviderError> {
+        self.search_read(move || super::search_changes::refresh_paths(request))
+            .await
     }
 
     async fn search_read<T>(

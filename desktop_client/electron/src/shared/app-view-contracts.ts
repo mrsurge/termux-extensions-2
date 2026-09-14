@@ -130,6 +130,7 @@ export type ElectronEditorSurfacePresentation = {
 export type ElectronSecondEditorOpenRequest = {
   projectPath: string;
   path: string;
+  historyTicket?: string;
 };
 
 export type ElectronSecondEditorProjectRequest = {
@@ -142,6 +143,7 @@ export type ElectronSecondEditorPlaceRequest = {
 };
 
 export type ElectronSecondEditorCommand =
+  | { type: "history"; projectPath: string; ticket: string }
   | {
       type: "open";
       projectPath: string;
@@ -288,6 +290,7 @@ export type ElectronAppViewBridge = {
   openSecondEditor(
     projectPath: string,
     path: string,
+    historyTicket?: string,
   ): Promise<{ ok: true; presentation: ElectronEditorSurfacePresentation }>;
   syncSecondEditorProject(
     projectPath: string,

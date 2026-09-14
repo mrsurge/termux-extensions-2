@@ -83,6 +83,7 @@ export class SecondaryEditorRegistry {
   #presentation: ElectronEditorSurfacePresentation | null = null;
   #ready = false;
   #pendingOpenPath = "";
+  #pendingHistoryTicket = "";
   #loadGeneration = 0;
   #disposing = false;
   #closingWindowInternally = false;
@@ -161,15 +162,21 @@ export class SecondaryEditorRegistry {
   async open(
     rawProjectPath: unknown,
     rawPath: unknown,
+    rawHistoryTicket?: unknown,
   ): Promise<ElectronEditorSurfacePresentation> {
     const projectPath = normalizedProjectPath(rawProjectPath);
-    const path = normalizedFilePath(rawPath);
+    if (rawHistoryTicket !== undefined && (typeof rawHistoryTicket !== "string" || !/^[0-9a-f]{48}$/.test(rawHistoryTicket))) {
+      throw new Error("Invalid historical editor ticket");
+    }
+    const ticket = typeof rawHistoryTicket === "string" ? rawHistoryTicket : "";
+    const path = ticket ? "" : normalizedFilePath(rawPath);
     await this.syncProject(projectPath);
     if (!this.#presentation) throw new Error("Secondary editor state is unavailable");
     if (this.#presentation.mode === "closed") {
       await this.#setPresentation({ ...this.#presentation, mode: "docked" });
     }
     this.#pendingOpenPath = path;
+    this.#pendingHistoryTicket = ticket;
     await this.#ensureView();
     this.#applyPresentation();
     this.#sendState();
@@ -187,6 +194,7 @@ export class SecondaryEditorRegistry {
     this.#disposeView();
     this.#projectPath = projectPath;
     this.#pendingOpenPath = "";
+    this.#pendingHistoryTicket = "";
     this.#presentation = await readSecondaryEditorPresentation(
       this.#options.getConfiguredFrameworkOrigin(),
       projectPath,
@@ -276,6 +284,7 @@ export class SecondaryEditorRegistry {
     this.#projectPath = "";
     this.#presentation = null;
     this.#pendingOpenPath = "";
+    this.#pendingHistoryTicket = "";
     this.#embeddedVisible = false;
     this.#embeddedBounds = { x: 0, y: 0, width: 0, height: 0 };
     this.#disposeView();
@@ -550,13 +559,16 @@ export class SecondaryEditorRegistry {
 
   #sendPendingOpen(): void {
     const contents = this.#view?.webContents;
-    if (!this.#ready || !contents || contents.isDestroyed() || !this.#pendingOpenPath) return;
-    const command: ElectronSecondEditorCommand = {
+    if (!this.#ready || !contents || contents.isDestroyed() || (!this.#pendingOpenPath && !this.#pendingHistoryTicket)) return;
+    const command: ElectronSecondEditorCommand = this.#pendingHistoryTicket ? {
+      type: "history", projectPath: this.#projectPath, ticket: this.#pendingHistoryTicket,
+    } : {
       type: "open",
       projectPath: this.#projectPath,
       path: this.#pendingOpenPath,
     };
     this.#pendingOpenPath = "";
+    this.#pendingHistoryTicket = "";
     contents.send("te2-desktop:second-editor-command", command);
   }
 

@@ -289,7 +289,7 @@ export function createExplorerSearchController(
     preparedPayload?: JsonObject,
   ): Promise<void> {
     const mode = deps.getSearchMode();
-    if (mode === "changes" || mode === "review") return;
+    if (mode === "changes" || mode === "review" || mode === "history") return;
     if (!deps.getProjectPath()) {
       deps.setSearchError("No project open");
       deps.setSearchLoading(false);
@@ -337,7 +337,7 @@ export function createExplorerSearchController(
     preparedPayload?: JsonObject,
   ): void {
     const mode = deps.getSearchMode();
-    if (mode === "changes" || mode === "review") return;
+    if (mode === "changes" || mode === "review" || mode === "history") return;
     deps.setSearchQuery(query);
     clearTimer();
     syncSearchHighlight(query);
@@ -474,7 +474,7 @@ export function createExplorerSearchController(
       return;
     }
 
-    if (mode === "diagnostics") {
+    if (mode === "diagnostics" || mode === "history") {
       deps.setSearchLoading(false);
       deps.setSearchError(null);
       setSearchStatus(null);
@@ -614,9 +614,26 @@ export function createExplorerSearchController(
       const previous = deps.getSearchResults();
       const current: Record<string, unknown> = isRecord(previous) ? previous : { mode: 'changes', changes: [] };
       if (isRecord(part.metadata)) Object.assign(current, part.metadata);
+      if (isRecord(part.delta)) {
+        const updates: unknown[] = Array.isArray(part.delta.updates) ? part.delta.updates : [];
+        const removed: unknown[] = Array.isArray(part.delta.removed) ? part.delta.removed : [];
+        const old: unknown[] = Array.isArray(current.changes) ? current.changes : [];
+        const entries = new Map(old.filter(isRecord).map(item => [item.rel, item]));
+        for (const rel of removed) entries.delete(rel);
+        for (const item of updates.filter(isRecord)) entries.set(item.rel, item);
+        current.changes = [...entries.values()].sort((a, b) => Number(a.statusCode === '??') - Number(b.statusCode === '??')).slice(0, 700);
+        current.total = entries.size;
+        // One live delta replaces the previous highlighted set, including rows
+        // retained offscreen. Initial enumeration does not masquerade as an edit.
+        current.recentChanges = { paths: updates.filter(isRecord).map(item => item.rel).filter((rel): rel is string => typeof rel === 'string') };
+        current.refreshRequired ||= part.refreshRequired === true;
+        deps.setSearchResults(current);
+        deps.renderSearchOverlay();
+        return;
+      }
       if (isRecord(part.change)) {
         const changes = Array.isArray(current.changes) ? current.changes : [];
-        if (changes.length >= 40) return;
+        if (changes.length >= 700) return;
         current.changes = [...changes, part.change];
       }
       current.complete = false;
@@ -685,6 +702,7 @@ export function createExplorerSearchController(
     }
   }
 
+  const moreRequests = new Set<string>();
   async function loadMoreResults(): Promise<void> {
     const current = normalizeContentSearchResults(deps.getSearchResults());
     const identity = deps.getSearchIdentity();
@@ -693,7 +711,8 @@ export function createExplorerSearchController(
     if (!searchId || !cursor || !deps.hasBus()) {
       return;
     }
-
+    if (moreRequests.has(searchId)) return;
+    moreRequests.add(searchId);
     deps.setGlobalMoreLoading(true);
     setSearchStatus({ status: "loadingMore", message: "Loading more results" });
     deps.renderSearchOverlay();
@@ -718,6 +737,7 @@ export function createExplorerSearchController(
         payload,
         30000,
       )) as ExplorerSearchMoreResult;
+      if (deps.getSearchIdentity().searchId !== searchId) return;
       if (response.result) {
         deps.setSearchResults(
           mergeContentSearchResults(deps.getSearchResults(), response.result),
@@ -729,9 +749,12 @@ export function createExplorerSearchController(
       setSearchStatus({ status: "done", message: "More results loaded" });
     } catch (error) {
       const message = getErrorMessage(error, "Failed to load more results");
+      if (deps.getSearchIdentity().searchId !== searchId) return;
       deps.setSearchError(message);
       setSearchStatus({ status: "error", message });
     } finally {
+      moreRequests.delete(searchId);
+      if (deps.getSearchIdentity().searchId !== searchId) return;
       deps.setGlobalMoreLoading(false);
       deps.renderSearchOverlay();
     }
@@ -748,7 +771,8 @@ export function createExplorerSearchController(
     if (!rel || !searchId || !cursor || !deps.hasBus()) {
       return;
     }
-
+    if (moreRequests.has(searchId)) return;
+    moreRequests.add(searchId);
     deps.setFileMoreLoading(rel, true);
     setSearchStatus({
       status: "loadingMore",
@@ -777,6 +801,7 @@ export function createExplorerSearchController(
         payload,
         30000,
       )) as ExplorerSearchMoreInFileResult;
+      if (deps.getSearchIdentity().searchId !== searchId) return;
       if (response.file) {
         deps.setSearchResults(
           mergeContentSearchFile(deps.getSearchResults(), response.file),
@@ -787,9 +812,12 @@ export function createExplorerSearchController(
       setSearchStatus({ status: "done", message: "More matches loaded" });
     } catch (error) {
       const message = getErrorMessage(error, "Failed to load more matches");
+      if (deps.getSearchIdentity().searchId !== searchId) return;
       deps.setSearchError(message);
       setSearchStatus({ status: "error", message });
     } finally {
+      moreRequests.delete(searchId);
+      if (deps.getSearchIdentity().searchId !== searchId) return;
       deps.setFileMoreLoading(rel, false);
       deps.renderSearchOverlay();
     }

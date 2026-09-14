@@ -1,0 +1,35 @@
+--- a/browser/scmHistoryViewPane.ts
++++ b/browser/scmHistoryViewPane.ts
+@@ -38,11 +38,11 @@
+ 
+ 	private _renderGraphPlaceholder(templateData: HistoryFileTemplate, historyItemViewModel: ISCMHistoryItemViewModel, graphColumns: ISCMHistoryItemGraphNode[]): void {
+ 		const graphPlaceholderSvgWidth = SWIMLANE_WIDTH * (graphColumns.length + 1);
+-		const marginLeft = graphPlaceholderSvgWidth - 16 /* .monaco-tl-indent left */;
+-		templateData.rowElement.style.marginLeft = `${marginLeft}px`;
+-
++		// The standalone tree has no workbench indent/twisty gutter. Graphs are
++		// ordinary first-column content, sharing the commit row's exact origin.
++		templateData.rowElement.style.marginLeft = '';
+ 		templateData.graphPlaceholder.textContent = '';
+-		templateData.graphPlaceholder.style.left = `${-1 * marginLeft}px`;
++		templateData.graphPlaceholder.style.left = '';
+ 		templateData.graphPlaceholder.style.width = `${graphPlaceholderSvgWidth}px`;
+ 		templateData.graphPlaceholder.appendChild(renderSCMHistoryGraphPlaceholder(graphColumns, getHistoryItemIndex(historyItemViewModel)));
+ 	}
+@@ -171,7 +171,7 @@
+ 		templateData.graphPlaceholder.textContent = '';
+ 		templateData.graphPlaceholder.style.width = `${SWIMLANE_WIDTH * (element.element.graphColumns.length + 1)}px`;
+ 		templateData.graphPlaceholder.appendChild(renderSCMHistoryGraphPlaceholder(element.element.graphColumns));
+-		templateData.historyItemPlaceholderLabel.textContent = { idle: 'Load More...', loading: 'Loading...', error: 'Retry loading more' }[element.element.state];
++		templateData.historyItemPlaceholderLabel.textContent = { idle: 'Scroll for more history', loading: 'Loading...', error: 'Retry loading more' }[element.element.state];
+ 		templateData.element.setAttribute('aria-busy', String(element.element.state === 'loading'));
+ 	}
+ 
+@@ -242,6 +242,7 @@
+ 			children.push(...historyItemChanges.map(change => ({
+ 				path: change.path,
+ 				previousPath: change.previousPath,
++				status: change.status,
+ 				counts: change.counts,
+ 				historyItemViewModel: inputOrElement.historyItemViewModel,
+ 				graphColumns: inputOrElement.historyItemViewModel.outputSwimlanes,

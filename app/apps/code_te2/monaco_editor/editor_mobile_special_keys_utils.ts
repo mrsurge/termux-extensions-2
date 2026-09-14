@@ -30,6 +30,7 @@ import {
   type MobileEditorSpecialKeyRequestDetail,
 } from '../src/mobile-input/editor-special-key-bridge.ts';
 import { bindPointerHoldRepeat } from '../src/mobile-input/pointer-hold-repeat.ts';
+import { bindQuickInputKeys, focusedQuickInput, dispatchQuickInputKey, quickInputAction } from './editor_quick_input_keys.ts';
 
 const CTRL_STATE_EVENT = 'android-terminalapp-ctrl-state';
 const OPEN_TOUCH_MENU_EVENT = 'monaco-touch-selection:open-menu';
@@ -59,6 +60,8 @@ interface ModifierState {
   ctrlMode: CtrlMode;
   alt: boolean;
   shift: boolean;
+  shiftArmed: boolean;
+  setShiftArmed(active: boolean): void;
   setCtrlMode(mode: CtrlMode, publish?: boolean): void;
   setAlt(active: boolean): void;
   setShift(active: boolean): void;
@@ -97,6 +100,15 @@ export function dispatchMobileEditorKey(
     modifiers?: SyntheticKeyModifiers;
   } = {},
 ): boolean {
+  const quickInput = focusedQuickInput(win.document);
+  if (quickInput) {
+    const state = activeModifierStates.get(win);
+    dispatchQuickInputKey(quickInput, key, options.modifiers ?? {
+      ctrl: Boolean(state?.ctrl), alt: Boolean(state?.alt), shift: Boolean(state?.shift || state?.shiftArmed),
+    });
+    if (!options.modifiers) state?.consumeOneShot();
+    return true;
+  }
   let input = getEditorInput(editor);
   if (!input) return false;
 
@@ -111,9 +123,13 @@ export function dispatchMobileEditorKey(
   const modifiers = options.modifiers ?? {
     ctrl: useStickyModifiers && Boolean(modifierState?.ctrl),
     alt: useStickyModifiers && Boolean(modifierState?.alt),
-    shift: useStickyModifiers && Boolean(modifierState?.shift),
+    shift: useStickyModifiers && Boolean(modifierState?.shift || modifierState?.shiftArmed),
   };
 
+  if (modifiers.ctrl && modifiers.shift && !modifiers.alt && quickInputAction(editor, key.key)) {
+    if (!options.modifiers) modifierState?.consumeOneShot();
+    return true;
+  }
   dispatchSyntheticEditorKey(input, key, modifiers);
   if (!options.modifiers) modifierState?.consumeOneShot();
   return true;
@@ -220,7 +236,10 @@ export function bindMobileEditorSpecialKeys(
   onSave: (() => void) | null = null,
 ): { dispose(): void } | null {
   const editorDom = editor.getDomNode?.();
-  if (!editorDom || !isMobileUserAgent(win.navigator)) return null;
+  if (!editorDom) return null;
+  if (!isMobileUserAgent(win.navigator)) {
+    return { dispose: bindQuickInputKeys(editor, editorDom.ownerDocument, () => false, () => {}) };
+  }
   const host = editorDom.closest<HTMLElement>('#editor-frame');
   if (!host) return null;
   const role = mobileEditorRole(win);
@@ -290,7 +309,10 @@ export function bindMobileEditorSpecialKeys(
   const end = createButton(doc, 'End', 'End');
   const pageUp = createButton(doc, 'PgUp', 'Page up');
   const pageDown = createButton(doc, 'PgDn', 'Page down');
-  navigationRow.append(tab, home, end, pageUp, pageDown);
+  const shift = createButton(doc, 'Shift', 'Shift next key');
+  const palette = createButton(doc, 'Cmd', 'Command Palette (Ctrl+Shift+P)');
+  const escape = createButton(doc, 'Esc', 'Escape');
+  navigationRow.append(shift, tab, home, end, pageUp, pageDown, palette, escape);
   panel.append(primaryRow, navigationRow);
 
   const ctrlWindow = win as MobileSpecialKeysWindow;
@@ -304,6 +326,7 @@ export function bindMobileEditorSpecialKeys(
     ctrlLocked: state.ctrlMode === 'locked',
     alt: state.alt,
     shift: state.shift,
+    shiftArmed: state.shiftArmed,
   });
   const publishModifierSnapshot = (): void => {
     if (role === 'primary') {
@@ -352,6 +375,11 @@ export function bindMobileEditorSpecialKeys(
     selectButtons.forEach((button) => setPressed(button, active));
     publishModifierSnapshot();
   };
+  const setShiftArmed = (active: boolean): void => {
+    state.shiftArmed = active;
+    setPressed(shift, active);
+    publishModifierSnapshot();
+  };
   const initialCtrlMode: CtrlMode = ctrlWindow.ctrl
     ? (ctrlWindow.__te2MobileCtrlLocked ? 'locked' : 'armed')
     : 'off';
@@ -362,10 +390,13 @@ export function bindMobileEditorSpecialKeys(
     ctrlMode: initialCtrlMode,
     alt: false,
     shift: false,
+    shiftArmed: false,
     setCtrlMode,
     setAlt,
     setShift,
+    setShiftArmed,
     consumeOneShot() {
+      if (state.shiftArmed) state.setShiftArmed(false);
       if (state.ctrlMode === 'armed') state.setCtrlMode('off');
       if (state.alt) state.setAlt(false);
     },
@@ -422,6 +453,7 @@ export function bindMobileEditorSpecialKeys(
     if (syncingCtrl) return;
     const detail = (event as CustomEvent<{ active?: boolean }>).detail;
     const active = Boolean(detail?.active);
+    if (!active && state.shiftArmed) state.setShiftArmed(false);
     if (!active && state.ctrlMode === 'locked') {
       state.setCtrlMode('locked');
       return;
@@ -451,6 +483,7 @@ export function bindMobileEditorSpecialKeys(
     if (state.ctrlMode !== nextCtrlMode) state.setCtrlMode(nextCtrlMode);
     if (state.alt !== detail.alt) state.setAlt(detail.alt);
     if (state.shift !== Boolean(detail.shift)) state.setShift(Boolean(detail.shift));
+    if (state.shiftArmed !== Boolean(detail.shiftArmed)) state.setShiftArmed(Boolean(detail.shiftArmed));
   };
   const syncProjectedModifiers = (event: Event): void => {
     if (role !== 'secondary') return;
@@ -465,11 +498,10 @@ export function bindMobileEditorSpecialKeys(
   }
 
   const consumeSecondaryModifiers = (event: Event): void => {
-    if (role !== 'primary') return;
     const detail = (
       event as CustomEvent<{ role?: MobileEditorRole }>
     ).detail;
-    if (detail?.role !== 'secondary') return;
+    if (detail?.role !== role && !(role === 'primary' && detail?.role === 'secondary')) return;
     state.consumeOneShot();
     publishModifierSnapshot();
   };
@@ -483,7 +515,7 @@ export function bindMobileEditorSpecialKeys(
       const handled = requestTerminalSpecialKey(win, key, {
         ctrl: state.ctrl,
         alt: state.alt,
-        shift: state.shift,
+        shift: state.shift || state.shiftArmed,
       });
       if (handled) state.consumeOneShot();
       return;
@@ -494,7 +526,7 @@ export function bindMobileEditorSpecialKeys(
         win,
         owner,
         key,
-        modifierSnapshot(),
+        { ...modifierSnapshot(), shift: state.shift || state.shiftArmed },
       );
       if (handled) state.consumeOneShot();
       return;
@@ -534,7 +566,7 @@ export function bindMobileEditorSpecialKeys(
         target = terminalFocused
           ? 'terminal'
           : (role === 'primary' ? currentMobileEditorOwner(win) : role);
-        modifiers = modifierSnapshot();
+        modifiers = { ...modifierSnapshot(), shift: state.shift || state.shiftArmed };
         handled = false;
         dispatch();
       },
@@ -601,6 +633,19 @@ export function bindMobileEditorSpecialKeys(
   win.addEventListener(MOBILE_EDITOR_PANEL_TOGGLE_EVENT, handlePanelToggle);
 
   const cleanups = [
+    bindQuickInputKeys(editor, doc, () => state.shiftArmed, () => {
+      state.consumeOneShot();
+      if (role === 'secondary') publishMobileEditorModifiersConsumed(win, role);
+    }, () => !state.ctrl && !state.alt, () => state.alt),
+    bindPointerAction(shift, () => state.setShiftArmed(!state.shiftArmed)),
+    bindPointerAction(palette, () => {
+      const owner = currentMobileEditorOwner(win);
+      if (role === 'primary' && owner === 'secondary') {
+        requestMobileEditorSpecialKey(win, owner, { key: 'p', code: 'KeyP', keyCode: 80 }, { ctrl: true, alt: false, shift: true });
+      } else quickInputAction(editor, 'p');
+      state.consumeOneShot();
+    }),
+    bindPointerAction(escape, () => dispatchActiveKey({ key: 'Escape', code: 'Escape', keyCode: 27 })),
     bindPointerAction(trigger, () => {
       if (role === 'secondary') {
         requestMobileEditorPanelToggle(win, role);

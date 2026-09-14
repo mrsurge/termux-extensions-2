@@ -1,0 +1,27 @@
+--- a/browser/scmHistoryViewPane.ts
++++ b/browser/scmHistoryViewPane.ts
+@@ -5,13 +5,14 @@
+ 
+ import { SWIMLANE_WIDTH, renderSCMHistoryItemGraph, renderSCMHistoryGraphPlaceholder, getHistoryItemIndex, historyItemHoverLabelForeground, historyItemHoverDefaultLabelBackground } from './scmHistory.ts';
+ import type { ISCMHistoryItem, ISCMHistoryItemRef, ISCMHistoryItemViewModel, ISCMHistoryItemGraphNode } from '../common/history.ts';
+-import { appendElement, renderFileSummary, renderCounts, groupBy, historyIconId } from '../../pane-platform.ts';
++import { appendElement, renderFileSummary, renderCounts, groupBy, historyIconId, type HistoryFileIconResolver } from '../../pane-platform.ts';
+ import type { HistoryFileRow, HistoryFileTemplate, HistoryCommitRow, HistoryCommitTemplate, HistoryLoadMoreRow, HistoryLoadMoreTemplate, HistoryRow, HistoryTreeInput, HistoryChildrenReader, HistoryFileSummary, HistoryErrorRow } from '../../pane-platform.ts';
+ import { asCssVariable, foreground } from '../../platform.ts';
+ 
+ // Standalone rows/data source from the preserved pane. Workbench registrations,
+ // command services and editor dispatch are replaced by the typed TE2 host.
+ export class HistoryItemChangeRenderer {
++	constructor(private readonly resolveIcon?: HistoryFileIconResolver) { }
+ 	static readonly TEMPLATE_ID = 'history-item-change';
+ 	get templateId(): string { return HistoryItemChangeRenderer.TEMPLATE_ID; }
+ 
+@@ -29,7 +30,7 @@
+ 	renderElement(node: { readonly element: HistoryFileRow }, _index: number, templateData: HistoryFileTemplate): void {
+ 		const { historyItemViewModel, graphColumns } = node.element;
+ 		this._renderGraphPlaceholder(templateData, historyItemViewModel, graphColumns);
+-		renderFileSummary(templateData, node.element);
++		renderFileSummary(templateData, node.element, this.resolveIcon);
+ 	}
+ 
+ 	renderCompressedElements(): never {

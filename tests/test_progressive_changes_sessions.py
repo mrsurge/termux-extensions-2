@@ -55,7 +55,7 @@ class ProgressiveChangesSessionsTest(IsolatedAsyncioTestCase):
     def event(self, method: str, correlation: str = 'c1', result: object = None) -> PipeEnvelope:
         return PipeEnvelope(method=method, params={'searchId': correlation, 'jobId': correlation, 'root': '/project', 'correlationId': correlation, 'result': result})
 
-    async def test_early_events_are_forwarded_without_retaining_diff_bodies(self) -> None:
+    async def test_early_events_are_forwarded_and_retained_for_live_projection(self) -> None:
         async def start(method: str, _params: dict[str, object], **_kwargs: object) -> object:
             self.assertEqual(method, 'search.changes.start')
             await self.manager.receive(self.event('search.job.result', result={'metadata': {'nextOffset': 40, 'baseHash': 'abc', 'snapshotToken': 'token', 'base': {'ref': 'abc'}}}))
@@ -69,7 +69,7 @@ class ProgressiveChangesSessionsTest(IsolatedAsyncioTestCase):
         self.assertTrue(session.complete)
         self.assertEqual(session.content_files, {})
         self.assertEqual(object_map(session.changes_metadata['base'])['ref'], 'HEAD')
-        self.assertNotIn('hunks', repr(session))
+        self.assertEqual(session.changes_items['a.py']['hunks'], ['body'])
         provider = SearchProvider(response={'searchId': 'c2', 'jobId': 'c2'})
         with patch('app.apps.code_te2.explorer.search._call_search_provider', new=provider):
             await self.manager.run(parse_search_run_params({'mode': 'changes', 'correlationId': 'c2', 'changesOffset': 40}), 'next')

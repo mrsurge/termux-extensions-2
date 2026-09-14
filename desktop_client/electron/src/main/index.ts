@@ -417,6 +417,7 @@ async function handleAppViewControl(
     const presentation = await secondaryEditorRegistry.open(
       request.projectPath,
       request.path,
+      request.historyTicket,
     );
     return { ok: true, presentation };
   }

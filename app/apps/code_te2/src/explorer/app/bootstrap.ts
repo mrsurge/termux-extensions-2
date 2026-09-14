@@ -242,6 +242,7 @@ const explorerFileOpenBridge = createExplorerFileOpenBridge({
   toast,
 });
 const explorerGitFooterUtils = createExplorerGitFooterUtils({
+  getProjectPath: () => explorerRuntimeState.getProjectPath() || '',
   isHistoricalComparison: () => (explorerDiffBaseController.getDiffBase().ref || "HEAD") !== "HEAD",
   getGitSummaryElement: () => gitSummaryEl,
   getGitStatus: () => explorerRuntimeState.getGitStatus(),
@@ -281,6 +282,8 @@ const explorerChromeController = createExplorerChromeController({
   initStickyScopes: (deps) => createExplorerStickyScopes(deps),
 });
 explorerSearchOverlayController = createExplorerSearchOverlayController({
+  hasStagedChanges: () => Boolean(explorerRuntimeState.getGitStatus()?.staged?.length),
+  commitStagedChanges: () => explorerGitFooterUtils.commitStagedChanges(true),
   toast,
   hasExplorerRpc: () => hasExplorerRpc(),
   notifyExplorer: (method, payload) => notifyExplorer(method, payload),
@@ -995,7 +998,10 @@ export async function initExplorerUI(options: ExplorerUiInitOptions) {
       if (!isExplorerRpcNotificationMethod(method)) return;
       explorerNotificationHandler.handleExplorerNotification(method, payload);
     },
-    handleReconnect: () => explorerRefreshController.handleReconnect(),
+    handleReconnect: () => {
+      explorerRefreshController.handleReconnect();
+      explorerSearchOverlayController.reconnectHistory();
+    },
     refreshExplorer: () => explorerRefreshController.refreshExplorer(),
   });
 

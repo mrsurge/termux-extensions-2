@@ -25,6 +25,51 @@ pub(crate) struct ChangesRequest {
     pub(crate) head_view: bool,
     pub(crate) offset: Option<usize>,
     pub(crate) snapshot_token: Option<String>,
+    #[serde(default)]
+    pub(crate) projection: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ChangesPathsRequest {
+    pub(crate) root: Option<String>,
+    pub(crate) base: String,
+    pub(crate) paths: Vec<String>,
+}
+
+/// Independent bounded reads reuse canonical preview/restore identities. A clean
+/// path is an explicit tombstone; pagination belongs to the old snapshot.
+pub(crate) fn refresh_paths(request: ChangesPathsRequest) -> Result<Value, SearchProviderError> {
+    if request.paths.len() > 40 {
+        return Err(SearchProviderError::Search(
+            "At most 40 changed paths are allowed".into(),
+        ));
+    }
+    let root = request.root.unwrap_or_default();
+    let provider = git_ops::GitProviderRequest {
+        root: Some(root.clone()),
+        base: Some(request.base.clone()),
+        ..Default::default()
+    };
+    let mut updates = Vec::new();
+    let mut removed = Vec::new();
+    for path in request.paths {
+        if Path::new(&root).join(&path).is_dir() {
+            return Err(SearchProviderError::Search(
+                "Directory change requires result refresh".into(),
+            ));
+        }
+        let entry = git_ops::git_worktree_change_for_path(git_ops::GitProviderRequest {
+            relative_path: Some(path.clone()),
+            ..provider.clone()
+        })
+        .map_err(|error| SearchProviderError::Search(format!("{error:?}")))?;
+        match entry {
+            Some(entry) => updates.push(render_change(&entry, &provider, &request.base, &root)?),
+            None => removed.push(path),
+        }
+    }
+    Ok(json!({"updates":updates,"removed":removed}))
 }
 
 pub(crate) fn run(
@@ -91,6 +136,7 @@ pub(crate) fn run(
     }
     check()?;
     let offset = request.offset.unwrap_or(0);
+    let page_limit = if request.projection { 700 } else { 40 };
     let base = json!({"ref": requested_base, "mode": if pinned == "HEAD" {"none"} else if head_view {"head"} else {"detached"}, "commit": commit.as_ref().map(|c| json!({"hash": c.hash, "short": c.short_hash, "subject": c.summary}))});
     // Discovery has no exact total yet. Publish ownership before the first file,
     // then stream each confirmed diff without waiting for later candidate checks.
@@ -111,6 +157,7 @@ pub(crate) fn run(
             } else {
                 pinned.clone()
             }),
+            limit: if request.projection { Some(700) } else { None },
             ..provider.clone()
         },
         || !cancelled.load(Ordering::Relaxed),
@@ -118,7 +165,8 @@ pub(crate) fn run(
             if cancelled.load(Ordering::Relaxed) {
                 return false;
             }
-            if offset != 0 || delivered >= 40 {
+            // Keep tracked results progressive; untracked files belong after every tracked path.
+            if offset != 0 || delivered >= page_limit || entry.code.trim() == "??" {
                 return true;
             }
             match render_change(entry, &provider, &pinned, &root) {
@@ -143,7 +191,9 @@ pub(crate) fn run(
     check()?;
     let listing = listing_result.map_err(map_error)?;
     // Keep discovery order identical for streamed files and subsequent pages.
-    let entries = listing.changes;
+    let mut entries = listing.changes;
+    // Stable partition also defines continuation order and its snapshot fingerprint.
+    entries.sort_by_key(|entry| entry.code.trim() == "??");
     let mut hash = DefaultHasher::new();
     pinned.hash(&mut hash);
     for entry in &entries {
@@ -170,19 +220,23 @@ pub(crate) fn run(
             "Invalid changes continuation".into(),
         ));
     }
-    let end = (offset + 40).min(entries.len());
+    let end = (offset + page_limit).min(entries.len());
     let meta = json!({"mode":"changes", "git":listing.is_repository, "base":base, "baseHash":pinned, "snapshotToken":token, "offset":offset, "nextOffset": if end < entries.len() {Some(end)} else {None}, "total":entries.len(), "truncated":listing.truncated});
-    if !emit(json!({"metadata":meta})) {
+    if offset > 0 && !emit(json!({"metadata":meta})) {
         return Err(SearchProviderError::Cancelled);
     }
     // Continuations emit only after the complete snapshot token has been validated.
-    if offset > 0 {
-        for entry in &entries[offset..end] {
+    {
+        let start = if offset == 0 { delivered } else { offset };
+        for entry in &entries[start..end] {
             check()?;
             if !emit(json!({"change":render_change(entry, &provider, &pinned, &root)?})) {
                 return Err(SearchProviderError::Cancelled);
             }
         }
+    }
+    if offset == 0 && !emit(json!({"metadata":meta})) {
+        return Err(SearchProviderError::Cancelled);
     }
     Ok(json!({"filesScanned":entries.len(),"fileCount":end-offset,"truncated":listing.truncated}))
 }
@@ -270,6 +324,76 @@ mod tests {
     }
 
     #[test]
+    fn retained_projection_streams_beyond_the_render_window() {
+        let fixture = Fixture::new("projection");
+        let _repo = git2::Repository::init(&fixture.0).unwrap();
+        for index in 0..45 {
+            fs::write(fixture.0.join(format!("{index}.txt")), "text\n").unwrap();
+        }
+        let events = RefCell::new(Vec::new());
+        run(
+            ChangesRequest {
+                projection: true,
+                ..fixture.request()
+            },
+            Arc::new(AtomicBool::new(false)),
+            |event| {
+                events.borrow_mut().push(event);
+                true
+            },
+        )
+        .unwrap();
+        let events = events.into_inner();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.get("change").is_some())
+                .count(),
+            45
+        );
+        assert_eq!(
+            events.last().unwrap()["metadata"]["nextOffset"],
+            Value::Null
+        );
+    }
+
+    #[test]
+    fn path_updates_are_literal_bounded_and_remove_clean_files() {
+        let fixture = Fixture::new("path-updates");
+        let repo = git2::Repository::init(&fixture.0).unwrap();
+        fs::write(fixture.0.join("file.txt"), "old\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("file.txt")).unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let sig = git2::Signature::now("Test", "test@example.invalid").unwrap();
+        let commit = repo
+            .commit(Some("HEAD"), &sig, &sig, "base", &tree, &[])
+            .unwrap();
+        let request = |paths: Vec<String>| ChangesPathsRequest {
+            root: Some(fixture.0.to_string_lossy().into_owned()),
+            base: commit.to_string(),
+            paths,
+        };
+        fs::write(fixture.0.join("file.txt"), "new\n").unwrap();
+        fs::write(fixture.0.join("unrequested.txt"), "ignored\n").unwrap();
+        let result = refresh_paths(request(vec!["file.txt".into()])).unwrap();
+        assert_eq!(result["updates"].as_array().unwrap().len(), 1);
+        assert_eq!(result["updates"][0]["rel"], "file.txt");
+        assert_eq!(
+            result["updates"][0]["hunks"][0]["restore"]["commit"],
+            commit.to_string()
+        );
+        fs::write(fixture.0.join("file.txt"), "old\n").unwrap();
+        assert_eq!(
+            refresh_paths(request(vec!["file.txt".into()])).unwrap()["removed"],
+            json!(["file.txt"])
+        );
+        assert!(refresh_paths(request(vec!["../escape".into()])).is_err());
+        assert!(refresh_paths(request(vec!["file.txt".into(); 41])).is_err());
+    }
+
+    #[test]
     fn streamed_modified_hunk_has_exact_restore_identity() {
         let fixture = Fixture::new("hunk-action");
         let repo = git2::Repository::init(&fixture.0).unwrap();
@@ -301,6 +425,47 @@ mod tests {
             super::super::text_edit_ops::sha256("new\nkeep\n")
         );
         assert_eq!(action["hunkIndex"], 0);
+    }
+
+    #[test]
+    fn untracked_results_follow_tracked_and_keep_counts_without_bodies() {
+        let fixture = Fixture::new("untracked-order");
+        let repo = git2::Repository::init(&fixture.0).unwrap();
+        fs::write(fixture.0.join("z.txt"), "old\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("z.txt")).unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let sig = git2::Signature::now("Test", "test@example.invalid").unwrap();
+        let commit = repo
+            .commit(Some("HEAD"), &sig, &sig, "base", &tree, &[])
+            .unwrap();
+        fs::write(fixture.0.join("z.txt"), "new\n").unwrap();
+        fs::write(fixture.0.join("a.txt"), "one\ntwo\n").unwrap();
+        for base in ["HEAD".to_owned(), commit.to_string()] {
+            let events = RefCell::new(Vec::new());
+            run(
+                ChangesRequest {
+                    base: Some(base),
+                    ..fixture.request()
+                },
+                Arc::new(AtomicBool::new(false)),
+                |event| {
+                    events.borrow_mut().push(event);
+                    true
+                },
+            )
+            .unwrap();
+            let events = events.into_inner();
+            let changes: Vec<_> = events
+                .iter()
+                .filter_map(|event| event.get("change"))
+                .collect();
+            assert_eq!(changes[0]["rel"], "z.txt");
+            assert_eq!(changes[1]["rel"], "a.txt");
+            assert_eq!(changes[1]["summary"]["added"], 2);
+            assert_eq!(changes[1]["hunks"], json!([]));
+        }
     }
 
     #[test]
@@ -420,6 +585,8 @@ mod tests {
             .find(|v| v["change"]["rel"] == "code.txt")
             .unwrap()["change"];
         assert_eq!(large["hunks"], json!([]));
+        assert_eq!(large["summary"]["added"], 6000);
+        assert_eq!(large["summary"]["deleted"], 1);
         assert!(large["error"].as_str().unwrap().contains("256 KiB"));
         assert!(serde_json::to_vec(large).unwrap().len() < 256 * 1024);
     }

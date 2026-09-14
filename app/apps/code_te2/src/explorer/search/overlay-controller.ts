@@ -1,7 +1,10 @@
 import type { JsonObject } from "../../rpc/transport.ts";
+import { getIcon as getSetiIcon } from '/static/vendor/seti-icons/seti-icons.js';
+import { ExplorerHistoryController } from '../history/controller.ts';
 import { restoreExplorerFile, restoreExplorerHunk } from "../tree/restore-action.ts";
 import type { ExplorerJumpOptions } from "../host/file-open-bridge.ts";
 import type { ExplorerRpcMethod } from "../rpc/contract.ts";
+import { EXPLORER_RPC_METHODS } from '../rpc/contract.ts';
 import { createExplorerChangesResultsRenderer } from "./changes-results-renderer.ts";
 import {
   createExplorerContentQueryWidget,
@@ -29,6 +32,8 @@ import { formatDiffBaseLabel, type ExplorerDiffBaseInfo } from "./utils.ts";
 type ExplorerSearchTimer = ReturnType<typeof setTimeout> | null;
 
 interface ExplorerSearchOverlayControllerDeps {
+  hasStagedChanges(): boolean;
+  commitStagedChanges(): Promise<void>;
   toast(message: string): void;
   hasExplorerRpc(): boolean;
   notifyExplorer(method: ExplorerRpcMethod, payload: JsonObject): void;
@@ -71,9 +76,10 @@ interface SearchModeOption {
 
 const SEARCH_MODE_OPTIONS: readonly SearchModeOption[] = [
   { id: "content", label: "By contents" },
-  { id: "changes", label: "By changes" },
   { id: "review", label: "Drafts" },
   { id: "diagnostics", label: "Diagnostics" },
+  { id: "changes", label: "By changes" },
+  { id: "history", label: "History" },
 ];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -86,7 +92,7 @@ function isExplorerSearchMode(value: unknown): value is ExplorerSearchMode {
     value === "content" ||
     value === "changes" ||
     value === "review" ||
-    value === "diagnostics"
+    value === "diagnostics" || value === "history"
   );
 }
 
@@ -126,6 +132,8 @@ function getReviewEntriesPayload(
 export function createExplorerSearchOverlayController(
   deps: ExplorerSearchOverlayControllerDeps,
 ) {
+  const historyController = new ExplorerHistoryController((method, payload) =>
+    deps.requestExplorer(method, payload, method === EXPLORER_RPC_METHODS.gitFetch ? 120000 : undefined));
   let searchOverlayVisible = false;
   let searchMode: ExplorerSearchMode = "content";
   let searchQuery = "";
@@ -171,6 +179,24 @@ export function createExplorerSearchOverlayController(
   });
 
   const changesResultsRenderer = createExplorerChangesResultsRenderer({
+    remoteAction: async (action) => {
+      const project = deps.getProjectPath();
+      if (action !== 'fetch' && !(await window.teUI.dialog.confirm(`Are you sure you want to ${action} changes ${action === 'pull' ? 'from' : 'to'} remote?`))) return;
+      if (project !== deps.getProjectPath() || (action !== 'fetch' && deps.getGitDiffBase().ref !== 'HEAD')) return;
+      try {
+        await deps.requestExplorer(action === 'fetch' ? EXPLORER_RPC_METHODS.gitFetch
+          : action === 'push' ? EXPLORER_RPC_METHODS.gitPush : EXPLORER_RPC_METHODS.gitPull, {}, 120000);
+        if (action === 'fetch') deps.toast('Remote references fetched.');
+      } catch (error) { deps.toast(error instanceof Error ? error.message : 'Git operation failed'); }
+    },
+    hasStagedChanges: () => deps.hasStagedChanges(),
+    commitStagedChanges: () => deps.commitStagedChanges(),
+    stageFile: async (rel) => {
+      if ((deps.getGitDiffBase().ref || 'HEAD') !== 'HEAD') return;
+      if (!deps.hasExplorerRpc()) { deps.toast('Explorer connection unavailable.'); return; }
+      deps.notifyExplorer(EXPLORER_RPC_METHODS.gitStage, { paths: [rel] });
+    },
+    getFileIcon: getSetiIcon,
     restoreHunk: (rel, identity) => restoreExplorerHunk({
       getProjectPath: () => deps.getProjectPath(),
       requestExplorer: (method, payload) => deps.requestExplorer(method, payload),
@@ -210,6 +236,7 @@ export function createExplorerSearchOverlayController(
 
     overlay.style.display = searchOverlayVisible ? "flex" : "none";
     if (!searchOverlayVisible) {
+      historyController.dispose();
       return;
     }
 
@@ -273,6 +300,11 @@ export function createExplorerSearchOverlayController(
     if (!resultsContainer) {
       return;
     }
+    if (searchMode === 'history') {
+      historyController.mount(resultsContainer);
+      return;
+    }
+    historyController.dispose();
 
     const state: ExplorerSearchOverlayState = {
       searchMode,
@@ -467,6 +499,7 @@ export function createExplorerSearchOverlayController(
     toast: (message) => deps.toast(message),
     renderSearchOverlay,
     focusSearchInput: () => {
+      if (searchMode === 'history') return;
       if (searchMode === "content" && contentQueryWidget) {
         contentQueryWidget.focus();
         return;
@@ -628,6 +661,8 @@ export function createExplorerSearchOverlayController(
   }
 
   return {
+    handleHistoryUpdated: (payload: JsonObject) => historyController.notify(payload),
+    reconnectHistory: () => historyController.reconnect(),
     openSearchOverlay: () => searchController.openSearchOverlay(),
     fetchChangesResults: (force = false) =>
       searchController.fetchChangesResults(force),

@@ -373,6 +373,10 @@ def unstage_paths(project_root: Path, paths: Iterable[str]) -> GitStatus:
     return get_status(project_root)
 
 
+def fetch_remote(project_root: Path, remote: str = "origin") -> None:
+    _ = _coerce_mutation(_call_git_provider("git.fetch", project_root, {"remote": remote}, timeout_seconds=115), expected_operation="fetch")
+
+
 def stage_all(project_root: Path) -> GitStatus:
     """Stage all current worktree changes through service.git."""
     status = get_status(project_root)
@@ -877,6 +881,7 @@ def _call_git_provider(
     params: JsonObject,
     *,
     op_id: str | None = None,
+    timeout_seconds: float | None = None,
 ) -> object:
     root = project_root.expanduser().resolve(strict=False)
     root_str = str(root)
@@ -890,6 +895,7 @@ def _call_git_provider(
         workspace_root=root_str,
         origin_name="code_te2.git",
         op_id=op_id,
+        timeout_seconds=timeout_seconds,
     )
     _git_log(f"{method}.pipe ok root={root_str}")
     return data

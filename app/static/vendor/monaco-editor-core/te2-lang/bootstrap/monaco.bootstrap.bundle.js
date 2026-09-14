@@ -2314,7 +2314,7 @@ var init_event = __esm({
         return fn;
       }
       Event2.chain = chain;
-      const HaltChainable = Symbol("HaltChainable");
+      const HaltChainable = /* @__PURE__ */ Symbol("HaltChainable");
       class ChainableSynthesis {
         constructor() {
           this.steps = [];
@@ -3107,7 +3107,7 @@ var init_cancellation = __esm({
 var MicrotaskDelay;
 var init_symbols = __esm({
   "app/static/vendor/monaco-editor-core/esm/vs/base/common/symbols.js"() {
-    MicrotaskDelay = Symbol("MicrotaskDelay");
+    MicrotaskDelay = /* @__PURE__ */ Symbol("MicrotaskDelay");
   }
 });
 
@@ -3246,7 +3246,7 @@ function createCancelableAsyncIterableProducer(callback) {
     }
   });
 }
-var Throttler, timeoutDeferred, microtaskDeferred, Delayer, ThrottledDelayer, TaskQueue, TimeoutTimer, IntervalTimer, RunOnceScheduler, runWhenGlobalIdle, _runWhenIdle, AbstractIdleValue, GlobalIdleValue, DeferredPromise, Promises, ProducerConsumer, AsyncIterableProducer, CancelableAsyncIterableProducer, AsyncReaderEndOfStream;
+var Throttler, timeoutDeferred, microtaskDeferred, Delayer, ThrottledDelayer, TaskQueue, TimeoutTimer, IntervalTimer, RunOnceScheduler, runWhenGlobalIdle, _runWhenIdle, AbstractIdleValue, GlobalIdleValue, DeferredPromise, Promises, ProducerConsumer, AsyncIterableProducer, CancelableAsyncIterableProducer;
 var init_async = __esm({
   "app/static/vendor/monaco-editor-core/esm/vs/base/common/async.js"() {
     init_cancellation();
@@ -3882,7 +3882,6 @@ var init_async = __esm({
         this._source.cancel();
       }
     };
-    AsyncReaderEndOfStream = Symbol("AsyncReaderEndOfStream");
   }
 });
 
@@ -40573,6 +40572,7 @@ var _debugComposition, ANDROID_IME_LINE_PREFIX, ANDROID_IME_LINE_SUFFIX, TextAre
 var init_textAreaEditContextState = __esm({
   "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContextState.js"() {
     init_strings();
+    init_selection();
     _debugComposition = false;
     ANDROID_IME_LINE_PREFIX = "\u21DD";
     ANDROID_IME_LINE_SUFFIX = "\n\n";
@@ -40703,6 +40703,61 @@ var init_textAreaEditContextState = __esm({
           replaceNextCharCnt: 0,
           positionDelta: 0
         };
+      }
+      static deduceAndroidCompositionInput(previousState, currentState) {
+        if (!previousState) {
+          return {
+            text: "",
+            replacePrevCharCnt: 0,
+            replaceNextCharCnt: 0,
+            positionDelta: 0
+          };
+        }
+        if (_debugComposition) {
+          console.log("------------------------deduceAndroidCompositionInput");
+          console.log(`PREVIOUS STATE: ${previousState.toString()}`);
+          console.log(`CURRENT STATE: ${currentState.toString()}`);
+        }
+        if (previousState.value === currentState.value) {
+          return {
+            text: "",
+            replacePrevCharCnt: 0,
+            replaceNextCharCnt: 0,
+            positionDelta: currentState.selectionEnd - previousState.selectionEnd
+          };
+        }
+        const prefixLength = Math.min(commonPrefixLength(previousState.value, currentState.value), previousState.selectionEnd);
+        const suffixLength = Math.min(commonSuffixLength(previousState.value, currentState.value), previousState.value.length - previousState.selectionEnd);
+        const previousValue = previousState.value.substring(prefixLength, previousState.value.length - suffixLength);
+        const currentValue = currentState.value.substring(prefixLength, currentState.value.length - suffixLength);
+        const previousSelectionStart = previousState.selectionStart - prefixLength;
+        const previousSelectionEnd = previousState.selectionEnd - prefixLength;
+        const currentSelectionStart = currentState.selectionStart - prefixLength;
+        const currentSelectionEnd = currentState.selectionEnd - prefixLength;
+        if (_debugComposition) {
+          console.log(`AFTER DIFFING PREVIOUS STATE: <${previousValue}>, selectionStart: ${previousSelectionStart}, selectionEnd: ${previousSelectionEnd}`);
+          console.log(`AFTER DIFFING CURRENT STATE: <${currentValue}>, selectionStart: ${currentSelectionStart}, selectionEnd: ${currentSelectionEnd}`);
+        }
+        return {
+          text: currentValue,
+          replacePrevCharCnt: previousSelectionEnd,
+          replaceNextCharCnt: previousValue.length - previousSelectionEnd,
+          positionDelta: currentSelectionEnd - currentValue.length
+        };
+      }
+      // Selection-only IME gestures use the same guarded line as text edits, but
+      // must not manufacture an edit or allow the prefix/suffix into model columns.
+      static deduceAndroidImeSelection(previousState, currentState) {
+        const line = previousState.androidModelLineNumber;
+        if (line === void 0 || currentState.androidModelLineNumber !== line || previousState.value !== currentState.value || !_TextAreaState._readAndroidImeLineProjection(currentState) || previousState.selectionStart === currentState.selectionStart && previousState.selectionEnd === currentState.selectionEnd) {
+          return null;
+        }
+        const start = ANDROID_IME_LINE_PREFIX.length;
+        const end = currentState.value.length - ANDROID_IME_LINE_SUFFIX.length;
+        if (currentState.selectionStart < start || currentState.selectionStart > end || currentState.selectionEnd < start || currentState.selectionEnd > end) {
+          return null;
+        }
+        return new Selection(line, currentState.selectionStart - start + 1, line, currentState.selectionEnd - start + 1);
       }
       static deduceAndroidImeLineEdit(previousState, currentState) {
         const modelLineNumber = previousState.androidModelLineNumber;
@@ -40879,6 +40934,7 @@ var init_textAreaEditContextInput = __esm({
         this.onSelectionChangeRequest = this._onSelectionChangeRequest.event;
         this._androidImeFrame = this._register(new MutableDisposable());
         this._asyncFocusGainWriteScreenReaderContent = this._register(new MutableDisposable());
+        this._androidImeSelectionUpdating = false;
         this._asyncTriggerCut = this._register(new RunOnceScheduler(() => this._onCut.fire(), 0));
         this._androidImeReseed = this._register(new RunOnceScheduler(() => this._reseedAndroidIme(), 0));
         this._textAreaState = TextAreaState.EMPTY;
@@ -41120,6 +41176,10 @@ var init_textAreaEditContextInput = __esm({
         this._androidImeTransactionPending = false;
         this._androidImeInputType = "";
       }
+      _initializeFromTest(textAreaState) {
+        this._hasFocus = true;
+        this._textAreaState = textAreaState ?? TextAreaState.readFromTextArea(this._textArea, null);
+      }
       _installSelectionChangeListener() {
         let previousSelectionChangeEventTime = 0;
         return addDisposableListener(this._textArea.ownerDocument, "selectionchange", (e) => {
@@ -41128,6 +41188,28 @@ var init_textAreaEditContextInput = __esm({
             return;
           }
           if (this._currentComposition) {
+            return;
+          }
+          if (this._browser.isAndroid && this._textAreaState.androidModelLineNumber !== void 0) {
+            if (this._androidImeTransactionPending || this._androidImeSelectionUpdating || !this._textArea.hasFocus()) {
+              return;
+            }
+            const previousState = this._textAreaState;
+            const projectedState = this._host.getScreenReaderContent();
+            if (projectedState.value !== previousState.value || projectedState.androidModelLineNumber !== previousState.androidModelLineNumber) {
+              return;
+            }
+            const currentState = TextAreaState.readFromTextArea(this._textArea, previousState);
+            const selection = TextAreaState.deduceAndroidImeSelection(previousState, currentState);
+            if (selection) {
+              this._textAreaState = currentState;
+              this._androidImeSelectionUpdating = true;
+              try {
+                this._onSelectionChangeRequest.fire(selection);
+              } finally {
+                this._androidImeSelectionUpdating = false;
+              }
+            }
             return;
           }
           if (!this._browser.isChrome) {
@@ -41142,9 +41224,6 @@ var init_textAreaEditContextInput = __esm({
           const delta2 = now - this._textArea.getIgnoreSelectionChangeTime();
           this._textArea.resetSelectionChangeTime();
           if (delta2 < 100) {
-            return;
-          }
-          if (this._browser.isAndroid && this._textAreaState.androidModelLineNumber !== void 0) {
             return;
           }
           if (!this._textAreaState.selection) {
@@ -41216,7 +41295,7 @@ var init_textAreaEditContextInput = __esm({
         this._textAreaState = textAreaState;
       }
       writeNativeTextAreaContent(reason) {
-        if (!this._accessibilityService.isScreenReaderOptimized() && reason === "render" || this._currentComposition || this._browser.isAndroid && this._androidImeTransactionPending) {
+        if (!this._accessibilityService.isScreenReaderOptimized() && reason === "render" || this._currentComposition || this._androidImeSelectionUpdating || this._browser.isAndroid && this._androidImeTransactionPending) {
           return;
         }
         this._setAndWriteTextAreaState(reason, this._host.getScreenReaderContent());
@@ -63713,7 +63792,7 @@ var init_textModelEditSource = __esm({
   "app/static/vendor/monaco-editor-core/esm/vs/editor/common/textModelEditSource.js"() {
     init_uuid();
     init_textLength();
-    privateSymbol = Symbol("TextModelEditSource");
+    privateSymbol = /* @__PURE__ */ Symbol("TextModelEditSource");
     TextModelEditSource = class {
       constructor(metadata, _privateCtorGuard) {
         this.metadata = metadata;
@@ -82330,13 +82409,12 @@ var init_hotReloadHelpers = __esm({
 });
 
 // app/static/vendor/monaco-editor-core/esm/vs/platform/accessibilitySignal/browser/accessibilitySignalService.js
-var IAccessibilitySignalService, AcknowledgeDocCommentsToken, Sound, SoundSource, AccessibilitySignal;
+var IAccessibilitySignalService, Sound, SoundSource, AccessibilitySignal;
 var init_accessibilitySignalService = __esm({
   "app/static/vendor/monaco-editor-core/esm/vs/platform/accessibilitySignal/browser/accessibilitySignalService.js"() {
     init_nls();
     init_instantiation();
     IAccessibilitySignalService = createDecorator("accessibilitySignalService");
-    AcknowledgeDocCommentsToken = Symbol("AcknowledgeDocCommentsToken");
     Sound = class _Sound {
       static register(options2) {
         const sound = new _Sound(options2.fileName);
@@ -104713,7 +104791,7 @@ var init_ternarySearchTree = __esm({
     };
     Undef = class _Undef {
       static {
-        this.Val = Symbol("undefined_placeholder");
+        this.Val = /* @__PURE__ */ Symbol("undefined_placeholder");
       }
       static wrap(value) {
         return value === void 0 ? _Undef.Val : value;
@@ -207298,7 +207376,7 @@ DataChannelForwardingTelemetryService = __decorate103([
   __param97(0, ITelemetryService),
   __param97(1, IDataChannelService)
 ], DataChannelForwardingTelemetryService);
-var shouldForwardToChannel = Symbol("shouldForwardToChannel");
+var shouldForwardToChannel = /* @__PURE__ */ Symbol("shouldForwardToChannel");
 function forwardToChannelIf(value) {
   return {
     // This will not be sent via telemetry, it is just a marker
@@ -234543,10 +234621,17 @@ init_editor_api();
 
 // te2_monaco_bootstrap_entry.js
 var languageContributionsPromise = null;
+var basicLanguageContributionsPromise = null;
+function ensureBasicLanguageContributions() {
+  if (!basicLanguageContributionsPromise) {
+    basicLanguageContributionsPromise = Promise.resolve().then(() => (init_monaco_contribution(), monaco_contribution_exports));
+  }
+  return basicLanguageContributionsPromise;
+}
 function ensureLanguageContributions() {
   if (!languageContributionsPromise) {
     languageContributionsPromise = Promise.all([
-      Promise.resolve().then(() => (init_monaco_contribution(), monaco_contribution_exports)),
+      ensureBasicLanguageContributions(),
       Promise.resolve().then(() => (init_monaco_contribution2(), monaco_contribution_exports2)),
       Promise.resolve().then(() => (init_monaco_contribution3(), monaco_contribution_exports3)),
       Promise.resolve().then(() => (init_monaco_contribution4(), monaco_contribution_exports4)),
@@ -234558,6 +234643,8 @@ function ensureLanguageContributions() {
 async function loadMonaco(options2 = {}) {
   if (options2.languageWorkersEnabled === true) {
     await ensureLanguageContributions();
+  } else if (options2.basicLanguagesOnly === true) {
+    await ensureBasicLanguageContributions();
   }
   return editor_main_exports;
 }

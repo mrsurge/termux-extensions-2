@@ -151,7 +151,7 @@ def _coerce_projection(value: object) -> CodeInspectorProjection:
     if status not in {"loading", "ready", "empty", "unsupported", "error"}:
         raise ValueError("invalid_code_inspector_status")
     mode = str(raw.get("mode") or "")
-    if mode not in {"references", "implementations", "callHierarchy"}:
+    if mode not in {"references", "implementations", "callHierarchy", "symbols"}:
         raise ValueError("invalid_code_inspector_mode")
     target = _json_object(raw.get("target"))
     summary = _json_object(raw.get("summary"))

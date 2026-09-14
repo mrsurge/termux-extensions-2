@@ -1,6 +1,7 @@
 import {
   mobileSecondaryShortcutVisible,
   mobileSecondaryTabVisible,
+  parseSecondaryContentPresentation,
 } from './secondary-editor-state.ts';
 import {
   MOBILE_EDITOR_MODIFIER_STATE_EVENT,
@@ -63,14 +64,15 @@ type SecondaryInputCommand =
     modifiers: SyntheticKeyModifiers;
   };
 
-type SecondaryCommand = SecondaryOpenCommand | SecondaryInputCommand;
+type SecondaryCommand = SecondaryOpenCommand | SecondaryInputCommand
+  | { type: 'history'; projectPath: string; ticket: string; requestId: string };
 
 export interface MobileSecondaryEditorController {
   readonly supported: boolean;
   attachDrawer(drawer: MobileSecondaryEditorDrawer): void;
   show(): void;
   hide(): void;
-  open(projectPath: string, path: string): Promise<void>;
+  open(projectPath: string, path: string, historyTicket?: string): Promise<void>;
   destroy(): void;
 }
 
@@ -202,9 +204,9 @@ export function createMobileSecondaryEditorController(
     options.container.replaceChildren();
   }
 
-  function applyForeground(path: string): void {
+  function applyPopulation(hasContent: boolean): void {
     const wasSelected = options.tab?.classList.contains('active') === true;
-    populated = !!path;
+    populated = hasContent;
     if (!populated) {
       dismissed = false;
       selectFallbackTab();
@@ -212,6 +214,10 @@ export function createMobileSecondaryEditorController(
       if (wasSelected) closeDrawer();
     }
     updateVisibility();
+  }
+
+  function applyForeground(path: string): void {
+    applyPopulation(!!path);
   }
 
   function ensureFrame(): Promise<void> {
@@ -288,6 +294,14 @@ export function createMobileSecondaryEditorController(
       syncInputState();
     } else if (event.data.type === 'foreground') {
       applyForeground(typeof event.data.path === 'string' ? event.data.path : '');
+    } else if (event.data.type === 'content') {
+      const content = parseSecondaryContentPresentation(event.data.content);
+      if (!content) return;
+      applyPopulation(content.kind !== 'empty');
+      if (options.tab) options.tab.title = content.kind === 'empty'
+        ? 'Second Window'
+        : content.kind === 'historicalDiff'
+          ? `${content.label} @ ${content.commitId.slice(0, 8)} (read-only)` : content.label;
     } else if (event.data.type === 'openResult') {
       const requestId = typeof event.data.requestId === 'string' ? event.data.requestId : '';
       const pending = pendingOpens.get(requestId);
@@ -405,7 +419,7 @@ export function createMobileSecondaryEditorController(
     },
     show,
     hide,
-    async open(projectPath, path) {
+    async open(projectPath, path, historyTicket) {
       if (!supported) throw new Error('Second Window is unavailable in this client');
       if (!isMobileLayout()) {
         throw new Error('Second Window is available in the mobile layout');
@@ -414,10 +428,11 @@ export function createMobileSecondaryEditorController(
       await ensureFrame();
       const requestId = `mobile_secondary_${Date.now().toString(36)}_${(++openSequence).toString(36)}`;
       const resultPromise = waitForOpenResult(requestId);
-      postCommand({ type: 'open', projectPath, path, requestId });
+      postCommand(historyTicket ? { type: 'history', projectPath, ticket: historyTicket, requestId }
+        : { type: 'open', projectPath, path, requestId });
       const openedPath = await resultPromise;
       if (!openedPath) throw new Error('Second Window did not retain the opened file');
-      applyForeground(openedPath);
+      applyPopulation(true);
       dismissed = false;
       updateVisibility();
       await Promise.resolve(drawer?.open());

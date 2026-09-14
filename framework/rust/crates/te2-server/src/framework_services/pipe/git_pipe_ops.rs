@@ -17,6 +17,73 @@ pub(super) async fn dispatch_git_request(
     event_sink: Option<Arc<dyn PipeEventSink>>,
 ) -> Option<PipeEnvelope> {
     match request.method.as_deref()? {
+        method @ ("git.historyGraph.open"
+        | "git.historyGraph.next"
+        | "git.historyGraph.close"
+        | "git.historyGraph.files"
+        | "git.historyGraph.blob") => {
+            let result = match serde_json::from_value::<
+                crate::framework_services::history_sessions::Request,
+            >(request.params.clone().unwrap_or_else(|| json!({})))
+            {
+                Ok(params) => {
+                    let changed = event_sink.clone().map(|sink| {
+                        let request = request.clone();
+                        let responder = responder.clone();
+                        let session_id = params.session_id.clone();
+                        Arc::new(move |result: Result<(), String>| {
+                            let mut envelope =
+                                PipeEnvelope::success_response(&request, &responder, json!(null));
+                            envelope.kind = super::protocol::PipeMessageKind::Notification;
+                            envelope.id = None;
+                            envelope.result = None;
+                            envelope.method = Some("git.historyGraph.changed".into());
+                            envelope.params = Some(json!({"version":1, "sessionId":session_id,
+                                "error":result.err()}));
+                            if let Err(error) = sink.send(envelope) {
+                                tracing::warn!(%error, "History ref notification failed");
+                            }
+                        })
+                            as crate::framework_services::history_watch::Changed
+                    });
+                    if method == "git.historyGraph.open" && changed.is_none() {
+                        return Some(PipeEnvelope::error_response(
+                            request,
+                            responder,
+                            PipeError::new(
+                                "git.historyGraph.error",
+                                "History requires a pipe event sink",
+                                false,
+                                None,
+                            ),
+                        ));
+                    }
+                    scheduler
+                        .history_sessions
+                        .dispatch_watched(
+                            method,
+                            crate::framework_services::history_sessions::Owner {
+                                nid: request.origin_nid,
+                                name: request.origin_name.clone(),
+                                root: request.workspace_root.clone().unwrap_or_default(),
+                                generation: request.project_generation,
+                            },
+                            params,
+                            changed,
+                        )
+                        .await
+                }
+                Err(error) => Err(format!("Invalid history params: {error}")),
+            };
+            Some(match result {
+                Ok(value) => PipeEnvelope::success_response(request, responder, value),
+                Err(message) => PipeEnvelope::error_response(
+                    request,
+                    responder,
+                    PipeError::new("git.historyGraph.error", message, false, None),
+                ),
+            })
+        }
         "git.snapshot.get" => Some(snapshot(request, responder, scheduler).await),
         "git.headBlob" => Some(
             provider_request(
@@ -186,6 +253,15 @@ pub(super) async fn dispatch_git_request(
                 responder,
                 scheduler,
                 |scheduler, params| async move { scheduler.git_init(params).await },
+            )
+            .await,
+        ),
+        "git.fetch" => Some(
+            provider_request(
+                request,
+                responder,
+                scheduler,
+                |scheduler, params| async move { scheduler.git_fetch(params).await },
             )
             .await,
         ),

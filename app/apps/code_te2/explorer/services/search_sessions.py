@@ -13,7 +13,7 @@ from typing import Literal, TypeAlias, cast
 from app.libs import pipe_runtime
 from app.libs.pipe_protocol import PipeEnvelope
 
-from ...worker_services.event_bus import current_project_generation, next_project_generation
+from ...worker_services.event_bus import current_project_generation, next_project_generation, subscribe, unsubscribe, WorkerEvent
 from ..context import EmitPersonal
 from ..contracts.search_review import (
     ContentEditTarget,
@@ -26,7 +26,7 @@ from ..contracts.search_review import (
     SearchReplaceParams,
     SearchTextRange,
 )
-from ..search import cancel_search_job, start_changes_search, start_content_search, start_file_search
+from ..search import cancel_search_job, start_changes_search, start_content_search, start_file_search, refresh_changes_paths
 from .render_state import build_directory_listings
 
 logger = logging.getLogger(__name__)
@@ -124,6 +124,9 @@ class SearchSession:
     is_case_sensitive: bool = False
     is_whole_words: bool = False
     changes_metadata: dict[str, object] = field(default_factory=dict)
+    changes_items: dict[str, JsonObject] = field(default_factory=_json_object_map)
+    changed_paths: set[str] = field(default_factory=_string_set)
+    changes_overflow: bool = False
     complete: bool = False
     cancelled: bool = False
     status: str = "running"
@@ -183,6 +186,7 @@ class ExplorerSearchSessions:
         self._early_events: list[PipeEnvelope] = []
         self._run_generation: int = 0
         self._event_lock: asyncio.Lock = asyncio.Lock()
+        self._changes_task: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
         if self._listener is not None:
@@ -198,8 +202,17 @@ class ExplorerSearchSessions:
             },
         )
         self._pump_task = asyncio.create_task(self._pump_pipe_events())
+        subscribe("WorkspaceFilesChanged", self._files_changed)
+        subscribe("FileSaved", self._files_changed)
 
     async def stop(self) -> None:
+        unsubscribe("WorkspaceFilesChanged", self._files_changed)
+        unsubscribe("FileSaved", self._files_changed)
+        if self._changes_task is not None:
+            _ = self._changes_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._changes_task
+            self._changes_task = None
         await self.cancel_active(reason="disconnect")
         if self._listener is not None:
             pipe_runtime.remove_notification_listener(self._listener)
@@ -210,6 +223,84 @@ class ExplorerSearchSessions:
                 await self._pump_task
         self._pump_task = None
         self._queue = None
+
+    async def _files_changed(self, event: WorkerEvent) -> None:
+        # Fact handlers only enqueue bounded paths. The IO task owns coalescing;
+        # edits arriving during an outstanding read remain pending for another pass.
+        session = self._sessions.get(self._active_search_id or "")
+        if session is None or session.kind != "changes" or session.cancelled:
+            return
+        if event.get("project_root") != str(session.root) or event.get("project_generation") != session.project_generation:
+            return
+        payload = event["payload"]
+        saved = payload.get("fileSaved")
+        if isinstance(saved, dict):
+            saved_path = _copy_object(payload.get("fileSaved")).get("path")
+            payload = {"changed_abs": [saved_path]} if isinstance(saved_path, str) else {}
+        for key in ("created_abs", "changed_abs", "deleted_abs"):
+            values = payload.get(key)
+            if not isinstance(values, list):
+                continue
+            for value in cast(list[object], values):
+                if not isinstance(value, str):
+                    continue
+                try:
+                    rel = Path(value).relative_to(session.root).as_posix()
+                except ValueError:
+                    continue
+                affected = [rel, *(path for path in session.changes_items if path.startswith(rel + '/'))]
+                for path in affected:
+                    if len(session.changed_paths) >= 700:
+                        session.changes_overflow = True
+                        break
+                    session.changed_paths.add(path)
+        self._schedule_changes()
+
+    def _schedule_changes(self) -> None:
+        if self._changes_task is None or self._changes_task.done():
+            self._changes_task = asyncio.create_task(self._refresh_changed_paths())
+
+    async def _refresh_changed_paths(self) -> None:
+        while True:
+            session = self._sessions.get(self._active_search_id or "")
+            if session is None or session.cancelled or session.kind != "changes" or not session.complete:
+                return
+            if not session.changed_paths and not session.changes_overflow:
+                return
+            paths = sorted(session.changed_paths)[:8]
+            session.changed_paths.difference_update(paths)
+            try:
+                delta = await refresh_changes_paths(session.root, _string(session.changes_metadata.get("baseHash")) or session.query, paths)
+            except Exception:
+                logger.exception("Changes path refresh failed")
+                delta = {"refreshRequired": True}
+            if session.cancelled or self._active_search_id != session.search_id:
+                continue
+            raw_removed = delta.get("removed")
+            removed = [rel for rel in cast(list[object], raw_removed) if isinstance(rel, str) and rel in session.changes_items] if isinstance(raw_removed, list) else []
+            for rel in removed:
+                _ = session.changes_items.pop(rel, None)
+            updates: list[JsonObject] = []
+            raw_updates = delta.get("updates")
+            if isinstance(raw_updates, list):
+                for raw in cast(list[object], raw_updates):
+                    item = _copy_object(raw)
+                    rel = _string(item.get("rel"))
+                    if session.changes_items.get(rel) == item:
+                        continue
+                    if rel and (rel in session.changes_items or len(session.changes_items) < 700):
+                        session.changes_items[rel] = item
+                        updates.append(item)
+                    elif rel:
+                        session.changes_overflow = True
+            if not updates and not removed and not session.changes_overflow and not delta.get("refreshRequired"):
+                continue
+            await self._emit_personal("search.job.result", {
+                **_base_job_payload(session, "SearchJobResult"),
+                "result": {"delta": {"updates": updates, "removed": removed},
+                    "refreshRequired": session.changes_overflow or delta.get("refreshRequired") is True},
+            })
+            session.changes_overflow = False
 
     async def run(self, params: SearchRunParams, reply_to: str | None) -> None:
         from ...stores import get_history_store
@@ -536,6 +627,11 @@ class ExplorerSearchSessions:
         if event.method == "search.job.result":
             if session.kind == "changes":
                 raw = _copy_object(event.raw_result)
+                if isinstance(raw.get("change"), dict):
+                    item = _copy_object(raw["change"])
+                    rel = _string(item.get("rel"))
+                    if rel and len(session.changes_items) < 700:
+                        session.changes_items[rel] = item
                 if isinstance(raw.get("metadata"), dict):
                     metadata = _copy_object(raw["metadata"])
                     if isinstance(metadata.get("base"), dict):
@@ -570,6 +666,8 @@ class ExplorerSearchSessions:
             _apply_search_limit_event(session, event)
             session.complete = True
             session.status = "done"
+            if session.kind == "changes":
+                self._schedule_changes()
             if session.kind == "content":
                 result = self._next_content_result_payload(session, force=True)
                 if result is not None:

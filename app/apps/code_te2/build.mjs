@@ -3,6 +3,7 @@
 // the host graph so its runtime cannot race a second editor bundle.
 import { context, build } from 'esbuild';
 import { copyFile, mkdir } from 'node:fs/promises';
+import { buildTree } from './src/explorer/history/vscode_scm/tree/build.mjs';
 
 const isWatch = process.argv.includes('--watch');
 
@@ -42,6 +43,19 @@ const hostConfig = {
   entryPoints: ['main.ts'],
   outfile: 'static/dist/host.js',
   format: 'esm',
+  plugins: [{ name: 'verified-scm-tree', setup(builder) {
+    let result;
+    builder.onStart(() => { result = undefined; });
+    builder.onResolve({ filter: /^te2-scm-tree(?:\.css)?$/ }, args => ({ path: args.path, namespace: 'scm-tree' }));
+    builder.onLoad({ filter: /.*/, namespace: 'scm-tree' }, async args => {
+      result ??= buildTree();
+      const output = await result;
+      const css = args.path.endsWith('.css');
+      const file = output.outputFiles.find(item => item.path.endsWith(css ? '.css' : '.js'));
+      if (!file) throw Error('Missing verified SCM tree output');
+      return { contents: file.text + (css ? '' : '\nimport "te2-scm-tree.css";'), loader: css ? 'css' : 'js' };
+    });
+  } }],
 };
 
 /** Workbench Adapter typed helper modules (Node ESM) */

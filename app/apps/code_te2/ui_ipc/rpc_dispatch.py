@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import assert_never
 
 from .rpc_contract import (
+    UI_IPC_RPC_METHOD_HOST_HISTORY_OPEN,
     UI_IPC_RPC_METHOD_HOST_COMPARISON,
     UI_IPC_RPC_METHOD_HOST_BOOT_SNAPSHOT_GET,
     UI_IPC_RPC_METHOD_HOST_LANGUAGE_BACKEND_SET,
@@ -267,6 +268,14 @@ async def dispatch_ui_ipc_rpc_request(
             params,
             source_name=source_name,
         )
+
+    if method == UI_IPC_RPC_METHOD_HOST_HISTORY_OPEN:
+        from ..host.history_activation import activate_history_ticket
+        client, role, ticket = params.get("clientInstanceId"), params.get("clientRole"), params.get("ticket")
+        if not isinstance(client, str) or role != "secondary" or not isinstance(ticket, str):
+            raise ValueError("Secondary identity and History ticket are required")
+        await activate_history_ticket(client, "secondary", ticket)
+        return {"ok": True}
 
     if method == UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_CREATE:
         from .sidebar_ws import handle_ui_sidebar_window_create_request

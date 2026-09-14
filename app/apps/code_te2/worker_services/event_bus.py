@@ -160,6 +160,13 @@ def subscribe(event_type: EventType, handler: EventHandler) -> None:
         handlers.append(handler)
 
 
+def unsubscribe(event_type: EventType, handler: EventHandler) -> None:
+    """Release a connection-owned subscription; current deliveries use a copy."""
+    handlers = _handlers.get(event_type)
+    if handlers is not None and handler in handlers:
+        handlers.remove(handler)
+
+
 async def publish(event: WorkerEvent) -> None:
     """Publish an event on the worker loop through the dispatcher queue."""
     queue = _queue

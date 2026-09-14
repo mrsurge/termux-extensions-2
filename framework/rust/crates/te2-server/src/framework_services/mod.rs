@@ -2,6 +2,13 @@ pub(crate) mod bookmark_ops;
 pub(crate) mod common;
 pub(crate) mod fs_ops;
 pub(crate) mod git_ops;
+pub(crate) mod history_files;
+pub(crate) mod history_graph;
+#[cfg(test)]
+mod history_performance;
+mod history_roles;
+pub(crate) mod history_sessions;
+pub(crate) mod history_watch;
 pub(crate) mod hunk_edits;
 mod net;
 pub(crate) mod pipe;

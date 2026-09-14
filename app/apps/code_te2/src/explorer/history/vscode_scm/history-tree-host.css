@@ -1,0 +1,91 @@
+/* TE2-only label adapters around the scoped upstream graph/tree styles. */
+/* Refresh belongs to the outer controller, outside the virtualized tree. */
+.fe-history-refresh {
+  background: #343c46; color: #e2e8ee; border: 1px solid #596575;
+  font: inherit; cursor: pointer;
+}
+.fe-history-refresh:focus-visible { outline: 2px solid #9bd5f5; outline-offset: -2px; }
+.te2-scm-history { height: 100%; min-width: 0; font-size: 12px; }
+.te2-scm-history .monaco-list { font-size: inherit; }
+.te2-scm-history .history-item,
+.te2-scm-history .history-item-change { width: 100%; min-width: 0; height: 22px; gap: 4px; }
+.te2-scm-history .history-subject,
+.te2-scm-history .history-file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.te2-scm-history .history-description { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .7; }
+.te2-scm-history .history-commit-statistics,
+.te2-scm-history .history-file-statistics { flex: none; margin-left: auto; padding-right: 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.te2-scm-history [data-state="pending"],
+.te2-scm-history [data-state="unavailable"] { opacity: .65; }
+.te2-scm-history .history-item-current { font-weight: 600; }
+.te2-scm-history .history-load-label { text-align: center; cursor: pointer; }
+.te2-scm-history [aria-busy="true"] .history-load-label { cursor: progress; }
+
+/* One graph origin for every row: whole-row expansion replaces the workbench
+   twisty/indent gutter, while upstream still owns keyboard/ARIA tree semantics. */
+.te2-scm-history .monaco-tl-row > .monaco-tl-indent,
+.te2-scm-history .monaco-tl-row > .monaco-tl-twistie { display: none !important; }
+.te2-scm-history .monaco-tl-row > .monaco-tl-contents { padding-left: 0 !important; margin-left: 0 !important; }
+.te2-scm-history .monaco-list-row .history-item-change,
+.te2-scm-history .monaco-list-row .history-item-load-more { display: flex; align-items: center; }
+.te2-scm-history .monaco-list-row .history-item-change > .graph-placeholder,
+.te2-scm-history .monaco-list-row .history-item-load-more > .graph-placeholder {
+  position: static; flex: none; height: 22px;
+}
+.te2-scm-history .history-item-change > .label-container { flex: 1; min-width: 0; }
+.te2-scm-history .history-file-name { display: flex; align-items: center; gap: 5px; }
+.te2-scm-history .history-file-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.te2-scm-history .history-file-icon { color: inherit; flex: none; }
+.te2-scm-history .history-file-icon svg { display: block; width: 16px; height: 16px; fill: currentColor; }
+.te2-scm-history .history-file-added { color: #85d49a; font-weight: bold; flex: none; }
+
+/* Selection belongs to this tree/client, not shared Git state or editor MRU.
+   Inset outlines retain the exact row height needed for continuous graph lanes. */
+.te2-scm-history .monaco-list .monaco-list-row.selected {
+  outline: none !important;
+  box-shadow: inset 0 0 0 2px #9bd5f5 !important;
+  background: #343c46 !important; color: #e2e8ee !important; border-radius: 0;
+}
+
+/* Host-wide character widths keep both numeric columns aligned as lazy totals
+   arrive. State labels span the same area; unavailable is never rendered as zero. */
+.te2-scm-history .history-commit-statistics,
+.te2-scm-history .history-file-statistics {
+  /* ch uses the pill font; 10px in the shared width covers padding/border/margins. */
+  font-size: 10px;
+  display: grid; grid-template-columns: repeat(2, var(--history-count-width, calc(2ch + 10px)));
+  gap: 3px; align-items: center; height: 22px; font-variant-numeric: tabular-nums;
+}
+.te2-scm-history .history-additions,
+.te2-scm-history .history-deletions {
+  padding: 0 3px; border-radius: 4px; text-align: right; box-sizing: border-box;
+  /* Compact pills leave air inside each 22px row without shifting graph lanes. */
+  margin: 0 1px; height: 16px; line-height: 14px; font-size: 10px;
+  border: 1px solid currentColor;
+}
+.te2-scm-history .history-additions { color: #a4e8b4; background: #254a33; }
+.te2-scm-history .history-deletions { color: #ffc0b9; background: #64342f; }
+.te2-scm-history .history-count-state { grid-column: 1 / -1; text-align: right; }
+
+/* Compact headers expose local names plus grouped remote/tag pills. Totals move
+   to mobile expansion or desktop hover; row height and upstream lanes stay fixed. */
+.te2-scm-history { position: relative; }
+.te2-scm-history .history-item > .label-container { max-width: 55%; overflow: hidden; }
+.te2-scm-history .history-item > .label-container > .label { min-width: 0; }
+.te2-scm-history .history-item > .label-container > .label > .description { max-width: 160px; text-overflow: ellipsis; white-space: nowrap; }
+.te2-scm-history .history-item-details { display: flex; height: 22px; width: 100%; min-width: 0; align-items: center; gap: 4px; }
+.te2-scm-history .history-item-details > .graph-placeholder { flex: none; height: 22px; }
+.te2-scm-history .history-detail-body { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
+.te2-scm-history .history-detail-counts { margin-left: 0; }
+.te2-scm-history .history-detail-refs { display: flex; gap: 8px; overflow-x: auto; white-space: nowrap; min-width: 0; }
+.te2-scm-history .history-detail-ref { flex: none; }
+/* This tooltip is owned by the History host and cannot escape over host menus.
+   All names are real text, wrapping here; mobile details scroll full names inline. */
+.te2-scm-history .history-details-hover {
+  position: absolute; z-index: 5; left: 4px; right: 4px; box-sizing: border-box;
+  max-height: 80%; overflow: auto; padding: 10px; border: 1px solid #596575;
+  border-radius: 4px; background: #252b33; color: #e2e8ee; box-shadow: 0 3px 10px #0008;
+}
+.te2-scm-history .history-hover-title { white-space: pre-wrap; overflow-wrap: anywhere; margin-bottom: 6px; }
+.te2-scm-history .history-details-hover .history-detail-body { align-items: flex-start; }
+.te2-scm-history .history-details-hover .history-detail-refs { flex-wrap: wrap; white-space: normal; overflow: visible; }
+.te2-scm-history .history-details-hover .history-detail-ref { flex-shrink: 1; overflow-wrap: anywhere; max-width: 100%; }

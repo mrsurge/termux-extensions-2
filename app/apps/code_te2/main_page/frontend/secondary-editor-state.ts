@@ -1,7 +1,26 @@
 export interface SecondaryEditorHostState {
+  secondaryContent?: unknown;
   activeProject?: string | null;
   currentPath?: string | null;
   clientForeground?: { path?: string | null } | null;
+}
+
+export type SecondaryContentPresentation =
+  | { kind: 'empty' }
+  | { kind: 'workingFile'; label: string }
+  | { kind: 'historicalDiff'; label: string; commitId: string };
+
+/** Presentation messages do not contain text or confer working-file ownership. */
+export function parseSecondaryContentPresentation(value: unknown): SecondaryContentPresentation | null {
+  if (!isRecord(value)) return null;
+  if (value.kind === 'empty') return { kind: 'empty' };
+  if (typeof value.label !== 'string' || !value.label || value.label.length > 4096) return null;
+  if (value.kind === 'workingFile') return { kind: 'workingFile', label: value.label };
+  if (value.kind === 'historicalDiff' && typeof value.commitId === 'string'
+      && /^[0-9a-f]{40}$/.test(value.commitId)) {
+    return { kind: 'historicalDiff', label: value.label, commitId: value.commitId };
+  }
+  return null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

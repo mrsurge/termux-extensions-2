@@ -698,7 +698,11 @@ pub(crate) fn git_diff_hunks(
     // Whole-file and minified-style diffs keep rows addressable without copying
     // pathological line bodies into Python or browser memory.
     let (hunks, added, deleted) = if suppression.is_some() {
-        (Vec::new(), 0, 0)
+        // Preview admission controls bodies, not statistics. Count against the
+        // same selected base even when oversized lines or whole-file status
+        // suppress every hunk; no line contents cross the service boundary.
+        let stats = diff.stats()?;
+        (Vec::new(), stats.insertions(), stats.deletions())
     } else {
         diff_hunks_for_path(&diff)?
     };
@@ -1080,6 +1084,46 @@ pub(crate) fn git_remote_list(
         root: repo_root_string(&repo, &root),
         remotes,
     })
+}
+
+/// Watcher refreshes compare one literal path, never enumerate repository status.
+pub(crate) fn git_worktree_change_for_path(
+    request: GitProviderRequest,
+) -> Result<Option<GitWorktreeChange>, GitProviderError> {
+    let root = request_root(&request)?;
+    let Some(repo) = discover_repo(&root)? else {
+        return Ok(None);
+    };
+    let path = single_relative_path(&repo, &root, &request)?;
+    let tree = optional_tree_for_rev(&repo, request.base.as_deref().unwrap_or("HEAD"))?;
+    let mut options = DiffOptions::new();
+    options
+        .include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .disable_pathspec_match(true)
+        .pathspec(&path);
+    let diff = repo.diff_tree_to_workdir(tree.as_ref(), Some(&mut options))?;
+    for delta in diff.deltas() {
+        let candidate = delta.new_file().path().or_else(|| delta.old_file().path());
+        if candidate != Some(Path::new(&path)) {
+            continue;
+        }
+        let code = match delta.status() {
+            Delta::Unmodified | Delta::Ignored => continue,
+            Delta::Added => "A",
+            Delta::Deleted => "D",
+            Delta::Untracked => "??",
+            Delta::Typechange => "T",
+            Delta::Conflicted => "U",
+            _ => "M",
+        };
+        return Ok(Some(GitWorktreeChange {
+            path,
+            code: code.into(),
+            original_path: None,
+        }));
+    }
+    Ok(None)
 }
 
 pub(crate) fn git_worktree_changes(
@@ -1512,6 +1556,20 @@ where
     }
     let repo = builder.clone(url, &destination)?;
     Ok(mutation_result(&repo, &destination, "clone", Vec::new()))
+}
+
+/// Fetch only updates configured remote refs; it never merges or touches files.
+pub(crate) fn git_fetch(
+    request: GitProviderRequest,
+) -> Result<GitMutationResult, GitProviderError> {
+    let (repo, root) = repo_from_request(&request)?;
+    let mut remote = repo.find_remote(request.remote.as_deref().unwrap_or("origin"))?;
+    let mut callbacks = RemoteCallbacks::new();
+    install_configured_git_credentials(&mut callbacks, None);
+    let mut options = FetchOptions::new();
+    options.remote_callbacks(callbacks);
+    remote.fetch(&[] as &[&str], Some(&mut options), None)?;
+    Ok(mutation_result(&repo, &root, "fetch", Vec::new()))
 }
 
 pub(crate) fn git_pull(request: GitProviderRequest) -> Result<GitMutationResult, GitProviderError> {
@@ -3091,6 +3149,8 @@ mod tests {
         let deleted_hunks = git_diff_hunks(deleted_hunks_request).expect("deleted hunks");
         assert_eq!(deleted_hunks.relative_path, "deleted.txt");
         assert!(deleted_hunks.hunks.is_empty());
+        assert_eq!(deleted_hunks.summary.added, 0);
+        assert_eq!(deleted_hunks.summary.deleted, 2);
         assert!(deleted_hunks.summary.tracked);
         assert_eq!(deleted_hunks.summary.status.as_deref(), Some("deleted"));
         assert_eq!(deleted_hunks.summary.content_suppressed, Some(true));
@@ -3108,6 +3168,8 @@ mod tests {
         let untracked_hunks = git_diff_hunks(untracked_hunks_request).expect("untracked hunks");
         assert_eq!(untracked_hunks.relative_path, "new.txt");
         assert!(untracked_hunks.hunks.is_empty());
+        assert_eq!(untracked_hunks.summary.added, 2);
+        assert_eq!(untracked_hunks.summary.deleted, 0);
         assert!(!untracked_hunks.summary.tracked);
         assert_eq!(untracked_hunks.summary.status.as_deref(), Some("untracked"));
         assert_eq!(untracked_hunks.summary.content_suppressed, Some(true));
@@ -3131,7 +3193,7 @@ mod tests {
         commit_all(&repo, "initial commit");
         let oversized_line = format!(
             "const value = \"{}\";\n",
-            "x".repeat(MAX_DIFF_LINE_BYTES + 128)
+            "x".repeat(512 * 1024)
         );
         fs::write(root.join("minified.js"), oversized_line).expect("write oversized");
 
@@ -3158,6 +3220,8 @@ mod tests {
         let hunks = git_diff_hunks(hunks_request).expect("oversized hunks");
         assert_eq!(hunks.relative_path, "minified.js");
         assert!(hunks.hunks.is_empty());
+        assert_eq!(hunks.summary.added, 1);
+        assert_eq!(hunks.summary.deleted, 1);
         assert!(hunks.summary.tracked);
         assert_eq!(hunks.summary.status.as_deref(), Some("modified"));
         assert_eq!(hunks.summary.content_suppressed, Some(true));
@@ -3168,6 +3232,36 @@ mod tests {
         assert_eq!(hunks.summary.line_byte_limit, Some(MAX_DIFF_LINE_BYTES));
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn fetch_updates_remote_refs_without_touching_local_head_or_disk() {
+        let remote_root = test_root("fetch-remote");
+        let remote = Repository::init(&remote_root).unwrap();
+        fs::write(remote_root.join("tracked.txt"), "base\n").unwrap();
+        commit_all(&remote, "base");
+        let branch = current_branch(&remote).unwrap();
+        let local_root = test_root("fetch-local");
+        let local = Repository::clone(&path_to_string(&remote_root), &local_root).unwrap();
+        let before = local.head().unwrap().target().unwrap();
+        fs::write(local_root.join("tracked.txt"), "unsaved disk change\n").unwrap();
+        fs::write(remote_root.join("tracked.txt"), "remote change\n").unwrap();
+        commit_all(&remote, "update");
+        let result = git_fetch(provider_request(&local_root)).unwrap();
+        assert_eq!(result.operation, "fetch");
+        assert_eq!(local.head().unwrap().target(), Some(before));
+        assert_eq!(
+            fs::read_to_string(local_root.join("tracked.txt")).unwrap(),
+            "unsaved disk change\n"
+        );
+        assert_eq!(
+            local
+                .refname_to_id(&format!("refs/remotes/origin/{branch}"))
+                .unwrap(),
+            remote.head().unwrap().target().unwrap()
+        );
+        let _ = fs::remove_dir_all(local_root);
+        let _ = fs::remove_dir_all(remote_root);
     }
 
     #[test]

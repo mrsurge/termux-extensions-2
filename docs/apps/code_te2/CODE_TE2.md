@@ -196,6 +196,8 @@ Spinner / Status indicator (host UI):
 - Every WBA protocol actor, including language intelligence, commands, messages, and webviews, receives its resolved nid through named runtime-adapter fields. The generated config for the pinned managed Code Server runtime is production authority; `RPC_DEFAULTS` is only the matching 4.130 no-config fallback.
 - The installed WBA MessagePack codec is one self-contained bundled ESM file at `workbench_protocol_proxy/node_workbench_adapter/dist/protocol/messagepack-codec.mjs`.
 
+Disconnect cleanup explicitly clears Socket.IO `sendBuffer`; WBA recovery remains disabled. Code TE2 console records use `$TE2_CACHE_HOME/code_te2`, while project diagnostics are under `.code_te2/diagnostics`. Startup does not probe or import `.code_cm6` or other retired CM6 roots.
+
 ## 0.7) Relay Boundaries
 
 Several relays participate in a native client session, but they have separate
@@ -224,6 +226,8 @@ client-runtime pattern in its own process.
 ---
 
 ## 1) Key files (where to look)
+
+Shared UI source lives in `main_page/frontend/ui/component-runtime/` (synchronous document-aware JSX, refs, ownership/disposal, small projections; no VDOM or durable state authority) and `main_page/frontend/ui/modal-kit/`. `ui/modal-kit/jsx-runtime.ts` is the compatibility re-export. Async `teUI.dialog` stays inline on browser/Android; Electron uses portable child-window IPC and same-origin portal adoption. Listbox popups belong to the active dialog layer. Retain CM6 JSON fields in Run Profiles/Settings. Android per-app settings use `SharedPreferences`, not framework Settings APIs; relay retargeting stays in `PersistentNetworkService.configure`. Shared `teUI.toast` messages in `app/static/js/te_ui.js` are click/tap/keyboard copy targets. They copy original plain text without the close glyph or feedback, preserve dismissal/expiry and report copy status in place. A user-initiated copy-event fallback supports HTTP contexts without focusing a helper textarea; concurrent copies are suppressed. `tests/toast_copy.test.mjs` validates shared behavior.
 
 ### Monaco editor runtime (worker)
 - `app/apps/code_te2/monaco_editor/inline_host.ts`
@@ -721,6 +725,8 @@ Used by review save/discard, open/jump, search highlighting, and project-switch 
 
 ## 6.6) Search system (progressive Rust pipe provider)
 
+Comparison scheduling source anchors: `handle_git_set_diff_base` only persists/validates and publishes `GitDiffBaseChanged`. Separate `LatestProjection` runners fence active and newest pending reads without cancelling underlying `to_thread` work. The retired `search:query` event and temporary `changes_timing` logs are not part of the production path.
+
 ### Ownership
 - Rust framework service: `service.search`
 - Python pipe wrapper/client: `explorer/search.py`
@@ -882,32 +888,32 @@ User live acceptance and broader end-to-end concurrency validation remain pendin
   The first page emits discovery metadata without a total, then confirmed file
   diffs while later candidates are still unchecked. Final metadata supplies the
   exact bounded total and continuation token before `search.job.done`. Existing
-  frontend metadata merging preserves file DOM during this final update.
+  frontend metadata merging preserves file DOM and local expansion during this final update. Compact gapless file headers expose per-file Stage (`+`) and a shared Stage and commit all action when the index is empty, otherwise Commit selected (the index), through existing Explorer RPCs; both are HEAD-only. Restore remains confirmation-gated, labeled `×` at HEAD and `Restore` in history. There is no hunk staging. The shared commit prompt rejects project/comparison changes before dispatch; the backend waits for staging and stops if staging fails. SVG fe-btn Push/Pull/Fetch controls reuse Git services. Fetch updates origin refs without merging; History separates Fetch from its local Refresh button. Untracked files retain real Git +/- statistics without bodies and follow tracked results across pagination; bodyless preview headers open the file directly. Status labels use `M` and green `A` for modified/untracked.
   HEAD browsing retains HEAD status enumeration; historical discovery uses
   index-backed candidates with per-path selected-tree-to-disk verification.
   Every hunk reads the pinned baseline. Continuations validate the full token
   before emitting any results and reject HEAD movement in HEAD view.
-- One page contains at most 40 files. Next-page navigation replaces the page,
-  rather than accumulating unlimited diff bodies; First page restarts it.
-  The existing 20,000-candidate enumeration bound is explicitly reported as
+- Code TE2 retains at most 700 file objects and initially reveals 40 rows;
+  scrolling reveals another 40 without rerunning Git or evicting revealed rows. File headers start collapsed with preview +/- counts, basename-resolved vendored icons and tail-clipped paths. Header toggles reveal bodies without navigation; diff rows navigate and Restore remains independent. Unavailable previews show unknown counts rather than fabricated totals.
+  The projection's 700-result enumeration bound is explicitly reported as
   truncation. A serialized file preview over 256 KiB retains its summary and
   shows an omitted-body notice; existing binary/minified/whole-file suppression
-  remains in the Git provider.
-- `changesOffset` on `explorer.search.run` is accepted only for the cached,
-  completed current session's next offset. Python supplies its pinned hash and
-  opaque snapshot token to Rust. The token fingerprints ordered confirmed paths,
-  status codes, sizes, and modification times. A changed token requires refresh;
-  it is a continuation guard, not an atomic filesystem snapshot or content hash.
-- Python retains only comparison/continuation metadata for these pages, not a
-  second cache of hunk bodies. A bounded early-event buffer plus ordered startup
+  remains in the Git provider. Suppressed text diffs retain Git insertion/deletion statistics against the same selected base, including oversized tracked lines and deleted files; the renderer uses these summaries even with preview warnings. Editor admission limits remain independent. The shown-file heading right-aligns retained tracked +/- totals, labels untracked additions separately, and marks incomplete/truncated/stale or unavailable projections partial. Totals do not depend on rendered rows. Header-only client-local MRU matches History styling: a click replaces selection; each live delta replaces it with the updated path group, including unrendered rows. Initial enumeration does not highlight files as live edits.
+- Native callers can still use fingerprinted 40-file continuation pages, but
+  Code TE2 requests a bounded projection instead. Python retains all file objects;
+  WorkspaceFilesChanged/FileSaved enqueue exact paths, read in batches of eight
+  through search.changes.paths. No full enumeration runs on routine file facts.
+  Broad directory events, overflow or failed reads expose explicit recovery.
+- Python retains comparison metadata and up to 700 file previews, including
+  not-yet-rendered results. A bounded early-event buffer plus ordered startup
   delivery handles events arriving before the correlated start reply. Late-start
   jobs are cancelled after supersede/disconnect/project change. Cancellation is
   cooperative between Git operations, not interruption inside a libgit2 call.
 - The frontend fences results by correlation/project/mode and reuses existing
   file-group DOM while appending results. Closing, changing comparison, switching
   projects, and disconnect discard obsolete jobs through the established event
-  lifecycle. Git/selection facts refresh the visible first page; there is no
-  polling or monolithic Python diff RPC fallback.
+  lifecycle. Comparison/HEAD changes refresh; path facts replace only affected
+  objects. By Contents also expands on early scroll; neither view uses polling.
 
 - File/folder name search is an inline Explorer-tree projection, not a search
   overlay. The project-root label becomes the query field, direct hits and their
@@ -967,6 +973,438 @@ User live acceptance and broader end-to-end concurrency validation remain pendin
 
 ---
 
+## 6.7) Source Control History Component Foundation
+
+The component under `src/explorer/history/vscode_scm/` is mounted in the advanced
+Explorer History tab. It is not a WBA feature. Its controller consumes the
+Explorer history notification/RPC lane independently of the search scheduler.
+The production build verifies and bundles the real upstream tree into the existing
+`host.js` and `host.css`; no additional runtime script is requested.
+
+Open acknowledgements and early notifications are reconciled by generation;
+reconnect starts fresh, and leaving the tab closes its session (including an
+open acknowledged after disposal). Metadata and statistics update the same tree,
+preserving expanded children. Commit expansion reads native file pages lazily;
+file clicks pass the pinned generation/commit/native index to `history.openFile`.
+The controller bounds presentation to 500 commits, 500 files per expansion and
+2,000 indexed summaries per generation. File-limit failures are explicit, not
+silently truncated results. Native-device acceptance remains pending.
+
+History establishes a missing restored-project fact generation before admission,
+using the worker event bus rather than storing a private generation-zero fallback.
+The native five-minute idle lease publishes an exact-session expiry notification.
+Python stops queued statistics and closes that session; the frontend discards its
+actionable rows and automatically refreshes once when History is visible.
+Document visibility and intersection events defer refresh while backgrounded or
+offscreen. A failed refresh requires explicit retry; disposal removes observers.
+There is no polling or automatic replay of a file against the new snapshot.
+
+The standalone pane removes the visible twisty/indent gutter; whole-row expansion
+and keyboard/ARIA semantics remain owned by the actual upstream tree. File graphs
+are in-flow first-column content, not negative-offset workbench overlays. File
+rows use the file tabs' filename-aware vendored Seti resolver, with a generic
+Codicon fallback, and a green A from native `added` status. Late icon resolution
+cannot mutate a recycled row. Numeric
+addition/deletion pills share a host-wide digit width which grows with observed
+counts. Selected rows use a square 2px light-blue inset border/dark-gray fill;
+the History font is 12px while graph rows retain their 22px height.
+Count pills are 16px tall with 10px text and a `currentColor` border, leaving
+vertical breathing room without changing row geometry. Refresh History uses
+the same dark-gray background as selected rows.
+Their shared columns also measure `ch` at 10px and reserve only the widest signed
+count (including partial markers) plus 10px for padding, border and margins.
+selection remains local to this tree/client.
+
+Commit headers show local branch names and grouped cloud/tag pills, not total
+counts. Snapshot ref names are classified into local/remote/tag icons and passed
+through upstream's color map; the active local ref uses the upstream active-ref
+color even before a fork. Native upstream/base reference roles receive the
+upstream remote/base colors; other labels inherit their actual lane color,
+without inventing a new graph edge.
+
+`history_roles.rs` resolves the current branch's configured upstream (including
+a local `remote = .` upstream), and a distinct remote base. Base precedence is a
+valid `branch.<name>.vscode-merge-base` remote, unique branch-creation reflog
+evidence (or oldest matching HEAD checkout), then symbolic HEAD of `origin` or
+the first configured remote. A local creation source contributes its remote
+upstream. No main/master name is assumed, no Git setting is written, and a base
+identical to upstream is omitted. Detached HEAD has neither role.
+
+Role refs must exist in the captured ref/OID set. Their identities contribute to
+the snapshot hash and typed Python/frontend adapters reject out-of-snapshot
+roles. Reflog evidence is bounded to 1 MiB and 4,096 entries per log; unavailable
+or ambiguous evidence falls through to the symbolic remote-HEAD fallback.
+Repository config/config.worktree and the exact HEAD/current-branch reflogs
+invalidate History through the native watcher. External/global included Git
+config changes require explicit Refresh; there is no broad config-tree watcher.
+
+Mobile UA (independent of width) expansion inserts one 22px details child before
+file rows. Its SVG continues the parent lanes, its totals use the latest commit
+projection, and its full branch/ref names scroll horizontally. Desktop omits that
+child and lazily creates a host-local hover/focus panel with full names and totals.
+The existing statistics stream updates both surfaces; neither hover nor a totals
+rerender reads Git files again. Scroll/Escape/leave/disposal remove desktop hover
+DOM. `commit-details.ts` owns these presentation-only surfaces; file counts and
+historical-open behavior remain unchanged.
+
+The tree's own scroll event requests a page within three 22px rows of the end.
+Requests are single-flight and require row-count advancement before another
+automatic request; errors require explicit retry. Layout can fill an undersized
+viewport. The continuation row retains keyboard/click access as a fallback,
+without a timer or DOM intersection sentinel for virtualized rows.
+
+`UPSTREAM.md`, the manifests and patch series record the exact VS Code revision,
+original hashes and reproducible adaptations. The graph algorithm, SVG geometry,
+commit/ref grouping and continuation geometry derive from the preserved upstream
+files. `tree/build.mjs` builds the actual base CompressibleAsyncDataTree from 164
+pinned dependencies, retaining upstream compiler semantics. Both dependency CSS
+and adapted history styles are scoped to `.te2-scm-history`.
+
+`HistoryTreeHost` is the TE2-owned replacement for outer workbench service wiring.
+It receives the real constructor through `tree-contract.ts`, summary rows, a
+typed asynchronous child reader, and file-open/load-more/error callbacks. It owns
+one immutable history generation and its own DOM, not project state or files.
+Mouse and touch share upstream's single pointer event; Enter activates file or
+continuation rows. Load-more and retries are guarded against duplicate execution.
+
+`SCMHistoryTreeDataSource` enumerates commit rows without loading their files.
+Expansion passes an immutable commit ID and its first parent (explicitly null
+for roots) to the reader. It caches summaries only for retained commits in that
+generation, avoiding duplicate Git reads when upstream refreshes expanded nodes
+after a root metadata update. Failed reads evict cache entries and show retry
+rows, never false empty commits; pending/binary/unavailable counts never mean zero.
+No document text is part of these row contracts.
+
+Disposal cancels native refresh promises before destroying their render-event
+sources, aborts the reader, drops subscriptions/cache and removes the owned DOM.
+Late reads cannot render into a replacement host. Two explicit upstream patches
+fix unobserved active-node debounce and refresh-cleanup rejections; there is no
+global error suppressor or production grace timer. DOM tests exercise the actual
+tree, including mouse/touch/keyboard events, expanded-row retention, retries,
+in-flight disposal, and stylesheet scope. Device acceptance remains pending.
+
+The SCM upstream source is pinned to code-server VS Code revision `591199df409fbf59b4b52d5ad4ee0470152a9b31`. The editable `vscode-te2-diff` fork does not contain SCM; its absence must not trigger a hand-written substitute. Native lifecycle methods are `git.historyGraph.open/next/close` on `service.git`.
+
+### Native Graph Reader Foundation
+
+Commit traversal follows the pinned VS Code Git extension's `--topo-order`
+convention: libgit2 `Sort::TOPOLOGICAL` without `Sort::TIME`. Adding TIME
+interleaves independent branch histories by timestamp. A paged fixture compares
+interleaved branch dates with Git itself; a read-only 500-commit HEAD probe on
+this repository matched Git exactly without the TIME flag. Root/ref selection
+and equal-time ties can still differ when comparing different viewers' scopes.
+The captured unique tip OIDs are seeded newest-first by committer date (pushed
+oldest-first because libgit2 prepends). Hash order is not traversal priority.
+This keeps inactive branch tips from preceding the current feature/main chain
+while preserving branch-contiguous topology. A multi-ref regression covers old
+branches, main, the current feature, remote refs and duplicate tag tips. A
+read-only 500-commit branches/remotes/tags probe matched Git's full order.
+
+`framework_services/history_graph.rs` contains the metadata-only reader.
+`history_sessions.rs` owns the repository and reader on a retained blocking
+worker between page requests. One revwalk supplies successive pages without
+offset rescans. The scheduler owns this registry separately from interactive
+Git read permits; at most four history workers exist, including idle sessions.
+Admission rejects at capacity instead of accumulating queued workers.
+
+The existing `service.git` pipe now supports `git.historyGraph.open`, `.next`
+and `.close`. Params are strict version 1 plus `sessionId`; next additionally
+requires the expected `offset` and accepts `limit`. Root and project generation
+come from the envelope. Sessions bind the exact origin NID/name, root spelling
+and generation; IDs are caller-generated bounded alphanumeric/hyphen strings,
+not snapshot fingerprints. Open returns `GitHistoryOpened` with metadata only;
+next returns `GitHistoryPageResult`; close returns `GitHistoryClosed`.
+
+Each worker has one bounded command slot, rejects overlapping requests, and
+invalidates its traversal after an unexpected offset or dropped request wait.
+Close sets cancellation and wakes the channel. A single five-minute idle lease
+expires abandoned sessions; it is not a polling loop. Finished registry entries
+are pruned on admission and explicit close. Native traversal memory and time
+inside libgit2 still have the limitations below.
+
+`worker_services/history_service.py` provides the typed asynchronous adapter and
+`history_session` context manager. It uses existing `pipe_runtime.call_async`
+(which offloads the synchronous pipe wait), validates DTO/session/snapshot/offset
+identities and closes on context exit. Cancelled opening waits for admission to
+settle before closing; an uncertain/lost transport is ultimately bounded by the
+native idle lease. It never retries page advancement. The legacy synchronous
+Git adapter remains unchanged. Explorer lifecycle/fact routing remains pending;
+no frontend uses these calls yet.
+
+Snapshot capture records commit-valued local/remote branches and tags plus HEAD,
+sorts their identities, and pins the traversal roots. Annotated tags peel to
+commits; tree/blob tags are excluded. Empty repositories and detached HEAD are
+explicit. A SHA-256 metadata fingerprint is not a session authorization token or
+a repository identity. Ref capture is not an atomic Git transaction; later ref
+changes require a new generation rather than modifying the retained reader.
+
+Pages contain ordered parent IDs and commit metadata, never file diffs/stats or
+worktree content. They accept 1-500 commits, with 100 as the intended default.
+At an exact page boundary, completion may require one final empty page, avoiding
+lookahead work solely to calculate a total. Capture rejects more than 4,096
+commit refs, metadata fields over 16 KiB, or commits with more than 128 parents.
+These are explicit errors, not silently missing graph edges. Output is bounded;
+libgit2's internal topological state is not proven bounded by the page size.
+
+Cancellation is checked during ref capture and around every native walk step.
+It cannot interrupt libgit2 inside a step, including initial topology preparation.
+A failed or cancelled page invalidates the reader, preventing a retry from
+silently skipping already-consumed rows. The owner must discard that generation.
+First-page timing and native memory measurements remain acceptance requirements.
+
+### Lazy Historical File Reads
+
+`history_files.rs` supplies `git.historyGraph.files` and `.blob` through the same
+owner-checked sessions. Files takes a full immutable `commitId`, offset and limit
+(40 default, 100 maximum). Blob takes that commit and its file index. The worker
+retains one commit's tree diff for reuse and replaces it when another commit is
+requested; it does not retain text bodies across calls. These operations never
+advance the metadata graph cursor.
+
+The comparison is the commit's first parent, or an absent tree at a root commit.
+Rename detection is shared by the summaries and blob-pair reader with libgit2's
+rename candidate limit set to 200. Beyond that limit, heuristic rename matches
+may remain separate additions/deletions. A commit exceeding 20,000 changed files
+fails explicitly. Native tree enumeration/rename matching precedes the first file
+page; per-file patches/counts are computed only for the requested page, not for
+the entire commit or graph. The statistics producer below schedules aggregation.
+
+Line counts have a separate 16 MiB-per-side native budget. Both object headers
+are checked before constructing a zero-context libgit2 patch; counting does not
+materialize preview strings or impose preview UTF-8 admission. Large generated
+text can therefore have exact line counts while its editor preview remains
+blocked by the unchanged 375 KiB limit. Binary/unsupported/over-budget counts
+remain explicit. These bounds do not make libgit2 diff allocation or execution
+interruptible within an individual patch operation.
+
+The frontend preserves known totals for incomplete/error statistics as starred
+numeric pills, with a partial-total tooltip identifying uncounted files or an
+interrupted calculation. An unknown file never turns the entire known sum into
+Unavailable, and partial sums are never labeled as complete.
+
+File summaries return status, old/new paths and blob IDs, plus counts with ready,
+binary, tooLarge or unavailable states. Blob sides are absent, text, binary,
+tooLarge, invalidUtf8 or unsupported (including gitlinks). Returned text is strict
+UTF-8, at most 375 KiB per side. The reader checks the Git object header before
+loading a blob body. This does not claim a bound on all internal libgit2 diff or
+rename allocations. Non-UTF-8 paths fail explicitly rather than becoming a wrong
+file identity. Worktree/draft content is not read as either displayed side.
+
+The Python adapter validates typed file pages and continuation offsets. Its
+`blob_pair` accepts the selected `HistoryFile`, then verifies returned blob IDs
+and old/new paths against that row as well as commit/index/session identities.
+It cannot silently substitute a different file after a native list rebuild.
+The second-editor content lifecycle and UI projection are still unimplemented.
+
+### Progressive Statistics Producer
+
+`explorer/services/history_statistics.py` owns one generation-local producer,
+with one native file page in flight at a time. Call `retain` only after graph
+rows have been published. It reconciles at most 500 retained commit descriptors;
+this is a statistics work-set bound, not a cap on reachable repository history.
+Completed retained commits are deduplicated; pruning removes pending/completed
+state, and there is no cross-generation cache or polling timer.
+
+Each 40-file read executes in Rust through the typed session adapter. Python
+adds the small returned integers and publishes one cumulative update before
+requesting another page, yielding between pages. The session lock is released
+between reads, allowing queued interactive History requests to proceed. This
+does not preempt a native page already in flight.
+
+Updates carry generation, commit ID, processed/total files, known additions and
+deletions, and unknown-file count. State is computing, ready, incomplete or error.
+Known sums are never presented as complete totals when some file counts are
+unavailable. Failed commits do not become clean or retry automatically. A read
+failure does not prevent processing later retained commits.
+
+The owner supplies the asynchronous publication callback and must dispose this
+producer before closing its native session. Disposal and retention checks fence
+late results, including a read which completes after cancellation. Publication
+failures propagate through the producer task (`settled`/`dispose`) and a done
+callback observes/logs them even when no caller is awaiting completion.
+
+### Explorer History Projection
+
+`explorer/services/history_projection.py` owns one native session per requesting
+Explorer connection. `explorer.history.open` and `.refresh` acknowledge with a
+connection-local generation immediately; native initialization runs separately.
+`explorer.history.updated` publishes generation-fenced snapshot, page, statistics,
+or error notifications through `emit_personal`, never a broadcast. Typed
+dataclass payloads currently retain snake_case field names inside the envelope;
+the eventual frontend adapter must normalize these explicitly.
+
+`explorer.history.more` and `.files` require that generation; files also takes
+`commitId` and an optional offset. `.close` requires the current generation.
+Graph pages are published before scheduling counts for their rows. Statistics
+retain only the latest 500 commit descriptors, not every paginated row. Superseded
+initialization, reads and publication cannot populate the next generation.
+
+Disconnect cleanup disposes the controller and unsubscribes its fact handlers.
+Project changes invalidate it synchronously. Async exit-stack ordering stops the
+statistics producer before closing the native session. Opening a replacement
+waits for prior cleanup without blocking the fact handler or initial RPC ack.
+
+History ref invalidation is owned by Rust `history_watch.rs`, independently of
+WBA, workspace watcher mode, and Python Git facts. libgit2 resolves `path()` and
+`commondir()` so linked-worktree HEAD and shared refs outside the worktree are
+both watched. Native `notify` uses inotify on Linux/Android; no polling fallback
+is instantiated. Metadata-root and ref-directory watches are nonrecursive and
+bounded to 4096 directories per admitted session. Objects/logs/worktree contents
+are never recursively watched. HEAD, packed-refs, shallow, and heads/remotes/tags
+changes invalidate; locks, index and access events do not.
+
+Watches precede snapshot construction. A capacity-one channel coalesces events
+into one `git.historyGraph.changed` pipe notification per immutable session.
+Pipe writes run outside the OS callback. Python registers its filtered listener
+before admission, validates sender/root/generation/session, and retains one
+notification even if it precedes the open reply. Normal invalidation disposes
+statistics and closes the old session before scheduling its replacement. This
+also handles A -> B -> A by taking a fresh snapshot, not comparing stale HEAD
+facts. Project/disconnect cleanup removes listeners and cancels scheduled refresh.
+
+Watch admission failure fails History open explicitly. Runtime watch error or
+overflow emits `watcherError` and leaves explicit Refresh available, without an
+automatic retry loop. Native-filesystem event availability remains a prerequisite;
+unsupported/network filesystems do not gain an implicit polling fallback.
+The existing session idle lease also bounds abandoned watches. Production History
+UI mounting and secondary-editor historical content routing are connected.
+
+`history_performance.rs` contains an ignored, explicit-root read-only benchmark
+of watched History startup, first-page traversal, and scheduler baseline reads
+before/during/after file-statistics work. It emits test-only JSON, not production
+logs. Reproduction, Termux measurements, and the distinction from full frontend
+open latency are in `docs/apps/source_control_graph/PERFORMANCE.md`.
+
+---
+
+### Secondary History Content State Foundation
+
+`host/secondary_content_state.py` separates working-file and immutable History
+blob-pair content from window presentation. Event-loop-owned state is bounded to
+64 exact-client slots; admission fails rather than evicting another client.
+Monotonic tokens fence superseded reads, close/recreate and project generations.
+
+`host/secondary_content_backend.py` now owns the worker-local state instance.
+Trusted backend callers prepare a token, obtain the validated immutable pair,
+and commit it. Commit clears only that secondary foreground using the existing
+sidecar write; it neither saves nor discards drafts nor removes shared recents.
+Existing edit persistence remains authoritative, with no additional flush step.
+The activation caller publishes the returned foreground fact after committing.
+
+Host boot snapshots project `secondaryContent` on the event loop after shared
+and off-loop snapshot construction. Foreground notifications carry the same
+exact-client descriptor. Foreground revision fencing ignores queued facts older
+than the historical commit; newer working-file facts remove historical content.
+Explicit secondary close and ProjectSwitchStarted clear retained state. Client
+disconnect alone does not clear it; worker restart does not persist historical
+content. An existing null secondary foreground prevents legacy file revival.
+
+Tests cover actual sidecar draft preservation, disk/recents/primary isolation,
+project and supersession rejection, old-fact handling and private boot projection.
+The `explorer.history.openFile` route validates generation/retained commit/index,
+rereads the exact native file descriptor, validates its blob pair and issues an
+opaque backend capability. `host/history_handoff.py` retains at most 32 bounded
+pairs, one outstanding per invoking client. Tickets expire after 60 seconds, are
+single-use, and reject project-generation or source-session invalidation. Expired
+entries are pruned on issuance; no polling task is introduced.
+
+The existing exact-client `ui.host.secondEditor.open` notification carries only
+`projectPath` and `historyTicket`. Mobile presentation and Electron's validated
+primary-only `open_second_editor` IPC forward a `history` command to their own
+secondary. That renderer redeems through `ui.host.history.open`; authenticated
+secondary role is required. `history_activation.py` commits the retained pair
+and publishes the existing foreground fact, separate from the state module to
+avoid a circular import. The secondary page defers a kind-switch reload until
+in-flight presentation commands are acknowledged. History opening bypasses WBA
+readiness and never uses `hostFileOpen` or a fabricated disk path.
+
+The graph UI now invokes this handoff. User-click activation and WBA facade
+disposal/end-to-end native behavior still require acceptance. Handoff tests cover
+single use, capacity, expiry, supersession, project/session fencing, secondary
+role enforcement and publication after descriptor commitment.
+
+The standalone `monaco_editor/historical_diff_view.ts` now consumes the strict
+`main_page/frontend/secondary-history-content.ts` decoder. It owns a diff control
+and two `te2-history:` models with per-view identities, readOnly/domReadOnly and
+originalEditable=false. Binary, oversized, invalid UTF-8 and unsupported sides
+render explicit status instead of fabricated empty diffs. Abort/dispose releases
+the owned control/models/DOM; syntax preparation failures cannot mount late.
+
+The secondary runtime supplies
+an isolated syntax-only Monaco realm and lexical setup, not a working-editor realm
+with installed intelligence providers. The pinned standalone diff implementation
+accepts global configuration options despite omitting them from the constructor
+interface; the options use the intersection with IGlobalEditorOptions to disable
+semantic highlighting. Semantic rendering, inlay hints, CodeLens, lightbulbs,
+suggestions, links and hover are disabled. These settings alone are not proof of
+zero provider traffic in a reused working-editor realm. Ten DOM/fake-Monaco tests
+validate ownership/options; real renderer and native acceptance remain pending.
+
+`historical_monaco_boot.ts` provides a fresh-realm syntax-only bootstrap. The
+Monaco bootstrap build script now supports `basicLanguagesOnly`, separately
+loading existing basic/Monarch contributions without TS/JSON/CSS/HTML language
+service contributions. Existing normal worker/code-server modes retain their
+behavior. Historical boot permits only the `editorWorkerService` worker used for
+diff computation, reuses Gecko's module-worker transport, awaits the stylesheet,
+and resolves languages by filename/longest extension with plaintext fallback.
+It does not load the WBA-backed TextMate runtime. Four focused bootstrap tests
+use dependency stubs; actual secondary browser acceptance remains outstanding.
+The generated bootstrap is published by scripts/build_monaco_bootstrap_bundle.mjs,
+not by editing its bundle, and requires no VS Code compilation.
+
+Secondary runtime now branches on its private host snapshot before editor boot.
+The working module is one-shot and has no complete public teardown/reboot
+lifecycle, so working/historical kind changes reload only the secondary page
+after backend commitment. Historical-to-historical revisions abort and replace
+the disposable renderer in place; duplicate snapshots retain it. Page disposal
+fences pending mounts. Facts received during cold boot trigger a fresh snapshot,
+and newer facts fence older snapshot replies. Null working foregrounds with
+historical content do not trigger automatic presentation close.
+
+Historical mode hides working menus/issues and rejects Save, Save As, draft
+discard and the working special-key dispatch path. A historical title identifies
+the file and commit without publishing a fabricated working foreground. A separate
+validated mobile presentation message carries only kind/label/commit and keeps
+the drawer populated independently of working-file ownership. Historical menus
+offer Find and Copy Selection. The special-key allowlist maps navigation and
+Shift-selection to Monaco core commands, supports Ctrl+F/A/C and Ctrl+Home/End,
+and rejects mutation/unknown commands. Focus listeners retain the selected diff
+side across menu focus and are disposed with the view. Clipboard failures surface
+through the host toast; no working-model fallback is allowed.
+
+Graph mounting/click activation and mobile touch-selection are connected.
+Six lifecycle tests cover boot,
+reconnect reuse, replacement, cross-kind reload, failure retry and disposal;
+real secondary-client acceptance remains pending.
+
+Historical appearance now comes from `host_state.preferences` at boot/reconnect and
+`ui.preferences.changed` on the existing host lane. The secondary retains the newest
+preference projection while a view mounts and fences older snapshot replies.
+`historical_appearance.ts` reuses normal font scaling/family and theme registry,
+URL and VS Code-theme conversion helpers. It applies only font, line-number and
+wrap options; read-only, syntax-only and provider restrictions remain fixed.
+Theme requests are revision- and disposal-fenced, so slow previous selections
+cannot overwrite the current view. No polling, WBA traffic or extra backend
+preference authority is introduced.
+
+Mobile-UA historical boot loads the maintained touch helper and shared editor
+presentation CSS (including the Cefrium Find-input font floor), assigning the
+same Monaco namespace for its EditorOption lookup. The source fork at
+`worktrees/monaco-touch-selection/src/index.ts` accepts `historicalReadOnly: true`:
+its main tools are Copy, Select Word, Select All, Find and Close; custom main,
+leading and navigation tool callbacks cannot add editing actions. Both diff
+controls attach helpers, and Monaco disposal removes each helper's handles,
+menus, observers and listeners. Working-editor defaults are unchanged.
+Build with `npm run build` in that fork and publish `dist/index.umd.cjs` to the
+existing `static/vendor/monaco-touch-selection/monaco-touch-selection.patched.umd.js`.
+The stylesheet is unchanged. This does not require rebuilding VS Code/Monaco.
+The historical mode source is committed in the maintained touch fork as `e5f22e7`.
+
+Regression coverage includes appearance allowlisting, out-of-order theme delivery,
+view disposal, mobile attachment, immutable diff options, and the deployed touch
+bundle's restricted/default menus. GeckoView and Cefrium live acceptance passed
+for this refinement; desktop acceptance remains pending.
+
 ## 7) Monaco asset pipeline (pinned VS Code build)
 
 The Monaco editor runtime uses the pinned VS Code `monaco-editor-core` ESM output:
@@ -1004,6 +1442,8 @@ Fix:
 ---
 
 ## 8) UI "knobs" (what you can safely tune)
+
+Fresh editor preferences use `github-dark`; the old `cm6-dark` seed migrates once, while explicit themes remain authoritative. Baseline debounce dependencies must wrap `window.setTimeout` and `window.clearTimeout`. Passing native methods unbound through an options object changes their receiver and can throw `Illegal invocation`, leaving enabled inline diff preferences stranded in a plain editor.
 
 ### Preferences -> Monaco options mapping
 The inline editor runtime builds Monaco options from SSOT preferences (`buildMonacoOptionsFromPrefs()`):
@@ -1692,6 +2132,8 @@ Console observability is framework-owned. Browser producers and drawer clients u
 
 The old worker-owned `/ui_ipc` console relay has been removed from the live source path. `ui_ipc` does not handle `console:*` events.
 
+Console eval wraps results with `Promise.resolve`, maps JavaScript `undefined` to `null`, and races the Python timeout plus two seconds. Disconnect rejects pending evaluations; teardown removes owned listeners/sockets and pending work.
+
 ### Architecture overview
 
 ```text
@@ -2008,6 +2450,8 @@ src/server/request-dispatch.ts.
 
 ## 35) Android / GeckoView IME and Browser Text Input
 
+The published editable xterm source checkpoint is branch `te2-mobile-touch-routing` at `1d71ed0732d592980eb0960ce3da001213d2636e`, based on xterm 5.3.0. Its source-owned capture surface and shared adapter must be published together. Android IME context switching defaults false. Settings refresh notification/power state on foreground events, and both activities resynchronize PersistentNetworkService in `onResume` after permission changes, without polling.
+
 ### Problem
 
 Android IME composition, especially Gboard, can fight Monaco's desktop-oriented textarea transaction model. Cursor position, composition ranges, and visible model content can diverge when composition text is applied through the browser path as if it were desktop input.
@@ -2028,7 +2472,7 @@ There are three distinct layers:
    - Native `input` events coalesce to one latest-value read per animation frame.
    - The coalesced transaction retains the latest `InputEvent.inputType`.
    - One cumulative UTF-16 range edit is applied before a generation-guarded canonical reseed.
-   - Android composition start/update/end events do not gate input or create Monaco's visible composition textarea.
+   - Android composition start/update/end events do not gate input or create Monaco's visible composition textarea. Selection-only `selectionchange` (including Gboard spacebar-slide) maps unchanged guarded line offsets directly to model selection in both Gecko and Chromium, before the desktop Chrome restriction. `deduceAndroidImeSelection` rejects guard positions, stale line identity and changed text; pending IME transactions retain ownership. The selection handoff updates retained offsets and suppresses synchronous textarea reseeding, avoiding keyboard resets or fabricated edits. `tests/android_selection_sync.test.mjs` exercises source and published ESM with actual input/wrapper classes.
    - Aligned ordinary insertion remains on Monaco's typing path. An aligned
      `insertLineBreak` or `insertParagraph` newline is also routed through
      typing so `EnterOperation` applies language indentation; multiline paste,
@@ -2044,11 +2488,11 @@ There are three distinct layers:
      by an unpaired synthetic keydown.
    - The mobile special-key dock is visible by default and has two rows. The
      first provides Ctrl, Alt, persistent Select/Shift, and arrow navigation;
-     the second provides Tab, Home, End, Page Up, and Page Down. Ctrl, Alt, and
-     Select combine through the same synthetic-key path, so Monaco's normal
-     Ctrl+Shift navigation and selection rules remain authoritative. When the
-     Terminal drawer owns focus, navigation keys use its established request
-     bridge instead of inventing another input path.
+     the second provides one-shot Shift, Tab, Home, End, Page Up/Down, Cmd and Esc. Enter remains on the virtual keyboard, not duplicated in the dock.
+     Ctrl+Shift+P/O invoke Monaco's existing command/symbol quick pick. Extra keys preserve focused quick-input fields; caret defaults are explicit because synthetic keys do not perform native text navigation.
+     One-shot Shift is separate from sticky Sel, composes with modifiers and is carried through guarded Ctrl-byte reconstruction. It uppercases only cancellable committed insertText, never active composition or guessed punctuation layouts.
+     The implementation is in editor_quick_input_keys.ts and editor_mobile_special_keys_utils.ts; existing editor realms own their actions. Historical command restrictions stay unchanged.
+     When the Terminal drawer owns focus, navigation keys still use its established request bridge rather than another input path.
    - The four arrow buttons repeat after a 420 ms hold delay at a 55 ms cadence.
      Pointer capture preserves the gesture if the finger drifts outside the
      button, while release, cancellation, lost capture, window blur, document
@@ -2547,6 +2991,8 @@ The Run Profiles modal is `main_page/frontend/ui/run-profiles-modal.ts`. It uses
 
 The active Linux desktop client is the Electron shell under `desktop_client/electron/`. `desktop_client/ui.py` remains a GTK/WebKit behavioral reference, not the current runtime.
 
+Electron settings v2 persists opt-in `autostart` and canonical `preferredAppId`. Launcher readiness triggers a catalog lookup against only the selected configured framework and then ordinary app-open/readiness. Missing framework/app/readiness leaves the launcher interactive; startup never implicitly launches a missing framework.
+
 ### Runtime shape
 
 - A local `te2-desktop://shell/` renderer owns the desktop launcher, Settings, persistent header, asset version/toasts, zoom, app-scoped Quit, and window controls.
@@ -2933,7 +3379,7 @@ The visible frontend open path does not wait for WBA background hydration. `edit
 
 ## 40) Code Inspector And Navigation
 
-Code Inspector is a backend-retained bottom-drawer projection for References, Implementations, and Call Hierarchy. It is not a direct frontend-to-frontend channel and does not add a new socket or HTTP endpoint.
+Code Inspector is a backend-retained bottom-drawer projection for References, Implementations, Call Hierarchy and Document Symbols. It is not a direct frontend-to-frontend channel and does not add a new socket or HTTP endpoint.
 
 ### Flow
 
@@ -2957,7 +3403,7 @@ Key backend files:
 
 WBA performs Code OSS document-selector scoring/order, semantic provider dispatch, reference/implementation merge-sort-deduplication, and lazy call-hierarchy session management. Reference and implementation locations are enriched with source previews capped at 240 characters; preview reads are deduplicated per file with bounded concurrency. The editor replaces the active file preview from Monaco's live model so unsaved text remains authoritative.
 
-Lazy call-hierarchy expansion and release return through backend-mediated editor commands. Browser reload does not release a WBA call-hierarchy session; project switch, adapter reset, replacement, or worker teardown invalidates it.
+Lazy call-hierarchy expansion and release return through backend-mediated editor commands. Browser reload does not release a WBA call-hierarchy session; project switch, adapter reset, replacement, or worker teardown invalidates it. Document Symbols uses the existing `symbols` -> `vscode.documentSymbols` WBA route against the open document (including its draft overlay). The touch inspection island exposes a structural SVG action. `src/code-inspector/document-symbols.ts` preserves provider hierarchy and one-based selection ranges, maps zero-based VS Code SymbolKind to vendored codicons, and bounds snapshots to 2,000 visited entries / 32 levels with explicit truncation. Invalid ranges are not converted into first-line jumps. Clicking a row navigates to its selection range through existing host file navigation without force-refreshing the model; the twisty expands independently. Rerun the action to refresh the snapshot. Requests reject changed paths, versions and replaced models; existing project/adapter resets clear retained state. Historical syntax-only views remain outside WBA inspection.
 
 Go to Definition is intentionally separate from the retained Code Inspector drawer mode. It is a direct editor-to-WBA action that invokes selector-ordered definition providers, returns the first canonical target, and navigates through backend-owned `editor.open` with `focus: false` and centered reveal.
 
@@ -3493,3 +3939,374 @@ host drawer.
 
 Project switch, explicit activation, active-shell close, and new-shell creation
 retain the established rebind event. There is no polling or transport fallback.
+
+## 47) Framework Runtime And Deployment Reference
+
+### Generic Worker Module Identity
+
+Built-in backend module identity comes from package path rather than public app id. Explicit `TE2_APP_ROUTER` is authoritative; legacy `<app_id>_bp` exists only for unconverted out-of-tree apps. The legacy watcher bridge and `te2.onFilesChanged` API are removed, not compatibility mechanisms.
+
+### Framework Runtime And State
+
+- Rust owns framework filesystem, Git, search, bookmarks, settings, state, app
+  lifecycle, proxying, shell orchestration, and the loaded-app/running-app index.
+  Ordinary request, WebSocket, proxy, and Socket.IO handling never rediscovers
+  FWS metadata or scans `/proc`; only explicit reload/reconciliation may do so.
+
+- The Rust server uses a multi-threaded Tokio runtime. Each app-worker bridge
+  has a bounded 256-frame nonblocking queue and dedicated blocking writer:
+  dispatch encodes/enqueues only, preserves accepted-frame order, and reports
+  saturation, closure, or writer failure without blocking a Tokio worker.
+
+- `app.libs.jobs` is a core-only persisted job manager/handler registry. Its
+  unmounted FastAPI/SSE router and global `/api/jobs` surface were removed.
+  TE2 does not directly declare `sse-starlette`; MCP may still pull it in.
+
+- App manifests are the catalog contract. Semantic backend readiness opts in
+  with `readiness_support: true` and publishes at
+  `/api/apps/{app_id}/readiness`.
+
+- Framework-readiness shells use one app-scoped
+  `/api/apps/events?app_id=...` SSE stream. Do not restore serialized boot GETs
+  or `/ws/apps` as an application-shell gate.
+
+- Framework settings, generic state, and bookmarks have canonical config/data
+  roots. TE2-owned per-app durable state is under
+  `$TE2_DATA_HOME/app_state/<app_id>`; `$TE2_DATA_HOME/apps/<app_id>` remains
+  user-app source, never an app-state partition.
+
+- The JetBrains Mono webfont payload contains only the published WOFF2 Regular,
+  Italic, Bold, and BoldItalic faces. Do not restore release archives, TTFs,
+  variable/no-ligature/proportional variants, or unused weights.
+
+- Legacy-root recovery is only the standalone dry-run-first
+  `te2 migrate-legacy-roots` command. `--apply` requires a stopped framework,
+  locks, validates an allowlist, stages atomic replacements, and records a
+  versioned one-time receipt. Startup never invokes it.
+
+- Canonical `TE2_*_HOME` overrides are final roots. Otherwise resolve XDG bases
+  plus `/te2`, with `$HOME` fallback for cache/data/config and a private
+  `te2-$UID` runtime directory. Bootstrap exports resolved roots to Rust and
+  workers; Android storage is separate.
+
+### Network Exposure
+
+- The Rust framework is loopback-only by default. Bootstrap resolves
+  `--broadcast` once into exact bind hosts and immutable Rust exposure policy;
+  invalid selectors fail before binding. `te2 --list-interfaces` emits Linux /
+  Termux structured JSON using `getifaddrs`.
+
+- Exact IP/CIDR selectors filter peer addresses; interface selectors filter the
+  accepted socket's local destination. Loopback is always allowed. One outer
+  Axum middleware protects HTTP, SSE, raw WebSockets, Socket.IO, app proxy,
+  console, and MCP routes.
+
+- Public bind addresses are distinct from the loopback `TE_FRAMEWORK_URL` given
+  to app workers, Framework-Shells, console, and MCP. IPv4 and IPv6 wildcard
+  listeners use separate sockets.
+
+### Build And Installation Contracts
+
+- Package/CLI metadata is `pyproject.toml`; Python runtime requirements are in
+  `requirements.txt`. Release versioning synchronizes package/Rust, Code TE2
+  version asset, app manifests, versioned frontend URLs, launcher, and shipped
+  Electron distribution. Dependency/protocol schema versions are separate.
+
+- Generated bundles, vendor trees, Android asset copies, and release candidates
+  are publication output, not editable source unless an approved task explicitly
+  targets them. Build wheels from clean isolated staging; never package the
+  working directory, bytecode caches, profiler output, or build intermediates.
+
+- Framework builds are optimized by default; `--debug` is opt-in. Cache builds
+  use one cross-process lock for build/validation/atomic publish/pruning; retain
+  incremental Cargo artifacts but only the chosen validated final binary.
+
+- Supported framework source is `framework/` (bootstrap/runtime bridge,
+  `tests/`, Rust workspace), and active Electron source is
+  `desktop_client/electron/`. Launcher/server settings use `TE2_SERVER_*`,
+  bridge settings use `TE2_RUNTIME_BRIDGE_*`, and Electron smoke settings use
+  `TE2_DESKTOP_*`; no experimental-name aliases remain.
+
+- Rust app-worker launch explicitly supplies matching loopback
+  `TE_FRAMEWORK_URL` and `TE_PORT`, independent of shellspecs/parent environment.
+
+- Code TE2, WBA, and browser vendor artefacts are checked-in built/vendored
+  inputs. Terminal first-use bootstrap and source-desktop bootstrap are the only
+  installed `npm ci` owners; no global npm application package is required.
+
+- Linux x86_64 installs exact `nodejs-wheel==24.16.0` in the private Python
+  environment. The shared resolver prefers sibling Node/npm, exports the
+  package's matching Node headers, prepends that environment for framework
+  children, and gives WBA the exact resolved Node executable. Termux retains a
+  separately validated native package mapping.
+
+- The supported Debian/Ubuntu Linux alpha requires `build-essential` for the
+  standalone Terminal's first-use `node-pty` native build. The private Python
+  environment still owns exact Node/npm and matching headers through
+  `nodejs-wheel`; users must not install a second global Node runtime for this.
+
+- Framework-Shells 0.0.63 release wheels are native: ordinary CPython uses
+  `cp39-abi3`, free-threaded CPython uses its exact `cp314-cp314t` tag, and
+  both carry the PyO3 pump plus Rust terminal broker. Agent Log Server 0.2.124
+  depends on that exact version and its platform wheel carries a verified
+  `als-server`, compiled browser bundle, and vendored Socket.IO MessagePack
+  parser. Release construction rejects incomplete wheel payloads. Neither
+  release path silently degrades to pure Python or Cargo.
+
+- TE2 pins `fastmcp==3.4.7`. FastMCP 4 selects MCP 2 and removes the
+  `mcp.server.fastmcp` API used by the current conversation-scoped
+  `agent-pty-blocks` stdio server; do not relax the pin until that server has a
+  tested MCP 2 migration.
+
+- Memory profiling is explicit through `te2 --memory-profile OUTPUT_DIR` and
+  relies on Heaptrack plus opt-in process-separated Python/Node snapshots.
+  Production retains the platform allocator; do not attribute extension-host or
+  language-server growth to Rust without process-separated evidence.
+
+- Supported x86_64 GNU/Linux TE2 binary-release wheels carry the audited
+  optimized Rust server plus explicit target/version/source/digest provenance.
+  Bootstrap verifies the payload after explicit server overrides and never
+  falls through to Cargo when binary-release provenance is missing, corrupt, or
+  incompatible; only source-build provenance retains the canonical fingerprinted
+  Cargo path. Final publication artifacts are clean synchronized-tag builds;
+  dirty candidates are validation inputs only.
+
+- `te2-server` enables the canonical `ferrous-framework-native` host by
+  default. Every Linux and Termux release candidate must pass its non-starting
+  machine-readable `--build-info` identity/target/feature contract. Termux
+  records that report in the target manifest and executes the staged binary to
+  confirm exact equality before activation; ELF shape and checksums alone are
+  insufficient.
+
+- Termux managed releases use the active Termux Python without a venv. Only
+  target-manifest-approved apt packages are shared; TE2, Framework-Shells,
+  Agent Log Server, and every non-apt Python input live in a versioned
+  release-local Python tree materialized from a verified binary-only wheelhouse.
+  `nodejs-wheel` remains Linux x86_64-only and Termux obtains Node/npm from apt.
+  A native x86_64 Termux container may validate clean installer transactions,
+  but physical AArch64 Termux remains authoritative for Android wheel tags,
+  ELF/Bionic linkage, the server, app workers, and Terminal acceptance.
+
+- The Termux archive carries one exact audited wheel inventory: 93 locked
+  third-party wheels plus TE2, Framework-Shells, and Agent Log Server (96
+  wheels total). Its
+  installer atomically manages the versioned release tree, `current` pointer,
+  receipt, and the `te2`, `te2-rust`, `fws`, `als-rs`, and
+  `als-rs-extension-adapter` wrappers. Repair and uninstall preserve TE2 state;
+  unmanaged wrapper collisions fail before mutation.
+
+- Termux archive construction is deterministic and publication-gated. Dirty
+  first-party inputs are rejected by default; the explicit validation-only
+  override records the dirty component and `publicationEligible: false` in the
+  manifest. Never promote such a candidate to a release.
+
+- Physical AArch64 Termux acceptance covers exact packaged-server selection,
+  all eight built-in apps, an actual app-worker launch through that server, ALS
+  static/proxy delivery, Terminal's first-use native
+  `node-pty` bootstrap and strict MessagePack PTY flow, corrupt/missing-wheel
+  rejection, same-version repair, uninstall state preservation, and SIGTERM.
+  ALS 0.2.122 includes the clean Android packaged-target fix and is published
+  with the matching AArch64 wheel.
+
+- Termux target manifests explicitly install the official `tur-repo`
+  subscription package during the initial apt transaction. Managed Android Code
+  Server retains its own confirmation-gated dependency installer and expects
+  TUR's `nodejs-24`; do not duplicate or bypass that source installer.
+
+- Termux target manifests also install TUR's `bun` package and validate its
+  executable as a forward JavaScript-runtime prerequisite; current WBA and
+  Terminal ownership remains on the separately declared Node/npm runtime.
+
+- The public release installer detects Termux before generic Linux. Its initial
+  Linux target is apt-based glibc x86_64; it installs the manifest-pinned PyPI
+  release into a staged versioned private venv, relocates generated venv paths
+  before atomic publication, validates every managed command, and exposes them
+  through user-local wrappers following `install/current`.
+
+- Linux `install-te2 --desktop` delegates to that exact venv's existing
+  `te2 desktop install` command. The established Electron bootstrap owns its
+  fingerprint/cache, 3 GiB guard, runtime, receipt, wrapper, icon, and desktop
+  entry. The installer seeds the existing local-framework config with stable
+  managed command/venv paths while preserving explicit user policy and paths.
+
+- The Linux prerequisite transaction is limited to `git`, `build-essential`,
+  `python3-venv`, and the available Debian `libarchive` runtime. Termux's
+  target manifest also includes `git`; Termux continues to obtain Node/npm
+  from apt and never installs `nodejs-wheel`.
+
+- Installed-release activation retains exactly current plus one prior-version
+  fallback after successful validation; same-version replacements remain
+  transaction-local and explicit rollback rotates the pair. Candidate failure
+  restores the exact prior pointers and managed files before pruning. Linux
+  desktop activation rewrites managed `command`/`venvPath` while preserving
+  user `broadcast`, `port`, and `env`. Electron runtime publication likewise
+  retains current plus one prior fingerprint, and a valid cache hit still repairs
+  missing receipt-owned wrapper, icon, and desktop-entry files.
+
+## 48) Standalone Terminal Contracts
+
+The standalone Terminal is a separate app from Code TE2's Python/Pyte drawer (section 46). Its Node/headless-xterm ownership and local UI controls are preserved here for shared-input maintenance.
+
+- The standalone terminal supports only the Node shellspec. Browser traffic is
+  strict one-object-per-frame MessagePack; FWS pipe traffic is length-prefixed
+  MessagePack. Node owns pty, headless xterm, 5,000-row scrollback, sequence,
+  and reconnect checkpoints. There is no JSON/base64 shell fallback.
+
+- Standalone Terminal lifecycle/control uses websocket-only `/terminal` at
+  `/api/app/terminal/socket.io` with strict MessagePack payloads. One FWS
+  snapshot plus lifecycle events owns generation-fenced revisioned shell-list
+  projection; frontend selection remains client-local. The frontend has no
+  application-control HTTP fallback or lifecycle polling.
+
+- Standalone Terminal soft keys are two fixed seven-key rows: `ESC`, `≡`, `-`,
+  `HOME`, `↑`, `END`, `PGUP`, then `TAB`, `CTRL`, `ALT`, `LEFT`, `DOWN`,
+  `RIGHT`, `PGDN`. `≡` only opens the shell drawer and has a 300 ms capture
+  guard against activating newly overlaid controls. Other action keys use
+  synthetic keydown/keyup on xterm's active textarea so xterm owns escape
+  translation. Ctrl is one-shot with double-tap lock; Alt is independently
+  one-shot; combined modifiers are supported. Standalone Python transport
+  ingress decodes to `object` and validates mappings rather than propagating
+  inferred `Any`.
+
+- Standalone Terminal directional soft keys emit immediately, repeat after
+  420 ms every 55 ms, and retain the exact xterm/textarea plus Ctrl/Alt snapshot
+  for the complete pointer hold. Release/cancel/lost capture, window blur,
+  document hiding, or disposal stops repetition; one-shot modifiers are
+  consumed once when the gesture ends.
+
+- The standalone key dock and its header `Keys` toggle are Android/mobile-only;
+  visibility defaults on and is client-local/non-persisted. Plain dash uses a
+  guarded textarea `insertText` event because Android xterm suppresses
+  printable keydown, while modified dash remains keyboard-event-owned.
+
+- The standalone Terminal's initial list and minibar share one client-local
+  `Show exited` checkbox. It defaults off, is not persisted or broadcast, and
+  filters only rendered cards while preserving the authoritative shell snapshot.
+
+- A standalone Terminal card is active only when it matches that frontend's
+  client-local `activeId`; `aria-current` and the selected accent are separate
+  from shared shell alive/exited status.
+
+## 49) Historical Release Provenance
+
+These are recorded release-time provenance and acceptance facts, moved from repository memory without re-running release verification. Statements such as "latest", "current", or "green" describe the publication checkpoint, not today's release catalog. Digests and immutable tags remain historical evidence; source manifests and current release tooling own future publication.
+
+- Historical production PyPI release `te2==0.2.342` was published from annotated tag
+  `0.2.342` at integrated main commit
+  `e4243671490fe3361a93770cd283ceb5051f19c8`. It pins exact first-party
+  dependencies `framework-shells==0.0.63` and
+  `agent-log-server==0.2.122`. The Linux wheel SHA-256 is
+  `3faf0440474b49e8bde0fba6ac3dc0400d98903fff25d938c99a34638e8ac5ca`;
+  the sdist is
+  `2ba1d3c63e4f0204d05373bbf74268c38c46d6e2e75d50a0d92ac96cdefaaf31`,
+  and the packaged Ferrous-native server is
+  `ea5fb1d7307bbf998a01ae8d84852a296dd89f77225468adb968be083ef10ab5`.
+  Public latest-curl Debian acceptance selected the packaged Ferrous-native
+  server, returned health 0.2.342, discovered all eight apps, started a real
+  worker, and materialized the receipt-owned Electron desktop integration.
+
+- Historical GitHub Release `0.2.342` used `alpha` only in its title and
+  `prerelease: false`. Its 13 API-reported asset digests
+  match the audited set; public `SHA256SUMS` is
+  `43aab1e620c89c1a9542a6c9545f80acf5c7bc236f778ae6aca44407088ea516`.
+  The Termux archive SHA-256 is
+  `c27f4f63364cc242ae5d6dbeba6918be99ef8e5b7a5744face56ed8b2e039b22`;
+  its Ferrous-native Android/AArch64 server is
+  `3a2c9ef2bfb2bf0c65629e1356e4122cf8d6e3eb30cd9b2b45920eeaa692fd1f`.
+  Physical Motorola public-install live acceptance is green. The APKs carry
+  version code 20342 and synchronized 0.2.342 assets; GeckoView SHA-256 is
+  `6c5b12f0b8818245d02b8c14481360b0e186d925e7643bd3f1c2c637412cf681`
+  and Cefrium is
+  `d6991ee38d8977f03e1de9b5c28a9821ee88d739c0ce605a61c87e53ab250485`.
+  They remain development-certificate sideloading artifacts. Immutable 0.2.340
+  contains a defective Termux server without Ferrous native support and must
+  never be reused or replaced in place.
+
+- Production PyPI release `te2==0.2.345` is published from annotated tag
+  `0.2.345` at integrated main commit
+  `234981e4b892bc579074f7c4c8050f7353c4c9fb`. It pins exact first-party
+  dependencies `framework-shells==0.0.63` and
+  `agent-log-server==0.2.123`. The Linux wheel SHA-256 is
+  `06bf65412f09bfde20c7ebcbf314e4927beaeb820de50b8b4e16ac4ac600267d`,
+  the sdist is
+  `5271b6a792d6c0c5291c585d2175863924304d33e7e272f7625267b05c294c40`,
+  and the packaged Ferrous-native server is
+  `4f0b95f291844ff25a1b504c9856fe04e4d1b010829a5b294bc50944ab16ac8a`.
+  Agent Log Server 0.2.123 is published for Linux and Android from clean tag
+  commit `bc97253e7bbdfdd4ccc9b96d2b6bf8a39926c656`.
+
+- GitHub Release `0.2.345`, titled `TE2 0.2.345 alpha`, is the normal/latest
+  release with `prerelease: false`. All 13 draft assets were downloaded and
+  checksum-verified before promotion; public `SHA256SUMS` is
+  `2570412eab97b6367475271130ea362b2861bbeb59d1bef7e1c03c5f6c55797e`.
+  The clean 96-wheel Termux archive SHA-256 is
+  `d7d6ffa136e03db462884e1e4f66648bd730496fa501995564117644dc4ec4ac`;
+  its Ferrous-native Android/AArch64 server is
+  `09a3352a00690255df01e4eeb2204d4cba2a10b6e25ee560f179902a50bb3766`.
+  The APKs carry version code 20345 and synchronized 0.2.345 assets;
+  GeckoView SHA-256 is
+  `a3d4cdf6baed0cdfbb1f9804f3b976e2e39d058606365fb11b5e8a88f9893fae`
+  and Cefrium is
+  `20aaf1625a6b299567e13b3bd6a02ea151fe78923d4953441bb7252d13f214b9`.
+  Public latest-curl Debian desktop/framework/real-worker acceptance is green.
+  Physical Motorola exact-archive acceptance upgraded `0.2.344` to `0.2.345`,
+  retained the former as fallback, installed TUR Bun 1.4.1, and passed framework
+  discovery plus real-worker launch.
+
+- Production PyPI release `te2==0.2.346` is published from annotated tag
+  `0.2.346` at integrated main commit
+  `c72c18432ce73c6d6f15a8bb448bba4952afbffb`. It pins exact first-party
+  dependencies `framework-shells==0.0.63` and
+  `agent-log-server==0.2.124`, plus `fastmcp==3.4.7`. The Linux wheel
+  SHA-256 is
+  `b4f776a6b42090c687469b0882db5c6466fbcd1ab0913df34cb064213e980192`,
+  the sdist is
+  `00b7f10a973d5da6072893f9013cff8987571fac8b5be428b524c9ce508d9b53`,
+  and the packaged Ferrous-native server is
+  `ec8540d0161ccdffe12ca55ff9048718bf8851419ac8acb7a0837017abdbc929`.
+  Agent Log Server 0.2.124 is published for Linux and Android from clean tag
+  commit `f59a37d82c3ce4578974214b1ab292d261cc8bae`.
+
+- GitHub Release `0.2.346`, titled `TE2 0.2.346 alpha`, is the normal/latest
+  release with `prerelease: false`. All 13 private-draft assets were downloaded
+  and checksum-verified before promotion; public `SHA256SUMS` is
+  `996b9793cca184562b43d4650e2950b4a317862d496a38794a5f907ccf2abacb`.
+  The clean 96-wheel Termux archive SHA-256 is
+  `81bafaa7012cbabd4fde8b50ef6dd0907448e4a17925a5847e4f30501218d292`;
+  its Ferrous-native Android/AArch64 server is
+  `15ece56be33934a8234bff4d80b23553c7bfd63ad30a310c261a22b85c586535`.
+  The APKs carry version code 20346 and synchronized 0.2.346 assets; GeckoView
+  SHA-256 is
+  `52eefb47304e5b3cdd564bc2fd2bb5d8aa363474d30c8c4af0c87f8bf688ffef`
+  and Cefrium is
+  `a857ff2efcd95dec99237e3c55f906206d18f4b395db73ab10ec085c78e7954f`.
+  Public latest-curl Debian desktop/framework/real-worker/MCP acceptance is
+  green. Physical Motorola acceptance upgraded `0.2.345` to `0.2.346`,
+  retained the former as its sole fallback, and passed framework discovery,
+  real-worker launch, and MCP initialize/ping/tool-list validation.
+
+- Production release `te2==0.2.347` is published from annotated tag
+  `0.2.347` at integrated main commit
+  `cce287ca3c90fb85d4eedd16b894fc3ad95f9b01`. It retains exact
+  `framework-shells==0.0.63` and `agent-log-server==0.2.124` dependencies.
+  The Linux wheel SHA-256 is
+  `bf898090af9da3f3dbda707451d6fa400676e77543e61b14be71deb3b9c190ba`,
+  the sdist is
+  `8faf3f7da49ad347b90fd0df7c8228b4a29ec47e271a66819325e11e18e535b3`,
+  and the packaged Ferrous-native server is
+  `dcd6d1b5e98a014bb34007ddbad8cbdaf995cc09ad87eb29f341dc03f5a80806`.
+
+- GitHub Release `0.2.347`, titled `TE2 0.2.347 alpha`, is normal/latest and
+  not a prerelease. All 13 draft assets passed API-digest and authenticated
+  byte-for-byte round-trip verification before promotion; public `SHA256SUMS`
+  is `7ea1bcd3b0d91544374a91d47945e5bad3c879ef537ff0e3a92574dbb505ac98`.
+  The deterministic 96-wheel Termux archive is
+  `d8c7e0b541140a6d55e252bd871ec2616297ce6f5e9a6c466103eb2cfebaea36`;
+  its Android/AArch64 Ferrous server is
+  `8e461e4d5468125078a3385287a16a34b90b86f8883dae60dd2cd081a707cd0a`.
+  GeckoView APK SHA-256 is
+  `d366a39b19631e2da103938ce86e89213479e7b89cd6abfb240a6e1d96033a8d`
+  and Cefrium is
+  `64d48aea138126a9fc26beaa86f299db2f852141a16dd90d8926817741af3736`.
+  Public Debian desktop/framework/worker acceptance and physical Motorola
+  archive/APK plus live framework/worker acceptance are green.

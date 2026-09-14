@@ -12,6 +12,7 @@ from ..open_state_events import (
 )
 from ..stores import get_history_store
 from ..worker_services.event_bus import current_project_generation
+from .secondary_content_backend import close_secondary_content
 
 JsonObject = dict[str, object]
 
@@ -79,6 +80,7 @@ async def handle_host_client_foreground_clear_request(
         reason="secondary_editor_closed",
         client_role="secondary",
     )
+    close_secondary_content(client_id)
     open_state = read_sidecar_open_state(
         project_root,
         reason="secondary_editor_closed",

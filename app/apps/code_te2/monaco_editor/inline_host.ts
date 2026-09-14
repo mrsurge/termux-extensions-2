@@ -132,7 +132,7 @@ const INLINE_EDITOR_HOST_STYLE = `
   grid-template-columns: repeat(7, minmax(0, 1fr));
 }
 .fe-root.layout-mobile > .te2-mobile-special-key-panel .te2-mobile-special-key-navigation-row {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(8, minmax(0, 1fr));
 }
 .fe-root > .te2-mobile-special-key-panel[hidden],
 .fe-root:not(.layout-mobile) > .te2-mobile-special-key-panel {
@@ -289,6 +289,17 @@ function ensureInlineScriptAsset(id: string, src: string): Promise<HTMLScriptEle
     };
     if (!(existing instanceof HTMLScriptElement)) document.head.appendChild(script);
   });
+}
+
+export async function ensureHistoricalTouchAssets(editorFrame: HTMLElement): Promise<void> {
+  // Share presentation CSS (including Cefrium's Find input floor), not working
+  // editor markup, providers, or boot state.
+  markNativeRenderer(editorFrame);
+  ensureInlineStyleAsset(INLINE_EDITOR_HOST_STYLE_ID, INLINE_EDITOR_HOST_STYLE);
+  const style = INLINE_EDITOR_STYLE_ASSETS[0];
+  ensureInlineStylesheetAsset(style.id, style.href);
+  const script = INLINE_EDITOR_SCRIPT_ASSETS[0];
+  await ensureInlineScriptAsset(script.id, script.src);
 }
 
 async function ensureInlineEditorAssetsLoaded(

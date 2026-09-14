@@ -32,6 +32,7 @@ export interface ExplorerGitStatus {
 }
 
 interface ExplorerGitFooterUtilsDeps {
+  getProjectPath?(): string;
   getGitSummaryElement(): HTMLElement | null;
   getGitStatus(): ExplorerGitStatus | null;
   isHistoricalComparison?(): boolean;
@@ -241,6 +242,33 @@ export function createExplorerGitFooterUtils(
     return true;
   }
 
+  // Both surfaces share one commit prompt; reject context changes while it is open.
+  let commitPromptOpen = false;
+  async function commitStagedChanges(stageIfEmpty = false): Promise<void> {
+    if (commitPromptOpen || deps.isHistoricalComparison?.()) return;
+    const project = deps.getProjectPath?.();
+    const stageAll = stageIfEmpty && !deps.getGitStatus()?.staged?.length;
+    if (!stageAll && !deps.getGitStatus()?.staged?.length) {
+      deps.toast('No staged changes to commit.');
+      return;
+    }
+    commitPromptOpen = true;
+    try {
+      const message = await window.teUI.dialog.prompt(stageAll
+        ? 'Stage and commit all disk changes (including untracked files): commit message'
+        : 'Commit staged changes: commit message');
+      if (!message) return;
+      if (project !== deps.getProjectPath?.() || deps.isHistoricalComparison?.()) {
+        deps.toast('Project or comparison changed; start Commit again.');
+        return;
+      }
+      const trimmed = message.trim();
+      if (!trimmed) { deps.toast('Commit message cannot be empty.'); return; }
+      safeSend(EXPLORER_RPC_METHODS.gitCommit, { message: trimmed, amend: false,
+        ...(stageIfEmpty ? { stageAll, projectPath: project || '' } : {}) });
+    } finally { commitPromptOpen = false; }
+  }
+
   function bindGitFooterActions(): void {
     const gitButtons = deps.getGitButtons();
     if (!gitButtons) return;
@@ -253,22 +281,7 @@ export function createExplorerGitFooterUtils(
       safeSend(EXPLORER_RPC_METHODS.gitUnstageAll, {});
     });
 
-    gitButtons.commit?.addEventListener('click', async () => {
-      const status = deps.getGitStatus();
-      const stagedCount = Array.isArray(status?.staged) ? status.staged.length : 0;
-      if (!stagedCount) {
-        deps.toast('No staged changes to commit.');
-        return;
-      }
-      const message = await window.teUI.dialog.prompt('Commit message');
-      if (!message) return;
-      const trimmed = message.trim();
-      if (!trimmed) {
-        deps.toast('Commit message cannot be empty.');
-        return;
-      }
-      safeSend(EXPLORER_RPC_METHODS.gitCommit, { message: trimmed });
-    });
+    gitButtons.commit?.addEventListener('click', () => { void commitStagedChanges(); });
 
     gitButtons.push?.addEventListener('click', async () => {
       if (!(await window.teUI.dialog.confirm('Are you sure you want to push changes to remote?'))) {
@@ -310,5 +323,6 @@ export function createExplorerGitFooterUtils(
     showGitProgressBar,
     hideGitProgressBar,
     bindGitFooterActions,
+    commitStagedChanges,
   };
 }

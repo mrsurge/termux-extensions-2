@@ -13,6 +13,46 @@ type DiffChangeLike = {
   removed?: boolean;
 };
 
+/** Mark literal filter matches across syntax spans without destroying their token/diff classes. */
+export function highlightFilterMatches(target: HTMLElement, query: string): void {
+  if (!query) return;
+  const text = target.textContent || '';
+  const ranges: Array<{ start: number; end: number }> = [];
+  const lower = text.toLowerCase();
+  for (let offset = 0; offset <= lower.length - query.length;) {
+    const start = lower.indexOf(query.toLowerCase(), offset);
+    if (start < 0) break;
+    ranges.push({ start, end: start + query.length });
+    offset = start + query.length;
+  }
+  const walker = target.ownerDocument.createTreeWalker(target, 4 /* SHOW_TEXT */);
+  const nodes: Text[] = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode as Text);
+  let offset = 0;
+  for (const node of nodes) {
+    const value = node.data;
+    const end = offset + value.length;
+    const matches = ranges.filter(range => range.start < end && range.end > offset);
+    if (matches.length) {
+      const fragment = target.ownerDocument.createDocumentFragment();
+      let cursor = 0;
+      for (const range of matches) {
+        const start = Math.max(0, range.start - offset);
+        const stop = Math.min(value.length, range.end - offset);
+        fragment.append(value.slice(cursor, start));
+        const hit = target.ownerDocument.createElement('span');
+        hit.className = 'fe-search-hit';
+        hit.textContent = value.slice(start, stop);
+        fragment.append(hit);
+        cursor = stop;
+      }
+      fragment.append(value.slice(cursor));
+      node.replaceWith(fragment);
+    }
+    offset = end;
+  }
+}
+
 interface SearchSnippetOptions {
   ranges?: ExplorerSearchTextRange[];
   matchText?: string | null;

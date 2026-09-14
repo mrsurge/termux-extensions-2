@@ -3,6 +3,7 @@ export type ExplorerSearchMode =
   | "content"
   | "changes"
   | "review"
+  | "history"
   | "diagnostics";
 
 export interface ExplorerSearchOverlayState {

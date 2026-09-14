@@ -173,3 +173,13 @@ test("mobile collapse and close preserve the retained renderer geometry", async 
     rendererMode: "docked",
   });
 });
+
+test('historical population metadata is distinct from working-file authority', async () => {
+  const { parseSecondaryContentPresentation } = await importStateRuntime();
+  const history = { kind: 'historicalDiff', label: 'removed.py', commitId: 'a'.repeat(40) };
+  assert.deepEqual(parseSecondaryContentPresentation(history), history);
+  assert.deepEqual(parseSecondaryContentPresentation({ kind: 'empty' }), { kind: 'empty' });
+  assert.equal(parseSecondaryContentPresentation({ ...history, commitId: 'HEAD' }), null);
+  assert.equal(parseSecondaryContentPresentation({ ...history, label: '' }), null);
+  assert.equal(parseSecondaryContentPresentation({ kind: 'historicalDiff', path: '/disk/file' }), null);
+});

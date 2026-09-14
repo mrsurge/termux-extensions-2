@@ -25,6 +25,7 @@ import {
 } from "../tree/view-utils.ts";
 
 interface ExplorerSearchOverlayController {
+  handleHistoryUpdated(payload: JsonObject): void;
   fetchChangesResults(force?: boolean): Promise<void> | void;
   handleSearchResultsUpdated(payload: JsonObject): void;
   handleSearchJobProgress(payload: JsonObject): void;
@@ -242,6 +243,9 @@ export function createExplorerNotificationHandler(
     }
 
     switch (method) {
+      case EXPLORER_RPC_NOTIFICATIONS.historyUpdated:
+        deps.searchOverlayController.handleHistoryUpdated(payload);
+        break;
       case EXPLORER_RPC_NOTIFICATIONS.prefsUiUpdated: {
         const ui = isRecord(payload.ui) ? payload.ui : null;
         const next = ui?.explorerStickyHeaders;
@@ -531,17 +535,23 @@ export function createExplorerNotificationHandler(
         const project = getNonEmptyString(payload.projectPath);
         if (project && project !== deps.runtimeState.getProjectPath()) break;
         console.log("[GIT_STATUS_DEBUG] Received:", payload);
-        deps.runtimeState.setGitStatus(coerceGitStatus(payload));
+        const oldStatus = deps.runtimeState.getGitStatus();
+        const status = coerceGitStatus(payload);
+        const headChanged = oldStatus?.head?.full !== status.head?.full || oldStatus?.isRepository !== status.isRepository;
+        deps.runtimeState.setGitStatus(status);
         if (payload.diffBase) deps.applyGitDiffBaseSnapshot?.(payload.diffBase);
         const selectedRefresh = payload.selectionOnly === true &&
           selectionRefresh?.project === deps.runtimeState.getProjectPath() &&
           selectionRefresh.revision === payload.selectionRevision;
-        if (!selectedRefresh && deps.searchOverlayController.isVisible() && deps.searchOverlayController.getSearchMode() === 'changes') {
+        // File facts update the retained search projection. Status decoration
+        // refreshes must not restart it; a moved HEAD invalidates its baseline.
+        if (!selectedRefresh && headChanged && deps.searchOverlayController.isVisible() && deps.searchOverlayController.getSearchMode() === 'changes') {
           void deps.searchOverlayController.fetchChangesResults(true);
         }
         deps.renderBranchLabel();
         deps.renderGitSummary();
         deps.setGitControlsEnabled(true, false);
+        if (!headChanged && deps.searchOverlayController.isVisible() && deps.searchOverlayController.getSearchMode() === 'changes') deps.renderSearchOverlay();
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.gitDiffBaseUpdated: {
