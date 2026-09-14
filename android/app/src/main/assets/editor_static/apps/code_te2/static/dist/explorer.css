@@ -1486,12 +1486,12 @@
 .fe-search-changes {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 0;
 }
 
 .fe-search-change-group {
   border-bottom: 1px solid var(--border);
-  padding-bottom: 8px;
+  padding-bottom: 0;
 }
 
 .fe-search-change-group:last-child {
@@ -1501,12 +1501,57 @@
 .fe-search-change-header {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 4px;
+  padding: 2px 8px;
   cursor: pointer;
+  flex-wrap: nowrap;
+}
+
+/* Keep actions/counts fixed while the path clips from its beginning on narrow screens. */
+.fe-search-change-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.fe-search-change-toggle:focus-visible { outline: 1px solid #7dd3fc; }
+.fe-search-change-body[hidden] { display: none; }
+.fe-search-change-icon { flex: 0 0 16px; width: 16px; height: 16px; }
+.fe-search-change-icon svg { width: 100%; height: 100%; fill: currentColor; }
+.fe-search-change-count {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  padding: 0 3px;
+  font-size: 11px;
+}
+.fe-search-change-count.is-added { color: #86efac; }
+.fe-search-change-count.is-deleted { color: #fca5a5; }
+
+/* Totals follow the entire retained projection while only rows scroll into DOM. */
+.fe-changes-progress { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.fe-changes-progress-heading { display: flex; align-items: flex-start; gap: 8px; width: 100%; }
+.fe-changes-total { margin-left: auto; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 4px; font-variant-numeric: tabular-nums; text-align: right; }
+/* Match History selection exactly, but isolate the accent to the file header. */
+.fe-search-change-header.is-recent {
+  outline: none !important;
+  box-shadow: inset 0 0 0 2px #9bd5f5 !important;
+  background: #343c46 !important; color: #e2e8ee !important; border-radius: 0;
 }
 
 .fe-search-change-path {
   flex: 1;
+  min-width: 0;
+  direction: rtl;
+  text-align: left;
   font-size: 13px;
   white-space: nowrap;
   overflow: hidden;
@@ -1516,7 +1561,8 @@
 .fe-search-change-meta {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 4px;
+  flex-shrink: 0;
   font-size: 12px;
 }
 
@@ -1985,3 +2031,48 @@
 .fe-search-hunk-toggle:focus-visible,
 .fe-search-hunk-blind:focus-visible,
 .fe-search-change-restore:focus-visible { outline: 2px solid #7dd3fc; outline-offset: -2px; }
+
+/* Compact file rows keep independent, labeled touch targets instead of text action labels. */
+.fe-search-change-header .fe-search-change-restore,
+.fe-search-hunk-header-row .fe-search-change-restore,
+.fe-search-change-stage {
+  flex: 0 0 30px;
+  width: 30px;
+  min-height: 30px;
+  margin: 0;
+  padding: 2px;
+  font-size: 18px;
+  line-height: 24px;
+  color: inherit;
+  background: rgba(148, 163, 184, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.fe-search-change-stage:disabled,
+.fe-search-changes-actions button:disabled { opacity: 0.4; cursor: default; }
+.fe-search-change-stage:focus-visible { outline: 2px solid #7dd3fc; }
+.fe-search-changes-actions { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.fe-search-changes-expand { margin-right: auto; }
+.fe-search-change-header .fe-search-change-restore.is-historical,
+.fe-search-hunk-header-row .fe-search-change-restore.is-historical {
+  flex-basis: auto;
+  width: auto;
+  padding: 2px 6px;
+  font-size: 12px;
+}
+
+/* Action colors distinguish staging/committing from destructive restoration. */
+.fe-search-change-stage,
+.fe-search-changes-commit {
+  color: #86efac;
+  border: 1px solid #4ade80;
+  background: rgba(34, 197, 94, 0.14);
+}
+.fe-search-change-group .fe-search-change-restore {
+  color: #fca5a5;
+  border-color: #f87171;
+  background: rgba(239, 68, 68, 0.14);
+}
+.fe-search-hunk-header-row { display: flex; align-items: stretch; }
+.fe-search-hunk-header-row .fe-search-hunk-toggle { flex: 1; min-width: 0; width: auto; }

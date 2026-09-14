@@ -96,9 +96,14 @@ test('selector notification plus Git snapshot starts exactly one changes refresh
   let ref = 'HEAD';
   let metadata;
   let reads = 0;
+  let gitStatus;
   const searches = [];
   const handler = createExplorerNotificationHandler({
-    runtimeState: { getProjectPath: () => '/workspace', setGitStatus() {} },
+    runtimeState: {
+      getProjectPath: () => '/workspace',
+      getGitStatus: () => gitStatus,
+      setGitStatus: value => { gitStatus = value; },
+    },
     setGitDiffBaseRef: value => { ref = value; },
     initDiffBaseFromBackend: async () => { reads++; },
     updateDiffBaseButtons() {},
@@ -107,7 +112,7 @@ test('selector notification plus Git snapshot starts exactly one changes refresh
       isVisible: () => visible, getSearchMode: () => 'changes',
       fetchChangesResults: async () => searches.push({ ref, metadata }),
     },
-    renderBranchLabel() {}, renderGitSummary() {}, setGitControlsEnabled() {},
+    renderBranchLabel() {}, renderGitSummary() {}, renderSearchOverlay() {}, setGitControlsEnabled() {},
   });
   handler.handleExplorerNotification('explorer.git.diffBase.updated', { projectPath: '/workspace', ref: 'old', refresh: true, selectionRevision: 's1' });
   assert.equal(reads, 1);
@@ -118,13 +123,15 @@ test('selector notification plus Git snapshot starts exactly one changes refresh
   handler.handleExplorerNotification('explorer.git.diffBase.updated', { projectPath: '/workspace', ref: 'old', selectionRevision: 's1' });
   assert.equal(searches.length, 1, 'duplicate selection projection does not rerun');
   handler.handleExplorerNotification('explorer.git.status.updated', { projectPath: '/workspace', diffBase });
-  assert.equal(searches.length, 2, 'later real Git facts still refresh unchanged selectors');
+  assert.equal(searches.length, 1, 'decoration-only Git facts retain the live changes projection');
   handler.handleExplorerNotification('explorer.git.diffBase.updated', { projectPath: '/workspace', ref: 'HEAD', selectionRevision: 's2' });
-  assert.equal(searches.length, 3, 'HEAD starts immediately too');
+  assert.equal(searches.length, 2, 'HEAD starts immediately too');
   handler.handleExplorerNotification('explorer.git.status.updated', { projectPath: '/workspace', diffBase: { ref: 'HEAD' }, selectionRevision: 's2', selectionOnly: true });
-  assert.equal(searches.length, 3, 'HEAD completion does not start a second search');
+  assert.equal(searches.length, 2, 'HEAD completion does not start a second search');
+  handler.handleExplorerNotification('explorer.git.status.updated', { projectPath: '/workspace', head: { full: 'abcdef', short: 'abcdef' }, diffBase: { ref: 'HEAD' } });
+  assert.equal(searches.length, 3, 'a moved HEAD invalidates the retained baseline');
   visible = false;
-  handler.handleExplorerNotification('explorer.git.status.updated', { projectPath: '/workspace', diffBase });
+  handler.handleExplorerNotification('explorer.git.status.updated', { projectPath: '/workspace', head: { full: 'fedcba', short: 'fedcba' }, diffBase });
   handler.handleExplorerNotification('explorer.git.status.updated', { projectPath: '/other', diffBase });
   assert.equal(searches.length, 3, 'hidden overlays and other projects do not refresh');
 });
@@ -151,6 +158,7 @@ for (const order of [
         getProjectPath: () => project,
         setProjectPath: value => { project = value; },
         getRenderedProjectPath: () => renderedProject,
+        getGitStatus: () => gitStatus,
         setGitStatus: value => { gitStatus = value; },
         getReconnectResyncPending: () => false,
       },

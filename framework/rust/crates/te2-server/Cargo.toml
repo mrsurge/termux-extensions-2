@@ -1,6 +1,6 @@
 [package]
 name = "te2-server"
-version = "0.2.347"
+version = "0.2.348"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true

@@ -3191,10 +3191,7 @@ mod tests {
         let repo = Repository::init(&root).expect("init repo");
         fs::write(root.join("minified.js"), "const value = 1;\n").expect("write tracked");
         commit_all(&repo, "initial commit");
-        let oversized_line = format!(
-            "const value = \"{}\";\n",
-            "x".repeat(512 * 1024)
-        );
+        let oversized_line = format!("const value = \"{}\";\n", "x".repeat(512 * 1024));
         fs::write(root.join("minified.js"), oversized_line).expect("write oversized");
 
         let mut diff_request = provider_request(&root);

@@ -1664,6 +1664,33 @@ does not authorize publication.
   Terminal workers. The final GeckoView and Cefrium APKs both reinstalled
   successfully and report version code `20347`.
 
+### Phase 4O — TE2 0.2.348 source-control and desktop-connect release
+
+- [x] Integrate the source-control graph, historical secondary-editor,
+  progressive Git comparison, Android editor-control, and shared-toast changes
+  merged through PR 23.
+- [x] Add a direct desktop `Connect` action beside the framework URL field. It
+  uses the same validated main-process save-and-retarget transaction as bookmark
+  selection, without requiring a bookmark or changing local-process ownership.
+- [x] Align the inherited comparison and active-file projection tests with the
+  retained local pagination and current Git-status invalidation contracts.
+- [x] Synchronize package, Rust, app/catalog, Electron, Android, frontend URL,
+  and Android asset versions at `0.2.348` / version code `20348`.
+- [x] Rebuild Code TE2, WBA, Terminal, and Electron outputs and publish the exact
+  rebuilt frontend into the Android asset seed.
+- [x] Pass maintained Python, Rust, Code TE2, Terminal, and Electron source
+  gates before constructing native artifacts.
+- [ ] Build and validate the Electron archive and both signed staging APKs from
+  the release candidate.
+- [ ] Complete native live acceptance before constructing the immutable source
+  tag.
+- [ ] Build the Linux wheel/sdist and deterministic physical-AArch64 Termux
+  archive from the clean immutable tag, retaining Agent Log Server `0.2.124`
+  and Framework-Shells `0.0.63`.
+- [ ] Publish TE2 to PyPI, assemble and byte-verify the normal/latest GitHub
+  release titled `TE2 0.2.348 alpha`, then pass fresh public Debian and physical
+  Termux acceptance.
+
 ## Deferred work
 
 - [ ] Linux arm64 Electron package.

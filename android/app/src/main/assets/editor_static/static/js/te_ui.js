@@ -52,6 +52,22 @@ installTeDialog(window);
       .te-toast.success { background: var(--te-toast-success); color: var(--foreground, #fff); }
       .te-toast.error { background: var(--te-toast-error); color: var(--foreground, #fff); }
       .te-toast.warning { background: var(--te-toast-warning); color: var(--foreground, #000); }
+      .te-toast-copy {
+        display: block;
+        width: 100%;
+        border: 0;
+        padding: 0;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        text-align: inherit;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        cursor: copy;
+      }
+      .te-toast-copy:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+      .te-toast-copy-status { display: block; font-size: 0.8em; opacity: 0.85; }
+      .te-toast:has(.te-toast-close) { padding-right: 36px; }
       .te-toast-close {
         position: absolute;
         top: 4px;
@@ -166,6 +182,32 @@ installTeDialog(window);
     return el;
   };
 
+  // Prefer the async clipboard API; legacy HTTP contexts can supply plain text
+  // to a copy event without focusing a temporary field or disturbing the IME.
+  const copyToastText = async (text) => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return;
+      }
+    } catch (_) { /* Permission failures may still allow a user-initiated copy. */ }
+    let copied = false;
+    const onCopy = (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (event.clipboardData) {
+        event.clipboardData.setData('text/plain', text);
+        copied = true;
+      }
+    };
+    window.addEventListener('copy', onCopy, true);
+    try {
+      if (!document.execCommand?.('copy') || !copied) throw new Error('Clipboard unavailable');
+    } finally {
+      window.removeEventListener('copy', onCopy, true);
+    }
+  };
+
   const toast = (message, opts = {}) => {
     if (!message) return;
     ensureStyle();
@@ -173,11 +215,40 @@ installTeDialog(window);
     const { duration = DEFAULT_TOAST_DURATION, variant = 'info', persistent = false, onClose } = opts;
     const toastEl = document.createElement('div');
     toastEl.className = `te-toast ${variant}`;
-    toastEl.textContent = message;
+    const text = String(message);
+    const copyButton = document.createElement('button');
+    copyButton.type = 'button';
+    copyButton.className = 'te-toast-copy';
+    copyButton.textContent = text;
+    copyButton.title = 'Copy notification to clipboard';
+    const copyStatus = document.createElement('span');
+    copyStatus.className = 'te-toast-copy-status';
+    copyStatus.setAttribute('role', 'status');
+    toastEl.append(copyButton, copyStatus);
+
+    // One factory listener covers every caller. Copy the original message,
+    // never the close glyph or feedback, and never summon a second toast.
+    let copying = false;
+    toastEl.addEventListener('pointerdown', (event) => {
+      if (!event.target.closest('.te-toast-close')) event.preventDefault();
+    });
+    toastEl.addEventListener('click', async (event) => {
+      if (event.target.closest('.te-toast-close') || copying) return;
+      copying = true;
+      try {
+        await copyToastText(text);
+        copyStatus.textContent = 'Copied';
+      } catch (_) {
+        copyStatus.textContent = 'Could not copy to clipboard';
+      } finally {
+        copying = false;
+      }
+    });
 
     if (persistent) {
       const closeBtn = document.createElement('button');
       closeBtn.className = 'te-toast-close';
+      closeBtn.type = 'button';
       closeBtn.innerHTML = '&times;';
       closeBtn.addEventListener('click', () => {
         toastEl.remove();

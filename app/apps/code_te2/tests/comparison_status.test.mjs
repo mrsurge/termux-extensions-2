@@ -102,7 +102,7 @@ test('By changes ignores superseded requests and responses after closing', async
   assert.equal(results, null);
 });
 
-test('progressive changes retain existing diff DOM and expose bounded continuation', async () => {
+test('progressive changes retain existing diff DOM and expose bounded local continuation', async () => {
   const win = new Window();
   const saved = new Map();
   for (const key of ['window', 'document', 'Node', 'HTMLElement', 'HTMLInputElement']) {
@@ -122,12 +122,14 @@ test('progressive changes retain existing diff DOM and expose bounded continuati
     renderSearchOverlayBody(container, state, deps);
     const group = container.querySelector('.fe-search-change-group');
     assert.ok(group);
-    state.searchResults = { ...state.searchResults, changes: [first, { rel: 'b.py', hunks: [] }], complete: true, nextOffset: 40, total: 45, offset: 0 };
+    const changes = [first, ...Array.from({ length: 44 }, (_, index) => ({ rel: `file-${index}.py`, hunks: [] }))];
+    state.searchResults = { ...state.searchResults, changes, complete: true, total: 45, offset: 0 };
     renderSearchOverlayBody(container, state, deps);
     assert.equal(container.querySelector('.fe-search-change-group'), group);
-    assert.equal(container.querySelectorAll('.fe-search-change-group').length, 2);
-    container.querySelector('.fe-changes-progress button').click();
-    assert.deepEqual(pages, [40]);
+    assert.equal(container.querySelectorAll('.fe-search-change-group').length, 40);
+    container.querySelector('.fe-changes-more').click();
+    assert.equal(container.querySelectorAll('.fe-search-change-group').length, 45);
+    assert.deepEqual(pages, []);
   } finally {
     win.happyDOM.abort();
     for (const [key, descriptor] of saved) {
