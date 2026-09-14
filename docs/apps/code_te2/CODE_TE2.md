@@ -2472,7 +2472,7 @@ There are three distinct layers:
    - Native `input` events coalesce to one latest-value read per animation frame.
    - The coalesced transaction retains the latest `InputEvent.inputType`.
    - One cumulative UTF-16 range edit is applied before a generation-guarded canonical reseed.
-   - Android composition start/update/end events do not gate input or create Monaco's visible composition textarea.
+   - Android composition start/update/end events do not gate input or create Monaco's visible composition textarea. Selection-only `selectionchange` (including Gboard spacebar-slide) maps unchanged guarded line offsets directly to model selection in both Gecko and Chromium, before the desktop Chrome restriction. `deduceAndroidImeSelection` rejects guard positions, stale line identity and changed text; pending IME transactions retain ownership. The selection handoff updates retained offsets and suppresses synchronous textarea reseeding, avoiding keyboard resets or fabricated edits. `tests/android_selection_sync.test.mjs` exercises source and published ESM with actual input/wrapper classes.
    - Aligned ordinary insertion remains on Monaco's typing path. An aligned
      `insertLineBreak` or `insertParagraph` newline is also routed through
      typing so `EnterOperation` applies language indentation; multiline paste,

@@ -377,11 +377,20 @@ Follow-Up Branch**. This is not a remaining blocker for this branch.
 
 ### Mobile Input
 
-- [ ] After Command Palette access, investigate Android keyboard spacebar-slide
-  cursor navigation. Establish what cursor/selection events reach the hidden
-  textarea before choosing any source or native changes; preserve composition
-  and Ctrl/229 guards. Symbol Index is now scheduled first; this is the final
-  planned investigation before wrap-up.
+- [x] Capture Android spacebar-slide signals: GeckoView emits selectionchange
+  with unchanged textarea text and no keyboard/input/composition events. User
+  placed the caret without typing. Chromium's delayed movement is user-reported.
+  Source has both a Chrome-only gate and an Android selection-only early return.
+- [x] Implement immediate guarded selection-only synchronization in the Monaco
+  fork for both Android renderers, preserving pending edits and Ctrl/229 guards.
+- [x] Test offset mapping, guard boundaries, reverse selection, duplicate events,
+  Gecko/Chromium dispatch and pending text transactions; publish generated assets.
+  Scoped Monaco TypeScript program check passed; source/published-module DOM tests
+  cover native input/wrapper dispatch and no reseed on selection handoff. Published
+  the two modules with type-aware TS emission (const-enum folding), rebuilt the
+  Monaco bootstrap, and passed Code TE2 typecheck/build. No native build/version bump.
+- [x] Live acceptance: spacebar-slide moves the visible caret immediately in
+  GeckoView and Cefrium, and subsequent typing/composition still targets it.
 - [x] Capture GeckoView textarea/input events and compare with Cefrium. Missing
   intended characters were absent from captured DOM key/input events; no 229 or
   composition events appeared in the explicit 229 capture. The simple typing

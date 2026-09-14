@@ -226,6 +226,25 @@ This work is deferred, not an implemented feature or a new History merge blocker
 Its concrete Kotlin/API scope, build/install and live validation need separate
 approval. Keep these tasks in the plan/tracker, not condensed repository memory.
 
+### Android Spacebar-Slide Cursor Synchronization
+
+The live GeckoView probe recorded native `selectionchange` events moving the
+hidden textarea caret from offsets 16 through 35, with unchanged text and no
+key/input/composition events. The user placed the cursor without typing. Chromium
+also defers visible movement until another IME event, per live user observation.
+The maintained Monaco source currently rejects non-Chrome selection events and
+separately skips Android whole-line selection changes until input arrives.
+
+Implement selection-only synchronization in the Monaco fork, before the desktop
+Chrome-only path. Map guarded textarea offsets to the retained model line and
+publish through the existing selection request event. Accept only unchanged text
+with valid line guards, focused input and no pending IME edit transaction; do not
+synthesize keys, change text, reseed the textarea or relax Ctrl/229 protections.
+Keep desktop behavior unchanged and cover Gecko/Chromium, repeated movement,
+selection direction, guard boundaries and in-flight text changes in tests.
+Publish through the existing Monaco build pipeline, then live-test both Android
+renderers. No Kotlin changes, APK build, version bump or framework restart.
+
 ### History Delivery And Validation
 
 1. Vendor exact upstream files and attribution; prove adapted graph output with
