@@ -1546,7 +1546,7 @@ native ordinary-CPython and free-threaded-CPython wheels and refuses a
 non-native release artifact. Agent Log Server then emits a platform wheel with
 its verified Rust server and exact Framework-Shells dependency. Only after
 those wheels exist does TE2 build against exact
-`framework-shells==0.0.63`, `agent-log-server==0.2.124`, and, on Linux x86-64,
+`framework-shells==0.0.63`, `agent-log-server==0.2.125`, and, on Linux x86-64,
 `nodejs-wheel==24.16.0`. Final published artifacts must be rebuilt from the
 clean synchronized tag; dirty-source candidates are acceptance inputs only.
 

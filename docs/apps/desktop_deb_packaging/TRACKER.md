@@ -42,7 +42,7 @@ Last updated: 2026-09-09
 | `sse-starlette` was held directly by an unmounted router | The dead `app.libs.jobs.jobs_bp` import/router was removed while the job core and handlers remain | Pruned; still transitive through MCP |
 | Framework-Shells is reproducibly pinned | `requirements.txt` uses exact validated 0.0.63 commit `0bf3269cd69a000015b0ac484a04004b8dc564d1` | Complete |
 | Framework-Shells release artifacts are native | The Linux candidate set carries the PyO3 pipe pump and Rust terminal broker in `cp39-abi3` and free-threaded `cp314-cp314t` manylinux wheels; release construction refuses a non-native wheel | Implemented and clean-install validated |
-| Agent Log Server has a fail-closed binary wheel | Exact 0.2.124 depends on Framework-Shells 0.0.63 and carries a target/version/digest-verified `als-server`, compiled browser bundle, and vendored Socket.IO MessagePack parser; corrupt/incompatible provenance and incomplete wheels fail construction | Implemented for 0.2.123; 0.2.124 publication validation is Phase 4M |
+| Agent Log Server has a fail-closed binary wheel | Exact 0.2.125 depends on Framework-Shells 0.0.63 and carries a target/version/digest-verified `als-server`, compiled browser bundle, and vendored Socket.IO MessagePack parser; corrupt/incompatible provenance and incomplete wheels fail construction | Implemented and validated on Linux; Android publication is part of Phase 4O |
 | ALS app-worker launch must preserve the managed venv | Bootstrap correctly prepends the active venv, but the former `sh -lc` shellspec reset `PATH` before resolving `als-rs` | Corrected to direct argv and covered by a manifest regression test |
 | Linux x86-64 owns an exact private Node runtime | `nodejs-wheel==24.16.0` supplies venv-local Node/npm and matching headers; bootstrap children, Terminal, WBA, and source Electron use the shared resolver | Implemented and clean-install validated |
 | Modern Termux excludes the Linux Node wheel | Both connected targets run Python 3.14.6 with `sys.platform == "android"` and `aarch64`; the Linux/x86-64 marker is false | Termux resolves Node/npm from its apt package mapping |
@@ -1664,7 +1664,7 @@ does not authorize publication.
   Terminal workers. The final GeckoView and Cefrium APKs both reinstalled
   successfully and report version code `20347`.
 
-### Phase 4O — TE2 0.2.348 source-control and desktop-connect release
+### Phase 4O — TE2 0.2.349 source-control and desktop-connect release
 
 - [x] Integrate the source-control graph, historical secondary-editor,
   progressive Git comparison, Android editor-control, and shared-toast changes
@@ -1675,7 +1675,8 @@ does not authorize publication.
 - [x] Align the inherited comparison and active-file projection tests with the
   retained local pagination and current Git-status invalidation contracts.
 - [x] Synchronize package, Rust, app/catalog, Electron, Android, frontend URL,
-  and Android asset versions at `0.2.348` / version code `20348`.
+  and Android asset versions first at the unpublished `0.2.348` candidate, then
+  at `0.2.349` / version code `20349` after Agent Log Server advanced.
 - [x] Rebuild Code TE2, WBA, Terminal, and Electron outputs and publish the exact
   rebuilt frontend into the Android asset seed.
 - [x] Pass maintained Python, Rust, Code TE2, Terminal, and Electron source
@@ -1683,12 +1684,18 @@ does not authorize publication.
 - [x] Build and validate the packaged Electron application and both signed
   staging APKs from the release candidate.
 - [x] Complete native live acceptance before constructing the immutable source
-  tag.
-- [ ] Build the Linux wheel/sdist and deterministic physical-AArch64 Termux
-  archive from the clean immutable tag, retaining Agent Log Server `0.2.124`
-  and Framework-Shells `0.0.63`.
+  tag. The accepted version-code `20349` GeckoView candidate is
+  `c939e146fd80eceafa90916e9b803e741d2309c7e715220c25b41379742d1dfc`;
+  the Cefrium candidate is
+  `3b790bbb3686de61a0932fbd5af9984cb8f1a574ffcd665e64227e1a421a9513`.
+- [x] Preserve pushed tag `0.2.348` as an immutable unpublished candidate; do
+  not publish or move it after the Agent Log Server dependency changed.
+- [x] Build, runtime-validate, and publish clean Linux and Android Agent Log
+  Server `0.2.125` wheels from commit `3adc3b1d696fc99be00409eb94028d1e34164dd3`.
+- [ ] Build the TE2 Linux wheel/sdist and deterministic physical-AArch64 Termux
+  archive from immutable tag `0.2.349`, retaining Framework-Shells `0.0.63`.
 - [ ] Publish TE2 to PyPI, assemble and byte-verify the normal/latest GitHub
-  release titled `TE2 0.2.348 alpha`, then pass fresh public Debian and physical
+  release titled `TE2 0.2.349 alpha`, then pass fresh public Debian and physical
   Termux acceptance.
 
 ## Deferred work

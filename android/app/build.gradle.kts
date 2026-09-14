@@ -12,8 +12,8 @@ android {
         applicationId = "com.termux.extensions"
         minSdk = 24
         targetSdk = 34
-        versionCode = 20348
-        versionName = "1.0.8-r0.2.348"
+        versionCode = 20349
+        versionName = "1.0.8-r0.2.349"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["sharedUserIdValue"] = "com.termux.extensions.base"

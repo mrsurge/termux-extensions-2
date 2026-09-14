@@ -8,7 +8,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FRAMEWORK_SHELLS_REQUIREMENT = "framework-shells==0.0.63"
-AGENT_LOG_SERVER_REQUIREMENT = "agent-log-server==0.2.124"
+AGENT_LOG_SERVER_REQUIREMENT = "agent-log-server==0.2.125"
 FASTMCP_REQUIREMENT = "fastmcp==3.4.7"
 NODEJS_WHEEL_REQUIREMENT = (
     'nodejs-wheel==24.16.0; sys_platform == "linux" '
