@@ -73,11 +73,64 @@ explicitly invoked. Preserve ordinary request ordering and state ownership.
 
 Exit: source-backed interface proposal and approved first implementation slice.
 
+### Selected Control Path (2026-09-15)
+
+Use one execution path for CLI and MCP:
+
+```text
+te2 framework eval / te2-mcp framework-eval tool
+  -> existing Rust framework listener/control plane
+  -> exact running app-worker stdio pipe
+  -> selected Python app's live event loop
+  -> correlated result through the same route
+```
+
+Keep `te2 console` for its existing browser/native console role. Do not register
+Python app workers as JavaScript console workers or evaluate in the FastAPI
+console relay process. CLI and MCP share target resolution, transport, errors
+and bounds. Add worker discovery/capability reporting alongside eval; accept code
+from an argument or stdin in the CLI. Target a live app/shell instance, not just
+a reusable PID or ambiguous label; reject stale identities after restart.
+
+The initial source audit found these concrete prerequisites:
+
+- `app/cli/run_rust_framework.py` already dispatches `te2 console` before bootstrap;
+  add the framework subcommand beside it, not as another server startup mode.
+- `framework/bootstrap/bootstrap.py` reserves `--debug` / `TE2_SERVER_DEBUG` for
+  the unoptimized build. Use `--runtime-debug` / `TE2_RUNTIME_DEBUG` for runtime
+  inspection, independent of release/debug binaries. Propagate explicitly through
+  bootstrap, framework launch environment and participating Python workers.
+  Enforce opt-in at both framework dispatch and worker execution, not just the UI.
+- `app_worker_pipe_bridge.rs` currently ignores non-request stdout frames. Add
+  bounded pending-request correlation, response routing and lifecycle rejection
+  using its existing pipe writer; do not introduce another stdout reader.
+- `app/libs/app_worker.py` currently dispatches incoming requests synchronously
+  on the stdin thread. `pipe_runtime.dispatch_request` runs awaitables through
+  `asyncio.run`, which is not the app's live loop. Schedule debug work onto the
+  captured app loop without blocking the pipe reader. Reuse one serialized output
+  writer so eval replies and app-origin service requests cannot interleave.
+- `--memory-profile` and `app/memory_profile.py` already provide controlled
+  Heaptrack/tracemalloc/SIGUSR2 capture. Reuse applicable primitives; runtime eval
+  must not implicitly enable heavy memory profiling or require Heaptrack.
+
+Support explicit state-changing evaluation as well as inspection. Timeout is a
+waiting bound, not proof that execution stopped: never retry automatically or
+claim rollback. Keep arbitrary code execution trusted and explicitly enabled.
+Finalize concrete payload limits, admission limits, authorization and result
+serialization during implementation design; no unbounded retained object handles.
+
 ## Phase 2: Python Evaluation And Memory Inspection
 
 Add opt-in runtime evaluation/reflection using the existing control plane. Make
 it usable from existing developer tooling/MCP where appropriate; do not mistake
 frontend console evaluation for access to live Python worker objects.
+
+Import Python `inspect` lazily inside the requested inspection capability.
+It is standard-library, not a pip dependency; nevertheless, handle ImportError
+as a structured capability-unavailable result rather than crashing worker startup.
+Do not add a global mandatory inspection import as part of this feature. Keep
+unrelated existing imports alone. Evaluation that does not need inspection must
+remain usable, and tests must cover both successful and unavailable lazy loading.
 
 Provide bounded inspection of retained search sessions, projection membership,
 task/queue state and relevant ownership/lifecycle metadata. Establish memory
@@ -98,6 +151,46 @@ Exit: a tested diagnostic surface able to answer what is retained and where work
 is waiting, without changing production semantics merely by being installed.
 
 ## Phase 3: Scheduling Evidence And Sidecar Cleanup
+
+### External Rust CPU Profiling
+
+Use optional external sampling tools rather than adding a Rust reflection or
+interpreter runtime. Prefer Samply on desktop Linux for interactive call trees,
+thread timelines and source views; retain perf/cargo-flamegraph as a simple SVG
+workflow. Investigate Simpleperf first for native Rust capture on Android/Termux.
+Desktop support does not establish Android compatibility: verify executable
+availability, kernel perf-event access, SELinux/process permissions and usable
+stack unwinding on the actual device before committing to a capture backend.
+
+Profile optimized binaries with matching retained debug symbols, recording build
+identity and symbol provenance. Reuse an appropriate existing optimized profiling
+build where possible; do not silently select the unoptimized --debug build or
+enable allocation profiling alongside CPU sampling.
+
+Expose bounded capture, status and artifact retrieval through shared CLI/MCP
+control-plane methods, gated by --runtime-debug / TE2_RUNTIME_DEBUG. Define exact
+process-instance targeting, explicit duration/rate/output limits, cancellation,
+concurrency limits and profiler-child cleanup without terminating the target.
+Profiler dependencies remain optional; unavailable tools/permissions produce clear
+capability errors. No automatic kernel security changes or profile uploads.
+Do not add another public debug listener; any local viewer is separately invoked.
+
+Keep raw captures and derived reports local with bounded retention and metadata.
+Validate each selected tool's export/import and symbolization workflow before
+promising interchangeable JSON artifacts. CLI/MCP should return artifact metadata
+and bounded retrieval, not unbounded profile JSON in routine responses.
+
+CPU sampling identifies executing hot paths, not all sources of latency. Samply's
+documented Linux capture is on-CPU only; retain correlated queue/service/wait
+timings and distinguish those from CPU cost. Measure capture overhead with a
+repeatable workload and keep sampling inactive by default.
+
+Upstream references for implementation qualification:
+- https://github.com/mstange/samply
+- https://github.com/flamegraph-rs/flamegraph
+- https://android.googlesource.com/platform/system/extras/+/refs/heads/main/simpleperf/doc/README.md
+
+### Scheduling And Cleanup
 
 Use the new inspection surface to separate ingress delay, queue wait, synchronous
 execution, external-service wait, projection publication and frontend delivery.
@@ -121,6 +214,25 @@ Extend the debug-variant native command path to inspect the live activity/view,
 input connection and filter. Evaluation/reflection and controlled actions should
 be usable for experiments, not arbitrarily limited to formatted read-only dumps.
 Choose concrete native APIs and thread boundaries during the approved design.
+
+Use Java reflection for live-object field inspection and method invocation, with
+`org.jetbrains.kotlin:kotlin-reflect` where Kotlin-specific property/function
+metadata is useful. Native evaluation here means operating on existing runtime
+objects through structured commands, not compiling or interpreting arbitrary
+Kotlin source. Keval is excluded; no math-expression parser is needed.
+
+Define exact object targeting, argument conversion, overload resolution, bounded
+result serialization and explicit mutation/invocation actions. Report inaccessible
+members and invocation exceptions accurately. Reflection does not bypass Android
+platform access restrictions; use explicit app-owned diagnostic hooks where needed.
+Do not retain obsolete activities/views through unbounded debug object handles.
+
+Keep new inspection seams and kotlin-reflect in debug source sets/dependency
+configurations. Release variants must not depend on the new library or expose
+these commands. Reuse existing native console endpoints and marshal view/input
+operations to the UI thread. Existing release console commands remain unchanged.
+Align kotlin-reflect with the app's Kotlin version; validate Android compatibility,
+dependency resolution, debug functionality and release exclusion.
 
 Provide enable/disable, snapshot/export/clear and optional logcat output. Record
 connection creation/replacement/closure, focus, restartInput, selection/cursor
