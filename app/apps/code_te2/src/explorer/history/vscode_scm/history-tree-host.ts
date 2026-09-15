@@ -62,7 +62,7 @@ export class HistoryTreeHost implements TreeDisposable {
       this.tree = new Tree('TE2 history', this.element, new ListDelegate(),
         { isIncompressible: () => true },
         [new HistoryItemRenderer(), new HistoryItemChangeRenderer(resolveIcon), new HistoryItemLoadMoreRenderer(), new HistoryItemErrorRenderer(), new HistoryDetailsRenderer(id => this.currentRows.get(id))], this.source, {
-          compressionEnabled: false, expandOnlyOnTwistieClick: false,
+          compressionEnabled: false, expandOnlyOnTwistieClick: false, supportDynamicHeights: mobile,
           identityProvider: { getId: rowId },
           accessibilityProvider: {
             getWidgetAriaLabel: () => 'Source Control History',
@@ -109,7 +109,7 @@ export class HistoryTreeHost implements TreeDisposable {
         String(count.additions).length + (count.state === 'partial' ? 2 : 1),
         String(count.deletions).length + (count.state === 'partial' ? 2 : 1));
     }
-    this.element.style.setProperty('--history-count-width', `calc(${this.countWidth}ch + 10px)`);
+    this.element.style.setProperty('--history-count-width', `calc(${this.countWidth}ch + 8px)`);
   }
 
   private maybeLoadMore(): void {

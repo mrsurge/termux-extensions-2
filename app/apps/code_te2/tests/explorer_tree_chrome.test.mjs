@@ -62,6 +62,30 @@ function rect(top, height = 40, left = 0, width = 320) {
   };
 }
 
+test('project switch dialogs describe draft loss as a risk, not a certainty', () => {
+  const projectSwitchWarning =
+    'Any unsaved changes in the current project could be lost. Continue?';
+  const certainLossWarning =
+    'Any unsaved changes in the current project will be lost. Continue?';
+  const chromeSource = fs.readFileSync(
+    path.join(appRoot, 'src/explorer/chrome/explorer-chrome-controller.ts'),
+    'utf8',
+  );
+  const projectsSource = fs.readFileSync(
+    path.join(appRoot, 'main_page/frontend/ui/projects-debug-modal.ts'),
+    'utf8',
+  );
+
+  assert.equal(
+    chromeSource.split(projectSwitchWarning).length - 1,
+    2,
+    'Open Project and New Project must both use conditional draft-loss wording',
+  );
+  assert.equal(projectsSource.includes(projectSwitchWarning), true);
+  assert.equal(chromeSource.includes(certainLossWarning), false);
+  assert.equal(projectsSource.includes(certainLossWarning), false);
+});
+
 test('tree diagnostic markers never become part of the canonical filename', async () => {
   installDom();
   const {

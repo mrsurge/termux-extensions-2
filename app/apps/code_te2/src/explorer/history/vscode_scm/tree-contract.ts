@@ -36,7 +36,7 @@ export interface HistoryTreeConstructor {
   new (
     user: string,
     container: HTMLElement,
-    delegate: { getHeight(): number; getTemplateId(element: HistoryRow): string },
+    delegate: { getHeight(): number; getTemplateId(element: HistoryRow): string; hasDynamicHeight?(element: HistoryRow): boolean },
     compression: { isIncompressible(element: HistoryRow): boolean },
     renderers: HistoryTreeRenderer[],
     dataSource: {
@@ -46,6 +46,7 @@ export interface HistoryTreeConstructor {
     options: {
       compressionEnabled: boolean;
       expandOnlyOnTwistieClick: boolean;
+      supportDynamicHeights?: boolean;
       identityProvider: { getId(element: HistoryRow): string };
       accessibilityProvider: { getWidgetAriaLabel(): string; getAriaLabel(element: HistoryRow): string };
     },

@@ -178,6 +178,7 @@ export class HistoryItemLoadMoreRenderer {
 
 export class ListDelegate {
 	getHeight(): number { return 22; }
+	hasDynamicHeight(element: HistoryRow): boolean { return element.type === 'historyItemDetails'; }
 	getTemplateId(element: HistoryRow): string {
 		switch (element.type) {
 			case 'historyItemViewModel': return HistoryItemRenderer.TEMPLATE_ID;
