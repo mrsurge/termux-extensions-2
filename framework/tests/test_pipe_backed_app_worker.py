@@ -12,6 +12,8 @@ import urllib.request
 from pathlib import Path
 from typing import TextIO
 
+from app.libs.pipe_protocol import PipeEnvelope, decode_line, encode_line
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FILE_EXPLORER_BACKEND = REPO_ROOT / "app/apps/file_explorer/file_explorer.py"
@@ -73,6 +75,7 @@ class PipeBackedAppWorkerTests(unittest.TestCase):
         env["TE_FRAMEWORK_URL"] = "http://127.0.0.1:9"
         env["TE_PIPE_NAME"] = "service.fs"
         env["TE_PIPE_NID"] = "2100"
+        env["TE2_RUNTIME_DEBUG"] = "1"
 
         proc = subprocess.Popen(
             cmd,
@@ -122,6 +125,26 @@ class PipeBackedAppWorkerTests(unittest.TestCase):
             result = response.get("result") or {}
             self.assertIsInstance(result.get("entries"), list, response)
             self.assertGreater(len(result["entries"]), 0, response)
+
+            # Exercise the real reader/lifespan seam, not a second asyncio.run loop.
+            probe = PipeEnvelope(kind="request", id="debug-status", method="runtime.debug.status",
+                                 origin_nid=1, origin_name="framework.rust.test",
+                                 target_nid=2100, target_name="service.fs")
+            _ = proc.stdin.write(encode_line(probe).decode("utf-8"))
+            proc.stdin.flush()
+            debug_response = decode_line(_readline_with_timeout(proc.stdout))
+            self.assertEqual(debug_response.kind, "response")
+            self.assertEqual(debug_response.id, "debug-status")
+            self.assertIsNone(debug_response.error)
+
+            probe.id = "debug-eval"
+            probe.method = "runtime.debug.eval"
+            probe.params = {"code": "await asyncio.sleep(0)\nresult = 7 if backend is not None else 0"}
+            _ = proc.stdin.write(encode_line(probe).decode("utf-8"))
+            proc.stdin.flush()
+            evaluated = decode_line(_readline_with_timeout(proc.stdout))
+            self.assertEqual(evaluated.id, "debug-eval")
+            self.assertEqual(evaluated.result, {"value": 7, "truncated": False}, evaluated)
         finally:
             proc.terminate()
             try:
@@ -129,6 +152,9 @@ class PipeBackedAppWorkerTests(unittest.TestCase):
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait(timeout=3)
+            for stream in (proc.stdin, proc.stdout, proc.stderr):
+                if stream is not None:
+                    stream.close()
 
 
 if __name__ == "__main__":

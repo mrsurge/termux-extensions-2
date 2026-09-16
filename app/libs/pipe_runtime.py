@@ -168,8 +168,28 @@ def accept_response(envelope: PipeEnvelope) -> bool:
         pending = _pending.get(request_id)
     if pending is None:
         return False
-    pending.put(envelope)
+    # Duplicate replies must never stall the sole stdin reader.
+    try:
+        pending.put_nowait(envelope)
+    except queue.Full:
+        return False
     return True
+
+
+def write_envelope(envelope: PipeEnvelope, before_write: Callable[[], None] | None = None) -> None:
+    """Serialize replies and outbound requests through the same protocol writer."""
+    with _lock:
+        writer = _transport_writer
+    if writer is None:
+        raise PipeRuntimeError("Outbound pipe transport is not configured", code="pipe.transportNotConfigured")
+    payload = encode_line(envelope)
+    with _write_lock:
+        # Release diagnostic admission only once its reply owns the writer, and
+        # before the peer can observe the frame and issue its next request.
+        if before_write is not None:
+            before_write()
+        _ = writer.write(payload)
+        _ = writer.flush()
 
 
 def add_notification_listener(
@@ -202,7 +222,7 @@ def accept_notification(envelope: PipeEnvelope) -> bool:
         if method_filter is not None and method not in method_filter:
             continue
         try:
-            event_queue.put_nowait(envelope)
+            _ = event_queue.put_nowait(envelope)
             delivered = True
         except Exception:
             continue
@@ -310,10 +330,7 @@ def _send_outbound_request(
         pending: queue.Queue[PipeEnvelope] = queue.Queue(maxsize=1)
         _pending[request_id] = pending
     try:
-        payload = encode_line(request)
-        with _write_lock:
-            _ = writer.write(payload)
-            _ = writer.flush()
+        write_envelope(request)
         timeout = _response_timeout(timeout_seconds)
         try:
             response = pending.get(timeout=timeout)

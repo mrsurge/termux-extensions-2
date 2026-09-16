@@ -11,7 +11,7 @@ mod native {
     use std::{
         collections::HashSet,
         sync::{
-            Arc, Mutex, OnceLock,
+            Arc, Mutex, OnceLock, Weak,
             atomic::{AtomicBool, Ordering},
             mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError, sync_channel},
         },
@@ -65,9 +65,25 @@ mod native {
         handle: Handle,
     ) -> anyhow::Result<()> {
         let (sink, writer) = start_pipe_writer(manager.clone(), shell_id, app_id)?;
+        let registration = crate::runtime_debug_pipe::register(app_id, shell_id, sink.clone());
+        let registration = match registration {
+            Ok(registration) => registration,
+            Err(error) => {
+                sink.close();
+                let _ = writer.join();
+                return Err(error);
+            }
+        };
+        if let Some(registration) = &registration {
+            let _ = sink.debug_route.set(Arc::downgrade(&registration.route));
+            if sink.closed.load(Ordering::Acquire) {
+                registration.route.close();
+            }
+        }
         let read_result =
             run_bridge_read(manager, shell_id, app_id, scheduler, handle, sink.clone());
         sink.close();
+        drop(registration);
         let write_result = writer
             .join()
             .map_err(|_| anyhow::anyhow!("app-worker pipe writer panicked"))?;
@@ -85,6 +101,9 @@ mod native {
     ) -> anyhow::Result<()> {
         let mut buffer = Vec::<u8>::new();
         loop {
+            if sink.closed.load(Ordering::Acquire) {
+                break;
+            }
             match manager.read_stdout_chunk_blocking(shell_id, Duration::from_millis(250))? {
                 Some(chunk) => {
                     buffer.extend_from_slice(&chunk);
@@ -125,6 +144,15 @@ mod native {
                 return;
             }
         };
+        if matches!(
+            &request.kind,
+            PipeMessageKind::Response | PipeMessageKind::Error
+        ) {
+            if let Some(route) = sink.debug_route.get().and_then(Weak::upgrade) {
+                let _ = route.accept(request);
+            }
+            return;
+        }
         if !matches!(&request.kind, PipeMessageKind::Request) {
             debug!(
                 kind = ?&request.kind,
@@ -155,6 +183,7 @@ mod native {
     }
 
     struct FerrousPipeSink {
+        debug_route: Arc<OnceLock<Weak<crate::runtime_debug_pipe::DebugRoute>>>,
         sender: SyncSender<Vec<u8>>,
         closed: Arc<AtomicBool>,
         shell_id: String,
@@ -182,6 +211,9 @@ mod native {
 
         fn close(&self) {
             self.closed.store(true, Ordering::Release);
+            if let Some(route) = self.debug_route.get().and_then(Weak::upgrade) {
+                route.close();
+            }
         }
     }
 
@@ -199,7 +231,9 @@ mod native {
     ) -> anyhow::Result<(Arc<FerrousPipeSink>, JoinHandle<anyhow::Result<()>>)> {
         let (sender, receiver) = sync_channel(PIPE_WRITER_QUEUE_CAPACITY);
         let closed = Arc::new(AtomicBool::new(false));
+        let debug_route = Arc::new(OnceLock::<Weak<crate::runtime_debug_pipe::DebugRoute>>::new());
         let sink = Arc::new(FerrousPipeSink {
+            debug_route: debug_route.clone(),
             sender,
             closed: closed.clone(),
             shell_id: shell_id.to_owned(),
@@ -218,6 +252,9 @@ mod native {
                     closed.clone(),
                 );
                 closed.store(true, Ordering::Release);
+                if let Some(route) = debug_route.get().and_then(Weak::upgrade) {
+                    route.close();
+                }
                 result
             })?;
         Ok((sink, writer))
@@ -277,6 +314,7 @@ mod native {
         fn bounded_writer_queue_preserves_order_and_fails_explicitly() {
             let (sender, receiver) = sync_channel(2);
             let sink = FerrousPipeSink {
+                debug_route: Arc::default(),
                 sender,
                 closed: Arc::new(AtomicBool::new(false)),
                 shell_id: "shell".to_owned(),

@@ -24,6 +24,8 @@ from starlette.types import ASGIApp
 import uvicorn
 
 from app.libs.pipe_protocol import PipeEnvelope
+from app.libs.runtime_debug_pipe import RuntimeDebugPipe
+from app.libs.runtime_startup_trace import StartupTrace
 from app.memory_profile import install_python_memory_profiler
 
 
@@ -34,12 +36,6 @@ EXPLICIT_APP_ROUTER_EXPORT = "TE2_APP_ROUTER"
 
 class PipeReader(Protocol):
     def readline(self) -> bytes | str: ...
-
-
-class PipeWriter(Protocol):
-    def write(self, data: bytes) -> object: ...
-
-    def flush(self) -> object: ...
 
 
 class HttpResponse(Protocol):
@@ -210,14 +206,16 @@ def _raw_frame_has_content(raw: bytes | str) -> bool:
     return bool(raw.strip())
 
 
-def _run_pipe_worker(app_id: str, module: ModuleType, protocol_stdout: object) -> None:
+def _run_pipe_worker(
+    app_id: str, module: ModuleType, protocol_stdout: object,
+    debug_pipe: RuntimeDebugPipe | None = None,
+) -> None:
     from app.libs import pipe_runtime
     from app.libs.pipe_protocol import (
         PipeError,
         PipeIdentity,
         PipeProtocolError,
         decode_line,
-        encode_line,
         process_error_response,
     )
 
@@ -232,18 +230,16 @@ def _run_pipe_worker(app_id: str, module: ModuleType, protocol_stdout: object) -
 
     responder = PipeIdentity.from_env()
     stdin = cast(PipeReader, getattr(sys.stdin, "buffer", sys.stdin))
-    stdout = cast(PipeWriter, getattr(protocol_stdout, "buffer", protocol_stdout))
-
-    def _write_response(envelope: PipeEnvelope) -> None:
-        payload = encode_line(envelope)
-        _ = stdout.write(payload)
-        _ = stdout.flush()
+    pipe_runtime.configure_stdio_transport(protocol_stdout)
+    _write_response = pipe_runtime.write_envelope
 
     # Pipe mode reserves stdout for JSONL protocol frames. Backend imports and
     # dispatchers can still log freely because main() redirects sys.stdout first.
     while True:
         raw = stdin.readline()
         if raw in (b"", ""):
+            if debug_pipe is not None:
+                debug_pipe.close()
             return
         if not _raw_frame_has_content(raw):
             continue
@@ -287,6 +283,10 @@ def _run_pipe_worker(app_id: str, module: ModuleType, protocol_stdout: object) -
             )
             continue
 
+        # Only the reserved diagnostic lane moves off the reader; ordinary app
+        # dispatch keeps its existing ordering and execution behavior.
+        if debug_pipe is not None and debug_pipe.submit(request_envelope):
+            continue
         response = pipe_runtime.dispatch_request(request_envelope)
         _write_response(response)
 
@@ -302,6 +302,8 @@ def main() -> None:
         help="Run the backend module as a JSONL pipe service.",
     )
     args = _parse_args(parser)
+    startup_trace = StartupTrace(args.app_id)
+    startup_trace.mark("worker.entry")
     if not args.pipe and args.port is None:
         parser.error("--port is required unless --pipe is set")
 
@@ -314,31 +316,36 @@ def main() -> None:
 
     mounted_subapps: list[tuple[str, ASGIApp]] = []
     backend_serving_hook: Callable[[], object] | None = None
+    debug_pipe: RuntimeDebugPipe | None = None
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        startup_trace.mark("lifespan.begin")
         async with AsyncExitStack() as stack:
             for path, subapp in mounted_subapps:
                 lifespan_context = _subapp_lifespan_context(subapp)
                 if lifespan_context is None:
                     continue
                 print(f"DEBUG: Entering lifespan for mounted sub-app at {path}", file=sys.stderr)
-                _ = await stack.enter_async_context(lifespan_context(subapp))
+                with startup_trace.span("subapp.lifespan:" + path):
+                    _ = await stack.enter_async_context(lifespan_context(subapp))
             serving_task: asyncio.Task[None]
             hook = backend_serving_hook
             if hook is not None:
                 async def _run_backend_serving_hook() -> None:
                     await asyncio.sleep(0.1)
                     try:
-                        result = hook()
-                        if inspect.isawaitable(result):
-                            result = await cast(Awaitable[object], result)
+                        with startup_trace.span("backend.serving_hook"):
+                            result = hook()
+                            if inspect.isawaitable(result):
+                                result = await cast(Awaitable[object], result)
                         if isinstance(result, dict):
                             await asyncio.to_thread(
                                 _post_framework_readiness,
                                 args.app_id,
                                 cast(JsonObject, result),
                             )
+                            startup_trace.mark("framework.readiness_posted")
                     except Exception as exc:
                         print(f"[app-worker] Backend serving hook failed for {args.app_id}: {exc}", file=sys.stderr)
 
@@ -348,13 +355,22 @@ def main() -> None:
                     await asyncio.sleep(0.1)
                     try:
                         await asyncio.to_thread(_post_framework_readiness, args.app_id)
+                        startup_trace.mark("framework.readiness_posted")
                     except Exception as exc:
                         print(f"[app-worker] Backend readiness post failed for {args.app_id}: {exc}", file=sys.stderr)
 
                 serving_task = asyncio.create_task(_run_default_backend_serving_post())
-            yield
-            if not serving_task.done():
-                _ = serving_task.cancel()
+            # Publish the live loop only after mounted apps have initialized.
+            if debug_pipe is not None:
+                debug_pipe.bind(asyncio.get_running_loop())
+            try:
+                startup_trace.mark("lifespan.ready")
+                yield
+            finally:
+                if debug_pipe is not None:
+                    debug_pipe.close()
+                if not serving_task.done():
+                    _ = serving_task.cancel()
 
     app = FastAPI(lifespan=lifespan)
 
@@ -377,7 +393,8 @@ def main() -> None:
         previous_module = sys.modules.get(module_name)
         sys.modules[module_name] = module
         try:
-            spec.loader.exec_module(module)
+            with startup_trace.span("backend.import"):
+                spec.loader.exec_module(module)
         except BaseException:
             if previous_module is None:
                 _ = sys.modules.pop(module_name, None)
@@ -397,11 +414,17 @@ def main() -> None:
             if protocol_stdout is None:
                 raise RuntimeError("Pipe protocol stdout is not configured")
             pipe_runtime.configure_stdio_transport(protocol_stdout)
+            debug_pipe = RuntimeDebugPipe(
+                enabled=os.environ.get("TE2_RUNTIME_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"},
+                identity=PipeIdentity.from_env(),
+                reply=pipe_runtime.write_envelope,
+                backend=module,
+            )
 
         if args.pipe and args.port is None:
             if protocol_stdout is None:
                 raise RuntimeError("Pipe protocol stdout is not configured")
-            _run_pipe_worker(args.app_id, module, protocol_stdout)
+            _run_pipe_worker(args.app_id, module, protocol_stdout, debug_pipe)
             return
 
         router_name, main_router = _main_router_from_module(module, args.app_id)
@@ -426,6 +449,7 @@ def main() -> None:
                 app.mount(path, subapp)
 
         backend_serving_hook = _backend_serving_hook_from_module(module)
+        startup_trace.mark("backend.assembled")
 
     except Exception as e:
         print(f"Error loading app backend: {e}", file=sys.stderr)
@@ -445,7 +469,7 @@ def main() -> None:
             raise RuntimeError("Pipe protocol stdout is not configured")
         pipe_thread = threading.Thread(
             target=_run_pipe_worker,
-            args=(args.app_id, module, protocol_stdout),
+            args=(args.app_id, module, protocol_stdout, debug_pipe),
             name=f"te2-{args.app_id}-pipe-rpc",
             daemon=True,
         )

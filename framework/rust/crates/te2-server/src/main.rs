@@ -11,6 +11,10 @@ mod proxy_transport;
 mod registry;
 mod runtime;
 mod runtime_bridge;
+#[cfg(feature = "ferrous-framework-native")]
+mod runtime_debug_http;
+#[cfg(feature = "ferrous-framework-native")]
+mod runtime_debug_pipe;
 mod sio_proxy;
 mod te2_paths;
 
@@ -324,6 +328,8 @@ async fn main() -> Result<()> {
     let public_framework_url = config.framework_url();
     let bind_addrs = config.socket_addrs();
     let listeners = bind_tcp_listeners(&bind_addrs)?;
+    #[cfg(feature = "ferrous-framework-native")]
+    runtime_debug_http::initialize(config.port, &public_framework_url)?;
     let fws_bridge_runtime = start_fws_bridge(&config, &public_framework_url)?;
     let http_client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
@@ -459,6 +465,8 @@ fn build_router(state: AppState) -> Router {
         .merge(apps_lifecycle::router())
         .merge(app_proxy::router());
 
+    #[cfg(feature = "ferrous-framework-native")]
+    let router = router.merge(runtime_debug_http::router());
     app_proxy::register_sio_proxy_routes(router, state.sio_routes())
         .with_state(state)
         .layer(socket_layer)
@@ -709,6 +717,19 @@ fn start_fws_bridge(config: &ServerConfig, public_framework_url: &str) -> Result
         .context("failed to start Ferrous native FWS bridge host")?;
         let upstream_base_url = host.url();
         let mut child_env = host.child_env_overlay();
+        // Framework startup owns this opt-in; app manifests cannot elevate it.
+        let runtime_debug = env::var("TE2_RUNTIME_DEBUG")
+            .map(|value| {
+                matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                )
+            })
+            .unwrap_or(false);
+        child_env.insert(
+            "TE2_RUNTIME_DEBUG".to_owned(),
+            if runtime_debug { "1" } else { "0" }.to_owned(),
+        );
         child_env.insert(
             "FRAMEWORK_SHELLS_FWS_SOCKETIO_URL".to_owned(),
             public_framework_url.to_owned(),

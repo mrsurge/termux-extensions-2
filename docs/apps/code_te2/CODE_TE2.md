@@ -4063,6 +4063,79 @@ Built-in backend module identity comes from package path rather than public app 
   Production retains the platform allocator; do not attribute extension-host or
   language-server growth to Rust without process-separated evidence.
 
+- Runtime diagnostics opt-in is `--runtime-debug` / `TE2_RUNTIME_DEBUG`, not
+  the unoptimized-build `--debug`. `--no-runtime-debug` overrides inherited
+  enablement. Bootstrap normalizes the value to `1`/`0`; the Rust app launcher
+  overwrites manifest values with the framework-owned setting, including zero.
+  It does not automatically enable memory or CPU profiling. Capture endpoints
+  remain separate work; discovery/status/evaluation are available below.
+
+- Opt-in Python `[startup_timing]` stderr records measure backend import,
+  router assembly milestones, mounted lifespans, serving hooks and readiness POST
+  completion. They carry app/PID, elapsed milliseconds since worker main entry,
+  phase duration and outcome, without app content or credentials. Entry is after
+  interpreter/common worker imports, not process creation. Lifespan-ready does
+  not mean code-server/WBA or browser models are ready. No polling is introduced;
+  records are absent with runtime-debug disabled. Fresh worker startup is needed
+  to observe these boundaries; warm page refresh does not rerun Python imports.
+
+- The Python worker reserves `runtime.debug.*` on its existing JSONL pipe.
+  `runtime.debug.status` reports live-loop/thread status only when opted in and
+  bound after mounted-app startup. At most one diagnostic operation is admitted;
+  disabled, unbound, wrong-target and busy requests receive explicit errors.
+  Shutdown/pipe EOF closes admission and requests cooperative cancellation, not
+  rollback. Pipe-only workers have no live HTTP loop and reject diagnostics.
+  Ordinary app dispatch remains unchanged. Replies and outbound calls share one
+  writer lock; duplicate responses never block the stdin reader. Diagnostic reply
+  writes run off-loop. Diagnostic admission releases once the reply owns the
+  shared writer, before its bytes reach the peer, avoiding a false busy result
+  on an immediate subsequent call.
+
+- Rust diagnostic routing retains exact app/shell/random bridge-instance identity
+  only for opted-in bridges. It uses the existing writer and stdout reader, with
+  one pending diagnostic request per worker, matching request/correlation IDs and
+  framework reply destination. Waits must be positive and at most 30 seconds.
+  Timeout, caller cancellation and enqueue failure remove the waiter; disconnect
+  and writer failure wake it. Neither timeout nor cancellation proves execution
+  stopped, and requests are never automatically retried. Registration cleanup is
+  instance-scoped so an old bridge cannot remove its replacement. JSONL and
+  ordinary service dispatch remain unchanged.
+
+- The existing Rust listener exposes GET `/api/runtime-debug/workers` and POST
+  `/api/runtime-debug/status` and `/api/runtime-debug/eval`. Each requires runtime
+  opt-in and a per-start bearer credential. Startup atomically publishes
+  `$TE2_RUNTIME_HOME/runtime-debug-<port>.json` (0600, in an owned private runtime
+  directory). The file contains frameworkUrl/token; the token rotates at startup.
+  A stopped instance's file is inert and is not unlinked during shutdown, avoiding
+  deletion races with a replacement process. No token is placed in request URLs.
+  Local CLI reads the private file only for its matching loopback framework URL;
+  explicit remote CLI credentials use `TE2_RUNTIME_DEBUG_TOKEN`. Use trusted
+  tunnels, not untrusted plaintext HTTP, for remote credential-bearing traffic.
+
+- `te2 framework list-workers`, `status` and `eval` share one typed HTTP adapter
+  with `te2_framework_workers/status/eval` MCP tools. MCP requires an explicit
+  `credential` argument and never reads the local token on a remote caller's
+  behalf. Exact targets require appId, shellId and instanceId from discovery.
+  There is no ambiguous app-only fallback, retry or stale-instance recovery.
+
+```sh
+te2 framework list-workers
+te2 framework status --app code_te2 --shell SHELL_ID --instance INSTANCE_ID
+te2 framework eval --app code_te2 --shell SHELL_ID --instance INSTANCE_ID --code 'backend.__name__'
+```
+
+- Eval accepts `--code` or stdin, at most 32 KiB UTF-8 source, with a 1-30 second
+  waiting timeout. It executes trusted Python on the live app loop with builtins,
+  `backend` (the live module), `asyncio`, and lazy `inspect_runtime()`. Expressions
+  return a value; statements assign `result`; top-level await works. Bindings are
+  fresh per request, but mutations of live objects persist. There is no sandbox,
+  rollback, or preemption of blocking synchronous code. stdout stays in worker
+  logs rather than being intercepted. Missing inspect returns a capability error.
+  Result projection avoids arbitrary repr/properties, handles cycles, and caps
+  traversal at 2048 units/depth 12, strings at 4096 characters and encoded results
+  at 64 KiB. It reports truncation explicitly; unsupported objects should be
+  inspected explicitly inside the evaluation. No object handles are retained.
+
 - Supported x86_64 GNU/Linux TE2 binary-release wheels carry the audited
   optimized Rust server plus explicit target/version/source/digest provenance.
   Bootstrap verifies the payload after explicit server overrides and never

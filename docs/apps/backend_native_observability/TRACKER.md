@@ -14,8 +14,12 @@ Design/scope: `docs/apps/backend_native_observability/PLAN.md`.
 - [x] Approve Phase 1 read-only investigation and record selected routing/flag
   decisions. Runtime implementation and native build/install scope remain separate.
 
-Planning and initial source audit only so far. No runtime, Python, Rust, Kotlin
-or frontend implementation has changed on this branch.
+The runtime-debug startup flag, worker propagation and Python live-loop diagnostic
+dispatch foundation are implemented. The pipe-only runtime.debug.status probe is
+available, with internal Rust exact-bridge routing and response correlation.
+Credential-protected public discovery/status/evaluation and CLI/MCP adapters are
+implemented; live acceptance, dedicated state snapshots, profiling and native
+tooling remain pending.
 
 ## Phase 1: Runtime Map And Contract
 
@@ -27,20 +31,28 @@ or frontend implementation has changed on this branch.
   commands, not general Kotlin source evaluation.
 - [x] Select CLI `te2 framework eval` and MCP sharing Rust-to-worker pipe routing.
 - [x] Select --runtime-debug / TE2_RUNTIME_DEBUG, enforced at framework and worker.
-- [ ] Define exact target identity, typed envelopes, opt-in and teardown.
-- [ ] Define bounded capture/export, thread ownership, errors and disconnects.
+- [x] Define initial eval identity/envelopes/opt-in/credential and teardown.
+- [x] Define initial eval result bounds, live-loop ownership, errors/disconnects.
+  Dedicated capture/export and memory traversal remain later work.
 - [x] Separate observation from explicit state-changing eval/reflection actions.
 - [x] Document timeout limitations and trusted-code execution, not a sandbox.
-- [ ] Present source-backed edit scope and obtain implementation approval.
+- [x] Approve startup-gate and Python transport foundation slices. Later public
+  evaluation, Rust correlation and native edits require their concrete scope.
 
 ## Phase 2: Python Diagnostics
 
-- [ ] Implement approved opt-in evaluation/reflection via existing control plane.
-- [ ] Add shared CLI/MCP discovery and eval requests with exact instance identity.
-- [ ] Implement bounded Rust response correlation and worker-disconnect cleanup.
-- [ ] Schedule evaluation on the live app loop without blocking stdin replies;
-  serialize all protocol writes and reject workers without supported live context.
-- [ ] Lazy-load stdlib inspect on demand; test ImportError as capability failure,
+- [x] Add --runtime-debug/--no-runtime-debug and normalize TE2_RUNTIME_DEBUG;
+  override app manifest values from the framework-owned launch environment.
+- [x] Implement trusted opt-in evaluation and lazy inspect via existing control plane.
+- [x] Add shared CLI/MCP discovery and eval requests with exact instance identity.
+- [x] Implement internal Rust status routing, one pending request per bridge,
+  exact app/shell/instance resolution and disconnect/caller-cancellation cleanup.
+- [x] Expose credential-authenticated discovery/status/eval through CLI/MCP.
+- [x] Add bounded diagnostic dispatch on the live app loop without blocking stdin
+  replies; serialize writes and reject disabled/unbound/closed diagnostic contexts.
+- [x] Connect evaluation with source/result limits, credential authorization and
+  exact process identity contract.
+- [x] Lazy-load stdlib inspect on demand; test ImportError as capability failure,
   preserving startup and evaluation that does not depend on inspection.
 - [ ] Expose bounded search/projection/session and task/queue inspection.
 - [ ] Label counts, payload bytes, allocation measurements and RSS separately.
@@ -51,6 +63,74 @@ or frontend implementation has changed on this branch.
 - [ ] Record baseline and cleanup measurements, including instrumentation cost.
 
 ## Phase 3: Scheduling And Sidecar Audit
+
+### Startup Investigation Aside
+
+- [x] Inspect host boot and code-server readiness ownership without starting shells.
+- [x] Install bounded removable live timing wrappers via exact-worker eval.
+- [x] Add runtime-debug-only worker import/lifespan/serving timing on stderr.
+- [x] Capture user-triggered page refresh with code-server initially stopped.
+- [x] Capture a separately approved fresh worker boot for Python startup timing.
+- [ ] Propose evidence-backed launch-order changes, preserving WBA ownership and
+  draft/open-model synchronization; obtain approval before implementation.
+
+Source findings: host `runBootSequence` awaits `ensureWorkbenchAdapterReady`
+before `mountInlineEditorHost`. Its wait can last 60 seconds; a ready baton skips
+it. Boot-snapshot preparation already primes the runtime asynchronously.
+Python already subscribes to code-server output for `HTTP server listening`;
+moving shell ownership into WBA is not yet justified. Installation validation
+precedes the cached-shell fast path, and spawn-time extension registry rebuilding
+runs synchronously; timings must establish whether either is material.
+The existing readiness event/cached shell ID can remain set after external stop;
+they alone do not prove the process is alive. No launch semantics changed here.
+
+The temporary probe is stored as `backend._te2_startup_probe`: `events` retains
+at most 256 entries and `uninstall()` restores only wrappers it still owns.
+It survives page refresh, not worker replacement. Read events before uninstalling.
+Source startup measurements require a fresh worker launch, not a page refresh.
+
+2026-09-16 warm-worker capture, user-confirmed refresh: exact worker
+`frs_1789575592769_495_5_5`, instance `e3075cbf443b783d3f2fc237aabdb9bb`.
+Backend runtime preparation took 16008.491 ms: code-server ensure 5358.104 ms,
+then adapter ensure 10645.599 ms. Nested code-server measurements: installation
+validation 5.635 ms, two cached-shell lookups 435.741/367.043 ms, synchronous
+extension registry rebuilding 366.217 ms, output readiness wait 2785.632 ms.
+These nested timings must not be added to the parent totals. Adapter ensure
+includes configuration, shell discovery/start, ping, connect and ready publication;
+this capture does not separately attribute them or measure browser paint.
+Recommend investigating editor-first mounting with independently attached WBA
+intelligence before changing shell ownership. Cold Python boot is recorded below.
+Diagnostic-only source validation: 12 startup/pipe/isolated-worker tests passed;
+focused Basedpyright reports zero errors/warnings. No shared restart performed.
+All eight temporary wrappers were restored after capture; no live probe remains.
+
+2026-09-16 user-triggered cold Python worker restart: shell
+`frs_1789576540517_495_6_6`, instance `d36a91f47903aaf4e8aefa0a4b39e55f`,
+PID 7312. Structured stderr timings: backend import 1632.907 ms; assembled at
+1736.718 ms; lifespan-ready at 1862.191 ms; serving hook 86.340 ms, completed
+at 2143.952 ms after worker main entry. This excludes interpreter/common imports
+before main, and is not a browser paint or complete intelligence-ready duration.
+Code TE2 posts its own readiness inside the serving hook and returns None, so
+absence of the generic worker's framework.readiness_posted marker is expected.
+No readiness-post failure appeared in the inspected log. Code-server readiness
+and successful adapter bootstrap were also logged, but without duration records
+for this run; do not combine their times with the earlier warm-worker capture.
+No new Python startup stall was established. The source-confirmed frontend
+WBA-before-Monaco dependency remains the primary optimization candidate.
+
+### Original Audit Scope
+
+### Approved Startup Implementation
+
+- [ ] Commit/push observability checkpoint and approved startup plan.
+- [ ] Configure private compile-cache paths for managed code-server and Node WBA.
+- [ ] Verify cache support/output with the resolved runtime; report Linux limits.
+- [ ] Mount Monaco independently of WBA readiness; preserve reconnect/consent.
+- [ ] Advance worker-owned runtime preparation with single-flight launch ownership.
+- [ ] Validate focused tests, types and generated frontend publication.
+- [ ] User live acceptance: early file display, eventual intelligence, both modes.
+
+### Remaining Original Audit Scope
 
 - [x] Select external Rust CPU sampling, not a reflection/interpreter runtime:
   Samply on Linux, Simpleperf feasibility on Termux, flamegraph SVG alternative.
@@ -129,3 +209,49 @@ profiling, pipe dispatch direction/threading, and structured native console entr
 User approved the routing/flag choices and lazy inspect. The native plan was
 corrected to Java reflection plus debug-only kotlin-reflect, excluding Keval.
 No dependencies installed or runtime changed.
+
+Runtime-debug startup slice: added positive/negative CLI flags, normalized child
+environment and framework-authoritative manifest overrides. Validation:
+`python -m unittest framework.tests.test_bootstrap -q` passed 36 tests;
+`cargo test -p te2-server launcher::tests --locked -j 2` passed 5 tests.
+Basedpyright on bootstrap/tests reported zero errors and 295 warnings, including
+existing dynamic-module typing warnings and private-helper access in new tests.
+New tests use a typed module import rather than propagating dynamic-module Any.
+Rust formatting and git diff checks passed. Pytest is absent in this environment;
+the unittest runner was used directly. No framework restart or eval exposure.
+
+2026-09-16 Python transport foundation: 8 unittest tests passed across
+test_runtime_debug_pipe and test_pipe_backed_app_worker. Covered live-loop status,
+disabled/unbound/closed paths, target/method errors, single-flight admission,
+cooperative shutdown, nested framework replies, duplicate replies and serialized
+writes. The integration test launches an isolated worker; the shared framework
+was not restarted. Basedpyright on app_worker.py, pipe_runtime.py,
+runtime_debug_pipe.py and the new focused test reports zero errors/warnings.
+Ordinary dispatch and JSONL framing remain unchanged. User also reported the
+previous startup-flag slice compiles/runs normally in live use.
+
+2026-09-16 Rust routing slice: internal status discovery/routing captures exact
+app/shell/random bridge identity. Existing stdout dispatch now resolves matching
+response/error frames; registration and writer closure reject pending calls.
+Tests cover identity mismatches, late/duplicate responses, worker errors, busy
+admission, timeout/caller abort, enqueue failure and replacement-safe cleanup.
+`cargo test -p te2-server pipe --locked -j 2` passed 29 tests, including 4 new
+routing tests. Combined bootstrap/Python pipe regression passed 44 tests.
+Rust formatting and git diff checks passed. No shared runtime restart, public
+API exposure or live end-to-end CLI/MCP claim; those remain the next slice.
+
+2026-09-16 public evaluation slice: added credential-gated discovery/status/eval
+on the existing Rust listener, shared CLI/MCP access and bounded live-worker
+evaluation with top-level await and lazy inspect. The isolated worker test
+exercises the live backend module. A reply/admission race was fixed by releasing
+the worker slot under the serialized writer lock before the reply becomes visible;
+sequential requests require neither sleeps nor retries.
+Combined bootstrap, evaluator, pipe, isolated worker and discovery regressions:
+55 unittest tests passed. `cargo test -p te2-server runtime_debug --locked -j 2`
+passed 8 tests. Focused Basedpyright on the changed evaluator/transport/client/CLI
+modules and new unit tests reported zero errors/warnings. MCP tool construction
+and required credential/target schemas were checked. The broader MCP server
+still reports 19 existing bare-dict annotation errors and 49 warnings; the three
+new typed tools have only decorated-function unused warnings. Rust formatting
+and git diff checks passed. No shared framework restart or live end-to-end
+acceptance has been performed; CLI/MCP runtime acceptance remains pending.

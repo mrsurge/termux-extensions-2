@@ -14,6 +14,9 @@ import app as app_pkg
 
 
 def main() -> int:
+    if len(sys.argv) > 1 and sys.argv[1] == "framework":
+        from app.cli.framework_cli import main as framework_main
+        return framework_main(sys.argv[2:])
     if len(sys.argv) > 1 and sys.argv[1] == "console":
         from app.cli.console_cli import main as console_main
         return int(console_main(sys.argv[2:]))

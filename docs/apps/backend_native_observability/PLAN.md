@@ -119,6 +119,32 @@ claim rollback. Keep arbitrary code execution trusted and explicitly enabled.
 Finalize concrete payload limits, admission limits, authorization and result
 serialization during implementation design; no unbounded retained object handles.
 
+### Public Evaluation Contract
+
+The approved initial facade uses the existing Rust listener at
+`/api/runtime-debug/workers`, `/status` and `/eval`. Runtime-debug must be enabled
+on framework and worker. A fresh per-start bearer credential is atomically stored
+in the private runtime directory as `runtime-debug-<port>.json` (0600). It rotates
+on startup; a stopped instance's retained file is inert. The local CLI reads it
+only for its exact loopback framework URL. Remote CLI use supplies
+`TE2_RUNTIME_DEBUG_TOKEN`; MCP tools require an explicit `credential` argument,
+never silently borrowing the local token. Do not send credentials over untrusted
+plain HTTP or paste them into logs; use a trusted tunnel for remote access.
+
+Targets contain appId, shellId and random bridge instanceId. Evaluation accepts
+at most 32 KiB UTF-8 source, waits 1-30 seconds, and uses a fresh request scope
+with `backend` (the live module), `asyncio` and lazy `inspect_runtime()`. Expressions
+return their value; statements assign `result`; top-level await is supported.
+Actual object mutations persist, but scratch variable bindings do not. This is
+trusted Python with builtins, not a sandbox. Synchronous code can block the worker.
+
+Projection is limited to JSON primitives and exact built-in dict/list/tuple
+containers: at most 2048 traversal units, depth 12, strings clipped to 4096
+characters and a 64 KiB encoded result ceiling. Cycles/unknown objects/limits are
+explicitly marked as truncated rather than invoking arbitrary repr/property code.
+stdout is not captured and remains worker logging. No retained object handles,
+automatic retries, or promise of cancellation/rollback on timeout.
+
 ## Phase 2: Python Evaluation And Memory Inspection
 
 Add opt-in runtime evaluation/reflection using the existing control plane. Make
@@ -151,6 +177,44 @@ Exit: a tested diagnostic surface able to answer what is retained and where work
 is waiting, without changing production semantics merely by being installed.
 
 ## Phase 3: Scheduling Evidence And Sidecar Cleanup
+
+### Approved Startup Optimization Slice
+
+Checkpoint the current diagnostic implementation before changing startup behavior.
+Measured warm-worker preparation was 16.01 s (5.36 s code-server ensure followed
+by 10.65 s adapter ensure); a separate fresh Python worker reached lifespan-ready
+1.86 s after main entry. These are not browser-paint measurements.
+
+1. Supply a private absolute `NODE_COMPILE_CACHE` directory through the managed
+   code-server shell environment on Termux and standalone Linux. Verify the actual
+   runtime's support and cache production/reuse; enable it for Node-backed WBA
+   without requiring or misidentifying Bun as Node. Do not use the string `1` as
+   a boolean or create cache directories in the user's project. Cache failure
+   must not become an installation prerequisite. Preserve managed launchers and
+   version-separated Node cache behavior; do not promise first-launch speedups.
+2. Remove intelligence readiness from the browser document-display critical path.
+   Preserve installation consent and web-worker mode, launch errors/status,
+   draft materialization, exact-client state, and existing WBA reconnect/open
+   replay. Mount/render Monaco while runtime preparation proceeds independently;
+   do not replace backend authority with browser-owned open membership.
+3. Advance runtime preparation to the earliest safe existing worker lifecycle
+   boundary and start WBA without requiring a browser readiness baton. Inspect
+   prerequisites before moving work: settings/registry preparation must precede
+   launch, and concurrent callers must join one launch. Keep shell ownership in
+   Python orchestration/FWS; do not add a second launcher inside WBA. If launch
+   before Python import would require a new framework contract, document that
+   boundary and obtain separate approval rather than bypassing it.
+
+Use focused Python and frontend lifecycle/order tests, strict typing, and a frontend
+build. Record cache capability evidence separately from performance measurements.
+No shared framework restart, shell termination, Android bundling, version bump,
+or cold-cache cleanup is authorized by this slice. User-triggered restarts and
+live acceptance will measure the resulting display/intelligence separation.
+
+Reference: Node module compile-cache documentation and code-server v4.130.0
+`ci/build/code-server.sh` (standalone launcher execs bundled Node with inherited
+environment). Cached compilation does not replace extension activation or WBA
+connection work; inspect those independently if they remain slow.
 
 ### External Rust CPU Profiling
 
