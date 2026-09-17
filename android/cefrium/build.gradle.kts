@@ -80,6 +80,13 @@ android {
     }
 
     sourceSets {
+        getByName("testDebug").java.srcDir("../app/src/testDebug/java")
+        getByName("debug") {
+            java.srcDir("../app/src/debug/java")
+            manifest.srcFile("../app/src/debug/AndroidManifest.xml")
+        }
+        getByName("release").java.srcDir("../app/src/nonDebug/java")
+        getByName("staging").java.srcDir("../app/src/nonDebug/java")
         getByName("main") {
             java.srcDir("../app/src/main/java")
             kotlin.srcDir("../app/src/main/java")
@@ -94,6 +101,7 @@ configurations.all {
 }
 
 dependencies {
+    debugImplementation("org.jetbrains.kotlin:kotlin-reflect:2.2.10")
     val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
 
     implementation("com.cefrium:cefrium-sdk:0.8.0")
@@ -116,6 +124,7 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20090211")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
 }

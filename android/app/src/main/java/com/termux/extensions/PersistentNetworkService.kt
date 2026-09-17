@@ -150,6 +150,7 @@ class PersistentNetworkService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        NativeRuntimeDebug.register("service", this)
         settingsStore = AndroidAppSettingsStore(applicationContext)
         settings = settingsStore.load()
         runtimeState = AndroidClientRuntimeState(settings.frameworkBaseUrl)
@@ -194,6 +195,7 @@ class PersistentNetworkService : Service() {
     }
 
     override fun onDestroy() {
+        NativeRuntimeDebug.unregister("service", this)
         releaseForegroundAndLocks()
         unregisterWifiObserver()
         runTargetProjectionClient.disconnect()

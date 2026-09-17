@@ -1,0 +1,25 @@
+// Explicit build-contract check; no APK assembly or installation required.
+// ./gradlew -I verify-native-debug.init.gradle :app:verifyNativeDebugIsolation :cefrium:verifyNativeDebugIsolation
+gradle.projectsEvaluated {
+    [':app', ':cefrium'].each { name ->
+        def project = gradle.rootProject.project(name)
+        project.tasks.register('verifyNativeDebugIsolation') {
+            doLast {
+                def android = project.extensions.getByName('android')
+                assert !android.buildTypes.getByName('debug').minifyEnabled
+                ['release', 'staging'].each { variant ->
+                    def dirs = android.sourceSets.getByName(variant).java.srcDirs
+                    assert dirs.any { it.path.endsWith('/src/nonDebug/java') }
+                    assert !dirs.any { it.path.endsWith('/src/debug/java') }
+                    def configName = name == ':app' ? 'gecko' + variant.capitalize() + 'RuntimeClasspath' : variant + 'RuntimeClasspath'
+                    def deps = project.configurations.getByName(configName).allDependencies
+                    assert !deps.any { it.group == 'org.jetbrains.kotlin' && it.name == 'kotlin-reflect' }
+                }
+                assert project.configurations.getByName('debugImplementation').dependencies.any {
+                    it.group == 'org.jetbrains.kotlin' && it.name == 'kotlin-reflect' && it.version == '2.2.10'
+                }
+                println "${name}: native debug source/dependency isolation verified"
+            }
+        }
+    }
+}

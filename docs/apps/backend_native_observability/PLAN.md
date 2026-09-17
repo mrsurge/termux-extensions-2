@@ -336,7 +336,16 @@ projection delivery. Distinguish intentionally retained working sets from leaks.
 Exit: documented findings and targeted corrections, or an explicit evidence-based
 decision that a suspected path needs no change. No invented performance claim.
 
-## Phase 4: Gecko Native IME Diagnostics
+## Phase 4: Android Native Debug Runtime And Deferred IME Diagnostics
+
+First ship the general-purpose debug-only dispatcher for both GeckoView and
+Cefrium: console JSON and permission-protected ADB ordered broadcasts use the
+same main-thread inspection/mutation path. No new network listener. Debug builds
+disable minification; release/staging retain only inert registration/dispatch
+seams. Java reflection provides exact-signature invocation, Kotlin reflection
+provides optional metadata, and bounded weak handles avoid retaining activities.
+General command/root lifecycle tracing is included; low-level Gecko IME tracing
+below is subsequent work, not a prerequisite for this foundational slice.
 
 Extend the debug-variant native command path to inspect the live activity/view,
 input connection and filter. Evaluation/reflection and controlled actions should

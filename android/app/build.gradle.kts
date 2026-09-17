@@ -48,11 +48,8 @@ android {
     buildTypes {
         debug {
             signingConfig = signingConfigs.getByName("debug")
-            isMinifyEnabled = true
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
+            // Preserve runtime member names and readable stacks for inspection.
+            isMinifyEnabled = false
         }
         release {
             isMinifyEnabled = true
@@ -92,9 +89,15 @@ android {
         compose = true
     }
 
+    sourceSets {
+        getByName("release").java.srcDir("src/nonDebug/java")
+        getByName("staging").java.srcDir("src/nonDebug/java")
+    }
+
 }
 
 dependencies {
+    debugImplementation("org.jetbrains.kotlin:kotlin-reflect:2.2.10")
     val composeBom = platform("androidx.compose:compose-bom:2024.02.01")
 
     implementation("androidx.core:core-ktx:1.12.0")
@@ -114,6 +117,7 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20090211")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
 }

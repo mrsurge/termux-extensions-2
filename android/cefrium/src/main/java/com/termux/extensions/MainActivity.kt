@@ -275,6 +275,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        NativeRuntimeDebug.register("activity", this)
         diagnostics = AndroidDiagnostics(applicationContext)
         diagnostics.beginSession()
         settingsStore = AndroidAppSettingsStore(applicationContext)
@@ -1827,6 +1828,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        NativeRuntimeDebug.unregister("activity", this)
         ViewCompat.setWindowInsetsAnimationCallback(window.decorView, null)
         if (::browserContainer.isInitialized) {
             ViewCompat.setOnApplyWindowInsetsListener(browserContainer, null)

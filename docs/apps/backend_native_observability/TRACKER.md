@@ -249,17 +249,24 @@ publication; existing adoption and code-server resolution tests also pass.
 - [ ] Test ordering, cancellation, project changes, reconnect and retained state.
 - [ ] Live acceptance of targeted fixes; document no-change findings honestly.
 
-## Phase 4: Gecko Native IME Diagnostics
+## Phase 4: Android Debug Runtime And Deferred IME Diagnostics
 
-- [ ] Approve debug APK source, thread-dispatch and build/install scope.
+- [x] Approve shared debug source/ADB/console dispatcher and compilation/tests
+  for Gecko and Cefrium. No APK installation, asset publication or version bumps.
 - [x] Select live-object inspection/invocation through Java reflection plus
   kotlin-reflect for Kotlin metadata; exclude Keval and arbitrary Kotlin compilation.
-- [ ] Define object targeting, typed argument/overload handling, bounded results,
+- [x] Define object targeting, typed argument/overload handling, bounded results,
   explicit mutations, access failures and stale activity/view cleanup.
-- [ ] Align kotlin-reflect to the app Kotlin version; verify debug availability
+- [x] Align kotlin-reflect to the app Kotlin version; verify debug availability
   and absence of new dependencies/seams from release variants.
-- [ ] Extend native console/ADB inspection, reflection and controlled actions.
-- [ ] Add opt-in bounded local tracing, export/clear and optional logcat output.
+- [x] Extend native console/ADB inspection, reflection and controlled actions.
+- [x] Disable Gecko debug minification to preserve inspection member names;
+  Cefrium debug already disables it. Release/staging settings are unchanged.
+- [x] Add opt-in bounded dispatcher/root-lifecycle tracing, export/clear and
+  optional logcat output; no raw text capture or continuous socket stream.
+
+Remaining IME-specific diagnostics (deferred separately):
+
 - [ ] Trace connection lifecycle, focus/restartInput, selection, batch edits,
   composition/commit, deletion and key events with arguments/outcomes.
 - [ ] Keep raw-text capture separately flagged; prevent console/socket flooding.
@@ -270,6 +277,17 @@ publication; existing adoption and code-server resolution tests also pass.
 - [ ] Live acceptance of diagnostic controls on GeckoView.
 - [ ] On recurrence, capture the missed-input incident before restarting.
 - [ ] Compare Cefrium if warranted; decide fix scope from evidence.
+
+General debug foundation: both debug Kotlin compilations passed, five focused
+reflection tests passed for each renderer, and the repeatable
+`android/verify-native-debug.init.gradle` checks verified debug dependency/source
+isolation. Fresh Gecko/Cefrium release and staging main manifests omit the ADB
+receiver; debug manifests include it with the DUMP permission. Final pagination
+checks are included in the same focused test class. APKs have not been assembled
+or installed for this slice; ADB/console live acceptance remains pending.
+
+Trace recording currently covers command execution and registered-root lifecycle
+only, with raw text excluded.
 
 Tooling acceptance and incident resolution are separate. A non-reproducible
 incident can remain open without blocking an accepted instrumentation release.

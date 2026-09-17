@@ -4511,3 +4511,73 @@ Monaco mounting and editor RPC/document loading do not await this gate. Repeated
 ready notifications reuse Socket.IO's idempotent connect on the same socket;
 ordinary post-connect transport reconnection remains unchanged. This avoids a
 cold first handshake against a not-yet-listening WBA without reducing timeouts.
+
+### Android Debug Runtime Inspection (GeckoView And Cefrium)
+
+Both debug variants compile `app/src/debug`'s `NativeRuntimeDebug`; release and
+staging compile only the inert `app/src/nonDebug` seam. Cefrium shares these
+source sets with Gecko. Debug minification is disabled in both modules. Kotlin
+reflection 2.2.10 matches the Kotlin plugin and is a debug-only dependency.
+No APK assets or versions change as part of this instrumentation.
+
+The existing native console worker accepts JSON-RPC `android.debug.*` commands.
+ADB ordered broadcasts invoke the identical dispatcher without needing TE2, a
+network connection, or a console registration. Open the app first to obtain live
+roots. A broadcast does not create an activity or start the framework.
+
+```sh
+adb shell "am broadcast --receiver-foreground \
+  -n com.termux.extensions.gecko/com.termux.extensions.NativeDebugReceiver \
+  --es code '{\"jsonrpc\":\"2.0\",\"method\":\"android.debug.roots\",\"params\":{}}'"
+```
+
+Use the installed application ID (Cefrium: `com.termux.extensions.cefrium`) in
+place of `com.termux.extensions.gecko` if applicable. The receiver is debug-manifest
+only and requires `android.permission.DUMP`, held by ADB shell and privileged
+callers, not ordinary applications. It is not a sandbox or an untrusted plugin
+API. The existing trusted native console transport is the other access boundary.
+
+```sh
+te2 console eval --worker android:gecko:INSTALLATION_ID --code \
+  '{"jsonrpc":"2.0","method":"android.debug.inspect","params":{"target":"activity"}}'
+```
+
+Commands (all use the `android.debug.` prefix):
+
+- `roots`: discover registered `activity`/`service` roots. `application`, `decor`
+  and `focus` resolve dynamically from the current activity and may be unavailable.
+- `inspect`: list up to 128 fields/methods, with type/signature metadata and an
+  explicit truncation flag and `nextOffset`. Use `offset` (0-4096) for subsequent
+  pages and `kind: fields|methods|all` to select members. Optional
+  `kotlinMetadata: true` adds property names.
+- `get`: read `field` from the target; `set` writes `value`, returning prior/current
+  values. Final fields are rejected. Platform access restrictions still apply.
+- `invoke`: requires `method`, explicit `parameterTypes` and `arguments` arrays.
+  For example `{"target":"focus","method":"requestFocus","parameterTypes":[],
+  "arguments":[]}` calls the zero-argument method. Invocation exceptions are
+  unwrapped, not disguised as successful results.
+- `trace.configure`: `enabled` and optional `logcat` booleans control recording;
+  returns previous/current flags. `trace.read` exports; `trace.clear` clears.
+
+Targets accept a root or returned `object:N` handle plus an optional `path` array
+of field names (at most 12). Method arguments support JSON primitives, null and
+`{"ref":"object:N"}` references. Exact signatures choose overloads; fractional
+or overflowing integer inputs are rejected, not truncated. No arbitrary Kotlin
+compilation, expression interpreter, implicit property getters, or arbitrary
+object `toString` traversal is involved. Strings return `{text,truncated}`;
+other objects return `{class,handle}` rather than recursive object graphs.
+
+Reflection executes on the main thread. One queued/executing request is admitted;
+others fail busy. Requests older than five seconds when dequeued do not execute.
+A running arbitrary method cannot be safely preempted: invoking blocking code can
+hang the UI. Caller timeout does not cancel or roll back side effects. Never retry
+an uncertain mutation automatically. Limits: 16 KiB commands, 16 arguments,
+60 KiB results, 64 weak object handles, 128 trace records, 4096-character strings.
+Weak roots are removed on destruction only if their identity still matches;
+activity/service teardown also invalidates handles. A GC-cleared handle reports
+unavailable rather than targeting a new object.
+
+Tracing is disabled by default, bounded and local; optional logcat uses
+`TE2NativeDebug`. This foundation records dispatcher and root lifecycle events,
+not raw text or IME transactions. Detailed focus/InputConnection/IME hooks remain
+separate work; do not imply this generic seam already traces composition events.

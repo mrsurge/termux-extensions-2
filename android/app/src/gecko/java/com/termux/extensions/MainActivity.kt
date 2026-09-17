@@ -786,6 +786,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        NativeRuntimeDebug.register("activity", this)
         androidDiagnostics = AndroidDiagnostics(applicationContext)
         androidDiagnostics.beginSession()
         androidSettingsStore = AndroidAppSettingsStore(applicationContext)
@@ -2335,6 +2336,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        NativeRuntimeDebug.unregister("activity", this)
         uiHandler.removeCallbacks(appHealthCheckRunnable)
         if (isFinishing && !isChangingConfigurations) {
             clientRuntimeService?.setPersistentSessionActive(false)
