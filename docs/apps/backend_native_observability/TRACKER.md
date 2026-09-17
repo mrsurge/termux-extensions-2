@@ -219,12 +219,32 @@ publication; existing adoption and code-server resolution tests also pass.
 ### Application Lifecycle / Networking Separation (Planned Experiment)
 
 - [x] Record the proposal and tradeoffs in PLAN.md; implementation remains gated.
+- [x] Approved first slice: networked worker-owned async start/stop hooks;
+  project/session initialization no longer runs at route import time.
+- [x] Own and observe eager intelligence startup, stop FWS observation, and drain
+  accepted facts with a bounded shutdown wait. Preserve existing socket contracts.
+- [x] Validate partial startup failure, cancellation, repeat startup/stop, fact
+  draining, and real subprocess startup-before-serving / SIGTERM cleanup.
+  28 focused tests pass; lifecycle modules and new tests have zero type diagnostics.
+  Follow-up: corrected read-only shell/connection metadata and sidecar return
+  contracts; removed workbench dependency casts. The route contract, shell,
+  startup and lifecycle suite passes 32 tests. Type checking reports zero errors
+  across main, workbench routes, shell manager and new contract tests; 31 unrelated
+  existing `main.py` warnings remain.
+- [ ] Live acceptance of the lifecycle boundary after worker restart.
 - [ ] Inventory FastAPI-owned lifecycle, dependencies and loop-bound state.
 - [ ] Define worker-owned startup/shutdown, typed DTOs and client lifecycle.
 - [ ] Compare parallel FastAPI bridge process with existing Rust/pipe networking;
   specify bounded queues, selective state coalescing and ordered edits/commands.
 - [ ] Approve and prototype one lane; measure startup, responsiveness, memory,
   backpressure and reconnect/shutdown before considering broader migration.
+
+First-slice scope: still one process and event loop, with unchanged FastAPI import
+cost. Mounted ASGI transport lifespans stay transport-owned. Pipe-only worker
+mode is unchanged; this is not yet a full service/task ownership migration.
+Remaining inventory includes projector tasks, request/client dependencies and
+typed cross-process DTOs. No multiprocessing or transport migration is approved
+by completion of this boundary alone.
 
 ### Remaining Audit Items
 

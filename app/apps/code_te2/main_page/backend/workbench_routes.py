@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Protocol, cast
@@ -12,23 +12,29 @@ from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
 from .state_payload import JsonObject
+from ...code_server_shell_manager import ConnectionRecord
 
 
-class ShellRecordLike(Protocol):
-    id: str
-    pid: int | None
-    status: str | None
-    env_overrides: Mapping[str, object] | None
+class ShellRecordLike(ConnectionRecord, Protocol):
+    # Routes consume records without widening the writable fields of their owners.
+    @property
+    def id(self) -> str: ...
+
+    @property
+    def pid(self) -> int | None: ...
+
+    @property
+    def status(self) -> str | None: ...
 
 
 class WorkbenchExtensionSidecarLike(Protocol):
     def get_workbench_enabled_extensions(self) -> list[str]: ...
 
-    def set_workbench_enabled_extensions(self, enabled: list[str]) -> None: ...
+    def set_workbench_enabled_extensions(self, enabled: list[str]) -> list[str]: ...
 
-    def enable_workbench_extension(self, extension_id: str) -> None: ...
+    def enable_workbench_extension(self, extension_id: str) -> list[str]: ...
 
-    def disable_workbench_extension(self, extension_id: str) -> None: ...
+    def disable_workbench_extension(self, extension_id: str) -> list[str]: ...
 
     def save(self) -> None: ...
 
@@ -36,9 +42,7 @@ class WorkbenchExtensionSidecarLike(Protocol):
 class HistoryStoreLike(Protocol):
     def get_active_project(self) -> str | None: ...
 
-    def get_session_state(self) -> JsonObject: ...
-
-    def get_project_sidecar(self, project_root: str) -> WorkbenchExtensionSidecarLike | None: ...
+    def get_project_sidecar(self, project_root: str, /) -> WorkbenchExtensionSidecarLike | None: ...
 
 
 class EnsureCodeServerShellFn(Protocol):
@@ -98,7 +102,7 @@ def _active_project_root(deps: WorkbenchRoutesDeps) -> str:
 
 
 def _record_port(record: ShellRecordLike) -> int:
-    env = record.env_overrides or {}
+    env = _as_json_object(record.env_overrides)
     port_s = env.get("TE2_ADAPTER_PORT") or ""
     try:
         return int(str(port_s))
@@ -111,7 +115,7 @@ def _adapter_code_server_target(
     code_server_record: ShellRecordLike,
     project_root: str,
 ) -> tuple[str, str, str | None]:
-    env = code_server_record.env_overrides or {}
+    env = _as_json_object(code_server_record.env_overrides)
     resolved_project_root = str(env.get("PROJECT_ROOT") or project_root)
     code_server_http, code_server_socket_path = deps.code_server_connection_target(code_server_record)
     return resolved_project_root, code_server_http, code_server_socket_path
@@ -219,7 +223,7 @@ async def _reuse_boot_adapter_record(
     if not maybe or not maybe.pid or maybe.status != "running":
         return None
 
-    maybe_env = maybe.env_overrides or {}
+    maybe_env = _as_json_object(maybe.env_overrides)
     maybe_socket = str(maybe_env.get("TE2_CODE_SERVER_SOCKET") or "").strip()
     expected_socket = str(code_server_socket_path or "").strip()
     if maybe_socket != expected_socket:
@@ -445,7 +449,7 @@ def create_workbench_router(deps: WorkbenchRoutesDeps) -> APIRouter:
         enabled = _coerce_enabled_list(payload)
         if enabled is not None:
             try:
-                sidecar.set_workbench_enabled_extensions(enabled)
+                _ = sidecar.set_workbench_enabled_extensions(enabled)
                 sidecar.save()
             except Exception as exc:
                 raise HTTPException(status_code=500, detail=f"Failed to save enabled extensions: {exc}") from exc
@@ -460,9 +464,9 @@ def create_workbench_router(deps: WorkbenchRoutesDeps) -> APIRouter:
         flag = bool(payload.get("enabled", False))
         try:
             if flag:
-                sidecar.enable_workbench_extension(str(ext_id))
+                _ = sidecar.enable_workbench_extension(str(ext_id))
             else:
-                sidecar.disable_workbench_extension(str(ext_id))
+                _ = sidecar.disable_workbench_extension(str(ext_id))
             sidecar.save()
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Failed to save enabled extensions: {exc}") from exc

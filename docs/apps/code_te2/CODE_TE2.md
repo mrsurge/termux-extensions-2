@@ -4581,3 +4581,28 @@ Tracing is disabled by default, bounded and local; optional logcat uses
 `TE2NativeDebug`. This foundation records dispatcher and root lifecycle events,
 not raw text or IME transactions. Detailed focus/InputConnection/IME hooks remain
 separate work; do not imply this generic seam already traces composition events.
+
+### Worker-Owned Application Lifetime
+
+Networked `app.libs.app_worker` supports paired async `te2_app_start()` and
+`te2_app_stop()` exports through `app.libs.app_lifecycle`. Apps without either
+hook retain their existing ASGI lifecycle. A partial pair is an error. Startup
+completes before transport startup/readiness; shutdown runs after transport
+service exits, including startup failure or cancellation. Uvicorn's `_serve`
+override keeps this scope inside signal capture so SIGTERM re-raising cannot
+skip cleanup; its normal loop factory remains in control.
+
+Code TE2 initializes its project/session from this hook instead of module import.
+`worker_services.runtime` owns the eager intelligence task independently of
+application readiness and cancels/awaits it at shutdown. FWS observation closes
+its client and reconnect/snapshot tasks without terminating shells. The fact bus
+fences new publications, gives queued facts up to two seconds to drain, then
+cancels dispatcher/metrics tasks and clears loop references. Stable handler
+registrations survive a same-process restart; this queue is not an edit-command
+queue. Explorer's loop reference is cleared as well.
+
+This is the first ownership boundary, not a networking migration: imports,
+FastAPI/socket adapters, stores and application services still share a process
+and event loop. Other projector tasks and pipe-only worker lifetime are not yet
+migrated. No startup-speed improvement is implied. Lifecycle tests include
+partial failure, cancellation, repeated starts/stops and a real worker SIGTERM.

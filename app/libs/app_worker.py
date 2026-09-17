@@ -15,7 +15,6 @@ import argparse
 import importlib.util
 import inspect
 import json
-import signal
 import sys
 import threading
 import socket
@@ -23,7 +22,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from types import FrameType, ModuleType, TracebackType
+from types import ModuleType, TracebackType
 from typing import Protocol, cast, override
 from urllib import request as urllib_request
 from urllib.parse import quote
@@ -38,6 +37,7 @@ with _startup_trace.span("uvicorn.import"):
 with _startup_trace.span("worker_support.import"):
     from app.libs.pipe_protocol import PipeEnvelope
     from app.libs.runtime_debug_pipe import RuntimeDebugPipe
+    from app.libs.app_lifecycle import application_lifecycle
     from app.memory_profile import install_python_memory_profiler
 
 
@@ -384,6 +384,7 @@ def main() -> None:
                     debug_pipe.close()
                 if not serving_task.done():
                     _ = serving_task.cancel()
+                _ = await asyncio.gather(serving_task, return_exceptions=True)
 
     app = FastAPI(lifespan=lifespan)
 
@@ -510,6 +511,14 @@ def main() -> None:
     # runs before listening. Observe that boundary without changing its ordering.
     class StartupObservedServer(uvicorn.Server):
         @override
+        async def _serve(self, sockets: list[socket.socket] | None = None) -> None:
+            # Worker-owned services surround the transport, not its ASGI lifespan.
+            # Stay inside serve()'s signal scope: it re-raises SIGTERM on exit,
+            # so an outer serve() finally would never finish application cleanup.
+            async with application_lifecycle(module):
+                await super()._serve(sockets=sockets)
+
+        @override
         async def startup(self, sockets: list[socket.socket] | None = None) -> None:
             with startup_trace.span("uvicorn.startup"):
                 await super().startup(sockets=sockets)
@@ -517,14 +526,6 @@ def main() -> None:
                 startup_trace.mark("listener.ready")
 
     server = StartupObservedServer(config)
-
-    def _force_exit(signum: int, _frame: FrameType | None) -> None:
-        print(f"[app-worker] Received signal {signum}; forcing shutdown", file=sys.stderr)
-        server.force_exit = True
-        server.should_exit = True
-
-    _ = signal.signal(signal.SIGTERM, _force_exit)
-    _ = signal.signal(signal.SIGINT, _force_exit)
 
     server.run()
 

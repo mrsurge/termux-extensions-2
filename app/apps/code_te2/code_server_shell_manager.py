@@ -19,6 +19,15 @@ from .node_compile_cache import node_compile_cache
 JsonObject = dict[str, object]
 
 
+class ConnectionRecord(Protocol):
+    # Target resolution reads metadata only; it does not mutate shell records.
+    @property
+    def env_overrides(self) -> object: ...
+
+    @property
+    def command(self) -> object: ...
+
+
 class ShellRecord(Protocol):
     id: str
     label: str
@@ -226,7 +235,7 @@ def _expected_socket_path() -> str:
     return str(_CODE_SERVER_SOCKET_PATH)
 
 
-def code_server_connection_target(record: ShellRecord) -> tuple[str, str | None]:
+def code_server_connection_target(record: ConnectionRecord) -> tuple[str, str | None]:
     """Return the code-server HTTP base and optional UDS path for the WBA."""
     env = _json_object(record.env_overrides)
     socket_path = str(env.get("TE_CODE_SERVER_SOCKET") or "").strip()

@@ -265,6 +265,17 @@ existing Rust networking/pipe facilities. A second loop/thread alone does not
 remove import cost or guarantee parallel initialization; aiorun is an optional
 lifecycle convenience, not a performance requirement.
 
+First implemented boundary: networked `app_worker` runs paired optional async
+`te2_app_start` / `te2_app_stop` hooks around Uvicorn transport service, inside
+its signal-capture scope. Code TE2 moves project/session initialization into
+startup, owns the independent eager intelligence task, and stops FWS observation
+before a bounded fact-bus drain. Cleanup also covers partial startup failures.
+The configured Uvicorn loop factory, readiness publication, socket routes and
+Monaco/WBA readiness gate remain unchanged. Keep a subprocess regression test
+for the Uvicorn `_serve` integration because signal re-raising must happen only
+after app cleanup. This slice does not remove FastAPI imports, move networking
+to another loop/process, migrate pipe-only workers, or establish latency gains.
+
 Use existing supervised shell/pipe ownership rather than an unmanaged child
 process or new eval port. A multiprocessing prototype is a decision-gated
 alternative, not a committed transport. Never fork live loops/connections.

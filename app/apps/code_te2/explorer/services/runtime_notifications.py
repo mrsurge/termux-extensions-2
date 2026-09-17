@@ -53,7 +53,7 @@ _git_published_content_revision = 0
 _git_refresh_revision = 0
 
 
-def set_explorer_event_loop(loop: asyncio.AbstractEventLoop) -> None:
+def set_explorer_event_loop(loop: asyncio.AbstractEventLoop | None) -> None:
     """Called during app startup to set the event loop for watcher callbacks."""
     global _explorer_event_loop
     _explorer_event_loop = loop
