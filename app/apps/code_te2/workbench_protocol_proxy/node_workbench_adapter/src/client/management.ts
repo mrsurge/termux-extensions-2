@@ -420,9 +420,9 @@ export async function connectManagementSession(
   const extArgs = { language: "en", break: false, port: null, env: { VSCODE_PROXY_URI: proxyUri } };
   const workspaceRoot = coerceWorkspaceRoot(params, folder);
 
-  await runtime.setupFileWatcher(workspaceRoot);
+  await runtime.spanTraceAsync("connect.fileWatcher.setup", () => runtime.setupFileWatcher(workspaceRoot));
 
-  const productVersion = await runtime.loadProductVersionFromAppRoot(envData);
+  const productVersion = await runtime.spanTraceAsync("connect.productVersion", () => runtime.loadProductVersionFromAppRoot(envData));
   const extInitData = runtime.buildExtHostInitData({
     authority: useRemote ? authority : null,
     commit,

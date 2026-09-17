@@ -1182,3 +1182,38 @@ test("webview panel uses the shared secure surface and disposes through ExtHostW
   assert.equal(notifications.at(-1).params.event, "dispose");
   assert.ok(lifecycle.some((event) => event.type === "webview/snapshot"));
 });
+
+// Deferred startup must not publish old-workspace surfaces after teardown.
+for (const boundary of ['activation', 'provider']) {
+  test(`background webview startup is fenced during ${boundary} wait`, async (t) => {
+    let release;
+    const activation = new Promise(resolve => { release = resolve; });
+    const events = [];
+    const runtime = new WebviewRuntime({
+      reconstructionStoragePath: await reconstructionStorage(t),
+      rpcIds: RPC,
+      getWorkspaceFolder: () => process.cwd(),
+      getExtensions: () => [],
+      activateByEvent: () => boundary === 'activation' ? activation : Promise.resolve(),
+      onLifecycleEvent: event => events.push(event),
+      log: () => {},
+    });
+    runtime.primaryContributions = () => [{ viewType: 'test.view' }];
+    let created = 0;
+    runtime.createSurface = async () => { created++; };
+    const pending = runtime.activatePrimaryViews();
+    await Promise.resolve();
+    if (boundary === 'provider') assert.equal(runtime.providerWaiters.size, 1);
+    runtime.clear('workspace_switch', false);
+    const count = events.length;
+    release();
+    await pending;
+    assert.equal(created, 0);
+    assert.equal(events.length, count);
+    assert.equal(runtime.providerWaiters.size, 0);
+    // The new workspace is not cancelled with the old one.
+    runtime.providers.set('test.view', {});
+    await runtime.activatePrimaryViews();
+    assert.equal(created, 1);
+  });
+}

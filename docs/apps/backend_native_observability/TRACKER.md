@@ -180,7 +180,8 @@ inline app-shell scripts passed syntax validation.
 - [x] Preserve FWS lifecycle subscriptions and run-profile parent ownership.
 - [x] Validate 80 focused tests, including import isolation and stale fan-out.
   Focused Basedpyright: zero errors, six existing warnings.
-- [ ] User restart and live before/after startup timing acceptance.
+- [x] User live acceptance of the import/projection cleanup; checkpoint
+  `34c630cf` committed as mrsurge and pushed. Controlled timing remains separate.
 
 Fresh live baseline (PID 23846): FastAPI import 1129 ms, backend import 2139 ms,
 listener-ready 4376 ms from module entry, serving hook complete 4538 ms.
@@ -193,13 +194,27 @@ HTTPX is absent from the post-change boot import trace. No runtime was restarted
 
 - [x] Inspect process-start versus connection boundaries: WBA listener/ping does
   not require a connected workbench; Python currently serializes both shells.
-- [ ] Define prepare/connect split, canonical target prerequisites and single-flight
+- [x] Define prepare/connect split, canonical target prerequisites and single-flight
   adoption semantics; approve concrete implementation before changing runtime.
-- [ ] Evaluate readiness-output trigger versus adapter-owned UDS service check.
+- [x] Evaluate readiness-output trigger versus adapter-owned UDS service check.
   Existing output timeout continues; neither timeout nor UDS existence proves ready.
 - [ ] Test failed/late startup, stale UDS, reconnect/adoption, concurrent callers,
   project changes and cancellation without duplicate connection or respawn churn.
 - [ ] Compare mobile cold/warm text/intelligence timing and peak memory.
+
+Implementation now overlaps WBA process preparation with code-server's post-spawn
+readiness wait, after code-server installation/registry/settings prerequisites.
+The shared adapter launch lock spans preparation, dependency wait and connection.
+The new internal prepare/connect boundary retains a prepared shell on cancellation;
+ordinary callers continue through the existing ensure API. Output readiness
+timeouts/missing pipes now fail instead of silently continuing. Existing adopted
+shell paths still rely on the actual workbench handshake for usable intelligence.
+Runtime-debug records dependency wait and workbench connection separately.
+No new UDS polling loop, native build, frontend change or runtime restart.
+Live acceptance of this new overlap slice is pending.
+Validation: 73 focused tests pass. New tests cover overlap ordering, dependency
+failure, cancellation preservation, callback-once, launch locking and readiness
+publication; existing adoption and code-server resolution tests also pass.
 
 ### Application Lifecycle / Networking Separation (Planned Experiment)
 
@@ -336,3 +351,89 @@ still reports 19 existing bare-dict annotation errors and 49 warnings; the three
 new typed tools have only decorated-function unused warnings. Rust formatting
 and git diff checks passed. No shared framework restart or live end-to-end
 acceptance has been performed; CLI/MCP runtime acceptance remains pending.
+
+### Parallel Startup Live Timing Follow-Up
+
+PID 32584: worker listener at 3253 ms; first intelligence orchestration completed
+in 8836 ms. WBA dependency wait was 0.103 ms, while adapter.connect took 4993 ms.
+This confirms overlap occurred but does not establish first usable provider timing.
+Two orchestration callers were visible; that alone is not evidence of two spawns.
+
+Added bounded runtime-debug-only WBA connect spans (100 maximum): management,
+server-root discovery, environment/extension scan, file watcher, extension-host
+connection/handshake and primary-view activation. Begin/end records use stderr,
+PID/span identity, timestamp/duration/outcome; no document or credential payloads.
+Explicit shellspec propagation enables them on the next WBA launch. Adapter build
+and three focused instrumentation tests passed. Standalone TypeScript checking
+is blocked by missing .mjs declarations in this adapter tree. No restart performed.
+
+### Sidebar Activation Off The Connection Critical Path
+
+Fresh PID 3707 timings: management 2056 ms (root discovery 900 ms, extension scan
+555 ms), extension-host connection 2781 ms, sidebar activation 1174 ms. Python
+worker listener ready at 2597 ms; aggregate adapter connect 6397 ms.
+
+- [x] Return connection readiness without awaiting primary sidebar views.
+- [x] Fence late activation by session/workspace and cancel provider waits on clear.
+- [x] Add bounded one-shot debug milestones for document open, language activation,
+  provider registration and diagnostic arrival; no document/credential payloads.
+- [x] Adapter rebuilt; 12 focused startup/webview tests passed, including teardown
+  during activation/provider waits and readiness before sidebar completion.
+- [ ] Live cold-start timing and sidebar/intelligence acceptance after WBA restart.
+
+No shared runtime restart performed. Provider/diagnostic milestones are not proof
+of first useful language result; interpret them separately from connection readiness.
+
+### Direct WBA Transport / TextMate Timing
+
+The mjs reproduction had WBA ready at unixMs 1789609128713, JavaScript activation
+complete at 1789609132166, but browser namespace connection at 1789609142446.
+TextMate installed source.js at 1789609143692. Catalog/grammar requests timed out
+waiting for the socket during this gap. This does not establish TextMate as a
+blocker; the delayed connection remains unexplained.
+
+- [x] Add temporary browser transport timing, capped at 80 records per realm:
+  attach/connect/error, manager open/reconnect attempts, and catalog/grammar
+  wait/send/reply/timeout. No RPC payloads and no altered retry policy.
+- [x] Add runtime-debug WBA listener-ready and bounded Engine.IO arrival/error
+  markers to distinguish backend listening from actual transport arrival.
+- [x] Transport suite: 23 tests pass, including trace bounds and payload exclusion.
+- [ ] Reproduce after frontend asset update and worker/WBA restart; correlate
+  browser transport records with backend listener and namespace timestamps.
+
+### Shared-Client Startup Race Investigation
+
+User reproduced equivalent latency in GeckoView, Cefrium and Chromium clients;
+Gecko-specific connection admission/backoff is not established as the shared cause.
+The observed browser attempt timed out at 20 seconds; its retry connected in about
+60 ms. A running-service browser probe connected in 25 ms and propagated a rejected
+handshake in 403 ms. Neither reproduces the startup-only failure.
+
+- [x] Isolated Rust test: a proxy upgraded against a closed upstream port closes
+  its downstream promptly (2-second assertion bound; initial test took 20 ms).
+- [x] Add runtime-debug bounded shared-proxy markers: WBA route arrival, downstream
+  upgrade, upstream connect begin/failure/success and bridge closure. No query data.
+- [ ] Capture the same cold-start race with the instrumented shared framework.
+
+No Android source changes or shared framework restart were performed. Do not infer
+that TextMate parsing blocks networking: the observed grammar calls waited for a
+socket and completed quickly after the successful retry.
+
+### Editor WBA Readiness Gate
+
+The latest browser capture connected early at 23:31:41.549, received backend
+adapter-ready at 23:31:44.990, timed out at 23:32:01.552, and connected on retry
+at 23:32:03.000. User comparison with the older mount-gated frontend supports
+retaining the readiness gate for intelligence only, not delaying Monaco again.
+
+- [x] Disable initial WBA auto-connect and use the existing editor-lane ready
+  snapshot/event; preserve immediate Monaco mounting and document RPC.
+- [x] Cover ready notification handling, repeated/reconnect snapshots, initial
+  socket options, and independent editor mounting in focused regression tests.
+- [x] Live cold-start acceptance after updating frontend assets: no initial
+  WBA handshake timeout; document text still loads independently.
+
+User confirmed the updated startup is fast. Frontend typecheck, 28 focused
+transport/boot tests and bundle publication passed before live acceptance.
+
+No Android changes, timeout reduction, polling, or new readiness transport.

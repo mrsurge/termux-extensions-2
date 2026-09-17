@@ -4449,3 +4449,65 @@ it again. Each client fan-out shares a single per-broadcast configuration snapsh
 with generation checks around asynchronous work. This is not a persistent cache:
 subsequent updates read current configuration, including external edits. Running
 shell state remains event-backed, with no process discovery or polling added.
+
+### Parallel Intelligence Process Preparation
+
+`intelligence_startup.prime_intelligence_runtime` starts WBA preparation from
+code-server's post-spawn notification, after installation, extension registry and
+settings prerequisites. Both processes can initialize while code-server's existing
+output subscription waits for its listening message. WBA acquires its pipe and
+answers ping before awaiting that dependency; only `adapter.connect` and its
+completed workbench handshake can publish intelligence-ready. No UDS-existence
+heuristic or new polling loop is used. Missing pipes/output timeout fail explicitly.
+
+The adapter's single-flight lock spans prepare/wait/connect so competing callers
+cannot mistake a staging process for a failed session. A process-local prepared
+shell marker supports retry after dependency cancellation without respawning that
+shell. Cancelling the orchestrator drains its owned task, not shared processes.
+Warm/adopted paths retain their existing session checks. Runtime-debug timing
+separates process preparation, dependency waiting and workbench connection.
+
+With runtime-debug enabled, the managed WBA shell receives TE2_RUNTIME_DEBUG and
+emits at most 100 startup-only `connect.*` spans to stderr. Paired begin/end records
+include PID/span ID, unix milliseconds, monotonic duration and outcome, but no
+request data. These supplement Python's aggregate connection timing and do not
+prove that a language provider has completed activation or returned diagnostics.
+
+Sidebar primary-view activation is background work after the extension-host
+handshake, not a prerequisite for `adapter.connect` completion. WebviewRuntime
+owns an abort controller per session/workspace: clear cancels provider timers and
+waiters, and continuations check cancellation before surface creation/publication.
+Already-dispatched extension activation RPCs retain their existing bounded timeout;
+reset does not attempt to undo extension-host execution. Workspace switching retains
+its existing awaited activation path, with the same stale-work guards.
+
+Runtime-debug also emits at most 32 once-per-phase milestones per WBA process:
+connection ready, first document-open attempt/success/failure, language activation
+begin/success/failure, first provider event per kind, and first diagnostic update.
+They contain timestamps/PID and phase names only, not file paths or document text.
+A provider registration or empty diagnostic update does not prove usable language
+results; these are observation boundaries, not new readiness gates.
+
+During startup transport investigation, `[wba_startup_transport]` browser records
+are capped at 80 per editor realm, independently of backend runtime-debug. They
+trace Socket.IO manager/namespace boundaries and catalog/grammar RPC timing,
+without RPC payloads or changing reconnect policy. Runtime-debug WBA records
+`socket.listener.ready` and up to 20 Engine.IO connection/error events. The static
+framework WBA proxy targets localhost:18181; TextMate catalog/grammar requests need
+that socket, but do not await document-open acknowledgements or language activation.
+
+Shared Rust proxy diagnostics under runtime-debug emit `websocket_startup_timing`
+for WBA public-route arrival and bridge upgrade/upstream-connect/closure boundaries.
+Route arrivals and bridge lifetimes are each bounded to 128 per framework process;
+records omit client query strings and credentials. These require a framework
+restart onto the rebuilt binary, not just an app-worker restart. A regression test
+covers prompt downstream termination when the upstream listener does not exist.
+
+The editor constructs its WBA Socket.IO socket with `autoConnect: false` and
+connects from the existing `editor.adapter.state` ready notification. The Python
+editor lane replays this state on connection, covering warm loads and reconnects;
+the editor also checks already-delivered readiness after attaching WBA handlers.
+Monaco mounting and editor RPC/document loading do not await this gate. Repeated
+ready notifications reuse Socket.IO's idempotent connect on the same socket;
+ordinary post-connect transport reconnection remains unchanged. This avoids a
+cold first handshake against a not-yet-listening WBA without reducing timeouts.

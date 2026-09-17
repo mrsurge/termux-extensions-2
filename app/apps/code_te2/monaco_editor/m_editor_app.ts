@@ -229,6 +229,7 @@ interface MonacoRuntimeDiffEditorLike {
 }
 
 interface EditorSocketLike {
+  connect(): unknown;
   connected?: boolean;
   id?: string | null;
   sendBuffer?: unknown[];
@@ -619,6 +620,9 @@ interface MonacoBootWindowLike extends Window {
       return diffEditor;
     },
     replayOpenFileAfterBaton: _replayOpenFileAfterBaton,
+    onAdapterReady: function () {
+      wbaRpcSocket?.connect();
+    },
     onProjectSwitching: function (params) {
       try {
         editorWbaRpcTransport.rejectPending("project switching");
@@ -700,6 +704,9 @@ interface MonacoBootWindowLike extends Window {
     },
   });
   var editorWbaRpcTransport = createEditorWbaRpcTransport({
+    onStartupTrace: function (phase, detail) {
+      console.log("[wba_startup_transport]", { phase, ...detail });
+    },
     getSocket: function () {
       return wbaRpcSocket;
     },
@@ -2134,6 +2141,9 @@ interface MonacoBootWindowLike extends Window {
       }) as EditorSocketLike;
       if (!_languageWorkersEnabled()) {
         wbaRpcSocket = window.io(SOCKET_IO_NAMESPACES.wba, {
+          // Opening before the backend baton can strand the first handshake
+          // until Socket.IO's timeout. Keep document rendering independent.
+          autoConnect: false,
           path: SOCKET_IO_PATHS.wba,
           transports: ["websocket"],
           query: fileEditorSocketQuery(),
@@ -2467,6 +2477,12 @@ interface MonacoBootWindowLike extends Window {
         wbaRpcSocket.on("disconnect", () => {
           console.warn("[wba] socket disconnected");
         });
+      }
+
+      // Cover a readiness snapshot received before socket construction too;
+      // later snapshots/events use onAdapterReady above. No polling is needed.
+      if ((window as Window & { __te2AdapterReady?: boolean }).__te2AdapterReady) {
+        wbaRpcSocket?.connect();
       }
 
       return true;

@@ -837,6 +837,11 @@ editorWbaSocketServer = attachEditorWbaSocket(server, {
 });
 
 server.listen(PORT, HOST, () => {
+  if (/^(1|true|yes|on)$/i.test(String(process.env.TE2_RUNTIME_DEBUG ?? '').trim())) {
+    console.error('[startup_timing]', JSON.stringify({
+      appId: 'code_te2.wba', pid: process.pid, phase: 'socket.listener.ready', unixMs: Date.now(),
+    }));
+  }
   // Startup beacon MUST go to stdout (not stderr) for the shellspec stdout_regex readiness probe.
   process.stdout.write(
     encodeStartupBeaconLine({

@@ -345,15 +345,9 @@ def _code_server_connection_target_for_routes(record: ShellRecordLike) -> tuple[
 
 
 async def _prime_code_server_runtime(project_root: str) -> None:
-    code_server_shell = await ensure_code_server_shell(project_root)
-    code_server_http, code_server_socket_path = _code_server_connection_target_for_routes(
-        cast(ShellRecordLike, cast(object, code_server_shell))
-    )
-    _ = await _ensure_workbench_adapter_shell_for_routes(
-        project_root,
-        code_server_http=code_server_http,
-        code_server_socket_path=code_server_socket_path,
-    )
+    from .intelligence_startup import prime_intelligence_runtime
+
+    await prime_intelligence_runtime(project_root)
 
 
 set_code_server_runtime_primer(_prime_code_server_runtime)

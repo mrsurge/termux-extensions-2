@@ -6,7 +6,7 @@ import hashlib
 import json as _json
 import re
 import shutil
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from importlib import import_module
 from pathlib import Path
 from typing import Protocol, cast
@@ -310,7 +310,7 @@ async def _wait_for_code_server_readiness(shell_id: str, timeout_s: float = 60.0
                     print("[code_server] readiness detected via subscribed output", flush=True)
                     return
 
-        print(f"[code_server] WARNING: readiness timeout ({timeout_s}s), continuing anyway", flush=True)
+        raise TimeoutError(f"code-server readiness timeout after {timeout_s}s")
     finally:
         try:
             await mgr.unsubscribe_output_bytes(shell_id, queue)
@@ -340,14 +340,30 @@ async def terminate_code_server_shell() -> bool:
     return True
 
 
-async def ensure_code_server_shell(project_root: str) -> ShellRecord:
+async def ensure_code_server_shell(
+    project_root: str, *, on_spawned: Callable[[ShellRecord], None] | None = None
+) -> ShellRecord:
     # Startup and browser priming share one launch owner. The event alone cannot
     # serialize callers after an exited shell has invalidated the fast path.
     async with _spawn_lock:
-        return await _ensure_code_server_shell(project_root)
+        if on_spawned is None:
+            return await _ensure_code_server_shell(project_root)
+        notified = False
+
+        def notify(record: ShellRecord) -> None:
+            nonlocal notified
+            if not notified:
+                notified = True
+                on_spawned(record)
+
+        record = await _ensure_code_server_shell(project_root, on_spawned=notify)
+        notify(record)  # Adopted shells already completed the startup path.
+        return record
 
 
-async def _ensure_code_server_shell(project_root: str) -> ShellRecord:
+async def _ensure_code_server_shell(
+    project_root: str, *, on_spawned: Callable[[ShellRecord], None] | None = None
+) -> ShellRecord:
     """Ensure code-server is running as a framework shell.
 
     Concurrent callers are serialised by _spawn_lock. The _ready_event
@@ -464,10 +480,15 @@ async def _ensure_code_server_shell(project_root: str) -> ShellRecord:
 
         _active_shell_id = shell.id
 
+        # Configuration is now finalized. Prepare WBA while code-server starts,
+        # but keep the readiness result owned by this coroutine.
+        if on_spawned is not None:
+            on_spawned(shell)
+
         if await _has_live_pipe(shell):
             await _wait_for_code_server_readiness(shell.id)
         else:
-            print("[code_server] WARNING: no live pipe, cannot subscribe for readiness", flush=True)
+            raise RuntimeError("code-server live pipe unavailable for readiness")
 
         return shell
     finally:
