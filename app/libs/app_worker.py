@@ -18,7 +18,7 @@ import json
 import sys
 import threading
 import socket
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,7 +47,7 @@ EXPLICIT_APP_ROUTER_EXPORT = "TE2_APP_ROUTER"
 
 
 class PipeReader(Protocol):
-    def readline(self) -> bytes | str: ...
+    def read1(self, size: int) -> bytes: ...
 
 
 class HttpResponse(Protocol):
@@ -214,8 +214,13 @@ def _main_router_from_module(module: ModuleType, app_id: str) -> tuple[str, APIR
     )
 
 
-def _raw_frame_has_content(raw: bytes | str) -> bool:
-    return bool(raw.strip())
+def _pipe_messages(reader: PipeReader) -> Iterator[object]:
+    from app.libs.messagepack_stream import MessagePackStream
+
+    decoder = MessagePackStream()
+    while chunk := reader.read1(65536):
+        yield from decoder.feed(chunk)
+    decoder.finish()
 
 
 def _run_pipe_worker(
@@ -227,7 +232,7 @@ def _run_pipe_worker(
         PipeError,
         PipeIdentity,
         PipeProtocolError,
-        decode_line,
+        decode_envelope,
         process_error_response,
     )
 
@@ -245,18 +250,27 @@ def _run_pipe_worker(
     pipe_runtime.configure_stdio_transport(protocol_stdout)
     _write_response = pipe_runtime.write_envelope
 
-    # Pipe mode reserves stdout for JSONL protocol frames. Backend imports and
+    # Pipe mode reserves stdout for MessagePack maps. Backend imports and
     # dispatchers can still log freely because main() redirects sys.stdout first.
+    messages = _pipe_messages(stdin)
     while True:
-        raw = stdin.readline()
-        if raw in (b"", ""):
+        try:
+            value = next(messages)
+        except StopIteration:
+            pipe_runtime.close_stdio_transport("Framework pipe reached EOF")
             if debug_pipe is not None:
                 debug_pipe.close()
             return
-        if not _raw_frame_has_content(raw):
-            continue
+        except Exception as exc:
+            # Unknown frame boundaries cannot safely be skipped. Do not guess
+            # where the next request begins after corrupt or truncated input.
+            print(f"[app-worker] Invalid MessagePack pipe stream: {exc}", file=sys.stderr)
+            pipe_runtime.close_stdio_transport(str(exc))
+            if debug_pipe is not None:
+                debug_pipe.close()
+            return
         try:
-            request_envelope = decode_line(raw)
+            request_envelope = decode_envelope(value)
         except PipeProtocolError as exc:
             _write_response(
                 process_error_response(

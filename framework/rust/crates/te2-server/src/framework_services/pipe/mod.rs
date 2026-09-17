@@ -199,13 +199,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn line_codec_round_trips_request_envelope() {
+    async fn messagepack_codec_round_trips_request_envelope() {
         let root = test_root("codec");
         let envelope = request("fs.listDirectory", json!({ "path": "." }), &root);
-        let encoded = protocol::encode_line(&envelope).expect("encode line");
-        assert!(encoded.ends_with('\n'));
-
-        let decoded = protocol::decode_line(&encoded).expect("decode line");
+        let encoded = protocol::encode_frame(&envelope).expect("encode frame");
+        let mut decoder = protocol::PipeDecoder::default();
+        let mut messages = Vec::new();
+        for byte in &encoded {
+            messages.extend(decoder.feed(&[*byte]).expect("decode fragment"));
+        }
+        decoder.finish().unwrap();
+        let decoded = messages.remove(0);
         assert_eq!(decoded.jsonrpc, "2.0");
         assert_eq!(decoded.protocol_version, 1);
         assert_eq!(decoded.kind, PipeMessageKind::Request);

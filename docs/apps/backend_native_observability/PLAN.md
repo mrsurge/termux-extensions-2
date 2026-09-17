@@ -291,7 +291,50 @@ cold readiness, import cost, event-loop responsiveness, IPC cost, peak memory an
 first-use latency. Prototype one lane without changing its frontend contract;
 do not migrate all lanes or remove FastAPI until evidence and separate approval.
 
-### External Rust CPU Profiling
+### DTO Boundary Follow-Up (Deferred)
+
+The lifecycle checkpoint is live accepted. Keep the present networking process:
+no multiprocessing cutover is needed for current performance. Explorer already
+uses application-owned facts, generation guards and projectors; reuse these,
+not a second event bus. The remaining extraction is completed DTO plus logical
+recipient -> injected delivery -> connection lookup and wire encoding. Preserve
+the single-backend/single-project shared working set and existing all-client
+fallback; foreground focus remains client-specific. Future work removes the
+Explorer JSON text round trip, extracts editor connect/result orchestration and
+Sidebar transport coupling, and tests DTO generation independently of sockets.
+No such DTO extraction is part of the pipe codec change below.
+
+### MessagePack Process-Pipe Cutover (Approved)
+
+Pin Python framework-shells at 2fc55098a785242a99b04e46c5ca319bb49b6417
+and Rust ferrous-framework at 0d5112ad5173fdccd13b7a024bf878ac60905ddb;
+unchanged release version numbers do not identify these implementations.
+
+1. Framework/app-worker pipes use concatenated MessagePack maps instead of
+   JSON lines. Preserve the JSON-RPC-shaped envelope, correlation, cancellation,
+   debug dispatch, bounded writes and request ordering. Decode arbitrary chunks,
+   bound frames, reject malformed/truncated data without guessing resync points.
+2. WBA stdio uses structured MessagePack records for replies, pushes and startup
+   beacons, replacing text prefixes. Human diagnostics remain on stderr.
+3. Declare `log_codecs: {stdout: messagepack, stderr: text}` only for protocol
+   stdout. Do not relabel ordinary PTY/text shells or change browser sockets.
+4. Preserve Terminal's existing uint32-BE length-prefixed MessagePack Node pipe.
+   Extend both FWS observation implementations with explicit framing support;
+   the new default MessagePack log reader expects concatenated objects. Keep
+   large-frame boundary indexing independent of the 1 MiB preview parse budget,
+   preserving Terminal's 32 MiB transport limit. Follow-up dependency commits
+   need independent validation and exact downstream pins before publication.
+5. Validate cross-language fixtures, fragmented/coalesced frames, EOF, malformed
+   inputs, byte limits, ordering, startup/debug lanes and inspection projections.
+
+The standalone Terminal app worker is currently a proc shell, not a framework
+pipe worker; its Node terminal-stream child is the binary pipe. Text PTY streams,
+native VS Code protocols, HTTP/Socket.IO formats, Android assets and version
+numbers remain unchanged. No shared runtime restart or dependency installation
+is authorized implicitly by source/build validation. Old/new pipe endpoints
+must be deployed together, including already-running WBA shells.
+
+### External Rust CPU Profiling Details
 
 Use optional external sampling tools rather than adding a Rust reflection or
 interpreter runtime. Prefer Samply on desktop Linux for interactive call trees,

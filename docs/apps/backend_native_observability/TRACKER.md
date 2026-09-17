@@ -231,7 +231,8 @@ publication; existing adoption and code-server resolution tests also pass.
   startup and lifecycle suite passes 32 tests. Type checking reports zero errors
   across main, workbench routes, shell manager and new contract tests; 31 unrelated
   existing `main.py` warnings remain.
-- [ ] Live acceptance of the lifecycle boundary after worker restart.
+- [x] Live acceptance of the lifecycle boundary after worker restart; user
+  reports the fastest startup observed so far.
 - [ ] Inventory FastAPI-owned lifecycle, dependencies and loop-bound state.
 - [ ] Define worker-owned startup/shutdown, typed DTOs and client lifecycle.
 - [ ] Compare parallel FastAPI bridge process with existing Rust/pipe networking;
@@ -246,7 +247,37 @@ Remaining inventory includes projector tasks, request/client dependencies and
 typed cross-process DTOs. No multiprocessing or transport migration is approved
 by completion of this boundary alone.
 
-### Remaining Audit Items
+### MessagePack Pipe Cutover
+
+- [x] Audit: framework/app pipes are JSONL; WBA uses JSONL/prefixes; Terminal
+  Node pipe already uses uint32-BE framed MessagePack. Terminal app worker is proc.
+- [x] Record DTO-boundary findings and defer networking/process separation.
+- [x] Pin both FWS handoff commits and update Cargo lockfile. Python FWS is now
+  installed non-editably in site-packages at the exact pinned commit; verified
+  package provenance. The running framework was not restarted.
+- [x] Migrate framework/Python worker pipes and debug fixtures to bounded
+  concatenated MessagePack, keeping application envelopes and ordering.
+- [ ] Migrate WBA stdio and Python reader/writer, startup/reply/push records.
+- [x] Declare log codecs on Code TE2 and File Explorer app-worker pipe shells.
+- [ ] Declare WBA codec and Terminal framing metadata after those migrations.
+- [ ] Add explicit length-prefixed framing observation in both FWS repositories;
+  fix large-frame indexing/preview budget separation and pin follow-up commits.
+- [ ] Run cross-language, malformed/fragmented/large-frame, startup/debug and
+  inspection tests; Rust check/tests and WBA typecheck/build.
+- [ ] Live acceptance after coordinated framework/worker/WBA restart.
+
+No wire-format migration has live acceptance yet. No browser protocol, native
+VS Code wire protocol, PTY text stream or Android publication changes planned.
+
+First-slice validation: 27 focused Python tests and 30 Rust pipe/writer/debug
+tests pass; Rust check passes; changed Python codec/worker/test files type-check
+with zero diagnostics. A shared hex fixture is decoded by Python and Rust, and
+the pinned Python FWS source decoded it for inspection. Python package installation
+was subsequently approved and verified. No live restart, WBA migration or
+nested-repository edits yet.
+Framework and Python pipe peers must be restarted together, not independently.
+
+### Remaining Observability Audit Items
 
 - [x] Select external Rust CPU sampling, not a reflection/interpreter runtime:
   Samply on Linux, Simpleperf feasibility on Termux, flamegraph SVG alternative.

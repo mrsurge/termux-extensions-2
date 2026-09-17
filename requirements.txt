@@ -4,9 +4,10 @@ uvicorn
 websockets
 httpx
 msgspec>=0.21.1
+msgpack>=1.1
 anyio
 fastmcp==3.4.7
-framework-shells==0.0.63
+framework-shells @ git+https://github.com/mrsurge/framework-shells.git@2fc55098a785242a99b04e46c5ca319bb49b6417
 agent-log-server==0.2.125
 nodejs-wheel==24.16.0; sys_platform == "linux" and platform_machine == "x86_64"
 libarchive-c>=5.1

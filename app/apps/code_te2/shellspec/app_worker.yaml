@@ -3,6 +3,7 @@ version: "1"
 shells:
   app-worker:
     backend: pipe
+    log_codecs: {stdout: messagepack, stderr: text}
     pipe:
       mode: native_pipe_testing
     cwd: ${ctx:PROJECT_ROOT}

@@ -4094,7 +4094,8 @@ Built-in backend module identity comes from package path rather than public app 
   Browser clocks may differ; readiness is not intelligence readiness. No polling
   or gate changes; disabled runs are silent. Import timing requires a fresh worker.
 
-- The Python worker reserves `runtime.debug.*` on its existing JSONL pipe.
+- The Python worker reserves `runtime.debug.*` on its existing framework pipe
+  (now concatenated MessagePack maps, retaining the JSON-RPC-shaped envelope).
   `runtime.debug.status` reports live-loop/thread status only when opted in and
   bound after mounted-app startup. At most one diagnostic operation is admitted;
   disabled, unbound, wrong-target and busy requests receive explicit errors.
@@ -4113,8 +4114,8 @@ Built-in backend module identity comes from package path rather than public app 
   Timeout, caller cancellation and enqueue failure remove the waiter; disconnect
   and writer failure wake it. Neither timeout nor cancellation proves execution
   stopped, and requests are never automatically retried. Registration cleanup is
-  instance-scoped so an old bridge cannot remove its replacement. JSONL and
-  ordinary service dispatch remain unchanged.
+  instance-scoped so an old bridge cannot remove its replacement. Ordinary
+  service dispatch uses the same binary framing and remains unchanged.
 
 - The existing Rust listener exposes GET `/api/runtime-debug/workers` and POST
   `/api/runtime-debug/status` and `/api/runtime-debug/eval`. Each requires runtime
@@ -4606,3 +4607,24 @@ FastAPI/socket adapters, stores and application services still share a process
 and event loop. Other projector tasks and pipe-only worker lifetime are not yet
 migrated. No startup-speed improvement is implied. Lifecycle tests include
 partial failure, cancellation, repeated starts/stops and a real worker SIGTERM.
+
+### Framework Pipe Codec
+
+Rust framework <-> Python `app_worker --pipe` uses concatenated MessagePack maps,
+not UTF-8/JSON lines. Envelope fields, identities, correlation and protocolVersion
+1 are retained. Both peers must be upgraded together; there is no text fallback.
+Python uses msgpack's incremental unpacker with strict msgspec envelope conversion;
+Rust uses rmp-serde named maps. Arbitrary read boundaries and coalesced messages
+are supported with a 32 MiB per-frame limit. Truncated/corrupt streams are not
+resynchronized by guessing. Python closes transport admission and wakes pending
+calls on EOF/error; Rust closes its writer/debug route when its reader exits.
+Human output stays on stderr, and app-worker shellspecs declare stdout MessagePack
+observation. FWS dependencies are pinned by commit because the log-codec handoff
+did not bump package versions.
+
+This cutover currently covers framework/app-worker pipes, including runtime-debug
+traffic. WBA stdio remains JSON/prefix-based pending its coordinated migration.
+Standalone Terminal's app worker is proc-based; its separate Node stream remains
+uint32-BE length-prefixed MessagePack. FWS observation support for that framing and
+large-record indexing beyond the existing 1 MiB preview budget is still pending.
+No browser socket, PTY terminal text, or native VS Code protocol changed.

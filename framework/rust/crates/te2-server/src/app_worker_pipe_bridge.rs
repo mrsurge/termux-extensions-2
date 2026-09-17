@@ -3,7 +3,7 @@ mod native {
     use crate::framework_services::{
         pipe::{
             PipeEventSink, dispatch_request,
-            protocol::{PipeEnvelope, PipeIdentity, PipeMessageKind, decode_line, encode_line},
+            protocol::{PipeDecoder, PipeEnvelope, PipeIdentity, PipeMessageKind, encode_frame},
         },
         scheduler::FrameworkServiceScheduler,
     };
@@ -99,19 +99,18 @@ mod native {
         handle: Handle,
         sink: Arc<FerrousPipeSink>,
     ) -> anyhow::Result<()> {
-        let mut buffer = Vec::<u8>::new();
+        let mut decoder = PipeDecoder::default();
         loop {
             if sink.closed.load(Ordering::Acquire) {
                 break;
             }
             match manager.read_stdout_chunk_blocking(shell_id, Duration::from_millis(250))? {
                 Some(chunk) => {
-                    buffer.extend_from_slice(&chunk);
-                    while let Some(line) = take_line(&mut buffer) {
-                        handle_stdout_line(
+                    for envelope in decoder.feed(&chunk)? {
+                        handle_stdout_envelope(
                             shell_id,
                             app_id,
-                            &line,
+                            envelope,
                             scheduler.clone(),
                             handle.clone(),
                             sink.clone(),
@@ -120,6 +119,7 @@ mod native {
                 }
                 None => {
                     if !pipe_is_live(&manager, shell_id)? {
+                        decoder.finish()?;
                         break;
                     }
                 }
@@ -128,22 +128,14 @@ mod native {
         Ok(())
     }
 
-    fn handle_stdout_line(
+    fn handle_stdout_envelope(
         shell_id: &str,
         app_id: &str,
-        line: &[u8],
+        request: PipeEnvelope,
         scheduler: FrameworkServiceScheduler,
         handle: Handle,
         sink: Arc<FerrousPipeSink>,
     ) {
-        let text = String::from_utf8_lossy(line);
-        let request = match decode_line(text.as_ref()) {
-            Ok(envelope) => envelope,
-            Err(error) => {
-                warn!(%error, %shell_id, %app_id, "invalid app-worker pipe frame");
-                return;
-            }
-        };
         if matches!(
             &request.kind,
             PipeMessageKind::Response | PipeMessageKind::Error
@@ -219,8 +211,7 @@ mod native {
 
     impl PipeEventSink for FerrousPipeSink {
         fn send(&self, envelope: PipeEnvelope) -> anyhow::Result<()> {
-            let encoded = encode_line(&envelope)?;
-            self.enqueue(encoded.into_bytes())
+            self.enqueue(encode_frame(&envelope)?)
         }
     }
 
@@ -287,15 +278,6 @@ mod native {
                 Err(RecvTimeoutError::Disconnected) => return Ok(()),
             }
         }
-    }
-
-    fn take_line(buffer: &mut Vec<u8>) -> Option<Vec<u8>> {
-        let pos = buffer.iter().position(|byte| *byte == b'\n')?;
-        let mut line = buffer.drain(..=pos).collect::<Vec<_>>();
-        while matches!(line.last(), Some(b'\n' | b'\r')) {
-            line.pop();
-        }
-        if line.is_empty() { None } else { Some(line) }
     }
 
     fn pipe_is_live(manager: &FerrousNativeManager, shell_id: &str) -> anyhow::Result<bool> {
