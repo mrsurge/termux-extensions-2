@@ -8,7 +8,6 @@ import faulthandler
 import threading
 import traceback
 from collections.abc import Callable
-from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
 from urllib import request as urllib_request
@@ -287,13 +286,9 @@ from .terminal_backend import terminal_router
 code_te2_bp.include_router(terminal_router)
 
 # Include the self-contained editor routes
-from .monaco_editor.editor_backend import editor_router
+from .monaco_editor.editor_backend import editor_router, register_monaco_editor_routes
 code_te2_bp.include_router(editor_router)
-_register_monaco_editor_routes = cast(
-    Callable[[APIRouter, str], None],
-    cast(object, import_module("app.apps.code_te2.monaco_editor").__dict__["register_monaco_editor_routes"]),
-)
-_register_monaco_editor_routes(code_te2_bp, "/ui")
+register_monaco_editor_routes(code_te2_bp, "/ui")
 
 # --- Code TE2 Socket.IO (worker-owned) ---
 # The main framework process still proxies the current physical paths to this
@@ -455,12 +450,11 @@ def _ensure_workbench_json_sync(project_root_str: str) -> None:
         print(f"[code_te2] workbench json sync failed (non-fatal): {exc}", flush=True)
 
 
-async def _eager_start_code_server():
-    """Best-effort eager start of code-server at worker boot.
+async def _eager_start_code_server() -> None:
+    """Prepare the complete intelligence runtime without waiting for a browser.
 
-    Only starts code-server (the extension host backend). The workbench adapter
-    is launched later, triggered by the frontend readiness chain:
-    editor iframe ready -> code-server confirmed -> adapter launch -> baton fan-out.
+    The worker loop/pipe must exist first. Import-time spawning would bypass
+    lifecycle ownership, preferences and the settings preparation below.
     """
     try:
         ui_prefs = _json_object(_preferences_store.get_preferences().get("ui"))
@@ -474,13 +468,11 @@ async def _eager_start_code_server():
         if not pr:
             return
         # Sync watcher settings BEFORE code-server launches
-        _ensure_workbench_json_sync(pr)
-        cs = await ensure_code_server_shell(pr)
-        cs_env = _json_object(cs.env_overrides)
-        pr = str(cs_env.get("PROJECT_ROOT") or pr)
-        print(f"[code_te2] eager code-server startup OK (project={pr})", flush=True)
+        await asyncio.to_thread(_ensure_workbench_json_sync, pr)
+        await _prime_code_server_runtime(pr)
+        print(f"[code_te2] eager intelligence startup OK (project={pr})", flush=True)
     except Exception as exc:
-        print(f"[code_te2] eager code-server startup failed: {exc}", flush=True)
+        print(f"[code_te2] eager intelligence startup failed: {exc}", flush=True)
 
 
 @code_te2_bp.on_event("startup")  # pyright: ignore[reportDeprecated]

@@ -13,6 +13,7 @@ from framework_shells.record import ShellRecord
 from app.node_toolchain import NodeToolchainError, resolve_node_toolchain
 
 from .code_te2_paths import code_te2_paths
+from .node_compile_cache import node_compile_cache
 from .diagnostics_latency_metrics import (
     diagnostics_latency_metrics_enabled,
     elapsed_ms,
@@ -30,6 +31,7 @@ WORKBENCH_ADAPTER_FIXED_PORT = 18181
 log = logging.getLogger("workbench_adapter_shell_manager")
 
 _active_shell_id: Optional[str] = None
+_spawn_lock = asyncio.Lock()
 _rpc_counter: int = 0
 _rpc_pending: dict[int, asyncio.Future[JsonObject]] = {}
 _stdout_reader_task: asyncio.Task[None] | None = None
@@ -633,6 +635,17 @@ async def ensure_workbench_adapter_shell(
     code_server_http: str,
     code_server_socket_path: Optional[str] = None,
 ) -> ShellRecord:
+    # Worker startup and boot snapshots can arrive together; only one caller may
+    # adopt/spawn/connect the shared adapter, while later callers reuse it.
+    async with _spawn_lock:
+        return await _ensure_workbench_adapter_shell(project_root, code_server_http, code_server_socket_path)
+
+
+async def _ensure_workbench_adapter_shell(
+    project_root: str,
+    code_server_http: str,
+    code_server_socket_path: Optional[str] = None,
+) -> ShellRecord:
     """Ensure the Node workbench adapter framework shell is running.
 
     This is the browser-facing control plane for read-only language intelligence:
@@ -645,7 +658,7 @@ async def ensure_workbench_adapter_shell(
     # The adapter reads this file synchronously on startup.
     try:
         from .extension_registry import ensure_rpc_config
-        ensure_rpc_config()
+        await asyncio.to_thread(ensure_rpc_config)
     except Exception as exc:
         log.warning("[adapter] ensure_rpc_config failed: %s", exc)
 
@@ -732,6 +745,7 @@ async def ensure_workbench_adapter_shell(
                 "WORKBENCH_ADAPTER_PORT": str(WORKBENCH_ADAPTER_FIXED_PORT),
                 "WORKBENCH_ADAPTER_ENTRY": str(adapter_entry),
                 "WORKBENCH_ADAPTER_NODE": str(node_binary),
+                "NODE_COMPILE_CACHE": await asyncio.to_thread(node_compile_cache, "workbench-adapter"),
                 "CODE_SERVER_HTTP": str(code_server_http),
                 "CODE_SERVER_SOCKET": str(code_server_socket_path or ""),
                 "CODE_SERVER_EXTENSIONS_JSON": str(

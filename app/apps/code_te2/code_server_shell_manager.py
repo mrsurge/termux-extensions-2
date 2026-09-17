@@ -14,6 +14,7 @@ from typing import Protocol, cast
 from app.te2_paths import ensure_runtime_home
 
 from .code_te2_paths import code_te2_paths
+from .node_compile_cache import node_compile_cache
 
 JsonObject = dict[str, object]
 
@@ -340,6 +341,13 @@ async def terminate_code_server_shell() -> bool:
 
 
 async def ensure_code_server_shell(project_root: str) -> ShellRecord:
+    # Startup and browser priming share one launch owner. The event alone cannot
+    # serialize callers after an exited shell has invalidated the fast path.
+    async with _spawn_lock:
+        return await _ensure_code_server_shell(project_root)
+
+
+async def _ensure_code_server_shell(project_root: str) -> ShellRecord:
     """Ensure code-server is running as a framework shell.
 
     Concurrent callers are serialised by _spawn_lock. The _ready_event
@@ -419,7 +427,7 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
         # files.watcherExclude values on top of the gate output.
         try:
             from .extension_registry import ensure_registry_and_gate
-            _ = ensure_registry_and_gate()
+            _ = await asyncio.to_thread(ensure_registry_and_gate)
         except Exception as exc:
             print(f"[code_server] extension registry scan failed (non-fatal): {exc}", flush=True)
 
@@ -430,7 +438,7 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
             sc = ProjectSidecar.load_or_create(str(repo_root))
             watcher = _json_object(sc.dump_raw().get("watcher", {}))
             wmode = str(watcher.get("mode", "ipc"))
-            sync_vscode_watcher_settings(wmode)
+            await asyncio.to_thread(sync_vscode_watcher_settings, wmode)
         except Exception as exc:
             print(f"[code_server] watcher settings sync failed (non-fatal): {exc}", flush=True)
 
@@ -447,6 +455,7 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
                 "CODE_SERVER_DATA_DIR": str(data_dir),
                 "CODE_SERVER_SOCKET": _expected_socket_path(),
                 "CODE_SERVER_PROBE_OUT": str(_CODE_SERVER_PROBE_OUTPUT_PATH),
+                "NODE_COMPILE_CACHE": await asyncio.to_thread(node_compile_cache, "code-server"),
             },
             label=label,
             record_spec_id=f"service:{APP_ID}:code_server",

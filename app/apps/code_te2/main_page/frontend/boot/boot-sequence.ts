@@ -230,7 +230,12 @@ export async function runBootSequence(deps: BootSequenceDeps): Promise<void> {
 
   const useWorkbenchAdapter = await prepareCodeServer(bootSnapshot, snapshotUiPrefs, deps);
   if (useWorkbenchAdapter) {
-    try { await deps.ensureWorkbenchAdapterReady(); } catch (error) { console.warn('Workbench adapter readiness failed:', error); }
+    // Document display is independent of extension-host readiness. Existing WBA
+    // state/baton handlers replay the active model when intelligence connects.
+    // Keep the status/error observer, but never gate mounting Monaco on it.
+    void deps.ensureWorkbenchAdapterReady().catch((error) => {
+      console.warn('Workbench adapter readiness failed:', error);
+    });
   }
   try { await deps.connectUIIPC(); } catch (error) { console.warn('Failed to connect UI IPC channel:', error); }
   try { await deps.mountInlineEditorHost(bootSnapshot); } catch (error) { console.error('Inline editor boot failed:', error); }

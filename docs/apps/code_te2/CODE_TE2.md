@@ -1689,6 +1689,20 @@ prerequisite read when its first snapshot reported the managed runtime missing.
 This closes the cross-view install/reload race: an installation and shells that
 became ready after the first snapshot are adopted instead of prompting again.
 
+Startup separates document display from intelligence: host boot observes WBA
+readiness without awaiting it before mounting Monaco, and Monaco announces
+editor-ready without awaiting the language catalog. Existing baton/connect replay
+opens the current model and enriches language/providers when WBA becomes ready.
+Worker startup primes both code-server and WBA before a browser request is needed;
+it still respects Worker mode and never installs a missing runtime implicitly.
+Each shell manager serializes ensure/adopt/spawn operations. Registry/config
+preparation runs off-loop but completes before its corresponding process starts.
+Both managed shellspecs pass an absolute private `NODE_COMPILE_CACHE` directory
+under `$TE2_CACHE_HOME/node_compile/<service>` (code-server/workbench-adapter).
+Cache failure is nonfatal; Node handles version-specific entries, and Bun is not
+claimed to support this Node feature. This does not change managed executable
+selection or require Electron to forward environment variables to a remote host.
+
 ### Generic WBA language path
 
 The Code Server path is data-driven:
@@ -4070,14 +4084,15 @@ Built-in backend module identity comes from package path rather than public app 
   It does not automatically enable memory or CPU profiling. Capture endpoints
   remain separate work; discovery/status/evaluation are available below.
 
-- Opt-in Python `[startup_timing]` stderr records measure backend import,
-  router assembly milestones, mounted lifespans, serving hooks and readiness POST
-  completion. They carry app/PID, elapsed milliseconds since worker main entry,
-  phase duration and outcome, without app content or credentials. Entry is after
-  interpreter/common worker imports, not process creation. Lifespan-ready does
-  not mean code-server/WBA or browser models are ready. No polling is introduced;
-  records are absent with runtime-debug disabled. Fresh worker startup is needed
-  to observe these boundaries; warm page refresh does not rerun Python imports.
+- Opt-in `[startup_timing]` records separate Python module entry, FastAPI/Uvicorn
+  imports, worker support, backend assembly, lifespans, listener-ready and serving
+  hooks. Python carries app/PID, module-relative milliseconds, wall-clock unixMs,
+  duration and outcome; interpreter/package startup before module entry is excluded.
+  Rust marks launch/spawn and readiness receipt/publication/catalog completion.
+  Updated app-shell assets mark bootstrap, gate release, native prerequisites,
+  template/module load and initialization when bootstrap enables runtime-debug.
+  Browser clocks may differ; readiness is not intelligence readiness. No polling
+  or gate changes; disabled runs are silent. Import timing requires a fresh worker.
 
 - The Python worker reserves `runtime.debug.*` on its existing JSONL pipe.
   `runtime.debug.status` reports live-loop/thread status only when opted in and
@@ -4414,3 +4429,23 @@ These are recorded release-time provenance and acceptance facts, moved from repo
   real File Explorer worker. Physical Motorola acceptance upgraded from
   0.2.347 with one fallback and launched real File Explorer and ALS-RS workers;
   both targets reported health 0.2.349 and all eight built-in apps.
+
+## 50) Worker Import And Run Profile Projection Boundaries
+
+Host, Monaco and editor-service package initializers do not eagerly re-export
+service implementations. Import contracts/services from their owning modules;
+main.py explicitly registers editor routes during assembly. FWS event hooks still
+register at startup, independently of whether a run profile is currently running.
+
+Run-profile URL readiness imports HTTPX only when invoked. Terminal shell actions
+import Framework-Shells on use; WBA still imports it during worker assembly, so
+this is dependency isolation rather than complete removal from worker startup.
+Run profiles remain owned by Code TE2's lifecycle; no independent supervisor or
+new networking transport is introduced.
+
+Run-profile configuration loading validates/constructs profiles once. Projection
+reads run off-loop; candidate matching reuses that parsed list instead of reading
+it again. Each client fan-out shares a single per-broadcast configuration snapshot,
+with generation checks around asynchronous work. This is not a persistent cache:
+subsequent updates read current configuration, including external edits. Running
+shell state remains event-backed, with no process discovery or polling added.

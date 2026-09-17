@@ -118,19 +118,100 @@ for this run; do not combine their times with the earlier warm-worker capture.
 No new Python startup stall was established. The source-confirmed frontend
 WBA-before-Monaco dependency remains the primary optimization candidate.
 
-### Original Audit Scope
-
 ### Approved Startup Implementation
 
-- [ ] Commit/push observability checkpoint and approved startup plan.
-- [ ] Configure private compile-cache paths for managed code-server and Node WBA.
-- [ ] Verify cache support/output with the resolved runtime; report Linux limits.
-- [ ] Mount Monaco independently of WBA readiness; preserve reconnect/consent.
-- [ ] Advance worker-owned runtime preparation with single-flight launch ownership.
-- [ ] Validate focused tests, types and generated frontend publication.
+- [x] Commit/push observability checkpoint and approved startup plan (`8e7e606f`).
+- [x] Configure private compile-cache paths for managed code-server and Node WBA.
+- [x] Verify cache support/output with the resolved runtime; report Linux limits.
+- [x] Mount Monaco independently of WBA readiness; preserve reconnect/consent.
+- [x] Advance worker-owned runtime preparation with serialized launch ownership.
+- [x] Validate focused tests, types and generated frontend publication.
 - [ ] User live acceptance: early file display, eventual intelligence, both modes.
 
-### Remaining Original Audit Scope
+Implementation: both host adapter-ready and editor language-catalog waits are
+nonblocking for document rendering/readiness. Installation consent is unchanged;
+WBA baton/open replay still owns intelligence activation. Worker startup now primes
+code-server and WBA together instead of deferring the adapter to browser boot.
+Both shell managers serialize ensure/adopt/spawn paths. Registry/settings writes
+move off the event loop. No pre-import launcher or ownership migration was added.
+
+Compile caches are private absolute service directories under TE2 cache home;
+failure disables this optional optimization rather than preventing launch. Both
+shellspecs pass NODE_COMPILE_CACHE as environment, not a CLI argument. Bun is
+not claimed to implement Node's cache. The actual Termux managed launcher resolves
+Node v24.18.0; two isolated --version runs successfully created/reopened a directory
+containing 283 cache files. This verifies acceptance/persistence, not a measured
+speedup or individual cache-hit count. Desktop standalone launcher inheritance was
+source-verified, but no Linux runtime was available for live cache verification.
+
+Validation: 37 Python tests passed (startup cache/serialization, adapter adoption,
+runtime resolution, language backend and bootstrap); 8 frontend boot/historical
+boot tests passed. Frontend typecheck and `node build.mjs` passed. Focused strict
+Python checks for the new helper, code-server manager and new tests are clean.
+Broader main.py/adapter checking reports 3 pre-existing cast-overlap errors in
+main.py at lines 338/349/378 and 50 warnings; no new error originates in this slice.
+No shared runtime or app worker was restarted, no Android assets were bundled,
+and no version was bumped. Live acceptance and before/after timing remain pending.
+
+### Startup Boundary Instrumentation Follow-Up
+
+- [x] Add runtime-debug-only early Python import spans, actual listener readiness,
+  Rust launch/spawn/readiness spans and browser readiness/asset/init milestones.
+- [ ] Capture a fresh framework/worker boot after the user restarts; distinguish
+  FastAPI imports from backend imports and readiness publication before attributing
+  the remaining roughly five seconds to any one dependency.
+
+The earlier main-entry measurements above excluded common imports. New Python
+measurements start at module entry and include wall-clock timestamps. Browser
+markers require updated app-shell assets (Android still uses OTA/APK assets).
+Readiness behavior is unchanged; no runtime restart is performed by this slice.
+Validation: four startup trace tests passed; strict Python checks for the worker,
+trace helper and tests passed. Cargo check and formatting passed; all three
+inline app-shell scripts passed syntax validation.
+
+### Approved Import And Projection Cleanup
+
+- [x] Keep host/editor/service package initializers lightweight; register routes
+  explicitly from their owning module during app assembly.
+- [x] Defer run-profile HTTPX readiness imports and terminal launch imports.
+  WBA still imports Framework-Shells; this does not eliminate that dependency.
+- [x] Construct run profiles once per configuration load; read projection config
+  off-loop and reuse it for candidate matching and each broadcast's client fan-out.
+- [x] Preserve FWS lifecycle subscriptions and run-profile parent ownership.
+- [x] Validate 80 focused tests, including import isolation and stale fan-out.
+  Focused Basedpyright: zero errors, six existing warnings.
+- [ ] User restart and live before/after startup timing acceptance.
+
+Fresh live baseline (PID 23846): FastAPI import 1129 ms, backend import 2139 ms,
+listener-ready 4376 ms from module entry, serving hook complete 4538 ms.
+An isolated post-change import measured app_worker 835 ms and backend 873 ms,
+versus the earlier isolated backend 2481 ms. These are not controlled paired
+benchmarks: warm caches/CPU load changed, so no equivalent live speedup is claimed.
+HTTPX is absent from the post-change boot import trace. No runtime was restarted.
+
+### Parallel Code-Server / WBA Startup (Next)
+
+- [x] Inspect process-start versus connection boundaries: WBA listener/ping does
+  not require a connected workbench; Python currently serializes both shells.
+- [ ] Define prepare/connect split, canonical target prerequisites and single-flight
+  adoption semantics; approve concrete implementation before changing runtime.
+- [ ] Evaluate readiness-output trigger versus adapter-owned UDS service check.
+  Existing output timeout continues; neither timeout nor UDS existence proves ready.
+- [ ] Test failed/late startup, stale UDS, reconnect/adoption, concurrent callers,
+  project changes and cancellation without duplicate connection or respawn churn.
+- [ ] Compare mobile cold/warm text/intelligence timing and peak memory.
+
+### Application Lifecycle / Networking Separation (Planned Experiment)
+
+- [x] Record the proposal and tradeoffs in PLAN.md; implementation remains gated.
+- [ ] Inventory FastAPI-owned lifecycle, dependencies and loop-bound state.
+- [ ] Define worker-owned startup/shutdown, typed DTOs and client lifecycle.
+- [ ] Compare parallel FastAPI bridge process with existing Rust/pipe networking;
+  specify bounded queues, selective state coalescing and ordered edits/commands.
+- [ ] Approve and prototype one lane; measure startup, responsiveness, memory,
+  backpressure and reconnect/shutdown before considering broader migration.
+
+### Remaining Audit Items
 
 - [x] Select external Rust CPU sampling, not a reflection/interpreter runtime:
   Samply on Linux, Simpleperf feasibility on Termux, flamegraph SVG alternative.

@@ -10,10 +10,10 @@ from contextlib import contextmanager
 
 
 class StartupTrace:
-    def __init__(self, app_id: str) -> None:
+    def __init__(self, app_id: str, *, started: float | None = None) -> None:
         self.enabled: bool = os.environ.get("TE2_RUNTIME_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
         self.app_id: str = app_id
-        self.started: float = time.perf_counter()
+        self.started: float = time.perf_counter() if started is None else started
 
     def mark(self, phase: str, *, elapsed_ms: float | None = None, outcome: str = "ok") -> None:
         if not self.enabled:
@@ -21,6 +21,7 @@ class StartupTrace:
         # PID plus process-local elapsed time identifies this boot without claiming
         # comparable monotonic epochs across the framework, browser and worker.
         record = {"appId": self.app_id, "pid": os.getpid(), "phase": phase,
+                  "unixMs": time.time_ns() // 1_000_000,
                   "sinceEntryMs": round((time.perf_counter() - self.started) * 1000, 3),
                   "elapsedMs": elapsed_ms, "outcome": outcome}
         try:

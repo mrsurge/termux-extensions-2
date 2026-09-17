@@ -12,6 +12,7 @@ from .run_profile_state import (
     run_profile_request_context,
 )
 from .run_profile_surfaces import cancel_all_run_profile_url_readiness
+from .runner_profiles import load_run_profiles
 from .ui_ipc.rpc_contract import UI_IPC_RPC_NOTIFICATION_RUN_PROFILE_STATE_CHANGED
 from .worker_services.event_bus import (
     WorkerEvent,
@@ -120,7 +121,14 @@ async def _project_run_profile_state(event: WorkerEvent) -> None:
             list_ui_ipc_browser_clients,
         )
 
-        for client_instance_id in list_ui_ipc_browser_clients():
+        clients = list_ui_ipc_browser_clients()
+        if not clients:
+            return
+        # One disk read/parse per broadcast, independent of the number of clients.
+        profiles = await asyncio.to_thread(load_run_profiles, project_root) if project_root else []
+        for client_instance_id in clients:
+            if project_root and generation is not None and current_project_generation(project_root) != generation:
+                return
             path: str | None = None
             if project_root:
                 foreground = await asyncio.to_thread(
@@ -130,11 +138,15 @@ async def _project_run_profile_state(event: WorkerEvent) -> None:
                     reason="run_profile_projection",
                 )
                 path = foreground["path"]
+            if project_root and generation is not None and current_project_generation(project_root) != generation:
+                return
             client_projection = await build_run_profile_state_projection(
-                {"path": path} if path else {"path": ""}
+                {"path": path} if path else {"path": ""}, profiles=profiles
             )
             client_projection["revision"] = projection.get("revision", 0)
             client_projection["source"] = projection.get("source", event["source"])
+            if project_root and generation is not None and current_project_generation(project_root) != generation:
+                return
             await emit_ui_ipc_rpc_notification(
                 UI_IPC_RPC_NOTIFICATION_RUN_PROFILE_STATE_CHANGED,
                 client_projection,

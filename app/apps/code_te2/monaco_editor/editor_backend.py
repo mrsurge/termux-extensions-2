@@ -1020,7 +1020,7 @@ async def set_font_scale_endpoint(data: dict[str, object] = Body(...)):
     )
 
 
-def register_monaco_editor_routes(fastapi_app: FastAPI, mount_path: str = "/ui") -> None:
+def register_monaco_editor_routes(fastapi_app: FastAPI | APIRouter, mount_path: str = "/ui") -> None:
     """Register Monaco static asset routes for the inline host editor runtime."""
     app_pkg_root = Path(__file__).resolve().parents[3]
     vendored_monaco = app_pkg_root / "static" / "vendor" / "monaco-editor-core"

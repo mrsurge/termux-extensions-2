@@ -11,6 +11,14 @@ from app.libs.runtime_startup_trace import StartupTrace
 
 
 class StartupTraceTests(unittest.TestCase):
+    def test_external_origin_and_wall_clock(self) -> None:
+        output = io.StringIO()
+        with patch.dict("os.environ", {"TE2_RUNTIME_DEBUG": "1"}), redirect_stderr(output):
+            with patch("time.perf_counter", return_value=12.5), patch("time.time_ns", return_value=1234000000):
+                StartupTrace("fixture", started=10.0).mark("python.module_entry")
+        self.assertIn('"sinceEntryMs": 2500.0', output.getvalue())
+        self.assertIn('"unixMs": 1234', output.getvalue())
+
     def test_disabled_has_no_output(self) -> None:
         output = io.StringIO()
         with patch.dict("os.environ", {"TE2_RUNTIME_DEBUG": "0"}), redirect_stderr(output):

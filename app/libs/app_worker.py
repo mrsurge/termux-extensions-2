@@ -1,32 +1,44 @@
 # /data/data/com.termux/files/home/mrselect/app/libs/app_worker.py
 from __future__ import annotations
 
+# Capture module entry before framework/web imports. This excludes interpreter
+# initialization and package loading before Python begins executing this file.
+import time
+_WORKER_MODULE_ENTRY = time.perf_counter()
+import os
+from app.libs.runtime_startup_trace import StartupTrace
+_startup_trace = StartupTrace(os.environ.get("TE_APP_ID", "unknown"), started=_WORKER_MODULE_ENTRY)
+_startup_trace.mark("python.module_entry")
+
 import asyncio
 import argparse
 import importlib.util
 import inspect
 import json
-import os
 import signal
 import sys
 import threading
+import socket
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from types import FrameType, ModuleType, TracebackType
-from typing import Protocol, cast
+from typing import Protocol, cast, override
 from urllib import request as urllib_request
 from urllib.parse import quote
 
-from fastapi import FastAPI, APIRouter
-from starlette.types import ASGIApp
-import uvicorn
+_startup_trace.mark("common_stdlib_imports.end")
+with _startup_trace.span("fastapi.import"):
+    from fastapi import FastAPI, APIRouter
+    from starlette.types import ASGIApp
+with _startup_trace.span("uvicorn.import"):
+    import uvicorn
 
-from app.libs.pipe_protocol import PipeEnvelope
-from app.libs.runtime_debug_pipe import RuntimeDebugPipe
-from app.libs.runtime_startup_trace import StartupTrace
-from app.memory_profile import install_python_memory_profiler
+with _startup_trace.span("worker_support.import"):
+    from app.libs.pipe_protocol import PipeEnvelope
+    from app.libs.runtime_debug_pipe import RuntimeDebugPipe
+    from app.memory_profile import install_python_memory_profiler
 
 
 JsonObject = dict[str, object]
@@ -302,7 +314,8 @@ def main() -> None:
         help="Run the backend module as a JSONL pipe service.",
     )
     args = _parse_args(parser)
-    startup_trace = StartupTrace(args.app_id)
+    startup_trace = _startup_trace
+    startup_trace.app_id = args.app_id
     startup_trace.mark("worker.entry")
     if not args.pipe and args.port is None:
         parser.error("--port is required unless --pipe is set")
@@ -493,7 +506,17 @@ def main() -> None:
         timeout_graceful_shutdown=2,
         log_config=None,
     )
-    server = uvicorn.Server(config)
+    # Uvicorn's startup returns after socket creation, unlike ASGI lifespan which
+    # runs before listening. Observe that boundary without changing its ordering.
+    class StartupObservedServer(uvicorn.Server):
+        @override
+        async def startup(self, sockets: list[socket.socket] | None = None) -> None:
+            with startup_trace.span("uvicorn.startup"):
+                await super().startup(sockets=sockets)
+            if self.started:
+                startup_trace.mark("listener.ready")
+
+    server = StartupObservedServer(config)
 
     def _force_exit(signum: int, _frame: FrameType | None) -> None:
         print(f"[app-worker] Received signal {signum}; forcing shutdown", file=sys.stderr)

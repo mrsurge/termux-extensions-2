@@ -357,6 +357,11 @@ async fn set_app_readiness(
     Path(app_id): Path<String>,
     payload: Option<Json<JsonMap<String, Value>>>,
 ) -> Response {
+    let received = std::time::Instant::now();
+    let trace_startup = crate::launcher::runtime_debug_enabled();
+    if trace_startup {
+        tracing::info!(app_id = %app_id, phase = "readiness.received", "startup_timing");
+    }
     let registry = state.app_registry_snapshot();
     let app = match readiness_manifest_or_error(&registry, &app_id) {
         Ok(app) => app,
@@ -395,7 +400,13 @@ async fn set_app_readiness(
             json!({ "app_id": canonical_app_id, "readiness": readiness.clone() }),
         ),
     );
+    if trace_startup {
+        tracing::info!(app_id = %canonical_app_id, phase = "readiness.published", elapsed_ms = received.elapsed().as_secs_f64() * 1000.0, "startup_timing");
+    }
     publish_catalog_snapshot(&state).await;
+    if trace_startup {
+        tracing::info!(app_id = %canonical_app_id, phase = "readiness.catalog_complete", elapsed_ms = received.elapsed().as_secs_f64() * 1000.0, "startup_timing");
+    }
     Json(ApiResponse {
         ok: true,
         data: Value::Object(readiness),
@@ -657,6 +668,7 @@ fn build_app_bootstrap_payload(
         "state_key": state_key,
         "state": state,
         "debug_full_stack": debug_full_stack,
+        "runtime_debug": crate::launcher::runtime_debug_enabled(),
     })
 }
 

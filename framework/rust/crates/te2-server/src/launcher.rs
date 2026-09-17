@@ -58,6 +58,15 @@ pub fn launch_supported() -> bool {
     cfg!(feature = "ferrous-framework-native")
 }
 
+pub(crate) fn runtime_debug_enabled() -> bool {
+    std::env::var("TE2_RUNTIME_DEBUG").is_ok_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
+}
+
 pub fn launch_app(
     store: &LaunchStore,
     app: &AppDefinition,
@@ -66,6 +75,11 @@ pub fn launch_app(
     framework_port: u16,
     framework_shells_env: &std::collections::HashMap<String, String>,
 ) -> Result<LaunchResult> {
+    let launch_started = std::time::Instant::now();
+    let trace_startup = runtime_debug_enabled();
+    if trace_startup {
+        tracing::info!(app_id = %app.app_id, phase = "launch.requested", "startup_timing");
+    }
     #[cfg(not(feature = "ferrous-framework-native"))]
     {
         let _ = (
@@ -134,6 +148,12 @@ pub fn launch_app(
             if should_bypass_shellspec_readiness(app, shell) {
                 rendered_shell.readiness = None;
             }
+            // Timestamp spawn separately from manifest rendering and later
+            // worker-owned readiness. These records never release the gate.
+            let spawn_started = std::time::Instant::now();
+            if trace_startup {
+                tracing::info!(app_id = %app.app_id, entry = %entry_name, phase = "spawn.begin", elapsed_ms = launch_started.elapsed().as_secs_f64() * 1000.0, "startup_timing");
+            }
             let record = manager
                 .spawn_rendered_shellspec_with_overrides_blocking(
                     rendered_shell.clone(),
@@ -157,6 +177,10 @@ pub fn launch_app(
                         "failed to spawn app shell '{entry_name}' through ferrous_framework native manager"
                     )
                 })?;
+
+            if trace_startup {
+                tracing::info!(app_id = %app.app_id, shell_id = %record.id, phase = "spawn.end", elapsed_ms = spawn_started.elapsed().as_secs_f64() * 1000.0, "startup_timing");
+            }
 
             if is_app_worker_shell(shell) && primary_shell_id.is_none() {
                 primary_shell_id = Some(record.id.clone());

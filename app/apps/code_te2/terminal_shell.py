@@ -7,9 +7,6 @@ import signal
 from pathlib import Path
 from typing import cast
 
-from framework_shells import get_manager as _manager
-from framework_shells.orchestrator import Orchestrator
-
 SHELLSPEC_DIR = Path(__file__).parent / "shellspec"
 SHELLSPEC_REF = "terminal.yaml#terminal"
 
@@ -91,7 +88,11 @@ async def create_editor_shell(
     Returns:
         dict: Shell session info including ID
     """
-    mgr = await _manager()
+    # Shell launch dependencies must not gate editor/router startup.
+    from framework_shells import get_manager
+    from framework_shells.orchestrator import Orchestrator
+
+    mgr = await get_manager()
     orch = Orchestrator(mgr)
     
     shell_cmd_value: ShellCommand = shell_cmd if shell_cmd is not None else ['bash', '-l', '-i']
@@ -132,7 +133,9 @@ async def destroy_editor_shell(shell_id: str) -> bool:
     Returns:
         bool: True if successfully removed
     """
-    mgr = await _manager()
+    from framework_shells import get_manager
+
+    mgr = await get_manager()
     try:
         # Force termination and remove metadata/logs
         await mgr.remove_shell(shell_id, force=True)
@@ -150,7 +153,9 @@ async def resize_editor_shell(shell_id: str, cols: int, rows: int) -> bool:
         cols: Terminal columns
         rows: Terminal rows
     """
-    mgr = await _manager()
+    from framework_shells import get_manager
+
+    mgr = await get_manager()
     try:
         await mgr.resize_pty(shell_id, cols, rows)
 

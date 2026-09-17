@@ -173,8 +173,12 @@ export async function bootMonacoRuntime(
     deps.connectEditorHostActions();
     await Promise.resolve(deps.connectEditorSocket());
     if (!languageWorkersEnabled) {
-      try { await deps.ensureWorkbenchLanguageCatalogInstalled(); } catch (_) {}
-      try { deps.installWorkbenchLanguageBridgeProviders(); } catch (_) {}
+      // Catalog enrichment follows WBA availability, not editor readiness. A
+      // cold extension host must not delay the editor-ready/open-model handshake.
+      void deps.ensureWorkbenchLanguageCatalogInstalled().then(() => {
+        deps.installWorkbenchLanguageBridgeProviders();
+        deps.applyActiveModelLanguage();
+      }).catch(() => {});
     }
 
     try {

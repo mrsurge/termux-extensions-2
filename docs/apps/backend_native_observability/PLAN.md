@@ -216,6 +216,70 @@ Reference: Node module compile-cache documentation and code-server v4.130.0
 environment). Cached compilation does not replace extension activation or WBA
 connection work; inspect those independently if they remain slow.
 
+### Next Investigation: Parallel Intelligence Startup
+
+Investigate this before the larger lifecycle/networking experiment. The current
+`main._prime_code_server_runtime` awaits code-server before calling WBA ensure;
+WBA ensure combines spawn, stdio ping and `adapter.connect`. The adapter's own
+listener and `te2.ping` are independent of workbench connection, so process boot
+can potentially overlap code-server boot. This is a source-backed opportunity,
+not yet a measured improvement or authorization to change runtime behavior.
+
+Proposed stages:
+1. Resolve/validate the managed installation, generated extension/RPC settings
+   and canonical UDS target before spawning. Preserve consent and worker mode.
+2. Launch code-server and prepare the WBA process concurrently, retaining each
+   service's single-flight ownership. WBA preparation ends at a responsive pipe;
+   it must not publish intelligence-ready or dispose an already valid session.
+3. Await code-server readiness asynchronously, then connect the prepared adapter
+   once. Prefer the existing output subscription as the normal trigger.
+4. Investigate an adapter-owned UDS readiness check for missed startup output or
+   adoption. A path existing is not enough: verify a successful service-level
+   exchange. Any bounded startup-only retry requires an explicit decision; no
+   perpetual polling, busy waiting, or blocking the worker/adapter event loop.
+5. Publish connected readiness only after the real workbench handshake succeeds.
+
+Handle timeout/process exit, stale sockets, project changes, cancellation, live
+shell adoption and simultaneous browser/worker callers. Current code-server
+output-readiness timeout continues with a warning; do not treat this as proof of
+readiness in the staged design. Adoption failure while merely waiting must not
+cause kill/relaunch churn. Instrument process-ready, dependency-ready and
+workbench-connected separately. Compare cold/warm startup, text latency, total
+intelligence latency and peak memory on mobile; simultaneous boot may contend.
+
+### Gated Experiment: Application Lifecycle Outside Networking
+
+Keep this after the intelligence-startup investigation. Separate application
+ownership from FastAPI before deciding whether to remove Python networking.
+The application worker owns state, service initialization, task supervision,
+subscriptions, DTO production and shutdown. A thin networking adapter owns
+connections/authentication, encoding and delivery. Transport-ready, app-ready
+and intelligence-ready remain distinct; early connections cannot imply usable
+application state. Run-profile shells remain owned by Code TE2's lifecycle.
+
+First audit FastAPI lifespan hooks, dependencies, request/socket objects and
+loop-bound state. Define explicit startup/stop and typed request/event/client
+lifecycle contracts using ordinary asyncio. Evaluate an independently launched
+FastAPI process, booting in parallel with the application worker, against the
+existing Rust networking/pipe facilities. A second loop/thread alone does not
+remove import cost or guarantee parallel initialization; aiorun is an optional
+lifecycle convenience, not a performance requirement.
+
+Use existing supervised shell/pipe ownership rather than an unmanaged child
+process or new eval port. A multiprocessing prototype is a decision-gated
+alternative, not a committed transport. Never fork live loops/connections.
+Bound queue depth/bytes and concurrent dispatch; correlate requests independently
+of notifications. Only explicitly replaceable, revisioned state DTOs may coalesce
+in an asynchronous accumulator. Preserve command/edit ordering and completion;
+never silently merge/drop editing operations or replay uncertain mutations.
+Specify disconnect, cancellation, slow-client backpressure, adapter failure and
+shutdown behavior. Keep credentials and runtime-debug opt-in at the boundary.
+
+Use runtime eval plus retained timing records to investigate failures. Measure
+cold readiness, import cost, event-loop responsiveness, IPC cost, peak memory and
+first-use latency. Prototype one lane without changing its frontend contract;
+do not migrate all lanes or remove FastAPI until evidence and separate approval.
+
 ### External Rust CPU Profiling
 
 Use optional external sampling tools rather than adding a Rust reflection or
