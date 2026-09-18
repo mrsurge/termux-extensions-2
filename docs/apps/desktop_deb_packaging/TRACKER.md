@@ -1749,6 +1749,25 @@ does not authorize publication.
   eight apps. Real File Explorer and ALS-RS workers both reached ready/HTTP 200
   from the isolated acceptance runtime.
 
+### Phase 4P — TE2 0.2.350 runtime and Explorer release
+
+- [x] Integrate the worker/WBA MessagePack transports, transport-independent
+  app lifetime, runtime diagnostics, startup scheduling, Cefrium 0.8.8, and
+  Explorer projection/history refinements merged after `0.2.349`.
+- [x] Pin the published Framework-Shells `0.0.64`, Agent Log Server `0.2.131`,
+  and Ferrous Framework `0.2.14` release graph.
+- [x] Correct the maintained source gates for the attributed upstream SCM tree,
+  intentional app-worker lifecycle helper, live WBA pipe requirement, and
+  explicitly stopped event-bus suite state.
+- [x] Synchronize package, Rust, app/catalog, Electron, Android, frontend URL,
+  and Android asset versions at `0.2.350` / version code `20350`.
+- [ ] Rebuild and validate the Code TE2, Terminal, Electron, Android, Linux,
+  and physical-AArch64 Termux release artifacts from the immutable tag.
+- [ ] Publish the exact Linux wheel/sdist to PyPI and the audited 13-asset
+  normal/latest GitHub release titled `TE2 0.2.350 alpha`.
+- [ ] Pass fresh public Debian desktop/framework/worker acceptance and physical
+  Motorola Termux/APK acceptance before promoting the GitHub draft.
+
 ## Deferred work
 
 - [ ] Linux arm64 Electron package.

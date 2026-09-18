@@ -52,6 +52,7 @@ class SecondaryContentBackendTests(unittest.IsolatedAsyncioTestCase):
         _ = self.stack.enter_context(patch.object(project_sidecar, "_sidecar_root", return_value=root / "sidecars"))
         _ = self.stack.enter_context(patch.object(HistoryStore, "get_active_project", return_value=self.project))
         _ = self.stack.enter_context(patch.object(event_bus, "current_project_generation", return_value=1))
+        _ = self.stack.enter_context(patch.object(event_bus, "_stopped", False))
         _ = write_client_document_open(self.project, self.path, PRIMARY, require_existing_sidecar=False)
         _ = write_client_document_open(self.project, self.path, CLIENT)
 

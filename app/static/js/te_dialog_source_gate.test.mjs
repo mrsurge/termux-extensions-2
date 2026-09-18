@@ -9,6 +9,8 @@ const SKIP_DIRECTORIES = new Set([
   "build",
   "dist",
   "node_modules",
+  "tests",
+  "upstream",
   "vendor",
   "vscode_oss_src",
   "workbench_protocol_proxy",

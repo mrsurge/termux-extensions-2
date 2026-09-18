@@ -360,7 +360,17 @@ class CodeTe2WorkbenchPathHandoffTests(unittest.IsolatedAsyncioTestCase):
             patch.object(
                 workbench_adapter_shell_manager,
                 "_ensure_live_adapter_io",
-                AsyncMock(return_value=False),
+                AsyncMock(return_value=True),
+            ),
+            patch.object(
+                workbench_adapter_shell_manager,
+                "adapter_rpc",
+                AsyncMock(return_value={"result": True}),
+            ),
+            patch.object(
+                workbench_adapter_shell_manager,
+                "_connect_prepared_adapter",
+                AsyncMock(),
             ),
             patch.object(
                 workbench_adapter_shell_manager,
