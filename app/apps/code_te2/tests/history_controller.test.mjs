@@ -24,7 +24,7 @@ async function fixture(run) {
   finally { globalThis.ResizeObserver = previous; delete globalThis.__historyViews; await win.happyDOM.close(); }
 }
 const snapshot = generation => ({ generation, kind: 'snapshot', snapshot: { head_id: 'a'.repeat(40), refs: [] } });
-const page = generation => ({ generation, kind: 'page', page: { offset: 0, complete: true, commits: [{ identity: 'a'.repeat(40), subject: 'Root', author: 'Test', parents: [] }] } });
+const page = generation => ({ generation, kind: 'page', page: { offset: 0, complete: true, commits: [{ identity: 'a'.repeat(40), subject: 'Root', author: 'Test', timestamp: 1_700_000_000, parents: [] }] } });
 test('early notifications render graph, statistics update in place, file click uses native index', async () => fixture(async (container, views) => {
   const calls = []; let finish;
   const c = new ExplorerHistoryController(async (method, payload) => {
@@ -35,6 +35,8 @@ test('early notifications render graph, statistics update in place, file click u
   });
   c.mount(container); c.notify(snapshot(1)); c.notify(page(1)); finish({ generation: 1 }); await settle();
   assert.equal(views.length, 1);
+  assert.equal(views[0].input.rows[0].historyItemViewModel.historyItem.timestamp, 1_700_000_000_000,
+    'native epoch seconds become the millisecond timestamp expected by the SCM view model');
   c.notify({ generation: 1, kind: 'statistics', statistics: { commit_id: 'a'.repeat(40), state: 'ready', known_additions: 1, known_deletions: 0 } });
   assert.equal(views.length, 1);
   assert.equal(views[0].input.rows[0].counts.additions, 1);
@@ -146,8 +148,8 @@ test('snapshot refs name local heads, group remote icons, and color the active u
       { name: 'refs/remotes/other/main', commit_id: 'b'.repeat(40) }
     ] } });
   c.notify({ generation: 1, kind: 'page', page: { offset: 0, complete: true, commits: [
-    { identity: 'a'.repeat(40), parents: ['b'.repeat(40)], subject: 'Feature', author: 'A' },
-    { identity: 'b'.repeat(40), parents: [], subject: 'Main', author: 'A' }
+    { identity: 'a'.repeat(40), parents: ['b'.repeat(40)], subject: 'Feature', author: 'A', timestamp: 1_700_000_000 },
+    { identity: 'b'.repeat(40), parents: [], subject: 'Main', author: 'A', timestamp: 1_699_999_000 }
   ] } });
   const [feature, main] = views[0].input.rows.map(row => row.historyItemViewModel);
   assert.equal(feature.historyItem.references[0].name, 'feature');
@@ -166,10 +168,10 @@ test('native upstream and base roles color their lanes and labels independently'
   c.notify({ generation: 1, kind: 'snapshot', snapshot: { head_id: current.commit_id,
     head_ref: current.name, refs: [current, remote, base], upstream_ref: remote, base_ref: base } });
   c.notify({ generation: 1, kind: 'page', page: { offset: 0, complete: true, commits: [
-    { identity: current.commit_id, parents: [remote.commit_id], subject: 'Current', author: 'A' },
-    { identity: remote.commit_id, parents: [base.commit_id], subject: 'Pushed', author: 'A' },
-    { identity: base.commit_id, parents: ['d'.repeat(40)], subject: 'Base', author: 'A' },
-    { identity: 'd'.repeat(40), parents: [], subject: 'Root', author: 'A' }
+    { identity: current.commit_id, parents: [remote.commit_id], subject: 'Current', author: 'A', timestamp: 1_700_000_000 },
+    { identity: remote.commit_id, parents: [base.commit_id], subject: 'Pushed', author: 'A', timestamp: 1_699_999_000 },
+    { identity: base.commit_id, parents: ['d'.repeat(40)], subject: 'Base', author: 'A', timestamp: 1_699_998_000 },
+    { identity: 'd'.repeat(40), parents: [], subject: 'Root', author: 'A', timestamp: 1_699_997_000 }
   ] } });
   const models = views[0].input.rows.map(row => row.historyItemViewModel);
   for (const [index, color] of ['scmGraph.historyItemRefColor', 'scmGraph.historyItemRemoteRefColor', 'scmGraph.historyItemBaseRefColor'].entries()) {
