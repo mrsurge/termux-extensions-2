@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { build } from 'esbuild';
 import { Window } from 'happy-dom';
@@ -146,6 +147,37 @@ test('desktop UA keeps checkboxes even at mobile width',()=>{
   const h=harness({width:360});
   assert.equal(h.root.querySelectorAll('input[type="checkbox"]').length,2);
   h.win.happyDOM.abort();
+});
+
+test('By Contents keeps file controls on one line and outlines each complete result group',async()=>{
+  const css=await readFile('main_page/frontend/explorer.css','utf8');
+  const rule=selector=>{
+    const escaped=selector.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    const matches=[...css.matchAll(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`,'g'))];
+    assert.equal(matches.length,1,`${selector} must have one authoritative rule`);
+    return matches[0][1];
+  };
+  const headerCss=rule('.fe-search-file-header');
+  assert.match(headerCss,/flex-wrap:\s*nowrap/);
+  assert.match(headerCss,/overflow:\s*hidden/);
+  assert.match(rule('.fe-search-file-title'),/white-space:\s*nowrap/);
+  const groupCss=rule('.fe-search-file-group');
+  assert.match(groupCss,/box-shadow:\s*inset 0 0 0 1px rgba\(148,\s*163,\s*184,\s*0\.2\)/);
+  assert.match(groupCss,/overflow:\s*hidden/);
+
+  const desktop=harness({allFiles:[{rel:'deeply/nested/path/to/file.py',matches:[hit(0)],fileMatchCount:1}]});
+  const desktopHeader=desktop.root.querySelector('.fe-search-file-header');
+  assert.ok(desktopHeader.querySelector(':scope > input.fe-search-select'));
+  assert.ok(desktopHeader.querySelector(':scope > [aria-label^="Dismiss "]'));
+  assert.equal(desktopHeader.querySelector('.fe-search-path-parent').textContent,'deeply/nested/path/to/');
+  assert.equal(desktopHeader.querySelector('.fe-search-path-name').textContent,'file.py');
+  desktop.win.happyDOM.abort();
+
+  const mobile=harness({mobile:true,allFiles:[{rel:'deeply/nested/path/to/file.py',matches:[hit(0)],fileMatchCount:1}]});
+  const mobileHeader=mobile.root.querySelector('.fe-search-file-header');
+  assert.equal(mobileHeader.querySelector(':scope > input.fe-search-select'),null);
+  assert.ok(mobileHeader.querySelector(':scope > [aria-label^="Dismiss "]'));
+  mobile.win.happyDOM.abort();
 });
 
 test('mobile header long press starts selection; taps toggle full and partial groups',async()=>{

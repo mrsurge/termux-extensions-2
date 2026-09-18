@@ -5,7 +5,7 @@
 
 import { SWIMLANE_WIDTH, renderSCMHistoryItemGraph, renderSCMHistoryGraphPlaceholder, getHistoryItemIndex, historyItemHoverLabelForeground, historyItemHoverDefaultLabelBackground } from './scmHistory.ts';
 import type { ISCMHistoryItem, ISCMHistoryItemRef, ISCMHistoryItemViewModel, ISCMHistoryItemGraphNode } from '../common/history.ts';
-import { appendElement, formatHistoryTimestamp, renderFileSummary, renderCounts, groupBy, historyIconId, type HistoryFileIconResolver } from '../../pane-platform.ts';
+import { appendElement, renderFileSummary, renderCounts, groupBy, historyIconId, type HistoryFileIconResolver } from '../../pane-platform.ts';
 import type { HistoryFileRow, HistoryFileTemplate, HistoryCommitRow, HistoryCommitTemplate, HistoryLoadMoreRow, HistoryLoadMoreTemplate, HistoryRow, HistoryTreeInput, HistoryChildrenReader, HistoryFileSummary, HistoryErrorRow } from '../../pane-platform.ts';
 import { asCssVariable, foreground } from '../../platform.ts';
 
@@ -59,7 +59,7 @@ export class HistoryItemRenderer {
 	static readonly TEMPLATE_ID = 'history-item';
 	get templateId(): string { return HistoryItemRenderer.TEMPLATE_ID; }
 
-	constructor(private readonly badges: 'all' | 'filter' = 'all', private readonly mobile = false) { }
+	constructor(private readonly badges: 'all' | 'filter' = 'all') { }
 
 	renderTemplate(container: HTMLElement): HistoryCommitTemplate {
 		const element = appendElement(container, 'history-item');
@@ -83,11 +83,6 @@ export class HistoryItemRenderer {
 		templateData.description.replaceChildren();
 		const descriptionPrimary = appendElement(templateData.description, 'history-description-primary');
 		descriptionPrimary.textContent = [historyItem.displayId ?? historyItem.id.slice(0, 8), historyItem.author].filter(Boolean).join(' ');
-		const timestamp = this.mobile ? formatHistoryTimestamp(historyItem.timestamp) : '';
-		if (timestamp) {
-			const timestampElement = appendElement(templateData.description, 'history-description-timestamp');
-			timestampElement.textContent = timestamp;
-		}
 		templateData.element.dataset.commitId = historyItem.id;
 		this._renderBadges(historyItem, templateData);
 	}

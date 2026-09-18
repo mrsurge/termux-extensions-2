@@ -171,6 +171,38 @@ test('real tree host preserves expanded children on root refresh and routes file
   finally { host.dispose(); container.remove(); }
 });
 
+test('replacement host restores only captured expanded commit identities', async () => {
+  const rows = commitRows();
+  const firstContainer = win.document.createElement('div'); win.document.body.append(firstContainer);
+  const actions = { openFile: async () => {}, loadMore: async () => {}, onError: assert.fail };
+  const first = new hostModule.HistoryTreeHost(firstContainer, upstream.CompressibleAsyncDataTree,
+    { type: 'historyRoot', id: 'first', rows }, async () => [
+      { path: 'restored.py', counts: { state: 'ready', additions: 1, deletions: 0 } },
+    ], actions);
+  let second;
+  const secondContainer = win.document.createElement('div'); win.document.body.append(secondContainer);
+  try {
+    first.layout(500, 800); await first.ready;
+    await first.tree.expand(rows[0]);
+    const expanded = first.expandedCommitIds();
+    assert.deepEqual([...expanded], ['merge']);
+    first.dispose();
+
+    second = new hostModule.HistoryTreeHost(secondContainer, upstream.CompressibleAsyncDataTree,
+      { type: 'historyRoot', id: 'second', rows }, async () => [
+        { path: 'restored.py', counts: { state: 'ready', additions: 1, deletions: 0 } },
+      ], actions, undefined, expanded);
+    assert.deepEqual([...second.expandedCommitIds()], ['merge'],
+      'a replacement interrupted before setInput settles retains its pending identities');
+    second.layout(500, 800); await second.ready;
+    assert.equal(second.tree.isCollapsed(rows[0]), false);
+    assert.equal(secondContainer.querySelector('.history-file-name').textContent, 'restored.py');
+    second.tree.collapse(rows[0]);
+    assert.deepEqual([...second.expandedCommitIds()], [], 'a user collapse replaces restored state');
+  } catch (error) { throw boundedError(error); }
+  finally { first.dispose(); second?.dispose(); firstContainer.remove(); secondContainer.remove(); }
+});
+
 test('disposing a real host aborts an in-flight child read and rejects stale rendering', async () => {
   const rows = commitRows();
   const container = win.document.createElement('div'); win.document.body.append(container);
@@ -235,9 +267,11 @@ test('base-tree and history styles are bounded to the history host', async () =>
   let detailRefNameRule = null;
   let detailMetricsRule = null;
   let detailHashRule = null;
-  let descriptionTimestampRule = null;
-  let hoverBylineRule = null;
-  let hoverTimestampRule = null;
+  let detailBylineRule = null;
+  let detailTimestampRule = null;
+  let fileDirectoryRule = null;
+  let fileDirectoryTextRule = null;
+  let fileBasenameRule = null;
   let detailsRowRule = null;
   let detailsGraphRule = null;
   let detailsGraphSvgRule = null;
@@ -279,14 +313,20 @@ test('base-tree and history styles are bounded to the history host', async () =>
         if (rule.selectorText === '.te2-scm-history .history-detail-hash') {
           detailHashRule = rule;
         }
-        if (rule.selectorText === '.te2-scm-history .history-description-timestamp') {
-          descriptionTimestampRule = rule;
+        if (rule.selectorText === '.te2-scm-history .history-detail-byline') {
+          detailBylineRule = rule;
         }
-        if (rule.selectorText === '.te2-scm-history .history-hover-byline') {
-          hoverBylineRule = rule;
+        if (rule.selectorText === '.te2-scm-history .history-detail-timestamp') {
+          detailTimestampRule = rule;
         }
-        if (rule.selectorText === '.te2-scm-history .history-hover-timestamp') {
-          hoverTimestampRule = rule;
+        if (rule.selectorText === '.te2-scm-history .history-file-directory') {
+          fileDirectoryRule = rule;
+        }
+        if (rule.selectorText === '.te2-scm-history .history-file-directory-text') {
+          fileDirectoryTextRule = rule;
+        }
+        if (rule.selectorText === '.te2-scm-history .history-file-basename') {
+          fileBasenameRule = rule;
         }
         if (rule.selectorText === '.te2-scm-history .history-item-details') {
           detailsRowRule = rule;
@@ -297,7 +337,7 @@ test('base-tree and history styles are bounded to the history host', async () =>
         if (rule.selectorText === '.te2-scm-history .history-item-details > .graph-placeholder > .history-details-graph') {
           detailsGraphSvgRule = rule;
         }
-        if (rule.selectorText === '.te2-scm-history .history-item-details > .history-detail-body') {
+        if (rule.selectorText === '.te2-scm-history .history-item-details > .history-details-content') {
           detailsBodyRule = rule;
         }
         selectors++;
@@ -324,9 +364,15 @@ test('base-tree and history styles are bounded to the history host', async () =>
   assert.equal(detailMetricsRule?.style.flexDirection, 'column');
   assert.equal(detailMetricsRule?.style.alignItems, 'flex-end');
   assert.equal(detailHashRule?.style.cursor, 'pointer');
-  assert.equal(descriptionTimestampRule?.style.marginLeft, 'auto');
-  assert.equal(hoverBylineRule?.style.justifyContent, 'space-between');
-  assert.equal(hoverTimestampRule?.style.marginLeft, 'auto');
+  assert.equal(detailBylineRule?.style.justifyContent, 'space-between');
+  assert.equal(detailTimestampRule?.style.marginLeft, 'auto');
+  assert.equal(fileDirectoryRule?.style.overflow, 'hidden');
+  assert.equal(fileDirectoryRule?.style.opacity, '.62');
+  assert.equal(fileDirectoryRule?.style.flex, '0 1 auto');
+  assert.equal(fileDirectoryRule?.style.justifyContent, 'flex-end');
+  assert.equal(fileDirectoryTextRule?.style.flex, '0 0 auto');
+  assert.equal(fileBasenameRule?.style.flex, '0 0 auto');
+  assert.equal(fileBasenameRule?.style.textOverflow, 'ellipsis');
   assert.equal(detailsRowRule?.style.lineHeight, '16px', 'details must not inherit the virtual row height as line-height');
   assert.equal(detailsGraphRule?.style.alignSelf, 'stretch');
   assert.equal(detailsGraphRule?.style.height, 'auto');
@@ -401,6 +447,9 @@ test('file icon resolver receives basename and late SVG cannot alter a recycled 
   resolvers[1]({ svg: '<svg data-icon="javascript"></svg>', color: '#fedcba' });
   await tick();
   assert.deepEqual(names, ['first.py', 'second.mjs']);
+  assert.equal(template.label.querySelector('.history-file-directory-text').textContent, 'lib/');
+  assert.equal(template.label.querySelector('.history-file-basename').textContent, 'second.mjs');
+  assert.equal(template.label.title, 'lib/second.mjs');
   assert.equal(template.label.querySelector('svg').dataset.icon, 'javascript');
   assert.equal(template.label.querySelectorAll('svg').length, 1);
   renderer.disposeTemplate(template);
@@ -421,6 +470,10 @@ test('partial commit totals and copyable full commit identity live in details, n
     ] },
   } };
   const info = win.document.createElement('div'); details.renderHistoryDetails(info, detailedRow);
+  assert.equal(info.querySelector('.history-detail-subject').textContent, 'Merge');
+  assert.equal(info.querySelector('.history-detail-identity').textContent, 'a'.repeat(40));
+  assert.equal(info.querySelector('.history-detail-author').textContent, 'Alice');
+  assert.ok(info.querySelector('.history-detail-timestamp').textContent);
   const stats = info.querySelector('.history-commit-statistics');
   assert.equal(stats.textContent, '+42* -7*'); assert.match(stats.title, /2 file/);
   const metrics = info.querySelector('.history-detail-metrics');
@@ -468,8 +521,12 @@ test('mobile UA gets a details child in wide layouts and totals rerender without
     assert.equal(delegate.hasDynamicHeight(rows[0]), false);
     assert.equal(container.querySelectorAll('.history-item-details').length, 1);
     assert.equal(container.querySelector('.te2-scm-history').classList.contains('is-mobile'), true);
-    assert.ok(container.querySelector('.history-description-timestamp')?.textContent,
-      'mobile commit headers display the retained commit date and time');
+    assert.equal(container.querySelector('.history-item .history-description-timestamp'), null,
+      'mobile commit headers retain the same compact metadata shape as desktop');
+    assert.equal(container.querySelector('.history-item-details .history-detail-subject').textContent, 'Merge');
+    assert.equal(container.querySelector('.history-item-details .history-detail-author').textContent, 'Alice');
+    assert.ok(container.querySelector('.history-item-details .history-detail-timestamp')?.textContent,
+      'the expanded mobile details card owns the retained commit date and time');
     assert.equal(container.querySelectorAll('.history-item .history-commit-statistics').length, 0);
     assert.equal(container.querySelectorAll('.history-item-details svg').length, 1);
     const detailsGraph = container.querySelector('.history-item-details .history-details-graph');
@@ -521,11 +578,11 @@ test('desktop hover exposes live totals without expanding or reading files and d
     await host.updateRows(replacement);
     assert.equal(win.document.querySelector('.history-details-hover .history-commit-statistics').textContent, '+15 -3');
     nextAnchor.dispatchEvent(new win.MouseEvent('pointerover', { bubbles: true }));
-    assert.equal(win.document.querySelector('.history-hover-subject').textContent, 'Left',
+    assert.equal(win.document.querySelector('.history-detail-subject').textContent, 'Left',
       'adjacent rows reveal immediately after the first settled hover');
-    assert.equal(win.document.querySelector('.history-hover-identity').textContent, 'left');
-    assert.equal(win.document.querySelector('.history-hover-author').textContent, 'Bob');
-    assert.ok(win.document.querySelector('.history-hover-timestamp').textContent,
+    assert.equal(win.document.querySelector('.history-detail-identity').textContent, 'left');
+    assert.equal(win.document.querySelector('.history-detail-author').textContent, 'Bob');
+    assert.ok(win.document.querySelector('.history-detail-timestamp').textContent,
       'the hover keeps date and time on its existing author line');
     historyElement.dispatchEvent(new win.MouseEvent('pointerleave'));
     assert.ok(win.document.querySelector('.history-details-hover'), 'the bridge keeps the portal alive while the pointer crosses the gap');

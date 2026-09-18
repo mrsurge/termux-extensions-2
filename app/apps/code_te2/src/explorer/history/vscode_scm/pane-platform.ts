@@ -119,13 +119,28 @@ export function renderFileSummary(template: HistoryFileTemplate, row: HistoryFil
   const icon = template.label.ownerDocument.createElement('span');
   icon.className = 'history-file-icon codicon codicon-file';
   icon.setAttribute('aria-hidden', 'true');
-  const name = template.label.ownerDocument.createElement('span');
-  name.className = 'history-file-path';
-  name.textContent = row.path;
-  template.label.replaceChildren(icon, name);
+  const path = template.label.ownerDocument.createElement('span');
+  path.className = 'history-file-path';
+  const separator = row.path.lastIndexOf('/');
+  const directoryValue = separator >= 0 ? row.path.slice(0, separator + 1) : '';
+  const basenameValue = separator >= 0 ? row.path.slice(separator + 1) : row.path;
+  if (directoryValue) {
+    const directory = template.label.ownerDocument.createElement('span');
+    directory.className = 'history-file-directory';
+    const directoryText = template.label.ownerDocument.createElement('span');
+    directoryText.className = 'history-file-directory-text';
+    directoryText.textContent = directoryValue;
+    directory.append(directoryText);
+    path.append(directory);
+  }
+  const basename = template.label.ownerDocument.createElement('span');
+  basename.className = 'history-file-basename';
+  basename.textContent = basenameValue || row.path;
+  path.append(basename);
+  template.label.replaceChildren(icon, path);
   // The production host supplies the same vendored filename resolver as tabs.
   // A recycled row detaches this icon, fencing any late asynchronous resolution.
-  if (resolveIcon) void resolveIcon(row.path.split('/').at(-1) || row.path).then(resolved => {
+  if (resolveIcon) void resolveIcon(basenameValue || row.path).then(resolved => {
     if (icon.parentElement !== template.label || !resolved?.svg) return;
     icon.className = 'history-file-icon';
     icon.innerHTML = resolved.svg; // Trusted vendored SVG, never a Git path string.

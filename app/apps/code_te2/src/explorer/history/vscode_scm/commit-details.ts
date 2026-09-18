@@ -2,9 +2,7 @@ import { appendElement, formatHistoryTimestamp, historyIconId, renderCounts, typ
 import { SWIMLANE_HEIGHT, SWIMLANE_WIDTH, renderSCMHistoryGraphPlaceholder, getHistoryItemIndex } from './adapted/browser/scmHistory.ts';
 import { asCssVariable } from './platform.ts';
 
-/** Shared presentation only: totals arrive on the existing statistics stream. */
-export function renderHistoryDetails(container: HTMLElement, row: HistoryCommitRow): void {
-  container.replaceChildren();
+function renderHistoryDetailsBody(container: HTMLElement, row: HistoryCommitRow): void {
   const refs = appendElement(container, 'history-detail-refs');
   const item = row.historyItemViewModel.historyItem;
   for (const ref of item.references || []) {
@@ -53,6 +51,23 @@ export function renderHistoryDetails(container: HTMLElement, row: HistoryCommitR
   renderCounts(counts, row.counts);
 }
 
+/** Shared mobile-card/desktop-tooltip presentation. Totals arrive on the existing statistics stream. */
+export function renderHistoryDetails(container: HTMLElement, row: HistoryCommitRow): void {
+  container.replaceChildren();
+  const item = row.historyItemViewModel.historyItem;
+  const title = appendElement(container, 'history-detail-title');
+  const subject = appendElement(title, 'history-detail-subject');
+  subject.textContent = item.subject;
+  const identity = appendElement(title, 'history-detail-identity');
+  identity.textContent = item.id;
+  const byline = appendElement(title, 'history-detail-byline');
+  const author = appendElement(byline, 'history-detail-author');
+  author.textContent = item.author || '';
+  const timestamp = appendElement(byline, 'history-detail-timestamp');
+  timestamp.textContent = formatHistoryTimestamp(item.timestamp);
+  renderHistoryDetailsBody(appendElement(container, 'history-detail-body'), row);
+}
+
 interface DetailsTemplate { element: HTMLElement; graph: HTMLElement; body: HTMLElement; }
 /** Mobile gets one ordinary tree child; its graph continues through the row. */
 export class HistoryDetailsRenderer {
@@ -60,7 +75,7 @@ export class HistoryDetailsRenderer {
   constructor(private readonly current: (id: string) => HistoryCommitRow | undefined) {}
   renderTemplate(container: HTMLElement): DetailsTemplate {
     const element = appendElement(container, 'history-item-details');
-    return { element, graph: appendElement(element, 'graph-placeholder'), body: appendElement(element, 'history-detail-body') };
+    return { element, graph: appendElement(element, 'graph-placeholder'), body: appendElement(element, 'history-details-content') };
   }
   renderElement(node: { readonly element: HistoryDetailsRow }, _index: number, template: DetailsTemplate): void {
     const owner = this.current(node.element.owner.historyItemViewModel.historyItem.id) || node.element.owner;
@@ -164,19 +179,7 @@ export class HistoryDetailsHover {
     const row = this.id ? this.current(this.id) : undefined;
     if (!this.panel || !this.portal || !this.content) return;
     if (!row || !this.anchor?.isConnected) { this.hide(); return; }
-    const item = row.historyItemViewModel.historyItem;
-    this.content.replaceChildren();
-    const title = appendElement(this.content, 'history-hover-title');
-    const subject = appendElement(title, 'history-hover-subject');
-    subject.textContent = item.subject;
-    const identity = appendElement(title, 'history-hover-identity');
-    identity.textContent = item.id;
-    const byline = appendElement(title, 'history-hover-byline');
-    const author = appendElement(byline, 'history-hover-author');
-    author.textContent = item.author || '';
-    const timestamp = appendElement(byline, 'history-hover-timestamp');
-    timestamp.textContent = formatHistoryTimestamp(item.timestamp);
-    renderHistoryDetails(appendElement(this.content, 'history-detail-body'), row);
+    renderHistoryDetails(this.content, row);
     this.position();
   }
   private position(): void {

@@ -18,10 +18,6 @@
 .te2-scm-history .history-description-primary {
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.te2-scm-history .history-description-timestamp {
-  flex: none; margin-left: auto; font-variant-numeric: tabular-nums;
-}
-.te2-scm-history.is-mobile .history-description { flex: 1 1 auto; }
 .te2-scm-history .history-commit-statistics,
 .te2-scm-history .history-file-statistics { flex: none; margin-left: auto; padding-right: 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .te2-scm-history [data-state="pending"],
@@ -43,7 +39,20 @@
 }
 .te2-scm-history .history-item-change > .label-container { flex: 1; min-width: 0; }
 .te2-scm-history .history-file-name { display: flex; align-items: center; gap: 5px; }
-.te2-scm-history .history-file-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.te2-scm-history .history-file-path {
+  display: flex; flex: 1; min-width: 0; overflow: hidden; white-space: nowrap;
+}
+.te2-scm-history .history-file-directory {
+  display: flex; justify-content: flex-end; flex: 0 1 auto;
+  min-width: 0; overflow: hidden; opacity: .62;
+}
+.te2-scm-history .history-file-directory-text {
+  flex: none; white-space: nowrap;
+}
+.te2-scm-history .history-file-basename {
+  flex: none; max-width: 100%; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
 .te2-scm-history .history-file-icon { color: inherit; flex: none; }
 .te2-scm-history .history-file-icon svg { display: block; width: 16px; height: 16px; fill: currentColor; }
 .te2-scm-history .history-file-added { color: #85d49a; font-weight: bold; flex: none; }
@@ -93,8 +102,9 @@
 .te2-scm-history .history-item-details > .graph-placeholder > .history-details-graph {
   display: block; height: 100%;
 }
-.te2-scm-history .history-detail-body { display: flex; align-items: flex-start; gap: 8px; min-width: 0; flex: 1; }
-.te2-scm-history .history-item-details > .history-detail-body {
+.te2-scm-history .history-details-content { min-width: 0; flex: 1; }
+.te2-scm-history .history-detail-body { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.te2-scm-history .history-item-details > .history-details-content {
   margin: 0 4px 1px 0; padding: 4px 6px; box-sizing: border-box;
   border: 1px solid #405064; border-radius: 3px; background: #151d27;
 }
@@ -154,12 +164,12 @@
 .te2-scm-history .history-details-hover::after {
   left: -7px; border-width: 6px 7px 6px 0; border-right-color: #252b33;
 }
-.te2-scm-history .history-hover-title { overflow-wrap: anywhere; margin-bottom: 6px; }
-.te2-scm-history .history-hover-subject,
-.te2-scm-history .history-hover-identity { min-width: 0; }
-.te2-scm-history .history-hover-byline {
+.te2-scm-history .history-detail-title { overflow-wrap: anywhere; margin-bottom: 6px; }
+.te2-scm-history .history-detail-subject,
+.te2-scm-history .history-detail-identity { min-width: 0; }
+.te2-scm-history .history-detail-byline {
   display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-width: 0;
 }
-.te2-scm-history .history-hover-author { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.te2-scm-history .history-hover-timestamp { flex: none; margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.te2-scm-history .history-detail-author { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.te2-scm-history .history-detail-timestamp { flex: none; margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .te2-scm-history .history-details-hover .history-detail-body { align-items: flex-start; }

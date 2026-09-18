@@ -35,13 +35,16 @@ export class HistoryTreeHost implements TreeDisposable {
   private readonly retrying = new Set<string>();
   private updateRevision = 0;
   private countWidth = 2;
+  private inputReady = false;
   private autoLoadFailed = false;
   private requestedRowCount = -1;
   private readonly currentRows = new Map<string, HistoryCommitRow>();
   private readonly hover: HistoryDetailsHover | null;
+  private readonly pendingExpandedCommitIds: Set<string>;
 
-  constructor(container: HTMLElement, Tree: HistoryTreeConstructor, input: HistoryTreeInput, readChildren: HistoryChildrenReader, private readonly actions: HistoryTreeActions, resolveIcon?: HistoryFileIconResolver) {
+  constructor(container: HTMLElement, Tree: HistoryTreeConstructor, input: HistoryTreeInput, readChildren: HistoryChildrenReader, private readonly actions: HistoryTreeActions, resolveIcon?: HistoryFileIconResolver, expandedCommitIds: Iterable<string> = []) {
     this.input = { ...input };
+    this.pendingExpandedCommitIds = new Set(expandedCommitIds);
     this.element = container.ownerDocument.createElement('div');
     this.element.className = 'te2-scm-history scm-history-view';
     applyGraphColors(this.element);
@@ -62,7 +65,7 @@ export class HistoryTreeHost implements TreeDisposable {
     try {
       this.tree = new Tree('TE2 history', this.element, new ListDelegate(),
         { isIncompressible: () => true },
-        [new HistoryItemRenderer('all', mobile), new HistoryItemChangeRenderer(resolveIcon), new HistoryItemLoadMoreRenderer(), new HistoryItemErrorRenderer(), new HistoryDetailsRenderer(id => this.currentRows.get(id))], this.source, {
+        [new HistoryItemRenderer('all'), new HistoryItemChangeRenderer(resolveIcon), new HistoryItemLoadMoreRenderer(), new HistoryItemErrorRenderer(), new HistoryDetailsRenderer(id => this.currentRows.get(id))], this.source, {
           compressionEnabled: false, expandOnlyOnTwistieClick: false, supportDynamicHeights: mobile,
           identityProvider: { getId: rowId },
           accessibilityProvider: {
@@ -99,9 +102,35 @@ export class HistoryTreeHost implements TreeDisposable {
     this.subscriptions.push(this.tree.onDidScroll(event => {
       if (event.scrollTopChanged) { this.hover?.hide(); this.maybeLoadMore(); }
     }));
-    this.ready = this.tree.setInput(this.input).catch(error => {
+    this.ready = this.tree.setInput(this.input).then(() => {
+      this.inputReady = true;
+      return this.restoreExpandedRows();
+    }).catch(error => {
       if (!this.disposed) { this.dispose(); throw error; }
     });
+  }
+
+  private async restoreExpandedRows(): Promise<void> {
+    for (const [commitId, row] of this.currentRows) {
+      if (this.disposed || !this.pendingExpandedCommitIds.delete(commitId)) continue;
+      try {
+        if (this.tree.isCollapsed(row)) await this.tree.expand(row);
+      } catch (error) {
+        if (!this.disposed) this.actions.onError(error);
+      }
+    }
+  }
+
+  expandedCommitIds(): Set<string> {
+    if (this.disposed) return new Set();
+    // A second semantic refresh can replace this host before setInput settles.
+    // In that interval the supplied identities are still the authoritative
+    // presentation snapshot; returning an empty set would erase them.
+    if (!this.inputReady) return new Set(this.pendingExpandedCommitIds);
+    const expandedRows = new Set(this.tree.getViewState().expanded);
+    return new Set([...this.currentRows]
+      .filter(([, row]) => expandedRows.has(rowId(row)))
+      .map(([commitId]) => commitId));
   }
 
   private sizeCounts(counts: readonly HistoryCounts[]): void {
@@ -163,6 +192,7 @@ export class HistoryTreeHost implements TreeDisposable {
     // Root-only refresh retains expanded file children; no new Git read per row.
     try {
       await this.tree.updateChildren(this.input, false, true);
+      await this.restoreExpandedRows();
       // Details resolve current projection by ID. Rerender visible children only;
       // updating a total must not re-read the commit's file pages.
       this.tree.rerender(); this.hover?.refresh(); this.maybeLoadMore();

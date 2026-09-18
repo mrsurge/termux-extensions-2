@@ -175,3 +175,8 @@ details child. `commit-details.ts` renders that child with unchanged upstream SV
 lanes and owns the desktop live hover alternative. The controller supplies real
 ref categories/icons and upstream color-map inputs; no ancestry algorithm changes
 or fabricated fork edges are involved.
+
+`patches/0008-mobile-details-row-runtime.patch` gives the TE2-owned mobile details
+child dynamic tree height while preserving the commit header's fixed 22px shape.
+It also gives the compact hash/author description its own element so details-row
+presentation cannot change or crowd the subject line.

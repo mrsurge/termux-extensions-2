@@ -921,6 +921,10 @@ User live acceptance and broader end-to-end concurrency validation remain pendin
   projects, and disconnect discard obsolete jobs through the established event
   lifecycle. Comparison/HEAD changes refresh; path facts replace only affected
   objects. By Contents also expands on early scroll; neither view uses polling.
+  Each By Contents file group has one faint outer card outline around its header
+  and hit rows. Its desktop checkbox and dismiss action, or mobile dismiss action,
+  remain on the fixed single-line header while only the path truncates; hit
+  snippets retain their independent wrapping behavior.
 
 - File/folder name search is an inline Explorer-tree projection, not a search
   overlay. The project-root label becomes the query field, direct hits and their
@@ -1000,18 +1004,34 @@ silently truncated results. Native-device acceptance remains pending.
 History establishes a missing restored-project fact generation before admission,
 using the worker event bus rather than storing a private generation-zero fallback.
 The native five-minute idle lease publishes an exact-session expiry notification.
-Python stops queued statistics and closes that session; the frontend discards its
-actionable rows and automatically refreshes once when History is visible.
-Document visibility and intersection events defer refresh while backgrounded or
-offscreen. A failed refresh requires explicit retry; disposal removes observers.
-There is no polling or automatic replay of a file against the new snapshot.
+That lease is native transport lifetime, not logical History lifetime. Python
+serializes renewal against connection commands, stops the old statistics producer,
+closes the expired session, and opens a replacement. Rust's SHA-256 snapshot
+identity covers HEAD, the active/upstream/base roles, and every captured ref name
+and OID. When that identity matches, Python silently replays and verifies the
+already-published commit frontier before swapping sessions and restarting bounded
+statistics under the same frontend generation. Commands arriving during renewal
+wait for that atomic substitution. A changed identity or failed replay publishes
+the existing expiry fallback instead of exposing a partially renewed session.
+
+The frontend fallback keeps a controller-local presentation ledger containing
+only expanded commit OIDs and the previous bounded page frontier. A real refresh
+replays that frontier and re-expands matching commits as their rows reappear;
+missing commits stay closed. The ledger is scoped by project and is destroyed
+when History closes, never persisted in browser or backend storage. Document
+visibility and intersection events still defer fallback refresh while backgrounded
+or offscreen. A failed refresh requires explicit retry; disposal removes observers.
+There is no polling, keepalive, or automatic replay of a historical file click.
 
 The standalone pane removes the visible twisty/indent gutter; whole-row expansion
 and keyboard/ARIA semantics remain owned by the actual upstream tree. File graphs
 are in-flow first-column content, not negative-offset workbench overlays. File
 rows use the file tabs' filename-aware vendored Seti resolver, with a generic
 Codicon fallback, and a green A from native `added` status. Late icon resolution
-cannot mutate a recycled row. Numeric
+cannot mutate a recycled row. Each row separates a dimmed directory prefix from
+the full-bright basename. The complete path remains left-aligned when it fits;
+under width pressure only the directory prefix reveals its trailing end, clipping
+the repository/root side first and preserving the filename. Numeric
 addition/deletion pills share a host-wide digit width which grows with observed
 counts. Selected rows use a square 2px light-blue inset border/dark-gray fill;
 the History font is 12px while graph rows retain their 22px height.
@@ -1045,15 +1065,15 @@ Repository config/config.worktree and the exact HEAD/current-branch reflogs
 invalidate History through the native watcher. External/global included Git
 config changes require explicit Refresh; there is no broad config-tree watcher.
 
-Mobile UA (independent of width) expansion inserts one 22px details child before
-file rows. Its SVG continues the parent lanes, its totals use the latest commit
-projection, and its full branch/ref names scroll horizontally. Desktop omits that
-child and lazily creates a host-local hover/focus panel with full names and totals.
-The native graph timestamp remains part of the typed page projection: the
-frontend converts its epoch seconds once to the millisecond history-item contract.
-Desktop displays localized date/time at the right of the hover's existing author
-row; mobile displays it at the right of the fixed 22px commit header, without
-adding another row or another Git read.
+Mobile UA (independent of width) keeps the fixed 22px commit header identical to
+desktop and inserts one details child before file rows only while expanded. Its
+SVG continues the parent lanes, and its darker card uses the same subject,
+identity, author/date byline, full branch/ref names, hash and totals presentation
+as the desktop hover/focus panel. Long refs wrap inside the card. The native graph
+timestamp remains part of the typed page projection: the frontend converts its
+epoch seconds once to the millisecond history-item contract and both detail
+surfaces display localized date/time at the right of the shared author row,
+without another Git read.
 Both surfaces place an eight-character hash to the right of the ref list and above
 the count pills. Activating it copies the full commit ID without selecting,
 expanding, or otherwise activating the owning history row; desktop hover remains

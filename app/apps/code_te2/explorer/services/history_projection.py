@@ -118,9 +118,32 @@ class ExplorerHistory:
         if revision == self._revision and self._project == self._root() and not self._closed:
             await self._emit("explorer.history.updated", {"generation": revision, "kind": kind, **payload})
 
+    def _new_statistics(self, revision: int, session: HistorySession) -> HistoryStatistics:
+        async def publish(update: HistoryStatisticsUpdate) -> None:
+            # These are typed dataclasses, not unchecked transport objects.
+            await self._notify(revision, "statistics", {
+                "statistics": cast(dict[str, object], asdict(update)),
+            })
+        return HistoryStatistics(revision, session.files, publish)
+
+    async def _replay_retained(self, session: HistorySession,
+                               retained: tuple[HistoryCommit, ...]) -> None:
+        """Advance a replacement reader to the published frontier, fail closed."""
+        offset = 0
+        while offset < len(retained):
+            page = await session.next_page(min(100, len(retained) - offset))
+            expected = retained[offset:offset + len(page.commits)]
+            if page.offset != offset or page.commits != expected or not page.commits:
+                raise ValueError("History renewal replay changed")
+            offset += len(page.commits)
+            if page.complete and offset < len(retained):
+                raise ValueError("History renewal ended before the retained frontier")
+
     async def _run(self, revision: int, project: Path, previous: asyncio.Task[None] | None,
                    ready: asyncio.Future[HistorySession]) -> None:
         stats: HistoryStatistics | None = None
+        stack: AsyncExitStack | None = None
+        refresh_refs = False
         try:
             if previous is not None:
                 try:
@@ -129,60 +152,101 @@ class ExplorerHistory:
                     pass
             if revision != self._revision:
                 return
-            async with AsyncExitStack() as stack:
-                session = await stack.enter_async_context(history_session(project, self._project_generation or 0))
-                if revision != self._revision:
-                    return
-                self._session = session
-                snapshot = session.snapshot
-                assert snapshot is not None
-                async def publish(update: HistoryStatisticsUpdate) -> None:
-                    # These are typed dataclasses, not unchecked transport objects.
-                    await self._notify(revision, "statistics", {"statistics": cast(dict[str, object], asdict(update))})
-                stats = HistoryStatistics(revision, session.files, publish)
-                # LIFO: stop the producer before closing its native session.
-                _ = stack.push_async_callback(stats.dispose)
-                self._statistics = stats
-                await self._notify(revision, "snapshot", {"snapshot": cast(dict[str, object], asdict(snapshot))})
-                _ = await self._page(revision, session)
-                if not ready.done():
-                    ready.set_result(session)
+            stack = AsyncExitStack()
+            _ = await stack.__aenter__()
+            session = await stack.enter_async_context(history_session(project, self._project_generation or 0))
+            if revision != self._revision:
+                return
+            self._session = session
+            snapshot = session.snapshot
+            assert snapshot is not None
+            stats = self._new_statistics(revision, session)
+            self._statistics = stats
+            await self._notify(revision, "snapshot", {
+                "project": str(project),
+                "snapshot": cast(dict[str, object], asdict(snapshot)),
+            })
+            _ = await self._page(revision, session)
+            if not ready.done():
+                ready.set_result(session)
+            while revision == self._revision:
                 error = await session.wait_changed()
-                if error is not None:
-                    kind = "expired" if error == "History session expired" else "watcherError"
-                    if kind == "expired":
-                        # Stop queued statistics before they can issue reads to
-                        # the expired native worker; retain only the refresh UI.
-                        await stats.dispose()
-                    await self._notify(revision, kind, {"error": error})
-                    if kind == "expired":
-                        return  # The exit stack closes this session exactly once.
-                    _ = await asyncio.Event().wait()
-            # Close the old producer/watcher before scheduling replacement.
+                if error != "History session expired":
+                    if error is not None:
+                        await self._notify(revision, "watcherError", {"error": error})
+                        _ = await asyncio.Event().wait()
+                    break
+
+                # The native five-minute lease is transport lifetime, not
+                # semantic History lifetime. Serialize replacement against all
+                # commands, compare Rust's canonical snapshot identity, then
+                # replay the already-published graph frontier before swapping.
+                async with self._commands:
+                    retained = tuple(self._retained)
+                    previous_identity = snapshot.identity
+                    await stats.dispose()
+                    stats = None
+                    self._statistics = None
+                    self._session = None
+                    await stack.aclose()
+                    stack = AsyncExitStack()
+                    _ = await stack.__aenter__()
+                    try:
+                        replacement = await stack.enter_async_context(
+                            history_session(project, self._project_generation or 0)
+                        )
+                        replacement_snapshot = replacement.snapshot
+                        if replacement_snapshot is None or replacement_snapshot.identity != previous_identity:
+                            raise ValueError("History changed while renewing its native session")
+                        await self._replay_retained(replacement, retained)
+                    except Exception as renewal_error:
+                        await self._notify(revision, "expired", {"error": str(renewal_error)[:512]})
+                        return
+                    if revision != self._revision:
+                        return
+                    session = replacement
+                    snapshot = replacement_snapshot
+                    self._session = session
+                    stats = self._new_statistics(revision, session)
+                    self._statistics = stats
+                    stats.retain(retained)
+            # Close the old producer/watcher before scheduling a semantic
+            # replacement caused by refs/config, not an idle lease renewal.
             if revision == self._revision:
-                self._ref_refresh = asyncio.get_running_loop().call_soon(self._refresh_refs, revision)
+                refresh_refs = True
         except asyncio.CancelledError:
             raise
         except Exception as error:
             await self._notify(revision, "error", {"error": str(error)[:512]})
         finally:
+            try:
+                if stats is not None:
+                    await stats.dispose()
+            finally:
+                if stack is not None:
+                    await stack.aclose()
             if not ready.done():
                 _ = ready.cancel()
             if revision == self._revision:
                 self._session = None
                 self._statistics = None
+                if refresh_refs:
+                    self._ref_refresh = asyncio.get_running_loop().call_soon(
+                        self._refresh_refs, revision
+                    )
 
     async def _get(self, revision: int) -> HistorySession:
         ready = self._ready
         if ready is None or revision != self._revision:
             raise ValueError("Stale History generation")
         try:
-            session = await asyncio.shield(ready)
+            _ = await asyncio.shield(ready)
         except asyncio.CancelledError:
             if ready.cancelled():
                 raise ValueError("History session initialization was superseded") from None
             raise
-        if revision != self._revision or session.closed:
+        session = self._session
+        if revision != self._revision or session is None or session.closed:
             raise ValueError("History session is no longer active")
         return session
 

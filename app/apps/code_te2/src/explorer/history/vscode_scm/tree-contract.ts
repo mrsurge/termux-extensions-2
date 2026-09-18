@@ -26,6 +26,7 @@ export interface HistoryTree {
   getFocus(): HistoryRow[];
   setSelection(elements: HistoryRow[]): void;
   getSelection(): HistoryRow[];
+  getViewState(): { readonly expanded: string[]; readonly focus: string[]; readonly selection: string[]; readonly scrollTop: number };
   cancelAllRefreshPromises(includeSubTrees: boolean): void;
   onPointer(listener: (event: { readonly element: HistoryRow | null; readonly browserEvent: UIEvent }) => void): TreeDisposable;
   onKeyDown(listener: (event: KeyboardEvent) => void): TreeDisposable;

@@ -1,0 +1,21 @@
+--- a/browser/scmHistoryViewPane.ts
++++ b/browser/scmHistoryViewPane.ts
+@@ -80,7 +80,9 @@
+ 		templateData.graphContainer.appendChild(renderSCMHistoryItemGraph(historyItemViewModel));
+ 		templateData.label.textContent = historyItem.subject;
+ 		templateData.label.classList.toggle('history-item-current', historyItemViewModel.kind === 'HEAD');
+-		templateData.description.textContent = [historyItem.displayId ?? historyItem.id.slice(0, 8), historyItem.author].filter(Boolean).join(' ');
++		templateData.description.replaceChildren();
++		const descriptionPrimary = appendElement(templateData.description, 'history-description-primary');
++		descriptionPrimary.textContent = [historyItem.displayId ?? historyItem.id.slice(0, 8), historyItem.author].filter(Boolean).join(' ');
+ 		templateData.element.dataset.commitId = historyItem.id;
+ 		this._renderBadges(historyItem, templateData);
+ 	}
+@@ -178,6 +180,7 @@
+ 
+ export class ListDelegate {
+ 	getHeight(): number { return 22; }
++	hasDynamicHeight(element: HistoryRow): boolean { return element.type === 'historyItemDetails'; }
+ 	getTemplateId(element: HistoryRow): string {
+ 		switch (element.type) {
+ 			case 'historyItemViewModel': return HistoryItemRenderer.TEMPLATE_ID;

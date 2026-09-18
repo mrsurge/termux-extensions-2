@@ -56,6 +56,11 @@ export class ExplorerHistoryController {
   private complete = false;
   private pending: JsonObject[] = [];
   private expired = false;
+  private presentationProject = '';
+  private readonly expandedCommitIds = new Set<string>();
+  private restoreCommitCount = 0;
+  private restoreLoading = false;
+  private restoreRequestedCount = -1;
   private visibility: IntersectionObserver | null = null;
   private intersectsViewport = false;
   private readonly onVisibility = () => this.refreshExpired();
@@ -119,15 +124,31 @@ export class ExplorerHistoryController {
   private layout(): void {
     if (this.body) this.tree?.layout(this.body.clientHeight, this.body.clientWidth);
   }
-  private reset(): void {
+  private capturePresentation(): void {
+    if (!this.tree) return;
+    const loaded = new Set(this.commits.map(commit => commit.id));
+    for (const commitId of loaded) this.expandedCommitIds.delete(commitId);
+    for (const commitId of this.tree.expandedCommitIds()) this.expandedCommitIds.add(commitId);
+    this.restoreCommitCount = Math.max(this.restoreCommitCount, this.commits.length);
+  }
+  private clearPresentation(): void {
+    this.presentationProject = '';
+    this.expandedCommitIds.clear();
+    this.restoreCommitCount = 0;
+  }
+  private reset(preservePresentation = false): void {
+    if (preservePresentation) this.capturePresentation();
+    else this.clearPresentation();
     this.upstreamRef = undefined; this.baseRef = undefined;
     this.expired = false;
     this.tree?.dispose(); this.tree = null;
     this.commits = []; this.statistics.clear(); this.indices.clear(); this.refs.clear(); this.head = undefined; this.headRef = undefined; this.complete = false;
+    this.restoreLoading = false;
+    this.restoreRequestedCount = -1;
   }
   private async open(): Promise<void> {
     const epoch = ++this.epoch;
-    this.reset(); this.generation = -1; this.pending = [];
+    this.reset(true); this.generation = -1; this.pending = [];
     this.message('Loading History...');
     try {
       const reply = await this.request(RPC.historyOpen, {});
@@ -154,9 +175,12 @@ export class ExplorerHistoryController {
       if (generation === this.generation && this.expired) return;
       if (generation > this.generation) {
         if (payload.kind !== 'snapshot') return;
-        this.reset(); this.generation = generation;
+        this.reset(true); this.generation = generation;
       }
       if (payload.kind === 'snapshot') {
+        const project = text(payload.project);
+        if (this.presentationProject && this.presentationProject !== project) this.clearPresentation();
+        this.presentationProject = project;
         const snapshot = record(payload.snapshot);
         this.head = typeof snapshot.head_id === 'string' ? snapshot.head_id : undefined;
         this.headRef = typeof snapshot.head_ref === 'string' ? snapshot.head_ref : undefined;
@@ -192,6 +216,7 @@ export class ExplorerHistoryController {
         this.complete = page.complete === true || this.commits.length >= 500;
         this.message(this.commits.length >= 500 ? 'Showing the first 500 commits' : `${this.commits.length} commits`);
         this.render();
+        this.restoreFrontier();
       } else if (payload.kind === 'statistics') {
         const item = record(payload.statistics);
         this.statistics.set(text(item.commit_id), item.state === 'ready'
@@ -203,7 +228,7 @@ export class ExplorerHistoryController {
       } else if (payload.kind === 'expired') {
         // Discard expired identities, then refresh once when visible. Never
         // replay a file click against the replacement snapshot.
-        this.reset();
+        this.reset(true);
         this.expired = true;
         this.message('History paused; refreshing when visible.');
         this.refreshExpired();
@@ -268,14 +293,36 @@ export class ExplorerHistoryController {
         },
         loadMore: async () => { await this.request(RPC.historyMore, { generation }); },
         onError: error => this.message(error),
-      }, getSetiIcon);
+      }, getSetiIcon, this.expandedCommitIds);
     void this.tree.ready.then(() => this.layout()).catch(error => this.message(error));
+  }
+
+  private restoreFrontier(): void {
+    if (this.restoreCommitCount <= 0 || this.commits.length >= this.restoreCommitCount || this.complete) {
+      if (this.complete) {
+        const retained = new Set(this.commits.map(commit => commit.id));
+        for (const commitId of this.expandedCommitIds) if (!retained.has(commitId)) this.expandedCommitIds.delete(commitId);
+      }
+      this.restoreCommitCount = 0;
+      return;
+    }
+    if (this.restoreLoading || this.generation < 0 || this.restoreRequestedCount === this.commits.length) return;
+    const epoch = this.epoch, generation = this.generation;
+    this.restoreRequestedCount = this.commits.length;
+    this.restoreLoading = true;
+    void this.request(RPC.historyMore, { generation }).catch(error => {
+      if (epoch === this.epoch) this.message(error);
+    }).finally(() => {
+      if (epoch !== this.epoch) return;
+      this.restoreLoading = false;
+      this.restoreFrontier();
+    });
   }
 
   dispose(): void {
     if (!this.root) return;
     const generation = this.generation;
-    ++this.epoch; this.reset(); this.pending = []; this.generation = -1;
+    ++this.epoch; this.reset(false); this.pending = []; this.generation = -1;
     this.resize?.disconnect(); this.resize = null;
     this.visibility?.disconnect(); this.visibility = null;
     this.root.ownerDocument.removeEventListener('visibilitychange', this.onVisibility);

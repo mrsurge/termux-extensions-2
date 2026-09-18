@@ -8,8 +8,9 @@ const bundle = await build({ entryPoints: ['src/explorer/history/controller.ts']
   b.onResolve({ filter: /^te2-scm-tree$/ }, () => ({ path: 'tree', namespace: 'fixture' }));
   b.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({ contents: 'export const CompressibleAsyncDataTree = class {};' }));
   b.onLoad({ filter: /history-tree-host\.ts$/ }, () => ({ contents: `export class HistoryTreeHost {
-    constructor(container, Tree, input, reader, actions) { Object.assign(this, { input, reader, actions }); this.ready = Promise.resolve(); globalThis.__historyViews.push(this); }
+    constructor(container, Tree, input, reader, actions, icon, expanded = []) { Object.assign(this, { input, reader, actions }); this.restored = [...expanded]; this.expanded = new Set(); this.ready = Promise.resolve(); globalThis.__historyViews.push(this); }
     updateRows(rows) { this.input.rows = rows; return Promise.resolve(); }
+    expandedCommitIds() { return new Set(this.expanded); }
     layout() {} dispose() { this.disposed = true; }
   }` }));
 } }] });
@@ -23,7 +24,8 @@ async function fixture(run) {
   try { await run(win.document.createElement('div'), globalThis.__historyViews); }
   finally { globalThis.ResizeObserver = previous; delete globalThis.__historyViews; await win.happyDOM.close(); }
 }
-const snapshot = generation => ({ generation, kind: 'snapshot', snapshot: { head_id: 'a'.repeat(40), refs: [] } });
+const snapshot = (generation, project = '/project') => ({ generation, kind: 'snapshot', project,
+  snapshot: { identity: '1'.repeat(64), head_id: 'a'.repeat(40), refs: [] } });
 const page = generation => ({ generation, kind: 'page', page: { offset: 0, complete: true, commits: [{ identity: 'a'.repeat(40), subject: 'Root', author: 'Test', timestamp: 1_700_000_000, parents: [] }] } });
 test('early notifications render graph, statistics update in place, file click uses native index', async () => fixture(async (container, views) => {
   const calls = []; let finish;
@@ -63,6 +65,37 @@ test('new snapshot replaces tree and old events cannot overwrite it', async () =
   assert.equal(views.length, 2); assert.equal(views[0].disposed, true);
   assert.equal(views[1].input.rows.length, 1); c.dispose();
 }));
+test('real refresh restores expanded commits only within the mounted project', async () => fixture(async (container, views) => {
+  const c = new ExplorerHistoryController(async () => ({ generation: 1 }));
+  c.mount(container); await settle(); c.notify(snapshot(1)); c.notify(page(1));
+  views[0].expanded.add('a'.repeat(40));
+  c.notify(snapshot(2)); c.notify(page(2));
+  assert.deepEqual(views[1].restored, ['a'.repeat(40)]);
+  views[1].expanded.add('a'.repeat(40));
+  c.notify(snapshot(3, '/other')); c.notify(page(3));
+  assert.deepEqual(views[2].restored, [], 'project switches discard the ephemeral presentation ledger');
+  views[2].expanded.add('a'.repeat(40));
+  c.dispose();
+  c.mount(container); await settle(); c.notify(snapshot(4, '/other')); c.notify(page(4));
+  assert.deepEqual(views[3].restored, [], 'closing History destroys the presentation ledger');
+  c.dispose();
+}));
+test('real refresh replays the previously loaded bounded page frontier', async () => fixture(async (container) => {
+  const calls = [];
+  const c = new ExplorerHistoryController(async (method, payload) => {
+    calls.push([method, payload]);
+    return method.endsWith('.open') ? { generation: 1 } : {};
+  });
+  const row = (identity, subject) => ({ identity, subject, author: 'Test', timestamp: 1_700_000_000, parents: [] });
+  c.mount(container); await settle(); c.notify(snapshot(1));
+  c.notify({ generation: 1, kind: 'page', page: { offset: 0, complete: false, commits: [
+    row('a'.repeat(40), 'A'), row('b'.repeat(40), 'B'),
+  ] } });
+  c.notify(snapshot(2));
+  c.notify({ generation: 2, kind: 'page', page: { offset: 0, complete: false, commits: [row('a'.repeat(40), 'A')] } });
+  assert.deepEqual(calls.at(-1), ['explorer.history.more', { generation: 2 }]);
+  c.dispose();
+}));
 test('reconnect opens a fresh generation and fences old notifications', async () => fixture(async (container, views) => {
   let generation = 0;
   const c = new ExplorerHistoryController(async method => method.endsWith('.open') ? { generation: ++generation } : {});
@@ -78,7 +111,7 @@ test('file expansion rejects non-advancing continuation instead of spinning', as
   await assert.rejects(views[0].reader({ commitId: 'a'.repeat(40) }, new AbortController().signal), /did not advance/);
   c.dispose();
 }));
-test('native idle expiry removes actionable stale rows without reopening or polling', async () => fixture(async (container, views) => {
+test('native renewal fallback removes actionable stale rows without polling', async () => fixture(async (container, views) => {
   let opens = 0;
   const c = new ExplorerHistoryController(async method => {
     if (method.endsWith('.open')) opens++;
@@ -140,7 +173,7 @@ test('visible expiry immediately opens a new generation without replaying old fi
 test('snapshot refs name local heads, group remote icons, and color the active unbranched lane', async () => fixture(async (container, views) => {
   const c = new ExplorerHistoryController(async () => ({ generation: 1 }));
   c.mount(container); await settle();
-  c.notify({ generation: 1, kind: 'snapshot', snapshot: {
+  c.notify({ generation: 1, kind: 'snapshot', project: '/project', snapshot: {
     head_id: 'a'.repeat(40), head_ref: 'refs/heads/feature', refs: [
       { name: 'refs/heads/feature', commit_id: 'a'.repeat(40) },
       { name: 'refs/heads/main', commit_id: 'b'.repeat(40) },
@@ -165,7 +198,7 @@ test('native upstream and base roles color their lanes and labels independently'
   const current = { name: 'refs/heads/topic', commit_id: 'a'.repeat(40) };
   const remote = { name: 'refs/remotes/origin/topic', commit_id: 'b'.repeat(40) };
   const base = { name: 'refs/remotes/origin/trunk', commit_id: 'c'.repeat(40) };
-  c.notify({ generation: 1, kind: 'snapshot', snapshot: { head_id: current.commit_id,
+  c.notify({ generation: 1, kind: 'snapshot', project: '/project', snapshot: { head_id: current.commit_id,
     head_ref: current.name, refs: [current, remote, base], upstream_ref: remote, base_ref: base } });
   c.notify({ generation: 1, kind: 'page', page: { offset: 0, complete: true, commits: [
     { identity: current.commit_id, parents: [remote.commit_id], subject: 'Current', author: 'A', timestamp: 1_700_000_000 },
