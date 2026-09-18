@@ -4110,9 +4110,9 @@ Built-in backend module identity comes from package path rather than public app 
   environment still owns exact Node/npm and matching headers through
   `nodejs-wheel`; users must not install a second global Node runtime for this.
 
-- Framework-Shells 0.0.63 release wheels are native: ordinary CPython uses
+- Framework-Shells 0.0.64 release wheels are native: ordinary CPython uses
   `cp39-abi3`, free-threaded CPython uses its exact `cp314-cp314t` tag, and
-  both carry the PyO3 pump plus Rust terminal broker. Agent Log Server 0.2.125
+  both carry the PyO3 pump plus Rust terminal broker. Agent Log Server 0.2.131
   depends on that exact version and its platform wheel carries a verified
   `als-server`, compiled browser bundle, and vendored Socket.IO MessagePack
   parser. Release construction rejects incomplete wheel payloads. Neither

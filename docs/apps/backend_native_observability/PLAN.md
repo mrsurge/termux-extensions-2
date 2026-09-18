@@ -306,15 +306,11 @@ No such DTO extraction is part of the pipe codec change below.
 
 ### MessagePack Process-Pipe Cutover (Approved)
 
-Pin Python framework-shells 0.0.64 at f9a0eeb45620540cea0617c3e68ec6bf1041d123
-and Rust ferrous-framework 0.2.14 at 45b3830187ed789669a20bad68ac43e700a16f41.
-Exact commits identify the implementations, not release version numbers alone.
-These presentation follow-ups add bounded sliding log windows, live-tail
-pinning and collapsible/resizable log panes. Both nested feature branches already
-contain them; integration updates
-dependency pins rather than rebasing either history. Verify installed Python
-`direct_url.json`: pip may retain the preceding commit at the same version unless
-the exact requirement is force-reinstalled.
+Pin Python Framework-Shells 0.0.64 from tagged commit `7e86f1c` and Rust
+Ferrous Framework 0.2.14 from tagged commit `4cdf5db`. These presentation
+follow-ups add bounded sliding log windows, live-tail pinning and
+collapsible/resizable log panes. Integration consumes the published FWS wheel
+and Ferrous release tag rather than either former feature-branch revision.
 
 1. Framework/app-worker pipes use concatenated MessagePack maps instead of
    JSON lines. Preserve the JSON-RPC-shaped envelope, correlation, cancellation,

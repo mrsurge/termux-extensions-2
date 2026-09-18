@@ -12,7 +12,7 @@ rust-version = "1.93"
 [workspace.dependencies]
 anyhow = "1"
 axum = { version = "0.8", features = ["ws"] }
-ferrous_framework = { git = "https://github.com/mrsurge/ferrous-framework.git", rev = "45b3830187ed789669a20bad68ac43e700a16f41" }
+ferrous_framework = { git = "https://github.com/mrsurge/ferrous-framework.git", tag = "0.2.14" }
 futures-util = "0.3"
 getrandom = "0.3"
 git2 = "0.20"

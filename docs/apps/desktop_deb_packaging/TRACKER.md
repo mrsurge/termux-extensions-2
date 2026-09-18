@@ -1,6 +1,6 @@
 # Unified Linux And Termux Release Installer Tracker
 
-Last updated: 2026-09-14
+Last updated: 2026-09-18
 
 ## Program status
 
@@ -41,9 +41,9 @@ Last updated: 2026-09-14
 | No complete unified installer exists | Electron packaging produces an unpacked application only; no cross-target detection, component acquisition/verification, user-root transaction, receipt, or updater exists | Confirmed |
 | The Python dependency list is mostly direct runtime surface | Packaged source directly imports FastAPI, Starlette, Uvicorn, HTTPX, msgspec, AnyIO, FastMCP, Framework-Shells, Agent Log Server, libarchive-c, socketio, and PyYAML; Linux x86-64 adds the owned Node runtime wheel | Confirmed |
 | `sse-starlette` was held directly by an unmounted router | The dead `app.libs.jobs.jobs_bp` import/router was removed while the job core and handlers remain | Pruned; still transitive through MCP |
-| Framework-Shells is reproducibly pinned | `requirements.txt` uses exact validated 0.0.63 commit `0bf3269cd69a000015b0ac484a04004b8dc564d1` | Complete |
+| Framework-Shells is reproducibly pinned | `requirements.txt` uses published 0.0.64 from tagged commit `7e86f1c`; release wheels cover ordinary/free-threaded Linux and Android AArch64 | Complete |
 | Framework-Shells release artifacts are native | The Linux candidate set carries the PyO3 pipe pump and Rust terminal broker in `cp39-abi3` and free-threaded `cp314-cp314t` manylinux wheels; release construction refuses a non-native wheel | Implemented and clean-install validated |
-| Agent Log Server has a fail-closed binary wheel | Exact 0.2.125 depends on Framework-Shells 0.0.63 and carries a target/version/digest-verified `als-server`, compiled browser bundle, and vendored Socket.IO MessagePack parser; corrupt/incompatible provenance and incomplete wheels fail construction | Implemented and validated on Linux; Android publication is part of Phase 4O |
+| Agent Log Server has a fail-closed binary wheel | Exact 0.2.131 depends on Framework-Shells 0.0.64 and carries a target/version/digest-verified `als-server`, compiled browser bundle, and vendored Socket.IO MessagePack parser; both Linux and Android wheels passed clean install/server smokes | Implemented, validated, and published for Linux and Android |
 | ALS app-worker launch must preserve the managed venv | Bootstrap correctly prepends the active venv, but the former `sh -lc` shellspec reset `PATH` before resolving `als-rs` | Corrected to direct argv and covered by a manifest regression test |
 | Linux x86-64 owns an exact private Node runtime | `nodejs-wheel==24.16.0` supplies venv-local Node/npm and matching headers; bootstrap children, Terminal, WBA, and source Electron use the shared resolver | Implemented and clean-install validated |
 | Modern Termux excludes the Linux Node wheel | Both connected targets run Python 3.14.6 with `sys.platform == "android"` and `aarch64`; the Linux/x86-64 marker is false | Termux resolves Node/npm from its apt package mapping |

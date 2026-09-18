@@ -152,17 +152,16 @@ The Termux path installs its exact package dependencies during the consented
 installation. The Linux official standalone script retains its own downloader
 prerequisite until that bootstrap is replaced.
 
-Framework-Shells is pinned to an exact validated revision. A reproducible
+Framework-Shells is pinned to an exact published version. A reproducible
 package build must retain an auditable mapping from every direct Python
 dependency to the source import or runtime feature that needs it. The validated
-development and isolated-wheel runtime reports Framework-Shells 0.0.63 from commit
-`0bf3269cd69a000015b0ac484a04004b8dc564d1`.
+release baseline is Framework-Shells 0.0.64 from tagged commit `7e86f1c`.
 
-The Linux first-party wheel graph is also explicit. Framework-Shells 0.0.63 is
+The Linux first-party wheel graph is also explicit. Framework-Shells 0.0.64 is
 a native distribution, never a pure-Python publication wheel: it carries both
 the PyO3 pipe pump and Rust terminal broker. The accepted Linux wheel set has a
 `cp39-abi3` wheel for ordinary CPython and a separately tagged `cp314-cp314t`
-wheel for free-threaded CPython. Agent Log Server 0.2.124 depends on that exact
+wheel for free-threaded CPython. Agent Log Server 0.2.131 depends on that exact
 Framework-Shells version and its Linux wheel carries a target/version/digest
 verified `als-server`, the compiled browser bundle, and its vendored Socket.IO
 MessagePack parser. Release construction rejects a wheel missing any of those
@@ -1546,7 +1545,7 @@ native ordinary-CPython and free-threaded-CPython wheels and refuses a
 non-native release artifact. Agent Log Server then emits a platform wheel with
 its verified Rust server and exact Framework-Shells dependency. Only after
 those wheels exist does TE2 build against exact
-`framework-shells==0.0.63`, `agent-log-server==0.2.125`, and, on Linux x86-64,
+`framework-shells==0.0.64`, `agent-log-server==0.2.131`, and, on Linux x86-64,
 `nodejs-wheel==24.16.0`. Final published artifacts must be rebuilt from the
 clean synchronized tag; dirty-source candidates are acceptance inputs only.
 

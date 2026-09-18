@@ -290,15 +290,11 @@ check, 24 Rust pipe tests, 11 log-view UI tests, 12 installed-package
 log/MessagePack tests and 15 TE2 pipe/adoption tests passed. No shared runtime
 restart or push performed.
 
-Latest release pins supersede that presentation checkpoint: FWS 0.0.64
-`f9a0eeb45620540cea0617c3e68ec6bf1041d123`, Ferrous 0.2.14
-`45b3830187ed789669a20bad68ac43e700a16f41`. Both nested checkouts already
-contained these releases. Requirements/Cargo pins and lockfile are updated;
-FWS is installed non-editably in site-packages with version and exact Git
-provenance verified. Validation: 16 log-view/pane-layout tests, 12 installed
-FWS log/MessagePack tests, 15 TE2 pipe/adoption tests and locked Rust check passed.
-The new pane UI has not been live-tested here. Native checkout artifacts and
-WBA edits remain untouched; no framework restart, commit or push performed.
+The published release baseline supersedes that presentation checkpoint: FWS
+0.0.64 is tagged at `7e86f1c` and Ferrous 0.2.14 at `4cdf5db`. TE2 consumes the
+published FWS wheel and the Ferrous release tag rather than either former
+feature-branch revision. FWS 0.0.64 passed its Python/browser suites plus Linux
+and Android native-wheel smokes; Ferrous 0.2.14 passed its full Rust suite.
 
 WBA slice: stdin is concatenated JSON-RPC-shaped MessagePack maps; stdout records
 use `kind: reply|push|startup` and `payload`. Concurrent request dispatch, reply IDs,
