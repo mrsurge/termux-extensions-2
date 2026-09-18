@@ -257,9 +257,11 @@ by completion of this boundary alone.
   package provenance. The running framework was not restarted.
 - [x] Migrate framework/Python worker pipes and debug fixtures to bounded
   concatenated MessagePack, keeping application envelopes and ordering.
-- [ ] Migrate WBA stdio and Python reader/writer, startup/reply/push records.
+- [x] Migrate WBA stdio and Python reader/writer, startup/reply/push records.
 - [x] Declare log codecs on Code TE2 and File Explorer app-worker pipe shells.
-- [ ] Declare WBA codec and Terminal framing metadata after those migrations.
+- [x] Declare WBA stdout MessagePack/stderr text and reject adoption of older
+  shells without the matching pipe-codec environment marker.
+- [ ] Declare Terminal framing metadata after observation supports its framing.
 - [ ] Add explicit length-prefixed framing observation in both FWS repositories;
   fix large-frame indexing/preview budget separation and pin follow-up commits.
 - [ ] Run cross-language, malformed/fragmented/large-frame, startup/debug and
@@ -273,9 +275,47 @@ First-slice validation: 27 focused Python tests and 30 Rust pipe/writer/debug
 tests pass; Rust check passes; changed Python codec/worker/test files type-check
 with zero diagnostics. A shared hex fixture is decoded by Python and Rust, and
 the pinned Python FWS source decoded it for inspection. Python package installation
-was subsequently approved and verified. No live restart, WBA migration or
-nested-repository edits yet.
+was subsequently approved and verified. No live restart or nested-repository
+edits yet.
 Framework and Python pipe peers must be restarted together, not independently.
+
+Presentation dependency follow-up: FWS `af4238edb7c572c6d3535bef8ff174472da149d7`
+and Ferrous `0151f5f2a12b2110aca02a72ad85059ab0eec0e9` are direct successors
+already checked out on both nested feature branches; no history rebase was
+necessary. Updated requirements/Cargo pins and lockfile. FWS was force-reinstalled
+non-editably without dependency upgrades because its package version stayed
+0.0.63; site-package `direct_url.json` confirms the exact new commit. Existing
+native binary/extension changes in the FWS checkout were preserved. Rust locked
+check, 24 Rust pipe tests, 11 log-view UI tests, 12 installed-package
+log/MessagePack tests and 15 TE2 pipe/adoption tests passed. No shared runtime
+restart or push performed.
+
+Latest release pins supersede that presentation checkpoint: FWS 0.0.64
+`f9a0eeb45620540cea0617c3e68ec6bf1041d123`, Ferrous 0.2.14
+`45b3830187ed789669a20bad68ac43e700a16f41`. Both nested checkouts already
+contained these releases. Requirements/Cargo pins and lockfile are updated;
+FWS is installed non-editably in site-packages with version and exact Git
+provenance verified. Validation: 16 log-view/pane-layout tests, 12 installed
+FWS log/MessagePack tests, 15 TE2 pipe/adoption tests and locked Rust check passed.
+The new pane UI has not been live-tested here. Native checkout artifacts and
+WBA edits remain untouched; no framework restart, commit or push performed.
+
+WBA slice: stdin is concatenated JSON-RPC-shaped MessagePack maps; stdout records
+use `kind: reply|push|startup` and `payload`. Concurrent request dispatch, reply IDs,
+push coalescing and the serialized Python writer remain intact. Binary writes use
+FWS live stdin, matching Terminal; FWS `write_to_pipe()` remains text-only. Socket
+RPC and native VS Code encoding are unchanged. The codec is bundled, with no new
+installed-runtime Node module requirement.
+
+Validation: 15 focused Python tests and 10 Node codec/webview tests pass, including bytewise
+fragmentation/coalescing, malformed/truncated/oversize frames, 2 MiB Python/Node
+exchange, reply/push routing, old-shell rejection and canceled-wait cleanup.
+Code TE2 `npm run typecheck`, strict focused pipe-codec/stdio TypeScript checking,
+and the full frontend/WBA build pass. Changed Python
+files have no type errors; existing manager warnings remain. Standalone WBA
+tsconfig still reports existing missing module declarations/strict errors,
+compared against the pre-slice checkpoint; it is not a clean validation target.
+Live startup/intelligence and FWS log inspection remain pending coordinated restart.
 
 ### Remaining Observability Audit Items
 

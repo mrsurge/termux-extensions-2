@@ -306,9 +306,15 @@ No such DTO extraction is part of the pipe codec change below.
 
 ### MessagePack Process-Pipe Cutover (Approved)
 
-Pin Python framework-shells at 2fc55098a785242a99b04e46c5ca319bb49b6417
-and Rust ferrous-framework at 0d5112ad5173fdccd13b7a024bf878ac60905ddb;
-unchanged release version numbers do not identify these implementations.
+Pin Python framework-shells 0.0.64 at f9a0eeb45620540cea0617c3e68ec6bf1041d123
+and Rust ferrous-framework 0.2.14 at 45b3830187ed789669a20bad68ac43e700a16f41.
+Exact commits identify the implementations, not release version numbers alone.
+These presentation follow-ups add bounded sliding log windows, live-tail
+pinning and collapsible/resizable log panes. Both nested feature branches already
+contain them; integration updates
+dependency pins rather than rebasing either history. Verify installed Python
+`direct_url.json`: pip may retain the preceding commit at the same version unless
+the exact requirement is force-reinstalled.
 
 1. Framework/app-worker pipes use concatenated MessagePack maps instead of
    JSON lines. Preserve the JSON-RPC-shaped envelope, correlation, cancellation,
@@ -316,6 +322,9 @@ unchanged release version numbers do not identify these implementations.
    bound frames, reject malformed/truncated data without guessing resync points.
 2. WBA stdio uses structured MessagePack records for replies, pushes and startup
    beacons, replacing text prefixes. Human diagnostics remain on stderr.
+   Use FWS live binary stdin under the existing writer lock, as Terminal does;
+   its text-only `write_to_pipe()` cannot carry these frames. Bundle the stream
+   decoder separately from the codec served to extension webview browsers.
 3. Declare `log_codecs: {stdout: messagepack, stderr: text}` only for protocol
    stdout. Do not relabel ordinary PTY/text shells or change browser sockets.
 4. Preserve Terminal's existing uint32-BE length-prefixed MessagePack Node pipe.

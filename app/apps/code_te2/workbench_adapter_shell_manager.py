@@ -4,7 +4,6 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Optional, TypedDict, cast
 import asyncio
-import json
 import logging
 import os
 import time
@@ -14,6 +13,7 @@ from framework_shells.orchestrator import Orchestrator
 from framework_shells.record import ShellRecord
 from app.node_toolchain import NodeToolchainError, resolve_node_toolchain
 from app.libs.runtime_startup_trace import StartupTrace
+from app.libs.messagepack_stream import MessagePackStream, encode_message
 
 from .code_te2_paths import code_te2_paths
 from .node_compile_cache import node_compile_cache
@@ -66,9 +66,6 @@ def _json_object(value: object) -> JsonObject:
     raw = cast(dict[object, object], value)
     return {str(key): item for key, item in raw.items()}
 
-
-def _decode_json_object(value: str) -> JsonObject:
-    return _json_object(cast(object, json.loads(value)))
 
 
 def get_adapter_state() -> dict[str, object]:
@@ -223,6 +220,9 @@ def _expected_port() -> str:
 
 def _matches_expected_target(record: ShellRecord, code_server_socket_path: Optional[str]) -> bool:
     env = _json_object(record.env_overrides)
+    # Never adopt an older JSON-speaking adapter into the binary reader.
+    if env.get("TE2_ADAPTER_PIPE_CODEC") != "messagepack-v1":
+        return False
     if str(env.get("TE2_ADAPTER_PORT") or "").strip() != _expected_port():
         return False
     env_socket = str(env.get("TE2_CODE_SERVER_SOCKET") or "").strip()
@@ -334,50 +334,38 @@ async def _ensure_live_adapter_io(shell_id: str) -> bool:
 
 
 async def _stdout_reader_loop(shell_id: str, queue: asyncio.Queue[bytes]) -> None:
-    """Read adapter stdout chunks from FWS, route RPC responses, and log the rest."""
+    """Decode structured pipe records without treating log text as protocol data."""
     global _stdout_reader_task
 
-    RPC_PREFIX = b"<<<RPC>>> "
-    PUSH_PREFIX = b"<<<PUSH>>> "
-    buf = b""
+    stream = MessagePackStream()
     try:
         while True:
             chunk = await queue.get()
             if not chunk:
                 continue
-            buf += chunk
-            while b"\n" in buf:
-                line_bytes, buf = buf.split(b"\n", 1)
-                if line_bytes.endswith(b"\r"):
-                    line_bytes = line_bytes[:-1]
-                if line_bytes.startswith(RPC_PREFIX):
-                    payload = line_bytes[len(RPC_PREFIX):].decode("utf-8", errors="replace")
-                    try:
-                        obj = _decode_json_object(payload)
-                        rid_obj = obj.get("id")
-                        rid = rid_obj if isinstance(rid_obj, int) else None
-                        fut = _rpc_pending.pop(rid, None) if rid is not None else None
-                        if fut and not fut.done():
-                            fut.set_result(obj)
-                        else:
-                            log.debug("[adapter_stdio] unmatched RPC response id=%s", rid)
-                    except json.JSONDecodeError:
-                        log.warning("[adapter_stdio] bad RPC JSON: %s", payload[:200])
-                elif line_bytes.startswith(PUSH_PREFIX):
-                    payload = line_bytes[len(PUSH_PREFIX):].decode("utf-8", errors="replace")
-                    try:
-                        obj = _decode_json_object(payload)
-                        _queue_push(
-                            obj,
-                            payload_bytes=len(line_bytes) - len(PUSH_PREFIX),
-                        )
-                    except json.JSONDecodeError:
-                        log.warning("[adapter_stdio] bad PUSH JSON: %s", payload[:200])
+            for record in stream.feed(chunk):
+                if not isinstance(record, dict):
+                    raise ValueError("Adapter pipe record must be a map")
+                envelope = _json_object(cast(dict[object, object], record))
+                payload = envelope.get("payload")
+                if not isinstance(payload, dict):
+                    raise ValueError("Adapter pipe payload must be a map")
+                obj = _json_object(cast(dict[object, object], payload))
+                kind = envelope.get("kind")
+                if kind == "reply":
+                    rid_obj = obj.get("id")
+                    rid = rid_obj if isinstance(rid_obj, int) else None
+                    fut = _rpc_pending.pop(rid, None) if rid is not None else None
+                    if fut and not fut.done():
+                        fut.set_result(obj)
+                    else:
+                        log.debug("[adapter_stdio] unmatched RPC response id=%s", rid)
+                elif kind == "push":
+                    _queue_push(obj, payload_bytes=len(encode_message(obj)))
+                elif kind == "startup":
+                    log.debug("[adapter_stdio] startup shell=%s", shell_id)
                 else:
-                    line = line_bytes.decode("utf-8", errors="replace")
-                    if line.startswith("[rpc-config]"):
-                        print(f"[adapter_stdout] {line[:500]}", flush=True)
-                    log.debug("[adapter_stdout] %s", line[:500])
+                    raise ValueError(f"Unknown adapter pipe record kind: {kind!r}")
     except asyncio.CancelledError:
         pass
     except Exception as exc:
@@ -586,19 +574,30 @@ async def adapter_rpc(method: str, params: JsonObject | None = None, timeout: fl
         fut: asyncio.Future[JsonObject] = asyncio.get_event_loop().create_future()
         _rpc_pending[rid] = fut
 
-        line = json.dumps(msg) + "\n"
         try:
-            await mgr.write_to_pipe(shell_id, line)
-        except Exception:
-            _rpc_pending.pop(rid, None)
+            frame = encode_message(msg)
+            # FWS write_to_pipe is text-only. Use the same live binary stdin
+            # seam as Terminal, under this adapter's existing writer lock.
+            state = mgr.get_pipe_state(shell_id)
+            if state is None or not state.stdin_supported:
+                raise RuntimeError("Adapter pipe stdin unavailable")
+            stdin = state.process.stdin
+            if stdin is None or stdin.is_closing():
+                raise RuntimeError("Adapter pipe stdin closed")
+            stdin.write(frame)
+            await stdin.drain()
+        except BaseException:
+            _ = _rpc_pending.pop(rid, None)
+            _ = fut.cancel()
             raise
 
     try:
         result = await asyncio.wait_for(fut, timeout=timeout)
         return result
     except asyncio.TimeoutError:
-        _rpc_pending.pop(rid, None)
         raise RuntimeError(f"adapter_rpc timeout: method={method} id={rid} after {timeout}s")
+    finally:
+        _ = _rpc_pending.pop(rid, None)
 
 
 async def terminate_adapter_shell() -> bool:

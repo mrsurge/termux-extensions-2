@@ -455,8 +455,8 @@ checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 
 [[package]]
 name = "ferrous_framework"
-version = "0.2.13"
-source = "git+https://github.com/mrsurge/ferrous-framework.git?rev=0d5112ad5173fdccd13b7a024bf878ac60905ddb#0d5112ad5173fdccd13b7a024bf878ac60905ddb"
+version = "0.2.14"
+source = "git+https://github.com/mrsurge/ferrous-framework.git?rev=45b3830187ed789669a20bad68ac43e700a16f41#45b3830187ed789669a20bad68ac43e700a16f41"
 dependencies = [
  "anyhow",
  "axum",

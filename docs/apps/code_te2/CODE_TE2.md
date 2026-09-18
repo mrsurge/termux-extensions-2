@@ -4622,8 +4622,15 @@ Human output stays on stderr, and app-worker shellspecs declare stdout MessagePa
 observation. FWS dependencies are pinned by commit because the log-codec handoff
 did not bump package versions.
 
-This cutover currently covers framework/app-worker pipes, including runtime-debug
-traffic. WBA stdio remains JSON/prefix-based pending its coordinated migration.
+This cutover covers framework/app-worker pipes, including runtime-debug traffic,
+and WBA stdio. WBA stdin carries JSON-RPC-shaped maps; stdout carries
+`{kind: "reply" | "push" | "startup", payload: ...}` records. Human logs use stderr.
+Python uses the existing adapter write lock and FWS live stdin (the same binary
+write seam as Terminal, since FWS `write_to_pipe()` accepts text only). Reply IDs,
+concurrent WBA dispatch and diagnostics push coalescing are unchanged. The bundled
+codec uses a pure-JS stream decoder with a 32 MiB per-frame bound; no newline or
+prefix scanning remains. `TE2_ADAPTER_PIPE_CODEC=messagepack-v1` prevents adoption
+of an old JSON-speaking shell. Update the Python worker and WBA together.
 Standalone Terminal's app worker is proc-based; its separate Node stream remains
 uint32-BE length-prefixed MessagePack. FWS observation support for that framing and
 large-record indexing beyond the existing 1 MiB preview budget is still pending.

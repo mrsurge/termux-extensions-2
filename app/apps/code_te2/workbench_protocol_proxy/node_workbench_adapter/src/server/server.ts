@@ -1,7 +1,6 @@
 import http from "node:http";
 import v8 from "node:v8";
 import path from "node:path";
-import readline from "node:readline";
 import fs from "node:fs/promises";
 import process from "node:process";
 import { Buffer } from "node:buffer";
@@ -36,10 +35,10 @@ const { dispatchJsonRpcRequest } = dispatchMod;
 const { attachEditorWbaSocket } = editorSocketMod;
 const {
   buildJsonRpcErrorReply,
-  encodePushLine,
-  encodeRpcReplyLine,
-  encodeStartupBeaconLine,
-  parseStdioJsonLine,
+  encodePush,
+  encodeRpcReply,
+  encodeStartupBeacon,
+  PipeMessagePackDecoder,
 } = stdioMod;
 const { listTextmateGrammars, loadTextmateGrammar } = textmateMod;
 
@@ -129,7 +128,7 @@ const SYNC_TRACE_MIN_BYTES = Number(
 );
 
 const _BASE_JSON_STRINGIFY = JSON.stringify;
-// With pipe backend, stdout is reserved for <<<RPC>>> responses.
+// With pipe backend, stdout is reserved for structured MessagePack records.
 // Redirect all console.log to stderr so logs remain visible in framework shells UI.
 const _origConsoleLog = console.log;
 console.log = (...args) => console.error(...args);
@@ -450,7 +449,7 @@ function bridgeRuntime(): EventBridgeRuntime {
     wsClientCount: () => editorWbaSocketServer?.clientCount() ?? 0,
     wsBroadcastNotification,
     writePushLine: (payload: unknown) =>
-      process.stdout.write(encodePushLine(payload)),
+      process.stdout.write(encodePush(payload)),
     log: (...args: unknown[]) => console.log(...args),
   };
 }
@@ -842,9 +841,9 @@ server.listen(PORT, HOST, () => {
       appId: 'code_te2.wba', pid: process.pid, phase: 'socket.listener.ready', unixMs: Date.now(),
     }));
   }
-  // Startup beacon MUST go to stdout (not stderr) for the shellspec stdout_regex readiness probe.
+  // Startup telemetry is a structured record; shell readiness uses the TCP listener.
   process.stdout.write(
-    encodeStartupBeaconLine({
+    encodeStartupBeacon({
       type: "adapter/start",
       ts_ms: nowMs(),
       listen: `http://${HOST}:${PORT}`,
@@ -853,43 +852,32 @@ server.listen(PORT, HOST, () => {
   );
 });
 
-// ── stdio JSON-RPC transport ────────────────────────────────────────
-// Allows the Python worker (editor_ws.py) to call handleJsonRpc over
-// a pipe instead of HTTP, eliminating a network hop.
-// Protocol: one JSON object per line on stdin → <<<RPC>>> {json}\n on stdout.
-// Non-RPC output (console.log, etc.) is unchanged — Python splits on prefix.
-
-const _stdinRl = readline.createInterface({
-  input: process.stdin,
-  terminal: false,
-});
-
-_stdinRl.on("line", async (line: string) => {
-  const parsed = parseStdioJsonLine(line);
-  if (!parsed.ok) {
-    if (parsed.errorReply) {
-      process.stdout.write(encodeRpcReplyLine(parsed.errorReply));
-    }
-    return;
-  }
-  const msg = parsed.value;
+// Process-pipe RPC keeps requests concurrent so readiness/control calls cannot
+// block one another. Frame errors are fatal; ordinary RPC errors remain replies.
+const stdinDecoder = new PipeMessagePackDecoder();
+async function dispatchStdio(msg: unknown): Promise<void> {
   try {
     const reply = await handleJsonRpc(msg);
-    if (reply && reply.id != null) {
-      process.stdout.write(encodeRpcReplyLine(reply));
-    }
-  } catch (e) {
+    if (reply && reply.id != null) process.stdout.write(encodeRpcReply(reply));
+  } catch (error) {
     const message = asJsonRpcEnvelope(msg);
-    const err = buildJsonRpcErrorReply(
-      message.id ?? null,
-      -32000,
-      errorMessage(e),
-    );
-    process.stdout.write(encodeRpcReplyLine(err));
+    process.stdout.write(encodeRpcReply(buildJsonRpcErrorReply(
+      message.id ?? null, -32000, errorMessage(error),
+    )));
   }
+}
+function failStdio(error: unknown): void {
+  console.error("[adapter_stdio] fatal transport error", error);
+  process.stdin.pause();
+  process.exit(1);
+}
+process.stdin.on("data", (chunk: Buffer) => {
+  try {
+    stdinDecoder.feed(chunk, (msg) => { void dispatchStdio(msg).catch(failStdio); });
+  } catch (error) { failStdio(error); }
 });
-
-_stdinRl.on("close", () => {
-  // stdin closed — parent process gone. Graceful shutdown.
+process.stdin.on("error", failStdio);
+process.stdin.on("end", () => {
+  try { stdinDecoder.finish(); } catch (error) { failStdio(error); return; }
   setTimeout(() => process.exit(0), 100).unref?.();
 });
