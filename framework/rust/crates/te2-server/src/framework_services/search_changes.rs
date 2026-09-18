@@ -3,13 +3,15 @@ use super::{git_ops, search_ops::SearchProviderError};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
-    collections::hash_map::DefaultHasher,
+    collections::{BTreeMap, hash_map::DefaultHasher},
     hash::{Hash, Hasher},
     path::Path,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, SyncSender, TryRecvError},
     },
+    thread::{self, JoinHandle},
 };
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -27,6 +29,7 @@ pub(crate) struct ChangesRequest {
     pub(crate) snapshot_token: Option<String>,
     #[serde(default)]
     pub(crate) projection: bool,
+    pub(crate) search_threads: Option<usize>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -35,6 +38,173 @@ pub(crate) struct ChangesPathsRequest {
     pub(crate) root: Option<String>,
     pub(crate) base: String,
     pub(crate) paths: Vec<String>,
+}
+
+type ChangeRender =
+    dyn Fn(git_ops::GitWorktreeChange) -> Result<Value, SearchProviderError> + Send + Sync;
+
+struct ChangeRenderJob {
+    sequence: usize,
+    entry: git_ops::GitWorktreeChange,
+}
+
+struct ChangeRenderResult {
+    sequence: usize,
+    value: Result<Value, SearchProviderError>,
+}
+
+/// Bounded per-file Git work with one ordered emitter. Worker repository handles
+/// remain independent; only the owning changes job calls the pipe event sink.
+struct ChangeRenderPool {
+    work: Option<SyncSender<ChangeRenderJob>>,
+    results: Receiver<ChangeRenderResult>,
+    workers: Vec<JoinHandle<()>>,
+    buffered: BTreeMap<usize, Result<Value, SearchProviderError>>,
+    next_sequence: usize,
+    next_emit: usize,
+    in_flight: usize,
+    abort: Arc<AtomicBool>,
+}
+
+impl ChangeRenderPool {
+    fn new(worker_count: usize, render: Arc<ChangeRender>, cancelled: Arc<AtomicBool>) -> Self {
+        let worker_count = worker_count.max(1);
+        let (work_tx, work_rx) = mpsc::sync_channel::<ChangeRenderJob>(worker_count * 2);
+        let work_rx = Arc::new(Mutex::new(work_rx));
+        let (result_tx, result_rx) = mpsc::channel();
+        let abort = Arc::new(AtomicBool::new(false));
+        let mut workers = Vec::with_capacity(worker_count);
+        for _ in 0..worker_count {
+            let work_rx = Arc::clone(&work_rx);
+            let result_tx = result_tx.clone();
+            let render = Arc::clone(&render);
+            let cancelled = Arc::clone(&cancelled);
+            let abort = Arc::clone(&abort);
+            workers.push(thread::spawn(move || {
+                loop {
+                    let job = match work_rx.lock() {
+                        Ok(receiver) => receiver.recv(),
+                        Err(_) => return,
+                    };
+                    let Ok(job) = job else { return };
+                    let value = if abort.load(Ordering::Relaxed)
+                        || cancelled.load(Ordering::Relaxed)
+                    {
+                        Err(SearchProviderError::Cancelled)
+                    } else {
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| render(job.entry)))
+                            .unwrap_or_else(|_| {
+                                Err(SearchProviderError::Search(
+                                    "changes render worker panicked".into(),
+                                ))
+                            })
+                    };
+                    if result_tx
+                        .send(ChangeRenderResult {
+                            sequence: job.sequence,
+                            value,
+                        })
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+            }));
+        }
+        drop(result_tx);
+        Self {
+            work: Some(work_tx),
+            results: result_rx,
+            workers,
+            buffered: BTreeMap::new(),
+            next_sequence: 0,
+            next_emit: 0,
+            in_flight: 0,
+            abort,
+        }
+    }
+
+    fn submit(&mut self, entry: git_ops::GitWorktreeChange) -> Result<(), SearchProviderError> {
+        let sequence = self.next_sequence;
+        self.work
+            .as_ref()
+            .ok_or_else(|| SearchProviderError::Search("changes render pool stopped".into()))?
+            .send(ChangeRenderJob { sequence, entry })
+            .map_err(|_| SearchProviderError::Search("changes render worker stopped".into()))?;
+        self.next_sequence += 1;
+        self.in_flight += 1;
+        Ok(())
+    }
+
+    fn drain_available(
+        &mut self,
+        emit: &impl Fn(Value) -> bool,
+    ) -> Result<(), SearchProviderError> {
+        loop {
+            match self.results.try_recv() {
+                Ok(result) => {
+                    self.buffered.insert(result.sequence, result.value);
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) if self.in_flight == self.buffered.len() => break,
+                Err(TryRecvError::Disconnected) => {
+                    self.abort.store(true, Ordering::Relaxed);
+                    return Err(SearchProviderError::Search(
+                        "changes render worker stopped".into(),
+                    ));
+                }
+            }
+        }
+        self.emit_ready(emit)
+    }
+
+    fn drain_all(&mut self, emit: &impl Fn(Value) -> bool) -> Result<(), SearchProviderError> {
+        while self.in_flight > 0 {
+            let result = self.results.recv().map_err(|_| {
+                self.abort.store(true, Ordering::Relaxed);
+                SearchProviderError::Search("changes render worker stopped".into())
+            })?;
+            self.buffered.insert(result.sequence, result.value);
+            self.emit_ready(emit)?;
+        }
+        Ok(())
+    }
+
+    fn emit_ready(&mut self, emit: &impl Fn(Value) -> bool) -> Result<(), SearchProviderError> {
+        while let Some(value) = self.buffered.remove(&self.next_emit) {
+            self.next_emit += 1;
+            self.in_flight = self.in_flight.saturating_sub(1);
+            let value = value?;
+            if !emit(json!({"change":value})) {
+                self.abort.store(true, Ordering::Relaxed);
+                return Err(SearchProviderError::Cancelled);
+            }
+        }
+        Ok(())
+    }
+
+    fn finish(mut self, emit: &impl Fn(Value) -> bool) -> Result<(), SearchProviderError> {
+        self.drain_all(emit)?;
+        self.work.take();
+        for worker in self.workers.drain(..) {
+            if worker.join().is_err() {
+                return Err(SearchProviderError::Search(
+                    "changes render worker panicked".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Drop for ChangeRenderPool {
+    fn drop(&mut self) {
+        self.abort.store(true, Ordering::Relaxed);
+        self.work.take();
+        for worker in self.workers.drain(..) {
+            let _ = worker.join();
+        }
+    }
 }
 
 /// Independent bounded reads reuse canonical preview/restore identities. A clean
@@ -138,8 +308,10 @@ pub(crate) fn run(
     let offset = request.offset.unwrap_or(0);
     let page_limit = if request.projection { 700 } else { 40 };
     let base = json!({"ref": requested_base, "mode": if pinned == "HEAD" {"none"} else if head_view {"head"} else {"detached"}, "commit": commit.as_ref().map(|c| json!({"hash": c.hash, "short": c.short_hash, "subject": c.summary}))});
-    // Discovery has no exact total yet. Publish ownership before the first file,
-    // then stream each confirmed diff without waiting for later candidate checks.
+    // Discovery has no exact total yet. Publish ownership before the first file.
+    // The first confirmed diff remains synchronous so historical disk races are
+    // exposed before the next candidate is checked; later files pipeline through
+    // ordered workers while discovery continues.
     if offset == 0
         && !emit(
             json!({"metadata":{"mode":"changes","git":true,"base":base,"baseHash":pinned,"offset":0,"nextOffset":null}}),
@@ -148,7 +320,15 @@ pub(crate) fn run(
         return Err(SearchProviderError::Cancelled);
     }
     check()?;
-    let mut delivered = 0;
+    let worker_count = super::search_ops::resolve_search_threads(request.search_threads);
+    let render_provider = provider.clone();
+    let render_pinned = pinned.clone();
+    let render_root = root.clone();
+    let render: Arc<ChangeRender> = Arc::new(move |entry| {
+        render_change(&entry, &render_provider, &render_pinned, &render_root)
+    });
+    let mut renderer: Option<ChangeRenderPool> = None;
+    let mut scheduled = 0;
     let mut delivery_error = None;
     let listing_result = git_ops::git_worktree_changes_visit(
         git_ops::GitProviderRequest {
@@ -166,27 +346,46 @@ pub(crate) fn run(
                 return false;
             }
             // Keep tracked results progressive; untracked files belong after every tracked path.
-            if offset != 0 || delivered >= page_limit || entry.code.trim() == "??" {
+            if offset != 0 || scheduled >= page_limit || entry.code.trim() == "??" {
                 return true;
             }
-            match render_change(entry, &provider, &pinned, &root) {
-                Ok(change) => {
-                    if cancelled.load(Ordering::Relaxed) || !emit(json!({"change":change})) {
-                        delivery_error = Some(SearchProviderError::Cancelled);
+            if scheduled == 0 {
+                match render_change(entry, &provider, &pinned, &root) {
+                    Ok(change) => {
+                        if cancelled.load(Ordering::Relaxed) || !emit(json!({"change":change})) {
+                            delivery_error = Some(SearchProviderError::Cancelled);
+                            return false;
+                        }
+                    }
+                    Err(error) => {
+                        delivery_error = Some(error);
                         return false;
                     }
-                    delivered += 1;
-                    true
                 }
-                Err(error) => {
+                scheduled = 1;
+                true
+            } else {
+                let pool = renderer.get_or_insert_with(|| {
+                    ChangeRenderPool::new(worker_count, Arc::clone(&render), Arc::clone(&cancelled))
+                });
+                if let Err(error) = pool
+                    .submit(entry.clone())
+                    .and_then(|()| pool.drain_available(&emit))
+                {
                     delivery_error = Some(error);
                     false
+                } else {
+                    scheduled += 1;
+                    true
                 }
             }
         },
     );
     if let Some(error) = delivery_error {
         return Err(error);
+    }
+    if let Some(pool) = renderer.as_mut() {
+        pool.drain_all(&emit)?;
     }
     check()?;
     let listing = listing_result.map_err(map_error)?;
@@ -227,13 +426,18 @@ pub(crate) fn run(
     }
     // Continuations emit only after the complete snapshot token has been validated.
     {
-        let start = if offset == 0 { delivered } else { offset };
+        let start = if offset == 0 { scheduled } else { offset };
         for entry in &entries[start..end] {
             check()?;
-            if !emit(json!({"change":render_change(entry, &provider, &pinned, &root)?})) {
-                return Err(SearchProviderError::Cancelled);
-            }
+            let pool = renderer.get_or_insert_with(|| {
+                ChangeRenderPool::new(worker_count, Arc::clone(&render), Arc::clone(&cancelled))
+            });
+            pool.submit(entry.clone())?;
+            pool.drain_available(&emit)?;
         }
+    }
+    if let Some(pool) = renderer.take() {
+        pool.finish(&emit)?;
     }
     if offset == 0 && !emit(json!({"metadata":meta})) {
         return Err(SearchProviderError::Cancelled);
@@ -300,7 +504,12 @@ fn render_change(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{cell::RefCell, fs, path::PathBuf};
+    use std::{
+        cell::RefCell,
+        fs,
+        path::PathBuf,
+        sync::{Barrier, atomic::AtomicUsize},
+    };
 
     struct Fixture(PathBuf);
     impl Fixture {
@@ -321,6 +530,47 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn change_render_pool_runs_concurrently_but_emits_in_discovery_order() {
+        let rendezvous = Arc::new(Barrier::new(2));
+        let active = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let render: Arc<ChangeRender> = {
+            let rendezvous = Arc::clone(&rendezvous);
+            let active = Arc::clone(&active);
+            let peak = Arc::clone(&peak);
+            Arc::new(move |entry| {
+                let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+                peak.fetch_max(current, Ordering::SeqCst);
+                rendezvous.wait();
+                active.fetch_sub(1, Ordering::SeqCst);
+                Ok(json!({"rel": entry.path}))
+            })
+        };
+        let mut pool = ChangeRenderPool::new(2, render, Arc::new(AtomicBool::new(false)));
+        for path in ["first.txt", "second.txt"] {
+            pool.submit(git_ops::GitWorktreeChange {
+                path: path.into(),
+                code: "M".into(),
+                original_path: None,
+            })
+            .unwrap();
+        }
+        let emitted = RefCell::new(Vec::new());
+        pool.finish(&|event| {
+            emitted.borrow_mut().push(
+                event["change"]["rel"]
+                    .as_str()
+                    .expect("rendered relative path")
+                    .to_owned(),
+            );
+            true
+        })
+        .unwrap();
+        assert!(peak.load(Ordering::SeqCst) >= 2);
+        assert_eq!(emitted.into_inner(), ["first.txt", "second.txt"]);
     }
 
     #[test]

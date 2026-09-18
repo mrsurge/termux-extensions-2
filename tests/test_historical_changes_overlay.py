@@ -19,3 +19,15 @@ class HistoricalChangesOverlayTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(params['headView'])
         self.assertEqual(params['projectGeneration'], 7)
         self.assertEqual(params['correlationId'], 'view')
+
+    async def test_changes_job_forwards_shared_search_worker_configuration(self) -> None:
+        provider = SearchProvider(response={'dto': 'SearchJobStarted'})
+        with (
+            patch.dict(search.os.environ, {search.SEARCH_THREADS_ENV: '3'}),
+            patch.object(search, '_call_search_provider', new=provider),
+        ):
+            _ = await search.start_changes_search(
+                Path('/project'), project_generation=7, correlation_id='view',
+                base='HEAD', head_view=True, offset=0, snapshot_token=None,
+            )
+        self.assertEqual(provider.calls[0][1]['searchThreads'], 3)

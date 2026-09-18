@@ -11,7 +11,17 @@
 .te2-scm-history .history-item-change { width: 100%; min-width: 0; height: 22px; gap: 4px; }
 .te2-scm-history .history-subject,
 .te2-scm-history .history-file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.te2-scm-history .history-description { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .7; }
+.te2-scm-history .history-description {
+  display: flex; flex: 0 1 auto; align-items: center; gap: 5px;
+  min-width: 0; overflow: hidden; white-space: nowrap; opacity: .7;
+}
+.te2-scm-history .history-description-primary {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.te2-scm-history .history-description-timestamp {
+  flex: none; margin-left: auto; font-variant-numeric: tabular-nums;
+}
+.te2-scm-history.is-mobile .history-description { flex: 1 1 auto; }
 .te2-scm-history .history-commit-statistics,
 .te2-scm-history .history-file-statistics { flex: none; margin-left: auto; padding-right: 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .te2-scm-history [data-state="pending"],
@@ -93,6 +103,19 @@
   display: flex; flex: 1; flex-direction: column; gap: 3px;
   min-width: 0; max-width: 100%; overflow: visible; white-space: normal;
 }
+.te2-scm-history .history-detail-metrics {
+  display: flex; flex: none; flex-direction: column; align-items: flex-end;
+  gap: 4px; margin-left: auto;
+}
+.te2-scm-history .history-detail-hash {
+  appearance: none; border: 0; padding: 0 2px; background: transparent;
+  color: #9fb0c3; font: inherit; font-family: var(--monaco-monospace-font, monospace);
+  line-height: 16px; cursor: pointer;
+}
+.te2-scm-history .history-detail-hash:hover,
+.te2-scm-history .history-detail-hash:focus-visible {
+  color: #fff; text-decoration: underline; outline: 1px solid #718096; outline-offset: 1px;
+}
 .te2-scm-history .history-detail-ref {
   display: flex; align-items: flex-start; gap: 4px; min-width: 0; max-width: 100%;
 }
@@ -103,7 +126,7 @@
 /* Desktop details leave the clipped Explorer through a host-owned body portal.
    The fixed portal sits below host menus and fades in only after hover settles. */
 .te2-scm-history.te2-history-details-hover-portal {
-  position: fixed; z-index: 150; height: auto; pointer-events: none;
+  position: fixed; z-index: 150; height: auto; pointer-events: auto;
   opacity: 0; transform: translateX(-4px);
   transition: opacity 120ms ease-out, transform 120ms ease-out;
 }
@@ -131,5 +154,12 @@
 .te2-scm-history .history-details-hover::after {
   left: -7px; border-width: 6px 7px 6px 0; border-right-color: #252b33;
 }
-.te2-scm-history .history-hover-title { white-space: pre-wrap; overflow-wrap: anywhere; margin-bottom: 6px; }
+.te2-scm-history .history-hover-title { overflow-wrap: anywhere; margin-bottom: 6px; }
+.te2-scm-history .history-hover-subject,
+.te2-scm-history .history-hover-identity { min-width: 0; }
+.te2-scm-history .history-hover-byline {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-width: 0;
+}
+.te2-scm-history .history-hover-author { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.te2-scm-history .history-hover-timestamp { flex: none; margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .te2-scm-history .history-details-hover .history-detail-body { align-items: flex-start; }

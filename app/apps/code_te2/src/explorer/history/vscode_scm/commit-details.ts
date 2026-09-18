@@ -1,14 +1,13 @@
-import { appendElement, historyIconId, renderCounts, type HistoryCommitRow, type HistoryDetailsRow } from './pane-platform.ts';
+import { appendElement, formatHistoryTimestamp, historyIconId, renderCounts, type HistoryCommitRow, type HistoryDetailsRow } from './pane-platform.ts';
 import { SWIMLANE_HEIGHT, SWIMLANE_WIDTH, renderSCMHistoryGraphPlaceholder, getHistoryItemIndex } from './adapted/browser/scmHistory.ts';
 import { asCssVariable } from './platform.ts';
 
 /** Shared presentation only: totals arrive on the existing statistics stream. */
 export function renderHistoryDetails(container: HTMLElement, row: HistoryCommitRow): void {
   container.replaceChildren();
-  const counts = appendElement(container, 'history-detail-counts history-commit-statistics');
-  renderCounts(counts, row.counts);
   const refs = appendElement(container, 'history-detail-refs');
-  for (const ref of row.historyItemViewModel.historyItem.references || []) {
+  const item = row.historyItemViewModel.historyItem;
+  for (const ref of item.references || []) {
     const reference = appendElement(refs, 'history-detail-ref');
     reference.title = ref.id;
     if (ref.color) reference.style.color = asCssVariable(ref.color);
@@ -21,6 +20,37 @@ export function renderHistoryDetails(container: HTMLElement, row: HistoryCommitR
     name.textContent = ref.name;
   }
   if (!refs.childElementCount) refs.textContent = 'No branch or tag heads';
+  const metrics = appendElement(container, 'history-detail-metrics');
+  if (/^[0-9a-f]{40}$/i.test(item.id)) {
+    const hash = metrics.ownerDocument.createElement('button');
+    hash.type = 'button';
+    hash.className = 'history-detail-hash';
+    hash.textContent = item.id.slice(0, 8);
+    hash.title = 'Copy full commit hash';
+    hash.setAttribute('aria-label', `Copy full commit hash ${item.id}`);
+    hash.addEventListener('pointerdown', event => event.stopPropagation());
+    hash.addEventListener('pointerup', event => event.stopPropagation());
+    hash.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') event.stopPropagation();
+    });
+    hash.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      const clipboard = hash.ownerDocument.defaultView?.navigator.clipboard;
+      if (!clipboard || typeof clipboard.writeText !== 'function') {
+        hash.title = 'Clipboard unavailable';
+        return;
+      }
+      void clipboard.writeText(item.id).then(() => {
+        if (hash.isConnected) hash.title = 'Copied full commit hash';
+      }).catch(() => {
+        if (hash.isConnected) hash.title = 'Unable to copy commit hash';
+      });
+    });
+    metrics.append(hash);
+  }
+  const counts = appendElement(metrics, 'history-detail-counts history-commit-statistics');
+  renderCounts(counts, row.counts);
 }
 
 interface DetailsTemplate { element: HTMLElement; graph: HTMLElement; body: HTMLElement; }
@@ -49,6 +79,7 @@ export class HistoryDetailsRenderer {
 
 export const HISTORY_DETAILS_HOVER_DELAY_MS = 1000;
 export const HISTORY_DETAILS_HOVER_GRACE_MS = 400;
+export const HISTORY_DETAILS_HOVER_BRIDGE_MS = 160;
 
 /** Desktop hover/focus is lazy DOM, not a second Git fetch or native title.
  * The portal follows live totals, remains owned by this host, and dies with it. */
@@ -60,16 +91,20 @@ export class HistoryDetailsHover {
   private id: string | null = null;
   private revealTimer: number | null = null;
   private revealFrame: number | null = null;
+  private hideTimer: number | null = null;
   private warmResetTimer: number | null = null;
   private warm = false;
   private readonly over = (event: Event) => {
+    this.clearHideTimer();
     const target = event.target;
     if (!(target instanceof Element)) return;
     const anchor = target.closest<HTMLElement>('.history-item[data-commit-id]');
     if (!anchor || !this.host.contains(anchor)) { this.hide(); return; }
     this.schedule(anchor, anchor.dataset.commitId || null);
   };
-  private readonly leave = () => this.hide();
+  private readonly leave = () => this.scheduleHide();
+  private readonly portalEnter = () => this.clearHideTimer();
+  private readonly portalLeave = () => this.hide();
   private readonly key = (event: KeyboardEvent) => { if (event.key === 'Escape') this.hide(); };
   constructor(private readonly host: HTMLElement, private readonly current: (id: string) => HistoryCommitRow | undefined) {
     host.addEventListener('pointerover', this.over);
@@ -83,6 +118,7 @@ export class HistoryDetailsHover {
     this.schedule(anchor, id);
   }
   private schedule(anchor: HTMLElement | null, id: string | null): void {
+    this.clearHideTimer();
     if (!anchor || !id) { this.hide(); return; }
     if (this.anchor === anchor && this.id === id) {
       if (this.panel) this.refresh();
@@ -110,6 +146,8 @@ export class HistoryDetailsHover {
     const body = this.host.ownerDocument.body;
     if (!body) { this.hide(); return; }
     this.portal = appendElement(body, 'te2-scm-history te2-history-details-hover-portal');
+    this.portal.addEventListener('pointerenter', this.portalEnter);
+    this.portal.addEventListener('pointerleave', this.portalLeave);
     this.panel = appendElement(this.portal, 'history-details-hover');
     this.panel.setAttribute('role', 'tooltip');
     this.content = appendElement(this.panel, 'history-details-hover-content');
@@ -129,7 +167,15 @@ export class HistoryDetailsHover {
     const item = row.historyItemViewModel.historyItem;
     this.content.replaceChildren();
     const title = appendElement(this.content, 'history-hover-title');
-    title.textContent = `${item.subject}\n${item.id}\n${item.author || ''}`;
+    const subject = appendElement(title, 'history-hover-subject');
+    subject.textContent = item.subject;
+    const identity = appendElement(title, 'history-hover-identity');
+    identity.textContent = item.id;
+    const byline = appendElement(title, 'history-hover-byline');
+    const author = appendElement(byline, 'history-hover-author');
+    author.textContent = item.author || '';
+    const timestamp = appendElement(byline, 'history-hover-timestamp');
+    timestamp.textContent = formatHistoryTimestamp(item.timestamp);
     renderHistoryDetails(appendElement(this.content, 'history-detail-body'), row);
     this.position();
   }
@@ -169,6 +215,20 @@ export class HistoryDetailsHover {
     this.revealTimer = null;
     this.revealFrame = null;
   }
+  private clearHideTimer(): void {
+    const view = this.host.ownerDocument.defaultView;
+    if (this.hideTimer !== null && view) view.clearTimeout(this.hideTimer);
+    this.hideTimer = null;
+  }
+  private scheduleHide(): void {
+    const view = this.host.ownerDocument.defaultView;
+    if (!view) { this.hide(); return; }
+    this.clearHideTimer();
+    this.hideTimer = view.setTimeout(() => {
+      this.hideTimer = null;
+      this.hide();
+    }, HISTORY_DETAILS_HOVER_BRIDGE_MS);
+  }
   private removePortal(): void {
     this.portal?.remove();
     this.portal = null;
@@ -191,6 +251,7 @@ export class HistoryDetailsHover {
     }, HISTORY_DETAILS_HOVER_GRACE_MS);
   }
   hide(): void {
+    this.clearHideTimer();
     this.clearRevealWork();
     this.removePortal();
     this.id = null;
@@ -198,7 +259,7 @@ export class HistoryDetailsHover {
     this.startWarmReset();
   }
   dispose(): void {
-    this.clearRevealWork(); this.cancelWarmReset(); this.removePortal();
+    this.clearRevealWork(); this.clearHideTimer(); this.cancelWarmReset(); this.removePortal();
     this.id = null; this.anchor = null; this.warm = false;
     this.host.removeEventListener('pointerover', this.over);
     this.host.removeEventListener('focusin', this.over); this.host.removeEventListener('pointerleave', this.leave);

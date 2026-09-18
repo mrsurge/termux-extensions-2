@@ -79,6 +79,16 @@ export interface HistoryTreeInput {
   readonly rows: readonly (HistoryCommitRow | HistoryLoadMoreRow)[];
 }
 
+const historyTimestampFormatter = new Intl.DateTimeFormat(undefined, {
+  year: '2-digit', month: 'numeric', day: 'numeric',
+  hour: 'numeric', minute: '2-digit',
+});
+
+export function formatHistoryTimestamp(timestamp: number | undefined): string {
+  if (typeof timestamp !== 'number' || !Number.isFinite(timestamp)) return '';
+  return historyTimestampFormatter.format(new Date(timestamp));
+}
+
 export function groupBy<T>(values: readonly T[], key: (value: T) => string): Record<string, T[]> {
   const groups: Record<string, T[]> = Object.create(null);
   for (const value of values) (groups[key(value)] ??= []).push(value);

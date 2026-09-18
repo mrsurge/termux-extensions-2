@@ -38,10 +38,10 @@ after(async () => {
 
 function commitRows() {
   return graph.toISCMHistoryItemViewModelArray([
-    { id: 'merge', parentIds: ['left', 'right'], subject: 'Merge', message: 'Merge', author: 'Alice' },
-    { id: 'left', parentIds: ['base'], subject: 'Left', message: 'Left' },
-    { id: 'right', parentIds: ['base'], subject: 'Right', message: 'Right' },
-    { id: 'base', parentIds: [], subject: 'Root', message: 'Root' },
+    { id: 'merge', parentIds: ['left', 'right'], subject: 'Merge', message: 'Merge', author: 'Alice', timestamp: Date.UTC(2026, 8, 17, 18, 30) },
+    { id: 'left', parentIds: ['base'], subject: 'Left', message: 'Left', author: 'Bob', timestamp: Date.UTC(2026, 8, 16, 17, 20) },
+    { id: 'right', parentIds: ['base'], subject: 'Right', message: 'Right', timestamp: Date.UTC(2026, 8, 15, 16, 10) },
+    { id: 'base', parentIds: [], subject: 'Root', message: 'Root', timestamp: Date.UTC(2026, 8, 14, 15, 0) },
   ]).map(historyItemViewModel => ({ type: 'historyItemViewModel', historyItemViewModel, counts: { state: 'pending' } }));
 }
 const tick = () => new Promise(resolve => setTimeout(resolve, 20));
@@ -233,6 +233,11 @@ test('base-tree and history styles are bounded to the history host', async () =>
   let hoverContentRule = null;
   let detailRefsRule = null;
   let detailRefNameRule = null;
+  let detailMetricsRule = null;
+  let detailHashRule = null;
+  let descriptionTimestampRule = null;
+  let hoverBylineRule = null;
+  let hoverTimestampRule = null;
   let detailsRowRule = null;
   let detailsGraphRule = null;
   let detailsGraphSvgRule = null;
@@ -268,6 +273,21 @@ test('base-tree and history styles are bounded to the history host', async () =>
         if (rule.selectorText === '.te2-scm-history .history-detail-ref-name') {
           detailRefNameRule = rule;
         }
+        if (rule.selectorText === '.te2-scm-history .history-detail-metrics') {
+          detailMetricsRule = rule;
+        }
+        if (rule.selectorText === '.te2-scm-history .history-detail-hash') {
+          detailHashRule = rule;
+        }
+        if (rule.selectorText === '.te2-scm-history .history-description-timestamp') {
+          descriptionTimestampRule = rule;
+        }
+        if (rule.selectorText === '.te2-scm-history .history-hover-byline') {
+          hoverBylineRule = rule;
+        }
+        if (rule.selectorText === '.te2-scm-history .history-hover-timestamp') {
+          hoverTimestampRule = rule;
+        }
         if (rule.selectorText === '.te2-scm-history .history-item-details') {
           detailsRowRule = rule;
         }
@@ -292,7 +312,7 @@ test('base-tree and history styles are bounded to the history host', async () =>
   assert.equal(countPillRule?.style.justifySelf, 'end');
   assert.equal(countPillRule?.style.width, 'max-content');
   assert.equal(hoverPortalRule?.style.position, 'fixed');
-  assert.equal(hoverPortalRule?.style.pointerEvents, 'none');
+  assert.equal(hoverPortalRule?.style.pointerEvents, 'auto');
   assert.equal(hoverPortalRule?.style.opacity, '0');
   assert.match(hoverPortalRule?.style.transition || '', /opacity 120ms ease-out/);
   assert.equal(visibleHoverPortalRule?.style.opacity, '1');
@@ -301,6 +321,12 @@ test('base-tree and history styles are bounded to the history host', async () =>
   assert.equal(detailRefsRule?.style.flexDirection, 'column');
   assert.equal(detailRefsRule?.style.whiteSpace, 'normal');
   assert.equal(detailRefNameRule?.style.overflowWrap, 'anywhere');
+  assert.equal(detailMetricsRule?.style.flexDirection, 'column');
+  assert.equal(detailMetricsRule?.style.alignItems, 'flex-end');
+  assert.equal(detailHashRule?.style.cursor, 'pointer');
+  assert.equal(descriptionTimestampRule?.style.marginLeft, 'auto');
+  assert.equal(hoverBylineRule?.style.justifyContent, 'space-between');
+  assert.equal(hoverTimestampRule?.style.marginLeft, 'auto');
   assert.equal(detailsRowRule?.style.lineHeight, '16px', 'details must not inherit the virtual row height as line-height');
   assert.equal(detailsGraphRule?.style.alignSelf, 'stretch');
   assert.equal(detailsGraphRule?.style.height, 'auto');
@@ -380,7 +406,7 @@ test('file icon resolver receives basename and late SVG cannot alter a recycled 
   renderer.disposeTemplate(template);
 });
 
-test('partial commit totals live in details, not commit headers', () => {
+test('partial commit totals and copyable full commit identity live in details, not commit headers', async () => {
   const renderer = new pane.HistoryItemRenderer();
   const container = win.document.createElement('div');
   const template = renderer.renderTemplate(container);
@@ -389,7 +415,7 @@ test('partial commit totals live in details, not commit headers', () => {
   assert.equal(container.querySelector('.history-commit-statistics'), null);
   const detailedRow = { ...row, historyItemViewModel: {
     ...row.historyItemViewModel,
-    historyItem: { ...row.historyItemViewModel.historyItem, references: [
+    historyItem: { ...row.historyItemViewModel.historyItem, id: 'a'.repeat(40), displayId: 'aaaaaaaa', references: [
       { id: 'refs/heads/main', name: 'main', color: 'scmGraph.historyItemRefColor', icon: { id: 'git-branch' } },
       { id: 'refs/tags/release-with-a-very-long-name', name: 'release-with-a-very-long-name', color: 'scmGraph.historyItemRemoteRefColor', icon: { id: 'tag' } },
     ] },
@@ -397,6 +423,22 @@ test('partial commit totals live in details, not commit headers', () => {
   const info = win.document.createElement('div'); details.renderHistoryDetails(info, detailedRow);
   const stats = info.querySelector('.history-commit-statistics');
   assert.equal(stats.textContent, '+42* -7*'); assert.match(stats.title, /2 file/);
+  const metrics = info.querySelector('.history-detail-metrics');
+  const hash = metrics.querySelector('.history-detail-hash');
+  assert.equal(hash.textContent, 'aaaaaaaa');
+  assert.equal(metrics.firstElementChild, hash, 'hash sits above the insertion/deletion pills');
+  let copied = null; let parentClicks = 0;
+  const oldClipboard = Object.getOwnPropertyDescriptor(win.navigator, 'clipboard');
+  Object.defineProperty(win.navigator, 'clipboard', { configurable: true, value: {
+    writeText: async value => { copied = value; },
+  } });
+  info.addEventListener('click', () => { parentClicks++; });
+  hash.dispatchEvent(new win.MouseEvent('click', { bubbles: true, cancelable: true }));
+  await tick();
+  assert.equal(copied, 'a'.repeat(40));
+  assert.equal(parentClicks, 0, 'copying does not activate the owning history row');
+  if (oldClipboard) Object.defineProperty(win.navigator, 'clipboard', oldClipboard);
+  else delete win.navigator.clipboard;
   const refs = info.querySelectorAll('.history-detail-ref');
   assert.equal(refs.length, 2);
   assert.ok(refs[0].querySelector('.codicon-git-branch'));
@@ -425,6 +467,9 @@ test('mobile UA gets a details child in wide layouts and totals rerender without
     assert.equal(delegate.hasDynamicHeight({ type: 'historyItemDetails', owner: rows[0] }), true);
     assert.equal(delegate.hasDynamicHeight(rows[0]), false);
     assert.equal(container.querySelectorAll('.history-item-details').length, 1);
+    assert.equal(container.querySelector('.te2-scm-history').classList.contains('is-mobile'), true);
+    assert.ok(container.querySelector('.history-description-timestamp')?.textContent,
+      'mobile commit headers display the retained commit date and time');
     assert.equal(container.querySelectorAll('.history-item .history-commit-statistics').length, 0);
     assert.equal(container.querySelectorAll('.history-item-details svg').length, 1);
     const detailsGraph = container.querySelector('.history-item-details .history-details-graph');
@@ -476,14 +521,24 @@ test('desktop hover exposes live totals without expanding or reading files and d
     await host.updateRows(replacement);
     assert.equal(win.document.querySelector('.history-details-hover .history-commit-statistics').textContent, '+15 -3');
     nextAnchor.dispatchEvent(new win.MouseEvent('pointerover', { bubbles: true }));
-    assert.match(win.document.querySelector('.history-hover-title').textContent, /^Left\nleft\n/,
+    assert.equal(win.document.querySelector('.history-hover-subject').textContent, 'Left',
       'adjacent rows reveal immediately after the first settled hover');
+    assert.equal(win.document.querySelector('.history-hover-identity').textContent, 'left');
+    assert.equal(win.document.querySelector('.history-hover-author').textContent, 'Bob');
+    assert.ok(win.document.querySelector('.history-hover-timestamp').textContent,
+      'the hover keeps date and time on its existing author line');
     historyElement.dispatchEvent(new win.MouseEvent('pointerleave'));
+    assert.ok(win.document.querySelector('.history-details-hover'), 'the bridge keeps the portal alive while the pointer crosses the gap');
+    portal.dispatchEvent(new win.MouseEvent('pointerenter'));
+    await new Promise(resolve => setTimeout(resolve, details.HISTORY_DETAILS_HOVER_BRIDGE_MS + 40));
+    assert.ok(win.document.querySelector('.history-details-hover'), 'entering the portal cancels bridge dismissal');
+    portal.dispatchEvent(new win.MouseEvent('pointerleave'));
     assert.equal(win.document.querySelector('.history-details-hover'), null);
     nextAnchor.dispatchEvent(new win.MouseEvent('pointerover', { bubbles: true }));
     assert.ok(win.document.querySelector('.history-details-hover'), 'brief re-entry remains warm');
     historyElement.dispatchEvent(new win.MouseEvent('pointerleave'));
-    await new Promise(resolve => setTimeout(resolve, details.HISTORY_DETAILS_HOVER_GRACE_MS + 40));
+    await new Promise(resolve => setTimeout(resolve,
+      details.HISTORY_DETAILS_HOVER_BRIDGE_MS + details.HISTORY_DETAILS_HOVER_GRACE_MS + 40));
     anchor.dispatchEvent(new win.MouseEvent('pointerover', { bubbles: true }));
     assert.equal(win.document.querySelector('.history-details-hover'), null,
       'a cooled hover uses the full delay again');

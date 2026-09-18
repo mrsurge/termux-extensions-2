@@ -48,6 +48,7 @@ export class HistoryTreeHost implements TreeDisposable {
     container.appendChild(this.element);
     // UA, not viewport width: touch details must remain available in landscape.
     const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(container.ownerDocument.defaultView?.navigator.userAgent || '');
+    this.element.classList.toggle('is-mobile', mobile);
     for (const row of input.rows) if (row.type === 'historyItemViewModel') this.currentRows.set(row.historyItemViewModel.historyItem.id, row);
     this.hover = mobile ? null : new HistoryDetailsHover(this.element, id => this.currentRows.get(id));
     this.sizeCounts(input.rows.filter(row => row.type === 'historyItemViewModel').map(row => row.counts));
@@ -61,7 +62,7 @@ export class HistoryTreeHost implements TreeDisposable {
     try {
       this.tree = new Tree('TE2 history', this.element, new ListDelegate(),
         { isIncompressible: () => true },
-        [new HistoryItemRenderer(), new HistoryItemChangeRenderer(resolveIcon), new HistoryItemLoadMoreRenderer(), new HistoryItemErrorRenderer(), new HistoryDetailsRenderer(id => this.currentRows.get(id))], this.source, {
+        [new HistoryItemRenderer('all', mobile), new HistoryItemChangeRenderer(resolveIcon), new HistoryItemLoadMoreRenderer(), new HistoryItemErrorRenderer(), new HistoryDetailsRenderer(id => this.currentRows.get(id))], this.source, {
           compressionEnabled: false, expandOnlyOnTwistieClick: false, supportDynamicHeights: mobile,
           identityProvider: { getId: rowId },
           accessibilityProvider: {

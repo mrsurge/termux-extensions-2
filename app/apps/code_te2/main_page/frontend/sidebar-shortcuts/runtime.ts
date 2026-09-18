@@ -1410,6 +1410,15 @@ export function initSidebarShortcuts(
     _headerIconMenuKey = "";
   }
 
+  function _headerIconMenuOwns(key: string): boolean {
+    return !!(
+      sidebarHeaderIconMenuEl?.classList.contains("show") &&
+      _normStr(
+        _headerIconMenuKey || sidebarHeaderIconMenuEl.dataset.shortcutKey,
+      ) === key
+    );
+  }
+
   function _closeRefreshMenu() {
     if (!sidebarRefreshMenuEl) return;
     sidebarRefreshMenuEl.classList.remove("show");
@@ -2637,6 +2646,11 @@ export function initSidebarShortcuts(
       });
       return;
     }
+    const shortcutKey = _normStr(sc.key);
+    if (shortcutKey && _headerIconMenuOwns(shortcutKey)) {
+      _closeHeaderIconMenu();
+      return;
+    }
     try {
       if (closeAllMenus) closeAllMenus();
     } catch (_) {}
@@ -2848,8 +2862,8 @@ export function initSidebarShortcuts(
     );
     menu.style.left = `${baseLeft}px`;
     menu.style.top = `${baseTop}px`;
-    menu.dataset.shortcutKey = _normStr(sc?.key);
-    _headerIconMenuKey = _normStr(sc?.key);
+    menu.dataset.shortcutKey = shortcutKey;
+    _headerIconMenuKey = shortcutKey;
     menu.classList.add("show");
 
     requestAnimationFrame(() => {
@@ -2867,6 +2881,10 @@ export function initSidebarShortcuts(
 
   async function _openLauncherMenu(anchorEl: HTMLElement | null) {
     if (!sidebarHeaderIconMenuEl || !anchorEl) return;
+    if (!hasElectronSidebarMenu() && _headerIconMenuOwns("__launcher__")) {
+      _closeHeaderIconMenu();
+      return;
+    }
     try {
       if (closeAllMenus) closeAllMenus();
     } catch (_) {}
@@ -3391,7 +3409,9 @@ export function initSidebarShortcuts(
           suppressUntil = 0;
           return;
         }
+        const closesOwnMenu = _headerIconMenuOwns(_normStr(sc.key));
         _closeHeaderIconMenu();
+        if (closesOwnMenu) return;
         const targetId = sc.id || sc.url || sc.key;
         if (!targetId) return;
         _setClientActiveShortcut(targetId, {

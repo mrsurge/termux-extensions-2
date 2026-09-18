@@ -135,15 +135,17 @@ async def start_changes_search(
     offset: int,
     snapshot_token: str | None,
 ) -> JsonObject:
+    request: JsonObject = {
+        "dto": "SearchChangesRequest", "version": 1, "root": str(root),
+        "projectGeneration": project_generation, "correlationId": correlation_id,
+        "base": base, "headView": head_view, "offset": offset,
+        "snapshotToken": snapshot_token,
+        "projection": True,
+    }
+    _put_optional_int(request, "searchThreads", _request_search_threads(None))
     data = await _call_search_provider(
         "search.changes.start",
-        {
-            "dto": "SearchChangesRequest", "version": 1, "root": str(root),
-            "projectGeneration": project_generation, "correlationId": correlation_id,
-            "base": base, "headView": head_view, "offset": offset,
-            "snapshotToken": snapshot_token,
-            "projection": True,
-        },
+        request,
         root=root,
         project_generation=project_generation,
         correlation_id=correlation_id,

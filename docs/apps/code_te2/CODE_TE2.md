@@ -882,12 +882,19 @@ User live acceptance and broader end-to-end concurrency validation remain pendin
 
 - By changes uses the same start/result/done/error/cancel job lifecycle. The
   start acknowledgement does not wait for Git enumeration or hunk generation.
-  Rust `framework_services/search_changes.rs` runs that work on the scheduler's
-  bounded blocking search lane; the editor file-open/Git lanes remain separate.
+  Rust `framework_services/search_changes.rs` runs discovery on the scheduler's
+  bounded blocking search lane. It renders the first confirmed path
+  synchronously, then pipelines remaining per-file diff/restore materialization
+  through bounded ordered workers using the content-search thread configuration.
+  Each worker opens independent Git repository state; only the changes-job
+  coordinator emits pipe events. The editor file-open/Git lanes remain separate.
 - Each changes job resolves the requested comparison to an immutable commit.
-  The first page emits discovery metadata without a total, then confirmed file
-  diffs while later candidates are still unchecked. Final metadata supplies the
-  exact bounded total and continuation token before `search.job.done`. Existing
+  The first page emits discovery metadata without a total, then its first
+  confirmed diff before validating later historical candidates. Remaining
+  workers may finish out of order, but sequence buffering preserves discovery
+  order, tracked-before-untracked ordering, pagination, and continuation
+  semantics. Final metadata supplies the exact bounded total and continuation
+  token before `search.job.done`. Existing
   frontend metadata merging preserves file DOM and local expansion during this final update. Compact gapless file headers expose per-file Stage (`+`) and a shared Stage and commit all action when the index is empty, otherwise Commit selected (the index), through existing Explorer RPCs; both are HEAD-only. Restore remains confirmation-gated, labeled `×` at HEAD and `Restore` in history. There is no hunk staging. The shared commit prompt rejects project/comparison changes before dispatch; the backend waits for staging and stops if staging fails. SVG fe-btn Push/Pull/Fetch controls reuse Git services. Fetch updates origin refs without merging; History separates Fetch from its local Refresh button. Untracked files retain real Git +/- statistics without bodies and follow tracked results across pagination; bodyless preview headers open the file directly. Status labels use `M` and green `A` for modified/untracked.
   HEAD browsing retains HEAD status enumeration; historical discovery uses
   index-backed candidates with per-path selected-tree-to-disk verification.
@@ -1042,6 +1049,15 @@ Mobile UA (independent of width) expansion inserts one 22px details child before
 file rows. Its SVG continues the parent lanes, its totals use the latest commit
 projection, and its full branch/ref names scroll horizontally. Desktop omits that
 child and lazily creates a host-local hover/focus panel with full names and totals.
+The native graph timestamp remains part of the typed page projection: the
+frontend converts its epoch seconds once to the millisecond history-item contract.
+Desktop displays localized date/time at the right of the hover's existing author
+row; mobile displays it at the right of the fixed 22px commit header, without
+adding another row or another Git read.
+Both surfaces place an eight-character hash to the right of the ref list and above
+the count pills. Activating it copies the full commit ID without selecting,
+expanding, or otherwise activating the owning history row; desktop hover remains
+open while the pointer crosses from the commit row into this interactive panel.
 The existing statistics stream updates both surfaces; neither hover nor a totals
 rerender reads Git files again. Scroll/Escape/leave/disposal remove desktop hover
 DOM. `commit-details.ts` owns these presentation-only surfaces; file counts and
@@ -3078,7 +3094,10 @@ exact-view native bridge instead of DOM dropdowns that cannot composite above a
 sibling `WebContentsView`. The request is declarative and bounded to labels,
 separators, enabled action ids, and coordinates. Electron returns only the
 selected id; Code TE2 executes the existing action, so Electron never becomes
-Sidebar lifecycle authority. Browser and Gecko retain the DOM menus.
+Sidebar lifecycle authority. Browser and Android retain one keyed DOM menu owner:
+the launcher tap and a repeated icon long-press toggle their own menu, while a
+different launcher/long-press replaces the prior menu. Tapping the icon that owns
+an open long-press menu closes it without activating the surface.
 
 The trusted header exposes Attach, Refresh, Console, DevTools, exact Stop, and
 Close. Attach or user Close publishes an exact reattach event. Extension

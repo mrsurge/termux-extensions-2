@@ -20,6 +20,12 @@ function number(value: unknown): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw Error('Invalid History count');
   return value;
 }
+function timestamp(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value)) throw Error('Invalid History timestamp');
+  const milliseconds = value * 1000;
+  if (!Number.isSafeInteger(milliseconds)) throw Error('Invalid History timestamp');
+  return milliseconds;
+}
 function array(value: unknown): unknown[] {
   if (!Array.isArray(value)) throw Error('Invalid History list');
   return value as unknown[];
@@ -180,7 +186,8 @@ export class ExplorerHistoryController {
           if (this.commits.length >= 500) break;
           this.commits.push({ id: text(row.identity), displayId: text(row.identity).slice(0, 8),
             subject: text(row.subject), message: text(row.subject), author: text(row.author),
-            parentIds: array(row.parents).map(text), references: this.refs.get(text(row.identity)) });
+            timestamp: timestamp(row.timestamp), parentIds: array(row.parents).map(text),
+            references: this.refs.get(text(row.identity)) });
         }
         this.complete = page.complete === true || this.commits.length >= 500;
         this.message(this.commits.length >= 500 ? 'Showing the first 500 commits' : `${this.commits.length} commits`);

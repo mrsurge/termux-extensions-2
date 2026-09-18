@@ -65,6 +65,21 @@ test("keeps the extension drawer and status projection in the host source graph"
     /versionChanged\s*&&\s*!_isExtensionWebviewEntry\(sc\)/,
     "WBA HTML revisions must not reload the trusted Sidebar wrapper",
   );
+  assert.match(
+    sidebarShortcuts,
+    /_headerIconMenuOwns\("__launcher__"\)[\s\S]*?_closeHeaderIconMenu\(\);[\s\S]*?return;/,
+    "the mobile launcher is a true open/close menu toggle",
+  );
+  assert.match(
+    sidebarShortcuts,
+    /const shortcutKey = _normStr\(sc\.key\);[\s\S]*?_headerIconMenuOwns\(shortcutKey\)[\s\S]*?_closeHeaderIconMenu\(\);[\s\S]*?return;/,
+    "repeating a mobile dock-icon long press closes the menu it owns",
+  );
+  assert.match(
+    sidebarShortcuts,
+    /const closesOwnMenu = _headerIconMenuOwns\(_normStr\(sc\.key\)\);[\s\S]*?_closeHeaderIconMenu\(\);[\s\S]*?if \(closesOwnMenu\) return;/,
+    "tapping a dock icon closes its own long-press menu without activating the surface",
+  );
   assert.match(controller, /extensions\.activity\.snapshot/);
   assert.match(controller, /extensions\.logs\.select/);
   assert.match(bridge, /code-te2:extension-activity/);
