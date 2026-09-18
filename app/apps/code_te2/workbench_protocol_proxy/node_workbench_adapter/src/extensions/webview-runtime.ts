@@ -634,6 +634,8 @@ window.addEventListener('blur',closeContextMenu);
 }
 
 export class WebviewRuntime {
+  // Background startup belongs to this workspace/session, never its successor.
+  private activationController = new AbortController();
   private readonly serverEpoch = crypto.randomUUID();
   private readonly providers = new Map<string, WebviewProvider>();
   private readonly surfaces = new Map<string, ExtensionWebviewSurface>();
@@ -688,16 +690,20 @@ export class WebviewRuntime {
   }
 
   async activatePrimaryViews(): Promise<void> {
+    const { signal } = this.activationController;
     const contributions = this.primaryContributions();
     await Promise.all(
       contributions.map(async (contribution) => {
         try {
           await this.runtime.activateByEvent(`onView:${contribution.viewType}`);
-          await this.waitForProvider(contribution.viewType, 5000);
+          if (signal.aborted) return;
+          await this.waitForProvider(contribution.viewType, 5000, signal);
+          if (signal.aborted) return;
           if (!this.findSurfaceByView(contribution.viewType)) {
             await this.createSurface(contribution);
           }
         } catch (error) {
+          if (signal.aborted) return;
           this.runtime.log(
             `[webview] activation failed view=${contribution.viewType}:`,
             error instanceof Error ? error.message : String(error),
@@ -705,10 +711,12 @@ export class WebviewRuntime {
         }
       }),
     );
-    this.emitSnapshot();
+    if (!signal.aborted) this.emitSnapshot();
   }
 
   clear(reason: string, clearProviders = true): void {
+    this.activationController.abort();
+    this.activationController = new AbortController();
     const oldWorkspace = this.workspaceFolder();
     for (const runtimeSurface of [...this.runtimeSurfaces.values()]) {
       try {
@@ -1459,21 +1467,32 @@ export class WebviewRuntime {
     }
   }
 
-  private waitForProvider(viewType: string, timeoutMs: number): Promise<void> {
+  private waitForProvider(viewType: string, timeoutMs: number, signal: AbortSignal): Promise<void> {
+    if (signal.aborted) return Promise.reject(new Error("webview activation cancelled"));
     if (this.providers.has(viewType)) return Promise.resolve();
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const cleanup = (): void => {
+        clearTimeout(timer);
+        signal.removeEventListener("abort", cancel);
         const waiters = this.providerWaiters.get(viewType);
         waiters?.delete(complete);
         if (waiters?.size === 0) this.providerWaiters.delete(viewType);
+      };
+      const cancel = (): void => {
+        cleanup();
+        reject(new Error("webview activation cancelled"));
+      };
+      const timer = setTimeout(() => {
+        cleanup();
         reject(
           new Error(`timed out waiting for webview provider: ${viewType}`),
         );
       }, timeoutMs);
       const complete = (): void => {
-        clearTimeout(timer);
+        cleanup();
         resolve();
       };
+      signal.addEventListener("abort", cancel, { once: true });
       const waiters =
         this.providerWaiters.get(viewType) ?? new Set<() => void>();
       waiters.add(complete);

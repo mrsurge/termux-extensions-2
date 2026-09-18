@@ -1,49 +1,23 @@
-export const RPC_PREFIX = "<<<RPC>>> ";
-export const PUSH_PREFIX = "<<<PUSH>>> ";
+import { encodePipeMessage } from "../protocol/pipe-codec.mjs";
+export { PipeMessagePackDecoder } from "../protocol/pipe-codec.mjs";
 
 export interface JsonRpcErrorReply {
   jsonrpc: "2.0";
   id: unknown;
-  error: {
-    code: number;
-    message: string;
-  };
-}
-
-export interface ParsedStdioJsonLine {
-  ok: boolean;
-  value?: unknown;
-  errorReply?: JsonRpcErrorReply;
+  error: { code: number; message: string };
 }
 
 export function buildJsonRpcErrorReply(id: unknown, code: number, message: string): JsonRpcErrorReply {
-  return {
-    jsonrpc: "2.0",
-    id,
-    error: { code, message },
-  };
+  return { jsonrpc: "2.0", id, error: { code, message } };
 }
 
-export function parseStdioJsonLine(line: string): ParsedStdioJsonLine {
-  if (!line.trim()) return { ok: false };
-  try {
-    return { ok: true, value: JSON.parse(line) };
-  } catch {
-    return {
-      ok: false,
-      errorReply: buildJsonRpcErrorReply(null, -32700, "Parse error"),
-    };
-  }
+// Explicit record kinds replace textual prefixes; stderr is the only log lane.
+export function encodeRpcReply(reply: unknown): Uint8Array {
+  return encodePipeMessage({ kind: "reply", payload: reply });
 }
-
-export function encodeRpcReplyLine(reply: unknown): string {
-  return `${RPC_PREFIX}${JSON.stringify(reply)}\n`;
+export function encodePush(payload: unknown): Uint8Array {
+  return encodePipeMessage({ kind: "push", payload });
 }
-
-export function encodePushLine(payload: unknown): string {
-  return `${PUSH_PREFIX}${JSON.stringify(payload)}\n`;
-}
-
-export function encodeStartupBeaconLine(payload: unknown): string {
-  return `${JSON.stringify(payload)}\n`;
+export function encodeStartupBeacon(payload: unknown): Uint8Array {
+  return encodePipeMessage({ kind: "startup", payload });
 }

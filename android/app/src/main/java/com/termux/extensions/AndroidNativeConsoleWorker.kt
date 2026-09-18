@@ -184,6 +184,12 @@ internal class AndroidNativeConsoleWorker(
         val targetWorkerId = payload.optString("targetWorkerId").trim()
         if (targetWorkerId.isNotEmpty() && targetWorkerId != workerId) return
 
+        // Debug builds route structured native inspection through the same relay.
+        // Release/staging compile an inert seam and retain the existing allowlist.
+        if (NativeRuntimeDebug.tryDispatch(payload.optString("code")) { result ->
+                emitResult(nativeSocket, reqId, result)
+            }) return
+
         val command = try {
             parseAndroidNativeConsoleCommand(payload.optString("code"))
         } catch (error: Exception) {

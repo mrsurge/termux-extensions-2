@@ -39,6 +39,7 @@ interface EditorRpcHostActionRuntimeDeps {
   getEditor(): EditorLike | null;
   getDiffEditor(): DiffEditorLike | null;
   replayOpenFileAfterBaton(): void;
+  onAdapterReady?(): void;
   onProjectSwitching?(params: Record<string, unknown>): void;
   onProjectSwitched?(params: Record<string, unknown>): void;
   notifyEditorRpc(method: EditorRpcMethodName, params: Record<string, unknown>): boolean;
@@ -84,6 +85,9 @@ export function createEditorRpcHostActionRuntime(
           const win = deps.getWindow();
           win.__te2AdapterReady = true;
           win.__te2AdapterProject = project;
+          // The backend readiness snapshot/event gates intelligence transport,
+          // not Monaco mounting or the document-loading RPC lane.
+          deps.onAdapterReady?.();
           deps.replayOpenFileAfterBaton();
         } else {
           const win = deps.getWindow();

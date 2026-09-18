@@ -275,6 +275,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        NativeRuntimeDebug.register("activity", this)
         diagnostics = AndroidDiagnostics(applicationContext)
         diagnostics.beginSession()
         settingsStore = AndroidAppSettingsStore(applicationContext)
@@ -432,6 +433,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun initializeBrowser() {
         browser = CefriumBrowser.createWithSurface(this)
+        // Apply the SDK's native pinch policy before any page loads.
+        browser.setPinchToZoomEnabled(false)
         selectionIntegration = CefriumSelectionIntegration(browser)
         browser.setQueryHandler { _, request, origin, callback ->
             handleNativeQuery(request, origin, callback)
@@ -1407,6 +1410,8 @@ class MainActivity : AppCompatActivity() {
         if (devToolsRuntime == null) return
         val existingInspector = inspectorBrowser
         val inspector = existingInspector ?: CefriumBrowser.createWithSurface(this).also { next ->
+            // Inspector pages follow the same no-pinch policy as the main surface.
+            next.setPinchToZoomEnabled(false)
             inspectorClientReady = false
             inspectorPageLoaded = false
             inspectorDeliveredGeneration = 0L
@@ -1645,6 +1650,8 @@ class MainActivity : AppCompatActivity() {
     private fun ensureProcessesBrowser() {
         val runtime = clientRuntimeService ?: return
         val processes = processesBrowser ?: CefriumBrowser.createWithSurface(this).also {
+            // Keep the Processes surface at its intended page scale too.
+            it.setPinchToZoomEnabled(false)
             it.setPullToRefreshEnabled(false)
             processesPanel.addView(
                 it.surfaceContainer,
@@ -1827,6 +1834,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        NativeRuntimeDebug.unregister("activity", this)
         ViewCompat.setWindowInsetsAnimationCallback(window.decorView, null)
         if (::browserContainer.isInitialized) {
             ViewCompat.setOnApplyWindowInsetsListener(browserContainer, null)

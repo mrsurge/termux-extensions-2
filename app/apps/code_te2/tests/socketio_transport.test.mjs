@@ -8,6 +8,46 @@ import { build } from 'esbuild';
 const appRoot = path.resolve(import.meta.dirname, '..');
 let moduleSequence = 0;
 
+test('editor readiness gates WBA startup without waiting to mount an editor', async () => {
+  const { createEditorRpcHostActionRuntime } = await importTypeScript(
+    'monaco_editor/editor_rpc_host_action_runtime.ts',
+  );
+  const handlers = new Map();
+  const win = {};
+  const calls = [];
+  const runtime = createEditorRpcHostActionRuntime({
+    getWindow: () => win,
+    getEditor: () => null,
+    getDiffEditor: () => null,
+    onAdapterReady: () => calls.push('connect'),
+    replayOpenFileAfterBaton: () => calls.push('replay'),
+    notifyEditorRpc: () => true,
+    onEditorRpcNotification: (method, handler) => {
+      handlers.set(method, handler);
+      return () => handlers.delete(method);
+    },
+  });
+  runtime.connect();
+  runtime.connect();
+  const notify = handlers.get('editor.adapter.state');
+  for (const status of ['idle', 'starting', 'connected']) notify({ status });
+  assert.deepEqual(calls, []);
+  notify({ status: 'ready', project: '/project' });
+  assert.deepEqual(calls, ['connect', 'replay']);
+  assert.equal(win.__te2AdapterReady, true);
+  // Warm/reconnected editor lanes use the identical authoritative snapshot.
+  notify({ status: 'ready', project: '/project' });
+  assert.deepEqual(calls, ['connect', 'replay', 'connect', 'replay']);
+});
+
+test('WBA socket is explicitly gated while the editor socket stays immediate', () => {
+  const source = fs.readFileSync(path.join(appRoot, 'monaco_editor/m_editor_app.ts'), 'utf8');
+  assert.match(source, /window\.io\(SOCKET_IO_NAMESPACES\.wba, \{[\s\S]*?autoConnect: false/);
+  const editorOptions = source.slice(source.indexOf('window.io(SOCKET_IO_NAMESPACES.editorRpc,'), source.indexOf('if (!_languageWorkersEnabled())', source.indexOf('window.io(SOCKET_IO_NAMESPACES.editorRpc,')));
+  assert.doesNotMatch(editorOptions, /autoConnect: false/);
+  assert.match(source, /if \(\(window as Window & \{ __te2AdapterReady\?: boolean \}\)\.__te2AdapterReady\) \{\s*wbaRpcSocket\?\.connect\(\)/);
+});
+
 async function importTypeScript(relativePath) {
   const result = await build({
     entryPoints: [path.join(appRoot, relativePath)],
@@ -1156,4 +1196,28 @@ test('Android Cefrium IME dismissal transfers the active editor to the toolbar',
   binding.dispose();
   assert.deepEqual(cancelledFrames, [2]);
   assert.equal(listeners.has(CEFRIUM_IME_DISMISSED_EVENT), false);
+});
+
+test('WBA startup tracing is bounded and does not initiate connections or expose RPC params', async () => {
+  const { createEditorWbaRpcTransport } = await importTypeScript('monaco_editor/editor_wba_rpc_transport.ts');
+  const socket = new FakeSocket();
+  socket.io = new FakeSocket();
+  const records = [];
+  const transport = createEditorWbaRpcTransport({
+    getSocket: () => socket, setTimeoutFn: setTimeout, clearTimeoutFn: clearTimeout,
+    onStartupTrace: (phase, detail) => records.push({ phase, ...detail }),
+  });
+  transport.attachSocket(socket);
+  const pending = transport.call('te2.language_catalog', { secret: 'must-not-log' }, { timeoutMs: 5000 });
+  socket.io.trigger('open');
+  socket.trigger('connect');
+  await settlePromises();
+  socket.trigger('disconnect', 'transport close');
+  await assert.rejects(pending, /disconnected/);
+  assert.ok(records.some(x => x.phase === 'manager.open'));
+  assert.ok(records.some(x => x.phase === 'rpc.send'));
+  for (let i = 0; i < 100; i++) socket.io.trigger('reconnect_attempt', i);
+  assert.equal(records.length, 80);
+  assert.equal(socket.connectCalls, 0);
+  assert.equal(JSON.stringify(records).includes('must-not-log'), false);
 });

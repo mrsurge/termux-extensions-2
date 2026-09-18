@@ -5,6 +5,7 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import unittest
 from pathlib import Path
@@ -99,6 +100,10 @@ class AppWorkerLoadingTests(unittest.TestCase):
             value for value in [str(REPO_ROOT), env.get("PYTHONPATH", "")] if value
         )
         env["TE_FRAMEWORK_URL"] = "http://127.0.0.1:9"
+        scratch = tempfile.TemporaryDirectory(prefix="te2-lifecycle-")
+        self.addCleanup(scratch.cleanup)
+        stopped_file = Path(scratch.name) / "stopped"
+        env["TE2_TEST_LIFECYCLE_STOP_FILE"] = str(stopped_file)
         proc = subprocess.Popen(
             [
                 sys.executable,
@@ -133,6 +138,8 @@ class AppWorkerLoadingTests(unittest.TestCase):
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait(timeout=3)
+            _ = proc.communicate(timeout=3)
+        self.assertEqual(stopped_file.read_text(encoding="utf-8"), "stopped")
 
 
 if __name__ == "__main__":

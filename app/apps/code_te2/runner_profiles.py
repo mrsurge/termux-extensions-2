@@ -83,10 +83,17 @@ def run_profiles_config_path(project_root: str | Path) -> Path:
 
 
 def load_run_profiles(project_root: str | Path) -> list[RunProfile]:
-    return _profiles_from_config(load_run_profiles_config(project_root))
+    # Construct profiles once; the public config reader also validates for editors.
+    return _profiles_from_config(_read_run_profiles_config(project_root))
 
 
 def load_run_profiles_config(project_root: str | Path) -> JsonObject:
+    config = _read_run_profiles_config(project_root)
+    _ = _profiles_from_config(config)
+    return config
+
+
+def _read_run_profiles_config(project_root: str | Path) -> JsonObject:
     config_path = run_profiles_config_path(project_root)
     if not config_path.exists():
         return _empty_config()
@@ -94,7 +101,7 @@ def load_run_profiles_config(project_root: str | Path) -> JsonObject:
         decoded = cast(object, json.loads(config_path.read_text("utf-8")))
     except json.JSONDecodeError as exc:
         raise ValueError(f"Invalid run profile JSON: {exc}") from exc
-    return parse_run_profiles_config(decoded)
+    return _config_object(decoded)
 
 
 def parse_run_profiles_config_json(raw_text: str) -> JsonObject:
@@ -193,6 +200,7 @@ def list_run_profile_candidates(
     active_file: str | Path,
     *,
     include_all: bool = False,
+    profiles: list[RunProfile] | None = None,
 ) -> list[RunProfileMatch]:
     root, file_path, rel_path = _run_profile_context(project_root, active_file)
     return [
@@ -202,7 +210,7 @@ def list_run_profile_candidates(
             active_file=file_path,
             relative_path=rel_path,
         )
-        for profile in load_run_profiles(root)
+        for profile in (load_run_profiles(root) if profiles is None else profiles)
         if include_all
         or run_profile_matches_path(profile, rel_path, project_root=root)
     ]
@@ -589,7 +597,7 @@ def _additional_ports(
             f"Run profile {profile_id} additionalPorts requires a primary port"
         )
 
-    seen_ports = {primary_port} if primary_port is not None else set()
+    seen_ports: set[int] = {primary_port} if primary_port is not None else set()
     additional: list[RunProfileAdditionalPort] = []
     for index, item_obj in enumerate(raw_items):
         item = _json_object(item_obj)

@@ -396,7 +396,7 @@ export async function connectExtensionHostSession(
 
   const handshakePromise = waitForExtHandshake(runtime, context.extInitData);
   installExtMessageListener(runtime);
-  await handshakePromise;
+  await runtime.spanTraceAsync("connect.extensionHost.handshake", () => handshakePromise);
 
   runtime.log(`[rpc-config] source: ${runtime.rpcConfigSource}`);
   bootstrapConfiguration(runtime, context);

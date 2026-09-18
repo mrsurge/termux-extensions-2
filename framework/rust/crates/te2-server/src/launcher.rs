@@ -58,6 +58,15 @@ pub fn launch_supported() -> bool {
     cfg!(feature = "ferrous-framework-native")
 }
 
+pub(crate) fn runtime_debug_enabled() -> bool {
+    std::env::var("TE2_RUNTIME_DEBUG").is_ok_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
+}
+
 pub fn launch_app(
     store: &LaunchStore,
     app: &AppDefinition,
@@ -66,6 +75,11 @@ pub fn launch_app(
     framework_port: u16,
     framework_shells_env: &std::collections::HashMap<String, String>,
 ) -> Result<LaunchResult> {
+    let launch_started = std::time::Instant::now();
+    let trace_startup = runtime_debug_enabled();
+    if trace_startup {
+        tracing::info!(app_id = %app.app_id, phase = "launch.requested", "startup_timing");
+    }
     #[cfg(not(feature = "ferrous-framework-native"))]
     {
         let _ = (
@@ -107,6 +121,9 @@ pub fn launch_app(
                 &app.app_id,
                 framework_url,
                 framework_port,
+                framework_shells_env
+                    .get("TE2_RUNTIME_DEBUG")
+                    .is_some_and(|value| value == "1"),
             );
             let mut render_env = framework_shells_env.clone();
             render_env.extend(launch_env_overrides.clone());
@@ -131,6 +148,12 @@ pub fn launch_app(
             if should_bypass_shellspec_readiness(app, shell) {
                 rendered_shell.readiness = None;
             }
+            // Timestamp spawn separately from manifest rendering and later
+            // worker-owned readiness. These records never release the gate.
+            let spawn_started = std::time::Instant::now();
+            if trace_startup {
+                tracing::info!(app_id = %app.app_id, entry = %entry_name, phase = "spawn.begin", elapsed_ms = launch_started.elapsed().as_secs_f64() * 1000.0, "startup_timing");
+            }
             let record = manager
                 .spawn_rendered_shellspec_with_overrides_blocking(
                     rendered_shell.clone(),
@@ -154,6 +177,10 @@ pub fn launch_app(
                         "failed to spawn app shell '{entry_name}' through ferrous_framework native manager"
                     )
                 })?;
+
+            if trace_startup {
+                tracing::info!(app_id = %app.app_id, shell_id = %record.id, phase = "spawn.end", elapsed_ms = spawn_started.elapsed().as_secs_f64() * 1000.0, "startup_timing");
+            }
 
             if is_app_worker_shell(shell) && primary_shell_id.is_none() {
                 primary_shell_id = Some(record.id.clone());
@@ -290,10 +317,16 @@ fn apply_framework_launch_env(
     app_id: &str,
     framework_url: &str,
     framework_port: u16,
+    runtime_debug: bool,
 ) {
     target.insert("TE_APP_ID".to_owned(), app_id.to_owned());
     target.insert("TE_FRAMEWORK_URL".to_owned(), framework_url.to_owned());
     target.insert("TE_PORT".to_owned(), framework_port.to_string());
+    // Override both manifest values and inherited environment, even when disabled.
+    target.insert(
+        "TE2_RUNTIME_DEBUG".to_owned(),
+        if runtime_debug { "1" } else { "0" }.to_owned(),
+    );
 }
 
 #[cfg(feature = "ferrous-framework-native")]
@@ -419,7 +452,13 @@ mod tests {
     fn framework_identity_is_an_explicit_launch_override() {
         let mut overrides = HashMap::new();
         overrides.insert("TE_PORT".to_owned(), "8089".to_owned());
-        apply_framework_launch_env(&mut overrides, "example", "http://127.0.0.1:8081", 8081);
+        apply_framework_launch_env(
+            &mut overrides,
+            "example",
+            "http://127.0.0.1:8081",
+            8081,
+            false,
+        );
 
         assert_eq!(
             overrides.get("TE_APP_ID").map(String::as_str),
@@ -430,5 +469,27 @@ mod tests {
             Some("http://127.0.0.1:8081")
         );
         assert_eq!(overrides.get("TE_PORT").map(String::as_str), Some("8081"));
+    }
+
+    #[test]
+    fn runtime_debug_overrides_manifest_in_both_directions() {
+        for enabled in [false, true] {
+            let mut overrides = HashMap::new();
+            overrides.insert(
+                "TE2_RUNTIME_DEBUG".to_owned(),
+                if enabled { "0" } else { "1" }.to_owned(),
+            );
+            apply_framework_launch_env(
+                &mut overrides,
+                "example",
+                "http://127.0.0.1:8081",
+                8081,
+                enabled,
+            );
+            assert_eq!(
+                overrides.get("TE2_RUNTIME_DEBUG").map(String::as_str),
+                Some(if enabled { "1" } else { "0" })
+            );
+        }
     }
 }

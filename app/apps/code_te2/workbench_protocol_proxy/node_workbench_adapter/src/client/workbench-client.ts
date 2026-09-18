@@ -357,6 +357,8 @@ const MAX_JSON_BYTES = Number(
   process.env.TE2_MAX_JSON_BYTES ?? String(8 * 1024 * 1024),
 );
 const SPAN_TRACE_ENABLE = String(process.env.TE2_SPAN_TRACE || "") === "1";
+const STARTUP_TRACE_ENABLE = /^(1|true|yes|on)$/i.test(String(process.env.TE2_RUNTIME_DEBUG ?? "").trim());
+let startupTraceCount = 0;
 const SPAN_TRACE_MAX = Number(process.env.TE2_SPAN_TRACE_MAX ?? "200");
 const SPAN_TRACE_MIN_MS = Number(process.env.TE2_SPAN_TRACE_MIN_MS ?? "5");
 let _spanTraceRemaining = SPAN_TRACE_MAX;
@@ -539,6 +541,25 @@ async function spanTraceAsync<T>(
   name: string,
   fn: () => Promise<T>,
 ): Promise<T> {
+  // Bounded startup-only spans: no source text, request payloads or credentials.
+  // Log begins too, so a stalled handshake leaves a useful last known boundary.
+  if (STARTUP_TRACE_ENABLE && name.startsWith("connect.") && startupTraceCount < 100) {
+    const spanId = ++startupTraceCount;
+    const start = performance.now();
+    let outcome = "error";
+    const mark = (phase: string) => console.error("[startup_timing]", JSON.stringify({
+      appId: "code_te2.wba", pid: process.pid, spanId, phase, unixMs: Date.now(),
+      elapsedMs: Math.round((performance.now() - start) * 1000) / 1000, outcome,
+    }));
+    mark(`${name}.begin`);
+    try {
+      const result = await fn();
+      outcome = "ok";
+      return result;
+    } finally {
+      mark(`${name}.end`);
+    }
+  }
   if (!SPAN_TRACE_ENABLE || _spanTraceRemaining <= 0) return await fn();
   const start = Date.now();
   try {
@@ -740,6 +761,15 @@ function clientInstanceIdFrom(params: unknown): string | null {
 }
 
 export class WorkbenchClient {
+  // Process-local, bounded milestones distinguish connection from usable intelligence.
+  private readonly _startupMilestones = new Set<string>();
+  private _startupMark(phase: string): void {
+    if (!STARTUP_TRACE_ENABLE || this._startupMilestones.has(phase) || this._startupMilestones.size >= 32) return;
+    this._startupMilestones.add(phase);
+    console.error("[startup_timing]", JSON.stringify({
+      appId: "code_te2.wba", pid: process.pid, phase, unixMs: Date.now(),
+    }));
+  }
   onEvent: WorkbenchEventSink;
   mgmt: MgmtSessionLike;
   ext: ExtSessionLike;
@@ -1701,11 +1731,18 @@ export class WorkbenchClient {
 
   async activateLanguage(languageId: string): Promise<Record<string, unknown>> {
     const normalized = String(languageId || "plaintext").trim() || "plaintext";
-    const [specific, generic] = await Promise.all([
-      this._extensionActivation.activateByEvent(`onLanguage:${normalized}`),
-      this._extensionActivation.activateByEvent("onLanguage"),
-    ]);
-    return { ok: true, languageId: normalized, specific, generic };
+    this._startupMark(`language.${normalized}.begin`);
+    try {
+      const [specific, generic] = await Promise.all([
+        this._extensionActivation.activateByEvent(`onLanguage:${normalized}`),
+        this._extensionActivation.activateByEvent("onLanguage"),
+      ]);
+      this._startupMark(`language.${normalized}.succeeded`);
+      return { ok: true, languageId: normalized, specific, generic };
+    } catch (error) {
+      this._startupMark(`language.${normalized}.failed`);
+      throw error;
+    }
   }
 
   activateByEvent(
@@ -2027,6 +2064,9 @@ export class WorkbenchClient {
   }
 
   _handleWorkbenchEvent(payload: Record<string, unknown>): void {
+    if (typeof payload.type === "string" && (
+      payload.type.startsWith("provider/") || payload.type === "diagnostics/changeMany"
+    )) this._startupMark(`intelligence.first.${payload.type}`);
     if (payload.type === "diagnostics/changeMany") {
       this._diagnosticSnapshots.apply(payload);
     }
@@ -2286,15 +2326,19 @@ export class WorkbenchClient {
     this._resetSessionCaches("connect");
     this._connecting = true;
     try {
-      const management = await connectManagementSession(
+      const management = await spanTraceAsync("connect.management.total", () => connectManagementSession(
         this._managementRuntime(),
         params,
-      );
-      const result = await connectExtensionHostSession(
+      ));
+      const result = await spanTraceAsync("connect.extensionHost.total", () => connectExtensionHostSession(
         this._extensionHostRuntime(),
         management,
-      );
-      await this._webviews.activatePrimaryViews();
+      ));
+      // Sidebar providers are independent of editor readiness. WebviewRuntime
+      // fences their asynchronous continuation on session/workspace teardown.
+      void spanTraceAsync("connect.primaryViews.activate", () => this._webviews.activatePrimaryViews())
+        .catch(() => this._startupMark("connect.primaryViews.failed"));
+      this._startupMark("connect.ready");
       return result;
     } finally {
       this._connecting = false;
@@ -2414,6 +2458,7 @@ export class WorkbenchClient {
   }
 
   async openFile(params: unknown = {}): Promise<Record<string, unknown>> {
+    this._startupMark("document.firstOpen.begin");
     const requestedPath = isRecord(params) ? String(params.path ?? "") : "";
     const previousVersion = requestedPath
       ? this._documentRegistry.getVersion(requestedPath)
@@ -2446,7 +2491,11 @@ export class WorkbenchClient {
       ) {
         this._semanticTokenProjections.invalidatePath(requestedPath);
       }
+      this._startupMark("document.firstOpen.succeeded");
       return result;
+    } catch (error) {
+      this._startupMark("document.firstOpen.failed");
+      throw error;
     } finally {
       this._openFilePending = Math.max(0, this._openFilePending - 1);
       this._trackOpeningPath(requestedPath, -1);

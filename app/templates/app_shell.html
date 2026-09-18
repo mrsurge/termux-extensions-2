@@ -519,6 +519,11 @@
 
         const appId = resolveAppId();
         let debugFullStack = false;
+        let runtimeStartupDebug = false;
+        // Browser-relative timing is intentionally separate from server clocks.
+        function startupMark(phase) {
+            if (runtimeStartupDebug) console.info('[startup_timing]', { appId, phase, navigationMs: performance.now(), unixMs: Date.now() });
+        }
 
         // Minimal teFetch helper for the app shell
         async function teFetch(url, options) {
@@ -606,6 +611,8 @@
                     ? bootstrap.app
                     : null;
                 debugFullStack = bootstrap.debug_full_stack === true;
+                runtimeStartupDebug = bootstrap.runtime_debug === true;
+                startupMark('shell.bootstrap_received');
                 const bootstrapStateKey = String(bootstrap.state_key || '').trim();
                 if (teStateStore && bootstrapStateKey === stateKey && typeof teStateStore.seed === 'function') {
                     teStateStore.seed(stateKey, bootstrap.state);
@@ -624,6 +631,7 @@
                     if (done || !appDef) return;
                     const status = normalizeReadinessStatus(readiness);
                     if (status === 'ready') {
+                        startupMark('shell.readiness_released');
                         resolveApp();
                         return;
                     }
@@ -1082,13 +1090,16 @@
                 if (!appId) throw new Error('App ID not available for app shell');
                 const sidebarVersion = sidebarShortcutVersion();
                 const appDef = await waitForAppLifecycle();
+                startupMark('shell.lifecycle_resolved');
                 await waitForNativeAppPrerequisites(appId);
+                startupMark('shell.native_prerequisites_ready');
                 const assetBaseUrl = typeof appDef.asset_base_url === 'string' ? appDef.asset_base_url.trim() : '';
                 const templatePath = assetBaseUrl
                     ? `${assetBaseUrl.replace(/\/+$/, '')}/${appDef.entrypoints.frontend_template.replace(/^\/+/, '')}`
                     : `/apps/${appDef._dir}/${appDef.entrypoints.frontend_template}`;
                 const templateUrl = withSidebarShortcutVersion(templatePath, sidebarVersion, window.location.href);
                 const template = await fetch(templateUrl, sidebarVersion ? { cache: 'reload' } : undefined).then(res => res.text());
+                startupMark('shell.template_loaded');
                 appContainer.innerHTML = rewriteTemplateVersionedAssets(template, templateUrl, sidebarVersion);
                 window.refreshAppShellLayoutMetrics?.();
 
@@ -1098,6 +1109,7 @@
                         : `/apps/${appDef._dir}/${appDef.entrypoints.frontend_script}`;
                     const scriptUrl = withSidebarShortcutVersion(scriptPath, sidebarVersion, window.location.href);
                     const module = await import(scriptUrl);
+                    startupMark('shell.module_loaded');
                     const api = {
                         get: (endpoint) => teFetch(`/api/app/${appId}/${endpoint}`),
                         post: (endpoint, body) => teFetch(`/api/app/${appId}/${endpoint}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
@@ -1108,6 +1120,7 @@
                     if (initResult && typeof initResult.then === 'function') {
                         await initResult;
                     }
+                    startupMark('shell.app_initialized');
                 }
                 window.refreshAppShellLayoutMetrics?.();
             } catch (error) {

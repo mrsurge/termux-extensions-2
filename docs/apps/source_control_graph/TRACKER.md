@@ -467,6 +467,11 @@ both renderers' current input paths. It is separate from spacebar-slide navigati
 
 ## Deferred Work For A Follow-Up Branch
 
+Carried forward to `docs/apps/backend_native_observability/PLAN.md` and
+`docs/apps/backend_native_observability/TRACKER.md` on
+`feature/backend-native-observability`, based on released main at `ee0c0f1a`.
+The new tracker owns progress; the entries below preserve original scope/evidence.
+
 ### WBA And Extension-Provided Themes
 
 Status: deferred at user request. Existing theme-loading/conversion machinery

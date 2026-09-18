@@ -61,6 +61,7 @@ _dispatcher_task: asyncio.Task[None] | None = None
 _handlers: dict[EventType, list[EventHandler]] = {}
 _project_generation = 0
 _current_project_root: str | None = None
+_stopped = False
 
 
 def _env_flag(name: str) -> bool:
@@ -105,7 +106,8 @@ _metrics_max_handler_ms = 0.0
 
 def set_worker_event_loop(loop: asyncio.AbstractEventLoop) -> None:
     """Register the app-worker loop used by thread-safe event ingress."""
-    global _loop, _queue, _dispatcher_task
+    global _loop, _queue, _dispatcher_task, _stopped
+    _stopped = False
     _loop = loop
     if _queue is None:
         _queue = asyncio.Queue()
@@ -113,6 +115,28 @@ def set_worker_event_loop(loop: asyncio.AbstractEventLoop) -> None:
         _dispatcher_task = loop.create_task(_dispatch_loop(), name="code_te2_event_bus")
     if _metrics_enabled:
         _ensure_metrics_summary_task(loop)
+
+
+async def stop_worker_event_loop() -> None:
+    """Fence ingress, drain accepted facts, then release loop-owned tasks/queue."""
+    global _loop, _queue, _dispatcher_task, _metrics_summary_task, _stopped
+    _stopped = True
+    queue = _queue
+    try:
+        if queue is not None:
+            await asyncio.wait_for(queue.join(), timeout=2.0)
+    except TimeoutError:
+        logger.warning("[code_te2] fact-bus shutdown drain timed out")
+    finally:
+        tasks = [task for task in (_dispatcher_task, _metrics_summary_task) if task is not None]
+        for task in tasks:
+            _ = task.cancel()
+        if tasks:
+            _ = await asyncio.gather(*tasks, return_exceptions=True)
+        _loop = None
+        _queue = None
+        _dispatcher_task = _metrics_summary_task = None
+        _metrics_enqueue_ms_by_event_id.clear()
 
 
 def current_project_generation(project_root: str | Path | None = None) -> int | None:
@@ -169,6 +193,8 @@ def unsubscribe(event_type: EventType, handler: EventHandler) -> None:
 
 async def publish(event: WorkerEvent) -> None:
     """Publish an event on the worker loop through the dispatcher queue."""
+    if _stopped:
+        return
     queue = _queue
     if queue is None:
         if _metrics_enabled:
@@ -184,10 +210,12 @@ def publish_threadsafe(event: WorkerEvent) -> bool:
     """Post an event from a watcher/thread callback into the worker loop."""
     loop = _loop
     queue = _queue
-    if loop is None or queue is None or not loop.is_running():
+    if _stopped or loop is None or queue is None or not loop.is_running():
         return False
 
     def _enqueue() -> None:
+        if _stopped or queue is not _queue:
+            return
         queue.put_nowait(event)
         if _metrics_enabled:
             _metrics_record_enqueued(event, queue.qsize())

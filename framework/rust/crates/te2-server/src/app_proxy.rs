@@ -394,6 +394,20 @@ async fn sio_proxy_request(
             "Socket.IO proxy route was not found.",
         );
     };
+    // Separate arrival at the public WBA route from the upgraded bridge task.
+    // This records neither the client query/identity nor forwarded credentials.
+    static WBA_TRACE_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    if matched.route.route_id == "wba" && crate::launcher::runtime_debug_enabled() {
+        let attempt = WBA_TRACE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if attempt < 128 {
+            tracing::info!(
+                attempt,
+                upgrade = ws.is_ok(),
+                phase = "route_arrived",
+                "websocket_startup_timing"
+            );
+        }
+    }
     let Some((host, port)) = resolve_sio_upstream(&state, &matched) else {
         return json_error(
             StatusCode::SERVICE_UNAVAILABLE,

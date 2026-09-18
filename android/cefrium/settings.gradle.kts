@@ -9,9 +9,9 @@
 // module is built independently from here with its own wrapper.
 pluginManagement {
     repositories {
-        maven("https://codeberg.org/api/packages/cefrium/maven")
         google()
         mavenCentral()
+        maven("https://codeberg.org/api/packages/cefrium/maven")
         gradlePluginPortal()
     }
 }

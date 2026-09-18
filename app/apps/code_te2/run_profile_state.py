@@ -49,6 +49,7 @@ async def build_run_profile_state_projection(
     data: Mapping[str, object] | None = None,
     *,
     reconcile_stale_route: bool = False,
+    profiles: list[RunProfile] | None = None,
 ) -> JsonMap:
     shell_state_ready = run_profile_shell_facts_ready()
     project_root, current_file = run_profile_request_context(data)
@@ -70,7 +71,9 @@ async def build_run_profile_state_projection(
         }
 
     root = Path(project_root).expanduser().resolve(strict=False)
-    profiles = load_run_profiles(root)
+    # Config IO is off-loop; callers may share a per-update snapshot, never a TTL cache.
+    if profiles is None:
+        profiles = await asyncio.to_thread(load_run_profiles, root)
     profile_states = await asyncio.gather(
         *(
             _build_profile_state_projection(
@@ -96,6 +99,7 @@ async def build_run_profile_state_projection(
             root,
             current_file,
             include_all=True,
+            profiles=profiles,
         )
         owners = [
             match
@@ -107,7 +111,7 @@ async def build_run_profile_state_projection(
             )
         ]
     elif current_file:
-        owners = list_run_profile_candidates(root, current_file)
+        owners = list_run_profile_candidates(root, current_file, profiles=profiles)
         candidates = owners
     else:
         owners = []

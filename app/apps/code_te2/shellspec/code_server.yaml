@@ -21,6 +21,7 @@ shells:
         "${ctx:PROJECT_ROOT}"
         2>&1
     env:
+      NODE_COMPILE_CACHE: ${ctx:NODE_COMPILE_CACHE}
       PATH: ${ctx:CODE_SERVER_BIN_DIR}:${env:PATH}
       TE_APP_ID: ${ctx:APP_ID}
       TE_CODE_SERVER_BIN: ${ctx:CODE_SERVER_BIN}

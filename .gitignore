@@ -29,6 +29,7 @@ app/static/vendor/ignored/
 app/static/vendor/lsp_servers/android-kotlin-lsp
 .tmp/
 android/app/build
+android/.kotlin/
 **/build
 .codex-scratch/
 .release/

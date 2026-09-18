@@ -96,6 +96,19 @@ export function attachEditorWbaSocket(
     maxHttpBufferSize: 8 * 1024 * 1024,
   });
   const namespace = io.of(WBA_SOCKET_NAMESPACE);
+  // Correlate transport arrival with the browser manager, before namespace auth.
+  let startupTransportEvents = 0;
+  if (/^(1|true|yes|on)$/i.test(String(process.env.TE2_RUNTIME_DEBUG ?? '').trim())) {
+    for (const event of ['connection', 'connection_error'] as const) {
+      io.engine.on(event, () => {
+        if (startupTransportEvents++ >= 20) return;
+        console.error('[startup_timing]', JSON.stringify({
+          appId: 'code_te2.wba', pid: process.pid,
+          phase: `socket.engine.${event}`, unixMs: Date.now(),
+        }));
+      });
+    }
+  }
 
   namespace.use((socket, next) => {
     const auth = socket.handshake.auth;

@@ -191,14 +191,14 @@ pub(crate) enum PipePayload {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PipeProtocolError {
-    Json(String),
+    MessagePack(String),
     Invalid(String),
 }
 
 impl fmt::Display for PipeProtocolError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Json(message) => write!(formatter, "json parse error: {message}"),
+            Self::MessagePack(message) => write!(formatter, "MessagePack parse error: {message}"),
             Self::Invalid(message) => write!(formatter, "invalid pipe envelope: {message}"),
         }
     }
@@ -206,17 +206,110 @@ impl fmt::Display for PipeProtocolError {
 
 impl std::error::Error for PipeProtocolError {}
 
-pub(crate) fn decode_line(raw: &str) -> Result<PipeEnvelope, PipeProtocolError> {
-    let trimmed = raw.trim_end_matches(['\r', '\n']);
-    let envelope = serde_json::from_str::<PipeEnvelope>(trimmed)
-        .map_err(|error| PipeProtocolError::Json(error.to_string()))?;
+pub(crate) const MAX_FRAME_BYTES: usize = 32 * 1024 * 1024;
+
+pub(crate) fn encode_frame(envelope: &PipeEnvelope) -> Result<Vec<u8>, PipeProtocolError> {
     envelope.validate_basic()?;
-    Ok(envelope)
+    // Named maps preserve the existing cross-language envelope field names.
+    let encoded = rmp_serde::to_vec_named(envelope)
+        .map_err(|error| PipeProtocolError::MessagePack(error.to_string()))?;
+    if encoded.len() > MAX_FRAME_BYTES {
+        return Err(PipeProtocolError::Invalid(
+            "frame exceeds byte limit".into(),
+        ));
+    }
+    Ok(encoded)
 }
 
-pub(crate) fn encode_line(envelope: &PipeEnvelope) -> Result<String, PipeProtocolError> {
-    envelope.validate_basic()?;
-    let encoded = serde_json::to_string(envelope)
-        .map_err(|error| PipeProtocolError::Json(error.to_string()))?;
-    Ok(format!("{encoded}\n"))
+#[derive(Default)]
+pub(crate) struct PipeDecoder {
+    // Only incomplete bytes cross reads. A malformed object is fatal because
+    // concatenated MessagePack has no safe delimiter for resynchronization.
+    pending: Vec<u8>,
+}
+
+impl PipeDecoder {
+    pub(crate) fn feed(&mut self, chunk: &[u8]) -> Result<Vec<PipeEnvelope>, PipeProtocolError> {
+        let mut messages = Vec::new();
+        for part in chunk.chunks(65536) {
+            self.pending.extend_from_slice(part);
+            let mut consumed = 0;
+            while consumed < self.pending.len() {
+                let bytes = &self.pending[consumed..];
+                if !matches!(bytes[0], 0x80..=0x8f | 0xde | 0xdf) {
+                    return Err(PipeProtocolError::Invalid(
+                        "expected an envelope map".into(),
+                    ));
+                }
+                let mut cursor = std::io::Cursor::new(&bytes[..bytes.len().min(MAX_FRAME_BYTES)]);
+                let result =
+                    PipeEnvelope::deserialize(&mut rmp_serde::Deserializer::new(&mut cursor));
+                match result {
+                    Ok(envelope) => {
+                        envelope.validate_basic()?;
+                        consumed += cursor.position() as usize;
+                        messages.push(envelope);
+                    }
+                    Err(
+                        rmp_serde::decode::Error::InvalidMarkerRead(ref error)
+                        | rmp_serde::decode::Error::InvalidDataRead(ref error),
+                    ) if error.kind() == std::io::ErrorKind::UnexpectedEof
+                        && bytes.len() < MAX_FRAME_BYTES =>
+                    {
+                        break;
+                    }
+                    Err(error) => return Err(PipeProtocolError::MessagePack(error.to_string())),
+                }
+            }
+            if consumed != 0 {
+                self.pending.drain(..consumed);
+            }
+        }
+        Ok(messages)
+    }
+
+    pub(crate) fn finish(&self) -> Result<(), PipeProtocolError> {
+        if self.pending.is_empty() {
+            Ok(())
+        } else {
+            Err(PipeProtocolError::Invalid("truncated frame at EOF".into()))
+        }
+    }
+}
+
+#[cfg(test)]
+mod codec_tests {
+    use super::*;
+
+    fn fixture() -> Vec<u8> {
+        let hex =
+            include_str!("../../../../../../../tests/fixtures/framework_pipe_request.msgpack.hex")
+                .trim();
+        hex.as_bytes()
+            .chunks_exact(2)
+            .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn python_fixture_fragmentation_coalescing_and_eof() {
+        let bytes = fixture();
+        let mut stream = bytes.clone();
+        stream.extend_from_slice(&bytes);
+        for size in [1, 3, stream.len()] {
+            let mut decoder = PipeDecoder::default();
+            let mut messages = Vec::new();
+            for chunk in stream.chunks(size) {
+                messages.extend(decoder.feed(chunk).unwrap());
+            }
+            decoder.finish().unwrap();
+            assert_eq!(messages.len(), 2);
+            assert_eq!(messages[0].id.as_deref(), Some("cross-language"));
+            assert_eq!(messages[0].params.as_ref().unwrap()["path"], "line\nbreak");
+        }
+        let mut decoder = PipeDecoder::default();
+        assert!(decoder.feed(&bytes[..bytes.len() - 1]).unwrap().is_empty());
+        assert!(decoder.finish().is_err());
+        assert!(PipeDecoder::default().feed(&[0xc1]).is_err());
+    }
 }

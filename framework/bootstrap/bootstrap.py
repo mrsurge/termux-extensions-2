@@ -63,6 +63,7 @@ class BootstrapArgs:
     framework_shells_run_id: str | None
     stdio_control: bool
     memory_profile_dir: str | None
+    runtime_debug: bool = False
 
 
 @dataclass(frozen=True)
@@ -131,7 +132,7 @@ def _parse_args(argv: Sequence[str] | None) -> BootstrapArgs:
         prog="te2",
         description="Build and launch the TE2 Rust framework.",
         epilog=(
-            "Standalone commands: te2 console <command>; "
+            "Standalone commands: te2 console <command>; te2 framework <command>; "
             "te2 migrate-legacy-roots [--apply] [--json]"
         ),
     )
@@ -166,6 +167,12 @@ def _parse_args(argv: Sequence[str] | None) -> BootstrapArgs:
         help="Build the unoptimized debug server.",
     )
     parser.set_defaults(release=not _env_flag("TE2_SERVER_DEBUG"))
+    parser.add_argument(
+        "--runtime-debug",
+        action=argparse.BooleanOptionalAction,
+        default=_env_flag("TE2_RUNTIME_DEBUG"),
+        help="Opt in to runtime diagnostics, independently of the Rust build profile.",
+    )
     parser.add_argument(
         "--force-build",
         action="store_true",
@@ -252,12 +259,15 @@ def _parse_args(argv: Sequence[str] | None) -> BootstrapArgs:
         framework_shells_run_id=cast(str | None, raw.framework_shells_run_id),
         stdio_control=cast(bool, raw.stdio_control),
         memory_profile_dir=cast(str | None, raw.memory_profile),
+        runtime_debug=cast(bool, raw.runtime_debug),
     )
 
 
 def _build_env(args: BootstrapArgs) -> dict[str, str]:
     env = merge_login_shell_path(os.environ)
     _sanitize_runtime_env(env)
+    # Explicit zero overrides inherited enablement, including --no-runtime-debug.
+    env["TE2_RUNTIME_DEBUG"] = "1" if args.runtime_debug else "0"
     paths = resolve_te2_paths(env)
     ensure_runtime_home(paths.runtime_home)
     paths.export(env)

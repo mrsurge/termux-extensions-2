@@ -13,6 +13,8 @@ from pathlib import Path
 from types import ModuleType
 from unittest import mock
 
+from framework.bootstrap import bootstrap as runtime_bootstrap
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BOOTSTRAP_PATH = REPO_ROOT / "framework" / "bootstrap" / "bootstrap.py"
@@ -80,6 +82,38 @@ class FrameworkBootstrapTests(unittest.TestCase):
     def test_stdio_control_is_explicit(self) -> None:
         self.assertFalse(self.bootstrap._parse_args([]).stdio_control)
         self.assertTrue(self.bootstrap._parse_args(["--stdio-control"]).stdio_control)
+
+    def test_runtime_debug_is_independent_of_build_mode(self) -> None:
+        with mock.patch.dict(os.environ, {"TE2_RUNTIME_DEBUG": "0", "TE2_SERVER_DEBUG": "0"}):
+            self.assertFalse(runtime_bootstrap._parse_args([]).runtime_debug)
+            self.assertFalse(runtime_bootstrap._parse_args(["--debug"]).runtime_debug)
+            args = runtime_bootstrap._parse_args(["--runtime-debug"])
+            self.assertTrue(args.runtime_debug)
+            self.assertTrue(args.release)
+            self.assertEqual(runtime_bootstrap._rust_build_profile(args), "release")
+
+    def test_runtime_debug_environment_and_explicit_disable(self) -> None:
+        for value in ("1", "true", " YES ", "on", "0", "false", "garbage", ""):
+            with self.subTest(value=value), mock.patch.dict(os.environ, {"TE2_RUNTIME_DEBUG": value}):
+                self.assertEqual(
+                    runtime_bootstrap._parse_args([]).runtime_debug,
+                    value.strip().lower() in {"1", "true", "yes", "on"},
+                )
+                self.assertFalse(runtime_bootstrap._parse_args(["--no-runtime-debug"]).runtime_debug)
+                self.assertTrue(runtime_bootstrap._parse_args(["--runtime-debug"]).runtime_debug)
+
+    def test_runtime_debug_child_environment_is_normalized(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            root = Path(raw_tmp)
+            roots = {f"TE2_{name}_HOME": str(root / name.lower()) for name in ("CACHE", "DATA", "CONFIG", "RUNTIME")}
+            for enabled in (False, True):
+                with self.subTest(enabled=enabled), mock.patch.dict(os.environ, roots), mock.patch.object(
+                    runtime_bootstrap, "_reserve_local_port", return_value=49123
+                ), mock.patch.object(
+                    runtime_bootstrap, "merge_login_shell_path", return_value={"TE2_RUNTIME_DEBUG": "1" if not enabled else "0", **roots}
+                ), mock.patch.object(runtime_bootstrap, "_ensure_framework_shells_env"):
+                    args = runtime_bootstrap._parse_args(["--runtime-debug" if enabled else "--no-runtime-debug"])
+                    self.assertEqual(runtime_bootstrap._build_env(args)["TE2_RUNTIME_DEBUG"], "1" if enabled else "0")
 
     def test_memory_profile_selects_symbolized_profile_and_heaptrack_wrapper(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:

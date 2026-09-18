@@ -1689,6 +1689,20 @@ prerequisite read when its first snapshot reported the managed runtime missing.
 This closes the cross-view install/reload race: an installation and shells that
 became ready after the first snapshot are adopted instead of prompting again.
 
+Startup separates document display from intelligence: host boot observes WBA
+readiness without awaiting it before mounting Monaco, and Monaco announces
+editor-ready without awaiting the language catalog. Existing baton/connect replay
+opens the current model and enriches language/providers when WBA becomes ready.
+Worker startup primes both code-server and WBA before a browser request is needed;
+it still respects Worker mode and never installs a missing runtime implicitly.
+Each shell manager serializes ensure/adopt/spawn operations. Registry/config
+preparation runs off-loop but completes before its corresponding process starts.
+Both managed shellspecs pass an absolute private `NODE_COMPILE_CACHE` directory
+under `$TE2_CACHE_HOME/node_compile/<service>` (code-server/workbench-adapter).
+Cache failure is nonfatal; Node handles version-specific entries, and Bun is not
+claimed to support this Node feature. This does not change managed executable
+selection or require Electron to forward environment variables to a remote host.
+
 ### Generic WBA language path
 
 The Code Server path is data-driven:
@@ -2692,7 +2706,10 @@ The WebExtension intercepts these URL patterns (redirecting to local server):
 
 # Then rebuild the native clients:
 cd android
-./termux-sdk-env.sh ./gradlew :app:assembleGeckoDebug :cefrium:assembleDebug
+./gradlew :app:assembleGeckoDebug
+# Cefrium is a separate build; select JDK 25 and an Android 37 SDK first.
+cd cefrium
+./gradlew assembleDebug
 ```
 
 ### Boot sequence
@@ -3466,13 +3483,16 @@ This artifact-driven path is required on Termux because Node reports the Android
 
 ## 42) Android Cefrium Client
 
-The isolated `:cefrium` Android application module evaluates Cefrium 0.7.1 while reusing the shared Android source and packaged assets. GeckoView in `android/app` remains the primary Android renderer.
+The standalone `android/cefrium` build pins Cefrium SDK/plugin 0.8.8 while reusing
+the shared Android source and packaged assets. It is no longer a subproject of
+`android/`: AGP 9.4 / Gradle 9.7.1 / JDK 25 / compileSdk 37 are isolated from
+GeckoView's existing toolchain. GeckoView in `android/app` remains the primary renderer.
 
 ### Module boundary
 
 The Cefrium module is intentionally isolated:
 
-- `:cefrium` owns its activity, layout, manifest, and Cefrium-specific local
+- `android/cefrium` owns its activity, layout, manifest, and Cefrium-specific local
   relay routing; its process-local `PersistentNetworkService` owns the
   `AndroidFrameworkRelay` lifecycle.
 - It applies the `com.cefrium` Gradle plugin only inside the Cefrium module.
@@ -3483,6 +3503,24 @@ The Cefrium module is intentionally isolated:
 ### Runtime behavior
 
 Cefrium always loads TE2 through one dynamically allocated `127.0.0.1` relay origin owned by the shared `AndroidFrameworkRelay`, even when a configured framework host is reachable directly.
+
+`CefriumApplication.attachBaseContext` selects `--javaless-renderers=disabled`
+before the SDK initialization provider runs, preserving existing switches. SDK
+0.8.8 lacks the native-only sandboxed service that Chromium otherwise selects,
+causing a fatal `NameNotFoundException`. Use the SDK's existing Java-backed
+services; reassess this compatibility policy when upgrading the SDK. Gecko is
+unaffected. Activity or application `onCreate` is too late for this policy.
+
+With SDK 0.8.8, main app, Inspector and Processes browser creation immediately
+sets `setPinchToZoomEnabled(false)` before page loading. This native pinch policy
+is independent of the older main-surface selection/readability corrections
+described below, which remain intact. On 2026-09-18, Termux JDK 25/SDK 37 debug
+isolation, all 47 unit tests and APK assembly passed. Native library stripping
+was unavailable with the x86-64 NDK tools, so Gradle packaged those libraries
+unstripped. The subsequent startup fix passed 49 tests; the user confirmed zoom
+suppression and normal framework operation with the installed debug APK.
+Non-debug variants and exhaustive cross-surface checks remain separate;
+this does not establish a guarantee against every possible page-zoom path.
 
 The relay behavior is:
 
@@ -3538,16 +3576,24 @@ native focus sink/query, timer loop, or alternate fallback path.
 Validate the Cefrium module with:
 
 ```bash
-./gradlew :cefrium:testDebugUnitTest
-./gradlew :cefrium:assembleDebug
+cd android/cefrium
+./gradlew -I ../verify-native-debug.init.gradle verifyNativeDebugIsolation testDebugUnitTest
+./gradlew assembleDebug
 ```
 
 Keep primary-renderer comparison coverage with:
 
 ```bash
+cd android
 ./gradlew :app:testGeckoDebugUnitTest
 ./gradlew :app:assembleGeckoDebug
 ```
+
+Shared variant Kotlin directories are explicitly registered in Cefrium's AGP 9
+source sets; Java source registration alone does not include the debug reflection
+implementation, its tests, or non-debug stubs. `android/verify-native-debug.init.gradle`
+supports each independent build and checks source/dependency isolation. The 0.8.8
+integration still requires a Cefrium build and live acceptance on the new toolchain.
 
 ---
 
@@ -4063,6 +4109,81 @@ Built-in backend module identity comes from package path rather than public app 
   Production retains the platform allocator; do not attribute extension-host or
   language-server growth to Rust without process-separated evidence.
 
+- Runtime diagnostics opt-in is `--runtime-debug` / `TE2_RUNTIME_DEBUG`, not
+  the unoptimized-build `--debug`. `--no-runtime-debug` overrides inherited
+  enablement. Bootstrap normalizes the value to `1`/`0`; the Rust app launcher
+  overwrites manifest values with the framework-owned setting, including zero.
+  It does not automatically enable memory or CPU profiling. Capture endpoints
+  remain separate work; discovery/status/evaluation are available below.
+
+- Opt-in `[startup_timing]` records separate Python module entry, FastAPI/Uvicorn
+  imports, worker support, backend assembly, lifespans, listener-ready and serving
+  hooks. Python carries app/PID, module-relative milliseconds, wall-clock unixMs,
+  duration and outcome; interpreter/package startup before module entry is excluded.
+  Rust marks launch/spawn and readiness receipt/publication/catalog completion.
+  Updated app-shell assets mark bootstrap, gate release, native prerequisites,
+  template/module load and initialization when bootstrap enables runtime-debug.
+  Browser clocks may differ; readiness is not intelligence readiness. No polling
+  or gate changes; disabled runs are silent. Import timing requires a fresh worker.
+
+- The Python worker reserves `runtime.debug.*` on its existing framework pipe
+  (now concatenated MessagePack maps, retaining the JSON-RPC-shaped envelope).
+  `runtime.debug.status` reports live-loop/thread status only when opted in and
+  bound after mounted-app startup. At most one diagnostic operation is admitted;
+  disabled, unbound, wrong-target and busy requests receive explicit errors.
+  Shutdown/pipe EOF closes admission and requests cooperative cancellation, not
+  rollback. Pipe-only workers have no live HTTP loop and reject diagnostics.
+  Ordinary app dispatch remains unchanged. Replies and outbound calls share one
+  writer lock; duplicate responses never block the stdin reader. Diagnostic reply
+  writes run off-loop. Diagnostic admission releases once the reply owns the
+  shared writer, before its bytes reach the peer, avoiding a false busy result
+  on an immediate subsequent call.
+
+- Rust diagnostic routing retains exact app/shell/random bridge-instance identity
+  only for opted-in bridges. It uses the existing writer and stdout reader, with
+  one pending diagnostic request per worker, matching request/correlation IDs and
+  framework reply destination. Waits must be positive and at most 30 seconds.
+  Timeout, caller cancellation and enqueue failure remove the waiter; disconnect
+  and writer failure wake it. Neither timeout nor cancellation proves execution
+  stopped, and requests are never automatically retried. Registration cleanup is
+  instance-scoped so an old bridge cannot remove its replacement. Ordinary
+  service dispatch uses the same binary framing and remains unchanged.
+
+- The existing Rust listener exposes GET `/api/runtime-debug/workers` and POST
+  `/api/runtime-debug/status` and `/api/runtime-debug/eval`. Each requires runtime
+  opt-in and a per-start bearer credential. Startup atomically publishes
+  `$TE2_RUNTIME_HOME/runtime-debug-<port>.json` (0600, in an owned private runtime
+  directory). The file contains frameworkUrl/token; the token rotates at startup.
+  A stopped instance's file is inert and is not unlinked during shutdown, avoiding
+  deletion races with a replacement process. No token is placed in request URLs.
+  Local CLI reads the private file only for its matching loopback framework URL;
+  explicit remote CLI credentials use `TE2_RUNTIME_DEBUG_TOKEN`. Use trusted
+  tunnels, not untrusted plaintext HTTP, for remote credential-bearing traffic.
+
+- `te2 framework list-workers`, `status` and `eval` share one typed HTTP adapter
+  with `te2_framework_workers/status/eval` MCP tools. MCP requires an explicit
+  `credential` argument and never reads the local token on a remote caller's
+  behalf. Exact targets require appId, shellId and instanceId from discovery.
+  There is no ambiguous app-only fallback, retry or stale-instance recovery.
+
+```sh
+te2 framework list-workers
+te2 framework status --app code_te2 --shell SHELL_ID --instance INSTANCE_ID
+te2 framework eval --app code_te2 --shell SHELL_ID --instance INSTANCE_ID --code 'backend.__name__'
+```
+
+- Eval accepts `--code` or stdin, at most 32 KiB UTF-8 source, with a 1-30 second
+  waiting timeout. It executes trusted Python on the live app loop with builtins,
+  `backend` (the live module), `asyncio`, and lazy `inspect_runtime()`. Expressions
+  return a value; statements assign `result`; top-level await works. Bindings are
+  fresh per request, but mutations of live objects persist. There is no sandbox,
+  rollback, or preemption of blocking synchronous code. stdout stays in worker
+  logs rather than being intercepted. Missing inspect returns a capability error.
+  Result projection avoids arbitrary repr/properties, handles cycles, and caps
+  traversal at 2048 units/depth 12, strings at 4096 characters and encoded results
+  at 64 KiB. It reports truncation explicitly; unsupported objects should be
+  inspected explicitly inside the evaluation. No object handles are retained.
+
 - Supported x86_64 GNU/Linux TE2 binary-release wheels carry the audited
   optimized Rust server plus explicit target/version/source/digest provenance.
   Bootstrap verifies the payload after explicit server overrides and never
@@ -4341,3 +4462,208 @@ These are recorded release-time provenance and acceptance facts, moved from repo
   real File Explorer worker. Physical Motorola acceptance upgraded from
   0.2.347 with one fallback and launched real File Explorer and ALS-RS workers;
   both targets reported health 0.2.349 and all eight built-in apps.
+
+## 50) Worker Import And Run Profile Projection Boundaries
+
+Host, Monaco and editor-service package initializers do not eagerly re-export
+service implementations. Import contracts/services from their owning modules;
+main.py explicitly registers editor routes during assembly. FWS event hooks still
+register at startup, independently of whether a run profile is currently running.
+
+Run-profile URL readiness imports HTTPX only when invoked. Terminal shell actions
+import Framework-Shells on use; WBA still imports it during worker assembly, so
+this is dependency isolation rather than complete removal from worker startup.
+Run profiles remain owned by Code TE2's lifecycle; no independent supervisor or
+new networking transport is introduced.
+
+Run-profile configuration loading validates/constructs profiles once. Projection
+reads run off-loop; candidate matching reuses that parsed list instead of reading
+it again. Each client fan-out shares a single per-broadcast configuration snapshot,
+with generation checks around asynchronous work. This is not a persistent cache:
+subsequent updates read current configuration, including external edits. Running
+shell state remains event-backed, with no process discovery or polling added.
+
+### Parallel Intelligence Process Preparation
+
+`intelligence_startup.prime_intelligence_runtime` starts WBA preparation from
+code-server's post-spawn notification, after installation, extension registry and
+settings prerequisites. Both processes can initialize while code-server's existing
+output subscription waits for its listening message. WBA acquires its pipe and
+answers ping before awaiting that dependency; only `adapter.connect` and its
+completed workbench handshake can publish intelligence-ready. No UDS-existence
+heuristic or new polling loop is used. Missing pipes/output timeout fail explicitly.
+
+The adapter's single-flight lock spans prepare/wait/connect so competing callers
+cannot mistake a staging process for a failed session. A process-local prepared
+shell marker supports retry after dependency cancellation without respawning that
+shell. Cancelling the orchestrator drains its owned task, not shared processes.
+Warm/adopted paths retain their existing session checks. Runtime-debug timing
+separates process preparation, dependency waiting and workbench connection.
+
+With runtime-debug enabled, the managed WBA shell receives TE2_RUNTIME_DEBUG and
+emits at most 100 startup-only `connect.*` spans to stderr. Paired begin/end records
+include PID/span ID, unix milliseconds, monotonic duration and outcome, but no
+request data. These supplement Python's aggregate connection timing and do not
+prove that a language provider has completed activation or returned diagnostics.
+
+Sidebar primary-view activation is background work after the extension-host
+handshake, not a prerequisite for `adapter.connect` completion. WebviewRuntime
+owns an abort controller per session/workspace: clear cancels provider timers and
+waiters, and continuations check cancellation before surface creation/publication.
+Already-dispatched extension activation RPCs retain their existing bounded timeout;
+reset does not attempt to undo extension-host execution. Workspace switching retains
+its existing awaited activation path, with the same stale-work guards.
+
+Runtime-debug also emits at most 32 once-per-phase milestones per WBA process:
+connection ready, first document-open attempt/success/failure, language activation
+begin/success/failure, first provider event per kind, and first diagnostic update.
+They contain timestamps/PID and phase names only, not file paths or document text.
+A provider registration or empty diagnostic update does not prove usable language
+results; these are observation boundaries, not new readiness gates.
+
+During startup transport investigation, `[wba_startup_transport]` browser records
+are capped at 80 per editor realm, independently of backend runtime-debug. They
+trace Socket.IO manager/namespace boundaries and catalog/grammar RPC timing,
+without RPC payloads or changing reconnect policy. Runtime-debug WBA records
+`socket.listener.ready` and up to 20 Engine.IO connection/error events. The static
+framework WBA proxy targets localhost:18181; TextMate catalog/grammar requests need
+that socket, but do not await document-open acknowledgements or language activation.
+
+Shared Rust proxy diagnostics under runtime-debug emit `websocket_startup_timing`
+for WBA public-route arrival and bridge upgrade/upstream-connect/closure boundaries.
+Route arrivals and bridge lifetimes are each bounded to 128 per framework process;
+records omit client query strings and credentials. These require a framework
+restart onto the rebuilt binary, not just an app-worker restart. A regression test
+covers prompt downstream termination when the upstream listener does not exist.
+
+The editor constructs its WBA Socket.IO socket with `autoConnect: false` and
+connects from the existing `editor.adapter.state` ready notification. The Python
+editor lane replays this state on connection, covering warm loads and reconnects;
+the editor also checks already-delivered readiness after attaching WBA handlers.
+Monaco mounting and editor RPC/document loading do not await this gate. Repeated
+ready notifications reuse Socket.IO's idempotent connect on the same socket;
+ordinary post-connect transport reconnection remains unchanged. This avoids a
+cold first handshake against a not-yet-listening WBA without reducing timeouts.
+
+### Android Debug Runtime Inspection (GeckoView And Cefrium)
+
+Both debug variants compile `app/src/debug`'s `NativeRuntimeDebug`; release and
+staging compile only the inert `app/src/nonDebug` seam. Cefrium shares these
+source sets with Gecko. Debug minification is disabled in both modules. Kotlin
+reflection 2.2.10 matches the Kotlin plugin and is a debug-only dependency.
+No APK assets or versions change as part of this instrumentation.
+
+The existing native console worker accepts JSON-RPC `android.debug.*` commands.
+ADB ordered broadcasts invoke the identical dispatcher without needing TE2, a
+network connection, or a console registration. Open the app first to obtain live
+roots. A broadcast does not create an activity or start the framework.
+
+```sh
+adb shell "am broadcast --receiver-foreground \
+  -n com.termux.extensions.gecko/com.termux.extensions.NativeDebugReceiver \
+  --es code '{\"jsonrpc\":\"2.0\",\"method\":\"android.debug.roots\",\"params\":{}}'"
+```
+
+Use the installed application ID (Cefrium: `com.termux.extensions.cefrium`) in
+place of `com.termux.extensions.gecko` if applicable. The receiver is debug-manifest
+only and requires `android.permission.DUMP`, held by ADB shell and privileged
+callers, not ordinary applications. It is not a sandbox or an untrusted plugin
+API. The existing trusted native console transport is the other access boundary.
+
+```sh
+te2 console eval --worker android:gecko:INSTALLATION_ID --code \
+  '{"jsonrpc":"2.0","method":"android.debug.inspect","params":{"target":"activity"}}'
+```
+
+Commands (all use the `android.debug.` prefix):
+
+- `roots`: discover registered `activity`/`service` roots. `application`, `decor`
+  and `focus` resolve dynamically from the current activity and may be unavailable.
+- `inspect`: list up to 128 fields/methods, with type/signature metadata and an
+  explicit truncation flag and `nextOffset`. Use `offset` (0-4096) for subsequent
+  pages and `kind: fields|methods|all` to select members. Optional
+  `kotlinMetadata: true` adds property names.
+- `get`: read `field` from the target; `set` writes `value`, returning prior/current
+  values. Final fields are rejected. Platform access restrictions still apply.
+- `invoke`: requires `method`, explicit `parameterTypes` and `arguments` arrays.
+  For example `{"target":"focus","method":"requestFocus","parameterTypes":[],
+  "arguments":[]}` calls the zero-argument method. Invocation exceptions are
+  unwrapped, not disguised as successful results.
+- `trace.configure`: `enabled` and optional `logcat` booleans control recording;
+  returns previous/current flags. `trace.read` exports; `trace.clear` clears.
+
+Targets accept a root or returned `object:N` handle plus an optional `path` array
+of field names (at most 12). Method arguments support JSON primitives, null and
+`{"ref":"object:N"}` references. Exact signatures choose overloads; fractional
+or overflowing integer inputs are rejected, not truncated. No arbitrary Kotlin
+compilation, expression interpreter, implicit property getters, or arbitrary
+object `toString` traversal is involved. Strings return `{text,truncated}`;
+other objects return `{class,handle}` rather than recursive object graphs.
+
+Reflection executes on the main thread. One queued/executing request is admitted;
+others fail busy. Requests older than five seconds when dequeued do not execute.
+A running arbitrary method cannot be safely preempted: invoking blocking code can
+hang the UI. Caller timeout does not cancel or roll back side effects. Never retry
+an uncertain mutation automatically. Limits: 16 KiB commands, 16 arguments,
+60 KiB results, 64 weak object handles, 128 trace records, 4096-character strings.
+Weak roots are removed on destruction only if their identity still matches;
+activity/service teardown also invalidates handles. A GC-cleared handle reports
+unavailable rather than targeting a new object.
+
+Tracing is disabled by default, bounded and local; optional logcat uses
+`TE2NativeDebug`. This foundation records dispatcher and root lifecycle events,
+not raw text or IME transactions. Detailed focus/InputConnection/IME hooks remain
+separate work; do not imply this generic seam already traces composition events.
+
+### Worker-Owned Application Lifetime
+
+Networked `app.libs.app_worker` supports paired async `te2_app_start()` and
+`te2_app_stop()` exports through `app.libs.app_lifecycle`. Apps without either
+hook retain their existing ASGI lifecycle. A partial pair is an error. Startup
+completes before transport startup/readiness; shutdown runs after transport
+service exits, including startup failure or cancellation. Uvicorn's `_serve`
+override keeps this scope inside signal capture so SIGTERM re-raising cannot
+skip cleanup; its normal loop factory remains in control.
+
+Code TE2 initializes its project/session from this hook instead of module import.
+`worker_services.runtime` owns the eager intelligence task independently of
+application readiness and cancels/awaits it at shutdown. FWS observation closes
+its client and reconnect/snapshot tasks without terminating shells. The fact bus
+fences new publications, gives queued facts up to two seconds to drain, then
+cancels dispatcher/metrics tasks and clears loop references. Stable handler
+registrations survive a same-process restart; this queue is not an edit-command
+queue. Explorer's loop reference is cleared as well.
+
+This is the first ownership boundary, not a networking migration: imports,
+FastAPI/socket adapters, stores and application services still share a process
+and event loop. Other projector tasks and pipe-only worker lifetime are not yet
+migrated. No startup-speed improvement is implied. Lifecycle tests include
+partial failure, cancellation, repeated starts/stops and a real worker SIGTERM.
+
+### Framework Pipe Codec
+
+Rust framework <-> Python `app_worker --pipe` uses concatenated MessagePack maps,
+not UTF-8/JSON lines. Envelope fields, identities, correlation and protocolVersion
+1 are retained. Both peers must be upgraded together; there is no text fallback.
+Python uses msgpack's incremental unpacker with strict msgspec envelope conversion;
+Rust uses rmp-serde named maps. Arbitrary read boundaries and coalesced messages
+are supported with a 32 MiB per-frame limit. Truncated/corrupt streams are not
+resynchronized by guessing. Python closes transport admission and wakes pending
+calls on EOF/error; Rust closes its writer/debug route when its reader exits.
+Human output stays on stderr, and app-worker shellspecs declare stdout MessagePack
+observation. FWS dependencies are pinned by commit because the log-codec handoff
+did not bump package versions.
+
+This cutover covers framework/app-worker pipes, including runtime-debug traffic,
+and WBA stdio. WBA stdin carries JSON-RPC-shaped maps; stdout carries
+`{kind: "reply" | "push" | "startup", payload: ...}` records. Human logs use stderr.
+Python uses the existing adapter write lock and FWS live stdin (the same binary
+write seam as Terminal, since FWS `write_to_pipe()` accepts text only). Reply IDs,
+concurrent WBA dispatch and diagnostics push coalescing are unchanged. The bundled
+codec uses a pure-JS stream decoder with a 32 MiB per-frame bound; no newline or
+prefix scanning remains. `TE2_ADAPTER_PIPE_CODEC=messagepack-v1` prevents adoption
+of an old JSON-speaking shell. Update the Python worker and WBA together.
+Standalone Terminal's app worker is proc-based; its separate Node stream remains
+uint32-BE length-prefixed MessagePack. FWS observation support for that framing and
+large-record indexing beyond the existing 1 MiB preview budget is still pending.
+No browser socket, PTY terminal text, or native VS Code protocol changed.

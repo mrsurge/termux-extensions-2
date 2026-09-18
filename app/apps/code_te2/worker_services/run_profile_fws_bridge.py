@@ -50,6 +50,8 @@ FWS_LIFECYCLE_METHODS = frozenset(
 class AsyncSocketIoClient(Protocol):
     connected: bool
 
+    def shutdown(self) -> Awaitable[None]: ...
+
     def on(
         self,
         event: str,
@@ -154,7 +156,7 @@ async def _open_terminal_log_stream(shell_id: str) -> None:
 def start_run_profile_fws_bridge() -> None:
     """Subscribe once to FWS lifecycle facts; no timer or state polling is used."""
     global _client, _connect_task
-    if _connect_task is not None and not _connect_task.done():
+    if _client is not None:
         return
 
     client = cast(
@@ -181,6 +183,28 @@ def start_run_profile_fws_bridge() -> None:
     )
 
 
+async def stop_run_profile_fws_bridge() -> None:
+    """Release observation only; FWS remains the authority for shell lifetime."""
+    global _client, _connect_task, _snapshot_task
+    global _terminal_log_requested_shell_id, _terminal_log_open_shell_id
+    global _terminal_log_stream_ready, _terminal_log_lock
+    client, _client = _client, None
+    tasks = [task for task in (_connect_task, _snapshot_task) if task is not None]
+    _connect_task = _snapshot_task = None
+    for task in tasks:
+        _ = task.cancel()
+    if tasks:
+        _ = await asyncio.gather(*tasks, return_exceptions=True)
+    try:
+        if client is not None:
+            await client.shutdown()
+    finally:
+        _relevant_shell_labels.clear()
+        _terminal_log_requested_shell_id = _terminal_log_open_shell_id = ""
+        _terminal_log_stream_ready = False
+        _terminal_log_lock = asyncio.Lock()
+
+
 async def _connect(client: AsyncSocketIoClient) -> None:
     try:
         await client.connect(
@@ -200,6 +224,9 @@ async def _connect(client: AsyncSocketIoClient) -> None:
 
 async def _on_connect() -> None:
     global _snapshot_task, _terminal_log_open_shell_id, _terminal_log_stream_ready
+    # Shutdown fences callbacks before cancelling tasks or closing the socket.
+    if _client is None:
+        return
     reconnect_shell_id = _terminal_log_requested_shell_id
     _terminal_log_open_shell_id = ""
     _terminal_log_stream_ready = False

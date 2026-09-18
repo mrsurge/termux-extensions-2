@@ -27,6 +27,9 @@ interface WbaRpcNotificationEnvelope {
 }
 
 interface WbaRpcSocketLike {
+  io?: {
+    on?(eventName: string, handler: (payload: unknown) => void): void;
+  };
   connected?: boolean;
   sendBuffer?: unknown[];
   emit?(eventName: string, payload: unknown): void;
@@ -54,6 +57,7 @@ interface WbaRpcTransportDeps {
   setTimeoutFn(callback: () => void, delayMs: number): ReturnType<typeof setTimeout>;
   clearTimeoutFn(timer: ReturnType<typeof setTimeout>): void;
   onProtocolError?(error: unknown): void;
+  onStartupTrace?(phase: string, detail: Record<string, string | number | boolean>): void;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -166,6 +170,14 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
   let nextId = 1;
   let attached = false;
   let hasConnected = false;
+  // Temporary bounded startup evidence; never retain payloads or alter retries.
+  let traceCount = 0;
+  const tracedMethods = new Set(['te2.language_catalog', 'vscode.textmate.grammars.list', 'vscode.textmate.grammars.load']);
+  function trace(phase: string, detail: Record<string, string | number | boolean> = {}): void {
+    if (!deps.onStartupTrace || traceCount >= 80) return;
+    traceCount++;
+    try { deps.onStartupTrace(phase, { sequence: traceCount, unixMs: Date.now(), ...detail }); } catch (_) {}
+  }
 
   function resolveConnectWaiters(): void {
     const socket = deps.getSocket();
@@ -201,6 +213,7 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
       if (!entry) return;
       deps.clearTimeoutFn(entry.timer);
       pending.delete(key);
+      if (tracedMethods.has(entry.method)) trace('rpc.reply', { method: entry.method, id: key });
       entry.resolve(message.result);
       return;
     }
@@ -211,6 +224,7 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
       if (entry) {
         deps.clearTimeoutFn(entry.timer);
         pending.delete(key);
+        if (tracedMethods.has(entry.method)) trace('rpc.error', { method: entry.method, id: key });
         entry.reject(new Error(message.error.message || 'wba rpc error'));
       }
       return;
@@ -246,18 +260,29 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
   function attachSocket(socket: WbaRpcSocketLike): void {
     if (attached || !socket || typeof socket.on !== 'function') return;
     attached = true;
+    trace('socket.attached', { connected: socket.connected === true });
+    // Manager events distinguish the underlying transport from namespace readiness.
+    for (const event of ['open', 'close', 'error', 'reconnect_attempt', 'reconnect', 'reconnect_error', 'reconnect_failed']) {
+      socket.io?.on?.(event, (payload) => trace(`manager.${event}`, {
+        ...(typeof payload === 'number' ? { attempt: payload } : {}),
+        ...(payload instanceof Error ? { error: payload.message.slice(0, 160) } : {}),
+      }));
+    }
     socket.on(WBA_RPC_EVENT, handleMessage);
     const handleConnect = () => {
+      trace('socket.connected');
       hasConnected = true;
       resolveConnectWaiters();
     };
     socket.on('connect', handleConnect);
     socket.on('disconnect', () => {
+      trace('socket.disconnected');
       clearSocketReplayBuffer(socket);
       rejectConnectWaiters('wba rpc socket disconnected');
       rejectAllPending('wba rpc socket disconnected');
     });
-    socket.on('connect_error', () => {
+    socket.on('connect_error', (error) => {
+      trace('socket.connect_error', { error: error instanceof Error ? error.message.slice(0, 160) : 'unknown' });
       clearSocketReplayBuffer(socket);
       rejectConnectWaiters('wba rpc socket connect error');
       rejectAllPending('wba rpc socket connect error');
@@ -282,6 +307,7 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
         reject,
         timer: deps.setTimeoutFn(() => {
           connectWaiters.delete(waiter);
+          if (tracedMethods.has(method)) trace('rpc.socket_wait_timeout', { method });
           reject(new Error(`wba rpc socket not connected: ${method}`));
         }, timeoutMs),
       };
@@ -296,6 +322,7 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
   ): Promise<unknown> {
     const timeoutMs = opts && Number.isFinite(Number(opts.timeoutMs)) ? Number(opts.timeoutMs) : 12000;
     const startedAt = Date.now();
+    if (tracedMethods.has(method)) trace('rpc.wait_for_socket', { method, connected: isConnected() });
     const socket = await waitForConnected(method, timeoutMs);
     const remainingMs = timeoutMs - (Date.now() - startedAt);
     if (remainingMs <= 0) {
@@ -312,10 +339,12 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
         const entry = pending.get(key);
         if (!entry) return;
         pending.delete(key);
+        if (tracedMethods.has(method)) trace('rpc.timeout', { method, id: key });
         reject(new Error(`wba rpc timeout: ${method}`));
       }, remainingMs);
       pending.set(idKey(requestId), { timer, resolve, reject, method });
       try {
+        if (tracedMethods.has(method)) trace('rpc.send', { method, id: String(requestId), socketWaitMs: Date.now() - startedAt });
         emit(
           WBA_RPC_EVENT,
           messagePackRpcWireCodec.encode({

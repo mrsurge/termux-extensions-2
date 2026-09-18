@@ -165,22 +165,47 @@ pub(crate) async fn bridge_websocket(
     headers: HeaderMap,
     bridge_label: &'static str,
 ) {
+    // Trace the shared proxy boundary independently of application readiness.
+    // Keep credentials/query strings out of timing records and bound startup noise.
+    static TRACE_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let trace_id = if crate::launcher::runtime_debug_enabled() {
+        TRACE_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
+    } else {
+        0
+    };
+    let started = std::time::Instant::now();
+    let trace = |phase: &'static str| {
+        if (1..=128).contains(&trace_id) {
+            tracing::info!(
+                trace_id,
+                bridge_label,
+                phase,
+                elapsed_ms = started.elapsed().as_secs_f64() * 1000.0,
+                "websocket_startup_timing"
+            );
+        }
+    };
+    trace("downstream_upgraded");
     let mut request = match upstream_url.clone().into_client_request() {
         Ok(request) => request,
         Err(error) => {
+            trace("upstream_request_failed");
             warn!(%error, %upstream_url, bridge_label, "failed to build upstream websocket request");
             return;
         }
     };
     copy_websocket_headers(&headers, request.headers_mut());
 
+    trace("upstream_connect_begin");
     let upstream = match connect_async(request).await {
         Ok((stream, _response)) => stream,
         Err(error) => {
+            trace("upstream_connect_failed");
             warn!(%error, %upstream_url, bridge_label, "failed to connect upstream websocket");
             return;
         }
     };
+    trace("upstream_connected");
 
     // The websocket bridge is deliberately protocol-agnostic: text, binary,
     // ping/pong, and close frames pass through without interpreting Socket.IO.
@@ -225,6 +250,7 @@ pub(crate) async fn bridge_websocket(
         _ = client_to_upstream => {}
         _ = upstream_to_client => {}
     }
+    trace("bridge_closed");
 }
 
 fn axum_to_upstream_ws_message(message: Message) -> (Option<UpstreamWsMessage>, bool) {
@@ -336,6 +362,42 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use super::{proxy_streaming_http_request, should_forward_response_header};
+
+    // Reproduce cold WBA startup without stopping a live framework service.
+    #[tokio::test]
+    async fn websocket_closed_upstream_does_not_strand_client() {
+        use axum::{Router, extract::ws::WebSocketUpgrade, routing::get};
+        use futures_util::StreamExt;
+        use std::time::Duration;
+
+        let closed = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let upstream = format!("ws://{}/socket.io/", closed.local_addr().unwrap());
+        drop(closed);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let app = Router::new().route(
+            "/",
+            get(move |ws: WebSocketUpgrade| async move {
+                ws.on_upgrade(move |socket| {
+                    super::bridge_websocket(socket, upstream, HeaderMap::new(), "test")
+                })
+            }),
+        );
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let (mut client, _) = tokio_tungstenite::connect_async(format!("ws://{address}/"))
+            .await
+            .unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(2), client.next()).await;
+        server.abort();
+        assert!(
+            result.is_ok(),
+            "failed upstream must close downstream promptly"
+        );
+        assert!(matches!(
+            result.unwrap(),
+            None | Some(Err(_)) | Some(Ok(tokio_tungstenite::tungstenite::Message::Close(_)))
+        ));
+    }
 
     #[test]
     fn response_header_filter_preserves_content_encoding() {

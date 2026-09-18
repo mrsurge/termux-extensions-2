@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 
 import msgspec
+from .messagepack_stream import encode_message
 
 JSONRPC_VERSION = "2.0"
 PROTOCOL_VERSION = 1
@@ -55,10 +56,6 @@ class PipeProtocolError(ValueError):
     pass
 
 
-_DECODER = msgspec.json.Decoder(PipeEnvelope)
-_ENCODER = msgspec.json.Encoder()
-
-
 def validate_envelope(envelope: PipeEnvelope) -> None:
     if envelope.jsonrpc != JSONRPC_VERSION:
         raise PipeProtocolError(f"jsonrpc must be {JSONRPC_VERSION}")
@@ -71,22 +68,18 @@ def validate_envelope(envelope: PipeEnvelope) -> None:
             raise PipeProtocolError("request method is required")
 
 
-def decode_line(raw: bytes | bytearray | memoryview | str) -> PipeEnvelope:
-    data = raw.encode("utf-8") if isinstance(raw, str) else bytes(raw)
-    data = data.rstrip(b"\r\n")
-    if not data.strip():
-        raise PipeProtocolError("empty pipe frame")
+def decode_envelope(value: object) -> PipeEnvelope:
     try:
-        envelope = _DECODER.decode(data)
+        envelope = msgspec.convert(value, type=PipeEnvelope, strict=True)
     except msgspec.ValidationError as exc:
-        raise PipeProtocolError(f"json parse error: {exc}") from exc
+        raise PipeProtocolError(f"invalid MessagePack envelope: {exc}") from exc
     validate_envelope(envelope)
     return envelope
 
 
-def encode_line(envelope: PipeEnvelope) -> bytes:
+def encode_frame(envelope: PipeEnvelope) -> bytes:
     validate_envelope(envelope)
-    return _ENCODER.encode(envelope) + b"\n"
+    return encode_message(envelope)
 
 
 def success_response(

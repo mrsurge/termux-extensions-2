@@ -11,6 +11,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
+        android:name=".CefriumApplication"
         android:sharedUserId="${sharedUserIdValue}"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"

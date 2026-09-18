@@ -27,6 +27,7 @@ ipnet.workspace = true
 libc.workspace = true
 notify.workspace = true
 regex.workspace = true
+rmp-serde.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

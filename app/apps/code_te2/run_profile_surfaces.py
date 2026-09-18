@@ -8,8 +8,6 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
-import httpx
-
 from .monaco_editor.editor_backend_services.contracts import JsonMap
 from .runner_profile_shell_manager import runner_profile_shell_state
 from .runner_profiles import (
@@ -85,6 +83,9 @@ async def wait_for_run_profile_url(
     shell_id: str,
     url: str,
 ) -> None:
+    # HTTP client/CLI dependencies are unnecessary until a URL-backed run starts.
+    import httpx
+
     surface_id = run_profile_surface_id(project_root, profile_id)
     current_task = asyncio.current_task()
     if current_task is None:
@@ -302,7 +303,7 @@ async def _refresh_surface_slot(
     host_id = run_profile_surface_host_id(project_root, profile.profile_id)
     slot = _sidebar_slots().get(host_id)
     surface = _surface_from_slot(slot)
-    if not surface or _text(surface.get("shellId")) != shell_id:
+    if slot is None or not surface or _text(surface.get("shellId")) != shell_id:
         return False
     revision = _integer(surface.get("refreshRevision")) + 1
     surface["refreshRevision"] = revision
@@ -365,7 +366,7 @@ def _sidebar_slots() -> dict[str, JsonMap]:
     slots: dict[str, JsonMap] = {}
     for key, value in cast(Mapping[object, object], slots_obj).items():
         if isinstance(key, str) and isinstance(value, Mapping):
-            slots[key] = {str(item_key): item for item_key, item in value.items()}
+            slots[key] = {str(item_key): item for item_key, item in cast(Mapping[object, object], value).items()}
     return slots
 
 

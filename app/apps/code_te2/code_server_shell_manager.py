@@ -6,7 +6,7 @@ import hashlib
 import json as _json
 import re
 import shutil
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from importlib import import_module
 from pathlib import Path
 from typing import Protocol, cast
@@ -14,8 +14,18 @@ from typing import Protocol, cast
 from app.te2_paths import ensure_runtime_home
 
 from .code_te2_paths import code_te2_paths
+from .node_compile_cache import node_compile_cache
 
 JsonObject = dict[str, object]
+
+
+class ConnectionRecord(Protocol):
+    # Target resolution reads metadata only; it does not mutate shell records.
+    @property
+    def env_overrides(self) -> object: ...
+
+    @property
+    def command(self) -> object: ...
 
 
 class ShellRecord(Protocol):
@@ -225,7 +235,7 @@ def _expected_socket_path() -> str:
     return str(_CODE_SERVER_SOCKET_PATH)
 
 
-def code_server_connection_target(record: ShellRecord) -> tuple[str, str | None]:
+def code_server_connection_target(record: ConnectionRecord) -> tuple[str, str | None]:
     """Return the code-server HTTP base and optional UDS path for the WBA."""
     env = _json_object(record.env_overrides)
     socket_path = str(env.get("TE_CODE_SERVER_SOCKET") or "").strip()
@@ -309,7 +319,7 @@ async def _wait_for_code_server_readiness(shell_id: str, timeout_s: float = 60.0
                     print("[code_server] readiness detected via subscribed output", flush=True)
                     return
 
-        print(f"[code_server] WARNING: readiness timeout ({timeout_s}s), continuing anyway", flush=True)
+        raise TimeoutError(f"code-server readiness timeout after {timeout_s}s")
     finally:
         try:
             await mgr.unsubscribe_output_bytes(shell_id, queue)
@@ -339,7 +349,30 @@ async def terminate_code_server_shell() -> bool:
     return True
 
 
-async def ensure_code_server_shell(project_root: str) -> ShellRecord:
+async def ensure_code_server_shell(
+    project_root: str, *, on_spawned: Callable[[ShellRecord], None] | None = None
+) -> ShellRecord:
+    # Startup and browser priming share one launch owner. The event alone cannot
+    # serialize callers after an exited shell has invalidated the fast path.
+    async with _spawn_lock:
+        if on_spawned is None:
+            return await _ensure_code_server_shell(project_root)
+        notified = False
+
+        def notify(record: ShellRecord) -> None:
+            nonlocal notified
+            if not notified:
+                notified = True
+                on_spawned(record)
+
+        record = await _ensure_code_server_shell(project_root, on_spawned=notify)
+        notify(record)  # Adopted shells already completed the startup path.
+        return record
+
+
+async def _ensure_code_server_shell(
+    project_root: str, *, on_spawned: Callable[[ShellRecord], None] | None = None
+) -> ShellRecord:
     """Ensure code-server is running as a framework shell.
 
     Concurrent callers are serialised by _spawn_lock. The _ready_event
@@ -419,7 +452,7 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
         # files.watcherExclude values on top of the gate output.
         try:
             from .extension_registry import ensure_registry_and_gate
-            _ = ensure_registry_and_gate()
+            _ = await asyncio.to_thread(ensure_registry_and_gate)
         except Exception as exc:
             print(f"[code_server] extension registry scan failed (non-fatal): {exc}", flush=True)
 
@@ -430,7 +463,7 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
             sc = ProjectSidecar.load_or_create(str(repo_root))
             watcher = _json_object(sc.dump_raw().get("watcher", {}))
             wmode = str(watcher.get("mode", "ipc"))
-            sync_vscode_watcher_settings(wmode)
+            await asyncio.to_thread(sync_vscode_watcher_settings, wmode)
         except Exception as exc:
             print(f"[code_server] watcher settings sync failed (non-fatal): {exc}", flush=True)
 
@@ -447,6 +480,7 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
                 "CODE_SERVER_DATA_DIR": str(data_dir),
                 "CODE_SERVER_SOCKET": _expected_socket_path(),
                 "CODE_SERVER_PROBE_OUT": str(_CODE_SERVER_PROBE_OUTPUT_PATH),
+                "NODE_COMPILE_CACHE": await asyncio.to_thread(node_compile_cache, "code-server"),
             },
             label=label,
             record_spec_id=f"service:{APP_ID}:code_server",
@@ -455,10 +489,15 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
 
         _active_shell_id = shell.id
 
+        # Configuration is now finalized. Prepare WBA while code-server starts,
+        # but keep the readiness result owned by this coroutine.
+        if on_spawned is not None:
+            on_spawned(shell)
+
         if await _has_live_pipe(shell):
             await _wait_for_code_server_readiness(shell.id)
         else:
-            print("[code_server] WARNING: no live pipe, cannot subscribe for readiness", flush=True)
+            raise RuntimeError("code-server live pipe unavailable for readiness")
 
         return shell
     finally:

@@ -72,13 +72,21 @@ const codecConfig = {
   logLevel: "info",
 };
 
+// Keep the process-only decoder out of the codec served to webview browsers.
+const pipeCodecConfig = {
+  ...codecConfig,
+  entryPoints: ["src/protocol/pipe-codec.ts"],
+  outfile: "dist/protocol/pipe-codec.mjs",
+};
+
 if (isWatch) {
-  const [moduleCtx, codecCtx] = await Promise.all([
+  const [moduleCtx, codecCtx, pipeCodecCtx] = await Promise.all([
     context(moduleConfig),
     context(codecConfig),
+    context(pipeCodecConfig),
   ]);
-  await Promise.all([moduleCtx.watch(), codecCtx.watch()]);
+  await Promise.all([moduleCtx.watch(), codecCtx.watch(), pipeCodecCtx.watch()]);
   console.log("Watching Workbench Adapter TypeScript...");
 } else {
-  await Promise.all([build(moduleConfig), build(codecConfig)]);
+  await Promise.all([build(moduleConfig), build(codecConfig), build(pipeCodecConfig)]);
 }

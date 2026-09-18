@@ -3,7 +3,7 @@ mod native {
     use crate::framework_services::{
         pipe::{
             PipeEventSink, dispatch_request,
-            protocol::{PipeEnvelope, PipeIdentity, PipeMessageKind, decode_line, encode_line},
+            protocol::{PipeDecoder, PipeEnvelope, PipeIdentity, PipeMessageKind, encode_frame},
         },
         scheduler::FrameworkServiceScheduler,
     };
@@ -11,7 +11,7 @@ mod native {
     use std::{
         collections::HashSet,
         sync::{
-            Arc, Mutex, OnceLock,
+            Arc, Mutex, OnceLock, Weak,
             atomic::{AtomicBool, Ordering},
             mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError, sync_channel},
         },
@@ -65,9 +65,25 @@ mod native {
         handle: Handle,
     ) -> anyhow::Result<()> {
         let (sink, writer) = start_pipe_writer(manager.clone(), shell_id, app_id)?;
+        let registration = crate::runtime_debug_pipe::register(app_id, shell_id, sink.clone());
+        let registration = match registration {
+            Ok(registration) => registration,
+            Err(error) => {
+                sink.close();
+                let _ = writer.join();
+                return Err(error);
+            }
+        };
+        if let Some(registration) = &registration {
+            let _ = sink.debug_route.set(Arc::downgrade(&registration.route));
+            if sink.closed.load(Ordering::Acquire) {
+                registration.route.close();
+            }
+        }
         let read_result =
             run_bridge_read(manager, shell_id, app_id, scheduler, handle, sink.clone());
         sink.close();
+        drop(registration);
         let write_result = writer
             .join()
             .map_err(|_| anyhow::anyhow!("app-worker pipe writer panicked"))?;
@@ -83,16 +99,18 @@ mod native {
         handle: Handle,
         sink: Arc<FerrousPipeSink>,
     ) -> anyhow::Result<()> {
-        let mut buffer = Vec::<u8>::new();
+        let mut decoder = PipeDecoder::default();
         loop {
+            if sink.closed.load(Ordering::Acquire) {
+                break;
+            }
             match manager.read_stdout_chunk_blocking(shell_id, Duration::from_millis(250))? {
                 Some(chunk) => {
-                    buffer.extend_from_slice(&chunk);
-                    while let Some(line) = take_line(&mut buffer) {
-                        handle_stdout_line(
+                    for envelope in decoder.feed(&chunk)? {
+                        handle_stdout_envelope(
                             shell_id,
                             app_id,
-                            &line,
+                            envelope,
                             scheduler.clone(),
                             handle.clone(),
                             sink.clone(),
@@ -101,6 +119,7 @@ mod native {
                 }
                 None => {
                     if !pipe_is_live(&manager, shell_id)? {
+                        decoder.finish()?;
                         break;
                     }
                 }
@@ -109,22 +128,23 @@ mod native {
         Ok(())
     }
 
-    fn handle_stdout_line(
+    fn handle_stdout_envelope(
         shell_id: &str,
         app_id: &str,
-        line: &[u8],
+        request: PipeEnvelope,
         scheduler: FrameworkServiceScheduler,
         handle: Handle,
         sink: Arc<FerrousPipeSink>,
     ) {
-        let text = String::from_utf8_lossy(line);
-        let request = match decode_line(text.as_ref()) {
-            Ok(envelope) => envelope,
-            Err(error) => {
-                warn!(%error, %shell_id, %app_id, "invalid app-worker pipe frame");
-                return;
+        if matches!(
+            &request.kind,
+            PipeMessageKind::Response | PipeMessageKind::Error
+        ) {
+            if let Some(route) = sink.debug_route.get().and_then(Weak::upgrade) {
+                let _ = route.accept(request);
             }
-        };
+            return;
+        }
         if !matches!(&request.kind, PipeMessageKind::Request) {
             debug!(
                 kind = ?&request.kind,
@@ -155,6 +175,7 @@ mod native {
     }
 
     struct FerrousPipeSink {
+        debug_route: Arc<OnceLock<Weak<crate::runtime_debug_pipe::DebugRoute>>>,
         sender: SyncSender<Vec<u8>>,
         closed: Arc<AtomicBool>,
         shell_id: String,
@@ -182,13 +203,15 @@ mod native {
 
         fn close(&self) {
             self.closed.store(true, Ordering::Release);
+            if let Some(route) = self.debug_route.get().and_then(Weak::upgrade) {
+                route.close();
+            }
         }
     }
 
     impl PipeEventSink for FerrousPipeSink {
         fn send(&self, envelope: PipeEnvelope) -> anyhow::Result<()> {
-            let encoded = encode_line(&envelope)?;
-            self.enqueue(encoded.into_bytes())
+            self.enqueue(encode_frame(&envelope)?)
         }
     }
 
@@ -199,7 +222,9 @@ mod native {
     ) -> anyhow::Result<(Arc<FerrousPipeSink>, JoinHandle<anyhow::Result<()>>)> {
         let (sender, receiver) = sync_channel(PIPE_WRITER_QUEUE_CAPACITY);
         let closed = Arc::new(AtomicBool::new(false));
+        let debug_route = Arc::new(OnceLock::<Weak<crate::runtime_debug_pipe::DebugRoute>>::new());
         let sink = Arc::new(FerrousPipeSink {
+            debug_route: debug_route.clone(),
             sender,
             closed: closed.clone(),
             shell_id: shell_id.to_owned(),
@@ -218,6 +243,9 @@ mod native {
                     closed.clone(),
                 );
                 closed.store(true, Ordering::Release);
+                if let Some(route) = debug_route.get().and_then(Weak::upgrade) {
+                    route.close();
+                }
                 result
             })?;
         Ok((sink, writer))
@@ -252,15 +280,6 @@ mod native {
         }
     }
 
-    fn take_line(buffer: &mut Vec<u8>) -> Option<Vec<u8>> {
-        let pos = buffer.iter().position(|byte| *byte == b'\n')?;
-        let mut line = buffer.drain(..=pos).collect::<Vec<_>>();
-        while matches!(line.last(), Some(b'\n' | b'\r')) {
-            line.pop();
-        }
-        if line.is_empty() { None } else { Some(line) }
-    }
-
     fn pipe_is_live(manager: &FerrousNativeManager, shell_id: &str) -> anyhow::Result<bool> {
         let Some(state) = manager.get_pipe_state(shell_id)? else {
             return Ok(false);
@@ -277,6 +296,7 @@ mod native {
         fn bounded_writer_queue_preserves_order_and_fails_explicitly() {
             let (sender, receiver) = sync_channel(2);
             let sink = FerrousPipeSink {
+                debug_route: Arc::default(),
                 sender,
                 closed: Arc::new(AtomicBool::new(false)),
                 shell_id: "shell".to_owned(),

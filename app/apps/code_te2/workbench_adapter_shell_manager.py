@@ -1,18 +1,22 @@
 import hashlib
 from collections import deque
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Optional, TypedDict, cast
 import asyncio
-import json
 import logging
+import os
 import time
 
 from framework_shells import get_manager
 from framework_shells.orchestrator import Orchestrator
 from framework_shells.record import ShellRecord
 from app.node_toolchain import NodeToolchainError, resolve_node_toolchain
+from app.libs.runtime_startup_trace import StartupTrace
+from app.libs.messagepack_stream import MessagePackStream, encode_message
 
 from .code_te2_paths import code_te2_paths
+from .node_compile_cache import node_compile_cache
 from .diagnostics_latency_metrics import (
     diagnostics_latency_metrics_enabled,
     elapsed_ms,
@@ -30,6 +34,8 @@ WORKBENCH_ADAPTER_FIXED_PORT = 18181
 log = logging.getLogger("workbench_adapter_shell_manager")
 
 _active_shell_id: Optional[str] = None
+_prepared_shell_id: str | None = None
+_spawn_lock = asyncio.Lock()
 _rpc_counter: int = 0
 _rpc_pending: dict[int, asyncio.Future[JsonObject]] = {}
 _stdout_reader_task: asyncio.Task[None] | None = None
@@ -60,9 +66,6 @@ def _json_object(value: object) -> JsonObject:
     raw = cast(dict[object, object], value)
     return {str(key): item for key, item in raw.items()}
 
-
-def _decode_json_object(value: str) -> JsonObject:
-    return _json_object(cast(object, json.loads(value)))
 
 
 def get_adapter_state() -> dict[str, object]:
@@ -217,6 +220,9 @@ def _expected_port() -> str:
 
 def _matches_expected_target(record: ShellRecord, code_server_socket_path: Optional[str]) -> bool:
     env = _json_object(record.env_overrides)
+    # Never adopt an older JSON-speaking adapter into the binary reader.
+    if env.get("TE2_ADAPTER_PIPE_CODEC") != "messagepack-v1":
+        return False
     if str(env.get("TE2_ADAPTER_PORT") or "").strip() != _expected_port():
         return False
     env_socket = str(env.get("TE2_CODE_SERVER_SOCKET") or "").strip()
@@ -328,50 +334,38 @@ async def _ensure_live_adapter_io(shell_id: str) -> bool:
 
 
 async def _stdout_reader_loop(shell_id: str, queue: asyncio.Queue[bytes]) -> None:
-    """Read adapter stdout chunks from FWS, route RPC responses, and log the rest."""
+    """Decode structured pipe records without treating log text as protocol data."""
     global _stdout_reader_task
 
-    RPC_PREFIX = b"<<<RPC>>> "
-    PUSH_PREFIX = b"<<<PUSH>>> "
-    buf = b""
+    stream = MessagePackStream()
     try:
         while True:
             chunk = await queue.get()
             if not chunk:
                 continue
-            buf += chunk
-            while b"\n" in buf:
-                line_bytes, buf = buf.split(b"\n", 1)
-                if line_bytes.endswith(b"\r"):
-                    line_bytes = line_bytes[:-1]
-                if line_bytes.startswith(RPC_PREFIX):
-                    payload = line_bytes[len(RPC_PREFIX):].decode("utf-8", errors="replace")
-                    try:
-                        obj = _decode_json_object(payload)
-                        rid_obj = obj.get("id")
-                        rid = rid_obj if isinstance(rid_obj, int) else None
-                        fut = _rpc_pending.pop(rid, None) if rid is not None else None
-                        if fut and not fut.done():
-                            fut.set_result(obj)
-                        else:
-                            log.debug("[adapter_stdio] unmatched RPC response id=%s", rid)
-                    except json.JSONDecodeError:
-                        log.warning("[adapter_stdio] bad RPC JSON: %s", payload[:200])
-                elif line_bytes.startswith(PUSH_PREFIX):
-                    payload = line_bytes[len(PUSH_PREFIX):].decode("utf-8", errors="replace")
-                    try:
-                        obj = _decode_json_object(payload)
-                        _queue_push(
-                            obj,
-                            payload_bytes=len(line_bytes) - len(PUSH_PREFIX),
-                        )
-                    except json.JSONDecodeError:
-                        log.warning("[adapter_stdio] bad PUSH JSON: %s", payload[:200])
+            for record in stream.feed(chunk):
+                if not isinstance(record, dict):
+                    raise ValueError("Adapter pipe record must be a map")
+                envelope = _json_object(cast(dict[object, object], record))
+                payload = envelope.get("payload")
+                if not isinstance(payload, dict):
+                    raise ValueError("Adapter pipe payload must be a map")
+                obj = _json_object(cast(dict[object, object], payload))
+                kind = envelope.get("kind")
+                if kind == "reply":
+                    rid_obj = obj.get("id")
+                    rid = rid_obj if isinstance(rid_obj, int) else None
+                    fut = _rpc_pending.pop(rid, None) if rid is not None else None
+                    if fut and not fut.done():
+                        fut.set_result(obj)
+                    else:
+                        log.debug("[adapter_stdio] unmatched RPC response id=%s", rid)
+                elif kind == "push":
+                    _queue_push(obj, payload_bytes=len(encode_message(obj)))
+                elif kind == "startup":
+                    log.debug("[adapter_stdio] startup shell=%s", shell_id)
                 else:
-                    line = line_bytes.decode("utf-8", errors="replace")
-                    if line.startswith("[rpc-config]"):
-                        print(f"[adapter_stdout] {line[:500]}", flush=True)
-                    log.debug("[adapter_stdout] %s", line[:500])
+                    raise ValueError(f"Unknown adapter pipe record kind: {kind!r}")
     except asyncio.CancelledError:
         pass
     except Exception as exc:
@@ -580,19 +574,30 @@ async def adapter_rpc(method: str, params: JsonObject | None = None, timeout: fl
         fut: asyncio.Future[JsonObject] = asyncio.get_event_loop().create_future()
         _rpc_pending[rid] = fut
 
-        line = json.dumps(msg) + "\n"
         try:
-            await mgr.write_to_pipe(shell_id, line)
-        except Exception:
-            _rpc_pending.pop(rid, None)
+            frame = encode_message(msg)
+            # FWS write_to_pipe is text-only. Use the same live binary stdin
+            # seam as Terminal, under this adapter's existing writer lock.
+            state = mgr.get_pipe_state(shell_id)
+            if state is None or not state.stdin_supported:
+                raise RuntimeError("Adapter pipe stdin unavailable")
+            stdin = state.process.stdin
+            if stdin is None or stdin.is_closing():
+                raise RuntimeError("Adapter pipe stdin closed")
+            stdin.write(frame)
+            await stdin.drain()
+        except BaseException:
+            _ = _rpc_pending.pop(rid, None)
+            _ = fut.cancel()
             raise
 
     try:
         result = await asyncio.wait_for(fut, timeout=timeout)
         return result
     except asyncio.TimeoutError:
-        _rpc_pending.pop(rid, None)
         raise RuntimeError(f"adapter_rpc timeout: method={method} id={rid} after {timeout}s")
+    finally:
+        _ = _rpc_pending.pop(rid, None)
 
 
 async def terminate_adapter_shell() -> bool:
@@ -601,7 +606,8 @@ async def terminate_adapter_shell() -> bool:
     Returns True if a shell was terminated, False if nothing was running.
     Safe to call even if no adapter is active.
     """
-    global _active_shell_id, _rpc_counter, _rpc_write_lock
+    global _active_shell_id, _rpc_counter, _rpc_write_lock, _prepared_shell_id
+    _prepared_shell_id = None
 
     if not _active_shell_id:
         return False
@@ -632,6 +638,26 @@ async def ensure_workbench_adapter_shell(
     project_root: str,
     code_server_http: str,
     code_server_socket_path: Optional[str] = None,
+    *,
+    wait_for_dependency: Callable[[], Awaitable[None]] | None = None,
+) -> ShellRecord:
+    # Worker startup and boot snapshots can arrive together; only one caller may
+    # adopt/spawn/connect the shared adapter, while later callers reuse it.
+    async with _spawn_lock:
+        if wait_for_dependency is None:
+            return await _ensure_workbench_adapter_shell(project_root, code_server_http, code_server_socket_path)
+        return await _ensure_workbench_adapter_shell(
+            project_root, code_server_http, code_server_socket_path,
+            wait_for_dependency=wait_for_dependency,
+        )
+
+
+async def _ensure_workbench_adapter_shell(
+    project_root: str,
+    code_server_http: str,
+    code_server_socket_path: Optional[str] = None,
+    *,
+    wait_for_dependency: Callable[[], Awaitable[None]] | None = None,
 ) -> ShellRecord:
     """Ensure the Node workbench adapter framework shell is running.
 
@@ -639,13 +665,13 @@ async def ensure_workbench_adapter_shell(
     openFile → (hover/symbols/diagnostics) via code-server remote extension host.
     """
 
-    global _active_shell_id
+    global _active_shell_id, _prepared_shell_id
 
     # Generate / validate rpc-config.json before launching the adapter.
     # The adapter reads this file synchronously on startup.
     try:
         from .extension_registry import ensure_rpc_config
-        ensure_rpc_config()
+        await asyncio.to_thread(ensure_rpc_config)
     except Exception as exc:
         log.warning("[adapter] ensure_rpc_config failed: %s", exc)
 
@@ -659,6 +685,11 @@ async def ensure_workbench_adapter_shell(
         if cached and cached.label == label:
             if _matches_expected_target(cached, code_server_socket_path):
                 if await _ensure_live_adapter_io(cached.id):
+                    if _prepared_shell_id == cached.id:
+                        await _connect_prepared_adapter(project_root, code_server_http, code_server_socket_path, wait_for_dependency)
+                        return cached
+                    if wait_for_dependency is not None:
+                        await wait_for_dependency()
                     if (
                         _adapter_state_is_ready_for(project_root)
                         or await _adopt_live_adapter_session(project_root)
@@ -686,6 +717,8 @@ async def ensure_workbench_adapter_shell(
         if _matches_expected_target(existing, code_server_socket_path):
             if await _ensure_live_adapter_io(existing.id):
                 _active_shell_id = existing.id
+                if wait_for_dependency is not None:
+                    await wait_for_dependency()
                 if await _adopt_live_adapter_session(project_root):
                     return existing
                 log.info(
@@ -732,6 +765,8 @@ async def ensure_workbench_adapter_shell(
                 "WORKBENCH_ADAPTER_PORT": str(WORKBENCH_ADAPTER_FIXED_PORT),
                 "WORKBENCH_ADAPTER_ENTRY": str(adapter_entry),
                 "WORKBENCH_ADAPTER_NODE": str(node_binary),
+                "NODE_COMPILE_CACHE": await asyncio.to_thread(node_compile_cache, "workbench-adapter"),
+                "TE2_RUNTIME_DEBUG": os.environ.get("TE2_RUNTIME_DEBUG", "0"),
                 "CODE_SERVER_HTTP": str(code_server_http),
                 "CODE_SERVER_SOCKET": str(code_server_socket_path or ""),
                 "CODE_SERVER_EXTENSIONS_JSON": str(
@@ -778,37 +813,46 @@ async def ensure_workbench_adapter_shell(
             print("[adapter_shell_mgr] stdio ping failed after 20 attempts")
             _set_adapter_state("error", project=project_root, error="Adapter ping timeout")
             await _publish_adapter_state_fact()
-            return shell
+            raise RuntimeError("Adapter ping timeout")
 
-        # Bootstrap: connect adapter to code-server
-        try:
-            print(
-                "[adapter_shell_mgr] calling adapter.connect "
-                f"proxyHttp={code_server_http} "
-                f"socket={'set' if code_server_socket_path else 'unset'} "
-                f"authority={remote_authority}"
-            )
-            connect_params: JsonObject = {
-                "proxyHttp": code_server_http,
-                "authority": remote_authority,
-                "folder": str(project_root_abs),
-            }
-            if code_server_socket_path:
-                connect_params["codeServerSocketPath"] = code_server_socket_path
-            connect_resp = await adapter_rpc(
-                "adapter.connect",
-                connect_params,
-                timeout=75.0,
-            )
-            print(f"[adapter_shell_mgr] bootstrap connect resp: {connect_resp}")
-            _ = _rpc_result(connect_resp, method="adapter.connect")
-            await _publish_ready_if_changed(project_root)
-        except Exception as exc:
-            print(f"[adapter_shell_mgr] bootstrap adapter.connect FAILED: {exc}")
-            _set_adapter_state("error", project=project_root, error=str(exc))
-            await _publish_adapter_state_fact()
+        _prepared_shell_id = shell.id
+        await _connect_prepared_adapter(project_root, code_server_http, code_server_socket_path, wait_for_dependency)
     else:
         log.warning("[adapter] no live pipe capabilities for shell=%s — stdio RPC unavailable", shell.id)
         _set_adapter_state("error", project=project_root, error="No live pipe capabilities")
         await _publish_adapter_state_fact()
+        raise RuntimeError("Adapter live pipe unavailable")
     return shell
+
+
+async def _connect_prepared_adapter(
+    project_root: str,
+    code_server_http: str,
+    code_server_socket_path: str | None,
+    wait_for_dependency: Callable[[], Awaitable[None]] | None,
+) -> None:
+    global _prepared_shell_id
+    # Keep a responsive but disconnected shell reusable if dependency startup
+    # fails or the caller cancels. The launch lock remains held across this wait.
+    trace = StartupTrace("code_te2.wba")
+    trace.mark("process.prepared")
+    if wait_for_dependency is not None:
+        with trace.span("dependency.wait"):
+            await wait_for_dependency()
+    try:
+        params: JsonObject = {
+            "proxyHttp": code_server_http,
+            "authority": "localhost",
+            "folder": str(Path(project_root).resolve(strict=False)),
+        }
+        if code_server_socket_path:
+            params["codeServerSocketPath"] = code_server_socket_path
+        with trace.span("workbench.connect"):
+            response = await adapter_rpc("adapter.connect", params, timeout=75.0)
+        _ = _rpc_result(response, method="adapter.connect")
+        _prepared_shell_id = None
+        await _publish_ready_if_changed(project_root)
+    except Exception as exc:
+        _set_adapter_state("error", project=project_root, error=str(exc))
+        await _publish_adapter_state_fact()
+        raise

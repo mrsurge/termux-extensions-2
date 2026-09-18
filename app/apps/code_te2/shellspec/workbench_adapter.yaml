@@ -3,6 +3,9 @@ version: "1"
 shells:
   workbench-adapter:
     backend: pipe
+    log_codecs:
+      stdout: messagepack
+      stderr: text
     pipe:
       mode: native_pipe_testing
     cwd: ${ctx:REPO_ROOT}
@@ -12,6 +15,9 @@ shells:
       - >-
         "${ctx:WORKBENCH_ADAPTER_NODE}" "${ctx:WORKBENCH_ADAPTER_ENTRY}"
     env:
+      TE2_ADAPTER_PIPE_CODEC: messagepack-v1
+      TE2_RUNTIME_DEBUG: ${ctx:TE2_RUNTIME_DEBUG}
+      NODE_COMPILE_CACHE: ${ctx:NODE_COMPILE_CACHE}
       TE_APP_ID: ${ctx:APP_ID}
       TE2_ADAPTER_HOST: 127.0.0.1
       TE2_ADAPTER_PORT: ${ctx:WORKBENCH_ADAPTER_PORT}

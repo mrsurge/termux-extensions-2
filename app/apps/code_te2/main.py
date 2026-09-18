@@ -8,7 +8,6 @@ import faulthandler
 import threading
 import traceback
 from collections.abc import Callable
-from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
 from urllib import request as urllib_request
@@ -43,10 +42,6 @@ from .main_page.backend.state_payload import (
     status_to_payload,
 )
 from .main_page.backend.workbench_routes import (
-    CodeServerConnectionTargetFn,
-    EnsureCodeServerShellFn,
-    EnsureWorkbenchAdapterShellFn,
-    HistoryStoreLike as WorkbenchHistoryStoreLike,
     ShellRecordLike,
     WorkbenchRoutesDeps,
     create_workbench_router,
@@ -287,13 +282,9 @@ from .terminal_backend import terminal_router
 code_te2_bp.include_router(terminal_router)
 
 # Include the self-contained editor routes
-from .monaco_editor.editor_backend import editor_router
+from .monaco_editor.editor_backend import editor_router, register_monaco_editor_routes
 code_te2_bp.include_router(editor_router)
-_register_monaco_editor_routes = cast(
-    Callable[[APIRouter, str], None],
-    cast(object, import_module("app.apps.code_te2.monaco_editor").__dict__["register_monaco_editor_routes"]),
-)
-_register_monaco_editor_routes(code_te2_bp, "/ui")
+register_monaco_editor_routes(code_te2_bp, "/ui")
 
 # --- Code TE2 Socket.IO (worker-owned) ---
 # The main framework process still proxies the current physical paths to this
@@ -324,7 +315,7 @@ _STATE_PAYLOAD_DEPS = StatePayloadDeps(
 async def _get_framework_shell_by_id(shell_id: str) -> ShellRecordLike | None:
     from .workbench_adapter_shell_manager import get_shell_record
 
-    return cast(ShellRecordLike | None, await get_shell_record(shell_id))
+    return await get_shell_record(shell_id)
 
 
 async def _ensure_workbench_adapter_shell_for_routes(
@@ -335,30 +326,23 @@ async def _ensure_workbench_adapter_shell_for_routes(
 )-> ShellRecordLike:
     from .workbench_adapter_shell_manager import ensure_workbench_adapter_shell
 
-    return cast(ShellRecordLike, await ensure_workbench_adapter_shell(
+    return await ensure_workbench_adapter_shell(
         project_root,
         code_server_http=code_server_http,
         code_server_socket_path=code_server_socket_path,
-    ))
+    )
 
 
 def _code_server_connection_target_for_routes(record: ShellRecordLike) -> tuple[str, str | None]:
-    from .code_server_shell_manager import ShellRecord as CodeServerShellRecord
     from .code_server_shell_manager import code_server_connection_target
 
-    return code_server_connection_target(cast(CodeServerShellRecord, record))
+    return code_server_connection_target(record)
 
 
 async def _prime_code_server_runtime(project_root: str) -> None:
-    code_server_shell = await ensure_code_server_shell(project_root)
-    code_server_http, code_server_socket_path = _code_server_connection_target_for_routes(
-        cast(ShellRecordLike, cast(object, code_server_shell))
-    )
-    _ = await _ensure_workbench_adapter_shell_for_routes(
-        project_root,
-        code_server_http=code_server_http,
-        code_server_socket_path=code_server_socket_path,
-    )
+    from .intelligence_startup import prime_intelligence_runtime
+
+    await prime_intelligence_runtime(project_root)
 
 
 set_code_server_runtime_primer(_prime_code_server_runtime)
@@ -375,11 +359,11 @@ configure_boot_snapshot_dependencies(
 
 
 _WORKBENCH_ROUTES_DEPS = WorkbenchRoutesDeps(
-    history=cast(WorkbenchHistoryStoreLike, _history_store),
+    history=_history_store,
     get_project_root=get_project_root,
-    ensure_code_server_shell=cast(EnsureCodeServerShellFn, ensure_code_server_shell),
-    ensure_workbench_adapter_shell=cast(EnsureWorkbenchAdapterShellFn, _ensure_workbench_adapter_shell_for_routes),
-    code_server_connection_target=cast(CodeServerConnectionTargetFn, _code_server_connection_target_for_routes),
+    ensure_code_server_shell=ensure_code_server_shell,
+    ensure_workbench_adapter_shell=_ensure_workbench_adapter_shell_for_routes,
+    code_server_connection_target=_code_server_connection_target_for_routes,
     get_shell_by_id=_get_framework_shell_by_id,
 )
 code_te2_bp.include_router(create_workbench_router(_WORKBENCH_ROUTES_DEPS))
@@ -422,24 +406,21 @@ def _ensure_project_root_synced() -> Path:
             return stored_path
     return get_project_root()
 
-# Sync the initial project root on module import.
-try:
-    project_root = _ensure_project_root_synced()
-    edit_tracker.set_project_root(project_root)
-except Exception:
-    project_root = get_project_root()
-
-# Housekeeping for per-project sidecars and session counters.
-try:
-    cleanup_orphaned_sidecars()
-except Exception:
-    # Sidecar cleanup is best-effort; failures should not block editor startup.
-    pass
-
-try:
-    _active_project_sidecar = initialize_project_session()
-except Exception:
-    _active_project_sidecar = None
+def _initialize_application_project() -> None:
+    # Project/session mutation belongs to application startup, not route imports.
+    try:
+        project_root = _ensure_project_root_synced()
+        edit_tracker.set_project_root(project_root)
+    except Exception:
+        pass
+    try:
+        cleanup_orphaned_sidecars()
+    except Exception:
+        pass
+    try:
+        _ = initialize_project_session()
+    except Exception:
+        pass
 
 
 def _ensure_workbench_json_sync(project_root_str: str) -> None:
@@ -455,12 +436,11 @@ def _ensure_workbench_json_sync(project_root_str: str) -> None:
         print(f"[code_te2] workbench json sync failed (non-fatal): {exc}", flush=True)
 
 
-async def _eager_start_code_server():
-    """Best-effort eager start of code-server at worker boot.
+async def _eager_start_code_server() -> None:
+    """Prepare the complete intelligence runtime without waiting for a browser.
 
-    Only starts code-server (the extension host backend). The workbench adapter
-    is launched later, triggered by the frontend readiness chain:
-    editor iframe ready -> code-server confirmed -> adapter launch -> baton fan-out.
+    The worker loop/pipe must exist first. Import-time spawning would bypass
+    lifecycle ownership, preferences and the settings preparation below.
     """
     try:
         ui_prefs = _json_object(_preferences_store.get_preferences().get("ui"))
@@ -474,22 +454,24 @@ async def _eager_start_code_server():
         if not pr:
             return
         # Sync watcher settings BEFORE code-server launches
-        _ensure_workbench_json_sync(pr)
-        cs = await ensure_code_server_shell(pr)
-        cs_env = _json_object(cs.env_overrides)
-        pr = str(cs_env.get("PROJECT_ROOT") or pr)
-        print(f"[code_te2] eager code-server startup OK (project={pr})", flush=True)
+        await asyncio.to_thread(_ensure_workbench_json_sync, pr)
+        await _prime_code_server_runtime(pr)
+        print(f"[code_te2] eager intelligence startup OK (project={pr})", flush=True)
     except Exception as exc:
-        print(f"[code_te2] eager code-server startup failed: {exc}", flush=True)
+        print(f"[code_te2] eager intelligence startup failed: {exc}", flush=True)
 
 
-@code_te2_bp.on_event("startup")  # pyright: ignore[reportDeprecated]
-async def _on_startup():  # pyright: ignore[reportUnusedFunction]
+async def te2_app_start() -> None:
     _install_loop_exception_handler()
-    from .worker_services.runtime import bootstrap_worker_runtime
+    from .worker_services.runtime import start_worker_runtime
 
-    bootstrap_worker_runtime(asyncio.get_running_loop())
-    asyncio.ensure_future(_eager_start_code_server())
+    await start_worker_runtime(_initialize_application_project, _eager_start_code_server)
+
+
+async def te2_app_stop() -> None:
+    from .worker_services.runtime import stop_worker_runtime
+
+    await stop_worker_runtime()
 
 
 def _get_active_project_root() -> Path:

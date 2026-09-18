@@ -206,6 +206,10 @@ Actual UI VSIX relocation needs a separate approved design and acceptance pass.
 
 ### Deferred Native IME Debugging Side Slice
 
+Follow-up planning/progress now lives in
+`docs/apps/backend_native_observability/PLAN.md` and its `TRACKER.md`.
+The description below is retained as the original handoff evidence.
+
 GeckoView's intermittent missed-key issue is currently not reproducible after a
 device restart. The completed browser probes and negative geometry/Ctrl-bypass
 experiments are recorded in TRACKER.md under Deferred Gecko Native IME Diagnostics.

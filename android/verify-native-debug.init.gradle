@@ -1,0 +1,42 @@
+// Explicit build-contract check; no APK assembly or installation required.
+// Gecko (android/): ./gradlew -I verify-native-debug.init.gradle :app:verifyNativeDebugIsolation
+// Cefrium (android/cefrium/): ./gradlew -I ../verify-native-debug.init.gradle verifyNativeDebugIsolation
+gradle.projectsEvaluated {
+    // Cefrium owns a separate AGP 9 build; never require it in Gecko's project graph.
+    gradle.rootProject.allprojects.findAll {
+        it.path == ':app' || (it.path == ':' && it.name == 'cefrium')
+    }.each { project ->
+        def isCefrium = project.name == 'cefrium'
+        project.tasks.register('verifyNativeDebugIsolation') {
+            doLast {
+                def android = project.extensions.getByName('android')
+                assert !android.buildTypes.getByName('debug').minifyEnabled
+                ['release', 'staging'].each { variant ->
+                    def dirs = android.sourceSets.getByName(variant).java.srcDirs
+                    assert dirs.any { it.path.endsWith('/src/nonDebug/java') }
+                    assert !dirs.any { it.path.endsWith('/src/debug/java') }
+                    if (isCefrium) {
+                        def kotlinDirs = android.sourceSets.getByName(variant).kotlin.srcDirs
+                        assert kotlinDirs.any { it.path.endsWith('/src/nonDebug/java') }
+                        assert !kotlinDirs.any { it.path.endsWith('/src/debug/java') }
+                    }
+                    def configName = !isCefrium ? 'gecko' + variant.capitalize() + 'RuntimeClasspath' : variant + 'RuntimeClasspath'
+                    def deps = project.configurations.getByName(configName).allDependencies
+                    assert !deps.any { it.group == 'org.jetbrains.kotlin' && it.name == 'kotlin-reflect' }
+                }
+                assert project.configurations.getByName('debugImplementation').dependencies.any {
+                    it.group == 'org.jetbrains.kotlin' && it.name == 'kotlin-reflect' && it.version == '2.2.10'
+                }
+                if (isCefrium) {
+                    assert android.sourceSets.getByName('debug').kotlin.srcDirs.any {
+                        it.path.endsWith('/app/src/debug/java')
+                    }
+                    assert android.sourceSets.getByName('testDebug').kotlin.srcDirs.any {
+                        it.path.endsWith('/app/src/testDebug/java')
+                    }
+                }
+                println "${project.path}: native debug source/dependency isolation verified"
+            }
+        }
+    }
+}
