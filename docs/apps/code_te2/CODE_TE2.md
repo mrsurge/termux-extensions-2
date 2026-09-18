@@ -2706,7 +2706,10 @@ The WebExtension intercepts these URL patterns (redirecting to local server):
 
 # Then rebuild the native clients:
 cd android
-./termux-sdk-env.sh ./gradlew :app:assembleGeckoDebug :cefrium:assembleDebug
+./gradlew :app:assembleGeckoDebug
+# Cefrium is a separate build; select JDK 25 and an Android 37 SDK first.
+cd cefrium
+./gradlew assembleDebug
 ```
 
 ### Boot sequence
@@ -3480,13 +3483,16 @@ This artifact-driven path is required on Termux because Node reports the Android
 
 ## 42) Android Cefrium Client
 
-The isolated `:cefrium` Android application module evaluates Cefrium 0.7.1 while reusing the shared Android source and packaged assets. GeckoView in `android/app` remains the primary Android renderer.
+The standalone `android/cefrium` build pins Cefrium SDK/plugin 0.8.8 while reusing
+the shared Android source and packaged assets. It is no longer a subproject of
+`android/`: AGP 9.4 / Gradle 9.7.1 / JDK 25 / compileSdk 37 are isolated from
+GeckoView's existing toolchain. GeckoView in `android/app` remains the primary renderer.
 
 ### Module boundary
 
 The Cefrium module is intentionally isolated:
 
-- `:cefrium` owns its activity, layout, manifest, and Cefrium-specific local
+- `android/cefrium` owns its activity, layout, manifest, and Cefrium-specific local
   relay routing; its process-local `PersistentNetworkService` owns the
   `AndroidFrameworkRelay` lifecycle.
 - It applies the `com.cefrium` Gradle plugin only inside the Cefrium module.
@@ -3497,6 +3503,24 @@ The Cefrium module is intentionally isolated:
 ### Runtime behavior
 
 Cefrium always loads TE2 through one dynamically allocated `127.0.0.1` relay origin owned by the shared `AndroidFrameworkRelay`, even when a configured framework host is reachable directly.
+
+`CefriumApplication.attachBaseContext` selects `--javaless-renderers=disabled`
+before the SDK initialization provider runs, preserving existing switches. SDK
+0.8.8 lacks the native-only sandboxed service that Chromium otherwise selects,
+causing a fatal `NameNotFoundException`. Use the SDK's existing Java-backed
+services; reassess this compatibility policy when upgrading the SDK. Gecko is
+unaffected. Activity or application `onCreate` is too late for this policy.
+
+With SDK 0.8.8, main app, Inspector and Processes browser creation immediately
+sets `setPinchToZoomEnabled(false)` before page loading. This native pinch policy
+is independent of the older main-surface selection/readability corrections
+described below, which remain intact. On 2026-09-18, Termux JDK 25/SDK 37 debug
+isolation, all 47 unit tests and APK assembly passed. Native library stripping
+was unavailable with the x86-64 NDK tools, so Gradle packaged those libraries
+unstripped. The subsequent startup fix passed 49 tests; the user confirmed zoom
+suppression and normal framework operation with the installed debug APK.
+Non-debug variants and exhaustive cross-surface checks remain separate;
+this does not establish a guarantee against every possible page-zoom path.
 
 The relay behavior is:
 
@@ -3552,16 +3576,24 @@ native focus sink/query, timer loop, or alternate fallback path.
 Validate the Cefrium module with:
 
 ```bash
-./gradlew :cefrium:testDebugUnitTest
-./gradlew :cefrium:assembleDebug
+cd android/cefrium
+./gradlew -I ../verify-native-debug.init.gradle verifyNativeDebugIsolation testDebugUnitTest
+./gradlew assembleDebug
 ```
 
 Keep primary-renderer comparison coverage with:
 
 ```bash
+cd android
 ./gradlew :app:testGeckoDebugUnitTest
 ./gradlew :app:assembleGeckoDebug
 ```
+
+Shared variant Kotlin directories are explicitly registered in Cefrium's AGP 9
+source sets; Java source registration alone does not include the debug reflection
+implementation, its tests, or non-debug stubs. `android/verify-native-debug.init.gradle`
+supports each independent build and checks source/dependency isolation. The 0.8.8
+integration still requires a Cefrium build and live acceptance on the new toolchain.
 
 ---
 

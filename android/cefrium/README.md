@@ -11,15 +11,13 @@ entering Gecko builds.
 
 ## Build
 
-The module pins the Cefrium SDK and Gradle plugin to `0.8.0`, targets arm64, and
+The module pins the Cefrium SDK and Gradle plugin to `0.8.8`, targets arm64, and
 requires Android API 29 or newer.
 
-**`0.8.0` is a required move, not a choice.** The Cefrium Maven registry
-(`https://codeberg.org/api/packages/cefrium/maven`) only ever serves the latest
-release; `0.7.1` has been pruned and no longer resolves
-(`Plugin [id: 'com.cefrium', version: '0.7.1'] was not found`). Cefrium is beta
-with limited maintainer bandwidth and does not keep old versions installable, so
-this module must track whatever is current upstream.
+Maven Central is the preferred source for the pinned SDK and plugin. The
+Codeberg mirror keeps only the latest release; the original migration's `0.8.0`
+artifacts no longer resolve there or on Central. The `0.8.8` SDK and plugin POMs
+have both been verified on Central. Keep both version pins aligned.
 
 **`:cefrium` is no longer a subproject of the root `android/` Gradle build.**
 Cefrium `0.8.0` ships Chromium 152's Java 25 (class-file 69) bytecode, which
@@ -40,9 +38,23 @@ Check free space before starting Gradle and stop if less than 2 GB is available:
 df -Pk .
 cd android/cefrium
 export JAVA_HOME=<a JDK 25 install>      # e.g. Temurin 25; javac must read class-69
-export ANDROID_HOME=<an SDK with platforms;android-37 + build-tools;37.0.0>
+export ANDROID_HOME=<an SDK with platforms;android-37.0 + build-tools;37.0.0>
 ./gradlew testDebugUnitTest assembleDebug
 ```
+
+On Termux, install `openjdk-25` and select
+`JAVA_HOME="$PREFIX/lib/jvm/java-25-openjdk"` for this standalone build only.
+Use `-Pandroid.aapt2FromMavenOverride="$PREFIX/bin/aapt2"` for the native ARM64
+resource compiler. For memory-constrained builds, use `--no-daemon --max-workers=1`,
+`-Dorg.gradle.jvmargs='-Xmx3g -Dfile.encoding=UTF-8'` and
+`-Pkotlin.compiler.execution.strategy=in-process`.
+The current Google command-line tools delegate to an x86-64 native executable,
+which cannot run directly on Termux ARM64; install SDK archives from Google's
+repository with their published checksums instead. Keep existing SDKs intact.
+
+`compileSdk 37` does not raise the device requirement: `minSdk 29` and
+`targetSdk 34` remain unchanged, so Android 15 remains supported. JDK 25 is a
+build-host requirement, not a device runtime requirement.
 
 The debug APK is written to:
 
@@ -68,6 +80,12 @@ few non-obvious traps, recorded here so nobody has to rediscover them:
   with zero errors reported *in* the missing files themselves, since they were
   never fed to the compiler at all. This is easy to misdiagnose as many small
   compile bugs instead of one root cause.
+  This also applies to our shared `debug`, `testDebug`, `release`, and `staging`
+  sources. Debug includes native reflection; release/staging include only the
+  non-debug stubs. Verify the standalone build with
+  `./gradlew -I ../verify-native-debug.init.gradle verifyNativeDebugIsolation`.
+  Gecko uses `./gradlew -I verify-native-debug.init.gradle :app:verifyNativeDebugIsolation`
+  from `android/`. These commands must not share a Gradle invocation.
 - **`android:extractNativeLibs` in the manifest is gone; use
   `packaging { jniLibs { useLegacyPackaging = true } }`** in the build script
   (already the case here) -- AGP 9 rejects the manifest attribute outright.
@@ -108,6 +126,31 @@ DevTools/CDP endpoint), this module is the concrete external use case to design
 against. Filed upstream as SDK feedback alongside this migration.
 
 ## Runtime Shape
+
+`CefriumApplication.attachBaseContext` sets Chromium's
+`--javaless-renderers=disabled` before the SDK's auto-initializing content provider
+runs. The 0.8.8 AAR contains Java-backed sandboxed services but does not include
+`NativeOnlySandboxedProcessService0`; allowing the Javaless Renderers feature to
+select that service caused a fatal `NameNotFoundException` on startup. Existing
+command-line switches are preserved. This is Cefrium-only and should be revisited
+when the SDK's renderer-service packaging is corrected; do not move it into the
+activity or `Application.onCreate`, which run after provider initialization.
+The corrected debug build passed 49 unit tests and launched successfully on a
+Pixel 9 Pro XL over loopback ADB, with Android binding `SandboxedProcessService0`
+and the local launcher rendering. The user subsequently confirmed zoom suppression
+and live operation with the framework running normally. Non-debug variants and
+exhaustive cross-surface regression checks remain separate validation.
+
+Main app, Inspector and Processes browsers call the SDK's
+`setPinchToZoomEnabled(false)` immediately after creation, before loading pages.
+The main surface retains its existing double-tap/selection integration and
+focused-input safeguards. This is a native pinch policy, not a claim that every
+possible page-scale change is suppressed. On 2026-09-18, debug-isolation,
+all 47 unit tests and `assembleDebug` passed on Termux with JDK 25 and SDK 37.
+Google's x86-64 NDK `llvm-strip` could not run on this ARM64 host; Gradle
+packaged `libandroidx.graphics.path.so`, `libcef.so` and
+`libdatastore_shared_counter.so` unstripped. The corrected 49-test debug build
+received user live acceptance as described above.
 
 The app reuses the Android-owned launcher, Settings, asset manager,
 Framework-Shell console, UI IPC client, diagnostics, and persistent-network
@@ -180,7 +223,8 @@ parser in the byte-for-byte relay.
 
 ## Validation Baseline
 
-The desktop Android build environment has verified:
+The earlier desktop Android build environment verified the following baseline;
+this is not acceptance of the current 0.8.8 integration:
 
 - Cefrium unit tests, including local routing, HTTP forwarding, redirect
   rewriting, relay retargeting, and raw upgraded-socket streaming

@@ -342,6 +342,51 @@ Live startup/intelligence and FWS log inspection remain pending coordinated rest
 
 ## Phase 4: Android Debug Runtime And Deferred IME Diagnostics
 
+### Cefrium Upstream Integration (2026-09-18)
+
+- [x] Back up the pre-rebase feature tip as
+  `backup/backend-native-observability-pre-cefrium-20260918` and replay all nine
+  feature commits onto `origin/main` (`6deb791a`, merged maintainer PR #21).
+  Resolve the Compose BOM conflict by preserving the newer BOM and debug reflection.
+- [x] Pin standalone Cefrium SDK/plugin to 0.8.8 and prefer Maven Central;
+  verify both artifact POMs resolve. Keep Gecko's toolchain unchanged.
+- [x] Explicitly register shared debug/testDebug/nonDebug Kotlin source paths
+  for AGP 9 and adapt the debug-isolation script to separate Gradle builds.
+- [x] Disable native pinch-to-zoom through `setPinchToZoomEnabled(false)` at
+  creation of the main, Inspector and Processes Cefrium browsers, before loading.
+  Preserve existing selection, double-tap and focused-input handling.
+- [x] Run Gecko debug-isolation and unit-test tasks successfully after rebase.
+- [x] Run Cefrium debug-isolation, unit tests and APK build on JDK 25 with SDK 37.
+  Termux OpenJDK 25 and SDK 37 are installed alongside the existing toolchains.
+  Debug isolation, all 47 unit tests and `assembleDebug` pass (14m 44s first build).
+  Used native Termux aapt2, one Gradle worker and a 3 GiB in-process compiler heap.
+  APK: `android/cefrium/build/outputs/apk/debug/cefrium-debug.apk` (237 MiB),
+  version `1.0.8-r0.2.349-cefrium` unchanged. Google's x86-64 `llvm-strip` cannot
+  run on this host; Gradle successfully packaged the affected native libraries
+  unstripped. No APK installation or live acceptance is implied.
+- [x] Live acceptance of the Cefrium 0.8.8 debug build with the framework operating
+  normally, confirmed by the user after the startup correction below.
+  Initial debug install exposed a fatal missing `NativeOnlySandboxedProcessService0`.
+  The 0.8.8 AAR ships only Java-backed sandboxed services while Chromium enables
+  Javaless Renderers. Approved correction: Cefrium-only `Application.attachBaseContext`
+  sets `--javaless-renderers=disabled` before the SDK initialization provider;
+  two source wiring tests pass (49 unit tests total), as do debug isolation and
+  APK assembly (1m 20s incremental build). Installed with `adb install -r` and
+  cold-launched on the loopback Pixel 9 Pro XL: launcher rendered, process stayed
+  alive, and Android bound `SandboxedProcessService0` instead of the missing
+  native-only service. The initial smoke check used the offline launcher; the user
+  subsequently confirmed normal framework operation. Existing app data retained.
+- [x] User confirms zoom suppression in the installed build.
+- [ ] Separate non-debug variant/native-debug tooling acceptance and exhaustive
+  three-surface navigation/reopen, selection and keyboard regression checks.
+
+No shared runtime restart or release publication. Debug APK installation and the
+startup smoke check above were explicitly approved. User approved committing and
+pushing the rebased feature branch after live acceptance; use an explicit remote
+SHA lease to protect concurrent changes when publishing the rewritten history.
+
+### Debug Foundation
+
 - [x] Approve shared debug source/ADB/console dispatcher and compilation/tests
   for Gecko and Cefrium. No APK installation, asset publication or version bumps.
 - [x] Select live-object inspection/invocation through Java reflection plus

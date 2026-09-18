@@ -1,7 +1,7 @@
 plugins {
     id("com.android.application") version "9.4.0"
     id("org.jetbrains.kotlin.plugin.compose") version "2.4.10"
-    id("com.cefrium") version "0.8.0"
+    id("com.cefrium") version "0.8.8"
 }
 
 android {
@@ -80,13 +80,25 @@ android {
     }
 
     sourceSets {
-        getByName("testDebug").java.srcDir("../app/src/testDebug/java")
+        // AGP 9 does not infer shared Kotlin sources from java.srcDir.
+        // Keep debug reflection and release stubs isolated in every variant.
+        getByName("testDebug") {
+            java.srcDir("../app/src/testDebug/java")
+            kotlin.srcDir("../app/src/testDebug/java")
+        }
         getByName("debug") {
             java.srcDir("../app/src/debug/java")
+            kotlin.srcDir("../app/src/debug/java")
             manifest.srcFile("../app/src/debug/AndroidManifest.xml")
         }
-        getByName("release").java.srcDir("../app/src/nonDebug/java")
-        getByName("staging").java.srcDir("../app/src/nonDebug/java")
+        getByName("release") {
+            java.srcDir("../app/src/nonDebug/java")
+            kotlin.srcDir("../app/src/nonDebug/java")
+        }
+        getByName("staging") {
+            java.srcDir("../app/src/nonDebug/java")
+            kotlin.srcDir("../app/src/nonDebug/java")
+        }
         getByName("main") {
             java.srcDir("../app/src/main/java")
             kotlin.srcDir("../app/src/main/java")
@@ -104,7 +116,7 @@ dependencies {
     debugImplementation("org.jetbrains.kotlin:kotlin-reflect:2.2.10")
     val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
 
-    implementation("com.cefrium:cefrium-sdk:0.8.0")
+    implementation("com.cefrium:cefrium-sdk:0.8.8")
     implementation("androidx.core:core-ktx:1.16.0")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.browser:browser:1.8.0")
