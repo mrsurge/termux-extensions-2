@@ -116,6 +116,7 @@ dependencies {
     debugImplementation("org.jetbrains.kotlin:kotlin-reflect:2.2.10")
     val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
 
+    compileOnly(files("libs/window-extensions-core-1.0.0.jar"))
     implementation("com.cefrium:cefrium-sdk:0.8.8")
     implementation("androidx.core:core-ktx:1.16.0")
     implementation("androidx.appcompat:appcompat:1.7.0")
