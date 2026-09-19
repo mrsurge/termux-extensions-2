@@ -644,3 +644,25 @@ the executing interpreter, not a frontend flag or user-agent guess.
 - [x] Twelve focused Python runtime-discovery/parallel-startup tests pass.
 - [ ] Live acceptance of automatic selection after worker restart (prior Bun and
   semantic-token acceptance used the explicit testing command).
+
+### Pinned Protocol And Preference-Owned Installation
+
+- [x] Audit: all 30 WBA actor IDs match the pinned 4.130.0 runtime map; code-server
+  spawn callback preceded readiness, but WBA preparation still ran `--version`.
+- [x] Import frozen `pinned-rpc-ids.ts`, explicitly ship it from the WBA build,
+  and document the pinned Code commit and manual actor/upgrade maintenance rule.
+- [x] Remove Python extraction, version subprocess, generated config paths and
+  environment wiring; no runtime JSON/default fallback remains.
+- [x] Add backend-only PreferencesStore installation flag/version/layout; normal
+  startup, snapshots, settings and extension operations use that authority.
+- [x] Migration attempts the known launcher without probing; installation/launch
+  success persists state. Spawn/readiness failure and worker-mode switch clear it,
+  but adapter errors do not. Explicit install may validate/adopt preserved files.
+- [x] Build WBA; test fixed map and Node/Bun MessagePack process startup, migration,
+  missing/stale state, managed layouts, and code-server versus adapter failures.
+  Validation: 54 Python tests, 16 Node tests, 13 Bun tests pass. New strict Python
+  modules/tests are clean; broader touched Python modules retain legacy warnings.
+  WBA TypeScript remains at 108 existing diagnostics, with none added by this slice.
+- [x] User live acceptance: startup bug fixed after the installation/protocol cleanup.
+  No shared runtime was restarted by the agent; language-mode switching was not
+  separately reported for this slice.

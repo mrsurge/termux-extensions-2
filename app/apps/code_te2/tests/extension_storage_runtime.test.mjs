@@ -233,15 +233,12 @@ test(
   },
 );
 
-test("MainThreadStorage uses the generated named nid", () => {
+test("MainThreadStorage uses the pinned map, ignoring runtime config overrides", () => {
   const loaded = loadRpcIds({
-    env: { TE2_RPC_CONFIG_PATH: "/generated/te2_rpc_config.json" },
-    readText: () =>
-      JSON.stringify({
-        code_server_version: "4.130.0",
-        nids: { MainThreadStorage: 61 },
-      }),
+    env: { TE2_RPC_CONFIG_PATH: "/stale/config.json" },
+    readText() { assert.fail("NID discovery is forbidden"); },
   });
-  assert.equal(loaded.ids.MainThreadStorage, 61);
-  assert.match(loaded.source, /1\/\d+ applied/);
+  assert.equal(loaded.ids.MainThreadStorage, 38);
+  assert.match(loaded.source, /pinned code-server 4\.130\.0/);
+  assert.ok(Object.isFrozen(loaded.ids));
 });

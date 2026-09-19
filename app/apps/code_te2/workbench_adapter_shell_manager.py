@@ -667,14 +667,6 @@ async def _ensure_workbench_adapter_shell(
 
     global _active_shell_id, _prepared_shell_id
 
-    # Generate / validate rpc-config.json before launching the adapter.
-    # The adapter reads this file synchronously on startup.
-    try:
-        from .extension_registry import ensure_rpc_config
-        await asyncio.to_thread(ensure_rpc_config)
-    except Exception as exc:
-        log.warning("[adapter] ensure_rpc_config failed: %s", exc)
-
     mgr = await get_manager()
     orch = Orchestrator(mgr)
 
@@ -776,7 +768,6 @@ async def _ensure_workbench_adapter_shell(
                 "CODE_SERVER_WEBVIEW_RECONSTRUCTION": str(
                     paths.code_server_webview_reconstruction_dir
                 ),
-                "CODE_SERVER_RPC_CONFIG": str(paths.code_server_rpc_config_path),
                 "REMOTE_AUTHORITY": remote_authority,
             },
             label=label,

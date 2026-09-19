@@ -92,10 +92,7 @@ class CodeTe2PathTests(unittest.TestCase):
             paths.runtime_root / "code_server.sock",
             paths.code_server_socket_path,
         )
-        self.assertEqual(
-            self.root / "cache" / "code_server" / "probes" / "te2_rpc_config.json",
-            paths.code_server_rpc_config_path,
-        )
+        self.assertFalse(hasattr(paths, "code_server_rpc_config_path"))
 
     def test_history_and_preferences_persist_only_in_canonical_roots(self) -> None:
         env = self._canonical_env()
@@ -229,7 +226,7 @@ class CodeTe2PathTests(unittest.TestCase):
             extension_registry._USER_SETTINGS_PATH,
         )
         self.assertEqual(paths.code_server_registry_path, extension_registry._REGISTRY_PATH)
-        self.assertEqual(paths.code_server_rpc_config_path, extension_registry._RPC_CONFIG_PATH)
+        self.assertFalse(hasattr(paths, "code_server_rpc_config_path"))
         self.assertEqual(
             paths.code_server_data_dir,
             code_server_shell_manager._CODE_SERVER_DATA_DIR,
@@ -264,8 +261,8 @@ class CodeTe2PathTests(unittest.TestCase):
             "TE2_WEBVIEW_RECONSTRUCTION_STORAGE_PATH: ${ctx:CODE_SERVER_WEBVIEW_RECONSTRUCTION}",
             shellspec,
         )
-        self.assertIn(
-            "TE2_RPC_CONFIG_PATH: ${ctx:CODE_SERVER_RPC_CONFIG}",
+        self.assertNotIn(
+            "TE2_RPC_CONFIG_PATH",
             shellspec,
         )
 
@@ -367,15 +364,15 @@ class CodeTe2WorkbenchPathHandoffTests(unittest.IsolatedAsyncioTestCase):
                 "_publish_adapter_state_fact",
                 AsyncMock(),
             ),
-            patch.object(extension_registry, "ensure_rpc_config", return_value={}),
         ):
-            result = await workbench_adapter_shell_manager.ensure_workbench_adapter_shell(
-                "/workspace/example",
-                "http://localhost",
-                "/runtime/code-server.sock",
-            )
-
-        self.assertIs(shell, result)
+            # The fixture deliberately has no live pipe: spawning still gives us
+            # the context to inspect, but the readiness contract must fail.
+            with self.assertRaisesRegex(RuntimeError, "live pipe unavailable"):
+                await workbench_adapter_shell_manager.ensure_workbench_adapter_shell(
+                    "/workspace/example",
+                    "http://localhost",
+                    "/runtime/code-server.sock",
+                )
         call = orchestrator.start_from_ref.await_args
         assert call is not None
         ctx = cast(dict[str, object], call.kwargs["ctx"])
@@ -396,10 +393,7 @@ class CodeTe2WorkbenchPathHandoffTests(unittest.IsolatedAsyncioTestCase):
             str(paths.code_server_webview_reconstruction_dir),
             ctx["CODE_SERVER_WEBVIEW_RECONSTRUCTION"],
         )
-        self.assertEqual(
-            str(paths.code_server_rpc_config_path),
-            ctx["CODE_SERVER_RPC_CONFIG"],
-        )
+        self.assertNotIn("CODE_SERVER_RPC_CONFIG", ctx)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from typing import override
 
@@ -63,11 +64,9 @@ class CodeServerResolutionTests(unittest.TestCase):
         for key in RESOLUTION_ENV_KEYS:
             os.environ.pop(key, None)
         os.environ["XDG_DATA_HOME"] = str(self.root / "data")
-        extension_registry.select_code_server_runtime_installation(None)
 
     @override
     def tearDown(self) -> None:
-        extension_registry.select_code_server_runtime_installation(None)
         for key, value in self.saved_env.items():
             if value is None:
                 os.environ.pop(key, None)
@@ -94,7 +93,7 @@ class CodeServerResolutionTests(unittest.TestCase):
         _make_executable(package_root / "bin" / "code-server")
         vscode_root = _make_vscode_root(package_root)
 
-        installation = extension_registry.resolve_code_server_installation()
+        installation = extension_registry.te2_managed_code_server_installation(extension_registry.PINNED_CODE_SERVER_VERSION)
 
         self.assertIsNotNone(installation)
         assert installation is not None
@@ -120,7 +119,7 @@ class CodeServerResolutionTests(unittest.TestCase):
         launcher.symlink_to(os.path.relpath(payload, start=launcher.parent))
         vscode_root = _make_vscode_root(package_root)
 
-        installation = extension_registry.resolve_code_server_installation()
+        installation = extension_registry.te2_managed_code_server_installation(extension_registry.PINNED_CODE_SERVER_VERSION)
 
         self.assertIsNotNone(installation)
         assert installation is not None
@@ -147,7 +146,7 @@ class CodeServerResolutionTests(unittest.TestCase):
         linked_vscode.parent.mkdir(parents=True)
         linked_vscode.symlink_to(external_vscode, target_is_directory=True)
 
-        installation = extension_registry.resolve_code_server_installation()
+        installation = extension_registry.te2_managed_code_server_installation(extension_registry.PINNED_CODE_SERVER_VERSION)
 
         self.assertIsNotNone(installation)
         assert installation is not None
@@ -161,7 +160,7 @@ class CodeServerResolutionTests(unittest.TestCase):
         os.environ["NVM_BIN"] = str(external.parent)
         os.environ["PREFIX"] = str(self.root / "external")
 
-        self.assertIsNone(extension_registry.resolve_code_server_installation())
+        self.assertIsNone(extension_registry.te2_managed_code_server_installation(extension_registry.PINNED_CODE_SERVER_VERSION))
 
     def test_only_the_pinned_managed_version_is_considered(self) -> None:
         managed_root = Path(os.environ["XDG_DATA_HOME"]) / "te2" / "code_server"
@@ -169,7 +168,7 @@ class CodeServerResolutionTests(unittest.TestCase):
         _make_executable(other_root / "bin" / "code-server")
         _make_vscode_root(other_root)
 
-        self.assertIsNone(extension_registry.resolve_code_server_installation())
+        self.assertIsNone(extension_registry.te2_managed_code_server_installation(extension_registry.PINNED_CODE_SERVER_VERSION))
 
     def test_bundle_and_builtin_discovery_ignore_environment_overrides(self) -> None:
         install_root = (
@@ -186,24 +185,12 @@ class CodeServerResolutionTests(unittest.TestCase):
         os.environ["TE2_EXTENSION_HOST_BUNDLE"] = str(override_bundle)
         os.environ["TE2_BUILTIN_EXTENSIONS_DIR"] = str(self.root / "override")
 
-        installation = extension_registry.resolve_code_server_installation()
+        installation = extension_registry.te2_managed_code_server_installation(extension_registry.PINNED_CODE_SERVER_VERSION)
 
         self.assertIsNotNone(installation)
         assert installation is not None
-        expected_bundle = (
-            vscode_root
-            / "out"
-            / "vs"
-            / "workbench"
-            / "api"
-            / "node"
-            / "extensionHostProcess.js"
-        )
-        self.assertEqual(str(expected_bundle), extension_registry._find_ext_host_bundle())
-        self.assertEqual(
-            str(vscode_root / "extensions"),
-            extension_registry._find_builtin_extensions_dir(),
-        )
+        with patch.object(extension_registry, "resolve_code_server_installation", return_value=installation):
+            self.assertEqual(str(vscode_root / "extensions"), extension_registry._find_builtin_extensions_dir())
         self.assertEqual(launcher, installation.executable)
 
     def test_shellspec_uses_resolved_binary_and_prepends_its_bin_directory(self) -> None:

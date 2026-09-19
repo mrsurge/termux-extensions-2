@@ -39,6 +39,9 @@ class CodeServerBootstrapTests(unittest.TestCase):
         self.root = Path(self.temp_dir.name)
         self.cache_dir = self.root / "cache"
         self.install_prefix = self.root / "data" / "te2" / "code_server" / "4.130.0"
+        clear = patch.object(code_server_bootstrap, "clear_installation")
+        _ = clear.start()
+        self.addCleanup(clear.stop)
 
     @override
     def tearDown(self) -> None:
@@ -61,10 +64,10 @@ class CodeServerBootstrapTests(unittest.TestCase):
         with (
             patch.object(
                 code_server_bootstrap,
-                "te2_managed_code_server_installation",
+                "selected_installation",
                 return_value=managed,
             ),
-            patch.object(code_server_bootstrap, "get_code_server_version") as version,
+            patch.object(code_server_bootstrap.subprocess, "check_output") as version,
         ):
             prerequisite = code_server_bootstrap.inspect_code_server_prerequisite()
             resolved = code_server_bootstrap.ensure_code_server_installation()
@@ -77,7 +80,7 @@ class CodeServerBootstrapTests(unittest.TestCase):
         with (
             patch.object(
                 code_server_bootstrap,
-                "te2_managed_code_server_installation",
+                "selected_installation",
                 return_value=None,
             ),
             patch.object(code_server_bootstrap, "_install_official_code_server") as linux_install,
@@ -100,7 +103,7 @@ class CodeServerBootstrapTests(unittest.TestCase):
         with (
             patch.object(
                 code_server_bootstrap,
-                "te2_managed_code_server_installation",
+                "selected_installation",
                 return_value=managed,
             ),
         ):

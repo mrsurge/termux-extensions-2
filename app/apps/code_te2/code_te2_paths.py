@@ -75,10 +75,6 @@ class CodeTe2Paths:
     def code_server_probe_output_path(self) -> Path:
         return self.te2_cache_root / "code_server" / "probes" / "te2-probe.jsonl"
 
-    @property
-    def code_server_rpc_config_path(self) -> Path:
-        return self.te2_cache_root / "code_server" / "probes" / "te2_rpc_config.json"
-
 
 def resolve_code_te2_paths(
     environ: Mapping[str, str] | None = None,

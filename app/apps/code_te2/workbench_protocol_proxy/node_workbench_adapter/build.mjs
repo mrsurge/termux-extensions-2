@@ -6,6 +6,7 @@ const moduleConfig = {
   entryPoints: [
     "src/protocol/wire-encoding.ts",
     "src/protocol/rpc-ids.ts",
+    "src/protocol/pinned-rpc-ids.ts",
     "src/protocol/pending-requests.ts",
     "src/protocol/ext-host-dispatch.ts",
     "src/client/configuration.ts",

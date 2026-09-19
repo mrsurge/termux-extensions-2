@@ -355,17 +355,21 @@ async def ensure_code_server_shell(
     # Startup and browser priming share one launch owner. The event alone cannot
     # serialize callers after an exited shell has invalidated the fast path.
     async with _spawn_lock:
-        if on_spawned is None:
-            return await _ensure_code_server_shell(project_root)
         notified = False
 
         def notify(record: ShellRecord) -> None:
             nonlocal notified
             if not notified:
                 notified = True
-                on_spawned(record)
+                if on_spawned is not None:
+                    on_spawned(record)
 
         record = await _ensure_code_server_shell(project_root, on_spawned=notify)
+        from .code_server_install_state import record_installation, selected_installation
+
+        installation = selected_installation()
+        if installation is not None:
+            await asyncio.to_thread(record_installation, installation)
         notify(record)  # Adopted shells already completed the startup path.
         return record
 
@@ -467,25 +471,31 @@ async def _ensure_code_server_shell(
         except Exception as exc:
             print(f"[code_server] watcher settings sync failed (non-fatal): {exc}", flush=True)
 
-        shell = await orch.start_from_ref(
-            SHELLSPEC_REF,
-            base_dir=SHELLSPEC_DIR,
-            ctx={
-                "APP_ID": APP_ID,
-                "PROJECT_ROOT": str(repo_root),
-                "PROJECT_HASH": _project_hash(str(repo_root)),
-                "INSTANCE_ID": "primary",
-                "CODE_SERVER_BIN": code_server_bin,
-                "CODE_SERVER_BIN_DIR": str(Path(code_server_bin).parent),
-                "CODE_SERVER_DATA_DIR": str(data_dir),
-                "CODE_SERVER_SOCKET": _expected_socket_path(),
-                "CODE_SERVER_PROBE_OUT": str(_CODE_SERVER_PROBE_OUTPUT_PATH),
-                "NODE_COMPILE_CACHE": await asyncio.to_thread(node_compile_cache, "code-server"),
-            },
-            label=label,
-            record_spec_id=f"service:{APP_ID}:code_server",
-            wait_ready=False,
-        )
+        try:
+            shell = await orch.start_from_ref(
+                SHELLSPEC_REF,
+                base_dir=SHELLSPEC_DIR,
+                ctx={
+                    "APP_ID": APP_ID,
+                    "PROJECT_ROOT": str(repo_root),
+                    "PROJECT_HASH": _project_hash(str(repo_root)),
+                    "INSTANCE_ID": "primary",
+                    "CODE_SERVER_BIN": code_server_bin,
+                    "CODE_SERVER_BIN_DIR": str(Path(code_server_bin).parent),
+                    "CODE_SERVER_DATA_DIR": str(data_dir),
+                    "CODE_SERVER_SOCKET": _expected_socket_path(),
+                    "CODE_SERVER_PROBE_OUT": str(_CODE_SERVER_PROBE_OUTPUT_PATH),
+                    "NODE_COMPILE_CACHE": await asyncio.to_thread(node_compile_cache, "code-server"),
+                },
+                label=label,
+                record_spec_id=f"service:{APP_ID}:code_server",
+                wait_ready=False,
+            )
+        except Exception:
+            from .code_server_install_state import clear_installation
+
+            await asyncio.to_thread(clear_installation)
+            raise
 
         _active_shell_id = shell.id
 
@@ -494,10 +504,16 @@ async def _ensure_code_server_shell(
         if on_spawned is not None:
             on_spawned(shell)
 
-        if await _has_live_pipe(shell):
-            await _wait_for_code_server_readiness(shell.id)
-        else:
-            raise RuntimeError("code-server live pipe unavailable for readiness")
+        try:
+            if await _has_live_pipe(shell):
+                await _wait_for_code_server_readiness(shell.id)
+            else:
+                raise RuntimeError("code-server live pipe unavailable for readiness")
+        except Exception:
+            from .code_server_install_state import clear_installation
+
+            await asyncio.to_thread(clear_installation)
+            raise
 
         return shell
     finally:

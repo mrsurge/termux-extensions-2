@@ -12,18 +12,19 @@ with TE2's generated language gates into code-server User/settings.json.
 
 import json
 import os
-import re
 import subprocess
 import tempfile
 import time
-from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
-from typing import Final, TypeAlias, cast
+from typing import TypeAlias, cast
 
-from app.te2_paths import te2_data_home
 
 from .code_te2_paths import code_te2_paths
+from .code_server_identity import (
+    CodeServerInstallation as CodeServerInstallation,
+    PINNED_CODE_SERVER_VERSION as PINNED_CODE_SERVER_VERSION,
+    te2_managed_code_server_root as te2_managed_code_server_root,
+)
 
 JsonValue: TypeAlias = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
 JsonObject: TypeAlias = dict[str, JsonValue]
@@ -40,8 +41,7 @@ _CODE_SERVER_DATA_DIR = _CODE_TE2_PATHS.code_server_data_dir
 _EXTENSIONS_DIR = _CODE_TE2_PATHS.code_server_extensions_dir
 _USER_SETTINGS_PATH = _CODE_TE2_PATHS.code_server_user_settings_path
 _REGISTRY_PATH = _CODE_TE2_PATHS.code_server_registry_path
-_RPC_CONFIG_PATH = _CODE_TE2_PATHS.code_server_rpc_config_path
-PINNED_CODE_SERVER_VERSION: Final = "4.130.0"
+
 
 
 def _json_object_from_text(text: str) -> JsonObject | None:
@@ -144,24 +144,14 @@ def _write_json_object_atomic(path: Path, value: dict[str, object]) -> None:
             temp_path.unlink(missing_ok=True)
 
 
-@dataclass(frozen=True)
-class CodeServerInstallation:
-    executable: Path
-    vscode_root: Path | None
-    source: str
-
-
 def _path_is_executable(path: Path) -> bool:
     return path.is_file() and os.access(path, os.X_OK)
-
-
-def te2_managed_code_server_root() -> Path:
-    return (te2_data_home() / "code_server").resolve()
 
 
 def te2_managed_code_server_installation(
     version: str,
 ) -> CodeServerInstallation | None:
+    """Validate package files only during explicit installation, never startup."""
     install_root = te2_managed_code_server_root() / version
     executable = install_root / "bin" / "code-server"
     if not _path_is_executable(executable):
@@ -198,26 +188,10 @@ def te2_managed_code_server_installation(
     )
 
 
-def select_code_server_runtime_installation(
-    installation: CodeServerInstallation | None,
-) -> None:
-    """Invalidate the managed installation cache after install or removal."""
-    if installation is not None:
-        expected = (
-            te2_managed_code_server_root()
-            / PINNED_CODE_SERVER_VERSION
-            / "bin"
-            / "code-server"
-        ).resolve(strict=False)
-        actual = installation.executable.resolve(strict=False)
-        if actual != expected:
-            raise ValueError(f"Code TE2 only accepts its managed Code Server: {actual}")
-    resolve_code_server_installation.cache_clear()
-
-
-@lru_cache(maxsize=1)
 def resolve_code_server_installation() -> CodeServerInstallation | None:
-    return te2_managed_code_server_installation(PINNED_CODE_SERVER_VERSION)
+    from .code_server_install_state import selected_installation
+
+    return selected_installation()
 
 
 def resolve_code_server_executable() -> str | None:
@@ -243,397 +217,6 @@ def _find_builtin_extensions_dir() -> str:
         / ".missing"
         / "extensions"
     )
-
-# ── RPC Config (nid auto-discovery) ───────────────────────────────────
-#
-# The workbench adapter hardcodes ~13 numeric rpcIds (protocol identifiers)
-# from VS Code's extHost.protocol.ts.  These shift when VS Code adds/removes
-# createProxyIdentifier() calls.  We auto-extract them from the installed
-# code-server bundle and cache in te2_rpc_config.json.
-
-_ADAPTER_REQUIRED_NIDS = frozenset({
-    "MainThreadConsole",
-    "MainThreadCommands",
-    "MainThreadLogger",
-    "MainThreadMessageService",
-    "MainThreadOutputService",
-    "MainThreadStatusBar",
-    "MainThreadTextEditors",
-    "MainThreadWebviews",
-    "MainThreadWebviewPanels",
-    "MainThreadWebviewViews",
-    "MainThreadExtensionService",
-    "ExtHostConfiguration",
-    "ExtHostCommands",
-    "ExtHostDocumentsAndEditors",
-    "ExtHostDocuments",
-    "ExtHostEditors",
-    "ExtHostFileSystemInfo",
-    "ExtHostLanguages",
-    "ExtHostLanguageFeatures",
-    "ExtHostStatusBar",
-    "ExtHostExtensionService",
-    "ExtHostWorkspace",
-    "ExtHostEditorTabs",
-    "ExtHostOutputService",
-    "ExtHostWebviews",
-    "ExtHostWebviewPanels",
-    "ExtHostWebviewViews",
-})
-
-_JS_IDENTIFIER = r"[A-Za-z_$][A-Za-z0-9_$]*"
-
-
-class NidExtractionError(ValueError):
-    pass
-
-
-@dataclass(frozen=True)
-class NidExtractionResult:
-    nids: dict[str, int]
-    strategy: str
-    source_path: str
-
-
-def _find_ext_host_bundle(installation: CodeServerInstallation | None = None) -> str | None:
-    """Locate extensionHostProcess.js from the installed code-server."""
-    installation = installation or resolve_code_server_installation()
-    if installation is None or installation.vscode_root is None:
-        return None
-    bundle = (
-        installation.vscode_root
-        / "out" / "vs" / "workbench" / "api" / "node" / "extensionHostProcess.js"
-    )
-    return str(bundle) if bundle.is_file() else None
-
-
-def _find_ext_host_protocol_source(
-    installation: CodeServerInstallation | None = None,
-) -> str | None:
-    installation = installation or resolve_code_server_installation()
-    if installation is None or installation.vscode_root is None:
-        return None
-    source = (
-        installation.vscode_root
-        / "src" / "vs" / "workbench" / "api" / "common" / "extHost.protocol.ts"
-    )
-    return str(source) if source.is_file() else None
-
-
-def get_code_server_version(installation: CodeServerInstallation | None = None) -> JsonObject | None:
-    """Run ``code-server --version`` and return package, commit, and Code versions."""
-    installation = installation or resolve_code_server_installation()
-    if installation is None:
-        return None
-    try:
-        out = subprocess.check_output(
-            [str(installation.executable), "--version"],
-            text=True,
-            timeout=5,
-            stderr=subprocess.DEVNULL,
-            env=_code_server_subprocess_env(installation),
-        )
-        # Output may be multi-line or single-line:
-        #   "4.109.2\n9184b645...\nwith Code 1.109.2"      (multi-line)
-        #   "4.109.2 9184b645... with Code 1.109.2"        (single-line)
-        text = out.strip()
-        package_match = re.search(r"(?m)^\s*(\d+\.\d+\.\d+)\b", text)
-        commit_match = re.search(r"\b([0-9a-f]{6,64})\b", text, re.IGNORECASE)
-        code_match = re.search(
-            r"\bwith\s+Code\s+(\d+\.\d+(?:\.\d+)?)\b",
-            text,
-            re.IGNORECASE,
-        )
-        if package_match and commit_match:
-            result: JsonObject = {
-                "version": package_match.group(1),
-                "commit": commit_match.group(1),
-            }
-            if code_match:
-                result["code_version"] = code_match.group(1)
-            return result
-    except Exception:
-        pass
-    return None
-
-
-_get_code_server_version = get_code_server_version
-
-
-def _balanced_js_object(content: str, open_brace: int, label: str) -> tuple[str, int]:
-    depth = 0
-    quote: str | None = None
-    escaped = False
-    for index in range(open_brace, len(content)):
-        char = content[index]
-        if quote is not None:
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == quote:
-                quote = None
-            continue
-        if char in {'"', "'", "`"}:
-            quote = char
-        elif char == "{":
-            depth += 1
-        elif char == "}":
-            depth -= 1
-            if depth == 0:
-                return content[open_brace + 1:index], index + 1
-    raise NidExtractionError(f"{label} object is not balanced")
-
-
-def _minified_proxy_object(
-    content: str,
-    *,
-    anchor: str,
-    label: str,
-    start: int = 0,
-    expected_factory: str | None = None,
-) -> tuple[str, str, int]:
-    pattern = re.compile(
-        rf"(?P<object>{_JS_IDENTIFIER})\s*=\s*\{{\s*"
-        + rf"{re.escape(anchor)}\s*:\s*(?P<factory>{_JS_IDENTIFIER})\s*\(\s*"
-        + rf"(?P<quote>['\"]){re.escape(anchor)}(?P=quote)"
-    )
-    match = pattern.search(content, pos=start)
-    if match is None:
-        raise NidExtractionError(f"{label} object anchor {anchor!r} was not found")
-    factory = match.group("factory")
-    if expected_factory is not None and factory != expected_factory:
-        raise NidExtractionError(
-            f"{label} factory {factory!r} does not match MainContext factory {expected_factory!r}"
-        )
-    open_brace = content.find("{", match.start("object"), match.end())
-    if open_brace < 0:
-        raise NidExtractionError(f"{label} opening brace was not found")
-    body, end = _balanced_js_object(content, open_brace, label)
-    return body, factory, end
-
-
-def _minified_proxy_entries(body: str, factory: str, label: str) -> list[str]:
-    pattern = re.compile(
-        rf"(?P<key>{_JS_IDENTIFIER})\s*:\s*{re.escape(factory)}\s*\(\s*"
-        + rf"(?P<quote>['\"])(?P<sid>{_JS_IDENTIFIER})(?P=quote)\s*\)"
-    )
-    entries = [match.group("key") for match in pattern.finditer(body)]
-    if not entries:
-        raise NidExtractionError(f"{label} contains no proxy identifier entries")
-    return entries
-
-
-def _build_nid_map(main_entries: list[str], ext_entries: list[str]) -> dict[str, int]:
-    ordered = [*main_entries, *ext_entries]
-    if len(set(ordered)) != len(ordered):
-        raise NidExtractionError("proxy identifier objects contain duplicate property keys")
-    return {name: index for index, name in enumerate(ordered, start=1)}
-
-
-def _extract_nids_from_bundle_result(bundle_path: str) -> NidExtractionResult:
-    try:
-        content = Path(bundle_path).read_text(encoding="utf-8", errors="ignore")
-    except OSError as exc:
-        raise NidExtractionError(f"failed to read minified bundle: {exc}") from exc
-
-    main_body, factory, main_end = _minified_proxy_object(
-        content,
-        anchor="MainThreadAuthentication",
-        label="MainContext",
-    )
-    ext_body, _, _ = _minified_proxy_object(
-        content,
-        anchor="ExtHostCodeMapper",
-        label="ExtHostContext",
-        start=main_end,
-        expected_factory=factory,
-    )
-    return NidExtractionResult(
-        nids=_build_nid_map(
-            _minified_proxy_entries(main_body, factory, "MainContext"),
-            _minified_proxy_entries(ext_body, factory, "ExtHostContext"),
-        ),
-        strategy=f"minified-proxy-objects:{factory}",
-        source_path=bundle_path,
-    )
-
-
-def _source_proxy_entries(content: str, object_name: str) -> list[str]:
-    declaration = re.search(
-        rf"export\s+const\s+{re.escape(object_name)}\s*=\s*\{{",
-        content,
-    )
-    if declaration is None:
-        raise NidExtractionError(f"source {object_name} declaration was not found")
-    open_brace = content.find("{", declaration.start(), declaration.end())
-    body, _ = _balanced_js_object(content, open_brace, f"source {object_name}")
-    pattern = re.compile(
-        rf"(?m)^\s*(?P<key>{_JS_IDENTIFIER})\s*:\s*createProxyIdentifier"
-        + rf"(?:<[^\n]*?>)?\s*\(\s*(?P<quote>['\"])(?P<sid>{_JS_IDENTIFIER})"
-        + rf"(?P=quote)\s*\)"
-    )
-    entries = [match.group("key") for match in pattern.finditer(body)]
-    if not entries:
-        raise NidExtractionError(f"source {object_name} contains no proxy identifier entries")
-    return entries
-
-
-def _extract_nids_from_protocol_source_result(source_path: str) -> NidExtractionResult:
-    try:
-        content = Path(source_path).read_text(encoding="utf-8", errors="ignore")
-    except OSError as exc:
-        raise NidExtractionError(f"failed to read protocol source: {exc}") from exc
-    return NidExtractionResult(
-        nids=_build_nid_map(
-            _source_proxy_entries(content, "MainContext"),
-            _source_proxy_entries(content, "ExtHostContext"),
-        ),
-        strategy="extHost.protocol.ts",
-        source_path=source_path,
-    )
-
-
-def ensure_rpc_config() -> dict[str, int]:
-    """Version-gated rpc-config.json generation.
-
-    Returns the nids dict (from cache or freshly extracted).
-    Returns empty dict on failure (adapter falls back to hardcoded defaults).
-    """
-    installation = resolve_code_server_installation()
-    version_info = get_code_server_version(installation)
-    if not version_info:
-        print("[rpc-config] code-server not found, skipping", flush=True)
-        return {}
-    assert installation is not None
-    print(
-        "[rpc-config] resolved code-server "
-        + f"source={installation.source} executable={installation.executable} "
-        + f"vscode_root={installation.vscode_root or 'unresolved'}",
-        flush=True,
-    )
-
-    # Check existing config
-    if _RPC_CONFIG_PATH.exists():
-        try:
-            existing = _json_object_from_text(_RPC_CONFIG_PATH.read_text()) or {}
-            if (
-                existing.get("code_server_version") == version_info["version"]
-                and existing.get("code_server_commit") == version_info["commit"]
-            ):
-                nids = {key: int(value) for key, value in _object_dict(existing.get("nids", {})).items() if isinstance(value, int)}
-                missing = _ADAPTER_REQUIRED_NIDS - set(nids)
-                if 100 <= len(nids) <= 300 and not missing:
-                    print(
-                        f"[rpc-config] cache hit — {len(nids)} nids (code-server {version_info['version']})",
-                        flush=True,
-                    )
-                    return nids
-                print(
-                    "[rpc-config] cache is incomplete "
-                    + f"count={len(nids)} missing={sorted(missing)} — regenerating",
-                    flush=True,
-                )
-            print(
-                f"[rpc-config] version mismatch: cached={existing.get('code_server_version')} installed={version_info['version']} — regenerating",
-                flush=True,
-            )
-        except Exception:
-            print("[rpc-config] corrupt config file, regenerating", flush=True)
-
-    extraction: NidExtractionResult | None = None
-    extraction_errors: list[str] = []
-
-    # Prefer the exact installed bundle used by the extension host.
-    bundle = _find_ext_host_bundle(installation)
-    if bundle:
-        print(f"[rpc-config] parsing nids from {bundle}", flush=True)
-        try:
-            extraction = _extract_nids_from_bundle_result(bundle)
-        except NidExtractionError as exc:
-            extraction_errors.append(f"bundle: {exc}")
-    else:
-        print(
-            "[rpc-config] extensionHostProcess.js not found for "
-            + f"{installation.executable}",
-            flush=True,
-        )
-
-    # Some source/package layouts also ship extHost.protocol.ts. Use it as a
-    # fallback and cross-check the minified order when both forms are present.
-    protocol_source = _find_ext_host_protocol_source(installation)
-    source_extraction: NidExtractionResult | None = None
-    if protocol_source:
-        try:
-            source_extraction = _extract_nids_from_protocol_source_result(protocol_source)
-        except NidExtractionError as exc:
-            extraction_errors.append(f"source: {exc}")
-    if extraction is None and source_extraction is not None:
-        extraction = source_extraction
-        print(f"[rpc-config] using protocol source fallback {protocol_source}", flush=True)
-    elif extraction is not None and source_extraction is not None:
-        if extraction.nids != source_extraction.nids:
-            print(
-                "[rpc-config] ABORT — minified bundle nid order disagrees with "
-                + f"protocol source {protocol_source}",
-                flush=True,
-            )
-            return _load_stale_nids()
-
-    if extraction is None:
-        detail = "; ".join(extraction_errors) or "no bundle or protocol source was parseable"
-        print(f"[rpc-config] extraction failed — {detail}", flush=True)
-        return {}
-    nids = extraction.nids
-    print(
-        f"[rpc-config] extracted {len(nids)} nids "
-        + f"strategy={extraction.strategy} source={extraction.source_path}",
-        flush=True,
-    )
-
-    # Validate: all 13 adapter-required names must be present
-    missing = _ADAPTER_REQUIRED_NIDS - set(nids.keys())
-    if missing:
-        print(f"[rpc-config] ABORT — missing required nids: {missing}", flush=True)
-        return _load_stale_nids()
-
-    # Validate: entry count in reasonable range
-    count = len(nids)
-    if not (100 <= count <= 300):
-        print(f"[rpc-config] ABORT — suspicious entry count {count} (expected 100-300)", flush=True)
-        return _load_stale_nids()
-
-    # Write config
-    config = {
-        "code_server_version": version_info["version"],
-        "code_server_commit": version_info["commit"],
-        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "extraction_strategy": extraction.strategy,
-        "extraction_source": extraction.source_path,
-        "nids": nids,
-    }
-    try:
-        _RPC_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        _RPC_CONFIG_PATH.write_text(json.dumps(config, indent=2))
-        print(
-            f"[rpc-config] wrote {count} nids → {_RPC_CONFIG_PATH} (code-server {version_info['version']})",
-            flush=True,
-        )
-    except Exception as exc:
-        print(f"[rpc-config] failed to write config: {exc}", flush=True)
-
-    return nids
-
-
-def _load_stale_nids() -> dict[str, int]:
-    """Try to return nids from an existing (possibly stale) config file."""
-    if _RPC_CONFIG_PATH.exists():
-        try:
-            existing = _json_object_from_text(_RPC_CONFIG_PATH.read_text()) or {}
-            return {key: int(value) for key, value in _object_dict(existing.get("nids", {})).items() if isinstance(value, int)}
-        except Exception:
-            pass
-    return {}
 
 # Extensions we never load — they spawn processes or do filesystem ops
 # that hang in our headless environment
@@ -1033,7 +616,7 @@ def load_registry() -> Registry:
     except OSError:
         return _empty_registry()
     if isinstance(data, dict) and "extensions" in data:
-        registry = dict(data)
+        registry: Registry = dict(data)
         if _migrate_registry_user_settings(registry):
             # A failed migration write must remain visible instead of silently
             # presenting an empty registry and risking a destructive rebuild.

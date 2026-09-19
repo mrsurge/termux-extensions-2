@@ -19,10 +19,12 @@ from app.te2_paths import te2_cache_home
 from .extension_registry import (
     CodeServerInstallation,
     PINNED_CODE_SERVER_VERSION,
-    get_code_server_version,
-    select_code_server_runtime_installation,
     te2_managed_code_server_installation,
     te2_managed_code_server_root,
+)
+from .code_server_install_state import (
+    clear_installation,
+    record_installation, selected_installation,
 )
 
 
@@ -145,7 +147,7 @@ def _assess_installation(
 
 
 def inspect_code_server_prerequisite() -> CodeServerPrerequisite:
-    managed = te2_managed_code_server_installation(REQUIRED_CODE_SERVER_VERSION)
+    managed = selected_installation()
     return _assess_installation(managed)
 
 
@@ -477,12 +479,7 @@ def _install_android_code_server(cache_dir: Path, install_prefix: Path) -> None:
 def _verify_bootstrapped_installation(
     installation: CodeServerInstallation,
 ) -> CodeServerInstallation:
-    version_info = get_code_server_version(installation) or {}
-    package_version = str(version_info.get("version") or "")
-    if package_version != REQUIRED_CODE_SERVER_VERSION:
-        reported = package_version or "unknown"
-        message = f"The private Code Server executable reported package version {reported} instead of {REQUIRED_CODE_SERVER_VERSION}: {installation.executable}"
-        raise CodeServerBootstrapError(message)
+    # Validate the newly installed package, not by launching a second server.
     prerequisite = _assess_installation(installation)
     if not prerequisite.compatible:
         message = f"The private Code Server installation is not compatible: {prerequisite.reason}"
@@ -492,10 +489,6 @@ def _verify_bootstrapped_installation(
 
 def install_code_server_installation() -> CodeServerInstallation:
     """Install the pinned private runtime after the frontend obtains consent."""
-    prerequisite = inspect_code_server_prerequisite()
-    if prerequisite.compatible and prerequisite.installation is not None:
-        return prerequisite.installation
-
     cache_dir = code_server_bootstrap_cache_dir()
     cache_dir.mkdir(parents=True, exist_ok=True)
     install_prefix = code_server_install_prefix()
@@ -503,9 +496,13 @@ def install_code_server_installation() -> CodeServerInstallation:
 
     with lock_path.open("a+b") as lock_file:
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-        prerequisite = inspect_code_server_prerequisite()
-        if prerequisite.compatible and prerequisite.installation is not None:
-            return prerequisite.installation
+        # Explicit install may adopt a preserved package (web-worker mode does
+        # not delete it). Disk validation belongs only to this consented path.
+        preserved = te2_managed_code_server_installation(REQUIRED_CODE_SERVER_VERSION)
+        if preserved is not None and preserved.vscode_root is not None:
+            verified = _verify_bootstrapped_installation(preserved)
+            record_installation(verified)
+            return verified
 
         if _is_termux_android():
             _install_android_code_server(cache_dir, install_prefix)
@@ -522,7 +519,7 @@ def install_code_server_installation() -> CodeServerInstallation:
             message = f"Code Server installation completed, but the private launcher was not usable: {launcher}"
             raise CodeServerBootstrapError(message)
         verified = _verify_bootstrapped_installation(installed)
-        select_code_server_runtime_installation(verified)
+        record_installation(verified)
         return verified
 
 
@@ -536,7 +533,6 @@ def remove_code_server_installation() -> bool:
     with lock_path.open("a+b") as lock_file:
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
         existed = install_prefix.exists() or install_prefix.is_symlink()
-        select_code_server_runtime_installation(None)
         _remove_path(install_prefix)
-        select_code_server_runtime_installation(None)
+        clear_installation()
         return existed

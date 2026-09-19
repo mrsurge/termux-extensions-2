@@ -194,6 +194,21 @@ class PreferencesStore:
     # ---------------------------------------------------------------------
     # public API
 
+    def get_code_server_installation(self) -> JsonDict | None:
+        """Backend-owned installation ledger; absent means pre-ledger migration."""
+        with self._lock:
+            raw = self._read_from_disk().get("codeServerInstallation")
+            return _as_dict(cast(object, raw)) if isinstance(raw, dict) else None
+
+    def set_code_server_installation(self, state: JsonDict) -> None:
+        # Kept outside editable UI preferences so clients cannot claim an install.
+        with self._lock:
+            data = self._read_from_disk()
+            if data.get("codeServerInstallation") == state:
+                return
+            data["codeServerInstallation"] = dict(state)
+            self._write_to_disk(data)
+
     def get_preferences(self, project_path: str | None = None) -> JsonDict:
         """Read preferences directly from disk - NO cache, NO defaults merged."""
         with self._lock:
@@ -239,6 +254,10 @@ class PreferencesStore:
                     if key in DEFAULT_UI_PREFS:
                         ui_store[key] = value
                 data["ui"] = ui_store
+                # Mode and availability change atomically, regardless of which
+                # preference entrypoint initiated the switch. Package files stay.
+                if ui.get("webWorkersEnabled") is True:
+                    data["codeServerInstallation"] = {"installed": False}
 
             project_result: JsonDict = {}
             if project:

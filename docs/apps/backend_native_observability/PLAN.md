@@ -505,6 +505,16 @@ Bun and otherwise Node; explicit executable overrides remain authoritative. Use
 portable shellspec context, with no discovery subprocess on the launch path.
 No shared-runtime restart is implied.
 
+Approved startup cleanup: remove Python NID extraction/version subprocesses and
+WBA runtime JSON overrides. Ship `src/protocol/pinned-rpc-ids.ts` as an explicit
+build entry/import for the managed Code pin. Persist installation availability,
+version and package layout in backend-owned PreferencesStore state. Normal runtime
+callers derive paths from that record, not filesystem discovery. Missing records
+attempt one known managed launch for migration; successful install/launch records
+availability, code-server spawn/readiness failure and web-worker selection clear
+it. WBA/LSP errors must not clear the installation flag. Preserve installed files
+on mode changes; validate/adopt them only through explicit installer consent.
+
 Use strict Python types/Basedpyright and focused tests for changed Python paths;
 Rust formatting/check/tests for changed framework contracts; Code TE2 frontend
 tests, typecheck and build for browser changes. Android validation follows the

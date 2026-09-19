@@ -120,7 +120,7 @@ test('real adapter drains accepted pipe RPCs before exiting at EOF', { timeout: 
   const child = spawn(process.execPath, [fileURLToPath(new URL('../workbench_protocol_proxy/node_workbench_adapter/dist/server/server.mjs', import.meta.url))], {
     env: { ...process.env, TE2_ADAPTER_HOST: '127.0.0.1', TE2_ADAPTER_PORT: '0', TE2_RUNTIME_DEBUG: '0',
       TE2_EXTENSION_STORAGE_PATH: join(dir, 'extensions'),
-      TE2_WEBVIEW_RECONSTRUCTION_STORAGE_PATH: join(dir, 'webviews'), TE2_RPC_CONFIG_PATH: '',
+      TE2_WEBVIEW_RECONSTRUCTION_STORAGE_PATH: join(dir, 'webviews'),
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   });

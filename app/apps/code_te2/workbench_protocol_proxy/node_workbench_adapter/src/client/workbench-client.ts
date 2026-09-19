@@ -369,11 +369,7 @@ const EXT_MSG_TRACE_EVERY = Number(
 );
 const EXT_MSG_TRACE_MAX = Number(process.env.TE2_EXT_MSG_TRACE_MAX ?? "2000");
 
-const _loadedRpcIds = loadRpcIds({
-  env: process.env,
-  readText: (filePath) => readFileSync(filePath, "utf8"),
-  log: (message) => console.log(message),
-});
+const _loadedRpcIds = loadRpcIds();
 const _rpcIds = _loadedRpcIds.ids;
 const _rpcConfigSource = _loadedRpcIds.source;
 

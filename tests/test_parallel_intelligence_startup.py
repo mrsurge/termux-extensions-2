@@ -8,12 +8,18 @@ from typing import cast
 from unittest.mock import AsyncMock, patch
 from framework_shells.record import ShellRecord
 
+from app.apps.code_te2 import code_server_install_state
 from app.apps.code_te2 import intelligence_startup as startup
 from app.apps.code_te2 import workbench_adapter_shell_manager as adapter
 from app.apps.code_te2 import code_server_shell_manager as code_server
 
 
 class ParallelStartupTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        selected = patch.object(code_server_install_state, "selected_installation", return_value=None)
+        _ = selected.start()
+        self.addCleanup(selected.stop)
+
     async def test_spawn_callback_runs_once_for_fresh_or_adopted_shell(self) -> None:
         record = cast(code_server.ShellRecord, object())
         for fresh in (False, True):
