@@ -160,6 +160,20 @@ For `code_te2`, we intentionally separate responsibilities:
 - **Execution**:
   - Worker owns drafts/saves/versioning and host/explorer state.
   - Rust pipe services own filesystem, Git, and search DTO production.
+  - Explorer delivery passes completed message mappings through
+    `ExplorerConnection.send_message` in `explorer/transport/connection_manager.py`.
+    The manager selects project/client/personal recipients; the concrete
+    `rpc_socketio.py` adapter encodes MessagePack notifications or completes a
+    pending acknowledgement. There is no internal JSON text round trip. Existing
+    project-miss all-client fallback and single-project authority are unchanged;
+    this boundary does not yet remove FastAPI or extract all editor/Sidebar transport.
+  - `monaco_editor/editor_session_service.py` owns editor bootstrap ordering and
+    result-derived notification policy, using injected readers and delivery
+    callbacks. It emits logical connection/client targets, not socket rooms.
+    `editor_rpc_socketio.py` retains authentication, registration, room lookup,
+    dispatch wiring and wire encoding. State snapshot precedes best-effort adapter
+    state/open-state publication; jump/baseline notifications reach the client,
+    draft comparison reaches only the requester, and pushes precede the RPC reply.
   - `code-server` owns extension execution and remote-agent services.
   - Node workbench adapter owns protocol translation, provider state, editor-facing WBA RPC/events, and backend stdio control hooks.
 

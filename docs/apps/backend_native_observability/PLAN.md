@@ -291,7 +291,7 @@ cold readiness, import cost, event-loop responsiveness, IPC cost, peak memory an
 first-use latency. Prototype one lane without changing its frontend contract;
 do not migrate all lanes or remove FastAPI until evidence and separate approval.
 
-### DTO Boundary Follow-Up (Deferred)
+### DTO Boundary Follow-Up (Resumed)
 
 The lifecycle checkpoint is live accepted. Keep the present networking process:
 no multiprocessing cutover is needed for current performance. Explorer already
@@ -299,10 +299,32 @@ uses application-owned facts, generation guards and projectors; reuse these,
 not a second event bus. The remaining extraction is completed DTO plus logical
 recipient -> injected delivery -> connection lookup and wire encoding. Preserve
 the single-backend/single-project shared working set and existing all-client
-fallback; foreground focus remains client-specific. Future work removes the
-Explorer JSON text round trip, extracts editor connect/result orchestration and
-Sidebar transport coupling, and tests DTO generation independently of sockets.
-No such DTO extraction is part of the pipe codec change below.
+fallback; foreground focus remains client-specific. The first slice removes the
+Explorer JSON text round trip: registered `ExplorerConnection` implementations
+accept completed message mappings through `send_message`, and the Socket.IO
+adapter alone encodes notifications. Pending replies retain their acknowledgement
+path. The existing manager supplies project/client/personal recipient lookup;
+no parallel event bus or queue is introduced. Routing tests inject recording
+connections without requiring live sockets.
+
+The next bounded slice extracts editor connect/result orchestration into
+`monaco_editor/editor_session_service.py`. Bootstrap snapshot, adapter-state and
+open-state publication retain their order and existing mandatory/best-effort
+semantics. Result-derived notifications use logical connection/client recipients
+and precede the reply. The adapter still owns authentication, room membership,
+identity registration, wire encoding, request dispatch wiring and error envelopes;
+this is not full editor transport removal. Snapshot readers and delivery functions
+are injected, and the service imports neither FastAPI nor Socket.IO.
+
+Next, extract remaining editor delivery/envelope coupling and Sidebar transport coupling.
+Audit actual HTTP consumers before replacing or removing FastAPI routes. Keep
+Uvicorn/Socket.IO in the same process during extraction; a thin ASGI transport
+replacement is a separately approved phase, not a prerequisite for this slice.
+Validate untrusted input at the boundary even when internal DTOs are statically
+typed. FastAPI removal from Code TE2 does not remove the Terminal/MCP Pydantic
+dependencies. Only after the service boundary is stable, evaluate selective
+mypyc compilation with measured hot paths; compilation and multiprocessing are
+not part of this change. The pipe codec change below is a separate workstream.
 
 ### MessagePack Process-Pipe Cutover (Approved)
 
@@ -394,6 +416,18 @@ projection delivery. Distinguish intentionally retained working sets from leaks.
 
 Exit: documented findings and targeted corrections, or an explicit evidence-based
 decision that a suspected path needs no change. No invented performance claim.
+
+## Follow-Up: Android Second Editor Regression
+
+User report and follow-up (2026-09-19): the second editor window does not open in
+either the GeckoView or Cefrium APK. This supersedes the original GeckoView-only
+observation. Investigation is deferred at user request. A change on or after the
+last release is suspected, but neither the regression commit nor its cause is
+established. Shared frontend/Python source may be responsible, so do not assume
+a native-only defect. Compare opening intent, backend routing/state projection,
+and secondary-editor presentation with a working client before choosing a fix.
+This records an investigation item, not an approved Android edit/build scope,
+and is independent of the live-accepted Explorer DTO delivery slice.
 
 ## Phase 4: Android Native Debug Runtime And Deferred IME Diagnostics
 

@@ -247,6 +247,59 @@ Remaining inventory includes projector tasks, request/client dependencies and
 typed cross-process DTOs. No multiprocessing or transport migration is approved
 by completion of this boundary alone.
 
+### DTO Boundary Resumption: Explorer Delivery
+
+- [x] Trace the current Explorer delivery path and its internal JSON encode/decode
+  round trip; retain existing facts, projectors and single-project authority.
+- [x] Replace `ExplorerConnection.send_text` with typed `send_message`; pass DTOs
+  through the existing injected connection interface. Socket.IO owns MessagePack
+  notification encoding; pending request acknowledgement behavior is unchanged.
+- [x] Preserve project/client/personal addressing and the all-client fallback.
+  Snapshot broadcast recipients so a disconnect during delivery cannot skip peers.
+- [x] Remove obsolete JSON parsing/byte timing fields; retain real wire encoding
+  and emit/queue diagnostics. Document the boundary and subsequent phases.
+- [x] Validation: 42 focused delivery, codec, project-switch, comparison/history,
+  live changes and second-window tests pass. Basedpyright reports zero errors;
+  nine existing warnings remain in the adapter stub and older codec test file.
+- [x] User reports live acceptance of the Explorer DTO delivery slice (2026-09-19).
+  Specific multi-client scenarios were not separately reported.
+- [ ] Extract editor connect/result orchestration and Sidebar delivery coupling.
+- [ ] Inventory route consumers and remaining lifecycle/dependency ownership;
+  propose the thin ASGI replacement before removing FastAPI.
+- [ ] After separation, benchmark selective mypyc compilation of typed hot paths.
+
+No browser wire changes, frontend build, shared runtime restart, dependency
+removal or multiprocessing cutover was performed in the Explorer slice.
+
+### Editor Session/Result Orchestration
+
+- [x] Extract bootstrap and result-notification policy into the transport-free
+  `editor_session_service.py`, with typed readers and delivery callbacks.
+- [x] Keep authentication, connection identity, room membership, MessagePack and
+  error encoding in the adapter. Preserve notification-before-reply ordering,
+  client-wide jump/baseline updates and requester-only draft comparison updates.
+- [x] Test fresh reconnect snapshots, secondary identity, optional adapter failure,
+  mandatory delivery failure, cancellation, result scope/order, encoded envelopes,
+  room registration before bootstrap and identity cleanup on disconnect.
+- [x] Validation: 52 focused tests pass; changed editor modules and new tests have
+  zero Basedpyright errors or warnings. Existing Explorer edits are preserved.
+- [x] User reports normal operation and live acceptance of this slice (2026-09-19).
+  Second-window opening remains a separate unresolved issue below; acceptance
+  does not establish that every multi-presentation scenario was exercised.
+- [ ] Remaining editor envelope/dispatch wiring and Sidebar delivery extraction.
+
+No frontend assets, Android code, shared framework restart, or dependency removal
+in this slice. Existing best-effort bootstrap behavior is preserved, not expanded.
+
+### Reported Regression: Android Second Editor
+
+- [ ] Investigate the second editor window failing to open in both GeckoView and
+  Cefrium APKs. User follow-up (2026-09-19) confirms Cefrium is also affected;
+  the original GeckoView-only observation is superseded. A change on or after
+  the last release is suspected. Exact regression commit and cause are unknown.
+  Include shared frontend/Python routing and state projection in the investigation,
+  not just native Android code. This is separate from Explorer delivery acceptance.
+
 ### MessagePack Pipe Cutover
 
 - [x] Audit: framework/app pipes are JSONL; WBA uses JSONL/prefixes; Terminal

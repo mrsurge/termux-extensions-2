@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
 from pathlib import Path
@@ -33,6 +32,7 @@ from .rpc_contract import (
     parse_explorer_rpc_request,
 )
 from ...explorer_runtime import ExplorerDispatcher
+from .connection_manager import JsonMessage
 
 logger = logging.getLogger(__name__)
 
@@ -79,9 +79,9 @@ class ExplorerRpcSocketShim:
         sid: str,
         client_instance_id: str,
     ):
-        self.namespace = namespace
-        self.sid = sid
-        self.client_instance_id = client_instance_id
+        self.namespace: _SocketIOAsyncNamespace = namespace
+        self.sid: str = sid
+        self.client_instance_id: str = client_instance_id
         self._pending_requests: dict[str, asyncio.Future[dict[str, object]]] = {}
 
     async def accept(self) -> None:
@@ -93,7 +93,7 @@ class ExplorerRpcSocketShim:
         return future
 
     def finish_request(self, request_id: str) -> None:
-        self._pending_requests.pop(request_id, None)
+        _ = self._pending_requests.pop(request_id, None)
 
     def complete_rpc_request(self, request_id: str, result: dict[str, object]) -> bool:
         pending = self._pending_requests.pop(request_id, None)
@@ -126,20 +126,11 @@ class ExplorerRpcSocketShim:
                 continue
             future.set_exception(error)
 
-    async def send_text(self, data: str) -> None:
+    async def send_message(self, message: JsonMessage) -> None:
+        # Services supply complete envelopes. Only this adapter encodes bytes;
+        # pending request replies retain their existing acknowledgement path.
+        payload = dict(message)
         metrics_enabled = diagnostics_latency_metrics_enabled()
-        parse_started_ns = time.perf_counter_ns() if metrics_enabled else 0
-        try:
-            loaded = cast(object, json.loads(data))
-        except json.JSONDecodeError:
-            return
-        if not isinstance(loaded, dict):
-            return
-        payload = {
-            key: value
-            for key, value in cast(dict[object, object], loaded).items()
-            if isinstance(key, str)
-        }
 
         if payload.get("jsonrpc") == "2.0":
             request_id = payload.get("id")
@@ -158,7 +149,6 @@ class ExplorerRpcSocketShim:
                     )
                     return
 
-                parse_ms = elapsed_ms(parse_started_ns)
                 encode_started_ns = time.perf_counter_ns()
                 encoded = encode_frontend_rpc_message(
                     payload,
@@ -176,9 +166,7 @@ class ExplorerRpcSocketShim:
                 record_latency_event(
                     "diagnostics_socketio_emit",
                     {
-                        "json_bytes": len(data.encode("utf-8")),
                         "wire_bytes": len(encoded),
-                        "json_parse_ms": parse_ms,
                         "msgpack_encode_ms": encode_ms,
                         "emit_ms": elapsed_ms(emit_started_ns),
                         "queue_before": queue_before,

@@ -16,18 +16,14 @@ from ..client_presentation import (
     client_presentation_identity_from_environ,
     client_presentation_room,
 )
-from ..open_state_backend import SidecarOpenStatePayload
+from .editor_session_service import (
+    EditorNotification,
+    bootstrap_editor_session,
+    publish_editor_result,
+)
 from .editor_rpc_contract import (
-    EDITOR_RPC_METHOD_DRAFT_DIFF_GET,
-    EDITOR_RPC_METHOD_GIT_BASELINES_GET,
-    EDITOR_RPC_METHOD_JUMP_TO_LINE,
     JSONRPC_INTERNAL_ERROR,
     JSONRPC_INVALID_PARAMS,
-    EDITOR_RPC_NOTIFICATION_ADAPTER_STATE,
-    EDITOR_RPC_NOTIFICATION_DRAFT_DIFF,
-    EDITOR_RPC_NOTIFICATION_FILE_JUMP_TO_LINE,
-    EDITOR_RPC_NOTIFICATION_GIT_BASELINES,
-    EDITOR_RPC_NOTIFICATION_STATE_SSOT,
     EditorRpcDispatchError,
     EditorRpcProtocolError,
     coerce_jsonrpc_notification_envelope,
@@ -72,38 +68,18 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
         emit_to_room = cast(Callable[..., Awaitable[object]], self.emit)
         _ = await emit_to_room(event_name, payload, room=room)
 
-    async def _publish_result_notification(self, sid: str, method: str, result: object) -> None:
-        if not isinstance(result, dict):
-            return
-        payload = cast(dict[str, object], result)
-        if method == EDITOR_RPC_METHOD_JUMP_TO_LINE:
-            await emit_editor_rpc_notification(
-                lambda event_name, notification_payload: self._emit_to_room(
-                    client_presentation_room(self._client_id(sid)),
-                    event_name,
-                    notification_payload,
-                ),
-                EDITOR_RPC_NOTIFICATION_FILE_JUMP_TO_LINE,
-                payload,
-            )
-            return
-        if method == EDITOR_RPC_METHOD_GIT_BASELINES_GET:
-            await emit_editor_rpc_notification(
-                lambda event_name, notification_payload: self._emit_to_room(
-                    client_presentation_room(self._client_id(sid)),
-                    event_name,
-                    notification_payload,
-                ),
-                EDITOR_RPC_NOTIFICATION_GIT_BASELINES,
-                payload,
-            )
-            return
-        if method == EDITOR_RPC_METHOD_DRAFT_DIFF_GET:
-            await emit_editor_rpc_notification(
-                lambda event_name, notification_payload: self._emit_to_sid(sid, event_name, notification_payload),
-                EDITOR_RPC_NOTIFICATION_DRAFT_DIFF,
-                payload,
-            )
+    async def _deliver_notification(self, sid: str, notification: EditorNotification) -> None:
+        # Resolve logical recipients only at the transport edge. The service
+        # never constructs rooms or reaches into Socket.IO connection state.
+        room = (
+            client_presentation_room(self._client_id(sid))
+            if notification.recipient == "client" else sid
+        )
+        await emit_editor_rpc_notification(
+            lambda event, payload: self._emit_to_room(room, event, payload),
+            notification.method,
+            notification.params,
+        )
 
     async def on_connect(
         self,
@@ -124,34 +100,19 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
         enter_room = cast(Callable[..., Awaitable[object]], self.enter_room)
         _ = await enter_room(sid, "code_te2")
         _ = await enter_room(sid, client_presentation_room(identity["clientInstanceId"]))
-        snapshot = editor_runtime_build_connect_snapshot(
-            client_instance_id=identity["clientInstanceId"],
-            client_role=identity["clientRole"],
-        )
-        await emit_editor_rpc_notification(
-            lambda event_name, payload: self._emit_to_sid(sid, event_name, payload),
-            EDITOR_RPC_NOTIFICATION_STATE_SSOT,
-            snapshot,
-        )
-        open_state_obj = snapshot.get("openState")
-        try:
+        def read_adapter_state() -> dict[str, object]:
             from ..workbench_adapter_shell_manager import get_adapter_state
 
-            await emit_editor_rpc_notification(
-                lambda event_name, payload: self._emit_to_sid(sid, event_name, payload),
-                EDITOR_RPC_NOTIFICATION_ADAPTER_STATE,
-                get_adapter_state(),
-            )
-        except Exception:
-            pass
-        if isinstance(open_state_obj, dict):
-            try:
-                await editor_runtime_emit_open_state_changed(
-                    cast(SidecarOpenStatePayload, cast(object, open_state_obj)),
-                    source="rpc_connect",
-                )
-            except Exception:
-                pass
+            return get_adapter_state()
+
+        await bootstrap_editor_session(
+            client_instance_id=identity["clientInstanceId"],
+            client_role=identity["clientRole"],
+            read_snapshot=editor_runtime_build_connect_snapshot,
+            read_adapter_state=read_adapter_state,
+            publish_open_state=editor_runtime_emit_open_state_changed,
+            deliver=lambda notification: self._deliver_notification(sid, notification),
+        )
 
     async def on_disconnect(self, sid: str, reason: object | None = None) -> None:
         del reason
@@ -248,11 +209,16 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
                 handle_issues_dump_response=editor_runtime_handle_issues_dump_response,
                 handle_breadcrumb_navigate=editor_runtime_handle_breadcrumb_navigate,
             )
-            await self._publish_result_notification(sid, request["method"], result)
-            await emit_editor_rpc_result(
-                lambda event_name, payload: self._emit_to_sid(sid, event_name, payload),
-                request["id"],
-                result,
+            await publish_editor_result(
+                method=request["method"],
+                request_id=request["id"],
+                result=result,
+                deliver=lambda notification: self._deliver_notification(sid, notification),
+                reply=lambda request_id, result: emit_editor_rpc_result(
+                    lambda event_name, payload: self._emit_to_sid(sid, event_name, payload),
+                    request_id,
+                    result,
+                ),
             )
         except EditorRpcProtocolError as exc:
             await emit_editor_rpc_error(
