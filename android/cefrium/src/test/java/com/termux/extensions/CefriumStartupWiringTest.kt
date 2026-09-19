@@ -34,4 +34,13 @@ class CefriumStartupWiringTest {
         assertFalse(source.contains("Cefrium.initialize("))
         assertFalse(source.contains("CommandLine.reset("))
     }
+
+    @Test
+    fun minimizedBuildKeepsChromiumWindowLayoutCallbackAbi() {
+        val rules = File("proguard-rules.pro").readText()
+        val externalConsumer = "androidx.window.extensions.core.util.function.Consumer"
+
+        assertTrue(rules.contains("-keep,allowobfuscation class * implements $externalConsumer"))
+        assertTrue(rules.substringAfter("implements $externalConsumer").contains("accept(java.lang.Object)"))
+    }
 }

@@ -4419,6 +4419,34 @@ These are recorded release-time provenance and acceptance facts, moved from repo
   0.2.347 with one fallback and launched real File Explorer and ALS-RS workers;
   both targets reported health 0.2.349 and all eight built-in apps.
 
+- Production release `te2==0.2.350` is published from annotated tag
+  `0.2.350` at integrated main commit
+  `fa4d09c202eec0951490b03e8864a2f8407d15e7`. It pins exact dependencies
+  `framework-shells==0.0.64`, `agent-log-server==0.2.131`, and
+  `fastmcp==3.4.7`. The Linux wheel SHA-256 is
+  `be74a1dd6300e9fdff7f8f4e352794360f5c0bfd7ae54044160c15c9bc85eeb0`,
+  the sdist is
+  `05b67b3fd9df77812f8d308a33df8246469f70f7bbd2a9bc8c760c25e757e383`,
+  and the packaged Linux Ferrous-native server is
+  `462173ea9a76e0b98d684e0ac7cdee726b6c248ffffa6f73fba617cb650366c9`.
+
+- GitHub Release `0.2.350`, titled `TE2 0.2.350 alpha`, was promoted as the
+  normal/latest release with `prerelease: false` after all 13 private-draft
+  assets were downloaded and compared byte-for-byte. Public `SHA256SUMS`
+  SHA-256 is
+  `ae7f91f829f612cacbcc80b0a13aadeceb3b4566be9583162c817b94d7ef2475`.
+  The deterministic 96-wheel Termux archive is
+  `8040a6320dfeecd4210d7df406f6f84ae85feda70c10fcb2f417e847ade0d8c3`;
+  its Android/AArch64 Ferrous server is
+  `5946020e1e27ceedcdba4530cf2a9a7ae3028c6a588e73bf070363e154b1ed85`.
+  GeckoView APK SHA-256 is
+  `8e16a6344f73db33dbc74f72da01ebc2efb594968ca0a27e5a1332e0de0093d4`
+  and Cefrium is
+  `370d1855200cd282a06e5dcc85ccdba737039d483f455bd2c7476d53362d5715`.
+  Public latest-curl Debian and physical Motorola acceptance both returned
+  health 0.2.350, discovered all eight apps, and launched a real File Explorer
+  worker through `ferrous_framework_native` to ready/HTTP 200.
+
 ## 50) Worker Import And Run Profile Projection Boundaries
 
 Host, Monaco and editor-service package initializers do not eagerly re-export

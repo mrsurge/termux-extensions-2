@@ -113,6 +113,7 @@ class ProjectionTests(unittest.IsolatedAsyncioTestCase):
             patch.object(runtime, 'schedule_git_status_update', schedule),
             patch.object(event_bus, '_handlers', handlers),
             patch.object(event_bus, '_queue', None),
+            patch.object(event_bus, '_stopped', False),
         ):
             try:
                 await asyncio.wait_for(event_bus.publish(event), 1)

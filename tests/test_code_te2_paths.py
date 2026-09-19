@@ -357,7 +357,17 @@ class CodeTe2WorkbenchPathHandoffTests(unittest.IsolatedAsyncioTestCase):
             patch.object(
                 workbench_adapter_shell_manager,
                 "_ensure_live_adapter_io",
-                AsyncMock(return_value=False),
+                AsyncMock(return_value=True),
+            ),
+            patch.object(
+                workbench_adapter_shell_manager,
+                "adapter_rpc",
+                AsyncMock(return_value={"result": True}),
+            ),
+            patch.object(
+                workbench_adapter_shell_manager,
+                "_connect_prepared_adapter",
+                AsyncMock(),
             ),
             patch.object(
                 workbench_adapter_shell_manager,
@@ -365,14 +375,13 @@ class CodeTe2WorkbenchPathHandoffTests(unittest.IsolatedAsyncioTestCase):
                 AsyncMock(),
             ),
         ):
-            # The fixture deliberately has no live pipe: spawning still gives us
-            # the context to inspect, but the readiness contract must fail.
-            with self.assertRaisesRegex(RuntimeError, "live pipe unavailable"):
-                await workbench_adapter_shell_manager.ensure_workbench_adapter_shell(
-                    "/workspace/example",
-                    "http://localhost",
-                    "/runtime/code-server.sock",
-                )
+            result = await workbench_adapter_shell_manager.ensure_workbench_adapter_shell(
+                "/workspace/example",
+                "http://localhost",
+                "/runtime/code-server.sock",
+            )
+
+        self.assertIs(shell, result)
         call = orchestrator.start_from_ref.await_args
         assert call is not None
         ctx = cast(dict[str, object], call.kwargs["ctx"])

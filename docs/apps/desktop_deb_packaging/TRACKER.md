@@ -1749,6 +1749,71 @@ does not authorize publication.
   eight apps. Real File Explorer and ALS-RS workers both reached ready/HTTP 200
   from the isolated acceptance runtime.
 
+### Phase 4P — TE2 0.2.350 runtime and Explorer release
+
+- [x] Integrate the worker/WBA MessagePack transports, transport-independent
+  app lifetime, runtime diagnostics, startup scheduling, Cefrium 0.8.8, and
+  Explorer projection/history refinements merged after `0.2.349`.
+- [x] Pin the published Framework-Shells `0.0.64`, Agent Log Server `0.2.131`,
+  and Ferrous Framework `0.2.14` release graph.
+- [x] Correct the maintained source gates for the attributed upstream SCM tree,
+  intentional app-worker lifecycle helper, live WBA pipe requirement, and
+  explicitly stopped event-bus suite state.
+- [x] Synchronize package, Rust, app/catalog, Electron, Android, frontend URL,
+  and Android asset versions at `0.2.350` / version code `20350`.
+- [x] Rebuild and validate the Code TE2, Terminal, Electron, Android, Linux,
+  and physical-AArch64 Termux release artifacts from the immutable tag.
+- [x] Publish the exact Linux wheel/sdist to PyPI and the audited 13-asset
+  normal/latest GitHub release titled `TE2 0.2.350 alpha`.
+- [x] Pass fresh public Debian desktop/framework/worker acceptance and physical
+  Motorola Termux/APK acceptance before promoting the GitHub draft.
+
+### Phase 4P TE2 0.2.350 publication and acceptance evidence
+
+- Annotated tag `0.2.350` identifies integrated source commit
+  `fa4d09c202eec0951490b03e8864a2f8407d15e7`. The feature branch, `main`,
+  and both remote refs identified that commit before publication; this evidence
+  commit remains intentionally outside the immutable tag.
+- Maintained release gates passed with 175 Rust tests plus five ignored tests,
+  570 Python tests plus 65 subtests, 456 Code TE2 tests, 22 Terminal tests, and
+  101 Electron tests. Both Android staging suites and APK builds passed with
+  their required JDK 17 and JDK 25 toolchains.
+- Production PyPI publishes `te2==0.2.350` with exact dependencies
+  `framework-shells==0.0.64`, `agent-log-server==0.2.131`, and
+  `fastmcp==3.4.7`. The public Linux wheel SHA-256 is
+  `be74a1dd6300e9fdff7f8f4e352794360f5c0bfd7ae54044160c15c9bc85eeb0`,
+  the sdist is
+  `05b67b3fd9df77812f8d308a33df8246469f70f7bbd2a9bc8c760c25e757e383`,
+  and the packaged Linux Ferrous-native server is
+  `462173ea9a76e0b98d684e0ac7cdee726b6c248ffffa6f73fba617cb650366c9`.
+- The clean 96-wheel Termux archive reproduced byte-for-byte across two builds
+  on the physical Pixel. Its SHA-256 is
+  `8040a6320dfeecd4210d7df406f6f84ae85feda70c10fcb2f417e847ade0d8c3`;
+  its Android/AArch64 server is
+  `5946020e1e27ceedcdba4530cf2a9a7ae3028c6a588e73bf070363e154b1ed85`
+  and reports `ferrous-framework-native`.
+- The synchronized staging APKs carry version code `20350`, asset version
+  `0.2.350`, the repository development signer, and valid 16 KiB alignment.
+  GeckoView SHA-256 is
+  `8e16a6344f73db33dbc74f72da01ebc2efb594968ca0a27e5a1332e0de0093d4`;
+  Cefrium is
+  `370d1855200cd282a06e5dcc85ccdba737039d483f455bd2c7476d53362d5715`.
+  Both exact APKs installed and launched successfully on the Motorola.
+- GitHub Release `0.2.350`, titled `TE2 0.2.350 alpha`, is the normal/latest
+  release with `prerelease: false` and 13 assets. Every private-draft download
+  matched the staged artifact byte-for-byte before promotion; public
+  `SHA256SUMS` SHA-256 is
+  `ae7f91f829f612cacbcc80b0a13aadeceb3b4566be9583162c817b94d7ef2475`.
+- A fresh public latest-curl Debian Trixie `--desktop` install selected TE2
+  `0.2.350`, materialized the receipt-owned Electron runtime, returned health
+  `0.2.350`, discovered all eight apps, and launched a real File Explorer
+  worker through `ferrous_framework_native` to ready/HTTP 200.
+- Physical Motorola public latest-curl acceptance upgraded `0.2.349` to
+  `0.2.350`, retained `0.2.349` as the sole fallback, selected the exact
+  archived Ferrous-native server, returned health `0.2.350`, discovered all
+  eight apps, and launched the same real worker to ready/HTTP 200. All
+  acceptance runtimes were terminated cleanly.
+
 ## Deferred work
 
 - [ ] Linux arm64 Electron package.
@@ -1814,3 +1879,4 @@ does not authorize publication.
 | 2026-09-09 | TE2 0.2.347 comparison/search release candidate | Integrated PR 22, synchronized all release-facing versions and Android assets, passed Python/Rust/Code TE2/Terminal/Electron/Android gates, audited both staging APKs, installed both on Pixel, and completed user live acceptance | Accepted; immutable tag construction and clean-tag Linux/Termux/APK publication builds may proceed |
 | 2026-09-09 | TE2 0.2.347 comparison/search publication | Clean-tag Linux/Termux/APK construction, deterministic physical-AArch64 archive assembly, production PyPI publication, private-draft API and round-trip verification, public Debian desktop/framework/worker acceptance, and physical Motorola archive/APK installation plus live framework/worker acceptance | Passed; 0.2.347 is the normal/latest release and all supported public artifacts match the audited immutable-tag set |
 | 2026-09-14 | TE2 0.2.349 source-control and desktop-connect publication | Clean-tag Linux/Termux/APK/Electron construction, ALS 0.2.125 Linux and Android wheels, deterministic physical-AArch64 archive assembly, production PyPI publication, private-draft byte-for-byte verification, public Debian desktop/framework/worker acceptance, and physical Motorola upgrade plus File Explorer/ALS-RS worker acceptance | Passed; 0.2.349 is the normal/latest non-prerelease release, all 13 public assets match the audited immutable-tag set, and both supported installation paths resolve ALS 0.2.125 |
+| 2026-09-18 | TE2 0.2.350 runtime and Explorer publication | Clean-tag Linux/Termux/APK/Electron construction, deterministic physical-AArch64 archive assembly, exact PyPI hash verification, private-draft byte-for-byte verification, public latest-curl Debian desktop/framework/worker acceptance, and physical Motorola Termux/APK plus worker acceptance | Passed; 0.2.350 is the normal/latest non-prerelease release, all 13 public assets match the audited immutable-tag set, and both supported public installation paths launch real workers through `ferrous_framework_native` |

@@ -48,7 +48,6 @@ class PruneBoundaryTests(unittest.TestCase):
             "app/ipc/server.py",
             "app/extensions/apps/loader.py",
             "app/extensions/apps/runtime.py",
-            "app/libs/app_lifecycle.py",
             "app/libs/git_service.py",
         ]
         present = [path for path in retired if (REPO_ROOT / path).exists()]
