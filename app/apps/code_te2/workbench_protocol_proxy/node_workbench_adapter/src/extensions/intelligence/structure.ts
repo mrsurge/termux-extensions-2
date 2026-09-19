@@ -146,17 +146,10 @@ export async function provideDocumentSymbols(runtime: StructureRuntime, params: 
     });
   }
 
-  let handles = runtime.findAllProviderHandles("documentSymbols", document);
+  // This request owns the client editor gate. Missing providers must not hold
+  // file switches hostage; registration events refresh symbols when available.
+  const handles = runtime.findAllProviderHandles("documentSymbols", document);
   if (handles.length === 0) {
-    runtime.log(`[symbols] no provider yet for '${languageId}', waiting up to ${timeoutMs}ms...`);
-    await runtime.waitFor(
-      () => runtime.findAllProviderHandles("documentSymbols", document).length > 0,
-      { timeoutMs, intervalMs: 50 },
-    );
-    handles = runtime.findAllProviderHandles("documentSymbols", document);
-  }
-  if (handles.length === 0) {
-    runtime.log(`[symbols] STILL no provider for '${languageId}' after timeout`);
     return { ok: false, error: `no document symbols provider for language '${languageId}'` };
   }
   runtime.log(`[symbols] multi-provider handles=[${handles.join(",")}] for '${languageId}'`);

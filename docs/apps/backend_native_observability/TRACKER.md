@@ -587,3 +587,60 @@ User confirmed the updated startup is fast. Frontend typecheck, 28 focused
 transport/boot tests and bundle publication passed before live acceptance.
 
 No Android changes, timeout reduction, polling, or new readiness transport.
+
+### WBA Runtime I/O Pass (2026-09-18)
+
+- [x] Shared Node/Bun geometric pipe-buffer growth; complete read chunks avoid
+  copies, incomplete caller buffers are owned, retained binary values stay valid.
+- [x] Shared stdout writer honors drain, preserves order, bounds outstanding bytes
+  at 64 MiB, and explicitly fails overflow/closed pipes. EOF waits for accepted
+  RPCs and output flush rather than using a fixed 100 ms process-exit timer.
+- [x] Redirect import-time console logging before dynamic imports to prevent text
+  from entering the binary stdout stream when optional RPC configuration is absent.
+- [x] Explicit runtime/version/file-reader/socket-engine reporting in health and
+  startup records. Bun uses `Bun.file().arrayBuffer()`; Node uses `fs.readFile`.
+  Both share in-flight/cached reads of just two immutable webview runtime assets.
+- [x] Build and focused Node/Bun tests, including real Socket.IO binary exchange,
+  strict MessagePack framing, backpressure/overflow and 100 real pipe replies at EOF.
+  Final suites: 42 Node tests and 12 Bun tests pass; changed I/O modules pass
+  standalone strict TypeScript checking.
+- [x] Benchmark 4 MiB text map fragmented into 16 KiB reads, five runs per runtime:
+  Node v25.8.0 baseline 887-1033 ms, updated 249-259 ms; Bun 1.3.14 baseline
+  776-829 ms, updated 145-174 ms. This is a decoder microbenchmark, not end-to-end
+  intelligence/startup latency. Reproduce with `tests/benchmark_wba_pipe.mjs`.
+- [x] Full WBA TypeScript comparison against HEAD: 107 pre-existing diagnostics,
+  107 current, no newly introduced diagnostics. Do not claim a clean full typecheck.
+- [x] Live acceptance after a user-controlled WBA restart.
+- [ ] Separate Bun-native Socket.IO engine integration, if subsequently approved.
+
+No shared runtime restart, Android publication or version bump. Installed Node
+and Bun are both supported; Bun branches are selected from
+the executing interpreter, not a frontend flag or user-agent guess.
+
+### Language-switch semantic-token delay
+
+- [x] Live probe isolated YAML's missing-symbol-provider eight-second wait inside
+  the WBA client-operation gate. Python's 229-token projection survived and was
+  returned as a cache hit after the queued open proceeded; no regeneration was
+  required in this reproduction.
+- [x] Remove missing-provider polling from document symbols, full/range semantic
+  tokens and legend lookup; preserve extension activation and editor serialization.
+- [x] Retry matching active-document breadcrumb symbols on provider registration;
+  semantic providers already use registration notifications.
+- [x] Regression tests cover queue release, retained Python cache use, missing
+  providers, and late symbol registration. Node focused suite: 18 pass; Bun: 16 pass.
+  Frontend typecheck and frontend/WBA builds pass.
+- [x] User live acceptance after WBA restart and frontend asset update:
+  Python -> YAML -> Python no longer waits for missing YAML symbols.
+
+### Non-blocking WBA interpreter selection
+
+- [x] Restore portable shellspec context instead of the device-local Bun command.
+- [x] Start filesystem-only Bun/Node discovery in a background thread during worker
+  startup; remove synchronous toolchain/login-shell discovery from WBA spawning.
+- [x] Prefer discovered Bun, preserve explicit runtime overrides and packaged Node,
+  and use `node` immediately if discovery has not completed. No version probes,
+  npm requirement, waiting for discovery, or switching an already-running WBA.
+- [x] Twelve focused Python runtime-discovery/parallel-startup tests pass.
+- [ ] Live acceptance of automatic selection after worker restart (prior Bun and
+  semantic-token acceptance used the explicit testing command).

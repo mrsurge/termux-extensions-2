@@ -489,6 +489,22 @@ Recheck these at each phase; this is an orientation map, not a caller audit.
 
 ## Validation And Closeout
 
+### Bounded WBA Runtime I/O Pass
+
+Keep protocol, identity, readiness and RPC dispatch semantics shared across Node
+and Bun. Optimize fragmented pipe buffer growth and stdout backpressure for both.
+Use explicit runtime detection only for a measured Bun file-read primitive; cache
+only the two immutable adapter runtime assets, not workspace files. Report the
+selected runtime/I/O path in health/startup records. Validate under both installed
+interpreters, including binary Socket.IO and actual subprocess EOF/reply delivery.
+The official Bun-native Socket.IO engine requires a separate HTTP/WebSocket
+integration slice; do not replace the existing engine in this bounded pass.
+Approved follow-up: worker startup performs background, filesystem-only Bun/Node
+discovery. WBA launch reads the result without awaiting it, preferring discovered
+Bun and otherwise Node; explicit executable overrides remain authoritative. Use
+portable shellspec context, with no discovery subprocess on the launch path.
+No shared-runtime restart is implied.
+
 Use strict Python types/Basedpyright and focused tests for changed Python paths;
 Rust formatting/check/tests for changed framework contracts; Code TE2 frontend
 tests, typecheck and build for browser changes. Android validation follows the

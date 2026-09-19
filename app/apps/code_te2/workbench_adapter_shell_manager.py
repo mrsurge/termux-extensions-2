@@ -11,12 +11,12 @@ import time
 from framework_shells import get_manager
 from framework_shells.orchestrator import Orchestrator
 from framework_shells.record import ShellRecord
-from app.node_toolchain import NodeToolchainError, resolve_node_toolchain
 from app.libs.runtime_startup_trace import StartupTrace
 from app.libs.messagepack_stream import MessagePackStream, encode_message
 
 from .code_te2_paths import code_te2_paths
 from .node_compile_cache import node_compile_cache
+from .workbench_runtime_discovery import workbench_runtime_discovery
 from .diagnostics_latency_metrics import (
     diagnostics_latency_metrics_enabled,
     elapsed_ms,
@@ -737,13 +737,8 @@ async def _ensure_workbench_adapter_shell(
     repo_root = Path(__file__).resolve().parents[3]
     project_root_abs = Path(project_root).resolve(strict=False)
     adapter_entry = (repo_root / "app" / "apps" / "code_te2" / "workbench_protocol_proxy" / "node_workbench_adapter" / "dist" / "server" / "server.mjs").resolve(strict=False)
-    try:
-        node_binary, _npm_binary = resolve_node_toolchain(
-            node_override_key="TE2_WORKBENCH_ADAPTER_NODE_BIN",
-            npm_override_key="TE2_WORKBENCH_ADAPTER_NPM_BIN",
-        )
-    except NodeToolchainError as exc:
-        raise RuntimeError(f"Workbench adapter Node.js runtime is unavailable: {exc}") from exc
+    # Discovery runs during worker startup; spawning never waits for it or npm.
+    node_binary = workbench_runtime_discovery.selected()
     if not code_server_socket_path:
         raise RuntimeError("code-server UDS socket path is required")
     remote_authority = "localhost"

@@ -2407,6 +2407,11 @@ interface MonacoBootWindowLike extends Window {
       );
 
       registerEditorWbaRuntimeHandlers(editorWbaRpcTransport, {
+        onDocumentSymbolsProviderRegistered(language) {
+          if (currentPath && model?.getLanguageId?.() === language) {
+            breadcrumbRuntime.requestSymbols(currentPath, { reason: "provider_registered" });
+          }
+        },
         getCurrentPath: function () {
           return currentPath;
         },

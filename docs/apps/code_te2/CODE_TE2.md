@@ -4706,3 +4706,47 @@ Standalone Terminal's app worker is proc-based; its separate Node stream remains
 uint32-BE length-prefixed MessagePack. FWS observation support for that framing and
 large-record indexing beyond the existing 1 MiB preview budget is still pending.
 No browser socket, PTY terminal text, or native VS Code protocol changed.
+
+### WBA Runtime I/O
+
+`server/runtime-io.ts` keeps stdout flow control shared across Node and Bun: FIFO
+frames stop on stream backpressure, resume on drain, and count both queued and
+stream-owned bytes toward a 64 MiB backlog bound. Overflow or output failure is
+fatal, never a silent dropped RPC. Input EOF waits for accepted calls and flushed
+output. Console redirection precedes dynamic imports so initialization logs cannot
+corrupt stdout. The MessagePack decoder grows incomplete frames geometrically,
+does not copy complete chunks, and never overwrites delivered binary views.
+
+Only the file-read primitive is runtime-specific: `process.versions.bun` plus the
+Bun API selects `Bun.file().arrayBuffer()`; Node uses asynchronous `fs.readFile`.
+The two shipped webview runtime assets use process-lifetime, single-flight caches
+with failed-read retry; user documents and mutable extension resources do not use
+this cache. Replacing these shipped assets requires restarting WBA. `/health` and
+the structured startup record expose runtime, version, fileReader and socketEngine.
+Socket.IO remains on the existing Node-compatible Engine.IO path in both runtimes;
+no native Bun server, public route or protocol change is implied. Tests and the
+standalone pipe microbenchmark are under `tests/wba_runtime_io.test.mjs` and
+`tests/benchmark_wba_pipe.mjs`.
+
+Worker startup schedules filesystem-only runtime discovery via `asyncio.to_thread`
+(`workbench_runtime_discovery.py`). Discovered Bun is preferred over Node, with
+`TE2_WORKBENCH_ADAPTER_NODE_BIN` retaining explicit override precedence. WBA launch
+only reads the completed result; pending/failed discovery defaults to `node`, never
+awaits a probe, and never invokes the general login-shell/npm toolchain resolver.
+Node alongside the Python interpreter remains supported for desktop packaging.
+The shellspec uses the portable `WORKBENCH_ADAPTER_NODE` and
+`WORKBENCH_ADAPTER_ENTRY` context values; runtime selection applies to new shells,
+not an existing WBA. Worker teardown cancels discovery without waiting on its
+filesystem thread; that thread cannot publish into a subsequent worker lifecycle.
+
+### Missing intelligence providers must not block navigation
+
+Document-symbol and full/range semantic-token requests return promptly when no
+matching provider exists; legend lookup likewise returns null rather than polling.
+These requests may execute under the client editor-operation gate, so awaiting a
+missing provider there blocks subsequent file activation, even when the target
+file already has a valid semantic-token projection. Extension activation and real
+provider RPCs retain their existing handling; the serialization gate is not removed.
+Semantic registration events install/refresh the Monaco provider. Document-symbol
+registration events retry the matching active document's breadcrumb request through
+its existing generation/barrier checks. Tests: `tests/wba_missing_provider.test.mjs`.

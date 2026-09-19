@@ -41,6 +41,7 @@ const moduleConfig = {
     "src/server/request-dispatch.ts",
     "src/server/server.ts",
     "src/server/stdio-protocol.ts",
+    "src/server/runtime-io.ts",
     "src/server/textmate-grammars.ts",
     "src/workspace/lifecycle.ts",
     "src/workspace/document-registry.ts",

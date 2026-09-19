@@ -411,14 +411,8 @@ export async function provideSemanticTokens(runtime: SemanticRuntime, params: un
     });
   }
 
-  let handles = runtime.findSemanticFullHandles(document);
-  if (handles.length === 0) {
-    await runtime.waitFor(
-      () => runtime.findSemanticFullHandles(document).length > 0,
-      { timeoutMs: Math.min(timeoutMs, 5000), intervalMs: 50 },
-    );
-    handles = runtime.findSemanticFullHandles(document);
-  }
+  // Provider registration drives retries; never poll while owning the editor gate.
+  const handles = runtime.findSemanticFullHandles(document);
   if (handles.length === 0) return { ok: false, error: `no semanticTokens provider for language '${languageId}'` };
 
   runtime.log(`[semanticTokens] multi-provider handles=[${handles.join(",")}] for lang=${languageId}`);
@@ -541,14 +535,7 @@ export async function provideSemanticTokensRange(runtime: SemanticRuntime, param
   const syncError = await syncTextIfProvided(runtime, input, path, languageId, authority, timeoutMs, "semanticTokensRange");
   if (syncError) return syncError;
 
-  let handles = runtime.findSemanticRangeHandles(document);
-  if (handles.length === 0) {
-    await runtime.waitFor(
-      () => runtime.findSemanticRangeHandles(document).length > 0,
-      { timeoutMs: Math.min(timeoutMs, 5000), intervalMs: 50 },
-    );
-    handles = runtime.findSemanticRangeHandles(document);
-  }
+  const handles = runtime.findSemanticRangeHandles(document);
   if (handles.length === 0) return { ok: false, error: `no semanticTokensRange provider for language '${languageId}'` };
 
   runtime.log(`${runtime.timeLabel()} [semanticTokensRange] multi-provider handles=[${handles.join(",")}] for lang=${languageId}`);
@@ -594,14 +581,8 @@ export async function provideSemanticTokensRange(runtime: SemanticRuntime, param
 }
 
 export async function getSemanticTokensLegend(runtime: SemanticRuntime, languageId: string): Promise<unknown> {
-  let handles = runtime.findAllProviderHandles("semanticTokens", languageId);
-  if (handles.length === 0) {
-    await runtime.waitFor(
-      () => runtime.findAllProviderHandles("semanticTokens", languageId).length > 0,
-      { timeoutMs: 8000, intervalMs: 100 },
-    );
-    handles = runtime.findAllProviderHandles("semanticTokens", languageId);
-  }
+  // Late providers publish their legend through provider/semanticTokens.
+  const handles = runtime.findAllProviderHandles("semanticTokens", languageId);
   if (handles.length === 0) return null;
   for (const handle of handles) {
     const entry = runtime.getProvider("semanticTokens", handle);

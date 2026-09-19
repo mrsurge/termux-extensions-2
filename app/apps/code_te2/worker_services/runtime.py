@@ -18,6 +18,7 @@ from ..run_profile_surfaces import register_run_profile_surface_event_handlers
 from ..search_highlight_events import register_search_highlight_event_bus_handlers
 from ..sidebar_window_events import register_sidebar_window_event_bus_handlers
 from ..workspace_events import register_workspace_event_bus_handlers
+from ..workbench_runtime_discovery import workbench_runtime_discovery
 from .event_bus import set_worker_event_loop, stop_worker_event_loop
 from .run_profile_fws_bridge import start_run_profile_fws_bridge, stop_run_profile_fws_bridge
 
@@ -43,6 +44,8 @@ async def start_worker_runtime(
     global _startup_task, _started
     if _started:
         return
+    # Discover the optional Bun executable independently of readiness/intelligence.
+    workbench_runtime_discovery.start()
     # Keep initialization on the owning loop for now: moving mutable stores to
     # another thread requires a separate ownership audit, not just to_thread.
     initialize_project()
@@ -60,6 +63,7 @@ async def stop_worker_runtime() -> None:
     global _registered_loop, _startup_task, _started
     task, _startup_task = _startup_task, None
     _started = False
+    await workbench_runtime_discovery.stop()
     if task is not None:
         _ = task.cancel()
         _ = await asyncio.gather(task, return_exceptions=True)

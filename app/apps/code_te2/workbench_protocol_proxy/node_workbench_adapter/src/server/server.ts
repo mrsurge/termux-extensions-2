@@ -17,6 +17,11 @@ import type {
 } from "./request-dispatch";
 import { formatErrorMessage } from "./error-format.mjs";
 import { sendWebviewResourceResponse } from "./webview-resource-response.mjs";
+import { createStaticAssetLoader, PipeOutputWriter, runtimeIo } from "./runtime-io.mjs";
+
+// Reserve stdout before dynamic imports: their initialization logs must not
+// corrupt the MessagePack pipe, even when optional configuration is absent.
+console.log = (...args) => console.error(...args);
 
 const { WorkbenchClient } = await import("../client/workbench-client.mjs");
 const bridgeMod = await import("./event-bridge.mjs");
@@ -128,16 +133,8 @@ const SYNC_TRACE_MIN_BYTES = Number(
 );
 
 const _BASE_JSON_STRINGIFY = JSON.stringify;
-// With pipe backend, stdout is reserved for structured MessagePack records.
-// Redirect all console.log to stderr so logs remain visible in framework shells UI.
-const _origConsoleLog = console.log;
-console.log = (...args) => console.error(...args);
-
-// Guard against EPIPE when Python parent closes the pipe before adapter exits.
-process.stdout.on("error", (err: NodeJS.ErrnoException) => {
-  if (err?.code === "EPIPE") return;
-  console.error("[server] stdout error:", err);
-});
+// A closed or overloaded output pipe cannot deliver RPC replies: fail explicitly.
+const pipeOutput = new PipeOutputWriter(process.stdout, failStdio);
 
 function _stackTop(skip = 2, limit = 6): string[] {
   try {
@@ -449,7 +446,7 @@ function bridgeRuntime(): EventBridgeRuntime {
     wsClientCount: () => editorWbaSocketServer?.clientCount() ?? 0,
     wsBroadcastNotification,
     writePushLine: (payload: unknown) =>
-      process.stdout.write(encodePush(payload)),
+      pipeOutput.write(encodePush(payload)),
     log: (...args: unknown[]) => console.log(...args),
   };
 }
@@ -688,6 +685,10 @@ async function handleJsonRpc(
   };
 }
 
+const loadWebviewCodec = createStaticAssetLoader(new URL("../protocol/messagepack-codec.mjs", import.meta.url));
+const loadSocketIoClient = createStaticAssetLoader(new URL(
+  "../../../../vendor/node_socketio/node_modules/socket.io/client-dist/socket.io.min.js", import.meta.url,
+));
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(
@@ -718,16 +719,14 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && url.pathname === "/health") {
-      return jsonResponse(res, 200, { ok: true, ts_ms: nowMs() });
+      return jsonResponse(res, 200, { ok: true, ts_ms: nowMs(), io: runtimeIo });
     }
 
     if (
       req.method === "GET" &&
       url.pathname === "/webview/runtime/messagepack-codec.mjs"
     ) {
-      const codec = await fs.readFile(
-        new URL("../protocol/messagepack-codec.mjs", import.meta.url),
-      );
+      const codec = await loadWebviewCodec();
       return bodyResponse(
         res,
         200,
@@ -740,12 +739,7 @@ const server = http.createServer(async (req, res) => {
       req.method === "GET" &&
       url.pathname === "/webview/runtime/socket.io.min.js"
     ) {
-      const socketIoClient = await fs.readFile(
-        new URL(
-          "../../../../vendor/node_socketio/node_modules/socket.io/client-dist/socket.io.min.js",
-          import.meta.url,
-        ),
-      );
+      const socketIoClient = await loadSocketIoClient();
       return bodyResponse(
         res,
         200,
@@ -842,9 +836,10 @@ server.listen(PORT, HOST, () => {
     }));
   }
   // Startup telemetry is a structured record; shell readiness uses the TCP listener.
-  process.stdout.write(
+  pipeOutput.write(
     encodeStartupBeacon({
       type: "adapter/start",
+      io: runtimeIo,
       ts_ms: nowMs(),
       listen: `http://${HOST}:${PORT}`,
       config: state.config,
@@ -855,13 +850,14 @@ server.listen(PORT, HOST, () => {
 // Process-pipe RPC keeps requests concurrent so readiness/control calls cannot
 // block one another. Frame errors are fatal; ordinary RPC errors remain replies.
 const stdinDecoder = new PipeMessagePackDecoder();
+const pendingStdio = new Set<Promise<void>>();
 async function dispatchStdio(msg: unknown): Promise<void> {
   try {
     const reply = await handleJsonRpc(msg);
-    if (reply && reply.id != null) process.stdout.write(encodeRpcReply(reply));
+    if (reply && reply.id != null) pipeOutput.write(encodeRpcReply(reply));
   } catch (error) {
     const message = asJsonRpcEnvelope(msg);
-    process.stdout.write(encodeRpcReply(buildJsonRpcErrorReply(
+    pipeOutput.write(encodeRpcReply(buildJsonRpcErrorReply(
       message.id ?? null, -32000, errorMessage(error),
     )));
   }
@@ -873,11 +869,19 @@ function failStdio(error: unknown): void {
 }
 process.stdin.on("data", (chunk: Buffer) => {
   try {
-    stdinDecoder.feed(chunk, (msg) => { void dispatchStdio(msg).catch(failStdio); });
+    stdinDecoder.feed(chunk, (msg) => {
+      const pending = dispatchStdio(msg).catch(failStdio);
+      pendingStdio.add(pending);
+      void pending.finally(() => pendingStdio.delete(pending));
+    });
   } catch (error) { failStdio(error); }
 });
 process.stdin.on("error", failStdio);
 process.stdin.on("end", () => {
   try { stdinDecoder.finish(); } catch (error) { failStdio(error); return; }
-  setTimeout(() => process.exit(0), 100).unref?.();
+  // EOF stops admission, not outstanding replies. Flush accepted work instead of
+  // truncating a busy pipe with the previous fixed 100 ms exit timer.
+  void Promise.all(pendingStdio).then(() => pipeOutput.flush()).then(
+    () => process.exit(0), failStdio,
+  );
 });

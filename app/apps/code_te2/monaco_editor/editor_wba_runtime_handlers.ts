@@ -83,6 +83,7 @@ interface EditorWbaRuntimeHandlerDeps {
     lang: string,
   ): void;
   resetDynamicProviderCaches?(reason?: string): void;
+  onDocumentSymbolsProviderRegistered?(language: string): void;
   onWorkspaceSwitchedAck?(event: Record<string, unknown>): void;
   notifyExtensionMessage?(event: Record<string, unknown>): void;
   handleEditorOperation?(event: Record<string, unknown>): void;
@@ -181,6 +182,13 @@ export function registerEditorWbaRuntimeHandlers(
           event,
           deps.cacheInlayHintsProviderRegistration,
         );
+        return;
+      }
+
+      // A late symbol provider retries through the current document's normal
+      // generation/barrier checks, rather than holding a WBA request open.
+      if (type === "provider/documentSymbols" && typeof event.language === "string") {
+        deps.onDocumentSymbolsProviderRegistered?.(event.language);
         return;
       }
 
