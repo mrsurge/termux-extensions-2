@@ -286,10 +286,53 @@ removal or multiprocessing cutover was performed in the Explorer slice.
 - [x] User reports normal operation and live acceptance of this slice (2026-09-19).
   Second-window opening remains a separate unresolved issue below; acceptance
   does not establish that every multi-presentation scenario was exercised.
-- [ ] Remaining editor envelope/dispatch wiring and Sidebar delivery extraction.
+- [x] Extract editor envelope construction and consolidate runtime dispatch wiring
+  in the following slice; Sidebar delivery extraction remains pending.
 
 No frontend assets, Android code, shared framework restart, or dependency removal
 in this slice. Existing best-effort bootstrap behavior is preserved, not expanded.
+
+### Editor Envelope And Runtime Binding
+
+- [x] Move outbound normalization and result/error/notification DTO builders into
+  `editor_rpc_messages.py`, with no transport/codec imports. Keep publisher APIs.
+- [x] Consolidate request/notification runtime dependency binding in
+  `editor_runtime_dispatch.py`; preserve authenticated source-client forwarding.
+- [x] Preserve error IDs/data, request versus notification reply behavior,
+  tuple/path normalization, non-string-key filtering, cycle/depth limits and
+  notification-before-result ordering. This is extraction, not policy redesign.
+- [x] Validation: 60 focused tests pass; changed modules and new boundary tests
+  have zero Basedpyright errors or warnings. No frontend build is needed.
+- [x] User reports live acceptance of the editor envelope/runtime-binding slice;
+  everything is working (2026-09-19). Android second-window issue remains separate.
+- [ ] Extract Sidebar delivery policy and audit remaining transport consumers.
+
+No shared runtime restart, Android edits, FastAPI removal, or browser protocol
+changes. The runtime binding still depends on existing editor runtime services;
+their transitive transport dependencies are not claimed to be removed.
+
+### Sidebar Window/Client-State Projection
+
+- [x] Build typed, ordered projections independently of sockets/stores; reuse
+  ledger facts and the existing active-shortcut state rather than new authorities.
+- [x] Extract fact delivery to a transport adapter using the existing configured
+  Socket.IO server and lightweight UI notifications; avoid handler import cycles.
+- [x] Apply the same projection boundary to direct window snapshots/client state.
+  Keep UI-before-Sidebar ordering, activation/readiness/state ordering, global
+  readiness, client/global targeting, direct-target precedence and sender exclusion.
+- [x] Preserve per-notification best-effort fact delivery, propagating direct
+  failures and cancellation. No command, mention or agent-edit behavior changes.
+- [x] Validation: 94 focused tests pass. New service/transport/tests and changed
+  event projector have zero Basedpyright errors/warnings. Broader check including
+  `sidebar_ws.py` has zero errors and 14 existing unused-return warnings in
+  unrelated command handlers.
+- [x] User reports smooth operation and live acceptance of the Sidebar projection
+  slice (2026-09-19). Individual multi-client scenarios were not separately reported.
+- [ ] Audit remaining transport consumers, runtime lifecycle and HTTP route users
+  before proposing the FastAPI replacement boundary.
+
+No frontend build, Android changes, runtime restart, commit or push in this slice.
+The separately reported Android second-window opening bug remains uninvestigated.
 
 ### Reported Regression: Android Second Editor
 

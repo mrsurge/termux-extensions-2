@@ -171,9 +171,23 @@ For `code_te2`, we intentionally separate responsibilities:
     result-derived notification policy, using injected readers and delivery
     callbacks. It emits logical connection/client targets, not socket rooms.
     `editor_rpc_socketio.py` retains authentication, registration, room lookup,
-    dispatch wiring and wire encoding. State snapshot precedes best-effort adapter
+    request validation/error mapping and wire encoding. State snapshot precedes best-effort adapter
     state/open-state publication; jump/baseline notifications reach the client,
     draft comparison reaches only the requester, and pushes precede the RPC reply.
+  - `editor_rpc_messages.py` builds complete editor result/error/notification
+    envelopes and preserves existing normalization before transport encoding.
+    `editor_rpc_emit.py` retains the publisher API as a builder/encoding/delivery
+    facade. `editor_runtime_dispatch.py` binds runtime dependencies once for both
+    requests and notifications, retaining source-client forwarding. Runtime
+    service internals are not yet wholly separated from transport.
+  - `ui_ipc/sidebar_projection_service.py` builds ordered window/client-state
+    projections from existing state and facts without Socket.IO/store access.
+    Adapters resolve logical recipients and encode deliveries. Ledger updates
+    remain activation -> readiness -> state, UI before Sidebar at each step;
+    readiness is global and sender exclusions apply only to Sidebar deliveries.
+    `sidebar_projection_transport.py` retains best-effort fact delivery using
+    the configured socket server; direct registration/snapshot sends still
+    propagate failures. Command/mention/agent-edit routing remains unchanged.
   - `code-server` owns extension execution and remote-agent services.
   - Node workbench adapter owns protocol translation, provider state, editor-facing WBA RPC/events, and backend stdio control hooks.
 

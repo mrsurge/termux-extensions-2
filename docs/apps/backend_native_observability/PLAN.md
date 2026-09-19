@@ -316,7 +316,28 @@ identity registration, wire encoding, request dispatch wiring and error envelope
 this is not full editor transport removal. Snapshot readers and delivery functions
 are injected, and the service imports neither FastAPI nor Socket.IO.
 
-Next, extract remaining editor delivery/envelope coupling and Sidebar transport coupling.
+The editor envelope slice moves result/error/notification construction and the
+existing normalization policy into transport-free `editor_rpc_messages.py`.
+`editor_rpc_emit.py` retains its established publisher entrypoints but delegates
+DTO construction before encoding/delivery. `editor_runtime_dispatch.py` owns the
+single runtime dependency binding used by both requests and notifications. It
+still calls existing runtime services; this does not make their entire transitive
+dependency graph transport-free. Error mapping and authentication stay in the
+adapter. No coercion, inbound validation, notification ordering or protocol change.
+
+The Sidebar window/client-state slice builds ordered `SidebarProjection` DTOs in
+`ui_ipc/sidebar_projection_service.py`, without sockets, stores or a new event bus.
+Existing ledger facts drive activation, readiness and state projections; each UI
+notification precedes its Sidebar counterpart. The service also builds direct
+window snapshots and client shortcut state. Logical recipients become rooms only
+at the adapters. `sidebar_projection_transport.py` uses the existing configured
+socket server and lightweight UI notification helper, avoiding imports of the
+namespace-handler graph. Preserve global readiness, client-miss global fallback,
+sender exclusions, per-notification best-effort ledger delivery, and propagating
+direct/registration errors. Registration itself, focus/open commands, mentions,
+agent edits and native second-window behavior are not extracted or changed here.
+
+Next, audit remaining Sidebar/editor delivery consumers and lifecycle coupling.
 Audit actual HTTP consumers before replacing or removing FastAPI routes. Keep
 Uvicorn/Socket.IO in the same process during extraction; a thin ASGI transport
 replacement is a separately approved phase, not a prerequisite for this slice.
