@@ -4,6 +4,10 @@ from __future__ import annotations
 from typing import assert_never
 
 from .rpc_contract import (
+    UI_IPC_RPC_METHOD_HOST_PROJECTS_LIST,
+    UI_IPC_RPC_METHOD_HOST_PROJECTS_RESET,
+    UI_IPC_RPC_METHOD_HOST_PROJECTS_REMOVE,
+    UI_IPC_RPC_METHOD_HOST_PROJECTS_OPEN,
     UI_IPC_RPC_METHOD_HOST_EDITOR_STATE_GET,
     UI_IPC_RPC_METHOD_HOST_SESSION_UPDATE,
     UI_IPC_RPC_METHOD_HOST_DIAGNOSTICS_EXPORT,
@@ -69,6 +73,9 @@ from ..host.git_backend import (
     handle_host_git_remote_add_request,
 )
 from ..host.transport_state_backend import handle_editor_state_get, handle_session_update
+from ..host.projects_backend import (
+    handle_projects_list, handle_projects_reset, handle_projects_remove, handle_projects_open,
+)
 from ..host.diagnostics_export_backend import handle_diagnostics_export
 from ..host.state_backend import handle_host_file_scroll_update_request
 from ..host.terminal_actions_backend import handle_host_run_active_file_request
@@ -93,6 +100,15 @@ async def dispatch_ui_ipc_rpc_request(
     *,
     source_name: str,
 ) -> object:
+    if method == UI_IPC_RPC_METHOD_HOST_PROJECTS_LIST:
+        return await handle_projects_list()
+    if method == UI_IPC_RPC_METHOD_HOST_PROJECTS_RESET:
+        return await handle_projects_reset(params, source_name=source_name)
+    if method == UI_IPC_RPC_METHOD_HOST_PROJECTS_REMOVE:
+        return await handle_projects_remove(params, source_name=source_name)
+    if method == UI_IPC_RPC_METHOD_HOST_PROJECTS_OPEN:
+        return await handle_projects_open(params, source_name=source_name)
+
     if method == UI_IPC_RPC_METHOD_HOST_EDITOR_STATE_GET:
         return handle_editor_state_get()
     if method == UI_IPC_RPC_METHOD_HOST_SESSION_UPDATE:

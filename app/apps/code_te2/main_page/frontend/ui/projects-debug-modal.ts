@@ -1,9 +1,48 @@
 
-import { EXPLORER_RPC_METHODS } from '../../../src/explorer/rpc/contract.ts';
-import { notifyExplorerRpc } from '../../../src/explorer/rpc/client.ts';
+// Production Projects modal. Legacy CSS/DOM names retain "debug" for compatibility.
+// All intents use host-owned RPC callbacks; state projection belongs to the backend.
+interface ProjectsModalDeps {
+  list(): Promise<unknown>;
+  reset(path: string): Promise<unknown>;
+  remove(path: string): Promise<unknown>;
+  open(path: string): Promise<unknown>;
+}
 
-// ---------- Projects & Sidecars debug modal ----------
-// Extracted from main.js — fully self-contained (no closure deps).
+function record(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Invalid Projects response');
+  }
+  return value as Record<string, unknown>;
+}
+
+function result(value: unknown): Record<string, unknown> {
+  const reply = record(value);
+  if (reply.ok !== true) {
+    throw new Error(typeof reply.error === 'string' ? reply.error
+      : typeof reply.reason === 'string' ? reply.reason : 'Projects request failed');
+  }
+  return reply;
+}
+
+function projectEntries(value: unknown): ProjectDebugEntry[] {
+  const rows = result(value).data;
+  if (!Array.isArray(rows)) throw new Error('Invalid Projects list');
+  return rows.map((value: unknown) => {
+    const row = record(value);
+    if (typeof row.path !== 'string') throw new Error('Invalid project path');
+    return {
+      path: row.path,
+      is_active: row.is_active === true,
+      label: typeof row.label === 'string' ? row.label : undefined,
+      opened_at: typeof row.opened_at === 'string' ? row.opened_at : undefined,
+      sidecar_path: typeof row.sidecar_path === 'string' ? row.sidecar_path : undefined,
+      sidecar_exists: row.sidecar_exists === true,
+      session_count: typeof row.session_count === 'number' ? row.session_count : undefined,
+      last_boot_at: typeof row.last_boot_at === 'string' ? row.last_boot_at : undefined,
+      draft_count: typeof row.draft_count === 'number' ? row.draft_count : undefined,
+    };
+  });
+}
 
 interface ProjectsDebugModalController {
   root: HTMLDivElement;
@@ -30,6 +69,13 @@ function errorMessage(err: unknown, fallback: string): string {
 }
 
 let projectsDebugModal: ProjectsDebugModalController | null = null;
+let projectsModalDeps: ProjectsModalDeps | null = null;
+
+// Host installs the transport once; File menu and Explorer share this UI entry
+// without either importing or opening the other surface's private RPC socket.
+export function configureProjectsModal(deps: ProjectsModalDeps): void {
+  projectsModalDeps = deps;
+}
 
 function ensureProjectsDebugModal() {
   if (projectsDebugModal) return projectsDebugModal;
@@ -71,16 +117,11 @@ export function hideProjectsDebugModal() {
   projectsDebugModal.root.setAttribute('aria-hidden', 'true');
 }
 
-async function loadProjectsDebugContent() {
+async function loadProjectsDebugContent(deps: ProjectsModalDeps) {
   const modal = ensureProjectsDebugModal();
   modal.contentEl.textContent = 'Loading recent projects…';
   try {
-    const resp = await fetch('/api/app/code_te2/debug/projects', { cache: 'no-store' });
-    const json = await resp.json();
-    if (!resp.ok || json?.ok === false) {
-      throw new Error(json?.error || resp.statusText || 'Request failed');
-    }
-    const items: ProjectDebugEntry[] = Array.isArray(json.data) ? json.data.slice() : [];
+    const items = projectEntries(await deps.list());
     if (!items.length) {
       modal.contentEl.innerHTML = '<p>No recent projects recorded.</p>';
       return;
@@ -166,32 +207,17 @@ async function loadProjectsDebugContent() {
             ].join('\n');
         if (!(await window.teUI.dialog.confirm(confirmText))) return;
         try {
-          const respDel = await fetch('/api/app/code_te2/debug/projects', {
-            method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: p }),
-          });
-          const jsonDel = await respDel.json().catch(() => ({}));
-          if (!respDel.ok || jsonDel?.ok === false) {
-            throw new Error(jsonDel?.error || respDel.statusText || 'Delete failed');
-          }
-          await loadProjectsDebugContent();
-
-          // If we just soft-reset the CURRENT project, treat this as the user
-          // having just opened a "fresh" project: clear host editor state and
-          // let the iframe reload into its null-document state for this project.
-          if (entry.is_active && typeof window.__codeTe2HandleProjectOpened === 'function') {
-            try {
-              window.__codeTe2HandleProjectOpened(p);
-              hideProjectsDebugModal();
-            } catch (err) {
-              console.warn('[ProjectsDebug] Failed to resync editor after reset:', err);
-            }
-          }
+          trashBtn.disabled = true;
+          result(await (entry.is_active ? deps.reset(p) : deps.remove(p)));
+          // Backend facts refresh every client; never synthesize a local project open.
+          await loadProjectsDebugContent(deps);
+          if (entry.is_active) hideProjectsDebugModal();
         } catch (e) {
           await window.teUI.dialog.alert(
-            `Failed to delete project entry: ${errorMessage(e, 'unknown error')}`,
+            `Failed to update project state: ${errorMessage(e, 'unknown error')}`,
           );
+        } finally {
+          trashBtn.disabled = false;
         }
       });
 
@@ -213,8 +239,10 @@ async function loadProjectsDebugContent() {
           ) {
             return;
           }
-          if (!notifyExplorerRpc(EXPLORER_RPC_METHODS.projectOpen, { path: p })) {
-            await window.teUI.dialog.alert('Explorer connection unavailable.');
+          try {
+            result(await deps.open(p));
+          } catch (error) {
+            await window.teUI.dialog.alert(errorMessage(error, 'Project open failed'));
             return;
           }
           hideProjectsDebugModal();
@@ -225,7 +253,7 @@ async function loadProjectsDebugContent() {
     modal.contentEl.innerHTML = '';
     modal.contentEl.appendChild(frag);
   } catch (err) {
-    modal.contentEl.textContent = `Failed to load debug info: ${errorMessage(err, 'unknown error')}`;
+    modal.contentEl.textContent = `Failed to load project info: ${errorMessage(err, 'unknown error')}`;
   }
 }
 
@@ -233,5 +261,9 @@ export async function showProjectsDebugModal() {
   const modal = ensureProjectsDebugModal();
   modal.root.classList.add('show');
   modal.root.setAttribute('aria-hidden', 'false');
-  await loadProjectsDebugContent();
+  if (!projectsModalDeps) {
+    modal.contentEl.textContent = 'Projects connection is not ready. Reopen Projects to retry.';
+    return;
+  }
+  await loadProjectsDebugContent(projectsModalDeps);
 }

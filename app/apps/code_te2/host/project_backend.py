@@ -118,6 +118,16 @@ async def handle_sidebar_project_lookup_request(
     return lookup_project(_project_service_deps(), _path_param(data))
 
 
+async def handle_host_project_open_request(
+    data: dict[str, object], *, source_name: str,
+) -> JsonMap:
+    """Host Projects uses the shared switch service, not the Explorer socket."""
+    return await open_project(
+        _project_service_deps(), _path_param(data), require_known_sidecar=False,
+        reason=f"{source_name}:projects_open",
+    )
+
+
 async def handle_sidebar_project_open_request(
     data: dict[str, object],
     *,

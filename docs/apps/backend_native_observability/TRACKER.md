@@ -431,12 +431,12 @@ frontend must deploy together; obsolete HTTP endpoints are not compatibility API
 
 ### Remaining HTTP Assembly Audit
 
-- [x] Inventory FastAPI owners: `main.py`, editor routes/resources,
-  workbench routes and history router remain after the Git/project cleanup below.
+- [x] Inventory FastAPI owners: `main.py`, editor routes/resources and
+  workbench routes remain after the Git/project and Projects cleanup below.
   Code TE2 still exports
   `TE2_APP_ROUTER`; wrapper native-ASGI support alone does not remove FastAPI.
-- [x] Identify live HTTP consumers in project-debug modal and theme discovery;
-  do not delete these routes without migrating their callers.
+- [x] Identify live HTTP consumers in the production Projects modal and theme
+  discovery; Projects has now migrated to host RPC, theme discovery remains.
 - [ ] Complete caller-by-caller classification of remaining routes, including
   dynamically constructed paths, external app/CLI consumers and debug endpoints.
 - [ ] Move remaining application messaging to owning RPC lanes without fallbacks;
@@ -463,8 +463,33 @@ frontend must deploy together; obsolete HTTP endpoints are not compatibility API
 - [x] Live acceptance: user tested the Git/project cleanup and confirmed it
   remains green. No shared runtime restart performed by the agent.
 
-History/debug/theme/WBA HTTP routes remain for the next consumer audit. This
+Debug/theme/WBA HTTP routes remain for the next consumer audit. This
 slice does not yet switch Code TE2 to `TE2_ASGI_APP` or remove FastAPI packages.
+
+### Production Projects Modal Transport
+
+- [x] Treat "debug modal" as a legacy internal name, not a debug-only feature.
+  Both File menu and Explorer open the same host-configured Projects modal.
+- [x] Add typed `ui.host.projects.list/reset/remove/open` host RPC methods and
+  transport-independent services. Sidecar metadata listing runs off-loop using
+  independent sidecar snapshots, not cached mutable instances.
+- [x] Keep confirmations and reject stale reset/remove decisions in the backend.
+  Reset clears recent/open/foreground/draft state and restores HEAD comparison;
+  publish through existing all-client editor/draft/comparison projectors.
+  Removing inactive projects forgets sidecar disk and cached state plus history,
+  never project files. Persistence failures are surfaced rather than swallowed.
+- [x] Open through the shared backend project-switch service; remove the modal's
+  direct Explorer socket call and frontend-only reset/open projection.
+- [x] Remove `history_routes.py`, its assembly, `/debug/projects` HTTP handlers
+  and unused history/raw/touch/file routes. No HTTP fallback or runtime-debug gate.
+- [x] Validation: 41 focused Python tests and 19 frontend tests pass, including
+  11 new backend and seven new modal/ownership tests. Fresh-process imports block
+  FastAPI/Pydantic/Starlette successfully. Changed services/contracts
+  and new Python tests pass Basedpyright without diagnostics. Frontend typecheck
+  and build pass; `static/dist/host.js` regenerated, no Android publication.
+  `main.py` retains its 15 existing warnings and has no errors.
+- [x] Live acceptance: user tested the deployed Projects slice and confirmed it
+  works. No shared framework restart performed by the agent.
 
 ### Reported Regression: Android Second Editor
 

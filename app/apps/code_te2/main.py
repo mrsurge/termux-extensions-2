@@ -41,7 +41,6 @@ from .main_page.backend.workbench_routes import (
     WorkbenchRoutesDeps,
     create_workbench_router,
 )
-from .main_page.backend.history_routes import HistoryRoutesDeps, create_history_router
 from .stores import get_history_store, get_preferences_store
 
 IGNORE_PATTERNS = [
@@ -466,15 +465,6 @@ def _expand_and_validate_path(path: str) -> tuple[str | None, str | None]:
 
 # Git/project intents are owned by host/Explorer/Sidebar RPC services.
 # Do not reintroduce parallel HTTP mutation paths that bypass those guards.
-_HISTORY_ROUTES_DEPS = HistoryRoutesDeps(
-    history=_history_store,
-    get_project_root=get_project_root,
-    format_label=HistoryStore.format_label,
-    get_sidecar_path=ProjectSidecar.get_sidecar_path,
-    load_sidecar=ProjectSidecar.load_or_create,
-)
-code_te2_bp.include_router(create_history_router(_HISTORY_ROUTES_DEPS))
-
 @code_te2_bp.get('/')
 def status_root():
     return {"ok": True, "data": {"message": "File Editor CM6 app API ready"}}

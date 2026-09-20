@@ -430,9 +430,20 @@ host/Explorer/Sidebar RPC paths, including historical mutation guards. Validate
 route absence, RPC dispatch/source attribution, project switching and guarded
 restores without operating on the user's repository or restarting the framework.
 
-Next audit the remaining editor/WBA/history routes. The project-debug
-modal and theme discovery have live HTTP callers, so route removal is not a
-mechanical decorator deletion. Move application messaging through owning RPC
+The production Projects modal retains its legacy "debug" DOM/internal names,
+but is not runtime-debug-gated. Move list/reset/remove/open to typed
+`ui.host.projects.*` host RPCs, shared by the File menu and Explorer launcher.
+Keep confirmation dialogs, separate reset from removal to reject stale active
+project decisions, and preserve all project files. Backend services own sidecar
+cleanup, cached-state invalidation and cross-client open/draft/comparison facts.
+Delegate project opening to the established project-switch service. Remove the
+history router and its unused raw/touch/file endpoints, without HTTP fallbacks.
+Validate isolated-store mutations/failures, socket dispatch, modal interactions,
+source-consumer absence, Python/TypeScript types and generated frontend output.
+
+Next audit the remaining editor/WBA routes. Theme discovery still has live HTTP
+callers, so route removal is not a mechanical decorator deletion. Move
+application messaging through owning RPC
 lanes, retain actual resource HTTP, then assemble a native `TE2_ASGI_APP` with the
 existing Socket.IO mounts/lifecycle. No framework restart or Android publication
 is implicit in this work, and other apps retain lazy FastAPI support.

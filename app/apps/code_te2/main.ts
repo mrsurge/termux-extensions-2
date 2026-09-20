@@ -42,7 +42,7 @@ import { createFileStatusController } from './main_page/frontend/ui/file-status.
 import { createSettingsBootstrap } from './main_page/frontend/ui/settings-bootstrap.ts';
 import { createAutosaveModalController } from './main_page/frontend/ui/autosave-modal.ts';
 import { createAutosaveRuntimeController } from './main_page/frontend/ui/autosave-runtime.ts';
-import { showProjectsDebugModal } from './main_page/frontend/ui/projects-debug-modal.ts';
+import { configureProjectsModal, showProjectsDebugModal } from './main_page/frontend/ui/projects-debug-modal.ts';
 import { initWatcherUI, drainPendingWatcherEvents, showWatcherLimitModal } from './main_page/frontend/ui/watcher-settings.ts';
 import { createUiIpcConnections } from './main_page/frontend/connections/ui-ipc.ts';
 import { EXPLORER_RPC_NOTIFICATIONS } from './src/explorer/rpc/contract.ts';
@@ -1474,6 +1474,13 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     requestRunProfilesGet: () => uiIpcConnections.requestUiIpc(UI_IPC_RPC_METHODS.hostRunProfilesGet, {}),
     requestRunProfilesSave: (payload: UnknownRecord) => uiIpcConnections.requestUiIpc(UI_IPC_RPC_METHODS.hostRunProfilesSave, payload),
     toast: (msg: string) => host.toast(msg),
+  });
+
+  configureProjectsModal({
+    list: () => uiIpcConnections.requestUiIpc(UI_IPC_RPC_METHODS.hostProjectsList),
+    reset: (path: string) => uiIpcConnections.requestUiIpc(UI_IPC_RPC_METHODS.hostProjectsReset, { path }),
+    remove: (path: string) => uiIpcConnections.requestUiIpc(UI_IPC_RPC_METHODS.hostProjectsRemove, { path }),
+    open: (path: string) => uiIpcConnections.requestUiIpc(UI_IPC_RPC_METHODS.hostProjectsOpen, { path }, 90_000),
   });
 
   installBasicMenuActions({

@@ -5,6 +5,10 @@ export const UI_IPC_RPC_NAMESPACE = RPC_NAMESPACES.uiIpc;
 
 export const UI_IPC_RPC_METHODS = {
   hostEditorStateGet: 'ui.host.editorState.get',
+  hostProjectsList: 'ui.host.projects.list',
+  hostProjectsReset: 'ui.host.projects.reset',
+  hostProjectsRemove: 'ui.host.projects.remove',
+  hostProjectsOpen: 'ui.host.projects.open',
   hostSessionUpdate: 'ui.host.session.update',
   hostDiagnosticsExport: 'ui.host.diagnostics.export',
   hostHistoryOpen: 'ui.host.history.open',

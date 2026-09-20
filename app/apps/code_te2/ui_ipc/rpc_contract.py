@@ -15,6 +15,10 @@ UI_IPC_RPC_REQUEST_EVENT: Final = "rpc"
 UI_IPC_RPC_NOTIFICATION_EVENT: Final = "rpc.notify"
 
 UI_IPC_RPC_METHOD_HOST_EDITOR_STATE_GET: Final = "ui.host.editorState.get"
+UI_IPC_RPC_METHOD_HOST_PROJECTS_LIST: Final = "ui.host.projects.list"
+UI_IPC_RPC_METHOD_HOST_PROJECTS_RESET: Final = "ui.host.projects.reset"
+UI_IPC_RPC_METHOD_HOST_PROJECTS_REMOVE: Final = "ui.host.projects.remove"
+UI_IPC_RPC_METHOD_HOST_PROJECTS_OPEN: Final = "ui.host.projects.open"
 UI_IPC_RPC_METHOD_HOST_SESSION_UPDATE: Final = "ui.host.session.update"
 UI_IPC_RPC_METHOD_HOST_DIAGNOSTICS_EXPORT: Final = "ui.host.diagnostics.export"
 UI_IPC_RPC_METHOD_HOST_FILE_OPEN: Final = "ui.host.file.open"
@@ -60,6 +64,10 @@ UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_CLOSE: Final = "ui.sidebar.window.close"
 UI_IPC_RPC_METHOD_SIDEBAR_ACTIVE_SHORTCUT_SET: Final = "ui.sidebar.activeShortcut.set"
 
 UiIpcRpcMethod = Literal[
+    "ui.host.projects.list",
+    "ui.host.projects.reset",
+    "ui.host.projects.remove",
+    "ui.host.projects.open",
     "ui.host.diagnostics.export",
     "ui.host.session.update",
     "ui.host.editorState.get",
@@ -169,6 +177,10 @@ UiIpcRpcNotification = Literal[
 ]
 
 ALLOWED_REQUEST_METHODS: Final[set[str]] = {
+    UI_IPC_RPC_METHOD_HOST_PROJECTS_LIST,
+    UI_IPC_RPC_METHOD_HOST_PROJECTS_RESET,
+    UI_IPC_RPC_METHOD_HOST_PROJECTS_REMOVE,
+    UI_IPC_RPC_METHOD_HOST_PROJECTS_OPEN,
     UI_IPC_RPC_METHOD_HOST_COMPARISON,
     UI_IPC_RPC_METHOD_HOST_EDITOR_STATE_GET,
     UI_IPC_RPC_METHOD_HOST_SESSION_UPDATE,

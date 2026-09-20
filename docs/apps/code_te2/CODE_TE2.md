@@ -4732,8 +4732,31 @@ use `sidebar.project.*`. No HTTP fallback remains for these removed routes.
 The shared `project_service.py` and `state_payload.py` are retained: they serve
 live RPC/bootstrap consumers, not only the deleted routers. Historical mutation
 guards, staged/draft restore confirmations, project-switch effects and Rust
-Git/file-ops ownership remain on the existing service paths. Remaining history,
-debug, theme/resource and workbench HTTP routes are a separate migration scope.
+Git/file-ops ownership remain on the existing service paths. Remaining debug,
+theme/resource and workbench HTTP routes are a separate migration scope.
+
+### Production Projects Modal
+
+`projects-debug-modal.ts` retains its legacy internal/CSS names but is production
+UI, not gated by runtime debugging. The host installs typed transport callbacks
+once for both the File menu and Explorer entry points. List/reset/remove/open use
+`ui.host.projects.*` on `/ui_ipc`, with no HTTP fallback or Explorer-socket calls.
+`host/projects_backend.py` owns the operations and returns ready-to-send DTOs.
+Listing reads independent sidecar snapshots off-loop; opening delegates to the
+shared backend project-switch service.
+
+Reset and removal are distinct confirmed intents. The backend checks current
+active-project status again before writing, so a stale dialog cannot turn Reset
+into Remove or vice versa. Reset clears recents, client foregrounds, draft cache
+and tracked job references, restores HEAD comparison, advances open-state revision,
+then reuses editor/draft/comparison projections for connected clients. Removing an
+inactive entry deletes its sidecar and history and clears its cached sidecar data;
+neither operation deletes project files. Write failures propagate to the modal;
+the history and sidecar files are not one cross-file transaction.
+
+The old `history_routes.py` assembly and its `/debug/projects`, raw state,
+history touch/list/remove routes are removed. Deploy worker and generated host
+frontend together. Shared HistoryStore/ProjectSidecar services remain authoritative.
 
 ### Framework Pipe Codec
 
