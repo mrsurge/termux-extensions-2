@@ -78,6 +78,9 @@ test('boot snapshot materializes only a revision-fenced client file', async () =
     languageFromPath: () => 'python',
   };
 
+  runtime.applyBootSnapshotToEditor(deps, false);
+  assert.equal(state.created.length, 0, 'preference seeding cannot materialize a document');
+  assert.equal(state.currentPath, null);
   runtime.applyBootSnapshotToEditor(deps);
   assert.equal(state.created.length, 1);
   assert.equal(state.created[0].content, 'revision two');

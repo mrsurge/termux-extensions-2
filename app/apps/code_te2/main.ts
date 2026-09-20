@@ -549,6 +549,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
       window.location.reload();
     },
     toast: (msg: string, ms?: number) => host.toast(msg, ms),
+    requestThemeCatalog: () => uiIpcConnections.requestUiIpc(UI_IPC_RPC_METHODS.hostThemesList),
     requestLanguageBackendSet: (mode: 'code-server' | 'web-workers') =>
       uiIpcConnections.requestBackendLanguageBackendSet({ mode }),
   });

@@ -2277,10 +2277,39 @@ te2 console search "query" --worker <worker-id> --limit 100
 ## 26) Themes, TextMate palette, and retokenization
 
 Theme selection is a preference-backed editor concern. Code TE2 registers the
-vendored GitHub themes and extension-contributed themes, resolves the selected
-theme JSON, converts it to Monaco data, then applies it through the theme
-runtime. The live loader is loadVscodeTextmateThemesRuntime() and the live
-application path is applyMonacoThemeRuntime().
+catalog's themes, resolves the selected theme JSON, converts it to Monaco data,
+then applies it through the theme runtime. The live loader is
+loadVscodeTextmateThemesRuntime() and the live application path is
+applyMonacoThemeRuntime().
+
+`theme_catalog.py` constructs typed catalog metadata off the event loop. The
+settings picker/summary use `ui.host.themes.list`; working editors use
+`editor.themes.list`. Historical secondary views inject their existing host-lane
+request into the theme loader, without starting an editor/WBA session. Both RPC
+handlers call the same service. The former `/ui/monaco_editor/available_themes`
+HTTP endpoint is removed with no fallback. JSON theme files, TextMate resources
+and Monaco assets remain HTTP resource routes, retaining native OTA/APK asset
+interception.
+
+Monaco loads its runtime and connects its own editor socket before awaiting the
+selected theme. The boot snapshot first seeds preferences only; document models
+are created/attached only after theme application succeeds. Normal opens and
+socket replays share this barrier, while historical secondary views apply their
+host-supplied theme before mounting either diff model. Preference changes during
+loading select the latest theme before releasing model consumers. Live snapshots
+invalidate the older bootstrap document, and newer replays supersede pending
+ones, including empty-project snapshots. WBA readiness is not a dependency.
+Theme errors reject readiness rather than displaying a falsely themed document.
+Concurrent catalog requests share an in-flight promise; only validated successes
+are cached. Request failures clear the promise rather than caching an empty
+catalog, and the theme loader also clears rejected loading promises for retry.
+The settings picker exposes failure separately from a genuinely empty catalog.
+
+This transport slice preserves catalog IDs and resource URLs, not new VSIX theme
+support. The current `extension_registry.get_extension_list()` summary omits
+`path`/`themes`, so its entries do not supply extension themes to the catalog.
+Full WBA/VSIX theme integration, JSONC and inheritance remain deferred; bundled
+GitHub themes are the currently populated catalog.
 
 The same raw VS Code theme is applied to the TextMate registry. Its color map is
 published to Monaco and every loaded model is reset for tokenization. This

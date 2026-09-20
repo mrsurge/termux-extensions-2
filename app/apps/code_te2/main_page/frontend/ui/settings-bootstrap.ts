@@ -1,5 +1,6 @@
 // @ts-check
 
+import type { RequestThemeCatalog } from '../../../src/theme_catalog.ts';
 import { createSettingsRefreshController } from './settings-refresh.ts';
 import { createSettingsManagerController } from './settings-manager.ts';
 import { createSettingsConfigModalController } from './settings-config-modal.ts';
@@ -59,7 +60,10 @@ export function createSettingsBootstrap(deps: any) {
   let settingsManagerController: ReturnType<typeof createSettingsManagerController> | null = null;
   let settingsConfigModalController: ReturnType<typeof createSettingsConfigModalController> | null = null;
 
+  const requestThemeCatalog: RequestThemeCatalog = deps.requestThemeCatalog;
+
   const settingsRefreshController = createSettingsRefreshController({
+    requestThemeCatalog,
     getEditorViewState: deps.getEditorViewState,
     getUiPrefs: deps.getUiPrefs,
     settingsModalEl: deps.els.settingsModal,
@@ -115,6 +119,7 @@ export function createSettingsBootstrap(deps: any) {
   settingsModalsController.install();
 
   const settingsThemesController = createSettingsThemesController({
+    requestThemeCatalog,
     themesModalEl: deps.els.themesModal,
     themesCloseEl: deps.els.themesClose,
     themesListEl: deps.els.themesList,

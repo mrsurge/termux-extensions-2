@@ -546,7 +546,9 @@ export async function bootSecondaryEditorRuntime(
         kind: 'historicalDiff', label: basename(path), commitId: content.commitId,
       });
       setStatus('Loading historical comparison...');
-      const view = await bootHistoricalDiff(editorFrame, content, signal, historicalPreferences);
+      // Historical mode uses the reduced host shell's own lane, never a WBA/editor session.
+      const view = await bootHistoricalDiff(editorFrame, content, signal, () => historicalPreferences,
+        () => connection.request(UI_IPC_RPC_METHODS.hostThemesList, {}, 8_000));
       if (!signal.aborted) {
         historicalView = view;
         view.updatePreferences(historicalPreferences);

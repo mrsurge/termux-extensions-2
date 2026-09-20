@@ -46,6 +46,7 @@ interface EditorSocketConnectionDeps {
   emitToHost(eventName: string, payload: Record<string, unknown>): void;
   getCachedPrefs(): unknown;
   setCachedPrefs(snapshot: unknown): void;
+  onSsotSnapshot?(): void;
   getBaseSha256(): string | null;
   setBaseSha256(value: string | null): void;
   getCurrentPath(): string | null;
@@ -169,6 +170,7 @@ export function registerEditorSocketConnectionHandlers(
   let snapshotSequence = 0;
   const handleSsotSnapshot = (snapshot: unknown): void => {
     const sequence = ++snapshotSequence;
+    deps.onSsotSnapshot?.();
     let stage = 'snapshot';
     const trace = (nextStage: string): void => {
       stage = nextStage;
@@ -196,6 +198,8 @@ export function registerEditorSocketConnectionHandlers(
         const file = snapshotFile;
         trace('ensure-editor');
         void deps.ensureEditorWithPrefs().then(async () => {
+          // Theme loading may span a newer replay, including an empty project.
+          if (sequence !== snapshotSequence) return;
           trace('editor-ready');
           const snapshotPath = asString(file.path);
           if (!acceptDocumentProjection(snapshotPath, file.document_revision)) {
@@ -400,7 +404,9 @@ export function registerEditorSocketConnectionHandlers(
           } catch (_) {}
         } catch (_) {}
       }
-      if (typeof theme === 'string' && theme) deps.applyMonacoTheme(theme);
+      if (typeof theme === 'string' && theme) void Promise.resolve(deps.applyMonacoTheme(theme)).catch((error: unknown) => {
+        console.warn('[MonacoTheme] Preference theme update failed', error);
+      });
       deps.ensureTouchSelection('prefs');
       try { if (diffEditor && typeof diffEditor.layout === 'function') diffEditor.layout(); } catch (_) {}
       try { if (editor && typeof editor.layout === 'function') editor.layout(); } catch (_) {}

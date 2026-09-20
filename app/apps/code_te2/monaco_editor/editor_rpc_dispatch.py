@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 import time
+from ..theme_catalog import get_theme_catalog
 from collections.abc import Awaitable, Callable
 from .editor_host_actions_backend import handle_editor_host_action
 from ..diagnostics_latency_metrics import (
@@ -98,6 +99,9 @@ async def dispatch_editor_rpc_request(
     handle_issues_dump_response: HandleEditorPayloadFn,
     handle_breadcrumb_navigate: HandleEditorPayloadFn,
 ) -> object:
+    if method == "editor.themes.list":
+        return await get_theme_catalog()
+
     if method == "editor.preferences.get":
         from ..stores import get_preferences_store
         return {"preferences": get_preferences_store().get_preferences(active_project())}

@@ -27,13 +27,12 @@ test('out-of-order theme loads and disposed viewers cannot publish stale colors'
   const calls = [];
   const pending = new Map();
   const fakeFetch = async url => {
-    if (url.endsWith('available_themes')) return { ok: true, json: async () => ({ themes: [] }) };
     return new Promise(resolve => pending.set(url, resolve));
   };
   const controller = new AbortController();
   const apply = createHistoricalThemeApplier({ editor: {
     defineTheme: name => calls.push(['define', name]), setTheme: name => calls.push(['set', name]),
-  } }, controller.signal, fakeFetch);
+  } }, controller.signal, async () => ({ themes: [] }), fakeFetch);
   const resolve = (suffix) => {
     const key = [...pending.keys()].find(key => key.endsWith(suffix));
     assert.ok(key);

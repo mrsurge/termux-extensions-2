@@ -1,3 +1,4 @@
+import { parseThemeCatalog, type RequestThemeCatalog } from '../../../src/theme_catalog.ts';
 import { EXPLORER_RPC_METHODS } from "../../../src/explorer/rpc/contract.ts";
 import { createJsonTextmateField } from "./cm6-json-textmate-field.ts";
 
@@ -55,6 +56,7 @@ function createRawSettingsJsonField(
  * }} deps
  */
 export function createSettingsRefreshController(deps: any) {
+  const requestThemeCatalog: RequestThemeCatalog = deps.requestThemeCatalog;
   // ── Scope tab switching ──
   let activeScope = "user";
   const extManagerModalEl = deps.extManagerModalEl as HTMLElement;
@@ -214,19 +216,10 @@ export function createSettingsRefreshController(deps: any) {
     const currentTheme =
       deps.getEditorViewState()?.theme || "github-dark";
     try {
-      const res = await fetch(
-        "/api/app/code_te2/ui/monaco_editor/available_themes",
-        { cache: "no-store" },
-      );
-      if (res.ok) {
-        const data = await res.json();
-        const themes = data?.themes || [];
-        const active = themes.find((t: any) => t.id === currentTheme);
-        const label = active ? active.label : currentTheme;
-        deps.themeSummaryEl.textContent = `${label} — ${themes.length} available`;
-      } else {
-        deps.themeSummaryEl.textContent = currentTheme;
-      }
+      const { themes } = parseThemeCatalog(await requestThemeCatalog());
+      const active = themes.find((theme) => theme.id === currentTheme);
+      const label = active ? active.label : currentTheme;
+      deps.themeSummaryEl.textContent = `${label} — ${themes.length} available`;
     } catch (_) {
       deps.themeSummaryEl.textContent = currentTheme;
     }

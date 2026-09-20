@@ -3,7 +3,9 @@ from __future__ import annotations
 
 from typing import assert_never
 
+from ..theme_catalog import get_theme_catalog
 from .rpc_contract import (
+    UI_IPC_RPC_METHOD_HOST_THEMES_LIST,
     UI_IPC_RPC_METHOD_HOST_PROJECTS_LIST,
     UI_IPC_RPC_METHOD_HOST_PROJECTS_RESET,
     UI_IPC_RPC_METHOD_HOST_PROJECTS_REMOVE,
@@ -100,6 +102,8 @@ async def dispatch_ui_ipc_rpc_request(
     *,
     source_name: str,
 ) -> object:
+    if method == UI_IPC_RPC_METHOD_HOST_THEMES_LIST:
+        return await get_theme_catalog()
     if method == UI_IPC_RPC_METHOD_HOST_PROJECTS_LIST:
         return await handle_projects_list()
     if method == UI_IPC_RPC_METHOD_HOST_PROJECTS_RESET:

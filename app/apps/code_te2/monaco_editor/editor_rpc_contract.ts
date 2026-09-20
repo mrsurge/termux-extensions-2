@@ -35,6 +35,7 @@ export interface JsonRpcErrorEnvelope {
 }
 
 export const EDITOR_RPC_METHODS = {
+  themesList: "editor.themes.list",
   open: "editor.open",
   jumpToLine: "editor.jumpToLine",
   gitBaselinesGet: "editor.gitBaselines.get",

@@ -109,6 +109,39 @@ async function settlePromises() {
   await Promise.resolve();
 }
 
+test('editor theme connection wait is event-driven, bounded, and retryable', async () => {
+  const { createEditorRpcTransport } = await importTypeScript('monaco_editor/editor_rpc_transport.ts');
+  const socket = new FakeSocket();
+  const timers = new Map();
+  let nextTimer = 0;
+  const transport = createEditorRpcTransport({
+    getSocket: () => socket,
+    setTimeoutFn: callback => { const id = ++nextTimer; timers.set(id, callback); return id; },
+    clearTimeoutFn: id => timers.delete(id),
+  });
+  transport.attachSocket(socket);
+  const first = transport.waitUntilConnected();
+  assert.equal(timers.size, 1);
+  assert.equal(socket.rawEmits.length, 0);
+  socket.trigger('connect');
+  await first;
+  await transport.waitUntilConnected();
+  assert.equal(timers.size, 0);
+  socket.trigger('disconnect');
+  const error = transport.waitUntilConnected();
+  socket.trigger('connect_error');
+  await assert.rejects(error, /connect error/);
+  assert.equal(timers.size, 0);
+  const timeout = transport.waitUntilConnected();
+  [...timers.values()][0]();
+  await assert.rejects(timeout, /connection timed out/);
+  timers.clear();
+  const retry = transport.waitUntilConnected();
+  socket.trigger('connect');
+  await retry;
+  assert.equal(timers.size, 0);
+});
+
 function deferred() {
   let resolve;
   let reject;
@@ -1220,4 +1253,33 @@ test('WBA startup tracing is bounded and does not initiate connections or expose
   assert.equal(records.length, 80);
   assert.equal(socket.connectCalls, 0);
   assert.equal(JSON.stringify(records).includes('must-not-log'), false);
+});
+
+test('a newer empty replay invalidates a document still waiting for its theme', async () => {
+  const { registerEditorSocketConnectionHandlers } = await importTypeScript(
+    'monaco_editor/editor_socket_connection_runtime.ts',
+  );
+  const handlers = new Map();
+  let releaseTheme;
+  const themeReady = new Promise(resolve => { releaseTheme = resolve; });
+  const paths = [];
+  const cleared = [];
+  let snapshots = 0;
+  const deps = new Proxy({
+    rpcNotifications: { onNotification(method, handler) { handlers.set(method, handler); } },
+    onSsotSnapshot() { snapshots++; },
+    ensureEditorWithPrefs: () => themeReady,
+    setCurrentPath: path => paths.push(path),
+    clearActiveModel: reason => cleared.push(reason),
+  }, { get(target, property) { return property in target ? target[property] : () => {}; } });
+  registerEditorSocketConnectionHandlers({ on() {} }, deps);
+  handlers.get('editor.state.ssot')({ file: {
+    path: '/old/project/file.py', content: 'old project', document_revision: 10,
+  } });
+  handlers.get('editor.state.ssot')({ currentPath: null, file: null });
+  releaseTheme();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(snapshots, 2);
+  assert.deepEqual(paths, []);
+  assert.deepEqual(cleared, ['ssot_empty']);
 });

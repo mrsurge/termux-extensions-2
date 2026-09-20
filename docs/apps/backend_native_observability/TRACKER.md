@@ -436,7 +436,7 @@ frontend must deploy together; obsolete HTTP endpoints are not compatibility API
   Code TE2 still exports
   `TE2_APP_ROUTER`; wrapper native-ASGI support alone does not remove FastAPI.
 - [x] Identify live HTTP consumers in the production Projects modal and theme
-  discovery; Projects has now migrated to host RPC, theme discovery remains.
+  discovery; both now use their owning RPC lanes (theme slice below).
 - [ ] Complete caller-by-caller classification of remaining routes, including
   dynamically constructed paths, external app/CLI consumers and debug endpoints.
 - [ ] Move remaining application messaging to owning RPC lanes without fallbacks;
@@ -518,6 +518,36 @@ slice does not yet switch Code TE2 to `TE2_ASGI_APP` or remove FastAPI packages.
   live list service; its cause is not established. No probe added to source.
 - [x] User live acceptance: Projects-modal project switching hydrates correctly
   (2026-09-19). No shared framework restart or Android publication by the agent.
+
+### Theme-Catalog RPC Migration
+
+- [x] Extract typed catalog metadata into `theme_catalog.py`; perform index and
+  extension-registry disk reads off-loop. Share the service between host and
+  editor RPC without importing FastAPI/Pydantic/Starlette.
+- [x] Migrate settings picker/summary and working editors to their respective
+  `ui.host.themes.list` / `editor.themes.list` methods. Historical secondary
+  views use their existing host connection without adding editor/WBA sessions.
+- [x] Remove `available_themes` HTTP discovery without fallback. Preserve theme
+  resource HTTP routes, IDs/URLs, preference behavior and OTA/APK interception.
+- [x] Connect the existing editor socket before theme discovery; apply the selected
+  theme before boot/open/replay document models and historical diff models mount.
+  Keep WBA independent. Share concurrent loads and reuse successful application;
+  theme failures reject readiness, with failed promises cleared for retry.
+- [x] Recheck preference changes during theme loading. Live snapshots invalidate
+  bootstrap document state; newer replays supersede older pending model restores.
+- [x] Record existing VSIX limitation rather than expand scope: extension summary
+  DTOs omit path/theme metadata, so extension theme discovery/inheritance remains
+  deferred. This migration does not claim to implement that integration.
+- [x] Focused validation (2026-09-20): 64 Python tests and 62 frontend tests pass;
+  TypeScript passes; Basedpyright reports 0 errors and 10 existing warnings in
+  `editor_backend.py`. `node build.mjs` rebuilt `static/dist/host.js`.
+  Coverage includes theme-before-model ordering, failure/retry, latest-preference
+  handling, historical cancellation and superseded/empty socket snapshots.
+- [x] User live acceptance (2026-09-20) after worker restart and frontend asset update: theme
+  picker/summary, selected theme after cold boot/reconnect, and both secondary modes.
+
+No Android edits, shared runtime restart or version bump. Code TE2 still exports
+`TE2_APP_ROUTER`; remaining editor/WBA HTTP assembly is the next audit slice.
 
 ### Reported Regression: Android Second Editor
 

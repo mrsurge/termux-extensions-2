@@ -451,9 +451,23 @@ isolated project stores, two-client fanout and delayed stale work. Investigate t
 reported modal RPC timeout separately; do not add a fallback or claim its cause
 without evidence.
 
-Next audit the remaining editor/WBA routes. Theme discovery still has live HTTP
-callers, so route removal is not a mechanical decorator deletion. Move
-application messaging through owning RPC
+Theme-catalog slice: extract discovery to an off-loop, typed Python service,
+shared by `ui.host.themes.list` and `editor.themes.list`. Migrate the settings
+picker/summary, working editors and historical secondary view through their own
+lanes; historical mode uses its existing host connection, not a new editor/WBA
+session. Remove the catalog HTTP route without fallback; retain resource URLs.
+Load Monaco and connect its editor socket first, then apply the selected theme
+before creating/attaching document models. Seed bootstrap preferences separately
+from document restoration; normal opens, replay and historical secondary models
+must respect theme readiness without waiting for WBA. New preferences/replays
+supersede pending state, and resource failures cannot declare successful readiness.
+Clear failed in-flight catalog/theme loads so subsequent requests can retry.
+Test lane dispatch, import isolation, off-loop reads, malformed data,
+concurrent/retry behavior, historical appearance and cold startup. This is not the
+deferred VSIX-theme integration: the extension summary currently omits the
+path/theme metadata expected by the old catalog as well as the extracted one.
+
+Next audit the remaining editor/WBA routes. Move application messaging through owning RPC
 lanes, retain actual resource HTTP, then assemble a native `TE2_ASGI_APP` with the
 existing Socket.IO mounts/lifecycle. No framework restart or Android publication
 is implicit in this work, and other apps retain lazy FastAPI support.
