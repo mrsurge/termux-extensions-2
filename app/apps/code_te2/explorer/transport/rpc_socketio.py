@@ -33,6 +33,7 @@ from .rpc_contract import (
 )
 from ...explorer_runtime import ExplorerDispatcher
 from .connection_manager import JsonMessage
+from ...worker_services.event_bus import current_project_generation
 
 logger = logging.getLogger(__name__)
 
@@ -44,9 +45,22 @@ def sync_active_explorer_dispatchers_project_root(project_root: Path) -> None:
     for namespace in list(_ACTIVE_EXPLORER_NAMESPACES):
         for dispatcher in list(namespace.dispatchers.values()):
             try:
-                dispatcher.project_root = project_root
+                dispatcher.set_project_root(project_root)
             except Exception:
                 logger.exception("[ExplorerRPC] failed to sync dispatcher project root")
+
+
+async def refresh_active_explorer_project(project_root: Path, project_generation: int) -> bool:
+    """Run the shared-project refresh once; its facts fan out to every client."""
+    if current_project_generation(project_root) != project_generation:
+        return False
+    for namespace in list(_ACTIVE_EXPLORER_NAMESPACES):
+        for dispatcher in list(namespace.dispatchers.values()):
+            if dispatcher.project_root == project_root:
+                await dispatcher.handle_explorer_refresh({}, None)
+                return True
+    # With no Explorer connected, its normal connection bootstrap hydrates later.
+    return False
 
 
 if TYPE_CHECKING:

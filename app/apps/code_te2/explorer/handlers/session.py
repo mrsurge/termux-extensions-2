@@ -19,10 +19,9 @@ from ..services.render_state import (
     load_pruned_open_directories,
 )
 from ..services.state_facts import (
-    publish_explorer_directories_changed,
     publish_explorer_open_directories_changed,
 )
-from ...worker_services.event_bus import current_project_generation
+from ...worker_services.event_bus import build_event, current_project_generation, publish
 from ...project_sidecar import ProjectSidecar
 
 logger = logging.getLogger(__name__)
@@ -49,22 +48,33 @@ async def handle_explorer_refresh(
 ) -> None:
     del params, msg_id
 
+    generation = current_project_generation(context.project_root)
     mark_git_cache_dirty(context.project_root)
     open_directories = await asyncio.to_thread(
         load_pruned_open_directories,
         context.project_root,
     )
-    await publish_explorer_directories_changed(
-        context.project_root,
-        [".", *open_directories],
-        reason="manual_refresh",
+    if current_project_generation(context.project_root) != generation:
+        return
+    # Reset the shared expanded-directory projection as well as its listings.
+    # Capture the generation before I/O so a late refresh cannot retarget itself.
+    await publish(build_event(
+        "ExplorerRenderStateChanged",
+        project_root=context.project_root,
+        project_generation=generation,
         source="explorer_session:refresh",
-    )
+        payload={
+            "reason": "refresh",
+            "directories": [".", *sorted(set(open_directories), key=lambda rel: (rel.count('/'), rel))],
+            "open_directories": open_directories,
+            "open_directories_changed": True,
+        },
+    ))
     from ..services.runtime_notifications import schedule_git_status_update
 
     schedule_git_status_update(
         context.project_root,
-        project_generation=current_project_generation(context.project_root),
+        project_generation=generation,
         source="explorer_session:refresh",
         delay=0.0,
     )

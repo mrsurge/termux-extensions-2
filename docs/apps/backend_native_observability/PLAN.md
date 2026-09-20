@@ -441,6 +441,16 @@ history router and its unused raw/touch/file endpoints, without HTTP fallbacks.
 Validate isolated-store mutations/failures, socket dispatch, modal interactions,
 source-consumer absence, Python/TypeScript types and generated frontend output.
 
+Project-switch hydration follow-up: consolidate the working directory-picker
+completion into `switch_project_connection`. Host/Sidebar and Explorer calls must
+rebind all dispatcher sessions and invoke the same existing Explorer refresh
+after the finished-switch fact, without caller-specific or per-client duplicate
+refreshes. Restore expanded-directory state, preserve parent-first listing order,
+and discard superseded generations. Test modal/picker/Sidebar entry points with
+isolated project stores, two-client fanout and delayed stale work. Investigate the
+reported modal RPC timeout separately; do not add a fallback or claim its cause
+without evidence.
+
 Next audit the remaining editor/WBA routes. Theme discovery still has live HTTP
 callers, so route removal is not a mechanical decorator deletion. Move
 application messaging through owning RPC

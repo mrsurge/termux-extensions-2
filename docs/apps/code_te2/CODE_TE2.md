@@ -485,6 +485,20 @@ client whose new-project foreground is explicitly empty receives
 `ProjectSwitchFinished` event is the sole global `explorer.project.opened`
 projection; failures before that event publish no completion.
 
+All project-open entry points (Projects modal, directory picker, Sidebar, and
+create/clone paths) use `switch_project_connection` for dispatcher rebinding and
+Explorer hydration as well as the underlying project switch. The shared service
+updates every connected dispatcher's root through `set_project_root`, cancelling
+old bootstrap work and invalidating History/search sessions. After enqueueing
+`ProjectSwitchFinished`, it invokes the existing Explorer refresh once, not once
+per client. That refresh publishes shared expanded-directory state and root plus
+shallow-to-deep listings, schedules Git status, and republishes review state.
+Callers do not run their own post-switch refresh or reassign roots afterward.
+With no Explorer connected, normal connection bootstrap supplies the tree later.
+Generation checks reject superseded switches, late directory loads and queued
+old completion events. The transport lanes remain separate; no frontend borrows
+another surface's socket.
+
 ### Drafts (project sidecar / session_cache)
 Drafts are stored in project sidecar "session_cache" entries:
 - key = absolute file path

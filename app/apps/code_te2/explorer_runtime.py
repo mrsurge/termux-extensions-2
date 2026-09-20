@@ -359,10 +359,15 @@ class ExplorerDispatcher:
             websocket=self.websocket,
             tracked_job_ids=self._tracked_job_ids,
             emit_personal=self.emit_personal,
-            set_project_root=self._set_project_root,
         )
 
-    def _set_project_root(self, project_root: Path) -> None:
+    def set_project_root(self, project_root: Path) -> None:
+        if self.project_root == project_root:
+            return
+        # A host/Sidebar switch must invalidate the same session state as an
+        # Explorer switch, including an old connection's unfinished bootstrap.
+        if self._bootstrap_task is not None and not self._bootstrap_task.done():
+            _ = self._bootstrap_task.cancel()
         self._history.invalidate_project()
         search_sessions = self._search_session_service()
         if search_sessions is not None:
@@ -921,9 +926,8 @@ class ExplorerDispatcher:
         except ExplorerProjectContractError as exc:
             return await self.send_error(exc.message, msg_id)
 
-        switch_result = await handle_project_open(self._build_project_context(), params, msg_id)
-        self.project_root = switch_result.project_root
-        await self.handle_explorer_refresh({}, msg_id)
+        # Root updates and hydration belong to the shared switch service.
+        _ = await handle_project_open(self._build_project_context(), params, msg_id)
 
     async def handle_project_create(self, payload: JsonObject, msg_id: str | None) -> None:
         from .explorer.contracts.project import (
@@ -937,9 +941,7 @@ class ExplorerDispatcher:
         except ExplorerProjectContractError as exc:
             return await self.send_error(exc.message, msg_id)
 
-        switch_result = await handle_project_create(self._build_project_context(), params, msg_id)
-        self.project_root = switch_result.project_root
-        await self.handle_explorer_refresh({}, msg_id)
+        _ = await handle_project_create(self._build_project_context(), params, msg_id)
 
     async def handle_project_list(self, payload: JsonObject, msg_id: str | None) -> None:
         from .explorer.contracts.project import parse_project_list_params
@@ -960,8 +962,7 @@ class ExplorerDispatcher:
         except ExplorerProjectContractError as exc:
             return await self.send_error(exc.message, msg_id)
 
-        switch_result = await handle_git_clone(self._build_project_context(), params, msg_id)
-        self.project_root = switch_result.project_root
+        _ = await handle_git_clone(self._build_project_context(), params, msg_id)
 
     # --- Search & Review (State Events) ---
 

@@ -17,6 +17,7 @@ from .ui_ipc.rpc_contract import (
 from .worker_services.event_bus import (
     JsonObject,
     WorkerEvent,
+    current_project_generation,
     event_payload_object,
     subscribe as subscribe_worker_event,
 )
@@ -43,8 +44,18 @@ async def _handle_project_switch_started_event(event: WorkerEvent) -> None:
 
 
 async def _handle_project_switch_finished_event(event: WorkerEvent) -> None:
+    # A queued completion must not clear the tree for a newer selection.
+    if _stale_switch(event):
+        return
     await _emit_project_switch_notification(event, phase="end")
+    if _stale_switch(event):
+        return
     await _emit_explorer_project_opened(event)
+
+
+def _stale_switch(event: WorkerEvent) -> bool:
+    generation = event.get("project_generation")
+    return generation is not None and current_project_generation(event.get("project_root")) != generation
 
 
 async def _emit_project_switch_notification(

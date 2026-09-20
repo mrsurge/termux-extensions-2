@@ -491,6 +491,34 @@ slice does not yet switch Code TE2 to `TE2_ASGI_APP` or remove FastAPI packages.
 - [x] Live acceptance: user tested the deployed Projects slice and confirmed it
   works. No shared framework restart performed by the agent.
 
+### Shared Project-Switch Hydration
+
+- [x] Identify the divergence: directory selection ran an extra Explorer refresh
+  after switching; the Projects/Sidebar service only reassigned dispatcher roots.
+  Shared completion facts reset the tree, but those paths omitted its hydration.
+- [x] Move dispatcher rebinding and the existing refresh into the common switch
+  operation. Remove caller-specific refresh/root assignment from open/create/clone
+  handlers. One shared refresh publishes to every connected Explorer client.
+- [x] Rebind through dispatcher session invalidation, cancelling old bootstrap
+  work; project expanded-directory state and parent-first listings after the
+  finished-switch fact. Preserve scheduled Git/review updates without duplicate
+  full Git replay when Explorer is connected.
+- [x] Fence stale directory loads, switch completion facts and superseded switch
+  returns with the captured project generation.
+- [x] Validation: 66 focused Python tests and 17 frontend tests pass; frontend
+  typecheck/build pass with unchanged generated assets. Six new regression tests
+  cover all three open entry points, one refresh for two clients, old bootstrap
+  cancellation, stale results and directory projection order.
+- [x] Focused Basedpyright: zero errors across eight changed backend modules and
+  both project-switch test modules; 16 existing warnings on unchanged lines.
+  The new hydration regression test module has no diagnostics.
+- [x] Runtime investigation cleanup: Python hooks restored; user reloaded the
+  browser, and eval confirms its probe is absent and Projects list populated.
+  The transient modal RPC failure was not reproduced by directly calling the
+  live list service; its cause is not established. No probe added to source.
+- [x] User live acceptance: Projects-modal project switching hydrates correctly
+  (2026-09-19). No shared framework restart or Android publication by the agent.
+
 ### Reported Regression: Android Second Editor
 
 - [ ] Investigate the second editor window failing to open in both GeckoView and
