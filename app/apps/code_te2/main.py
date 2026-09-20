@@ -20,7 +20,6 @@ from .explorer.services.file_ops import (
     get_project_root,
     set_project_root,
 )
-from .code_server_shell_manager import ensure_code_server_shell
 from .code_server_runtime_hooks import set_code_server_runtime_primer
 from . import edit_tracker
 from .diff_helper import invalidate_diff_cache
@@ -35,11 +34,6 @@ from .main_page.backend.state_payload import (
     expand_and_validate_path,
     get_runtime_metadata,
     resolve_diff_base,
-)
-from .main_page.backend.workbench_routes import (
-    ShellRecordLike,
-    WorkbenchRoutesDeps,
-    create_workbench_router,
 )
 from .stores import get_history_store, get_preferences_store
 
@@ -256,9 +250,8 @@ async def serve_agent_icon(name: str):
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(file)
 
-# Include the self-contained editor routes
-from .monaco_editor.editor_backend import editor_router, register_monaco_editor_routes
-code_te2_bp.include_router(editor_router)
+# Resource HTTP is separate from editor state/control, which uses socket RPC.
+from .monaco_editor.editor_asset_routes import register_monaco_editor_routes
 register_monaco_editor_routes(code_te2_bp, "/ui")
 
 # --- Code TE2 Socket.IO (worker-owned) ---
@@ -287,33 +280,8 @@ _STATE_PAYLOAD_DEPS = StatePayloadDeps(
 )
 
 
-async def _get_framework_shell_by_id(shell_id: str) -> ShellRecordLike | None:
-    from .workbench_adapter_shell_manager import get_shell_record
-
-    return await get_shell_record(shell_id)
-
-
-async def _ensure_workbench_adapter_shell_for_routes(
-    project_root: str,
-    *,
-    code_server_http: str,
-    code_server_socket_path: str | None,
-)-> ShellRecordLike:
-    from .workbench_adapter_shell_manager import ensure_workbench_adapter_shell
-
-    return await ensure_workbench_adapter_shell(
-        project_root,
-        code_server_http=code_server_http,
-        code_server_socket_path=code_server_socket_path,
-    )
-
-
-def _code_server_connection_target_for_routes(record: ShellRecordLike) -> tuple[str, str | None]:
-    from .code_server_shell_manager import code_server_connection_target
-
-    return code_server_connection_target(record)
-
-
+# Worker lifecycle and boot-snapshot RPC share this primer. WBA startup/control
+# does not use an HTTP discovery, launch or command-proxy route.
 async def _prime_code_server_runtime(project_root: str) -> None:
     from .intelligence_startup import prime_intelligence_runtime
 
@@ -331,17 +299,6 @@ configure_boot_snapshot_dependencies(
     editor_snapshot_builder=editor_runtime_build_connect_snapshot,
     watcher_availability=is_watchexec_available,
 )
-
-
-_WORKBENCH_ROUTES_DEPS = WorkbenchRoutesDeps(
-    history=_history_store,
-    get_project_root=get_project_root,
-    ensure_code_server_shell=ensure_code_server_shell,
-    ensure_workbench_adapter_shell=_ensure_workbench_adapter_shell_for_routes,
-    code_server_connection_target=_code_server_connection_target_for_routes,
-    get_shell_by_id=_get_framework_shell_by_id,
-)
-code_te2_bp.include_router(create_workbench_router(_WORKBENCH_ROUTES_DEPS))
 
 
 def initialize_project_session() -> ProjectSidecar | None:

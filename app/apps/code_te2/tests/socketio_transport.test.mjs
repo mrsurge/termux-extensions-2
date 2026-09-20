@@ -1060,6 +1060,7 @@ test('TextMate catalog and factory initialization are shared across concurrent c
   );
   const wasm = fs.readFileSync(path.join(appRoot, 'monaco_editor/textmate/onig.wasm'));
   let grammarListCalls = 0;
+  const grammarLoads = [];
   let wasmFetches = 0;
   const windowLike = {
     monaco: {
@@ -1076,18 +1077,25 @@ test('TextMate catalog and factory initialization are shared across concurrent c
   const runtime = createEditorTextmateRuntime({
     getWindow: () => windowLike,
     getApiBase: () => '',
-    fetchFn: async () => {
+    fetchFn: async (url) => {
+      assert.equal(url, 'monaco_editor/textmate/onig.wasm');
       wasmFetches += 1;
       return new Response(wasm);
     },
     fetchJsonWithBase: async () => ({}),
     buildUiUrl: (value) => value,
     normalizeLanguage: (value) => String(value || ''),
-    editorWorkbenchCall: async (method) => {
+    editorWorkbenchCall: async (method, params) => {
+      if (method === 'grammars_load') {
+        grammarLoads.push(params.id);
+        return { ok: true, raw: JSON.stringify({ scopeName: 'source.test', patterns: [
+          { match: 'hello', name: 'keyword.test' },
+        ] }) };
+      }
       assert.equal(method, 'grammars_list');
       grammarListCalls += 1;
       await settlePromises();
-      return { grammars: [] };
+      return { grammars: [{ id: 'test.ext/syntaxes/test.json', scopeName: 'source.test', language: 'test' }] };
     },
   });
 
@@ -1097,6 +1105,12 @@ test('TextMate catalog and factory initialization are shared across concurrent c
   ]);
   assert.equal(first, second);
   assert.equal(grammarListCalls, 1);
+  assert.equal(wasmFetches, 1);
+  // Grammar content remains WBA-owned; only the WASM runtime is fetched as HTTP.
+  const { grammar } = await first.createGrammar('test', 1);
+  const tokens = grammar.tokenizeLine('hello', null).tokens;
+  assert.ok(tokens[0].scopes.includes('keyword.test'));
+  assert.deepEqual(grammarLoads, ['test.ext/syntaxes/test.json']);
   assert.equal(wasmFetches, 1);
 });
 

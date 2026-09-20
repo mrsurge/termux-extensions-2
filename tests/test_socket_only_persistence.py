@@ -43,6 +43,7 @@ class SocketPersistenceTests(unittest.IsolatedAsyncioTestCase):
             "/update_preference", "/set_view_settings", "/set_font_scale",
             "/check_cache", "/cache_state", "/refresh_cache_state", "/discard_draft",
             "/set_content", "/color_picker/toggle", "/read_only/set", "/minimap/mode",
+            "/refresh_diffs", "/jump_to_line", "/search/open", "/debug/state",
         }
         for name in ("main.py", "monaco_editor/editor_backend.py"):
             tree = ast.parse((ROOT / "app/apps/code_te2" / name).read_text())

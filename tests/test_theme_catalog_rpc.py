@@ -102,7 +102,7 @@ class ThemeCatalogTests(unittest.IsolatedAsyncioTestCase):
                 _ = await theme_catalog.get_theme_catalog()
 
     def test_catalog_http_removed_while_resource_routes_remain(self) -> None:
-        source = (Path(__file__).parents[1] / "app/apps/code_te2/monaco_editor/editor_backend.py").read_text()
+        source = (Path(__file__).parents[1] / "app/apps/code_te2/monaco_editor/editor_asset_routes.py").read_text()
         self.assertNotIn("available_themes", source)
         for route in ("/monaco_editor/themes/", "/monaco_editor/cs_themes/", "/monaco_editor/textmate/"):
             self.assertIn(route, source)

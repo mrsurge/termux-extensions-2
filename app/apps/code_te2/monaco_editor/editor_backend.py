@@ -8,14 +8,9 @@ import asyncio
 from pathlib import Path
 from typing import Optional, Protocol, cast
 
-from fastapi import APIRouter, Body, FastAPI, HTTPException
-from fastapi.responses import Response
-from starlette.responses import FileResponse
-
 # --- Local Imports ---
 from app.apps.code_te2.stores import get_history_store, get_preferences_store
 from app.apps.code_te2.preferences_store import ALLOWED_FONT_SCALES
-from app.apps.code_te2.code_te2_paths import code_te2_paths
 # Import helpers
 from app.apps.code_te2.explorer.services.file_ops import get_project_root, mark_git_cache_dirty
 from app.apps.code_te2.core_read import push_save_ack, emit_diff_changed, unsubscribe
@@ -25,12 +20,6 @@ from .editor_backend_services.contracts import RuntimeMeta
 from .editor_backend_services.protocols import EditorLike
 from .editor_backend_services.editor_routes_service import (
     build_view_state_dict as _build_view_state_dict_service,
-    handle_jump_to_line as _handle_jump_to_line,
-    handle_search_open as _handle_search_open,
-)
-from .editor_backend_services.cache_routes_service import (
-    handle_debug_editor_state as _handle_debug_editor_state,
-    handle_refresh_diffs as _handle_refresh_diffs,
 )
 from .editor_backend_services.cache_runtime_service import (
     apply_watcher_replace as _apply_watcher_replace_service,
@@ -107,9 +96,6 @@ def _write_full_json(
 ) -> dict[str, object]:
     return dict(write_full(project_root, path, content, base_sha256=base_sha256, mode=mode))
 
-
-# --- FastAPI Router ---
-editor_router = APIRouter(prefix="/editor")
 
 # --- Global State ---
 _active_editor: EditorLike | None = None
@@ -652,7 +638,8 @@ def _persist_active_draft_immediately(reason: str = 'switch') -> bool:
         print(f"[PERSIST][{reason}] Failed to refresh diffs: {exc}", file=sys.stderr)
     return True
 
-# --- Editor API Endpoints ---
+# Editor state helpers are transport-independent. HTTP assets live in
+# editor_asset_routes; active controls use the host/editor RPC dispatchers.
 
 def _set_suppress_on_change_until(value: float) -> None:
     global _suppress_on_change_until
@@ -671,57 +658,12 @@ def _set_watcher_token(token: object | None) -> None:
 def _unsubscribe_token(token: object) -> None:
     unsubscribe(str(token))
 
-@editor_router.post('/refresh_diffs')
-async def refresh_diffs(data: dict[str, object] = Body(...)):
-    return await _handle_refresh_diffs(
-        data,
-        history_store=_history_store,
-        get_active_editors=get_active_editors,
-        get_project_root=get_project_root,
-        normalize_rel_path=_normalize_rel_path,
-        collect_diff=_collect_diff,
-        current_diff_base=_current_diff_base,
-    )
-
-@editor_router.post('/jump_to_line')
-async def jump_to_line(data: dict[str, object] = Body(...)):
-    editors = get_active_editors()
-    primary = get_active_editor()
-    return _handle_jump_to_line(data, editors=editors, primary=primary)
-
-@editor_router.post('/search/open')
-async def editor_search_open(data: dict[str, object] = Body(...)):
-    """Open the CodeMirror search panel when user presses Ctrl+F."""
-    editor = get_active_editor()
-    
-    if not editor:
-        raise HTTPException(
-            status_code=404, 
-            detail="Editor not initialized. Open a file first."
-        )
-    
-    try:
-        return _handle_search_open(editor)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Failed to open search panel: {str(e)}"
-        )
-
 def _get_view_state_dict() -> dict[str, object]:
     return _build_view_state_dict_service(
         preferences_store=_preferences_store,
         active_project=_history_store.get_active_project,
         project_root=get_project_root,
         get_lsp_state_payload=_history_store.get_lsp_state_payload,
-    )
-
-
-@editor_router.get('/debug/state')
-def debug_editor_state():
-    return _handle_debug_editor_state(
-        get_active_editor=get_active_editor,
-        get_current_file=get_current_file,
     )
 
 
@@ -750,95 +692,6 @@ async def _write_editor_buffer_to_disk(*, client_id: str, op_id: str | None) -> 
         notify_draft_state_changed=notify_draft_state_changed,
         get_combined_diffs_async=_get_combined_diffs_async,
     )
-
-def register_monaco_editor_routes(fastapi_app: FastAPI | APIRouter, mount_path: str = "/ui") -> None:
-    """Register Monaco static asset routes for the inline host editor runtime."""
-    app_pkg_root = Path(__file__).resolve().parents[3]
-    vendored_monaco = app_pkg_root / "static" / "vendor" / "monaco-editor-core"
-    vscode_monaco_esm_dir = vendored_monaco / "esm"
-    esm_ok = vscode_monaco_esm_dir.exists()
-    vscode_monaco_lang_dir = vendored_monaco / "te2-lang"
-    lang_ok = vscode_monaco_lang_dir.exists()
-
-    async def _serve_static_with_css_shim(base_dir: Path, file_path: str, raw: str | None) -> Response | FileResponse:
-        base = base_dir.resolve()
-        target = (base / file_path).resolve()
-        if not str(target).startswith(str(base) + "/") and target != base:
-            return Response("not found", status_code=404, media_type="text/plain")
-        if not target.exists() or not target.is_file():
-            return Response("not found", status_code=404, media_type="text/plain")
-        if target.suffix == ".css" and raw == "1":
-            return FileResponse(str(target), media_type="text/css")
-        if target.suffix == ".css":
-            shim = """
-// Auto-generated CSS module shim (TE2 / VSCode Monaco ESM)
-const url = new URL(import.meta.url);
-url.searchParams.set('raw', '1');
-const href = url.toString();
-const id = 'te2-css:' + href;
-if (!document.querySelector(`link[data-te2-css="${id}"]`)) {
-  const link = document.createElement('link');
-  link.rel = 'stylesheet';
-  link.href = href;
-  link.dataset.te2Css = id;
-  document.head.appendChild(link);
-}
-export default href;
-""".lstrip()
-            return Response(shim, media_type="application/javascript")
-        return FileResponse(str(target))
-
-    @fastapi_app.api_route(
-        f"{mount_path}/monaco_vscode/esm/{{file_path:path}}",
-        methods=["GET", "HEAD"],
-        include_in_schema=False,
-    )
-    async def _serve_monaco_vscode_esm(file_path: str, raw: str | None = None):
-        if not esm_ok:
-            return Response("monaco esm not built; run `worktrees/vscode-te2-diff/build_monaco_te2.sh`", status_code=404)
-        return await _serve_static_with_css_shim(vscode_monaco_esm_dir, file_path, raw)
-
-    @fastapi_app.api_route(
-        f"{mount_path}/monaco_vscode/lang/{{file_path:path}}",
-        methods=["GET", "HEAD"],
-        include_in_schema=False,
-    )
-    async def _serve_monaco_vscode_lang(file_path: str, raw: str | None = None):
-        if not lang_ok:
-            return Response("te2-lang not built; run `worktrees/vscode-te2-diff/build_monaco_te2.sh`", status_code=404)
-        return await _serve_static_with_css_shim(vscode_monaco_lang_dir, file_path, raw)
-
-    @fastapi_app.get(mount_path + "/monaco_editor/themes/{file_path:path}", include_in_schema=False)
-    async def _serve_monaco_editor_theme_json(file_path: str):
-        base = Path(__file__).with_name("themes").resolve()
-        target = (base / file_path).resolve()
-        if not str(target).startswith(str(base) + "/") and target != base:
-            return Response("not found", status_code=404, media_type="text/plain")
-        if not target.exists() or not target.is_file():
-            return Response("not found", status_code=404, media_type="text/plain")
-        return FileResponse(str(target), media_type="application/json")
-
-    cs_ext_themes = code_te2_paths().code_server_extensions_dir
-
-    @fastapi_app.get(mount_path + "/monaco_editor/cs_themes/{ext_id}/{theme_file:path}", include_in_schema=False)
-    async def _serve_cs_extension_theme(ext_id: str, theme_file: str):
-        base = (cs_ext_themes / ext_id / "themes").resolve()
-        target = (base / theme_file).resolve()
-        if not str(target).startswith(str(base) + "/") and target != base:
-            return Response("not found", status_code=404, media_type="text/plain")
-        if not target.exists() or not target.is_file():
-            return Response("not found", status_code=404, media_type="text/plain")
-        return FileResponse(str(target), media_type="application/json")
-
-    @fastapi_app.get(mount_path + "/monaco_editor/textmate/{file_path:path}", include_in_schema=False)
-    async def _serve_monaco_editor_textmate(file_path: str):
-        base = Path(__file__).with_name("textmate").resolve()
-        target = (base / file_path).resolve()
-        if not str(target).startswith(str(base) + "/") and target != base:
-            return Response("not found", status_code=404, media_type="text/plain")
-        if not target.exists() or not target.is_file():
-            return Response("not found", status_code=404, media_type="text/plain")
-        return FileResponse(str(target))
 
 def _refresh_active_diffs():
     """Recalculate combined diffs for the current file based on latest preferences."""

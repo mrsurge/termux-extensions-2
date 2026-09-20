@@ -286,6 +286,7 @@ class CodeTe2PathTests(unittest.TestCase):
             "services/sidebar_backchannel_uds.py",
             "explorer/handlers/prefs.py",
             "monaco_editor/editor_backend.py",
+            "monaco_editor/editor_asset_routes.py",
             "workbench_protocol_proxy/node_workbench_adapter/src/extensions/catalog.ts",
             "workbench_protocol_proxy/node_workbench_adapter/src/client/configuration.ts",
             "workbench_protocol_proxy/node_workbench_adapter/src/protocol/rpc-ids.ts",

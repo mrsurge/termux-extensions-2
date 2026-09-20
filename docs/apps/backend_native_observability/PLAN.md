@@ -467,7 +467,28 @@ concurrent/retry behavior, historical appearance and cold startup. This is not t
 deferred VSIX-theme integration: the extension summary currently omits the
 path/theme metadata expected by the old catalog as well as the extracted one.
 
-Next audit the remaining editor/WBA routes. Move application messaging through owning RPC
+Editor-resource isolation slice: remove the unused `/editor/refresh_diffs`,
+`/editor/jump_to_line`, `/editor/search/open` and `/editor/debug/state` HTTP
+controls. Existing editor/host RPC navigation, Find and baseline notifications
+remain authoritative. Move only resource registration to `editor_asset_routes.py`
+so `editor_backend.py` and preference/state consumers do not import web frameworks.
+Keep Monaco ESM/language assets, theme JSON and TextMate WASM URLs, CSS shims and
+native interception unchanged. WBA `grammars_list`/`grammars_load` remain RPC;
+they are not static-resource discovery. Test framework-blocked imports, actual
+ASGI asset responses, removed routes, startup/RPC behavior and real grammar
+tokenization with WBA-supplied content. No frontend bundle or APK changes needed.
+
+WBA HTTP retirement slice: delete the unused discover/start/attach/status and
+command-proxy routes, plus the extension-enabled GET/POST routes, their router
+module and route-only assembly helpers. Do not replace them with another launch
+path. Worker lifecycle and boot-snapshot RPC keep the shared intelligence primer;
+WBA browser RPC remains direct and Python adapter control remains on the existing
+pipe. Preserve sidecar data/accessors and test their real types instead of deleted
+route protocols. Repair the stale startup-test `on_spawned` signature, isolate
+installation lookup and bound test waits. Validate startup overlap, cancellation,
+record contracts and source-consumer absence; no startup rescheduling or builds.
+
+Next audit the remaining main routes. Move application messaging through owning RPC
 lanes, retain actual resource HTTP, then assemble a native `TE2_ASGI_APP` with the
 existing Socket.IO mounts/lifecycle. No framework restart or Android publication
 is implicit in this work, and other apps retain lazy FastAPI support.

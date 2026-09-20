@@ -547,7 +547,57 @@ slice does not yet switch Code TE2 to `TE2_ASGI_APP` or remove FastAPI packages.
   picker/summary, selected theme after cold boot/reconnect, and both secondary modes.
 
 No Android edits, shared runtime restart or version bump. Code TE2 still exports
-`TE2_APP_ROUTER`; remaining editor/WBA HTTP assembly is the next audit slice.
+`TE2_APP_ROUTER`; remaining main/WBA HTTP assembly is the next audit slice.
+
+### Editor Resource Boundary
+
+- [x] Remove the four unused editor HTTP controls (refresh diffs, jump to line,
+  search open and debug state) and their router mount. Keep active socket controls.
+- [x] Move resource registration into `monaco_editor/editor_asset_routes.py`;
+  editor backend and preference/state consumers import without FastAPI, Pydantic
+  or Starlette. Resource routing still uses FastAPI at the worker assembly edge;
+  this is not the final ASGI cutover.
+- [x] Preserve Monaco, theme and TextMate resource URLs and response semantics.
+  TextMate grammar discovery/content stays on WBA `grammars_list`/`grammars_load`;
+  `onig.wasm` remains HTTP/local-intercepted. No changes to WBA or Android sources.
+- [x] Focused validation (2026-09-20): 67 Python tests and 48 frontend tests pass,
+  including real TextMate tokenization from WBA-supplied grammar content.
+  TypeScript passes. Basedpyright: 0 errors, 21 existing warnings across
+  `main.py` and `editor_backend.py`; new asset module/tests are clean. Resource
+  handler bodies are unchanged apart from return annotations and extraction.
+- [x] Separate test-maintenance follow-up: the older
+  `test_startup_optimization.LaunchSerializationTests.test_code_server_launches_do_not_overlap`
+  mock omits `on_spawned`, causing its task to fail before signalling an unbounded
+  event wait. The initial broad run was stopped. The WBA HTTP retirement slice
+  repairs the fixture, isolates installation lookup and bounds synchronization
+  waits without changing runtime launch code.
+- [x] User live acceptance (2026-09-20) after app-worker restart: working editor startup,
+  theme and syntax highlighting (including switching languages), Find/navigation,
+  inline diffs and historical second editor. No frontend asset update required.
+
+### WBA HTTP Retirement
+
+- [x] Source audit found no active callers of the seven legacy HTTP endpoints:
+  `/workbench_adapter/{discover,start,attach,status,cmd}` and GET/POST
+  `/workbench/extensions/enabled`. Delete the router module and route-only main
+  helpers/dependencies; no replacement HTTP fallback or startup path.
+- [x] Preserve worker/boot-snapshot intelligence priming, direct WBA socket RPC,
+  pipe control and sidecar accessors/data. Theme/grammar transport is unchanged.
+- [x] Keep connection-record and sidecar contract coverage against real services,
+  assert router removal and retained primer/socket assembly, and repair the stale
+  launch serialization fixture with bounded waits and isolated installation state.
+- [x] Focused validation (2026-09-20): 75 Python tests pass, including the repaired
+  startup module, startup overlap/cancellation, lifecycle and editor/resource/RPC
+  checks. Basedpyright reports 0 errors; the two changed test modules are clean,
+  and `main.py` retains 15 existing warnings. Source audit finds no remaining
+  production references to the retired router/endpoints. No frontend source
+  changed in this slice, so no bundle or APK build was needed.
+- [x] User live acceptance (2026-09-20) after app-worker restart: intelligence startup and
+  reconnect, syntax/diagnostics/navigation, language-backend selection and the
+  Languages/Extensions modal. No frontend assets or APK rebuild needed.
+
+The remaining FastAPI boundary is main/resource HTTP assembly. Both extraction
+slices are live accepted. No runtime restart or frontend publication by the agent.
 
 ### Reported Regression: Android Second Editor
 

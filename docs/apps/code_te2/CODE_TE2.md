@@ -1778,6 +1778,14 @@ selection or require Electron to forward environment variables to a remote host.
 
 ### Generic WBA language path
 
+WBA startup/control does not use the retired Python
+`/workbench_adapter/{discover,start,attach,status,cmd}` or
+`/workbench/extensions/enabled` HTTP routes. Worker lifecycle and boot-snapshot
+RPC use the shared intelligence primer; the adapter's existing shell manager
+owns process/pipe control and browsers use direct `/wba` RPC. The removed router
+had no active callers. Sidecar extension-list data/accessors remain intact; this
+cleanup does not change extension activation policy or startup ordering.
+
 The Code Server path is data-driven:
 
 1. The WBA publishes language, language-configuration, grammar, theme, and
@@ -1797,6 +1805,17 @@ The Code Server path is data-driven:
 4. Provider registration events and reconnect snapshots install one stable
    Monaco bridge per advertised language and feature. There are no JavaScript,
    HTML, CSS, or other language-specific routing branches.
+
+Grammar discovery/content travels over the direct WBA socket as
+`vscode.textmate.grammars.list` / `vscode.textmate.grammars.load`. It does not use
+the Python asset router. The separate HTTP resource boundary in
+`monaco_editor/editor_asset_routes.py` serves `/ui/monaco_editor/textmate/onig.wasm`,
+Monaco ESM/language assets and theme JSON, retaining native OTA/APK interception
+and CSS-module shim behavior. `editor_backend.py` owns no HTTP routes or web
+framework imports. The obsolete refresh-diffs/jump/search/debug-state HTTP
+controls are removed; host/editor RPC and notifications own active controls.
+`main.py` still mounts resource HTTP through FastAPI pending its later ASGI
+assembly migration.
 
 Document highlights use `$provideDocumentHighlights` and back Monaco's
 cursor-occurrence highlighting. Definitions, references, and implementations
