@@ -98,6 +98,14 @@ async def dispatch_editor_rpc_request(
     handle_issues_dump_response: HandleEditorPayloadFn,
     handle_breadcrumb_navigate: HandleEditorPayloadFn,
 ) -> object:
+    if method == "editor.preferences.get":
+        from ..stores import get_preferences_store
+        return {"preferences": get_preferences_store().get_preferences(active_project())}
+
+    if method == "editor.preference.update":
+        from .editor_preferences_backend import handle_editor_preference_update_request
+        return await handle_editor_preference_update_request(params, source_client=source_client)
+
     if method in (EDITOR_RPC_METHOD_HOST_SAVE, EDITOR_RPC_METHOD_FOCUS, EDITOR_RPC_METHOD_BLUR):
         return await handle_editor_host_action(
             method,

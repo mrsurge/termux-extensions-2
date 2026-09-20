@@ -212,7 +212,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
   }
   const clientId = clientIdentity.clientInstanceId;
   let problemsPanel: ProblemsPanelController = createProblemsState();
-  let editorViewState: EditorViewState | null = null; // Loaded from backend at startup via /editor/view_state
+  let editorViewState: EditorViewState | null = null; // Projected from the host RPC state snapshot
   let cachedProjectRoot: string | null = null;
   let currentPath = '';
   let currentPathExists = false;
@@ -398,7 +398,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     getProblemsDetail: () => problemsPanel.getDetail(),
     pickerAvailable: () => pickerController.pickerAvailable(),
     saveFileWithPicker: async (options) => window.teFilePicker?.saveFile(options) ?? null,
-    apiPost: (path, body) => apiPost(path, body),
+    requestDiagnosticsExport: (payload) => uiIpcConnections.requestBackendDiagnosticsExport(payload),
     getClientId: () => clientId,
     requestBackendEditorIssuesCommand: (payload) => uiIpcConnections.requestBackendEditorIssuesCommand(payload),
     toast: (message, kind) => host.toast(message, kind),
@@ -632,7 +632,8 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     updatedAt: null,
   };
   const sessionTelemetry = createSessionTelemetryController({
-    apiPost,
+    requestState: () => uiIpcConnections.requestBackendEditorStateGet(),
+    updateSession: (payload) => uiIpcConnections.requestBackendSessionUpdate(payload),
     getActiveProjectFallback: () => cachedProjectRoot || (editorState && editorState.activeProject) || null,
     getCurrentPath: () => currentPath || null,
     getLastSha256: () => lastSha256,
@@ -743,7 +744,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
 
   // ---------- Unified Preference Management (Backend as Single Source of Truth) ----------
   const preferencesController = createPreferencesController({
-    apiPost: (path: string, body: UnknownRecord) => apiPost(path, body),
+    requestBackendEditorStateGet: () => uiIpcConnections.requestBackendEditorStateGet(),
     requestBackendEditorPreferenceUpdate: (payload: UnknownRecord) => uiIpcConnections.requestBackendEditorPreferenceUpdate(payload),
     getClientId: () => null,
     setEditorViewState: (state: EditorViewState | null) => {
@@ -1275,8 +1276,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     setLastSavedContent: () => {},
     markUnsaved: (flag: boolean) => markUnsaved(flag),
     syncSessionPath: () => syncSessionPath(),
-    apiPost: (path: string, body: UnknownRecord) => apiPost(path, body),
-    apiGet: (path: string) => apiGet(path),
     saveFileViaEditorSocket: (payload: UnknownRecord, timeoutMs?: number) => saveSocketController.saveFileViaEditorSocket(payload, timeoutMs),
     setStatus: (text: string) => {
       statusEl.textContent = text;
@@ -1540,6 +1539,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
   });
 
   installAdvancedMenuActions({
+    requestBackendDraftDiscard: (payload: UnknownRecord) => uiIpcConnections.requestBackendDraftDiscard(payload),
     bindMenuToggle,
     els: {
       miToggleAutosave,
@@ -1557,7 +1557,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     basename,
     getUnsaved: () => !!unsaved,
     saveFile: () => saveFile(),
-    apiPost: (path: string, body: UnknownRecord) => apiPost(path, body),
     markUnsaved: (flag: boolean) => markUnsaved(flag),
     toast: (msg: string, kind?: unknown) => host.toast(msg, kind),
   });

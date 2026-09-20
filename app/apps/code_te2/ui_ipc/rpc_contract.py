@@ -14,6 +14,9 @@ UI_IPC_RPC_NAMESPACE: Final = "/ui_ipc"
 UI_IPC_RPC_REQUEST_EVENT: Final = "rpc"
 UI_IPC_RPC_NOTIFICATION_EVENT: Final = "rpc.notify"
 
+UI_IPC_RPC_METHOD_HOST_EDITOR_STATE_GET: Final = "ui.host.editorState.get"
+UI_IPC_RPC_METHOD_HOST_SESSION_UPDATE: Final = "ui.host.session.update"
+UI_IPC_RPC_METHOD_HOST_DIAGNOSTICS_EXPORT: Final = "ui.host.diagnostics.export"
 UI_IPC_RPC_METHOD_HOST_FILE_OPEN: Final = "ui.host.file.open"
 UI_IPC_RPC_METHOD_HOST_FILE_SAVE: Final = "ui.host.file.save"
 UI_IPC_RPC_METHOD_HOST_DRAFT_DISCARD: Final = "ui.host.draft.discard"
@@ -57,6 +60,9 @@ UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_CLOSE: Final = "ui.sidebar.window.close"
 UI_IPC_RPC_METHOD_SIDEBAR_ACTIVE_SHORTCUT_SET: Final = "ui.sidebar.activeShortcut.set"
 
 UiIpcRpcMethod = Literal[
+    "ui.host.diagnostics.export",
+    "ui.host.session.update",
+    "ui.host.editorState.get",
     "ui.host.history.open",
     "ui.host.file.open",
     "ui.host.file.save",
@@ -164,6 +170,9 @@ UiIpcRpcNotification = Literal[
 
 ALLOWED_REQUEST_METHODS: Final[set[str]] = {
     UI_IPC_RPC_METHOD_HOST_COMPARISON,
+    UI_IPC_RPC_METHOD_HOST_EDITOR_STATE_GET,
+    UI_IPC_RPC_METHOD_HOST_SESSION_UPDATE,
+    UI_IPC_RPC_METHOD_HOST_DIAGNOSTICS_EXPORT,
     UI_IPC_RPC_METHOD_HOST_FILE_OPEN,
     UI_IPC_RPC_METHOD_HOST_FILE_SAVE,
     UI_IPC_RPC_METHOD_HOST_DRAFT_DISCARD,

@@ -64,7 +64,7 @@ async def handle_editor_preference_update_request(
     source_client: str | None = None,
 ) -> JsonMap:
     payload: JsonMap = dict(data)
-    if source_client and "nicegui_client_id" not in payload:
+    if source_client:
         payload["nicegui_client_id"] = source_client
 
     def _collect_diff(project_root: Path, rel_path: str, base_ref: str) -> dict[str, object]:

@@ -550,16 +550,11 @@ It then fetches:
   - returns `{path, content, sha256}`
   - the endpoint enforces that `path` must remain under `$HOME`
 
-### Draft cache lookup (Monaco editor backend route)
-- `POST /api/app/code_te2/editor/check_cache`
-  - returns `{has_draft, content, base_sha256}` when a cached draft exists
-  - route owner: `app/apps/code_te2/monaco_editor/editor_backend.py`
-  - implementation service: `app/apps/code_te2/monaco_editor/editor_backend_services/cache_routes_service.py`
-  - frontend caller: `app/apps/code_te2/monaco_editor/editor_open_cache_fetch_utils.ts`
-
-Notes:
-- The Monaco editor runtime uses `/editor/check_cache` as a “draft wins” read path when opening/restoring a file.
-- The authoritative socket open payload comes through the typed editor RPC lane (see below).
+### Draft Cache Projection
+- The authoritative socket open/bootstrap payload includes materialized draft
+  content and cache state through the typed editor RPC lane (see below).
+- The obsolete HTTP check-cache route and unused HTTP open helpers are removed.
+  There is no HTTP fallback for document persistence or draft state.
 
 ---
 
@@ -4672,6 +4667,50 @@ FastAPI/socket adapters, stores and application services still share a process
 and event loop. Other projector tasks and pipe-only worker lifetime are not yet
 migrated. No startup-speed improvement is implied. Lifecycle tests include
 partial failure, cancellation, repeated starts/stops and a real worker SIGTERM.
+
+### Worker Transport Exports
+
+`app/libs/app_worker.py` accepts callable `TE2_ASGI_APP` for native ASGI apps.
+That app owns routing, mounted applications and ASGI lifespan; explicit router
+exports or nonempty `SUBAPPS` cannot be combined with it. `app_worker_asgi.py`
+forwards HTTP/WebSocket scopes unchanged except for the reserved
+`GET /__te2/runtime/loop` probe. Native startup must complete successfully before
+worker readiness/debug-loop binding; worker cleanup runs before native shutdown.
+Paired application hooks still surround Uvicorn serving inside signal capture.
+
+Router-based apps retain `TE2_APP_ROUTER` or the legacy `<app_id>_bp` contract via
+lazy `app_worker_fastapi.py` assembly and existing mounted-subapp lifespans.
+Pipe-only workers import no HTTP stack; native network workers import Uvicorn
+and Starlette ASGI types but not FastAPI/Pydantic. Code TE2 itself still uses the
+router path pending HTTP/service migration. This does not remove dependencies,
+change socket protocols, or move networking to another process.
+
+### Editor Service Outcome Boundary
+
+Preference/view-setting services use `editor_backend_services/outcomes.py` for
+typed application errors, and the save service returns a `SaveConflict` carrying
+current disk metadata. These services import no FastAPI/Starlette/Pydantic.
+The temporary HTTP outcome adapter and its save/preference endpoints have been
+removed. Normal saves retain their socket `BASE_MISMATCH` response/confirmation
+flow. Ordinary save results remain dictionaries. Socket callers keep
+their existing generic error handling; application error strings deliberately
+retain the old numeric prefix for wire compatibility. Cancellation is not caught.
+This is service isolation, not the removal of Code TE2's remaining FastAPI routes.
+
+Host preference state comes from `ui.host.editorState.get`; session telemetry is
+updated with `ui.host.session.update` and does not own project/client foreground.
+Preference edits, Save/Save As and draft discard use their existing host RPCs.
+Monaco uses `editor.preferences.get` / `editor.preference.update` on its own lane,
+including cold-start reads and read-only changes. There is no HTTP fallback.
+Backend socket identity supplies preference source attribution. Cache state
+comes from editor bootstrap/live projections, not an HTTP boot refresh.
+
+Diagnostic text export and directory checks/creation use
+`ui.host.diagnostics.export`. The backend enforces project containment, refuses
+draft collisions and reuses write/acknowledgement/diff primitives. Existing
+directory-creation confirmation stays in the host UI. Superseded HTTP endpoints
+for session/cache/preferences/write/review save/discard are removed; deploy the
+worker and regenerated frontend together. Static/theme/grammar HTTP is unchanged.
 
 ### Framework Pipe Codec
 

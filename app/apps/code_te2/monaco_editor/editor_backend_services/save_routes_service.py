@@ -3,14 +3,13 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import sys
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Protocol, cast
 
-from fastapi import Response
+from .outcomes import SaveConflict
 
 from .protocols import EditorLike
 
@@ -20,7 +19,7 @@ JsonMap = dict[str, object]
 class SaveValidationError(Exception):
     def __init__(self, message: str):
         super().__init__(message)
-        self.message = message
+        self.message: str = message
 
 
 class HistoryStoreLike(Protocol):
@@ -187,7 +186,7 @@ async def handle_save_current_file(
     get_cached_editor_content: Callable[[EditorLike | None], str],
     get_preferences: Callable[[], dict[str, object]],
     nicegui_broadcast: Callable[[str, str, dict[str, object]], None],
-) -> JsonMap | Response:
+) -> JsonMap | SaveConflict:
     client_id_obj = data.get("client_id", "unknown")
     client_id = client_id_obj if isinstance(client_id_obj, str) and client_id_obj else "unknown"
     nicegui_client_id_obj = data.get("nicegui_client_id")
@@ -246,11 +245,7 @@ async def handle_save_current_file(
             f"[SAVE] BASE_MISMATCH path={current_file!r} expected={base_snapshot} actual={actual}",
             file=sys.stderr,
         )
-        return Response(
-            status_code=409,
-            content=json.dumps({"ok": False, "error": "BASE_MISMATCH", "data": {"current": exc.current_meta}}),
-            media_type="application/json",
-        )
+        return SaveConflict(current=exc.current_meta)
     except Exception as exc:
         print(f"[SAVE] ERROR path={current_file!r} error={exc}", file=sys.stderr)
         return {"ok": False, "error": str(exc)}

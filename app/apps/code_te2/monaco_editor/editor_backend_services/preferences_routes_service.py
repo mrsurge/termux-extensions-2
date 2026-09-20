@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Protocol, cast
 
-from fastapi import HTTPException
+from .outcomes import EditorServiceError
 
 from .protocols import EditorLike
 
@@ -67,12 +67,12 @@ async def handle_update_preference(
     source_client = source_client_obj if isinstance(source_client_obj, str) else None
 
     if not key:
-        raise HTTPException(status_code=400, detail="key is required")
+        raise EditorServiceError(kind="invalid", detail="key is required")
 
     from app.apps.code_te2.preferences_store import DEFAULT_EDITOR_PREFS
 
     if key not in DEFAULT_EDITOR_PREFS and key != "comparisonMode":
-        raise HTTPException(status_code=400, detail=f"Invalid preference key: {key}")
+        raise EditorServiceError(kind="invalid", detail=f"Invalid preference key: {key}")
 
     try:
         print(f"[PREFERENCE] Incoming update key={key} value={value}", file=sys.stderr)
@@ -112,7 +112,7 @@ async def handle_update_preference(
             try:
                 scale = resolve_font_scale(value)
             except RuntimeError as exc:
-                raise HTTPException(status_code=400, detail=str(exc))
+                raise EditorServiceError(kind="invalid", detail=str(exc))
             value = scale
             for ed in editors:
                 ed.set_font_scale(scale)
@@ -166,7 +166,7 @@ async def handle_update_preference(
         editor_updates: dict[str, object] = {key: value}
         if key == "comparisonMode":
             if value not in ("plain", "commit", "disk"):
-                raise HTTPException(status_code=400, detail="Invalid comparison mode")
+                raise EditorServiceError(kind="invalid", detail="Invalid comparison mode")
             editor_updates = {"showInlineDiffs": value == "commit", "showDraftDiffs": value == "disk"}
             if value == "disk":
                 editor_updates["autoSave"] = False
@@ -195,8 +195,8 @@ async def handle_update_preference(
             pass
 
         return {"ok": True, "data": view_state}
-    except HTTPException:
+    except EditorServiceError:
         raise
     except Exception as exc:
         print(f"[PREFERENCE] Failed to apply {key}={value}: {exc}", file=sys.stderr)
-        raise HTTPException(status_code=500, detail=f"Failed to apply preference: {exc}")
+        raise EditorServiceError(kind="internal", detail=f"Failed to apply preference: {exc}")

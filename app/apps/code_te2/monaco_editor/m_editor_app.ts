@@ -43,8 +43,6 @@ import { applyVscodeLanguageConfiguration } from "./editor_vscode_language_confi
 import { installVscodeLanguagesLoop } from "./editor_vscode_languages_install_loop_utils.ts";
 import { finalizeVscodeLanguagesInstall } from "./editor_vscode_languages_finalize_utils.ts";
 import { resolveAutoSaveFromPrefs } from "./editor_open_autosave_pref_utils.js";
-import { fetchOpenCache } from "./editor_open_cache_fetch_utils.js";
-import { resolveOpenContent } from "./editor_open_content_resolve_utils.js";
 import { resolveOpenLanguage } from "./editor_open_lang_resolve_utils.js";
 import { initOpenModel } from "./editor_open_model_init_utils.js";
 import {
@@ -452,6 +450,7 @@ interface MonacoBootWindowLike extends Window {
     },
   });
   var uiEditorRuntime = createEditorUiEditorRuntime({
+    updatePreference: (payload) => editorRpcCall("editor.preference.update", payload),
     getWindow: function () {
       return window;
     },
@@ -1825,10 +1824,7 @@ interface MonacoBootWindowLike extends Window {
   }
 
   async function fetchSSOTState() {
-    // Single call site so we can instrument/adjust behavior later.
-    return await fetchJsonWithBase(fetch, apiBase, "/state", {
-      cache: "no-store",
-    });
+    return await editorRpcCall("editor.preferences.get", {});
   }
 
   async function ensureEditorWithPrefs() {

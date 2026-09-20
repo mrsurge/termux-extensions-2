@@ -391,6 +391,21 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
     return uiIpcConnectPromise;
   }
 
+  async function requestBackendEditorStateGet(payload: JsonObject = {}): Promise<unknown> {
+    const connection = await connectUIIPC();
+    return connection.request(UI_IPC_RPC_METHODS.hostEditorStateGet, payload, 8000);
+  }
+
+  async function requestBackendSessionUpdate(payload: JsonObject = {}): Promise<unknown> {
+    const connection = await connectUIIPC();
+    return connection.request(UI_IPC_RPC_METHODS.hostSessionUpdate, payload, 8000);
+  }
+
+  async function requestBackendDiagnosticsExport(payload: JsonObject = {}): Promise<unknown> {
+    const connection = await connectUIIPC();
+    return connection.request(UI_IPC_RPC_METHODS.hostDiagnosticsExport, payload, 8000);
+  }
+
   async function requestBackendFileOpen(payload: JsonObject = {}): Promise<unknown> {
     const connection = await connectUIIPC();
     return await connection.request(UI_IPC_RPC_METHODS.hostFileOpen, payload || {}, 8000);
@@ -493,6 +508,9 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
     requestSidebarUiControl,
     connectSidebarIPC,
     connectUIIPC,
+    requestBackendEditorStateGet,
+    requestBackendSessionUpdate,
+    requestBackendDiagnosticsExport,
     requestBackendFileOpen,
     requestBackendFileSave,
     requestBackendDraftDiscard,

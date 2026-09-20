@@ -4,6 +4,9 @@ from __future__ import annotations
 from typing import assert_never
 
 from .rpc_contract import (
+    UI_IPC_RPC_METHOD_HOST_EDITOR_STATE_GET,
+    UI_IPC_RPC_METHOD_HOST_SESSION_UPDATE,
+    UI_IPC_RPC_METHOD_HOST_DIAGNOSTICS_EXPORT,
     UI_IPC_RPC_METHOD_HOST_HISTORY_OPEN,
     UI_IPC_RPC_METHOD_HOST_COMPARISON,
     UI_IPC_RPC_METHOD_HOST_BOOT_SNAPSHOT_GET,
@@ -65,6 +68,8 @@ from ..host.git_backend import (
     handle_host_git_branches_list_request,
     handle_host_git_remote_add_request,
 )
+from ..host.transport_state_backend import handle_editor_state_get, handle_session_update
+from ..host.diagnostics_export_backend import handle_diagnostics_export
 from ..host.state_backend import handle_host_file_scroll_update_request
 from ..host.terminal_actions_backend import handle_host_run_active_file_request
 from ..host.page_preview_backend import handle_host_page_preview_template_install_request
@@ -88,6 +93,13 @@ async def dispatch_ui_ipc_rpc_request(
     *,
     source_name: str,
 ) -> object:
+    if method == UI_IPC_RPC_METHOD_HOST_EDITOR_STATE_GET:
+        return handle_editor_state_get()
+    if method == UI_IPC_RPC_METHOD_HOST_SESSION_UPDATE:
+        return handle_session_update(params)
+    if method == UI_IPC_RPC_METHOD_HOST_DIAGNOSTICS_EXPORT:
+        return await handle_diagnostics_export(params, source_name=source_name)
+
     if method == UI_IPC_RPC_METHOD_HOST_FILE_OPEN:
         return await handle_host_open_request(
             params,

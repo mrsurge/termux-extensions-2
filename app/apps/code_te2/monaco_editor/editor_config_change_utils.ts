@@ -3,7 +3,7 @@ interface EditorConfigChangeOptions {
   lastKnownReadOnly: boolean | null;
   setLastKnownReadOnlyFn?: (readOnly: boolean) => void;
   monacoRef?: MonacoRuntimeGlobal | null;
-  fetchFn(input: string, init?: RequestInit): Promise<unknown>;
+  updatePreference(payload: Record<string, unknown>): Promise<unknown>;
 }
 
 export function onEditorConfigChanged(
@@ -11,7 +11,8 @@ export function onEditorConfigChanged(
   opts: EditorConfigChangeOptions | null | undefined,
 ): void {
   const editor = ed as MonacoRuntimeEditorLike | null;
-  const options = opts || { lastKnownReadOnly: null, fetchFn: async () => undefined };
+  if (!opts) throw new Error("Editor preference RPC is required");
+  const options = opts;
   if (typeof options.syncReadOnlyInputModeFn === 'function') options.syncReadOnlyInputModeFn(editor);
   try {
     if (!editor || !editor.getOption) return;
@@ -21,11 +22,7 @@ export function onEditorConfigChanged(
     const readOnly = editor.getOption(readOnlyOption);
     if (typeof readOnly !== 'boolean') return;
     if (options.lastKnownReadOnly !== null && readOnly !== options.lastKnownReadOnly) {
-      options.fetchFn('/api/app/code_te2/editor/update_preference', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: 'readOnly', value: readOnly }),
-      }).catch((error: unknown) => { console.warn('[Monaco] readOnly pref save failed', error); });
+      options.updatePreference({ key: 'readOnly', value: readOnly }).catch((error: unknown) => { console.warn('[Monaco] readOnly pref save failed', error); });
     }
     if (typeof options.setLastKnownReadOnlyFn === 'function') options.setLastKnownReadOnlyFn(readOnly);
   } catch (_) {}

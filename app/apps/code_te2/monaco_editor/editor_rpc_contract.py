@@ -22,6 +22,8 @@ JSONRPC_APPLICATION_ERROR: Final = -32000
 
 JsonRpcId = str | int
 
+EDITOR_RPC_METHOD_PREFERENCE_UPDATE: Final = "editor.preference.update"
+EDITOR_RPC_METHOD_PREFERENCES_GET: Final = "editor.preferences.get"
 EDITOR_RPC_METHOD_OPEN: Final = "editor.open"
 EDITOR_RPC_METHOD_JUMP_TO_LINE: Final = "editor.jumpToLine"
 EDITOR_RPC_METHOD_GIT_BASELINES_GET: Final = "editor.gitBaselines.get"
@@ -48,6 +50,8 @@ EDITOR_RPC_METHOD_BREADCRUMB_NAVIGATE: Final = "editor.breadcrumb.navigate"
 EDITOR_RPC_METHOD_CODE_INSPECTOR_PUBLISH: Final = "editor.codeInspector.publish"
 
 EditorRpcMethod = Literal[
+    "editor.preferences.get",
+    "editor.preference.update",
     "editor.open",
     "editor.jumpToLine",
     "editor.gitBaselines.get",

@@ -31,7 +31,7 @@ export interface HostChromeRuntimeDeps {
   getProblemsDetail: () => Record<string, unknown>;
   pickerAvailable: () => boolean;
   saveFileWithPicker: (options: SaveFileOptions) => Promise<SaveFileChoice | null | undefined>;
-  apiPost: (path: string, body?: JsonObject) => Promise<unknown>;
+  requestDiagnosticsExport: (payload: JsonObject) => Promise<unknown>;
   getClientId: () => string;
   requestBackendEditorIssuesCommand: (payload: JsonObject) => Promise<unknown>;
   toast: (message: string, kind?: string) => void;
@@ -135,33 +135,13 @@ export function createHostChromeRuntime(deps: HostChromeRuntimeDeps): HostChrome
     const codeRoot = `${projectRoot}/.code_te2`;
     const target = `${codeRoot}/diagnostics`;
 
-    const exists = async (): Promise<boolean> => {
-      try {
-        const params = new URLSearchParams({ path: target, hidden: '1', root: 'system' });
-        const resp = await fetch(`/api/browse?${params.toString()}`, { cache: 'no-store' });
-        if (!resp.ok) return false;
-        const json = await resp.json().catch(() => ({}));
-        return Boolean(isRecord(json) && json.ok);
-      } catch {
-        return false;
-      }
-    };
-
-    if (await exists()) return { ok: true, dir: target };
-
-    const yes = await deps.confirm('This will create a new directory called .code_te2/diagnostics in your project root. Is this ok?');
-    if (!yes) return { ok: false, dir: projectRoot };
-
-    try {
-      const rootResp = await deps.apiPost('explorer/mkdir', { parent_rel: '.', name: '.code_te2' });
-      if (isFailureResponse(rootResp)) throw new Error(String(rootResp.error || 'mkdir failed'));
-      const resp = await deps.apiPost('explorer/mkdir', { parent_rel: '.code_te2', name: 'diagnostics' });
-      if (isFailureResponse(resp)) throw new Error(String(resp.error || 'mkdir failed'));
-    } catch (err) {
-      deps.toast(errorMessage(err, 'Failed to create .code_te2/diagnostics'));
+    const state = await deps.requestDiagnosticsExport({ action: 'directory' });
+    if (!isRecord(state)) throw new Error('Invalid diagnostic directory state');
+    if (state.exists === true) return { ok: true, dir: target };
+    if (!await deps.confirm('Create .code_te2/diagnostics in your project root?')) {
       return { ok: false, dir: projectRoot };
     }
-
+    await deps.requestDiagnosticsExport({ action: 'mkdir' });
     return { ok: true, dir: target };
   }
 
@@ -173,7 +153,7 @@ export function createHostChromeRuntime(deps: HostChromeRuntimeDeps): HostChrome
       client_id: deps.getClientId(),
       op_id: opId,
     };
-    const res = await deps.apiPost('write', payload);
+    const res = await deps.requestDiagnosticsExport(payload);
     if (isFailureResponse(res)) {
       throw new Error(String(res.error || 'Write failed'));
     }

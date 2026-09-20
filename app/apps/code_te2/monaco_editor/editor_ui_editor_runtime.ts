@@ -6,6 +6,7 @@ import { syncReadOnlyInputMode } from './editor_readonly_input_mode_utils.ts';
 import { onEditorConfigChanged } from './editor_config_change_utils.ts';
 
 interface EditorUiEditorRuntimeDeps {
+  updatePreference(payload: Record<string, unknown>): Promise<unknown>;
   getWindow(): Window;
   getDocument(): Document;
   getMonaco(): unknown;
@@ -140,9 +141,7 @@ export function createEditorUiEditorRuntime(deps: EditorUiEditorRuntimeDeps) {
       lastKnownReadOnly,
       setLastKnownReadOnlyFn(readOnly: boolean | null) { lastKnownReadOnly = readOnly; },
       monacoRef: deps.getMonaco() as MonacoRuntimeGlobal | null,
-      fetchFn(url: string, init?: RequestInit) {
-        return deps.getWindow().fetch(url, init);
-      },
+      updatePreference: deps.updatePreference,
     });
   }
 

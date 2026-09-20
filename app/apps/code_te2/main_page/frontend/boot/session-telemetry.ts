@@ -1,5 +1,6 @@
 interface SessionTelemetryDeps {
-  apiPost: (path: string, body: Record<string, unknown>) => Promise<unknown>;
+  requestState: () => Promise<unknown>;
+  updateSession: (body: Record<string, unknown>) => Promise<unknown>;
   getActiveProjectFallback: () => string | null;
   getCurrentPath: () => string | null;
   getLastSha256: () => string | null;
@@ -40,13 +41,9 @@ export function createSessionTelemetryController(deps: SessionTelemetryDeps) {
 
   async function fetchPersistedSessionState(): Promise<PersistedSessionState | null> {
     try {
-      const resp = await fetch('/api/app/code_te2/session_state', { cache: 'no-store' });
-      const parsed: unknown = await resp.json();
-      const jsonRecord = isRecord(parsed) ? parsed : null;
-      if (!resp.ok || jsonRecord?.ok === false) {
-        throw new Error(String(jsonRecord?.error || resp.statusText || 'Session state fetch failed'));
-      }
-      persistedSessionSnapshot = isRecord(jsonRecord?.data) ? jsonRecord.data as PersistedSessionState : {};
+      const snapshot = await deps.requestState();
+      if (!isRecord(snapshot) || !isRecord(snapshot.session_state)) throw new Error("Session state unavailable");
+      persistedSessionSnapshot = snapshot.session_state;
       return persistedSessionSnapshot;
     } catch (err) {
       console.warn('Failed to load session telemetry:', err);
@@ -87,7 +84,7 @@ export function createSessionTelemetryController(deps: SessionTelemetryDeps) {
       return;
     }
     try {
-      await deps.apiPost('session_state', sessionState);
+      await deps.updateSession(sessionState);
     } catch (err) {
       console.warn('Failed to persist session telemetry:', err);
     }

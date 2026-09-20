@@ -328,11 +328,78 @@ their transitive transport dependencies are not claimed to be removed.
   unrelated command handlers.
 - [x] User reports smooth operation and live acceptance of the Sidebar projection
   slice (2026-09-19). Individual multi-client scenarios were not separately reported.
-- [ ] Audit remaining transport consumers, runtime lifecycle and HTTP route users
-  before proposing the FastAPI replacement boundary.
+- [x] Audit remaining transport consumers, runtime lifecycle and HTTP route users.
+  Session bootstrap, view-state preferences, grammar/theme/assets and debug HTTP
+  consumers remain real. Code TE2 services also retain HTTPException/Response
+  coupling; wrapper extraction alone does not remove those imports.
 
 No frontend build, Android changes, runtime restart, commit or push in this slice.
 The separately reported Android second-window opening bug remains uninvestigated.
+
+### Transport-Neutral Worker Wrapper
+
+- [x] Add explicit `TE2_ASGI_APP` contract with native-owned routing/mounts/lifespan;
+  reject invalid or conflicting exports without a silent router fallback.
+- [x] Isolate legacy router assembly in lazy `app_worker_fastapi.py`; preserve
+  existing router names, mounts and worker-owned application lifecycle hooks.
+- [x] Return from pipe-only execution before importing the web stack. Native
+  network workers use Uvicorn without FastAPI/Pydantic imports.
+- [x] Retain readiness, debug-loop binding and loop probe; native startup completes
+  before worker readiness, and worker cleanup precedes native shutdown.
+- [x] Add subprocess import-blocking and lifecycle regression tests, including
+  legacy HTTP/SIGTERM, native HTTP, pipe framing, cancellation and startup failure.
+- [x] Validation: 27 focused tests pass; all changed/new Python modules and
+  fixtures pass Basedpyright with zero errors and zero warnings.
+- [x] User live acceptance after fixing the type-only `ASGIApp` runtime cast in
+  mount discovery. The mounted-lifespan test now exercises actual `SUBAPPS`
+  discovery and reproduced the NameError before the fix.
+- [ ] Migrate Code TE2 HTTP assembly and transport-dependent service results in
+  separately scoped slices. No FastAPI/Pydantic package dependencies removed yet.
+
+No shared runtime restart, Android edits, frontend build or publication in this
+slice. The native ASGI path still uses Starlette's ASGI type aliases.
+
+### Editor Service Outcomes
+
+- [x] Remove FastAPI imports from preference, view-setting and save services.
+  Application-owned `EditorServiceError` carries invalid/internal classification;
+  `SaveConflict` carries current disk metadata without constructing a response.
+- [x] Initially isolate HTTP outcome translation; subsequently remove the temporary
+  adapter and superseded endpoints in the approved websocket-only cutover below.
+  The numeric prefix in service errors remains for existing RPC wire compatibility.
+- [x] Validation: 61 focused service, comparison, RPC, session and worker tests
+  pass, including fresh-process import blocking for FastAPI/Pydantic/Starlette.
+  Changed services, new adapter and tests pass strict Basedpyright without
+  diagnostics; the broader editor route module has zero errors and 26 warnings
+  (legacy defaults, deprecated Optional, unused returns/parameter and strings).
+- [ ] User live acceptance of preferences/view settings and save behavior.
+- [ ] Continue remaining HTTP route assembly migration. Code TE2 still uses
+  FastAPI; no dependency removal or native-ASGI export switch in this slice.
+
+No runtime restart, frontend/Android changes, commit or push for this slice.
+
+### Websocket-Only Persistence Cutover
+
+- [x] Move host view-state reads, session telemetry and diagnostic exports to
+  typed host RPC methods; retain existing save, Save As, preference and discard RPCs.
+- [x] Move Monaco read-only updates and cold-start preference reads to its editor
+  RPC lane. Backend assigns preference source identity from the socket caller.
+- [x] Remove superseded HTTP preference/session/cache/save/review-write routes,
+  dormant HTTP save/open helpers and the temporary HTTP outcome adapter. Remove
+  redundant boot HTTP cache refresh; retain socket bootstrap and live projections.
+- [x] No HTTP fallback. Disconnected saves stay dirty; preference failures report
+  failure. Diagnostic writes reject draft collisions and project escape, preserve
+  mode and publish canonical acknowledgements/diff updates.
+- [x] Validation: 67 focused Python tests and 39 frontend tests pass, including
+  boot and socket transport coverage. Frontend TypeScript check and bundle build
+  pass. New RPC backends/contracts/dispatchers and tests have zero Basedpyright
+  errors/warnings. Broader legacy route modules are not warning-free.
+- [ ] Live acceptance with both updated worker and rebuilt frontend: cold boot,
+  reconnect, preferences, draft/auto-save transition, Save/Save As, conflict prompts
+  and diagnostic export. No shared runtime restart or Android publication performed.
+
+Static/theme/grammar HTTP remains intentional. Remaining unrelated HTTP routes
+still require FastAPI; this is not the final native-ASGI assembly switch.
 
 ### Reported Regression: Android Second Editor
 

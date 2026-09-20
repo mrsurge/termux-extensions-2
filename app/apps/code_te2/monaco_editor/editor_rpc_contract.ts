@@ -44,6 +44,8 @@ export const EDITOR_RPC_METHODS = {
   mentionRequest: "editor.mention.request",
   agentEditsDocumentStateGet: "editor.agentEdits.documentState.get",
   agentEditsDecide: "editor.agentEdits.decide",
+  preferenceUpdate: "editor.preference.update",
+  preferencesGet: "editor.preferences.get",
   hostSave: "editor.host.save",
   focus: "editor.focus",
   blur: "editor.blur",

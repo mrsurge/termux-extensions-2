@@ -8,7 +8,7 @@ import asyncio
 from pathlib import Path
 from typing import Optional, Protocol, cast
 
-from fastapi import APIRouter, Body, FastAPI, HTTPException, Query
+from fastapi import APIRouter, Body, FastAPI, HTTPException
 from fastapi.responses import Response
 from starlette.responses import FileResponse
 
@@ -18,31 +18,19 @@ from app.apps.code_te2.preferences_store import ALLOWED_FONT_SCALES
 from app.apps.code_te2.code_te2_paths import code_te2_paths
 # Import helpers
 from app.apps.code_te2.explorer.services.file_ops import get_project_root, mark_git_cache_dirty
-from app.apps.code_te2.core_read import push_save_ack, emit_diff_changed, subscribe, unsubscribe
-from app.apps.code_te2.core_write import write_full, BaseMismatchError
+from app.apps.code_te2.core_read import push_save_ack, emit_diff_changed, unsubscribe
+from app.apps.code_te2.core_write import write_full
 from app.apps.code_te2.diff_helper import invalidate_diff_cache
 from .editor_backend_services.contracts import RuntimeMeta
 from .editor_backend_services.protocols import EditorLike
-from .editor_backend_services.view_settings_service import (
-    handle_set_font_scale as _handle_set_font_scale,
-    handle_set_view_settings as _handle_set_view_settings,
-)
 from .editor_backend_services.editor_routes_service import (
     build_view_state_dict as _build_view_state_dict_service,
     handle_jump_to_line as _handle_jump_to_line,
     handle_search_open as _handle_search_open,
-    handle_set_minimap_mode as _handle_set_minimap_mode,
-    handle_set_read_only as _handle_set_read_only,
-    handle_toggle_color_picker as _handle_toggle_color_picker,
 )
 from .editor_backend_services.cache_routes_service import (
-    handle_check_cache as _handle_check_cache,
     handle_debug_editor_state as _handle_debug_editor_state,
-    handle_discard_draft as _handle_discard_draft,
-    handle_get_cache_state as _handle_get_cache_state,
-    handle_refresh_cache_state as _handle_refresh_cache_state,
     handle_refresh_diffs as _handle_refresh_diffs,
-    handle_set_editor_content as _handle_set_editor_content,
 )
 from .editor_backend_services.cache_runtime_service import (
     apply_watcher_replace as _apply_watcher_replace_service,
@@ -53,11 +41,7 @@ from .editor_backend_services.cache_runtime_service import (
     schedule_diff_refresh as _schedule_diff_refresh_service,
 )
 from .editor_backend_services.save_routes_service import (
-    handle_save_current_file as _handle_save_current_file,
     write_editor_buffer_to_disk as _write_editor_buffer_to_disk_service,
-)
-from .editor_backend_services.preferences_routes_service import (
-    handle_update_preference as _handle_update_preference,
 )
 
 _history_store = get_history_store()
@@ -670,35 +654,6 @@ def _persist_active_draft_immediately(reason: str = 'switch') -> bool:
 
 # --- Editor API Endpoints ---
 
-@editor_router.post('/discard_draft')
-async def discard_draft(data: dict[str, object] = Body(...)):
-    from app.apps.code_te2.explorer.services.runtime_notifications import (
-        notify_draft_state_changed,
-    )
-
-    return await _handle_discard_draft(
-        data,
-        history_store=_history_store,
-        get_current_file=get_current_file,
-        notify_draft_state_changed=notify_draft_state_changed,
-        broadcast_cache_state=_broadcast_cache_state,
-    )
-
-@editor_router.post('/refresh_cache_state')
-async def refresh_cache_state():
-    return await _handle_refresh_cache_state(
-        history_store=_history_store,
-        get_current_file=get_current_file,
-        runtime_meta=_get_runtime_metadata,
-        get_active_editors=get_active_editors,
-        broadcast_cache_state=_broadcast_cache_state,
-    )
-
-@editor_router.post('/check_cache')
-async def check_cache(data: dict[str, object] = Body(...)):
-    return await _handle_check_cache(data, history_store=_history_store)
-
-
 def _set_suppress_on_change_until(value: float) -> None:
     global _suppress_on_change_until
     _suppress_on_change_until = value
@@ -715,35 +670,6 @@ def _set_watcher_token(token: object | None) -> None:
 
 def _unsubscribe_token(token: object) -> None:
     unsubscribe(str(token))
-
-@editor_router.post('/set_content')
-async def set_editor_content(data: dict[str, object] = Body(...)):
-    return await _handle_set_editor_content(
-        data,
-        history_store=_history_store,
-        preferences_store=_preferences_store,
-        get_active_editor=get_active_editor,
-        get_active_editors=get_active_editors,
-        get_current_file=get_current_file,
-        set_current_file=set_current_file,
-        persist_active_draft_immediately=_persist_active_draft_immediately,
-        cancel_cache_persist_timer=_cancel_cache_persist_timer,
-        get_cached_editor_content=_get_cached_editor_content,
-        set_suppress_on_change_until=_set_suppress_on_change_until,
-        broadcast_cache_state=_broadcast_cache_state,
-        schedule_diff_refresh=_schedule_diff_refresh,
-        apply_watcher_replace=_apply_watcher_replace,
-        current_diff_base=_current_diff_base,
-        normalize_rel_path=_normalize_rel_path,
-        collect_diff=_collect_diff,
-        get_combined_diffs_async=_get_combined_diffs_async,
-        resolve_font_scale=_resolve_font_scale,
-        get_project_root=get_project_root,
-        subscribe=subscribe,
-        unsubscribe=_unsubscribe_token,
-        get_watcher_token=_get_watcher_token,
-        set_watcher_token=_set_watcher_token,
-    )
 
 @editor_router.post('/refresh_diffs')
 async def refresh_diffs(data: dict[str, object] = Body(...)):
@@ -782,57 +708,6 @@ async def editor_search_open(data: dict[str, object] = Body(...)):
             detail=f"Failed to open search panel: {str(e)}"
         )
 
-@editor_router.post('/color_picker/toggle')
-async def editor_toggle_color_picker(data: dict[str, object] = Body(...)):
-    """Toggle CSS color picker extension."""
-    editor = get_active_editor()
-    
-    if not editor:
-        raise HTTPException(
-            status_code=404,
-            detail="Editor not initialized. Open a file first."
-        )
-    
-    try:
-        return _handle_toggle_color_picker(editor, data)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to toggle color picker: {str(e)}"
-        )
-
-@editor_router.post('/read_only/set')
-async def editor_set_read_only(data: dict[str, object] = Body(...)):
-    """Set editor read-only mode."""
-    editor = get_active_editor()
-    
-    if not editor:
-        raise HTTPException(
-            status_code=404,
-            detail="Editor not initialized. Open a file first."
-        )
-    
-    try:
-        return _handle_set_read_only(editor, data)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to set read-only mode: {str(e)}"
-        )
-
-@editor_router.post('/minimap/mode')
-async def editor_minimap_mode(data: dict[str, object] = Body(...)):
-    """Set the minimap mode for the current editor."""
-    editor = get_active_editor()
-    if not editor:
-        raise HTTPException(status_code=404, detail='Editor not initialized')
-    try:
-        return _handle_set_minimap_mode(editor, data)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f'Failed to set minimap mode: {e}')
-
-
-# --- Helper Function for View State ---
 def _get_view_state_dict() -> dict[str, object]:
     return _build_view_state_dict_service(
         preferences_store=_preferences_store,
@@ -841,98 +716,6 @@ def _get_view_state_dict() -> dict[str, object]:
         get_lsp_state_payload=_history_store.get_lsp_state_payload,
     )
 
-
-@editor_router.get('/view_state')
-async def get_view_state():
-    """Return current editor view settings for frontend display (menu checkmarks)."""
-    return {"ok": True, "data": _get_view_state_dict()}
-
-
-@editor_router.post('/update_preference')
-async def update_preference(data: dict[str, object] = Body(...)):
-    def _emit_preferences_changed(
-        project_path: str,
-        key: str,
-        value: object,
-        view_state: dict[str, object],
-        preferences: dict[str, object],
-        source_client: str | None,
-    ) -> None:
-        from app.apps.code_te2.explorer.transport.rpc_emit import (
-            emit_project_explorer_rpc_notification,
-        )
-
-        payload: dict[str, object] = {
-            "project_path": project_path,
-            "key": key,
-            "value": value,
-            "view_state": view_state,
-            "preferences": preferences,
-            "source_client": source_client,
-        }
-        asyncio.create_task(
-            emit_project_explorer_rpc_notification(
-                project_path,
-                "explorer.editor.prefs.changed",
-                payload,
-            )
-        )
-        try:
-            from app.apps.code_te2.monaco_editor.editor_ws import editor_runtime_emit_room_event
-
-            asyncio.create_task(
-                editor_runtime_emit_room_event(
-                    "editor:prefs_changed",
-                    payload,
-                )
-            )
-        except Exception:
-            pass
-        try:
-            from app.apps.code_te2.ui_ipc.rpc_contract import (
-                UI_IPC_RPC_NOTIFICATION_PREFERENCES_CHANGED,
-            )
-            from app.apps.code_te2.ui_ipc.ui_ipc_ws import (
-                emit_ui_ipc_rpc_notification,
-            )
-
-            asyncio.create_task(
-                emit_ui_ipc_rpc_notification(
-                    UI_IPC_RPC_NOTIFICATION_PREFERENCES_CHANGED,
-                    payload,
-                )
-            )
-        except Exception:
-            pass
-
-    return await _handle_update_preference(
-        data,
-        editors=get_active_editors(),
-        preferences_store=_preferences_store,
-        history_store=_history_store,
-        get_project_root=get_project_root,
-        get_current_file=get_current_file,
-        resolve_font_scale=_resolve_font_scale,
-        normalize_rel_path=_normalize_rel_path,
-        collect_diff=_collect_diff,
-        current_diff_base=_current_diff_base,
-        broadcast_cache_state=_broadcast_cache_state,
-        refresh_active_diffs=_refresh_active_diffs,
-        build_view_state_dict=_get_view_state_dict,
-        theme_map=THEME_MAP,
-        emit_preferences_changed=_emit_preferences_changed,
-    )
-
-
-@editor_router.get('/cache_state')
-def get_cache_state(project: str | None = Query(None), path: str | None = Query(None)):
-    return _handle_get_cache_state(
-        history_store=_history_store,
-        runtime_meta=_get_runtime_metadata,
-        get_current_file=get_current_file,
-        project=project,
-        path=path,
-    )
 
 @editor_router.get('/debug/state')
 def debug_editor_state():
@@ -967,58 +750,6 @@ async def _write_editor_buffer_to_disk(*, client_id: str, op_id: str | None) -> 
         notify_draft_state_changed=notify_draft_state_changed,
         get_combined_diffs_async=_get_combined_diffs_async,
     )
-
-@editor_router.post('/save')
-async def save_current_file(data: dict[str, object] = Body(...)):
-    def _broadcast_to_explorer(project_norm: str, method: str, params: dict[str, object]) -> None:
-        from app.apps.code_te2.explorer.transport.rpc_emit import (
-            emit_project_explorer_rpc_notification,
-        )
-
-        asyncio.create_task(
-            emit_project_explorer_rpc_notification(project_norm, method, params)
-        )
-
-    async def _write_wrapper(client_id: str, op_id: str | None, _nicegui_client_id: str | None) -> dict[str, object]:
-        return await _write_editor_buffer_to_disk(client_id=client_id, op_id=op_id)
-
-    return await _handle_save_current_file(
-        data,
-        write_editor_buffer_to_disk_fn=_write_wrapper,
-        history_store=_history_store,
-        get_current_file=get_current_file,
-        get_current_file_sha256=get_current_file_sha256,
-        base_mismatch_error_type=BaseMismatchError,
-        get_active_editor=get_active_editor,
-        get_cached_editor_content=_get_cached_editor_content,
-        get_preferences=_preferences_store.get_preferences,
-        nicegui_broadcast=_broadcast_to_explorer,
-    )
-
-
-@editor_router.post('/set_view_settings')
-async def set_view_settings(data: dict[str, object] = Body(...)):
-    return _handle_set_view_settings(
-        data,
-        get_active_editor=get_active_editor,
-        update_editor_preferences=lambda updates: _preferences_store.update_preferences(editor=updates),
-        active_project=_history_store.get_active_project,
-        project_root=get_project_root,
-        normalize_rel_path=_normalize_rel_path,
-        collect_diff=_collect_diff,
-        current_diff_base=_current_diff_base,
-        resolve_theme_preference=_resolve_theme_preference,
-    )
-
-@editor_router.post('/set_font_scale')
-async def set_font_scale_endpoint(data: dict[str, object] = Body(...)):
-    return _handle_set_font_scale(
-        data,
-        get_active_editor=get_active_editor,
-        resolve_font_scale=_resolve_font_scale,
-        update_editor_preferences=lambda updates: _preferences_store.update_preferences(editor=updates),
-    )
-
 
 def register_monaco_editor_routes(fastapi_app: FastAPI | APIRouter, mount_path: str = "/ui") -> None:
     """Register Monaco static asset routes for the inline host editor runtime."""

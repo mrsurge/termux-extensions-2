@@ -3,7 +3,6 @@
 import sys
 import os
 import json
-import time
 import faulthandler
 import threading
 import traceback
@@ -13,9 +12,8 @@ from typing import TYPE_CHECKING, Protocol, cast
 from urllib import request as urllib_request
 from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, WebSocket, Body, Query
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import FileResponse
 import asyncio
-from anyio import to_thread
 from .history_store import HistoryStore
 from .explorer.services.file_ops import (
     _normalize_rel_path as _file_ops_normalize_rel_path,
@@ -28,8 +26,8 @@ from .code_server_runtime_hooks import set_code_server_runtime_primer
 from . import edit_tracker
 from .diff_helper import invalidate_diff_cache
 from .worker_services import git_service as worker_git_service
-from .core_read import push_save_ack, emit_diff_changed, subscribe, unsubscribe
-from .core_write import FileMeta, write_full, BaseMismatchError
+from .core_read import subscribe, unsubscribe
+from .core_write import FileMeta
 from .project_sidecar import ProjectSidecar, cleanup_orphaned_sidecars
 from .code_te2_paths import code_te2_paths
 from .main_page.backend.state_payload import (
@@ -80,22 +78,9 @@ def _str_value(value: object, default: str = "") -> str:
     return value if isinstance(value, str) else default
 
 
-def _str_list(value: object) -> list[str]:
-    return [item for item in _json_list(value) if isinstance(item, str)]
-
-
 def te2_pipe_dispatch(envelope: "PipeEnvelope") -> JsonDict | None:
     del envelope
     return None
-
-
-def _file_meta_json(meta: dict[str, str | int | None]) -> JsonDict:
-    return {key: value for key, value in meta.items()}
-
-
-def _meta_sha256(meta: dict[str, str | int | None]) -> str:
-    value = meta.get("sha256")
-    return value if isinstance(value, str) else ""
 
 
 class ReadableResponse(Protocol):
@@ -605,109 +590,6 @@ def status():
     return {"ok": True, "data": {"message": "File Editor CM6 app API ready"}}
 
 
-@code_te2_bp.get('/session_cache')
-def get_session_cache(
-    project: str = Query(...),
-    path: str = Query(...),
-):
-    """Retrieve cached session for a document."""
-    expanded_project, err = _expand_and_validate_path(project)
-    if err or expanded_project is None:
-        raise HTTPException(status_code=403, detail=err)
-    
-    expanded_path, err = _expand_and_validate_path(path)
-    if err or expanded_path is None:
-        raise HTTPException(status_code=403, detail=err)
-    
-    cached = _history_store.get_cached_document(expanded_project, expanded_path)
-    
-    if not cached:
-        return {"ok": True, "data": None}
-    
-    # Determine state: crashed vs mid-session vs clean
-    runtime_meta = _get_runtime_metadata()
-    current_run_id = runtime_meta["run_id"]
-    cached_run_id = cached.get("run_id", "unknown")
-    unsaved = cached.get("unsaved", False)
-    
-    if not unsaved:
-        state = "clean"
-    else:
-        state = "mid_session" if current_run_id == cached_run_id else "crashed"
-    
-    return {
-        "ok": True,
-        "data": {
-            "state": state,
-            "content": cached["content"],
-            "content_sha256": cached["content_sha256"],
-            "base_sha256": cached["base_sha256"],
-            "unsaved": unsaved,
-            "run_id": cached_run_id,
-            "updated_at": cached["updated_at"],
-            "current_run_id": current_run_id,
-        }
-    }
-
-
-@code_te2_bp.delete('/session_cache')
-async def delete_session_cache(
-    project: str = Query(...),
-    path: str = Query(...),
-):
-    """Discard cached session for a document."""
-    expanded_project, err = _expand_and_validate_path(project)
-    if err or expanded_project is None:
-        raise HTTPException(status_code=403, detail=err)
-    
-    expanded_path, err = _expand_and_validate_path(path)
-    if err or expanded_path is None:
-        raise HTTPException(status_code=403, detail=err)
-    
-    existed = _history_store.clear_cached_document(expanded_project, expanded_path)
-    
-    # Notify explorer of draft state change
-    if existed:
-        try:
-            from .explorer.services.runtime_notifications import notify_draft_state_changed
-            notify_draft_state_changed(expanded_project)
-        except Exception:
-            pass
-        try:
-            from .monaco_editor.editor_ws import (
-                editor_runtime_emit_room_event,
-                editor_runtime_reload_disk_content_if_active,
-            )
-
-            await editor_runtime_emit_room_event(
-                "editor:cache_state",
-                {
-                    "path": expanded_path,
-                    "state": "clean",
-                    "unsaved": False,
-                    "reason": "discard_external",
-                    "document_revision": _history_store.get_document_revision(
-                        expanded_project,
-                        expanded_path,
-                    ),
-                },
-            )
-            await editor_runtime_reload_disk_content_if_active(
-                expanded_path,
-                source="legacy_session_cache_delete",
-                request_id=f"session_cache_delete_{int(time.time() * 1000)}",
-            )
-        except Exception:
-            pass
-    
-    return {
-        "ok": True,
-        "data": {
-            "cleared": existed
-        }
-    }
-
-
 @code_te2_bp.get('/read')
 def read_file(path: str = Query(...)):
     expanded, err = _expand_and_validate_path(path)
@@ -720,91 +602,6 @@ def read_file(path: str = Query(...)):
             content = f.read()
         meta = _get_file_meta(Path(expanded))
         return {"ok": True, "data": {"path": expanded, "content": content, "sha256": meta.get("sha256")}}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@code_te2_bp.post('/write')
-async def write_file_route(data: JsonDict = Body(...)):
-    # Edit 2025-11-17T00:13:07+00:00: This is the legacy write endpoint.
-    # It was updated to capture the original file's mode before writing and
-    # pass it to the `write_full` function to preserve permissions.
-    path = _str_value(data.get('path')) or None
-    content_value = data.get('content')
-    content = content_value if isinstance(content_value, str) else None
-    client_id = _str_value(data.get('client_id'), 'unknown')
-    op_id = _str_value(data.get('op_id'))
-    base_sha256: str | None = None
-
-    if not path:
-        raise HTTPException(status_code=400, detail="Path is required")
-    if content is None:
-        raise HTTPException(status_code=400, detail="Content is required")
-
-    base_obj = _json_object(data.get('base'))
-    base_sha_obj = base_obj.get('sha256')
-    if isinstance(base_sha_obj, str):
-        base_sha256 = base_sha_obj
-
-    project_root = get_project_root()
-    try:
-        rel_path = _normalize_rel_path(project_root, path)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    
-    # NEW: Capture original mode before write
-    target_path = project_root.joinpath(rel_path).resolve()
-    orig_mode = None
-    if target_path.exists() and target_path.is_file():
-        try:
-            orig_mode = target_path.stat().st_mode & 0o777
-        except OSError:
-            pass  # Proceed without mode preservation
-    
-    try:
-        # NEW: Pass mode to write_full
-        file_meta = await to_thread.run_sync(
-            lambda: write_full(project_root, str(rel_path), content, 
-                             base_sha256=base_sha256, mode=orig_mode)
-        )
-        
-        # NEW: Purge cache entry on successful save
-        project_path = _history_store.get_active_project()
-        if project_path:
-            _history_store.clear_cached_document(project_path, path)
-            removed_clean = _history_store.prune_clean_drafts(project_path)
-            if removed_clean:
-                try:
-                    from .explorer.services.runtime_notifications import notify_draft_state_changed
-                    notify_draft_state_changed(project_path)
-                except Exception:
-                    pass
-
-        # Send save acknowledgement to prevent self-echo
-        push_save_ack(str(rel_path), op_id, client_id, _file_meta_json(file_meta))
-
-        # Notify diff subscribers of change
-        emit_diff_changed(str(rel_path), _meta_sha256(file_meta))
-
-        # Refresh caches so explorer + diff stay accurate
-        mark_git_cache_dirty(project_root)
-        invalidate_diff_cache(project_root, str(rel_path))
-
-        return {
-            "ok": True,
-            "data": {
-                "mtime": file_meta["mtime"],
-                "size": file_meta["size"],
-                "sha256": file_meta["sha256"]
-            }
-        }
-    except BaseMismatchError as e:
-        return JSONResponse(status_code=409, content={
-            "ok": False,
-            "error": "BASE_MISMATCH",
-            "data": {
-                "current": e.current_meta
-            }
-        })
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -896,53 +693,6 @@ async def get_editor_state_deprecated():
 
     return {"ok": True, "data": payload}
 
-@code_te2_bp.get('/session_state')
-def get_session_state():
-    """Return last-known editor session telemetry."""
-    state = _history_store.get_session_state()
-    return {"ok": True, "data": state}
-
-@code_te2_bp.post('/session_state')
-def update_session_state(payload: JsonDict = Body(...)):
-    """Persist lightweight session telemetry for crash/reconnect recovery."""
-    state = _history_store.update_session_state(payload or {})
-    return {"ok": True, "data": state}
-
-
-@code_te2_bp.get('/preferences')
-def get_preferences():
-    """Return persisted editor/UI preferences."""
-    project_path = _history_store.get_active_project()
-    prefs = _preferences_store.get_preferences(project_path)
-    return {"ok": True, "data": prefs}
-
-
-@code_te2_bp.post('/preferences')
-async def update_preferences(payload: JsonDict = Body(...)):
-    """Persist editor/UI preference changes."""
-    editor = _json_object(payload.get('editor')) or None
-    ui = _json_object(payload.get('ui')) or None
-    project: JsonDict | None = _json_object(payload.get('project')) or None
-
-    active_project = _history_store.get_active_project()
-    if project is None and active_project:
-        project = cast(JsonDict, {"path": active_project})
-    elif project and not project.get('path') and active_project:
-        project['path'] = active_project
-
-    try:
-        print(f"[PREFERENCES] Incoming preferences payload={payload}", file=sys.stderr)
-        updated = _preferences_store.update_preferences(
-            editor=editor,
-            ui=ui,
-            project=project,
-        )
-        # Return a fresh snapshot for convenience
-        snapshot = _preferences_store.get_preferences(active_project)
-        return {"ok": True, "data": snapshot, "updated": updated}
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
 @code_te2_bp.get('/diff')
 def get_diff(path: str = Query(...)):
     """Return git diff hunks for the requested file."""
@@ -1020,138 +770,6 @@ async def review_list(lightweight: bool = Query(False)) -> JsonDict:
         print(f"[REVIEW] Draft list failed: {e}", file=sys.stderr)
         
     return {"ok": True, "data": results}
-
-@code_te2_bp.post('/review/save')
-async def review_save(data: JsonDict = Body(...)) -> JsonDict:
-    """Save selected files from drafts to disk with full lifecycle notifications."""
-    files = _str_list(data.get('files'))
-    if not files:
-        return {"ok": True, "saved_count": 0}
-        
-    project_root = _history_store.get_active_project()
-    if not project_root:
-        raise HTTPException(status_code=400, detail="No active project")
-    
-    root_path = Path(project_root)
-    saved_count = 0
-    errors: list[str] = []
-    
-    import time # Ensure time is available
-    
-    for rel_path in files:
-        try:
-            abs_path = root_path / rel_path
-            # Get draft content
-            cached = _history_store.get_cached_document(project_root, str(abs_path))
-            if not cached:
-                continue
-                
-            content_value = cached.get('content', '')
-            content = content_value if isinstance(content_value, str) else ''
-            base_sha_value = cached.get('base_sha256')
-            base_sha = base_sha_value if isinstance(base_sha_value, str) else None
-            
-            # Check original mode
-            orig_mode = None
-            if abs_path.exists():
-                try:
-                    orig_mode = abs_path.stat().st_mode & 0o777
-                except OSError:
-                    pass
-            
-            # Write to disk
-            await to_thread.run_sync(
-                lambda: write_full(root_path, rel_path, content, 
-                                 base_sha256=base_sha, mode=orig_mode)
-            )
-            
-            # Lifecycle notifications
-            file_meta = _get_file_meta(abs_path)
-            op_id = f"review_save_{int(time.time())}"
-            push_save_ack(str(rel_path), op_id, "review_panel", _file_meta_json(file_meta))
-            emit_diff_changed(str(rel_path), _meta_sha256(file_meta))
-            invalidate_diff_cache(root_path, str(rel_path))
-            
-            # Clear draft
-            _history_store.clear_cached_document(project_root, str(abs_path))
-            saved_count += 1
-            
-        except Exception as e:
-            errors.append(f"{rel_path}: {str(e)}")
-            
-    _history_store.prune_clean_drafts(project_root)
-
-    # Refresh git status cache and draft cache
-    mark_git_cache_dirty(root_path)
-    from .explorer.services.file_ops import mark_draft_cache_dirty
-    mark_draft_cache_dirty(root_path)
-    
-    # Notify explorer of draft state change
-    try:
-        from .explorer.services.runtime_notifications import notify_draft_state_changed
-        notify_draft_state_changed(project_root)
-    except Exception:
-        pass
-    
-    return {"ok": True, "saved_count": saved_count, "errors": errors}
-
-@code_te2_bp.post('/review/discard')
-async def review_discard(data: JsonDict = Body(...)) -> JsonDict:
-    """Discard drafts for selected files."""
-    files = _str_list(data.get('files'))
-    if not files:
-        return {"ok": True, "discarded_count": 0}
-        
-    project_root = _history_store.get_active_project()
-    if not project_root:
-        raise HTTPException(status_code=400, detail="No active project")
-        
-    root_path = Path(project_root)
-    discarded_count = 0
-    
-    for rel_path in files:
-        abs_path = root_path / rel_path
-        if _history_store.clear_cached_document(project_root, str(abs_path)):
-            discarded_count += 1
-            try:
-                from .monaco_editor.editor_ws import (
-                    editor_runtime_emit_room_event,
-                    editor_runtime_reload_disk_content_if_active,
-                )
-
-                await editor_runtime_emit_room_event(
-                    "editor:cache_state",
-                    {
-                        "path": str(abs_path),
-                        "state": "clean",
-                        "unsaved": False,
-                        "reason": "discard_external",
-                        "document_revision": _history_store.get_document_revision(
-                            project_root,
-                            str(abs_path),
-                        ),
-                    },
-                )
-                await editor_runtime_reload_disk_content_if_active(
-                    str(abs_path),
-                    source="legacy_review_discard",
-                    request_id=f"legacy_review_discard_{int(time.time() * 1000)}",
-                )
-            except Exception:
-                pass
-    
-    # Invalidate draft cache
-    from .explorer.services.file_ops import mark_draft_cache_dirty
-    mark_draft_cache_dirty(root_path)
-    
-    # Notify explorer of draft state change
-    try:
-        from .explorer.services.runtime_notifications import notify_draft_state_changed
-        notify_draft_state_changed(project_root)
-    except Exception:
-        pass
-            
-    return {"ok": True, "discarded_count": discarded_count}
 
 @code_te2_bp.get('/edit_tracker/status')
 def get_edit_tracker_status():

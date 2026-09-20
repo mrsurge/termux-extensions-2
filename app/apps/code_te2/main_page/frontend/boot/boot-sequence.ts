@@ -250,7 +250,7 @@ export async function runBootSequence(deps: BootSequenceDeps): Promise<void> {
   const serverState = snapshotServerState || await deps.syncEditorState(true);
   deps.broadcastRecentsUpdate(serverState);
   await deps.refreshMenuState();
-  try { await deps.apiPost('editor/refresh_cache_state', {}); } catch (error) { console.warn('Failed to refresh cache state on boot:', error); }
+  // Draft/cache state arrives through editor bootstrap and live projections.
 
   if (!snapshotSessionState) {
     await deps.fetchPersistedSessionState();

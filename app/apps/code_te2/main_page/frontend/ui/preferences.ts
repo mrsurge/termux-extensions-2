@@ -1,16 +1,19 @@
+type State = Record<string, unknown>;
+interface PreferencesDeps {
+  requestBackendEditorStateGet(): Promise<unknown>;
+  requestBackendEditorPreferenceUpdate(payload: State): Promise<unknown>;
+  getClientId(): string | null;
+  setEditorViewState(state: State | null): void;
+  setMenuChecked(element: Element | null | undefined, checked: boolean): void;
+  applyFontScale(scale: number): void;
+  getMenuItems(): Record<string, HTMLElement | null>;
+}
+function record(value: unknown): State | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as State : null;
+}
 
-/**
- * @param {{
- *   apiPost: (path: string, body: any) => Promise<any>,
- *   requestBackendEditorPreferenceUpdate?: (payload: any) => Promise<any>,
- *   getClientId: () => string | null,
- *   setEditorViewState: (state: any) => void,
- *   setMenuChecked: (el: any, checked: boolean) => void,
- *   applyFontScale: (scale: number) => void,
- *   getMenuItems: () => Record<string, any>
- * }} deps
- */
-export function createPreferencesController(deps: any) {
+// Preferences have one transport: owning host RPC plus pushed state projections.
+export function createPreferencesController(deps: PreferencesDeps) {
   function setMenuItemLabel(el: unknown, label: string) {
     const node = el instanceof HTMLElement ? el : null;
     const labelNode = node ? node.querySelector('span') : null;
@@ -21,7 +24,7 @@ export function createPreferencesController(deps: any) {
     }
   }
 
-  function syncSaveModeMenu(m: Record<string, any>, state: any) {
+  function syncSaveModeMenu(m: Record<string, HTMLElement | null>, state: State) {
     const autoSave = !!state.autoSave;
     const item = m.miToggleAutosave;
     setMenuItemLabel(item, autoSave ? 'Draft Mode' : 'Auto Save');
@@ -37,66 +40,58 @@ export function createPreferencesController(deps: any) {
 
   async function fetchEditorState() {
     try {
-      const resp = await fetch('/api/app/code_te2/editor/view_state', { cache: 'no-store' });
-      const json = await resp.json();
-      return json?.data || null;
+      const snapshot = record(await deps.requestBackendEditorStateGet());
+      if (!record(snapshot?.view_state)) throw new Error("Editor state unavailable");
+      return record(snapshot?.view_state);
     } catch (err) {
       console.error('[EditorState] Failed to fetch:', err);
       return null;
     }
   }
 
-  function applyStateToMenus(state: any) {
+  function applyStateToMenus(state: State | null) {
+    if (!state) return;
     const m = deps.getMenuItems();
-    deps.setMenuChecked(m.miToggleLines, state.showLineNumbers);
-    deps.setMenuChecked(m.miToggleSyntax, state.showSyntax);
-    deps.setMenuChecked(m.miToggleCloseBrackets, state.autoCloseBrackets);
-    deps.setMenuChecked(m.miToggleAutocomplete, state.autocompletion);
+    deps.setMenuChecked(m.miToggleLines, !!state.showLineNumbers);
+    deps.setMenuChecked(m.miToggleSyntax, !!state.showSyntax);
+    deps.setMenuChecked(m.miToggleCloseBrackets, !!state.autoCloseBrackets);
+    deps.setMenuChecked(m.miToggleAutocomplete, !!state.autocompletion);
     deps.setMenuChecked(m.miToggleInlayHints, state.showInlayHints !== false);
-    deps.setMenuChecked(m.miToggleShading, state.showShading);
-    deps.setMenuChecked(m.miToggleIndentGuides, state.showIndentGuides);
-    deps.setMenuChecked(m.miToggleWrap, state.wordWrap);
+    deps.setMenuChecked(m.miToggleShading, !!state.showShading);
+    deps.setMenuChecked(m.miToggleIndentGuides, !!state.showIndentGuides);
+    deps.setMenuChecked(m.miToggleWrap, !!state.wordWrap);
     syncSaveModeMenu(m, state);
     const autoSave = !!state.autoSave;
     const showDraftDiffs = !autoSave && !!state.showDraftDiffs;
     const showCommitDiffs = !showDraftDiffs && !!state.showInlineDiffs;
     deps.setMenuChecked(m.miToggleDiffs, showCommitDiffs);
     deps.setMenuChecked(m.miToggleDraftDiffs, showDraftDiffs);
-    deps.setMenuChecked(m.miToggleColorPicker, state.colorPicker);
-    deps.setMenuChecked(m.miToggleReadonly, state.readOnly);
-    deps.setMenuChecked(m.miToggleMinimap, state.showMinimap);
-    deps.setMenuChecked(m.miToggleStickyScroll, state.stickyScroll);
-    deps.setMenuChecked(m.miTrackAgentSidebarEdits, state.trackAgentSidebarEdits);
-    deps.applyFontScale(state.fontScale ?? 0.85);
+    deps.setMenuChecked(m.miToggleColorPicker, !!state.colorPicker);
+    deps.setMenuChecked(m.miToggleReadonly, !!state.readOnly);
+    deps.setMenuChecked(m.miToggleMinimap, !!state.showMinimap);
+    deps.setMenuChecked(m.miToggleStickyScroll, !!state.stickyScroll);
+    deps.setMenuChecked(m.miTrackAgentSidebarEdits, !!state.trackAgentSidebarEdits);
+    deps.applyFontScale(typeof state.fontScale === "number" ? state.fontScale : 0.85);
   }
 
-  function applyPreferencesChangedPayload(payload: any) {
-    const nextState = payload && typeof payload === 'object'
-      ? (payload.view_state && typeof payload.view_state === 'object'
-        ? payload.view_state
-        : (payload.preferences && typeof payload.preferences === 'object'
-          && payload.preferences.editor && typeof payload.preferences.editor === 'object'
-          ? payload.preferences.editor
-          : null))
-      : null;
+  function applyPreferencesChangedPayload(payload: unknown) {
+    const data = record(payload);
+    const nextState = record(data?.view_state) || record(record(data?.preferences)?.editor);
     if (!nextState) return false;
     deps.setEditorViewState(nextState);
     applyStateToMenus(nextState);
     return true;
   }
 
-  async function updatePreference(key: string, value: any) {
+  async function updatePreference(key: string, value: unknown) {
     try {
       console.log('[Preference] updatePreference request', key, value);
-      const body: { key: string; value: any; nicegui_client_id?: string } = { key, value };
+      const body: { key: string; value: unknown; nicegui_client_id?: string } = { key, value };
       const clientId = deps.getClientId();
       if (clientId) body.nicegui_client_id = clientId;
-      const resp = typeof deps.requestBackendEditorPreferenceUpdate === 'function'
-        ? await deps.requestBackendEditorPreferenceUpdate(body)
-        : await deps.apiPost('editor/update_preference', body);
-      const viewState = resp && typeof resp === 'object' && resp.data && typeof resp.data === 'object'
-        ? resp.data
-        : resp;
+      const resp = record(await deps.requestBackendEditorPreferenceUpdate(body));
+      if (!resp || resp.ok === false) throw new Error("Preference update failed");
+      const viewState = record(resp.data);
       if (viewState && typeof viewState === 'object' && Object.keys(viewState).length > 0) {
         deps.setEditorViewState(viewState);
         applyStateToMenus(viewState);

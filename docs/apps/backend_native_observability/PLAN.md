@@ -347,6 +347,68 @@ dependencies. Only after the service boundary is stable, evaluate selective
 mypyc compilation with measured hot paths; compilation and multiprocessing are
 not part of this change. The pipe codec change below is a separate workstream.
 
+### Transport-Neutral Worker Wrapper
+
+The worker accepts an explicit callable `TE2_ASGI_APP` export. Native apps own
+their routing, mounts and ASGI lifespan; combining that export with
+`TE2_APP_ROUTER` or nonempty `SUBAPPS` is rejected rather than silently choosing
+one. `app_worker_asgi.py` forwards HTTP/WebSocket scopes unchanged, reserves the
+worker loop-probe route, and binds worker readiness/debug lifetime only after
+native startup succeeds. Worker cleanup precedes native shutdown. Application
+start/stop hooks still surround Uvicorn serving inside its signal-capture scope.
+
+Existing router apps use lazy `app_worker_fastapi.py` assembly, preserving
+explicit/legacy router resolution and mounted-subapp lifetime. Pipe-only workers
+return before importing FastAPI, Starlette or Uvicorn. The native network path
+still uses Starlette's ASGI type aliases, but does not import FastAPI/Pydantic.
+This is import isolation, not package dependency removal or process separation.
+
+Validate native HTTP and pipe-only subprocesses with import blockers, legacy
+HTTP/SIGTERM behavior, lifecycle ordering, cancellation and startup failure.
+Next migrate Code TE2's actual HTTP consumers and transport-dependent service
+results in bounded slices; it still exports its FastAPI router today. Keep
+Socket.IO, route contracts and input validation intact. Do not delete real HTTP
+consumers such as session bootstrap, view state, grammar/theme/assets and debug
+controls merely because the main interaction lanes are sockets.
+
+### Editor Service Outcome Boundary
+
+Preference and view-setting services raise application-owned `EditorServiceError`
+with invalid/internal classification, not HTTPException. Preserve the established
+numeric-prefix error text while socket adapters still stringify exceptions;
+this is a compatibility constraint, not a new RPC error policy. Save conflicts
+return `SaveConflict` with current disk metadata. The temporary HTTP adapter has
+been removed by the websocket-only cutover below; it is not a supported fallback.
+Normal saves retain their existing socket conflict DTOs and confirmation flow.
+
+Test invalid preferences/theme/font scale, persistence failure, save success,
+validation/conflict/unexpected failures, cancellation and fresh-interpreter
+import isolation. This slice does not make Code TE2's complete import graph
+FastAPI-free: route assembly and other transport-coupled services remain.
+
+### Websocket-Only Editor Persistence
+
+All preference/view-state reads and updates, session telemetry, saves and draft
+discard use the surface's own RPC lane. Host uses `ui.host.editorState.get`,
+`ui.host.session.update`, existing preference/save/discard methods, and
+`ui.host.diagnostics.export` for diagnostic output/directory operations. Monaco
+uses `editor.preferences.get` and `editor.preference.update`; it never reaches
+into the host socket. Authenticated source identity owns preference notification
+attribution. Session telemetry remains telemetry, not project/foreground authority.
+
+Remove superseded HTTP persistence endpoints, the unused HTTP save/open helpers,
+and boot's redundant HTTP cache refresh. Editor bootstrap and notifications carry
+draft/cache state. Disconnected calls report failure; never retry through HTTP or
+claim a failed save succeeded. Keep normal Save/Save As and Explorer draft RPCs.
+Diagnostic export uses existing write/notification primitives and refuses paths
+outside the project or files with drafts; directory creation remains user-confirmed.
+
+Ship backend and regenerated frontend together. No HTTP compatibility route is
+kept for stale clients. Static/theme/grammar resources remain HTTP, as do unrelated
+routes not yet migrated. This is not complete FastAPI removal. Test contracts,
+route absence, no-fallback failures, telemetry validation, diagnostic containment
+and writes; run frontend typecheck/build and focused backend typechecking.
+
 ### MessagePack Process-Pipe Cutover (Approved)
 
 Pin Python Framework-Shells 0.0.64 from tagged commit `7e86f1c` and Rust
