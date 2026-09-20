@@ -248,8 +248,18 @@ test("UI IPC interruption preserves listeners until the next snapshot event", as
   }
 });
 
-test("native app readiness can wait event-wise without an independent timeout", async () => {
+test("loopback app readiness does not wait for unnecessary route authority", async () => {
   const manager = new RunTargetRelayManager(() => "http://127.0.0.1:8089");
+  try {
+    await manager.waitUntilProjectionReady();
+    assert.equal(manager.debugSnapshot().authorityAvailable, false);
+  } finally {
+    await manager.stopAll();
+  }
+});
+
+test("remote app readiness still waits for an authoritative projection", async () => {
+  const manager = new RunTargetRelayManager(() => "http://framework.example:8089");
   let settled = false;
   try {
     const ready = manager.waitUntilProjectionReady(null).then(() => {

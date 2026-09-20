@@ -29,6 +29,7 @@ export class ElectronUiIpcClient {
     private readonly clientId: string,
     private readonly onRunTargetRoutesChanged: (projection: JsonObject) => void,
     private readonly onRouteAuthorityUnavailable: () => void,
+    private readonly socketFactory: typeof io = io,
   ) {}
 
   connect(frameworkOrigin: string): void {
@@ -39,7 +40,7 @@ export class ElectronUiIpcClient {
     }
     this.disconnect();
     this.#origin = normalized;
-    const socket = io(`${normalized}/ui_ipc`, {
+    const socket = this.socketFactory(`${normalized}/ui_ipc`, {
       path: "/ui_ipc_ws/socket.io",
       transports: ["websocket"],
       upgrade: false,
@@ -73,6 +74,21 @@ export class ElectronUiIpcClient {
       const params = asObject(notification.params);
       if (params) this.onRunTargetRoutesChanged(params);
     });
+  }
+
+  ensureConnected(frameworkOrigin: string): void {
+    const normalized = new URL(frameworkOrigin).origin;
+    if (!this.#socket || this.#origin !== normalized) {
+      this.connect(normalized);
+      return;
+    }
+    if (this.#socket.connected) return;
+
+    // A Socket.IO client already in reconnection backoff does not guarantee that
+    // connect() will attempt a transport immediately. The app-readiness gate runs
+    // only after the backend is ready, so replace the stale attempt and connect now.
+    this.disconnect();
+    this.connect(normalized);
   }
 
   disconnect(): void {

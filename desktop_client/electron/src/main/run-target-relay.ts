@@ -250,11 +250,14 @@ export class RunTargetRelayManager {
     this.#projectionGeneration += 1;
   }
 
-  waitUntilProjectionReady(timeoutMs: number | null = 10_000): Promise<void> {
-    if (this.#hasAuthoritativeProjection && this.#projectionReady) {
-      return Promise.resolve();
+  async waitUntilProjectionReady(timeoutMs: number | null = 10_000): Promise<void> {
+    if (await this.localityClassifier(this.frameworkOrigin())) {
+      return;
     }
-    return new Promise((resolve, reject) => {
+    if (this.#hasAuthoritativeProjection && this.#projectionReady) {
+      return;
+    }
+    await new Promise<void>((resolve, reject) => {
       const waiter = {
         resolve,
         reject,

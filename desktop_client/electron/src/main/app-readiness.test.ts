@@ -46,7 +46,7 @@ test("Electron app navigation delegates backend readiness to the shared app shel
   const reconnectSource = mainSource.slice(reconnectStart, reconnectEnd);
   assert.match(
     reconnectSource,
-    /uiIpcClient\.connect\(configuredFrameworkOrigin\)/,
+    /uiIpcClient\.ensureConnected\(configuredFrameworkOrigin\)/,
   );
 
   const lifecycle = appShell.indexOf(

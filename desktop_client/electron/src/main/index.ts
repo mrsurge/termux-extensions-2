@@ -888,7 +888,7 @@ function ensureElectronUiIpcConnected(): void {
     connectElectronUiIpc();
     return;
   }
-  uiIpcClient.connect(configuredFrameworkOrigin);
+  uiIpcClient.ensureConnected(configuredFrameworkOrigin);
 }
 
 async function saveConnection(params: Record<string, unknown>): Promise<{
