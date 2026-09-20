@@ -18,7 +18,6 @@ from .history_store import HistoryStore
 from .explorer.services.file_ops import (
     _normalize_rel_path as _file_ops_normalize_rel_path,
     get_project_root,
-    mark_git_cache_dirty,
     set_project_root,
 )
 from .code_server_shell_manager import ensure_code_server_shell
@@ -32,20 +31,16 @@ from .project_sidecar import ProjectSidecar, cleanup_orphaned_sidecars
 from .code_te2_paths import code_te2_paths
 from .main_page.backend.state_payload import (
     StatePayloadDeps,
-    build_diff_base_payload,
     build_state_payload,
     expand_and_validate_path,
     get_runtime_metadata,
     resolve_diff_base,
-    status_to_payload,
 )
 from .main_page.backend.workbench_routes import (
     ShellRecordLike,
     WorkbenchRoutesDeps,
     create_workbench_router,
 )
-from .main_page.backend.project_routes import ProjectRoutesDeps, create_project_router
-from .main_page.backend.git_routes import GitRoutesDeps, create_git_router
 from .main_page.backend.history_routes import HistoryRoutesDeps, create_history_router
 from .stores import get_history_store, get_preferences_store
 
@@ -262,10 +257,6 @@ async def serve_agent_icon(name: str):
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(file)
 
-# Register terminal routes, (and give me a new reason to make a commit)
-from .terminal_backend import terminal_router
-code_te2_bp.include_router(terminal_router)
-
 # Include the self-contained editor routes
 from .monaco_editor.editor_backend import editor_router, register_monaco_editor_routes
 code_te2_bp.include_router(editor_router)
@@ -459,28 +450,9 @@ async def te2_app_stop() -> None:
     await stop_worker_runtime()
 
 
-def _get_active_project_root() -> Path:
-    project_path = _history_store.get_active_project()
-    if not project_path:
-        raise RuntimeError('No project selected')
-    project = Path(project_path)
-    if not project.exists():
-        raise RuntimeError(f'Project "{project_path}" not found')
-    set_project_root(project_path)
-    return project
-
-
 def _resolve_diff_base(project_path: str | None) -> str:
     return resolve_diff_base(_STATE_PAYLOAD_DEPS, project_path)
 
-
-def _diff_base_payload(project_path: str | None) -> JsonDict:
-    return build_diff_base_payload(_STATE_PAYLOAD_DEPS, project_path)
-
-
-
-def _status_to_payload(status: object) -> JsonDict:
-    return status_to_payload(cast(worker_git_service.GitStatus, status))
 
 def _get_runtime_metadata() -> JsonDict:
     return get_runtime_metadata()
@@ -492,86 +464,8 @@ def _expand_and_validate_path(path: str) -> tuple[str | None, str | None]:
     return expand_and_validate_path(path)
 
 
-_GIT_ROUTES_DEPS = GitRoutesDeps(
-    history=_history_store,
-    get_active_project_root=_get_active_project_root,
-    get_project_root=get_project_root,
-    list_branches=worker_git_service.list_branches,
-    checkout_branch=worker_git_service.checkout_branch,
-    create_branch=worker_git_service.create_branch,
-    get_status=worker_git_service.get_status,
-    stage_all=worker_git_service.stage_all,
-    unstage_all=worker_git_service.unstage_all,
-    commit_changes=worker_git_service.commit_changes,
-    push_changes=worker_git_service.push_changes,
-    pull_changes=worker_git_service.pull_changes,
-    stage_paths=worker_git_service.stage_paths,
-    unstage_paths=worker_git_service.unstage_paths,
-    get_commits_for_path=worker_git_service.get_commits_for_path,
-    restore_path=worker_git_service.restore_path,
-    get_commits=worker_git_service.get_commits,
-    reset_hard=worker_git_service.reset_hard,
-    is_git_repository=worker_git_service.is_git_repository,
-    init_repository=worker_git_service.init_repository,
-    get_commit_info=worker_git_service.get_commit_info,
-    add_remote=worker_git_service.add_remote,
-    get_origin_url=worker_git_service.get_origin_url,
-    status_to_payload=_status_to_payload,
-    diff_base_payload=_diff_base_payload,
-    invalidate_diff_cache=invalidate_diff_cache,
-    mark_git_cache_dirty=mark_git_cache_dirty,
-)
-code_te2_bp.include_router(create_git_router(_GIT_ROUTES_DEPS))
-
-
-async def _close_active_terminal_sockets_for_project_routes() -> None:
-    from .terminal_backend import close_active_terminal_sockets
-
-    await close_active_terminal_sockets()
-
-
-def _stop_diagnostics_bridge_for_project_routes() -> None:
-    from .wba_event_bridge import reset_wba_project_event_state
-
-    reset_wba_project_event_state()
-
-
-async def _terminate_adapter_shell_for_project_routes() -> bool:
-    from .workbench_adapter_shell_manager import terminate_adapter_shell
-
-    return await terminate_adapter_shell()
-
-
-async def _emit_sidebar_cwd_set_for_project_routes(reason: str) -> None:
-    from .ui_ipc import sidebar_ws
-
-    await sidebar_ws.emit_sidebar_cwd_set_global(reason=reason)
-
-
-def _create_project_for_project_routes(parent_path: str, name: str) -> dict[str, object]:
-    from .explorer.services.file_ops import create_project
-
-    result = create_project(parent_path, name)
-    return {str(key): value for key, value in result.items()}
-
-
-_PROJECT_ROUTES_DEPS = ProjectRoutesDeps(
-    history=_history_store,
-    get_project_root=get_project_root,
-    set_project_root=set_project_root,
-    invalidate_diff_cache=invalidate_diff_cache,
-    set_edit_tracker_project_root=edit_tracker.set_project_root,
-    close_active_terminal_sockets=_close_active_terminal_sockets_for_project_routes,
-    stop_diagnostics_bridge=_stop_diagnostics_bridge_for_project_routes,
-    terminate_adapter_shell=_terminate_adapter_shell_for_project_routes,
-    emit_sidebar_cwd_set=_emit_sidebar_cwd_set_for_project_routes,
-    build_state_payload=_build_state_payload,
-    create_project=_create_project_for_project_routes,
-    format_label=HistoryStore.format_label,
-    get_sidecar_path=ProjectSidecar.get_sidecar_path,
-)
-code_te2_bp.include_router(create_project_router(_PROJECT_ROUTES_DEPS))
-
+# Git/project intents are owned by host/Explorer/Sidebar RPC services.
+# Do not reintroduce parallel HTTP mutation paths that bypass those guards.
 _HISTORY_ROUTES_DEPS = HistoryRoutesDeps(
     history=_history_store,
     get_project_root=get_project_root,

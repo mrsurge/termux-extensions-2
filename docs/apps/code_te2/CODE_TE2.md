@@ -3925,6 +3925,16 @@ browser control and bootstrap plane is the app-worker Socket.IO namespace
 `/terminal` on the canonical `/api/app/code_te2/socket.io` path; the drawer
 does not use terminal API HTTP requests.
 
+The obsolete terminal REST endpoints and raw `/ws/terminal/{shell_id}` transport
+are removed, including their parallel client registry. `terminal_backend.py`
+and the host Run service import no FastAPI. Service failures use
+`terminal_outcomes.TerminalServiceError` (invalid/missing/conflict/internal);
+terminal request replies retain detail-only errors and other existing socket
+consumers retain numeric-prefixed string errors. Run always enters the host RPC
+save/confirmation/profile flow; there is no HTTP fallback. The existing
+`close_active_terminal_sockets` service hook now only emits Socket.IO rebind
+notifications; it does not close the shared socket transport.
+
 Control methods are correlated acknowledgements for `shells.get`,
 `shell.create`, `shell.activate`, `shell.title`, `shell.remove` /
 `shell.destroy`, and compatibility `shell.history`. Registration is a reliable
@@ -4711,6 +4721,19 @@ draft collisions and reuses write/acknowledgement/diff primitives. Existing
 directory-creation confirmation stays in the host UI. Superseded HTTP endpoints
 for session/cache/preferences/write/review save/discard are removed; deploy the
 worker and regenerated frontend together. Static/theme/grammar HTTP is unchanged.
+
+### Git And Project Transport Ownership
+
+The former `main_page/backend/git_routes.py` and `project_routes.py` HTTP routers
+are removed along with their route-only assembly in `main.py`. Host branch and
+remote actions use `ui.host.git.*`; Explorer Git/project actions use
+`explorer.git.*` / `explorer.project.*`, and Sidebar project lookup/open/create
+use `sidebar.project.*`. No HTTP fallback remains for these removed routes.
+The shared `project_service.py` and `state_payload.py` are retained: they serve
+live RPC/bootstrap consumers, not only the deleted routers. Historical mutation
+guards, staged/draft restore confirmations, project-switch effects and Rust
+Git/file-ops ownership remain on the existing service paths. Remaining history,
+debug, theme/resource and workbench HTTP routes are a separate migration scope.
 
 ### Framework Pipe Codec
 

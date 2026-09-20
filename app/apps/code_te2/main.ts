@@ -1324,7 +1324,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
 
   const runFileController = createRunFileController({
     getCurrentPath: () => currentPath,
-    apiPost: (path: string, body: UnknownRecord) => apiPost(path, body),
     requestBackendRunActiveFile: (payload: UnknownRecord) => uiIpcConnections.requestBackendRunActiveFile(payload),
     requestBackendRunProfileState: (payload: UnknownRecord) => uiIpcConnections.requestUiIpc(UI_IPC_RPC_METHODS.hostRunProfileStateGet, payload),
     requestBackendRunProfileStop: (payload: UnknownRecord) => uiIpcConnections.requestUiIpc(UI_IPC_RPC_METHODS.hostRunProfileStop, payload),

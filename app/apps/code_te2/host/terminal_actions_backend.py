@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from typing import Callable, cast
 
-from fastapi import HTTPException
+from ..terminal_outcomes import TerminalServiceError
 
 from ..explorer.review import save_reviews
 from ..explorer.services.file_ops import mark_draft_cache_dirty
@@ -280,8 +280,8 @@ async def _handle_host_run_active_file_request(
     hook = cast(RunActiveFileHook, getattr(terminal_backend, "handle_run_active_file_request"))
     try:
         result = dict(await hook(payload))
-    except HTTPException as exc:
-        if exc.status_code == 400 and str(exc.detail) == _LEGACY_UNSUPPORTED_RUNNER_MESSAGE:
+    except TerminalServiceError as exc:
+        if exc.kind == "invalid" and exc.detail == _LEGACY_UNSUPPORTED_RUNNER_MESSAGE:
             return {
                 "ok": False,
                 "error": "No run profile or default runner for this file",

@@ -68,6 +68,39 @@ test('Run state is projection-driven without a scheduled query loop', async () =
   assert.equal(state.buttonStates.at(-1).runningProfiles[0].profileId, 'python');
 });
 
+test('Run requires its host RPC and contains no HTTP fallback', () => {
+  const source = fs.readFileSync(
+    path.join(appRoot, 'main_page/frontend/file-ops/run-file.ts'), 'utf8',
+  );
+  assert.doesNotMatch(source, /apiPost|\bfetch\s*\(|terminal\/run_active_file/);
+  assert.match(source, /requestBackendRunActiveFile: /);
+});
+
+test('disconnected Run reports failure without retrying over HTTP', async () => {
+  const { createRunFileController } = await importRunFileController();
+  const state = controllerDeps([]);
+  let attempts = 0;
+  state.deps.requestBackendRunActiveFile = async () => {
+    attempts += 1;
+    throw new Error('Host socket disconnected');
+  };
+  const originalFetch = globalThis.fetch;
+  const originalError = console.error;
+  let httpCalls = 0;
+  globalThis.fetch = async () => { httpCalls += 1; throw new Error('HTTP forbidden'); };
+  console.error = () => {};
+  try {
+    await createRunFileController(state.deps).runCurrentFile();
+  } finally {
+    globalThis.fetch = originalFetch;
+    console.error = originalError;
+  }
+  assert.equal(attempts, 1);
+  assert.equal(httpCalls, 0);
+  assert.deepEqual(state.toasts, ['Host socket disconnected']);
+  assert.equal(state.buttonStates.at(-1).busy, false);
+});
+
 function installDialog(result) {
   globalThis.window = {
     teUI: {
@@ -98,9 +131,6 @@ function controllerDeps(
     toasts,
     deps: {
       getCurrentPath: () => '/project/main.py',
-      apiPost: async () => {
-        throw new Error('legacy HTTP fallback should not be used');
-      },
       requestBackendRunActiveFile: async (payload) => {
         calls.push(payload);
         return responses.shift();

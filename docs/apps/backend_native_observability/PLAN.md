@@ -409,6 +409,34 @@ routes not yet migrated. This is not complete FastAPI removal. Test contracts,
 route absence, no-fallback failures, telemetry validation, diagnostic containment
 and writes; run frontend typecheck/build and focused backend typechecking.
 
+### Terminal And Run Transport Cleanup
+
+Run must use its existing host RPC, not an optional HTTP execution fallback.
+The drawer already uses `/terminal` Socket.IO for lifecycle/control/history and
+PTY events. Remove unused terminal REST routes and raw-WebSocket handler/registry
+after checking frontend/backend/framework/native callers. Keep the canonical
+socket handlers, project-scoped facts, identity/rebind generation, pyte checkpoint
+and live-output mechanisms unchanged.
+
+Terminal services raise application-owned `TerminalServiceError` with
+invalid/missing/conflict/internal classification. Preserve existing socket error
+messages and the host's unsupported-default-runner response; cancellation must
+propagate. Test imports with FastAPI/Pydantic blocked, control dispatch/failures,
+project-filtered notifications, disconnected Run, confirmations and replay.
+
+Remove the unused Git/project HTTP routers and their route-only dependency
+tables/helpers in `main.py`. Retain shared project/state services and the existing
+host/Explorer/Sidebar RPC paths, including historical mutation guards. Validate
+route absence, RPC dispatch/source attribution, project switching and guarded
+restores without operating on the user's repository or restarting the framework.
+
+Next audit the remaining editor/WBA/history routes. The project-debug
+modal and theme discovery have live HTTP callers, so route removal is not a
+mechanical decorator deletion. Move application messaging through owning RPC
+lanes, retain actual resource HTTP, then assemble a native `TE2_ASGI_APP` with the
+existing Socket.IO mounts/lifecycle. No framework restart or Android publication
+is implicit in this work, and other apps retain lazy FastAPI support.
+
 ### MessagePack Process-Pipe Cutover (Approved)
 
 Pin Python Framework-Shells 0.0.64 from tagged commit `7e86f1c` and Rust

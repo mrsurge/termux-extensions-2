@@ -372,7 +372,8 @@ slice. The native ASGI path still uses Starlette's ASGI type aliases.
   Changed services, new adapter and tests pass strict Basedpyright without
   diagnostics; the broader editor route module has zero errors and 26 warnings
   (legacy defaults, deprecated Optional, unused returns/parameter and strings).
-- [ ] User live acceptance of preferences/view settings and save behavior.
+- [x] User live acceptance of preferences/view settings and save behavior,
+  confirmed with the websocket-only persistence checkpoint.
 - [ ] Continue remaining HTTP route assembly migration. Code TE2 still uses
   FastAPI; no dependency removal or native-ASGI export switch in this slice.
 
@@ -394,12 +395,76 @@ No runtime restart, frontend/Android changes, commit or push for this slice.
   boot and socket transport coverage. Frontend TypeScript check and bundle build
   pass. New RPC backends/contracts/dispatchers and tests have zero Basedpyright
   errors/warnings. Broader legacy route modules are not warning-free.
-- [ ] Live acceptance with both updated worker and rebuilt frontend: cold boot,
+- [x] Live acceptance with both updated worker and rebuilt frontend: cold boot,
   reconnect, preferences, draft/auto-save transition, Save/Save As, conflict prompts
-  and diagnostic export. No shared runtime restart or Android publication performed.
+  and diagnostic export. User confirmed this was completed before requesting
+  checkpoint commit `0b35a46d`; no repeat acceptance requested for that slice.
 
 Static/theme/grammar HTTP remains intentional. Remaining unrelated HTTP routes
 still require FastAPI; this is not the final native-ASGI assembly switch.
+
+### Terminal And Run Transport Cleanup
+
+- [x] Audit terminal routes against frontend, backend, tests, framework and native
+  client source. Drawer already uses `/terminal` Socket.IO control/events; Run
+  already has a host RPC. No current caller needs the old REST/raw-WS routes.
+- [x] Remove Run's optional HTTP fallback and require its host RPC. Preserve the
+  existing backend save confirmation, profile selection and source identity flow.
+- [x] Replace terminal service `HTTPException` with typed `TerminalServiceError`
+  classifications; retain detail-only terminal RPC failures and stringified error
+  compatibility. Host still recognizes unsupported default runners. No swallowing
+  cancellation or reporting failed requests as success.
+- [x] Remove 11 obsolete terminal HTTP routes, the raw `/ws/terminal/{shell_id}`
+  handler and its unused socket registry/fanout. Preserve canonical Socket.IO
+  registration, fact/list events, rebind notifications, PTY I/O and pyte replay.
+- [x] Validation: 76 Python tests and 27 frontend tests pass. Frontend typecheck
+  and bundle build pass. Fresh-interpreter tests block FastAPI/Pydantic/Starlette
+  while importing the terminal and host Run modules. New outcome/tests and host
+  action module typecheck cleanly; terminal backend has zero errors and 35
+  remaining warnings (legacy stub/override/unused-result/parameter diagnostics).
+- [x] Live acceptance of this slice: drawer create/reconnect, switch/rename/close,
+  Run confirmation/default runner/profile execution, and project switching.
+  User tested the updated slice and confirmed it is working.
+
+No shared runtime restart or Android publication performed. Source and generated
+frontend must deploy together; obsolete HTTP endpoints are not compatibility APIs.
+
+### Remaining HTTP Assembly Audit
+
+- [x] Inventory FastAPI owners: `main.py`, editor routes/resources,
+  workbench routes and history router remain after the Git/project cleanup below.
+  Code TE2 still exports
+  `TE2_APP_ROUTER`; wrapper native-ASGI support alone does not remove FastAPI.
+- [x] Identify live HTTP consumers in project-debug modal and theme discovery;
+  do not delete these routes without migrating their callers.
+- [ ] Complete caller-by-caller classification of remaining routes, including
+  dynamically constructed paths, external app/CLI consumers and debug endpoints.
+- [ ] Move remaining application messaging to owning RPC lanes without fallbacks;
+  remove proven-dead routes and retain resource delivery as HTTP.
+- [ ] Assemble the remaining required endpoints/mounts/lifespan as native ASGI,
+  switch to `TE2_ASGI_APP`, and verify cold boot/import isolation and socket lanes.
+  Other workers keep their lazy FastAPI support; no package removal yet.
+
+### Git And Project HTTP Removal
+
+- [x] Confirm Git/project HTTP route modules and dependency assemblies have no
+  current source consumers beyond `main.py`; UI actions use the host/Explorer
+  RPC lanes and Sidebar project requests use the shared project service.
+- [x] Delete `main_page/backend/git_routes.py` and `project_routes.py`, their
+  `main.py` includes/dependency tables, and helpers/imports used only by them.
+  Retain shared state payload, project service and Rust Git/file-ops services.
+- [x] Preserve existing branch/remote host RPCs, Explorer Git/project methods,
+  historical stage/commit guards, guarded restore and project-switch projections.
+  No replacement HTTP routes, fallback, new frontend lane or lifecycle changes.
+- [x] Validation: 46 Python tests pass, including eight new route-absence/RPC
+  dispatch and project-service delegation tests. Basedpyright: zero errors;
+  new tests are clean, `main.py` retains 15 legacy warnings. No frontend changes
+  in this slice, so no additional frontend build or Android publication required.
+- [x] Live acceptance: user tested the Git/project cleanup and confirmed it
+  remains green. No shared runtime restart performed by the agent.
+
+History/debug/theme/WBA HTTP routes remain for the next consumer audit. This
+slice does not yet switch Code TE2 to `TE2_ASGI_APP` or remove FastAPI packages.
 
 ### Reported Regression: Android Second Editor
 
@@ -409,6 +474,10 @@ still require FastAPI; this is not the final native-ASGI assembly switch.
   the last release is suspected. Exact regression commit and cause are unknown.
   Include shared frontend/Python routing and state projection in the investigation,
   not just native Android code. This is separate from Explorer delivery acceptance.
+  Source check: mobile presentation uses iframe loading plus postMessage; actual
+  working/historical file opens use host Socket.IO RPC (`hostFileOpen` /
+  `hostHistoryOpen`), not the removed persistence or terminal HTTP endpoints.
+  This is not a diagnosis; investigate after FastAPI migration as requested.
 
 ### MessagePack Pipe Cutover
 
