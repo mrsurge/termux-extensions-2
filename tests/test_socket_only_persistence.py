@@ -44,6 +44,8 @@ class SocketPersistenceTests(unittest.IsolatedAsyncioTestCase):
             "/check_cache", "/cache_state", "/refresh_cache_state", "/discard_draft",
             "/set_content", "/color_picker/toggle", "/read_only/set", "/minimap/mode",
             "/refresh_diffs", "/jump_to_line", "/search/open", "/debug/state",
+            "/read", "/state", "/diff", "/review/list", "/edit_tracker/status",
+            "/ws/read", "/ws/edit_tracker", "/ws/debug_console", "/editor/update_diffs",
         }
         for name in ("main.py", "monaco_editor/editor_backend.py"):
             tree = ast.parse((ROOT / "app/apps/code_te2" / name).read_text())
@@ -54,6 +56,41 @@ class SocketPersistenceTests(unittest.IsolatedAsyncioTestCase):
                             route = decorator.args[0]
                             if isinstance(route, ast.Constant):
                                 self.assertNotIn(route.value, forbidden)
+
+    def test_main_retains_only_health_and_resource_routes(self) -> None:
+        # Inspect assembly without importing main: importing it installs process
+        # hooks and opens the user's stores, which this contract test must not do.
+        source = (ROOT / "app/apps/code_te2/main.py").read_text()
+        tree = ast.parse(source)
+        routes: set[tuple[str, str]] = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for decorator in node.decorator_list:
+                if not isinstance(decorator, ast.Call) or not decorator.args:
+                    continue
+                function = decorator.func
+                if not isinstance(function, ast.Attribute):
+                    continue
+                if not isinstance(function.value, ast.Name) or function.value.id != "code_te2_bp":
+                    continue
+                route = decorator.args[0]
+                if isinstance(route, ast.Constant) and isinstance(route.value, str):
+                    routes.add((function.attr, route.value))
+        self.assertEqual(routes, {
+            ("get", "/"), ("get", "/status"),
+            ("get", "/static/{file_path:path}"), ("get", "/agent_icons/{name}"),
+        })
+        self.assertIn('register_monaco_editor_routes(code_te2_bp, "/ui")', source)
+        self.assertIn("edit_tracker.set_project_root(project_root)", source)
+        self.assertIn("invalidate_diff_cache(new_root)", source)
+        for retired in (
+            "_STATE_PAYLOAD_DEPS", "_build_state_payload", "_resolve_diff_base",
+            "_get_runtime_metadata", "_expand_and_validate_path", "_get_file_meta",
+            "_edit_tracker_status", "_edit_tracker_subscribe", "_collect_diff",
+            "_compute_draft_diff", "_normalize_rel_path", "_json_list", "_debug_log_path",
+        ):
+            self.assertNotIn(retired, source)
 
     def test_session_update_validates_and_does_not_admit_authority_keys(self) -> None:
         history = FakeHistory("/project")

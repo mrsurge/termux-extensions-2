@@ -488,8 +488,16 @@ route protocols. Repair the stale startup-test `on_spawned` signature, isolate
 installation lookup and bound test waits. Validate startup overlap, cancellation,
 record contracts and source-consumer absence; no startup rescheduling or builds.
 
-Next audit the remaining main routes. Move application messaging through owning RPC
-lanes, retain actual resource HTTP, then assemble a native `TE2_ASGI_APP` with the
+Main-route retirement slice: source audit found no active callers for `/read`,
+`/state`, `/diff`, `/review/list`, `/edit_tracker/status`, `/ws/read`,
+`/ws/edit_tracker`, `/ws/debug_console` or the `/editor/update_diffs` stub.
+Remove these routes and their private wrappers/dependency table, not the shared
+state, diff, read or edit-tracker services. Preserve readiness, lifecycle,
+intelligence priming, console tools, all Socket.IO mounts and resource/health
+HTTP. Validate the remaining route inventory, existing RPC/resource contracts,
+startup and typing; no frontend build or restart is part of this slice.
+
+Next assemble the remaining resource/health HTTP as a native `TE2_ASGI_APP` with the
 existing Socket.IO mounts/lifecycle. No framework restart or Android publication
 is implicit in this work, and other apps retain lazy FastAPI support.
 

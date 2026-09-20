@@ -596,8 +596,25 @@ No Android edits, shared runtime restart or version bump. Code TE2 still exports
   reconnect, syntax/diagnostics/navigation, language-backend selection and the
   Languages/Extensions modal. No frontend assets or APK rebuild needed.
 
-The remaining FastAPI boundary is main/resource HTTP assembly. Both extraction
-slices are live accepted. No runtime restart or frontend publication by the agent.
+### Main Legacy Route Retirement
+
+- [x] Source audit found no active callers of `/read`, `/state`, `/diff`,
+  `/review/list`, `/edit_tracker/status`, `/ws/read`, `/ws/edit_tracker`,
+  `/ws/debug_console` or the `/editor/update_diffs` stub. Remove these nine routes
+  and route-only helpers/imports; no replacement transport or fallback.
+- [x] Preserve shared state/diff/read/edit-tracker services, project initialization,
+  intelligence priming, lifecycle/readiness, console tools, Socket.IO mounts and
+  health/resource routes. Add a main-route inventory regression test without
+  importing main and installing its process hooks/opening user stores.
+- [x] Focused validation (2026-09-20): 76 Python tests pass. Basedpyright reports
+  0 errors; changed test code is clean and main retains 5 existing warnings
+  (down from 15 after removing legacy handlers). No frontend/build changes.
+- [x] User live acceptance (2026-09-20) after app-worker reload: file/project navigation,
+  draft/commit diffs, change projections, console and intelligence startup.
+
+The remaining FastAPI boundary is main/resource HTTP assembly. The earlier editor
+and WBA extraction slices and main-route retirement are live accepted.
+No runtime restart or frontend publication by the agent.
 
 ### Reported Regression: Android Second Editor
 

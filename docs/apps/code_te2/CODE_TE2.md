@@ -4794,8 +4794,17 @@ use `sidebar.project.*`. No HTTP fallback remains for these removed routes.
 The shared `project_service.py` and `state_payload.py` are retained: they serve
 live RPC/bootstrap consumers, not only the deleted routers. Historical mutation
 guards, staged/draft restore confirmations, project-switch effects and Rust
-Git/file-ops ownership remain on the existing service paths. Remaining debug,
-theme/resource and workbench HTTP routes are a separate migration scope.
+Git/file-ops ownership remain on the existing service paths.
+
+The main app's unused `/read`, `/state`, `/diff`, `/review/list`,
+`/edit_tracker/status`, `/ws/read`, `/ws/edit_tracker`, `/ws/debug_console` and
+`/editor/update_diffs` routes are also removed. This removes only legacy transport
+entrypoints and their private wrappers; shared state/read/diff/edit-tracker
+services still serve the active RPC and event paths. The real console bridge is
+unchanged, as are readiness, project initialization and intelligence startup.
+Main directly registers only `/`, `/status`, `/static/{file_path:path}` and
+`/agent_icons/{name}`, plus the separate editor asset router. Native-ASGI assembly
+of these remaining resources/health endpoints is still pending.
 
 ### Production Projects Modal
 

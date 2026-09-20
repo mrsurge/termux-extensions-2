@@ -6,35 +6,22 @@ import json
 import faulthandler
 import threading
 import traceback
-from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
 from urllib import request as urllib_request
 from urllib.parse import quote
-from fastapi import APIRouter, HTTPException, WebSocket, Body, Query
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 import asyncio
-from .history_store import HistoryStore
 from .explorer.services.file_ops import (
-    _normalize_rel_path as _file_ops_normalize_rel_path,
     get_project_root,
     set_project_root,
 )
 from .code_server_runtime_hooks import set_code_server_runtime_primer
 from . import edit_tracker
 from .diff_helper import invalidate_diff_cache
-from .worker_services import git_service as worker_git_service
-from .core_read import subscribe, unsubscribe
-from .core_write import FileMeta
 from .project_sidecar import ProjectSidecar, cleanup_orphaned_sidecars
 from .code_te2_paths import code_te2_paths
-from .main_page.backend.state_payload import (
-    StatePayloadDeps,
-    build_state_payload,
-    expand_and_validate_path,
-    get_runtime_metadata,
-    resolve_diff_base,
-)
 from .stores import get_history_store, get_preferences_store
 
 IGNORE_PATTERNS = [
@@ -58,10 +45,6 @@ def _json_object(value: object) -> JsonDict:
     return {str(key): item for key, item in cast(dict[object, object], value).items()}
 
 
-def _json_list(value: object) -> list[object]:
-    return cast(list[object], value) if isinstance(value, list) else []
-
-
 def _str_value(value: object, default: str = "") -> str:
     return value if isinstance(value, str) else default
 
@@ -75,62 +58,6 @@ class ReadableResponse(Protocol):
     def read(self) -> bytes: ...
 
     def close(self) -> None: ...
-
-
-class NormalizeRelPathFn(Protocol):
-    def __call__(self, project_root: Path, raw_path: str) -> str: ...
-
-
-class CollectDiffFn(Protocol):
-    def __call__(self, project_root: Path, rel_path: str, *, base_ref: str | None = None) -> object: ...
-
-
-class ComputeDraftDiffFn(Protocol):
-    def __call__(self, file_path: str, draft_content: str, disk_content: str) -> object: ...
-
-
-class EditTrackerSubscribeFn(Protocol):
-    def __call__(self, callback: Callable[[JsonDict], None]) -> str: ...
-
-
-class EditTrackerStatusFn(Protocol):
-    def __call__(self) -> object: ...
-
-
-def _normalize_rel_path(project_root: Path, raw_path: str) -> str:
-    fn = cast(NormalizeRelPathFn, cast(object, _file_ops_normalize_rel_path))
-    return fn(project_root, raw_path)
-
-
-def _get_file_meta(path: Path) -> FileMeta:
-    from . import core_write as _core_write
-
-    fn = cast(Callable[[Path], FileMeta], cast(object, getattr(_core_write, "_get_file_meta")))
-    return fn(path)
-
-
-def _collect_diff(project_root: Path, rel_path: str, *, base_ref: str | None = None) -> JsonDict:
-    from . import diff_helper as _diff_helper
-
-    fn = cast(CollectDiffFn, cast(object, getattr(_diff_helper, "collect_diff")))
-    return _json_object(fn(project_root, rel_path, base_ref=base_ref))
-
-
-def _compute_draft_diff(file_path: str, draft_content: str, disk_content: str) -> JsonDict:
-    from . import draft_diff_helper as _draft_diff_helper
-
-    fn = cast(ComputeDraftDiffFn, cast(object, getattr(_draft_diff_helper, "compute_draft_diff")))
-    return _json_object(fn(file_path, draft_content, disk_content))
-
-
-def _edit_tracker_status() -> JsonDict:
-    fn = cast(EditTrackerStatusFn, cast(object, getattr(edit_tracker, "get_tracking_status")))
-    return _json_object(fn())
-
-
-def _edit_tracker_subscribe(callback: Callable[[JsonDict], None]) -> str:
-    fn = cast(EditTrackerSubscribeFn, cast(object, getattr(edit_tracker, "subscribe")))
-    return fn(callback)
 
 
 def _install_crash_diagnostics() -> None:
@@ -225,10 +152,8 @@ async def te2_app_backend_serving() -> None:
 
 code_te2_bp = APIRouter()
 TE2_APP_ROUTER = code_te2_bp
-# sock = Sock()
-
-# # Register terminal routes and WebSocket handler
-# register_terminal_routes(code_te2_bp, sock)
+# Application controls and file/event projections use the owned Socket.IO lanes.
+# This router retains only health checks and static/editor resource delivery.
 
 # Serve static files (JS, CSS, etc.)
 @code_te2_bp.get("/static/{file_path:path}")
@@ -269,16 +194,6 @@ SUBAPPS = [
 
 _history_store = get_history_store()
 _preferences_store = get_preferences_store()
-
-_STATE_PAYLOAD_DEPS = StatePayloadDeps(
-    history=_history_store,
-    preferences=_preferences_store,
-    set_project_root=set_project_root,
-    is_git_repository=worker_git_service.is_git_repository,
-    get_commit_info=worker_git_service.get_commit_info,
-    format_label=HistoryStore.format_label,
-)
-
 
 # Worker lifecycle and boot-snapshot RPC share this primer. WBA startup/control
 # does not use an HTTP discovery, launch or command-proxy route.
@@ -406,20 +321,6 @@ async def te2_app_stop() -> None:
     await stop_worker_runtime()
 
 
-def _resolve_diff_base(project_path: str | None) -> str:
-    return resolve_diff_base(_STATE_PAYLOAD_DEPS, project_path)
-
-
-def _get_runtime_metadata() -> JsonDict:
-    return get_runtime_metadata()
-
-def _build_state_payload() -> JsonDict:
-    return build_state_payload(_STATE_PAYLOAD_DEPS)
-
-def _expand_and_validate_path(path: str) -> tuple[str | None, str | None]:
-    return expand_and_validate_path(path)
-
-
 # Git/project intents are owned by host/Explorer/Sidebar RPC services.
 # Do not reintroduce parallel HTTP mutation paths that bypass those guards.
 @code_te2_bp.get('/')
@@ -429,261 +330,3 @@ def status_root():
 @code_te2_bp.get('/status')
 def status():
     return {"ok": True, "data": {"message": "File Editor CM6 app API ready"}}
-
-
-@code_te2_bp.get('/read')
-def read_file(path: str = Query(...)):
-    expanded, err = _expand_and_validate_path(path)
-    if err or expanded is None:
-        raise HTTPException(status_code=403, detail=err)
-    if not os.path.isfile(expanded):
-        raise HTTPException(status_code=404, detail='File not found')
-    try:
-        with open(expanded, 'r', encoding='utf-8', errors='replace') as f:
-            content = f.read()
-        meta = _get_file_meta(Path(expanded))
-        return {"ok": True, "data": {"path": expanded, "content": content, "sha256": meta.get("sha256")}}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@code_te2_bp.websocket('/ws/read')
-async def ws_read(websocket: WebSocket):
-    """WebSocket endpoint for file change notifications."""
-    await websocket.accept()
-    path = websocket.query_params.get('path')
-    client_id = websocket.query_params.get('client_id', 'unknown')
-
-    if not path:
-        await websocket.close(reason='Missing path parameter')
-        return
-
-    project_root = get_project_root()
-    try:
-        rel_path = _normalize_rel_path(project_root, path)
-    except ValueError:
-        await websocket.close(reason='Path outside project root')
-        return
-
-    # Subscribe to file changes
-    event_queue: asyncio.Queue[JsonDict] = asyncio.Queue()
-    token = subscribe(str(rel_path), client_id, lambda event: event_queue.put_nowait(event))
-
-    async def forward_events():
-        while True:
-            try:
-                event = await event_queue.get()
-                await websocket.send_text(json.dumps(event))
-            except asyncio.CancelledError:
-                print(f"[ws/read] forward_events cancelled path={path} client={client_id}", file=sys.stderr)
-                break
-            except Exception as e:
-                print(f"[ws/read] forward_events error path={path} client={client_id} err={e}", file=sys.stderr)
-                break
-
-    forward_task = asyncio.create_task(forward_events())
-
-    try:
-        # Keep connection alive and ignore incoming messages
-        async for _msg in websocket.iter_text():
-            pass
-    except Exception as e:
-        print(f"[ws/read] iter_text error path={path} client={client_id} err={e}", file=sys.stderr)
-    finally:
-        try:
-            if websocket.client_state.value != 3:  # not DISCONNECTED
-                await websocket.close()
-        except Exception:
-            pass
-        forward_task.cancel()
-        unsubscribe(token)
-        print(f"[ws/read] closed path={path} client={client_id}", file=sys.stderr)
-
-@code_te2_bp.get('/state')
-async def get_editor_state_deprecated():
-    """
-    Combined state endpoint for the frontend (files + project + git base).
-    Now also returns 'projectOrigin'.
-    """
-    history = _history_store
-    payload = _build_state_payload()
-
-    active_project = history.get_active_project()
-
-    # If we have an active project, check/refresh its origin cache
-    project_origin = None
-    if active_project and os.path.isdir(active_project):
-        try:
-            if worker_git_service.is_git_repository(Path(active_project)):
-                project_origin = worker_git_service.get_origin_url(Path(active_project))
-                history.set_project_origin(active_project, project_origin)
-            else:
-                history.set_project_origin(active_project, None)
-        except Exception:
-            pass
-    else:
-        project_origin = history.get_project_origin(active_project)
-
-    session_state = history.get_session_state()
-    open_file = payload.get("lastFile")
-    payload.update({
-        "projectOrigin": project_origin,
-        "currentPath": open_file if isinstance(open_file, str) else None,
-        "unsaved": session_state.get("unsaved"),
-        "editorState": session_state,
-    })
-
-    return {"ok": True, "data": payload}
-
-@code_te2_bp.get('/diff')
-def get_diff(path: str = Query(...)):
-    """Return git diff hunks for the requested file."""
-    if not path:
-        raise HTTPException(status_code=400, detail="Path is required")
-
-    project_path = _history_store.get_active_project() or str(get_project_root())
-    if not project_path:
-        raise HTTPException(status_code=400, detail="No project selected")
-
-    project_root = Path(project_path).expanduser()
-    if not project_root.exists():
-        raise HTTPException(status_code=404, detail="Project directory not available")
-
-    try:
-        rel = _normalize_rel_path(project_root, path)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-    base_ref = _resolve_diff_base(project_path)
-    payload = _collect_diff(project_root, rel, base_ref=base_ref)
-    return {"ok": True, "data": payload}
-
-@code_te2_bp.get('/review/list')
-async def review_list(lightweight: bool = Query(False)) -> JsonDict:
-    """
-    Get list of files with unsaved drafts.
-    If lightweight=True, skips diff computation and returns only metadata.
-    """
-    project_root = _history_store.get_active_project()
-    if not project_root or not Path(project_root).exists():
-        return {"ok": True, "data": []}
-    
-    root_path = Path(project_root)
-    results: list[JsonDict] = []
-    
-    try:
-        drafts = _history_store.list_project_drafts(project_root)
-        for draft in drafts:
-            # draft entry contains 'file_path' (abs)
-            file_path_value = draft.get('file_path')
-            if not isinstance(file_path_value, str) or not file_path_value:
-                continue
-            abs_path = Path(file_path_value)
-            try:
-                rel_path = str(abs_path.relative_to(root_path))
-            except ValueError:
-                continue # Skip files outside project
-            
-            hunks: list[object] = []
-            if not lightweight:
-                # Compute diff
-                try:
-                    draft_content_value = draft.get('content', '')
-                    draft_content = draft_content_value if isinstance(draft_content_value, str) else ''
-                    if abs_path.exists():
-                        disk_content = abs_path.read_text(encoding='utf-8', errors='replace')
-                    else:
-                        disk_content = ''
-                    
-                    diff_data = _compute_draft_diff(str(abs_path), draft_content, disk_content)
-                    hunks = _json_list(diff_data.get('hunks'))
-                except Exception as e:
-                    print(f"[REVIEW] Diff computation failed for {rel_path}: {e}", file=sys.stderr)
-
-            results.append({
-                "path": str(abs_path),
-                "rel": rel_path,
-                "has_draft": True,
-                "timestamp": draft.get('updated_at'),
-                "hunks": hunks
-            })
-            
-    except Exception as e:
-        print(f"[REVIEW] Draft list failed: {e}", file=sys.stderr)
-        
-    return {"ok": True, "data": results}
-
-@code_te2_bp.get('/edit_tracker/status')
-def get_edit_tracker_status():
-    """Get current edit tracker status."""
-    try:
-        status = _edit_tracker_status()
-        return {"ok": True, "data": status}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@code_te2_bp.websocket('/ws/edit_tracker')
-async def edit_tracker_ws(websocket: WebSocket):
-    """WebSocket endpoint for edit tracking events."""
-    await websocket.accept()
-    
-    event_queue: asyncio.Queue[JsonDict] = asyncio.Queue()
-    
-    def queue_callback(event: JsonDict) -> None:
-        try:
-            event_queue.put_nowait(event)
-        except Exception:
-            pass
-    
-    token = _edit_tracker_subscribe(queue_callback)
-    
-    async def forward_events_to_ws():
-        """Forward edit tracker events to WebSocket"""
-        while True:
-            try:
-                event = await event_queue.get()
-                await websocket.send_text(json.dumps(event))
-            except asyncio.CancelledError:
-                break
-            except Exception:
-                break
-    
-    forward_task = asyncio.create_task(forward_events_to_ws())
-    
-    try:
-        # Keep connection alive (receive ping/pong)
-        async for _msg in websocket.iter_text():
-            pass
-    finally:
-        # Clean up
-        forward_task.cancel()
-        try:
-            edit_tracker.unsubscribe(token)
-        except Exception:
-            pass
-
-# =============================================================================
-# Debug Console WebSocket
-# =============================================================================
-_debug_log_path = _CODE_TE2_PATHS.browser_console_log_path
-
-@code_te2_bp.websocket('/ws/debug_console')
-async def debug_console_ws(websocket: WebSocket):
-    """WebSocket endpoint for browser console log forwarding."""
-    await websocket.accept()
-    # Ensure directory exists
-    _debug_log_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    try:
-        async for msg in websocket.iter_text():
-            try:
-                # Append to log file silently
-                with open(_debug_log_path, 'a') as f:
-                    f.write(msg + '\n')
-            except Exception:
-                pass  # Stay silent
-    except Exception:
-        pass  # Stay silent on disconnect too
-
-@code_te2_bp.post('/editor/update_diffs')
-async def update_diffs(data: JsonDict = Body(...)):
-    """Update diff hunks in editor state - for testing inline diffs"""
