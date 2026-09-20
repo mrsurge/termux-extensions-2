@@ -194,12 +194,14 @@ test('host chrome accepts only the current client path and newest shared revisio
       'main_page/frontend/host-editor-events-runtime.ts',
     );
     const applied = [];
+    const hashes = [];
+    const externalRefreshes = [];
     const issues = document.createElement('div');
     const runtime = createHostEditorEventsRuntime({
       applyCacheIndicator: (payload) => applied.push(payload),
-      triggerExternalRefresh() {},
+      triggerExternalRefresh: path => externalRefreshes.push(path),
       applyAutosavePreference() {},
-      setLastSha256() {},
+      setLastSha256: sha => hashes.push(sha),
       getCurrentPath: () => '/project/a.py',
       getRestoredSessionActive: () => false,
       setRestoredSessionActive() {},
@@ -224,6 +226,7 @@ test('host chrome accepts only the current client path and newest shared revisio
         state: 'mid_session',
         unsaved: true,
         document_revision: 2,
+        base_sha256: 'a'.repeat(64),
       },
     }));
     window.dispatchEvent(new window.CustomEvent('code-te2:editor-cache-state', {
@@ -237,6 +240,25 @@ test('host chrome accepts only the current client path and newest shared revisio
 
     assert.equal(applied.length, 1);
     assert.equal(applied[0].unsaved, true);
+    assert.deepEqual(hashes, ['a'.repeat(64)]);
+    assert.deepEqual(externalRefreshes, []);
+
+    // The owning editor projection replaces the obsolete raw file subscription.
+    // Only a current-document, non-stale update may change host hash/draft state.
+    for (const detail of [
+      { path: '/project/b.py', document_revision: 10 },
+      { path: '/project/a.py', document_revision: 1 },
+      { path: '/project/a.py', document_revision: 3 },
+    ]) {
+      window.dispatchEvent(new window.CustomEvent('code-te2:editor-cache-state', {
+        detail: { state: 'clean', unsaved: false, reason: 'watcher_external',
+          content_sha256: 'b'.repeat(64), ...detail },
+      }));
+    }
+    assert.deepEqual(hashes, ['a'.repeat(64), 'b'.repeat(64)]);
+    assert.deepEqual(externalRefreshes, ['/project/a.py']);
+    assert.equal(applied.length, 2);
+    assert.equal(applied[1].unsaved, false);
   } finally {
     globalThis.window = previousWindow;
     globalThis.document = previousDocument;

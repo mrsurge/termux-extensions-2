@@ -24,7 +24,6 @@ test('file open delegates authority to Python without a host snapshot preflight'
   );
   const backendRequests = [];
   const completions = [];
-  const websocketPaths = [];
   const controller = createOpenFlowController({
     setStatus: () => {},
     toAbsolute: (value, base) => base ? `${base}/${value}` : value,
@@ -53,7 +52,7 @@ test('file open delegates authority to Python without a host snapshot preflight'
     syncSessionPath: () => {},
     getCachedProjectRoot: () => null,
     dispatchExplorerActiveFile: () => {},
-    openWebSocket: (filePath) => { websocketPaths.push(filePath); },
+    openWebSocket: () => { throw new Error('Legacy file socket must not open'); },
     jumpToCurrentFileLine: () => {},
     toast: () => {},
   });
@@ -64,5 +63,4 @@ test('file open delegates authority to Python without a host snapshot preflight'
   assert.equal(backendRequests[0].path, 'relative/file.py');
   assert.equal(completions.length, 1);
   assert.equal(completions[0].filePath, '/workspace/canonical/file.py');
-  assert.deepEqual(websocketPaths, ['/workspace/canonical/file.py']);
 });

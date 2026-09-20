@@ -374,8 +374,8 @@ slice. The native ASGI path still uses Starlette's ASGI type aliases.
   (legacy defaults, deprecated Optional, unused returns/parameter and strings).
 - [x] User live acceptance of preferences/view settings and save behavior,
   confirmed with the websocket-only persistence checkpoint.
-- [ ] Continue remaining HTTP route assembly migration. Code TE2 still uses
-  FastAPI; no dependency removal or native-ASGI export switch in this slice.
+- [x] Continue remaining HTTP route assembly migration in the later native-ASGI
+  slice below. No package dependency removal.
 
 No runtime restart, frontend/Android changes, commit or push for this slice.
 
@@ -431,17 +431,16 @@ frontend must deploy together; obsolete HTTP endpoints are not compatibility API
 
 ### Remaining HTTP Assembly Audit
 
-- [x] Inventory FastAPI owners: `main.py`, editor routes/resources and
-  workbench routes remain after the Git/project and Projects cleanup below.
-  Code TE2 still exports
-  `TE2_APP_ROUTER`; wrapper native-ASGI support alone does not remove FastAPI.
+- [x] Inventory FastAPI owners: main, editor resources and workbench routes were
+  the remaining boundary. Follow-up retirement/extraction slices are below;
+  the final native export now removes FastAPI from Code TE2 assembly.
 - [x] Identify live HTTP consumers in the production Projects modal and theme
   discovery; both now use their owning RPC lanes (theme slice below).
-- [ ] Complete caller-by-caller classification of remaining routes, including
+- [x] Complete caller-by-caller classification of remaining routes, including
   dynamically constructed paths, external app/CLI consumers and debug endpoints.
-- [ ] Move remaining application messaging to owning RPC lanes without fallbacks;
+- [x] Move remaining application messaging to owning RPC lanes without fallbacks;
   remove proven-dead routes and retain resource delivery as HTTP.
-- [ ] Assemble the remaining required endpoints/mounts/lifespan as native ASGI,
+- [x] Assemble the remaining required endpoints/mounts/lifespan as native ASGI,
   switch to `TE2_ASGI_APP`, and verify cold boot/import isolation and socket lanes.
   Other workers keep their lazy FastAPI support; no package removal yet.
 
@@ -598,10 +597,12 @@ No Android edits, shared runtime restart or version bump. Code TE2 still exports
 
 ### Main Legacy Route Retirement
 
-- [x] Source audit found no active callers of `/read`, `/state`, `/diff`,
+- [x] Initial audit reported no active callers of `/read`, `/state`, `/diff`,
   `/review/list`, `/edit_tracker/status`, `/ws/read`, `/ws/edit_tracker`,
   `/ws/debug_console` or the `/editor/update_diffs` stub. Remove these nine routes
   and route-only helpers/imports; no replacement transport or fallback.
+  **Correction:** `/ws/read` had a dynamic frontend caller missed by this audit;
+  see the frontend cleanup below. Initial backend-only checks were insufficient.
 - [x] Preserve shared state/diff/read/edit-tracker services, project initialization,
   intelligence priming, lifecycle/readiness, console tools, Socket.IO mounts and
   health/resource routes. Add a main-route inventory regression test without
@@ -612,9 +613,52 @@ No Android edits, shared runtime restart or version bump. Code TE2 still exports
 - [x] User live acceptance (2026-09-20) after app-worker reload: file/project navigation,
   draft/commit diffs, change projections, console and intelligence startup.
 
-The remaining FastAPI boundary is main/resource HTTP assembly. The earlier editor
-and WBA extraction slices and main-route retirement are live accepted.
-No runtime restart or frontend publication by the agent.
+The editor/WBA extraction and main-route retirement slices are live accepted.
+The later 403 report exposed incomplete frontend retirement of `/ws/read`.
+
+### Legacy File-Read Frontend Cleanup
+
+- [x] Trace current-source caller: main's file manager calls shared
+  `wsPort.buildWsUrl`, constructing `/ws/app/code_te2/read`; Rust forwards to
+  `/ws/read`. Reconnect attempts fail because the handler was removed, not
+  because of stale assets, another device or an authentication regression.
+- [x] Remove the host file-read manager/handler, open/save/boot/project-switch
+  wiring, keepalive/retries and unused acknowledgement bookkeeping. Preserve
+  existing host/editor RPC, save conflict handling, revision-fenced cache/draft
+  projections and backend watcher delivery. No parallel replacement channel.
+- [x] Validation: 61 frontend tests and TypeScript checking pass, including
+  dynamic-helper source guards, boot/open paths, save/Save As replies and current
+  versus stale/other-document hash/draft/external-change projections.
+- [x] Production frontend build passes; generated host.js contains none of the
+  retired `wsPort`/`buildWsUrl`/file-read reconnect markers. Generated vendor
+  strings retain whitespace; source-only diff checking passes.
+- [x] User live acceptance (2026-09-20) after loading the rebuilt frontend:
+  reports operation looks good and `/ws/read` retry warnings are gone.
+
+The shared shell URL helper is not changed. Already-loaded frontends retain their
+old reconnect loop until replaced/reloaded. No asset version bump, Android
+publication, shared runtime restart or logging suppression in this slice.
+
+### Native-ASGI Code TE2 Assembly
+
+- [x] Replace main's router/SUBAPPS exports with `TE2_ASGI_APP`. New `http_app.py`
+  composes health/resources and the same Socket.IO gateway, without owning worker
+  startup or changing readiness/intelligence ordering. Other apps are unchanged.
+- [x] Convert editor resources to a Starlette route factory. Preserve URLs,
+  explicit methods, CSS shim/raw responses, MIME/bytes, missing-build errors and
+  containment. Keep JSON health/error responses; static paths cannot escape their
+  resource root. FastAPI-generated docs/OpenAPI endpoints are not retained.
+- [x] Isolated real-backend probe blocks FastAPI/Pydantic, exercises resource
+  delivery, native lifespan/debug probe and real Engine.IO WebSocket handshakes
+  through all five mounts. Test request includes the browser's Upgrade header.
+- [x] Validation (2026-09-20): 93 focused tests pass, including worker subprocess
+  lifecycle/legacy compatibility, active RPC, startup and assets. Basedpyright:
+  zero errors, five existing main warnings; new modules/tests are clean.
+- [x] User live acceptance (2026-09-20): reports normal operation after the native
+  cutover and confirms the follow-up frontend cleanup eliminates retry warnings.
+
+No shared runtime restart, frontend/APK build, package dependency removal or
+startup rescheduling. FastAPI/Pydantic remain installed for other consumers.
 
 ### Reported Regression: Android Second Editor
 

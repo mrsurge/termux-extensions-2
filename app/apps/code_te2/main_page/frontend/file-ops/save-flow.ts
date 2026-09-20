@@ -12,8 +12,6 @@ interface SaveFileParams {
 
 interface SaveFlowControllerDeps {
   clientId: string;
-  setInflightOpId: (id: string | null) => void;
-  setLastSaveTime: (ts: number) => void;
   getLastSha256: () => string | null;
   setLastSha256: (sha: string | null) => void;
   setLastSavedContent: (content: string) => void;
@@ -34,8 +32,6 @@ interface SaveFlowControllerDeps {
   detectLanguageFromFilename: (path: string) => string | null;
   updatePathDisplay: () => void;
   openFile?: (path: string, options?: Record<string, unknown>) => Promise<unknown>;
-  closeWebSocket: () => void;
-  openWebSocket: (path: string) => void | Promise<void>;
   getCachedProjectRoot: () => string | null;
   getEditorState: () => unknown;
   setEditorState: (state: unknown) => void;
@@ -172,8 +168,6 @@ export function createSaveFlowController(deps: SaveFlowControllerDeps) {
         deps.setLastPickerPath(deps.parentDir(targetAbs));
         deps.setCurrentModeLanguage(deps.detectLanguageFromFilename(targetAbs));
         deps.updatePathDisplay();
-        deps.closeWebSocket();
-        deps.openWebSocket(targetAbs);
       }
       deps.setStatus('Saved');
       setTimeout(() => { if (!deps.getUnsaved()) deps.setStatus(''); }, 1500);

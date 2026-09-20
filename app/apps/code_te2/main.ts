@@ -7,7 +7,6 @@ import { createTerminalDrawer } from './main_page/frontend/host-terminal-drawer.
 import { initBranchMenu } from './main_page/frontend/host-git-branch-menu.ts';
 // Hardcoded extension imports for now; will be dynamically loaded later.
 import { initSidebarShortcuts } from './main_page/frontend/sidebar-shortcuts/runtime.ts';
-import ReconnectingWebSocket from './main_page/frontend/connections/reconnecting-websocket.ts';
 import { createConsoleDrawer } from './main_page/frontend/host-console-drawer.ts';
 import { createProblemsState } from './src/diagnostics/problems-panel.ts';
 import { installDiagnosticsLatencyProbe } from './src/diagnostics/latency-probe.ts';
@@ -47,8 +46,6 @@ import { initWatcherUI, drainPendingWatcherEvents, showWatcherLimitModal } from 
 import { createUiIpcConnections } from './main_page/frontend/connections/ui-ipc.ts';
 import { EXPLORER_RPC_NOTIFICATIONS } from './src/explorer/rpc/contract.ts';
 import { notifyExplorerRpc, requestExplorerRpc } from './src/explorer/rpc/client.ts';
-import { createFileWebSocketManager } from './main_page/frontend/connections/file-websocket.ts';
-import { createFileSyncHandler } from './main_page/frontend/connections/file-sync-handler.ts';
 import { ensureSocketIoLoaded, ensureVConsoleLoaded } from './main_page/frontend/connections/vendor-loaders.ts';
 import { createSessionTelemetryController } from './main_page/frontend/boot/session-telemetry.ts';
 import { createEditorStateController } from './main_page/frontend/boot/editor-state.ts';
@@ -644,7 +641,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
   let externalRefreshInProgress = false;
 
   function resetActiveFileState({ resetPicker = false }: { resetPicker?: boolean } = {}) {
-    fileWebSocketManager.closeWebSocket();
     currentPath = '';
     currentPathExists = false;
     if (resetPicker) lastPickerPath = HOME_DIR;
@@ -657,12 +653,9 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
   hostUiPrefsRuntime.installWindowHook();
   hostUiPrefsRuntime.drainPendingUiPrefs();
 
-  // WebSocket and autosave state
-  let inflightOpId: string | null = null;
+  // Autosave timing; save replies and editor projections own acknowledgement state.
   const AUTOSAVE_IDLE_DELAY = 1200; // manual saves / disabled autosave
   const AUTOSAVE_ACTIVE_DELAY = 450; // faster loop while autosave is ON
-  let lastSaveTime = 0;
-  const SELF_ECHO_GRACE = 1800; // 1.8s grace period after save (avoid cursor jumps on slow typing)
   const saveSocketController = createSaveSocketController({
     requestBackendFileSave: (payload) => uiIpcConnections.requestBackendFileSave(payload),
   });
@@ -1082,7 +1075,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
   // Called from Explorer runtime via window.__codeTe2HandleProjectOpened(path, payload).
   const projectSwitchController = createProjectSwitchController({
     getTerminal: () => terminal,
-    closeWebSocket: () => fileWebSocketManager.closeWebSocket(),
     resetHostState: () => {
       currentPath = '';
       currentPathExists = false;
@@ -1137,47 +1129,8 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     request: payload => uiIpcConnections.requestUiIpc(UI_IPC_RPC_METHODS.hostComparison, payload),
   });
 
-  // ---------- WebSocket management ----------
-  const fileSyncHandler = createFileSyncHandler({
-    getLastSaveTime: () => lastSaveTime,
-    getInflightOpId: () => inflightOpId,
-    selfEchoGraceMs: SELF_ECHO_GRACE,
-    toAbsolute,
-    homeDir: HOME_DIR,
-    getCurrentPath: () => currentPath,
-    setCurrentPath: (path: string) => {
-      _setHostCurrentPathOnly(path);
-    },
-    updatePathDisplay: () => updatePathDisplay(),
-    setLastSavedContent: () => {},
-    getLastSha256: () => lastSha256,
-    setLastSha256: (sha: string | null) => {
-      lastSha256 = sha;
-    },
-    markUnsaved: (flag: boolean) => markUnsaved(flag),
-    setStatus: (text: string) => {
-      statusEl.textContent = text;
-    },
-    getUnsaved: () => !!unsaved,
-    clearInflightOpId: () => {
-      inflightOpId = null;
-    },
-    refreshExplorer: () => refreshExplorer(),
-  });
-  const fileWebSocketManager = createFileWebSocketManager({
-    ReconnectingWebSocket,
-    clientId,
-    setStatus: (msg: string) => {
-      statusEl.textContent = msg;
-    },
-    clearStatus: (expected, delayMs) => {
-      setTimeout(() => {
-        if (statusEl.textContent === expected) statusEl.textContent = '';
-      }, delayMs);
-    },
-    onMessage: (msg: unknown) => fileSyncHandler.handleWSMessage(msg),
-  });
-
+  // Host file state comes from save RPC replies and revision-checked editor
+  // cache-state notifications. Do not open a parallel raw file-read socket.
   // ---------- File ops ----------
   const fileStatusController = createFileStatusController({
     runActiveBtn,
@@ -1253,7 +1206,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     dispatchExplorerActiveFile: (rel: string | null) => {
       dispatchExplorerNotification(EXPLORER_RPC_NOTIFICATIONS.activeFileUpdated, { rel });
     },
-    openWebSocket: (path: string) => fileWebSocketManager.openWebSocket(path),
     jumpToCurrentFileLine: (line: number, opts?: UnknownRecord) => jumpToCurrentFileLine(line, opts),
     toast: (msg: string) => host.toast(msg),
   });
@@ -1264,12 +1216,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
 
   const saveFlowController = createSaveFlowController({
     clientId,
-    setInflightOpId: (id: string | null) => {
-      inflightOpId = id;
-    },
-    setLastSaveTime: (ts: number) => {
-      lastSaveTime = ts;
-    },
     getLastSha256: () => lastSha256,
     setLastSha256: (sha: string | null) => {
       lastSha256 = sha;
@@ -1300,8 +1246,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     detectLanguageFromFilename,
     updatePathDisplay: () => updatePathDisplay(),
     openFile: (path: string, options?: OpenFileOptions) => openFile(path, options),
-    closeWebSocket: () => fileWebSocketManager.closeWebSocket(),
-    openWebSocket: (path: string) => fileWebSocketManager.openWebSocket(path),
     getCachedProjectRoot: () => cachedProjectRoot,
     getEditorState: () => editorState,
     setEditorState: (state: unknown) => {
@@ -1678,7 +1622,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
       lastSha256 = sha;
     },
     setCurrentModeLanguage: () => {},
-    openWebSocket: (path: string) => fileWebSocketManager.openWebSocket(path),
     openFile: (path: string) => openFile(path),
     setOpenFilePickerDir: (path: string) => {
       lastPickerPath = path;

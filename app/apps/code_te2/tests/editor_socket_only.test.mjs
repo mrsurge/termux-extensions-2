@@ -92,3 +92,63 @@ test('persistence callers contain no HTTP paths or fallback branches', () => {
     assert.doesNotMatch(source, /\bfetch\(|deps\.api(?:Post|Get)\(/, entry);
   }
 });
+
+test('host file flows do not invoke shared dynamic legacy read socket URLs', () => {
+  // The old caller contained no literal /ws/read: app_shell's wsPort helper
+  // constructed /ws/app/<app>/read, which the Rust proxy rewrites to /ws/read.
+  // Guard the indirection as well as the endpoint, not just route strings.
+  for (const entry of [
+    'main.ts', 'main_page/frontend/host-boot-runtime.ts',
+    'main_page/frontend/boot/boot-sequence.ts', 'main_page/frontend/ui/project-switch.ts',
+    'main_page/frontend/file-ops/open-flow.ts', 'main_page/frontend/file-ops/save-flow.ts',
+  ]) {
+    const source = fs.readFileSync(path.join(root, entry), 'utf8');
+    assert.doesNotMatch(source, /wsPort|buildWsUrl|openWebSocket|closeWebSocket|file-websocket|file-sync-handler|\/ws\/read/, entry);
+  }
+  for (const name of ['file-websocket.ts', 'file-sync-handler.ts']) {
+    assert.equal(fs.existsSync(path.join(root, 'main_page/frontend/connections', name)), false);
+  }
+});
+
+test('save reply owns saved status, disk hash and clean state without a file socket', async (t) => {
+  t.mock.method(globalThis, 'setTimeout', () => 0);
+  const { createSaveFlowController } = await load('main_page/frontend/file-ops/save-flow.ts');
+  const requests = [], state = { sha: 'old', dirty: true, status: '' };
+  const controller = createSaveFlowController({
+    clientId: 'test', getLastSha256: () => state.sha,
+    setLastSha256: value => { state.sha = value; },
+    setLastSavedContent() {}, markUnsaved: value => { state.dirty = value; },
+    setStatus: value => { state.status = value; },
+    toast: message => assert.fail(message),
+    saveFileViaEditorSocket: async payload => {
+      requests.push(payload);
+      return { ok: true, data: { path: '/p/a', sha256: 'new' } };
+    },
+    openWebSocket: () => assert.fail('Legacy file socket'),
+  });
+  assert.equal(await controller.saveFile({ currentPath: '/p/a', currentPathExists: true }), true);
+  assert.equal(requests[0].base_sha256, 'old');
+  assert.deepEqual(state, { sha: 'new', dirty: false, status: 'Saved' });
+});
+
+test('save as uses the backend save and normal open flow without opening a raw socket', async (t) => {
+  t.mock.method(globalThis, 'setTimeout', () => 0);
+  const { createSaveFlowController } = await load('main_page/frontend/file-ops/save-flow.ts');
+  const calls = [];
+  const controller = createSaveFlowController({
+    clientId: 'test', pickSaveTarget: async () => ({ path: '/p/new' }),
+    toAbsolute: path => path, setStatus() {}, setLastSha256: sha => calls.push(['hash', sha]),
+    saveFileViaEditorSocket: async payload => {
+      calls.push(['save', payload.target_path]);
+      return { ok: true, data: { sha256: 'new' } };
+    },
+    openFile: async (path, options) => { calls.push(['open', path, options]); },
+    openWebSocket: () => assert.fail('Legacy file socket'),
+    closeWebSocket: () => assert.fail('Legacy file socket'),
+    toast: message => assert.fail(message),
+  });
+  await controller.saveAsDialog();
+  assert.deepEqual(calls, [
+    ['save', '/p/new'], ['hash', 'new'], ['open', '/p/new', { forceRefresh: true }],
+  ]);
+});

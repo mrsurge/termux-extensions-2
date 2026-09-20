@@ -100,7 +100,8 @@ test('host mounts and restores a document while WBA readiness is pending', async
     applySidebarUiPrefs: noop, broadcastRecentsUpdate: noop, refreshMenuState: async () => {},
     apiPost: async () => {}, initSessionStateContext: noop, queueSessionStateUpdate: noop,
     resetSavedState: noop, markUnsaved: noop, getUrlSearch: () => '',
-    applyRestoredPathState: noop, openWebSocket: () => { calls.push('document'); },
+    applyRestoredPathState: () => { calls.push('document'); },
+    openWebSocket: () => { throw new Error('Legacy file socket must not open during boot'); },
   };
   try {
     // A hanging readiness promise must not hold the returned boot promise open.

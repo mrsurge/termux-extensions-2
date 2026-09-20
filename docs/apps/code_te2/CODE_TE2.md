@@ -166,7 +166,7 @@ For `code_te2`, we intentionally separate responsibilities:
     `rpc_socketio.py` adapter encodes MessagePack notifications or completes a
     pending acknowledgement. There is no internal JSON text round trip. Existing
     project-miss all-client fallback and single-project authority are unchanged;
-    this boundary does not yet remove FastAPI or extract all editor/Sidebar transport.
+    this boundary is independent of the native-ASGI assembly described below.
   - `monaco_editor/editor_session_service.py` owns editor bootstrap ordering and
     result-derived notification policy, using injected readers and delivery
     callbacks. It emits logical connection/client targets, not socket rooms.
@@ -1814,8 +1814,8 @@ Monaco ESM/language assets and theme JSON, retaining native OTA/APK interception
 and CSS-module shim behavior. `editor_backend.py` owns no HTTP routes or web
 framework imports. The obsolete refresh-diffs/jump/search/debug-state HTTP
 controls are removed; host/editor RPC and notifications own active controls.
-`main.py` still mounts resource HTTP through FastAPI pending its later ASGI
-assembly migration.
+`http_app.py` composes these Starlette resource routes into the native ASGI app
+exported by `main.py`; no FastAPI/Pydantic imports are needed for this assembly.
 
 Document highlights use `$provideDocumentHighlights` and back Monaco's
 cursor-occurrence highlighting. Definitions, references, and implementations
@@ -4062,7 +4062,7 @@ retain the established rebind event. There is no polling or transport fallback.
 
 ### Generic Worker Module Identity
 
-Built-in backend module identity comes from package path rather than public app id. Explicit `TE2_APP_ROUTER` is authoritative; legacy `<app_id>_bp` exists only for unconverted out-of-tree apps. The legacy watcher bridge and `te2.onFilesChanged` API are removed, not compatibility mechanisms.
+Built-in backend module identity comes from package path rather than public app id. Code TE2 exports `TE2_ASGI_APP`; router-based apps retain explicit `TE2_APP_ROUTER` or legacy `<app_id>_bp` via lazy FastAPI assembly. The legacy watcher bridge and `te2.onFilesChanged` API are removed, not compatibility mechanisms.
 
 ### Framework Runtime And State
 
@@ -4734,8 +4734,8 @@ cancels dispatcher/metrics tasks and clears loop references. Stable handler
 registrations survive a same-process restart; this queue is not an edit-command
 queue. Explorer's loop reference is cleared as well.
 
-This is the first ownership boundary, not a networking migration: imports,
-FastAPI/socket adapters, stores and application services still share a process
+This is an ownership boundary, not process separation: imports,
+ASGI/socket adapters, stores and application services still share a process
 and event loop. Other projector tasks and pipe-only worker lifetime are not yet
 migrated. No startup-speed improvement is implied. Lifecycle tests include
 partial failure, cancellation, repeated starts/stops and a real worker SIGTERM.
@@ -4753,9 +4753,22 @@ Paired application hooks still surround Uvicorn serving inside signal capture.
 Router-based apps retain `TE2_APP_ROUTER` or the legacy `<app_id>_bp` contract via
 lazy `app_worker_fastapi.py` assembly and existing mounted-subapp lifespans.
 Pipe-only workers import no HTTP stack; native network workers import Uvicorn
-and Starlette ASGI types but not FastAPI/Pydantic. Code TE2 itself still uses the
-router path pending HTTP/service migration. This does not remove dependencies,
-change socket protocols, or move networking to another process.
+and Starlette but not FastAPI/Pydantic. Code TE2 now uses this native path:
+`main.py` exports `TE2_ASGI_APP`, assembled by `http_app.py` from health/static
+routes, `build_editor_asset_routes()` and the existing Socket.IO gateway.
+It exports neither `TE2_APP_ROUTER` nor `SUBAPPS`. The five physical socket mounts
+retain their previous scope/root-path semantics and gateway instance. Worker
+start/stop, readiness, diagnostics and intelligence priming are unchanged.
+
+Resource URLs, MIME/bytes, CSS shims and explicit GET/HEAD sets are preserved.
+Health and HTTP exception responses retain JSON envelopes; static resources are
+confined to their root, including symlink resolution. Auto-generated FastAPI
+docs/OpenAPI endpoints are gone. The native app does not introduce a second
+application lifecycle or new control routes. Tests import the real backend with
+FastAPI/Pydantic blocked and isolated stores, exercise its resources and every
+Engine.IO WebSocket mount, and verify native lifespan through the worker wrapper.
+Other apps' lazy FastAPI path remains tested. This does not uninstall package
+dependencies, change socket protocols, or move networking to another process.
 
 ### Editor Service Outcome Boundary
 
@@ -4767,7 +4780,7 @@ removed. Normal saves retain their socket `BASE_MISMATCH` response/confirmation
 flow. Ordinary save results remain dictionaries. Socket callers keep
 their existing generic error handling; application error strings deliberately
 retain the old numeric prefix for wire compatibility. Cancellation is not caught.
-This is service isolation, not the removal of Code TE2's remaining FastAPI routes.
+Service isolation is separate from the completed native-ASGI transport cutover.
 
 Host preference state comes from `ui.host.editorState.get`; session telemetry is
 updated with `ui.host.session.update` and does not own project/client foreground.
@@ -4802,9 +4815,20 @@ The main app's unused `/read`, `/state`, `/diff`, `/review/list`,
 entrypoints and their private wrappers; shared state/read/diff/edit-tracker
 services still serve the active RPC and event paths. The real console bridge is
 unchanged, as are readiness, project initialization and intelligence startup.
-Main directly registers only `/`, `/status`, `/static/{file_path:path}` and
-`/agent_icons/{name}`, plus the separate editor asset router. Native-ASGI assembly
-of these remaining resources/health endpoints is still pending.
+The native HTTP assembly registers only `/`, `/status`, `/static/{file_path:path}`
+and `/agent_icons/{name}`, plus the separate editor asset routes and Socket.IO
+mounts. See Worker Transport Exports for its lifecycle/import boundary.
+
+The host no longer creates a separate file-read WebSocket on boot/open/Save As.
+Its old `file-websocket.ts` used app_shell's `wsPort.buildWsUrl()` to construct
+`/ws/app/code_te2/read`, rewritten by the proxy to `/ws/read`; this indirect
+consumer was initially missed when the backend route was retired. The manager,
+legacy sync handler and their call sites are removed. Save RPC replies own saved
+status and disk hash; revision-checked editor cache-state notifications own
+current-file draft/hash updates and external refresh. Backend watcher/editor
+delivery is unchanged. Deploy/load the rebuilt host frontend with this removal:
+older already-loaded clients retry the missing route and produce 403 warnings.
+Do not restore that redundant subscription or mask proxy errors.
 
 ### Production Projects Modal
 

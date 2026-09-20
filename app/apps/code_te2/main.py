@@ -10,8 +10,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
 from urllib import request as urllib_request
 from urllib.parse import quote
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
 import asyncio
 from .explorer.services.file_ops import (
     get_project_root,
@@ -150,47 +148,17 @@ async def te2_app_backend_serving() -> None:
     except Exception as exc:
         print(f"[code_te2] readiness post failed: {exc}", flush=True)
 
-code_te2_bp = APIRouter()
-TE2_APP_ROUTER = code_te2_bp
-# Application controls and file/event projections use the owned Socket.IO lanes.
-# This router retains only health checks and static/editor resource delivery.
+# The native app owns resource routes and socket mounts, never worker services.
+# app_worker wraps this export with readiness/debug lifespan and invokes our
+# existing te2_app_start/stop hooks around Uvicorn on the same event loop.
+from .http_app import build_code_te2_asgi_app
+from .socketio_gateway import CODE_TE2_ASGI_APP
 
-# Serve static files (JS, CSS, etc.)
-@code_te2_bp.get("/static/{file_path:path}")
-async def serve_static(file_path: str):
-    """Serve static files from the app's static directory"""
-    static_dir = Path(__file__).parent / "static"
-    file = static_dir / file_path
-    if not file.exists() or not file.is_file():
-        raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(file)
-
-@code_te2_bp.get("/agent_icons/{name}")
-async def serve_agent_icon(name: str):
-    safe = Path(name).name
-    if not safe or safe != name:
-        raise HTTPException(status_code=400, detail="Invalid icon name")
-    file = (AGENT_ICON_DIR / safe)
-    if not file.exists() or not file.is_file():
-        raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(file)
-
-# Resource HTTP is separate from editor state/control, which uses socket RPC.
-from .monaco_editor.editor_asset_routes import register_monaco_editor_routes
-register_monaco_editor_routes(code_te2_bp, "/ui")
-
-# --- Code TE2 Socket.IO (worker-owned) ---
-# The main framework process still proxies the current physical paths to this
-# one worker endpoint. Logical namespaces stay owned by their existing handlers.
-from app.apps.code_te2.socketio_gateway import CODE_TE2_ASGI_APP
-
-SUBAPPS = [
-    ("/socket.io", CODE_TE2_ASGI_APP),
-    ("/editor_ws/socket.io", CODE_TE2_ASGI_APP),
-    ("/explorer_ws/socket.io", CODE_TE2_ASGI_APP),
-    ("/ui_ipc_ws/socket.io", CODE_TE2_ASGI_APP),
-    ("/terminal_ws/socket.io", CODE_TE2_ASGI_APP),
-]
+TE2_ASGI_APP = build_code_te2_asgi_app(
+    static_dir=Path(__file__).parent / "static",
+    agent_icon_dir=AGENT_ICON_DIR,
+    socket_app=CODE_TE2_ASGI_APP,
+)
 
 _history_store = get_history_store()
 _preferences_store = get_preferences_store()
@@ -319,14 +287,3 @@ async def te2_app_stop() -> None:
     from .worker_services.runtime import stop_worker_runtime
 
     await stop_worker_runtime()
-
-
-# Git/project intents are owned by host/Explorer/Sidebar RPC services.
-# Do not reintroduce parallel HTTP mutation paths that bypass those guards.
-@code_te2_bp.get('/')
-def status_root():
-    return {"ok": True, "data": {"message": "File Editor CM6 app API ready"}}
-
-@code_te2_bp.get('/status')
-def status():
-    return {"ok": True, "data": {"message": "File Editor CM6 app API ready"}}

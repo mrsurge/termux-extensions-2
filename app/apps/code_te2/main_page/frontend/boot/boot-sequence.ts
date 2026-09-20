@@ -45,7 +45,6 @@ interface BootSequenceDeps {
   toAbsolute(path: string, base?: unknown, homeDir?: string): string;
   HOME_DIR: string;
   applyRestoredPathState(args: RestoredPathStateArgs): void;
-  openWebSocket(path: string): void;
   openFile(path: string): Promise<unknown>;
   onOpenFileFailure(err: Error): void;
   onNoRestoredPath(serverState: Record<string, unknown>): void;
@@ -272,7 +271,6 @@ export async function runBootSequence(deps: BootSequenceDeps): Promise<void> {
 
   if (restoredPath) {
     deps.applyRestoredPathState({ restoredPath, serverState, restoredSha });
-    deps.openWebSocket(restoredPath);
     console.log('[BOOT] Synced with backend SSOT:', restoredPath);
   }
 

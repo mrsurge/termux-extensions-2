@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from fastapi import FastAPI
+from starlette.applications import Starlette
 import httpx
 
 from app.apps.code_te2.code_te2_paths import resolve_code_te2_paths
@@ -41,8 +41,7 @@ class EditorAssetRoutesTests(unittest.IsolatedAsyncioTestCase):
                 _ = file.write_bytes(content)
             (module.parent / "themes/escape.json").symlink_to(root / "secret.json")
             with patch.object(assets, "__file__", str(module)), patch.object(assets, "code_te2_paths", return_value=paths):
-                app = FastAPI()
-                assets.register_monaco_editor_routes(app)
+                app = Starlette(routes=assets.build_editor_asset_routes())
                 async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
                     resources = {
                         "/ui/monaco_vscode/esm/editor.js": monaco / "esm/editor.js",
@@ -71,6 +70,10 @@ class EditorAssetRoutesTests(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(head.status_code, 200)
                         self.assertEqual(head.content, b"")
                         self.assertEqual(head.headers["content-length"], get.headers["content-length"])
+                    for url in ("/ui/monaco_editor/textmate/onig.wasm",
+                                "/ui/monaco_editor/themes/vendored/test/theme.json",
+                                "/ui/monaco_editor/cs_themes/test.ext/theme.json"):
+                        self.assertEqual((await client.head(url)).status_code, 405)
                     for url in (
                         "/ui/monaco_editor/themes/escape.json",
                         "/ui/monaco_editor/themes/%2e%2e/editor_asset_routes.py",
@@ -88,8 +91,7 @@ class EditorAssetRoutesTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory(prefix="te2-editor-assets-missing-") as directory:
             root = Path(directory)
             with patch.object(assets, "__file__", str(root / "app/apps/code_te2/monaco_editor/editor_asset_routes.py")):
-                app = FastAPI()
-                assets.register_monaco_editor_routes(app, "/resources")
+                app = Starlette(routes=assets.build_editor_asset_routes("/resources"))
                 async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
                     for target in ("esm", "lang"):
                         response = await client.get(f"/resources/monaco_vscode/{target}/missing.js")
@@ -121,7 +123,6 @@ assert 'app.apps.code_te2.monaco_editor.editor_asset_routes' not in sys.modules
 
     def test_main_mounts_only_resources_from_editor_http_boundary(self) -> None:
         source = (ROOT / "app/apps/code_te2/main.py").read_text()
-        self.assertIn("from .monaco_editor.editor_asset_routes import register_monaco_editor_routes", source)
+        self.assertIn("TE2_ASGI_APP = build_code_te2_asgi_app(", source)
         self.assertNotIn("include_router(editor_router)", source)
         self.assertNotIn("from .monaco_editor.editor_backend import", source)
-

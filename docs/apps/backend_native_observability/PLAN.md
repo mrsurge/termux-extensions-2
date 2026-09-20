@@ -365,11 +365,9 @@ This is import isolation, not package dependency removal or process separation.
 
 Validate native HTTP and pipe-only subprocesses with import blockers, legacy
 HTTP/SIGTERM behavior, lifecycle ordering, cancellation and startup failure.
-Next migrate Code TE2's actual HTTP consumers and transport-dependent service
-results in bounded slices; it still exports its FastAPI router today. Keep
-Socket.IO, route contracts and input validation intact. Do not delete real HTTP
-consumers such as session bootstrap, view state, grammar/theme/assets and debug
-controls merely because the main interaction lanes are sockets.
+Code TE2's consumer migration and native export are implemented in the bounded
+slices below. Keep Socket.IO, route contracts and input validation intact.
+Audit real consumers before retiring any transport; resources still need HTTP.
 
 ### Editor Service Outcome Boundary
 
@@ -488,7 +486,7 @@ route protocols. Repair the stale startup-test `on_spawned` signature, isolate
 installation lookup and bound test waits. Validate startup overlap, cancellation,
 record contracts and source-consumer absence; no startup rescheduling or builds.
 
-Main-route retirement slice: source audit found no active callers for `/read`,
+Main-route retirement slice: the initial audit reported no active callers for `/read`,
 `/state`, `/diff`, `/review/list`, `/edit_tracker/status`, `/ws/read`,
 `/ws/edit_tracker`, `/ws/debug_console` or the `/editor/update_diffs` stub.
 Remove these routes and their private wrappers/dependency table, not the shared
@@ -497,9 +495,32 @@ intelligence priming, console tools, all Socket.IO mounts and resource/health
 HTTP. Validate the remaining route inventory, existing RPC/resource contracts,
 startup and typing; no frontend build or restart is part of this slice.
 
-Next assemble the remaining resource/health HTTP as a native `TE2_ASGI_APP` with the
-existing Socket.IO mounts/lifecycle. No framework restart or Android publication
-is implicit in this work, and other apps retain lazy FastAPI support.
+Audit correction: `/ws/read` did have a live frontend caller. The host's
+`file-websocket.ts` used shared `window.wsPort.buildWsUrl()` from app_shell to
+construct `/ws/app/code_te2/read`, rewritten by the Rust proxy to `/ws/read`.
+Literal backend-route searches missed this dependency; deleting the route left
+the current frontend repeatedly reconnecting with 403s. Remove the redundant
+host file-read manager/handler and boot/open/save/project-switch wiring, not the
+active backend services. Save RPC replies and revision-fenced editor cache-state
+notifications already own host hash, saved/draft status and external refresh.
+Test those paths and dynamic-helper absence, type-check and rebuild host.js.
+Shared shell helpers remain outside this Code TE2 cleanup. Clients must load the
+new frontend; do not restore an obsolete route or suppress proxy warnings.
+
+Native-ASGI assembly slice: `http_app.py` composes Starlette health/resources and
+the unchanged Socket.IO gateway. `main.py` exports only `TE2_ASGI_APP`, not
+`TE2_APP_ROUTER`/`SUBAPPS`; the worker's existing native path owns readiness/debug
+wrapping and still calls application start/stop around Uvicorn. The editor asset
+factory returns Starlette routes without FastAPI/Pydantic. Preserve explicit
+GET/HEAD sets, JSON health/errors, MIME/FileResponse behavior, CSS shims, URLs,
+canonical/legacy socket paths and mount root scopes. Confine static resources to
+their root; retain editor resource containment. No generated API docs are served.
+
+Validate real-backend import with FastAPI/Pydantic blocked in isolated state,
+Engine.IO WebSocket handshakes through every mount, native lifespan and resource
+responses, and the existing worker/RPC/startup suites. No framework restart,
+frontend/Android publication, dependency uninstall or startup rescheduling is
+implicit; other apps retain lazy FastAPI support. Live acceptance is separate.
 
 ### MessagePack Process-Pipe Cutover (Approved)
 

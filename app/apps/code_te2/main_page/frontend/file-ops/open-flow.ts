@@ -50,7 +50,6 @@ interface OpenFlowControllerDeps {
   syncSessionPath: () => void;
   getCachedProjectRoot: () => string | null;
   dispatchExplorerActiveFile: (rel: string | null) => void;
-  openWebSocket: (path: string) => void | Promise<void>;
   jumpToCurrentFileLine: (line: number, opts?: Record<string, unknown>) => void | Promise<void>;
   toast: (msg: string) => void;
 }
@@ -133,7 +132,6 @@ export function createOpenFlowController(deps: OpenFlowControllerDeps) {
       deps.syncSessionPath();
       deps.setStatus('');
 
-      deps.openWebSocket(resolvedTarget);
       finishDiagnosticsOpenTrace(openRequestId, 'host_open_finished');
     } catch (error) {
       finishDiagnosticsOpenTrace(openRequestId, 'host_open_failed', {
