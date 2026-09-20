@@ -917,6 +917,12 @@ export async function bootSecondaryEditorRuntime(
       ensureSocketIoLoaded,
       bootSnapshot: fullSnapshot,
     });
+    // Presentation readiness is local renderer readiness. Waiting for the
+    // backend editor-ready echo creates a cycle: the native/mobile host keeps
+    // the requested file queued until this realm is ready, while this realm
+    // cannot establish its model until that file command is delivered.
+    editorReady = true;
+    await publishPresentationReady();
   }
   bootComplete = true;
   // Facts during asynchronous cold boot are reconciled from a fresh snapshot.

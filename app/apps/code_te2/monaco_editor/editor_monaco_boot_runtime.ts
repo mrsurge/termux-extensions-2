@@ -31,6 +31,8 @@ interface EditorMonacoBootRuntimeDeps {
   connectEditorHostActions(): void;
   emitToHost(eventName: string, payload: Record<string, unknown>): void;
   updateDebug(extra: string): void;
+  onReady?(): void;
+  onError?(error: unknown): void;
 }
 
 function isGeckoRuntime(win: WindowWithMonacoBoot): boolean {
@@ -189,8 +191,10 @@ export async function bootMonacoRuntime(
 
     deps.emitToHost('editor_ready', {});
     deps.updateDebug('boot=ok');
+    deps.onReady?.();
   } catch (error) {
     console.error('[Monaco] boot failed', error);
     deps.updateDebug('boot=fail');
+    deps.onError?.(error);
   }
 }

@@ -2985,6 +2985,16 @@ Shared desktop assets reuse `/api/editor_version` and `/api/editor_assets_bundle
 
 Successful asset installs clear the `persist:te2-framework` HTTP cache and generated V8 code cache, then reload an active app view with cache bypass. Forced same-version updates must activate without requiring an Electron restart.
 
+The relay origin does not make the framework worktree the frontend asset
+authority. Electron serves its installed inventory from the desktop asset root;
+GeckoView and Cefrium serve their materialized Android asset trees. Rebuilding
+Code TE2 on the framework host and reloading a native app therefore reloads the
+client's existing bytes only. Native-client validation after a frontend change
+must first invoke that client's explicit asset update/OTA path (or install a
+package carrying the rebuilt asset seed) and verify the resulting client asset
+version. This invariant applies even when the visible URL is a loopback relay
+whose remaining HTTP, Socket.IO, WebSocket, and API traffic reaches the server.
+
 ### Native app-view bridge
 
 Code TE2 app views in Electron expose frozen `window.te2Electron` from `desktop_client/electron/src/preload/app-view-preload.ts`. The shared contract is `desktop_client/electron/src/shared/app-view-contracts.ts`.
@@ -3016,7 +3026,7 @@ Allowed app-view commands are:
 | `place_second_editor_surface` | From the primary renderer only, place the retained secondary view over the Code TE2-owned grid placeholder. |
 | `set_second_editor_dock_size` | From the primary renderer only, persist a bounded dock width in the current framework/project presentation record. |
 | `set_second_editor_mode` | Change the secondary presentation among closed, docked, collapsed, and detached. |
-| `second_editor_ready` | Let only the current secondary renderer release its queued canonical file-open intent. |
+| `second_editor_ready` | After the reduced renderer's local Monaco boot completes, let only that current secondary renderer release its queued canonical file-open intent. |
 
 The command allowlist is exact-view and origin validated in Electron main. The
 preload also delivers bounded detached-surface events only to that exact app
@@ -3119,6 +3129,17 @@ capture, updates the grid column during the gesture, and commits the final
 bounded width through `set_second_editor_dock_size`. The existing Electron
 presentation store remains the sole dock-size authority; Code TE2 layout
 `localStorage` does not retain that value.
+
+Secondary presentation readiness is a local renderer barrier. The inline host
+publishes a boot promise that settles only after Monaco creation, editor socket
+subscription, and the local `editor_ready` publication step complete. The
+reduced renderer then acknowledges presentation readiness, allowing Electron
+main or the mobile parent to deliver its queued file-open command. The backend
+`ui.editor.ready` echo remains an idempotent reconnect/compatibility signal, but
+it is not the prerequisite for native presentation readiness: gating the queued
+open on that echo creates a cycle in which no secondary model can be established.
+Boot failures reject the local promise and remain visible instead of falsely
+releasing the queued open.
 
 Versioned `$TE2_CONFIG_HOME/desktop-state.json` atomically owns distinct primary
 and secondary client identities, existing Sidebar presentation, and bounded

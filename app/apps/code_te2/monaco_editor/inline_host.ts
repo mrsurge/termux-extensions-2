@@ -222,6 +222,7 @@ declare global {
       payload: Record<string, unknown>,
     ) => Record<string, unknown>;
     __te2InlineMonacoBoot?: Promise<void>;
+    __te2InlineMonacoRuntimeBoot?: Promise<void>;
   }
 }
 
@@ -341,6 +342,11 @@ export async function mountInlineEditorHost(
   editorFrame.innerHTML = INLINE_EDITOR_MARKUP;
   await ensureInlineEditorAssetsLoaded(options.ensureSocketIoLoaded);
   await import('./m_editor_app.ts');
+  const runtimeBoot = window.__te2InlineMonacoRuntimeBoot;
+  if (!runtimeBoot) {
+    throw new Error('Inline Monaco runtime did not publish its boot lifecycle.');
+  }
+  await runtimeBoot;
 }
 
 export function bootInlineEditorHost(

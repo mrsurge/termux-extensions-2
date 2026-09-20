@@ -101,6 +101,11 @@ The packaged `TE2Desktop` launcher supplies `--no-sandbox` to the bundled
   `persist:te2-framework` HTTP and V8 code caches before reloading an active app
   view. A force refresh therefore activates same-version bytes without
   restarting Electron; if no app is open, the next launch reaches the relay.
+- The relay serves Electron's installed asset inventory; it does not serve a
+  newly rebuilt frontend bundle directly from the framework worktree. Reload is
+  not frontend deployment. Run the explicit desktop asset update (including a
+  forced same-version update when applicable) and verify its resulting version
+  before validating a native-client frontend change.
 - Electron owns the Copy/Paste context menu. The actions call the focused
   renderer's native copy and paste commands directly.
 - Code TE2 console workers in the Electron app view register as

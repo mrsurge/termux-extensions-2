@@ -145,10 +145,11 @@ test('Monaco editor-ready does not wait for the WBA language catalog', { timeout
       installWorkbenchLanguageBridgeProviders: () => { calls.push('providers'); },
       applyActiveModelLanguage: noop, collectBootLanguageIds: () => [], warnIfPlaintextOnlyLanguages: noop,
       emitToHost: (name) => { calls.push(name); }, updateDebug: noop,
+      onReady: () => { calls.push('local_ready'); },
     });
-    assert.deepEqual(calls, ['editor', 'editor_ready']);
+    assert.deepEqual(calls, ['editor', 'editor_ready', 'local_ready']);
     resolveCatalog(true);
     await Promise.resolve();
-    assert.deepEqual(calls, ['editor', 'editor_ready', 'providers']);
+    assert.deepEqual(calls, ['editor', 'editor_ready', 'local_ready', 'providers']);
   } finally { resolveCatalog(false); globalThis.Worker = previousWorker; win.happyDOM.abort(); }
 });

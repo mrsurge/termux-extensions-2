@@ -49,6 +49,12 @@ validation, backup, atomic rename, and rollback. The desktop Settings page shows
 the installed version and interceptor state and provides a force-update action.
 The client also checks for a newer bundle at startup.
 
+This installed tree is Electron's frontend authority. The loopback relay does
+not expose freshly built framework-worktree UI bytes, and Reload only reads the
+currently installed client tree. After a Code TE2 frontend build, invoke the
+desktop asset updater (force it for same-version development bytes) and verify
+the installed version/update result before live validation.
+
 Electron projects every configured HTTP or HTTPS framework origin through one
 in-process server on a dynamically allocated `127.0.0.1` port. The server
 proxies ordinary HTTP, streaming SSE, Socket.IO, and raw WebSocket upgrades. It

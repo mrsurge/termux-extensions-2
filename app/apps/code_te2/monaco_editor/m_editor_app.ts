@@ -366,15 +366,25 @@ interface CachedPrefsLike extends Record<string, unknown> {
 }
 
 interface MonacoBootWindowLike extends Window {
+  __te2InlineMonacoHost?: boolean;
   __te2InlineMonacoBootSnapshot?: unknown;
   __te2InlineMonacoBuildSidebarMentionPayload?: (
     payload: Record<string, unknown>,
   ) => Record<string, unknown>;
+  __te2InlineMonacoRuntimeBoot?: Promise<void>;
 }
 
 (function () {
   const bootWindow = window as MonacoBootWindowLike;
   const initialBootSnapshot = bootWindow.__te2InlineMonacoBootSnapshot || null;
+  let resolveInlineRuntimeBoot: (() => void) | null = null;
+  let rejectInlineRuntimeBoot: ((error: unknown) => void) | null = null;
+  if (bootWindow.__te2InlineMonacoHost) {
+    bootWindow.__te2InlineMonacoRuntimeBoot = new Promise<void>((resolve, reject) => {
+      resolveInlineRuntimeBoot = resolve;
+      rejectInlineRuntimeBoot = reject;
+    });
+  }
 
   // Debug (draft diff hunks): default ON for now to diagnose incorrect ranges.
   // You can disable at runtime in the inline editor console with:
@@ -2617,6 +2627,12 @@ interface MonacoBootWindowLike extends Window {
         connectEditorHostActions: connectEditorHostActions,
         emitToHost: emitToHost,
         updateDebug: updateDebug,
+        onReady: function () {
+          resolveInlineRuntimeBoot?.();
+        },
+        onError: function (error) {
+          rejectInlineRuntimeBoot?.(error);
+        },
       }) as Parameters<typeof bootMonacoRuntime>[0],
     );
   }
