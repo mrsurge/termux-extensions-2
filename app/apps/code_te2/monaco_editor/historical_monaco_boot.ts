@@ -1,3 +1,4 @@
+import type { RequestThemeCatalog } from '../src/theme_catalog.ts';
 import type * as Monaco from '../../../static/vendor/monaco-editor-core/esm/vs/editor/editor.api';
 import { loadMonaco } from '../../../static/vendor/monaco-editor-core/te2-lang/bootstrap/monaco.bootstrap.bundle.js';
 import { createGeckoModuleWorker } from './editor_monaco_boot_runtime.ts';
@@ -48,7 +49,7 @@ async function loadSyntaxMonaco(): Promise<typeof Monaco> {
 
 export async function bootHistoricalDiff(
   container: HTMLElement, content: unknown, signal: AbortSignal,
-  preferences: unknown = {},
+  getPreferences: () => unknown, requestCatalog: RequestThemeCatalog,
 ): Promise<HistoricalEditorView> {
   if (!loading) {
     loading = loadSyntaxMonaco().catch((error: unknown) => { loading = null; throw error; });
@@ -63,39 +64,50 @@ export async function bootHistoricalDiff(
   const lifetime = new AbortController();
   const abort = () => lifetime.abort();
   signal.addEventListener('abort', abort, { once: true });
-  const applyTheme = createHistoricalThemeApplier(monaco, lifetime.signal);
-  const initial = historicalAppearance(preferences);
+  const applyTheme = createHistoricalThemeApplier(monaco, lifetime.signal, requestCatalog);
   const languages = monaco.languages.getLanguages();
   let view: HistoricalDiffView;
-  try { view = await mountHistoricalDiffView({
-    container, content, monaco, signal,
-    appearance: initial.appearance,
-    attachTouch: mobile ? (control) => {
-      const helper = window['monaco-touch-selection']?.editorTouchSelectionHelp;
-      if (!helper) throw new Error('Historical touch selection unavailable');
-      helper(control, { mobile: true, historicalReadOnly: true });
-    } : undefined,
-    languageForPath(path) {
-      const basename = path.split('/').pop() || '';
-      const filenameMatch = languages.find((language) => language.filenames?.includes(basename));
-      if (filenameMatch) return filenameMatch.id;
-      // Longest suffix wins for compound extensions such as .d.ts.
-      let matched = 'plaintext';
-      let length = 0;
-      for (const language of languages) {
-        for (const extension of language.extensions || []) {
-          if (extension.length > length && basename.toLowerCase().endsWith(extension.toLowerCase())) {
-            matched = language.id;
-            length = extension.length;
+  try {
+    // Fetch/apply colors before the historical diff creates either model. Read
+    // live preferences again after I/O so a mid-load change cannot flash old colors.
+    let initial = historicalAppearance(getPreferences());
+    while (true) {
+      await applyTheme(initial.theme);
+      signal.throwIfAborted();
+      const latest = historicalAppearance(getPreferences());
+      if (latest.theme === initial.theme) { initial = latest; break; }
+      initial = latest;
+    }
+    view = await mountHistoricalDiffView({
+      container, content, monaco, signal,
+      appearance: initial.appearance,
+      attachTouch: mobile ? (control) => {
+        const helper = window['monaco-touch-selection']?.editorTouchSelectionHelp;
+        if (!helper) throw new Error('Historical touch selection unavailable');
+        helper(control, { mobile: true, historicalReadOnly: true });
+      } : undefined,
+      languageForPath(path) {
+        const basename = path.split('/').pop() || '';
+        const filenameMatch = languages.find((language) => language.filenames?.includes(basename));
+        if (filenameMatch) return filenameMatch.id;
+        // Longest suffix wins for compound extensions such as .d.ts.
+        let matched = 'plaintext';
+        let length = 0;
+        for (const language of languages) {
+          for (const extension of language.extensions || []) {
+            if (extension.length > length && basename.toLowerCase().endsWith(extension.toLowerCase())) {
+              matched = language.id;
+              length = extension.length;
+            }
           }
         }
-      }
-      return matched;
-    },
-    // Basic-language onLanguage hooks load the existing Monarch tokenizer when
-    // createModel selects its language; no workbench grammar calls are needed.
-    prepareSyntax: async () => {},
-  }); } catch (error) {
+        return matched;
+      },
+      // Basic-language onLanguage hooks load the existing Monarch tokenizer when
+      // createModel selects its language; no workbench grammar calls are needed.
+      prepareSyntax: async () => {},
+    });
+  } catch (error) {
     lifetime.abort();
     signal.removeEventListener('abort', abort);
     throw error;
@@ -108,7 +120,7 @@ export async function bootHistoricalDiff(
       if (!lifetime.signal.aborted) console.warn('[historical-editor] Theme unavailable', error);
     });
   };
-  updatePreferences(preferences);
+  updatePreferences(getPreferences());
   return { ...view, updatePreferences, dispose() {
     lifetime.abort();
     signal.removeEventListener('abort', abort);

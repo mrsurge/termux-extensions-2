@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { completionTrace } from "../server/runtime-debug.mjs";
 
 interface PicomatchOptions {
   dot?: boolean;
@@ -717,6 +718,7 @@ export class ProviderRegistry {
       supportsResolve,
     });
     for (const language of selectorLanguages(selector)) {
+      completionTrace.record("provider.register", { language, handle, supportsResolve });
       outcome.events.push({
         type: "provider/completions",
         handle,
@@ -728,6 +730,9 @@ export class ProviderRegistry {
     outcome.logs.push(
       `[providers] completions map size=${this.providers.completions.size} languages=[${this.languageSummary("completions")}]`,
     );
+    // Pattern-only selectors have no language notification, but can still match
+    // an already-open document and need the same internal warm-up readiness edge.
+    if (outcome.events.length === 0) outcome.events.push({ type: "provider/completions/registered", handle });
     return outcome;
   }
 

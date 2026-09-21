@@ -20,7 +20,7 @@ async function loadBoot() {
         monaco: `export async function loadMonaco(options) { globalThis.__historyBoot.calls.push(options); return globalThis.__historyBoot.monaco; }`,
         gecko: `export function createGeckoModuleWorker(...args) { globalThis.__historyBoot.gecko.push(args[4]); return {}; }`,
         view: `export async function mountHistoricalDiffView(options) { globalThis.__historyBoot.views.push(options); return { dispose() {}, updateAppearance(value) { globalThis.__historyBoot.appearances.push(value); } }; }`,
-        appearance: `export function historicalAppearance(value) { return { appearance: value, theme: 'vs-dark' }; } export function createHistoricalThemeApplier() { return async () => {}; }`,
+        appearance: `export function historicalAppearance(value) { return { appearance: value, theme: value.theme || 'vs-dark' }; } export function createHistoricalThemeApplier(monaco, signal, requestCatalog) { globalThis.__historyBoot.catalogs.push(requestCatalog); return async theme => { globalThis.__historyBoot.appliedThemes.push(theme); await globalThis.__historyBoot.themePending; }; }`,
         touch: `export async function ensureHistoricalTouchAssets() { globalThis.__historyBoot.touchLoads++; }`,
       }[fixture], loader: 'js' }));
     } }],
@@ -31,7 +31,7 @@ async function loadBoot() {
 async function fixture(run) {
   const win = new Window();
   const saved = new Map(['window', 'document', 'Worker', '__historyBoot'].map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
-  const state = { calls: [], gecko: [], workers: [], views: [], appearances: [], touchLoads: 0, monaco: {
+  const state = { appliedThemes: [], themePending: undefined, catalogs: [], calls: [], gecko: [], workers: [], views: [], appearances: [], touchLoads: 0, monaco: {
     editor: { setTheme() {} },
     languages: { getLanguages: () => [
       { id: 'typescript', extensions: ['.ts'] },
@@ -56,10 +56,12 @@ test('syntax boot loads only lexical contributions and refuses language workers'
     const { bootHistoricalDiff } = await loadBoot();
     const container = win.document.createElement('div');
     const abort = new AbortController();
-    const mounting = bootHistoricalDiff(container, {}, abort.signal);
+    const catalog = async () => ({ themes: [] });
+    const mounting = bootHistoricalDiff(container, {}, abort.signal, () => ({}), catalog);
     const link = win.document.querySelector('link');
     link.dispatchEvent(new win.Event('load'));
     await mounting;
+    assert.equal(state.catalogs[0], catalog);
     assert.deepEqual(state.calls, [{ languageWorkersEnabled: false, basicLanguagesOnly: true }]);
     const workerFactory = win.MonacoEnvironment.getWorker;
     assert.throws(() => workerFactory('', 'typescript'), /refused/);
@@ -68,7 +70,7 @@ test('syntax boot loads only lexical contributions and refuses language workers'
     assert.equal(state.views[0].languageForPath('/src/a.d.ts'), 'declaration');
     assert.equal(state.views[0].languageForPath('/src/Dockerfile'), 'dockerfile');
     assert.equal(state.views[0].languageForPath('/src/unknown.xyz'), 'plaintext');
-    await bootHistoricalDiff(container, {}, abort.signal);
+    await bootHistoricalDiff(container, {}, abort.signal, () => ({}), async () => ({ themes: [] }));
     assert.equal(state.calls.length, 1);
   });
 });
@@ -79,7 +81,7 @@ test('mobile boot attaches read-only tools to the exact control and accepts live
     const attached = [];
     win['monaco-touch-selection'] = { editorTouchSelectionHelp: (...args) => attached.push(args) };
     const { bootHistoricalDiff } = await loadBoot();
-    const mounting = bootHistoricalDiff(win.document.createElement('div'), {}, new AbortController().signal, { fontScale: 1.5 });
+    const mounting = bootHistoricalDiff(win.document.createElement('div'), {}, new AbortController().signal, () => ({ fontScale: 1.5 }), async () => ({ themes: [] }));
     win.document.querySelector('link').dispatchEvent(new win.Event('load'));
     const view = await mounting;
     assert.equal(state.touchLoads, 1);
@@ -99,7 +101,7 @@ test('cancelled boot does not mount after stylesheet becomes ready', async () =>
   await fixture(async (win, state) => {
     const { bootHistoricalDiff } = await loadBoot();
     const abort = new AbortController();
-    const mounting = bootHistoricalDiff(win.document.createElement('div'), {}, abort.signal);
+    const mounting = bootHistoricalDiff(win.document.createElement('div'), {}, abort.signal, () => ({}), async () => ({ themes: [] }));
     abort.abort();
     win.document.querySelector('link').dispatchEvent(new win.Event('load'));
     await assert.rejects(mounting, { name: 'AbortError' });
@@ -111,11 +113,11 @@ test('stylesheet failure is retryable and never boots a partial viewer', async (
   await fixture(async (win, state) => {
     const { bootHistoricalDiff } = await loadBoot();
     const signal = new AbortController().signal;
-    const mounting = bootHistoricalDiff(win.document.createElement('div'), {}, signal);
+    const mounting = bootHistoricalDiff(win.document.createElement('div'), {}, signal, () => ({}), async () => ({ themes: [] }));
     win.document.querySelector('link').dispatchEvent(new win.Event('error'));
     await assert.rejects(mounting, /stylesheet failed/);
     assert.equal(state.views.length, 0);
-    const retry = bootHistoricalDiff(win.document.createElement('div'), {}, signal);
+    const retry = bootHistoricalDiff(win.document.createElement('div'), {}, signal, () => ({}), async () => ({ themes: [] }));
     win.document.querySelector('link').dispatchEvent(new win.Event('load'));
     await retry;
     assert.equal(state.views.length, 1);
@@ -128,4 +130,52 @@ test('bootstrap source keeps lexical-only branch separate from service contribut
   const basic = source.slice(source.indexOf('function ensureBasicLanguageContributions'), source.indexOf('function ensureLanguageContributions'));
   assert.match(basic, /@te2-contrib-basic/);
   assert.doesNotMatch(basic, /@te2-contrib-(typescript|json|html|css)/);
+});
+
+test('historical models wait for the latest selected theme', async () => {
+  await fixture(async (win, state) => {
+    const { bootHistoricalDiff } = await loadBoot();
+    let release;
+    state.themePending = new Promise(resolve => { release = resolve; });
+    let preferences = { theme: 'first', fontScale: 1 };
+    const mounting = bootHistoricalDiff(win.document.createElement('div'), {},
+      new AbortController().signal, () => preferences, async () => ({ themes: [] }));
+    win.document.querySelector('link').dispatchEvent(new win.Event('load'));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(state.appliedThemes, ['first']);
+    assert.equal(state.views.length, 0);
+    preferences = { theme: 'second', fontScale: 2 };
+    release();
+    const view = await mounting;
+    assert.deepEqual(state.appliedThemes.slice(0, 2), ['first', 'second']);
+    assert.equal(state.views.length, 1);
+    assert.deepEqual(state.views[0].appearance, preferences);
+    view.dispose();
+  });
+});
+
+test('historical theme failure and cancellation never mount an unthemed model', async () => {
+  await fixture(async (win, state) => {
+    const { bootHistoricalDiff } = await loadBoot();
+    let rejectTheme;
+    state.themePending = new Promise((_resolve, reject) => { rejectTheme = reject; });
+    const mounting = bootHistoricalDiff(win.document.createElement('div'), {},
+      new AbortController().signal, () => ({}), async () => ({ themes: [] }));
+    win.document.querySelector('link').dispatchEvent(new win.Event('load'));
+    await new Promise(resolve => setImmediate(resolve));
+    const failed = assert.rejects(mounting, /theme resource failed/);
+    rejectTheme(Error('theme resource failed'));
+    await failed;
+    assert.equal(state.views.length, 0);
+    let release;
+    state.themePending = new Promise(resolve => { release = resolve; });
+    const abort = new AbortController();
+    const retry = bootHistoricalDiff(win.document.createElement('div'), {},
+      abort.signal, () => ({}), async () => ({ themes: [] }));
+    await new Promise(resolve => setImmediate(resolve));
+    abort.abort();
+    release();
+    await assert.rejects(retry, { name: 'AbortError' });
+    assert.equal(state.views.length, 0);
+  });
 });

@@ -100,7 +100,8 @@ test('host mounts and restores a document while WBA readiness is pending', async
     applySidebarUiPrefs: noop, broadcastRecentsUpdate: noop, refreshMenuState: async () => {},
     apiPost: async () => {}, initSessionStateContext: noop, queueSessionStateUpdate: noop,
     resetSavedState: noop, markUnsaved: noop, getUrlSearch: () => '',
-    applyRestoredPathState: noop, openWebSocket: () => { calls.push('document'); },
+    applyRestoredPathState: () => { calls.push('document'); },
+    openWebSocket: () => { throw new Error('Legacy file socket must not open during boot'); },
   };
   try {
     // A hanging readiness promise must not hold the returned boot promise open.
@@ -117,7 +118,7 @@ test('host mounts and restores a document while WBA readiness is pending', async
   } finally { ready(false); win.happyDOM.abort(); }
 });
 
-test('Monaco editor-ready does not wait for the WBA language catalog', { timeout: 2000 }, async () => {
+async function importMonacoBoot() {
   const built = await build({
     entryPoints: [path.join(appRoot, 'monaco_editor/editor_monaco_boot_runtime.ts')],
     bundle: true, write: false, format: 'esm', platform: 'node',
@@ -126,7 +127,66 @@ test('Monaco editor-ready does not wait for the WBA language catalog', { timeout
       builder.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({ contents: 'export async function loadMonaco() { return {}; }', loader: 'js' }));
     } }],
   });
-  const { bootMonacoRuntime } = await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles[0].text).toString('base64')}`);
+  return import(`data:text/javascript;base64,${Buffer.from(built.outputFiles[0].text).toString('base64')}`);
+}
+
+test('boot connects before theme wait and attaches no document until colors are ready', async () => {
+  const { bootMonacoRuntime } = await importMonacoBoot();
+  const win = new Window();
+  const previousWorker = globalThis.Worker;
+  globalThis.Worker = class {};
+  const calls = [];
+  let ready;
+  const theme = new Promise(resolve => { ready = resolve; });
+  let prefs = null;
+  const noop = () => {};
+  try {
+    const boot = bootMonacoRuntime({
+      getWindow: () => win, getApiBase: () => '', getBootSnapshot: () => ({}),
+      getCachedPrefs: () => prefs, languageWorkersEnabled: () => true, getWorkerLogOnce: () => ({}),
+      ensureTe2DiffTheme: noop,
+      applyBootSnapshot: (includeDocument = true) => {
+        calls.push(includeDocument ? 'model' : 'preferences'); prefs = {};
+      },
+      connectEditorHostActions: () => calls.push('subscribe'),
+      connectEditorSocket: () => calls.push('connect'),
+      ensureDocumentTheme: async () => { calls.push('theme-request'); await theme; calls.push('theme-applied'); },
+      ensureEditorWithPrefs: async () => calls.push('attach'),
+      applyActiveModelLanguage: noop, collectBootLanguageIds: () => [], warnIfPlaintextOnlyLanguages: noop,
+      emitToHost: name => calls.push(name), updateDebug: noop, onReady: () => calls.push('ready'),
+    });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(calls, ['preferences', 'subscribe', 'connect', 'theme-request']);
+    ready(); await boot;
+    assert.deepEqual(calls, ['preferences', 'subscribe', 'connect', 'theme-request', 'theme-applied',
+      'model', 'attach', 'editor_ready', 'ready']);
+  } finally { ready(); globalThis.Worker = previousWorker; await win.happyDOM.close(); }
+});
+
+test('theme failure rejects boot readiness instead of mounting an unthemed document', async (t) => {
+  t.mock.method(console, 'error', () => {});
+  const { bootMonacoRuntime } = await importMonacoBoot();
+  const win = new Window();
+  const previousWorker = globalThis.Worker;
+  globalThis.Worker = class {};
+  const calls = [];
+  const noop = () => {};
+  try {
+    await bootMonacoRuntime({
+      getWindow: () => win, getApiBase: () => '', getBootSnapshot: () => ({}), getCachedPrefs: () => ({}),
+      languageWorkersEnabled: () => true, getWorkerLogOnce: () => ({}), ensureTe2DiffTheme: noop,
+      applyBootSnapshot: () => calls.push('model'), ensureEditorWithPrefs: async () => calls.push('attach'),
+      connectEditorHostActions: noop, connectEditorSocket: () => calls.push('connect'),
+      ensureDocumentTheme: async () => { throw Error('theme failed'); },
+      emitToHost: name => calls.push(name), updateDebug: noop, onReady: () => calls.push('ready'),
+      onError: error => calls.push(error.message),
+    });
+    assert.deepEqual(calls, ['connect', 'theme failed']);
+  } finally { globalThis.Worker = previousWorker; await win.happyDOM.close(); }
+});
+
+test('Monaco editor-ready does not wait for the WBA language catalog', { timeout: 2000 }, async () => {
+  const { bootMonacoRuntime } = await importMonacoBoot();
   const win = new Window();
   const previousWorker = globalThis.Worker;
   globalThis.Worker = class {};
@@ -138,7 +198,7 @@ test('Monaco editor-ready does not wait for the WBA language catalog', { timeout
     await bootMonacoRuntime({
       getWindow: () => win, getApiBase: () => '', getBootSnapshot: () => ({}),
       getCachedPrefs: () => ({}), languageWorkersEnabled: () => false, getWorkerLogOnce: () => ({}),
-      ensureTe2DiffTheme: noop, applyMonacoTheme: noop, applyBootSnapshot: noop,
+      ensureTe2DiffTheme: noop, ensureDocumentTheme: async () => {}, applyBootSnapshot: noop,
       ensureEditorWithPrefs: async () => { calls.push('editor'); },
       connectEditorHostActions: noop, connectEditorSocket: noop,
       ensureWorkbenchLanguageCatalogInstalled: () => catalog,

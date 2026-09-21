@@ -38,6 +38,7 @@ function readBootFile(snapshot: BootSnapshotLike | null): Record<string, unknown
 
 export function applyBootSnapshotToEditor(
   deps: EditorBootSnapshotRuntimeDeps,
+  includeDocument = true,
 ): void {
   const snapshot = asRecord(deps.getBootSnapshot()) as BootSnapshotLike | null;
   if (!snapshot) return;
@@ -49,6 +50,8 @@ export function applyBootSnapshotToEditor(
   if (snapshotPrefs && !deps.getCachedPrefs()) {
     deps.setCachedPrefs({ preferences: snapshotPrefs });
   }
+  // The first boot pass seeds preferences only. Models wait for theme readiness.
+  if (!includeDocument) return;
 
   const snapshotFile = readBootFile(snapshot);
   const nextPathRaw = (

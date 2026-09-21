@@ -30,7 +30,7 @@ import { buildMonacoOptionsFromPrefsState } from "./editor_monaco_options_utils.
 import { ensureTe2DiffThemeApplied } from "./editor_diff_theme_utils.ts";
 import { getVscodeThemeJsonUrl } from "./editor_theme_url_utils.ts";
 import { vscodeThemeToMonacoTheme } from "./editor_theme_convert_utils.ts";
-import { ensureThemeRegistryState } from "./editor_theme_registry_state_utils.ts";
+import { ensureThemeRegistryState, createDocumentThemeGate, type ThemeRegistryState } from "./editor_theme_registry_state_utils.ts";
 import { loadVscodeTextmateThemesRuntime } from "./editor_theme_loader_runtime_utils.ts";
 import { applyMonacoThemeRuntime } from "./editor_theme_apply_runtime_utils.ts";
 import { clearDraftDiffZonesState } from "./editor_draft_zone_clear_utils.ts";
@@ -43,8 +43,6 @@ import { applyVscodeLanguageConfiguration } from "./editor_vscode_language_confi
 import { installVscodeLanguagesLoop } from "./editor_vscode_languages_install_loop_utils.ts";
 import { finalizeVscodeLanguagesInstall } from "./editor_vscode_languages_finalize_utils.ts";
 import { resolveAutoSaveFromPrefs } from "./editor_open_autosave_pref_utils.js";
-import { fetchOpenCache } from "./editor_open_cache_fetch_utils.js";
-import { resolveOpenContent } from "./editor_open_content_resolve_utils.js";
 import { resolveOpenLanguage } from "./editor_open_lang_resolve_utils.js";
 import { initOpenModel } from "./editor_open_model_init_utils.js";
 import {
@@ -99,6 +97,7 @@ import {
   disposePlainEditorOnly as disposePlainEditorRuntime,
   ensureDiffEditorWithPrefs as ensureDiffEditorWithPrefsRuntime,
   ensureEditorWithPrefs as ensureEditorWithPrefsRuntime,
+  themeFromPrefs,
   ensurePlainEditorWithPrefs as ensurePlainEditorWithPrefsRuntime,
 } from "./editor_editor_lifecycle.ts";
 import { applyGitBaselines as applyGitBaselinesRuntime } from "./editor_git_baseline_runtime.ts";
@@ -240,11 +239,6 @@ interface EditorSocketLike {
   on?(eventName: string, handler: (payload: unknown) => void): void;
 }
 
-interface ThemeRegistryStateLike {
-  registry: unknown;
-  promise: Promise<unknown> | null;
-}
-
 interface SemanticTokensLegendLike {
   tokenTypes: string[];
   tokenModifiers: string[];
@@ -376,7 +370,7 @@ interface MonacoBootWindowLike extends Window {
 
 (function () {
   const bootWindow = window as MonacoBootWindowLike;
-  const initialBootSnapshot = bootWindow.__te2InlineMonacoBootSnapshot || null;
+  let initialBootSnapshot = bootWindow.__te2InlineMonacoBootSnapshot || null;
   let resolveInlineRuntimeBoot: (() => void) | null = null;
   let rejectInlineRuntimeBoot: ((error: unknown) => void) | null = null;
   if (bootWindow.__te2InlineMonacoHost) {
@@ -452,6 +446,7 @@ interface MonacoBootWindowLike extends Window {
     },
   });
   var uiEditorRuntime = createEditorUiEditorRuntime({
+    updatePreference: (payload) => editorRpcCall("editor.preference.update", payload),
     getWindow: function () {
       return window;
     },
@@ -877,7 +872,7 @@ interface MonacoBootWindowLike extends Window {
     ) as MonacoRuntimeModelLike;
   }
 
-  function applyBootSnapshot(): void {
+  function applyBootSnapshot(includeDocument = true): void {
     applyBootSnapshotToEditor({
       getBootSnapshot: function () {
         return initialBootSnapshot;
@@ -911,13 +906,19 @@ interface MonacoBootWindowLike extends Window {
       },
       setModel: function (value: MonacoRuntimeModelLike | null) {
         model = value;
+        // A socket replay may have created the empty control while boot waited.
+        if (editor && value) {
+          editor.setModel?.(value);
+          installMirrorPublisher();
+          installScrollPublisher();
+        }
       },
       createFileModel: createFileModel,
       applyLanguageToModel: applyLanguageToModel,
       languageFromPath: function (path: string) {
         return languageFromPath(path);
       },
-    });
+    }, includeDocument);
   }
 
   function editorRpcCall(
@@ -1576,34 +1577,26 @@ interface MonacoBootWindowLike extends Window {
 
   // ensureTe2Themes / loadOfficialThemes — replaced by loadVscodeTextmateThemes() with dynamic registry.
 
-  // Theme registry: fetched once from the available_themes endpoint.
-  // Maps theme ID → { serveUrl, label, uiTheme, source }.
-  let _themeRegistry: unknown = null;
-  let _themeRegistryPromise: Promise<unknown> | null = null;
-  const _themeRegistryState: ThemeRegistryStateLike = {
-    registry: null,
-    promise: null,
-  };
+  // Catalog metadata uses this editor's RPC lane; resources retain local asset URLs.
+  const _themeRegistryState: ThemeRegistryState = {};
+  const documentThemeGate = createDocumentThemeGate(
+    () => editorRpcTransport.waitUntilConnected(),
+    async (theme) => {
+      if (!textmateThemeOwnerRuntime) throw new Error('Theme runtime is not initialized');
+      await textmateThemeOwnerRuntime.applyTheme(theme);
+    },
+  );
 
-  async function _ensureThemeRegistry(): Promise<unknown> {
-    _themeRegistryState.registry = _themeRegistry;
-    _themeRegistryState.promise = _themeRegistryPromise;
-    var reg = await ensureThemeRegistryState(
-      _themeRegistryState,
-      _fetch,
-      buildUiUrl,
-      apiBase,
-    );
-    _themeRegistry = reg;
-    _themeRegistryPromise = _themeRegistryState.promise;
-    return reg;
+  async function _ensureThemeRegistry() {
+    return ensureThemeRegistryState(_themeRegistryState,
+      () => editorRpcCall(EDITOR_RPC_METHODS.themesList, {}));
   }
 
   function _getVscodeThemeJsonUrl(themeId: string): string {
     return (
       getVscodeThemeJsonUrl(
         themeId,
-        _themeRegistryState.registry || _themeRegistry,
+        _themeRegistryState.registry,
         apiBase,
       ) || ""
     );
@@ -1686,8 +1679,11 @@ interface MonacoBootWindowLike extends Window {
   }
 
   async function applyMonacoTheme(themeKey: string): Promise<void> {
-    if (textmateThemeOwnerRuntime) {
-      return textmateThemeOwnerRuntime.applyTheme(themeKey);
+    try {
+      await documentThemeGate.apply(themeKey);
+    } catch (error) {
+      emitToHost('editor_notify', { message: 'Theme could not be loaded: ' + String(error) });
+      throw error;
     }
   }
 
@@ -1825,13 +1821,26 @@ interface MonacoBootWindowLike extends Window {
   }
 
   async function fetchSSOTState() {
-    // Single call site so we can instrument/adjust behavior later.
-    return await fetchJsonWithBase(fetch, apiBase, "/state", {
-      cache: "no-store",
-    });
+    return await editorRpcCall("editor.preferences.get", {});
+  }
+
+  async function ensureDocumentTheme(): Promise<void> {
+    await editorRpcTransport.waitUntilConnected();
+    if (!cachedPrefs) {
+      const snapshot = await fetchSSOTState();
+      if (!cachedPrefs) cachedPrefs = snapshot as CachedPrefsLike;
+    }
+    // Preferences may advance while resources load. Recheck before releasing
+    // boot, replay or open transactions to create/attach a model.
+    while (true) {
+      const theme = themeFromPrefs(cachedPrefs) || 'github-dark';
+      await applyMonacoTheme(theme);
+      if ((themeFromPrefs(cachedPrefs) || 'github-dark') === theme) return;
+    }
   }
 
   async function ensureEditorWithPrefs() {
+    await ensureDocumentTheme();
     return await ensureEditorWithPrefsRuntime(editorLifecycleDeps);
   }
 
@@ -2168,6 +2177,10 @@ interface MonacoBootWindowLike extends Window {
         >[0],
         buildSocketConnectionDeps({
           rpcNotifications: editorRpcTransport,
+          onSsotSnapshot: function () {
+            // Live state supersedes the bootstrap cache before awaiting themes.
+            initialBootSnapshot = null;
+          },
           emitToHost: emitToHost,
           getCachedPrefs: function () {
             return cachedPrefs;
@@ -2594,16 +2607,12 @@ interface MonacoBootWindowLike extends Window {
         getCachedPrefs: function () {
           return cachedPrefs;
         },
-        setCachedPrefs: function (value: CachedPrefsLike | null) {
-          cachedPrefs = value;
-        },
-        fetchSSOTState: fetchSSOTState,
         languageWorkersEnabled: _languageWorkersEnabled,
         getWorkerLogOnce: function () {
           return _workerLogOnce;
         },
         ensureTe2DiffTheme: ensureTe2DiffTheme,
-        applyMonacoTheme: applyMonacoTheme,
+        ensureDocumentTheme: ensureDocumentTheme,
         ensureEditorWithPrefs: ensureEditorWithPrefs,
         applyBootSnapshot: applyBootSnapshot,
         ensureWorkbenchLanguageCatalogInstalled:

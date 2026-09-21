@@ -3,7 +3,16 @@ from __future__ import annotations
 
 from typing import assert_never
 
+from ..theme_catalog import get_theme_catalog
 from .rpc_contract import (
+    UI_IPC_RPC_METHOD_HOST_THEMES_LIST,
+    UI_IPC_RPC_METHOD_HOST_PROJECTS_LIST,
+    UI_IPC_RPC_METHOD_HOST_PROJECTS_RESET,
+    UI_IPC_RPC_METHOD_HOST_PROJECTS_REMOVE,
+    UI_IPC_RPC_METHOD_HOST_PROJECTS_OPEN,
+    UI_IPC_RPC_METHOD_HOST_EDITOR_STATE_GET,
+    UI_IPC_RPC_METHOD_HOST_SESSION_UPDATE,
+    UI_IPC_RPC_METHOD_HOST_DIAGNOSTICS_EXPORT,
     UI_IPC_RPC_METHOD_HOST_HISTORY_OPEN,
     UI_IPC_RPC_METHOD_HOST_COMPARISON,
     UI_IPC_RPC_METHOD_HOST_BOOT_SNAPSHOT_GET,
@@ -65,6 +74,11 @@ from ..host.git_backend import (
     handle_host_git_branches_list_request,
     handle_host_git_remote_add_request,
 )
+from ..host.transport_state_backend import handle_editor_state_get, handle_session_update
+from ..host.projects_backend import (
+    handle_projects_list, handle_projects_reset, handle_projects_remove, handle_projects_open,
+)
+from ..host.diagnostics_export_backend import handle_diagnostics_export
 from ..host.state_backend import handle_host_file_scroll_update_request
 from ..host.terminal_actions_backend import handle_host_run_active_file_request
 from ..host.page_preview_backend import handle_host_page_preview_template_install_request
@@ -88,6 +102,24 @@ async def dispatch_ui_ipc_rpc_request(
     *,
     source_name: str,
 ) -> object:
+    if method == UI_IPC_RPC_METHOD_HOST_THEMES_LIST:
+        return await get_theme_catalog()
+    if method == UI_IPC_RPC_METHOD_HOST_PROJECTS_LIST:
+        return await handle_projects_list()
+    if method == UI_IPC_RPC_METHOD_HOST_PROJECTS_RESET:
+        return await handle_projects_reset(params, source_name=source_name)
+    if method == UI_IPC_RPC_METHOD_HOST_PROJECTS_REMOVE:
+        return await handle_projects_remove(params, source_name=source_name)
+    if method == UI_IPC_RPC_METHOD_HOST_PROJECTS_OPEN:
+        return await handle_projects_open(params, source_name=source_name)
+
+    if method == UI_IPC_RPC_METHOD_HOST_EDITOR_STATE_GET:
+        return handle_editor_state_get()
+    if method == UI_IPC_RPC_METHOD_HOST_SESSION_UPDATE:
+        return handle_session_update(params)
+    if method == UI_IPC_RPC_METHOD_HOST_DIAGNOSTICS_EXPORT:
+        return await handle_diagnostics_export(params, source_name=source_name)
+
     if method == UI_IPC_RPC_METHOD_HOST_FILE_OPEN:
         return await handle_host_open_request(
             params,

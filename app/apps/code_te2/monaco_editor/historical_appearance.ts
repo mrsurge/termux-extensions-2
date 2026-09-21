@@ -3,7 +3,7 @@ import { buildMonacoOptionsFromPrefsState } from './editor_monaco_options_utils.
 import { ensureThemeRegistryState } from './editor_theme_registry_state_utils.ts';
 import { getVscodeThemeJsonUrl } from './editor_theme_url_utils.ts';
 import { vscodeThemeToMonacoTheme } from './editor_theme_convert_utils.ts';
-import { buildUiUrl } from './editor_common_utils.ts';
+import type { RequestThemeCatalog } from '../src/theme_catalog.ts';
 
 function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -28,6 +28,7 @@ export function historicalAppearance(preferences: unknown) {
 /** Theme fetches are asynchronous; only the newest live view may publish them. */
 export function createHistoricalThemeApplier(
   monaco: Pick<typeof Monaco, 'editor'>, signal: AbortSignal,
+  requestCatalog: RequestThemeCatalog,
   fetchTheme: typeof fetch = (...args) => fetch(...args),
 ) {
   const registry = {};
@@ -50,7 +51,7 @@ export function createHistoricalThemeApplier(
     let pending = themes.get(theme);
     if (!pending) {
       pending = (async () => {
-        const entries = await ensureThemeRegistryState(registry, fetchTheme, buildUiUrl, '/api/app/code_te2');
+        const entries = await ensureThemeRegistryState(registry, requestCatalog);
         const url = getVscodeThemeJsonUrl(theme, entries, '/api/app/code_te2');
         if (!url) throw new Error(`Historical theme unavailable: ${theme}`);
         const response = await fetchTheme(url);

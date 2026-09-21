@@ -8,41 +8,18 @@ import asyncio
 from pathlib import Path
 from typing import Optional, Protocol, cast
 
-from fastapi import APIRouter, Body, FastAPI, HTTPException, Query
-from fastapi.responses import Response
-from starlette.responses import FileResponse
-
 # --- Local Imports ---
 from app.apps.code_te2.stores import get_history_store, get_preferences_store
 from app.apps.code_te2.preferences_store import ALLOWED_FONT_SCALES
-from app.apps.code_te2.code_te2_paths import code_te2_paths
 # Import helpers
 from app.apps.code_te2.explorer.services.file_ops import get_project_root, mark_git_cache_dirty
-from app.apps.code_te2.core_read import push_save_ack, emit_diff_changed, subscribe, unsubscribe
-from app.apps.code_te2.core_write import write_full, BaseMismatchError
+from app.apps.code_te2.core_read import push_save_ack, emit_diff_changed, unsubscribe
+from app.apps.code_te2.core_write import write_full
 from app.apps.code_te2.diff_helper import invalidate_diff_cache
 from .editor_backend_services.contracts import RuntimeMeta
 from .editor_backend_services.protocols import EditorLike
-from .editor_backend_services.view_settings_service import (
-    handle_set_font_scale as _handle_set_font_scale,
-    handle_set_view_settings as _handle_set_view_settings,
-)
 from .editor_backend_services.editor_routes_service import (
     build_view_state_dict as _build_view_state_dict_service,
-    handle_jump_to_line as _handle_jump_to_line,
-    handle_search_open as _handle_search_open,
-    handle_set_minimap_mode as _handle_set_minimap_mode,
-    handle_set_read_only as _handle_set_read_only,
-    handle_toggle_color_picker as _handle_toggle_color_picker,
-)
-from .editor_backend_services.cache_routes_service import (
-    handle_check_cache as _handle_check_cache,
-    handle_debug_editor_state as _handle_debug_editor_state,
-    handle_discard_draft as _handle_discard_draft,
-    handle_get_cache_state as _handle_get_cache_state,
-    handle_refresh_cache_state as _handle_refresh_cache_state,
-    handle_refresh_diffs as _handle_refresh_diffs,
-    handle_set_editor_content as _handle_set_editor_content,
 )
 from .editor_backend_services.cache_runtime_service import (
     apply_watcher_replace as _apply_watcher_replace_service,
@@ -53,11 +30,7 @@ from .editor_backend_services.cache_runtime_service import (
     schedule_diff_refresh as _schedule_diff_refresh_service,
 )
 from .editor_backend_services.save_routes_service import (
-    handle_save_current_file as _handle_save_current_file,
     write_editor_buffer_to_disk as _write_editor_buffer_to_disk_service,
-)
-from .editor_backend_services.preferences_routes_service import (
-    handle_update_preference as _handle_update_preference,
 )
 
 _history_store = get_history_store()
@@ -123,9 +96,6 @@ def _write_full_json(
 ) -> dict[str, object]:
     return dict(write_full(project_root, path, content, base_sha256=base_sha256, mode=mode))
 
-
-# --- FastAPI Router ---
-editor_router = APIRouter(prefix="/editor")
 
 # --- Global State ---
 _active_editor: EditorLike | None = None
@@ -668,36 +638,8 @@ def _persist_active_draft_immediately(reason: str = 'switch') -> bool:
         print(f"[PERSIST][{reason}] Failed to refresh diffs: {exc}", file=sys.stderr)
     return True
 
-# --- Editor API Endpoints ---
-
-@editor_router.post('/discard_draft')
-async def discard_draft(data: dict[str, object] = Body(...)):
-    from app.apps.code_te2.explorer.services.runtime_notifications import (
-        notify_draft_state_changed,
-    )
-
-    return await _handle_discard_draft(
-        data,
-        history_store=_history_store,
-        get_current_file=get_current_file,
-        notify_draft_state_changed=notify_draft_state_changed,
-        broadcast_cache_state=_broadcast_cache_state,
-    )
-
-@editor_router.post('/refresh_cache_state')
-async def refresh_cache_state():
-    return await _handle_refresh_cache_state(
-        history_store=_history_store,
-        get_current_file=get_current_file,
-        runtime_meta=_get_runtime_metadata,
-        get_active_editors=get_active_editors,
-        broadcast_cache_state=_broadcast_cache_state,
-    )
-
-@editor_router.post('/check_cache')
-async def check_cache(data: dict[str, object] = Body(...)):
-    return await _handle_check_cache(data, history_store=_history_store)
-
+# Editor state helpers are transport-independent. HTTP assets live in
+# editor_asset_routes; active controls use the host/editor RPC dispatchers.
 
 def _set_suppress_on_change_until(value: float) -> None:
     global _suppress_on_change_until
@@ -716,229 +658,12 @@ def _set_watcher_token(token: object | None) -> None:
 def _unsubscribe_token(token: object) -> None:
     unsubscribe(str(token))
 
-@editor_router.post('/set_content')
-async def set_editor_content(data: dict[str, object] = Body(...)):
-    return await _handle_set_editor_content(
-        data,
-        history_store=_history_store,
-        preferences_store=_preferences_store,
-        get_active_editor=get_active_editor,
-        get_active_editors=get_active_editors,
-        get_current_file=get_current_file,
-        set_current_file=set_current_file,
-        persist_active_draft_immediately=_persist_active_draft_immediately,
-        cancel_cache_persist_timer=_cancel_cache_persist_timer,
-        get_cached_editor_content=_get_cached_editor_content,
-        set_suppress_on_change_until=_set_suppress_on_change_until,
-        broadcast_cache_state=_broadcast_cache_state,
-        schedule_diff_refresh=_schedule_diff_refresh,
-        apply_watcher_replace=_apply_watcher_replace,
-        current_diff_base=_current_diff_base,
-        normalize_rel_path=_normalize_rel_path,
-        collect_diff=_collect_diff,
-        get_combined_diffs_async=_get_combined_diffs_async,
-        resolve_font_scale=_resolve_font_scale,
-        get_project_root=get_project_root,
-        subscribe=subscribe,
-        unsubscribe=_unsubscribe_token,
-        get_watcher_token=_get_watcher_token,
-        set_watcher_token=_set_watcher_token,
-    )
-
-@editor_router.post('/refresh_diffs')
-async def refresh_diffs(data: dict[str, object] = Body(...)):
-    return await _handle_refresh_diffs(
-        data,
-        history_store=_history_store,
-        get_active_editors=get_active_editors,
-        get_project_root=get_project_root,
-        normalize_rel_path=_normalize_rel_path,
-        collect_diff=_collect_diff,
-        current_diff_base=_current_diff_base,
-    )
-
-@editor_router.post('/jump_to_line')
-async def jump_to_line(data: dict[str, object] = Body(...)):
-    editors = get_active_editors()
-    primary = get_active_editor()
-    return _handle_jump_to_line(data, editors=editors, primary=primary)
-
-@editor_router.post('/search/open')
-async def editor_search_open(data: dict[str, object] = Body(...)):
-    """Open the CodeMirror search panel when user presses Ctrl+F."""
-    editor = get_active_editor()
-    
-    if not editor:
-        raise HTTPException(
-            status_code=404, 
-            detail="Editor not initialized. Open a file first."
-        )
-    
-    try:
-        return _handle_search_open(editor)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Failed to open search panel: {str(e)}"
-        )
-
-@editor_router.post('/color_picker/toggle')
-async def editor_toggle_color_picker(data: dict[str, object] = Body(...)):
-    """Toggle CSS color picker extension."""
-    editor = get_active_editor()
-    
-    if not editor:
-        raise HTTPException(
-            status_code=404,
-            detail="Editor not initialized. Open a file first."
-        )
-    
-    try:
-        return _handle_toggle_color_picker(editor, data)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to toggle color picker: {str(e)}"
-        )
-
-@editor_router.post('/read_only/set')
-async def editor_set_read_only(data: dict[str, object] = Body(...)):
-    """Set editor read-only mode."""
-    editor = get_active_editor()
-    
-    if not editor:
-        raise HTTPException(
-            status_code=404,
-            detail="Editor not initialized. Open a file first."
-        )
-    
-    try:
-        return _handle_set_read_only(editor, data)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to set read-only mode: {str(e)}"
-        )
-
-@editor_router.post('/minimap/mode')
-async def editor_minimap_mode(data: dict[str, object] = Body(...)):
-    """Set the minimap mode for the current editor."""
-    editor = get_active_editor()
-    if not editor:
-        raise HTTPException(status_code=404, detail='Editor not initialized')
-    try:
-        return _handle_set_minimap_mode(editor, data)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f'Failed to set minimap mode: {e}')
-
-
-# --- Helper Function for View State ---
 def _get_view_state_dict() -> dict[str, object]:
     return _build_view_state_dict_service(
         preferences_store=_preferences_store,
         active_project=_history_store.get_active_project,
         project_root=get_project_root,
         get_lsp_state_payload=_history_store.get_lsp_state_payload,
-    )
-
-
-@editor_router.get('/view_state')
-async def get_view_state():
-    """Return current editor view settings for frontend display (menu checkmarks)."""
-    return {"ok": True, "data": _get_view_state_dict()}
-
-
-@editor_router.post('/update_preference')
-async def update_preference(data: dict[str, object] = Body(...)):
-    def _emit_preferences_changed(
-        project_path: str,
-        key: str,
-        value: object,
-        view_state: dict[str, object],
-        preferences: dict[str, object],
-        source_client: str | None,
-    ) -> None:
-        from app.apps.code_te2.explorer.transport.rpc_emit import (
-            emit_project_explorer_rpc_notification,
-        )
-
-        payload: dict[str, object] = {
-            "project_path": project_path,
-            "key": key,
-            "value": value,
-            "view_state": view_state,
-            "preferences": preferences,
-            "source_client": source_client,
-        }
-        asyncio.create_task(
-            emit_project_explorer_rpc_notification(
-                project_path,
-                "explorer.editor.prefs.changed",
-                payload,
-            )
-        )
-        try:
-            from app.apps.code_te2.monaco_editor.editor_ws import editor_runtime_emit_room_event
-
-            asyncio.create_task(
-                editor_runtime_emit_room_event(
-                    "editor:prefs_changed",
-                    payload,
-                )
-            )
-        except Exception:
-            pass
-        try:
-            from app.apps.code_te2.ui_ipc.rpc_contract import (
-                UI_IPC_RPC_NOTIFICATION_PREFERENCES_CHANGED,
-            )
-            from app.apps.code_te2.ui_ipc.ui_ipc_ws import (
-                emit_ui_ipc_rpc_notification,
-            )
-
-            asyncio.create_task(
-                emit_ui_ipc_rpc_notification(
-                    UI_IPC_RPC_NOTIFICATION_PREFERENCES_CHANGED,
-                    payload,
-                )
-            )
-        except Exception:
-            pass
-
-    return await _handle_update_preference(
-        data,
-        editors=get_active_editors(),
-        preferences_store=_preferences_store,
-        history_store=_history_store,
-        get_project_root=get_project_root,
-        get_current_file=get_current_file,
-        resolve_font_scale=_resolve_font_scale,
-        normalize_rel_path=_normalize_rel_path,
-        collect_diff=_collect_diff,
-        current_diff_base=_current_diff_base,
-        broadcast_cache_state=_broadcast_cache_state,
-        refresh_active_diffs=_refresh_active_diffs,
-        build_view_state_dict=_get_view_state_dict,
-        theme_map=THEME_MAP,
-        emit_preferences_changed=_emit_preferences_changed,
-    )
-
-
-@editor_router.get('/cache_state')
-def get_cache_state(project: str | None = Query(None), path: str | None = Query(None)):
-    return _handle_get_cache_state(
-        history_store=_history_store,
-        runtime_meta=_get_runtime_metadata,
-        get_current_file=get_current_file,
-        project=project,
-        path=path,
-    )
-
-@editor_router.get('/debug/state')
-def debug_editor_state():
-    return _handle_debug_editor_state(
-        get_active_editor=get_active_editor,
-        get_current_file=get_current_file,
     )
 
 
@@ -967,234 +692,6 @@ async def _write_editor_buffer_to_disk(*, client_id: str, op_id: str | None) -> 
         notify_draft_state_changed=notify_draft_state_changed,
         get_combined_diffs_async=_get_combined_diffs_async,
     )
-
-@editor_router.post('/save')
-async def save_current_file(data: dict[str, object] = Body(...)):
-    def _broadcast_to_explorer(project_norm: str, method: str, params: dict[str, object]) -> None:
-        from app.apps.code_te2.explorer.transport.rpc_emit import (
-            emit_project_explorer_rpc_notification,
-        )
-
-        asyncio.create_task(
-            emit_project_explorer_rpc_notification(project_norm, method, params)
-        )
-
-    async def _write_wrapper(client_id: str, op_id: str | None, _nicegui_client_id: str | None) -> dict[str, object]:
-        return await _write_editor_buffer_to_disk(client_id=client_id, op_id=op_id)
-
-    return await _handle_save_current_file(
-        data,
-        write_editor_buffer_to_disk_fn=_write_wrapper,
-        history_store=_history_store,
-        get_current_file=get_current_file,
-        get_current_file_sha256=get_current_file_sha256,
-        base_mismatch_error_type=BaseMismatchError,
-        get_active_editor=get_active_editor,
-        get_cached_editor_content=_get_cached_editor_content,
-        get_preferences=_preferences_store.get_preferences,
-        nicegui_broadcast=_broadcast_to_explorer,
-    )
-
-
-@editor_router.post('/set_view_settings')
-async def set_view_settings(data: dict[str, object] = Body(...)):
-    return _handle_set_view_settings(
-        data,
-        get_active_editor=get_active_editor,
-        update_editor_preferences=lambda updates: _preferences_store.update_preferences(editor=updates),
-        active_project=_history_store.get_active_project,
-        project_root=get_project_root,
-        normalize_rel_path=_normalize_rel_path,
-        collect_diff=_collect_diff,
-        current_diff_base=_current_diff_base,
-        resolve_theme_preference=_resolve_theme_preference,
-    )
-
-@editor_router.post('/set_font_scale')
-async def set_font_scale_endpoint(data: dict[str, object] = Body(...)):
-    return _handle_set_font_scale(
-        data,
-        get_active_editor=get_active_editor,
-        resolve_font_scale=_resolve_font_scale,
-        update_editor_preferences=lambda updates: _preferences_store.update_preferences(editor=updates),
-    )
-
-
-def register_monaco_editor_routes(fastapi_app: FastAPI | APIRouter, mount_path: str = "/ui") -> None:
-    """Register Monaco static asset routes for the inline host editor runtime."""
-    app_pkg_root = Path(__file__).resolve().parents[3]
-    vendored_monaco = app_pkg_root / "static" / "vendor" / "monaco-editor-core"
-    vscode_monaco_esm_dir = vendored_monaco / "esm"
-    esm_ok = vscode_monaco_esm_dir.exists()
-    vscode_monaco_lang_dir = vendored_monaco / "te2-lang"
-    lang_ok = vscode_monaco_lang_dir.exists()
-
-    async def _serve_static_with_css_shim(base_dir: Path, file_path: str, raw: str | None) -> Response | FileResponse:
-        base = base_dir.resolve()
-        target = (base / file_path).resolve()
-        if not str(target).startswith(str(base) + "/") and target != base:
-            return Response("not found", status_code=404, media_type="text/plain")
-        if not target.exists() or not target.is_file():
-            return Response("not found", status_code=404, media_type="text/plain")
-        if target.suffix == ".css" and raw == "1":
-            return FileResponse(str(target), media_type="text/css")
-        if target.suffix == ".css":
-            shim = """
-// Auto-generated CSS module shim (TE2 / VSCode Monaco ESM)
-const url = new URL(import.meta.url);
-url.searchParams.set('raw', '1');
-const href = url.toString();
-const id = 'te2-css:' + href;
-if (!document.querySelector(`link[data-te2-css="${id}"]`)) {
-  const link = document.createElement('link');
-  link.rel = 'stylesheet';
-  link.href = href;
-  link.dataset.te2Css = id;
-  document.head.appendChild(link);
-}
-export default href;
-""".lstrip()
-            return Response(shim, media_type="application/javascript")
-        return FileResponse(str(target))
-
-    @fastapi_app.api_route(
-        f"{mount_path}/monaco_vscode/esm/{{file_path:path}}",
-        methods=["GET", "HEAD"],
-        include_in_schema=False,
-    )
-    async def _serve_monaco_vscode_esm(file_path: str, raw: str | None = None):
-        if not esm_ok:
-            return Response("monaco esm not built; run `worktrees/vscode-te2-diff/build_monaco_te2.sh`", status_code=404)
-        return await _serve_static_with_css_shim(vscode_monaco_esm_dir, file_path, raw)
-
-    @fastapi_app.api_route(
-        f"{mount_path}/monaco_vscode/lang/{{file_path:path}}",
-        methods=["GET", "HEAD"],
-        include_in_schema=False,
-    )
-    async def _serve_monaco_vscode_lang(file_path: str, raw: str | None = None):
-        if not lang_ok:
-            return Response("te2-lang not built; run `worktrees/vscode-te2-diff/build_monaco_te2.sh`", status_code=404)
-        return await _serve_static_with_css_shim(vscode_monaco_lang_dir, file_path, raw)
-
-    @fastapi_app.get(mount_path + "/monaco_editor/themes/{file_path:path}", include_in_schema=False)
-    async def _serve_monaco_editor_theme_json(file_path: str):
-        base = Path(__file__).with_name("themes").resolve()
-        target = (base / file_path).resolve()
-        if not str(target).startswith(str(base) + "/") and target != base:
-            return Response("not found", status_code=404, media_type="text/plain")
-        if not target.exists() or not target.is_file():
-            return Response("not found", status_code=404, media_type="text/plain")
-        return FileResponse(str(target), media_type="application/json")
-
-    cs_ext_themes = code_te2_paths().code_server_extensions_dir
-
-    @fastapi_app.get(mount_path + "/monaco_editor/cs_themes/{ext_id}/{theme_file:path}", include_in_schema=False)
-    async def _serve_cs_extension_theme(ext_id: str, theme_file: str):
-        base = (cs_ext_themes / ext_id / "themes").resolve()
-        target = (base / theme_file).resolve()
-        if not str(target).startswith(str(base) + "/") and target != base:
-            return Response("not found", status_code=404, media_type="text/plain")
-        if not target.exists() or not target.is_file():
-            return Response("not found", status_code=404, media_type="text/plain")
-        return FileResponse(str(target), media_type="application/json")
-
-    vendored_themes_dir = Path(__file__).with_name("themes") / "vendored"
-
-    @fastapi_app.get(mount_path + "/monaco_editor/available_themes", include_in_schema=False)
-    async def _available_themes():
-        import json as _json
-
-        themes: list[dict[str, object]] = []
-        if vendored_themes_dir.is_dir():
-            for vendor_dir in sorted(vendored_themes_dir.iterdir()):
-                idx_file = vendor_dir / "theme_index.json"
-                if not idx_file.is_file():
-                    continue
-                try:
-                    idx_obj = cast(object, _json.loads(idx_file.read_text("utf-8")))
-                    if not isinstance(idx_obj, dict):
-                        continue
-                    idx = cast(dict[str, object], idx_obj)
-                    vendored_list_obj: object = idx.get("vendored", [])
-                    vendored_list = cast(list[object], vendored_list_obj if isinstance(vendored_list_obj, list) else [])
-                    for theme_item_obj in vendored_list:
-                        if not isinstance(theme_item_obj, dict):
-                            continue
-                        theme_item = cast(dict[str, object], theme_item_obj)
-                        theme_id = theme_item.get("id")
-                        theme_label = theme_item.get("label")
-                        theme_file = theme_item.get("file")
-                        if not isinstance(theme_id, str) or not isinstance(theme_label, str) or not isinstance(theme_file, str):
-                            continue
-                        source_label_obj = idx.get("source")
-                        source_label = source_label_obj if isinstance(source_label_obj, str) else vendor_dir.name
-                        themes.append(
-                            {
-                                "id": theme_id,
-                                "label": theme_label,
-                                "uiTheme": theme_item.get("uiTheme", "vs-dark"),
-                                "source": "vendored",
-                                "sourceLabel": source_label,
-                                "serveUrl": f"monaco_editor/themes/vendored/{vendor_dir.name}/{theme_file}",
-                            }
-                        )
-                except Exception:
-                    pass
-
-        try:
-            from ..extension_registry import get_extension_list
-
-            exts_obj = cast(object, get_extension_list())
-            exts = cast(list[object], exts_obj if isinstance(exts_obj, list) else [])
-            for ext_obj in exts:
-                if not isinstance(ext_obj, dict):
-                    continue
-                ext_item = cast(dict[str, object], ext_obj)
-                ext_themes_obj = ext_item.get("themes", [])
-                ext_themes = cast(list[object], ext_themes_obj if isinstance(ext_themes_obj, list) else [])
-                if not ext_themes:
-                    continue
-                ext_id = ext_item.get("id", "")
-                ext_path = ext_item.get("path", "")
-                if not isinstance(ext_id, str) or not isinstance(ext_path, str) or not ext_id or not ext_path:
-                    continue
-                for theme_obj in ext_themes:
-                    if not isinstance(theme_obj, dict):
-                        continue
-                    theme_item = cast(dict[str, object], theme_obj)
-                    raw_path = theme_item.get("path", "")
-                    if not isinstance(raw_path, str):
-                        continue
-                    fname = raw_path.rsplit("/", 1)[-1] if "/" in raw_path else raw_path
-                    label_obj = theme_item.get("label", fname)
-                    label = label_obj if isinstance(label_obj, str) else fname
-                    tid = label.lower().replace(" ", "-").replace("(", "").replace(")", "")
-                    ext_dir_name = Path(ext_path).name
-                    themes.append(
-                        {
-                            "id": f"ext:{ext_id}:{tid}",
-                            "label": label,
-                            "uiTheme": theme_item.get("uiTheme", "vs-dark"),
-                            "source": "extension",
-                            "sourceLabel": ext_item.get("display_name", ext_id),
-                            "serveUrl": f"monaco_editor/cs_themes/{ext_dir_name}/{fname}",
-                        }
-                    )
-        except Exception as exc:
-            print(f"[themes] extension theme scan failed: {exc}", flush=True)
-
-        return {"themes": themes}
-
-    @fastapi_app.get(mount_path + "/monaco_editor/textmate/{file_path:path}", include_in_schema=False)
-    async def _serve_monaco_editor_textmate(file_path: str):
-        base = Path(__file__).with_name("textmate").resolve()
-        target = (base / file_path).resolve()
-        if not str(target).startswith(str(base) + "/") and target != base:
-            return Response("not found", status_code=404, media_type="text/plain")
-        if not target.exists() or not target.is_file():
-            return Response("not found", status_code=404, media_type="text/plain")
-        return FileResponse(str(target))
 
 def _refresh_active_diffs():
     """Recalculate combined diffs for the current file based on latest preferences."""

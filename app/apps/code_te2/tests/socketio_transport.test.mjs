@@ -109,6 +109,39 @@ async function settlePromises() {
   await Promise.resolve();
 }
 
+test('editor theme connection wait is event-driven, bounded, and retryable', async () => {
+  const { createEditorRpcTransport } = await importTypeScript('monaco_editor/editor_rpc_transport.ts');
+  const socket = new FakeSocket();
+  const timers = new Map();
+  let nextTimer = 0;
+  const transport = createEditorRpcTransport({
+    getSocket: () => socket,
+    setTimeoutFn: callback => { const id = ++nextTimer; timers.set(id, callback); return id; },
+    clearTimeoutFn: id => timers.delete(id),
+  });
+  transport.attachSocket(socket);
+  const first = transport.waitUntilConnected();
+  assert.equal(timers.size, 1);
+  assert.equal(socket.rawEmits.length, 0);
+  socket.trigger('connect');
+  await first;
+  await transport.waitUntilConnected();
+  assert.equal(timers.size, 0);
+  socket.trigger('disconnect');
+  const error = transport.waitUntilConnected();
+  socket.trigger('connect_error');
+  await assert.rejects(error, /connect error/);
+  assert.equal(timers.size, 0);
+  const timeout = transport.waitUntilConnected();
+  [...timers.values()][0]();
+  await assert.rejects(timeout, /connection timed out/);
+  timers.clear();
+  const retry = transport.waitUntilConnected();
+  socket.trigger('connect');
+  await retry;
+  assert.equal(timers.size, 0);
+});
+
 function deferred() {
   let resolve;
   let reject;
@@ -1027,6 +1060,7 @@ test('TextMate catalog and factory initialization are shared across concurrent c
   );
   const wasm = fs.readFileSync(path.join(appRoot, 'monaco_editor/textmate/onig.wasm'));
   let grammarListCalls = 0;
+  const grammarLoads = [];
   let wasmFetches = 0;
   const windowLike = {
     monaco: {
@@ -1043,18 +1077,25 @@ test('TextMate catalog and factory initialization are shared across concurrent c
   const runtime = createEditorTextmateRuntime({
     getWindow: () => windowLike,
     getApiBase: () => '',
-    fetchFn: async () => {
+    fetchFn: async (url) => {
+      assert.equal(url, 'monaco_editor/textmate/onig.wasm');
       wasmFetches += 1;
       return new Response(wasm);
     },
     fetchJsonWithBase: async () => ({}),
     buildUiUrl: (value) => value,
     normalizeLanguage: (value) => String(value || ''),
-    editorWorkbenchCall: async (method) => {
+    editorWorkbenchCall: async (method, params) => {
+      if (method === 'grammars_load') {
+        grammarLoads.push(params.id);
+        return { ok: true, raw: JSON.stringify({ scopeName: 'source.test', patterns: [
+          { match: 'hello', name: 'keyword.test' },
+        ] }) };
+      }
       assert.equal(method, 'grammars_list');
       grammarListCalls += 1;
       await settlePromises();
-      return { grammars: [] };
+      return { grammars: [{ id: 'test.ext/syntaxes/test.json', scopeName: 'source.test', language: 'test' }] };
     },
   });
 
@@ -1064,6 +1105,12 @@ test('TextMate catalog and factory initialization are shared across concurrent c
   ]);
   assert.equal(first, second);
   assert.equal(grammarListCalls, 1);
+  assert.equal(wasmFetches, 1);
+  // Grammar content remains WBA-owned; only the WASM runtime is fetched as HTTP.
+  const { grammar } = await first.createGrammar('test', 1);
+  const tokens = grammar.tokenizeLine('hello', null).tokens;
+  assert.ok(tokens[0].scopes.includes('keyword.test'));
+  assert.deepEqual(grammarLoads, ['test.ext/syntaxes/test.json']);
   assert.equal(wasmFetches, 1);
 });
 
@@ -1220,4 +1267,33 @@ test('WBA startup tracing is bounded and does not initiate connections or expose
   assert.equal(records.length, 80);
   assert.equal(socket.connectCalls, 0);
   assert.equal(JSON.stringify(records).includes('must-not-log'), false);
+});
+
+test('a newer empty replay invalidates a document still waiting for its theme', async () => {
+  const { registerEditorSocketConnectionHandlers } = await importTypeScript(
+    'monaco_editor/editor_socket_connection_runtime.ts',
+  );
+  const handlers = new Map();
+  let releaseTheme;
+  const themeReady = new Promise(resolve => { releaseTheme = resolve; });
+  const paths = [];
+  const cleared = [];
+  let snapshots = 0;
+  const deps = new Proxy({
+    rpcNotifications: { onNotification(method, handler) { handlers.set(method, handler); } },
+    onSsotSnapshot() { snapshots++; },
+    ensureEditorWithPrefs: () => themeReady,
+    setCurrentPath: path => paths.push(path),
+    clearActiveModel: reason => cleared.push(reason),
+  }, { get(target, property) { return property in target ? target[property] : () => {}; } });
+  registerEditorSocketConnectionHandlers({ on() {} }, deps);
+  handlers.get('editor.state.ssot')({ file: {
+    path: '/old/project/file.py', content: 'old project', document_revision: 10,
+  } });
+  handlers.get('editor.state.ssot')({ currentPath: null, file: null });
+  releaseTheme();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(snapshots, 2);
+  assert.deepEqual(paths, []);
+  assert.deepEqual(cleared, ['ssot_empty']);
 });

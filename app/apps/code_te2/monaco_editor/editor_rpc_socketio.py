@@ -16,51 +16,27 @@ from ..client_presentation import (
     client_presentation_identity_from_environ,
     client_presentation_room,
 )
-from ..open_state_backend import SidecarOpenStatePayload
+from .editor_session_service import (
+    EditorNotification,
+    bootstrap_editor_session,
+    publish_editor_result,
+)
 from .editor_rpc_contract import (
-    EDITOR_RPC_METHOD_DRAFT_DIFF_GET,
-    EDITOR_RPC_METHOD_GIT_BASELINES_GET,
-    EDITOR_RPC_METHOD_JUMP_TO_LINE,
     JSONRPC_INTERNAL_ERROR,
     JSONRPC_INVALID_PARAMS,
-    EDITOR_RPC_NOTIFICATION_ADAPTER_STATE,
-    EDITOR_RPC_NOTIFICATION_DRAFT_DIFF,
-    EDITOR_RPC_NOTIFICATION_FILE_JUMP_TO_LINE,
-    EDITOR_RPC_NOTIFICATION_GIT_BASELINES,
-    EDITOR_RPC_NOTIFICATION_STATE_SSOT,
     EditorRpcDispatchError,
     EditorRpcProtocolError,
     coerce_jsonrpc_notification_envelope,
     coerce_jsonrpc_request_envelope,
 )
-from .editor_rpc_dispatch import dispatch_editor_rpc_request
+from .editor_runtime_dispatch import dispatch_editor_runtime_request
 from .editor_client_registry import (
     editor_client_identity,
     register_editor_client,
     unregister_editor_client,
 )
 from .editor_rpc_emit import emit_editor_rpc_error, emit_editor_rpc_notification, emit_editor_rpc_result
-from .editor_ws import (
-    editor_runtime_active_project,
-    editor_runtime_build_connect_snapshot,
-    editor_runtime_emit_open_state_changed,
-    editor_runtime_emit_room_event,
-    editor_runtime_get_cached_document,
-    editor_runtime_handle_breadcrumb_navigate,
-    editor_runtime_handle_issues_dump_response,
-    editor_runtime_handle_model_ready,
-    editor_runtime_handle_scroll_state,
-    editor_runtime_is_under_project,
-    editor_runtime_meta,
-    editor_runtime_normalize_abs_path,
-    editor_runtime_notify_draft_state_changed,
-    editor_runtime_read_disk_text,
-    editor_runtime_read_file_payload,
-    editor_runtime_record_file_activity,
-    editor_runtime_record_sidecar_open_file,
-    editor_runtime_record_save_sha,
-    editor_runtime_resolve_save_snapshot_response,
-)
+from .editor_ws import editor_runtime_build_connect_snapshot, editor_runtime_emit_open_state_changed
 
 
 class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
@@ -72,38 +48,18 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
         emit_to_room = cast(Callable[..., Awaitable[object]], self.emit)
         _ = await emit_to_room(event_name, payload, room=room)
 
-    async def _publish_result_notification(self, sid: str, method: str, result: object) -> None:
-        if not isinstance(result, dict):
-            return
-        payload = cast(dict[str, object], result)
-        if method == EDITOR_RPC_METHOD_JUMP_TO_LINE:
-            await emit_editor_rpc_notification(
-                lambda event_name, notification_payload: self._emit_to_room(
-                    client_presentation_room(self._client_id(sid)),
-                    event_name,
-                    notification_payload,
-                ),
-                EDITOR_RPC_NOTIFICATION_FILE_JUMP_TO_LINE,
-                payload,
-            )
-            return
-        if method == EDITOR_RPC_METHOD_GIT_BASELINES_GET:
-            await emit_editor_rpc_notification(
-                lambda event_name, notification_payload: self._emit_to_room(
-                    client_presentation_room(self._client_id(sid)),
-                    event_name,
-                    notification_payload,
-                ),
-                EDITOR_RPC_NOTIFICATION_GIT_BASELINES,
-                payload,
-            )
-            return
-        if method == EDITOR_RPC_METHOD_DRAFT_DIFF_GET:
-            await emit_editor_rpc_notification(
-                lambda event_name, notification_payload: self._emit_to_sid(sid, event_name, notification_payload),
-                EDITOR_RPC_NOTIFICATION_DRAFT_DIFF,
-                payload,
-            )
+    async def _deliver_notification(self, sid: str, notification: EditorNotification) -> None:
+        # Resolve logical recipients only at the transport edge. The service
+        # never constructs rooms or reaches into Socket.IO connection state.
+        room = (
+            client_presentation_room(self._client_id(sid))
+            if notification.recipient == "client" else sid
+        )
+        await emit_editor_rpc_notification(
+            lambda event, payload: self._emit_to_room(room, event, payload),
+            notification.method,
+            notification.params,
+        )
 
     async def on_connect(
         self,
@@ -124,34 +80,19 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
         enter_room = cast(Callable[..., Awaitable[object]], self.enter_room)
         _ = await enter_room(sid, "code_te2")
         _ = await enter_room(sid, client_presentation_room(identity["clientInstanceId"]))
-        snapshot = editor_runtime_build_connect_snapshot(
-            client_instance_id=identity["clientInstanceId"],
-            client_role=identity["clientRole"],
-        )
-        await emit_editor_rpc_notification(
-            lambda event_name, payload: self._emit_to_sid(sid, event_name, payload),
-            EDITOR_RPC_NOTIFICATION_STATE_SSOT,
-            snapshot,
-        )
-        open_state_obj = snapshot.get("openState")
-        try:
+        def read_adapter_state() -> dict[str, object]:
             from ..workbench_adapter_shell_manager import get_adapter_state
 
-            await emit_editor_rpc_notification(
-                lambda event_name, payload: self._emit_to_sid(sid, event_name, payload),
-                EDITOR_RPC_NOTIFICATION_ADAPTER_STATE,
-                get_adapter_state(),
-            )
-        except Exception:
-            pass
-        if isinstance(open_state_obj, dict):
-            try:
-                await editor_runtime_emit_open_state_changed(
-                    cast(SidecarOpenStatePayload, cast(object, open_state_obj)),
-                    source="rpc_connect",
-                )
-            except Exception:
-                pass
+            return get_adapter_state()
+
+        await bootstrap_editor_session(
+            client_instance_id=identity["clientInstanceId"],
+            client_role=identity["clientRole"],
+            read_snapshot=editor_runtime_build_connect_snapshot,
+            read_adapter_state=read_adapter_state,
+            publish_open_state=editor_runtime_emit_open_state_changed,
+            deliver=lambda notification: self._deliver_notification(sid, notification),
+        )
 
     async def on_disconnect(self, sid: str, reason: object | None = None) -> None:
         del reason
@@ -191,68 +132,25 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
             request = coerce_jsonrpc_request_envelope(decoded)
             if request is None:
                 notification = coerce_jsonrpc_notification_envelope(decoded)
-                _ = await dispatch_editor_rpc_request(
-                    notification["method"],
-                    notification["params"],
-                    source_client=source_client,
-                    active_project=editor_runtime_active_project,
-                    normalize_abs_path=editor_runtime_normalize_abs_path,
-                    is_under_project=editor_runtime_is_under_project,
-                    runtime_meta=editor_runtime_meta,
-                    read_file_payload=editor_runtime_read_file_payload,
-                    read_disk_text=editor_runtime_read_disk_text,
-                    get_cached_document=editor_runtime_get_cached_document,
-                    record_sidecar_open_file=editor_runtime_record_sidecar_open_file,
-                    emit_open_state_changed=editor_runtime_emit_open_state_changed,
-                    emit_to_room=lambda event_name, payload: editor_runtime_emit_room_event(
-                        event_name,
-                        payload,
-                        client_instance_id=source_client,
-                    ),
-                    notify_draft_state_changed=editor_runtime_notify_draft_state_changed,
-                    record_save_sha=editor_runtime_record_save_sha,
-                    record_file_activity=editor_runtime_record_file_activity,
-                    handle_scroll_state=editor_runtime_handle_scroll_state,
-                    handle_model_ready=editor_runtime_handle_model_ready,
-                    resolve_save_snapshot_response=editor_runtime_resolve_save_snapshot_response,
-                    handle_issues_dump_response=editor_runtime_handle_issues_dump_response,
-                    handle_breadcrumb_navigate=editor_runtime_handle_breadcrumb_navigate,
+                _ = await dispatch_editor_runtime_request(
+                    notification["method"], notification["params"], source_client=source_client,
                 )
                 return
 
             request_id = request["id"]
-            result = await dispatch_editor_rpc_request(
-                request["method"],
-                request["params"],
-                source_client=source_client,
-                active_project=editor_runtime_active_project,
-                normalize_abs_path=editor_runtime_normalize_abs_path,
-                is_under_project=editor_runtime_is_under_project,
-                runtime_meta=editor_runtime_meta,
-                read_file_payload=editor_runtime_read_file_payload,
-                read_disk_text=editor_runtime_read_disk_text,
-                get_cached_document=editor_runtime_get_cached_document,
-                record_sidecar_open_file=editor_runtime_record_sidecar_open_file,
-                emit_open_state_changed=editor_runtime_emit_open_state_changed,
-                emit_to_room=lambda event_name, payload: editor_runtime_emit_room_event(
-                    event_name,
-                    payload,
-                    client_instance_id=source_client,
-                ),
-                notify_draft_state_changed=editor_runtime_notify_draft_state_changed,
-                record_save_sha=editor_runtime_record_save_sha,
-                record_file_activity=editor_runtime_record_file_activity,
-                handle_scroll_state=editor_runtime_handle_scroll_state,
-                handle_model_ready=editor_runtime_handle_model_ready,
-                resolve_save_snapshot_response=editor_runtime_resolve_save_snapshot_response,
-                handle_issues_dump_response=editor_runtime_handle_issues_dump_response,
-                handle_breadcrumb_navigate=editor_runtime_handle_breadcrumb_navigate,
+            result = await dispatch_editor_runtime_request(
+                request["method"], request["params"], source_client=source_client,
             )
-            await self._publish_result_notification(sid, request["method"], result)
-            await emit_editor_rpc_result(
-                lambda event_name, payload: self._emit_to_sid(sid, event_name, payload),
-                request["id"],
-                result,
+            await publish_editor_result(
+                method=request["method"],
+                request_id=request["id"],
+                result=result,
+                deliver=lambda notification: self._deliver_notification(sid, notification),
+                reply=lambda request_id, result: emit_editor_rpc_result(
+                    lambda event_name, payload: self._emit_to_sid(sid, event_name, payload),
+                    request_id,
+                    result,
+                ),
             )
         except EditorRpcProtocolError as exc:
             await emit_editor_rpc_error(

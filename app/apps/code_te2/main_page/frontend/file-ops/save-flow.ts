@@ -12,15 +12,11 @@ interface SaveFileParams {
 
 interface SaveFlowControllerDeps {
   clientId: string;
-  setInflightOpId: (id: string | null) => void;
-  setLastSaveTime: (ts: number) => void;
   getLastSha256: () => string | null;
   setLastSha256: (sha: string | null) => void;
   setLastSavedContent: (content: string) => void;
   markUnsaved: (flag: boolean) => void;
   syncSessionPath: () => void;
-  apiPost: (path: string, body: Record<string, unknown>) => Promise<unknown>;
-  apiGet: (path: string) => Promise<unknown>;
   saveFileViaEditorSocket: (payload: Record<string, unknown>, timeoutMs?: number) => Promise<unknown>;
   setStatus: (text: string) => void;
   getUnsaved: () => boolean;
@@ -36,8 +32,6 @@ interface SaveFlowControllerDeps {
   detectLanguageFromFilename: (path: string) => string | null;
   updatePathDisplay: () => void;
   openFile?: (path: string, options?: Record<string, unknown>) => Promise<unknown>;
-  closeWebSocket: () => void;
-  openWebSocket: (path: string) => void | Promise<void>;
   getCachedProjectRoot: () => string | null;
   getEditorState: () => unknown;
   setEditorState: (state: unknown) => void;
@@ -74,52 +68,6 @@ function responseData(response: Record<string, unknown>): Record<string, unknown
 }
 
 export function createSaveFlowController(deps: SaveFlowControllerDeps) {
-  async function doSave(targetPath: string, content: string): Promise<{ success: boolean; result?: unknown; error?: string }> {
-    const opId = `op_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    deps.setInflightOpId(opId);
-    deps.setLastSaveTime(Date.now());
-    const payload: Record<string, unknown> = { path: targetPath, content, client_id: deps.clientId, op_id: opId };
-    const lastSha = deps.getLastSha256();
-    if (lastSha) payload.base = { sha256: lastSha };
-    try {
-      const result = await deps.apiPost('write', payload);
-      const resultRecord = responseRecord(result);
-      deps.setLastSha256(stringValue(resultRecord.sha256) || deps.getLastSha256());
-      deps.setLastSavedContent(content);
-      deps.markUnsaved(false);
-      deps.syncSessionPath();
-      return { success: true, result };
-    } catch (error) {
-      deps.setInflightOpId(null);
-      const errorRecord = responseRecord(error);
-      const response = responseRecord(errorRecord.response);
-      if (errorRecord.status === 409 || response.error === 'BASE_MISMATCH') {
-        try {
-          const latest = responseRecord(await deps.apiGet(`read?path=${encodeURIComponent(targetPath)}`));
-          deps.setLastSha256(stringValue(latest.sha256));
-          if (await window.teUI.dialog.confirm('File was modified externally. Retry save and overwrite?')) {
-            const retryPayload: Record<string, unknown> = {
-              path: targetPath,
-              content,
-              client_id: deps.clientId,
-              op_id: `${opId}_retry`,
-            };
-            const retryResult = await deps.apiPost('write', retryPayload);
-            const retryRecord = responseRecord(retryResult);
-            deps.setLastSha256(stringValue(retryRecord.sha256) || deps.getLastSha256());
-            deps.setLastSavedContent(content);
-            deps.markUnsaved(false);
-            return { success: true, result: retryResult };
-          }
-          return { success: false, error: 'Conflict - user cancelled' };
-        } catch (retryErr) {
-          return { success: false, error: `Conflict resolution failed: ${errorMessage(retryErr)}` };
-        }
-      }
-      return { success: false, error: errorMessage(error) };
-    }
-  }
-
   async function saveFile(params: SaveFileParams = {}): Promise<unknown> {
     const { currentPath, currentPathExists, isAutosave = false, onMissingPath } = params;
     deps.setStatus('Saving...');
@@ -220,8 +168,6 @@ export function createSaveFlowController(deps: SaveFlowControllerDeps) {
         deps.setLastPickerPath(deps.parentDir(targetAbs));
         deps.setCurrentModeLanguage(deps.detectLanguageFromFilename(targetAbs));
         deps.updatePathDisplay();
-        deps.closeWebSocket();
-        deps.openWebSocket(targetAbs);
       }
       deps.setStatus('Saved');
       setTimeout(() => { if (!deps.getUnsaved()) deps.setStatus(''); }, 1500);
@@ -231,5 +177,5 @@ export function createSaveFlowController(deps: SaveFlowControllerDeps) {
     }
   }
 
-  return { doSave, saveFile, saveAsDialog };
+  return { saveFile, saveAsDialog };
 }

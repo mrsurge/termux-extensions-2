@@ -2,16 +2,18 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 import os
 import stat
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from typing import cast
+from typing import cast, override
 from framework_shells.record import ShellRecord
 
 from app.apps.code_te2 import code_server_shell_manager as code_server
+from app.apps.code_te2 import code_server_install_state
 from app.apps.code_te2 import workbench_adapter_shell_manager as adapter
 from app.apps.code_te2.node_compile_cache import node_compile_cache
 
@@ -43,12 +45,20 @@ class CompileCacheTests(unittest.TestCase):
 
 
 class LaunchSerializationTests(unittest.IsolatedAsyncioTestCase):
+    @override
+    async def asyncSetUp(self) -> None:
+        # Launch fixtures must not inspect or persist the user's installed runtime.
+        selected = patch.object(code_server_install_state, "selected_installation", return_value=None)
+        _ = selected.start()
+        self.addCleanup(selected.stop)
+
     async def test_code_server_launches_do_not_overlap(self) -> None:
         entered = asyncio.Event()
         release = asyncio.Event()
         calls = 0
 
-        async def launch(_root: str) -> code_server.ShellRecord:
+        async def launch(_root: str, *, on_spawned: Callable[[ShellRecord], None]) -> code_server.ShellRecord:
+            del on_spawned
             nonlocal calls
             calls += 1
             entered.set()
@@ -57,12 +67,13 @@ class LaunchSerializationTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(code_server, "_spawn_lock", asyncio.Lock()), patch.object(code_server, "_ensure_code_server_shell", launch):
             first = asyncio.create_task(code_server.ensure_code_server_shell("/project"))
-            _ = await entered.wait()
+            # Bound synchronization so a mock signature regression fails, not hangs.
+            _ = await asyncio.wait_for(entered.wait(), 2)
             second = asyncio.create_task(code_server.ensure_code_server_shell("/project"))
             await asyncio.sleep(0)
             self.assertEqual(calls, 1)
             release.set()
-            _ = await asyncio.gather(first, second)
+            _ = await asyncio.wait_for(asyncio.gather(first, second), 2)
             self.assertEqual(calls, 2)
 
     async def test_adapter_launch_cancellation_releases_ownership(self) -> None:
@@ -79,7 +90,7 @@ class LaunchSerializationTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(adapter, "_spawn_lock", asyncio.Lock()), patch.object(adapter, "_ensure_workbench_adapter_shell", launch):
             first = asyncio.create_task(adapter.ensure_workbench_adapter_shell("/project", "http://localhost"))
-            _ = await entered.wait()
+            _ = await asyncio.wait_for(entered.wait(), 2)
             second = asyncio.create_task(adapter.ensure_workbench_adapter_shell("/project", "http://localhost"))
             await asyncio.sleep(0)
             self.assertEqual(calls, 1)
@@ -87,5 +98,5 @@ class LaunchSerializationTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(asyncio.CancelledError):
                 _ = await first
             release.set()
-            _ = await second
+            _ = await asyncio.wait_for(second, 2)
             self.assertEqual(calls, 2)

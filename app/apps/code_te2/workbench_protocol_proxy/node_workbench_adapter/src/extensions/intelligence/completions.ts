@@ -1,4 +1,6 @@
 import type { ProviderDocument } from "../provider-registry";
+import { completionTrace } from "../../server/runtime-debug.mjs";
+import { completionTimeouts } from "../../protocol/completion-timeouts.mjs";
 
 export interface CompletionPendingOptions {
   timeoutMs: number;
@@ -199,13 +201,28 @@ export function inflateCompletionItems(dto: unknown, log: (message: string) => v
 }
 
 export async function provideCompletions(runtime: CompletionRuntime, params: unknown = {}): Promise<Record<string, unknown>> {
+  const input = isRecord(params) ? params : {};
+  const request = completionTrace.record("completion.begin", {
+    language: input.languageId, path: input.path, frontendRequest: input.debugRequestId,
+  });
+  try {
+    const result = await runCompletions(runtime, params, request);
+    completionTrace.record("completion.end", { request, ok: result.ok });
+    return result;
+  } catch (error) {
+    completionTrace.record("completion.failed", { request });
+    throw error;
+  }
+}
+
+async function runCompletions(runtime: CompletionRuntime, params: unknown, request: number): Promise<Record<string, unknown>> {
   runtime.ensureConnected();
   const input = isRecord(params) ? params : {};
   const authority = String(input.authority ?? runtime.defaultAuthority());
   const path = String(input.path ?? "");
   const lineNumber = Number(input.lineNumber ?? 1);
   const column = Number(input.column ?? 1);
-  const timeoutMs = Number(input.timeoutMs ?? 10000);
+  const timeoutMs = completionTimeouts(input.timeoutMs).providerMs;
   const languageId = String(input.languageId || "") || runtime.languageIdFromPath(path) || "plaintext";
   const triggerKind = Number(input.triggerKind ?? 0);
   const triggerCharacter = input.triggerCharacter ?? undefined;
@@ -219,6 +236,7 @@ export async function provideCompletions(runtime: CompletionRuntime, params: unk
   runtime.log(`[completions] path=${path} lang=${languageId} line=${lineNumber} col=${column} trigger=${triggerKind}`);
 
   if (input.text != null && path) {
+    completionTrace.record("completion.sync.begin", { request });
     try {
       const syncResult = await ensureCompletionTextSynced(
         runtime,
@@ -230,9 +248,11 @@ export async function provideCompletions(runtime: CompletionRuntime, params: unk
         timeoutMs,
       );
       const result = isRecord(syncResult) ? syncResult : {};
+      completionTrace.record("completion.sync.end", { request });
       runtime.log(`[completions] pre-flight didChange ack path=${path} ver=${result.versionId ?? "?"} type=${result.ackType ?? "?"}`);
     } catch (error) {
       const message = errorMessage(error);
+      completionTrace.record("completion.sync.failed", { request });
       runtime.warn("[completions] pre-flight didChange failed", message);
       return { ok: false, error: `didChange_ack_failed: ${message}` };
     }
@@ -254,11 +274,13 @@ export async function provideCompletions(runtime: CompletionRuntime, params: unk
 
   let handles = runtime.findAllProviderHandles("completions", document);
   if (handles.length === 0) {
+    completionTrace.record("completion.providerWait.begin", { request, language: languageId });
     await runtime.waitFor(
       () => runtime.findAllProviderHandles("completions", document).length > 0,
       { timeoutMs: Math.min(timeoutMs, 5000), intervalMs: 50 },
     );
     handles = runtime.findAllProviderHandles("completions", document);
+    completionTrace.record("completion.providerWait.end", { request, count: handles.length });
   }
   if (handles.length === 0) return { ok: false, error: `no completions provider for language '${languageId}'` };
 
@@ -269,18 +291,25 @@ export async function provideCompletions(runtime: CompletionRuntime, params: unk
   if (triggerCharacter != null) context.triggerCharacter = triggerCharacter;
 
   const results = await Promise.all(handles.map((handle) => {
+    completionTrace.record("completion.rpc.sent", { request, handle });
     const { promise } = runtime.sendExtPending(
       runtime.languageFeaturesRpcId,
       "$provideCompletionItems",
       [handle, uriObj, { lineNumber, column }, context],
       true,
       {
-        timeoutMs: timeoutMs + 5000,
+        timeoutMs,
         timeoutMessage: "timed out waiting for completions reply",
         timeoutResult: null,
       },
     );
-    return promise.catch(() => null);
+    return promise.then(reply => {
+      completionTrace.record("completion.rpc.reply", { request, handle, replyType: replyType(reply) });
+      return reply;
+    }, () => {
+      completionTrace.record("completion.rpc.failed", { request, handle });
+      return null;
+    });
   }));
 
   let mergedItems: Record<string, unknown>[] = [];
@@ -305,6 +334,7 @@ export async function provideCompletions(runtime: CompletionRuntime, params: unk
 }
 
 export async function provideCompletionSingle(runtime: CompletionRuntime, params: CompletionSingleParams): Promise<Record<string, unknown>> {
+  const request = completionTrace.record("completion.single.begin", { handle: params.providerHandle });
   runtime.ensureConnected();
   const uriObj = runtime.uriForPath(params.path, params.authority);
   const context: Record<string, unknown> = { triggerKind: params.triggerKind };
@@ -316,11 +346,17 @@ export async function provideCompletionSingle(runtime: CompletionRuntime, params
     [params.providerHandle, uriObj, { lineNumber: params.lineNumber, column: params.column }, context],
     true,
     {
-      timeoutMs: params.timeoutMs + 5000,
+      timeoutMs: completionTimeouts(params.timeoutMs).providerMs,
       timeoutMessage: "timed out waiting for completions reply",
     },
   );
-  const reply = await promise;
+  let reply: unknown;
+  try { reply = await promise; }
+  catch (error) {
+    completionTrace.record("completion.single.failed", { request });
+    throw error;
+  }
+  completionTrace.record("completion.single.reply", { request, replyType: replyType(reply) });
 
   if (replyType(reply) === 9) {
     const raw = replyResult(reply);

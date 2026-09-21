@@ -42,7 +42,6 @@ async def handle_project_open(
         switch_adapter_workspace=True,
         open_state_reason="explorer_project_open",
     )
-    context.set_project_root(switch_result.project_root)
     await context.emit_personal(
         "explorer.project.opened",
         {
@@ -106,7 +105,6 @@ async def handle_git_clone(
         switch_adapter_workspace=False,
         open_state_reason="explorer_git_clone",
     )
-    context.set_project_root(switch_result.project_root)
 
     op_id = worker_git_service.new_git_job_op_id("git_clone")
     remember_tracked_job(switch_result.project_root, context.tracked_job_ids, op_id)

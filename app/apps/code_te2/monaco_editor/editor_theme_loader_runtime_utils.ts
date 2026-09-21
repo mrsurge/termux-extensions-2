@@ -51,5 +51,10 @@ export async function loadVscodeTextmateThemesRuntime(opts: ThemeLoaderRuntimeOp
     }
     options.state.done = true;
   })();
-  return options.state.promise;
+  try {
+    return await options.state.promise;
+  } finally {
+    // A failed catalog request must not poison all later reconnect attempts.
+    options.state.promise = null;
+  }
 }

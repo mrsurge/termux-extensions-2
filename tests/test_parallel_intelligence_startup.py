@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import unittest
 from collections.abc import Awaitable, Callable
-from typing import cast
+from typing import cast, override
 from unittest.mock import AsyncMock, patch
 from framework_shells.record import ShellRecord
 
@@ -12,9 +12,11 @@ from app.apps.code_te2 import code_server_install_state
 from app.apps.code_te2 import intelligence_startup as startup
 from app.apps.code_te2 import workbench_adapter_shell_manager as adapter
 from app.apps.code_te2 import code_server_shell_manager as code_server
+from app.apps.code_te2 import intelligence_bootstrap_gate as gate
 
 
 class ParallelStartupTests(unittest.IsolatedAsyncioTestCase):
+    @override
     async def asyncSetUp(self) -> None:
         selected = patch.object(code_server_install_state, "selected_installation", return_value=None)
         _ = selected.start()
@@ -106,6 +108,40 @@ class ParallelStartupTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(TimeoutError):
                 await startup.prime_intelligence_runtime("/project")
         self.assertTrue(finished.is_set())
+
+    async def test_both_readiness_orders_gate_connect(self) -> None:
+        for app_first in (True, False):
+            prepared, code_ready, connected = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+            async def code(_root: str, *, on_spawned: Callable[[code_server.ShellRecord], None]) -> code_server.ShellRecord:
+                record = cast(code_server.ShellRecord, object())
+                on_spawned(record)
+                _ = await code_ready.wait()
+                return record
+
+            async def wba(_root: str, _http: str, _socket: str | None, *, wait_for_dependency: Callable[[], Awaitable[None]]) -> object:
+                prepared.set()
+                await wait_for_dependency()
+                connected.set()
+                return object()
+
+            gate.hold_application()
+            try:
+                with patch.object(startup, "ensure_code_server_shell", code), patch.object(startup, "ensure_workbench_adapter_shell", wba), patch.object(startup, "code_server_connection_target", return_value=("http://localhost", "/test.sock")):
+                    task = asyncio.create_task(startup.prime_intelligence_runtime("/project"))
+                    _ = await asyncio.wait_for(prepared.wait(), 1)
+                    if app_first:
+                        gate.release_application()
+                    else:
+                        code_ready.set()
+                    await asyncio.sleep(0)
+                    self.assertFalse(connected.is_set())
+                    code_ready.set()
+                    gate.release_application()
+                    await asyncio.wait_for(task, 1)
+                    self.assertTrue(connected.is_set())
+            finally:
+                gate.reset_application()
 
     async def test_cancelled_dependency_keeps_prepared_shell_for_retry(self) -> None:
         async def cancelled() -> None:

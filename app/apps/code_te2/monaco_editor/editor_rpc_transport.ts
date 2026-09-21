@@ -28,6 +28,12 @@ interface PendingRequestEntry {
   method: string;
 }
 
+interface ConnectionWaiter {
+  timer: ReturnType<typeof setTimeout>;
+  resolve(): void;
+  reject(error: Error): void;
+}
+
 interface EditorRpcTransportDeps {
   getSocket(): EditorRpcSocketLike | null;
   setTimeoutFn(callback: () => void, delayMs: number): ReturnType<typeof setTimeout>;
@@ -53,6 +59,7 @@ function clearSocketReplayBuffer(socket: EditorRpcSocketLike | null | undefined)
 export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
   attachSocket(socket: EditorRpcSocketLike): void;
   isConnected(): boolean;
+  waitUntilConnected(timeoutMs?: number): Promise<void>;
   call(method: EditorRpcMethodName, params: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<unknown>;
   publishReliable(method: EditorRpcMethodName, params: Record<string, unknown>, opts?: { timeoutMs?: number }): boolean;
   notify(method: EditorRpcMethodName | EditorRpcNotificationName, params: Record<string, unknown>): boolean;
@@ -60,9 +67,34 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
   getPendingRequests(): Map<string, PendingRequestEntry>;
 } {
   const pending = new Map<string, PendingRequestEntry>();
+  const connectionWaiters = new Set<ConnectionWaiter>();
   const notificationHandlers = new Map<string, Set<(params: Record<string, unknown>) => void>>();
   let nextId = 1;
   let attached = false;
+
+  function settleConnectionWaiters(error?: Error): void {
+    for (const waiter of connectionWaiters) {
+      deps.clearTimeoutFn(waiter.timer);
+      if (error) waiter.reject(error);
+      else waiter.resolve();
+    }
+    connectionWaiters.clear();
+  }
+
+  // Wait on the existing socket's events, never polling or starting another lane.
+  function waitUntilConnected(timeoutMs = 12000): Promise<void> {
+    if (isConnected()) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const waiter: ConnectionWaiter = {
+        resolve, reject,
+        timer: deps.setTimeoutFn(() => {
+          connectionWaiters.delete(waiter);
+          reject(new Error('editor rpc connection timed out'));
+        }, timeoutMs),
+      };
+      connectionWaiters.add(waiter);
+    });
+  }
 
   function rejectAllPending(message: string): void {
     for (const [key, entry] of pending.entries()) {
@@ -125,11 +157,14 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
     if (attached || !socket || typeof socket.on !== 'function') return;
     attached = true;
     socket.on(EDITOR_RPC_EVENT, handleMessage);
+    socket.on('connect', () => settleConnectionWaiters());
     socket.on('disconnect', () => {
+      settleConnectionWaiters(new Error('editor rpc socket disconnected'));
       clearSocketReplayBuffer(socket);
       rejectAllPending('editor rpc socket disconnected');
     });
     socket.on('connect_error', () => {
+      settleConnectionWaiters(new Error('editor rpc socket connect error'));
       clearSocketReplayBuffer(socket);
       rejectAllPending('editor rpc socket connect error');
     });
@@ -221,6 +256,7 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
   return {
     attachSocket,
     isConnected,
+    waitUntilConnected,
     call,
     publishReliable,
     notify,

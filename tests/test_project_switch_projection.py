@@ -172,6 +172,7 @@ class ProjectSwitchProjectionTests(unittest.TestCase):
             explorer_emissions.append((method, payload))
 
         with (
+            patch.object(project_switch_events, "current_project_generation", return_value=9),
             patch.object(
                 project_switch_events,
                 "_emit_project_switch_notification",
@@ -200,6 +201,7 @@ class ProjectSwitchProjectionTests(unittest.TestCase):
         with (
             patch.object(project_switch, "set_project_root", return_value=Path("/workspace/new")),
             patch.object(project_switch, "next_project_generation", return_value=11),
+            patch.object(project_switch, "current_project_generation", return_value=11),
             patch.object(project_switch, "publish", side_effect=record_event),
             patch.object(project_switch, "reset_project_session", new=AsyncMock(return_value=False)),
             patch.object(project_switch.manager, "reassign_all"),

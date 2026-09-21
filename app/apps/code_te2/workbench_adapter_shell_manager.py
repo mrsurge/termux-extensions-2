@@ -16,6 +16,7 @@ from app.libs.messagepack_stream import MessagePackStream, encode_message
 
 from .code_te2_paths import code_te2_paths
 from .node_compile_cache import node_compile_cache
+from .intelligence_bootstrap_gate import application_is_ready, wait_for_application
 from .workbench_runtime_discovery import workbench_runtime_discovery
 from .diagnostics_latency_metrics import (
     diagnostics_latency_metrics_enabled,
@@ -68,6 +69,11 @@ def _json_object(value: object) -> JsonObject:
 
 
 
+def get_adapter_shell_id() -> str | None:
+    """Return current process ownership without launching or adopting a shell."""
+    return _active_shell_id
+
+
 def get_adapter_state() -> dict[str, object]:
     """Return a copy of the current adapter lifecycle state."""
     return dict(_adapter_state)
@@ -75,6 +81,10 @@ def get_adapter_state() -> dict[str, object]:
 
 async def _publish_adapter_state_fact() -> None:
     """Publish the current adapter state as a backend fact."""
+    # Preparation can precede app imports. Keep the latest state here; lifecycle
+    # publishes it once project initialization and fact subscription are complete.
+    if not application_is_ready():
+        return
     try:
         from .adapter_lifecycle_events import publish_adapter_state_changed
 
@@ -98,6 +108,16 @@ def _set_adapter_state(status: str, project: Optional[str] = None, error: Option
     _adapter_state["status"] = status
     _adapter_state["project"] = project
     _adapter_state["error"] = error
+
+
+async def publish_current_adapter_state() -> None:
+    await _publish_adapter_state_fact()
+
+
+async def stop_adapter_io() -> None:
+    """Close worker-owned readers without terminating reusable managed shells."""
+    await _clear_stdout_subscription()
+    _fail_pending_rpcs("adapter worker stopped")
 
 
 def _normalized_project_path(value: object) -> str | None:
@@ -446,6 +466,9 @@ async def _drain_pushes() -> None:
     global _push_drain_task
 
     try:
+        # Adopted shells may already emit pushes during assembly. Keep ordered
+        # delivery behind the gate without blocking the reader's RPC replies.
+        await wait_for_application()
         while _pending_pushes:
             batch = _pending_pushes.popleft()
             obj: JsonObject = batch["obj"]
@@ -541,7 +564,10 @@ async def _handle_push_event(
         log.debug("[push] ignored legacy adapter push frame; direct WBA socket owns editor notifications")
 
 
-async def adapter_rpc(method: str, params: JsonObject | None = None, timeout: float = 30.0) -> JsonObject:
+async def adapter_rpc(
+    method: str, params: JsonObject | None = None, timeout: float = 30.0,
+    *, expected_shell_id: str | None = None,
+) -> JsonObject:
     """Send a JSON-RPC request to the adapter over stdio and await the response.
 
     Returns the full JSON-RPC response object (with 'result' or 'error').
@@ -560,6 +586,9 @@ async def adapter_rpc(method: str, params: JsonObject | None = None, timeout: fl
         shell_id = _active_shell_id
         if not shell_id:
             raise RuntimeError("Adapter pipe not available — shell not started")
+        # Debug callers must never silently follow a replacement WBA process.
+        if expected_shell_id is not None and shell_id != expected_shell_id:
+            raise RuntimeError("runtimeDebug.staleShell")
 
         if not await _ensure_live_adapter_io(shell_id):
             raise RuntimeError("Adapter pipe not available — shell missing live pipe capabilities")

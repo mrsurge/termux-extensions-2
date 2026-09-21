@@ -9,10 +9,10 @@ just the manager without triggering the cycle.
 """
 
 import asyncio
-import json
+from collections.abc import Mapping
 import logging
 from pathlib import Path
-from typing import Mapping, Optional, Protocol
+from typing import Protocol
 
 JsonMessage = Mapping[str, object]
 
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 # Pure utility
 # ---------------------------------------------------------------------------
 
-def abs_to_rel(abs_path: str, project_root: str) -> Optional[str]:
+def abs_to_rel(abs_path: str, project_root: str) -> str | None:
     """Convert an absolute path into a project-root-relative path (best-effort)."""
     if not abs_path.strip():
         return None
@@ -50,17 +50,19 @@ class ExplorerConnection(Protocol):
 
     async def accept(self) -> None: ...
 
-    async def send_text(self, data: str) -> None: ...
+    # Application messages cross this injected boundary as DTOs, never wire text.
+    # The concrete transport alone owns encoding and socket addressing.
+    async def send_message(self, message: JsonMessage) -> None: ...
 
 class ConnectionManager:
-    def __init__(self):
+    def __init__(self) -> None:
         # Map: project_path -> List[WebSocket]
         self.active_connections: dict[str, list[ExplorerConnection]] = {}
         # Map: websocket -> project_path (for cleanup)
         self.ws_project_map: dict[ExplorerConnection, str] = {}
         self.pulse_task: asyncio.Task[None] | None = None
 
-    async def accept_and_register(self, websocket: ExplorerConnection, project_path: str):
+    async def accept_and_register(self, websocket: ExplorerConnection, project_path: str) -> None:
         # Some shims (Socket.IO) don't need accept; provide no-op if missing
         if hasattr(websocket, 'accept'):
             try:
@@ -69,7 +71,7 @@ class ConnectionManager:
                 pass
         self.register_existing(websocket, project_path)
 
-    def register_existing(self, websocket: ExplorerConnection, project_path: str):
+    def register_existing(self, websocket: ExplorerConnection, project_path: str) -> None:
         # Check if this is the very first connection globally
         was_empty = not any(self.active_connections.values())
         
@@ -93,7 +95,7 @@ class ConnectionManager:
         self.ws_project_map = {connection: project_path for connection in deduped}
         logger.info("Explorer clients reassigned to project: %s", project_path)
 
-    def disconnect(self, websocket: ExplorerConnection):
+    def disconnect(self, websocket: ExplorerConnection) -> None:
         project_path = self.ws_project_map.get(websocket)
         if project_path and project_path in self.active_connections:
             if websocket in self.active_connections[project_path]:
@@ -110,21 +112,21 @@ class ConnectionManager:
         if not any(self.active_connections.values()):
             self.stop_pulse()
 
-    def start_pulse(self):
+    def start_pulse(self) -> None:
         """Start the heartbeat pulse task."""
         if self.pulse_task is None or self.pulse_task.done():
             loop = asyncio.get_event_loop()
             self.pulse_task = loop.create_task(self._pulse_loop())
             logger.info("[PULSE] Heart monitor started")
 
-    def stop_pulse(self):
+    def stop_pulse(self) -> None:
         """Stop the heartbeat pulse task."""
         if self.pulse_task:
-            self.pulse_task.cancel()
+            _ = self.pulse_task.cancel()
             self.pulse_task = None
             logger.info("[PULSE] Heart monitor stopped")
 
-    async def _pulse_loop(self):
+    async def _pulse_loop(self) -> None:
         """Periodically ping clients to ensure they are alive and keep connection active."""
         try:
             while True:
@@ -134,7 +136,7 @@ class ConnectionManager:
                 
                 # Broadcast pulse to all projects
                 for project_path in list(self.active_connections.keys()):
-                    await self.broadcast(
+                    _ = await self.broadcast(
                         project_path,
                         {"jsonrpc": "2.0", "method": "explorer.pulse", "params": {}},
                     )
@@ -143,7 +145,7 @@ class ConnectionManager:
         except Exception as e:
             logger.error(f"[PULSE] Error in pulse loop: {e}")
 
-    def _resolve_project_key(self, project_path: str) -> Optional[str]:
+    def _resolve_project_key(self, project_path: str) -> str | None:
         """Find the connection key that matches this project path."""
         if project_path in self.active_connections:
             return project_path
@@ -177,11 +179,11 @@ class ConnectionManager:
             )
             return False
         if resolved_key in self.active_connections:
-            text = json.dumps(message)
             sent = False
-            for connection in self.active_connections[resolved_key]:
+            # Delivery yields; use a snapshot so disconnects cannot skip peers.
+            for connection in list(self.active_connections[resolved_key]):
                 try:
-                    await connection.send_text(text)
+                    await connection.send_message(message)
                     sent = True
                 except Exception as e:
                     logger.warning(f"Failed to send broadcast: {e}")
@@ -191,19 +193,18 @@ class ConnectionManager:
     async def send_personal(self, websocket: ExplorerConnection, message: JsonMessage) -> None:
         """Send message to a single client."""
         try:
-            await websocket.send_text(json.dumps(message))
+            await websocket.send_message(message)
         except Exception as e:
             logger.warning(f"Failed to send personal message: {e}")
 
     async def send_client(self, client_instance_id: str, message: JsonMessage) -> bool:
         """Send to every Explorer presentation owned by one stable client."""
-        text = json.dumps(message)
         sent = False
         for connection in list(self.ws_project_map.keys()):
             if connection.client_instance_id != client_instance_id:
                 continue
             try:
-                await connection.send_text(text)
+                await connection.send_message(message)
                 sent = True
             except Exception as exc:
                 logger.warning("Failed to send client-scoped Explorer message: %s", exc)

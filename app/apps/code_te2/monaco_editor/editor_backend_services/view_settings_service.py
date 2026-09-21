@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import cast
 
-from fastapi import HTTPException
+from .outcomes import EditorServiceError
 
 from .protocols import EditorLike
 
@@ -102,12 +102,12 @@ def handle_set_view_settings(
         try:
             mapped_theme = resolve_theme_preference(theme_name)
         except RuntimeError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
+            raise EditorServiceError(kind="invalid", detail=str(exc))
         if editor:
             editor.set_theme(mapped_theme)
 
     if editor_updates:
-        update_editor_preferences(editor_updates)
+        _ = update_editor_preferences(editor_updates)
 
     return {"ok": True}
 
@@ -125,7 +125,7 @@ def handle_set_font_scale(
         try:
             scale = resolve_font_scale(data.get("scale"))
         except RuntimeError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
+            raise EditorServiceError(kind="invalid", detail=str(exc))
 
         if editor:
             try:
@@ -133,21 +133,21 @@ def handle_set_font_scale(
                 print(f"[EDITOR] Font scale changed to: {scale}", file=sys.stderr)
             except Exception as exc:
                 print(f"[EDITOR] Failed to set font scale: {exc}", file=sys.stderr)
-                raise HTTPException(status_code=500, detail=f"Failed to apply font scale: {exc}")
+                raise EditorServiceError(kind="internal", detail=f"Failed to apply font scale: {exc}")
 
         try:
-            update_editor_preferences({"fontScale": scale})
+            _ = update_editor_preferences({"fontScale": scale})
             print(f"[EDITOR] Persisted font scale: {scale} globally", file=sys.stderr)
         except Exception as exc:
             print(f"[EDITOR] Failed to persist font scale: {exc}", file=sys.stderr)
-            raise HTTPException(status_code=500, detail=f"Failed to persist font scale: {exc}")
+            raise EditorServiceError(kind="internal", detail=f"Failed to persist font scale: {exc}")
 
         return {"ok": True, "data": {"fontScale": scale}}
-    except HTTPException:
+    except EditorServiceError:
         raise
     except Exception as exc:
         import traceback
 
         print(f"[EDITOR] Unexpected error in set_font_scale: {exc}", file=sys.stderr)
         print(traceback.format_exc(), file=sys.stderr)
-        raise HTTPException(status_code=500, detail=f"Internal error: {exc}")
+        raise EditorServiceError(kind="internal", detail=f"Internal error: {exc}")

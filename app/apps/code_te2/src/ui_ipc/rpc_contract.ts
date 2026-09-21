@@ -4,6 +4,14 @@ import type { JsonObject, JsonRpcNotificationEnvelope } from '../rpc/transport.t
 export const UI_IPC_RPC_NAMESPACE = RPC_NAMESPACES.uiIpc;
 
 export const UI_IPC_RPC_METHODS = {
+  hostThemesList: 'ui.host.themes.list',
+  hostEditorStateGet: 'ui.host.editorState.get',
+  hostProjectsList: 'ui.host.projects.list',
+  hostProjectsReset: 'ui.host.projects.reset',
+  hostProjectsRemove: 'ui.host.projects.remove',
+  hostProjectsOpen: 'ui.host.projects.open',
+  hostSessionUpdate: 'ui.host.session.update',
+  hostDiagnosticsExport: 'ui.host.diagnostics.export',
   hostHistoryOpen: 'ui.host.history.open',
   hostComparison: 'ui.host.comparison',
   hostFileOpen: 'ui.host.file.open',

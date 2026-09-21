@@ -5,13 +5,16 @@ traffic isolated from editor/console chatter.
 """
 
 import time
-from typing import Awaitable, Protocol, cast
+from collections.abc import Awaitable
+from typing import Protocol, cast
 
 from ..explorer.services.file_ops import get_project_root
 from ..sidebar_window_events import publish_sidebar_window_state_changed
 from ..stores import get_history_store, get_preferences_store
-from .rpc_contract import (
-    UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOWS_CHANGED,
+from .sidebar_projection_service import (
+    SidebarProjection,
+    build_client_state_projection,
+    build_window_snapshot_projection,
 )
 from .sidebar_rpc_contract import (
     SIDEBAR_IPC_RPC_METHOD_AGENT_EDITS_CLEAR,
@@ -46,7 +49,6 @@ from .sidebar_rpc_contract import (
     SIDEBAR_IPC_RPC_METHOD_WINDOW_READINESS_UPDATE,
     SIDEBAR_IPC_RPC_METHOD_WINDOW_STATE_UPDATE,
     SIDEBAR_IPC_RPC_NOTIFICATION_ACTIVE_SHORTCUT_REFRESH,
-    SIDEBAR_IPC_RPC_NOTIFICATION_CLIENT_STATE,
     SIDEBAR_IPC_RPC_NOTIFICATION_CWD_SET,
     SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_CLOSE,
     SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_OPEN,
@@ -56,7 +58,6 @@ from .sidebar_rpc_contract import (
     SIDEBAR_IPC_RPC_NOTIFICATION_MENTION,
     SIDEBAR_IPC_RPC_NOTIFICATION_PRESENCE,
     SIDEBAR_IPC_RPC_NOTIFICATION_PROJECT_OPENED,
-    SIDEBAR_IPC_RPC_NOTIFICATION_WINDOWS_CHANGED,
     SIDEBAR_IPC_RPC_NOTIFICATION_WINDOW_FOCUSED,
     SidebarIpcRpcProtocolError,
     build_jsonrpc_error,
@@ -153,16 +154,6 @@ def _app_id_aliases(app_id: object) -> set[str]:
     return aliases
 
 
-def _client_state_payload(client_id: str) -> JsonObject:
-    safe_client_id = _norm(client_id)
-    return {
-        "client_id": safe_client_id,
-        "clientId": safe_client_id,
-        "activeShortcutId": _norm(_client_active_shortcuts.get(safe_client_id)),
-        "ts": int(time.time() * 1000),
-    }
-
-
 def _sidebar_window_activated_payload(client_id: str, host_id: str) -> JsonObject:
     safe_client_id = _norm(client_id)
     safe_host_id = _norm(host_id)
@@ -184,29 +175,40 @@ async def _emit_rpc_notification(ns: SidebarNamespace, method: str, params: Json
 
 
 async def _emit_ui_ipc_sidebar_notification(method: str, params: JsonObject) -> None:
-    from .ui_ipc_ws import emit_ui_ipc_rpc_notification
+    from .notifications import emit_ui_ipc_rpc_notification
 
     await emit_ui_ipc_rpc_notification(method, params)
 
 
-async def _emit_client_state(ns: SidebarNamespace, client_id: str, *, to_sid: str | None = None, skip_sid: str | None = None) -> None:
-    state_payload = _client_state_payload(client_id)
-    if to_sid:
-        await _emit_rpc_notification(ns, SIDEBAR_IPC_RPC_NOTIFICATION_CLIENT_STATE, state_payload, to_sid=to_sid)
+async def _deliver_direct_projection(ns: SidebarNamespace, projection: SidebarProjection) -> None:
+    # Direct/registration sends still propagate errors. Only ledger fact delivery
+    # is best-effort; share projection policy without merging failure contracts.
+    if projection.lane == "ui":
+        await _emit_ui_ipc_sidebar_notification(projection.method, projection.payload)
         return
-    await _emit_rpc_notification(ns, SIDEBAR_IPC_RPC_NOTIFICATION_CLIENT_STATE, state_payload, room=_client_room(client_id), skip_sid=skip_sid)
+    await _emit_rpc_notification(
+        ns, projection.method, projection.payload,
+        to_sid=projection.target if projection.scope == "connection" else None,
+        room=_client_room(projection.target or "") if projection.scope == "client" else "sidebar_ipc",
+        skip_sid=projection.exclude_connection,
+    )
+
+
+async def _emit_client_state(ns: SidebarNamespace, client_id: str, *, to_sid: str | None = None, skip_sid: str | None = None) -> None:
+    projection = build_client_state_projection(
+        client_id, _client_active_shortcuts.get(_norm(client_id)),
+        timestamp_ms=int(time.time() * 1000), connection=to_sid, exclude_connection=skip_sid,
+    )
+    await _deliver_direct_projection(ns, projection)
 
 
 async def _emit_sidebar_windows_changed(ns: SidebarNamespace, *, client_id: str | None = None, to_sid: str | None = None, skip_sid: str | None = None) -> None:
     from .sidebar_window_state import get_sidebar_window_state
 
-    payload = get_sidebar_window_state()
-    await _emit_ui_ipc_sidebar_notification(UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOWS_CHANGED, payload)
-    if to_sid:
-        await _emit_rpc_notification(ns, SIDEBAR_IPC_RPC_NOTIFICATION_WINDOWS_CHANGED, payload, to_sid=to_sid)
-        return
-    room = _client_room(client_id) if client_id else "sidebar_ipc"
-    await _emit_rpc_notification(ns, SIDEBAR_IPC_RPC_NOTIFICATION_WINDOWS_CHANGED, payload, room=room, skip_sid=skip_sid)
+    for projection in build_window_snapshot_projection(
+        get_sidebar_window_state(), client_id=client_id, connection=to_sid, exclude_connection=skip_sid,
+    ):
+        await _deliver_direct_projection(ns, projection)
 
 
 def _sidebar_window_focus_payload(client_id: str, host_id: str, source: object = "") -> JsonObject:

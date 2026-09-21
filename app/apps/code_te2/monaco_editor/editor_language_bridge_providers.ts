@@ -1,4 +1,5 @@
 import { provideWorkbenchCompletionItemsFromVscodeSuggest } from "./vscode_completion_vendor/suggest.js";
+import { traceCompletion } from "./editor_completion_trace.ts";
 import {
   provideWorkbenchInlayHintsFromVscodeMainThread,
   resolveWorkbenchInlayHintFromVscodeMainThread,
@@ -1062,12 +1063,20 @@ export function createEditorLanguageBridgeProviders(
               monacoTriggerKinds:
                 monacoRef.languages.CompletionTriggerKind || null,
               propertyKind: completionPropertyKind(deps),
-              adapterTimeoutMs: 8000,
-              callTimeoutMs: 10000,
               getCurrentPath: deps.getCurrentPath,
               absPathFromVscodeUri: deps.absPathFromVscodeUri,
-              callWorkbenchCompletions(params, opts) {
-                return deps.editorWorkbenchCall("completions", params, opts);
+              async callWorkbenchCompletions(params, opts) {
+                const request = traceCompletion("completion.sent", { language: langId });
+                try {
+                  const result = await deps.editorWorkbenchCall("completions", {
+                    ...params, ...(request ? { debugRequestId: request } : {}),
+                  }, opts);
+                  traceCompletion("completion.reply", { language: langId, request });
+                  return result;
+                } catch (error) {
+                  traceCompletion("completion.failed", { language: langId, request });
+                  throw error;
+                }
               },
             });
           } catch (_) {
@@ -1083,6 +1092,7 @@ export function createEditorLanguageBridgeProviders(
         : null;
     deps.languageBridge.completionProviderSignatureByLanguage[langId] =
       nextSignature;
+    traceCompletion("provider.monacoRegistered", { language: langId, handles: handles.join(",") });
     console.log(
       "[completions] registered aggregated provider bridge for lang=" +
         langId +

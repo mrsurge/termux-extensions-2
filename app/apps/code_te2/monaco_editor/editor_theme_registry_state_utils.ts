@@ -1,43 +1,60 @@
-interface ThemeRegistryEntryLike {
-  id?: string;
-  serveUrl?: string;
+import { parseThemeCatalog, type RequestThemeCatalog, type ThemeCatalogEntry } from '../src/theme_catalog.ts';
+
+export type ThemeRegistry = Record<string, ThemeCatalogEntry>;
+
+export interface ThemeRegistryState {
+  registry?: ThemeRegistry | null;
+  promise?: Promise<ThemeRegistry> | null;
 }
 
-type ThemeRegistryLike = Record<string, ThemeRegistryEntryLike>;
-
-interface ThemeRegistryStateLike {
-  registry?: unknown;
-  promise?: Promise<unknown> | null;
+export function createDocumentThemeGate(
+  waitUntilConnected: () => Promise<void>,
+  applyTheme: (theme: string) => Promise<void>,
+) {
+  let selectedTheme = 'github-dark';
+  let appliedTheme: string | null = null;
+  let pending: Promise<void> | null = null;
+  // Model consumers share this barrier. A later preference supersedes an older
+  // in-flight choice; no waiter may release until the latest choice is applied.
+  return {
+    async apply(theme: string): Promise<void> {
+      selectedTheme = theme || 'github-dark';
+      while (pending || appliedTheme !== selectedTheme) {
+        if (!pending) {
+          pending = Promise.resolve().then(async () => {
+            await waitUntilConnected();
+            while (appliedTheme !== selectedTheme) {
+              const next = selectedTheme;
+              await applyTheme(next);
+              appliedTheme = next;
+            }
+          }).finally(() => { pending = null; });
+        }
+        await pending;
+      }
+    },
+  };
 }
 
 export async function ensureThemeRegistryState(
-  state: ThemeRegistryStateLike,
-  fetchFn: (input: string, init?: RequestInit) => Promise<Response>,
-  buildUiUrlFn: (apiBase: string, path: string) => string,
-  apiBase: string,
-): Promise<ThemeRegistryLike> {
-  if (state && state.registry) return state.registry as ThemeRegistryLike;
-  if (state && state.promise) return state.promise as Promise<ThemeRegistryLike>;
-  state.promise = (async function (): Promise<ThemeRegistryLike> {
-    try {
-      const response = await fetchFn(buildUiUrlFn(apiBase, 'monaco_editor/available_themes'), { cache: 'no-store' });
-      if (!response.ok) throw new Error('HTTP ' + response.status);
-      const data = await response.json() as { themes?: ThemeRegistryEntryLike[] };
-      const themes = data && Array.isArray(data.themes) ? data.themes : [];
-      const registry: ThemeRegistryLike = {};
-      for (let index = 0; index < themes.length; index += 1) {
-        const theme = themes[index];
-        if (theme && theme.id && theme.serveUrl) registry[theme.id] = theme;
-      }
-      state.registry = registry;
-      return registry;
-    } catch (error) {
-      console.warn('[MonacoTheme] _ensureThemeRegistry failed', error);
-      state.registry = {};
-      return state.registry as ThemeRegistryLike;
-    } finally {
-      state.promise = null;
-    }
-  })();
-  return state.promise as Promise<ThemeRegistryLike>;
+  state: ThemeRegistryState,
+  requestCatalog: RequestThemeCatalog,
+): Promise<ThemeRegistry> {
+  if (state.registry) return state.registry;
+  if (state.promise) return state.promise;
+  // Share only successful metadata. A disconnected/failed RPC is not an empty
+  // catalog and must remain retryable after the surface reconnects.
+  const pending = Promise.resolve().then(requestCatalog).then((reply) => {
+    const { themes } = parseThemeCatalog(reply);
+    const registry: ThemeRegistry = Object.create(null);
+    for (const theme of themes) registry[theme.id] = theme;
+    state.registry = registry;
+    return registry;
+  });
+  state.promise = pending;
+  try {
+    return await pending;
+  } finally {
+    if (state.promise === pending) state.promise = null;
+  }
 }

@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 from ..adapter_lifecycle_events import register_adapter_lifecycle_event_bus_handlers
 from ..code_inspector_events import register_code_inspector_event_bus_handlers
 from ..explorer.services.runtime_notifications import set_explorer_event_loop
+from ..explorer.services.project_root_state import get_project_root
 from ..explorer.services.render_state import register_explorer_render_state_bus_handlers
 from ..file_tabs_projection import register_file_tabs_projection_handlers
 from ..logical_document_reconciler import register_logical_document_reconciler_handlers
@@ -19,6 +20,7 @@ from ..search_highlight_events import register_search_highlight_event_bus_handle
 from ..sidebar_window_events import register_sidebar_window_event_bus_handlers
 from ..workspace_events import register_workspace_event_bus_handlers
 from ..workbench_runtime_discovery import workbench_runtime_discovery
+from ..intelligence_bootstrap import attach_application, stop_early_intelligence
 from .event_bus import set_worker_event_loop, stop_worker_event_loop
 from .run_profile_fws_bridge import start_run_profile_fws_bridge, stop_run_profile_fws_bridge
 
@@ -50,6 +52,7 @@ async def start_worker_runtime(
     # another thread requires a separate ownership audit, not just to_thread.
     initialize_project()
     bootstrap_worker_runtime()
+    await attach_application(str(get_project_root()))
     async def run_intelligence() -> None:
         await start_intelligence()
 
@@ -58,15 +61,22 @@ async def start_worker_runtime(
     _started = True
 
 
-async def stop_worker_runtime() -> None:
-    """Stop producers before draining the fact bus; do not terminate child shells."""
-    global _registered_loop, _startup_task, _started
+async def stop_intelligence_startup() -> None:
+    """Cancel both startup owners before backend-mode changes stop the shells."""
+    global _startup_task
     task, _startup_task = _startup_task, None
-    _started = False
-    await workbench_runtime_discovery.stop()
     if task is not None:
         _ = task.cancel()
         _ = await asyncio.gather(task, return_exceptions=True)
+    await stop_early_intelligence()
+    await workbench_runtime_discovery.stop()
+
+
+async def stop_worker_runtime() -> None:
+    """Stop producers before draining the fact bus; do not terminate child shells."""
+    global _registered_loop, _started
+    _started = False
+    await stop_intelligence_startup()
     try:
         await stop_run_profile_fws_bridge()
     finally:

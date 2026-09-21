@@ -124,6 +124,20 @@ class ExplorerMessagePackNamespaceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(error, dict)
         self.assertEqual(-32700, cast(dict[str, object], error).get("code"))
 
+    async def test_internal_result_completes_ack_without_wire_encoding(self) -> None:
+        shim = ExplorerRpcSocketShim(_TestExplorerNamespace(), "test-sid", "client_a")
+        future = shim.open_request("request_a")
+        envelope: dict[str, object] = {
+            "jsonrpc": "2.0", "id": "request_a", "result": {"ok": True},
+        }
+        with patch(
+            "app.apps.code_te2.explorer.transport.rpc_socketio.encode_frontend_rpc_message",
+            side_effect=AssertionError("pending reply encoded as notification"),
+        ):
+            await shim.send_message(envelope)
+        self.assertTrue(future.done())
+        self.assertEqual(await future, envelope)
+
     async def test_internal_notification_is_encoded_before_socketio_emit(self) -> None:
         emitted: list[tuple[str, object, str | None]] = []
         namespace = _TestExplorerNamespace()
@@ -145,8 +159,8 @@ class ExplorerMessagePackNamespaceTests(unittest.IsolatedAsyncioTestCase):
             "client_aaaaaaaaaaaa",
         )
 
-        await shim.send_text(
-            '{"jsonrpc":"2.0","method":"search.job.result","params":{"count":2}}'
+        await shim.send_message(
+            {"jsonrpc": "2.0", "method": "search.job.result", "params": {"count": 2}}
         )
 
         self.assertEqual(1, len(emitted))

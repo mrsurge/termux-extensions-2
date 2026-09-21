@@ -6,8 +6,7 @@ interface RunFileResponse extends Record<string, unknown> {
 
 interface RunFileControllerDeps {
   getCurrentPath: () => string | null;
-  apiPost: (path: string, body: Record<string, unknown>) => Promise<unknown>;
-  requestBackendRunActiveFile?: (payload: Record<string, unknown>) => Promise<unknown>;
+  requestBackendRunActiveFile: (payload: Record<string, unknown>) => Promise<unknown>;
   requestBackendRunProfileState: (payload: Record<string, unknown>) => Promise<unknown>;
   requestBackendRunProfileStop: (payload: Record<string, unknown>) => Promise<unknown>;
   setRunButtonState: (state: RunButtonState) => void;
@@ -160,9 +159,8 @@ export function createRunFileController(deps: RunFileControllerDeps) {
   }
 
   async function requestRun(payload: Record<string, unknown>): Promise<RunFileResponse> {
-    const response = deps.requestBackendRunActiveFile
-      ? await deps.requestBackendRunActiveFile(payload)
-      : await deps.apiPost('terminal/run_active_file', payload);
+    // Run always enters the host-owned save/confirmation flow through its RPC lane.
+    const response = await deps.requestBackendRunActiveFile(payload);
     return asRunFileResponse(response);
   }
 

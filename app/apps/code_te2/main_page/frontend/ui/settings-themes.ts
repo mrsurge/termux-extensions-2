@@ -1,19 +1,19 @@
-// @ts-check
+import { parseThemeCatalog, type RequestThemeCatalog, type ThemeCatalogEntry } from '../../../src/theme_catalog.ts';
 
-/**
- * @param {{
- *   themesModalEl: HTMLElement,
- *   themesCloseEl: HTMLElement,
- *   themesListEl: HTMLElement,
- *   settingsThemeStripEl: HTMLElement,
- *   settingsThemeSummaryEl: HTMLElement,
- *   getEditorViewState: () => any,
- *   setEditorTheme: (themeId: string) => void,
- *   updatePreference: (key: string, value: any) => Promise<boolean>,
- *   toast: (msg: string, ms?: number) => void,
- * }} deps
- */
-export function createSettingsThemesController(deps: any) {
+interface SettingsThemesDeps {
+  themesModalEl: HTMLElement;
+  themesCloseEl: HTMLElement;
+  themesListEl: HTMLElement;
+  settingsThemeStripEl: HTMLElement;
+  settingsThemeSummaryEl: HTMLElement;
+  getEditorViewState(): { theme?: string } | null;
+  setEditorTheme(themeId: string): void;
+  updatePreference(key: string, value: string): Promise<boolean>;
+  requestThemeCatalog: RequestThemeCatalog;
+  toast(msg: string, ms?: number): void;
+}
+
+export function createSettingsThemesController(deps: SettingsThemesDeps) {
   function openEditorThemesModal() {
     deps.themesModalEl.classList.add('show');
     deps.themesModalEl.setAttribute('aria-hidden', 'false');
@@ -28,21 +28,21 @@ export function createSettingsThemesController(deps: any) {
   async function refreshEditorThemesModal() {
     const document = deps.themesListEl.ownerDocument;
     deps.themesListEl.textContent = 'Loading…';
-    let themes = [];
+    let themes: ThemeCatalogEntry[];
     try {
-      const res = await fetch('/api/app/code_te2/ui/monaco_editor/available_themes', { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        themes = data?.themes || [];
-      }
-    } catch (_) {}
+      ({ themes } = parseThemeCatalog(await deps.requestThemeCatalog()));
+    } catch (error) {
+      deps.themesListEl.textContent = 'Failed to load themes. Reopen to retry.';
+      console.warn('[themes] Catalog request failed', error);
+      return;
+    }
 
     const currentTheme = deps.getEditorViewState()?.theme || 'github-dark';
     deps.themesListEl.innerHTML = '';
-    const vendored = themes.filter((t: any) => t.source === 'vendored');
-    const fromExts = themes.filter((t: any) => t.source === 'extension');
+    const vendored = themes.filter((t) => t.source === 'vendored');
+    const fromExts = themes.filter((t) => t.source === 'extension');
 
-    function renderSection(title: string, items: any[]) {
+    function renderSection(title: string, items: ThemeCatalogEntry[]) {
       if (!items.length) return;
       const heading = document.createElement('div');
       heading.style.cssText = 'font-weight:600; margin:12px 0 8px; font-size:13px; opacity:0.7; text-transform:uppercase; letter-spacing:0.5px;';
@@ -51,7 +51,7 @@ export function createSettingsThemesController(deps: any) {
 
       const grid = document.createElement('div');
       grid.style.cssText = 'display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:8px;';
-      items.forEach((t: any) => {
+      items.forEach((t) => {
         const row = document.createElement('label');
         row.style.cssText = 'display:flex; align-items:center; gap:10px; padding:8px 10px; border:1px solid var(--border, #333); border-radius:8px; cursor:pointer;';
         const input = document.createElement('input');

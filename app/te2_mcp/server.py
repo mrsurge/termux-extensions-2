@@ -4,6 +4,7 @@ import asyncio
 
 from fastmcp import FastMCP
 from app.libs.framework_debug_client import request_debug
+from app.libs.wba_debug_client import request_wba_debug
 
 from app.extensions.apps.scaffold import (
     list_templates as list_app_templates,
@@ -48,6 +49,17 @@ def build_server() -> FastMCP:
     @server.tool(description="Execute trusted Python in the exact worker live loop. Not sandboxed. No automatic retry: timeout does not cancel execution. backend is the live module; statements return result. Requires explicit runtime credential.")
     async def te2_framework_eval(credential: str, app_id: str, shell_id: str, instance_id: str, code: str, timeout_seconds: int = 20) -> dict[str, object]:
         return await request_debug("eval", credential=credential, target={"appId": app_id, "shellId": shell_id, "instanceId": instance_id}, code=code, timeout_seconds=timeout_seconds)
+
+    @server.tool(description="Discover the current WBA process identity through its exact Code TE2 parent worker. Requires runtime-debug and an explicit credential; no automatic restart.")
+    async def te2_wba_status(credential: str, app_id: str, shell_id: str, instance_id: str) -> dict[str, object]:
+        return await request_wba_debug("status", credential=credential, target={"appId": app_id, "shellId": shell_id, "instanceId": instance_id})
+
+    @server.tool(description="Evaluate trusted JavaScript on the exact live WBA Node/Bun loop via its private MessagePack pipe. wb, state, trace and persistent probe bindings are available; use an expression or set result in statements, with await supported. Not sandboxed. Timeout does not stop execution or undo mutations; never automatically retry. Requires runtime-debug, explicit credential, exact parent and WBA identities.")
+    async def te2_wba_eval(credential: str, app_id: str, shell_id: str, instance_id: str, wba_shell_id: str, wba_instance_id: str, code: str, timeout_seconds: int = 20) -> dict[str, object]:
+        return await request_wba_debug(
+            "eval", credential=credential, target={"appId": app_id, "shellId": shell_id, "instanceId": instance_id},
+            shell_id=wba_shell_id, instance_id=wba_instance_id, code=code, timeout_seconds=timeout_seconds,
+        )
 
     @server.tool(description="Return te2-mcp status, active local paths, and serving mode.")
     def te2_mcp_status() -> dict:

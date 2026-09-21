@@ -87,7 +87,13 @@ export function installAdvancedMenuActions(deps: any) {
         return;
       }
     }
-    try { await deps.apiPost('editor/discard_draft', { path: currentPath }); } catch (err) { console.warn('[Autosave] Failed to discard existing draft', err); }
+    try {
+      await deps.requestBackendDraftDiscard({ path: currentPath });
+    } catch (err) {
+      deps.toast('Autosave not enabled: draft discard failed');
+      console.warn('[Autosave] Draft discard failed', err);
+      return;
+    }
     const success = await deps.updatePreference('autoSave', true);
     if (!success) {
       deps.toast('Failed to update preference');

@@ -57,7 +57,7 @@ interface EditorLifecycleDeps {
   buildMonacoOptionsFromPrefs(state: unknown): Record<string, unknown>;
   forceSemanticHighlighting(): void;
   installMarkerNavBindings(editor: MonacoEditorLike): void;
-  applyMonacoTheme(themeKey: string): void;
+  applyMonacoTheme(themeKey: string): Promise<void> | void;
   ensureTouchSelection(reason: string): void;
   syncReadOnlyInputMode(editor: MonacoEditorLike): void;
   onEditorConfigChanged(editor: MonacoEditorLike): void;
@@ -76,7 +76,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function themeFromPrefs(state: unknown): string {
+export function themeFromPrefs(state: unknown): string {
   const root = asRecord(state);
   const prefs = asRecord(root && root.preferences ? root.preferences : root);
   const editor = asRecord(prefs && prefs.editor);
@@ -124,7 +124,9 @@ function applySharedPlainEditorSetup(
     deps.installMarkerNavBindings(editor);
   } catch (_) {}
   try {
-    if (options.themeKey) deps.applyMonacoTheme(options.themeKey);
+    if (options.themeKey) void Promise.resolve(deps.applyMonacoTheme(options.themeKey)).catch((error: unknown) => {
+      console.warn('[MonacoTheme] Editor theme update failed', error);
+    });
   } catch (_) {}
   deps.ensureTouchSelection(options.touchReason);
   deps.syncReadOnlyInputMode(editor);
@@ -301,7 +303,11 @@ export function ensureDiffEditorWithPrefs(deps: EditorLifecycleDeps): MonacoDiff
       if (modifiedEditor && typeof modifiedEditor.updateOptions === 'function') modifiedEditor.updateOptions(scrollOptions);
       if (originalEditor && typeof originalEditor.updateOptions === 'function') originalEditor.updateOptions(scrollOptions);
     } catch (_) {}
-    try { if (themeKey) deps.applyMonacoTheme(themeKey); } catch (_) {}
+    try {
+      if (themeKey) void Promise.resolve(deps.applyMonacoTheme(themeKey)).catch((error: unknown) => {
+        console.warn('[MonacoTheme] Diff theme update failed', error);
+      });
+    } catch (_) {}
   } catch (_) {}
 
   const modifiedEditor = typeof diffEditor.getModifiedEditor === 'function' ? diffEditor.getModifiedEditor() : null;

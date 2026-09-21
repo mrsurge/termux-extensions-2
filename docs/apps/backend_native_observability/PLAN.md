@@ -291,7 +291,7 @@ cold readiness, import cost, event-loop responsiveness, IPC cost, peak memory an
 first-use latency. Prototype one lane without changing its frontend contract;
 do not migrate all lanes or remove FastAPI until evidence and separate approval.
 
-### DTO Boundary Follow-Up (Deferred)
+### DTO Boundary Follow-Up (Resumed)
 
 The lifecycle checkpoint is live accepted. Keep the present networking process:
 no multiprocessing cutover is needed for current performance. Explorer already
@@ -299,10 +299,228 @@ uses application-owned facts, generation guards and projectors; reuse these,
 not a second event bus. The remaining extraction is completed DTO plus logical
 recipient -> injected delivery -> connection lookup and wire encoding. Preserve
 the single-backend/single-project shared working set and existing all-client
-fallback; foreground focus remains client-specific. Future work removes the
-Explorer JSON text round trip, extracts editor connect/result orchestration and
-Sidebar transport coupling, and tests DTO generation independently of sockets.
-No such DTO extraction is part of the pipe codec change below.
+fallback; foreground focus remains client-specific. The first slice removes the
+Explorer JSON text round trip: registered `ExplorerConnection` implementations
+accept completed message mappings through `send_message`, and the Socket.IO
+adapter alone encodes notifications. Pending replies retain their acknowledgement
+path. The existing manager supplies project/client/personal recipient lookup;
+no parallel event bus or queue is introduced. Routing tests inject recording
+connections without requiring live sockets.
+
+The next bounded slice extracts editor connect/result orchestration into
+`monaco_editor/editor_session_service.py`. Bootstrap snapshot, adapter-state and
+open-state publication retain their order and existing mandatory/best-effort
+semantics. Result-derived notifications use logical connection/client recipients
+and precede the reply. The adapter still owns authentication, room membership,
+identity registration, wire encoding, request dispatch wiring and error envelopes;
+this is not full editor transport removal. Snapshot readers and delivery functions
+are injected, and the service imports neither FastAPI nor Socket.IO.
+
+The editor envelope slice moves result/error/notification construction and the
+existing normalization policy into transport-free `editor_rpc_messages.py`.
+`editor_rpc_emit.py` retains its established publisher entrypoints but delegates
+DTO construction before encoding/delivery. `editor_runtime_dispatch.py` owns the
+single runtime dependency binding used by both requests and notifications. It
+still calls existing runtime services; this does not make their entire transitive
+dependency graph transport-free. Error mapping and authentication stay in the
+adapter. No coercion, inbound validation, notification ordering or protocol change.
+
+The Sidebar window/client-state slice builds ordered `SidebarProjection` DTOs in
+`ui_ipc/sidebar_projection_service.py`, without sockets, stores or a new event bus.
+Existing ledger facts drive activation, readiness and state projections; each UI
+notification precedes its Sidebar counterpart. The service also builds direct
+window snapshots and client shortcut state. Logical recipients become rooms only
+at the adapters. `sidebar_projection_transport.py` uses the existing configured
+socket server and lightweight UI notification helper, avoiding imports of the
+namespace-handler graph. Preserve global readiness, client-miss global fallback,
+sender exclusions, per-notification best-effort ledger delivery, and propagating
+direct/registration errors. Registration itself, focus/open commands, mentions,
+agent edits and native second-window behavior are not extracted or changed here.
+
+Next, audit remaining Sidebar/editor delivery consumers and lifecycle coupling.
+Audit actual HTTP consumers before replacing or removing FastAPI routes. Keep
+Uvicorn/Socket.IO in the same process during extraction; a thin ASGI transport
+replacement is a separately approved phase, not a prerequisite for this slice.
+Validate untrusted input at the boundary even when internal DTOs are statically
+typed. FastAPI removal from Code TE2 does not remove the Terminal/MCP Pydantic
+dependencies. Only after the service boundary is stable, evaluate selective
+mypyc compilation with measured hot paths; compilation and multiprocessing are
+not part of this change. The pipe codec change below is a separate workstream.
+
+### Transport-Neutral Worker Wrapper
+
+The worker accepts an explicit callable `TE2_ASGI_APP` export. Native apps own
+their routing, mounts and ASGI lifespan; combining that export with
+`TE2_APP_ROUTER` or nonempty `SUBAPPS` is rejected rather than silently choosing
+one. `app_worker_asgi.py` forwards HTTP/WebSocket scopes unchanged, reserves the
+worker loop-probe route, and binds worker readiness/debug lifetime only after
+native startup succeeds. Worker cleanup precedes native shutdown. Application
+start/stop hooks still surround Uvicorn serving inside its signal-capture scope.
+
+Existing router apps use lazy `app_worker_fastapi.py` assembly, preserving
+explicit/legacy router resolution and mounted-subapp lifetime. Pipe-only workers
+return before importing FastAPI, Starlette or Uvicorn. The native network path
+still uses Starlette's ASGI type aliases, but does not import FastAPI/Pydantic.
+This is import isolation, not package dependency removal or process separation.
+
+Validate native HTTP and pipe-only subprocesses with import blockers, legacy
+HTTP/SIGTERM behavior, lifecycle ordering, cancellation and startup failure.
+Code TE2's consumer migration and native export are implemented in the bounded
+slices below. Keep Socket.IO, route contracts and input validation intact.
+Audit real consumers before retiring any transport; resources still need HTTP.
+
+### Editor Service Outcome Boundary
+
+Preference and view-setting services raise application-owned `EditorServiceError`
+with invalid/internal classification, not HTTPException. Preserve the established
+numeric-prefix error text while socket adapters still stringify exceptions;
+this is a compatibility constraint, not a new RPC error policy. Save conflicts
+return `SaveConflict` with current disk metadata. The temporary HTTP adapter has
+been removed by the websocket-only cutover below; it is not a supported fallback.
+Normal saves retain their existing socket conflict DTOs and confirmation flow.
+
+Test invalid preferences/theme/font scale, persistence failure, save success,
+validation/conflict/unexpected failures, cancellation and fresh-interpreter
+import isolation. This slice does not make Code TE2's complete import graph
+FastAPI-free: route assembly and other transport-coupled services remain.
+
+### Websocket-Only Editor Persistence
+
+All preference/view-state reads and updates, session telemetry, saves and draft
+discard use the surface's own RPC lane. Host uses `ui.host.editorState.get`,
+`ui.host.session.update`, existing preference/save/discard methods, and
+`ui.host.diagnostics.export` for diagnostic output/directory operations. Monaco
+uses `editor.preferences.get` and `editor.preference.update`; it never reaches
+into the host socket. Authenticated source identity owns preference notification
+attribution. Session telemetry remains telemetry, not project/foreground authority.
+
+Remove superseded HTTP persistence endpoints, the unused HTTP save/open helpers,
+and boot's redundant HTTP cache refresh. Editor bootstrap and notifications carry
+draft/cache state. Disconnected calls report failure; never retry through HTTP or
+claim a failed save succeeded. Keep normal Save/Save As and Explorer draft RPCs.
+Diagnostic export uses existing write/notification primitives and refuses paths
+outside the project or files with drafts; directory creation remains user-confirmed.
+
+Ship backend and regenerated frontend together. No HTTP compatibility route is
+kept for stale clients. Static/theme/grammar resources remain HTTP, as do unrelated
+routes not yet migrated. This is not complete FastAPI removal. Test contracts,
+route absence, no-fallback failures, telemetry validation, diagnostic containment
+and writes; run frontend typecheck/build and focused backend typechecking.
+
+### Terminal And Run Transport Cleanup
+
+Run must use its existing host RPC, not an optional HTTP execution fallback.
+The drawer already uses `/terminal` Socket.IO for lifecycle/control/history and
+PTY events. Remove unused terminal REST routes and raw-WebSocket handler/registry
+after checking frontend/backend/framework/native callers. Keep the canonical
+socket handlers, project-scoped facts, identity/rebind generation, pyte checkpoint
+and live-output mechanisms unchanged.
+
+Terminal services raise application-owned `TerminalServiceError` with
+invalid/missing/conflict/internal classification. Preserve existing socket error
+messages and the host's unsupported-default-runner response; cancellation must
+propagate. Test imports with FastAPI/Pydantic blocked, control dispatch/failures,
+project-filtered notifications, disconnected Run, confirmations and replay.
+
+Remove the unused Git/project HTTP routers and their route-only dependency
+tables/helpers in `main.py`. Retain shared project/state services and the existing
+host/Explorer/Sidebar RPC paths, including historical mutation guards. Validate
+route absence, RPC dispatch/source attribution, project switching and guarded
+restores without operating on the user's repository or restarting the framework.
+
+The production Projects modal retains its legacy "debug" DOM/internal names,
+but is not runtime-debug-gated. Move list/reset/remove/open to typed
+`ui.host.projects.*` host RPCs, shared by the File menu and Explorer launcher.
+Keep confirmation dialogs, separate reset from removal to reject stale active
+project decisions, and preserve all project files. Backend services own sidecar
+cleanup, cached-state invalidation and cross-client open/draft/comparison facts.
+Delegate project opening to the established project-switch service. Remove the
+history router and its unused raw/touch/file endpoints, without HTTP fallbacks.
+Validate isolated-store mutations/failures, socket dispatch, modal interactions,
+source-consumer absence, Python/TypeScript types and generated frontend output.
+
+Project-switch hydration follow-up: consolidate the working directory-picker
+completion into `switch_project_connection`. Host/Sidebar and Explorer calls must
+rebind all dispatcher sessions and invoke the same existing Explorer refresh
+after the finished-switch fact, without caller-specific or per-client duplicate
+refreshes. Restore expanded-directory state, preserve parent-first listing order,
+and discard superseded generations. Test modal/picker/Sidebar entry points with
+isolated project stores, two-client fanout and delayed stale work. Investigate the
+reported modal RPC timeout separately; do not add a fallback or claim its cause
+without evidence.
+
+Theme-catalog slice: extract discovery to an off-loop, typed Python service,
+shared by `ui.host.themes.list` and `editor.themes.list`. Migrate the settings
+picker/summary, working editors and historical secondary view through their own
+lanes; historical mode uses its existing host connection, not a new editor/WBA
+session. Remove the catalog HTTP route without fallback; retain resource URLs.
+Load Monaco and connect its editor socket first, then apply the selected theme
+before creating/attaching document models. Seed bootstrap preferences separately
+from document restoration; normal opens, replay and historical secondary models
+must respect theme readiness without waiting for WBA. New preferences/replays
+supersede pending state, and resource failures cannot declare successful readiness.
+Clear failed in-flight catalog/theme loads so subsequent requests can retry.
+Test lane dispatch, import isolation, off-loop reads, malformed data,
+concurrent/retry behavior, historical appearance and cold startup. This is not the
+deferred VSIX-theme integration: the extension summary currently omits the
+path/theme metadata expected by the old catalog as well as the extracted one.
+
+Editor-resource isolation slice: remove the unused `/editor/refresh_diffs`,
+`/editor/jump_to_line`, `/editor/search/open` and `/editor/debug/state` HTTP
+controls. Existing editor/host RPC navigation, Find and baseline notifications
+remain authoritative. Move only resource registration to `editor_asset_routes.py`
+so `editor_backend.py` and preference/state consumers do not import web frameworks.
+Keep Monaco ESM/language assets, theme JSON and TextMate WASM URLs, CSS shims and
+native interception unchanged. WBA `grammars_list`/`grammars_load` remain RPC;
+they are not static-resource discovery. Test framework-blocked imports, actual
+ASGI asset responses, removed routes, startup/RPC behavior and real grammar
+tokenization with WBA-supplied content. No frontend bundle or APK changes needed.
+
+WBA HTTP retirement slice: delete the unused discover/start/attach/status and
+command-proxy routes, plus the extension-enabled GET/POST routes, their router
+module and route-only assembly helpers. Do not replace them with another launch
+path. Worker lifecycle and boot-snapshot RPC keep the shared intelligence primer;
+WBA browser RPC remains direct and Python adapter control remains on the existing
+pipe. Preserve sidecar data/accessors and test their real types instead of deleted
+route protocols. Repair the stale startup-test `on_spawned` signature, isolate
+installation lookup and bound test waits. Validate startup overlap, cancellation,
+record contracts and source-consumer absence; no startup rescheduling or builds.
+
+Main-route retirement slice: the initial audit reported no active callers for `/read`,
+`/state`, `/diff`, `/review/list`, `/edit_tracker/status`, `/ws/read`,
+`/ws/edit_tracker`, `/ws/debug_console` or the `/editor/update_diffs` stub.
+Remove these routes and their private wrappers/dependency table, not the shared
+state, diff, read or edit-tracker services. Preserve readiness, lifecycle,
+intelligence priming, console tools, all Socket.IO mounts and resource/health
+HTTP. Validate the remaining route inventory, existing RPC/resource contracts,
+startup and typing; no frontend build or restart is part of this slice.
+
+Audit correction: `/ws/read` did have a live frontend caller. The host's
+`file-websocket.ts` used shared `window.wsPort.buildWsUrl()` from app_shell to
+construct `/ws/app/code_te2/read`, rewritten by the Rust proxy to `/ws/read`.
+Literal backend-route searches missed this dependency; deleting the route left
+the current frontend repeatedly reconnecting with 403s. Remove the redundant
+host file-read manager/handler and boot/open/save/project-switch wiring, not the
+active backend services. Save RPC replies and revision-fenced editor cache-state
+notifications already own host hash, saved/draft status and external refresh.
+Test those paths and dynamic-helper absence, type-check and rebuild host.js.
+Shared shell helpers remain outside this Code TE2 cleanup. Clients must load the
+new frontend; do not restore an obsolete route or suppress proxy warnings.
+
+Native-ASGI assembly slice: `http_app.py` composes Starlette health/resources and
+the unchanged Socket.IO gateway. `main.py` exports only `TE2_ASGI_APP`, not
+`TE2_APP_ROUTER`/`SUBAPPS`; the worker's existing native path owns readiness/debug
+wrapping and still calls application start/stop around Uvicorn. The editor asset
+factory returns Starlette routes without FastAPI/Pydantic. Preserve explicit
+GET/HEAD sets, JSON health/errors, MIME/FileResponse behavior, CSS shims, URLs,
+canonical/legacy socket paths and mount root scopes. Confine static resources to
+their root; retain editor resource containment. No generated API docs are served.
+
+Validate real-backend import with FastAPI/Pydantic blocked in isolated state,
+Engine.IO WebSocket handshakes through every mount, native lifespan and resource
+responses, and the existing worker/RPC/startup suites. No framework restart,
+frontend/Android publication, dependency uninstall or startup rescheduling is
+implicit; other apps retain lazy FastAPI support. Live acceptance is separate.
 
 ### MessagePack Process-Pipe Cutover (Approved)
 
@@ -394,6 +612,18 @@ projection delivery. Distinguish intentionally retained working sets from leaks.
 
 Exit: documented findings and targeted corrections, or an explicit evidence-based
 decision that a suspected path needs no change. No invented performance claim.
+
+## Follow-Up: Android Second Editor Regression
+
+User report and follow-up (2026-09-19): the second editor window does not open in
+either the GeckoView or Cefrium APK. This supersedes the original GeckoView-only
+observation. Investigation is deferred at user request. A change on or after the
+last release is suspected, but neither the regression commit nor its cause is
+established. Shared frontend/Python source may be responsible, so do not assume
+a native-only defect. Compare opening intent, backend routing/state projection,
+and secondary-editor presentation with a working client before choosing a fix.
+This records an investigation item, not an approved Android edit/build scope,
+and is independent of the live-accepted Explorer DTO delivery slice.
 
 ## Phase 4: Android Native Debug Runtime And Deferred IME Diagnostics
 
@@ -515,6 +745,37 @@ availability, code-server spawn/readiness failure and web-worker selection clear
 it. WBA/LSP errors must not clear the installation flag. Preserve installed files
 on mode changes; validate/adopt them only through explicit installer consent.
 
+### Earlier Intelligence Bootstrap: State Boundary First
+
+The existing lifecycle schedules intelligence before serving HTTP, but only after
+backend imports and ASGI assembly. Scheduling a coroutine before synchronous
+imports alone would not overlap those imports with process launch. Do not move
+loop-bound managers, futures or stdout readers onto an unrelated event loop.
+
+First slice: extract the backend choice and managed installation ledger into
+`intelligence.json`, with a lightweight typed reader and the unchanged preference
+API projecting that authority. Migrate legacy values once, remove duplicate keys,
+fail on invalid canonical state, and atomically clear installation availability
+when selecting web workers. Consolidate watcher settings preparation in the
+code-server shell manager, after extension gating and before spawn. Keep current
+lifecycle timing and WBA readiness dependencies unchanged for this slice.
+
+Approved follow-up: Code TE2's shellspec opts into `--bootstrap-module`. Uvicorn
+enters that async context on its serving loop before off-loop backend import and
+assembly. The compact state controls early managed-process preparation; only
+assembly uses a thread, never runtime hooks, shell managers or their readers.
+Preload shared preparation dependencies first to avoid partially imported modules.
+Keep legacy workers synchronous and pipe-only mode unchanged.
+
+Code-server readiness and application readiness are separate gates. Prepare WBA
+from the existing code-server spawn callback, but wait for both before connecting.
+Buffer existing WBA pushes behind application readiness, retain latest adapter
+state, and publish it after project initialization and fact-handler registration.
+The eager caller reuses the early task. Backend-mode changes and shutdown cancel
+both startup owners before stopping readers/shells or draining the fact bus.
+Join an interrupted assembly thread before cleanup. No new event loop, transport,
+HTTP fallback, or readiness polling is introduced.
+
 Use strict Python types/Basedpyright and focused tests for changed Python paths;
 Rust formatting/check/tests for changed framework contracts; Code TE2 frontend
 tests, typecheck and build for browser changes. Android validation follows the
@@ -524,3 +785,41 @@ Record exact build/revision, measurement conditions and live acceptance per
 renderer. No automatic shared runtime restart, APK installation, asset-version
 bump or release is part of this plan creation. Checkpoint completed slices when
 requested, and keep unresolved reproductions distinct from completed tooling.
+
+### WBA Completion Observability
+
+Approved follow-up: expose trusted live Node/Bun WBA evaluation over its existing
+MessagePack pipe, reachable through the existing authenticated Python CLI/MCP
+debug route. Keep WBA HTTP/browser eval disabled. Target both parent identity and
+WBA shell/process identity, with bounded admission/results and no implicit retry.
+Allow temporary evaluation-installed probes as well as bounded runtime-debug-only
+completion timing from startup. Separate activation, Python provider registration,
+frontend registration, and actual completion request latency before changing any
+intelligence scheduling. Validate on Node and Bun, typecheck/build frontend, test
+the Python relay, and defer shared runtime reload/reproduction to the user.
+Contract and commands: `WBA_RUNTIME_DEBUG.md`.
+
+The live completion capture proved a deadline mismatch, not slow browser provider
+registration. Give providers (especially basedpyright on mobile) 30 seconds for
+their response, independently of preparation and scheduling. A shared browser/WBA
+budget must cover the dispatcher gate as well as extension-host pending requests;
+keep unrelated language-feature timeouts unchanged. Test slow/fast/missing replies
+with a deterministic clock, queue contention and disconnect cleanup on Node/Bun.
+The outer RPC must account for both existing gate admissions (activation, then
+completion); this is a ceiling, not a warm-up delay. Compare upstream activation,
+document delivery and completion preparation before considering speculative
+requests. No cancellation rewrite or synthetic warm-up is approved in this slice.
+Source comparison and measured boundaries: `WBA_RUNTIME_DEBUG.md`, completion
+investigation section. The user reports other LSPs do not exhibit this delay.
+
+Approved follow-up after the evaluation-only experiment: WBA issues one discarded
+completion request per matching provider/language/project session once both the
+provider and a synchronized open document exist. Registration and successful
+document open/hydration are the only scheduling triggers; no polling, fake text
+input, UI suggestions, or startup readiness gate. Prefer a foreground document,
+honor provider selectors, and do not repeat on tab switches. An actual completion
+request satisfies the same key if it wins the scheduling race. Reset the keys on
+project/extension-host session changes. Serialize only these background warm-ups,
+not interactive operations; release result caches and contain failures without
+retrying. Validate both readiness orders, duplication, reset races and cleanup on
+Node/Bun. The user reloads the WBA for production live acceptance.

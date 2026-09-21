@@ -23,16 +23,14 @@ from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontext
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType, TracebackType
-from typing import Protocol, cast, override
+from typing import TYPE_CHECKING, Protocol, cast, override
 from urllib import request as urllib_request
 from urllib.parse import quote
 
 _startup_trace.mark("common_stdlib_imports.end")
-with _startup_trace.span("fastapi.import"):
-    from fastapi import FastAPI, APIRouter
+if TYPE_CHECKING:
+    from fastapi import APIRouter
     from starlette.types import ASGIApp
-with _startup_trace.span("uvicorn.import"):
-    import uvicorn
 
 with _startup_trace.span("worker_support.import"):
     from app.libs.pipe_protocol import PipeEnvelope
@@ -44,6 +42,7 @@ with _startup_trace.span("worker_support.import"):
 JsonObject = dict[str, object]
 PipeDispatcher = Callable[[PipeEnvelope], object]
 EXPLICIT_APP_ROUTER_EXPORT = "TE2_APP_ROUTER"
+__all__ = ["main", "EXPLICIT_APP_ROUTER_EXPORT", "_main_router_from_module"]
 
 
 class PipeReader(Protocol):
@@ -75,6 +74,14 @@ class AppWorkerArgs:
     port: int | None
     backend_module: str
     pipe: bool
+    bootstrap_module: str | None = None
+
+
+@dataclass(frozen=True)
+class PreparedWorker:
+    module: ModuleType
+    app: ASGIApp
+    start_pipe: Callable[[], None]
 
 
 def _framework_url() -> str:
@@ -144,7 +151,8 @@ def _module_subapps(module: ModuleType) -> list[tuple[str, ASGIApp]]:
             continue
         path, subapp = tuple_item
         if isinstance(path, str) and callable(subapp):
-            subapps.append((path, cast(ASGIApp, subapp)))
+            # ASGIApp is type-only so pipe workers do not import the web stack.
+            subapps.append((path, cast("ASGIApp", subapp)))
     return subapps
 
 
@@ -163,6 +171,7 @@ def _parse_args(parser: argparse.ArgumentParser) -> AppWorkerArgs:
         port=_optional_int_arg(getattr(namespace_obj, "port", None)),
         backend_module=str(getattr(namespace_obj, "backend_module", "") or ""),
         pipe=bool(getattr(namespace_obj, "pipe", False)),
+        bootstrap_module=str(getattr(namespace_obj, "bootstrap_module", "") or "") or None,
     )
 
 
@@ -197,21 +206,10 @@ def _backend_module_name(
 
 
 def _main_router_from_module(module: ModuleType, app_id: str) -> tuple[str, APIRouter]:
-    if EXPLICIT_APP_ROUTER_EXPORT in module.__dict__:
-        explicit_router = cast(object, module.__dict__[EXPLICIT_APP_ROUTER_EXPORT])
-        if not isinstance(explicit_router, APIRouter):
-            raise RuntimeError(
-                f"Backend module for {app_id} exports {EXPLICIT_APP_ROUTER_EXPORT}, but it is not a FastAPI APIRouter"
-            )
-        return EXPLICIT_APP_ROUTER_EXPORT, explicit_router
+    # Retain the helper for existing callers without importing FastAPI at startup.
+    from app.libs.app_worker_fastapi import main_router_from_module as resolve_router
 
-    expected_router_name = f"{app_id}_bp"
-    candidate = module.__dict__.get(expected_router_name)
-    if isinstance(candidate, APIRouter):
-        return expected_router_name, candidate
-    raise RuntimeError(
-        f"Backend module for {app_id} must export {EXPLICIT_APP_ROUTER_EXPORT} or a FastAPI APIRouter named '{expected_router_name}'"
-    )
+    return resolve_router(module, app_id)
 
 
 def _pipe_messages(reader: PipeReader) -> Iterator[object]:
@@ -322,10 +320,11 @@ def main() -> None:
     _ = parser.add_argument("--app-id", required=True, help="The ID of the app to run.")
     _ = parser.add_argument("--port", type=int, help="The port to run the HTTP app worker on.")
     _ = parser.add_argument("--backend-module", required=True, help="The path to the backend module.")
+    _ = parser.add_argument("--bootstrap-module", help="Opt-in async preparation module for HTTP workers.")
     _ = parser.add_argument(
         "--pipe",
         action="store_true",
-        help="Run the backend module as a JSONL pipe service.",
+        help="Run the backend module as a MessagePack pipe service.",
     )
     args = _parse_args(parser)
     startup_trace = _startup_trace
@@ -333,6 +332,8 @@ def main() -> None:
     startup_trace.mark("worker.entry")
     if not args.pipe and args.port is None:
         parser.error("--port is required unless --pipe is set")
+    if args.bootstrap_module and args.port is None:
+        parser.error("--bootstrap-module requires an HTTP worker (--port)")
 
     protocol_stdout: object | None = None
     if args.pipe:
@@ -341,12 +342,22 @@ def main() -> None:
     os.environ["TE_APP_ID"] = args.app_id
     _ = install_python_memory_profiler(f"app_worker-{args.app_id}")
 
+    # Legacy workers keep their synchronous assembly path. Opted-in workers build
+    # inside Uvicorn's signal scope, on the very loop that later serves requests.
+    prepared = None if args.bootstrap_module else _assemble_worker(args, protocol_stdout)
+    if args.port is not None:
+        _run_http_worker(args, protocol_stdout, prepared)
+
+
+def _assemble_worker(args: AppWorkerArgs, protocol_stdout: object | None) -> PreparedWorker | None:
+    startup_trace = _startup_trace
+
     mounted_subapps: list[tuple[str, ASGIApp]] = []
     backend_serving_hook: Callable[[], object] | None = None
     debug_pipe: RuntimeDebugPipe | None = None
 
     @asynccontextmanager
-    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    async def lifespan(_app: object) -> AsyncIterator[None]:
         startup_trace.mark("lifespan.begin")
         async with AsyncExitStack() as stack:
             for path, subapp in mounted_subapps:
@@ -400,14 +411,6 @@ def main() -> None:
                     _ = serving_task.cancel()
                 _ = await asyncio.gather(serving_task, return_exceptions=True)
 
-    app = FastAPI(lifespan=lifespan)
-
-    @app.get("/__te2/runtime/loop")
-    async def te2_runtime_loop_probe() -> JsonObject:
-        return {"ok": True, "data": _runtime_loop_probe_payload(args.app_id)}
-
-    _ = te2_runtime_loop_probe
-
     try:
         # Add project root to the Python path
         project_root = Path(__file__).resolve().parents[2]
@@ -455,66 +458,61 @@ def main() -> None:
             _run_pipe_worker(args.app_id, module, protocol_stdout, debug_pipe)
             return
 
-        router_name, main_router = _main_router_from_module(module, args.app_id)
-        print(
-            f"DEBUG: Using main router '{router_name}' with {len(main_router.routes)} routes",
-            file=sys.stderr,
-        )
-        for route in list(main_router.routes)[:10]:
-            route_path = getattr(route, "path", "NO_PATH")
-            print(f"  - {route_path}", file=sys.stderr)
-        if len(main_router.routes) > 10:
-            print(f"  ... and {len(main_router.routes) - 10} more routes", file=sys.stderr)
-        app.include_router(main_router)
-        
-        # Mount optional sub-apps if the backend module provides them (fallback)
-        subapps = _module_subapps(module)
-        if subapps:
-            print(f"DEBUG: Mounting {len(subapps)} sub-app(s)", file=sys.stderr)
-            for path, subapp in subapps:
-                print(f"  - Mounting at {path}", file=sys.stderr)
-                mounted_subapps.append((path, subapp))
-                app.mount(path, subapp)
+        from app.libs.app_worker_asgi import explicit_asgi_application, WorkerASGI
+
+        native_app = explicit_asgi_application(module, args.app_id)
+        if native_app is not None:
+            app = WorkerASGI(
+                native_app, lifespan=lifespan,
+                loop_probe=lambda: _runtime_loop_probe_payload(args.app_id),
+            )
+        else:
+            with startup_trace.span("fastapi.import"):
+                from app.libs.app_worker_fastapi import build_fastapi_application
+            mounted_subapps.extend(_module_subapps(module))
+            app = build_fastapi_application(
+                module, args.app_id, lifespan=lifespan, subapps=mounted_subapps,
+                loop_probe=lambda: _runtime_loop_probe_payload(args.app_id),
+            )
 
         backend_serving_hook = _backend_serving_hook_from_module(module)
         startup_trace.mark("backend.assembled")
 
     except Exception as e:
         print(f"Error loading app backend: {e}", file=sys.stderr)
-        sys.exit(1)
+        raise RuntimeError(f"Error loading app backend: {e}") from e
 
-    # Final check: how many routes does the app have?
-    print(f"DEBUG: FastAPI app has {len(app.routes)} total routes before uvicorn.run()", file=sys.stderr)
-    for route in list(app.routes)[:15]:
-        route_path = getattr(route, 'path', 'NO_PATH')
-        route_name = getattr(route, 'name', 'NO_NAME')
-        print(f"  - {route_path} ({route_name})", file=sys.stderr)
-    if len(app.routes) > 15:
-        print(f"  ... and {len(app.routes) - 15} more routes", file=sys.stderr)
+    def start_pipe() -> None:
+        if args.pipe:
+            if protocol_stdout is None:
+                raise RuntimeError("Pipe protocol stdout is not configured")
+            pipe_thread = threading.Thread(
+                target=_run_pipe_worker,
+                args=(args.app_id, module, protocol_stdout, debug_pipe),
+                name=f"te2-{args.app_id}-pipe-rpc",
+                daemon=True,
+            )
+            pipe_thread.start()
+            print(f"DEBUG: Started app-worker pipe RPC loop for {args.app_id}", file=sys.stderr)
 
-    if args.pipe:
-        if protocol_stdout is None:
-            raise RuntimeError("Pipe protocol stdout is not configured")
-        pipe_thread = threading.Thread(
-            target=_run_pipe_worker,
-            args=(args.app_id, module, protocol_stdout, debug_pipe),
-            name=f"te2-{args.app_id}-pipe-rpc",
-            daemon=True,
-        )
-        pipe_thread.start()
-        print(
-            f"DEBUG: Started app-worker pipe RPC loop for {args.app_id}",
-            file=sys.stderr,
-        )
-    
+    return PreparedWorker(module, app, start_pipe)
+
+
+def _run_http_worker(
+    args: AppWorkerArgs, protocol_stdout: object | None, prepared: PreparedWorker | None,
+) -> None:
+    startup_trace = _startup_trace
     port = args.port
     if port is None:
         raise RuntimeError("--port is required for HTTP app-worker mode")
 
     print(f"DEBUG: Starting uvicorn on http://127.0.0.1:{port}", file=sys.stderr)
 
+    with startup_trace.span("uvicorn.import"):
+        import uvicorn
+
     config = uvicorn.Config(
-        app,
+        prepared.app if prepared is not None else "te2-worker:pending-bootstrap",
         host="127.0.0.1",
         port=port,
         lifespan="on",
@@ -529,7 +527,20 @@ def main() -> None:
             # Worker-owned services surround the transport, not its ASGI lifespan.
             # Stay inside serve()'s signal scope: it re-raises SIGTERM on exit,
             # so an outer serve() finally would never finish application cleanup.
-            async with application_lifecycle(module):
+            async with AsyncExitStack() as stack:
+                worker = prepared
+                if args.bootstrap_module:
+                    from app.libs.app_worker_bootstrap import bootstrap_context, assemble_off_loop
+
+                    _ = await stack.enter_async_context(bootstrap_context(args.bootstrap_module))
+                    worker = await assemble_off_loop(lambda: _assemble_worker(args, protocol_stdout))
+                if worker is None:
+                    raise RuntimeError("HTTP worker assembly did not return an application")
+                if self.should_exit:
+                    return
+                self.config.app = worker.app
+                worker.start_pipe()
+                _ = await stack.enter_async_context(application_lifecycle(worker.module))
                 await super()._serve(sockets=sockets)
 
         @override

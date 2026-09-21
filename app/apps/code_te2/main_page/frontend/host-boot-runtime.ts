@@ -71,7 +71,6 @@ interface HostBootRuntimeDeps {
   setLastPickerPath: (path: string) => void;
   setLastSha256: (sha: string | null) => void;
   setCurrentModeLanguage: (lang: string | null) => void;
-  openWebSocket: (path: string) => void;
   openFile: (path: string) => Promise<unknown>;
   setOpenFilePickerDir: (path: string) => void;
   resetActiveFileState: () => void;
@@ -180,7 +179,6 @@ export function createHostBootRuntime(deps: HostBootRuntimeDeps) {
         setLastSha256: (sha) => deps.setLastSha256(sha),
         setCurrentModeLanguage: (lang) => deps.setCurrentModeLanguage(lang),
       }),
-      openWebSocket: (path) => deps.openWebSocket(path),
       openFile: (path) => {
         deps.setOpenFilePickerDir(deps.parentDir(path));
         return deps.openFile(path);

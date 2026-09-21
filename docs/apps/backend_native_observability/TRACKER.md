@@ -247,6 +247,432 @@ Remaining inventory includes projector tasks, request/client dependencies and
 typed cross-process DTOs. No multiprocessing or transport migration is approved
 by completion of this boundary alone.
 
+### DTO Boundary Resumption: Explorer Delivery
+
+- [x] Trace the current Explorer delivery path and its internal JSON encode/decode
+  round trip; retain existing facts, projectors and single-project authority.
+- [x] Replace `ExplorerConnection.send_text` with typed `send_message`; pass DTOs
+  through the existing injected connection interface. Socket.IO owns MessagePack
+  notification encoding; pending request acknowledgement behavior is unchanged.
+- [x] Preserve project/client/personal addressing and the all-client fallback.
+  Snapshot broadcast recipients so a disconnect during delivery cannot skip peers.
+- [x] Remove obsolete JSON parsing/byte timing fields; retain real wire encoding
+  and emit/queue diagnostics. Document the boundary and subsequent phases.
+- [x] Validation: 42 focused delivery, codec, project-switch, comparison/history,
+  live changes and second-window tests pass. Basedpyright reports zero errors;
+  nine existing warnings remain in the adapter stub and older codec test file.
+- [x] User reports live acceptance of the Explorer DTO delivery slice (2026-09-19).
+  Specific multi-client scenarios were not separately reported.
+- [ ] Extract editor connect/result orchestration and Sidebar delivery coupling.
+- [ ] Inventory route consumers and remaining lifecycle/dependency ownership;
+  propose the thin ASGI replacement before removing FastAPI.
+- [ ] After separation, benchmark selective mypyc compilation of typed hot paths.
+
+No browser wire changes, frontend build, shared runtime restart, dependency
+removal or multiprocessing cutover was performed in the Explorer slice.
+
+### Editor Session/Result Orchestration
+
+- [x] Extract bootstrap and result-notification policy into the transport-free
+  `editor_session_service.py`, with typed readers and delivery callbacks.
+- [x] Keep authentication, connection identity, room membership, MessagePack and
+  error encoding in the adapter. Preserve notification-before-reply ordering,
+  client-wide jump/baseline updates and requester-only draft comparison updates.
+- [x] Test fresh reconnect snapshots, secondary identity, optional adapter failure,
+  mandatory delivery failure, cancellation, result scope/order, encoded envelopes,
+  room registration before bootstrap and identity cleanup on disconnect.
+- [x] Validation: 52 focused tests pass; changed editor modules and new tests have
+  zero Basedpyright errors or warnings. Existing Explorer edits are preserved.
+- [x] User reports normal operation and live acceptance of this slice (2026-09-19).
+  Second-window opening remains a separate unresolved issue below; acceptance
+  does not establish that every multi-presentation scenario was exercised.
+- [x] Extract editor envelope construction and consolidate runtime dispatch wiring
+  in the following slice; Sidebar delivery extraction remains pending.
+
+No frontend assets, Android code, shared framework restart, or dependency removal
+in this slice. Existing best-effort bootstrap behavior is preserved, not expanded.
+
+### Editor Envelope And Runtime Binding
+
+- [x] Move outbound normalization and result/error/notification DTO builders into
+  `editor_rpc_messages.py`, with no transport/codec imports. Keep publisher APIs.
+- [x] Consolidate request/notification runtime dependency binding in
+  `editor_runtime_dispatch.py`; preserve authenticated source-client forwarding.
+- [x] Preserve error IDs/data, request versus notification reply behavior,
+  tuple/path normalization, non-string-key filtering, cycle/depth limits and
+  notification-before-result ordering. This is extraction, not policy redesign.
+- [x] Validation: 60 focused tests pass; changed modules and new boundary tests
+  have zero Basedpyright errors or warnings. No frontend build is needed.
+- [x] User reports live acceptance of the editor envelope/runtime-binding slice;
+  everything is working (2026-09-19). Android second-window issue remains separate.
+- [ ] Extract Sidebar delivery policy and audit remaining transport consumers.
+
+No shared runtime restart, Android edits, FastAPI removal, or browser protocol
+changes. The runtime binding still depends on existing editor runtime services;
+their transitive transport dependencies are not claimed to be removed.
+
+### Sidebar Window/Client-State Projection
+
+- [x] Build typed, ordered projections independently of sockets/stores; reuse
+  ledger facts and the existing active-shortcut state rather than new authorities.
+- [x] Extract fact delivery to a transport adapter using the existing configured
+  Socket.IO server and lightweight UI notifications; avoid handler import cycles.
+- [x] Apply the same projection boundary to direct window snapshots/client state.
+  Keep UI-before-Sidebar ordering, activation/readiness/state ordering, global
+  readiness, client/global targeting, direct-target precedence and sender exclusion.
+- [x] Preserve per-notification best-effort fact delivery, propagating direct
+  failures and cancellation. No command, mention or agent-edit behavior changes.
+- [x] Validation: 94 focused tests pass. New service/transport/tests and changed
+  event projector have zero Basedpyright errors/warnings. Broader check including
+  `sidebar_ws.py` has zero errors and 14 existing unused-return warnings in
+  unrelated command handlers.
+- [x] User reports smooth operation and live acceptance of the Sidebar projection
+  slice (2026-09-19). Individual multi-client scenarios were not separately reported.
+- [x] Audit remaining transport consumers, runtime lifecycle and HTTP route users.
+  Session bootstrap, view-state preferences, grammar/theme/assets and debug HTTP
+  consumers remain real. Code TE2 services also retain HTTPException/Response
+  coupling; wrapper extraction alone does not remove those imports.
+
+No frontend build, Android changes, runtime restart, commit or push in this slice.
+The separately reported Android second-window opening bug remains uninvestigated.
+
+### Transport-Neutral Worker Wrapper
+
+- [x] Add explicit `TE2_ASGI_APP` contract with native-owned routing/mounts/lifespan;
+  reject invalid or conflicting exports without a silent router fallback.
+- [x] Isolate legacy router assembly in lazy `app_worker_fastapi.py`; preserve
+  existing router names, mounts and worker-owned application lifecycle hooks.
+- [x] Return from pipe-only execution before importing the web stack. Native
+  network workers use Uvicorn without FastAPI/Pydantic imports.
+- [x] Retain readiness, debug-loop binding and loop probe; native startup completes
+  before worker readiness, and worker cleanup precedes native shutdown.
+- [x] Add subprocess import-blocking and lifecycle regression tests, including
+  legacy HTTP/SIGTERM, native HTTP, pipe framing, cancellation and startup failure.
+- [x] Validation: 27 focused tests pass; all changed/new Python modules and
+  fixtures pass Basedpyright with zero errors and zero warnings.
+- [x] User live acceptance after fixing the type-only `ASGIApp` runtime cast in
+  mount discovery. The mounted-lifespan test now exercises actual `SUBAPPS`
+  discovery and reproduced the NameError before the fix.
+- [ ] Migrate Code TE2 HTTP assembly and transport-dependent service results in
+  separately scoped slices. No FastAPI/Pydantic package dependencies removed yet.
+
+No shared runtime restart, Android edits, frontend build or publication in this
+slice. The native ASGI path still uses Starlette's ASGI type aliases.
+
+### Editor Service Outcomes
+
+- [x] Remove FastAPI imports from preference, view-setting and save services.
+  Application-owned `EditorServiceError` carries invalid/internal classification;
+  `SaveConflict` carries current disk metadata without constructing a response.
+- [x] Initially isolate HTTP outcome translation; subsequently remove the temporary
+  adapter and superseded endpoints in the approved websocket-only cutover below.
+  The numeric prefix in service errors remains for existing RPC wire compatibility.
+- [x] Validation: 61 focused service, comparison, RPC, session and worker tests
+  pass, including fresh-process import blocking for FastAPI/Pydantic/Starlette.
+  Changed services, new adapter and tests pass strict Basedpyright without
+  diagnostics; the broader editor route module has zero errors and 26 warnings
+  (legacy defaults, deprecated Optional, unused returns/parameter and strings).
+- [x] User live acceptance of preferences/view settings and save behavior,
+  confirmed with the websocket-only persistence checkpoint.
+- [x] Continue remaining HTTP route assembly migration in the later native-ASGI
+  slice below. No package dependency removal.
+
+No runtime restart, frontend/Android changes, commit or push for this slice.
+
+### Websocket-Only Persistence Cutover
+
+- [x] Move host view-state reads, session telemetry and diagnostic exports to
+  typed host RPC methods; retain existing save, Save As, preference and discard RPCs.
+- [x] Move Monaco read-only updates and cold-start preference reads to its editor
+  RPC lane. Backend assigns preference source identity from the socket caller.
+- [x] Remove superseded HTTP preference/session/cache/save/review-write routes,
+  dormant HTTP save/open helpers and the temporary HTTP outcome adapter. Remove
+  redundant boot HTTP cache refresh; retain socket bootstrap and live projections.
+- [x] No HTTP fallback. Disconnected saves stay dirty; preference failures report
+  failure. Diagnostic writes reject draft collisions and project escape, preserve
+  mode and publish canonical acknowledgements/diff updates.
+- [x] Validation: 67 focused Python tests and 39 frontend tests pass, including
+  boot and socket transport coverage. Frontend TypeScript check and bundle build
+  pass. New RPC backends/contracts/dispatchers and tests have zero Basedpyright
+  errors/warnings. Broader legacy route modules are not warning-free.
+- [x] Live acceptance with both updated worker and rebuilt frontend: cold boot,
+  reconnect, preferences, draft/auto-save transition, Save/Save As, conflict prompts
+  and diagnostic export. User confirmed this was completed before requesting
+  checkpoint commit `0b35a46d`; no repeat acceptance requested for that slice.
+
+Static/theme/grammar HTTP remains intentional. Remaining unrelated HTTP routes
+still require FastAPI; this is not the final native-ASGI assembly switch.
+
+### Terminal And Run Transport Cleanup
+
+- [x] Audit terminal routes against frontend, backend, tests, framework and native
+  client source. Drawer already uses `/terminal` Socket.IO control/events; Run
+  already has a host RPC. No current caller needs the old REST/raw-WS routes.
+- [x] Remove Run's optional HTTP fallback and require its host RPC. Preserve the
+  existing backend save confirmation, profile selection and source identity flow.
+- [x] Replace terminal service `HTTPException` with typed `TerminalServiceError`
+  classifications; retain detail-only terminal RPC failures and stringified error
+  compatibility. Host still recognizes unsupported default runners. No swallowing
+  cancellation or reporting failed requests as success.
+- [x] Remove 11 obsolete terminal HTTP routes, the raw `/ws/terminal/{shell_id}`
+  handler and its unused socket registry/fanout. Preserve canonical Socket.IO
+  registration, fact/list events, rebind notifications, PTY I/O and pyte replay.
+- [x] Validation: 76 Python tests and 27 frontend tests pass. Frontend typecheck
+  and bundle build pass. Fresh-interpreter tests block FastAPI/Pydantic/Starlette
+  while importing the terminal and host Run modules. New outcome/tests and host
+  action module typecheck cleanly; terminal backend has zero errors and 35
+  remaining warnings (legacy stub/override/unused-result/parameter diagnostics).
+- [x] Live acceptance of this slice: drawer create/reconnect, switch/rename/close,
+  Run confirmation/default runner/profile execution, and project switching.
+  User tested the updated slice and confirmed it is working.
+
+No shared runtime restart or Android publication performed. Source and generated
+frontend must deploy together; obsolete HTTP endpoints are not compatibility APIs.
+
+### Remaining HTTP Assembly Audit
+
+- [x] Inventory FastAPI owners: main, editor resources and workbench routes were
+  the remaining boundary. Follow-up retirement/extraction slices are below;
+  the final native export now removes FastAPI from Code TE2 assembly.
+- [x] Identify live HTTP consumers in the production Projects modal and theme
+  discovery; both now use their owning RPC lanes (theme slice below).
+- [x] Complete caller-by-caller classification of remaining routes, including
+  dynamically constructed paths, external app/CLI consumers and debug endpoints.
+- [x] Move remaining application messaging to owning RPC lanes without fallbacks;
+  remove proven-dead routes and retain resource delivery as HTTP.
+- [x] Assemble the remaining required endpoints/mounts/lifespan as native ASGI,
+  switch to `TE2_ASGI_APP`, and verify cold boot/import isolation and socket lanes.
+  Other workers keep their lazy FastAPI support; no package removal yet.
+
+### Git And Project HTTP Removal
+
+- [x] Confirm Git/project HTTP route modules and dependency assemblies have no
+  current source consumers beyond `main.py`; UI actions use the host/Explorer
+  RPC lanes and Sidebar project requests use the shared project service.
+- [x] Delete `main_page/backend/git_routes.py` and `project_routes.py`, their
+  `main.py` includes/dependency tables, and helpers/imports used only by them.
+  Retain shared state payload, project service and Rust Git/file-ops services.
+- [x] Preserve existing branch/remote host RPCs, Explorer Git/project methods,
+  historical stage/commit guards, guarded restore and project-switch projections.
+  No replacement HTTP routes, fallback, new frontend lane or lifecycle changes.
+- [x] Validation: 46 Python tests pass, including eight new route-absence/RPC
+  dispatch and project-service delegation tests. Basedpyright: zero errors;
+  new tests are clean, `main.py` retains 15 legacy warnings. No frontend changes
+  in this slice, so no additional frontend build or Android publication required.
+- [x] Live acceptance: user tested the Git/project cleanup and confirmed it
+  remains green. No shared runtime restart performed by the agent.
+
+Debug/theme/WBA HTTP routes remain for the next consumer audit. This
+slice does not yet switch Code TE2 to `TE2_ASGI_APP` or remove FastAPI packages.
+
+### Production Projects Modal Transport
+
+- [x] Treat "debug modal" as a legacy internal name, not a debug-only feature.
+  Both File menu and Explorer open the same host-configured Projects modal.
+- [x] Add typed `ui.host.projects.list/reset/remove/open` host RPC methods and
+  transport-independent services. Sidecar metadata listing runs off-loop using
+  independent sidecar snapshots, not cached mutable instances.
+- [x] Keep confirmations and reject stale reset/remove decisions in the backend.
+  Reset clears recent/open/foreground/draft state and restores HEAD comparison;
+  publish through existing all-client editor/draft/comparison projectors.
+  Removing inactive projects forgets sidecar disk and cached state plus history,
+  never project files. Persistence failures are surfaced rather than swallowed.
+- [x] Open through the shared backend project-switch service; remove the modal's
+  direct Explorer socket call and frontend-only reset/open projection.
+- [x] Remove `history_routes.py`, its assembly, `/debug/projects` HTTP handlers
+  and unused history/raw/touch/file routes. No HTTP fallback or runtime-debug gate.
+- [x] Validation: 41 focused Python tests and 19 frontend tests pass, including
+  11 new backend and seven new modal/ownership tests. Fresh-process imports block
+  FastAPI/Pydantic/Starlette successfully. Changed services/contracts
+  and new Python tests pass Basedpyright without diagnostics. Frontend typecheck
+  and build pass; `static/dist/host.js` regenerated, no Android publication.
+  `main.py` retains its 15 existing warnings and has no errors.
+- [x] Live acceptance: user tested the deployed Projects slice and confirmed it
+  works. No shared framework restart performed by the agent.
+
+### Shared Project-Switch Hydration
+
+- [x] Identify the divergence: directory selection ran an extra Explorer refresh
+  after switching; the Projects/Sidebar service only reassigned dispatcher roots.
+  Shared completion facts reset the tree, but those paths omitted its hydration.
+- [x] Move dispatcher rebinding and the existing refresh into the common switch
+  operation. Remove caller-specific refresh/root assignment from open/create/clone
+  handlers. One shared refresh publishes to every connected Explorer client.
+- [x] Rebind through dispatcher session invalidation, cancelling old bootstrap
+  work; project expanded-directory state and parent-first listings after the
+  finished-switch fact. Preserve scheduled Git/review updates without duplicate
+  full Git replay when Explorer is connected.
+- [x] Fence stale directory loads, switch completion facts and superseded switch
+  returns with the captured project generation.
+- [x] Validation: 66 focused Python tests and 17 frontend tests pass; frontend
+  typecheck/build pass with unchanged generated assets. Six new regression tests
+  cover all three open entry points, one refresh for two clients, old bootstrap
+  cancellation, stale results and directory projection order.
+- [x] Focused Basedpyright: zero errors across eight changed backend modules and
+  both project-switch test modules; 16 existing warnings on unchanged lines.
+  The new hydration regression test module has no diagnostics.
+- [x] Runtime investigation cleanup: Python hooks restored; user reloaded the
+  browser, and eval confirms its probe is absent and Projects list populated.
+  The transient modal RPC failure was not reproduced by directly calling the
+  live list service; its cause is not established. No probe added to source.
+- [x] User live acceptance: Projects-modal project switching hydrates correctly
+  (2026-09-19). No shared framework restart or Android publication by the agent.
+
+### Theme-Catalog RPC Migration
+
+- [x] Extract typed catalog metadata into `theme_catalog.py`; perform index and
+  extension-registry disk reads off-loop. Share the service between host and
+  editor RPC without importing FastAPI/Pydantic/Starlette.
+- [x] Migrate settings picker/summary and working editors to their respective
+  `ui.host.themes.list` / `editor.themes.list` methods. Historical secondary
+  views use their existing host connection without adding editor/WBA sessions.
+- [x] Remove `available_themes` HTTP discovery without fallback. Preserve theme
+  resource HTTP routes, IDs/URLs, preference behavior and OTA/APK interception.
+- [x] Connect the existing editor socket before theme discovery; apply the selected
+  theme before boot/open/replay document models and historical diff models mount.
+  Keep WBA independent. Share concurrent loads and reuse successful application;
+  theme failures reject readiness, with failed promises cleared for retry.
+- [x] Recheck preference changes during theme loading. Live snapshots invalidate
+  bootstrap document state; newer replays supersede older pending model restores.
+- [x] Record existing VSIX limitation rather than expand scope: extension summary
+  DTOs omit path/theme metadata, so extension theme discovery/inheritance remains
+  deferred. This migration does not claim to implement that integration.
+- [x] Focused validation (2026-09-20): 64 Python tests and 62 frontend tests pass;
+  TypeScript passes; Basedpyright reports 0 errors and 10 existing warnings in
+  `editor_backend.py`. `node build.mjs` rebuilt `static/dist/host.js`.
+  Coverage includes theme-before-model ordering, failure/retry, latest-preference
+  handling, historical cancellation and superseded/empty socket snapshots.
+- [x] User live acceptance (2026-09-20) after worker restart and frontend asset update: theme
+  picker/summary, selected theme after cold boot/reconnect, and both secondary modes.
+
+No Android edits, shared runtime restart or version bump. Code TE2 still exports
+`TE2_APP_ROUTER`; remaining main/WBA HTTP assembly is the next audit slice.
+
+### Editor Resource Boundary
+
+- [x] Remove the four unused editor HTTP controls (refresh diffs, jump to line,
+  search open and debug state) and their router mount. Keep active socket controls.
+- [x] Move resource registration into `monaco_editor/editor_asset_routes.py`;
+  editor backend and preference/state consumers import without FastAPI, Pydantic
+  or Starlette. Resource routing still uses FastAPI at the worker assembly edge;
+  this is not the final ASGI cutover.
+- [x] Preserve Monaco, theme and TextMate resource URLs and response semantics.
+  TextMate grammar discovery/content stays on WBA `grammars_list`/`grammars_load`;
+  `onig.wasm` remains HTTP/local-intercepted. No changes to WBA or Android sources.
+- [x] Focused validation (2026-09-20): 67 Python tests and 48 frontend tests pass,
+  including real TextMate tokenization from WBA-supplied grammar content.
+  TypeScript passes. Basedpyright: 0 errors, 21 existing warnings across
+  `main.py` and `editor_backend.py`; new asset module/tests are clean. Resource
+  handler bodies are unchanged apart from return annotations and extraction.
+- [x] Separate test-maintenance follow-up: the older
+  `test_startup_optimization.LaunchSerializationTests.test_code_server_launches_do_not_overlap`
+  mock omits `on_spawned`, causing its task to fail before signalling an unbounded
+  event wait. The initial broad run was stopped. The WBA HTTP retirement slice
+  repairs the fixture, isolates installation lookup and bounds synchronization
+  waits without changing runtime launch code.
+- [x] User live acceptance (2026-09-20) after app-worker restart: working editor startup,
+  theme and syntax highlighting (including switching languages), Find/navigation,
+  inline diffs and historical second editor. No frontend asset update required.
+
+### WBA HTTP Retirement
+
+- [x] Source audit found no active callers of the seven legacy HTTP endpoints:
+  `/workbench_adapter/{discover,start,attach,status,cmd}` and GET/POST
+  `/workbench/extensions/enabled`. Delete the router module and route-only main
+  helpers/dependencies; no replacement HTTP fallback or startup path.
+- [x] Preserve worker/boot-snapshot intelligence priming, direct WBA socket RPC,
+  pipe control and sidecar accessors/data. Theme/grammar transport is unchanged.
+- [x] Keep connection-record and sidecar contract coverage against real services,
+  assert router removal and retained primer/socket assembly, and repair the stale
+  launch serialization fixture with bounded waits and isolated installation state.
+- [x] Focused validation (2026-09-20): 75 Python tests pass, including the repaired
+  startup module, startup overlap/cancellation, lifecycle and editor/resource/RPC
+  checks. Basedpyright reports 0 errors; the two changed test modules are clean,
+  and `main.py` retains 15 existing warnings. Source audit finds no remaining
+  production references to the retired router/endpoints. No frontend source
+  changed in this slice, so no bundle or APK build was needed.
+- [x] User live acceptance (2026-09-20) after app-worker restart: intelligence startup and
+  reconnect, syntax/diagnostics/navigation, language-backend selection and the
+  Languages/Extensions modal. No frontend assets or APK rebuild needed.
+
+### Main Legacy Route Retirement
+
+- [x] Initial audit reported no active callers of `/read`, `/state`, `/diff`,
+  `/review/list`, `/edit_tracker/status`, `/ws/read`, `/ws/edit_tracker`,
+  `/ws/debug_console` or the `/editor/update_diffs` stub. Remove these nine routes
+  and route-only helpers/imports; no replacement transport or fallback.
+  **Correction:** `/ws/read` had a dynamic frontend caller missed by this audit;
+  see the frontend cleanup below. Initial backend-only checks were insufficient.
+- [x] Preserve shared state/diff/read/edit-tracker services, project initialization,
+  intelligence priming, lifecycle/readiness, console tools, Socket.IO mounts and
+  health/resource routes. Add a main-route inventory regression test without
+  importing main and installing its process hooks/opening user stores.
+- [x] Focused validation (2026-09-20): 76 Python tests pass. Basedpyright reports
+  0 errors; changed test code is clean and main retains 5 existing warnings
+  (down from 15 after removing legacy handlers). No frontend/build changes.
+- [x] User live acceptance (2026-09-20) after app-worker reload: file/project navigation,
+  draft/commit diffs, change projections, console and intelligence startup.
+
+The editor/WBA extraction and main-route retirement slices are live accepted.
+The later 403 report exposed incomplete frontend retirement of `/ws/read`.
+
+### Legacy File-Read Frontend Cleanup
+
+- [x] Trace current-source caller: main's file manager calls shared
+  `wsPort.buildWsUrl`, constructing `/ws/app/code_te2/read`; Rust forwards to
+  `/ws/read`. Reconnect attempts fail because the handler was removed, not
+  because of stale assets, another device or an authentication regression.
+- [x] Remove the host file-read manager/handler, open/save/boot/project-switch
+  wiring, keepalive/retries and unused acknowledgement bookkeeping. Preserve
+  existing host/editor RPC, save conflict handling, revision-fenced cache/draft
+  projections and backend watcher delivery. No parallel replacement channel.
+- [x] Validation: 61 frontend tests and TypeScript checking pass, including
+  dynamic-helper source guards, boot/open paths, save/Save As replies and current
+  versus stale/other-document hash/draft/external-change projections.
+- [x] Production frontend build passes; generated host.js contains none of the
+  retired `wsPort`/`buildWsUrl`/file-read reconnect markers. Generated vendor
+  strings retain whitespace; source-only diff checking passes.
+- [x] User live acceptance (2026-09-20) after loading the rebuilt frontend:
+  reports operation looks good and `/ws/read` retry warnings are gone.
+
+The shared shell URL helper is not changed. Already-loaded frontends retain their
+old reconnect loop until replaced/reloaded. No asset version bump, Android
+publication, shared runtime restart or logging suppression in this slice.
+
+### Native-ASGI Code TE2 Assembly
+
+- [x] Replace main's router/SUBAPPS exports with `TE2_ASGI_APP`. New `http_app.py`
+  composes health/resources and the same Socket.IO gateway, without owning worker
+  startup or changing readiness/intelligence ordering. Other apps are unchanged.
+- [x] Convert editor resources to a Starlette route factory. Preserve URLs,
+  explicit methods, CSS shim/raw responses, MIME/bytes, missing-build errors and
+  containment. Keep JSON health/error responses; static paths cannot escape their
+  resource root. FastAPI-generated docs/OpenAPI endpoints are not retained.
+- [x] Isolated real-backend probe blocks FastAPI/Pydantic, exercises resource
+  delivery, native lifespan/debug probe and real Engine.IO WebSocket handshakes
+  through all five mounts. Test request includes the browser's Upgrade header.
+- [x] Validation (2026-09-20): 93 focused tests pass, including worker subprocess
+  lifecycle/legacy compatibility, active RPC, startup and assets. Basedpyright:
+  zero errors, five existing main warnings; new modules/tests are clean.
+- [x] User live acceptance (2026-09-20): reports normal operation after the native
+  cutover and confirms the follow-up frontend cleanup eliminates retry warnings.
+
+No shared runtime restart, frontend/APK build, package dependency removal or
+startup rescheduling. FastAPI/Pydantic remain installed for other consumers.
+
+### Reported Regression: Android Second Editor
+
+- [ ] Investigate the second editor window failing to open in both GeckoView and
+  Cefrium APKs. User follow-up (2026-09-19) confirms Cefrium is also affected;
+  the original GeckoView-only observation is superseded. A change on or after
+  the last release is suspected. Exact regression commit and cause are unknown.
+  Include shared frontend/Python routing and state projection in the investigation,
+  not just native Android code. This is separate from Explorer delivery acceptance.
+  Source check: mobile presentation uses iframe loading plus postMessage; actual
+  working/historical file opens use host Socket.IO RPC (`hostFileOpen` /
+  `hostHistoryOpen`), not the removed persistence or terminal HTTP endpoints.
+  This is not a diagnosis; investigate after FastAPI migration as requested.
+
 ### MessagePack Pipe Cutover
 
 - [x] Audit: framework/app pipes are JSONL; WBA uses JSONL/prefixes; Terminal
@@ -666,3 +1092,160 @@ the executing interpreter, not a frontend flag or user-agent guess.
 - [x] User live acceptance: startup bug fixed after the installation/protocol cleanup.
   No shared runtime was restarted by the agent; language-mode switching was not
   separately reported for this slice.
+
+### Earlier Intelligence Bootstrap: Compact State Boundary
+
+- [x] Extract backend mode and installation ledger to config `intelligence.json`.
+  Keep UI DTOs and preference entrypoints unchanged; migrate legacy values once
+  and remove their old preference keys. Existing compact state wins on retries.
+- [x] Preserve atomic mode/installation invalidation with a sibling lock and
+  atomic file replace; reject corrupt canonical state rather than silently
+  reverting to legacy/default mode.
+- [x] Read installation identity and eager-start mode without loading the full
+  preference store. Import-boundary test excludes app stores and web frameworks.
+- [x] Remove eager-start's duplicate watcher-settings synchronization. Verify
+  extension gating, one watcher sync, then spawn in the shell manager.
+- [x] Validate migration/failure recovery, concurrent independent instances,
+  custom-store isolation, installation semantics and lifecycle/ASGI/RPC regressions:
+  116 tests passed, with isolated config/data/cache/runtime roots.
+  Basedpyright: zero errors; 12 existing warnings in main/preferences, none in
+  the new compact state module or changed tests.
+- [ ] User live acceptance after worker reload: retained backend choice,
+  intelligence startup and switching between the existing backend modes.
+- [x] Next slice: investigate and approve actual earlier managed-process launch
+  overlapping heavy backend assembly, without crossing event-loop ownership.
+
+This slice does not change launch timing, restart the shared framework, build
+Android assets, or claim measured startup gains.
+
+### Earlier Intelligence Bootstrap: Overlapped Assembly
+
+- [x] Add explicit `--bootstrap-module` for HTTP workers; opt in only Code TE2's
+  shellspec. Keep legacy synchronous assembly and pipe-only workers unchanged.
+- [x] Schedule intelligence preparation before full backend assembly. Preload
+  preparation dependencies, run import/assembly off-loop, and keep lifecycle,
+  WBA readers, shell manager locks/futures and Uvicorn on one owning loop.
+- [x] Keep web-worker mode from launching either intelligence shell. Read the
+  persisted project as a boot hint and recheck at lifecycle handoff.
+- [x] Gate WBA connection on both code-server and application readiness. Hold
+  ordered pushes during assembly and publish current adapter state once the
+  project's fact handlers are registered. Reuse the early task in eager startup.
+- [x] Join interrupted assembly before cleanup; cancel both preparation owners
+  on mode changes/shutdown. Unsubscribe WBA readers without terminating reusable
+  shells at worker teardown. User-selected mode changes still stop the shells.
+- [x] Cover import/loop overlap, both readiness orders, web-worker skip,
+  preparation failure, cancellation, project mismatch, deferred push delivery,
+  actual Code TE2 off-loop ASGI/Engine.IO assembly, and real fixture-worker SIGTERM.
+- [x] Validation: 131 startup/application tests plus 10 MessagePack pipe tests
+  passed under isolated state roots. New bootstrap/runner/runtime paths and their
+  focused tests have zero Basedpyright errors/warnings. Broader legacy
+  main/preferences/WBA modules have zero errors and retain existing warnings.
+- [ ] Live acceptance after worker restart: cold intelligence startup, editor
+  remains independent, backend-mode switching, and warm shell adoption.
+- [ ] Compare opt-in startup spans on device before claiming latency gains.
+
+No shared framework restart, Android publication or frontend rebuild performed.
+
+### Python Configuration Startup Experiment
+
+- [x] Preserve historical backend measurements and the user's separate estimate
+  of ~20 s to WBA/grammars, then another 5-10 s to semantic tokens/diagnostics.
+- [x] Capture run A, standard CPython 3.14.6 defaults: listener 3.549 s,
+  code-server startup complete 8.133 s, WBA connection complete 13.301 s from
+  module entry. Fresh worker/code-server/WBA; actual GIL on and JIT unavailable.
+- [ ] Run B: standard Python with JIT requested; verify build support first.
+- [ ] Run C: free-threaded Python with GIL off; verify effective state after imports.
+- [x] Capture requested run D: CPython 3.14.6 free-threading, actual GIL off,
+  JIT unavailable/off despite `PYTHON_JIT=1`. Sidebar items were closed, so this
+  is not a matched workload. Listener 2.858 s; code-server ready 6.398 s;
+  WBA connect complete 11.595 s. It does not validate JIT-enabled performance.
+- [x] Recover backend semantic-provider/diagnostics milestones for both A/D:
+  provider event 19.183/17.796 s, first diagnostics event 23.846/22.696 s.
+  These are not token computation or browser-visible rendering timestamps.
+- [x] Capture additional warmed GIL-on run E: standard Termux Python, not the
+  free-threaded binary with its GIL enabled. Actual JIT remains unavailable/off
+  despite both environment and `-X jit` requests. Listener 3.071 s, WBA connection
+  11.706 s, first semantic-provider event 16.371 s, first diagnostics event
+  18.870 s. WBA arrival is near D's 11.595 s; the later events arrive sooner.
+  Warm-up, interpreter build and unverified sidebar equivalence prevent a causal
+  GIL comparison. Preserve raw structured spans and provenance in the experiment.
+- [ ] Compare like-for-like milestones; no browser/provider latency claim from
+  backend readiness alone. Record shell reuse and uncontrolled cache/load effects.
+- [x] Capture run F with the same free-threaded interpreter as D and actual GIL
+  enabled (`PYTHON_GIL=1`); JIT remains unavailable/off. Fresh intelligence shells:
+  listener 2.413 s, WBA connected 13.210 s, first semantic-provider event 18.096 s,
+  first diagnostics event 21.976 s. Compared with D, WBA arrived 1.615 s later
+  while diagnostics arrived 0.720 s earlier. Build provenance now matches; mixed
+  timings and uncontrolled run conditions do not establish a GIL-mode winner.
+
+Detailed protocol, provenance, timing definitions and selected raw spans:
+`STARTUP_EXPERIMENT.md` and `startup_captures/`. No runtime implementation edits
+or restarts are part of capture; the user controls restarts.
+
+### WBA Evaluation And Completion Registration
+
+- [x] Inspect current WBA registry, activation, request dispatcher and Python
+  runtime-debug path. Existing Python evaluation only reaches predefined WBA RPCs;
+  arbitrary WBA JavaScript required a process-side evaluator.
+- [x] Add runtime-debug-only pipe evaluator, live wb/state/trace/probe bindings,
+  exact WBA process identity, single evaluation admission and bounded projection.
+  Reject evaluation through WBA HTTP and browser Socket.IO.
+- [x] Expose CLI wba-status/wba-eval and MCP te2_wba_status/te2_wba_eval through
+  the existing authenticated parent-worker route, with no Rust endpoint changes.
+- [x] Add bounded metadata-only completion timing from activation to per-language
+  registration, browser receipt/Monaco registration and request/reply boundaries.
+  Document temporary probe installation/removal separately from source tracing.
+- [x] Validate: 30 focused Node tests, 16 Bun tests and 23 Python tests pass,
+  including actual adapter child-process MessagePack eval and HTTP/Socket.IO
+  rejection. Frontend typecheck/build pass; new Python paths/tests report zero
+  Basedpyright errors/warnings. WBA TypeScript diagnostics match the archived HEAD
+  baseline exactly (107), with none added. Both WBA build entrypoints include the
+  new module. Bun's test-side esbuild uses the installed Android binary explicitly.
+- [x] User reloads WBA/frontend; live evaluation probes capture Python provider
+  registration reaching Monaco in ~80 ms, then a completion reply taking 10,040 ms
+  inside the extension-host request path. Browser expires at 10,002 ms; WBA
+  finishes 194 ms later with 733 items. Next request is 430 ms end-to-end with
+  32 items (different query, not a controlled cold/warm comparison).
+- [x] Replace inconsistent completion deadlines with one shared budget contract:
+  provider 30 s, operation 45 s, outer RPC 195 s worst-case including both existing
+  gate admissions. No artificial delay, synthetic warm-up, or timeout changes to
+  other language features. Preserve current cancellation behavior for this slice.
+- [x] Validate 38 focused Node tests and 14 Bun tests, including simulated slow
+  replies, two gate admissions, late registration, timeout cleanup and disconnect.
+  Frontend typecheck and both builds pass. WBA's 107 existing TypeScript
+  diagnostics match the previous baseline with zero added. The existing frontend
+  provider test harness uses long data-URL imports unsupported by this Bun build;
+  it passes under Node. The new tests use direct TypeScript imports under Bun.
+- [x] Compare local VS Code activation/suggest sources and basedpyright v1.40.1:
+  both activate on language events; no generic completion pre-warm found in the
+  inspected paths. Basedpyright completions load stdlib modules and may build an
+  auto-import symbol map. These are profiling candidates, not proven root causes.
+  User reports the delay is basedpyright-specific; other LSPs respond normally.
+- [x] User reloads built WBA/frontend and validates the longer completion window.
+- [x] Approved evaluation-only warm-up experiment on a freshly restarted WBA:
+  one synthetic request took 2.50 s; the next typed request returned 733 items in
+  1.83 s end-to-end (1.57 s extension-host portion versus the earlier 10.04 s).
+  Synthetic result cache released. User reports substantially faster completions.
+  Different cursor/background-analysis state means this is not a controlled A/B.
+- [x] Commit the live-validated timeout/evaluator checkpoint (`435548bb`) before
+  implementing the separately approved automatic warm-up.
+- [x] Add event-driven WBA warm-up once per matching provider/language/project
+  session, after provider registration and successful document synchronization
+  in either order. No synthetic edits, UI publication, polling, startup barrier,
+  or interactive operation-gate ownership. Real requests satisfy the same key.
+- [x] Reset keys on project/host replacement, skip unsynchronized documents,
+  contain failures without retry, and release discarded completion result caches
+  only into the host that created them. Include pattern-only provider selectors.
+- [x] Validate 70 focused Node tests and 43 Bun tests, including actual client
+  readiness wiring and originating-host cache release. Frontend typecheck and
+  both build entrypoints pass. WBA's 107 existing TypeScript diagnostics match
+  the checkpoint baseline exactly; none added. No version or APK asset changes.
+- [ ] User reloads WBA and validates automatic warm-up on an already-open Python
+  document after provider registration. The evaluation experiment above is not
+  production live acceptance.
+- [ ] If further optimization is needed, time basedpyright's workspace readiness,
+  stdlib loading and auto-import work; investigate cancellation propagation as a
+  separate scoped change.
+
+Details and exact evaluation commands: `WBA_RUNTIME_DEBUG.md`. No shared runtime
+restart, Android asset publication or version bump is authorized by this slice.

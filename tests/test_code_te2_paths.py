@@ -68,6 +68,7 @@ class CodeTe2PathTests(unittest.TestCase):
         self.assertEqual(paths.data_root / "projects", paths.project_sidecars_dir)
         self.assertEqual(paths.data_root / "history.json", paths.history_path)
         self.assertEqual(paths.config_root / "preferences.json", paths.preferences_path)
+        self.assertEqual(paths.config_root / "intelligence.json", paths.intelligence_state_path)
         self.assertEqual(paths.data_root / "agent_icons", paths.agent_icons_dir)
         self.assertEqual(
             paths.runtime_root / "sidebar_backchannel.sock",
@@ -286,6 +287,7 @@ class CodeTe2PathTests(unittest.TestCase):
             "services/sidebar_backchannel_uds.py",
             "explorer/handlers/prefs.py",
             "monaco_editor/editor_backend.py",
+            "monaco_editor/editor_asset_routes.py",
             "workbench_protocol_proxy/node_workbench_adapter/src/extensions/catalog.ts",
             "workbench_protocol_proxy/node_workbench_adapter/src/client/configuration.ts",
             "workbench_protocol_proxy/node_workbench_adapter/src/protocol/rpc-ids.ts",

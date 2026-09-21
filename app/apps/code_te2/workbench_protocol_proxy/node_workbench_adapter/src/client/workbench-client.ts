@@ -2,6 +2,8 @@ import crypto from "node:crypto";
 import { readFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { completionTrace } from "../server/runtime-debug.mjs";
+import { CompletionWarmup, warmCompletionProvider, type CompletionWarmupDocument } from "../extensions/intelligence/completion-warmup.mjs";
 
 // ╔═══════════════════════════════════════════════════════════════════════╗
 // ║  DO NOT HARDCODE CONFIGURATION VALUES IN THIS FILE.                   ║
@@ -804,6 +806,8 @@ export class WorkbenchClient {
   _diagnosticSnapshots: DiagnosticsSnapshotStore;
   _semanticTokenProjections: SemanticTokenProjectionManager;
   _semanticTokenProviderSignatures: Map<string, string>;
+  private readonly _completionWarmup: CompletionWarmup;
+  private readonly _completionReadyPaths = new Set<string>();
   _callHierarchySessions: CallHierarchySessionStore;
   _useRemote: boolean;
   _authority: string;
@@ -828,7 +832,19 @@ export class WorkbenchClient {
     extensionStoragePath: string;
     webviewReconstructionStoragePath: string;
   }) {
-    this.onEvent = typeof onEvent === "function" ? onEvent : () => {};
+    this.onEvent = (payload) => {
+      // Capture lifecycle metadata at the common event boundary, including
+      // extension-host activation notifications and provider replay on reconnect.
+      if (payload.type === "extension/activityChanged") {
+        const activity = isRecord(payload.activity) ? payload.activity : {};
+        if (activity.kind === "activation") completionTrace.record("extension.activation", {
+          extensionId: activity.extensionId, message: activity.message,
+        });
+      } else if (payload.type === "extension/activationResolved" || payload.type === "extension/activationFailed") {
+        completionTrace.record(String(payload.type), { target: payload.target, req: payload.req });
+      }
+      if (typeof onEvent === "function") onEvent(payload);
+    };
     this.onNotification = typeof onNotification === "function"
       ? onNotification
       : () => {};
@@ -1058,6 +1074,41 @@ export class WorkbenchClient {
         this._releaseSemanticTokenResult(providerHandle, resultId),
       canRun: () => this._openFilePending === 0 && !!this.ext?.protocol,
       log: (message) => console.log(message),
+    });
+
+    this._completionWarmup = new CompletionWarmup({
+      documents: () => {
+        const documents: CompletionWarmupDocument[] = this._documentRegistry.values();
+        return documents.filter(entry => this._completionReadyPaths.has(entry.path))
+          .sort((a, b) => Number(this._isPathClientForeground(b.path)) - Number(this._isPathClientForeground(a.path)));
+      },
+      handles: document => this._providerRegistry.findAllProviderHandlesForDocument("completions", {
+        path: document.path, languageId: document.languageId,
+        scheme: this._useRemote ? "vscode-remote" : "file", authority: this._authority,
+      }),
+      canRun: () => this._openFilePending === 0 && !!this.ext?.protocol,
+      request: async (document, handle) => {
+        const protocol = this.ext?.protocol;
+        const started = performance.now();
+        completionTrace.record("completion.warmup.begin", { handle, language: document.languageId });
+        const outcome = await warmCompletionProvider({
+          request: (provider, uri, timeoutMs) => this._sendExtPending(
+            _rpcIds.ExtHostLanguageFeatures, "$provideCompletionItems",
+            [provider, uri, { lineNumber: 1, column: 1 }, { triggerKind: 0 }],
+            true, { timeoutMs, timeoutMessage: "Completion warm-up timed out" },
+          ).promise,
+          release: (provider, cacheId) => {
+            // Never release an old host's cache ID into its replacement host.
+            if (protocol && this.ext?.protocol === protocol) this._sendExt(
+              _rpcIds.ExtHostLanguageFeatures, "$releaseCompletionItems", [provider, cacheId], false,
+            );
+          },
+        }, document, handle);
+        completionTrace.record("completion.warmup.end", {
+          handle, language: document.languageId, elapsedMs: performance.now() - started, ...outcome,
+        });
+      },
+      onError: () => { completionTrace.record("completion.warmup.failed"); },
     });
 
     if (DEBUG_METRICS) {
@@ -1727,6 +1778,7 @@ export class WorkbenchClient {
 
   async activateLanguage(languageId: string): Promise<Record<string, unknown>> {
     const normalized = String(languageId || "plaintext").trim() || "plaintext";
+    completionTrace.record("language.activate.begin", { language: normalized });
     this._startupMark(`language.${normalized}.begin`);
     try {
       const [specific, generic] = await Promise.all([
@@ -1734,9 +1786,11 @@ export class WorkbenchClient {
         this._extensionActivation.activateByEvent("onLanguage"),
       ]);
       this._startupMark(`language.${normalized}.succeeded`);
+      completionTrace.record("language.activate.end", { language: normalized });
       return { ok: true, languageId: normalized, specific, generic };
     } catch (error) {
       this._startupMark(`language.${normalized}.failed`);
+      completionTrace.record("language.activate.failed", { language: normalized });
       throw error;
     }
   }
@@ -2060,6 +2114,9 @@ export class WorkbenchClient {
   }
 
   _handleWorkbenchEvent(payload: Record<string, unknown>): void {
+    if (payload.type === "provider/completions" || payload.type === "provider/completions/registered") {
+      this._completionWarmup.notify();
+    }
     if (typeof payload.type === "string" && (
       payload.type.startsWith("provider/") || payload.type === "diagnostics/changeMany"
     )) this._startupMark(`intelligence.first.${payload.type}`);
@@ -2150,6 +2207,8 @@ export class WorkbenchClient {
   }
 
   _resetSessionCaches(reason: string): void {
+    this._completionWarmup.reset();
+    this._completionReadyPaths.clear();
     this._callHierarchySessions.releaseAll((providerHandle, sessionId) => {
       if (!this.ext?.protocol) return;
       this._sendExt(
@@ -2488,6 +2547,7 @@ export class WorkbenchClient {
         this._semanticTokenProjections.invalidatePath(requestedPath);
       }
       this._startupMark("document.firstOpen.succeeded");
+      if (result.ok !== false && requestedPath) this._completionReadyPaths.add(requestedPath);
       return result;
     } catch (error) {
       this._startupMark("document.firstOpen.failed");
@@ -2495,6 +2555,7 @@ export class WorkbenchClient {
     } finally {
       this._openFilePending = Math.max(0, this._openFilePending - 1);
       this._trackOpeningPath(requestedPath, -1);
+      this._completionWarmup.notify();
     }
   }
 
@@ -2509,6 +2570,7 @@ export class WorkbenchClient {
       const releasedPaths = new Set(result.released.map((path) => String(path)));
       const removedEditors: string[] = [];
       for (const releasedPath of result.released) {
+        this._completionReadyPaths.delete(String(releasedPath));
         this._semanticTokenProjections.invalidatePath(String(releasedPath));
       }
       for (const [clientInstanceId, facade] of this._clientEditorFacades) {
@@ -2544,6 +2606,8 @@ export class WorkbenchClient {
   ): Promise<Record<string, unknown>> {
     const result = await this._documentRegistry.hydrateLogicalDocument(params);
     if (result.ok === true && typeof result.path === "string") {
+      this._completionReadyPaths.add(result.path);
+      this._completionWarmup.notify();
       this._semanticTokenProjections.invalidatePath(result.path);
       this._semanticTokenProjections.schedule(result.path);
     }
@@ -2719,6 +2783,20 @@ export class WorkbenchClient {
 
   // ─── Completions ────────────────────────────────────────────────────
   async completions(params: unknown = {}): Promise<Record<string, unknown>> {
+    // A user request already warms these providers; do not schedule redundant
+    // synthetic work if it wins the race against the readiness microtask.
+    const input = isRecord(params) ? params : {};
+    const documentPath = String(input.path ?? "");
+    const languageId = this.resolveLanguageId(documentPath, "", input.languageId);
+    const handles = this._providerRegistry.findAllProviderHandlesForDocument("completions", {
+      path: documentPath, languageId, scheme: this._useRemote ? "vscode-remote" : "file",
+      authority: String(input.authority ?? this._authority),
+    });
+    for (const handle of handles) {
+      if (input.providerHandle == null || Number(input.providerHandle) === handle) {
+        this._completionWarmup.markRequested(handle, languageId);
+      }
+    }
     return provideCompletions(this._completionRuntime(), params);
   }
 
@@ -2872,6 +2950,8 @@ export class WorkbenchClient {
     rejectedPendingRequests: number;
     clearedBackgroundDocuments: number;
   } {
+    this._completionWarmup.reset();
+    this._completionReadyPaths.clear();
     const removedEditors = Array.from(
       new Set(
         [...this._clientEditorFacades.values()].map((facade) => facade.editorId),

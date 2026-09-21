@@ -193,7 +193,6 @@ async def open_project(
         replay_reason = "project_open_with_file"
 
     from ...explorer.services.project_switch import switch_project_connection
-    from ...explorer.transport.rpc_socketio import sync_active_explorer_dispatchers_project_root
 
     switch_result = await switch_project_connection(
         None,
@@ -205,7 +204,6 @@ async def open_project(
         open_state_source=reason,
     )
     project_root = switch_result.project_root
-    sync_active_explorer_dispatchers_project_root(project_root)
     state = deps.build_state_payload()
     lookup_after = lookup_project(deps, display_path)
     return {

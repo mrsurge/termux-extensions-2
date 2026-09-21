@@ -45,7 +45,6 @@ interface BootSequenceDeps {
   toAbsolute(path: string, base?: unknown, homeDir?: string): string;
   HOME_DIR: string;
   applyRestoredPathState(args: RestoredPathStateArgs): void;
-  openWebSocket(path: string): void;
   openFile(path: string): Promise<unknown>;
   onOpenFileFailure(err: Error): void;
   onNoRestoredPath(serverState: Record<string, unknown>): void;
@@ -250,7 +249,7 @@ export async function runBootSequence(deps: BootSequenceDeps): Promise<void> {
   const serverState = snapshotServerState || await deps.syncEditorState(true);
   deps.broadcastRecentsUpdate(serverState);
   await deps.refreshMenuState();
-  try { await deps.apiPost('editor/refresh_cache_state', {}); } catch (error) { console.warn('Failed to refresh cache state on boot:', error); }
+  // Draft/cache state arrives through editor bootstrap and live projections.
 
   if (!snapshotSessionState) {
     await deps.fetchPersistedSessionState();
@@ -272,7 +271,6 @@ export async function runBootSequence(deps: BootSequenceDeps): Promise<void> {
 
   if (restoredPath) {
     deps.applyRestoredPathState({ restoredPath, serverState, restoredSha });
-    deps.openWebSocket(restoredPath);
     console.log('[BOOT] Synced with backend SSOT:', restoredPath);
   }
 

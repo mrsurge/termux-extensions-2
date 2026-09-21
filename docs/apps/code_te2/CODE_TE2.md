@@ -160,6 +160,34 @@ For `code_te2`, we intentionally separate responsibilities:
 - **Execution**:
   - Worker owns drafts/saves/versioning and host/explorer state.
   - Rust pipe services own filesystem, Git, and search DTO production.
+  - Explorer delivery passes completed message mappings through
+    `ExplorerConnection.send_message` in `explorer/transport/connection_manager.py`.
+    The manager selects project/client/personal recipients; the concrete
+    `rpc_socketio.py` adapter encodes MessagePack notifications or completes a
+    pending acknowledgement. There is no internal JSON text round trip. Existing
+    project-miss all-client fallback and single-project authority are unchanged;
+    this boundary is independent of the native-ASGI assembly described below.
+  - `monaco_editor/editor_session_service.py` owns editor bootstrap ordering and
+    result-derived notification policy, using injected readers and delivery
+    callbacks. It emits logical connection/client targets, not socket rooms.
+    `editor_rpc_socketio.py` retains authentication, registration, room lookup,
+    request validation/error mapping and wire encoding. State snapshot precedes best-effort adapter
+    state/open-state publication; jump/baseline notifications reach the client,
+    draft comparison reaches only the requester, and pushes precede the RPC reply.
+  - `editor_rpc_messages.py` builds complete editor result/error/notification
+    envelopes and preserves existing normalization before transport encoding.
+    `editor_rpc_emit.py` retains the publisher API as a builder/encoding/delivery
+    facade. `editor_runtime_dispatch.py` binds runtime dependencies once for both
+    requests and notifications, retaining source-client forwarding. Runtime
+    service internals are not yet wholly separated from transport.
+  - `ui_ipc/sidebar_projection_service.py` builds ordered window/client-state
+    projections from existing state and facts without Socket.IO/store access.
+    Adapters resolve logical recipients and encode deliveries. Ledger updates
+    remain activation -> readiness -> state, UI before Sidebar at each step;
+    readiness is global and sender exclusions apply only to Sidebar deliveries.
+    `sidebar_projection_transport.py` retains best-effort fact delivery using
+    the configured socket server; direct registration/snapshot sends still
+    propagate failures. Command/mention/agent-edit routing remains unchanged.
   - `code-server` owns extension execution and remote-agent services.
   - Node workbench adapter owns protocol translation, provider state, editor-facing WBA RPC/events, and backend stdio control hooks.
 
@@ -457,6 +485,20 @@ client whose new-project foreground is explicitly empty receives
 `ProjectSwitchFinished` event is the sole global `explorer.project.opened`
 projection; failures before that event publish no completion.
 
+All project-open entry points (Projects modal, directory picker, Sidebar, and
+create/clone paths) use `switch_project_connection` for dispatcher rebinding and
+Explorer hydration as well as the underlying project switch. The shared service
+updates every connected dispatcher's root through `set_project_root`, cancelling
+old bootstrap work and invalidating History/search sessions. After enqueueing
+`ProjectSwitchFinished`, it invokes the existing Explorer refresh once, not once
+per client. That refresh publishes shared expanded-directory state and root plus
+shallow-to-deep listings, schedules Git status, and republishes review state.
+Callers do not run their own post-switch refresh or reassign roots afterward.
+With no Explorer connected, normal connection bootstrap supplies the tree later.
+Generation checks reject superseded switches, late directory loads and queued
+old completion events. The transport lanes remain separate; no frontend borrows
+another surface's socket.
+
 ### Drafts (project sidecar / session_cache)
 Drafts are stored in project sidecar "session_cache" entries:
 - key = absolute file path
@@ -522,16 +564,11 @@ It then fetches:
   - returns `{path, content, sha256}`
   - the endpoint enforces that `path` must remain under `$HOME`
 
-### Draft cache lookup (Monaco editor backend route)
-- `POST /api/app/code_te2/editor/check_cache`
-  - returns `{has_draft, content, base_sha256}` when a cached draft exists
-  - route owner: `app/apps/code_te2/monaco_editor/editor_backend.py`
-  - implementation service: `app/apps/code_te2/monaco_editor/editor_backend_services/cache_routes_service.py`
-  - frontend caller: `app/apps/code_te2/monaco_editor/editor_open_cache_fetch_utils.ts`
-
-Notes:
-- The Monaco editor runtime uses `/editor/check_cache` as a “draft wins” read path when opening/restoring a file.
-- The authoritative socket open payload comes through the typed editor RPC lane (see below).
+### Draft Cache Projection
+- The authoritative socket open/bootstrap payload includes materialized draft
+  content and cache state through the typed editor RPC lane (see below).
+- The obsolete HTTP check-cache route and unused HTTP open helpers are removed.
+  There is no HTTP fallback for document persistence or draft state.
 
 ---
 
@@ -1741,6 +1778,14 @@ selection or require Electron to forward environment variables to a remote host.
 
 ### Generic WBA language path
 
+WBA startup/control does not use the retired Python
+`/workbench_adapter/{discover,start,attach,status,cmd}` or
+`/workbench/extensions/enabled` HTTP routes. Worker lifecycle and boot-snapshot
+RPC use the shared intelligence primer; the adapter's existing shell manager
+owns process/pipe control and browsers use direct `/wba` RPC. The removed router
+had no active callers. Sidecar extension-list data/accessors remain intact; this
+cleanup does not change extension activation policy or startup ordering.
+
 The Code Server path is data-driven:
 
 1. The WBA publishes language, language-configuration, grammar, theme, and
@@ -1760,6 +1805,17 @@ The Code Server path is data-driven:
 4. Provider registration events and reconnect snapshots install one stable
    Monaco bridge per advertised language and feature. There are no JavaScript,
    HTML, CSS, or other language-specific routing branches.
+
+Grammar discovery/content travels over the direct WBA socket as
+`vscode.textmate.grammars.list` / `vscode.textmate.grammars.load`. It does not use
+the Python asset router. The separate HTTP resource boundary in
+`monaco_editor/editor_asset_routes.py` serves `/ui/monaco_editor/textmate/onig.wasm`,
+Monaco ESM/language assets and theme JSON, retaining native OTA/APK interception
+and CSS-module shim behavior. `editor_backend.py` owns no HTTP routes or web
+framework imports. The obsolete refresh-diffs/jump/search/debug-state HTTP
+controls are removed; host/editor RPC and notifications own active controls.
+`http_app.py` composes these Starlette resource routes into the native ASGI app
+exported by `main.py`; no FastAPI/Pydantic imports are needed for this assembly.
 
 Document highlights use `$provideDocumentHighlights` and back Monaco's
 cursor-occurrence highlighting. Definitions, references, and implementations
@@ -2240,10 +2296,39 @@ te2 console search "query" --worker <worker-id> --limit 100
 ## 26) Themes, TextMate palette, and retokenization
 
 Theme selection is a preference-backed editor concern. Code TE2 registers the
-vendored GitHub themes and extension-contributed themes, resolves the selected
-theme JSON, converts it to Monaco data, then applies it through the theme
-runtime. The live loader is loadVscodeTextmateThemesRuntime() and the live
-application path is applyMonacoThemeRuntime().
+catalog's themes, resolves the selected theme JSON, converts it to Monaco data,
+then applies it through the theme runtime. The live loader is
+loadVscodeTextmateThemesRuntime() and the live application path is
+applyMonacoThemeRuntime().
+
+`theme_catalog.py` constructs typed catalog metadata off the event loop. The
+settings picker/summary use `ui.host.themes.list`; working editors use
+`editor.themes.list`. Historical secondary views inject their existing host-lane
+request into the theme loader, without starting an editor/WBA session. Both RPC
+handlers call the same service. The former `/ui/monaco_editor/available_themes`
+HTTP endpoint is removed with no fallback. JSON theme files, TextMate resources
+and Monaco assets remain HTTP resource routes, retaining native OTA/APK asset
+interception.
+
+Monaco loads its runtime and connects its own editor socket before awaiting the
+selected theme. The boot snapshot first seeds preferences only; document models
+are created/attached only after theme application succeeds. Normal opens and
+socket replays share this barrier, while historical secondary views apply their
+host-supplied theme before mounting either diff model. Preference changes during
+loading select the latest theme before releasing model consumers. Live snapshots
+invalidate the older bootstrap document, and newer replays supersede pending
+ones, including empty-project snapshots. WBA readiness is not a dependency.
+Theme errors reject readiness rather than displaying a falsely themed document.
+Concurrent catalog requests share an in-flight promise; only validated successes
+are cached. Request failures clear the promise rather than caching an empty
+catalog, and the theme loader also clears rejected loading promises for retry.
+The settings picker exposes failure separately from a genuinely empty catalog.
+
+This transport slice preserves catalog IDs and resource URLs, not new VSIX theme
+support. The current `extension_registry.get_extension_list()` summary omits
+`path`/`themes`, so its entries do not supply extension themes to the catalog.
+Full WBA/VSIX theme integration, JSONC and inheritance remain deferred; bundled
+GitHub themes are the currently populated catalog.
 
 The same raw VS Code theme is applied to the TextMate registry. Its color map is
 published to Monaco and every loaded model is reset for tokenization. This
@@ -3902,6 +3987,16 @@ browser control and bootstrap plane is the app-worker Socket.IO namespace
 `/terminal` on the canonical `/api/app/code_te2/socket.io` path; the drawer
 does not use terminal API HTTP requests.
 
+The obsolete terminal REST endpoints and raw `/ws/terminal/{shell_id}` transport
+are removed, including their parallel client registry. `terminal_backend.py`
+and the host Run service import no FastAPI. Service failures use
+`terminal_outcomes.TerminalServiceError` (invalid/missing/conflict/internal);
+terminal request replies retain detail-only errors and other existing socket
+consumers retain numeric-prefixed string errors. Run always enters the host RPC
+save/confirmation/profile flow; there is no HTTP fallback. The existing
+`close_active_terminal_sockets` service hook now only emits Socket.IO rebind
+notifications; it does not close the shared socket transport.
+
 Control methods are correlated acknowledgements for `shells.get`,
 `shell.create`, `shell.activate`, `shell.title`, `shell.remove` /
 `shell.destroy`, and compatibility `shell.history`. Registration is a reliable
@@ -3967,7 +4062,7 @@ retain the established rebind event. There is no polling or transport fallback.
 
 ### Generic Worker Module Identity
 
-Built-in backend module identity comes from package path rather than public app id. Explicit `TE2_APP_ROUTER` is authoritative; legacy `<app_id>_bp` exists only for unconverted out-of-tree apps. The legacy watcher bridge and `te2.onFilesChanged` API are removed, not compatibility mechanisms.
+Built-in backend module identity comes from package path rather than public app id. Code TE2 exports `TE2_ASGI_APP`; router-based apps retain explicit `TE2_APP_ROUTER` or legacy `<app_id>_bp` via lazy FastAPI assembly. The legacy watcher bridge and `te2.onFilesChanged` API are removed, not compatibility mechanisms.
 
 ### Framework Runtime And State
 
@@ -4639,11 +4734,125 @@ cancels dispatcher/metrics tasks and clears loop references. Stable handler
 registrations survive a same-process restart; this queue is not an edit-command
 queue. Explorer's loop reference is cleared as well.
 
-This is the first ownership boundary, not a networking migration: imports,
-FastAPI/socket adapters, stores and application services still share a process
-and event loop. Other projector tasks and pipe-only worker lifetime are not yet
+This is an ownership boundary, not process separation: ASGI/socket adapters,
+stores and application services still share a process and owning event loop.
+The later opt-in bootstrap moves import/assembly only to a thread (see Early
+Intelligence Preparation And Backend Assembly below). Other projector tasks and pipe-only worker lifetime are not yet
 migrated. No startup-speed improvement is implied. Lifecycle tests include
 partial failure, cancellation, repeated starts/stops and a real worker SIGTERM.
+
+### Worker Transport Exports
+
+`app/libs/app_worker.py` accepts callable `TE2_ASGI_APP` for native ASGI apps.
+That app owns routing, mounted applications and ASGI lifespan; explicit router
+exports or nonempty `SUBAPPS` cannot be combined with it. `app_worker_asgi.py`
+forwards HTTP/WebSocket scopes unchanged except for the reserved
+`GET /__te2/runtime/loop` probe. Native startup must complete successfully before
+worker readiness/debug-loop binding; worker cleanup runs before native shutdown.
+Paired application hooks still surround Uvicorn serving inside signal capture.
+
+Router-based apps retain `TE2_APP_ROUTER` or the legacy `<app_id>_bp` contract via
+lazy `app_worker_fastapi.py` assembly and existing mounted-subapp lifespans.
+Pipe-only workers import no HTTP stack; native network workers import Uvicorn
+and Starlette but not FastAPI/Pydantic. Code TE2 now uses this native path:
+`main.py` exports `TE2_ASGI_APP`, assembled by `http_app.py` from health/static
+routes, `build_editor_asset_routes()` and the existing Socket.IO gateway.
+It exports neither `TE2_APP_ROUTER` nor `SUBAPPS`. The five physical socket mounts
+retain their previous scope/root-path semantics and gateway instance. Worker
+start/stop, readiness, diagnostics and intelligence priming are unchanged.
+
+Resource URLs, MIME/bytes, CSS shims and explicit GET/HEAD sets are preserved.
+Health and HTTP exception responses retain JSON envelopes; static resources are
+confined to their root, including symlink resolution. Auto-generated FastAPI
+docs/OpenAPI endpoints are gone. The native app does not introduce a second
+application lifecycle or new control routes. Tests import the real backend with
+FastAPI/Pydantic blocked and isolated stores, exercise its resources and every
+Engine.IO WebSocket mount, and verify native lifespan through the worker wrapper.
+Other apps' lazy FastAPI path remains tested. This does not uninstall package
+dependencies, change socket protocols, or move networking to another process.
+
+### Editor Service Outcome Boundary
+
+Preference/view-setting services use `editor_backend_services/outcomes.py` for
+typed application errors, and the save service returns a `SaveConflict` carrying
+current disk metadata. These services import no FastAPI/Starlette/Pydantic.
+The temporary HTTP outcome adapter and its save/preference endpoints have been
+removed. Normal saves retain their socket `BASE_MISMATCH` response/confirmation
+flow. Ordinary save results remain dictionaries. Socket callers keep
+their existing generic error handling; application error strings deliberately
+retain the old numeric prefix for wire compatibility. Cancellation is not caught.
+Service isolation is separate from the completed native-ASGI transport cutover.
+
+Host preference state comes from `ui.host.editorState.get`; session telemetry is
+updated with `ui.host.session.update` and does not own project/client foreground.
+Preference edits, Save/Save As and draft discard use their existing host RPCs.
+Monaco uses `editor.preferences.get` / `editor.preference.update` on its own lane,
+including cold-start reads and read-only changes. There is no HTTP fallback.
+Backend socket identity supplies preference source attribution. Cache state
+comes from editor bootstrap/live projections, not an HTTP boot refresh.
+
+Diagnostic text export and directory checks/creation use
+`ui.host.diagnostics.export`. The backend enforces project containment, refuses
+draft collisions and reuses write/acknowledgement/diff primitives. Existing
+directory-creation confirmation stays in the host UI. Superseded HTTP endpoints
+for session/cache/preferences/write/review save/discard are removed; deploy the
+worker and regenerated frontend together. Static/theme/grammar HTTP is unchanged.
+
+### Git And Project Transport Ownership
+
+The former `main_page/backend/git_routes.py` and `project_routes.py` HTTP routers
+are removed along with their route-only assembly in `main.py`. Host branch and
+remote actions use `ui.host.git.*`; Explorer Git/project actions use
+`explorer.git.*` / `explorer.project.*`, and Sidebar project lookup/open/create
+use `sidebar.project.*`. No HTTP fallback remains for these removed routes.
+The shared `project_service.py` and `state_payload.py` are retained: they serve
+live RPC/bootstrap consumers, not only the deleted routers. Historical mutation
+guards, staged/draft restore confirmations, project-switch effects and Rust
+Git/file-ops ownership remain on the existing service paths.
+
+The main app's unused `/read`, `/state`, `/diff`, `/review/list`,
+`/edit_tracker/status`, `/ws/read`, `/ws/edit_tracker`, `/ws/debug_console` and
+`/editor/update_diffs` routes are also removed. This removes only legacy transport
+entrypoints and their private wrappers; shared state/read/diff/edit-tracker
+services still serve the active RPC and event paths. The real console bridge is
+unchanged, as are readiness, project initialization and intelligence startup.
+The native HTTP assembly registers only `/`, `/status`, `/static/{file_path:path}`
+and `/agent_icons/{name}`, plus the separate editor asset routes and Socket.IO
+mounts. See Worker Transport Exports for its lifecycle/import boundary.
+
+The host no longer creates a separate file-read WebSocket on boot/open/Save As.
+Its old `file-websocket.ts` used app_shell's `wsPort.buildWsUrl()` to construct
+`/ws/app/code_te2/read`, rewritten by the proxy to `/ws/read`; this indirect
+consumer was initially missed when the backend route was retired. The manager,
+legacy sync handler and their call sites are removed. Save RPC replies own saved
+status and disk hash; revision-checked editor cache-state notifications own
+current-file draft/hash updates and external refresh. Backend watcher/editor
+delivery is unchanged. Deploy/load the rebuilt host frontend with this removal:
+older already-loaded clients retry the missing route and produce 403 warnings.
+Do not restore that redundant subscription or mask proxy errors.
+
+### Production Projects Modal
+
+`projects-debug-modal.ts` retains its legacy internal/CSS names but is production
+UI, not gated by runtime debugging. The host installs typed transport callbacks
+once for both the File menu and Explorer entry points. List/reset/remove/open use
+`ui.host.projects.*` on `/ui_ipc`, with no HTTP fallback or Explorer-socket calls.
+`host/projects_backend.py` owns the operations and returns ready-to-send DTOs.
+Listing reads independent sidecar snapshots off-loop; opening delegates to the
+shared backend project-switch service.
+
+Reset and removal are distinct confirmed intents. The backend checks current
+active-project status again before writing, so a stale dialog cannot turn Reset
+into Remove or vice versa. Reset clears recents, client foregrounds, draft cache
+and tracked job references, restores HEAD comparison, advances open-state revision,
+then reuses editor/draft/comparison projections for connected clients. Removing an
+inactive entry deletes its sidecar and history and clears its cached sidecar data;
+neither operation deletes project files. Write failures propagate to the modal;
+the history and sidecar files are not one cross-file transaction.
+
+The old `history_routes.py` assembly and its `/debug/projects`, raw state,
+history touch/list/remove routes are removed. Deploy worker and generated host
+frontend together. Shared HistoryStore/ProjectSidecar services remain authoritative.
 
 ### Framework Pipe Codec
 
@@ -4719,12 +4928,32 @@ its existing generation/barrier checks. Tests: `tests/wba_missing_provider.test.
 
 ### Preference-owned Code Server installation state
 
-`PreferencesStore` owns a backend-only top-level `codeServerInstallation` record:
+`intelligence_state.py` owns the small authoritative config file
+`$TE2_CONFIG_HOME/code_te2/intelligence.json` (using the standard resolved config
+root when that override is absent). It stores schema `version: 1`,
+`webWorkersEnabled`, and the backend-only `codeServerInstallation` record:
 `{installed: true, version: "4.130.0", layout: "termux" | "standalone"}`. Generic
 UI preference updates cannot write this record. Startup, boot snapshots, settings,
 and extension commands derive managed paths from it without checking whether
 executables or Code trees exist. The Code version is pinned in
 `code_server_identity.py`; only the explicit installer validates package files.
+
+`PreferencesStore` delegates mode/installation access to this file and projects
+the mode back into the unchanged UI preference DTO. On first access only, the
+compact store migrates those values from `preferences.json`; preference-store
+initialization then removes the legacy fields. Existing compact state always wins,
+including after interrupted legacy cleanup. Invalid compact state fails rather
+than falling back to old values. The mode and installation invalidation share one
+atomic replace under a stable sibling file lock, across threads/store instances.
+Other editor/UI/project preferences remain in `preferences.json`; updates spanning
+both files are not a cross-file transaction. Custom preference paths get sibling
+state files, not the live user's configuration.
+
+The code-server shell manager alone prepares
+watcher settings after extension gating, immediately before spawn; the eager
+caller no longer repeats that work. WBA's existing code-server readiness dependency
+remains intact. Tests: `test_intelligence_state`, `test_code_server_install_state`,
+`test_workbench_route_contracts`, and the startup/lifecycle regression suites.
 
 The record is set after successful installation or code-server launch/adoption.
 Code-server spawn/readiness failure clears it to `{installed: false}`; a WBA/LSP
@@ -4737,3 +4966,88 @@ platform-specific managed launcher once. Success records the pin/layout; launch
 failure records unavailable and ends optimistic retries. Worker-mode installations
 are not adopted during startup. A recorded different pin requires explicit install
 of the current pin. No shared-runtime restart is performed by these state helpers.
+
+### Early Intelligence Preparation And Backend Assembly
+
+Code TE2's worker shellspec passes
+`--bootstrap-module app.apps.code_te2.intelligence_bootstrap`. The generic runner
+enters that module's `te2_worker_bootstrap()` async context inside Uvicorn's signal
+scope, before backend assembly and HTTP listening. Non-opted-in workers retain
+synchronous assembly; pipe-only workers do not accept this option.
+
+The compact intelligence state determines whether to prepare code-server/WBA.
+Web-worker mode skips both shells. A read-only history snapshot supplies a boot
+project hint; the normal initialized project is checked at handoff. Shared
+preparation modules are loaded before the assembly thread starts. Only backend
+import/ASGI assembly uses `asyncio.to_thread`: project initialization, runtime hooks,
+manager locks, readiness futures, WBA readers and serving all use Uvicorn's loop.
+Crash-hook installation runs in application startup, not in the import thread.
+
+Code-server prepares its settings and spawns through the existing FWS manager.
+Its spawn callback schedules WBA preparation without waiting for code-server
+readiness. WBA connects only after **both** code-server readiness and application
+initialization/fact registration. Before attachment, its pipe reader still handles
+RPC replies; push delivery waits at the existing queue drain, and lifecycle-state
+publication retains only current state. Attachment releases pushes and publishes
+that state. The eager caller awaits the already-owned startup task, not another
+launch. Failure is observed/logged, not silently retried by that handoff.
+
+Import cancellation joins the thread before bootstrap teardown. Startup failure
+or worker exit cancels preparation and unsubscribes readers, not reusable child
+shells. Switching to web workers cancels eager and early preparation before the
+existing shell-stop operation; the fact bus itself stays active. A changed project
+hint cancels the old preparation before normal project priming.
+
+Default-off `TE2_RUNTIME_DEBUG` timing adds `code_te2.bootstrap` markers
+`preparation.scheduled`, `preparation.skipped_web_workers`, `application.attached`
+and `bootstrap.closed`, alongside existing backend-import/process/connect spans.
+This makes overlap observable without adding a production polling loop. Tests:
+`test_app_worker_bootstrap`, `test_intelligence_bootstrap`,
+`test_parallel_intelligence_startup`, and `test_code_te2_native_asgi`.
+
+### WBA Live Runtime Evaluation And Completion Tracing
+
+`te2 framework wba-status/wba-eval` and MCP `te2_wba_status/te2_wba_eval` reuse
+the authenticated Python worker debug path, then the existing WBA MessagePack
+pipe. `workbench_runtime_debug.py` checks the expected shell; WBA's pipe-only
+`runtime.debug.*` handler verifies its per-process UUID. Both workers require
+`TE2_RUNTIME_DEBUG`; HTTP and browser WBA sockets reject evaluation. No new
+listener, Rust route or browser console identity is introduced.
+
+Trusted JavaScript can inspect/mutate the real `wb` and `state`, use `await`, and
+install/remove temporary probes stored in `probe`. It is not sandboxed or
+preemptible; timeout does not cancel execution. Single evaluation admission and
+bounded results protect against accidental queue/output growth, not arbitrary
+evaluated code. Code, object traversal, result bytes and errors have explicit limits.
+
+Runtime-debug also enables bounded metadata-only WBA completion timing (256
+events) and provider metadata that enables browser timing (128 events), exposed
+through `trace.snapshot()` and `window.__te2CompletionTrace.snapshot()`. This
+distinguishes activation, per-language provider registration, frontend registration,
+document synchronization and completion reply latency. It does not capture source
+text or completion items, and does not inspect the separate language-server heap.
+Commands, target/projection details, live probes and reload requirements:
+`docs/apps/backend_native_observability/WBA_RUNTIME_DEBUG.md`.
+
+Completion timeout policy is shared by the browser shim and WBA through
+`node_workbench_adapter/src/protocol/completion-timeouts.ts`. The default provider
+response limit is 30 s, the document-operation limit is 45 s, and the outer RPC
+ceiling is 195 s. That outer ceiling covers two existing gate admissions
+(activation and completion), each allowing 50 s queueing plus 45 s execution,
+and 5 s transport margin. Replies return immediately; none of these allowances
+are sleeps. This avoids discarding a slow mobile basedpyright response behind a
+shorter browser or gate deadline. Other language-feature deadlines and cancellation
+behavior are unchanged.
+
+WBA's `extensions/intelligence/completion-warmup.ts` handles one discarded
+completion invocation per matching provider/language/project session. Provider
+registration and successful document open/hydration feed the same readiness
+coordinator, including providers registered after the document is already open.
+It prefers a synchronized foreground document, honors selectors, and uses line 1,
+column 1 without text edits, focus changes, or suggestions sent to the UI. It runs
+outside the interactive operation gate and does not block startup. Real requests
+satisfy the same key; tab switches and failures do not cause repeated warm-ups.
+Project/host session resets clear the keys. Result caches are released only to
+their originating host connection. Runtime-debug adds metadata-only trace events,
+not a prerequisite for warming. Evidence and acceptance are recorded in
+`docs/apps/backend_native_observability/WBA_RUNTIME_DEBUG.md` and `TRACKER.md`.

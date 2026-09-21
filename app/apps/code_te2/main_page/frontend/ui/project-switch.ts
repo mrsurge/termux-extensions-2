@@ -6,7 +6,6 @@ interface TerminalLike {
 
 interface ProjectSwitchControllerDeps {
   getTerminal: () => TerminalLike | null | undefined;
-  closeWebSocket: () => void;
   resetHostState: () => void;
   markUnsaved: (flag: boolean) => void;
   updatePathDisplay: () => void;
@@ -62,7 +61,6 @@ export function createProjectSwitchController(deps: ProjectSwitchControllerDeps)
       console.warn('[ProjectSwitch] Failed to close terminal drawer:', err);
     }
 
-    deps.closeWebSocket();
     deps.resetHostState();
     deps.markUnsaved(false);
     deps.updatePathDisplay();

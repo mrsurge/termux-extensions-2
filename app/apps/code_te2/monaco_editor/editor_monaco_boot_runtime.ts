@@ -14,14 +14,12 @@ interface EditorMonacoBootRuntimeDeps {
   getApiBase(): string;
   getBootSnapshot(): unknown;
   getCachedPrefs(): unknown;
-  setCachedPrefs(value: unknown): void;
-  fetchSSOTState(): Promise<unknown>;
   languageWorkersEnabled(): boolean;
   getWorkerLogOnce(): Record<string, boolean>;
   ensureTe2DiffTheme(): void;
-  applyMonacoTheme(themeKey: string): Promise<void> | void;
+  ensureDocumentTheme(): Promise<void>;
   ensureEditorWithPrefs(): Promise<unknown>;
-  applyBootSnapshot(): void;
+  applyBootSnapshot(includeDocument?: boolean): void;
   ensureWorkbenchLanguageCatalogInstalled(): Promise<boolean>;
   installWorkbenchLanguageBridgeProviders(): void;
   applyActiveModelLanguage(): void;
@@ -149,10 +147,7 @@ export async function bootMonacoRuntime(
 
     try {
       if (!deps.getCachedPrefs() && deps.getBootSnapshot()) {
-        deps.applyBootSnapshot();
-      }
-      if (!deps.getCachedPrefs()) {
-        deps.setCachedPrefs(await deps.fetchSSOTState());
+        deps.applyBootSnapshot(false);
       }
     } catch (_) {}
 
@@ -166,14 +161,13 @@ export async function bootMonacoRuntime(
     win.monaco = monacoNs || undefined;
     deps.ensureTe2DiffTheme();
 
-    try { await deps.applyMonacoTheme('github-dark'); } catch (_) {}
-
-    try { deps.applyBootSnapshot(); } catch (_) {}
-    await deps.ensureEditorWithPrefs();
-    // Register readiness subscribers before Socket.IO can replay connect-time
-    // adapter state; Rust can deliver that replay faster than Python did.
+    // Subscribe before connecting, then apply the selected theme before either
+    // a boot snapshot or live replay may create/attach a document model.
     deps.connectEditorHostActions();
     await Promise.resolve(deps.connectEditorSocket());
+    await deps.ensureDocumentTheme();
+    deps.applyBootSnapshot();
+    await deps.ensureEditorWithPrefs();
     if (!languageWorkersEnabled) {
       // Catalog enrichment follows WBA availability, not editor readiness. A
       // cold extension host must not delay the editor-ready/open-model handshake.

@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from typing import override
 from types import SimpleNamespace
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch, AsyncMock, Mock
 
 from app.apps.code_te2 import code_server_install_state as state
 from app.apps.code_te2.preferences_store import PreferencesStore
@@ -31,7 +31,7 @@ class InstallationStateTests(unittest.TestCase):
         root = Path(directory.name)
         self.prefs = PreferencesStore(root / "preferences.json")
         for item in (
-            patch.object(state, "_preferences", return_value=self.prefs),
+            patch.object(state, "_state_store", return_value=self.prefs.intelligence_state),
             patch.object(state, "te2_managed_code_server_root", return_value=root / "code-server"),
             patch.object(state, "default_layout", return_value="termux"),
         ):
@@ -46,7 +46,16 @@ class InstallationStateTests(unittest.TestCase):
         self.assertEqual(self.prefs.get_code_server_installation(), {
             "installed": True, "version": "4.130.0", "layout": "termux",
         })
-        with patch.object(Path, "is_file", side_effect=AssertionError("no probing")), patch.object(Path, "is_dir", side_effect=AssertionError("no probing")):
+        original_is_dir = Path.is_dir
+
+        def check_directory(path: Path) -> bool:
+            # Config-store directory preparation is allowed; installed package
+            # discovery/version probing is not part of the launch path.
+            if path.is_relative_to(candidate.executable.parent.parent):
+                raise AssertionError("no package probing")
+            return original_is_dir(path)
+
+        with patch.object(Path, "is_file", side_effect=AssertionError("no probing")), patch.object(Path, "is_dir", check_directory):
             self.assertEqual(state.selected_installation(), candidate)
 
     def test_launch_failure_ends_optimistic_migration(self) -> None:
@@ -109,10 +118,17 @@ class InstallationStateTests(unittest.TestCase):
             state.record_installation(installation)
             shell = SimpleNamespace(id="test-code-server")
             manager = SimpleNamespace(find_shell_by_label=AsyncMock(return_value=None))
-            orchestrator = SimpleNamespace(start_from_ref=AsyncMock(
+            spawn = AsyncMock(
                 return_value=shell,
                 side_effect=RuntimeError("spawn failed") if failure == "spawn" else None,
-            ))
+            )
+            orchestrator = SimpleNamespace(start_from_ref=spawn)
+            preparation = Mock()
+            gate = Mock(return_value={})
+            watcher = Mock()
+            preparation.attach_mock(gate, "gate")
+            preparation.attach_mock(watcher, "watcher")
+            preparation.attach_mock(spawn, "spawn")
             def factory(_manager: object) -> SimpleNamespace:
                 return orchestrator
 
@@ -132,10 +148,10 @@ class InstallationStateTests(unittest.TestCase):
                     patch.object(shells, "ensure_runtime_home"),
                     patch.object(shells, "remove_legacy_bridge_extension", return_value=False),
                     patch.object(shells, "node_compile_cache", return_value=""),
-                    patch.object(shells, "sync_vscode_watcher_settings"),
+                    patch.object(shells, "sync_vscode_watcher_settings", watcher),
                     patch.object(shells, "_has_live_pipe", AsyncMock(return_value=True)),
                     patch.object(shells, "_wait_for_code_server_readiness", AsyncMock(side_effect=RuntimeError("readiness failed"))),
-                    patch.object(registry, "ensure_registry_and_gate", return_value={}),
+                    patch.object(registry, "ensure_registry_and_gate", gate),
                     patch.object(ProjectSidecar, "load_or_create", return_value=SimpleNamespace(dump_raw=sidecar_data)),
                 ):
                     _ = stack.enter_context(item)
@@ -146,6 +162,8 @@ class InstallationStateTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     _ = await shells.ensure_code_server_shell(str(root), on_spawned=failed_adapter if failure == "adapter" else None)
                 saved = self.prefs.get_code_server_installation()
+                watcher.assert_called_once_with("ipc")
+                self.assertEqual([call[0] for call in preparation.mock_calls], ["gate", "watcher", "spawn"])
                 assert saved is not None
                 self.assertEqual(saved.get("installed"), failure == "adapter")
 

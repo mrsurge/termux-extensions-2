@@ -14,7 +14,7 @@ from typing import Callable, cast
 from .file_ops import set_project_root
 from ..transport.connection_manager import ExplorerConnection, manager
 from ...project_sidecar import ProjectSidecar
-from ...worker_services.event_bus import build_event, next_project_generation, publish
+from ...worker_services.event_bus import build_event, current_project_generation, next_project_generation, publish
 from ..contracts.watcher import build_watcher_config_payload
 from .project_session import reset_project_session
 
@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 AdapterRpc = Callable[[str, dict[str, object] | None, float], Awaitable[object]]
 EnsureWatchexecShell = Callable[[str, int], Awaitable[object | None]]
 MarkAdapterWorkspaceStateFn = Callable[..., Awaitable[None]]
+SyncExplorerProject = Callable[[Path], None]
+RefreshExplorerProject = Callable[[Path, int], Awaitable[bool]]
 _project_switch_seq = 0
 
 
@@ -45,6 +47,8 @@ async def switch_project_connection(
     open_state_reason: str = "project_open",
     open_state_source: str = "explorer_project_open",
 ) -> ExplorerProjectSwitchResult:
+    sync_explorer_project, refresh_explorer_project = _get_explorer_project_hooks()
+
     normalized_display_path = display_path or os.path.abspath(
         os.path.expanduser(str(project_path))
     )
@@ -83,9 +87,11 @@ async def switch_project_connection(
     del initialize_watcher
 
     was_new_sidecar = await reset_project_session(normalized_display_path)
+    _require_current_switch(new_root, project_generation)
     if websocket is not None:
         manager.register_existing(websocket, str(new_root))
     manager.reassign_all(str(new_root))
+    sync_explorer_project(new_root)
     await _reset_project_diagnostics(new_root, project_generation=project_generation)
 
     if switch_adapter_workspace:
@@ -114,6 +120,7 @@ async def switch_project_connection(
                 exc,
             )
 
+    _require_current_switch(new_root, project_generation)
     await _start_project_watchexec_if_needed(new_root)
     open_state = await _replay_sidecar_open_state(
         new_root,
@@ -121,7 +128,7 @@ async def switch_project_connection(
         source=open_state_source,
         project_generation=project_generation,
     )
-    await _broadcast_project_git_state(new_root, project_generation=project_generation)
+    _require_current_switch(new_root, project_generation)
     await publish(
         build_event(
             "ProjectSwitchFinished",
@@ -142,6 +149,13 @@ async def switch_project_connection(
         )
     )
 
+    # Every entry point uses the working Explorer refresh, after the opened fact
+    # that resets the tree. One refresh publishes listings/Git/review to all peers.
+    if not await refresh_explorer_project(new_root, project_generation):
+        _require_current_switch(new_root, project_generation)
+        await _broadcast_project_git_state(new_root, project_generation=project_generation)
+    _require_current_switch(new_root, project_generation)
+
     return ExplorerProjectSwitchResult(
         project_root=new_root,
         display_path=normalized_display_path,
@@ -149,6 +163,22 @@ async def switch_project_connection(
         project_generation=project_generation,
         open_state=open_state if isinstance(open_state, dict) else None,
     )
+
+
+def _require_current_switch(project_root: Path, generation: int) -> None:
+    if current_project_generation(project_root) != generation:
+        raise RuntimeError("Project switch superseded by a newer project selection")
+
+
+def _get_explorer_project_hooks() -> tuple[SyncExplorerProject, RefreshExplorerProject]:
+    # Resolve required runtime hooks lazily: the Explorer dispatcher imports this
+    # service too, so eager transport imports would form an initialization cycle.
+    module = importlib.import_module("app.apps.code_te2.explorer.transport.rpc_socketio")
+    sync = getattr(module, "sync_active_explorer_dispatchers_project_root", None)
+    refresh = getattr(module, "refresh_active_explorer_project", None)
+    if not callable(sync) or not callable(refresh):
+        raise RuntimeError("Explorer project lifecycle hooks unavailable")
+    return cast(SyncExplorerProject, sync), cast(RefreshExplorerProject, refresh)
 
 
 async def _start_project_watchexec_if_needed(project_root: Path) -> None:

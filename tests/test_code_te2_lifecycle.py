@@ -4,14 +4,43 @@ from __future__ import annotations
 import asyncio
 from typing import cast
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from app.apps.code_te2.worker_services import event_bus as bus
 from app.apps.code_te2.worker_services import runtime
 from app.apps.code_te2.worker_services import run_profile_fws_bridge as bridge
+from app.apps.code_te2.workbench_runtime_discovery import workbench_runtime_discovery
 
 
 class CodeTe2LifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_mode_change_cancels_eager_and_early_owners_without_stopping_bus(self) -> None:
+        entered = asyncio.Event()
+        stopped: list[str] = []
+
+        async def eager() -> None:
+            entered.set()
+            try:
+                await asyncio.Future[None]()
+            finally:
+                stopped.append("eager")
+
+        async def early() -> None:
+            self.assertEqual(stopped, ["eager"])
+            stopped.append("early")
+
+        task = asyncio.create_task(eager())
+        _ = await entered.wait()
+        with (
+            patch.object(runtime, "_startup_task", task),
+            patch.object(runtime, "stop_early_intelligence", early),
+            patch.object(workbench_runtime_discovery, "stop", AsyncMock()),
+            patch.object(runtime, "stop_worker_event_loop", AsyncMock()) as bus_stop,
+        ):
+            await runtime.stop_intelligence_startup()
+            self.assertTrue(task.cancelled())
+            self.assertEqual(stopped, ["eager", "early"])
+            bus_stop.assert_not_awaited()
+
     async def test_initialization_once_and_startup_task_cancelled_before_cleanup(self) -> None:
         events: list[str] = []
         entered = asyncio.Event()

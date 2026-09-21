@@ -62,6 +62,7 @@ const hostConfig = {
 const workbenchAdapterConfig = {
   entryPoints: [
     'workbench_protocol_proxy/node_workbench_adapter/src/protocol/wire-encoding.ts',
+    'workbench_protocol_proxy/node_workbench_adapter/src/protocol/completion-timeouts.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/protocol/rpc-ids.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/protocol/pending-requests.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/protocol/ext-host-dispatch.ts',
@@ -85,6 +86,7 @@ const workbenchAdapterConfig = {
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/webview-reconstruction-store.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/webview-runtime.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/intelligence/completions.ts',
+    'workbench_protocol_proxy/node_workbench_adapter/src/extensions/intelligence/completion-warmup.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/intelligence/code-navigation.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/intelligence/diagnostics-snapshot.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/intelligence/document-colors.ts',
@@ -96,6 +98,7 @@ const workbenchAdapterConfig = {
     'workbench_protocol_proxy/node_workbench_adapter/src/server/event-bridge.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/server/editor-socket.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/server/request-dispatch.ts',
+    'workbench_protocol_proxy/node_workbench_adapter/src/server/runtime-debug.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/server/server.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/server/stdio-protocol.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/server/textmate-grammars.ts',
