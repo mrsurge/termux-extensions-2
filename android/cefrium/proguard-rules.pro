@@ -13,14 +13,6 @@
 -dontwarn com.google.ar.core.R$*
 -dontwarn com.google.ar.core.**.R$*
 
-# Chromium passes synthetic callbacks into the device-provided AndroidX Window
-# Extensions implementation. R8 cannot see those external invocations and can
-# otherwise reduce a callback to an empty Consumer shell in minimized builds.
-# Preserve the externally invoked ABI while still allowing class obfuscation.
--keep,allowobfuscation class * implements androidx.window.extensions.core.util.function.Consumer {
-    public void accept(java.lang.Object);
-}
-
 # Optional platform/library hooks referenced by Chromium but unavailable in
 # this Android/Cefrium packaging combination.
 -dontwarn android.app.HandoffActivityData**

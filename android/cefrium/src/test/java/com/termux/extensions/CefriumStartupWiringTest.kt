@@ -36,11 +36,15 @@ class CefriumStartupWiringTest {
     }
 
     @Test
-    fun minimizedBuildKeepsChromiumWindowLayoutCallbackAbi() {
+    fun minimizedBuildUsesUpstreamWindowLayoutCallbackFix() {
+        val build = File("build.gradle.kts").readText()
         val rules = File("proguard-rules.pro").readText()
         val externalConsumer = "androidx.window.extensions.core.util.function.Consumer"
 
-        assertTrue(rules.contains("-keep,allowobfuscation class * implements $externalConsumer"))
-        assertTrue(rules.substringAfter("implements $externalConsumer").contains("accept(java.lang.Object)"))
+        assertTrue(build.contains("id(\"com.cefrium\") version \"0.9.0\""))
+        assertTrue(build.contains("implementation(\"com.cefrium:cefrium-sdk:0.9.0\")"))
+        assertTrue(build.contains("compileOnly(files(\"libs/window-extensions-core-1.0.0.jar\"))"))
+        assertTrue(File("libs/window-extensions-core-1.0.0.jar").isFile)
+        assertFalse(rules.contains(externalConsumer))
     }
 }

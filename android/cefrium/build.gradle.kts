@@ -1,7 +1,7 @@
 plugins {
     id("com.android.application") version "9.4.0"
     id("org.jetbrains.kotlin.plugin.compose") version "2.4.10"
-    id("com.cefrium") version "0.8.8"
+    id("com.cefrium") version "0.9.0"
 }
 
 android {
@@ -116,8 +116,11 @@ dependencies {
     debugImplementation("org.jetbrains.kotlin:kotlin-reflect:2.2.10")
     val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
 
+    // Cefrium 0.9.0 publishes this as Maven `provided`, which Gradle does not
+    // place on the consumer compile/R8 classpath. Keep the extracted classes
+    // JAR until the upstream Gradle metadata supplies an equivalent dependency.
     compileOnly(files("libs/window-extensions-core-1.0.0.jar"))
-    implementation("com.cefrium:cefrium-sdk:0.8.8")
+    implementation("com.cefrium:cefrium-sdk:0.9.0")
     implementation("androidx.core:core-ktx:1.16.0")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.browser:browser:1.8.0")
