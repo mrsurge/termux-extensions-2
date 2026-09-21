@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { readFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { completionTrace } from "../server/runtime-debug.mjs";
 
 // ╔═══════════════════════════════════════════════════════════════════════╗
 // ║  DO NOT HARDCODE CONFIGURATION VALUES IN THIS FILE.                   ║
@@ -828,7 +829,19 @@ export class WorkbenchClient {
     extensionStoragePath: string;
     webviewReconstructionStoragePath: string;
   }) {
-    this.onEvent = typeof onEvent === "function" ? onEvent : () => {};
+    this.onEvent = (payload) => {
+      // Capture lifecycle metadata at the common event boundary, including
+      // extension-host activation notifications and provider replay on reconnect.
+      if (payload.type === "extension/activityChanged") {
+        const activity = isRecord(payload.activity) ? payload.activity : {};
+        if (activity.kind === "activation") completionTrace.record("extension.activation", {
+          extensionId: activity.extensionId, message: activity.message,
+        });
+      } else if (payload.type === "extension/activationResolved" || payload.type === "extension/activationFailed") {
+        completionTrace.record(String(payload.type), { target: payload.target, req: payload.req });
+      }
+      if (typeof onEvent === "function") onEvent(payload);
+    };
     this.onNotification = typeof onNotification === "function"
       ? onNotification
       : () => {};
@@ -1727,6 +1740,7 @@ export class WorkbenchClient {
 
   async activateLanguage(languageId: string): Promise<Record<string, unknown>> {
     const normalized = String(languageId || "plaintext").trim() || "plaintext";
+    completionTrace.record("language.activate.begin", { language: normalized });
     this._startupMark(`language.${normalized}.begin`);
     try {
       const [specific, generic] = await Promise.all([
@@ -1734,9 +1748,11 @@ export class WorkbenchClient {
         this._extensionActivation.activateByEvent("onLanguage"),
       ]);
       this._startupMark(`language.${normalized}.succeeded`);
+      completionTrace.record("language.activate.end", { language: normalized });
       return { ok: true, languageId: normalized, specific, generic };
     } catch (error) {
       this._startupMark(`language.${normalized}.failed`);
+      completionTrace.record("language.activate.failed", { language: normalized });
       throw error;
     }
   }

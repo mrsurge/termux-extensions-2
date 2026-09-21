@@ -1,0 +1,1 @@
+function i(s){const t=Number(s),n=Number.isFinite(t)&&t>0?Math.max(1e3,Math.min(105e3,t)):3e4,o=5e3,e=n+2*o+5e3,r=2*(2*e+5e3)+5e3;return{providerMs:n,preflightMs:o,operationMs:e,rpcMs:r}}export{i as completionTimeouts};

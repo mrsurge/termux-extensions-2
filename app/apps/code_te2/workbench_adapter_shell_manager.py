@@ -69,6 +69,11 @@ def _json_object(value: object) -> JsonObject:
 
 
 
+def get_adapter_shell_id() -> str | None:
+    """Return current process ownership without launching or adopting a shell."""
+    return _active_shell_id
+
+
 def get_adapter_state() -> dict[str, object]:
     """Return a copy of the current adapter lifecycle state."""
     return dict(_adapter_state)
@@ -559,7 +564,10 @@ async def _handle_push_event(
         log.debug("[push] ignored legacy adapter push frame; direct WBA socket owns editor notifications")
 
 
-async def adapter_rpc(method: str, params: JsonObject | None = None, timeout: float = 30.0) -> JsonObject:
+async def adapter_rpc(
+    method: str, params: JsonObject | None = None, timeout: float = 30.0,
+    *, expected_shell_id: str | None = None,
+) -> JsonObject:
     """Send a JSON-RPC request to the adapter over stdio and await the response.
 
     Returns the full JSON-RPC response object (with 'result' or 'error').
@@ -578,6 +586,9 @@ async def adapter_rpc(method: str, params: JsonObject | None = None, timeout: fl
         shell_id = _active_shell_id
         if not shell_id:
             raise RuntimeError("Adapter pipe not available — shell not started")
+        # Debug callers must never silently follow a replacement WBA process.
+        if expected_shell_id is not None and shell_id != expected_shell_id:
+            raise RuntimeError("runtimeDebug.staleShell")
 
         if not await _ensure_live_adapter_io(shell_id):
             raise RuntimeError("Adapter pipe not available — shell missing live pipe capabilities")

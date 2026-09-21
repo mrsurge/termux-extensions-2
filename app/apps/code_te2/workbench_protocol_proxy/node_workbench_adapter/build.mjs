@@ -5,6 +5,7 @@ const isWatch = process.argv.includes("--watch");
 const moduleConfig = {
   entryPoints: [
     "src/protocol/wire-encoding.ts",
+    "src/protocol/completion-timeouts.ts",
     "src/protocol/rpc-ids.ts",
     "src/protocol/pinned-rpc-ids.ts",
     "src/protocol/pending-requests.ts",
@@ -43,6 +44,7 @@ const moduleConfig = {
     "src/server/server.ts",
     "src/server/stdio-protocol.ts",
     "src/server/runtime-io.ts",
+    "src/server/runtime-debug.ts",
     "src/server/textmate-grammars.ts",
     "src/workspace/lifecycle.ts",
     "src/workspace/document-registry.ts",

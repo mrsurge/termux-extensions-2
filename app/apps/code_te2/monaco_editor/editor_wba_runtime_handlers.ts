@@ -1,4 +1,5 @@
 import { logDiagnosticsEvent } from "./editor_diagnostics_log_utils.js";
+import { configureCompletionTrace, traceCompletion } from "./editor_completion_trace.ts";
 import { applyDiagnosticsBridgeUpdate } from "./editor_diagnostics_apply_update_utils.js";
 import { handleSemanticTokensProviderRegistered } from "./editor_socket_semantic_registered_handler_utils.js";
 import { handleCompletionProviderRegistered } from "./editor_socket_completion_registered_handler_utils.ts";
@@ -162,6 +163,11 @@ export function registerEditorWbaRuntimeHandlers(
       }
 
       if (type === "provider/completions") {
+        configureCompletionTrace(event.runtimeDebug === true);
+        traceCompletion("provider.received", {
+          language: event.language, handle: event.handle, sentAt: event.debugSentAt,
+          resync: event.resync === true,
+        });
         handleCompletionProviderRegistered(
           event,
           deps.cacheCompletionProviderRegistration,

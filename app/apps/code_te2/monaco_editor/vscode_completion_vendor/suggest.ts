@@ -6,6 +6,7 @@
  */
 
 import { inflateSuggestResultDtoFromMainThreadLanguageFeatures } from './mainThreadLanguageFeatures.js';
+import { completionTimeouts } from '../../workbench_protocol_proxy/node_workbench_adapter/src/protocol/completion-timeouts.ts';
 import {
   normalizeVscodeCompletionListFromCompletionModel,
   type VscodeCompletionListLike,
@@ -150,6 +151,8 @@ export async function provideWorkbenchCompletionItemsFromVscodeSuggest(
 
   const trigger = normalizeVscodeSuggestCompletionContext(deps.context, deps.monacoTriggerKinds);
   const languageId = String(deps.model && deps.model.getLanguageId ? deps.model.getLanguageId() : deps.languageId || 'plaintext');
+  const timeouts = completionTimeouts(deps.adapterTimeoutMs);
+  const requestedCallMs = Number(deps.callTimeoutMs);
   const params: VscodeWorkbenchCompletionRequest = {
     uri,
     path,
@@ -157,7 +160,7 @@ export async function provideWorkbenchCompletionItemsFromVscodeSuggest(
     lineNumber: Number(deps.position && deps.position.lineNumber ? deps.position.lineNumber : 1),
     column: Number(deps.position && deps.position.column ? deps.position.column : 1),
     triggerKind: trigger.triggerKind,
-    timeoutMs: Number.isFinite(Number(deps.adapterTimeoutMs)) ? Number(deps.adapterTimeoutMs) : 8000,
+    timeoutMs: timeouts.providerMs,
   };
   if (Number.isFinite(Number(deps.providerHandle))) {
     params.providerHandle = Number(deps.providerHandle);
@@ -170,7 +173,7 @@ export async function provideWorkbenchCompletionItemsFromVscodeSuggest(
 
   const response = await deps.callWorkbenchCompletions(
     params as unknown as Record<string, unknown>,
-    { timeoutMs: Number.isFinite(Number(deps.callTimeoutMs)) ? Number(deps.callTimeoutMs) : 10000 },
+    { timeoutMs: Number.isFinite(requestedCallMs) ? Math.max(timeouts.rpcMs, requestedCallMs) : timeouts.rpcMs },
   );
   const payload = peelWorkbenchCompletionPayload(response);
   const inflated = alreadyInflatedCompletionList(payload);

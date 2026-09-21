@@ -1181,3 +1181,55 @@ No shared framework restart, Android publication or frontend rebuild performed.
 Detailed protocol, provenance, timing definitions and selected raw spans:
 `STARTUP_EXPERIMENT.md` and `startup_captures/`. No runtime implementation edits
 or restarts are part of capture; the user controls restarts.
+
+### WBA Evaluation And Completion Registration
+
+- [x] Inspect current WBA registry, activation, request dispatcher and Python
+  runtime-debug path. Existing Python evaluation only reaches predefined WBA RPCs;
+  arbitrary WBA JavaScript required a process-side evaluator.
+- [x] Add runtime-debug-only pipe evaluator, live wb/state/trace/probe bindings,
+  exact WBA process identity, single evaluation admission and bounded projection.
+  Reject evaluation through WBA HTTP and browser Socket.IO.
+- [x] Expose CLI wba-status/wba-eval and MCP te2_wba_status/te2_wba_eval through
+  the existing authenticated parent-worker route, with no Rust endpoint changes.
+- [x] Add bounded metadata-only completion timing from activation to per-language
+  registration, browser receipt/Monaco registration and request/reply boundaries.
+  Document temporary probe installation/removal separately from source tracing.
+- [x] Validate: 30 focused Node tests, 16 Bun tests and 23 Python tests pass,
+  including actual adapter child-process MessagePack eval and HTTP/Socket.IO
+  rejection. Frontend typecheck/build pass; new Python paths/tests report zero
+  Basedpyright errors/warnings. WBA TypeScript diagnostics match the archived HEAD
+  baseline exactly (107), with none added. Both WBA build entrypoints include the
+  new module. Bun's test-side esbuild uses the installed Android binary explicitly.
+- [x] User reloads WBA/frontend; live evaluation probes capture Python provider
+  registration reaching Monaco in ~80 ms, then a completion reply taking 10,040 ms
+  inside the extension-host request path. Browser expires at 10,002 ms; WBA
+  finishes 194 ms later with 733 items. Next request is 430 ms end-to-end with
+  32 items (different query, not a controlled cold/warm comparison).
+- [x] Replace inconsistent completion deadlines with one shared budget contract:
+  provider 30 s, operation 45 s, outer RPC 195 s worst-case including both existing
+  gate admissions. No artificial delay, synthetic warm-up, or timeout changes to
+  other language features. Preserve current cancellation behavior for this slice.
+- [x] Validate 38 focused Node tests and 14 Bun tests, including simulated slow
+  replies, two gate admissions, late registration, timeout cleanup and disconnect.
+  Frontend typecheck and both builds pass. WBA's 107 existing TypeScript
+  diagnostics match the previous baseline with zero added. The existing frontend
+  provider test harness uses long data-URL imports unsupported by this Bun build;
+  it passes under Node. The new tests use direct TypeScript imports under Bun.
+- [x] Compare local VS Code activation/suggest sources and basedpyright v1.40.1:
+  both activate on language events; no generic completion pre-warm found in the
+  inspected paths. Basedpyright completions load stdlib modules and may build an
+  auto-import symbol map. These are profiling candidates, not proven root causes.
+  User reports the delay is basedpyright-specific; other LSPs respond normally.
+- [x] User reloads built WBA/frontend and validates the longer completion window.
+- [x] Approved evaluation-only warm-up experiment on a freshly restarted WBA:
+  one synthetic request took 2.50 s; the next typed request returned 733 items in
+  1.83 s end-to-end (1.57 s extension-host portion versus the earlier 10.04 s).
+  Synthetic result cache released. User reports substantially faster completions.
+  Different cursor/background-analysis state means this is not a controlled A/B.
+- [ ] If further optimization is needed, time basedpyright's workspace readiness,
+  stdlib loading and auto-import work; investigate cancellation propagation as a
+  separate scoped change. Do not automatically inject warm-up requests.
+
+Details and exact evaluation commands: `WBA_RUNTIME_DEBUG.md`. No shared runtime
+restart, Android asset publication or version bump is authorized by this slice.

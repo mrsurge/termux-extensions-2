@@ -785,3 +785,29 @@ Record exact build/revision, measurement conditions and live acceptance per
 renderer. No automatic shared runtime restart, APK installation, asset-version
 bump or release is part of this plan creation. Checkpoint completed slices when
 requested, and keep unresolved reproductions distinct from completed tooling.
+
+### WBA Completion Observability
+
+Approved follow-up: expose trusted live Node/Bun WBA evaluation over its existing
+MessagePack pipe, reachable through the existing authenticated Python CLI/MCP
+debug route. Keep WBA HTTP/browser eval disabled. Target both parent identity and
+WBA shell/process identity, with bounded admission/results and no implicit retry.
+Allow temporary evaluation-installed probes as well as bounded runtime-debug-only
+completion timing from startup. Separate activation, Python provider registration,
+frontend registration, and actual completion request latency before changing any
+intelligence scheduling. Validate on Node and Bun, typecheck/build frontend, test
+the Python relay, and defer shared runtime reload/reproduction to the user.
+Contract and commands: `WBA_RUNTIME_DEBUG.md`.
+
+The live completion capture proved a deadline mismatch, not slow browser provider
+registration. Give providers (especially basedpyright on mobile) 30 seconds for
+their response, independently of preparation and scheduling. A shared browser/WBA
+budget must cover the dispatcher gate as well as extension-host pending requests;
+keep unrelated language-feature timeouts unchanged. Test slow/fast/missing replies
+with a deterministic clock, queue contention and disconnect cleanup on Node/Bun.
+The outer RPC must account for both existing gate admissions (activation, then
+completion); this is a ceiling, not a warm-up delay. Compare upstream activation,
+document delivery and completion preparation before considering speculative
+requests. No cancellation rewrite or synthetic warm-up is approved in this slice.
+Source comparison and measured boundaries: `WBA_RUNTIME_DEBUG.md`, completion
+investigation section. The user reports other LSPs do not exhibit this delay.

@@ -18,6 +18,7 @@ import type {
 import { formatErrorMessage } from "./error-format.mjs";
 import { sendWebviewResourceResponse } from "./webview-resource-response.mjs";
 import { createStaticAssetLoader, PipeOutputWriter, runtimeIo } from "./runtime-io.mjs";
+import { WbaRuntimeDebug, completionTrace, runtimeDebugEnabled } from "./runtime-debug.mjs";
 
 // Reserve stdout before dynamic imports: their initialization logs must not
 // corrupt the MessagePack pipe, even when optional configuration is absent.
@@ -529,8 +530,15 @@ function takeHeapSnapshot(
 }
 
 let wb: RuntimeWorkbench;
-const workbenchEventHandler = (ev: unknown): void =>
+const workbenchEventHandler = (ev: unknown): void => {
+  if (isRecord(ev) && ev.type === "provider/completions") {
+    completionTrace.record("provider.emit", { language: ev.language, handle: ev.handle, resync: ev.resync === true });
+    // Only diagnostic timing crosses to the browser, never evaluation capability.
+    ev = { ...ev, runtimeDebug: runtimeDebugEnabled, debugSentAt: runtimeDebugEnabled ? Date.now() : null };
+  }
   createWorkbenchEventHandler(bridgeRuntime())(ev);
+};
+const runtimeDebug = new WbaRuntimeDebug();
 wb = new WorkbenchClient({
   onEvent: workbenchEventHandler,
   onNotification: wsBroadcastNotification,
@@ -605,6 +613,11 @@ async function handleJsonRpc(
       id,
       error: { code: -32600, message: "Invalid Request" },
     };
+  }
+
+  // HTTP /cmd and browser Socket.IO share this dispatcher. Eval is pipe-only.
+  if (method.startsWith("runtime.debug.")) {
+    return { ...buildJsonRpcErrorReply(id, -32601, "runtimeDebug.pipeOnly") };
   }
 
   const dispatched = await dispatchJsonRpcRequest(
@@ -853,7 +866,11 @@ const stdinDecoder = new PipeMessagePackDecoder();
 const pendingStdio = new Set<Promise<void>>();
 async function dispatchStdio(msg: unknown): Promise<void> {
   try {
-    const reply = await handleJsonRpc(msg);
+    const envelope = asJsonRpcEnvelope(msg);
+    const method = envelope.method;
+    const reply = typeof method === "string" && method.startsWith("runtime.debug.")
+      ? { jsonrpc: "2.0", id: envelope.id, result: await runtimeDebug.dispatch(method, isRecord(envelope.params) ? envelope.params : {}, wb, state) }
+      : await handleJsonRpc(msg);
     if (reply && reply.id != null) pipeOutput.write(encodeRpcReply(reply));
   } catch (error) {
     const message = asJsonRpcEnvelope(msg);

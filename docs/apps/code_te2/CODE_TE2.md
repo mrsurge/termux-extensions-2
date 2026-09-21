@@ -5004,3 +5004,37 @@ and `bootstrap.closed`, alongside existing backend-import/process/connect spans.
 This makes overlap observable without adding a production polling loop. Tests:
 `test_app_worker_bootstrap`, `test_intelligence_bootstrap`,
 `test_parallel_intelligence_startup`, and `test_code_te2_native_asgi`.
+
+### WBA Live Runtime Evaluation And Completion Tracing
+
+`te2 framework wba-status/wba-eval` and MCP `te2_wba_status/te2_wba_eval` reuse
+the authenticated Python worker debug path, then the existing WBA MessagePack
+pipe. `workbench_runtime_debug.py` checks the expected shell; WBA's pipe-only
+`runtime.debug.*` handler verifies its per-process UUID. Both workers require
+`TE2_RUNTIME_DEBUG`; HTTP and browser WBA sockets reject evaluation. No new
+listener, Rust route or browser console identity is introduced.
+
+Trusted JavaScript can inspect/mutate the real `wb` and `state`, use `await`, and
+install/remove temporary probes stored in `probe`. It is not sandboxed or
+preemptible; timeout does not cancel execution. Single evaluation admission and
+bounded results protect against accidental queue/output growth, not arbitrary
+evaluated code. Code, object traversal, result bytes and errors have explicit limits.
+
+Runtime-debug also enables bounded metadata-only WBA completion timing (256
+events) and provider metadata that enables browser timing (128 events), exposed
+through `trace.snapshot()` and `window.__te2CompletionTrace.snapshot()`. This
+distinguishes activation, per-language provider registration, frontend registration,
+document synchronization and completion reply latency. It does not capture source
+text or completion items, and does not inspect the separate language-server heap.
+Commands, target/projection details, live probes and reload requirements:
+`docs/apps/backend_native_observability/WBA_RUNTIME_DEBUG.md`.
+
+Completion timeout policy is shared by the browser shim and WBA through
+`node_workbench_adapter/src/protocol/completion-timeouts.ts`. The default provider
+response limit is 30 s, the document-operation limit is 45 s, and the outer RPC
+ceiling is 195 s. That outer ceiling covers two existing gate admissions
+(activation and completion), each allowing 50 s queueing plus 45 s execution,
+and 5 s transport margin. Replies return immediately; none of these allowances
+are sleeps. This avoids discarding a slow mobile basedpyright response behind a
+shorter browser or gate deadline. No synthetic completion warm-up is installed;
+other language-feature deadlines and cancellation behavior are unchanged.

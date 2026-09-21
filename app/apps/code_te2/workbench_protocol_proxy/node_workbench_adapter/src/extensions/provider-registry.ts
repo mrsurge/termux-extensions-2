@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { completionTrace } from "../server/runtime-debug.mjs";
 
 interface PicomatchOptions {
   dot?: boolean;
@@ -717,6 +718,7 @@ export class ProviderRegistry {
       supportsResolve,
     });
     for (const language of selectorLanguages(selector)) {
+      completionTrace.record("provider.register", { language, handle, supportsResolve });
       outcome.events.push({
         type: "provider/completions",
         handle,

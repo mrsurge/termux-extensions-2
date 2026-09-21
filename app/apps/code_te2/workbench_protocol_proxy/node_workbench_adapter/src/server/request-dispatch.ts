@@ -1,4 +1,6 @@
 import { formatErrorMessage } from "./error-format.mjs";
+import { completionTrace } from "./runtime-debug.mjs";
+import { completionTimeouts } from "../protocol/completion-timeouts.mjs";
 
 export interface DispatchRequest {
   id: unknown;
@@ -334,7 +336,9 @@ export async function dispatchJsonRpcRequest(
     params,
     label,
     operation,
-    boundedTimeout(params.timeoutMs) + 5000,
+    method === "vscode.completions"
+      ? completionTimeouts(params.timeoutMs).operationMs
+      : boundedTimeout(params.timeoutMs) + 5000,
   );
 
   if (method === "te2.ping") {
@@ -905,6 +909,10 @@ export async function dispatchJsonRpcRequest(
   }
 
   if (method === "vscode.completions") {
+    completionTrace.record("completion.dispatch", {
+      frontendRequest: params.debugRequestId, client: params.clientInstanceId,
+      language: params.languageId,
+    });
     const resolvedPath = runtime.normalizePathParam(params);
     if (!resolvedPath) return missingPathError(id);
     const authority = runtime.normalizeAuthorityParam(
@@ -913,6 +921,7 @@ export async function dispatchJsonRpcRequest(
     );
     const result = await runDocumentOperation("completions", () =>
       runtime.wb.completions({
+        debugRequestId: params.debugRequestId,
         path: resolvedPath,
         authority,
         providerHandle: params.providerHandle,
