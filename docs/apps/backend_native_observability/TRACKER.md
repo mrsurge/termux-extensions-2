@@ -1227,9 +1227,25 @@ or restarts are part of capture; the user controls restarts.
   1.83 s end-to-end (1.57 s extension-host portion versus the earlier 10.04 s).
   Synthetic result cache released. User reports substantially faster completions.
   Different cursor/background-analysis state means this is not a controlled A/B.
+- [x] Commit the live-validated timeout/evaluator checkpoint (`435548bb`) before
+  implementing the separately approved automatic warm-up.
+- [x] Add event-driven WBA warm-up once per matching provider/language/project
+  session, after provider registration and successful document synchronization
+  in either order. No synthetic edits, UI publication, polling, startup barrier,
+  or interactive operation-gate ownership. Real requests satisfy the same key.
+- [x] Reset keys on project/host replacement, skip unsynchronized documents,
+  contain failures without retry, and release discarded completion result caches
+  only into the host that created them. Include pattern-only provider selectors.
+- [x] Validate 70 focused Node tests and 43 Bun tests, including actual client
+  readiness wiring and originating-host cache release. Frontend typecheck and
+  both build entrypoints pass. WBA's 107 existing TypeScript diagnostics match
+  the checkpoint baseline exactly; none added. No version or APK asset changes.
+- [ ] User reloads WBA and validates automatic warm-up on an already-open Python
+  document after provider registration. The evaluation experiment above is not
+  production live acceptance.
 - [ ] If further optimization is needed, time basedpyright's workspace readiness,
   stdlib loading and auto-import work; investigate cancellation propagation as a
-  separate scoped change. Do not automatically inject warm-up requests.
+  separate scoped change.
 
 Details and exact evaluation commands: `WBA_RUNTIME_DEBUG.md`. No shared runtime
 restart, Android asset publication or version bump is authorized by this slice.

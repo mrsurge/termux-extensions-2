@@ -58,9 +58,32 @@ Source comparison (read-only; no upstream or extension edits):
 
 Next investigation, if needed: extension/LS-side spans around workspace readiness,
 stdlib loading, symbol-map building and candidate generation, using the same query
-and document state for comparisons. Do not change analysis settings or inject
-synthetic completions without approval. This slice changes deadlines only; live
-acceptance requires the user to reload the rebuilt WBA and frontend.
+and document state for comparisons. The initial slice changed deadlines only.
+
+### Approved Completion Warm-Up
+
+A later evaluation-only experiment sent one completion request on the already-open
+Python document, without edits or UI publication. It took 2.50 s; subsequent typed
+completion returned 733 suggestions in 1.83 s end-to-end (1.57 s inside the
+extension-host path). The user reported a substantial improvement. This was not a
+controlled A/B because cursor position and background analysis differed.
+
+`extensions/intelligence/completion-warmup.ts` now coordinates the approved
+production behavior: provider registration and successful open/hydration schedule
+one request per matching provider/language/project session. It prefers an available
+foreground document and uses line 1, column 1 with an explicit invocation context.
+The request has the existing 30-second provider budget, but holds no interactive
+operation gate and never changes document text, cursor, focus, or UI suggestions.
+Warm-ups run serially among themselves; user operations remain independent.
+
+Registration before document synchronization and registration after an already-open
+document are both supported, including pattern-only selectors. Real requests mark
+the same one-shot key; failures are contained, not retried on each tab switch.
+Project/host resets invalidate pending scheduling and permit a new session attempt.
+Discarded result caches are released only to the same host connection. Metadata-only
+`completion.warmup.begin/end/failed` trace events remain runtime-debug gated; the
+warm-up itself does not require debug mode. No evaluation probe is installed by
+this policy. Reloading the built WBA and production live acceptance remain user-owned.
 
 ## Target And Transport
 

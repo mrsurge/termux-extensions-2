@@ -811,3 +811,15 @@ document delivery and completion preparation before considering speculative
 requests. No cancellation rewrite or synthetic warm-up is approved in this slice.
 Source comparison and measured boundaries: `WBA_RUNTIME_DEBUG.md`, completion
 investigation section. The user reports other LSPs do not exhibit this delay.
+
+Approved follow-up after the evaluation-only experiment: WBA issues one discarded
+completion request per matching provider/language/project session once both the
+provider and a synchronized open document exist. Registration and successful
+document open/hydration are the only scheduling triggers; no polling, fake text
+input, UI suggestions, or startup readiness gate. Prefer a foreground document,
+honor provider selectors, and do not repeat on tab switches. An actual completion
+request satisfies the same key if it wins the scheduling race. Reset the keys on
+project/extension-host session changes. Serialize only these background warm-ups,
+not interactive operations; release result caches and contain failures without
+retrying. Validate both readiness orders, duplication, reset races and cleanup on
+Node/Bun. The user reloads the WBA for production live acceptance.

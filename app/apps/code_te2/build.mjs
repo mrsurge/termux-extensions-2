@@ -86,6 +86,7 @@ const workbenchAdapterConfig = {
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/webview-reconstruction-store.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/webview-runtime.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/intelligence/completions.ts',
+    'workbench_protocol_proxy/node_workbench_adapter/src/extensions/intelligence/completion-warmup.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/intelligence/code-navigation.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/intelligence/diagnostics-snapshot.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/intelligence/document-colors.ts',

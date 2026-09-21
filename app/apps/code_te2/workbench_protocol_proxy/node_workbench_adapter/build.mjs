@@ -28,6 +28,7 @@ const moduleConfig = {
     "src/extensions/provider-registry.ts",
     "src/extensions/webview-runtime.ts",
     "src/extensions/intelligence/completions.ts",
+    "src/extensions/intelligence/completion-warmup.ts",
     "src/extensions/intelligence/code-navigation.ts",
     "src/extensions/intelligence/diagnostics-snapshot.ts",
     "src/extensions/intelligence/document-colors.ts",

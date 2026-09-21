@@ -5036,5 +5036,18 @@ ceiling is 195 s. That outer ceiling covers two existing gate admissions
 (activation and completion), each allowing 50 s queueing plus 45 s execution,
 and 5 s transport margin. Replies return immediately; none of these allowances
 are sleeps. This avoids discarding a slow mobile basedpyright response behind a
-shorter browser or gate deadline. No synthetic completion warm-up is installed;
-other language-feature deadlines and cancellation behavior are unchanged.
+shorter browser or gate deadline. Other language-feature deadlines and cancellation
+behavior are unchanged.
+
+WBA's `extensions/intelligence/completion-warmup.ts` handles one discarded
+completion invocation per matching provider/language/project session. Provider
+registration and successful document open/hydration feed the same readiness
+coordinator, including providers registered after the document is already open.
+It prefers a synchronized foreground document, honors selectors, and uses line 1,
+column 1 without text edits, focus changes, or suggestions sent to the UI. It runs
+outside the interactive operation gate and does not block startup. Real requests
+satisfy the same key; tab switches and failures do not cause repeated warm-ups.
+Project/host session resets clear the keys. Result caches are released only to
+their originating host connection. Runtime-debug adds metadata-only trace events,
+not a prerequisite for warming. Evidence and acceptance are recorded in
+`docs/apps/backend_native_observability/WBA_RUNTIME_DEBUG.md` and `TRACKER.md`.

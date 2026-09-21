@@ -730,6 +730,9 @@ export class ProviderRegistry {
     outcome.logs.push(
       `[providers] completions map size=${this.providers.completions.size} languages=[${this.languageSummary("completions")}]`,
     );
+    // Pattern-only selectors have no language notification, but can still match
+    // an already-open document and need the same internal warm-up readiness edge.
+    if (outcome.events.length === 0) outcome.events.push({ type: "provider/completions/registered", handle });
     return outcome;
   }
 
