@@ -3,17 +3,16 @@
 from __future__ import annotations
 
 import os
-from typing import Literal, cast
+from typing import Literal
 
 from .code_server_identity import CodeServerInstallation, PINNED_CODE_SERVER_VERSION, te2_managed_code_server_root
-from .preferences_store import PreferencesStore
+from .intelligence_state import IntelligenceStateStore
 
 Layout = Literal["termux", "standalone"]
 
 
-def _preferences() -> PreferencesStore:
-    from .stores import get_preferences_store
-    return get_preferences_store()
+def _state_store() -> IntelligenceStateStore:
+    return IntelligenceStateStore()
 
 
 def installation_for_layout(layout: Layout) -> CodeServerInstallation:
@@ -27,13 +26,12 @@ def default_layout() -> Layout:
 
 
 def selected_installation() -> CodeServerInstallation | None:
-    prefs = _preferences()
-    state = prefs.get_code_server_installation()
+    snapshot = _state_store().read()
+    state = snapshot.installation
     if state is None:
         # One-time adoption: attempt the known private launcher, never scan disks.
         # Success records the pin/layout; failure records unavailable, ending retry.
-        ui = prefs.get_preferences().get("ui")
-        if isinstance(ui, dict) and cast(dict[str, object], ui).get("webWorkersEnabled") is True:
+        if snapshot.web_workers_enabled:
             return None
         return installation_for_layout(default_layout())
     if state.get("installed") is not True or state.get("version") != PINNED_CODE_SERVER_VERSION:
@@ -49,7 +47,7 @@ def record_installation(installation: CodeServerInstallation) -> None:
     for layout in ("termux", "standalone"):
         expected = installation_for_layout(layout)
         if installation.executable == expected.executable and installation.vscode_root == expected.vscode_root:
-            _preferences().set_code_server_installation({
+            _state_store().set_code_server_installation({
                 "installed": True, "version": PINNED_CODE_SERVER_VERSION, "layout": layout,
             })
             return
@@ -57,4 +55,4 @@ def record_installation(installation: CodeServerInstallation) -> None:
 
 
 def clear_installation() -> None:
-    _preferences().set_code_server_installation({"installed": False})
+    _state_store().set_code_server_installation({"installed": False})

@@ -1092,3 +1092,92 @@ the executing interpreter, not a frontend flag or user-agent guess.
 - [x] User live acceptance: startup bug fixed after the installation/protocol cleanup.
   No shared runtime was restarted by the agent; language-mode switching was not
   separately reported for this slice.
+
+### Earlier Intelligence Bootstrap: Compact State Boundary
+
+- [x] Extract backend mode and installation ledger to config `intelligence.json`.
+  Keep UI DTOs and preference entrypoints unchanged; migrate legacy values once
+  and remove their old preference keys. Existing compact state wins on retries.
+- [x] Preserve atomic mode/installation invalidation with a sibling lock and
+  atomic file replace; reject corrupt canonical state rather than silently
+  reverting to legacy/default mode.
+- [x] Read installation identity and eager-start mode without loading the full
+  preference store. Import-boundary test excludes app stores and web frameworks.
+- [x] Remove eager-start's duplicate watcher-settings synchronization. Verify
+  extension gating, one watcher sync, then spawn in the shell manager.
+- [x] Validate migration/failure recovery, concurrent independent instances,
+  custom-store isolation, installation semantics and lifecycle/ASGI/RPC regressions:
+  116 tests passed, with isolated config/data/cache/runtime roots.
+  Basedpyright: zero errors; 12 existing warnings in main/preferences, none in
+  the new compact state module or changed tests.
+- [ ] User live acceptance after worker reload: retained backend choice,
+  intelligence startup and switching between the existing backend modes.
+- [x] Next slice: investigate and approve actual earlier managed-process launch
+  overlapping heavy backend assembly, without crossing event-loop ownership.
+
+This slice does not change launch timing, restart the shared framework, build
+Android assets, or claim measured startup gains.
+
+### Earlier Intelligence Bootstrap: Overlapped Assembly
+
+- [x] Add explicit `--bootstrap-module` for HTTP workers; opt in only Code TE2's
+  shellspec. Keep legacy synchronous assembly and pipe-only workers unchanged.
+- [x] Schedule intelligence preparation before full backend assembly. Preload
+  preparation dependencies, run import/assembly off-loop, and keep lifecycle,
+  WBA readers, shell manager locks/futures and Uvicorn on one owning loop.
+- [x] Keep web-worker mode from launching either intelligence shell. Read the
+  persisted project as a boot hint and recheck at lifecycle handoff.
+- [x] Gate WBA connection on both code-server and application readiness. Hold
+  ordered pushes during assembly and publish current adapter state once the
+  project's fact handlers are registered. Reuse the early task in eager startup.
+- [x] Join interrupted assembly before cleanup; cancel both preparation owners
+  on mode changes/shutdown. Unsubscribe WBA readers without terminating reusable
+  shells at worker teardown. User-selected mode changes still stop the shells.
+- [x] Cover import/loop overlap, both readiness orders, web-worker skip,
+  preparation failure, cancellation, project mismatch, deferred push delivery,
+  actual Code TE2 off-loop ASGI/Engine.IO assembly, and real fixture-worker SIGTERM.
+- [x] Validation: 131 startup/application tests plus 10 MessagePack pipe tests
+  passed under isolated state roots. New bootstrap/runner/runtime paths and their
+  focused tests have zero Basedpyright errors/warnings. Broader legacy
+  main/preferences/WBA modules have zero errors and retain existing warnings.
+- [ ] Live acceptance after worker restart: cold intelligence startup, editor
+  remains independent, backend-mode switching, and warm shell adoption.
+- [ ] Compare opt-in startup spans on device before claiming latency gains.
+
+No shared framework restart, Android publication or frontend rebuild performed.
+
+### Python Configuration Startup Experiment
+
+- [x] Preserve historical backend measurements and the user's separate estimate
+  of ~20 s to WBA/grammars, then another 5-10 s to semantic tokens/diagnostics.
+- [x] Capture run A, standard CPython 3.14.6 defaults: listener 3.549 s,
+  code-server startup complete 8.133 s, WBA connection complete 13.301 s from
+  module entry. Fresh worker/code-server/WBA; actual GIL on and JIT unavailable.
+- [ ] Run B: standard Python with JIT requested; verify build support first.
+- [ ] Run C: free-threaded Python with GIL off; verify effective state after imports.
+- [x] Capture requested run D: CPython 3.14.6 free-threading, actual GIL off,
+  JIT unavailable/off despite `PYTHON_JIT=1`. Sidebar items were closed, so this
+  is not a matched workload. Listener 2.858 s; code-server ready 6.398 s;
+  WBA connect complete 11.595 s. It does not validate JIT-enabled performance.
+- [x] Recover backend semantic-provider/diagnostics milestones for both A/D:
+  provider event 19.183/17.796 s, first diagnostics event 23.846/22.696 s.
+  These are not token computation or browser-visible rendering timestamps.
+- [x] Capture additional warmed GIL-on run E: standard Termux Python, not the
+  free-threaded binary with its GIL enabled. Actual JIT remains unavailable/off
+  despite both environment and `-X jit` requests. Listener 3.071 s, WBA connection
+  11.706 s, first semantic-provider event 16.371 s, first diagnostics event
+  18.870 s. WBA arrival is near D's 11.595 s; the later events arrive sooner.
+  Warm-up, interpreter build and unverified sidebar equivalence prevent a causal
+  GIL comparison. Preserve raw structured spans and provenance in the experiment.
+- [ ] Compare like-for-like milestones; no browser/provider latency claim from
+  backend readiness alone. Record shell reuse and uncontrolled cache/load effects.
+- [x] Capture run F with the same free-threaded interpreter as D and actual GIL
+  enabled (`PYTHON_GIL=1`); JIT remains unavailable/off. Fresh intelligence shells:
+  listener 2.413 s, WBA connected 13.210 s, first semantic-provider event 18.096 s,
+  first diagnostics event 21.976 s. Compared with D, WBA arrived 1.615 s later
+  while diagnostics arrived 0.720 s earlier. Build provenance now matches; mixed
+  timings and uncontrolled run conditions do not establish a GIL-mode winner.
+
+Detailed protocol, provenance, timing definitions and selected raw spans:
+`STARTUP_EXPERIMENT.md` and `startup_captures/`. No runtime implementation edits
+or restarts are part of capture; the user controls restarts.

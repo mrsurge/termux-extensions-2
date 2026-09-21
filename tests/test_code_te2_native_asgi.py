@@ -81,6 +81,12 @@ class CodeTe2NativeASGITests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(scopes, [(path + "/", path) for path in SOCKET_PATHS])
 
     def test_real_backend_import_resources_lifespan_and_engineio_without_fastapi(self) -> None:
+        self._exercise_import([])
+
+    def test_real_backend_assembles_off_loop_with_early_bootstrap(self) -> None:
+        self._exercise_import(["--early-bootstrap"])
+
+    def _exercise_import(self, args: list[str]) -> None:
         # The real backend installs process hooks/stores at import: isolate it in
         # a subprocess with empty state. Do not launch shells or the shared host.
         with tempfile.TemporaryDirectory(prefix="te2-native-import-") as directory:
@@ -89,7 +95,7 @@ class CodeTe2NativeASGITests(unittest.IsolatedAsyncioTestCase):
                 env[f"TE2_{kind}_HOME"] = str(Path(directory) / kind.lower())
             env["PYTHONPATH"] = str(ROOT)
             result = subprocess.run(
-                [sys.executable, str(ROOT / "tests/fixtures/code_te2_native_asgi_probe.py")],
+                [sys.executable, str(ROOT / "tests/fixtures/code_te2_native_asgi_probe.py"), *args],
                 env=env, cwd=ROOT, capture_output=True, timeout=30,
             )
             self.assertEqual(result.returncode, 0, result.stderr.decode())

@@ -72,6 +72,8 @@ async def _enable_code_server() -> JsonMap:
 async def _enable_web_workers() -> JsonMap:
     try:
         await cancel_backend_runtime_prepare_tasks()
+        from ..worker_services.runtime import stop_intelligence_startup
+        await stop_intelligence_startup()
         from ..workbench_adapter_shell_manager import terminate_adapter_shell
         from ..code_server_shell_manager import terminate_code_server_shell
 

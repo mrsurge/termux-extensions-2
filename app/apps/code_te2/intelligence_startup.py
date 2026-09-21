@@ -11,6 +11,7 @@ from .code_server_shell_manager import (
     ensure_code_server_shell,
 )
 from .workbench_adapter_shell_manager import ensure_workbench_adapter_shell
+from .intelligence_bootstrap_gate import wait_for_application
 
 
 @dataclass
@@ -28,6 +29,7 @@ async def prime_intelligence_runtime(project_root: str) -> None:
 
     async def wait_for_code_server() -> None:
         await asyncio.shield(dependency)
+        await wait_for_application()
 
     def prepare_adapter(record: ShellRecord) -> None:
         trace.mark("code_server.spawned_or_adopted")

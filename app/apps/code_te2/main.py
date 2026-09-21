@@ -20,7 +20,8 @@ from . import edit_tracker
 from .diff_helper import invalidate_diff_cache
 from .project_sidecar import ProjectSidecar, cleanup_orphaned_sidecars
 from .code_te2_paths import code_te2_paths
-from .stores import get_history_store, get_preferences_store
+from .stores import get_history_store
+from .intelligence_state import IntelligenceStateStore
 
 IGNORE_PATTERNS = [
     '.git', '__pycache__', 'node_modules', '.venv', 'venv',
@@ -35,16 +36,6 @@ APP_ID = str(os.environ.get("TE_APP_ID") or "code_te2").strip() or "code_te2"
 
 if TYPE_CHECKING:
     from app.libs.pipe_protocol import PipeEnvelope
-
-
-def _json_object(value: object) -> JsonDict:
-    if not isinstance(value, dict):
-        return {}
-    return {str(key): item for key, item in cast(dict[object, object], value).items()}
-
-
-def _str_value(value: object, default: str = "") -> str:
-    return value if isinstance(value, str) else default
 
 
 def te2_pipe_dispatch(envelope: "PipeEnvelope") -> JsonDict | None:
@@ -110,9 +101,6 @@ def _install_loop_exception_handler() -> None:
     loop.set_exception_handler(_handle_loop_exception)
 
 
-_install_crash_diagnostics()
-
-
 def _framework_url() -> str:
     explicit = str(os.environ.get("TE_FRAMEWORK_URL") or "").strip()
     if explicit:
@@ -161,7 +149,6 @@ TE2_ASGI_APP = build_code_te2_asgi_app(
 )
 
 _history_store = get_history_store()
-_preferences_store = get_preferences_store()
 
 # Worker lifecycle and boot-snapshot RPC share this primer. WBA startup/control
 # does not use an HTTP discovery, launch or command-proxy route.
@@ -238,38 +225,28 @@ def _initialize_application_project() -> None:
         pass
 
 
-def _ensure_workbench_json_sync(project_root_str: str) -> None:
-    """Sync code-server User/settings.json watcher exclusion at boot."""
-    try:
-        from .project_sidecar import ProjectSidecar
-        from .code_server_shell_manager import sync_vscode_watcher_settings
-        sc = ProjectSidecar.load_or_create(project_root_str)
-        watcher = _json_object(sc.dump_raw().get("watcher"))
-        wmode = _str_value(watcher.get("mode"), "ipc")
-        sync_vscode_watcher_settings(wmode)
-    except Exception as exc:
-        print(f"[code_te2] workbench json sync failed (non-fatal): {exc}", flush=True)
-
-
 async def _eager_start_code_server() -> None:
     """Prepare the complete intelligence runtime without waiting for a browser.
 
     The worker loop/pipe must exist first. Import-time spawning would bypass
-    lifecycle ownership, preferences and the settings preparation below.
+    lifecycle ownership and the shell manager's final settings preparation.
     """
     try:
-        ui_prefs = _json_object(_preferences_store.get_preferences().get("ui"))
-        if ui_prefs.get("webWorkersEnabled") is True:
+        if IntelligenceStateStore().read().web_workers_enabled:
             print(
                 "[code_te2] eager code-server startup skipped: Monaco web-worker mode is active",
                 flush=True,
             )
             return
-        pr = _history_store.get_active_project() or str(get_project_root())
+        # Project initialization has resolved/validated the persisted hint.
+        pr = str(get_project_root())
         if not pr:
             return
-        # Sync watcher settings BEFORE code-server launches
-        await asyncio.to_thread(_ensure_workbench_json_sync, pr)
+        from .intelligence_bootstrap import await_early_intelligence
+        if await await_early_intelligence(pr):
+            return
+        # The shell manager prepares watcher settings after extension gating and
+        # before spawning; do not duplicate that disk work in the eager caller.
         await _prime_code_server_runtime(pr)
         print(f"[code_te2] eager intelligence startup OK (project={pr})", flush=True)
     except Exception as exc:
@@ -277,6 +254,7 @@ async def _eager_start_code_server() -> None:
 
 
 async def te2_app_start() -> None:
+    _install_crash_diagnostics()
     _install_loop_exception_handler()
     from .worker_services.runtime import start_worker_runtime
 

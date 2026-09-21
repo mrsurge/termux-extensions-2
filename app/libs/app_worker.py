@@ -74,6 +74,14 @@ class AppWorkerArgs:
     port: int | None
     backend_module: str
     pipe: bool
+    bootstrap_module: str | None = None
+
+
+@dataclass(frozen=True)
+class PreparedWorker:
+    module: ModuleType
+    app: ASGIApp
+    start_pipe: Callable[[], None]
 
 
 def _framework_url() -> str:
@@ -163,6 +171,7 @@ def _parse_args(parser: argparse.ArgumentParser) -> AppWorkerArgs:
         port=_optional_int_arg(getattr(namespace_obj, "port", None)),
         backend_module=str(getattr(namespace_obj, "backend_module", "") or ""),
         pipe=bool(getattr(namespace_obj, "pipe", False)),
+        bootstrap_module=str(getattr(namespace_obj, "bootstrap_module", "") or "") or None,
     )
 
 
@@ -311,6 +320,7 @@ def main() -> None:
     _ = parser.add_argument("--app-id", required=True, help="The ID of the app to run.")
     _ = parser.add_argument("--port", type=int, help="The port to run the HTTP app worker on.")
     _ = parser.add_argument("--backend-module", required=True, help="The path to the backend module.")
+    _ = parser.add_argument("--bootstrap-module", help="Opt-in async preparation module for HTTP workers.")
     _ = parser.add_argument(
         "--pipe",
         action="store_true",
@@ -322,6 +332,8 @@ def main() -> None:
     startup_trace.mark("worker.entry")
     if not args.pipe and args.port is None:
         parser.error("--port is required unless --pipe is set")
+    if args.bootstrap_module and args.port is None:
+        parser.error("--bootstrap-module requires an HTTP worker (--port)")
 
     protocol_stdout: object | None = None
     if args.pipe:
@@ -329,6 +341,16 @@ def main() -> None:
         sys.stdout = sys.stderr
     os.environ["TE_APP_ID"] = args.app_id
     _ = install_python_memory_profiler(f"app_worker-{args.app_id}")
+
+    # Legacy workers keep their synchronous assembly path. Opted-in workers build
+    # inside Uvicorn's signal scope, on the very loop that later serves requests.
+    prepared = None if args.bootstrap_module else _assemble_worker(args, protocol_stdout)
+    if args.port is not None:
+        _run_http_worker(args, protocol_stdout, prepared)
+
+
+def _assemble_worker(args: AppWorkerArgs, protocol_stdout: object | None) -> PreparedWorker | None:
+    startup_trace = _startup_trace
 
     mounted_subapps: list[tuple[str, ASGIApp]] = []
     backend_serving_hook: Callable[[], object] | None = None
@@ -458,23 +480,28 @@ def main() -> None:
 
     except Exception as e:
         print(f"Error loading app backend: {e}", file=sys.stderr)
-        sys.exit(1)
+        raise RuntimeError(f"Error loading app backend: {e}") from e
 
-    if args.pipe:
-        if protocol_stdout is None:
-            raise RuntimeError("Pipe protocol stdout is not configured")
-        pipe_thread = threading.Thread(
-            target=_run_pipe_worker,
-            args=(args.app_id, module, protocol_stdout, debug_pipe),
-            name=f"te2-{args.app_id}-pipe-rpc",
-            daemon=True,
-        )
-        pipe_thread.start()
-        print(
-            f"DEBUG: Started app-worker pipe RPC loop for {args.app_id}",
-            file=sys.stderr,
-        )
-    
+    def start_pipe() -> None:
+        if args.pipe:
+            if protocol_stdout is None:
+                raise RuntimeError("Pipe protocol stdout is not configured")
+            pipe_thread = threading.Thread(
+                target=_run_pipe_worker,
+                args=(args.app_id, module, protocol_stdout, debug_pipe),
+                name=f"te2-{args.app_id}-pipe-rpc",
+                daemon=True,
+            )
+            pipe_thread.start()
+            print(f"DEBUG: Started app-worker pipe RPC loop for {args.app_id}", file=sys.stderr)
+
+    return PreparedWorker(module, app, start_pipe)
+
+
+def _run_http_worker(
+    args: AppWorkerArgs, protocol_stdout: object | None, prepared: PreparedWorker | None,
+) -> None:
+    startup_trace = _startup_trace
     port = args.port
     if port is None:
         raise RuntimeError("--port is required for HTTP app-worker mode")
@@ -485,7 +512,7 @@ def main() -> None:
         import uvicorn
 
     config = uvicorn.Config(
-        app,
+        prepared.app if prepared is not None else "te2-worker:pending-bootstrap",
         host="127.0.0.1",
         port=port,
         lifespan="on",
@@ -500,7 +527,20 @@ def main() -> None:
             # Worker-owned services surround the transport, not its ASGI lifespan.
             # Stay inside serve()'s signal scope: it re-raises SIGTERM on exit,
             # so an outer serve() finally would never finish application cleanup.
-            async with application_lifecycle(module):
+            async with AsyncExitStack() as stack:
+                worker = prepared
+                if args.bootstrap_module:
+                    from app.libs.app_worker_bootstrap import bootstrap_context, assemble_off_loop
+
+                    _ = await stack.enter_async_context(bootstrap_context(args.bootstrap_module))
+                    worker = await assemble_off_loop(lambda: _assemble_worker(args, protocol_stdout))
+                if worker is None:
+                    raise RuntimeError("HTTP worker assembly did not return an application")
+                if self.should_exit:
+                    return
+                self.config.app = worker.app
+                worker.start_pipe()
+                _ = await stack.enter_async_context(application_lifecycle(worker.module))
                 await super()._serve(sockets=sockets)
 
         @override

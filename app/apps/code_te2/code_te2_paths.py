@@ -28,6 +28,10 @@ class CodeTe2Paths:
         return self.config_root / "preferences.json"
 
     @property
+    def intelligence_state_path(self) -> Path:
+        return self.config_root / "intelligence.json"
+
+    @property
     def agent_icons_dir(self) -> Path:
         return self.data_root / "agent_icons"
 

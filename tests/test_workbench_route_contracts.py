@@ -46,4 +46,6 @@ class WorkbenchRouteContractTests(unittest.TestCase):
         self.assertIn("set_code_server_runtime_primer(_prime_code_server_runtime)", source)
         self.assertIn("await prime_intelligence_runtime(project_root)", source)
         self.assertIn("start_worker_runtime(_initialize_application_project, _eager_start_code_server)", source)
+        self.assertNotIn("_ensure_workbench_json_sync", source)
+        self.assertIn("IntelligenceStateStore().read().web_workers_enabled", source)
         self.assertIn("socket_app=CODE_TE2_ASGI_APP", source)

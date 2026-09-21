@@ -16,6 +16,7 @@ from app.libs.messagepack_stream import MessagePackStream, encode_message
 
 from .code_te2_paths import code_te2_paths
 from .node_compile_cache import node_compile_cache
+from .intelligence_bootstrap_gate import application_is_ready, wait_for_application
 from .workbench_runtime_discovery import workbench_runtime_discovery
 from .diagnostics_latency_metrics import (
     diagnostics_latency_metrics_enabled,
@@ -75,6 +76,10 @@ def get_adapter_state() -> dict[str, object]:
 
 async def _publish_adapter_state_fact() -> None:
     """Publish the current adapter state as a backend fact."""
+    # Preparation can precede app imports. Keep the latest state here; lifecycle
+    # publishes it once project initialization and fact subscription are complete.
+    if not application_is_ready():
+        return
     try:
         from .adapter_lifecycle_events import publish_adapter_state_changed
 
@@ -98,6 +103,16 @@ def _set_adapter_state(status: str, project: Optional[str] = None, error: Option
     _adapter_state["status"] = status
     _adapter_state["project"] = project
     _adapter_state["error"] = error
+
+
+async def publish_current_adapter_state() -> None:
+    await _publish_adapter_state_fact()
+
+
+async def stop_adapter_io() -> None:
+    """Close worker-owned readers without terminating reusable managed shells."""
+    await _clear_stdout_subscription()
+    _fail_pending_rpcs("adapter worker stopped")
 
 
 def _normalized_project_path(value: object) -> str | None:
@@ -446,6 +461,9 @@ async def _drain_pushes() -> None:
     global _push_drain_task
 
     try:
+        # Adopted shells may already emit pushes during assembly. Keep ordered
+        # delivery behind the gate without blocking the reader's RPC replies.
+        await wait_for_application()
         while _pending_pushes:
             batch = _pending_pushes.popleft()
             obj: JsonObject = batch["obj"]

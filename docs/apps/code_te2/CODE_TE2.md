@@ -4734,9 +4734,10 @@ cancels dispatcher/metrics tasks and clears loop references. Stable handler
 registrations survive a same-process restart; this queue is not an edit-command
 queue. Explorer's loop reference is cleared as well.
 
-This is an ownership boundary, not process separation: imports,
-ASGI/socket adapters, stores and application services still share a process
-and event loop. Other projector tasks and pipe-only worker lifetime are not yet
+This is an ownership boundary, not process separation: ASGI/socket adapters,
+stores and application services still share a process and owning event loop.
+The later opt-in bootstrap moves import/assembly only to a thread (see Early
+Intelligence Preparation And Backend Assembly below). Other projector tasks and pipe-only worker lifetime are not yet
 migrated. No startup-speed improvement is implied. Lifecycle tests include
 partial failure, cancellation, repeated starts/stops and a real worker SIGTERM.
 
@@ -4927,12 +4928,32 @@ its existing generation/barrier checks. Tests: `tests/wba_missing_provider.test.
 
 ### Preference-owned Code Server installation state
 
-`PreferencesStore` owns a backend-only top-level `codeServerInstallation` record:
+`intelligence_state.py` owns the small authoritative config file
+`$TE2_CONFIG_HOME/code_te2/intelligence.json` (using the standard resolved config
+root when that override is absent). It stores schema `version: 1`,
+`webWorkersEnabled`, and the backend-only `codeServerInstallation` record:
 `{installed: true, version: "4.130.0", layout: "termux" | "standalone"}`. Generic
 UI preference updates cannot write this record. Startup, boot snapshots, settings,
 and extension commands derive managed paths from it without checking whether
 executables or Code trees exist. The Code version is pinned in
 `code_server_identity.py`; only the explicit installer validates package files.
+
+`PreferencesStore` delegates mode/installation access to this file and projects
+the mode back into the unchanged UI preference DTO. On first access only, the
+compact store migrates those values from `preferences.json`; preference-store
+initialization then removes the legacy fields. Existing compact state always wins,
+including after interrupted legacy cleanup. Invalid compact state fails rather
+than falling back to old values. The mode and installation invalidation share one
+atomic replace under a stable sibling file lock, across threads/store instances.
+Other editor/UI/project preferences remain in `preferences.json`; updates spanning
+both files are not a cross-file transaction. Custom preference paths get sibling
+state files, not the live user's configuration.
+
+The code-server shell manager alone prepares
+watcher settings after extension gating, immediately before spawn; the eager
+caller no longer repeats that work. WBA's existing code-server readiness dependency
+remains intact. Tests: `test_intelligence_state`, `test_code_server_install_state`,
+`test_workbench_route_contracts`, and the startup/lifecycle regression suites.
 
 The record is set after successful installation or code-server launch/adoption.
 Code-server spawn/readiness failure clears it to `{installed: false}`; a WBA/LSP
@@ -4945,3 +4966,41 @@ platform-specific managed launcher once. Success records the pin/layout; launch
 failure records unavailable and ends optimistic retries. Worker-mode installations
 are not adopted during startup. A recorded different pin requires explicit install
 of the current pin. No shared-runtime restart is performed by these state helpers.
+
+### Early Intelligence Preparation And Backend Assembly
+
+Code TE2's worker shellspec passes
+`--bootstrap-module app.apps.code_te2.intelligence_bootstrap`. The generic runner
+enters that module's `te2_worker_bootstrap()` async context inside Uvicorn's signal
+scope, before backend assembly and HTTP listening. Non-opted-in workers retain
+synchronous assembly; pipe-only workers do not accept this option.
+
+The compact intelligence state determines whether to prepare code-server/WBA.
+Web-worker mode skips both shells. A read-only history snapshot supplies a boot
+project hint; the normal initialized project is checked at handoff. Shared
+preparation modules are loaded before the assembly thread starts. Only backend
+import/ASGI assembly uses `asyncio.to_thread`: project initialization, runtime hooks,
+manager locks, readiness futures, WBA readers and serving all use Uvicorn's loop.
+Crash-hook installation runs in application startup, not in the import thread.
+
+Code-server prepares its settings and spawns through the existing FWS manager.
+Its spawn callback schedules WBA preparation without waiting for code-server
+readiness. WBA connects only after **both** code-server readiness and application
+initialization/fact registration. Before attachment, its pipe reader still handles
+RPC replies; push delivery waits at the existing queue drain, and lifecycle-state
+publication retains only current state. Attachment releases pushes and publishes
+that state. The eager caller awaits the already-owned startup task, not another
+launch. Failure is observed/logged, not silently retried by that handoff.
+
+Import cancellation joins the thread before bootstrap teardown. Startup failure
+or worker exit cancels preparation and unsubscribes readers, not reusable child
+shells. Switching to web workers cancels eager and early preparation before the
+existing shell-stop operation; the fact bus itself stays active. A changed project
+hint cancels the old preparation before normal project priming.
+
+Default-off `TE2_RUNTIME_DEBUG` timing adds `code_te2.bootstrap` markers
+`preparation.scheduled`, `preparation.skipped_web_workers`, `application.attached`
+and `bootstrap.closed`, alongside existing backend-import/process/connect spans.
+This makes overlap observable without adding a production polling loop. Tests:
+`test_app_worker_bootstrap`, `test_intelligence_bootstrap`,
+`test_parallel_intelligence_startup`, and `test_code_te2_native_asgi`.

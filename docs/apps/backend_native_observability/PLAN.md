@@ -745,6 +745,37 @@ availability, code-server spawn/readiness failure and web-worker selection clear
 it. WBA/LSP errors must not clear the installation flag. Preserve installed files
 on mode changes; validate/adopt them only through explicit installer consent.
 
+### Earlier Intelligence Bootstrap: State Boundary First
+
+The existing lifecycle schedules intelligence before serving HTTP, but only after
+backend imports and ASGI assembly. Scheduling a coroutine before synchronous
+imports alone would not overlap those imports with process launch. Do not move
+loop-bound managers, futures or stdout readers onto an unrelated event loop.
+
+First slice: extract the backend choice and managed installation ledger into
+`intelligence.json`, with a lightweight typed reader and the unchanged preference
+API projecting that authority. Migrate legacy values once, remove duplicate keys,
+fail on invalid canonical state, and atomically clear installation availability
+when selecting web workers. Consolidate watcher settings preparation in the
+code-server shell manager, after extension gating and before spawn. Keep current
+lifecycle timing and WBA readiness dependencies unchanged for this slice.
+
+Approved follow-up: Code TE2's shellspec opts into `--bootstrap-module`. Uvicorn
+enters that async context on its serving loop before off-loop backend import and
+assembly. The compact state controls early managed-process preparation; only
+assembly uses a thread, never runtime hooks, shell managers or their readers.
+Preload shared preparation dependencies first to avoid partially imported modules.
+Keep legacy workers synchronous and pipe-only mode unchanged.
+
+Code-server readiness and application readiness are separate gates. Prepare WBA
+from the existing code-server spawn callback, but wait for both before connecting.
+Buffer existing WBA pushes behind application readiness, retain latest adapter
+state, and publish it after project initialization and fact-handler registration.
+The eager caller reuses the early task. Backend-mode changes and shutdown cancel
+both startup owners before stopping readers/shells or draining the fact bus.
+Join an interrupted assembly thread before cleanup. No new event loop, transport,
+HTTP fallback, or readiness polling is introduced.
+
 Use strict Python types/Basedpyright and focused tests for changed Python paths;
 Rust formatting/check/tests for changed framework contracts; Code TE2 frontend
 tests, typecheck and build for browser changes. Android validation follows the

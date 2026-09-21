@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 import importlib.abc
 import importlib.machinery
 import sys
+from pathlib import Path
 from types import ModuleType
 from typing import override
 
@@ -26,7 +27,41 @@ sys.meta_path.insert(0, BlockFastAPI())
 import httpx
 from starlette.testclient import TestClient
 
-from app.apps.code_te2 import main
+if "--early-bootstrap" in sys.argv:
+    import asyncio
+    from importlib import import_module
+    from unittest.mock import AsyncMock, patch
+    from app.libs.app_worker_bootstrap import assemble_off_loop
+    from app.apps.code_te2 import intelligence_bootstrap as bootstrap
+    from app.apps.code_te2 import intelligence_startup as intelligence
+    from app.apps.code_te2 import intelligence_bootstrap_gate as gate
+    from app.apps.code_te2 import workbench_adapter_shell_manager as adapter
+
+    async def import_early() -> ModuleType:
+        events: list[str] = []
+
+        async def prepare(_project: str) -> None:
+            events.append("preparing")
+            await gate.wait_for_application()
+            events.append("attached")
+
+        def assemble() -> ModuleType:
+            module = import_module("app.apps.code_te2.main")
+            events.append("assembled")
+            return module
+
+        with patch.object(intelligence, "prime_intelligence_runtime", prepare), patch.object(adapter, "publish_current_adapter_state", AsyncMock()), patch.object(adapter, "stop_adapter_io", AsyncMock()):
+            async with bootstrap.te2_worker_bootstrap():
+                module = await assemble_off_loop(assemble)
+                assert events == ["preparing", "assembled"], events
+                await bootstrap.attach_application(str(Path.home()))
+                assert await bootstrap.await_early_intelligence(str(Path.home()))
+                assert events == ["preparing", "assembled", "attached"]
+                return module
+
+    main = asyncio.run(import_early())
+else:
+    from app.apps.code_te2 import main
 from app.apps.code_te2.http_app import SOCKET_PATHS
 from app.apps.code_te2.socketio_gateway import CODE_TE2_SIO
 from app.libs.app_worker_asgi import WorkerASGI, explicit_asgi_application

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TypeAlias, cast
 
 from .code_te2_paths import code_te2_paths
+from .intelligence_state import IntelligenceStateStore
 
 JsonDict: TypeAlias = dict[str, object]
 
@@ -92,6 +93,9 @@ class PreferencesStore:
         self._path = storage_path or code_te2_paths().preferences_path
         _ensure_dir(self._path)
         self._lock = threading.Lock()
+        self.intelligence_state: IntelligenceStateStore = IntelligenceStateStore(self._path)
+        # Migrate before deleting legacy fields; the compact file wins on retries.
+        _ = self.intelligence_state.read()
         # NO in-memory cache - file is always authority
         self._initialize_if_missing()
         self._ensure_schema_compliance()
@@ -110,7 +114,7 @@ class PreferencesStore:
             # File doesn't exist - write defaults to disk
             defaults = {
                 "editor": dict(DEFAULT_EDITOR_PREFS),
-                "ui": dict(DEFAULT_UI_PREFS),
+                "ui": {key: value for key, value in DEFAULT_UI_PREFS.items() if key != "webWorkersEnabled"},
                 "projects": {},
             }
             # Write to disk - MUST succeed
@@ -152,7 +156,15 @@ class PreferencesStore:
             data["editor"] = editor_store
             
             ui_store = _as_dict(data.get("ui"))
+            if "webWorkersEnabled" in ui_store:
+                del ui_store["webWorkersEnabled"]
+                modified = True
+            if "codeServerInstallation" in data:
+                del data["codeServerInstallation"]
+                modified = True
             for key, default_val in DEFAULT_UI_PREFS.items():
+                if key == "webWorkersEnabled":
+                    continue
                 if key not in ui_store:
                     ui_store[key] = default_val
                     modified = True
@@ -196,18 +208,11 @@ class PreferencesStore:
 
     def get_code_server_installation(self) -> JsonDict | None:
         """Backend-owned installation ledger; absent means pre-ledger migration."""
-        with self._lock:
-            raw = self._read_from_disk().get("codeServerInstallation")
-            return _as_dict(cast(object, raw)) if isinstance(raw, dict) else None
+        return self.intelligence_state.get_code_server_installation()
 
     def set_code_server_installation(self, state: JsonDict) -> None:
         # Kept outside editable UI preferences so clients cannot claim an install.
-        with self._lock:
-            data = self._read_from_disk()
-            if data.get("codeServerInstallation") == state:
-                return
-            data["codeServerInstallation"] = dict(state)
-            self._write_to_disk(data)
+        self.intelligence_state.set_code_server_installation(state)
 
     def get_preferences(self, project_path: str | None = None) -> JsonDict:
         """Read preferences directly from disk - NO cache, NO defaults merged."""
@@ -215,6 +220,7 @@ class PreferencesStore:
             data = self._read_from_disk()
             editor = _as_dict(data.get("editor"))
             ui = _as_dict(data.get("ui"))
+            ui["webWorkersEnabled"] = self.intelligence_state.read().web_workers_enabled
             project_entry: JsonDict = {}
             if project_path:
                 projects = _as_dict(data.get("projects"))
@@ -251,13 +257,9 @@ class PreferencesStore:
             if ui:
                 ui_store = _as_dict(data.get("ui"))
                 for key, value in ui.items():
-                    if key in DEFAULT_UI_PREFS:
+                    if key in DEFAULT_UI_PREFS and key != "webWorkersEnabled":
                         ui_store[key] = value
                 data["ui"] = ui_store
-                # Mode and availability change atomically, regardless of which
-                # preference entrypoint initiated the switch. Package files stay.
-                if ui.get("webWorkersEnabled") is True:
-                    data["codeServerInstallation"] = {"installed": False}
 
             project_result: JsonDict = {}
             if project:
@@ -277,10 +279,18 @@ class PreferencesStore:
                 }
 
             # Write back to disk
+            if ui and "webWorkersEnabled" in ui:
+                enabled = ui["webWorkersEnabled"]
+                if not isinstance(enabled, bool):
+                    raise ValueError("webWorkersEnabled must be a boolean")
+                self.intelligence_state.set_web_workers_enabled(enabled)
             self._write_to_disk(data)
+
+            projected_ui = _as_dict(data.get("ui"))
+            projected_ui["webWorkersEnabled"] = self.intelligence_state.read().web_workers_enabled
 
             return {
                 "editor": data.get("editor") or {},
-                "ui": data.get("ui") or {},
+                "ui": projected_ui,
                 "project": project_result,
             }
