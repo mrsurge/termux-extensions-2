@@ -29,7 +29,6 @@ shells:
       - app.apps.code_te2.intelligence_bootstrap
       - --pipe
     env:
-      PYTHON_JIT: "1"
       PYTHONPATH: ${env:PYTHONPATH}:${ctx:PROJECT_ROOT}
       TE_APP_ID: ${ctx:APP_ID}
       TE_APP_WORKER_PORT: ${free_port}
