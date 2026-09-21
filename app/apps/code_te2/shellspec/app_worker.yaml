@@ -17,8 +17,6 @@ shells:
           border: rgba(29, 70, 126, 0.88)
     command:
       - python3
-      - -X
-      - jit
       - -m
       - app.libs.app_worker
       - --app-id
