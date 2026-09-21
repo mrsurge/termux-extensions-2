@@ -281,6 +281,7 @@ export function initSidebarShortcuts(
     typeof options.emitSidebarUiRequest === "function"
       ? options.emitSidebarUiRequest
       : null;
+  const requestSidebarUi = options.requestSidebarUi;
   const emitSidebarRpcRequest =
     typeof options.emitSidebarRpcRequest === "function"
       ? options.emitSidebarRpcRequest
@@ -2412,6 +2413,22 @@ export function initSidebarShortcuts(
     }
   }
 
+  async function _closeAllAndKillApp(hostId: string): Promise<void> {
+    if (!hostId || !requestSidebarUi) return;
+    try {
+      const result = asRecord(await requestSidebarUi(
+        UI_IPC_RPC_METHODS.sidebarAppWindowsClose,
+        { hostId, source: "header_icon_menu" },
+      ));
+      if (result.ok !== true || !_normStr(result.app_id)) {
+        throw new Error("Failed to close app dock slots");
+      }
+      await _quitFrameworkApp(result.app_id);
+    } catch (error) {
+      toast(errorMessage(error, "Failed to close app dock slots"));
+    }
+  }
+
   async function _restartFrameworkApp(appId: unknown) {
     const id = _normStr(appId);
     if (!id) return false;
@@ -2504,6 +2521,10 @@ export function initSidebarShortcuts(
       await _quitFrameworkApp(appId);
       return;
     }
+    if (action === "close-all-kill-app") {
+      await _closeAllAndKillApp(hostId);
+      return;
+    }
     if (action === "extension-close") {
       if (surfaceKind === "panel") {
         _requestSidebarControl(UI_IPC_RPC_METHODS.hostExtensionWebviewDispose, {
@@ -2592,6 +2613,12 @@ export function initSidebarShortcuts(
         label: "Kill app",
         enabled: true,
       });
+      if (_isAppDockEntry(sc) && hostId) items.push({
+        type: "item",
+        id: "close-all-kill-app",
+        label: "Close all and kill",
+        enabled: true,
+      });
     }
     separator();
     if (isUrlSlot && _isExtensionWebviewEntry(sc)) {
@@ -2648,7 +2675,6 @@ export function initSidebarShortcuts(
     }
     const shortcutKey = _normStr(sc.key);
     if (shortcutKey && _headerIconMenuOwns(shortcutKey)) {
-      _closeHeaderIconMenu();
       return;
     }
     try {
@@ -2752,6 +2778,17 @@ export function initSidebarShortcuts(
         await _quitFrameworkApp(appId);
       });
       menu.appendChild(kill);
+      if (dockHostId) {
+        const closeAll = document.createElement("div");
+        closeAll.className = "fe-dd-item";
+        closeAll.textContent = "Close all and kill";
+        closeAll.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          _closeHeaderIconMenu();
+          void _closeAllAndKillApp(dockHostId);
+        });
+        menu.appendChild(closeAll);
+      }
     }
 
     addSeparator();
@@ -3377,13 +3414,17 @@ export function initSidebarShortcuts(
       btn.title = sc.label || sc.url || "Sidebar entry";
       btn.style.touchAction = "none";
       btn.style.cursor = "grab";
+      btn.draggable = false;
       btn.appendChild(iconNode);
+      btn.addEventListener("dragstart", (ev) => ev.preventDefault());
 
       renderedHeaderItems.push(sc);
       cell.dataset.headerIndex = String(renderedIndex);
 
       let longPressTimer: ReturnType<typeof setTimeout> | null = null;
       let suppressUntil = 0;
+      let suppressGestureClick = false;
+      let nativeMenuOpen = false;
       let pointerId: number | null = null;
       let startX = 0;
       let startY = 0;
@@ -3401,11 +3442,25 @@ export function initSidebarShortcuts(
         startY = 0;
       };
 
+      const openGestureMenu = () => {
+        suppressGestureClick = true;
+        if (hasElectronSidebarMenu()) {
+          if (nativeMenuOpen) return;
+          nativeMenuOpen = true;
+          void _openNativeHeaderIconMenu(btn, sc)
+            .catch((error) => toast(errorMessage(error, "Failed to open Sidebar menu")))
+            .finally(() => { nativeMenuOpen = false; });
+          return;
+        }
+        _openHeaderIconMenu(btn, sc);
+      };
+
       btn.addEventListener("click", (ev) => {
         ev.stopPropagation();
-        if (Date.now() < suppressUntil) {
+        if (suppressGestureClick || Date.now() < suppressUntil) {
           ev.preventDefault();
           ev.stopImmediatePropagation();
+          suppressGestureClick = false;
           suppressUntil = 0;
           return;
         }
@@ -3432,10 +3487,14 @@ export function initSidebarShortcuts(
       btn.addEventListener("contextmenu", (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
-        _openHeaderIconMenu(btn, sc);
+        clearLp();
+        if (headerDragState?.btn === btn) finishDrag(false);
+        clearPointer();
+        openGestureMenu();
       });
 
       btn.addEventListener("pointerdown", (ev) => {
+        suppressGestureClick = false;
         if (ev.pointerType === "mouse" && ev.button !== 0) return;
         if (
           ev.pointerType !== "mouse" &&
@@ -3466,7 +3525,8 @@ export function initSidebarShortcuts(
               return;
             suppressUntil = Date.now() + 900;
             finishDrag(false);
-            _openHeaderIconMenu(btn, sc);
+            clearPointer();
+            openGestureMenu();
           }, 520);
         }
         try {

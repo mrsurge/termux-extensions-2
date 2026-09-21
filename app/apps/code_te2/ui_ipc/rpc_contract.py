@@ -62,6 +62,7 @@ UI_IPC_RPC_METHOD_HOST_CODE_INSPECTOR_COMMAND: Final = "ui.host.codeInspector.co
 UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_CREATE: Final = "ui.sidebar.window.create"
 UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_ACTIVATE: Final = "ui.sidebar.window.activate"
 UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_CLOSE: Final = "ui.sidebar.window.close"
+UI_IPC_RPC_METHOD_SIDEBAR_APP_WINDOWS_CLOSE: Final = "ui.sidebar.appWindows.close"
 UI_IPC_RPC_METHOD_SIDEBAR_ACTIVE_SHORTCUT_SET: Final = "ui.sidebar.activeShortcut.set"
 
 UiIpcRpcMethod = Literal[
@@ -107,6 +108,7 @@ UiIpcRpcMethod = Literal[
     "ui.sidebar.window.create",
     "ui.sidebar.window.activate",
     "ui.sidebar.window.close",
+    "ui.sidebar.appWindows.close",
     "ui.sidebar.activeShortcut.set",
 ]
 
@@ -221,6 +223,7 @@ ALLOWED_REQUEST_METHODS: Final[set[str]] = {
     UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_CREATE,
     UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_ACTIVATE,
     UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_CLOSE,
+    UI_IPC_RPC_METHOD_SIDEBAR_APP_WINDOWS_CLOSE,
     UI_IPC_RPC_METHOD_SIDEBAR_ACTIVE_SHORTCUT_SET,
 }
 

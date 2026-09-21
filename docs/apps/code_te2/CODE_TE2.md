@@ -3145,9 +3145,14 @@ sibling `WebContentsView`. The request is declarative and bounded to labels,
 separators, enabled action ids, and coordinates. Electron returns only the
 selected id; Code TE2 executes the existing action, so Electron never becomes
 Sidebar lifecycle authority. Browser and Android retain one keyed DOM menu owner:
-the launcher tap and a repeated icon long-press toggle their own menu, while a
-different launcher/long-press replaces the prior menu. Tapping the icon that owns
-an open long-press menu closes it without activating the surface.
+the launcher tap toggles its menu, while an icon long-press opens its menu once
+per gesture. A matching native context-menu event cannot immediately close it.
+The release click is consumed; a later tap on the icon closes its open menu.
+Dock icons suppress text selection and native image dragging without changing
+the separate slot-reordering gesture. Both native and DOM menus offer Close all
+and kill for app slots: one backend ledger transaction closes all slots with
+the selected app id, publishes the shared membership snapshot, and the host
+then invokes the framework's existing app quit action once.
 
 The trusted header exposes Attach, Refresh, Console, DevTools, exact Stop, and
 Close. Attach or user Close publishes an exact reattach event. Extension
