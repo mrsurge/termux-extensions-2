@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
 import time
-from typing import Protocol
+from typing import Protocol, cast
 
 from ...diagnostics_latency_metrics import (
     begin_open_trace,
@@ -12,7 +12,7 @@ from ...diagnostics_latency_metrics import (
     finish_open_trace,
     record_open_stage,
 )
-from .contracts import EditorOpenFields, EditorOpenPayload
+from .contracts import EditorOpenFields, EditorOpenPayload, EditorSymbolRange
 from .payload_utils import get_opt_int, get_opt_str, get_str
 from ...open_state_backend import ClientForegroundPayload, SidecarOpenStatePayload
 
@@ -39,6 +39,29 @@ class EmitOpenStateChangedFn(Protocol):
     ) -> Awaitable[None]: ...
 
 
+def _symbol_range(value: object) -> EditorSymbolRange | None:
+    if not isinstance(value, Mapping):
+        return None
+    source = cast(Mapping[str, object], value)
+    keys = ("startLineNumber", "startColumn", "endLineNumber", "endColumn")
+    parts: dict[str, int] = {}
+    for key in keys:
+        part = source.get(key)
+        if not isinstance(part, int) or isinstance(part, bool) or part < 1:
+            return None
+        parts[key] = part
+    start = (parts["startLineNumber"], parts["startColumn"])
+    end = (parts["endLineNumber"], parts["endColumn"])
+    if end < start:
+        return None
+    return {
+        "startLineNumber": start[0],
+        "startColumn": start[1],
+        "endLineNumber": end[0],
+        "endColumn": end[1],
+    }
+
+
 def coerce_editor_open_request_fields(
     payload_in: Mapping[str, object],
     request_id: str,
@@ -61,6 +84,8 @@ def coerce_editor_open_request_fields(
     column = get_opt_int(payload_in, "column")
     scroll_y = get_opt_str(payload_in, "scroll_y") or get_opt_str(payload_in, "scrollY")
     focus = payload_in.get("focus")
+    place_cursor = payload_in.get("place_cursor") is True
+    symbol_range = _symbol_range(payload_in.get("symbol_range"))
     scroll_to_top_raw: object | None = payload_in.get("scroll_to_top") if "scroll_to_top" in payload_in else payload_in.get("scrollToTop")
 
     if line is not None and line < 1:
@@ -80,6 +105,8 @@ def coerce_editor_open_request_fields(
         "scroll_y": scroll_y,
         "focus": focus if isinstance(focus, bool) else None,
         "scroll_to_top": scroll_to_top_bool,
+        "place_cursor": place_cursor,
+        "symbol_range": symbol_range,
     }
 
 
@@ -143,6 +170,8 @@ async def emit_editor_open_from_backend(
         scroll_y = fields["scroll_y"]
         focus = fields["focus"]
         scroll_to_top = fields["scroll_to_top"]
+        place_cursor = fields["place_cursor"]
+        symbol_range = fields["symbol_range"]
 
         if line is not None:
             _ = payload.pop("scroll_line", None)
@@ -155,6 +184,10 @@ async def emit_editor_open_from_backend(
             payload["focus"] = focus
         if scroll_to_top is not None:
             payload["scroll_to_top"] = scroll_to_top
+        if place_cursor:
+            payload["place_cursor"] = True
+        if symbol_range is not None:
+            payload["symbol_range"] = symbol_range
 
         emit_started_ns = time.perf_counter_ns() if metrics_enabled else 0
         await emit_editor_open(payload)

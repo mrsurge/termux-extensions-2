@@ -13,6 +13,8 @@ interface CodeInspectorPanelDeps {
       column?: number;
       focus?: boolean;
       scrollY?: string;
+      placeCursor?: boolean;
+      symbolRange?: JsonObject;
     },
   ): Promise<unknown>;
 }
@@ -231,6 +233,8 @@ export function createCodeInspectorPanel(
         column: location.column,
         focus: false,
         scrollY: 'center',
+        placeCursor: true,
+        ...(nodeType === 'symbol' && isRecord(node.range) ? { symbolRange: node.range } : {}),
       });
     });
 

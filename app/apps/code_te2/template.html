@@ -1032,6 +1032,12 @@
   #editor-frame .monaco-editor {
     font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   }
+  #editor-frame .monaco-editor .te2-symbol-target-highlight {
+    background-color: var(--vscode-editor-symbolHighlightBackground);
+    border: 1px solid var(--vscode-editor-symbolHighlightBorder, var(--vscode-editorCursor-foreground));
+    box-sizing: border-box;
+    pointer-events: none;
+  }
   #cm6-host { position:absolute; inset:0; display:flex; }
   .cm-editor { flex:1; height:100%; }
   .cm-empty-anchor { 

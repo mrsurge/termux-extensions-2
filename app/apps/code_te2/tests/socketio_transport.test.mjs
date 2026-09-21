@@ -902,6 +902,32 @@ test('stored top-line restoration does not move the cursor or focus Monaco', asy
   assert.equal(focusCalls, 0);
 });
 
+test('inspector jump moves the cursor without focusing Monaco', async () => {
+  const { applyJumpToLine } = await importTypeScript(
+    'monaco_editor/editor_jump_utils.ts',
+  );
+  let position = null;
+  let focusCalls = 0;
+  let centeredLine = null;
+  applyJumpToLine({
+    revealLineInCenter: (line) => { centeredLine = line; },
+    setPosition: (next) => { position = next; },
+    focus: () => { focusCalls += 1; },
+  }, {
+    getLineCount: () => 100,
+    getLineMaxColumn: () => 80,
+  }, {
+    line: 17,
+    column: 9,
+    focus: false,
+    place_cursor: true,
+    scroll_y: 'center',
+  });
+  assert.deepEqual(position, { lineNumber: 17, column: 9 });
+  assert.equal(centeredLine, 17);
+  assert.equal(focusCalls, 0);
+});
+
 test('visible editor open completion does not await WBA or agent hydration', async () => {
   const { runEditorOpenTransaction } = await importTypeScript(
     'monaco_editor/editor_open_transaction_runner_main.ts',
@@ -918,12 +944,14 @@ test('visible editor open completion does not await WBA or agent hydration', asy
     dispose: () => modelLifecycleOrder.push('dispose:old'),
   };
   let model = oldModel;
+  let position = { lineNumber: 1, column: 1 };
   const editor = {
     setModel: (nextModel) => {
       modelLifecycleOrder.push('editor:setModel');
       model = nextModel;
     },
     getModel: () => model,
+    getPosition: () => position,
   };
   const wbaOpen = deferred();
   const agentHydration = deferred();
@@ -931,8 +959,10 @@ test('visible editor open completion does not await WBA or agent hydration', asy
   let agentHydrationCalls = 0;
   const switchOrder = [];
   const baselineRequests = [];
+  const breadcrumbUpdates = [];
+  const symbolHighlights = [];
 
-  const openPromise = runEditorOpenTransaction({
+  const deps = {
     getWindow: () => ({ monaco: {} }),
     getCurrentPath: () => currentPath,
     setCurrentPath: (pathValue) => {
@@ -975,7 +1005,9 @@ test('visible editor open completion does not await WBA or agent hydration', asy
     clearDiagnosticsForLeavingModel: () => {},
     wbCurrentGeneration: () => 0,
     wbBumpGeneration: () => 1,
-    bcUpdatePath: () => {},
+    bcUpdatePath: (_path, deferSymbols) => breadcrumbUpdates.push(deferSymbols),
+    clearSymbolTargetHighlight: () => symbolHighlights.push(null),
+    showSymbolTargetHighlight: (range) => symbolHighlights.push(range),
     queueDidChange: () => {},
     queueSymbols: () => {},
     openFileFlow: () => {
@@ -983,7 +1015,9 @@ test('visible editor open completion does not await WBA or agent hydration', asy
       return wbaOpen.promise;
     },
     absPathFromVscodeUri: (uri) => String(uri).replace(/^file:\/\//, ''),
-    applyJumpToLine: () => {},
+    applyJumpToLine: (_editor, _model, jump) => {
+      position = { lineNumber: jump.line, column: jump.column ?? 1 };
+    },
     coercePositiveInt: (value) => Number.isInteger(Number(value)) && Number(value) > 0 ? Number(value) : null,
     shouldRecreateOpenModel: () => false,
     applyOpenModelTextSafely: () => {},
@@ -995,7 +1029,8 @@ test('visible editor open completion does not await WBA or agent hydration', asy
     },
     setApplyingRemote: () => {},
     openTransactionStore: createEditorOpenTransactionStore(),
-  }, {
+  };
+  const openPromise = runEditorOpenTransaction(deps, {
     path: '/workspace/fast.py',
     content: 'print("ready")\n',
     request_id: 'rapid-open',
@@ -1012,6 +1047,7 @@ test('visible editor open completion does not await WBA or agent hydration', asy
   assert.equal(wbaOpenCalls, 1);
   assert.equal(agentHydrationCalls, 1);
   assert.deepEqual(baselineRequests, [{ immediate: true, reason: 'open' }]);
+  assert.deepEqual(breadcrumbUpdates, [true]);
   assert.ok(
     modelLifecycleOrder.indexOf('editor:setModel') <
       modelLifecycleOrder.indexOf('dispose:old'),
@@ -1020,6 +1056,23 @@ test('visible editor open completion does not await WBA or agent hydration', asy
   wbaOpen.resolve({ ok: true });
   agentHydration.resolve({ ok: true });
   await settlePromises();
+
+  const symbolRange = {
+    startLineNumber: 2, startColumn: 1, endLineNumber: 6, endColumn: 2,
+  };
+  await runEditorOpenTransaction(deps, {
+    path: '/workspace/fast.py',
+    request_id: 'symbol-jump',
+    document_revision: 0,
+    line: 3,
+    column: 5,
+    focus: false,
+    place_cursor: true,
+    symbol_range: symbolRange,
+  });
+  assert.deepEqual(breadcrumbUpdates, [true, false]);
+  assert.deepEqual(position, { lineNumber: 3, column: 5 });
+  assert.deepEqual(symbolHighlights.at(-1), symbolRange);
 });
 
 test('modelReady is backend notification rather than WBA open or resync', () => {

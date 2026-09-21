@@ -16,6 +16,13 @@ class RuntimeMeta(TypedDict):
     worker_pid: int
 
 
+class EditorSymbolRange(TypedDict):
+    startLineNumber: int
+    startColumn: int
+    endLineNumber: int
+    endColumn: int
+
+
 class EditorOpenFields(TypedDict):
     project: str
     path: str
@@ -25,6 +32,8 @@ class EditorOpenFields(TypedDict):
     scroll_y: str | None
     focus: bool | None
     scroll_to_top: bool | None
+    place_cursor: bool
+    symbol_range: EditorSymbolRange | None
 
 
 class EditorOpenPayload(TypedDict, total=False):
@@ -35,6 +44,8 @@ class EditorOpenPayload(TypedDict, total=False):
     column: int
     scroll_y: str
     focus: bool
+    place_cursor: bool
+    symbol_range: EditorSymbolRange
     scroll_to_top: bool
     source: str
     content: str

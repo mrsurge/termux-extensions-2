@@ -138,6 +138,8 @@ import {
 } from "./editor_code_inspector_runtime.ts";
 import {
   replaceCodeInspectorHighlights,
+  clearSymbolTargetHighlight,
+  showSymbolTargetHighlight,
 } from "./editor_search_highlight_runtime.ts";
 import { installTextmateDebugHooks } from "./editor_textmate_debug_runtime.ts";
 import { createEditorPrefRuntime } from "./editor_pref_runtime.ts";
@@ -1951,6 +1953,7 @@ interface MonacoBootWindowLike extends Window {
   }
 
   function clearActiveModel(reason: string): void {
+    clearSymbolTargetHighlight();
     const previousModel = model;
     model = null;
     currentPath = null;
@@ -2088,6 +2091,10 @@ interface MonacoBootWindowLike extends Window {
     wbCurrentGeneration: _wbCurrentGeneration,
     wbBumpGeneration: _wbBumpGeneration,
     bcUpdatePath: bcUpdatePath,
+    clearSymbolTargetHighlight: clearSymbolTargetHighlight,
+    showSymbolTargetHighlight: function (range: Record<string, unknown>) {
+      showSymbolTargetHighlight(diffEditor?.getModifiedEditor?.() ?? editor, range);
+    },
     queueDidChange: _wbQueueDidChange,
     queueSymbols: _wbQueueSymbols,
     openFileFlow: _wbOpenFileFlow,

@@ -46,6 +46,8 @@ interface RunEditorOpenTransactionDeps {
   wbCurrentGeneration(): number;
   wbBumpGeneration(path: string, source: string): number;
   bcUpdatePath(path: string, shouldAnnounce: boolean): void;
+  clearSymbolTargetHighlight(): void;
+  showSymbolTargetHighlight(range: Record<string, unknown>): void;
   queueDidChange(path: string, text: string, languageId: string, generation: number): void;
   queueSymbols(path: string, generation: number): void;
   openFileFlow(payload: Record<string, unknown>): Promise<unknown>;
@@ -136,7 +138,9 @@ export async function runEditorOpenTransaction(
     deps.coercePositiveInt,
   );
   let postOpenJumpPayload: EditorOpenJumpPayload | null = null;
-  try { deps.bcUpdatePath(currentPath, true); } catch (_) {}
+  deps.clearSymbolTargetHighlight();
+  // Same-model jumps must not discard the breadcrumb symbol tree.
+  try { deps.bcUpdatePath(currentPath, !sameFileNavigationOnly); } catch (_) {}
 
   try {
     const lang = deps.languageFromPath(currentPath);
@@ -251,6 +255,10 @@ export async function runEditorOpenTransaction(
           column: tx && tx.hasExplicitNavigation ? tx.column : null,
         });
       } catch (_) {}
+    }
+
+    if (satisfied && payload.symbol_range) {
+      deps.showSymbolTargetHighlight(payload.symbol_range);
     }
 
     let languageOpenPromise: Promise<unknown> | null = null;

@@ -70,6 +70,7 @@ test('document symbols preserve hierarchy and selection locations through WBA', 
   assert.equal(result.mode, 'symbols'); assert.equal(result.status, 'ready');
   assert.equal(result.summary.count, 2);
   assert.equal(result.tree[0].label, 'Example');
+  assert.deepEqual(result.tree[0].range, range);
   assert.deepEqual(result.tree[0].selectionRange, selectionRange);
   assert.equal(result.tree[0].children[0].path, '/workspace/main.rs');
   runtime.dispose();
@@ -572,9 +573,11 @@ test("rehydrates a retained hierarchy projection before lazy expansion", async (
 test("keeps Code Inspector and contents-search decorations independent", async () => {
   const {
     clearCodeInspectorHighlights,
+    clearSymbolTargetHighlight,
     clearSearchHighlight,
     handleSearchHighlight,
     replaceCodeInspectorHighlights,
+    showSymbolTargetHighlight,
   } = await importTypeScript(
     "monaco_editor/editor_search_highlight_runtime.ts",
   );
@@ -628,15 +631,20 @@ test("keeps Code Inspector and contents-search decorations independent", async (
     },
   );
   replaceCodeInspectorHighlights(editor, [inspectorRange]);
+  showSymbolTargetHighlight(editor, inspectorRange);
 
-  assert.equal(collections.length, 2);
+  assert.equal(collections.length, 3);
   assert.deepEqual(collections[0].decorations[0].range, searchRange);
   assert.deepEqual(collections[1].decorations[0].range, inspectorRange);
   assert.equal(collections[1].decorations[0].options.className, "findMatch");
+  assert.equal(collections[2].decorations[0].options.className, "te2-symbol-target-highlight");
 
   clearCodeInspectorHighlights();
   assert.equal(collections[1].decorations.length, 0);
   assert.equal(collections[0].decorations.length, 1);
+  assert.equal(collections[2].decorations.length, 1);
+  clearSymbolTargetHighlight();
+  assert.equal(collections[2].decorations.length, 0);
   clearSearchHighlight(editor);
 });
 

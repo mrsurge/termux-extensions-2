@@ -5,6 +5,8 @@ export interface EditorOpenPayload {
   column?: number | string | null;
   col?: number | string | null;
   focus?: boolean;
+  place_cursor?: boolean;
+  symbol_range?: Record<string, unknown>;
   scroll_y?: string;
   scroll_to_top?: boolean;
   request_id?: string;
@@ -26,6 +28,7 @@ export interface EditorOpenTransaction {
   line: number | null;
   column: number;
   focus?: boolean;
+  place_cursor?: boolean;
   scroll_y?: string;
   scroll_to_top?: boolean;
   request_id: string;
@@ -39,6 +42,7 @@ export interface EditorOpenJumpPayload {
   line: number;
   column?: number;
   focus?: boolean;
+  place_cursor?: boolean;
   scroll_y?: string;
   scroll_to_top?: boolean;
 }
