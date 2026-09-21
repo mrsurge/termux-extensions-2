@@ -1249,3 +1249,28 @@ or restarts are part of capture; the user controls restarts.
 
 Details and exact evaluation commands: `WBA_RUNTIME_DEBUG.md`. No shared runtime
 restart, Android asset publication or version bump is authorized by this slice.
+
+### Compact Completion Projection
+
+- [x] Inspect the active shim and VS Code main-thread provider implementation:
+  WBA inflated DTOs redundantly; single-provider responses repeated the compact
+  DTO under two aliases. The frontend preferred expanded items and its compact
+  alternative consumed only the first provider. Resolve/dispose were unwired.
+- [x] Project original provider DTOs once, remove WBA inflation and legacy aliases,
+  and remove TE2's extra frontend presort/filter pass. Preserve compact DTO fields.
+- [x] Register separate Monaco providers, with full selectors, trigger characters,
+  independent incomplete results and resolve capability. Deduplicate multi-language
+  events by provider handle and include pattern-only registrations/resync.
+- [x] Route item resolve/list disposal through WBA with originating session and
+  provider identity; reject stale-session cache operations. Dispose cancelled/empty
+  results, preserve cache ID zero, and avoid document activation on cache RPCs.
+- [x] Hold the client operation gate only for completion text synchronization,
+  not provider replies. Bound that admission to 10 s (5 s sync + margin), retain
+  provider 30 s / outer RPC 195 s, and forward modelVersionId for sync coalescing.
+- [x] Validate 81 focused Node tests and 57 Bun tests, including 700-item wire
+  payloads, slow/fast provider concurrency, resolve/dispose and session fencing.
+  Frontend typecheck and both builds pass. WBA's 107 pre-existing TypeScript
+  diagnostics are unchanged against the normalized baseline; none added.
+- [ ] Live acceptance after loading both rebuilt WBA and frontend: Python cold
+  completions, multiple providers, details/auto-import resolution, incomplete-list
+  refresh, tab/project switches, and provider reconnection. No old-payload fallback.

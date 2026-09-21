@@ -277,7 +277,7 @@ interface LanguageBridgeStateLike {
     string,
     Record<
       string,
-      { handle: string; triggerCharacters: string[]; supportsResolve: boolean }
+      { handle: string; selector?: unknown; triggerCharacters: string[]; supportsResolve: boolean }
     >
   >;
   completionProviderDisposablesByLanguage: Record<

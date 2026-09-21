@@ -823,3 +823,27 @@ project/extension-host session changes. Serialize only these background warm-ups
 not interactive operations; release result caches and contain failures without
 retrying. Validate both readiness orders, duplication, reset races and cleanup on
 Node/Bun. The user reloads the WBA for production live acceptance.
+
+### Compact Completion Projection
+
+Approved cleanup: use the VS Code main-thread completion model across WBA rather
+than retaining the earlier expanded-list implementation. WBA projects the original
+compact DTO once per provider, with provider/session identity outside the DTO.
+The browser registers providers separately, inflates each DTO through the vendored
+main-thread conversion, and lets Monaco own sorting, filtering, incomplete-list
+requeries and reuse. Preserve full selectors (including pattern-only providers),
+trigger characters, item IDs, default ranges, snippets, commands and edits.
+
+Wire item resolution and list disposal to the originating provider and session.
+Do not re-open or synchronize a document for these cache operations. Project or
+host replacement invalidates the session identity. Synchronization stays under
+the document-operation gate; provider response waits leave it so independently
+registered providers can respond concurrently. Keep the 30-second provider limit
+and conservative outer RPC budget, plus the one-shot warm-up policy. Remove old
+expanded payloads, duplicate compact aliases and the redundant frontend presort.
+No legacy payload fallback, backend restart, APK publication or version bump.
+
+Validate the real conversion/registration/dispatch paths on Node and Bun, including
+a 700-item MessagePack payload, multiple providers, slow/fast concurrency,
+resolution, cancellation disposal, empty results and stale-session rejection.
+Typecheck, rebuild both entrypoints and leave runtime acceptance to the user.

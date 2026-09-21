@@ -22,10 +22,11 @@ Live reproduction with basedpyright 1.40.1 and Bun, 2026-09-20:
 
 Previously the browser allowed 10 s but WBA allowed 8 s + 5 s for the provider.
 `protocol/completion-timeouts.ts` now owns the shared contract: 30 s provider,
-45 s operation (5 s sync + 5 s missing-provider wait + provider + 5 s margin),
-195 s outer RPC. The outer budget covers two existing gate admissions, activation
-then completion: each can queue for operation + 5 s and run for operation; add
-5 s transport margin. Only actual contention uses that allowance. It does not
+45 s language-activation operation, 10 s completion synchronization operation
+(5 s preflight plus margin), and 195 s conservative outer RPC. Provider replies
+now wait outside the document-operation gate, allowing independent providers to
+respond concurrently. The outer budget retains the former two full gate
+admissions plus transport margin. Only actual contention uses that allowance. It does not
 let a provider run for 195 s and does not add latency to fast replies. Disconnect
 still rejects pending frontend requests. Tests exercise the real dispatcher,
 gate, pending-request owner, browser codec/transport and completion shim with an
@@ -43,8 +44,9 @@ Source comparison (read-only; no upstream or extension edits):
   providers with cancellation tokens, with no fixed 10-second deadline in those
   methods. Local Monaco fork `src/vs/editor/contrib/suggest/browser/suggest.ts:293`
   reuses prior provider results and queries provider groups. No generic first
-  completion pre-warm was found in these inspected paths. Our callback currently
-  discards its Monaco cancellation token; fixing that is a separate change.
+  completion pre-warm was found in these inspected paths. Our callback now skips
+  cancelled calls and disposes results received after cancellation; propagation
+  into the extension-host request itself remains a separate change.
 - [Basedpyright v1.40.1 language-server source](https://github.com/DetachHead/basedpyright/blob/v1.40.1/packages/pyright-internal/src/languageServerBase.ts#L1124)
   awaits workspace selection before running the completion provider. Document
   opening calls `setFileOpened`; analyzer service schedules background reanalysis.
@@ -59,6 +61,16 @@ Source comparison (read-only; no upstream or extension edits):
 Next investigation, if needed: extension/LS-side spans around workspace readiness,
 stdlib loading, symbol-map building and candidate generation, using the same query
 and document state for comparisons. The initial slice changed deadlines only.
+
+### Compact Projection
+
+Completion replies now have one canonical payload:
+`{ sessionId, providers: [{ handle, dto }] }`. The original compact DTO is sent
+once; no expanded items or duplicate compact aliases remain. Monaco registers
+providers separately and uses the vendored main-thread converter, preserving its
+own sorting/reuse and per-provider incomplete results. Resolve and list disposal
+carry the originating provider/session identity; stale sessions are rejected.
+Update WBA and frontend together. No legacy payload fallback is provided.
 
 ### Approved Completion Warm-Up
 

@@ -1,5 +1,6 @@
 export interface CompletionProviderRegisteredPayload {
   language?: string;
+  selector?: unknown;
   handle?: unknown;
   triggerCharacters?: unknown[];
   supportsResolve?: unknown;
@@ -7,6 +8,7 @@ export interface CompletionProviderRegisteredPayload {
 
 interface CompletionProviderRegistrationLike {
   handle: string;
+  selector?: unknown;
   triggerCharacters: string[];
   supportsResolve: boolean;
 }
@@ -22,7 +24,7 @@ export function handleCompletionProviderRegistered(
   cacheCompletionProviderRegistration: (lang: string, registration: CompletionProviderRegistrationLike) => void,
 ): void {
   const typedData = asCompletionProviderRegisteredPayload(data);
-  const lang = typeof typedData?.language === 'string' ? typedData.language : '';
+  const lang = typeof typedData?.language === 'string' ? typedData.language : '*';
   const handle = typedData?.handle;
   if (!lang || handle == null) return;
   const handleKey = String(handle).trim();
@@ -41,6 +43,7 @@ export function handleCompletionProviderRegistered(
 
   cacheCompletionProviderRegistration(lang, {
     handle: handleKey,
+    selector: typedData?.selector,
     triggerCharacters,
     supportsResolve: !!typedData?.supportsResolve,
   });

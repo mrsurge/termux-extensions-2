@@ -7,6 +7,7 @@ import { build } from "esbuild";
 const appRoot = path.resolve(import.meta.dirname, "..");
 
 async function loadProvidersModule() {
+  if (process.versions.bun) return import('../monaco_editor/editor_language_bridge_providers.ts');
   const result = await build({
     entryPoints: [
       path.join(appRoot, "monaco_editor/editor_language_bridge_providers.ts"),
@@ -24,6 +25,7 @@ async function loadProvidersModule() {
 }
 
 async function loadBridgeUtils() {
+  if (process.versions.bun) return import('../monaco_editor/editor_bridge_utils.ts');
   const result = await build({
     entryPoints: [
       path.join(appRoot, "monaco_editor/editor_bridge_utils.ts"),
@@ -73,6 +75,41 @@ function languageBridgeState() {
   };
 }
 
+// Exercise installed callbacks and lifecycle, not just the DTO converter.
+test('completion providers retain individual selectors, triggers, incomplete flags and lifecycle', async () => {
+  const { createEditorLanguageBridgeProviders } = await loadProvidersModule();
+  const harness = createHarness(createEditorLanguageBridgeProviders, false, {
+    workbenchCall(method, params) {
+      if (method === 'completions') return { ok: true, result: { sessionId: 'session', providers: [{
+        handle: params.providerHandle,
+        dto: { x: params.providerHandle, c: params.providerHandle === 23, b: [{ a: `item${params.providerHandle}`, x: [params.providerHandle, 0] }] },
+      }] } };
+      if (method === 'completions_resolve') return { ok: true, result: { a: 'resolved', x: params.id } };
+      return { ok: true };
+    },
+  });
+  const a = { handle: '23', selector: [{ language: 'python', scheme: 'vscode-remote' }, { language: 'yaml' }], triggerCharacters: ['.'], supportsResolve: true };
+  const b = { handle: '24', selector: [{ scheme: 'vscode-remote', pattern: '**/*.py' }], triggerCharacters: [':'], supportsResolve: false };
+  harness.providers.cacheCompletionProviderRegistration('python', a);
+  harness.providers.cacheCompletionProviderRegistration('yaml', a);
+  harness.providers.cacheCompletionProviderRegistration('*', b);
+  const active = harness.registrations.completions.filter(r => !r.disposed);
+  assert.equal(active.length, 2);
+  assert.deepEqual(active[0].selector, [{ language: 'python', scheme: 'file' }, { language: 'yaml', scheme: undefined }]);
+  assert.deepEqual(active[1].selector, [{ scheme: 'file', pattern: '**/*.py' }]);
+  assert.deepEqual(active.map(r => r.provider.triggerCharacters), [['.'], [':']]);
+  assert.equal(typeof active[0].provider.resolveCompletionItem, 'function');
+  assert.equal(active[1].provider.resolveCompletionItem, undefined);
+  const model = { uri: { toString: () => 'file:///workspace/main.py' }, getLanguageId: () => 'python' };
+  const lists = await Promise.all(active.map(r => r.provider.provideCompletionItems(model, { lineNumber: 1, column: 1 }, {}, {})));
+  assert.deepEqual(lists.map(l => l.incomplete), [true, false]);
+  assert.deepEqual(harness.calls.filter(c => c.method === 'completions').map(c => c.params.providerHandle), [23, 24]);
+  assert.equal((await active[0].provider.resolveCompletionItem(lists[0].suggestions[0], {})).label, 'resolved');
+  for (const list of lists) list.dispose();
+  await Promise.resolve();
+  assert.deepEqual(harness.calls.filter(c => c.method === 'completions_release').map(c => c.params.cacheId), [23, 24]);
+});
+
 function createHarness(
   createEditorLanguageBridgeProviders,
   workersEnabled,
@@ -83,6 +120,11 @@ function createHarness(
   const tokenizationCalls = [];
   const languageBridge = languageBridgeState();
   const languages = {
+    registerCompletionItemProvider(selector, provider) {
+      const registration = { selector, provider, disposed: false };
+      (registrations.completions ??= []).push(registration);
+      return { dispose() { registration.disposed = true; } };
+    },
     registerHoverProvider(language, provider) {
       registrations.hover = { language, provider };
       return { dispose() {} };
@@ -131,10 +173,12 @@ function createHarness(
     getLanguageWorkersEnabled: () => workersEnabled,
     getDisableSemanticTokens: () => false,
     getCurrentPath: () => context.path,
+    absPathFromVscodeUri: () => context.path,
     getHasModel: () => true,
     getCurrentLanguageContext: () => context,
     editorWorkbenchCall: async (method, params) => {
       calls.push({ method, params });
+      if (options.workbenchCall) return options.workbenchCall(method, params);
       if (method === "document_highlights") {
         return {
           ok: true,

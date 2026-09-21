@@ -112,6 +112,10 @@ export function editorWorkbenchMethodToWbaMethod(method: string): string | null 
       return 'vscode.callHierarchy.release';
     case 'completions':
       return 'vscode.completions';
+    case 'completions_resolve':
+      return 'vscode.completions.resolve';
+    case 'completions_release':
+      return 'vscode.completions.release';
     case 'document_colors':
       return 'vscode.documentColors';
     case 'color_presentations':

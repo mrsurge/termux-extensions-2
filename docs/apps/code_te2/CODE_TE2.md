@@ -2480,8 +2480,9 @@ wba_event_bridge.py, and diagnostics_bridge.py.
 Provider registration is WBA-driven and generic. The registry matches the exact
 document selector (language, scheme, authority, and path), not just a language
 id, and invokes every matching provider. Results are merged where meaningful:
-hover contents and completion/symbol lists combine; semantic-token requests use
-the richest compatible response.
+hover contents and symbol lists combine; semantic-token requests use the richest
+compatible response. Completion providers are projected separately to Monaco,
+which owns their grouping, result reuse and incomplete-list refresh.
 
 The editor installs public Monaco providers from WBA registration events and a
 reconnect snapshot. It registers a missing contributed language before applying
@@ -3440,7 +3441,8 @@ WBA extension activation is extension-agnostic:
   events; WBA does not choose one activation candidate.
 - Provider selection is a separate document-scoped step. WBA matches every
   registered selector against the exact language, scheme, authority, and path,
-  then aggregates all matching providers. This includes valid pattern-only
+  then aggregates where appropriate. Completions retain individual providers for
+  Monaco's suggest model, with WBA rechecking each pinned selector. This includes valid pattern-only
   selectors without a `language` field, such as HTML-to-CSS completion
   providers registered for `**/*.{css,scss,less,sass,styl}`.
 - Extension-host `workspace.findFiles` calls are handled generically through
@@ -5032,12 +5034,14 @@ Commands, target/projection details, live probes and reload requirements:
 Completion timeout policy is shared by the browser shim and WBA through
 `node_workbench_adapter/src/protocol/completion-timeouts.ts`. The default provider
 response limit is 30 s, the document-operation limit is 45 s, and the outer RPC
-ceiling is 195 s. That outer ceiling covers two existing gate admissions
-(activation and completion), each allowing 50 s queueing plus 45 s execution,
-and 5 s transport margin. Replies return immediately; none of these allowances
-are sleeps. This avoids discarding a slow mobile basedpyright response behind a
-shorter browser or gate deadline. Other language-feature deadlines and cancellation
-behavior are unchanged.
+ceiling remains 195 s. Activation retains the operation budget; completion text
+synchronization now uses a separate 10 s gate admission (5 s acknowledgement plus
+margin). Provider replies run outside the gate with their own 30 s limit, allowing
+independent providers to respond concurrently. The conservative outer ceiling
+covers both admissions, provider waits and transport. These are not sleeps.
+Other language-feature deadlines are unchanged. Cancelled completion results are
+discarded and their caches released when they arrive; no new transport-level
+cancellation protocol is introduced.
 
 WBA's `extensions/intelligence/completion-warmup.ts` handles one discarded
 completion invocation per matching provider/language/project session. Provider
@@ -5051,3 +5055,42 @@ Project/host session resets clear the keys. Result caches are released only to
 their originating host connection. Runtime-debug adds metadata-only trace events,
 not a prerequisite for warming. Evidence and acceptance are recorded in
 `docs/apps/backend_native_observability/WBA_RUNTIME_DEBUG.md` and `TRACKER.md`.
+
+### Compact Completion Projection And Lifecycle
+
+The extension-host leg remains VS Code's binary-framed RPC containing a compact
+JSON suggestion DTO. WBA decodes that object but does not inflate its suggestions.
+The browser leg sends one MessagePack RPC reply with this canonical payload:
+
+```text
+{ ok: true, result: { sessionId, providers: [{ handle, dto }] } }
+```
+
+Each original DTO occurs once. Normal Monaco calls pin one provider; the WBA
+non-pinned batch path retains each matching provider separately. There are no
+expanded `items`, repeated `suggestResults` or top-level `dto` aliases. Old
+expanded payloads are not accepted by the new frontend; update WBA and frontend
+together. Python does not inflate or aggregate these completion responses.
+
+`editor_language_bridge_providers.ts` registers one Monaco provider per extension
+host handle, retaining its selector, trigger characters and resolve capability.
+The cache uses one shared `*` registry bucket to deduplicate language notifications;
+it does not replace provider selectors with a wildcard. Remote document schemes
+are mapped to Monaco's file URIs while language/glob filters remain intact. WBA
+revalidates pinned handles against the actual remote document. Pattern-only
+providers reach the browser via registration events and snapshot replay.
+
+The vendored `mainThreadLanguageFeatures.ts` converter expands DTO fields once on
+the frontend, including default ranges, snippets, edits, commit characters,
+commands and `_id`. Monaco's own suggest model handles ordering and per-provider
+incomplete-result reuse; TE2 no longer presorts with a parallel implementation.
+
+`vscode.completions.resolve` forwards the original item ID to
+`$resolveCompletionItem`; the frontend inflates and updates that same suggestion.
+Monaco list `dispose()` forwards the provider/cache ID to `$releaseCompletionItems`
+once, including empty lists and zero-valued cache IDs. Cancellation observed when
+a reply arrives disposes the result instead of publishing it. A weak map associates
+suggestions with their originating session/provider, without retaining raw DTOs.
+Resolve/release RPCs do not enter the document gate or activate a language. A new
+session ID on project/host reset rejects late cache operations before they can
+touch reused IDs in the replacement host.

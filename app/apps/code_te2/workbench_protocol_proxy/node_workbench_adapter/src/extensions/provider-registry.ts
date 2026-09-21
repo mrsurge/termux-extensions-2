@@ -486,9 +486,10 @@ export class ProviderRegistry {
     const events: Record<string, unknown>[] = [];
 
     for (const entry of this.providers.completions.values()) {
-      for (const language of selectorLanguages(entry.selector)) {
+      for (const language of completionLanguages(entry.selector)) {
         events.push({
           type: "provider/completions",
+          selector: entry.selector,
           handle: entry.handle,
           language,
           triggerCharacters: Array.isArray(entry.triggerCharacters)
@@ -717,10 +718,11 @@ export class ProviderRegistry {
       triggerCharacters,
       supportsResolve,
     });
-    for (const language of selectorLanguages(selector)) {
+    for (const language of completionLanguages(selector)) {
       completionTrace.record("provider.register", { language, handle, supportsResolve });
       outcome.events.push({
         type: "provider/completions",
+        selector,
         handle,
         language,
         triggerCharacters,
@@ -730,9 +732,6 @@ export class ProviderRegistry {
     outcome.logs.push(
       `[providers] completions map size=${this.providers.completions.size} languages=[${this.languageSummary("completions")}]`,
     );
-    // Pattern-only selectors have no language notification, but can still match
-    // an already-open document and need the same internal warm-up readiness edge.
-    if (outcome.events.length === 0) outcome.events.push({ type: "provider/completions/registered", handle });
     return outcome;
   }
 
@@ -968,4 +967,10 @@ export class ProviderRegistry {
     );
     return outcome;
   }
+}
+
+// Pattern-only providers must reach Monaco too; the selector remains intact.
+function completionLanguages(selector: unknown[]): string[] {
+  const languages = selectorLanguages(selector);
+  return languages.length ? languages : ["*"];
 }
