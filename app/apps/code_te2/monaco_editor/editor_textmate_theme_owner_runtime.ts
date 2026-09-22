@@ -8,23 +8,13 @@ interface MonacoWindowLike extends Window {
   };
 }
 
-interface ThemeLoaderStateLike {
-  done?: boolean;
-  promise?: Promise<unknown> | null;
-  jsonCache?: Record<string, unknown>;
-}
-
 interface EditorTextmateThemeOwnerDeps {
   getWindow(): MonacoWindowLike;
   getDocument(): Document;
-  fetchFn(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
   ensureTe2DiffTheme(): void;
-  loadVscodeTextmateThemesRuntime(args: unknown): Promise<unknown>;
   applyMonacoThemeRuntime(args: unknown): Promise<unknown>;
-  ensureThemeRegistry(): Promise<unknown>;
-  getVscodeThemeJsonUrl(themeId: string): string;
+  getSelectedTheme(): Promise<unknown>;
   vscodeThemeToMonacoTheme(themeId: string, vscodeJson: unknown): unknown;
-  resolveMonacoThemeId(themeKey: string, cache: Record<string, unknown>): string;
   applyThemeToTextmateRegistry(vscodeThemeJson: unknown): void;
   getLanguageWorkersEnabled(): boolean;
   normalizeLanguage(languageId: unknown): string;
@@ -50,11 +40,10 @@ export function createEditorTextmateThemeOwnerRuntime(
   deps: EditorTextmateThemeOwnerDeps,
 ): {
   getThemeJsonCache(): Record<string, unknown>;
-  ensureThemesLoaded(): Promise<unknown>;
   applyTheme(themeKey: string): Promise<void>;
   applyLanguageToModel(model: unknown, languageId: unknown, filePath: string): void;
 } {
-  const themeLoadState: ThemeLoaderStateLike = { done: false, promise: null, jsonCache: {} };
+  let themeJsonCache: Record<string, unknown> = {};
   const languageApplyInflight: Record<string, Promise<void> | undefined> = Object.create(null);
   let themeApplyInflight: Promise<void> | null = null;
   let themeApplyKey = '';
@@ -69,18 +58,7 @@ export function createEditorTextmateThemeOwnerRuntime(
   }
 
   function getThemeJsonCache(): Record<string, unknown> {
-    return themeLoadState.jsonCache || {};
-  }
-
-  async function ensureThemesLoaded(): Promise<unknown> {
-    return deps.loadVscodeTextmateThemesRuntime({
-      win: deps.getWindow(),
-      state: themeLoadState,
-      ensureThemeRegistryFn: deps.ensureThemeRegistry,
-      getThemeJsonUrlFn: deps.getVscodeThemeJsonUrl,
-      fetchFn: deps.fetchFn,
-      toMonacoThemeFn: deps.vscodeThemeToMonacoTheme,
-    });
+    return themeJsonCache;
   }
 
   async function applyTheme(themeKey: string): Promise<void> {
@@ -93,16 +71,12 @@ export function createEditorTextmateThemeOwnerRuntime(
       await deps.applyMonacoThemeRuntime({
         win: deps.getWindow(),
         doc: deps.getDocument(),
-        themeKey: nextKey,
         ensureTe2DiffThemeFn: deps.ensureTe2DiffTheme,
-        loadThemesFn: ensureThemesLoaded,
-        resolveThemeIdFn: deps.resolveMonacoThemeId,
-        getThemeJsonUrlFn: deps.getVscodeThemeJsonUrl,
-        fetchFn: deps.fetchFn,
+        getSelectedThemeFn: deps.getSelectedTheme,
         toMonacoThemeFn: deps.vscodeThemeToMonacoTheme,
         getJsonCacheFn: getThemeJsonCache,
         setJsonCacheFn(cache: Record<string, unknown>) {
-          themeLoadState.jsonCache = cache || {};
+          themeJsonCache = cache || {};
         },
         applyThemeToTextmateRegistryFn:
           deps.getLanguageWorkersEnabled() || isTextmateDisabled(deps.getWindow())
@@ -161,7 +135,6 @@ export function createEditorTextmateThemeOwnerRuntime(
 
   return {
     getThemeJsonCache,
-    ensureThemesLoaded,
     applyTheme,
     applyLanguageToModel,
   };

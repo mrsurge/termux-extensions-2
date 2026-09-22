@@ -167,6 +167,29 @@ test('all app-worker namespaces use one canonical path while WBA stays direct', 
   assert.equal(topology.SOCKET_IO_PATHS.te2Console, '/te2_console_ws/socket.io');
 });
 
+test('app-worker RPC starts on polling without delaying requests for WebSocket upgrade', async () => {
+  const topology = await importTypeScript('src/rpc/socketio-topology.ts');
+  const { createSocketIoJsonRpcClient } = await importTypeScript('src/rpc/transport.ts');
+  assert.deepEqual([...topology.APP_WORKER_SOCKET_IO_TRANSPORTS], ['polling', 'websocket']);
+  const socket = new FakeSocket();
+  socket.ackResponse = { jsonrpc: '2.0', id: 'request-1', result: { ready: true } };
+  let clientOptions;
+  const client = createSocketIoJsonRpcClient({
+    namespace: topology.SOCKET_IO_NAMESPACES.explorerRpc,
+    path: topology.SOCKET_IO_PATHS.explorer,
+    ensureSocketIoLoaded: async () => (_namespace, options) => {
+      clientOptions = options;
+      return socket;
+    },
+  });
+  const request = client.request('explorer.ready', {});
+  await settlePromises();
+  assert.deepEqual(clientOptions.transports, ['polling', 'websocket']);
+  assert.equal(socket.rawEmits.length, 0);
+  socket.trigger('connect'); // Engine.IO may still be polling at this point.
+  assert.deepEqual(await request, { ready: true });
+});
+
 test('socket identity publishes the validated editor role on every app lane', async () => {
   const topology = await importTypeScript('src/rpc/socketio-topology.ts');
   topology.configureCodeTe2SocketIdentity({
@@ -1088,12 +1111,30 @@ test('modelReady is backend notification rather than WBA open or resync', () => 
   assert.doesNotMatch(frontendBody, /wbFlushActiveModelOpen/);
   assert.doesNotMatch(frontendBody, /hydrateWorkbenchProviderSnapshot/);
 
+  const openRunnerSource = fs.readFileSync(
+    path.join(appRoot, 'monaco_editor/editor_open_transaction_runner_main.ts'),
+    'utf8',
+  );
+  assert.match(
+    openRunnerSource,
+    /syncWbaForReadyModel\?\.\('open_model_ready'\)/,
+    'the first attached model must complete a WBA sync deferred at socket connect',
+  );
+
   const reconnectBody = frontendSource.match(
     /function handleWbaSocketReadyForEditor[\s\S]*?\n  function _clearEditorDecorationStateRuntime/,
   )?.[0];
   assert.ok(reconnectBody, 'WBA reconnect handler must remain present');
   assert.match(reconnectBody, /editorWorkbenchCall\("resync"/);
-  assert.match(reconnectBody, /hydrateWorkbenchProviderSnapshot/);
+  assert.match(reconnectBody, /requestWbaActiveModelSynchronization/);
+
+  const activeModelSyncBody = frontendSource.match(
+    /function requestWbaActiveModelSynchronization[\s\S]*?\n  function handleWbaSocketReadyForEditor/,
+  )?.[0];
+  assert.ok(activeModelSyncBody, 'WBA active-model synchronization must remain present');
+  assert.match(activeModelSyncBody, /wbFlushActiveModelOpen/);
+  assert.match(activeModelSyncBody, /hydrateWorkbenchProviderSnapshot/);
+  assert.match(activeModelSyncBody, /refreshActiveLanguageIntelligenceAfterWbaConnect/);
 
   const backendSource = fs.readFileSync(
     path.join(appRoot, 'monaco_editor/editor_ws.py'),

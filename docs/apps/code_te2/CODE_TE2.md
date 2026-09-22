@@ -219,7 +219,7 @@ Spinner / Status indicator (host UI):
 - Sidebar IPC retains its current codec. Migrating `/ui_ipc` must not implicitly change the sibling `/sidebar_ipc` namespace.
 - Shared document membership is the bounded `ProjectSidecar` recent/logical-document set. Each stable `clientInstanceId` owns one backend-projected foreground path through `open_state_backend.py`; `ProjectSidecar.last_file` is only a one-time migration seed. Frontend `currentPath` values are exact-client projections.
 - Shared content projections carry a durable per-path `document_revision` drawn from one monotonic project stream. Matched frontends reject missing or lower revisions before changing Monaco or active-path chrome; equal revisions are valid for the correlated mirror/cache pair emitted by one backend transition.
-- App-lane outbound traffic uses websocket-only `volatile.emit` with connected-state guards. Disconnected RPC requests fail, notifications and terminal input drop, and connect handlers rebuild authoritative state.
+- App-lane outbound traffic uses connected-state guards and `volatile.emit` for notifications. Editor, Explorer, host and Sidebar connect via Engine.IO polling first and upgrade to WebSocket; the terminal and WBA stay WebSocket-only. Disconnected RPC requests fail, notifications and terminal input drop, and connect handlers rebuild authoritative state.
 - Code Server launch, VSIX/Open VSX commands, and builtin-extension access use the same preference-owned pinned TE2-managed installation. System, `PATH`, NVM, and executable environment overrides are not runtime authorities.
 - Every WBA protocol actor, including language intelligence, commands, messages, and webviews, receives its resolved nid through named runtime-adapter fields. The imported `src/protocol/pinned-rpc-ids.ts` map is sole production authority for code-server 4.130.0; no runtime JSON override or extraction exists.
 - The installed WBA MessagePack codec is one self-contained bundled ESM file at `workbench_protocol_proxy/node_workbench_adapter/dist/protocol/messagepack-codec.mjs`.
@@ -429,7 +429,7 @@ Notes:
 Important:
 - The **framework** registers public app Socket.IO paths and proxies them to the worker.
 - The **worker** mounts one shared Socket.IO ASGI app at `/socket.io/` plus legacy alias mounts in `SUBAPPS`.
-- The transport is websocket-only; the route proxy is not a namespace dispatcher and does not inspect payloads.
+- Editor, Explorer, host and Sidebar use Engine.IO polling first, with WebSocket upgrade. This is a latency experiment, not an established startup improvement: compare first usable RPC and cold/warm boot against the previous WebSocket-only client. The Rust route forwards polling GET/POST and WebSocket upgrades to the same upstream worker; it is not a namespace dispatcher and does not inspect payloads. WBA and terminal client transports remain WebSocket-only.
 
 ---
 
@@ -1529,18 +1529,23 @@ The inline editor runtime builds Monaco options from SSOT preferences (`buildMon
 - font scale -> `fontSize`
 - font family (default `JetBrains Mono Nerd`)
 - font ligatures (`fontLigatures` enabled by default for the local Nerd Font)
-- theme (Monaco base: `vs` / `vs-dark`, plus official `monaco-editor-themes` ids)
+- theme (Monaco base: `vs` / `vs-dark`, plus catalogued GitHub and installed VSIX themes)
   - `github-dark` (fresh-install default)
   - `github-dark-default`
   - `github-light-default` (preferred)
-  - `github-light` (legacy alias -> `github-light-default`)
+  - `github-light`
   - the nine vendored GitHub themes under
     `monaco_editor/themes/vendored/github/`
+  - installed Code Server theme contributions, with `ext:` catalog IDs
   - `te2-vs-dark`, used only for the diff-scoped dark presentation
 
-Note: TE2 loads Monaco first (`editor.main.js`), then registers official themes from
-`/api/app/code_te2/ui/monaco_editor/themes/*.json`. If Monaco isn't loaded yet,
-theme registration is skipped (by design) to avoid caching a no-op run.
+The catalog supplies the resource URL for both built-in and installed themes.
+Built-in JSON remains on the native OTA/APK-intercepted asset path; installed
+theme JSON is resolved from the registered extension directory. Both feed the
+same converter and Monaco/TextMate theme application path.
+The catalog's `uiTheme` also supplies the Monaco base (`vs`, `vs-dark`,
+`hc-black`, or `hc-light`) for both sources; the static JSON need not duplicate
+extension-manifest metadata.
 
 ### Diff mode behavior
 
@@ -2295,17 +2300,18 @@ te2 console search "query" --worker <worker-id> --limit 100
 
 ## 26) Themes, TextMate palette, and retokenization
 
-Theme selection is a preference-backed editor concern. Code TE2 registers the
-catalog's themes, resolves the selected theme JSON, converts it to Monaco data,
-then applies it through the theme runtime. The live loader is
-loadVscodeTextmateThemesRuntime() and the live application path is
-applyMonacoThemeRuntime().
+Theme selection is a preference-backed editor concern. Python resolves only
+the selected theme and projects its JSON to the working editor, which converts
+it to Monaco data in `applyMonacoThemeRuntime()`. The editor does not load the
+entire catalog's theme definitions before opening a document.
 
 `theme_catalog.py` constructs typed catalog metadata off the event loop. The
 settings picker/summary use `ui.host.themes.list`; working editors use
-`editor.themes.list`. Historical secondary views inject their existing host-lane
-request into the theme loader, without starting an editor/WBA session. Both RPC
-handlers call the same service. The former `/ui/monaco_editor/available_themes`
+`editor.theme.selected`, which reads the current Python preferences and resolves
+only that definition. The catalog remains picker metadata, not a boot gate.
+Historical secondary views request metadata on their existing host lane and
+fetch only their selected theme, without starting an editor/WBA session. The
+former `/ui/monaco_editor/available_themes`
 HTTP endpoint is removed with no fallback. JSON theme files, TextMate resources
 and Monaco assets remain HTTP resource routes, retaining native OTA/APK asset
 interception.
@@ -2319,30 +2325,41 @@ loading select the latest theme before releasing model consumers. Live snapshots
 invalidate the older bootstrap document, and newer replays supersede pending
 ones, including empty-project snapshots. WBA readiness is not a dependency.
 Theme errors reject readiness rather than displaying a falsely themed document.
-Concurrent catalog requests share an in-flight promise; only validated successes
-are cached. Request failures clear the promise rather than caching an empty
-catalog, and the theme loader also clears rejected loading promises for retry.
+The selected-theme RPC resolves the preference's theme off the event loop; a
+cold load or another client's preference change cannot cause serial frontend
+fetches of every theme. Failed selections remain retryable. Concurrent picker
+catalog requests share an in-flight promise; only validated successes are
+cached. Request failures clear the promise rather than caching an empty catalog.
 The settings picker exposes failure separately from a genuinely empty catalog.
 
-This transport slice preserves catalog IDs and resource URLs, not new VSIX theme
-support. The current `extension_registry.get_extension_list()` summary omits
-`path`/`themes`, so its entries do not supply extension themes to the catalog.
-Full WBA/VSIX theme integration, JSONC and inheritance remain deferred; bundled
-GitHub themes are the currently populated catalog.
+The catalog contains the nine bundled GitHub themes and compatible installed
+Code Server theme contributions. Extension theme resources support JSONC and
+relative `include` inheritance. The backend merges inherited UI colors,
+TextMate rules, and explicit semantic-token rules; unsupported external
+`tokenColors` files and legacy `settings` formats remain excluded. Theme IDs
+and URLs are catalog-owned, not hardcoded by the editor frontend.
 
-The same raw VS Code theme is applied to the TextMate registry. Its color map is
-published to Monaco and every loaded model is reset for tokenization. This
-sequence keeps encoded TextMate scopes, semantic-token rules, and visible Monaco
-theme state aligned. It does not use the removed palette-index monkey patch.
+The same raw VS Code theme is applied to the TextMate registry. Its color map,
+extended with explicit semantic foregrounds, is published to Monaco and every
+loaded model is reset for tokenization. The patched standalone Monaco theme
+service applies VS Code-style type/modifier/language selector scoring per
+semantic style property. TextMate-derived rules remain the fallback when a
+theme has no explicit semantic style. This keeps encoded TextMate scopes,
+semantic-token rules, and visible Monaco theme state aligned without a
+separate built-in-theme parser.
+The standalone matcher carries VS Code's built-in `member` -> `method` type
+inheritance; extension-defined semantic type hierarchies are not yet registered
+in the standalone editor.
 
-Theme changes are idempotent: load or reuse JSON, define the Monaco theme when
-needed, set the selected id, update the page base class, apply the TextMate
+Theme changes are idempotent: project the selected JSON, define the Monaco
+theme, set the selected id, update the page base class, apply the TextMate
 theme/color map, then reset tokenization. A missing contributed theme must fail
 locally without changing the active theme.
 
-Key sources: editor_theme_loader_runtime_utils.ts,
-editor_theme_apply_runtime_utils.ts, editor_textmate_runtime.ts, and the
-vendored GitHub theme directory.
+Key sources: `theme_catalog.py`, `editor_theme_apply_runtime_utils.ts`,
+`editor_theme_convert_utils.ts`, `editor_textmate_runtime.ts`, the vendored
+GitHub theme directory, and `standaloneSemanticTokenRules.ts` in the patched
+Monaco source checkout.
 
 ## 30) RPC Protocol IDs (`rpcId`) — How They Work and Auto-Discovery
 
@@ -3420,9 +3437,24 @@ attached, the transaction invokes one canonical `openFileFlow`; visible
 
 `editor.modelReady` is only a frontend-to-Python lifecycle notification. It
 does not flush a WBA open or replay providers. A genuine direct-WBA Socket.IO
-connection calls `te2.resync`, then flushes the active model and hydrates the
-provider snapshot. This keeps late/reconnected clients complete without making
-ordinary file switches replay workspace, provider, and webview state.
+connection calls `te2.resync`; that replay remains socket-scoped. The active-model
+phase is separate because the socket can win the cold-start race before the first
+Monaco model exists. A deferred phase is retained and, when the model attaches,
+flushes its WBA open, hydrates providers, reapplies retained diagnostics, replays
+the language and invalidates semantic tokens. A semantic provider arriving after
+the model invalidates that matching language immediately. This covers both
+orderings without polling, synthetic typing, or making ordinary file switches
+replay workspace/provider/webview state.
+
+Semantic-token ownership follows VS Code: WBA pushes provider registration and
+change events, while an attached Monaco model pulls the actual full/range token
+DTO through that provider. Diagnostics remain extension-host pushes. The direct
+semantic bridge gives the ext-host operation 30 seconds and its outer WBA RPC
+36 seconds so a cold basedpyright provider is not discarded by the generic
+12-second browser deadline. Monaco cancellation is checked before dispatch and
+again before applying a late result. This bound is not polling or a retry; a
+future generalized queued-request lease/heartbeat protocol remains a separate
+transport change.
 
 WBA treats a same-client, same-path open with the same non-null generation as an
 idempotent duplicate. It does not reread disk, replace text, clear dirty state,
@@ -4202,8 +4234,11 @@ Built-in backend module identity comes from package path rather than public app 
   Rust marks launch/spawn and readiness receipt/publication/catalog completion.
   Updated app-shell assets mark bootstrap, gate release, native prerequisites,
   template/module load and initialization when bootstrap enables runtime-debug.
-  Browser clocks may differ; readiness is not intelligence readiness. No polling
-  or gate changes; disabled runs are silent. Import timing requires a fresh worker.
+  Browser clocks may differ; readiness is not intelligence readiness. The generic
+  worker releases its serving hook immediately after Uvicorn confirms the bound
+  listener, replacing the old fixed lifespan delay; the hook's framework POST
+  remains asynchronous and lifecycle-owned. Disabled runs are silent. Import
+  timing requires a fresh worker.
 
 - The Python worker reserves `runtime.debug.*` on its existing framework pipe
   (now concatenated MessagePack maps, retaining the JSON-RPC-shaped envelope).

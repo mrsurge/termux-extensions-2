@@ -28,10 +28,8 @@ import { resolveMonacoThemeId } from "./editor_theme_resolver_utils.ts";
 import { isAdapterReady } from "./editor_workbench_barrier_utils.js";
 import { buildMonacoOptionsFromPrefsState } from "./editor_monaco_options_utils.ts";
 import { ensureTe2DiffThemeApplied } from "./editor_diff_theme_utils.ts";
-import { getVscodeThemeJsonUrl } from "./editor_theme_url_utils.ts";
 import { vscodeThemeToMonacoTheme } from "./editor_theme_convert_utils.ts";
-import { ensureThemeRegistryState, createDocumentThemeGate, type ThemeRegistryState } from "./editor_theme_registry_state_utils.ts";
-import { loadVscodeTextmateThemesRuntime } from "./editor_theme_loader_runtime_utils.ts";
+import { createDocumentThemeGate } from "./editor_theme_registry_state_utils.ts";
 import { applyMonacoThemeRuntime } from "./editor_theme_apply_runtime_utils.ts";
 import { clearDraftDiffZonesState } from "./editor_draft_zone_clear_utils.ts";
 import { clearDraftDiffDecorationsState } from "./editor_draft_decorations_clear_utils.ts";
@@ -122,6 +120,7 @@ import {
 } from "../main_page/frontend/connections/extension-activity-bridge.ts";
 import { RPC_CODEC_MSGPACK_V1 } from "../src/rpc/codec.ts";
 import {
+  APP_WORKER_SOCKET_IO_TRANSPORTS,
   SOCKET_IO_NAMESPACES,
   SOCKET_IO_PATHS,
   fileEditorSocketQuery,
@@ -1264,8 +1263,7 @@ interface MonacoBootWindowLike extends Window {
     return workbenchRuntime
       .replayOpenFileAfterBaton()
       .then(() => {
-        replayActiveModelLanguageAfterWbaConnect("baton");
-        refreshActiveLanguageIntelligenceAfterWbaConnect("baton");
+        requestWbaActiveModelSynchronization("baton");
       })
       .catch((error) => {
         console.warn("[readiness] baton active model flush failed", error);
@@ -1328,6 +1326,10 @@ interface MonacoBootWindowLike extends Window {
   }
 
   let providerSnapshotHydratePromise: Promise<void> | null = null;
+  let wbaConnectionRevision = 0;
+  let wbaResyncPromise: Promise<unknown> | null = null;
+  let wbaActiveModelSyncPromise: Promise<void> | null = null;
+  let wbaActiveModelSyncQueued = false;
 
   function hydrateWorkbenchProviderSnapshot(reason: string): Promise<void> {
     if (_languageWorkersEnabled()) return Promise.resolve();
@@ -1413,6 +1415,13 @@ interface MonacoBootWindowLike extends Window {
       console.warn("[wba] symbols flush failed after connect", error);
     }
     try {
+      _syncDiagnosticsForCurrentModel(
+        "wba_model_sync:" + String(reason || "unknown"),
+      );
+    } catch (error) {
+      console.warn("[wba] diagnostic replay failed after model sync", error);
+    }
+    try {
       const languageId =
         model && typeof model.getLanguageId === "function"
           ? String(model.getLanguageId() || "")
@@ -1440,34 +1449,82 @@ interface MonacoBootWindowLike extends Window {
     }
   }
 
-  function handleWbaSocketReadyForEditor(reason: string): void {
-    void editorWorkbenchCall("resync", {}, { timeoutMs: 5000 })
-      .catch((error) => {
-        console.warn("[wba] reconnect resync failed", error);
-        return null;
-      })
-      .then(() =>
-        workbenchRuntime
-          .wbFlushActiveModelOpen("wba_ready:" + String(reason || "connect"))
+  function requestWbaActiveModelSynchronization(reason: string): void {
+    wbaActiveModelSyncQueued = true;
+    if (wbaActiveModelSyncPromise) return;
+    if (!wbaRpcSocket?.connected || !currentPath || !model) return;
+
+    const revision = wbaConnectionRevision;
+    const syncReason = String(reason || "model_ready");
+    const replay = wbaResyncPromise || Promise.resolve(null);
+    wbaActiveModelSyncQueued = false;
+    let deferred = false;
+    let syncPromise: Promise<void>;
+    syncPromise = replay
+      .then(() => {
+        if (revision !== wbaConnectionRevision || !wbaRpcSocket?.connected) {
+          return null;
+        }
+        return workbenchRuntime
+          .wbFlushActiveModelOpen("wba_ready:" + syncReason)
           .catch((error) => {
             console.warn(
               "[wba] active model open flush failed after connect",
               error,
             );
             return null;
-          }),
-      )
+          });
+      })
       .then((result) => {
+        if (revision !== wbaConnectionRevision || !wbaRpcSocket?.connected) {
+          return;
+        }
         const record =
           result && typeof result === "object"
             ? (result as Record<string, unknown>)
             : {};
-        if (record.deferred === true) return null;
-        return hydrateWorkbenchProviderSnapshot(reason).finally(() => {
-          replayActiveModelLanguageAfterWbaConnect(reason);
-          refreshActiveLanguageIntelligenceAfterWbaConnect(reason);
+        if (record.deferred === true) {
+          deferred = true;
+          wbaActiveModelSyncQueued = true;
+          return;
+        }
+        return hydrateWorkbenchProviderSnapshot(syncReason).then(() => {
+          if (
+            revision !== wbaConnectionRevision ||
+            !wbaRpcSocket?.connected
+          ) {
+            return;
+          }
+          replayActiveModelLanguageAfterWbaConnect(syncReason);
+          refreshActiveLanguageIntelligenceAfterWbaConnect(syncReason);
         });
+      })
+      .finally(() => {
+        if (wbaActiveModelSyncPromise === syncPromise) {
+          wbaActiveModelSyncPromise = null;
+        }
+        // A model switch queued during a successful synchronization needs its
+        // own pass. A deferred pass waits for the next real readiness edge.
+        if (wbaActiveModelSyncQueued && !deferred) {
+          requestWbaActiveModelSynchronization("queued_after_" + syncReason);
+        }
       });
+    wbaActiveModelSyncPromise = syncPromise;
+  }
+
+  function handleWbaSocketReadyForEditor(reason: string): void {
+    const revision = ++wbaConnectionRevision;
+    const replay = editorWorkbenchCall("resync", {}, { timeoutMs: 5000 })
+      .catch((error) => {
+        console.warn("[wba] reconnect resync failed", error);
+        return null;
+      });
+    wbaResyncPromise = replay;
+    void replay.then(() => {
+      if (revision === wbaConnectionRevision) {
+        requestWbaActiveModelSynchronization(reason);
+      }
+    });
   }
 
   function _clearEditorDecorationStateRuntime() {
@@ -1577,10 +1634,7 @@ interface MonacoBootWindowLike extends Window {
     layoutEditors: _layoutEditors,
   }) as Parameters<typeof ensureEditorWithPrefsRuntime>[0];
 
-  // ensureTe2Themes / loadOfficialThemes — replaced by loadVscodeTextmateThemes() with dynamic registry.
-
-  // Catalog metadata uses this editor's RPC lane; resources retain local asset URLs.
-  const _themeRegistryState: ThemeRegistryState = {};
+  // Python projects the selected theme; the picker requests catalog metadata separately.
   const documentThemeGate = createDocumentThemeGate(
     () => editorRpcTransport.waitUntilConnected(),
     async (theme) => {
@@ -1588,21 +1642,6 @@ interface MonacoBootWindowLike extends Window {
       await textmateThemeOwnerRuntime.applyTheme(theme);
     },
   );
-
-  async function _ensureThemeRegistry() {
-    return ensureThemeRegistryState(_themeRegistryState,
-      () => editorRpcCall(EDITOR_RPC_METHODS.themesList, {}));
-  }
-
-  function _getVscodeThemeJsonUrl(themeId: string): string {
-    return (
-      getVscodeThemeJsonUrl(
-        themeId,
-        _themeRegistryState.registry,
-        apiBase,
-      ) || ""
-    );
-  }
 
   // ---------------------------------------------------------------------------
   // Semantic-token-type → TextMate-scope mapping (mirrors VS Code's
@@ -1651,14 +1690,10 @@ interface MonacoBootWindowLike extends Window {
     getDocument: function () {
       return document;
     },
-    fetchFn: _fetch,
     ensureTe2DiffTheme: ensureTe2DiffTheme,
-    loadVscodeTextmateThemesRuntime: loadVscodeTextmateThemesRuntime,
     applyMonacoThemeRuntime: applyMonacoThemeRuntime,
-    ensureThemeRegistry: _ensureThemeRegistry,
-    getVscodeThemeJsonUrl: _getVscodeThemeJsonUrl,
+    getSelectedTheme: () => editorRpcCall(EDITOR_RPC_METHODS.themeSelected, {}),
     vscodeThemeToMonacoTheme: _vscodeThemeToMonacoTheme,
-    resolveMonacoThemeId: resolveMonacoThemeId,
     applyThemeToTextmateRegistry: _applyThemeToTextmateRegistry,
     getLanguageWorkersEnabled: _languageWorkersEnabled,
     normalizeLanguage: normalizeLanguage,
@@ -2082,6 +2117,7 @@ interface MonacoBootWindowLike extends Window {
     syncDiagnosticsForCurrentModel: function (reason: string) {
       _syncDiagnosticsForCurrentModel(reason);
     },
+    syncWbaForReadyModel: requestWbaActiveModelSynchronization,
     emitToHost: emitToHost,
     emitModelReady: emitModelReady,
     requestDraftDiff: requestDraftDiff,
@@ -2161,7 +2197,7 @@ interface MonacoBootWindowLike extends Window {
       if (!window.io) return false;
       editorRpcSocket = window.io(SOCKET_IO_NAMESPACES.editorRpc, {
         path: SOCKET_IO_PATHS.editor,
-        transports: ["websocket"],
+        transports: [...APP_WORKER_SOCKET_IO_TRANSPORTS],
         query: fileEditorSocketQuery(),
         auth: { rpcCodec: RPC_CODEC_MSGPACK_V1 },
       }) as EditorSocketLike;
@@ -2511,6 +2547,9 @@ interface MonacoBootWindowLike extends Window {
         });
         wbaRpcSocket.on("disconnect", () => {
           console.warn("[wba] socket disconnected");
+          wbaConnectionRevision += 1;
+          wbaResyncPromise = null;
+          wbaActiveModelSyncQueued = true;
         });
       }
 

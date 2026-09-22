@@ -69,3 +69,46 @@ test("late symbol registrations reach the editor retry callback", async () => {
   handlers.get("te2.event")({ type: "provider/documentSymbols" });
   assert.deepEqual(retries, ["python"]);
 });
+
+test("late semantic provider registration invalidates an attached matching model", async () => {
+  const source = new URL("../monaco_editor/editor_wba_runtime_handlers.ts", import.meta.url);
+  let moduleUrl = source.href;
+  if (!process.versions.bun) {
+    const built = await build({
+      entryPoints: [source.pathname],
+      bundle: true, platform: "node", format: "esm", write: false,
+    });
+    moduleUrl = `data:text/javascript;base64,${Buffer.from(built.outputFiles[0].text).toString("base64")}`;
+  }
+  const { registerEditorWbaRuntimeHandlers } = await import(moduleUrl);
+  const handlers = new Map();
+  const registrations = [];
+  const invalidations = [];
+  registerEditorWbaRuntimeHandlers({
+    onNotification(name, fn) { handlers.set(name, fn); return () => {}; },
+  }, {
+    getModel: () => ({ getLanguageId: () => "python" }),
+    getCurrentPath: () => "/workspace/a.py",
+    absPathFromVscodeUri: () => null,
+    applyDiagnosticsUpdate() {},
+    languageBridge: {
+      registeredSemanticTokens: new Set(),
+      semanticTokensProviderKeysByLanguage: {},
+      semanticTokensLegendCache: {},
+      semanticTokensRangeFlag: {},
+      semanticTokensLanguagesByEventHandle: {},
+    },
+    registerSemanticTokensWithLegend: (...args) => registrations.push(args),
+    fireSemanticTokensChanged: (language) => invalidations.push(language),
+  });
+
+  handlers.get("te2.event")({
+    type: "provider/semanticTokens",
+    handle: 7,
+    language: "python",
+    legend: { tokenTypes: ["class"], tokenModifiers: [] },
+  });
+
+  assert.equal(registrations.length, 1);
+  assert.deepEqual(invalidations, ["python"]);
+});

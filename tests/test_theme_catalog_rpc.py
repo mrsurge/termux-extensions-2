@@ -19,6 +19,41 @@ from app.apps.code_te2.ui_ipc.rpc_contract import parse_ui_ipc_rpc_request
 
 
 class ThemeCatalogTests(unittest.IsolatedAsyncioTestCase):
+    def test_selected_theme_resolves_only_selected_resource(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="te2-selected-theme-") as directory:
+            root = Path(directory)
+            vendor = root / "vendored/github"
+            vendor.mkdir(parents=True)
+            _ = (vendor / "theme_index.json").write_text(json.dumps({"vendored": [
+                {"id": "github-dark", "file": "dark.json", "uiTheme": "vs-dark"},
+            ]}))
+            _ = (vendor / "dark.json").write_text('{"tokenColors":[]}')
+            extension = root / "extensions/publisher.colors-1.0"
+            extension.mkdir(parents=True)
+            _ = (extension / "selected.json").write_text('{"semanticTokenColors":{"class":"#abc"}}')
+            _ = (extension / "unselected.json").write_text("invalid json")
+            registry = {"extensions": {"publisher.colors": {
+                "id": "publisher.colors", "path": str(extension), "active": True,
+                "themes": [
+                    {"label": "Selected", "path": "selected.json", "uiTheme": "hc-black"},
+                    {"label": "Unselected", "path": "unselected.json", "uiTheme": "vs"},
+                ],
+            }}}
+            with (patch.object(theme_catalog, "VENDORED_THEMES_DIR", root / "vendored"),
+                  patch.object(theme_catalog, "_extension_roots", return_value=(root / "extensions",)),
+                  patch.object(extension_registry, "load_registry", return_value=registry)):
+                builtin = theme_catalog.resolve_selected_theme({"editor": {"theme": "github-dark"}})
+                self.assertEqual(builtin["theme"]["tokenColors"], [])
+                selected = theme_catalog.resolve_selected_theme({"editor": {
+                    "theme": "ext:publisher.colors:selected",
+                }})
+                self.assertEqual(selected["uiTheme"], "hc-black")
+                self.assertEqual(selected["theme"]["semanticTokenColors"], {"class": "#abc"})
+                with self.assertRaisesRegex(ValueError, "unavailable"):
+                    _ = theme_catalog.resolve_selected_theme({"editor": {
+                        "theme": "ext:publisher.colors:unselected",
+                    }})
+
     def test_bundled_indexes_are_ordered_and_malformed_entries_are_skipped(self) -> None:
         with tempfile.TemporaryDirectory(prefix="te2-theme-catalog-") as directory:
             root = Path(directory)
@@ -33,7 +68,7 @@ class ThemeCatalogTests(unittest.IsolatedAsyncioTestCase):
             _ = (root / "bad" / "theme_index.json").write_text("not json")
             with (
                 patch.object(theme_catalog, "VENDORED_THEMES_DIR", root),
-                patch.object(extension_registry, "get_extension_list", return_value=[]),
+                patch.object(extension_registry, "load_registry", return_value={"extensions": {}}),
                 self.assertLogs(theme_catalog.logger, level="WARNING"),
             ):
                 result = theme_catalog.build_theme_catalog()
@@ -44,23 +79,98 @@ class ThemeCatalogTests(unittest.IsolatedAsyncioTestCase):
             })
 
     def test_extension_catalog_preserves_existing_ids_and_resource_urls(self) -> None:
-        extensions: list[dict[str, object]] = [{
-            "id": "publisher.theme", "path": "/extensions/publisher.theme-1.0",
+        with tempfile.TemporaryDirectory(prefix="te2-themes-empty-") as directory:
+            root = Path(directory)
+            extension_dir = root / "extensions/publisher.theme-1.0"
+            theme_file = extension_dir / "themes/blue.json"
+            theme_file.parent.mkdir(parents=True)
+            _ = theme_file.write_text('{"colors":{"editor.background":"#123456"}}')
+            extensions: list[dict[str, object]] = [{
+            "id": "publisher.theme", "path": str(extension_dir), "active": True,
             "display_name": "Theme Pack", "themes": [{
                 "label": "Blue (Dark)", "path": "./themes/blue.json", "uiTheme": "vs-dark",
             }, {"path": 4}],
-        }, {"id": "metadata-without-theme-path", "themes": [{"label": "skip"}]}]
-        with (
-            tempfile.TemporaryDirectory(prefix="te2-themes-empty-") as directory,
-            patch.object(theme_catalog, "VENDORED_THEMES_DIR", Path(directory)),
-            patch.object(extension_registry, "get_extension_list", return_value=extensions),
-        ):
-            result = theme_catalog.build_theme_catalog()
-        self.assertEqual(result["themes"], [{
-            "id": "ext:publisher.theme:blue-dark", "label": "Blue (Dark)",
-            "uiTheme": "vs-dark", "source": "extension", "sourceLabel": "Theme Pack",
-            "serveUrl": "monaco_editor/cs_themes/publisher.theme-1.0/blue.json",
-        }])
+            }, {"id": "metadata-without-theme-path", "themes": [{"label": "skip"}]}]
+            with (
+                patch.object(theme_catalog, "VENDORED_THEMES_DIR", root),
+                patch.object(theme_catalog, "_extension_roots", return_value=(root / "extensions",)),
+                patch.object(extension_registry, "load_registry", return_value={"extensions": {
+                    entry["id"]: entry for entry in extensions
+                }}),
+            ):
+                result = theme_catalog.build_theme_catalog()
+            self.assertEqual(result["themes"], [{
+                "id": "ext:publisher.theme:blue-dark", "label": "Blue (Dark)",
+                "uiTheme": "vs-dark", "source": "extension", "sourceLabel": "Theme Pack",
+                "serveUrl": "monaco_editor/cs_themes/publisher.theme-1.0/themes/blue.json",
+            }])
+
+    def test_catalog_filters_unsupported_themes_and_resolves_bundled_root(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="te2-theme-roots-") as directory:
+            root = Path(directory)
+            bundled = root / "bundled/theme-defaults"
+            (bundled / "custom").mkdir(parents=True)
+            _ = (bundled / "custom/plain.json").write_text(
+                '{"colors":{"editor.background":"#111","editor.foreground":"#eee"},' +
+                '"tokenColors":[{"scope":"source.base"}]}')
+            _ = (bundled / "custom/inherited.json").write_text(
+                '{"include":"./plain.json","colors":{"editor.background":"#222"},' +
+                '"tokenColors":[{"scope":"source.child"}]}')
+            _ = (bundled / "custom/comments.json").write_text(
+                '{// comment\n"colors":{"editor.background":"#333",},' +
+                '"name":"// not a comment",}')
+            _ = (bundled / "custom/cycle.json").write_text('{"include":"./cycle.json"}')
+            _ = (bundled / "custom/missing.json").write_text('{"include":"./gone.json"}')
+            _ = (bundled / "custom/absolute.json").write_text('{"include":"/outside.json"}')
+            _ = (bundled / "custom/semantic.json").write_text(
+                '{"include":"./inherited.json","semanticTokenColors":{' +
+                '"class":"#fff","variable.readonly":{"foreground":"#abc"}}}')
+            (bundled / "custom/escape.json").symlink_to(root / "outside.json")
+            _ = (root / "outside.json").write_text('{"colors":{}}')
+            entry: dict[str, object] = {
+                "id": "vscode.theme-defaults", "path": str(bundled), "active": True,
+                "themes": [{"label": "%themeLabel%", "path": "./custom/plain.json"},
+                           {"label": "Inherited", "path": "./custom/inherited.json"},
+                           {"label": "Comments", "path": "./custom/comments.json"},
+                           {"label": "Cycle", "path": "./custom/cycle.json"},
+                           {"label": "Missing", "path": "./custom/missing.json"},
+                           {"label": "Absolute", "path": "./custom/absolute.json"},
+                           {"label": "Semantic", "path": "./custom/semantic.json"},
+                           {"label": "Escape", "path": "./custom/escape.json"}],
+            }
+            with (patch.object(theme_catalog, "VENDORED_THEMES_DIR", root / "missing"),
+                  patch.object(theme_catalog, "_extension_roots", return_value=(root / "bundled",)),
+                  patch.object(extension_registry, "load_registry", return_value={"extensions": {"vscode.theme-defaults": entry}})):
+                catalog = theme_catalog.build_theme_catalog()
+                self.assertIsNotNone(theme_catalog.load_extension_theme("theme-defaults", "custom/plain.json"))
+                inherited = theme_catalog.load_extension_theme("theme-defaults", "custom/inherited.json")
+                self.assertIsNotNone(inherited)
+                self.assertEqual(inherited["colors"] if inherited else None, {
+                    "editor.background": "#222", "editor.foreground": "#eee",
+                })
+                self.assertEqual(inherited["tokenColors"] if inherited else None, [
+                    {"scope": "source.base"}, {"scope": "source.child"},
+                ])
+                comments = theme_catalog.load_extension_theme("theme-defaults", "custom/comments.json")
+                self.assertEqual(comments["name"] if comments else None, "// not a comment")
+                self.assertIsNone(theme_catalog.load_extension_theme("theme-defaults", "custom/cycle.json"))
+                self.assertIsNone(theme_catalog.load_extension_theme("theme-defaults", "custom/missing.json"))
+                self.assertIsNone(theme_catalog.load_extension_theme("theme-defaults", "custom/absolute.json"))
+                semantic = theme_catalog.load_extension_theme("theme-defaults", "custom/semantic.json")
+                self.assertEqual(semantic["semanticTokenColors"] if semantic else None, {
+                    "class": "#fff", "variable.readonly": {"foreground": "#abc"},
+                })
+                self.assertEqual(semantic["tokenColors"] if semantic else None, [
+                    {"scope": "source.base"}, {"scope": "source.child"},
+                ])
+                self.assertIsNone(theme_catalog.load_extension_theme("theme-defaults", "custom/escape.json"))
+                self.assertIsNone(theme_catalog.load_extension_theme("theme-defaults", "custom/../custom/plain.json"))
+            self.assertEqual([(item["id"], item["label"]) for item in catalog["themes"]], [
+                ("ext:vscode.theme-defaults:plain", "Plain"),
+                ("ext:vscode.theme-defaults:inherited", "Inherited"),
+                ("ext:vscode.theme-defaults:comments", "Comments"),
+                ("ext:vscode.theme-defaults:semantic", "Semantic"),
+            ])
 
     async def test_catalog_disk_reads_run_off_the_rpc_event_loop(self) -> None:
         owner = threading.get_ident()
@@ -95,6 +205,42 @@ class ThemeCatalogTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(reply, expected)
             _ = request.assert_awaited_once_with()
+
+    async def test_editor_projects_only_backend_selected_theme(self) -> None:
+        from app.apps.code_te2 import stores
+
+        preferences: dict[str, object] = {"editor": {"theme": "github-dark"}}
+        selection: theme_catalog.SelectedTheme = {
+            "id": "github-dark", "uiTheme": "vs-dark", "theme": {"tokenColors": []},
+        }
+
+        class Store:
+            def get_preferences(self, project: str | None) -> dict[str, object]:
+                del project
+                return preferences
+
+        envelope: dict[str, object] = {
+            "jsonrpc": "2.0", "id": "selected", "method": "editor.theme.selected", "params": {},
+        }
+        self.assertIsNotNone(coerce_jsonrpc_request_envelope(envelope))
+        with (patch.object(stores, "get_preferences_store", return_value=Store()),
+              patch.object(editor_rpc_dispatch, "resolve_selected_theme", return_value=selection) as resolve):
+            reply = await editor_runtime_dispatch.dispatch_editor_runtime_request(
+                "editor.theme.selected", {}, source_client="primary",
+            )
+            preferences = {"editor": {"theme": "github-light"}}
+            next_selection: theme_catalog.SelectedTheme = {
+                "id": "github-light", "uiTheme": "vs", "theme": {"tokenColors": []},
+            }
+            resolve.return_value = next_selection
+            next_reply = await editor_runtime_dispatch.dispatch_editor_runtime_request(
+                "editor.theme.selected", {}, source_client="secondary",
+            )
+        self.assertEqual(reply, selection)
+        self.assertEqual(next_reply, next_selection)
+        self.assertEqual(resolve.call_count, 2)
+        self.assertEqual(resolve.call_args_list[0].args[0]["editor"], {"theme": "github-dark"})
+        self.assertEqual(resolve.call_args_list[1].args[0], preferences)
 
     async def test_scan_failures_are_not_successful_empty_catalogs(self) -> None:
         with patch.object(theme_catalog, "build_theme_catalog", side_effect=OSError("unavailable")):

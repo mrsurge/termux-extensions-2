@@ -9,6 +9,7 @@ import { URI } from '../../../static/vendor/monaco-editor-core/esm/vs/base/commo
 import * as vscodeTextmate from '../vendor/vscode-textmate';
 import * as vscodeOniguruma from '../vendor/vscode-oniguruma';
 import { resolveMonacoLanguageId } from './editor_language_utils.ts';
+import { semanticTokenForegrounds } from './editor_semantic_theme_utils.ts';
 import { TMGrammarFactory, missingTMGrammarErrorMessage } from './vscode_workbench_textmate_vendor/TMGrammarFactory.js';
 import {
   IValidEmbeddedLanguagesMap,
@@ -226,7 +227,13 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
       if (!tmGrammarFactory) return;
       const tmTheme = buildThemeSettings(theme);
       tmGrammarFactory.setTheme(tmTheme);
-      const colorMap = tmGrammarFactory.getColorMap();
+      const colorMap = tmGrammarFactory.getColorMap().slice();
+      // Semantic foregrounds must exist in the same palette as TextMate tokens.
+      for (const color of semanticTokenForegrounds(theme.semanticTokenColors)) {
+        if (!colorMap.some((entry) => typeof entry === 'string' && entry.toUpperCase() === color.toUpperCase())) {
+          colorMap.push(color);
+        }
+      }
       const win = deps.getWindow();
       if (colorMap.length > 0 && win.monaco?.languages?.setColorMap) {
         win.monaco.languages.setColorMap(colorMap);

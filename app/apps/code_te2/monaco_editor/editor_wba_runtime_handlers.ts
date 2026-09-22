@@ -141,6 +141,21 @@ export function registerEditorWbaRuntimeHandlers(
           deps.languageBridge,
           deps.registerSemanticTokensWithLegend,
         );
+        const model = deps.getModel() as
+          | { getLanguageId?(): string }
+          | null
+          | undefined;
+        const activeLanguage = model?.getLanguageId?.();
+        if (
+          typeof event.language === "string" &&
+          event.language &&
+          activeLanguage === event.language
+        ) {
+          // Monaco does not reliably request an initial semantic pass when the
+          // provider and first model race. A live registration is itself the
+          // deterministic invalidation edge for an already-attached model.
+          deps.fireSemanticTokensChanged(event.language);
+        }
         return;
       }
 

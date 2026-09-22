@@ -699,6 +699,58 @@ Exit: scoped compatibility design, fixture/lifecycle test matrix and an explicit
 implementation-or-defer decision. If implemented, require desktop and both
 Android renderers' acceptance before claiming parity.
 
+## Post-Merge Supplement: Symbols, Themes, And Startup Cache
+
+This branch has already been merged into main twice. Reuse it for the bounded
+follow-ups below rather than reopening the original backend/native observability
+scope or treating the original Phase 5 decision gate as the current work queue.
+Record source validation and live acceptance separately; neither a working-tree
+implementation nor documentation alone establishes release acceptance.
+
+1. Preserve live breadcrumb symbol tracking after a Code Inspector symbol-tree
+   lookup. Navigate to the selected symbol without automatically focusing the
+   editor or summoning the mobile IME. Investigate whether cursor placement can
+   be done without focus; give the symbol range a transient, theme-aware accent
+   distinct from Find highlighting. Fence decoration/navigation against file,
+   model and project changes, and test cursor movement after lookup.
+2. Finish and validate the installed-theme path already under development:
+   discover Code Server extension contributions, resolve their theme data on the
+   backend, and project only the selected definition to the editor. Keep picker
+   metadata separate from theme JSON and retain TextMate/Monaco semantic styling
+   and historical-secondary behavior. Record desktop, GeckoView and Cefrium
+   results individually; decide separately whether WBA webview chrome changes.
+   Investigate two narrower semantic-theme parity questions, without treating
+   either as a proven user-visible regression: extension-contributed semantic
+   token types with `superType` relationships (the standalone matcher currently
+   knows only `member` -> `method`), and VS Code's default semantic styling for
+   tokens lacking explicit theme rules. Compare the pinned Code Server token
+   classification registry/default-rule and TextMate scope-probe paths with our
+   standalone fixed scope mapping, using built-in and installed theme fixtures.
+   Explicit `semanticTokenColors` already match by type/modifier/language; do not
+   describe semantic tokens or Code Server built-in themes as unsupported.
+3. Investigate a bounded startup cache for TextMate grammars and theme
+   definitions. Identify their current owner, resource identity, load cost and
+   installed-extension revision before selecting persistence and invalidation
+   semantics. Warm-start use must not wait for extension-host discovery or fetch
+   the entire theme collection into the frontend. On reconnect, compare the
+   installed catalog, invalidate removed/changed entries atomically and preserve
+   unaffected ones. A missing or invalid selected theme must fail explicitly or
+   follow an approved preference policy; never silently keep stale styles.
+4. Keep framework page release aligned with real HTTP availability. The generic
+   app worker must release its serving hook from Uvicorn's confirmed listener
+   boundary, not a fixed lifespan delay. Separately, direct WBA socket replay is
+   socket-scoped while initial intelligence application is model-scoped: if WBA
+   connects before the first Monaco model, retain the pending synchronization and
+   complete it when that model is attached. Cover both provider/model orderings
+   without polling, synthetic typing, or making Python `editor.modelReady` an
+   intelligence transport.
+
+Measure cold and warm resource/paint milestones before and after cache work.
+Cache correctness, rollback on failed refresh, extension install/uninstall and
+reconnect are required test cases. The approved app-lane polling-first experiment
+remains distinct from direct WBA, which stays WebSocket-only; measure it rather
+than generalizing the transport choice.
+
 ## Source Starting Points
 
 Recheck these at each phase; this is an orientation map, not a caller audit.

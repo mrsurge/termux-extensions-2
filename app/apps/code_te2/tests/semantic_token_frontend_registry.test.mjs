@@ -52,7 +52,7 @@ function languageBridgeState() {
   };
 }
 
-function createDeps(languageBridge, registrations, invalidations) {
+function createDeps(languageBridge, registrations, invalidations, overrides = {}) {
   function register(kind, languageId, provider) {
     registrations.push([kind, languageId]);
     const subscription = provider.onDidChange(() => {
@@ -78,6 +78,7 @@ function createDeps(languageBridge, registrations, invalidations) {
         },
       },
     }),
+    ...overrides,
   };
 }
 
@@ -169,4 +170,121 @@ test("range-only languages retain one stable range provider", async () => {
     languageBridge.semanticTokensProviderModeByLanguage.typescript,
     "range",
   );
+});
+
+test("full semantic requests outlive slow provider startup and honor Monaco cancellation", async () => {
+  const { createEditorLanguageBridgeProviders } = await importModule(
+    "monaco_editor/editor_language_bridge_providers.ts",
+  );
+  const languageBridge = languageBridgeState();
+  const registrations = [];
+  const invalidations = [];
+  const registeredProviders = new Map();
+  const calls = [];
+  const deps = createDeps(languageBridge, registrations, invalidations, {
+    getCurrentPath: () => "/workspace/a.py",
+    absPathFromVscodeUri: () => "/workspace/a.py",
+    editorWorkbenchCall: async (method, params, options) => {
+      calls.push({ method, params, options });
+      return {
+        ok: true,
+        result: {
+          type: "full",
+          id: 7,
+          data: [0, 0, 3, 0, 0],
+        },
+      };
+    },
+    getMonaco: () => ({
+      languages: {
+        registerDocumentSemanticTokensProvider(languageId, provider) {
+          registeredProviders.set(languageId, provider);
+          return { dispose() {} };
+        },
+      },
+    }),
+  });
+  const providers = createEditorLanguageBridgeProviders(deps);
+  providers.registerSemanticTokensWithLegend(
+    "python",
+    { tokenTypes: ["class"], tokenModifiers: [] },
+    false,
+  );
+  const provider = registeredProviders.get("python");
+  const model = {
+    uri: { toString: () => "file:///workspace/a.py" },
+    getLanguageId: () => "python",
+    getValue: () => "class A: pass",
+    getVersionId: () => 1,
+  };
+
+  assert.equal(
+    await provider.provideDocumentSemanticTokens(
+      model,
+      null,
+      { isCancellationRequested: true },
+    ),
+    null,
+  );
+  assert.equal(calls.length, 0);
+
+  const result = await provider.provideDocumentSemanticTokens(
+    model,
+    null,
+    { isCancellationRequested: false },
+  );
+  assert.deepEqual(Array.from(result.data), [0, 0, 3, 0, 0]);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].method, "semantic_tokens");
+  assert.equal(calls[0].params.timeoutMs, 30000);
+  assert.equal(calls[0].options.timeoutMs, 36000);
+});
+
+test("semantic results completed after Monaco cancellation are discarded", async () => {
+  const { createEditorLanguageBridgeProviders } = await importModule(
+    "monaco_editor/editor_language_bridge_providers.ts",
+  );
+  const languageBridge = languageBridgeState();
+  const registeredProviders = new Map();
+  let releaseResponse;
+  const response = new Promise((resolve) => {
+    releaseResponse = resolve;
+  });
+  const providers = createEditorLanguageBridgeProviders(
+    createDeps(languageBridge, [], [], {
+      getCurrentPath: () => "/workspace/a.py",
+      absPathFromVscodeUri: () => "/workspace/a.py",
+      editorWorkbenchCall: () => response,
+      getMonaco: () => ({
+        languages: {
+          registerDocumentSemanticTokensProvider(languageId, provider) {
+            registeredProviders.set(languageId, provider);
+            return { dispose() {} };
+          },
+        },
+      }),
+    }),
+  );
+  providers.registerSemanticTokensWithLegend(
+    "python",
+    { tokenTypes: ["class"], tokenModifiers: [] },
+    false,
+  );
+  const token = { isCancellationRequested: false };
+  const pending = registeredProviders.get("python").provideDocumentSemanticTokens(
+    {
+      uri: { toString: () => "file:///workspace/a.py" },
+      getLanguageId: () => "python",
+      getValue: () => "class A: pass",
+      getVersionId: () => 1,
+    },
+    null,
+    token,
+  );
+  token.isCancellationRequested = true;
+  releaseResponse({
+    ok: true,
+    result: { type: "full", id: 8, data: [0, 0, 3, 0, 0] },
+  });
+  assert.equal(await pending, null);
 });

@@ -1,6 +1,7 @@
 import { expandShortHex } from './editor_parse_utils.ts';
 import { vscodeTokenColorsToMonacoRules } from './editor_theme_rules_utils.ts';
 import { buildSemanticTokenRules } from './editor_semantic_token_rules_utils.ts';
+import { parseSemanticTokenColors, semanticTokenForegrounds, type SemanticTokenColor } from './editor_semantic_theme_utils.ts';
 
 interface TokenColorSettings {
   foreground?: unknown;
@@ -16,13 +17,15 @@ interface TokenColorEntry {
 interface VscodeThemeJsonLike {
   uiTheme?: string;
   tokenColors?: TokenColorEntry[];
+  semanticTokenColors?: unknown;
   colors?: Record<string, unknown>;
 }
 
 export function vscodeThemeToMonacoTheme(
   themeId: string,
   vscodeJson: unknown,
-): { base: string; inherit: boolean; rules: unknown[]; colors: Record<string, string> } {
+): { base: string; inherit: boolean; rules: unknown[]; colors: Record<string, string>;
+  semanticTokenColors: Record<string, SemanticTokenColor>; encodedTokensColors: string[] } {
   const themeJson = vscodeJson as VscodeThemeJsonLike | null | undefined;
   const themeKey = String(themeId || '');
   let uiTheme: string | null = null;
@@ -46,10 +49,14 @@ export function vscodeThemeToMonacoTheme(
       }
     }
   } catch (_) {}
+  const semanticTokenColors = parseSemanticTokenColors(themeJson?.semanticTokenColors);
   return {
-    base: isLight ? 'vs' : 'vs-dark',
+    base: uiTheme === 'hc-black' || uiTheme === 'hc-light' || uiTheme === 'vs' || uiTheme === 'vs-dark'
+      ? uiTheme : isLight ? 'vs' : 'vs-dark',
     inherit: true,
     rules: vscodeTokenColorsToMonacoRules(tokenColors).concat(buildSemanticTokenRules(tokenColors)),
     colors,
+    semanticTokenColors,
+    encodedTokensColors: semanticTokenForegrounds(semanticTokenColors),
   };
 }

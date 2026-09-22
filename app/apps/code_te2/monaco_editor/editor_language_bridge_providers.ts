@@ -159,6 +159,13 @@ interface MonacoCancellationTokenLike {
   isCancellationRequested?: boolean;
 }
 
+// Basedpyright can register before its first semantic result is ready. VS Code
+// leaves that provider request alive under Monaco cancellation rather than
+// imposing the generic short RPC timeout, so keep the outer envelope beyond
+// the WBA/ext-host budget without introducing retries or synthetic edits.
+const SEMANTIC_TOKENS_ADAPTER_TIMEOUT_MS = 30000;
+const SEMANTIC_TOKENS_CALL_TIMEOUT_MS = 36000;
+
 interface MonacoCompletionContextLike {
   triggerKind?: number;
   triggerCharacter?: string;
@@ -2033,15 +2040,16 @@ export function createEditorLanguageBridgeProviders(
             deps.languageBridge.semanticTokensLegendCache[langId] || legend
           );
         },
-        provideDocumentRangeSemanticTokens(model, range) {
+        provideDocumentRangeSemanticTokens(model, range, token) {
           try {
             return provideWorkbenchDocumentRangeSemanticTokensFromVscodeMainThread(
               {
                 model,
                 languageId: langId,
                 range,
-                adapterTimeoutMs: 10000,
-                callTimeoutMs: 12000,
+                adapterTimeoutMs: SEMANTIC_TOKENS_ADAPTER_TIMEOUT_MS,
+                callTimeoutMs: SEMANTIC_TOKENS_CALL_TIMEOUT_MS,
+                cancelToken: token,
                 getCurrentPath: deps.getCurrentPath,
                 absPathFromVscodeUri: deps.absPathFromVscodeUri,
                 callWorkbenchSemanticTokensRange(params, opts) {
@@ -2084,7 +2092,7 @@ export function createEditorLanguageBridgeProviders(
       getLegend() {
         return deps.languageBridge.semanticTokensLegendCache[langId] || legend;
       },
-      provideDocumentSemanticTokens(model, lastResultId) {
+      provideDocumentSemanticTokens(model, lastResultId, token) {
         try {
           const languageId = String(
             model && model.getLanguageId ? model.getLanguageId() : langId,
@@ -2099,8 +2107,9 @@ export function createEditorLanguageBridgeProviders(
             model,
             languageId: langId,
             lastResultId,
-            adapterTimeoutMs: 10000,
-            callTimeoutMs: 12000,
+            adapterTimeoutMs: SEMANTIC_TOKENS_ADAPTER_TIMEOUT_MS,
+            callTimeoutMs: SEMANTIC_TOKENS_CALL_TIMEOUT_MS,
+            cancelToken: token,
             getCurrentPath: deps.getCurrentPath,
             absPathFromVscodeUri: deps.absPathFromVscodeUri,
             callWorkbenchSemanticTokens(params, opts) {

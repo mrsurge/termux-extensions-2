@@ -21,6 +21,10 @@ interface VscodeSemanticRangeLike {
   endColumn?: number;
 }
 
+interface VscodeCancellationTokenLike {
+  isCancellationRequested?: boolean;
+}
+
 interface SemanticTokensDeltaDtoLike {
   start?: number;
   deleteCount?: number;
@@ -42,6 +46,7 @@ export interface VscodeWorkbenchSemanticTokensDeps {
   lastResultId?: string | null;
   adapterTimeoutMs?: number;
   callTimeoutMs?: number;
+  cancelToken?: VscodeCancellationTokenLike | null;
   getCurrentPath(): string | null;
   absPathFromVscodeUri(raw: string): string | null;
   callWorkbenchSemanticTokens(
@@ -56,6 +61,7 @@ export interface VscodeWorkbenchSemanticTokensRangeDeps {
   range: VscodeSemanticRangeLike | null | undefined;
   adapterTimeoutMs?: number;
   callTimeoutMs?: number;
+  cancelToken?: VscodeCancellationTokenLike | null;
   getCurrentPath(): string | null;
   absPathFromVscodeUri(raw: string): string | null;
   callWorkbenchSemanticTokensRange(
@@ -182,6 +188,7 @@ function rangeTokensFromDto(dto: VscodeSemanticTokensDtoLike | null): { resultId
 export async function provideWorkbenchDocumentSemanticTokensFromVscodeMainThread(
   deps: VscodeWorkbenchSemanticTokensDeps,
 ): Promise<{ resultId: string; data: Uint32Array } | { resultId: string; edits: Array<{ start: number; deleteCount: number; data?: Uint32Array }> } | null> {
+  if (deps.cancelToken?.isCancellationRequested) return null;
   const uri = modelUriString(deps.model);
   const path = uri ? (deps.absPathFromVscodeUri(uri) || String(deps.getCurrentPath() || '')) : String(deps.getCurrentPath() || '');
   if (!uri || !path) return null;
@@ -203,12 +210,14 @@ export async function provideWorkbenchDocumentSemanticTokensFromVscodeMainThread
   const response = await deps.callWorkbenchSemanticTokens(params, {
     timeoutMs: Number.isFinite(Number(deps.callTimeoutMs)) ? Number(deps.callTimeoutMs) : 12000,
   });
+  if (deps.cancelToken?.isCancellationRequested) return null;
   return documentTokensFromDto(dtoFromPayload(peelWorkbenchPayload(response)));
 }
 
 export async function provideWorkbenchDocumentRangeSemanticTokensFromVscodeMainThread(
   deps: VscodeWorkbenchSemanticTokensRangeDeps,
 ): Promise<{ resultId: string; data: Uint32Array } | null> {
+  if (deps.cancelToken?.isCancellationRequested) return null;
   const uri = modelUriString(deps.model);
   const path = uri ? (deps.absPathFromVscodeUri(uri) || String(deps.getCurrentPath() || '')) : String(deps.getCurrentPath() || '');
   if (!uri || !path || !deps.range) return null;
@@ -234,6 +243,7 @@ export async function provideWorkbenchDocumentRangeSemanticTokensFromVscodeMainT
   const response = await deps.callWorkbenchSemanticTokensRange(params, {
     timeoutMs: Number.isFinite(Number(deps.callTimeoutMs)) ? Number(deps.callTimeoutMs) : 12000,
   });
+  if (deps.cancelToken?.isCancellationRequested) return null;
   return rangeTokensFromDto(dtoFromPayload(peelWorkbenchPayload(response)));
 }
 

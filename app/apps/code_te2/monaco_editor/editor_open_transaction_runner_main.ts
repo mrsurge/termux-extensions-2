@@ -37,6 +37,7 @@ interface RunEditorOpenTransactionDeps {
   applyLineNumberSizing(): void;
   ensureTouchSelection(reason: string): void;
   syncDiagnosticsForCurrentModel(reason: string): void;
+  syncWbaForReadyModel?(reason: string): void;
   emitToHost(eventType: string, payload: Record<string, unknown>): void;
   emitModelReady(payload: { path: string; languageId: string; generation?: number; request_id?: string; source?: string }): boolean;
   requestDraftDiff(reason: string): void;
@@ -201,6 +202,9 @@ export async function runEditorOpenTransaction(
     deps.applyLineNumberSizing();
     deps.ensureTouchSelection('open');
     deps.syncDiagnosticsForCurrentModel('open_model_ready');
+    // WBA may have connected before this first model existed. Complete that
+    // deferred synchronization at the actual model-ready boundary.
+    deps.syncWbaForReadyModel?.('open_model_ready');
 
     deps.setLastContentSha256(payload.content_sha256 || deps.getLastContentSha256());
     deps.emitToHost('editor_cache_state', {

@@ -861,6 +861,79 @@ incident can remain open without blocking an accepted instrumentation release.
 - [ ] Decide implement here or transfer to a named follow-up; record rationale.
 - [ ] If implemented: validate Monaco/TextMate and desktop/Gecko/Cefrium behavior.
 
+## Post-Merge Supplement
+
+This branch was merged into main twice and is being reused for three bounded
+follow-ups. The old Phase 5 decision-gate checklist is historical scope, not
+evidence that the in-progress theme implementation is absent. See PLAN.md,
+"Post-Merge Supplement: Symbols, Themes, And Startup Cache."
+
+### Symbol Navigation And Breadcrumbs
+
+- [ ] Confirm symbol-tree lookup does not disable subsequent live breadcrumb
+  updates after cursor moves, including after file/project changes.
+- [ ] Navigate without editor focus or stray mobile keyboard activation; test
+  whether cursor placement without focus is safe.
+- [ ] Add transient theme-aware symbol-range accent distinct from Find, with
+  model/revision cleanup; validate on desktop and both Android renderers.
+
+### Installed Themes: Finish And Accept
+
+- [x] Replace boot-time frontend catalog-definition fetch with a backend-selected
+  theme projection; picker metadata is not a document readiness dependency.
+- [ ] Validate the current working-tree theme conversion, JSONC/includes and
+  TextMate/semantic-token behavior with focused tests and frontend build.
+- [ ] Live-test cold boot, hot selection, reload, reconnect and working/historical
+  secondary views on desktop, GeckoView and Cefrium; record separate outcomes.
+- [ ] Investigate extension-contributed semantic token types with `superType`:
+  compare Code Server registry/legend semantics with standalone matching, which
+  currently handles only `member` -> `method` inheritance. Test explicit and
+  inherited selector colors separately; do not assume missing explicit styling.
+- [ ] Compare built-in Code Server theme fixtures with our semantic-token fallback
+  for tokens without explicit `semanticTokenColors`: upstream default rules and
+  TextMate scope probing versus the standalone fixed mapping. Determine whether
+  differences are observable before proposing a fix; explicit rules already work.
+- [ ] Reconcile original Phase 5 checks with evidence, then checkpoint/commit at
+  the user's chosen boundary; no WBA webview palette change is implied.
+
+### TextMate Grammar And Theme Startup Cache
+
+- [ ] Trace grammar/theme ownership, installed-extension catalog identity,
+  current caching and cold/warm startup costs before designing persistence.
+- [ ] Propose a bounded cache with extension discovery/revision reconciliation;
+  invalidate removed/changed entries atomically while retaining valid entries.
+- [ ] Test warm/cold start, install/update/uninstall, reconnect, bad cache and
+  missing selected theme; compare measured latency and memory with baseline.
+- [ ] Obtain separate approval for implementation once cache ownership and
+  invalidation semantics have been established.
+
+### HTTP And Initial Intelligence Readiness
+
+- [x] Replace the app worker's fixed 100 ms serving delay with an explicit gate
+  released immediately after Uvicorn reports its listener started. Keep the
+  readiness POST asynchronous and lifecycle-owned.
+- [x] Add a native-worker regression fixture whose serving hook performs a real
+  request against its own listener before recording readiness.
+- [x] Separate direct-WBA connection replay from active-model synchronization.
+  Preserve a deferred model pass when WBA connects first; complete WBA open,
+  provider hydration, diagnostics projection and semantic invalidation when the
+  model attaches.
+- [x] Invalidate an already-attached matching model when its semantic provider
+  arrives after the model. No timer, polling, synthetic edit, or Python
+  intelligence relay is introduced.
+- [x] Focused validation: native ASGI unittest suite passes 9 tests; WBA provider
+  tests pass 4 tests; modelReady/WBA boundary test passes; frontend TypeScript
+  typecheck and focused Basedpyright pass with zero diagnostics.
+- [x] Rebuild frontend assets after the readiness changes.
+- [x] First live cold-load attempt proved provider registration and Monaco's full
+  semantic request both occurred, but the browser discarded the request at its
+  fixed 12-second deadline while basedpyright was still warming.
+- [x] Replace that semantic-only deadline with a 30-second WBA/ext-host budget
+  inside a 36-second outer envelope, and discard a result if Monaco canceled its
+  model request. Provider registration remains push; token payload remains pull.
+- [ ] Live-test one true cold page load: framework release follows listener
+  readiness, and diagnostics/semantic tokens appear without refresh or typing.
+
 ## Closeout
 
 - [ ] Update CODE_TE2.md and condensed repo memory with verified contracts only.

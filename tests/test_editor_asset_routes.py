@@ -14,6 +14,7 @@ from starlette.applications import Starlette
 import httpx
 
 from app.apps.code_te2.code_te2_paths import resolve_code_te2_paths
+from app.apps.code_te2 import extension_registry, theme_catalog
 from app.apps.code_te2.monaco_editor import editor_asset_routes as assets
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,14 +34,22 @@ class EditorAssetRoutesTests(unittest.IsolatedAsyncioTestCase):
                 monaco / "te2-lang/worker.js": b"postMessage('ready');",
                 module.parent / "themes/vendored/test/theme.json": b'{"colors":{}}',
                 module.parent / "textmate/onig.wasm": b"\x00asm\x01\x00\x00\x00",
-                paths.code_server_extensions_dir / "test.ext/themes/theme.json": b'{"name":"extension"}',
+                paths.code_server_extensions_dir / "test.ext/custom/theme.json": b'{"name":"extension"}',
+                paths.code_server_extensions_dir / "test.ext/custom/base.json": b'{"colors":{"editor.background":"#111"}}',
+                paths.code_server_extensions_dir / "test.ext/custom/inherited.json": b'{"include":"./base.json","colors":{"editor.foreground":"#eee"}}',
+                paths.code_server_extensions_dir / "test.ext/custom/private.json": b'{"name":"private"}',
                 root / "secret.json": b"private",
             }
             for file, content in fixtures.items():
                 file.parent.mkdir(parents=True, exist_ok=True)
                 _ = file.write_bytes(content)
             (module.parent / "themes/escape.json").symlink_to(root / "secret.json")
-            with patch.object(assets, "__file__", str(module)), patch.object(assets, "code_te2_paths", return_value=paths):
+            extension = {"id": "test.ext", "path": str(paths.code_server_extensions_dir / "test.ext"),
+                         "active": True, "themes": [{"path": "./custom/theme.json", "label": "Test"},
+                                                    {"path": "./custom/inherited.json", "label": "Inherited"}]}
+            with (patch.object(assets, "__file__", str(module)),
+                  patch.object(theme_catalog, "_extension_roots", return_value=(paths.code_server_extensions_dir,)),
+                  patch.object(extension_registry, "load_registry", return_value={"extensions": {"test.ext": extension}})):
                 app = Starlette(routes=assets.build_editor_asset_routes())
                 async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
                     resources = {
@@ -48,12 +57,21 @@ class EditorAssetRoutesTests(unittest.IsolatedAsyncioTestCase):
                         "/ui/monaco_vscode/lang/worker.js": monaco / "te2-lang/worker.js",
                         "/ui/monaco_editor/themes/vendored/test/theme.json": module.parent / "themes/vendored/test/theme.json",
                         "/ui/monaco_editor/textmate/onig.wasm": module.parent / "textmate/onig.wasm",
-                        "/ui/monaco_editor/cs_themes/test.ext/theme.json": paths.code_server_extensions_dir / "test.ext/themes/theme.json",
+                        "/ui/monaco_editor/cs_themes/test.ext/custom/theme.json": paths.code_server_extensions_dir / "test.ext/custom/theme.json",
                     }
                     for url, file in resources.items():
                         response = await client.get(url)
                         self.assertEqual(response.status_code, 200, url)
-                        self.assertEqual(response.content, fixtures[file], url)
+                        if "/cs_themes/" in url:
+                            self.assertEqual(response.json()["name"], "extension")
+                        else:
+                            self.assertEqual(response.content, fixtures[file], url)
+                    inherited = await client.get("/ui/monaco_editor/cs_themes/test.ext/custom/inherited.json")
+                    self.assertEqual(inherited.status_code, 200)
+                    self.assertEqual(inherited.json()["colors"], {
+                        "editor.background": "#111", "editor.foreground": "#eee",
+                    })
+                    self.assertEqual(inherited.json()["uiTheme"], "vs-dark")
                     wasm = await client.get("/ui/monaco_editor/textmate/onig.wasm")
                     self.assertEqual(wasm.headers["content-type"], "application/wasm")
                     theme = await client.get("/ui/monaco_editor/themes/vendored/test/theme.json")
@@ -72,10 +90,12 @@ class EditorAssetRoutesTests(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(head.headers["content-length"], get.headers["content-length"])
                     for url in ("/ui/monaco_editor/textmate/onig.wasm",
                                 "/ui/monaco_editor/themes/vendored/test/theme.json",
-                                "/ui/monaco_editor/cs_themes/test.ext/theme.json"):
+                                "/ui/monaco_editor/cs_themes/test.ext/custom/theme.json"):
                         self.assertEqual((await client.head(url)).status_code, 405)
                     for url in (
                         "/ui/monaco_editor/themes/escape.json",
+                        "/ui/monaco_editor/cs_themes/test.ext/custom/private.json",
+                        "/ui/monaco_editor/cs_themes/test.ext/custom/base.json",
                         "/ui/monaco_editor/themes/%2e%2e/editor_asset_routes.py",
                         "/ui/monaco_vscode/esm/%2e%2e/%2e%2e/secret.json",
                         "/ui/monaco_editor/textmate/missing.wasm",
