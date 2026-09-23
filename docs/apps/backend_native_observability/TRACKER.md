@@ -922,13 +922,17 @@ evidence that the in-progress theme implementation is absent. See PLAN.md,
   enable highlights again. Frontend tests cover replay/new request and backend
   tests cover stale rejection and retained projection.
 - [x] Prevent automatic initial capitalization in filename search using the
-  search input's native `autocapitalize=off` attribute.
+  search input's native `autocapitalize=off` attribute. The sticky Explorer
+  search clone also needs the attribute because it creates a separate, focused
+  input; the original control's attribute does not carry over.
 - [x] Warn/confirm before fe-menubar branch checkout, preserving dirty
   worktree safeguards and cancellation. Comparison selection is not checkout.
   Cancel skips the checkout RPC; the existing backend checkout path is unchanged.
-- [x] User live acceptance of the three controls after Code TE2 worker refresh and
-  native client asset update. Typecheck/build, 13 Inspector frontend tests,
-  7 Inspector backend tests, and basedpyright passed without errors.
+- [ ] User live acceptance of all three controls after native client asset update.
+  The earlier acceptance was corrected: filename search still auto-capitalized
+  in the focused sticky clone on Android. Typecheck/build, 13 Inspector frontend
+  tests, 7 Inspector backend tests, and basedpyright previously passed; retest
+  the corrected search field on both Android clients.
 - [ ] Follow-up: trace cold-boot semantic-token warning (`end character >
   model.getLineLength(lineNumber)`). User reports no visible failure; do not hide
   the warning, clamp data or assume theme/extension fault without evidence.
