@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import io
 from pathlib import Path
 import subprocess
 import sys
@@ -19,6 +20,16 @@ from app.apps.code_te2.ui_ipc.rpc_contract import parse_ui_ipc_rpc_request
 
 
 class ThemeCatalogTests(unittest.IsolatedAsyncioTestCase):
+    def test_runtime_debug_theme_trace_uses_stderr_and_no_theme_body(self) -> None:
+        output = io.StringIO()
+        with (patch.dict("os.environ", {"TE2_RUNTIME_DEBUG": "1"}),
+              patch("sys.stderr", output)):
+            selected = theme_catalog.resolve_selected_theme({"editor": {"theme": "github-dark"}})
+        self.assertEqual(selected["id"], "github-dark")
+        self.assertIn("source=vendored:dark.json", output.getvalue())
+        self.assertIn("sha256=", output.getvalue())
+        self.assertNotIn("source.rust", output.getvalue())
+
     def test_selected_theme_resolves_only_selected_resource(self) -> None:
         with tempfile.TemporaryDirectory(prefix="te2-selected-theme-") as directory:
             root = Path(directory)
@@ -223,7 +234,8 @@ class ThemeCatalogTests(unittest.IsolatedAsyncioTestCase):
             "jsonrpc": "2.0", "id": "selected", "method": "editor.theme.selected", "params": {},
         }
         self.assertIsNotNone(coerce_jsonrpc_request_envelope(envelope))
-        with (patch.object(stores, "get_preferences_store", return_value=Store()),
+        with (patch.dict("os.environ", {"TE2_RUNTIME_DEBUG": "0"}),
+              patch.object(stores, "get_preferences_store", return_value=Store()),
               patch.object(editor_rpc_dispatch, "resolve_selected_theme", return_value=selection) as resolve):
             reply = await editor_runtime_dispatch.dispatch_editor_runtime_request(
                 "editor.theme.selected", {}, source_client="primary",
@@ -241,6 +253,27 @@ class ThemeCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resolve.call_count, 2)
         self.assertEqual(resolve.call_args_list[0].args[0]["editor"], {"theme": "github-dark"})
         self.assertEqual(resolve.call_args_list[1].args[0], preferences)
+
+    async def test_selected_theme_rpc_enables_cold_boot_trace_only_in_runtime_debug(self) -> None:
+        from app.apps.code_te2 import stores
+
+        selection: theme_catalog.SelectedTheme = {
+            "id": "github-dark", "uiTheme": "vs-dark", "theme": {"tokenColors": []},
+        }
+
+        class Store:
+            def get_preferences(self, project: str | None) -> dict[str, object]:
+                del project
+                return {"editor": {"theme": "github-dark"}}
+
+        with (patch.dict("os.environ", {"TE2_RUNTIME_DEBUG": "1"}),
+              patch.object(stores, "get_preferences_store", return_value=Store()),
+              patch.object(editor_rpc_dispatch, "resolve_selected_theme", return_value=selection)):
+            reply = await editor_runtime_dispatch.dispatch_editor_runtime_request(
+                "editor.theme.selected", {}, source_client="primary",
+            )
+        self.assertEqual(reply, {**selection, "_runtimeDebug": True})
+        self.assertNotIn("_runtimeDebug", selection)
 
     async def test_scan_failures_are_not_successful_empty_catalogs(self) -> None:
         with patch.object(theme_catalog, "build_theme_catalog", side_effect=OSError("unavailable")):

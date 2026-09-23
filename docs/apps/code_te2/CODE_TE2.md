@@ -2368,9 +2368,25 @@ configuration and intelligence attach asynchronously after syntax is visible. Th
 browser never receives the installed grammar corpus or theme collection. A changed
 or missing grammar fails the revision-checked request until the next registry scan
 publishes a coherent catalog.
+On a cold live SSOT, the event may supersede the cached boot snapshot before
+Monaco reads its path. Boot still loads the projected grammar catalog with an
+empty path; the SSOT path awaits its active grammar before creating a model and
+rechecks snapshot/revision identity after that wait. Without this boundary a
+Rust document briefly mounted as `plaintext` and selected the frontmatter
+TextMate scope despite a correct `github-dark` theme and Rust catalog entry.
 The standalone matcher carries VS Code's built-in `member` -> `method` type
 inheritance; extension-defined semantic type hierarchies are not yet registered
 in the standalone editor.
+
+With `--runtime-debug`/`TE2_RUNTIME_DEBUG`, the selected-theme RPC adds a
+debug-only marker. The editor holds at most 24 pre-reply boot milestones, then
+prints at most 64 `cold_boot_trace` events across theme application, TextMate
+catalog revision/scope and first-model mount. Normal runs discard them. The
+backend logs the selected theme's source and SHA prefix to stderr (never the
+MessagePack stdout pipe). The semantic bridge records request/current model
+versions and, for full-token replies only, the first out-of-range offset after
+bounded validation. It does not alter returned tokens or validate delta-token
+contents. The trace contains IDs, counts and offset summaries, not document text.
 
 Theme changes are idempotent: project the selected JSON, define the Monaco
 theme, set the selected id, update the page base class, apply the TextMate

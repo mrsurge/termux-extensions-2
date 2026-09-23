@@ -7,11 +7,15 @@
  * - worktrees/vscode-te2-diff/src/vs/editor/common/services/semanticTokensDto.ts
  */
 
+import { coldBootTraceEnabled, firstInvalidFullSemanticToken, traceColdBoot } from '../editor_cold_boot_trace.ts';
+
 interface VscodeSemanticBridgeModel {
   uri?: { toString(): string };
   getLanguageId?(): string;
   getValue?(): string;
   getVersionId?(): number;
+  getLineCount?(): number;
+  getLineLength?(lineNumber: number): number;
 }
 
 interface VscodeSemanticRangeLike {
@@ -211,7 +215,27 @@ export async function provideWorkbenchDocumentSemanticTokensFromVscodeMainThread
     timeoutMs: Number.isFinite(Number(deps.callTimeoutMs)) ? Number(deps.callTimeoutMs) : 12000,
   });
   if (deps.cancelToken?.isCancellationRequested) return null;
-  return documentTokensFromDto(dtoFromPayload(peelWorkbenchPayload(response)));
+  const result = documentTokensFromDto(dtoFromPayload(peelWorkbenchPayload(response)));
+  if (coldBootTraceEnabled()) {
+    const currentVersion = modelVersion(deps.model);
+    const full = result && 'data' in result ? result.data : null;
+    traceColdBoot('semantic.reply', {
+      uri: uri.slice(-160), language: languageId, requestedVersion: version ?? -1,
+      currentVersion: currentVersion ?? -1, kind: full ? 'full' : result ? 'delta' : 'empty',
+      words: full?.length ?? 0,
+    });
+    if (full && deps.model?.getLineCount && deps.model.getLineLength) {
+      try {
+        const invalid = firstInvalidFullSemanticToken(
+          full, deps.model.getLineCount(), (line) => deps.model!.getLineLength!(line),
+        );
+        if (invalid) traceColdBoot('semantic.invalid_offset', { uri: uri.slice(-160), ...invalid });
+      } catch (_) {
+        traceColdBoot('semantic.validation_unavailable', { uri: uri.slice(-160) });
+      }
+    }
+  }
+  return result;
 }
 
 export async function provideWorkbenchDocumentRangeSemanticTokensFromVscodeMainThread(

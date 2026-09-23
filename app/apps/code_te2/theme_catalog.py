@@ -244,6 +244,7 @@ def resolve_selected_theme(preferences: Mapping[str, object]) -> SelectedTheme:
                 except OSError:
                     data = None
                 if data is not None:
+                    _trace_selected_theme(theme_id, f"vendored:{filename}", data)
                     return {"id": theme_id, "uiTheme": _string(item.get("uiTheme"), "vs-dark"), "theme": data}
                 break
 
@@ -266,8 +267,22 @@ def resolve_selected_theme(preferences: Mapping[str, object]) -> SelectedTheme:
                 continue
             data = _resolve_theme(extension, path)
             if data is not None:
+                _trace_selected_theme(theme_id, f"extension:{ext_id}:{path}", data)
                 return {"id": theme_id, "uiTheme": _string(item.get("uiTheme"), "vs-dark"), "theme": data}
     raise ValueError(f"Selected editor theme is unavailable: {theme_id}")
+
+
+def _trace_selected_theme(theme_id: str, source: str, data: dict[str, object]) -> None:
+    import os
+
+    if os.environ.get("TE2_RUNTIME_DEBUG", "").strip().lower() not in {"1", "true", "yes", "on"}:
+        return
+    import hashlib
+    import sys
+
+    digest = hashlib.sha256(json.dumps(data, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:16]
+    # App-worker stdout is a MessagePack pipe; diagnostic text must use stderr.
+    print(f"[cold_boot_trace] phase=theme.resolved id={theme_id} source={source} sha256={digest}", file=sys.stderr, flush=True)
 
 
 def build_theme_catalog() -> ThemeCatalog:

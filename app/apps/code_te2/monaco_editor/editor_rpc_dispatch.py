@@ -105,9 +105,13 @@ async def dispatch_editor_rpc_request(
         return await get_theme_catalog()
 
     if method == "editor.theme.selected":
+        import os
         from ..stores import get_preferences_store
         preferences = get_preferences_store().get_preferences(active_project())
-        return await asyncio.to_thread(resolve_selected_theme, preferences)
+        selected = await asyncio.to_thread(resolve_selected_theme, preferences)
+        if os.environ.get("TE2_RUNTIME_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}:
+            return {**selected, "_runtimeDebug": True}
+        return selected
 
     if method == EDITOR_RPC_METHOD_TEXTMATE_CATALOG_GET:
         from ..textmate_projection import get_textmate_catalog

@@ -2295,6 +2295,7 @@ interface MonacoBootWindowLike extends Window {
           installMirrorPublisher: installMirrorPublisher,
           installScrollPublisher: installScrollPublisher,
           languageFromPath: languageFromPath,
+          prepareTextmateForDocument: prepareTextmateForDocument,
           monacoFileUri: function (path: string) {
             return monacoFileUri(
               window.monaco,
@@ -2710,10 +2711,26 @@ interface MonacoBootWindowLike extends Window {
         ensureTe2DiffTheme: ensureTe2DiffTheme,
         ensureDocumentTheme: ensureDocumentTheme,
         ensureDocumentSyntax: async function () {
+          if (_languageWorkersEnabled() || window.__debugDisableTextmate) return;
           const path = initialBootDocumentPath();
-          if (path) await prepareTextmateForDocument(path);
+          if (path) {
+            await prepareTextmateForDocument(path);
+          } else {
+            // A live SSOT may have displaced the boot snapshot; keep its
+            // extension/filename mappings ready before any model can mount.
+            await textmateRuntime.refreshVscodeGrammarIndex();
+          }
         },
         ensureEditorWithPrefs: ensureEditorWithPrefs,
+        getActiveModelTrace: function () {
+          if (!model) return null;
+          return {
+            uri: String(model.uri || '').slice(-160),
+            language: model.getLanguageId?.() || '',
+            version: model.getVersionId?.() || 0,
+            lines: model.getLineCount?.() || 0,
+          };
+        },
         applyBootSnapshot: applyBootSnapshot,
         ensureWorkbenchLanguageCatalogInstalled:
           ensureWorkbenchLanguageCatalogInstalled,

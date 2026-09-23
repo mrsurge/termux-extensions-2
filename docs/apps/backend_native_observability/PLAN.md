@@ -820,6 +820,40 @@ Bounded follow-ups, each requiring investigation and a concrete fix scope:
   extension, clamping token ranges or suppressing the warning. This is separate
   from semantic-theme inheritance and styling investigations.
 
+### Cold-Boot Rust Styling Evidence Gate
+
+The user now reports that a cold Rust boot can display colors resembling JSON
+or HTML with the wrong GitHub Dark variant. Read-only inspection of a live Rust
+model found `rust` language ID and `source.rust` TextMate scopes; boot logs also
+record `rust -> source.rust`. The selected preference is `github-dark`, which
+the backend maps to vendored `dark.json`, while `github-dark-default` maps to
+`dark-default.json`. A separate `plaintext -> markdown.toml.frontmatter.codeblock`
+registration is anomalous but not evidence that Rust uses that grammar. Monaco
+raises the semantic warning when a token's end offset exceeds the current
+model line; that warning is not a TextMate parse failure.
+
+Before changing token or theme behavior, add an opt-in, bounded runtime-debug
+boot trace covering backend theme ID/source and a compact theme fingerprint,
+Monaco and TextMate theme application order, catalog revision and chosen Rust
+scope, active model URI/language/version, and semantic-token request/result
+model identity with first invalid offset summary. Do not log document text or
+token arrays, clamp invalid ranges, or disable semantic tokens as a speculative
+fix. Correlate the same cold boot with the later visible state, then test and
+repair only the proven boundary. Exercise grammar registry install/update/
+uninstall and missing-body recovery in isolated fixtures before any disruptive
+live extension manipulation. Native asset publication and shared-runtime restarts
+remain separate user-controlled actions.
+
+The Cefrium cold Rust trace identified the first model as `plaintext` while the
+backend grammar catalog already contained `.rs`/`source.rust`; the `github-dark`
+theme ID and vendored `dark.json` source were correct. A live SSOT displaced the
+boot snapshot before the boot syntax step read its path, and the SSOT handler
+mounted the model without awaiting its own grammar. The targeted fix prepares
+the live document's TextMate language before mounting and fences superseded
+snapshots. Cold boot also loads the projected catalog when no boot path remains.
+Validate in a freshly updated native client; do not infer that this fixes the
+separate semantic-token range warning, which did not recur in that trace.
+
 ## Source Starting Points
 
 Recheck these at each phase; this is an orientation map, not a caller audit.

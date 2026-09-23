@@ -10,6 +10,7 @@ import * as vscodeTextmate from '../vendor/vscode-textmate';
 import * as vscodeOniguruma from '../vendor/vscode-oniguruma';
 import { resolveMonacoLanguageId } from './editor_language_utils.ts';
 import { semanticTokenForegrounds } from './editor_semantic_theme_utils.ts';
+import { traceColdBoot } from './editor_cold_boot_trace.ts';
 import { TMGrammarFactory, missingTMGrammarErrorMessage } from './vscode_workbench_textmate_vendor/TMGrammarFactory.js';
 import {
   IValidEmbeddedLanguagesMap,
@@ -229,6 +230,11 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
     const theme = asRecord(vscodeThemeJson);
     if (!theme) return;
     tmActiveThemeJson = theme;
+    traceColdBoot('theme.textmate_selected', {
+      name: asString(theme.name),
+      factoryReady: tmGrammarFactory !== null,
+      tokenRules: asArray(theme.tokenColors).length,
+    });
     try {
       if (!tmGrammarFactory) return;
       const tmTheme = buildThemeSettings(theme);
@@ -244,6 +250,7 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
       if (colorMap.length > 0 && win.monaco?.languages?.setColorMap) {
         win.monaco.languages.setColorMap(colorMap);
       }
+      traceColdBoot('theme.textmate_applied', { name: asString(theme.name), colors: colorMap.length });
       resetTokenizationForAllModels();
     } catch (error) {
       console.warn('[TextMate] applyThemeToRegistry failed', error);
@@ -325,6 +332,12 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
 
     if (loaded) {
       if (epoch === tmProjectionEpoch) tmVscodeIndex = idx;
+      traceColdBoot('grammar.catalog', {
+        revision: idx.revision.slice(0, 16),
+        grammars: Object.keys(idx.byScope).length,
+        rustScope: idx.byLanguage.rust?.preferred || '',
+        plaintextScope: idx.byLanguage.plaintext?.preferred || '',
+      });
       return idx;
     }
     return tmVscodeIndex || idx;
@@ -560,6 +573,7 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
         const epoch = tmProjectionEpoch;
         const scopeName = await scopeNameForLanguage(lang, filePath);
         if (epoch !== tmProjectionEpoch) return false;
+        traceColdBoot('grammar.chosen', { language: lang, scope: scopeName, epoch, revision: tmVscodeIndex?.revision.slice(0, 16) || '' });
         if (!scopeName) {
           console.warn('[TextMate] missing scope for', lang, filePath);
           return false;
@@ -645,6 +659,7 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
         tmProviderDisposables[lang] = registration || undefined;
 
         tmInstalled[lang] = true;
+        traceColdBoot('grammar.installed', { language: lang, scope: scopeName, epoch });
         console.log('[TextMate] installed workbench tokenizer', lang, '->', scopeName);
         return true;
       })();

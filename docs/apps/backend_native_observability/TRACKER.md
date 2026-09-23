@@ -908,7 +908,7 @@ evidence that the in-progress theme implementation is absent. See PLAN.md,
   unittest cases and 45 frontend tests pass; basedpyright reports zero errors or
   warnings for both changed Python files. Pytest is unavailable in the current
   interpreter, so the unittest suites ran directly.
-- [ ] User live acceptance of symbol highlighting after Code TE2 worker restart.
+- [x] User live acceptance of symbol highlighting after Code TE2 worker restart.
   Backend-only change; no frontend/Monaco/APK rebuild or shared restart performed.
 - [x] Add a small translucent bottom-right close-icon overlay button to
   Code Inspector, shared by all its modes. Clear only Inspector-owned editor
@@ -928,14 +928,53 @@ evidence that the in-progress theme implementation is absent. See PLAN.md,
 - [x] Warn/confirm before fe-menubar branch checkout, preserving dirty
   worktree safeguards and cancellation. Comparison selection is not checkout.
   Cancel skips the checkout RPC; the existing backend checkout path is unchanged.
-- [ ] User live acceptance of all three controls after native client asset update.
-  The earlier acceptance was corrected: filename search still auto-capitalized
-  in the focused sticky clone on Android. Typecheck/build, 13 Inspector frontend
-  tests, 7 Inspector backend tests, and basedpyright previously passed; retest
-  the corrected search field on both Android clients.
+- [x] User live acceptance of all three controls after native client asset update.
+  The initially missed sticky Explorer filename-search clone was corrected in
+  `53126784`; the user subsequently accepted it and symbol highlighting.
+  Typecheck/build, 13 Inspector frontend tests, 7 Inspector backend tests,
+  and basedpyright previously passed.
 - [ ] Follow-up: trace cold-boot semantic-token warning (`end character >
   model.getLineLength(lineNumber)`). User reports no visible failure; do not hide
   the warning, clamp data or assume theme/extension fault without evidence.
+
+### Cold-Boot Rust Styling And Semantic-Token Investigation
+
+- [x] Read-only source/live triage: the live Rust model reports `rust`, its
+  TextMate tokenizer produces `source.rust` scopes, and the boot log records
+  installation of `rust -> source.rust`. The active preference is `github-dark`.
+  The backend maps that ID to vendored `dark.json`, not `dark-default.json`.
+  A separate `plaintext -> markdown.toml.frontmatter.codeblock` mapping appears
+  in startup logs; it is suspicious but does not establish the Rust color cause.
+- [x] Locate the warning in Monaco's `SparseMultilineTokensStorage`: the semantic
+  token end character exceeds the active model's line length. This is not a
+  TextMate grammar parse warning; shared visual symptoms remain unproven.
+- [x] Add bounded, opt-in `--runtime-debug` boot tracing at selected-theme
+  resolution/application, TextMate registry theme and grammar revision/scope,
+  first mounted model identity/version, and semantic-token request/result validity.
+  Backend theme source and SHA prefix go to stderr; frontend milestones are held
+  until the debug-marked theme reply and then capped at 64 events. Full-token
+  inspection records only the first invalid offset, never document text or arrays.
+  Delta-token contents are not validated by this initial probe. Focused frontend
+  and Python tests, typecheck, Basedpyright and frontend build pass.
+- [x] Correlate a cold Rust boot in Cefrium after user-managed asset publication.
+  The first model was `plaintext` and chose the frontmatter grammar; the loaded
+  catalog contained Rust's `source.rust`, and the selected `github-dark` theme
+  resolved to the correct vendored `dark.json`. Later Rust models tokenize with
+  `source.rust`. GeckoView cold-boot comparison is still pending.
+- [x] Fix the demonstrated SSOT ordering gap: load the projected catalog even
+  without a boot path, await the active grammar before the first live model,
+  and reject snapshots superseded during that wait. Focused cold-order and
+  overlapping-SSOT tests pass. In the repeated Cefrium cold Rust run, the
+  first chosen grammar was `rust -> source.rust` under GitHub Dark, without
+  the earlier `plaintext -> frontmatter` choice; user reports it appears fixed.
+  GeckoView comparison and broader grammar lifecycle acceptance remain open.
+- [ ] Reproduce the semantic-token range warning with the bounded trace and
+  identify its request/model identity. No warning occurred in this Rust trace;
+  the observed grammar mislabel is not evidence of a shared root cause. Delta
+  token contents remain outside the current trace.
+- [ ] Exercise grammar install/update/uninstall and missing/changed-body recovery
+  with isolated fixtures first; do not mutate the user's installed extensions or
+  restart the shared framework as part of the investigation.
 
 ### Installed Themes: Finish And Accept
 

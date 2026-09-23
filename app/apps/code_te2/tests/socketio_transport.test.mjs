@@ -1575,3 +1575,90 @@ test('a newer empty replay invalidates a document still waiting for its theme', 
   assert.deepEqual(paths, []);
   assert.deepEqual(cleared, ['ssot_empty']);
 });
+
+test('live SSOT waits for projected grammar before mounting its first Rust model', async () => {
+  const { registerEditorSocketConnectionHandlers } = await importTypeScript(
+    'monaco_editor/editor_socket_connection_runtime.ts',
+  );
+  const handlers = new Map();
+  const syntax = deferred();
+  const order = [];
+  let currentPath = null;
+  let model = null;
+  const deps = new Proxy({
+    rpcNotifications: { onNotification(method, handler) { handlers.set(method, handler); } },
+    ensureEditorWithPrefs: async () => {},
+    getCurrentPath: () => currentPath,
+    setCurrentPath: pathValue => { currentPath = pathValue; },
+    getModel: () => model,
+    setModel: nextModel => { model = nextModel; },
+    languageFromPath: () => 'plaintext',
+    prepareTextmateForDocument: async pathValue => {
+      order.push(`syntax:${pathValue}`);
+      return syntax.promise;
+    },
+    createFileModel: (content, languageId, pathValue) => {
+      order.push(`model:${languageId}`);
+      return { uri: { toString: () => `file://${pathValue}` }, getValue: () => content, getLanguageId: () => languageId };
+    },
+    getEditor: () => ({ setModel() {} }),
+    getDiffEditor: () => null,
+    wbOpenFileFlow: async () => {},
+    requestAgentEditDocumentState: async () => {},
+  }, { get(target, property) { return property in target ? target[property] : () => {}; } });
+  registerEditorSocketConnectionHandlers({ on() {} }, deps);
+  handlers.get('editor.state.ssot')({ file: {
+    path: '/workspace/lib.rs', content: 'fn main() {}', document_revision: 1,
+  } });
+  await settlePromises();
+  assert.deepEqual(order, ['syntax:/workspace/lib.rs']);
+  assert.equal(model, null);
+  syntax.resolve('rust');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(order, ['syntax:/workspace/lib.rs', 'model:rust']);
+  assert.equal(model.getLanguageId(), 'rust');
+});
+
+test('a newer SSOT invalidates an older document during grammar preparation', async () => {
+  const { registerEditorSocketConnectionHandlers } = await importTypeScript(
+    'monaco_editor/editor_socket_connection_runtime.ts',
+  );
+  const handlers = new Map();
+  const oldSyntax = deferred();
+  const mounted = [];
+  let currentPath = null;
+  let model = null;
+  const deps = new Proxy({
+    rpcNotifications: { onNotification(method, handler) { handlers.set(method, handler); } },
+    ensureEditorWithPrefs: async () => {},
+    getCurrentPath: () => currentPath,
+    setCurrentPath: pathValue => { currentPath = pathValue; },
+    getModel: () => model,
+    setModel: nextModel => { model = nextModel; },
+    languageFromPath: pathValue => pathValue.endsWith('.rs') ? 'plaintext' : 'python',
+    prepareTextmateForDocument: pathValue => pathValue.endsWith('.rs') ? oldSyntax.promise : Promise.resolve('python'),
+    createFileModel: (content, languageId, pathValue) => {
+      mounted.push(pathValue);
+      return { uri: { toString: () => `file://${pathValue}` }, getValue: () => content, getLanguageId: () => languageId };
+    },
+    getEditor: () => ({ setModel() {} }),
+    getDiffEditor: () => null,
+    wbOpenFileFlow: async () => {},
+    requestAgentEditDocumentState: async () => {},
+  }, { get(target, property) { return property in target ? target[property] : () => {}; } });
+  registerEditorSocketConnectionHandlers({ on() {} }, deps);
+  const notify = handlers.get('editor.state.ssot');
+  notify({ file: { path: '/workspace/old.rs', content: 'old', document_revision: 1 } });
+  await settlePromises();
+  notify({ file: { path: '/workspace/new.py', content: 'new', document_revision: 1 } });
+  await new Promise(resolve => setImmediate(resolve));
+  oldSyntax.resolve('rust');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(mounted, ['/workspace/new.py']);
+  assert.equal(currentPath, '/workspace/new.py');
+});
+
+test('boot loads grammar catalog even when a live SSOT displaced its boot document', () => {
+  const source = fs.readFileSync(path.join(appRoot, 'monaco_editor/m_editor_app.ts'), 'utf8');
+  assert.match(source, /ensureDocumentSyntax: async function \(\) \{[\s\S]*?if \(path\) \{[\s\S]*?await prepareTextmateForDocument\(path\);[\s\S]*?\} else \{[\s\S]*?await textmateRuntime\.refreshVscodeGrammarIndex\(\);/);
+});
