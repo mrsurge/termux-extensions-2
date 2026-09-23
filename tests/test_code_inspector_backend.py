@@ -156,6 +156,24 @@ class CodeInspectorProjectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(emitted["direction"], "outgoing")
         self.assertEqual(emitted["projection"], hierarchy)
 
+    async def test_clear_highlights_keeps_projection_and_rejects_stale_request(self) -> None:
+        item = code_inspector_backend._coerce_projection(projection())
+        _ = code_inspector_projection.replace_code_inspector_projection(item)
+        emit = AsyncMock()
+        with patch.object(code_inspector_backend, "_emit_editor_command", emit):
+            result = await code_inspector_backend.handle_code_inspector_command(
+                {"action": "clearHighlights", "requestId": "request-1"},
+                source_name="host",
+            )
+            with self.assertRaisesRegex(ValueError, "stale_code_inspector_request"):
+                _ = await code_inspector_backend.handle_code_inspector_command(
+                    {"action": "clearHighlights", "requestId": "older-request"},
+                    source_name="host",
+                )
+        self.assertEqual(result["action"], "clearHighlights")
+        self.assertEqual(code_inspector_projection.peek_code_inspector_projection(), item)
+        emit.assert_awaited_once()
+
     async def test_rejects_invalid_direction_commands(self) -> None:
         with self.assertRaisesRegex(ValueError, "invalid_code_inspector_direction"):
             _ = await code_inspector_backend.handle_code_inspector_command(

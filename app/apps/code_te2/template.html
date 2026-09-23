@@ -1481,7 +1481,8 @@
   #code-inspector-container {
     flex: 1;
     min-height: 0;
-    overflow: auto;
+    overflow: hidden;
+    position: relative;
     background:
       linear-gradient(90deg, color-mix(in srgb, var(--accent, #58a6ff) 5%, transparent), transparent 28%),
       var(--bg, #0b0f1a);
@@ -1489,6 +1490,30 @@
     font-family: var(--font-mono, 'JetBrains Mono Nerd', monospace);
     font-size: 12px;
   }
+  #code-inspector-scroll {
+    height: 100%;
+    overflow: auto;
+  }
+  #code-inspector-clear-highlights {
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    width: 40px;
+    height: 40px;
+    border: 1px solid var(--border, #333);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--bg, #0b0f1a) 72%, transparent);
+    color: var(--fg, #e6edf3);
+    font-size: 20px;
+    cursor: pointer;
+    z-index: 1;
+  }
+  #code-inspector-clear-highlights:hover,
+  #code-inspector-clear-highlights:focus-visible {
+    border-color: var(--accent, #58a6ff);
+    background: var(--bg, #0b0f1a);
+  }
+  #code-inspector-clear-highlights[hidden] { display: none; }
   #code-inspector-tree {
     padding: 5px 0 12px;
   }
@@ -2671,8 +2696,11 @@
       <button class="console-clear-btn" id="code-inspector-collapse" type="button" title="Collapse Code Inspector" aria-label="Collapse Code Inspector">▼</button>
     </div>
     <div id="code-inspector-container" data-drawer-panel="code-inspector" style="display:none;">
-      <div id="code-inspector-tree" role="tree" aria-label="Code navigation results"></div>
-      <div id="code-inspector-empty" role="status" aria-live="polite">Choose a code navigation action from the editor context menu.</div>
+      <div id="code-inspector-scroll">
+        <div id="code-inspector-tree" role="tree" aria-label="Code navigation results"></div>
+        <div id="code-inspector-empty" role="status" aria-live="polite">Choose a code navigation action from the editor context menu.</div>
+      </div>
+      <button id="code-inspector-clear-highlights" type="button" aria-label="Clear Code Inspector highlights" title="Clear Code Inspector highlights" hidden>✕</button>
     </div>
   </div>
 

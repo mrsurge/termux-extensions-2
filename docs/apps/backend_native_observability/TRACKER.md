@@ -910,15 +910,25 @@ evidence that the in-progress theme implementation is absent. See PLAN.md,
   interpreter, so the unittest suites ran directly.
 - [ ] User live acceptance of symbol highlighting after Code TE2 worker restart.
   Backend-only change; no frontend/Monaco/APK rebuild or shared restart performed.
-- [ ] Next: add a small translucent bottom-right close-icon overlay button to
+- [x] Add a small translucent bottom-right close-icon overlay button to
   Code Inspector, shared by all its modes. Clear only Inspector-owned editor
   highlights (result ranges and symbol accent); retain results, drawer, cursor,
   text selection and unrelated Find/search highlights. Use existing backend-mediated
   editor commands, preserve no-focus mobile behavior and provide an accessible
   label/touch target. Test all highlight channels and idempotent clearing.
-- [ ] Follow-up: prevent automatic initial capitalization in filename search.
-- [ ] Follow-up: warn/confirm before fe-menubar branch checkout, preserving dirty
+  Implementation uses `clearHighlights` on the existing Inspector host/backend
+  command route. An exact request ID fences stale commands; the editor suppresses
+  reapply for that request and clears the separate symbol target. New inspections
+  enable highlights again. Frontend tests cover replay/new request and backend
+  tests cover stale rejection and retained projection.
+- [x] Prevent automatic initial capitalization in filename search using the
+  search input's native `autocapitalize=off` attribute.
+- [x] Warn/confirm before fe-menubar branch checkout, preserving dirty
   worktree safeguards and cancellation. Comparison selection is not checkout.
+  Cancel skips the checkout RPC; the existing backend checkout path is unchanged.
+- [x] User live acceptance of the three controls after Code TE2 worker refresh and
+  native client asset update. Typecheck/build, 13 Inspector frontend tests,
+  7 Inspector backend tests, and basedpyright passed without errors.
 - [ ] Follow-up: trace cold-boot semantic-token warning (`end character >
   model.getLineLength(lineNumber)`). User reports no visible failure; do not hide
   the warning, clamp data or assume theme/extension fault without evidence.

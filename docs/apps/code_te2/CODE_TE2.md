@@ -3568,6 +3568,14 @@ keeps symbol decoration separate from Find/Inspector-result highlights. Tests in
 `tests/test_host_symbol_navigation.py` exercise the real host handler and editor
 service together, mocking only persistence/file materialization and transport.
 
+The Inspector panel's bottom-right clear control sends `clearHighlights` through
+`ui.host.codeInspector.command` with the retained request ID. The backend rejects
+stale IDs and notifies the editor; it does not discard the result projection.
+The editor clears both result and symbol-target decoration channels, suppresses
+reapplication for the cleared request across ordinary editor resyncs, and reenables
+highlighting when a new inspection request starts. Search/Find decorations,
+cursor, selection, and drawer presentation are unaffected.
+
 ### Flow
 
 ```text

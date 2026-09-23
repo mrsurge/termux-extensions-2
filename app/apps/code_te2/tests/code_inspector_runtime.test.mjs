@@ -308,6 +308,46 @@ test("uses the live model preview and highlights only the open file", async () =
   assert.deepEqual(highlights.at(-1), []);
 });
 
+test("clear command suppresses the current inspection through reapply, then a new one restores highlights", async () => {
+  const { createEditorCodeInspectorRuntime } = await importTypeScript(
+    "monaco_editor/editor_code_inspector_runtime.ts",
+  );
+  const state = createEditorState();
+  const highlights = [];
+  const projections = [];
+  let symbolClears = 0;
+  const runtime = createEditorCodeInspectorRuntime({
+    getEditor: () => state.editor,
+    getCurrentPath: () => "/workspace/main.rs",
+    editorWorkbenchCall: async () => ({ ok: true, result: [{
+      path: "/workspace/main.rs",
+      range: { startLineNumber: 8, startColumn: 1, endLineNumber: 8, endColumn: 5 },
+    }] }),
+    publishProjection: projection => { projections.push(projection); return true; },
+    replaceHighlights: ranges => highlights.push(structuredClone(ranges)),
+    clearSymbolTargetHighlight: () => { symbolClears++; },
+    logError: () => assert.fail('unexpected error'),
+  });
+  runtime.start('references');
+  await settle();
+  assert.equal(highlights.at(-1).length, 1);
+  const firstRequestId = projections.at(-1).requestId;
+  runtime.handleCommand({ action: 'clearHighlights', requestId: 'stale' });
+  assert.equal(highlights.at(-1).length, 1);
+  runtime.handleCommand({ action: 'clearHighlights', requestId: firstRequestId });
+  assert.deepEqual(highlights.at(-1), []);
+  assert.equal(symbolClears, 1);
+  runtime.reapplyHighlights();
+  assert.deepEqual(highlights.at(-1), []);
+  runtime.handleCommand({ action: 'clearHighlights', requestId: firstRequestId });
+  assert.deepEqual(highlights.at(-1), []);
+  runtime.start('references');
+  await settle();
+  assert.notEqual(projections.at(-1).requestId, firstRequestId);
+  assert.equal(highlights.at(-1).length, 1);
+  runtime.dispose();
+});
+
 test("loads the first incoming call scope and switches to outgoing calls", async () => {
   const { createEditorCodeInspectorRuntime } = await importTypeScript(
     "monaco_editor/editor_code_inspector_runtime.ts",

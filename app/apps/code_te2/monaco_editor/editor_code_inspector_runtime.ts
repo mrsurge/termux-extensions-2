@@ -56,6 +56,7 @@ interface CodeInspectorRuntimeDeps {
   ): Promise<unknown>;
   publishProjection(projection: CodeInspectorProjection): boolean;
   replaceHighlights(ranges: JsonObject[]): void;
+  clearSymbolTargetHighlight?(): void;
   openLocation?(location: JsonObject): Promise<unknown>;
   notify?(message: string): boolean;
   logError(message: string, error: unknown): void;
@@ -334,6 +335,7 @@ export function createEditorCodeInspectorRuntime(
   let projection: CodeInspectorProjection | null = null;
   let disposed = false;
   let definitionRequestSequence = 0;
+  let clearedRequestId: string | null = null;
   const expanding = new Set<string>();
 
   function syncHighlights(): void {
@@ -342,6 +344,7 @@ export function createEditorCodeInspectorRuntime(
     if (
       !currentPath ||
       !current ||
+      current.requestId === clearedRequestId ||
       current.status !== 'ready' ||
       (current.mode !== 'references' && current.mode !== 'implementations')
     ) {
@@ -354,6 +357,7 @@ export function createEditorCodeInspectorRuntime(
   }
 
   function publish(next: CodeInspectorProjection): void {
+    if (projection?.requestId !== next.requestId) clearedRequestId = null;
     projection = next;
     syncHighlights();
     if (!deps.publishProjection(next)) {
@@ -705,6 +709,12 @@ export function createEditorCodeInspectorRuntime(
       } else {
         void expand(params);
       }
+    } else if (params.action === 'clearHighlights') {
+      const current = projection;
+      if (current && current.requestId === params.requestId) {
+        clearedRequestId = current.requestId;
+        clearHighlights();
+      }
     } else if (params.action === 'release') {
       void releaseSessions(retained ?? projection);
     }
@@ -716,6 +726,7 @@ export function createEditorCodeInspectorRuntime(
 
   function clearHighlights(): void {
     deps.replaceHighlights([]);
+    deps.clearSymbolTargetHighlight?.();
   }
 
   function dispose(): void {

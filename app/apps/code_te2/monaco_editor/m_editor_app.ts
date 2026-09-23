@@ -1130,6 +1130,7 @@ interface MonacoBootWindowLike extends Window {
         ranges,
       );
     },
+    clearSymbolTargetHighlight,
     openLocation: function (location) {
       return editorRpcCall(
         EDITOR_RPC_METHODS.open,
