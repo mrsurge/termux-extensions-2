@@ -2,7 +2,7 @@
  * Workbench-based TextMate runtime for TE2.
  * Source lineage:
  * - VS Code workbench TextMate grammar factory and tokenization support
- * - TE2 WBA grammar transport
+ * - TE2 backend-owned grammar projection
  */
 
 import { URI } from '../../../static/vendor/monaco-editor-core/esm/vs/base/common/uri.js';
@@ -35,7 +35,7 @@ interface WindowTextmateLike extends Window {
       setColorMap?(colorMap: string[]): void;
       getLanguages?(): Array<{ id?: string; aliases?: string[] }>;
       register?(desc: Record<string, unknown>): void;
-      setTokensProvider?(languageId: string, provider: Record<string, unknown>): void;
+      setTokensProvider?(languageId: string, provider: Record<string, unknown>): { dispose?(): void } | void;
       getEncodedLanguageId?(languageId: string): number;
     };
   };
@@ -63,19 +63,20 @@ interface VscodeGrammarByLanguageEntry {
 }
 
 interface VscodeGrammarIndexLike {
+  revision: string;
   byScope: Record<string, VscodeGrammarByScopeEntry>;
   byLanguage: Record<string, VscodeGrammarByLanguageEntry>;
   byLocation: Record<string, string>;
+  byFilename: Record<string, string>;
+  byExtension: Record<string, string>;
 }
 
 interface TextmateRuntimeDeps {
   getWindow(): WindowTextmateLike;
-  getApiBase(): string;
   fetchFn(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
-  fetchJsonWithBase(path: string, init?: RequestInit): Promise<unknown>;
   buildUiUrl(path: string): string;
   normalizeLanguage(languageId: unknown): string;
-  editorWorkbenchCall(
+  editorRpcCall(
     method: string,
     params: Record<string, unknown>,
     opts?: { timeoutMs?: number },
@@ -167,7 +168,10 @@ function grammarIdFromLocation(resource: URI): string {
 export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
   ensureTextmateReady(): Promise<unknown>;
   ensureTextmateTokenization(languageId: unknown, filePath: unknown): Promise<boolean>;
+  prepareTextmateForDocument(filePath: unknown, fallbackLanguage?: unknown): Promise<string>;
+  resolveLanguageForPath(filePath: unknown, fallbackLanguage?: unknown): string;
   refreshVscodeGrammarIndex(): Promise<VscodeGrammarIndexLike>;
+  refreshTextmateProjection(expectedRevision?: string | null): Promise<boolean>;
   scopeNameForLanguage(languageId: unknown, filePath: unknown): Promise<string>;
   applyThemeToRegistry(vscodeThemeJson: unknown): void;
   getGrammarByLang(): Record<string, unknown>;
@@ -181,6 +185,8 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
   let tmVscodeIndex: VscodeGrammarIndexLike | null = null;
   let tmVscodeIndexInflight: Promise<VscodeGrammarIndexLike> | null = null;
   let tmReadyInflight: Promise<unknown> | null = null;
+  let tmProjectionEpoch = 0;
+  const tmProviderDisposables: Record<string, { dispose?(): void } | undefined> = Object.create(null);
 
   function resetTokenizationForAllModels(): void {
     try {
@@ -244,22 +250,37 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
     }
   }
 
-  async function loadVscodeGrammarIndex(): Promise<VscodeGrammarIndexLike> {
+  async function loadVscodeGrammarIndex(epoch = tmProjectionEpoch): Promise<VscodeGrammarIndexLike> {
     const idx: VscodeGrammarIndexLike = {
+      revision: '',
       byScope: Object.create(null),
       byLanguage: Object.create(null),
       byLocation: Object.create(null),
+      byFilename: Object.create(null),
+      byExtension: Object.create(null),
     };
     let loaded = false;
 
     try {
-      const res = await deps.editorWorkbenchCall('grammars_list', {}, { timeoutMs: 8000 });
-      const result = asRecord(res)?.result && asRecord(asRecord(res)?.result)
-        ? asRecord(asRecord(res)?.result)!
-        : asRecord(res);
+      const result = asRecord(await deps.editorRpcCall('editor.textmate.catalog.get', {}, { timeoutMs: 8000 }));
+      idx.revision = asString(result?.revision);
       const grammars = asArray<Record<string, unknown>>(result?.grammars);
+      const languages = asArray<Record<string, unknown>>(result?.languages);
       loaded = true;
       const byLangScopes: Record<string, Set<string>> = Object.create(null);
+
+      for (const rawLanguage of languages) {
+        const language = deps.normalizeLanguage(rawLanguage.id);
+        if (!language) continue;
+        for (const filename of asArray<string>(rawLanguage.filenames)) {
+          if (typeof filename === 'string' && filename) idx.byFilename[filename] = language;
+        }
+        for (const extension of asArray<string>(rawLanguage.extensions)) {
+          if (typeof extension === 'string' && extension) {
+            idx.byExtension[extension.toLowerCase()] = language;
+          }
+        }
+      }
 
       for (const rawGrammar of grammars) {
         const scopeName = asString(rawGrammar.scopeName).trim();
@@ -303,7 +324,7 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
     }
 
     if (loaded) {
-      tmVscodeIndex = idx;
+      if (epoch === tmProjectionEpoch) tmVscodeIndex = idx;
       return idx;
     }
     return tmVscodeIndex || idx;
@@ -318,6 +339,62 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
     } finally {
       if (tmVscodeIndexInflight === inflight) tmVscodeIndexInflight = null;
     }
+  }
+
+  async function refreshTextmateProjection(expectedRevision?: string | null): Promise<boolean> {
+    const normalizedExpected = asString(expectedRevision);
+    if (normalizedExpected && normalizedExpected === tmVscodeIndex?.revision) return false;
+
+    tmProjectionEpoch += 1;
+    for (const language of Object.keys(tmProviderDisposables)) {
+      try {
+        tmProviderDisposables[language]?.dispose?.();
+      } catch (_) {}
+      delete tmProviderDisposables[language];
+    }
+    tmInstalled = Object.create(null);
+    tmInstallInflight = Object.create(null);
+    tmGrammarByLang = Object.create(null);
+    tmGrammarFactory = null;
+    tmReadyInflight = null;
+    tmVscodeIndex = null;
+    tmVscodeIndexInflight = null;
+    await refreshVscodeGrammarIndex();
+    resetTokenizationForAllModels();
+    return true;
+  }
+
+  function resolveLanguageForPath(filePath: unknown, fallbackLanguage?: unknown): string {
+    const fallback = deps.normalizeLanguage(fallbackLanguage);
+    const path = asString(filePath);
+    const index = tmVscodeIndex;
+    if (!path || !index) return fallback || 'plaintext';
+
+    const filename = path.split('/').pop() || path;
+    const exact = index.byFilename[filename];
+    if (exact) return exact;
+
+    const lowered = path.toLowerCase();
+    let bestLanguage = '';
+    let bestLength = 0;
+    for (const extension of Object.keys(index.byExtension)) {
+      if (extension.length > bestLength && lowered.endsWith(extension)) {
+        bestLanguage = index.byExtension[extension];
+        bestLength = extension.length;
+      }
+    }
+    return bestLanguage || fallback || 'plaintext';
+  }
+
+  async function prepareTextmateForDocument(
+    filePath: unknown,
+    fallbackLanguage?: unknown,
+  ): Promise<string> {
+    if (!tmVscodeIndex) await refreshVscodeGrammarIndex();
+    const language = resolveLanguageForPath(filePath, fallbackLanguage);
+    await ensureTextmateReady();
+    await ensureTextmateTokenization(language, filePath);
+    return language;
   }
 
   async function scopeNameForLanguage(languageId: unknown, filePath: unknown): Promise<string> {
@@ -383,6 +460,7 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
   }
 
   async function loadTextmateReady(): Promise<unknown> {
+    const epoch = tmProjectionEpoch;
     installDebugGlobals();
     if (!tmVscodeIndex) {
       await refreshVscodeGrammarIndex();
@@ -407,8 +485,9 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
       },
     });
 
-    const grammarDefinitions = buildGrammarDefinitions(tmVscodeIndex);
-    tmGrammarFactory = new TMGrammarFactory(
+    const grammarIndex = tmVscodeIndex;
+    const grammarDefinitions = buildGrammarDefinitions(grammarIndex);
+    const grammarFactory = new TMGrammarFactory(
       {
         logTrace(msg: string) {
           console.log('[TextMate]', msg);
@@ -417,14 +496,15 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
           console.warn('[TextMate]', msg, err);
         },
         async readFile(resource: URI): Promise<string> {
-          const grammarId = grammarIdFromLocation(resource) || tmVscodeIndex?.byLocation[resource.toString()] || '';
+          const grammarId = grammarIdFromLocation(resource) || grammarIndex.byLocation[resource.toString()] || '';
           if (!grammarId) {
             throw new Error(`Unknown grammar resource: ${resource.toString()}`);
           }
-          const loadRes = await deps.editorWorkbenchCall('grammars_load', { id: grammarId }, { timeoutMs: 8000 });
-          const payload = asRecord(loadRes)?.result && asRecord(asRecord(loadRes)?.result)
-            ? asRecord(asRecord(loadRes)?.result)!
-            : asRecord(loadRes);
+          const payload = asRecord(await deps.editorRpcCall(
+            'editor.textmate.grammar.get',
+            { id: grammarId, revision: grammarIndex.revision },
+            { timeoutMs: 8000 },
+          ));
           const ok = payload?.ok === true;
           const raw = asString(payload?.raw);
           if (!ok || !raw) {
@@ -438,12 +518,15 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
       onigLib,
     );
 
+    if (epoch !== tmProjectionEpoch) throw new Error('TextMate projection superseded');
+    tmGrammarFactory = grammarFactory;
+
     if (tmActiveThemeJson) {
       applyThemeToRegistry(tmActiveThemeJson);
     }
 
     console.log('[TextMate] workbench runtime ready');
-    return tmGrammarFactory;
+    return grammarFactory;
   }
 
   async function ensureTextmateReady(): Promise<unknown> {
@@ -474,7 +557,9 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
       if (inflight) return await inflight;
 
       tmInstallInflight[lang] = (async () => {
+        const epoch = tmProjectionEpoch;
         const scopeName = await scopeNameForLanguage(lang, filePath);
+        if (epoch !== tmProjectionEpoch) return false;
         if (!scopeName) {
           console.warn('[TextMate] missing scope for', lang, filePath);
           return false;
@@ -485,6 +570,7 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
         }
 
         const grammarFactory = await ensureTextmateReady() as TMGrammarFactory;
+        if (epoch !== tmProjectionEpoch) return false;
         const encodedLanguageId = typeof monacoLanguages.getEncodedLanguageId === 'function'
           ? Number(monacoLanguages.getEncodedLanguageId(lang))
           : 0;
@@ -494,6 +580,7 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
         }
 
         const created = await grammarFactory.createGrammar(lang, encodedLanguageId);
+        if (epoch !== tmProjectionEpoch) return false;
         const grammar = created.grammar as TextmateGrammarLike | null;
         if (!grammar) {
           console.warn('[TextMate] missing grammar for', lang, scopeName);
@@ -508,7 +595,7 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
         const setTokensProvider = monacoLanguages.setTokensProvider;
         if (typeof setTokensProvider !== 'function') return false;
 
-        setTokensProvider.call(monacoLanguages, lang, {
+        const registration = setTokensProvider.call(monacoLanguages, lang, {
           getInitialState() {
             return makeState(created.initialState);
           },
@@ -549,6 +636,14 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
           },
         });
 
+        if (epoch !== tmProjectionEpoch) {
+          try {
+            registration?.dispose?.();
+          } catch (_) {}
+          return false;
+        }
+        tmProviderDisposables[lang] = registration || undefined;
+
         tmInstalled[lang] = true;
         console.log('[TextMate] installed workbench tokenizer', lang, '->', scopeName);
         return true;
@@ -580,7 +675,10 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
   return {
     ensureTextmateReady,
     ensureTextmateTokenization,
+    prepareTextmateForDocument,
+    resolveLanguageForPath,
     refreshVscodeGrammarIndex,
+    refreshTextmateProjection,
     scopeNameForLanguage,
     applyThemeToRegistry,
     getGrammarByLang,

@@ -18,6 +18,7 @@ interface EditorMonacoBootRuntimeDeps {
   getWorkerLogOnce(): Record<string, boolean>;
   ensureTe2DiffTheme(): void;
   ensureDocumentTheme(): Promise<void>;
+  ensureDocumentSyntax(): Promise<void>;
   ensureEditorWithPrefs(): Promise<unknown>;
   applyBootSnapshot(includeDocument?: boolean): void;
   ensureWorkbenchLanguageCatalogInstalled(): Promise<boolean>;
@@ -165,7 +166,12 @@ export async function bootMonacoRuntime(
     // a boot snapshot or live replay may create/attach a document model.
     deps.connectEditorHostActions();
     await Promise.resolve(deps.connectEditorSocket());
-    await deps.ensureDocumentTheme();
+    // Theme and backend-projected syntax can prepare concurrently. Both are
+    // first-paint prerequisites; neither waits for WBA or the extension host.
+    await Promise.all([
+      deps.ensureDocumentTheme(),
+      deps.ensureDocumentSyntax(),
+    ]);
     deps.applyBootSnapshot();
     await deps.ensureEditorWithPrefs();
     if (!languageWorkersEnabled) {

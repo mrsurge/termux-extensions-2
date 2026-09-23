@@ -44,8 +44,9 @@ switching, watcher resubscription, extension menus/navigation, webview backend,
 and logical-document reconcile remain backend control-plane work.
 
 TextMate uses the vendored workbench runtime in
-`monaco_editor/editor_textmate_runtime.ts` and WBA grammar metadata. A provider
-is still required for meaningful language features.
+`monaco_editor/editor_textmate_runtime.ts` and the persisted Python extension-
+registry grammar projection. This syntax path is available before WBA; a WBA
+provider is still required for semantic language features.
 
 ### Extension validation matrix (next milestone)
 We will validate at least 2 deterministic features (hover + symbols + diagnostics) per language:
@@ -1747,9 +1748,9 @@ Code TE2 has two mutually exclusive language backends selected by the persisted
 
 - **Code Server mode** (the default) loads Monaco editor core without Monaco's
   basic/rich language contributions. It opens the direct strict-MessagePack
-  `/wba` lane, obtains language and grammar metadata from the WBA, installs
-  client-side TextMate tokenization from the contributed grammars, and registers
-  WBA-backed Monaco providers.
+  `/wba` lane, obtains language/provider metadata from the WBA, installs client-
+  side TextMate tokenization from the backend extension-registry projection, and
+  registers WBA-backed Monaco providers.
 - **Web Worker mode** lazy-loads Monaco's basic/rich language contributions and
   language workers. It does not open or probe the WBA, install the WBA language
   catalog, or register WBA-backed providers.
@@ -1793,8 +1794,8 @@ cleanup does not change extension activation policy or startup ordering.
 
 The Code Server path is data-driven:
 
-1. The WBA publishes language, language-configuration, grammar, theme, and
-   provider-registration metadata from the installed built-in and user
+1. The WBA publishes language, language-configuration, theme, and provider-
+   registration metadata from the installed built-in and user
    extensions. Contributions with the same language ID are composed rather
    than replaced: file-association arrays are unioned, higher-priority user
    metadata wins where it is present, and language configuration changes owner
@@ -1803,17 +1804,25 @@ The Code Server path is data-driven:
    auto-closing, or indentation rules.
 2. The inline editor registers the contributed language IDs and applies the
    contributed language configuration.
-3. `editor_textmate_runtime.ts` selects the first grammar contribution for the
-   language in WBA catalog order, loads the raw grammar through
-   `grammars_load`, and installs it in Monaco using the vendored TextMate and
+3. `extension_registry.py` persists complete built-in/user TextMate contribution
+   descriptors and one deterministic projection revision during its normal scan.
+   `editor_textmate_runtime.ts` requests that catalog through typed editor RPC,
+   selects the first contribution for a language, lazily requests only its body
+   under the same revision, and installs it using the vendored TextMate and
    Oniguruma runtimes.
 4. Provider registration events and reconnect snapshots install one stable
    Monaco bridge per advertised language and feature. There are no JavaScript,
    HTML, CSS, or other language-specific routing branches.
 
-Grammar discovery/content travels over the direct WBA socket as
-`vscode.textmate.grammars.list` / `vscode.textmate.grammars.load`. It does not use
-the Python asset router. The separate HTTP resource boundary in
+Active grammar discovery/content travels over `/rpc/editor` as
+`editor.textmate.catalog.get` / `editor.textmate.grammar.get`; there is no WBA or
+HTTP fallback. The obsolete WBA grammar aliases, handlers and duplicate scanner
+are removed. Catalog metadata is available from persisted registry state before
+WBA connects. Grammar bodies remain backend-owned lazy reads and are bounded to
+4 MiB. Each body read verifies the exact projection revision, managed extension
+root, relative path, recorded size and mtime. Install/update/uninstall scans publish
+a revision fact; editors atomically dispose stale token providers and rebuild only
+the active language without taking focus. The separate HTTP resource boundary in
 `monaco_editor/editor_asset_routes.py` serves `/ui/monaco_editor/textmate/onig.wasm`,
 Monaco ESM/language assets and theme JSON, retaining native OTA/APK interception
 and CSS-module shim behavior. `editor_backend.py` owns no HTTP routes or web
@@ -2347,6 +2356,18 @@ semantic style property. TextMate-derived rules remain the fallback when a
 theme has no explicit semantic style. This keeps encoded TextMate scopes,
 semantic-token rules, and visible Monaco theme state aligned without a
 separate built-in-theme parser.
+TextMate grammar catalog persistence is independent of selected-theme projection:
+the extension registry stores only bounded contribution descriptors, identities and
+filename/extension language associations, while raw grammar bodies are loaded on
+demand. Cold boot first awaits that exact client's authenticated editor RPC
+connection, then prepares the selected theme, catalog, Oniguruma factory and active
+grammar concurrently before creating the first document model. Socket construction
+is not readiness, and one warm client cannot satisfy another client's barrier. Later file-model
+replacements use the same syntax barrier. Neither path waits for WBA; its language
+configuration and intelligence attach asynchronously after syntax is visible. The
+browser never receives the installed grammar corpus or theme collection. A changed
+or missing grammar fails the revision-checked request until the next registry scan
+publishes a coherent catalog.
 The standalone matcher carries VS Code's built-in `member` -> `method` type
 inheritance; extension-defined semantic type hierarchies are not yet registered
 in the standalone editor.
@@ -4665,11 +4686,12 @@ results; these are observation boundaries, not new readiness gates.
 
 During startup transport investigation, `[wba_startup_transport]` browser records
 are capped at 80 per editor realm, independently of backend runtime-debug. They
-trace Socket.IO manager/namespace boundaries and catalog/grammar RPC timing,
+trace Socket.IO manager/namespace boundaries and language/provider RPC timing,
 without RPC payloads or changing reconnect policy. Runtime-debug WBA records
 `socket.listener.ready` and up to 20 Engine.IO connection/error events. The static
-framework WBA proxy targets localhost:18181; TextMate catalog/grammar requests need
-that socket, but do not await document-open acknowledgements or language activation.
+framework WBA proxy targets localhost:18181. TextMate catalog/grammar requests use
+the editor lane and do not depend on that socket, document-open acknowledgement or
+language activation.
 
 Shared Rust proxy diagnostics under runtime-debug emit `websocket_startup_timing`
 for WBA public-route arrival and bridge upgrade/upstream-connect/closure boundaries.

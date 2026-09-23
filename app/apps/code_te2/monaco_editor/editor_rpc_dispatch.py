@@ -35,6 +35,8 @@ from .editor_rpc_contract import (
     EDITOR_RPC_METHOD_SAVE,
     EDITOR_RPC_METHOD_SAVE_SNAPSHOT_RESPONSE,
     EDITOR_RPC_METHOD_SCROLL_STATE_PUBLISH,
+    EDITOR_RPC_METHOD_TEXTMATE_CATALOG_GET,
+    EDITOR_RPC_METHOD_TEXTMATE_GRAMMAR_GET,
     JSONRPC_METHOD_NOT_FOUND,
     EditorRpcDispatchError,
 )
@@ -106,6 +108,25 @@ async def dispatch_editor_rpc_request(
         from ..stores import get_preferences_store
         preferences = get_preferences_store().get_preferences(active_project())
         return await asyncio.to_thread(resolve_selected_theme, preferences)
+
+    if method == EDITOR_RPC_METHOD_TEXTMATE_CATALOG_GET:
+        from ..textmate_projection import get_textmate_catalog
+
+        return await asyncio.to_thread(get_textmate_catalog)
+
+    if method == EDITOR_RPC_METHOD_TEXTMATE_GRAMMAR_GET:
+        from ..textmate_projection import TextmateProjectionError, get_textmate_grammar_body
+
+        grammar_id = params.get("id")
+        revision = params.get("revision")
+        if not isinstance(grammar_id, str) or not grammar_id:
+            raise EditorRpcDispatchError(-32602, "textmate_grammar_id_required")
+        if not isinstance(revision, str) or not revision:
+            raise EditorRpcDispatchError(-32602, "textmate_revision_required")
+        try:
+            return await asyncio.to_thread(get_textmate_grammar_body, grammar_id, revision)
+        except TextmateProjectionError as exc:
+            raise EditorRpcDispatchError(-32000, str(exc)) from exc
 
     if method == "editor.preferences.get":
         from ..stores import get_preferences_store

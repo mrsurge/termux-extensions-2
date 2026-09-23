@@ -752,25 +752,37 @@ interface MonacoBootWindowLike extends Window {
     getWindow: function () {
       return window;
     },
-    getApiBase: function () {
-      return apiBase;
-    },
     fetchFn: _fetch,
-    fetchJsonWithBase: function (path, init) {
-      return fetchJsonWithBase(_fetch, apiBase, path, init);
-    },
     buildUiUrl: function (path) {
       return buildUiUrl(apiBase, path);
     },
     normalizeLanguage: normalizeLanguage,
-    editorWorkbenchCall: editorWorkbenchCall,
+    editorRpcCall: editorRpcCall,
   } as Parameters<typeof createEditorTextmateRuntime>[0]);
+  var ensureTextmateTokenization = textmateRuntime.ensureTextmateTokenization;
+
+  editorRpcTransport.onNotification(
+    EDITOR_RPC_NOTIFICATIONS.textmateProjectionChanged,
+    function (params) {
+      const revision = typeof params.revision === 'string' ? params.revision : null;
+      void textmateRuntime.refreshTextmateProjection(revision).then(function (changed) {
+        if (!changed) return;
+        const active = te2GetActiveEditorAndModel(diffEditor, editor);
+        const activeModel = active.model;
+        if (!activeModel) return;
+        const language = normalizeLanguage((activeModel as MonacoRuntimeModelLike).getLanguageId?.());
+        if (!language) return;
+        return ensureTextmateTokenization(language, currentPath);
+      }).catch(function (error) {
+        console.warn('[TextMate] projection refresh failed', error);
+      });
+    },
+  );
 
   function _applyThemeToTextmateRegistry(vscodeThemeJson: unknown): void {
     textmateRuntime.applyThemeToRegistry(vscodeThemeJson);
   }
 
-  var ensureTextmateTokenization = textmateRuntime.ensureTextmateTokenization;
   let textmateThemeOwnerRuntime: ReturnType<
     typeof createEditorTextmateThemeOwnerRuntime
   > | null = null;
@@ -845,7 +857,7 @@ interface MonacoBootWindowLike extends Window {
   }
 
   function languageFromPath(path: string | null): string {
-    return languageIdFromPath(
+    const fallback = languageIdFromPath(
       path,
       workbenchLanguageCatalogRuntime
         ? workbenchLanguageCatalogRuntime.getLanguageByFilename()
@@ -854,6 +866,19 @@ interface MonacoBootWindowLike extends Window {
         ? workbenchLanguageCatalogRuntime.getLanguageByExtension()
         : new Map<string, string>(),
     );
+    return textmateRuntime
+      ? textmateRuntime.resolveLanguageForPath(path, fallback)
+      : fallback;
+  }
+
+  async function prepareTextmateForDocument(
+    path: string,
+    fallbackLanguage = languageFromPath(path),
+  ): Promise<string> {
+    if (_languageWorkersEnabled() || !path || window.__debugDisableTextmate) {
+      return fallbackLanguage;
+    }
+    return textmateRuntime.prepareTextmateForDocument(path, fallbackLanguage);
   }
 
   function createFileModel(
@@ -2099,6 +2124,7 @@ interface MonacoBootWindowLike extends Window {
     },
     ensureEditorWithPrefs: ensureEditorWithPrefs,
     languageFromPath: languageFromPath,
+    prepareTextmateForDocument: prepareTextmateForDocument,
     monacoFileUri: function (monacoRef: unknown, path: string) {
       return monacoFileUri(
         monacoRef as MonacoRuntimeGlobal | null | undefined,
@@ -2187,14 +2213,15 @@ interface MonacoBootWindowLike extends Window {
     );
   }
 
-  function connectEditorSocket(): boolean {
+  async function connectEditorSocket(): Promise<void> {
     try {
       if (editorRpcSocket) {
         if (editorRpcSocket) editorRpcTransport.attachSocket(editorRpcSocket);
         if (wbaRpcSocket) editorWbaRpcTransport.attachSocket(wbaRpcSocket);
-        return true;
+        await editorRpcTransport.waitUntilConnected();
+        return;
       }
-      if (!window.io) return false;
+      if (!window.io) throw new Error("Socket.IO runtime is unavailable");
       editorRpcSocket = window.io(SOCKET_IO_NAMESPACES.editorRpc, {
         path: SOCKET_IO_PATHS.editor,
         transports: [...APP_WORKER_SOCKET_IO_TRANSPORTS],
@@ -2559,10 +2586,13 @@ interface MonacoBootWindowLike extends Window {
         wbaRpcSocket?.connect();
       }
 
-      return true;
+      // Socket construction is not connection readiness. Cold native clients
+      // must finish their own authenticated editor handshake before any RPC-backed
+      // theme, grammar, or document operation can run.
+      await editorRpcTransport.waitUntilConnected();
     } catch (e) {
       console.warn("[Monaco] socket connect failed", e);
-      return false;
+      throw e instanceof Error ? e : new Error(String(e));
     }
   }
 
@@ -2638,6 +2668,25 @@ interface MonacoBootWindowLike extends Window {
     editorHostActionRuntime.bindEditorHooks();
   }
 
+  function initialBootDocumentPath(): string {
+    const snapshot = initialBootSnapshot && typeof initialBootSnapshot === 'object'
+      ? initialBootSnapshot as Record<string, unknown>
+      : null;
+    const editorSsot = snapshot?.editor_ssot && typeof snapshot.editor_ssot === 'object'
+      ? snapshot.editor_ssot as Record<string, unknown>
+      : null;
+    const hostState = snapshot?.host_state && typeof snapshot.host_state === 'object'
+      ? snapshot.host_state as Record<string, unknown>
+      : null;
+    const file = editorSsot?.file && typeof editorSsot.file === 'object'
+      ? editorSsot.file as Record<string, unknown>
+      : null;
+    for (const value of [file?.path, editorSsot?.currentPath, hostState?.currentPath, hostState?.lastFile]) {
+      if (typeof value === 'string' && value.trim()) return value;
+    }
+    return '';
+  }
+
   async function bootMonaco() {
     await bootMonacoRuntime(
       buildBootMonacoRuntimeDeps({
@@ -2659,6 +2708,10 @@ interface MonacoBootWindowLike extends Window {
         },
         ensureTe2DiffTheme: ensureTe2DiffTheme,
         ensureDocumentTheme: ensureDocumentTheme,
+        ensureDocumentSyntax: async function () {
+          const path = initialBootDocumentPath();
+          if (path) await prepareTextmateForDocument(path);
+        },
         ensureEditorWithPrefs: ensureEditorWithPrefs,
         applyBootSnapshot: applyBootSnapshot,
         ensureWorkbenchLanguageCatalogInstalled:

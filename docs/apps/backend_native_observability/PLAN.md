@@ -728,14 +728,15 @@ implementation nor documentation alone establishes release acceptance.
    standalone fixed scope mapping, using built-in and installed theme fixtures.
    Explicit `semanticTokenColors` already match by type/modifier/language; do not
    describe semantic tokens or Code Server built-in themes as unsupported.
-3. Investigate a bounded startup cache for TextMate grammars and theme
-   definitions. Identify their current owner, resource identity, load cost and
-   installed-extension revision before selecting persistence and invalidation
-   semantics. Warm-start use must not wait for extension-host discovery or fetch
-   the entire theme collection into the frontend. On reconnect, compare the
-   installed catalog, invalidate removed/changed entries atomically and preserve
-   unaffected ones. A missing or invalid selected theme must fail explicitly or
-   follow an approved preference policy; never silently keep stale styles.
+3. Use the persisted Python extension registry as the bounded cold-start TextMate
+   grammar projection. A registry scan stores complete contribution descriptors
+   and one deterministic revision; typed editor RPC exposes catalog metadata and
+   lazy, revision-checked grammar bodies before WBA is connected. Install/update/
+   uninstall scans publish only the new revision, causing editors to dispose stale
+   token providers and rebuild from one atomic catalog. Do not fall back to WBA or
+   HTTP and do not send the full grammar corpus or theme collection to the browser.
+   Theme-definition warm caching remains a separate investigation because selected
+   theme projection already has distinct backend ownership and boot semantics.
 4. Keep framework page release aligned with real HTTP availability. The generic
    app worker must release its serving hook from Uvicorn's confirmed listener
    boundary, not a fixed lifespan delay. Separately, direct WBA socket replay is
@@ -837,6 +838,18 @@ Record exact build/revision, measurement conditions and live acceptance per
 renderer. No automatic shared runtime restart, APK installation, asset-version
 bump or release is part of this plan creation. Checkpoint completed slices when
 requested, and keep unresolved reproductions distinct from completed tooling.
+
+### Backend-Owned TextMate Startup
+
+Persist bounded grammar descriptors and filename/extension language associations
+in the Python extension registry. Project the catalog over typed editor RPC and
+load only the active grammar body under exact revision/path/stat limits. On cold
+boot, await the exact client's authenticated editor RPC connection, then concurrently
+apply the selected theme and prepare the catalog, Oniguruma
+factory and active grammar before creating the document model. Use the same syntax barrier
+for later model replacement. This path must not wait for code-server, WBA, or the
+extension host; WBA language configuration and intelligence attach afterward.
+Remove the duplicate WBA grammar scanner and retain no HTTP/WBA fallback.
 
 ### WBA Completion Observability
 

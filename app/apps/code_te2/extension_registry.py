@@ -10,6 +10,7 @@ The registry retains one user-owned global settings map, which is materialized
 with TE2's generated language gates into code-server User/settings.json.
 """
 
+import hashlib
 import json
 import os
 import subprocess
@@ -114,6 +115,10 @@ def _entry_object_dict(entry: ExtensionEntry, key: str) -> dict[str, object]:
     return _object_dict(entry.get(key, {}))
 
 
+def _grammar_entries(entry: ExtensionEntry) -> list[dict[str, object]]:
+    return [_object_dict(item) for item in _object_list(entry.get("grammars", []))]
+
+
 def _registry_extension_count(registry: Registry) -> int:
     return len(_extension_map(registry.get("extensions", {})))
 
@@ -135,7 +140,7 @@ def _write_json_object_atomic(path: Path, value: dict[str, object]) -> None:
             delete=False,
         ) as file_obj:
             json.dump(value, file_obj, indent=2)
-            file_obj.write("\n")
+            _ = file_obj.write("\n")
             temp_path = Path(file_obj.name)
         os.replace(temp_path, path)
         temp_path = None
@@ -297,13 +302,20 @@ def _parse_package_json(pkg_path: Path) -> ExtensionEntry | None:
 
     contributes = _object_dict(data.get("contributes", {}))
 
-    # Extract language IDs from contributes.languages
+    # Keep the path associations needed to select a grammar before WBA starts.
+    # Full language configuration remains WBA-owned and is installed later.
     lang_ids: list[str] = []
+    language_entries: list[dict[str, object]] = []
     for lang_obj in _object_list(contributes.get("languages", [])):
         lang = _object_dict(lang_obj)
         lid = lang.get("id")
         if isinstance(lid, str) and lid:
             lang_ids.append(lid)
+            language_entries.append({
+                "id": lid,
+                "extensions": _str_list(lang.get("extensions", [])),
+                "filenames": _str_list(lang.get("filenames", [])),
+            })
 
     # Extract configuration schema
     cfg = contributes.get("configuration")
@@ -315,13 +327,36 @@ def _parse_package_json(pkg_path: Path) -> ExtensionEntry | None:
             if isinstance(block, dict):
                 cfg_schema.update(_object_dict(_object_dict(cast(object, block)).get("properties", {})))
 
-    # Grammar scopes
+    # Preserve the complete TextMate contribution. The persisted registry is
+    # available before WBA connects, while grammar bodies remain lazy reads.
     grammar_langs: list[str] = []
+    grammar_entries: list[dict[str, object]] = []
     for grammar_obj in _object_list(contributes.get("grammars", [])):
         grammar = _object_dict(grammar_obj)
         gl = grammar.get("language")
         if isinstance(gl, str) and gl:
             grammar_langs.append(gl)
+        raw_path = grammar.get("path")
+        raw_scope = grammar.get("scopeName")
+        if not isinstance(raw_path, str) or not raw_path or not isinstance(raw_scope, str) or not raw_scope:
+            continue
+        grammar_path = (pkg_path.parent / raw_path).resolve(strict=False)
+        try:
+            stat = grammar_path.stat()
+        except OSError:
+            continue
+        grammar_entries.append({
+            "path": raw_path,
+            "scopeName": raw_scope,
+            "language": gl if isinstance(gl, str) and gl else None,
+            "embeddedLanguages": _object_dict(grammar.get("embeddedLanguages", {})),
+            "tokenTypes": _object_dict(grammar.get("tokenTypes", {})),
+            "injectTo": _str_list(grammar.get("injectTo", [])),
+            "balancedBracketScopes": _str_list(grammar.get("balancedBracketScopes", [])),
+            "unbalancedBracketScopes": _str_list(grammar.get("unbalancedBracketScopes", [])),
+            "size": stat.st_size,
+            "mtime_ns": stat.st_mtime_ns,
+        })
 
     # Theme contributions
     theme_entries: list[dict[str, str]] = []
@@ -352,7 +387,9 @@ def _parse_package_json(pkg_path: Path) -> ExtensionEntry | None:
         "publisher": publisher,
         "version": data.get("version", "0.0.0"),
         "languages": lang_ids,
+        "language_contributions": language_entries,
         "grammar_languages": grammar_langs,
+        "grammars": grammar_entries,
         "themes": theme_entries,
         "configuration_schema": cfg_schema,
         "display_name": data.get("displayName", name),
@@ -398,7 +435,9 @@ def _scan_builtin_extensions() -> ExtensionMap:
             "source": "builtin",
             "active": True,
             "languages": parsed["languages"],
+            "language_contributions": parsed.get("language_contributions", []),
             "grammar_languages": parsed["grammar_languages"],
+            "grammars": parsed.get("grammars", []),
             "themes": parsed.get("themes", []),
             "is_language_features": is_lang_features,
             "display_name": parsed["display_name"],
@@ -456,7 +495,9 @@ def _scan_user_extensions() -> ExtensionMap:
             "source": "user",
             "active": True,
             "languages": parsed["languages"] if parsed else [],
+            "language_contributions": parsed.get("language_contributions", []) if parsed else [],
             "grammar_languages": parsed["grammar_languages"] if parsed else [],
+            "grammars": parsed.get("grammars", []) if parsed else [],
             "themes": parsed.get("themes", []) if parsed else [],
             "is_language_features": False,
             "display_name": parsed["display_name"] if parsed else ext_id,
@@ -557,10 +598,37 @@ def _empty_registry() -> Registry:
     return {
         "version": 2,
         "updated_at": 0,
+        "textmate_revision": "",
         "extensions": {},
         "language_slots": {},
         "user_settings": {},
     }
+
+
+def _textmate_revision(extensions: ExtensionMap) -> str:
+    """Hash only immutable grammar identities, never settings or active slots."""
+    projection: list[dict[str, object]] = []
+    for ext_id in sorted(extensions):
+        extension = extensions[ext_id]
+        if not _entry_bool(extension, "active", True):
+            continue
+        grammars = sorted(
+            _grammar_entries(extension),
+            key=lambda item: (str(item.get("path", "")), str(item.get("scopeName", ""))),
+        )
+        if not grammars:
+            continue
+        projection.append({
+            "id": ext_id,
+            "version": _entry_string(extension, "version"),
+            "path": _entry_string(extension, "path"),
+            "language_contributions": _object_list(
+                extension.get("language_contributions", [])
+            ),
+            "grammars": grammars,
+        })
+    encoded = json.dumps(projection, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _read_user_settings_file() -> dict[str, object]:
@@ -597,13 +665,13 @@ def _migrate_registry_user_settings(registry: Registry) -> bool:
     extensions = _extension_map(registry.get("extensions", {}))
     for extension in extensions.values():
         user_settings.update(_entry_object_dict(extension, "configuration_values"))
-        extension.pop("configuration_values", None)
+        _ = extension.pop("configuration_values", None)
     user_settings.update(_object_dict(registry.get("custom_settings", {})))
 
     registry["version"] = 2
     registry["extensions"] = extensions
     registry["user_settings"] = user_settings
-    registry.pop("custom_settings", None)
+    _ = registry.pop("custom_settings", None)
     return True
 
 
@@ -675,13 +743,33 @@ def scan_and_rebuild() -> Registry:
     registry: Registry = {
         "version": 2,
         "updated_at": 0,
+        "textmate_revision": _textmate_revision(all_exts),
         "extensions": all_exts,
         "language_slots": slots,
         "user_settings": user_settings,
     }
 
+    old_revision = old_registry.get("textmate_revision")
     save_registry(registry)
+    new_revision = registry["textmate_revision"]
+    if isinstance(new_revision, str) and new_revision != old_revision:
+        _publish_textmate_projection_changed(new_revision)
     return registry
+
+
+def _publish_textmate_projection_changed(revision: str) -> None:
+    """Publish scan completion from the registry's worker thread when available."""
+    try:
+        from .worker_services.event_bus import build_event, publish_threadsafe
+
+        _ = publish_threadsafe(build_event(
+            "TextmateProjectionChanged",
+            source="extension_registry",
+            payload={"revision": revision},
+        ))
+    except Exception:
+        # Registry persistence is authoritative even during pre-loop bootstrap.
+        return
 
 
 # ── Global user settings ──────────────────────────────────────────────
@@ -697,7 +785,7 @@ def set_custom_settings(settings: dict[str, object]) -> None:
     registry = load_registry()
     registry["user_settings"] = settings
     save_registry(registry)
-    rebuild_settings_gate(registry)
+    _ = rebuild_settings_gate(registry)
     print(f"[ext_registry] user settings saved: {len(settings)} keys", flush=True)
 
 
@@ -756,7 +844,7 @@ def ensure_registry_and_gate() -> Registry:
     Returns the registry for inspection.
     """
     registry = scan_and_rebuild()
-    rebuild_settings_gate(registry)
+    _ = rebuild_settings_gate(registry)
     return registry
 
 
@@ -766,8 +854,8 @@ def _require_code_server_installation() -> CodeServerInstallation:
     installation = resolve_code_server_installation()
     if installation is None:
         raise RuntimeError(
-            "TE2's managed Code Server is not installed. "
-            "Select Code Server in Languages & Extensions first."
+            "TE2's managed Code Server is not installed. Select Code Server in "
+            + "Languages & Extensions first."
         )
     return installation
 
@@ -804,7 +892,7 @@ def _post_install_result(
     vsix_stem: str | None = None,
 ) -> dict[str, object]:
     registry = scan_and_rebuild()
-    rebuild_settings_gate(registry)
+    _ = rebuild_settings_gate(registry)
 
     user_extensions = _scan_user_extensions()
     registry_extensions = _extension_map(registry.get("extensions", {}))
@@ -920,7 +1008,7 @@ def uninstall_extension(ext_id: str) -> dict[str, object]:
 
     # Re-scan to reflect removal
     registry = scan_and_rebuild()
-    rebuild_settings_gate(registry)
+    _ = rebuild_settings_gate(registry)
 
     return {
         "ok": True,
@@ -982,7 +1070,7 @@ def set_extension_config(ext_id: str, values: dict[str, object]) -> dict[str, ob
     schema_keys = set(_entry_object_dict(ext, "configuration_schema"))
     user_settings = _object_dict(registry.get("user_settings", {}))
     for key in schema_keys:
-        user_settings.pop(key, None)
+        _ = user_settings.pop(key, None)
     for key, value in values.items():
         if key in schema_keys:
             user_settings[key] = value
@@ -994,7 +1082,9 @@ def set_extension_config(ext_id: str, values: dict[str, object]) -> dict[str, ob
 def toggle_extension(ext_id: str, active: bool) -> dict[str, object]:
     """Toggle an extension active/inactive and rebuild gate."""
     registry = load_registry()
-    ext = _extension_map(registry.get("extensions", {})).get(ext_id)
+    old_textmate_revision = registry.get("textmate_revision")
+    extensions = _extension_map(registry.get("extensions", {}))
+    ext = extensions.get(ext_id)
     if not ext:
         raise ValueError(f"Extension not found: {ext_id}")
     ext["active"] = active
@@ -1004,9 +1094,14 @@ def toggle_extension(ext_id: str, active: bool) -> dict[str, object]:
     for slot in slots.values():
         if _entry_string(slot, "extension") == ext_id:
             slot["active"] = active
+    registry["extensions"] = extensions
     registry["language_slots"] = slots
+    new_textmate_revision = _textmate_revision(extensions)
+    registry["textmate_revision"] = new_textmate_revision
 
     save_registry(registry)
+    if new_textmate_revision != old_textmate_revision:
+        _publish_textmate_projection_changed(new_textmate_revision)
     return rebuild_settings_gate(registry)
 
 

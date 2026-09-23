@@ -110,22 +110,31 @@ export function createEditorTextmateThemeOwnerRuntime(
     languageApplyInflight[applyKey] = (async () => {
       try {
         const textmateDisabled = isTextmateDisabled(deps.getWindow());
-        await deps.ensureWorkbenchLanguageCatalogInstalled();
-        if (filePath) {
-          const resolved = deps.normalizeLanguage(deps.languageFromPath(filePath));
-          if (resolved) lang = resolved;
-        }
-        setModelLanguage(model, lang);
+        // Syntax is backend-projected and must not wait for the extension host.
+        // WBA enriches language identity/configuration after its own cold start.
+        const syntaxReady = textmateDisabled
+          ? Promise.resolve(false)
+          : deps.ensureTextmateTokenization(lang, filePath);
+        const workbenchCatalogReady = deps.ensureWorkbenchLanguageCatalogInstalled();
         if (textmateDisabled) {
           if (!textmateDisableLogged) {
             textmateDisableLogged = true;
             try { console.log('[TextMate] disabled by __debugDisableTextmate'); } catch (_) {}
           }
         } else {
-          const ok = await deps.ensureTextmateTokenization(lang, filePath);
-          if (!ok) return;
-          setModelLanguage(model, lang);
+          const ok = await syntaxReady;
+          if (ok) setModelLanguage(model, lang);
         }
+
+        await workbenchCatalogReady;
+        if (filePath) {
+          const resolved = deps.normalizeLanguage(deps.languageFromPath(filePath));
+          if (resolved && resolved !== lang) {
+            lang = resolved;
+            if (!textmateDisabled) await deps.ensureTextmateTokenization(lang, filePath);
+          }
+        }
+        setModelLanguage(model, lang);
         try { deps.installWorkbenchLanguageBridgeProviders(); } catch (_) {}
       } finally {
         delete languageApplyInflight[applyKey];

@@ -1,7 +1,6 @@
 import http from "node:http";
 import v8 from "node:v8";
 import path from "node:path";
-import fs from "node:fs/promises";
 import process from "node:process";
 import { Buffer } from "node:buffer";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -29,7 +28,6 @@ const bridgeMod = await import("./event-bridge.mjs");
 const dispatchMod = await import("./request-dispatch.mjs");
 const editorSocketMod = await import("./editor-socket.mjs");
 const stdioMod = await import("./stdio-protocol.mjs");
-const textmateMod = await import("./textmate-grammars.mjs");
 
 const {
   buildStatusResult: buildBridgeStatusResult,
@@ -46,7 +44,6 @@ const {
   encodeStartupBeacon,
   PipeMessagePackDecoder,
 } = stdioMod;
-const { listTextmateGrammars, loadTextmateGrammar } = textmateMod;
 
 type AdapterRuntimeConfig = Record<string, unknown> & {
   upstreamHttp: string;
@@ -646,48 +643,6 @@ async function handleJsonRpc(
     { id, method, params },
   );
   if (dispatched) return dispatched;
-
-  // ── TextMate grammar serving ──────────────────────────────────────
-  if (method === "vscode.textmate.grammars.list") {
-    const grammars = listTextmateGrammars({
-      getExtensions: () => wb.getExtensions?.() ?? [],
-      resolvePath: (basePath: string, relativePath: string) =>
-        path.resolve(basePath, relativePath),
-      readTextFile: (filePath: string) => fs.readFile(filePath, "utf8"),
-      log: (...args: unknown[]) => console.log(...args),
-    });
-    return { jsonrpc: "2.0", id, result: { ok: true, grammars } };
-  }
-
-  if (method === "vscode.textmate.grammars.load") {
-    const p = isRecord(params) ? params : {};
-    const grammarId = typeof p.id === "string" ? p.id : null;
-    if (!grammarId) {
-      return {
-        jsonrpc: "2.0",
-        id,
-        error: { code: -32602, message: "Missing required param: id" },
-      };
-    }
-    const loaded = await loadTextmateGrammar(
-      {
-        getExtensions: () => wb.getExtensions?.() ?? [],
-        resolvePath: (basePath: string, relativePath: string) =>
-          path.resolve(basePath, relativePath),
-        readTextFile: (filePath: string) => fs.readFile(filePath, "utf8"),
-        log: (...args: unknown[]) => console.log(...args),
-      },
-      grammarId,
-    );
-    if (!loaded.ok) {
-      return {
-        jsonrpc: "2.0",
-        id,
-        error: { code: -32000, message: loaded.error },
-      };
-    }
-    return { jsonrpc: "2.0", id, result: loaded };
-  }
 
   // Placeholder: next step will implement connect/bootstrap and high-level calls
   // like vscode.symbols/vscode.hover/vscode.openFile/etc.

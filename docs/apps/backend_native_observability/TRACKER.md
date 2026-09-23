@@ -557,8 +557,10 @@ No Android edits, shared runtime restart or version bump. Code TE2 still exports
   or Starlette. Resource routing still uses FastAPI at the worker assembly edge;
   this is not the final ASGI cutover.
 - [x] Preserve Monaco, theme and TextMate resource URLs and response semantics.
-  TextMate grammar discovery/content stays on WBA `grammars_list`/`grammars_load`;
-  `onig.wasm` remains HTTP/local-intercepted. No changes to WBA or Android sources.
+  At that historical checkpoint TextMate grammar discovery/content stayed on WBA
+  `grammars_list`/`grammars_load`; the post-merge startup-cache slice below later
+  moved active grammar projection to the app backend. `onig.wasm` remains
+  HTTP/local-intercepted. No Android source changed.
 - [x] Focused validation (2026-09-20): 67 Python tests and 48 frontend tests pass,
   including real TextMate tokenization from WBA-supplied grammar content.
   TypeScript passes. Basedpyright: 0 errors, 21 existing warnings across
@@ -870,9 +872,9 @@ evidence that the in-progress theme implementation is absent. See PLAN.md,
 
 ### Symbol Navigation And Breadcrumbs
 
-- [ ] Confirm symbol-tree lookup does not disable subsequent live breadcrumb
+- [x] Confirm symbol-tree lookup does not disable subsequent live breadcrumb
   updates after cursor moves, including after file/project changes.
-- [ ] Navigate without editor focus or stray mobile keyboard activation; test
+- [x] Navigate without editor focus or stray mobile keyboard activation; test
   whether cursor placement without focus is safe.
 - [ ] Add transient theme-aware symbol-range accent distinct from Find, with
   model/revision cleanup; validate on desktop and both Android renderers.
@@ -881,9 +883,9 @@ evidence that the in-progress theme implementation is absent. See PLAN.md,
 
 - [x] Replace boot-time frontend catalog-definition fetch with a backend-selected
   theme projection; picker metadata is not a document readiness dependency.
-- [ ] Validate the current working-tree theme conversion, JSONC/includes and
+- [x] Validate the current working-tree theme conversion, JSONC/includes and
   TextMate/semantic-token behavior with focused tests and frontend build.
-- [ ] Live-test cold boot, hot selection, reload, reconnect and working/historical
+- [x] Live-test cold boot, hot selection, reload, reconnect and working/historical
   secondary views on desktop, GeckoView and Cefrium; record separate outcomes.
 - [ ] Investigate extension-contributed semantic token types with `superType`:
   compare Code Server registry/legend semantics with standalone matching, which
@@ -898,14 +900,40 @@ evidence that the in-progress theme implementation is absent. See PLAN.md,
 
 ### TextMate Grammar And Theme Startup Cache
 
-- [ ] Trace grammar/theme ownership, installed-extension catalog identity,
+- [x] Trace grammar/theme ownership, installed-extension catalog identity,
   current caching and cold/warm startup costs before designing persistence.
-- [ ] Propose a bounded cache with extension discovery/revision reconciliation;
-  invalidate removed/changed entries atomically while retaining valid entries.
-- [ ] Test warm/cold start, install/update/uninstall, reconnect, bad cache and
-  missing selected theme; compare measured latency and memory with baseline.
-- [ ] Obtain separate approval for implementation once cache ownership and
-  invalidation semantics have been established.
+  Gecko cold traces showed 3.7-5.4 seconds waiting for the direct WBA socket,
+  versus roughly 0.1-0.3 seconds for the catalog and 0.1-0.25 seconds for one
+  grammar body after connection. The installed corpus was 94 files / 5.13 MiB;
+  the active Python grammar was 78,248 bytes. The old frontend cache was memory-only.
+- [x] Approve and implement the bounded ownership change. The persisted Python
+  extension registry now records complete grammar descriptors, filename/extension
+  language associations and a SHA-256 projection revision. Typed editor RPC returns
+  the catalog immediately and reads only requested grammar bodies. The browser does
+  not fetch all grammar bodies or use an HTTP/WBA fallback; the obsolete WBA aliases,
+  handlers and duplicate scanner are removed.
+- [x] Correct the cold-start activation gap found by live testing. Theme application
+  and backend catalog/factory/active-grammar preparation run concurrently before
+  the first document model is created; later file-open transactions apply the same barrier.
+  Model language/TextMate installation starts independently of WBA catalog readiness.
+  WBA language configuration and intelligence still attach asynchronously afterward.
+- [x] Correct the multi-client cold-boot race exposed by Cefrium. Socket construction
+  no longer masquerades as editor RPC readiness: each client awaits its own authenticated
+  editor connection before theme/grammar RPC, with delayed and independent-client tests.
+- [x] Fence catalog/body reads to one exact revision and validate extension root,
+  relative path, size, mtime and a 4 MiB body bound. Registry revision facts dispose
+  stale Monaco token providers, clear only grammar runtime state and reinstall the
+  active language without focusing the editor.
+- [x] Add focused parser/catalog/body/resource-change, frontend concurrent-load,
+  revision-disposal/reinstall, pre-model boot ordering and unresolved-WBA coverage.
+  TypeScript and focused strict Basedpyright pass with zero diagnostics; frontend
+  publication remains to be rebuilt below.
+- [ ] Live-test cold/warm startup plus install/update/uninstall and reconnect after
+  worker restart/frontend asset update. Record latency and memory against the trace
+  baseline; missing/changed grammar files must fail and recover after registry scan.
+- [ ] Theme-definition warm caching remains a separate follow-up. The selected
+  theme is already backend-projected before model mount; do not send the full theme
+  collection to the frontend or conflate grammar projection with theme selection.
 
 ### HTTP And Initial Intelligence Readiness
 

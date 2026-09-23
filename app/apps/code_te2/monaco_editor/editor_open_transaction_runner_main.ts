@@ -28,6 +28,7 @@ interface RunEditorOpenTransactionDeps {
   setModel(model: OpenModelLike | null): void;
   ensureEditorWithPrefs(): Promise<unknown>;
   languageFromPath(path: string): string;
+  prepareTextmateForDocument(path: string, fallbackLanguage: string): Promise<string>;
   monacoFileUri(monacoRef: unknown, path: string): EditorUriLike | null;
   applyLanguageToModel(model: OpenModelLike, lang: string, absPath: string): void;
   createFileModel(content: string, lang: string, absPath: string): OpenModelLike;
@@ -144,7 +145,8 @@ export async function runEditorOpenTransaction(
   try { deps.bcUpdatePath(currentPath, !sameFileNavigationOnly); } catch (_) {}
 
   try {
-    const lang = deps.languageFromPath(currentPath);
+    const fallbackLanguage = deps.languageFromPath(currentPath);
+    const lang = await deps.prepareTextmateForDocument(currentPath, fallbackLanguage);
     let model = deps.getModel();
     const editor = deps.getEditor();
     const diffEditor = deps.getDiffEditor();

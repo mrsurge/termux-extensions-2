@@ -48,11 +48,30 @@ test('WBA socket is explicitly gated while the editor socket stays immediate', (
   assert.match(source, /if \(\(window as Window & \{ __te2AdapterReady\?: boolean \}\)\.__te2AdapterReady\) \{\s*wbaRpcSocket\?\.connect\(\)/);
 });
 
+test('TextMate grammar projection has no WBA transport fallback', () => {
+  const transportSource = fs.readFileSync(
+    path.join(appRoot, 'monaco_editor/editor_wba_rpc_transport.ts'),
+    'utf8',
+  );
+  const serverSource = fs.readFileSync(
+    path.join(
+      appRoot,
+      'workbench_protocol_proxy/node_workbench_adapter/src/server/server.ts',
+    ),
+    'utf8',
+  );
+  for (const source of [transportSource, serverSource]) {
+    assert.doesNotMatch(source, /vscode\.textmate\.grammars/);
+    assert.doesNotMatch(source, /grammars_(?:list|load)/);
+  }
+});
+
 async function importTypeScript(relativePath) {
   const result = await build({
     entryPoints: [path.join(appRoot, relativePath)],
     bundle: true,
     format: 'esm',
+    mainFields: ['module', 'main'],
     platform: 'node',
     target: 'es2022',
     write: false,
@@ -1004,6 +1023,10 @@ test('visible editor open completion does not await WBA or agent hydration', asy
     },
     ensureEditorWithPrefs: async () => {},
     languageFromPath: () => 'python',
+    prepareTextmateForDocument: async (_path, fallbackLanguage) => {
+      modelLifecycleOrder.push('syntax');
+      return fallbackLanguage;
+    },
     monacoFileUri: (_monaco, pathValue) => ({ toString: () => `file://${pathValue}` }),
     applyLanguageToModel: () => {},
     createFileModel: (content, languageId, pathValue) => ({
@@ -1071,6 +1094,11 @@ test('visible editor open completion does not await WBA or agent hydration', asy
   assert.equal(agentHydrationCalls, 1);
   assert.deepEqual(baselineRequests, [{ immediate: true, reason: 'open' }]);
   assert.deepEqual(breadcrumbUpdates, [true]);
+  assert.ok(
+    modelLifecycleOrder.indexOf('syntax') <
+      modelLifecycleOrder.indexOf('editor:setModel'),
+    'syntax must be prepared before the replacement model is attached',
+  );
   assert.ok(
     modelLifecycleOrder.indexOf('editor:setModel') <
       modelLifecycleOrder.indexOf('dispose:old'),
@@ -1179,17 +1207,22 @@ test('TextMate catalog and factory initialization are shared across concurrent c
     fetchJsonWithBase: async () => ({}),
     buildUiUrl: (value) => value,
     normalizeLanguage: (value) => String(value || ''),
-    editorWorkbenchCall: async (method, params) => {
-      if (method === 'grammars_load') {
+    editorRpcCall: async (method, params) => {
+      if (method === 'editor.textmate.grammar.get') {
         grammarLoads.push(params.id);
-        return { ok: true, raw: JSON.stringify({ scopeName: 'source.test', patterns: [
+        assert.equal(params.revision, 'grammar-revision-1');
+        return { ok: true, revision: 'grammar-revision-1', raw: JSON.stringify({ scopeName: 'source.test', patterns: [
           { match: 'hello', name: 'keyword.test' },
         ] }) };
       }
-      assert.equal(method, 'grammars_list');
+      assert.equal(method, 'editor.textmate.catalog.get');
       grammarListCalls += 1;
       await settlePromises();
-      return { grammars: [{ id: 'test.ext/syntaxes/test.json', scopeName: 'source.test', language: 'test' }] };
+      return {
+        revision: 'grammar-revision-1',
+        languages: [{ id: 'test', extensions: ['.test'], filenames: ['Testfile'] }],
+        grammars: [{ id: 'test.ext/syntaxes/test.json', scopeName: 'source.test', language: 'test' }],
+      };
     },
   });
 
@@ -1200,12 +1233,163 @@ test('TextMate catalog and factory initialization are shared across concurrent c
   assert.equal(first, second);
   assert.equal(grammarListCalls, 1);
   assert.equal(wasmFetches, 1);
-  // Grammar content remains WBA-owned; only the WASM runtime is fetched as HTTP.
+  // Grammar content remains backend-owned; only the WASM runtime is fetched as HTTP.
   const { grammar } = await first.createGrammar('test', 1);
   const tokens = grammar.tokenizeLine('hello', null).tokens;
   assert.ok(tokens[0].scopes.includes('keyword.test'));
   assert.deepEqual(grammarLoads, ['test.ext/syntaxes/test.json']);
   assert.equal(wasmFetches, 1);
+});
+
+test('TextMate resolves and installs document syntax before WBA language enrichment', async () => {
+  const { createEditorTextmateRuntime } = await importTypeScript(
+    'monaco_editor/editor_textmate_runtime.ts',
+  );
+  const wasm = fs.readFileSync(path.join(appRoot, 'monaco_editor/textmate/onig.wasm'));
+  const installed = [];
+  const runtime = createEditorTextmateRuntime({
+    getWindow: () => ({
+      monaco: {
+        editor: { getModels: () => [] },
+        languages: {
+          setColorMap: () => {},
+          getLanguages: () => [{ id: 'test' }],
+          register: () => {},
+          setTokensProvider: (language) => { installed.push(language); },
+          getEncodedLanguageId: () => 1,
+        },
+      },
+    }),
+    fetchFn: async () => new Response(wasm),
+    buildUiUrl: (value) => value,
+    normalizeLanguage: (value) => String(value || ''),
+    editorRpcCall: async (method) => {
+      if (method === 'editor.textmate.catalog.get') {
+        return {
+          revision: 'grammar-revision-1',
+          languages: [{ id: 'test', extensions: ['.test'], filenames: ['Testfile'] }],
+          grammars: [{ id: 'test.ext/syntaxes/test.json', scopeName: 'source.test', language: 'test' }],
+        };
+      }
+      return {
+        ok: true,
+        revision: 'grammar-revision-1',
+        raw: JSON.stringify({ scopeName: 'source.test', patterns: [] }),
+      };
+    },
+  });
+
+  assert.equal(await runtime.prepareTextmateForDocument('/workspace/value.test', 'plaintext'), 'test');
+  assert.deepEqual(installed, ['test']);
+  assert.equal(runtime.resolveLanguageForPath('/workspace/Testfile', 'plaintext'), 'test');
+});
+
+test('model TextMate installation is not serialized behind WBA catalog readiness', async () => {
+  const { createEditorTextmateThemeOwnerRuntime } = await importTypeScript(
+    'monaco_editor/editor_textmate_theme_owner_runtime.ts',
+  );
+  const events = [];
+  const catalog = deferred();
+  const runtime = createEditorTextmateThemeOwnerRuntime({
+    getWindow: () => ({
+      monaco: { editor: { setModelLanguage: (_model, language) => events.push(`language:${language}`) } },
+    }),
+    getDocument: () => ({}),
+    ensureTe2DiffTheme: () => {},
+    applyMonacoThemeRuntime: async () => {},
+    getSelectedTheme: async () => ({}),
+    vscodeThemeToMonacoTheme: () => ({}),
+    applyThemeToTextmateRegistry: () => {},
+    getLanguageWorkersEnabled: () => false,
+    normalizeLanguage: (value) => String(value || ''),
+    languageFromPath: () => 'test',
+    ensureWorkbenchLanguageCatalogInstalled: () => catalog.promise,
+    ensureTextmateTokenization: async () => { events.push('syntax'); return true; },
+    installWorkbenchLanguageBridgeProviders: () => events.push('providers'),
+  });
+
+  runtime.applyLanguageToModel({}, 'test', '/workspace/value.test');
+  await settlePromises();
+  assert.ok(events.includes('syntax'));
+  assert.ok(!events.includes('providers'));
+  catalog.resolve(true);
+  await settlePromises();
+  assert.ok(events.includes('providers'));
+});
+
+test('TextMate projection revisions dispose stale providers and reinstall from the new catalog', async () => {
+  const { createEditorTextmateRuntime } = await importTypeScript(
+    'monaco_editor/editor_textmate_runtime.ts',
+  );
+  const wasm = fs.readFileSync(path.join(appRoot, 'monaco_editor/textmate/onig.wasm'));
+  let revision = 1;
+  const grammarLoads = [];
+  const disposedProviders = [];
+  const installedProviders = [];
+  const models = [{ resetTokenizationCalls: 0, resetTokenization() { this.resetTokenizationCalls += 1; } }];
+  const runtime = createEditorTextmateRuntime({
+    getWindow: () => ({
+      monaco: {
+        editor: { getModels: () => models },
+        languages: {
+          setColorMap: () => {},
+          getLanguages: () => [{ id: 'test' }],
+          register: () => {},
+          setTokensProvider: (_language, provider) => {
+            installedProviders.push(provider);
+            const providerNumber = installedProviders.length;
+            return { dispose: () => disposedProviders.push(providerNumber) };
+          },
+          getEncodedLanguageId: () => 1,
+        },
+      },
+    }),
+    fetchFn: async () => new Response(wasm),
+    buildUiUrl: (value) => value,
+    normalizeLanguage: (value) => String(value || ''),
+    editorRpcCall: async (method, params) => {
+      const currentRevision = `grammar-revision-${revision}`;
+      if (method === 'editor.textmate.catalog.get') {
+        return {
+          revision: currentRevision,
+          grammars: [{
+            id: `test.ext/syntaxes/test-${revision}.json`,
+            scopeName: 'source.test',
+            language: 'test',
+          }],
+        };
+      }
+      assert.equal(method, 'editor.textmate.grammar.get');
+      assert.equal(params.revision, currentRevision);
+      grammarLoads.push(params.id);
+      return {
+        ok: true,
+        revision: currentRevision,
+        raw: JSON.stringify({
+          scopeName: 'source.test',
+          patterns: [{ match: `revision-${revision}`, name: `keyword.revision-${revision}` }],
+        }),
+      };
+    },
+  });
+
+  assert.equal(await runtime.ensureTextmateTokenization('test', '/workspace/test.ext'), true);
+  assert.equal(installedProviders.length, 1);
+  assert.deepEqual(grammarLoads, ['test.ext/syntaxes/test-1.json']);
+
+  assert.equal(await runtime.refreshTextmateProjection('grammar-revision-1'), false);
+  assert.deepEqual(disposedProviders, []);
+
+  revision = 2;
+  assert.equal(await runtime.refreshTextmateProjection('grammar-revision-2'), true);
+  assert.deepEqual(disposedProviders, [1]);
+  assert.equal(await runtime.ensureTextmateTokenization('test', '/workspace/test.ext'), true);
+  assert.equal(installedProviders.length, 2);
+  assert.deepEqual(grammarLoads, [
+    'test.ext/syntaxes/test-1.json',
+    'test.ext/syntaxes/test-2.json',
+  ]);
+  assert.ok(models[0].resetTokenizationCalls >= 1);
 });
 
 test('Android Gecko keyboard recovery synchronously restores focus', async () => {
