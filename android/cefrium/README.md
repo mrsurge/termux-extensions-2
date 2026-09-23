@@ -23,15 +23,11 @@ carried locally. Its POM declares the interface artifact with Maven `provided`
 scope, which Gradle does not add to the consumer compile/R8 classpath, so TE2 must
 temporarily retain the extracted `window-extensions-core-1.0.0.jar` as
 `compileOnly`. Do not restore the duplicate local keep rule. Cefrium also exposes
-HTTP-triggered download handling, but TE2 does not wire that API yet; downloads
-initiated by the file explorer therefore remain future work. Direct
-`file:///android_asset/...` and `file:///android_res/...` page/subresource loading
-is available now.
-TE2 retains its current relay-hosted UI in this upgrade. A future asset-hosting
-change can serve SPA bytes from the APK while the native runtime uses the
-configured `frameworkBaseUrl` to retarget its localhost relay. Browser API,
-Socket.IO and WebSocket traffic must continue through that relay rather than
-connecting directly to the remote framework origin.
+HTTP-triggered download handling. TE2 registers that handler before page load,
+serializes Android document-picker presentation, downloads into app-private
+staging storage, and copies completed bytes to the selected `content://`
+document. The integration requests no broad storage permission and removes
+owned staging or destination files after cancellation and failure.
 
 **`:cefrium` is no longer a subproject of the root `android/` Gradle build.**
 Cefrium `0.8.0` ships Chromium 152's Java 25 (class-file 69) bytecode, which

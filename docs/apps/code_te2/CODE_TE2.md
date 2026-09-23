@@ -3545,7 +3545,7 @@ This artifact-driven path is required on Termux because Node reports the Android
 
 ## 42) Android Cefrium Client
 
-The standalone `android/cefrium` build pins Cefrium SDK/plugin 0.8.8 while reusing
+The standalone `android/cefrium` build pins Cefrium SDK/plugin 0.9.0 while reusing
 the shared Android source and packaged assets. It is no longer a subproject of
 `android/`: AGP 9.4 / Gradle 9.7.1 / JDK 25 / compileSdk 37 are isolated from
 GeckoView's existing toolchain. GeckoView in `android/app` remains the primary renderer.
@@ -3568,12 +3568,12 @@ Cefrium always loads TE2 through one dynamically allocated `127.0.0.1` relay ori
 
 `CefriumApplication.attachBaseContext` selects `--javaless-renderers=disabled`
 before the SDK initialization provider runs, preserving existing switches. SDK
-0.8.8 lacks the native-only sandboxed service that Chromium otherwise selects,
+0.9.0 lacks the native-only sandboxed service that Chromium otherwise selects,
 causing a fatal `NameNotFoundException`. Use the SDK's existing Java-backed
 services; reassess this compatibility policy when upgrading the SDK. Gecko is
 unaffected. Activity or application `onCreate` is too late for this policy.
 
-With SDK 0.8.8, main app, Inspector and Processes browser creation immediately
+With SDK 0.9.0, main app, Inspector and Processes browser creation immediately
 sets `setPinchToZoomEnabled(false)` before page loading. This native pinch policy
 is independent of the older main-surface selection/readability corrections
 described below, which remain intact. On 2026-09-18, Termux JDK 25/SDK 37 debug
@@ -3596,6 +3596,17 @@ The relay behavior is:
 Only paths declared by Cefrium asset routing are served from installed assets. Dynamic API, Socket.IO, terminal, and app-worker traffic pass through the relay.
 
 The activity provides shared launcher and Settings behavior, native controls, app-scoped quit, native context menus, trusted-localhost clipboard permission, file-picker forwarding, renderer recovery, lifecycle pause/resume, native diagnostics, and TE2 console access.
+
+The main browser installs Cefrium's controllable download handler before any
+page navigation. Each request waits for an explicit Android `CreateDocument`
+result; picker presentation is serialized while accepted downloads may proceed
+concurrently. Cefrium writes only to an app-private staging file. On completion,
+TE2 copies those bytes off the UI thread into the chosen `content://` document
+and removes the staging file. Picker cancellation, native interruption, browser
+close, and Activity teardown cancel retained callbacks/download ids and remove
+owned partial state. This path requests no broad storage permission. Automated
+debug tests and APK assembly pass; live HTTP/`blob:`/`data:` acceptance remains
+a separate device check.
 
 Native app URLs retain `gv_native=1` for the established app-shell contract and add exact `te2_renderer=gecko|cefrium` identity. Code TE2 resolves Electron first, then the explicit Android renderer. A missing renderer on an established `gv_native=1` URL is legacy Gecko compatibility for APKs receiving newer OTA frontend assets; an unknown explicit renderer still fails instead of falling back to browser-local identity. Cefrium uses an exact-relay-origin `cefriumQuery` handler for stable installation identity and Run Profile surface registration, so it never waits for Gecko's WebExtension bridge. The app shell persists and forwards valid explicit renderer identity across its own navigation.
 
@@ -3654,7 +3665,7 @@ cd android
 Shared variant Kotlin directories are explicitly registered in Cefrium's AGP 9
 source sets; Java source registration alone does not include the debug reflection
 implementation, its tests, or non-debug stubs. `android/verify-native-debug.init.gradle`
-supports each independent build and checks source/dependency isolation. The 0.8.8
+supports each independent build and checks source/dependency isolation. The 0.9.0
 integration still requires a Cefrium build and live acceptance on the new toolchain.
 
 ---

@@ -47,4 +47,21 @@ class CefriumStartupWiringTest {
         assertTrue(File("libs/window-extensions-core-1.0.0.jar").isFile)
         assertFalse(rules.contains(externalConsumer))
     }
+
+    @Test
+    fun downloadHandlerIsInstalledBeforePageNavigationAndClosedWithBrowser() {
+        val source = File("src/main/java/com/termux/extensions/MainActivity.kt").readText()
+        val initializeBrowser = source.substringAfter("private fun initializeBrowser()")
+            .substringBefore("private fun installImeInsetsObserver()")
+        val onDestroy = source.substringAfter("override fun onDestroy()")
+            .substringBefore("companion object")
+
+        assertTrue(initializeBrowser.contains("browser.setDownloadHandler(downloadCoordinator)"))
+        assertTrue(
+            initializeBrowser.indexOf("browser.setDownloadHandler(downloadCoordinator)") <
+                initializeBrowser.indexOf("browser.setOnUrlChangedListener"),
+        )
+        assertTrue(onDestroy.contains("downloadCoordinator.close()"))
+        assertTrue(onDestroy.contains("browser.setDownloadHandler(null)"))
+    }
 }
