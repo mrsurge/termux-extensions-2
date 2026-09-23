@@ -927,13 +927,125 @@ evidence that the in-progress theme implementation is absent. See PLAN.md,
 - [x] Add focused parser/catalog/body/resource-change, frontend concurrent-load,
   revision-disposal/reinstall, pre-model boot ordering and unresolved-WBA coverage.
   TypeScript and focused strict Basedpyright pass with zero diagnostics; frontend
-  publication remains to be rebuilt below.
-- [ ] Live-test cold/warm startup plus install/update/uninstall and reconnect after
-  worker restart/frontend asset update. Record latency and memory against the trace
-  baseline; missing/changed grammar files must fail and recover after registry scan.
+  publication was rebuilt before user acceptance.
+- [x] User live acceptance of startup, grammar/theme projection and multi-client
+  readiness. Checkpoint `bb4adf06` is published; symbol highlighting remains open.
+- [ ] Separately exercise extension install/update/uninstall and missing/changed
+  grammar recovery after registry scan. Record latency/memory against the trace
+  baseline; general live acceptance does not establish this lifecycle matrix.
 - [ ] Theme-definition warm caching remains a separate follow-up. The selected
   theme is already backend-projected before model mount; do not send the full theme
   collection to the frontend or conflate grammar projection with theme selection.
+
+### Mobile Editor Gesture Ergonomics
+
+- [x] Trace Ctrl+Up/Down from shared extra-key dispatch through Monaco command/keybinding
+  resolution. Identify the upstream paragraph commands and preserve Ctrl+Left/Right
+  word navigation, direct hardware keyboard behavior and terminal-specific semantics.
+- [x] Investigate double-tap selection with Gecko pointer/gesture instrumentation
+  and pinned Monaco/touch-fork source; confirm handle interception. Inspect both
+  renderers' live handler registrations and validate the fix on both clients.
+- [x] Trace mobile long press through Monaco hover scheduling and touch-selection
+  ownership in source. Both renderers pass user live acceptance; no claim of a
+  captured Cefrium event trace is needed to establish that acceptance.
+- [x] Use source evidence to design a narrow Monaco-source policy that
+  preserves desktop hover but disables mobile long-press hover and lets Monaco select
+  the target word. Avoid a parallel monkey patch in the touch extension.
+- [x] Define focused source tests for tap/double-tap/long-press classification,
+  selection-handle hit testing, paragraph commands, scrolling and IME focus. Record
+  GeckoView and Cefrium acceptance separately. Monaco fork changes require a nested
+  commit/push and rebuilt parent publication.
+- [ ] Return to the outstanding theme-aware symbol-range highlight after these
+  ergonomics items are resolved or explicitly deferred.
+
+Pre-change source investigation (2026-09-22):
+
+- Shared mobile dispatch emits a synthetic key into Monaco; the default Ctrl+Up/Down
+  bindings scroll. `cursorMove` already supports `prevBlankLine` / `nextBlankLine`
+  with `select`, whitespace-only lines and document boundaries. Historical secondary
+  `historicalKeyCommand` currently rejects Ctrl+arrows, so it needs explicit coverage.
+- The touch fork shows handles on `touchstart`. Handle stems have a 32 px hit area
+  and teardrops have a 14 px expansion; opacity zero during repositioning does not
+  disable hit testing. Handles are siblings of `.lines-content`, outside Monaco's
+  registered gesture target. Live read-only Gecko inspection confirmed that DOM
+  relationship and PointerEvent support; no gesture sequence has been captured yet.
+- Monaco `base/browser/touch.ts` resets the 400 ms tap count on every touch move.
+  Its 700 ms hold is recognized on release and dispatched as a context-menu event.
+  `PointerEventHandler` forwards that event without word selection. The fallback
+  `TouchHandler` also ignores tap count when moving the caret.
+- The fork's `setupTextCursorSelectWord` is a separate short stem-tap handler
+  (under 1000 ms), not real double-tap recognition; it also schedules editor focus.
+- Touch pointer movement reaches `MouseHandler._onMouseMove` and then automatic
+  hover scheduling. The context-menu contribution focuses the editor even when
+  context menus are disabled. These are source-confirmed competing paths, but
+  their exact participation in the reported long-press bug remains unproven live.
+- Correction: `ContentHoverWidget._initTouchDrag` only drags an already-visible
+  hover; its timer does not initiate an editor-content hover. Preserve that behavior.
+
+Proposed implementation/validation scope:
+
+1. Reuse Monaco blank-line movement for Ctrl+Up/Down, including Shift selection,
+   repeat, working/secondary/historical editors and existing focus routing.
+   Keep terminal and quick-input dispatch under their existing owners.
+2. Give Monaco's editor touch path explicit tap/hold/scroll ownership with movement
+   tolerance, cancellation and per-editor double-tap tracking. A committed scroll
+   cannot become a hold or tap. Reuse native word-selection dispatch and scrolling.
+3. Make touch-fork stems non-intercepting and keep a distinct teardrop drag target;
+   remove the competing stem-tap word selector. Preserve handle offsets and dragging.
+4. Exclude editor touch gestures from automatic hover and duplicate context-menu
+   focus/selection. Keep explicit hover actions, mouse hover and hover-widget dragging.
+5. Before finalizing event filters, capture a bounded in-memory probe on each
+   available renderer: event target/type, pointer identity, motion, gesture count,
+   selection, focus and hover visibility. No text capture or on-disk runtime probe.
+6. Cover gesture classification and movement commands with source tests, then
+   typecheck/build both maintained forks and Code TE2. Publish generated assets;
+   user controls native asset updates and live acceptance. Preserve the existing
+   unrelated dirty Monaco theme sources when committing the gesture slice.
+
+Implementation approved and completed (source validation/publication below):
+
+- [x] Core paragraph commands reuse native blank-line operations; Ctrl+Shift extends
+  selection. The historical secondary allowlist includes paragraph/word movement.
+- [x] Editor-only touch arbitration retains native scroll/inertia, tolerates 10 px
+  jitter, selects on a 700 ms hold and prevents release from selecting a second time.
+  Double taps use per-editor 400 ms / 24 px tracking; scrolling is irreversible.
+- [x] Touch stems pass through text taps; teardrops retain dragging. First-tap caret
+  hit testing waits 450 ms, released immediately for nonempty selection. Hidden
+  handles are inert during geometry updates. Remove the legacy stem-tap selector.
+- [x] Source hold selection does not focus the IME. Filter touch hover/duplicate
+  context-menu events while keeping mouse and explicit hover actions.
+- [x] Bounded Gecko probe captured text taps, handle/stem interceptions and hold
+  context-menu events on release. Probe removed. Hover-presence sampling was not
+  sufficient to establish visibility, so do not claim it proved hover interference.
+- [x] Seven source tests cover dispatch/classification, cancellation, focus, native
+  paragraph boundaries/whitespace/selection and unchanged non-editor gestures.
+  Twenty-two frontend tests cover historical, mobile/secondary, modifier and palette
+  routing. Touch fork builds; full Monaco TypeScript and Code TE2 typecheck pass.
+- [x] Publish the changed Monaco ESM modules with TypeScript const-enum resolution
+  and preserved existing NLS catalog indices; rebuild the Monaco bootstrap and Code
+  TE2 host, and publish the touch UMD/CSS. No Android assets/version changed.
+  Fork commits: Monaco `f2d5196afbf`, touch selection `3c6620b` (author `mrsurge`).
+  Existing uncommitted Monaco theme sources were preserved outside the gesture commit.
+- [x] User live acceptance on GeckoView after updating native assets.
+- [x] User live acceptance on Cefrium after updating native assets.
+
+Publication correction after failed live test:
+
+- Both native clients had updated assets, but the published host embedded old Monaco.
+  Live Gecko had no `cursorParagraphUp` binding and retained `scrollLineUp` on Ctrl+Up;
+  both clients' pointer handlers lacked the new touch-arbitration fields.
+- The host build preceded the Monaco bootstrap rebuild. Both working and historical
+  loaders statically import that bootstrap, so updating bootstrap afterward could
+  not change the already-built host. This was a build-order error, not client cache.
+- Rebuild host after bootstrap; verify final host includes paragraph registration
+  and touch-arbitration implementation. Retest Ctrl+Up/Down and hold/double-tap on
+  both renderers before marking acceptance. No further gesture-policy changes were
+  made in response to this failed publication.
+- Corrected host publication completed. Code TE2 typecheck and all 22 focused
+  frontend tests pass; final host checks confirm the paragraph registration and
+  `touchActive`/`lastTouchAt` arbitration fields are embedded. Following native asset
+  updates, the user verified all issues in this ergonomics run fixed on both clients:
+  Ctrl+Up/Down paragraph movement, double-tap selection and long-press word selection.
 
 ### HTTP And Initial Intelligence Readiness
 
@@ -959,7 +1071,7 @@ evidence that the in-progress theme implementation is absent. See PLAN.md,
 - [x] Replace that semantic-only deadline with a 30-second WBA/ext-host budget
   inside a 36-second outer envelope, and discard a result if Monaco canceled its
   model request. Provider registration remains push; token payload remains pull.
-- [ ] Live-test one true cold page load: framework release follows listener
+- [x] User live acceptance of cold page load: framework release follows listener
   readiness, and diagnostics/semantic tokens appear without refresh or typing.
 
 ## Closeout

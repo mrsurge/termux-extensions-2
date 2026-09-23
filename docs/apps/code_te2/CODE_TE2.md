@@ -2490,6 +2490,44 @@ editor origin, with document-coordinate handles and a matching negative scroll
 translation initialized during selection sync. Layout and content-size events
 resync selection geometry after inline diff changes.
 
+Monaco's pointer/touch handlers opt `.lines-content` into editor gesture arbitration
+in `base/browser/editorTouchGesture.ts` and `touch.ts`. Other gesture targets keep
+their existing behavior. Editor touches tolerate 10 px movement before scrolling;
+once scrolling begins, returning to the origin cannot select text. A stationary
+700 ms hold selects through native word selection without textarea focus. Release
+cannot then emit a tap or desktop context menu. Double taps are editor-local, at
+most 400 ms apart and within 24 px. Cancel, blur, multitouch and disposal invalidate
+pending holds. Existing Monaco scrolling/inertia remains the scroll implementation.
+
+The maintained touch fork owns handle/menu presentation. It appends handles to
+`.overflow-guard`, outside the text gesture target. Stems pass through touches;
+teardrops own dragging. A first-tap caret handle stays inert for 450 ms so it cannot
+intercept the second tap. Nonempty selections release this cooldown immediately.
+Hidden/repositioning handles also stop hit testing. Source hold events reach the
+public editor context-menu event; the fork presents the menu for the existing
+selection, while the desktop context-menu contribution skips its focus operation.
+
+Touch-origin mouse movement/context-menu duplicates are filtered in the source
+pointer handler. Explicit hover actions and real mouse hover remain available.
+`ContentHoverWidget._initTouchDrag` still moves an already-visible hover; it is not
+the automatic hover trigger. No changes to guarded textarea input are needed.
+
+`cursorParagraphUp/Down` and their `Select` variants bind Ctrl+vertical arrows to
+Monaco's `cursorMove` blank-line operations. Hardware and projected extra keys use
+the same commands; historical secondary keys explicitly allow them. Ctrl+horizontal
+arrows retain word navigation, and terminal/quick-input routing stays separate.
+Validation and native-client acceptance: backend_native_observability/TRACKER.md,
+Mobile Editor Gesture Ergonomics.
+
+Monaco publication is a dependency chain, not independent builds. Both
+`editor_monaco_boot_runtime.ts` and `historical_monaco_boot.ts` statically import
+`monaco.bootstrap.bundle.js`; Code TE2's host build embeds it. After publishing
+Monaco ESM modules, run `node scripts/build_monaco_bootstrap_bundle.mjs` from the
+repository root, then `node build.mjs` from `app/apps/code_te2`. Only then publish
+the native client assets. Rebuilding bootstrap after host does not update the
+embedded Monaco in `static/dist/host.js`. Verify the final host artifact and live
+command/handler registration rather than merely the separate bootstrap artifact.
+
 ## 33) Diagnostics owner-keyed markers
 
 Extension-host diagnostics preserve their original owner. Monaco marker writes are

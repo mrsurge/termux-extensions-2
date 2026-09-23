@@ -745,6 +745,33 @@ implementation nor documentation alone establishes release acceptance.
    complete it when that model is attached. Cover both provider/model orderings
    without polling, synthetic typing, or making Python `editor.modelReady` an
    intelligence transport.
+5. Investigate three mobile-editor ergonomics issues before changing Monaco or
+   the maintained touch fork. Give Ctrl+Up/Down paragraph-navigation semantics
+   while retaining Ctrl+Left/Right word navigation. Trace double-tap selection
+   through Monaco pointer handling, touch-extension gesture state and selection
+   handle hit testing on GeckoView and Cefrium; the first-tap handle must not
+   consume the second tap. Trace long press from native pointer input through
+   Monaco hover dispatch and touch selection. If Monaco's mobile long-press hover
+   is the conflict, disable that behavior at the narrowest source-owned boundary
+   and make Monaco's long-press path select the target word; do not layer another
+   frontend monkey patch over the maintained source. Preserve desktop mouse hover,
+   mobile scrolling, handle dragging, IME focus and renderer parity. Any Monaco
+   fork edit requires its own nested commit/push and rebuilt publication before
+   parent-repo acceptance.
+
+   The source investigation found existing `cursorMove` blank-line navigation,
+   handle hit areas outside Monaco's `.lines-content` gesture target, and a shared
+   gesture recognizer that resets double-tap tracking on every movement. Monaco
+   currently sends holds to context-menu handling rather than word selection.
+   Implement editor-local tap/hold/scroll classification and reuse native word
+   selection; the touch fork should own handle presentation/dragging, not another
+   word-selection gesture. Preserve mouse/explicit hover while excluding touch
+   gestures from automatic hover and duplicate context-menu effects. Capture the
+   renderer event sequence before finalizing those filters. The hover widget's
+   own long-press timer only drags an existing hover and must remain intact.
+   Detailed source findings and validation scope are in TRACKER.md, Mobile Editor
+   Gesture Ergonomics. Implementation was approved after the source investigation;
+   native-client acceptance follows user-managed asset publication.
 
 Measure cold and warm resource/paint milestones before and after cache work.
 Cache correctness, rollback on failed refresh, extension install/uninstall and
