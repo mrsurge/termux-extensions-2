@@ -3558,6 +3558,16 @@ The visible frontend open path does not wait for WBA background hydration. `edit
 
 Code Inspector is a backend-retained bottom-drawer projection for References, Implementations, Call Hierarchy and Document Symbols. It is not a direct frontend-to-frontend channel and does not add a new socket or HTTP endpoint.
 
+Symbol navigation carries `symbol_range` (full symbol extent), `place_cursor`
+and `focus: false`, with `scroll_y: center`, from the Inspector through host
+file-open to the editor. `host/file_ops_backend.py` forwards these bounded options,
+including existing scroll aliases; the shared editor-open service validates and
+canonicalizes them. Do not rebuild a host payload that retains line/column but
+silently discards the accent or no-focus cursor-placement intent. The renderer
+keeps symbol decoration separate from Find/Inspector-result highlights. Tests in
+`tests/test_host_symbol_navigation.py` exercise the real host handler and editor
+service together, mocking only persistence/file materialization and transport.
+
 ### Flow
 
 ```text

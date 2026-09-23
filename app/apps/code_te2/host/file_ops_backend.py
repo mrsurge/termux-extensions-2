@@ -79,6 +79,12 @@ async def handle_host_open_request(
     }
     if isinstance(data.get('focus'), bool):
         payload['focus'] = data['focus']
+    # Preserve inspector/navigation intent across the host boundary. The shared
+    # editor-open service below owns range/type validation and canonical aliases.
+    for key in ('symbol_range', 'place_cursor', 'scroll_y', 'scrollY',
+                'scroll_to_top', 'scrollToTop'):
+        if key in data:
+            payload[key] = data[key]
     raw_line = data.get('line')
     if isinstance(raw_line, int):
         line = raw_line

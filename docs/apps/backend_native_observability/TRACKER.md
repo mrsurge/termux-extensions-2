@@ -879,6 +879,50 @@ evidence that the in-progress theme implementation is absent. See PLAN.md,
 - [ ] Add transient theme-aware symbol-range accent distinct from Find, with
   model/revision cleanup; validate on desktop and both Android renderers.
 
+### Closeout Follow-Ups And Deferred Identity Report
+
+- [x] Record user live acceptance of the mobile gesture slice (`86647a6a`).
+- [x] Fetch `origin/feature/desktop-deb-packaging` read-only for coordination;
+  inspected tip `c4a5f09e`, with no merge/rebase or Android source changes.
+  Phase 11 of `docs/apps/cefrium_mobile_parity/IMPLEMENTATION_PLAN.md` already
+  describes preferred per-install loopback ports, but keeps identity separate
+  from origin. Stable-origin/local-storage presentation ownership is the user's
+  newer direction to reconcile on that branch; do not implement it here yet.
+- [ ] Deferred, documentation-only: Android client-ID rejection after the
+  framework has run for a while. Both GeckoView and Cefrium are affected per user
+  report. APK/version compatibility and server-state cause are unverified.
+  Preserve multi-server retargeting and independent clients on the same server;
+  investigate only after explicit resumption and cross-branch reconciliation.
+- [x] First: diagnose Code Inspector symbol-target accent and propose the fix.
+  Existing breadcrumb continuity and no-focus navigation must remain intact.
+  Source finding: `host/file_ops_backend.py:handle_host_open_request` rebuilds a
+  partial open payload and omits `symbol_range`, `place_cursor` and `scroll_y`.
+  Inspector/open-flow send those fields and the downstream editor service accepts
+  them, but they never traverse this host boundary. Existing renderer tests bypass
+  the host handler. Live Cefrium has the target CSS and cursor-color fallback;
+  no target decoration was present before a reproduction.
+- [x] Approved host-boundary fix: forward the bounded navigation options to the
+  existing shared editor-open validator; no duplicate range parser or focus change.
+  Four new integration tests exercise the real host and editor-service handoff,
+  malformed options, scroll aliases and ordinary opens. Validation: 19 Python
+  unittest cases and 45 frontend tests pass; basedpyright reports zero errors or
+  warnings for both changed Python files. Pytest is unavailable in the current
+  interpreter, so the unittest suites ran directly.
+- [ ] User live acceptance of symbol highlighting after Code TE2 worker restart.
+  Backend-only change; no frontend/Monaco/APK rebuild or shared restart performed.
+- [ ] Next: add a small translucent bottom-right close-icon overlay button to
+  Code Inspector, shared by all its modes. Clear only Inspector-owned editor
+  highlights (result ranges and symbol accent); retain results, drawer, cursor,
+  text selection and unrelated Find/search highlights. Use existing backend-mediated
+  editor commands, preserve no-focus mobile behavior and provide an accessible
+  label/touch target. Test all highlight channels and idempotent clearing.
+- [ ] Follow-up: prevent automatic initial capitalization in filename search.
+- [ ] Follow-up: warn/confirm before fe-menubar branch checkout, preserving dirty
+  worktree safeguards and cancellation. Comparison selection is not checkout.
+- [ ] Follow-up: trace cold-boot semantic-token warning (`end character >
+  model.getLineLength(lineNumber)`). User reports no visible failure; do not hide
+  the warning, clamp data or assume theme/extension fault without evidence.
+
 ### Installed Themes: Finish And Accept
 
 - [x] Replace boot-time frontend catalog-definition fetch with a backend-selected

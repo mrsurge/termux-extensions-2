@@ -779,6 +779,47 @@ reconnect are required test cases. The approved app-lane polling-first experimen
 remains distinct from direct WBA, which stays WebSocket-only; measure it rather
 than generalizing the transport choice.
 
+## Branch Closeout Bugs And Cross-Branch Coordination
+
+The mobile gesture slice is live accepted and published in `86647a6a`. Finish the
+Code Inspector symbol-target highlight investigation first, preserving live
+breadcrumbs, source ranges, Find decorations and navigation without IME focus.
+Propose the concrete fix and tests after source/runtime evidence is collected.
+
+Record, but do not investigate or change Android client identity in this slice.
+The user reports GeckoView/Cefrium identity rejection after the framework has
+been running for a while; installed APK compatibility with other-branch changes
+is not established. Coordinate with `origin/feature/desktop-deb-packaging` and
+`docs/apps/cefrium_mobile_parity/IMPLEMENTATION_PLAN.md` before any identity work.
+The fetched plan at `c4a5f09e` includes preferred per-install loopback origins
+(Phase 11) but still separates native identity from origin/storage. The user's
+newer direction to use stable-origin local storage for client-local presentation
+preferences is pending reconciliation there, not an implemented contract here.
+Keep multi-server retargeting and multiple independent clients of one server as
+explicit requirements. Do not merge, duplicate, or preempt that implementation.
+
+Bounded follow-ups, each requiring investigation and a concrete fix scope:
+
+- Next, add a small translucent close-icon overlay button at the bottom-right of
+  the Code Inspector element, available across all Inspector modes. Its sole
+  effect is clearing Inspector-owned highlighting in the editor, including the
+  symbol-target accent. Do not dismiss results/the drawer, move or focus the
+  cursor, alter text selection or clear unrelated Find/search decorations.
+  Route the intent through the existing host/backend/editor command boundary;
+  cover symbol and result-highlight cleanup, repeat clearing, and mobile touch
+  accessibility without summoning the IME.
+- Disable automatic initial capitalization in Explorer filename search without
+  changing its search semantics or the editor's guarded IME path.
+- Require a warning/confirmation before branch checkout from the fe-menubar Git
+  selector. Inspect the existing checkout/dirty-worktree safeguards; cancellation
+  must not mutate the repository. Do not conflate comparison-ref selection with
+  actual branch checkout.
+- Investigate the cold-boot `Invalid Semantic Tokens Data From Extension: end
+  character > model.getLineLength(lineNumber)` warning. No visible failure has
+  been reported. Trace token/model/version identity before attributing it to an
+  extension, clamping token ranges or suppressing the warning. This is separate
+  from semantic-theme inheritance and styling investigations.
+
 ## Source Starting Points
 
 Recheck these at each phase; this is an orientation map, not a caller audit.
