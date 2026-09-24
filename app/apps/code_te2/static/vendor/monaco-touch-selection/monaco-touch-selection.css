@@ -55,6 +55,7 @@ html.hc-light, html.hc-light body {
   top: 0;
   display: none;
   z-index: var(--monaco-editor_touch-selection_z-index);
+  pointer-events: none;
 }
 
 .monaco-editor-touch-selections.show {
@@ -64,6 +65,17 @@ html.hc-light, html.hc-light body {
 /* The document owns drag tracking after touchstart; stale handles must not
    intercept Monaco's adjusted caret hit tests at their original position. */
 .monaco-editor-touch-selections.dragging {
+  pointer-events: none;
+}
+
+/* Only the teardrop is draggable; an invisible stem must not steal text taps. */
+.monaco-editor-touch-selections > .selector > .bottom-cursor {
+  pointer-events: auto;
+}
+
+.monaco-editor-touch-selections.dragging > .selector > .bottom-cursor,
+.monaco-editor-touch-selections.tap-pending > .selector > .bottom-cursor,
+.monaco-editor-touch-selections.position-pending > .selector > .bottom-cursor {
   pointer-events: none;
 }
 
@@ -90,7 +102,7 @@ html.hc-light, html.hc-light body {
 .monaco-editor-touch-selections > .selector > .bottom-cursor::before {
   content: "";
   position: absolute;
-  inset: -14px;
+  inset: 0 -14px -14px;
   background: transparent;
 }
 

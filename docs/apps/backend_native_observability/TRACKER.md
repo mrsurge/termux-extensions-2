@@ -557,8 +557,10 @@ No Android edits, shared runtime restart or version bump. Code TE2 still exports
   or Starlette. Resource routing still uses FastAPI at the worker assembly edge;
   this is not the final ASGI cutover.
 - [x] Preserve Monaco, theme and TextMate resource URLs and response semantics.
-  TextMate grammar discovery/content stays on WBA `grammars_list`/`grammars_load`;
-  `onig.wasm` remains HTTP/local-intercepted. No changes to WBA or Android sources.
+  At that historical checkpoint TextMate grammar discovery/content stayed on WBA
+  `grammars_list`/`grammars_load`; the post-merge startup-cache slice below later
+  moved active grammar projection to the app backend. `onig.wasm` remains
+  HTTP/local-intercepted. No Android source changed.
 - [x] Focused validation (2026-09-20): 67 Python tests and 48 frontend tests pass,
   including real TextMate tokenization from WBA-supplied grammar content.
   TypeScript passes. Basedpyright: 0 errors, 21 existing warnings across
@@ -860,6 +862,314 @@ incident can remain open without blocking an accepted instrumentation release.
 - [ ] Present compatibility fixtures, lifecycle tests and estimated scope.
 - [ ] Decide implement here or transfer to a named follow-up; record rationale.
 - [ ] If implemented: validate Monaco/TextMate and desktop/Gecko/Cefrium behavior.
+
+## Post-Merge Supplement
+
+This branch was merged into main twice and is being reused for three bounded
+follow-ups. The old Phase 5 decision-gate checklist is historical scope, not
+evidence that the in-progress theme implementation is absent. See PLAN.md,
+"Post-Merge Supplement: Symbols, Themes, And Startup Cache."
+
+### Symbol Navigation And Breadcrumbs
+
+- [x] Confirm symbol-tree lookup does not disable subsequent live breadcrumb
+  updates after cursor moves, including after file/project changes.
+- [x] Navigate without editor focus or stray mobile keyboard activation; test
+  whether cursor placement without focus is safe.
+- [ ] Add transient theme-aware symbol-range accent distinct from Find, with
+  model/revision cleanup; validate on desktop and both Android renderers.
+
+### Closeout Follow-Ups And Deferred Identity Report
+
+- [x] Record user live acceptance of the mobile gesture slice (`86647a6a`).
+- [x] Fetch `origin/feature/desktop-deb-packaging` read-only for coordination;
+  inspected tip `c4a5f09e`, with no merge/rebase or Android source changes.
+  Phase 11 of `docs/apps/cefrium_mobile_parity/IMPLEMENTATION_PLAN.md` already
+  describes preferred per-install loopback ports, but keeps identity separate
+  from origin. Stable-origin/local-storage presentation ownership is the user's
+  newer direction to reconcile on that branch; do not implement it here yet.
+- [ ] Deferred, documentation-only: Android client-ID rejection after the
+  framework has run for a while. Both GeckoView and Cefrium are affected per user
+  report. APK/version compatibility and server-state cause are unverified.
+  Preserve multi-server retargeting and independent clients on the same server;
+  investigate only after explicit resumption and cross-branch reconciliation.
+- [x] First: diagnose Code Inspector symbol-target accent and propose the fix.
+  Existing breadcrumb continuity and no-focus navigation must remain intact.
+  Source finding: `host/file_ops_backend.py:handle_host_open_request` rebuilds a
+  partial open payload and omits `symbol_range`, `place_cursor` and `scroll_y`.
+  Inspector/open-flow send those fields and the downstream editor service accepts
+  them, but they never traverse this host boundary. Existing renderer tests bypass
+  the host handler. Live Cefrium has the target CSS and cursor-color fallback;
+  no target decoration was present before a reproduction.
+- [x] Approved host-boundary fix: forward the bounded navigation options to the
+  existing shared editor-open validator; no duplicate range parser or focus change.
+  Four new integration tests exercise the real host and editor-service handoff,
+  malformed options, scroll aliases and ordinary opens. Validation: 19 Python
+  unittest cases and 45 frontend tests pass; basedpyright reports zero errors or
+  warnings for both changed Python files. Pytest is unavailable in the current
+  interpreter, so the unittest suites ran directly.
+- [x] User live acceptance of symbol highlighting after Code TE2 worker restart.
+  Backend-only change; no frontend/Monaco/APK rebuild or shared restart performed.
+- [x] Add a small translucent bottom-right close-icon overlay button to
+  Code Inspector, shared by all its modes. Clear only Inspector-owned editor
+  highlights (result ranges and symbol accent); retain results, drawer, cursor,
+  text selection and unrelated Find/search highlights. Use existing backend-mediated
+  editor commands, preserve no-focus mobile behavior and provide an accessible
+  label/touch target. Test all highlight channels and idempotent clearing.
+  Implementation uses `clearHighlights` on the existing Inspector host/backend
+  command route. An exact request ID fences stale commands; the editor suppresses
+  reapply for that request and clears the separate symbol target. New inspections
+  enable highlights again. Frontend tests cover replay/new request and backend
+  tests cover stale rejection and retained projection.
+- [x] Prevent automatic initial capitalization in filename search using the
+  search input's native `autocapitalize=off` attribute. The sticky Explorer
+  search clone also needs the attribute because it creates a separate, focused
+  input; the original control's attribute does not carry over.
+- [x] Warn/confirm before fe-menubar branch checkout, preserving dirty
+  worktree safeguards and cancellation. Comparison selection is not checkout.
+  Cancel skips the checkout RPC; the existing backend checkout path is unchanged.
+- [x] User live acceptance of all three controls after native client asset update.
+  The initially missed sticky Explorer filename-search clone was corrected in
+  `53126784`; the user subsequently accepted it and symbol highlighting.
+  Typecheck/build, 13 Inspector frontend tests, 7 Inspector backend tests,
+  and basedpyright previously passed.
+- [ ] Follow-up: trace cold-boot semantic-token warning (`end character >
+  model.getLineLength(lineNumber)`). User reports no visible failure; do not hide
+  the warning, clamp data or assume theme/extension fault without evidence.
+
+### Cold-Boot Rust Styling And Semantic-Token Investigation
+
+- [x] Read-only source/live triage: the live Rust model reports `rust`, its
+  TextMate tokenizer produces `source.rust` scopes, and the boot log records
+  installation of `rust -> source.rust`. The active preference is `github-dark`.
+  The backend maps that ID to vendored `dark.json`, not `dark-default.json`.
+  A separate `plaintext -> markdown.toml.frontmatter.codeblock` mapping appears
+  in startup logs; it is suspicious but does not establish the Rust color cause.
+- [x] Locate the warning in Monaco's `SparseMultilineTokensStorage`: the semantic
+  token end character exceeds the active model's line length. This is not a
+  TextMate grammar parse warning; shared visual symptoms remain unproven.
+- [x] Add bounded, opt-in `--runtime-debug` boot tracing at selected-theme
+  resolution/application, TextMate registry theme and grammar revision/scope,
+  first mounted model identity/version, and semantic-token request/result validity.
+  Backend theme source and SHA prefix go to stderr; frontend milestones are held
+  until the debug-marked theme reply and then capped at 64 events. Full-token
+  inspection records only the first invalid offset, never document text or arrays.
+  Delta-token contents are not validated by this initial probe. Focused frontend
+  and Python tests, typecheck, Basedpyright and frontend build pass.
+- [x] Correlate a cold Rust boot in Cefrium after user-managed asset publication.
+  The first model was `plaintext` and chose the frontmatter grammar; the loaded
+  catalog contained Rust's `source.rust`, and the selected `github-dark` theme
+  resolved to the correct vendored `dark.json`. Later Rust models tokenize with
+  `source.rust`. GeckoView cold-boot comparison is still pending.
+- [x] Fix the demonstrated SSOT ordering gap: load the projected catalog even
+  without a boot path, await the active grammar before the first live model,
+  and reject snapshots superseded during that wait. Focused cold-order and
+  overlapping-SSOT tests pass. In the repeated Cefrium cold Rust run, the
+  first chosen grammar was `rust -> source.rust` under GitHub Dark, without
+  the earlier `plaintext -> frontmatter` choice; user reports it appears fixed.
+  GeckoView comparison and broader grammar lifecycle acceptance remain open.
+- [ ] Reproduce the semantic-token range warning with the bounded trace and
+  identify its request/model identity. No warning occurred in this Rust trace;
+  the observed grammar mislabel is not evidence of a shared root cause. Delta
+  token contents remain outside the current trace.
+- [ ] Exercise grammar install/update/uninstall and missing/changed-body recovery
+  with isolated fixtures first; do not mutate the user's installed extensions or
+  restart the shared framework as part of the investigation.
+
+### Installed Themes: Finish And Accept
+
+- [x] Replace boot-time frontend catalog-definition fetch with a backend-selected
+  theme projection; picker metadata is not a document readiness dependency.
+- [x] Validate the current working-tree theme conversion, JSONC/includes and
+  TextMate/semantic-token behavior with focused tests and frontend build.
+- [x] Live-test cold boot, hot selection, reload, reconnect and working/historical
+  secondary views on desktop, GeckoView and Cefrium; record separate outcomes.
+- [ ] Investigate extension-contributed semantic token types with `superType`:
+  compare Code Server registry/legend semantics with standalone matching, which
+  currently handles only `member` -> `method` inheritance. Test explicit and
+  inherited selector colors separately; do not assume missing explicit styling.
+- [ ] Compare built-in Code Server theme fixtures with our semantic-token fallback
+  for tokens without explicit `semanticTokenColors`: upstream default rules and
+  TextMate scope probing versus the standalone fixed mapping. Determine whether
+  differences are observable before proposing a fix; explicit rules already work.
+- [ ] Reconcile original Phase 5 checks with evidence, then checkpoint/commit at
+  the user's chosen boundary; no WBA webview palette change is implied.
+
+### TextMate Grammar And Theme Startup Cache
+
+- [x] Trace grammar/theme ownership, installed-extension catalog identity,
+  current caching and cold/warm startup costs before designing persistence.
+  Gecko cold traces showed 3.7-5.4 seconds waiting for the direct WBA socket,
+  versus roughly 0.1-0.3 seconds for the catalog and 0.1-0.25 seconds for one
+  grammar body after connection. The installed corpus was 94 files / 5.13 MiB;
+  the active Python grammar was 78,248 bytes. The old frontend cache was memory-only.
+- [x] Approve and implement the bounded ownership change. The persisted Python
+  extension registry now records complete grammar descriptors, filename/extension
+  language associations and a SHA-256 projection revision. Typed editor RPC returns
+  the catalog immediately and reads only requested grammar bodies. The browser does
+  not fetch all grammar bodies or use an HTTP/WBA fallback; the obsolete WBA aliases,
+  handlers and duplicate scanner are removed.
+- [x] Correct the cold-start activation gap found by live testing. Theme application
+  and backend catalog/factory/active-grammar preparation run concurrently before
+  the first document model is created; later file-open transactions apply the same barrier.
+  Model language/TextMate installation starts independently of WBA catalog readiness.
+  WBA language configuration and intelligence still attach asynchronously afterward.
+- [x] Correct the multi-client cold-boot race exposed by Cefrium. Socket construction
+  no longer masquerades as editor RPC readiness: each client awaits its own authenticated
+  editor connection before theme/grammar RPC, with delayed and independent-client tests.
+- [x] Fence catalog/body reads to one exact revision and validate extension root,
+  relative path, size, mtime and a 4 MiB body bound. Registry revision facts dispose
+  stale Monaco token providers, clear only grammar runtime state and reinstall the
+  active language without focusing the editor.
+- [x] Add focused parser/catalog/body/resource-change, frontend concurrent-load,
+  revision-disposal/reinstall, pre-model boot ordering and unresolved-WBA coverage.
+  TypeScript and focused strict Basedpyright pass with zero diagnostics; frontend
+  publication was rebuilt before user acceptance.
+- [x] User live acceptance of startup, grammar/theme projection and multi-client
+  readiness. Checkpoint `bb4adf06` is published; symbol highlighting remains open.
+- [ ] Separately exercise extension install/update/uninstall and missing/changed
+  grammar recovery after registry scan. Record latency/memory against the trace
+  baseline; general live acceptance does not establish this lifecycle matrix.
+- [ ] Theme-definition warm caching remains a separate follow-up. The selected
+  theme is already backend-projected before model mount; do not send the full theme
+  collection to the frontend or conflate grammar projection with theme selection.
+
+### Mobile Editor Gesture Ergonomics
+
+- [x] Trace Ctrl+Up/Down from shared extra-key dispatch through Monaco command/keybinding
+  resolution. Identify the upstream paragraph commands and preserve Ctrl+Left/Right
+  word navigation, direct hardware keyboard behavior and terminal-specific semantics.
+- [x] Investigate double-tap selection with Gecko pointer/gesture instrumentation
+  and pinned Monaco/touch-fork source; confirm handle interception. Inspect both
+  renderers' live handler registrations and validate the fix on both clients.
+- [x] Trace mobile long press through Monaco hover scheduling and touch-selection
+  ownership in source. Both renderers pass user live acceptance; no claim of a
+  captured Cefrium event trace is needed to establish that acceptance.
+- [x] Use source evidence to design a narrow Monaco-source policy that
+  preserves desktop hover but disables mobile long-press hover and lets Monaco select
+  the target word. Avoid a parallel monkey patch in the touch extension.
+- [x] Define focused source tests for tap/double-tap/long-press classification,
+  selection-handle hit testing, paragraph commands, scrolling and IME focus. Record
+  GeckoView and Cefrium acceptance separately. Monaco fork changes require a nested
+  commit/push and rebuilt parent publication.
+- [ ] Return to the outstanding theme-aware symbol-range highlight after these
+  ergonomics items are resolved or explicitly deferred.
+
+Pre-change source investigation (2026-09-22):
+
+- Shared mobile dispatch emits a synthetic key into Monaco; the default Ctrl+Up/Down
+  bindings scroll. `cursorMove` already supports `prevBlankLine` / `nextBlankLine`
+  with `select`, whitespace-only lines and document boundaries. Historical secondary
+  `historicalKeyCommand` currently rejects Ctrl+arrows, so it needs explicit coverage.
+- The touch fork shows handles on `touchstart`. Handle stems have a 32 px hit area
+  and teardrops have a 14 px expansion; opacity zero during repositioning does not
+  disable hit testing. Handles are siblings of `.lines-content`, outside Monaco's
+  registered gesture target. Live read-only Gecko inspection confirmed that DOM
+  relationship and PointerEvent support; no gesture sequence has been captured yet.
+- Monaco `base/browser/touch.ts` resets the 400 ms tap count on every touch move.
+  Its 700 ms hold is recognized on release and dispatched as a context-menu event.
+  `PointerEventHandler` forwards that event without word selection. The fallback
+  `TouchHandler` also ignores tap count when moving the caret.
+- The fork's `setupTextCursorSelectWord` is a separate short stem-tap handler
+  (under 1000 ms), not real double-tap recognition; it also schedules editor focus.
+- Touch pointer movement reaches `MouseHandler._onMouseMove` and then automatic
+  hover scheduling. The context-menu contribution focuses the editor even when
+  context menus are disabled. These are source-confirmed competing paths, but
+  their exact participation in the reported long-press bug remains unproven live.
+- Correction: `ContentHoverWidget._initTouchDrag` only drags an already-visible
+  hover; its timer does not initiate an editor-content hover. Preserve that behavior.
+
+Proposed implementation/validation scope:
+
+1. Reuse Monaco blank-line movement for Ctrl+Up/Down, including Shift selection,
+   repeat, working/secondary/historical editors and existing focus routing.
+   Keep terminal and quick-input dispatch under their existing owners.
+2. Give Monaco's editor touch path explicit tap/hold/scroll ownership with movement
+   tolerance, cancellation and per-editor double-tap tracking. A committed scroll
+   cannot become a hold or tap. Reuse native word-selection dispatch and scrolling.
+3. Make touch-fork stems non-intercepting and keep a distinct teardrop drag target;
+   remove the competing stem-tap word selector. Preserve handle offsets and dragging.
+4. Exclude editor touch gestures from automatic hover and duplicate context-menu
+   focus/selection. Keep explicit hover actions, mouse hover and hover-widget dragging.
+5. Before finalizing event filters, capture a bounded in-memory probe on each
+   available renderer: event target/type, pointer identity, motion, gesture count,
+   selection, focus and hover visibility. No text capture or on-disk runtime probe.
+6. Cover gesture classification and movement commands with source tests, then
+   typecheck/build both maintained forks and Code TE2. Publish generated assets;
+   user controls native asset updates and live acceptance. Preserve the existing
+   unrelated dirty Monaco theme sources when committing the gesture slice.
+
+Implementation approved and completed (source validation/publication below):
+
+- [x] Core paragraph commands reuse native blank-line operations; Ctrl+Shift extends
+  selection. The historical secondary allowlist includes paragraph/word movement.
+- [x] Editor-only touch arbitration retains native scroll/inertia, tolerates 10 px
+  jitter, selects on a 700 ms hold and prevents release from selecting a second time.
+  Double taps use per-editor 400 ms / 24 px tracking; scrolling is irreversible.
+- [x] Touch stems pass through text taps; teardrops retain dragging. First-tap caret
+  hit testing waits 450 ms, released immediately for nonempty selection. Hidden
+  handles are inert during geometry updates. Remove the legacy stem-tap selector.
+- [x] Source hold selection does not focus the IME. Filter touch hover/duplicate
+  context-menu events while keeping mouse and explicit hover actions.
+- [x] Bounded Gecko probe captured text taps, handle/stem interceptions and hold
+  context-menu events on release. Probe removed. Hover-presence sampling was not
+  sufficient to establish visibility, so do not claim it proved hover interference.
+- [x] Seven source tests cover dispatch/classification, cancellation, focus, native
+  paragraph boundaries/whitespace/selection and unchanged non-editor gestures.
+  Twenty-two frontend tests cover historical, mobile/secondary, modifier and palette
+  routing. Touch fork builds; full Monaco TypeScript and Code TE2 typecheck pass.
+- [x] Publish the changed Monaco ESM modules with TypeScript const-enum resolution
+  and preserved existing NLS catalog indices; rebuild the Monaco bootstrap and Code
+  TE2 host, and publish the touch UMD/CSS. No Android assets/version changed.
+  Fork commits: Monaco `f2d5196afbf`, touch selection `3c6620b` (author `mrsurge`).
+  Existing uncommitted Monaco theme sources were preserved outside the gesture commit.
+- [x] User live acceptance on GeckoView after updating native assets.
+- [x] User live acceptance on Cefrium after updating native assets.
+
+Publication correction after failed live test:
+
+- Both native clients had updated assets, but the published host embedded old Monaco.
+  Live Gecko had no `cursorParagraphUp` binding and retained `scrollLineUp` on Ctrl+Up;
+  both clients' pointer handlers lacked the new touch-arbitration fields.
+- The host build preceded the Monaco bootstrap rebuild. Both working and historical
+  loaders statically import that bootstrap, so updating bootstrap afterward could
+  not change the already-built host. This was a build-order error, not client cache.
+- Rebuild host after bootstrap; verify final host includes paragraph registration
+  and touch-arbitration implementation. Retest Ctrl+Up/Down and hold/double-tap on
+  both renderers before marking acceptance. No further gesture-policy changes were
+  made in response to this failed publication.
+- Corrected host publication completed. Code TE2 typecheck and all 22 focused
+  frontend tests pass; final host checks confirm the paragraph registration and
+  `touchActive`/`lastTouchAt` arbitration fields are embedded. Following native asset
+  updates, the user verified all issues in this ergonomics run fixed on both clients:
+  Ctrl+Up/Down paragraph movement, double-tap selection and long-press word selection.
+
+### HTTP And Initial Intelligence Readiness
+
+- [x] Replace the app worker's fixed 100 ms serving delay with an explicit gate
+  released immediately after Uvicorn reports its listener started. Keep the
+  readiness POST asynchronous and lifecycle-owned.
+- [x] Add a native-worker regression fixture whose serving hook performs a real
+  request against its own listener before recording readiness.
+- [x] Separate direct-WBA connection replay from active-model synchronization.
+  Preserve a deferred model pass when WBA connects first; complete WBA open,
+  provider hydration, diagnostics projection and semantic invalidation when the
+  model attaches.
+- [x] Invalidate an already-attached matching model when its semantic provider
+  arrives after the model. No timer, polling, synthetic edit, or Python
+  intelligence relay is introduced.
+- [x] Focused validation: native ASGI unittest suite passes 9 tests; WBA provider
+  tests pass 4 tests; modelReady/WBA boundary test passes; frontend TypeScript
+  typecheck and focused Basedpyright pass with zero diagnostics.
+- [x] Rebuild frontend assets after the readiness changes.
+- [x] First live cold-load attempt proved provider registration and Monaco's full
+  semantic request both occurred, but the browser discarded the request at its
+  fixed 12-second deadline while basedpyright was still warming.
+- [x] Replace that semantic-only deadline with a 30-second WBA/ext-host budget
+  inside a 36-second outer envelope, and discard a result if Monaco canceled its
+  model request. Provider registration remains push; token payload remains pull.
+- [x] User live acceptance of cold page load: framework release follows listener
+  readiness, and diagnostics/semantic tokens appear without refresh or typing.
 
 ## Closeout
 
@@ -1249,3 +1559,28 @@ or restarts are part of capture; the user controls restarts.
 
 Details and exact evaluation commands: `WBA_RUNTIME_DEBUG.md`. No shared runtime
 restart, Android asset publication or version bump is authorized by this slice.
+
+### Compact Completion Projection
+
+- [x] Inspect the active shim and VS Code main-thread provider implementation:
+  WBA inflated DTOs redundantly; single-provider responses repeated the compact
+  DTO under two aliases. The frontend preferred expanded items and its compact
+  alternative consumed only the first provider. Resolve/dispose were unwired.
+- [x] Project original provider DTOs once, remove WBA inflation and legacy aliases,
+  and remove TE2's extra frontend presort/filter pass. Preserve compact DTO fields.
+- [x] Register separate Monaco providers, with full selectors, trigger characters,
+  independent incomplete results and resolve capability. Deduplicate multi-language
+  events by provider handle and include pattern-only registrations/resync.
+- [x] Route item resolve/list disposal through WBA with originating session and
+  provider identity; reject stale-session cache operations. Dispose cancelled/empty
+  results, preserve cache ID zero, and avoid document activation on cache RPCs.
+- [x] Hold the client operation gate only for completion text synchronization,
+  not provider replies. Bound that admission to 10 s (5 s sync + margin), retain
+  provider 30 s / outer RPC 195 s, and forward modelVersionId for sync coalescing.
+- [x] Validate 81 focused Node tests and 57 Bun tests, including 700-item wire
+  payloads, slow/fast provider concurrency, resolve/dispose and session fencing.
+  Frontend typecheck and both builds pass. WBA's 107 pre-existing TypeScript
+  diagnostics are unchanged against the normalized baseline; none added.
+- [ ] Live acceptance after loading both rebuilt WBA and frontend: Python cold
+  completions, multiple providers, details/auto-import resolution, incomplete-list
+  refresh, tab/project switches, and provider reconnection. No old-payload fallback.

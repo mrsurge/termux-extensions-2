@@ -89,6 +89,11 @@ export function initBranchMenu(deps: BranchMenuDeps): BranchMenuController {
   }
 
   async function checkoutBranch(name: string): Promise<void> {
+    const confirmed = await window.teUI.dialog.confirm(
+      `Check out branch "${name}"? This changes the files in your working tree. Review unsaved edits before continuing.`,
+      { confirmLabel: 'Check out branch' },
+    );
+    if (!confirmed) return;
     try {
       await deps.requestUiIpc(UI_IPC_RPC_METHODS.hostGitBranchCheckout, { name });
       await loadBranches(false);

@@ -36,6 +36,9 @@ export interface JsonRpcErrorEnvelope {
 
 export const EDITOR_RPC_METHODS = {
   themesList: "editor.themes.list",
+  themeSelected: "editor.theme.selected",
+  textmateCatalogGet: "editor.textmate.catalog.get",
+  textmateGrammarGet: "editor.textmate.grammar.get",
   open: "editor.open",
   jumpToLine: "editor.jumpToLine",
   gitBaselinesGet: "editor.gitBaselines.get",
@@ -97,6 +100,7 @@ export const EDITOR_RPC_NOTIFICATIONS = {
   projectSwitched: "editor.project.switched",
   agentEditsChanged: "editor.agentEdits.changed",
   codeInspectorCommand: "editor.codeInspector.command",
+  textmateProjectionChanged: "editor.textmate.projectionChanged",
 } as const;
 
 export type EditorRpcNotificationName =

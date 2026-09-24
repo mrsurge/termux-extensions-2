@@ -112,6 +112,10 @@ export function editorWorkbenchMethodToWbaMethod(method: string): string | null 
       return 'vscode.callHierarchy.release';
     case 'completions':
       return 'vscode.completions';
+    case 'completions_resolve':
+      return 'vscode.completions.resolve';
+    case 'completions_release':
+      return 'vscode.completions.release';
     case 'document_colors':
       return 'vscode.documentColors';
     case 'color_presentations':
@@ -142,10 +146,6 @@ export function editorWorkbenchMethodToWbaMethod(method: string): string | null 
       return 'adapter.providers';
     case 'did_change':
       return 'vscode.didChange';
-    case 'grammars_list':
-      return 'vscode.textmate.grammars.list';
-    case 'grammars_load':
-      return 'vscode.textmate.grammars.load';
     case 'language_catalog':
       return 'te2.language_catalog';
     case 'resync':
@@ -172,7 +172,7 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
   let hasConnected = false;
   // Temporary bounded startup evidence; never retain payloads or alter retries.
   let traceCount = 0;
-  const tracedMethods = new Set(['te2.language_catalog', 'vscode.textmate.grammars.list', 'vscode.textmate.grammars.load']);
+  const tracedMethods = new Set(['te2.language_catalog']);
   function trace(phase: string, detail: Record<string, string | number | boolean> = {}): void {
     if (!deps.onStartupTrace || traceCount >= 80) return;
     traceCount++;

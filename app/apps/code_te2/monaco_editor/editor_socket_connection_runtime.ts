@@ -1,6 +1,6 @@
 import { EDITOR_RPC_NOTIFICATIONS } from './editor_rpc_contract.ts';
 import { buildInlineDiffScrollbarOptions } from './editor_diff_scrollbar_options.ts';
-import { acceptDocumentProjection } from './editor_document_revision_runtime.ts';
+import { acceptDocumentProjection, isCurrentDocumentProjection } from './editor_document_revision_runtime.ts';
 import { traceInlineDiffInit } from './editor_inline_diff_init_trace.ts';
 import { updateComparisonBaselineFence } from './editor_git_baseline_runtime.ts';
 
@@ -67,6 +67,7 @@ interface EditorSocketConnectionDeps {
   installMirrorPublisher(): void;
   installScrollPublisher(): void;
   languageFromPath(path: string): string;
+  prepareTextmateForDocument(path: string, fallbackLanguage?: string): Promise<string>;
   monacoFileUri(path: string): MonacoUriLike | null;
   setApplyingRemote(value: boolean): void;
   ensureTouchSelection(reason: string): void;
@@ -210,14 +211,17 @@ export function registerEditorSocketConnectionHandlers(
             });
             return;
           }
-          deps.setBaseSha256(asString(file.base_sha256) || deps.getBaseSha256());
-          deps.setCurrentPath(snapshotPath || deps.getCurrentPath());
-          const activePath = deps.getCurrentPath();
+          const activePath = snapshotPath || deps.getCurrentPath();
           if (!activePath) return;
+          // A live SSOT can supersede the boot snapshot before syntax is ready.
+          // Resolve its language and grammar before the first model is mounted.
+          const lang = await deps.prepareTextmateForDocument(activePath, deps.languageFromPath(activePath));
+          if (sequence !== snapshotSequence || !isCurrentDocumentProjection(snapshotPath, file.document_revision)) return;
+          deps.setBaseSha256(asString(file.base_sha256) || deps.getBaseSha256());
+          deps.setCurrentPath(activePath);
           const ssotGeneration = deps.wbBumpGeneration(activePath, 'ssot');
           trace('generation-ready');
           try { deps.bcUpdatePath(activePath, true); } catch (_) {}
-          const lang = deps.languageFromPath(activePath);
           const activeModel = deps.getModel();
           const snapshotContent = asString(file.content);
           const shouldReuseBootModel = !!(

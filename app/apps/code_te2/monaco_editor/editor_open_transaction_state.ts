@@ -60,6 +60,7 @@ export function beginOpenTransaction(
     line,
     column: column || 1,
     focus: payload && Object.prototype.hasOwnProperty.call(payload, 'focus') ? payload.focus : undefined,
+    place_cursor: payload?.place_cursor === true,
     scroll_y: payload?.scroll_y,
     scroll_to_top: payload?.scroll_to_top,
     request_id: payload?.request_id ? String(payload.request_id) : '',
@@ -80,6 +81,7 @@ export function buildTransactionJumpPayload(
       line: tx.line || 1,
       column: tx.column,
       focus: tx.focus,
+      place_cursor: tx.place_cursor,
       scroll_y: tx.scroll_y,
       scroll_to_top: tx.scroll_to_top,
     };

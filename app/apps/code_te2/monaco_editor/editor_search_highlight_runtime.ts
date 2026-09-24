@@ -88,6 +88,11 @@ const codeInspectorDecorationState: DecorationChannelState = {
   collection: null,
   decorationIds: [],
 };
+const symbolTargetDecorationState: DecorationChannelState = {
+  editor: null,
+  collection: null,
+  decorationIds: [],
+};
 let activeHighlight: SearchHighlightPayload | null = null;
 let activeApplyToken = 0;
 
@@ -271,6 +276,29 @@ export function replaceCodeInspectorHighlights(
 
 export function clearCodeInspectorHighlights(): void {
   clearDecorationChannel(codeInspectorDecorationState);
+}
+
+export function showSymbolTargetHighlight(
+  editorValue: unknown,
+  rangeValue: unknown,
+): void {
+  const editor = asEditor(editorValue);
+  const range = normalizeDecorationRange(rangeValue);
+  clearDecorationChannel(symbolTargetDecorationState);
+  if (!editor || !range) return;
+  // Keep the target separate from search hits and use Monaco theme colors in CSS.
+  setDecorations(editor, [{
+    range,
+    options: {
+      description: 'te2-inspector-symbol-target',
+      className: 'te2-symbol-target-highlight',
+      stickiness: 1,
+    },
+  }], symbolTargetDecorationState);
+}
+
+export function clearSymbolTargetHighlight(): void {
+  clearDecorationChannel(symbolTargetDecorationState);
 }
 
 export function clearSearchHighlight(_editorValue: unknown): void {

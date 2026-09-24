@@ -146,9 +146,12 @@ export interface WorkbenchLike {
   releaseCallHierarchy: (
     params: Record<string, unknown>,
   ) => Record<string, unknown>;
+  prepareCompletions: (params: Record<string, unknown>) => Promise<() => Promise<Record<string, unknown>>>;
   completions: (
     params: Record<string, unknown>,
   ) => Promise<Record<string, unknown>>;
+  resolveCompletionItem: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  releaseCompletionItems: (params: Record<string, unknown>) => Record<string, unknown>;
   documentColors: (
     params: Record<string, unknown>,
   ) => Promise<Record<string, unknown>>;
@@ -337,7 +340,9 @@ export async function dispatchJsonRpcRequest(
     label,
     operation,
     method === "vscode.completions"
-      ? completionTimeouts(params.timeoutMs).operationMs
+      ? label === "completions.prepare"
+        ? completionTimeouts(params.timeoutMs).preflightMs + 5000
+        : completionTimeouts(params.timeoutMs).operationMs
       : boundedTimeout(params.timeoutMs) + 5000,
   );
 
@@ -908,6 +913,15 @@ export async function dispatchJsonRpcRequest(
     );
   }
 
+  // Cache lifecycle RPCs are session-scoped, not document operations: never
+  // re-open/synchronize an editor simply to resolve or dispose suggestions.
+  if (method === "vscode.completions.resolve") {
+    return success(id, await runtime.wb.resolveCompletionItem(params));
+  }
+  if (method === "vscode.completions.release") {
+    return success(id, runtime.wb.releaseCompletionItems(params));
+  }
+
   if (method === "vscode.completions") {
     completionTrace.record("completion.dispatch", {
       frontendRequest: params.debugRequestId, client: params.clientInstanceId,
@@ -919,8 +933,8 @@ export async function dispatchJsonRpcRequest(
       params,
       runtime.defaultRemoteAuthority,
     );
-    const result = await runDocumentOperation("completions", () =>
-      runtime.wb.completions({
+    const run = await runDocumentOperation("completions.prepare", () =>
+      runtime.wb.prepareCompletions({
         debugRequestId: params.debugRequestId,
         path: resolvedPath,
         authority,
@@ -931,10 +945,11 @@ export async function dispatchJsonRpcRequest(
         triggerKind: params.triggerKind,
         triggerCharacter: params.triggerCharacter,
         text: params.text,
+        modelVersionId: params.modelVersionId,
         timeoutMs: params.timeoutMs,
         generation: params.generation,
       }));
-    return success(id, result);
+    return success(id, await run());
   }
 
   if (method === "vscode.documentColors") {

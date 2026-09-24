@@ -66,6 +66,7 @@ from .editor_rpc_contract import (
     EDITOR_RPC_NOTIFICATION_SAVE_SNAPSHOT_REQUEST,
     EDITOR_RPC_NOTIFICATION_SEARCH_HIGHLIGHT,
     EDITOR_RPC_NOTIFICATION_STATE_SSOT,
+    EDITOR_RPC_NOTIFICATION_TEXTMATE_PROJECTION_CHANGED,
     EditorRpcNotification,
 )
 from .editor_rpc_emit import emit_editor_rpc_notification
@@ -622,6 +623,7 @@ def _rpc_notification_for_legacy_event(event_name: str) -> EditorRpcNotification
         "editor:edit_cmd": EDITOR_RPC_NOTIFICATION_EDIT_COMMAND,
         "editor:search_highlight": EDITOR_RPC_NOTIFICATION_SEARCH_HIGHLIGHT,
         "editor:agent_edits_changed": EDITOR_RPC_NOTIFICATION_AGENT_EDITS_CHANGED,
+        "editor:textmate_projection_changed": EDITOR_RPC_NOTIFICATION_TEXTMATE_PROJECTION_CHANGED,
     }
     return mapping.get(event_name)
 

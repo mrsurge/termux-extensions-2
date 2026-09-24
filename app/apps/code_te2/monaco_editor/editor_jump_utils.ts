@@ -2,6 +2,7 @@ interface EditorJumpPayloadLike {
   line?: number | string;
   column?: number | string;
   focus?: boolean;
+  place_cursor?: boolean;
   scroll_y?: string;
   scroll_to_top?: boolean;
 }
@@ -79,8 +80,9 @@ export function applyJumpToLine(
       try { typedEditor.revealLineNearTop?.(line, 0); } catch (_) {}
     }
 
-    if (focus === false) return;
+    if (focus === false && typedPayload.place_cursor !== true) return;
     try { typedEditor.setPosition?.({ lineNumber: line, column: col }); } catch (_) {}
+    if (focus === false) return;
     try { typedEditor.focus?.(); } catch (_) {}
   } catch (_) {}
 }

@@ -10,6 +10,10 @@ export function historicalKeyCommand(key: SyntheticEditorKey, modifiers: Synthet
     if (key.key.toLowerCase() === 'c') return 'copy';
     if (key.key === 'Home') return shift ? 'cursorTopSelect' : 'cursorTop';
     if (key.key === 'End') return shift ? 'cursorBottomSelect' : 'cursorBottom';
+    if (key.key === 'ArrowUp') return shift ? 'cursorParagraphUpSelect' : 'cursorParagraphUp';
+    if (key.key === 'ArrowDown') return shift ? 'cursorParagraphDownSelect' : 'cursorParagraphDown';
+    if (key.key === 'ArrowLeft') return shift ? 'cursorWordLeftSelect' : 'cursorWordLeft';
+    if (key.key === 'ArrowRight') return shift ? 'cursorWordRightSelect' : 'cursorWordRight';
     return null;
   }
   const commands: Record<string, string> = {

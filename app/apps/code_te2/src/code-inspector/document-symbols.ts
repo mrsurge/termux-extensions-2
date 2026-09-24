@@ -33,15 +33,16 @@ export function documentSymbolTree(items: unknown[], path: string): { tree: Json
       visited++;
       if (!isRecord(value)) continue;
       const location = isRecord(value.location) ? value.location : {};
-      const range = validRange(value.selectionRange) ?? validRange(value.range) ?? validRange(location.range);
-      if (!range) continue;
+      const range = validRange(value.range) ?? validRange(location.range);
+      const selectionRange = validRange(value.selectionRange) ?? range;
+      if (!selectionRange) continue;
       const id = `symbol:${visited}`;
       count++;
       nodes.push({ id, type: 'symbol', path, label: text(value.name) || 'Symbol',
         detail: text(value.detail) || text(value.containerName),
         description: text(value.detail) || text(value.containerName),
         kind: typeof value.kind === 'number' && Number.isInteger(value.kind) && value.kind >= 0 && value.kind < ICONS.length ? value.kind : 18,
-        range, selectionRange: range,
+        range: range ?? selectionRange, selectionRange,
         children: visit(Array.isArray(value.children) ? value.children : [], depth + 1),
       });
     }

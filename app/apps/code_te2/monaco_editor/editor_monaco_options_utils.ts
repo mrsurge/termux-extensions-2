@@ -1,4 +1,5 @@
 import { resolveMonacoThemeId } from './editor_theme_resolver_utils.ts';
+import { monacoThemeName } from './editor_theme_name_utils.ts';
 
 interface EditorPreferenceBag {
   showLineNumbers?: boolean;
@@ -95,7 +96,7 @@ export function buildMonacoOptionsFromPrefsState(
   return {
     value: '',
     language: 'plaintext',
-    theme,
+    theme: monacoThemeName(theme),
     'semanticHighlighting.enabled': true,
     automaticLayout: true,
     contextmenu: false,

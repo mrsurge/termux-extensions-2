@@ -1,4 +1,4 @@
-import { provideWorkbenchCompletionItemsFromVscodeSuggest } from "./vscode_completion_vendor/suggest.js";
+import { provideWorkbenchCompletionItemsFromVscodeSuggest, resolveWorkbenchCompletionItem } from "./vscode_completion_vendor/suggest.js";
 import { traceCompletion } from "./editor_completion_trace.ts";
 import {
   provideWorkbenchInlayHintsFromVscodeMainThread,
@@ -93,6 +93,7 @@ interface LanguageBridgeState {
 }
 
 interface CompletionProviderRegistrationLike {
+  selector?: unknown;
   handle: string;
   triggerCharacters: string[];
   supportsResolve: boolean;
@@ -157,6 +158,13 @@ interface MonacoRangeLike {
 interface MonacoCancellationTokenLike {
   isCancellationRequested?: boolean;
 }
+
+// Basedpyright can register before its first semantic result is ready. VS Code
+// leaves that provider request alive under Monaco cancellation rather than
+// imposing the generic short RPC timeout, so keep the outer envelope beyond
+// the WBA/ext-host budget without introducing retries or synthetic edits.
+const SEMANTIC_TOKENS_ADAPTER_TIMEOUT_MS = 30000;
+const SEMANTIC_TOKENS_CALL_TIMEOUT_MS = 36000;
 
 interface MonacoCompletionContextLike {
   triggerKind?: number;
@@ -278,6 +286,7 @@ interface MonacoLanguagesLike {
     provider: {
       __te2WorkbenchProvider?: true;
       triggerCharacters?: string[];
+      resolveCompletionItem?(suggestion: Record<string, unknown>, token: MonacoCancellationTokenLike): unknown;
       provideCompletionItems(
         model: MonacoModelLike,
         pos: MonacoPositionLike,
@@ -974,7 +983,7 @@ export function createEditorLanguageBridgeProviders(
       "::" +
       triggerCharacters +
       "::" +
-      (entry.supportsResolve ? "1" : "0")
+      (entry.supportsResolve ? "1" : "0") + "::" + JSON.stringify(entry.selector)
     );
   }
 
@@ -982,34 +991,6 @@ export function createEditorLanguageBridgeProviders(
     entries: CompletionProviderRegistrationLike[],
   ): string {
     return entries.map(getCompletionRegistrationSignature).sort().join("|");
-  }
-
-  function getCompletionProviderTriggerCharacters(
-    entries: CompletionProviderRegistrationLike[],
-  ): string[] {
-    const seen = new Set<string>();
-    const triggers: string[] = [];
-    for (const entry of entries) {
-      const triggerCharacters = Array.isArray(entry.triggerCharacters)
-        ? entry.triggerCharacters
-        : [];
-      for (const trigger of triggerCharacters) {
-        const normalized = String(trigger);
-        if (!normalized || seen.has(normalized)) continue;
-        seen.add(normalized);
-        triggers.push(normalized);
-      }
-    }
-    return triggers;
-  }
-
-  function getCompletionProviderHandles(
-    entries: CompletionProviderRegistrationLike[],
-  ): string[] {
-    return entries
-      .map((entry) => String(entry.handle || "").trim())
-      .filter(Boolean)
-      .sort((left, right) => Number(left) - Number(right));
   }
 
   function ensureCompletionProviderRegistered(langId: string): void {
@@ -1023,7 +1004,7 @@ export function createEditorLanguageBridgeProviders(
     if (deps.getLanguageWorkersEnabled()) return;
     const entries = getCompletionRegistrations(langId);
     if (!entries.length) return;
-    const handles = getCompletionProviderHandles(entries);
+    const handles = entries.map(entry => entry.handle);
     if (!handles.length) return;
     const nextSignature = getCompletionProviderSignature(entries);
     if (
@@ -1046,65 +1027,70 @@ export function createEditorLanguageBridgeProviders(
       } catch (_) {}
     }
 
-    const triggerCharacters = getCompletionProviderTriggerCharacters(entries);
-    const registrationDisposable =
-      monacoRef.languages.registerCompletionItemProvider(langId, {
+    // Preserve provider identity, selectors, trigger characters and incomplete
+    // state. Monaco's own suggest model can now reuse/requery each list separately.
+    const registrations = entries.map(entry => monacoRef.languages!.registerCompletionItemProvider!(
+      completionSelector(entry.selector, langId), {
         __te2WorkbenchProvider: true,
-        triggerCharacters,
-        provideCompletionItems(model, pos, context, token) {
-          try {
-            deps.flushMirrorDebounce();
-            void token;
-            return provideWorkbenchCompletionItemsFromVscodeSuggest({
-              languageId: langId,
-              model,
-              position: pos,
-              context,
-              monacoTriggerKinds:
-                monacoRef.languages.CompletionTriggerKind || null,
-              propertyKind: completionPropertyKind(deps),
-              getCurrentPath: deps.getCurrentPath,
-              absPathFromVscodeUri: deps.absPathFromVscodeUri,
-              async callWorkbenchCompletions(params, opts) {
-                const request = traceCompletion("completion.sent", { language: langId });
-                try {
-                  const result = await deps.editorWorkbenchCall("completions", {
-                    ...params, ...(request ? { debugRequestId: request } : {}),
-                  }, opts);
-                  traceCompletion("completion.reply", { language: langId, request });
-                  return result;
-                } catch (error) {
-                  traceCompletion("completion.failed", { language: langId, request });
-                  throw error;
-                }
-              },
-            });
-          } catch (_) {
-            return { suggestions: [] };
-          }
+        triggerCharacters: entry.triggerCharacters,
+        async provideCompletionItems(model, pos, context, token) {
+          if (token.isCancellationRequested) return { suggestions: [] };
+          deps.flushMirrorDebounce();
+          return provideWorkbenchCompletionItemsFromVscodeSuggest({
+            providerHandle: Number(entry.handle), languageId: langId, model, position: pos, context,
+            monacoTriggerKinds: monacoRef.languages!.CompletionTriggerKind || null,
+            propertyKind: completionPropertyKind(deps),
+            getCurrentPath: deps.getCurrentPath, absPathFromVscodeUri: deps.absPathFromVscodeUri,
+            isCancelled: () => !!token.isCancellationRequested,
+            releaseCompletionItems: params => deps.editorWorkbenchCall("completions_release", params),
+            async callWorkbenchCompletions(params, opts) {
+              const request = traceCompletion("completion.sent", { language: langId, handle: entry.handle });
+              try {
+                const result = await deps.editorWorkbenchCall("completions", {
+                  ...params, ...(request ? { debugRequestId: request } : {}),
+                }, opts);
+                traceCompletion("completion.reply", { language: langId, request });
+                return result;
+              } catch (error) {
+                traceCompletion("completion.failed", { language: langId, request });
+                throw error;
+              }
+            },
+          });
         },
-      });
-    deps.languageBridge.completionProviderDisposablesByLanguage[langId] =
-      registrationDisposable &&
-      typeof (registrationDisposable as MonacoDisposableLike).dispose ===
-        "function"
-        ? (registrationDisposable as MonacoDisposableLike)
-        : null;
-    deps.languageBridge.completionProviderSignatureByLanguage[langId] =
-      nextSignature;
+        ...(entry.supportsResolve ? {
+          resolveCompletionItem: (suggestion: Record<string, unknown>, token: MonacoCancellationTokenLike) =>
+            resolveWorkbenchCompletionItem(suggestion, completionPropertyKind(deps),
+              (params, options) => deps.editorWorkbenchCall("completions_resolve", params, options),
+              () => !!token.isCancellationRequested),
+        } : {}),
+      },
+    ));
+    deps.languageBridge.completionProviderDisposablesByLanguage[langId] = {
+      dispose() {
+        for (const registration of registrations) {
+          const disposable = registration as MonacoDisposableLike | null;
+          disposable?.dispose?.();
+        }
+      },
+    };
+    deps.languageBridge.completionProviderSignatureByLanguage[langId] = nextSignature;
     traceCompletion("provider.monacoRegistered", { language: langId, handles: handles.join(",") });
-    console.log(
-      "[completions] registered aggregated provider bridge for lang=" +
-        langId +
-        " handles=" +
-        handles.join(",") +
-        " triggers=" +
-        triggerCharacters.join(","),
-    );
   }
 
-  function ensureCompletionProvidersRegistered(langId: string): void {
-    ensureCompletionProviderRegistered(langId);
+  function completionSelector(selector: unknown, language: string): unknown {
+    if (!Array.isArray(selector)) return language;
+    // WBA uses vscode-remote URIs, while Monaco uses local file URIs for the
+    // same documents. Keep language/glob scoring in Monaco; WBA rechecks matches.
+    return selector.map(raw => {
+      const filter = asRecord(raw);
+      if (!filter) return raw;
+      return { ...filter, scheme: filter.scheme === "vscode-remote" ? "file" : filter.scheme };
+    });
+  }
+
+  function ensureCompletionProvidersRegistered(_langId: string): void {
+    ensureCompletionProviderRegistered("*");
   }
 
   function cacheCompletionProviderRegistration(
@@ -1112,6 +1098,10 @@ export function createEditorLanguageBridgeProviders(
     registration: CompletionProviderRegistrationLike,
   ): void {
     if (!langId) return;
+    // One registry slot across languages prevents duplicate registrations for
+    // providers whose selector contains both a language and a path-only filter.
+    const selector = registration.selector ?? [{ language: langId }];
+    langId = "*";
     const handleKey =
       registration.handle != null ? String(registration.handle).trim() : "";
     if (!handleKey) return;
@@ -1121,6 +1111,7 @@ export function createEditorLanguageBridgeProviders(
     }
     deps.languageBridge.completionProvidersByLanguage[langId][handleKey] = {
       handle: handleKey,
+      selector,
       triggerCharacters: Array.isArray(registration.triggerCharacters)
         ? registration.triggerCharacters.map(String).filter(Boolean)
         : [],
@@ -1859,39 +1850,10 @@ export function createEditorLanguageBridgeProviders(
         .map(String)
         .filter(Boolean);
       const supportsResolve = !!(entry && entry.supportsResolve);
-      for (const langId of selectorLanguagesFromSnapshot(
-        entry && entry.selector,
-      )) {
-        cacheCompletionProviderRegistration(langId, {
-          handle,
-          triggerCharacters,
-          supportsResolve,
-        });
-        completionCount += 1;
-      }
-    }
-
-    for (const rawEntry of inlayHintsEntries) {
-      const entry = asRecord(rawEntry);
-      const handle =
-        entry && entry.handle != null ? String(entry.handle).trim() : "";
-      if (!handle) continue;
-      for (const langId of selectorLanguagesFromSnapshot(
-        entry && entry.selector,
-      )) {
-        cacheInlayHintsProviderRegistration(langId, {
-          handle,
-          supportsResolve: entry?.supportsResolve === true,
-          displayName:
-            typeof entry?.displayName === "string" ? entry.displayName : null,
-          eventHandle:
-            typeof entry?.eventHandle === "number" &&
-            Number.isFinite(entry.eventHandle)
-              ? entry.eventHandle
-              : null,
-        });
-        inlayHintsCount += 1;
-      }
+      cacheCompletionProviderRegistration("*", {
+        handle, selector: entry?.selector, triggerCharacters, supportsResolve,
+      });
+      completionCount += 1;
     }
 
     for (const rawEntry of documentColorEntries) {
@@ -2078,15 +2040,16 @@ export function createEditorLanguageBridgeProviders(
             deps.languageBridge.semanticTokensLegendCache[langId] || legend
           );
         },
-        provideDocumentRangeSemanticTokens(model, range) {
+        provideDocumentRangeSemanticTokens(model, range, token) {
           try {
             return provideWorkbenchDocumentRangeSemanticTokensFromVscodeMainThread(
               {
                 model,
                 languageId: langId,
                 range,
-                adapterTimeoutMs: 10000,
-                callTimeoutMs: 12000,
+                adapterTimeoutMs: SEMANTIC_TOKENS_ADAPTER_TIMEOUT_MS,
+                callTimeoutMs: SEMANTIC_TOKENS_CALL_TIMEOUT_MS,
+                cancelToken: token,
                 getCurrentPath: deps.getCurrentPath,
                 absPathFromVscodeUri: deps.absPathFromVscodeUri,
                 callWorkbenchSemanticTokensRange(params, opts) {
@@ -2129,7 +2092,7 @@ export function createEditorLanguageBridgeProviders(
       getLegend() {
         return deps.languageBridge.semanticTokensLegendCache[langId] || legend;
       },
-      provideDocumentSemanticTokens(model, lastResultId) {
+      provideDocumentSemanticTokens(model, lastResultId, token) {
         try {
           const languageId = String(
             model && model.getLanguageId ? model.getLanguageId() : langId,
@@ -2144,8 +2107,9 @@ export function createEditorLanguageBridgeProviders(
             model,
             languageId: langId,
             lastResultId,
-            adapterTimeoutMs: 10000,
-            callTimeoutMs: 12000,
+            adapterTimeoutMs: SEMANTIC_TOKENS_ADAPTER_TIMEOUT_MS,
+            callTimeoutMs: SEMANTIC_TOKENS_CALL_TIMEOUT_MS,
+            cancelToken: token,
             getCurrentPath: deps.getCurrentPath,
             absPathFromVscodeUri: deps.absPathFromVscodeUri,
             callWorkbenchSemanticTokens(params, opts) {

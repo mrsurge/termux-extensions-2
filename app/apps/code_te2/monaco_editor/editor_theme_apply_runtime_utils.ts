@@ -1,3 +1,7 @@
+import { monacoThemeName } from './editor_theme_name_utils.ts';
+import { themeJsonWithUiTheme } from './editor_theme_url_utils.ts';
+import { configureColdBootTrace, traceColdBoot } from './editor_cold_boot_trace.ts';
+
 interface ThemeJsonLike extends Record<string, unknown> {
   uiTheme?: string;
 }
@@ -5,12 +9,8 @@ interface ThemeJsonLike extends Record<string, unknown> {
 interface ApplyMonacoThemeRuntimeOptions {
   win?: Window | null;
   doc: Document;
-  themeKey: string;
   ensureTe2DiffThemeFn?: () => unknown;
-  loadThemesFn?: () => Promise<unknown> | unknown;
-  resolveThemeIdFn?: (themeKey: string, cache: Record<string, ThemeJsonLike>) => string;
-  getThemeJsonUrlFn?: (themeId: string) => string | null;
-  fetchFn: (input: string, init?: RequestInit) => Promise<Response>;
+  getSelectedThemeFn(): Promise<unknown>;
   toMonacoThemeFn: (themeId: string, json: ThemeJsonLike) => unknown;
   getJsonCacheFn?: () => Record<string, ThemeJsonLike>;
   setJsonCacheFn?: (cache: Record<string, ThemeJsonLike>) => void;
@@ -24,35 +24,41 @@ export async function applyMonacoThemeRuntime(
   try {
     if (!options.win?.monaco?.editor?.setTheme) throw new Error('Monaco theme runtime unavailable');
     if (typeof options.ensureTe2DiffThemeFn === 'function') options.ensureTe2DiffThemeFn();
-    if (typeof options.loadThemesFn === 'function') await options.loadThemesFn();
-    const cache = options.getJsonCacheFn ? (options.getJsonCacheFn() || {}) : {};
-    // A known selected resource must not silently turn into the default theme
-    // merely because its preload failed. Retry that resource or fail explicitly.
-    const resolvedId = options.getThemeJsonUrlFn?.(options.themeKey)
-      ? options.themeKey
-      : options.resolveThemeIdFn ? options.resolveThemeIdFn(options.themeKey, cache) : String(options.themeKey || '');
-    if (!cache[resolvedId]) {
-      const url = options.getThemeJsonUrlFn ? options.getThemeJsonUrlFn(resolvedId) : null;
-      if (!url) throw new Error(`Theme resource unavailable: ${resolvedId}`);
-      const response = await options.fetchFn(url, { cache: 'no-store' });
-      if (!response.ok) throw new Error(`Theme resource failed: ${resolvedId} (HTTP ${response.status})`);
-      const value: unknown = await response.json();
-      if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`Invalid theme: ${resolvedId}`);
-      const json = value as ThemeJsonLike;
-      const monacoTheme = options.toMonacoThemeFn(resolvedId, json);
-      options.win.monaco.editor.defineTheme?.(resolvedId, monacoTheme as Record<string, unknown>);
-      cache[resolvedId] = json;
+    // The backend projects the selected theme; the renderer only translates it.
+    const selected = await options.getSelectedThemeFn();
+    if (!selected || typeof selected !== 'object' || Array.isArray(selected)) throw new Error('Invalid selected theme projection');
+    const selection = selected as Record<string, unknown>;
+    const resolvedId = selection.id;
+    const source = selection.theme;
+    if (typeof resolvedId !== 'string' || !resolvedId || !source || typeof source !== 'object' || Array.isArray(source)) {
+      throw new Error('Invalid selected theme projection');
     }
+    if (typeof selection.uiTheme !== 'string') throw new Error('Invalid selected theme base');
+    configureColdBootTrace(selection._runtimeDebug);
+    const cache = options.getJsonCacheFn ? (options.getJsonCacheFn() || {}) : {};
+    const json = themeJsonWithUiTheme(source as ThemeJsonLike, selection.uiTheme);
+    traceColdBoot('theme.selected', {
+      id: resolvedId,
+      base: selection.uiTheme,
+      name: typeof json.name === 'string' ? json.name : '',
+      tokenRules: Array.isArray(json.tokenColors) ? json.tokenColors.length : 0,
+      semanticRules: json.semanticTokenColors && typeof json.semanticTokenColors === 'object'
+        ? Object.keys(json.semanticTokenColors).length : 0,
+    });
+    const monacoTheme = options.toMonacoThemeFn(resolvedId, json);
+    options.win.monaco.editor.defineTheme?.(monacoThemeName(resolvedId), monacoTheme as Record<string, unknown>);
+    cache[resolvedId] = json;
     if (options.setJsonCacheFn) options.setJsonCacheFn(cache);
-    options.win.monaco.editor.setTheme(resolvedId);
+    options.win.monaco.editor.setTheme(monacoThemeName(resolvedId));
+    traceColdBoot('theme.monaco_applied', { id: resolvedId, monacoName: monacoThemeName(resolvedId) });
     try {
       options.doc.documentElement.classList.remove('vs', 'vs-dark', 'hc-black', 'hc-light');
-      let base = (cache[resolvedId] && cache[resolvedId].uiTheme) || '';
-      if (!base) base = resolvedId.toLowerCase().includes('light') ? 'vs' : 'vs-dark';
-      else if (base.includes('light')) base = 'vs';
-      else base = 'vs-dark';
-      options.doc.documentElement.classList.add(base);
-      console.log('[touch-theme] html class set to', base, 'for theme', resolvedId);
+      const themeBase = (cache[resolvedId] && cache[resolvedId].uiTheme) || '';
+      const scheme = themeBase ? (themeBase.includes('light') || themeBase === 'vs' ? 'vs' : 'vs-dark')
+        : resolvedId.toLowerCase().includes('light') ? 'vs' : 'vs-dark';
+      options.doc.documentElement.classList.add(scheme);
+      if (themeBase === 'hc-black' || themeBase === 'hc-light') options.doc.documentElement.classList.add(themeBase);
+      console.log('[touch-theme] html class set to', scheme, 'for theme', resolvedId);
     } catch (_) {}
     if (typeof options.applyThemeToTextmateRegistryFn === 'function') options.applyThemeToTextmateRegistryFn(cache[resolvedId]);
     return cache[resolvedId];

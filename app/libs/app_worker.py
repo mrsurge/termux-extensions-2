@@ -82,6 +82,7 @@ class PreparedWorker:
     module: ModuleType
     app: ASGIApp
     start_pipe: Callable[[], None]
+    mark_listener_ready: Callable[[], None]
 
 
 def _framework_url() -> str:
@@ -355,9 +356,11 @@ def _assemble_worker(args: AppWorkerArgs, protocol_stdout: object | None) -> Pre
     mounted_subapps: list[tuple[str, ASGIApp]] = []
     backend_serving_hook: Callable[[], object] | None = None
     debug_pipe: RuntimeDebugPipe | None = None
+    listener_ready_event: asyncio.Event | None = None
 
     @asynccontextmanager
     async def lifespan(_app: object) -> AsyncIterator[None]:
+        nonlocal listener_ready_event
         startup_trace.mark("lifespan.begin")
         async with AsyncExitStack() as stack:
             for path, subapp in mounted_subapps:
@@ -368,10 +371,12 @@ def _assemble_worker(args: AppWorkerArgs, protocol_stdout: object | None) -> Pre
                 with startup_trace.span("subapp.lifespan:" + path):
                     _ = await stack.enter_async_context(lifespan_context(subapp))
             serving_task: asyncio.Task[None]
+            listener_ready_event = asyncio.Event()
             hook = backend_serving_hook
             if hook is not None:
                 async def _run_backend_serving_hook() -> None:
-                    await asyncio.sleep(0.1)
+                    assert listener_ready_event is not None
+                    _ = await listener_ready_event.wait()
                     try:
                         with startup_trace.span("backend.serving_hook"):
                             result = hook()
@@ -390,7 +395,8 @@ def _assemble_worker(args: AppWorkerArgs, protocol_stdout: object | None) -> Pre
                 serving_task = asyncio.create_task(_run_backend_serving_hook())
             else:
                 async def _run_default_backend_serving_post() -> None:
-                    await asyncio.sleep(0.1)
+                    assert listener_ready_event is not None
+                    _ = await listener_ready_event.wait()
                     try:
                         await asyncio.to_thread(_post_framework_readiness, args.app_id)
                         startup_trace.mark("framework.readiness_posted")
@@ -410,6 +416,7 @@ def _assemble_worker(args: AppWorkerArgs, protocol_stdout: object | None) -> Pre
                 if not serving_task.done():
                     _ = serving_task.cancel()
                 _ = await asyncio.gather(serving_task, return_exceptions=True)
+                listener_ready_event = None
 
     try:
         # Add project root to the Python path
@@ -495,7 +502,13 @@ def _assemble_worker(args: AppWorkerArgs, protocol_stdout: object | None) -> Pre
             pipe_thread.start()
             print(f"DEBUG: Started app-worker pipe RPC loop for {args.app_id}", file=sys.stderr)
 
-    return PreparedWorker(module, app, start_pipe)
+    def mark_listener_ready() -> None:
+        event = listener_ready_event
+        if event is None:
+            raise RuntimeError("ASGI lifespan did not initialize the listener-ready gate")
+        event.set()
+
+    return PreparedWorker(module, app, start_pipe, mark_listener_ready)
 
 
 def _run_http_worker(
@@ -521,9 +534,12 @@ def _run_http_worker(
     )
     # Uvicorn's startup returns after socket creation, unlike ASGI lifespan which
     # runs before listening. Observe that boundary without changing its ordering.
+    active_worker = prepared
+
     class StartupObservedServer(uvicorn.Server):
         @override
         async def _serve(self, sockets: list[socket.socket] | None = None) -> None:
+            nonlocal active_worker
             # Worker-owned services surround the transport, not its ASGI lifespan.
             # Stay inside serve()'s signal scope: it re-raises SIGTERM on exit,
             # so an outer serve() finally would never finish application cleanup.
@@ -536,6 +552,7 @@ def _run_http_worker(
                     worker = await assemble_off_loop(lambda: _assemble_worker(args, protocol_stdout))
                 if worker is None:
                     raise RuntimeError("HTTP worker assembly did not return an application")
+                active_worker = worker
                 if self.should_exit:
                     return
                 self.config.app = worker.app
@@ -549,6 +566,12 @@ def _run_http_worker(
                 await super().startup(sockets=sockets)
             if self.started:
                 startup_trace.mark("listener.ready")
+                worker = active_worker
+                if worker is None:
+                    raise RuntimeError("HTTP worker is unavailable at listener readiness")
+                # Uvicorn has bound the socket at this exact boundary. Release
+                # the serving/readiness task now, not from a lifespan delay.
+                worker.mark_listener_ready()
 
     server = StartupObservedServer(config)
 

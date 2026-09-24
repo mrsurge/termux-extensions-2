@@ -425,6 +425,7 @@ export function createExplorerNameTreeSearchController(
       input.className = 'fe-tree-search-input';
       input.placeholder = 'Search files/folders…';
       input.autocomplete = 'off';
+      input.autocapitalize = 'off';
       input.spellcheck = false;
       label.appendChild(input);
     }

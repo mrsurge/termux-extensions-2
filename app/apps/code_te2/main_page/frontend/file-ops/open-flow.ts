@@ -15,6 +15,8 @@ export interface OpenFileOptions {
   focus?: boolean;
   scrollY?: string;
   scrollToTop?: boolean;
+  placeCursor?: boolean;
+  symbolRange?: Record<string, unknown>;
 }
 
 interface OpenRequestPayload extends Record<string, unknown> {
@@ -25,6 +27,8 @@ interface OpenRequestPayload extends Record<string, unknown> {
   focus?: boolean;
   scroll_y?: string;
   scroll_to_top?: boolean;
+  place_cursor?: boolean;
+  symbol_range?: Record<string, unknown>;
 }
 
 interface OpenFlowControllerDeps {
@@ -90,6 +94,8 @@ export function createOpenFlowController(deps: OpenFlowControllerDeps) {
     if (Object.prototype.hasOwnProperty.call(options, 'scrollToTop')) {
       openRequestOptions.scroll_to_top = Boolean(options.scrollToTop);
     }
+    if (options.placeCursor === true) openRequestOptions.place_cursor = true;
+    if (options.symbolRange) openRequestOptions.symbol_range = options.symbolRange;
     if (!path) throw new Error('Path is empty');
     beginDiagnosticsOpenTrace(openRequestId, path);
     deps.setStatus('Opening...');

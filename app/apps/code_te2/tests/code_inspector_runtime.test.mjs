@@ -70,6 +70,7 @@ test('document symbols preserve hierarchy and selection locations through WBA', 
   assert.equal(result.mode, 'symbols'); assert.equal(result.status, 'ready');
   assert.equal(result.summary.count, 2);
   assert.equal(result.tree[0].label, 'Example');
+  assert.deepEqual(result.tree[0].range, range);
   assert.deepEqual(result.tree[0].selectionRange, selectionRange);
   assert.equal(result.tree[0].children[0].path, '/workspace/main.rs');
   runtime.dispose();
@@ -305,6 +306,46 @@ test("uses the live model preview and highlights only the open file", async () =
   }]);
   runtime.clearHighlights();
   assert.deepEqual(highlights.at(-1), []);
+});
+
+test("clear command suppresses the current inspection through reapply, then a new one restores highlights", async () => {
+  const { createEditorCodeInspectorRuntime } = await importTypeScript(
+    "monaco_editor/editor_code_inspector_runtime.ts",
+  );
+  const state = createEditorState();
+  const highlights = [];
+  const projections = [];
+  let symbolClears = 0;
+  const runtime = createEditorCodeInspectorRuntime({
+    getEditor: () => state.editor,
+    getCurrentPath: () => "/workspace/main.rs",
+    editorWorkbenchCall: async () => ({ ok: true, result: [{
+      path: "/workspace/main.rs",
+      range: { startLineNumber: 8, startColumn: 1, endLineNumber: 8, endColumn: 5 },
+    }] }),
+    publishProjection: projection => { projections.push(projection); return true; },
+    replaceHighlights: ranges => highlights.push(structuredClone(ranges)),
+    clearSymbolTargetHighlight: () => { symbolClears++; },
+    logError: () => assert.fail('unexpected error'),
+  });
+  runtime.start('references');
+  await settle();
+  assert.equal(highlights.at(-1).length, 1);
+  const firstRequestId = projections.at(-1).requestId;
+  runtime.handleCommand({ action: 'clearHighlights', requestId: 'stale' });
+  assert.equal(highlights.at(-1).length, 1);
+  runtime.handleCommand({ action: 'clearHighlights', requestId: firstRequestId });
+  assert.deepEqual(highlights.at(-1), []);
+  assert.equal(symbolClears, 1);
+  runtime.reapplyHighlights();
+  assert.deepEqual(highlights.at(-1), []);
+  runtime.handleCommand({ action: 'clearHighlights', requestId: firstRequestId });
+  assert.deepEqual(highlights.at(-1), []);
+  runtime.start('references');
+  await settle();
+  assert.notEqual(projections.at(-1).requestId, firstRequestId);
+  assert.equal(highlights.at(-1).length, 1);
+  runtime.dispose();
 });
 
 test("loads the first incoming call scope and switches to outgoing calls", async () => {
@@ -572,9 +613,11 @@ test("rehydrates a retained hierarchy projection before lazy expansion", async (
 test("keeps Code Inspector and contents-search decorations independent", async () => {
   const {
     clearCodeInspectorHighlights,
+    clearSymbolTargetHighlight,
     clearSearchHighlight,
     handleSearchHighlight,
     replaceCodeInspectorHighlights,
+    showSymbolTargetHighlight,
   } = await importTypeScript(
     "monaco_editor/editor_search_highlight_runtime.ts",
   );
@@ -628,15 +671,20 @@ test("keeps Code Inspector and contents-search decorations independent", async (
     },
   );
   replaceCodeInspectorHighlights(editor, [inspectorRange]);
+  showSymbolTargetHighlight(editor, inspectorRange);
 
-  assert.equal(collections.length, 2);
+  assert.equal(collections.length, 3);
   assert.deepEqual(collections[0].decorations[0].range, searchRange);
   assert.deepEqual(collections[1].decorations[0].range, inspectorRange);
   assert.equal(collections[1].decorations[0].options.className, "findMatch");
+  assert.equal(collections[2].decorations[0].options.className, "te2-symbol-target-highlight");
 
   clearCodeInspectorHighlights();
   assert.equal(collections[1].decorations.length, 0);
   assert.equal(collections[0].decorations.length, 1);
+  assert.equal(collections[2].decorations.length, 1);
+  clearSymbolTargetHighlight();
+  assert.equal(collections[2].decorations.length, 0);
   clearSearchHighlight(editor);
 });
 

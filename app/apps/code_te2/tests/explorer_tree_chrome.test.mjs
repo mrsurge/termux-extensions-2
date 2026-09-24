@@ -384,6 +384,7 @@ test('compressed sticky scope renders canonical clickable path segments', async 
 
   const stickySearchInput = slots[0].querySelector('.fe-tree-search-input');
   assert.ok(stickySearchInput, slots[0].outerHTML);
+  assert.equal(stickySearchInput.autocapitalize, 'off');
   assert.equal(slots[0].querySelector('.fe-tree-search-count')?.textContent, '1/2');
   stickySearchInput.value = 'src';
   stickySearchInput.dispatchEvent(new window.Event('input', { bubbles: true }));

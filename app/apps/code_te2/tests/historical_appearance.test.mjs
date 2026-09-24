@@ -32,7 +32,10 @@ test('out-of-order theme loads and disposed viewers cannot publish stale colors'
   const controller = new AbortController();
   const apply = createHistoricalThemeApplier({ editor: {
     defineTheme: name => calls.push(['define', name]), setTheme: name => calls.push(['set', name]),
-  } }, controller.signal, async () => ({ themes: [] }), fakeFetch);
+  } }, controller.signal, async () => ({ themes: [
+    ['github-dark', 'dark.json'], ['github-light', 'light.json'], ['github-dark-dimmed', 'dark-dimmed.json'],
+  ].map(([id, file]) => ({ id, label: id, uiTheme: id === 'github-light' ? 'vs' : 'vs-dark',
+    source: 'vendored', sourceLabel: 'GitHub', serveUrl: `monaco_editor/themes/vendored/github/${file}` })) }), fakeFetch);
   const resolve = (suffix) => {
     const key = [...pending.keys()].find(key => key.endsWith(suffix));
     assert.ok(key);

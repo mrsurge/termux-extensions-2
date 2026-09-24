@@ -1,8 +1,9 @@
 import type * as Monaco from '../../../static/vendor/monaco-editor-core/esm/vs/editor/editor.api';
 import { buildMonacoOptionsFromPrefsState } from './editor_monaco_options_utils.ts';
 import { ensureThemeRegistryState } from './editor_theme_registry_state_utils.ts';
-import { getVscodeThemeJsonUrl } from './editor_theme_url_utils.ts';
+import { getVscodeThemeJsonUrl, themeJsonWithUiTheme } from './editor_theme_url_utils.ts';
 import { vscodeThemeToMonacoTheme } from './editor_theme_convert_utils.ts';
+import { monacoThemeName } from './editor_theme_name_utils.ts';
 import type { RequestThemeCatalog } from '../src/theme_catalog.ts';
 
 function record(value: unknown): Record<string, unknown> {
@@ -35,16 +36,17 @@ export function createHistoricalThemeApplier(
   let revision = 0;
   let current = '';
   const themes = new Map<string, Promise<Monaco.editor.IStandaloneThemeData>>();
-  const setRootTheme = (light: boolean): void => {
+  const setRootTheme = (base: string): void => {
     document.documentElement.classList.remove('vs', 'vs-dark', 'hc-black', 'hc-light');
-    document.documentElement.classList.add(light ? 'vs' : 'vs-dark');
+    document.documentElement.classList.add(base === 'vs' || base === 'hc-light' ? 'vs' : 'vs-dark');
+    if (base === 'hc-black' || base === 'hc-light') document.documentElement.classList.add(base);
   };
   return async (theme: string): Promise<void> => {
     const epoch = ++revision;
     if (signal.aborted || current === theme) return;
     if (['vs', 'vs-dark', 'hc-black', 'hc-light'].includes(theme)) {
       monaco.editor.setTheme(theme);
-      setRootTheme(theme === 'vs' || theme === 'hc-light');
+      setRootTheme(theme);
       current = theme;
       return;
     }
@@ -56,7 +58,9 @@ export function createHistoricalThemeApplier(
         if (!url) throw new Error(`Historical theme unavailable: ${theme}`);
         const response = await fetchTheme(url);
         if (!response.ok) throw new Error(`Historical theme failed: ${response.status}`);
-        const json: unknown = await response.json();
+        const value: unknown = await response.json();
+        if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`Invalid historical theme: ${theme}`);
+        const json = themeJsonWithUiTheme(value as Record<string, unknown>, entries[theme]?.uiTheme);
         // The existing converter produces Monaco theme data with opaque rule declarations.
         return vscodeThemeToMonacoTheme(theme, json) as Monaco.editor.IStandaloneThemeData;
       })();
@@ -65,9 +69,9 @@ export function createHistoricalThemeApplier(
     }
     const data = await pending;
     if (signal.aborted || epoch !== revision) return;
-    monaco.editor.defineTheme(theme, data);
-    monaco.editor.setTheme(theme);
-    setRootTheme(data.base === 'vs' || data.base === 'hc-light');
+    monaco.editor.defineTheme(monacoThemeName(theme), data);
+    monaco.editor.setTheme(monacoThemeName(theme));
+    setRootTheme(data.base);
     current = theme;
   };
 }

@@ -11,7 +11,6 @@ async function loadModule(relative, plugins = []) {
 }
 
 const { ensureThemeRegistryState, createDocumentThemeGate } = await loadModule('monaco_editor/editor_theme_registry_state_utils.ts');
-const { loadVscodeTextmateThemesRuntime } = await loadModule('monaco_editor/editor_theme_loader_runtime_utils.ts');
 const { createSettingsThemesController } = await loadModule('main_page/frontend/ui/settings-themes.ts');
 const { parseThemeCatalog } = await loadModule('src/theme_catalog.ts');
 const { createSettingsRefreshController } = await loadModule('main_page/frontend/ui/settings-refresh.ts', [{
@@ -92,31 +91,6 @@ test('failed theme gate rejects model waiters and retries without caching succes
   assert.equal(attempts, 2);
 });
 
-test('theme loader clears failed catalog promises and still fetches resource bytes', async () => {
-  const state = {};
-  let attempts = 0;
-  const resources = [];
-  const definitions = [];
-  const opts = {
-    state, win: { monaco: { editor: { defineTheme: (...args) => definitions.push(args) } } },
-    ensureThemeRegistryFn: async () => {
-      if (++attempts === 1) throw Error('disconnected');
-      return { [theme.id]: theme };
-    },
-    getThemeJsonUrlFn: () => theme.serveUrl,
-    fetchFn: async url => { resources.push(url); return { ok: true, json: async () => ({ tokenColors: [] }) }; },
-    toMonacoThemeFn: () => ({ rules: [] }),
-  };
-  await assert.rejects(loadVscodeTextmateThemesRuntime(opts), /disconnected/);
-  assert.equal(state.promise, null);
-  assert.equal(state.done, undefined);
-  await loadVscodeTextmateThemesRuntime(opts);
-  await loadVscodeTextmateThemesRuntime(opts);
-  assert.equal(attempts, 2);
-  assert.equal(definitions.length, 1);
-  assert.deepEqual(resources, [theme.serveUrl]);
-});
-
 test('theme picker uses injected host RPC, preserves selection, and displays request failures', async (t) => {
   const warning = t.mock.method(console, 'warn', () => {});
   const win = new Window();
@@ -159,7 +133,8 @@ test('all production consumers use owning lanes and never the removed HTTP catal
   const editor = await read('monaco_editor/m_editor_app.ts');
   assert.match(main, /requestThemeCatalog:.*requestUiIpc\(UI_IPC_RPC_METHODS.hostThemesList\)/);
   assert.match(secondary, /connection.request\(UI_IPC_RPC_METHODS.hostThemesList/);
-  assert.match(editor, /editorRpcCall\(EDITOR_RPC_METHODS.themesList/);
+  assert.match(editor, /editorRpcCall\(EDITOR_RPC_METHODS.themeSelected/);
+  assert.doesNotMatch(editor, /editorRpcCall\(EDITOR_RPC_METHODS.themesList/);
   assert.match(editor, /async function ensureEditorWithPrefs\(\) \{\s*await ensureDocumentTheme\(\)/);
   for (const path of ['main_page/frontend/ui/settings-themes.ts', 'main_page/frontend/ui/settings-refresh.ts',
     'monaco_editor/editor_theme_registry_state_utils.ts', 'monaco_editor/historical_appearance.ts']) {
@@ -201,22 +176,19 @@ test('selected theme failure cannot publish a fallback or satisfy model readines
   const win = new Window();
   const applied = [];
   let unavailable = true;
-  const cache = { 'github-dark': { uiTheme: 'vs-dark' } };
   const options = {
     win: { monaco: { editor: { setTheme: theme => applied.push(theme), defineTheme() {} } } },
-    doc: win.document, themeKey: 'github-light-default',
-    loadThemesFn: async () => {},
-    resolveThemeIdFn: () => 'github-dark',
-    getThemeJsonUrlFn: key => `/themes/${key}.json`,
-    getJsonCacheFn: () => cache,
-    fetchFn: async () => ({ ok: !unavailable, status: unavailable ? 503 : 200,
-      json: async () => ({ uiTheme: 'vs' }) }),
+    doc: win.document,
+    getSelectedThemeFn: async () => {
+      if (unavailable) throw Error('selected theme unavailable');
+      return { id: 'github-light-default', uiTheme: 'vs', theme: { tokenColors: [] } };
+    },
     toMonacoThemeFn: () => ({}),
   };
   const warn = console.warn;
   console.warn = () => {};
   try {
-    await assert.rejects(applyMonacoThemeRuntime(options), /HTTP 503/);
+    await assert.rejects(applyMonacoThemeRuntime(options), /selected theme unavailable/);
     assert.deepEqual(applied, []);
     unavailable = false;
     await applyMonacoThemeRuntime(options);

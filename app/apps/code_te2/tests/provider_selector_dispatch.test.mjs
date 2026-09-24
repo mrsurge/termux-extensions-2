@@ -21,6 +21,7 @@ test("completion registration publishes every advertised selector language", () 
     outcome.events,
     ["c", "cpp", "cuda-cpp"].map((language) => ({
       type: "provider/completions",
+      selector: ["c", "cpp", "cuda-cpp"].map(language => ({ language, scheme: "vscode-remote" })),
       handle: 184,
       language,
       triggerCharacters: [".", ">"],

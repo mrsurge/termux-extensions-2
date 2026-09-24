@@ -699,6 +699,161 @@ Exit: scoped compatibility design, fixture/lifecycle test matrix and an explicit
 implementation-or-defer decision. If implemented, require desktop and both
 Android renderers' acceptance before claiming parity.
 
+## Post-Merge Supplement: Symbols, Themes, And Startup Cache
+
+This branch has already been merged into main twice. Reuse it for the bounded
+follow-ups below rather than reopening the original backend/native observability
+scope or treating the original Phase 5 decision gate as the current work queue.
+Record source validation and live acceptance separately; neither a working-tree
+implementation nor documentation alone establishes release acceptance.
+
+1. Preserve live breadcrumb symbol tracking after a Code Inspector symbol-tree
+   lookup. Navigate to the selected symbol without automatically focusing the
+   editor or summoning the mobile IME. Investigate whether cursor placement can
+   be done without focus; give the symbol range a transient, theme-aware accent
+   distinct from Find highlighting. Fence decoration/navigation against file,
+   model and project changes, and test cursor movement after lookup.
+2. Finish and validate the installed-theme path already under development:
+   discover Code Server extension contributions, resolve their theme data on the
+   backend, and project only the selected definition to the editor. Keep picker
+   metadata separate from theme JSON and retain TextMate/Monaco semantic styling
+   and historical-secondary behavior. Record desktop, GeckoView and Cefrium
+   results individually; decide separately whether WBA webview chrome changes.
+   Investigate two narrower semantic-theme parity questions, without treating
+   either as a proven user-visible regression: extension-contributed semantic
+   token types with `superType` relationships (the standalone matcher currently
+   knows only `member` -> `method`), and VS Code's default semantic styling for
+   tokens lacking explicit theme rules. Compare the pinned Code Server token
+   classification registry/default-rule and TextMate scope-probe paths with our
+   standalone fixed scope mapping, using built-in and installed theme fixtures.
+   Explicit `semanticTokenColors` already match by type/modifier/language; do not
+   describe semantic tokens or Code Server built-in themes as unsupported.
+3. Use the persisted Python extension registry as the bounded cold-start TextMate
+   grammar projection. A registry scan stores complete contribution descriptors
+   and one deterministic revision; typed editor RPC exposes catalog metadata and
+   lazy, revision-checked grammar bodies before WBA is connected. Install/update/
+   uninstall scans publish only the new revision, causing editors to dispose stale
+   token providers and rebuild from one atomic catalog. Do not fall back to WBA or
+   HTTP and do not send the full grammar corpus or theme collection to the browser.
+   Theme-definition warm caching remains a separate investigation because selected
+   theme projection already has distinct backend ownership and boot semantics.
+4. Keep framework page release aligned with real HTTP availability. The generic
+   app worker must release its serving hook from Uvicorn's confirmed listener
+   boundary, not a fixed lifespan delay. Separately, direct WBA socket replay is
+   socket-scoped while initial intelligence application is model-scoped: if WBA
+   connects before the first Monaco model, retain the pending synchronization and
+   complete it when that model is attached. Cover both provider/model orderings
+   without polling, synthetic typing, or making Python `editor.modelReady` an
+   intelligence transport.
+5. Investigate three mobile-editor ergonomics issues before changing Monaco or
+   the maintained touch fork. Give Ctrl+Up/Down paragraph-navigation semantics
+   while retaining Ctrl+Left/Right word navigation. Trace double-tap selection
+   through Monaco pointer handling, touch-extension gesture state and selection
+   handle hit testing on GeckoView and Cefrium; the first-tap handle must not
+   consume the second tap. Trace long press from native pointer input through
+   Monaco hover dispatch and touch selection. If Monaco's mobile long-press hover
+   is the conflict, disable that behavior at the narrowest source-owned boundary
+   and make Monaco's long-press path select the target word; do not layer another
+   frontend monkey patch over the maintained source. Preserve desktop mouse hover,
+   mobile scrolling, handle dragging, IME focus and renderer parity. Any Monaco
+   fork edit requires its own nested commit/push and rebuilt publication before
+   parent-repo acceptance.
+
+   The source investigation found existing `cursorMove` blank-line navigation,
+   handle hit areas outside Monaco's `.lines-content` gesture target, and a shared
+   gesture recognizer that resets double-tap tracking on every movement. Monaco
+   currently sends holds to context-menu handling rather than word selection.
+   Implement editor-local tap/hold/scroll classification and reuse native word
+   selection; the touch fork should own handle presentation/dragging, not another
+   word-selection gesture. Preserve mouse/explicit hover while excluding touch
+   gestures from automatic hover and duplicate context-menu effects. Capture the
+   renderer event sequence before finalizing those filters. The hover widget's
+   own long-press timer only drags an existing hover and must remain intact.
+   Detailed source findings and validation scope are in TRACKER.md, Mobile Editor
+   Gesture Ergonomics. Implementation was approved after the source investigation;
+   native-client acceptance follows user-managed asset publication.
+
+Measure cold and warm resource/paint milestones before and after cache work.
+Cache correctness, rollback on failed refresh, extension install/uninstall and
+reconnect are required test cases. The approved app-lane polling-first experiment
+remains distinct from direct WBA, which stays WebSocket-only; measure it rather
+than generalizing the transport choice.
+
+## Branch Closeout Bugs And Cross-Branch Coordination
+
+The mobile gesture slice is live accepted and published in `86647a6a`. Finish the
+Code Inspector symbol-target highlight investigation first, preserving live
+breadcrumbs, source ranges, Find decorations and navigation without IME focus.
+Propose the concrete fix and tests after source/runtime evidence is collected.
+
+Record, but do not investigate or change Android client identity in this slice.
+The user reports GeckoView/Cefrium identity rejection after the framework has
+been running for a while; installed APK compatibility with other-branch changes
+is not established. Coordinate with `origin/feature/desktop-deb-packaging` and
+`docs/apps/cefrium_mobile_parity/IMPLEMENTATION_PLAN.md` before any identity work.
+The fetched plan at `c4a5f09e` includes preferred per-install loopback origins
+(Phase 11) but still separates native identity from origin/storage. The user's
+newer direction to use stable-origin local storage for client-local presentation
+preferences is pending reconciliation there, not an implemented contract here.
+Keep multi-server retargeting and multiple independent clients of one server as
+explicit requirements. Do not merge, duplicate, or preempt that implementation.
+
+Bounded follow-ups, each requiring investigation and a concrete fix scope:
+
+- Next, add a small translucent close-icon overlay button at the bottom-right of
+  the Code Inspector element, available across all Inspector modes. Its sole
+  effect is clearing Inspector-owned highlighting in the editor, including the
+  symbol-target accent. Do not dismiss results/the drawer, move or focus the
+  cursor, alter text selection or clear unrelated Find/search decorations.
+  Route the intent through the existing host/backend/editor command boundary;
+  cover symbol and result-highlight cleanup, repeat clearing, and mobile touch
+  accessibility without summoning the IME.
+- Disable automatic initial capitalization in Explorer filename search without
+  changing its search semantics or the editor's guarded IME path.
+- Require a warning/confirmation before branch checkout from the fe-menubar Git
+  selector. Inspect the existing checkout/dirty-worktree safeguards; cancellation
+  must not mutate the repository. Do not conflate comparison-ref selection with
+  actual branch checkout.
+- Investigate the cold-boot `Invalid Semantic Tokens Data From Extension: end
+  character > model.getLineLength(lineNumber)` warning. No visible failure has
+  been reported. Trace token/model/version identity before attributing it to an
+  extension, clamping token ranges or suppressing the warning. This is separate
+  from semantic-theme inheritance and styling investigations.
+
+### Cold-Boot Rust Styling Evidence Gate
+
+The user now reports that a cold Rust boot can display colors resembling JSON
+or HTML with the wrong GitHub Dark variant. Read-only inspection of a live Rust
+model found `rust` language ID and `source.rust` TextMate scopes; boot logs also
+record `rust -> source.rust`. The selected preference is `github-dark`, which
+the backend maps to vendored `dark.json`, while `github-dark-default` maps to
+`dark-default.json`. A separate `plaintext -> markdown.toml.frontmatter.codeblock`
+registration is anomalous but not evidence that Rust uses that grammar. Monaco
+raises the semantic warning when a token's end offset exceeds the current
+model line; that warning is not a TextMate parse failure.
+
+Before changing token or theme behavior, add an opt-in, bounded runtime-debug
+boot trace covering backend theme ID/source and a compact theme fingerprint,
+Monaco and TextMate theme application order, catalog revision and chosen Rust
+scope, active model URI/language/version, and semantic-token request/result
+model identity with first invalid offset summary. Do not log document text or
+token arrays, clamp invalid ranges, or disable semantic tokens as a speculative
+fix. Correlate the same cold boot with the later visible state, then test and
+repair only the proven boundary. Exercise grammar registry install/update/
+uninstall and missing-body recovery in isolated fixtures before any disruptive
+live extension manipulation. Native asset publication and shared-runtime restarts
+remain separate user-controlled actions.
+
+The Cefrium cold Rust trace identified the first model as `plaintext` while the
+backend grammar catalog already contained `.rs`/`source.rust`; the `github-dark`
+theme ID and vendored `dark.json` source were correct. A live SSOT displaced the
+boot snapshot before the boot syntax step read its path, and the SSOT handler
+mounted the model without awaiting its own grammar. The targeted fix prepares
+the live document's TextMate language before mounting and fences superseded
+snapshots. Cold boot also loads the projected catalog when no boot path remains.
+Validate in a freshly updated native client; do not infer that this fixes the
+separate semantic-token range warning, which did not recur in that trace.
+
 ## Source Starting Points
 
 Recheck these at each phase; this is an orientation map, not a caller audit.
@@ -786,6 +941,18 @@ renderer. No automatic shared runtime restart, APK installation, asset-version
 bump or release is part of this plan creation. Checkpoint completed slices when
 requested, and keep unresolved reproductions distinct from completed tooling.
 
+### Backend-Owned TextMate Startup
+
+Persist bounded grammar descriptors and filename/extension language associations
+in the Python extension registry. Project the catalog over typed editor RPC and
+load only the active grammar body under exact revision/path/stat limits. On cold
+boot, await the exact client's authenticated editor RPC connection, then concurrently
+apply the selected theme and prepare the catalog, Oniguruma
+factory and active grammar before creating the document model. Use the same syntax barrier
+for later model replacement. This path must not wait for code-server, WBA, or the
+extension host; WBA language configuration and intelligence attach afterward.
+Remove the duplicate WBA grammar scanner and retain no HTTP/WBA fallback.
+
 ### WBA Completion Observability
 
 Approved follow-up: expose trusted live Node/Bun WBA evaluation over its existing
@@ -823,3 +990,27 @@ project/extension-host session changes. Serialize only these background warm-ups
 not interactive operations; release result caches and contain failures without
 retrying. Validate both readiness orders, duplication, reset races and cleanup on
 Node/Bun. The user reloads the WBA for production live acceptance.
+
+### Compact Completion Projection
+
+Approved cleanup: use the VS Code main-thread completion model across WBA rather
+than retaining the earlier expanded-list implementation. WBA projects the original
+compact DTO once per provider, with provider/session identity outside the DTO.
+The browser registers providers separately, inflates each DTO through the vendored
+main-thread conversion, and lets Monaco own sorting, filtering, incomplete-list
+requeries and reuse. Preserve full selectors (including pattern-only providers),
+trigger characters, item IDs, default ranges, snippets, commands and edits.
+
+Wire item resolution and list disposal to the originating provider and session.
+Do not re-open or synchronize a document for these cache operations. Project or
+host replacement invalidates the session identity. Synchronization stays under
+the document-operation gate; provider response waits leave it so independently
+registered providers can respond concurrently. Keep the 30-second provider limit
+and conservative outer RPC budget, plus the one-shot warm-up policy. Remove old
+expanded payloads, duplicate compact aliases and the redundant frontend presort.
+No legacy payload fallback, backend restart, APK publication or version bump.
+
+Validate the real conversion/registration/dispatch paths on Node and Bun, including
+a 700-item MessagePack payload, multiple providers, slow/fast concurrency,
+resolution, cancellation disposal, empty results and stale-session rejection.
+Typecheck, rebuild both entrypoints and leave runtime acceptance to the user.

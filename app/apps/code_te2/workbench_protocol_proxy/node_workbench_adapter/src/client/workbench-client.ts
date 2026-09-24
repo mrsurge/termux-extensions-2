@@ -138,9 +138,8 @@ import {
   releaseCallHierarchy,
 } from "../extensions/intelligence/code-navigation.mjs";
 import {
-  inflateCompletionItems,
   provideCompletions,
-  provideCompletionSingle,
+  synchronizeCompletionText,
 } from "../extensions/intelligence/completions.mjs";
 import {
   provideColorPresentations,
@@ -807,6 +806,7 @@ export class WorkbenchClient {
   _semanticTokenProjections: SemanticTokenProjectionManager;
   _semanticTokenProviderSignatures: Map<string, string>;
   private readonly _completionWarmup: CompletionWarmup;
+  private _completionSessionId = crypto.randomUUID();
   private readonly _completionReadyPaths = new Set<string>();
   _callHierarchySessions: CallHierarchySessionStore;
   _useRemote: boolean;
@@ -2207,6 +2207,7 @@ export class WorkbenchClient {
   }
 
   _resetSessionCaches(reason: string): void {
+    this._completionSessionId = crypto.randomUUID();
     this._completionWarmup.reset();
     this._completionReadyPaths.clear();
     this._callHierarchySessions.releaseAll((providerHandle, sessionId) => {
@@ -2782,6 +2783,16 @@ export class WorkbenchClient {
   }
 
   // ─── Completions ────────────────────────────────────────────────────
+  async prepareCompletions(params: Record<string, unknown>): Promise<() => Promise<Record<string, unknown>>> {
+    const sessionId = this._completionSessionId;
+    const synced = await synchronizeCompletionText(this._completionRuntime(), params);
+    return async () => {
+      if (sessionId !== this._completionSessionId) return { ok: false, error: "stale_completion_session" };
+      if (synced.ok !== true) return synced;
+      return this.completions({ ...params, text: undefined });
+    };
+  }
+
   async completions(params: unknown = {}): Promise<Record<string, unknown>> {
     // A user request already warms these providers; do not schedule redundant
     // synthetic work if it wins the race against the readiness microtask.
@@ -2797,7 +2808,12 @@ export class WorkbenchClient {
         this._completionWarmup.markRequested(handle, languageId);
       }
     }
-    return provideCompletions(this._completionRuntime(), params);
+    const sessionId = this._completionSessionId;
+    const reply = await provideCompletions(this._completionRuntime(), params);
+    if (sessionId !== this._completionSessionId) return { ok: false, error: "stale_completion_session" };
+    return reply.ok === true && isRecord(reply.result)
+      ? { ok: true, result: { sessionId, ...reply.result } }
+      : reply;
   }
 
   async documentColors(
@@ -2849,32 +2865,34 @@ export class WorkbenchClient {
     );
   }
 
-  /** Single-provider completions path (for pinned handle callers). */
-  async _completionsSingle(
-    providerHandle: number,
-    path: string,
-    authority: string,
-    lineNumber: number,
-    column: number,
-    triggerKind: number,
-    triggerCharacter: unknown,
-    timeoutMs: number,
-  ): Promise<Record<string, unknown>> {
-    return provideCompletionSingle(this._completionRuntime(), {
-      providerHandle,
-      path,
-      authority,
-      lineNumber,
-      column,
-      triggerKind,
-      triggerCharacter,
-      timeoutMs,
-    });
+  // Completion cache IDs belong to an extension-host/project session, not the
+  // active editor. Resolve/dispose must not switch documents or sync their text.
+  async resolveCompletionItem(params: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (params.sessionId !== this._completionSessionId) return { ok: false, error: "stale_completion_session" };
+    const handle = params.providerHandle;
+    const id = params.id;
+    if (typeof handle !== "number" || !Number.isInteger(handle) || !Array.isArray(id)
+      || id.length !== 2 || !id.every(value => typeof value === "number" && Number.isInteger(value))) {
+      return { ok: false, error: "invalid_completion_identity" };
+    }
+    const reply = await this._sendExtPending(
+      _rpcIds.ExtHostLanguageFeatures, "$resolveCompletionItem", [handle, id], true,
+      { timeoutMs: 30000, timeoutMessage: "Completion resolve timed out" },
+    ).promise;
+    if (params.sessionId !== this._completionSessionId) return { ok: false, error: "stale_completion_session" };
+    if (isRecord(reply) && reply.type === 9) return { ok: true, result: reply.result };
+    return { ok: false, error: "completion_resolve_failed" };
   }
 
-  /** Inflate ISuggestResultDto minified fields to readable Monaco-compatible format. */
-  _inflateCompletionItems(dto: unknown): Record<string, unknown>[] {
-    return inflateCompletionItems(dto, (message) => console.log(message));
+  releaseCompletionItems(params: Record<string, unknown>): Record<string, unknown> {
+    if (params.sessionId !== this._completionSessionId) return { ok: false, error: "stale_completion_session" };
+    const handle = params.providerHandle;
+    const cacheId = params.cacheId;
+    if (typeof handle !== "number" || !Number.isInteger(handle)
+      || typeof cacheId !== "number" || !Number.isInteger(cacheId)) return { ok: false, error: "invalid_completion_identity" };
+    if (!this.ext?.protocol) return { ok: false, error: "extension_host_disconnected" };
+    this._sendExt(_rpcIds.ExtHostLanguageFeatures, "$releaseCompletionItems", [handle, cacheId], false);
+    return { ok: true };
   }
 
   // ─── Semantic Tokens ────────────────────────────────────────────────
@@ -2950,6 +2968,7 @@ export class WorkbenchClient {
     rejectedPendingRequests: number;
     clearedBackgroundDocuments: number;
   } {
+    this._completionSessionId = crypto.randomUUID();
     this._completionWarmup.reset();
     this._completionReadyPaths.clear();
     const removedEditors = Array.from(

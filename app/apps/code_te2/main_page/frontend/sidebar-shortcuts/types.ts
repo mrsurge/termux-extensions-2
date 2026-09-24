@@ -222,6 +222,10 @@ export interface SidebarShortcutsOptions {
     method: UiIpcRpcMethod,
     payload?: UnknownRecord,
   ) => void;
+  requestSidebarUi?: (
+    method: UiIpcRpcMethod,
+    payload?: UnknownRecord,
+  ) => Promise<unknown>;
   emitSidebarRpcRequest?: (
     method: SidebarIpcRpcMethod,
     payload?: UnknownRecord,

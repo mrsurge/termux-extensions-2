@@ -83,20 +83,6 @@ function replyError(reply: unknown): unknown {
   return field(reply, "error");
 }
 
-function commandNeeded(item: Record<string, unknown>): boolean {
-  return item.n != null || item.o != null;
-}
-
-function insertTextForItem(item: Record<string, unknown>): unknown {
-  if (item.h != null) return item.h;
-  if (typeof item.a === "string") return item.a;
-  return field(item.a, "label") ?? "";
-}
-
-function suggestResultDto(value: unknown): Record<string, unknown> | null {
-  return isRecord(value) ? value : null;
-}
-
 function optionalProviderHandle(value: unknown): number | null {
   if (value == null) return null;
   if (typeof value === "string" && value.trim() === "") return null;
@@ -160,46 +146,6 @@ async function ensureCompletionTextSynced(
   }
 }
 
-export function inflateCompletionItems(dto: unknown, log: (message: string) => void = () => undefined): Record<string, unknown>[] {
-  const completions = field(dto, "b");
-  if (!Array.isArray(completions)) return [];
-  const defaultRanges = field(dto, "a");
-  log(`[completions] _inflate defaultRanges(dto.a)=${JSON.stringify(defaultRanges)} completions.length=${completions.length}`);
-  if (completions.length > 0) {
-    const first = completions[0];
-    log(`[completions] _inflate item[0] a=${JSON.stringify(field(first, "a"))} j=${JSON.stringify(field(first, "j"))} f=${JSON.stringify(field(first, "f"))}`);
-  }
-
-  const items: Record<string, unknown>[] = [];
-  for (const rawItem of completions) {
-    if (!isRecord(rawItem)) continue;
-    const item: Record<string, unknown> = {
-      label: rawItem.a ?? "",
-      kind: rawItem.b ?? 0,
-      detail: rawItem.c ?? undefined,
-      documentation: rawItem.d ?? undefined,
-      sortText: rawItem.e ?? undefined,
-      filterText: rawItem.f ?? undefined,
-      preselect: rawItem.g ?? undefined,
-      insertText: insertTextForItem(rawItem),
-      insertTextRules: rawItem.i ?? undefined,
-      range: rawItem.j ?? defaultRanges ?? undefined,
-      commitCharacters: rawItem.k ?? undefined,
-      additionalTextEdits: rawItem.l ?? undefined,
-      tags: rawItem.m ?? undefined,
-    };
-    if (commandNeeded(rawItem)) {
-      item.command = {
-        $ident: rawItem.n ?? undefined,
-        id: rawItem.o ?? "",
-        arguments: rawItem.p ?? undefined,
-      };
-    }
-    items.push(item);
-  }
-  return items;
-}
-
 export async function provideCompletions(runtime: CompletionRuntime, params: unknown = {}): Promise<Record<string, unknown>> {
   const input = isRecord(params) ? params : {};
   const request = completionTrace.record("completion.begin", {
@@ -235,31 +181,16 @@ async function runCompletions(runtime: CompletionRuntime, params: unknown, reque
 
   runtime.log(`[completions] path=${path} lang=${languageId} line=${lineNumber} col=${column} trigger=${triggerKind}`);
 
-  if (input.text != null && path) {
-    completionTrace.record("completion.sync.begin", { request });
-    try {
-      const syncResult = await ensureCompletionTextSynced(
-        runtime,
-        input,
-        path,
-        String(input.text),
-        languageId,
-        authority,
-        timeoutMs,
-      );
-      const result = isRecord(syncResult) ? syncResult : {};
-      completionTrace.record("completion.sync.end", { request });
-      runtime.log(`[completions] pre-flight didChange ack path=${path} ver=${result.versionId ?? "?"} type=${result.ackType ?? "?"}`);
-    } catch (error) {
-      const message = errorMessage(error);
-      completionTrace.record("completion.sync.failed", { request });
-      runtime.warn("[completions] pre-flight didChange failed", message);
-      return { ok: false, error: `didChange_ack_failed: ${message}` };
-    }
-  }
+  const sync = await synchronizeCompletionText(runtime, input, request);
+  if (sync.ok !== true) return sync;
 
   const providerHandle = optionalProviderHandle(input.providerHandle);
   if (providerHandle !== null) {
+    // The frontend registers providers separately; retain server-side selector
+    // matching so a pinned handle cannot run against an unrelated document.
+    if (!runtime.findAllProviderHandles("completions", document).includes(providerHandle)) {
+      return { ok: true, result: { providers: [] } };
+    }
     return provideCompletionSingle(runtime, {
       providerHandle,
       path,
@@ -312,25 +243,16 @@ async function runCompletions(runtime: CompletionRuntime, params: unknown, reque
     });
   }));
 
-  let mergedItems: Record<string, unknown>[] = [];
-  let anyIncomplete = false;
-  let firstCacheId: unknown;
-  const suggestResults: Record<string, unknown>[] = [];
-  for (const reply of results) {
-    if (replyType(reply) !== 9) continue;
-    const raw = replyResult(reply);
-    if (!raw) continue;
-    const rawRecord = isRecord(raw) ? raw : {};
-    const rawDto = suggestResultDto(raw);
-    if (rawDto) suggestResults.push(rawDto);
-    const items = inflateCompletionItems(raw, runtime.log);
-    if (items.length > 0) mergedItems = mergedItems.concat(items);
-    if (rawRecord.c) anyIncomplete = true;
-    if (rawRecord.x != null && firstCacheId == null) firstCacheId = rawRecord.x;
-  }
-
-  runtime.log(`[completions] merged ${mergedItems.length} items from ${results.filter((reply) => replyType(reply) === 9).length}/${handles.length} providers`);
-  return { ok: true, result: { suggestResults, items: mergedItems, isIncomplete: anyIncomplete, cacheId: firstCacheId } };
+  // Project each original DTO once. Monaco owns inflation and provider merging;
+  // keep this batch form for non-pinned callers without expanding suggestions.
+  const providers: Array<{ handle: number; dto: Record<string, unknown> }> = [];
+  results.forEach((reply, index) => {
+    if (replyType(reply) !== 9) return;
+    const dto = replyResult(reply);
+    const handle = handles[index];
+    if (handle !== undefined && isRecord(dto)) providers.push({ handle, dto });
+  });
+  return { ok: true, result: { providers } };
 }
 
 export async function provideCompletionSingle(runtime: CompletionRuntime, params: CompletionSingleParams): Promise<Record<string, unknown>> {
@@ -360,21 +282,41 @@ export async function provideCompletionSingle(runtime: CompletionRuntime, params
 
   if (replyType(reply) === 9) {
     const raw = replyResult(reply);
-    if (!raw) return { ok: true, result: { dto: null, suggestResults: [], items: [], isIncomplete: false } };
-    const rawRecord = isRecord(raw) ? raw : {};
-    const items = inflateCompletionItems(raw, runtime.log);
-    const rawDto = suggestResultDto(raw);
-    return {
-      ok: true,
-      result: {
-        dto: rawDto,
-        suggestResults: rawDto ? [rawDto] : [],
-        items,
-        isIncomplete: !!rawRecord.c,
-        cacheId: rawRecord.x,
-      },
-    };
+    return { ok: true, result: { providers: isRecord(raw) ? [{ handle: params.providerHandle, dto: raw }] : [] } };
   }
   if (replyType(reply) === 11) return { ok: false, error: replyError(reply) };
   return { ok: false, error: reply };
+}
+
+// Only synchronization needs the projected client facade. Provider RPCs use an
+// explicit URI and can run outside that gate, independently of other providers.
+export async function synchronizeCompletionText(runtime: CompletionRuntime, input: Record<string, unknown>, request = 0): Promise<Record<string, unknown>> {
+  const path = String(input.path ?? "");
+  const languageId = String(input.languageId || "") || runtime.languageIdFromPath(path) || "plaintext";
+  const authority = String(input.authority ?? runtime.defaultAuthority());
+  const timeoutMs = completionTimeouts(input.timeoutMs).providerMs;
+  if (input.text != null && path) {
+    completionTrace.record("completion.sync.begin", { request });
+    try {
+      const syncResult = await ensureCompletionTextSynced(
+        runtime,
+        input,
+        path,
+        String(input.text),
+        languageId,
+        authority,
+        timeoutMs,
+      );
+      const result = isRecord(syncResult) ? syncResult : {};
+      completionTrace.record("completion.sync.end", { request });
+      runtime.log(`[completions] pre-flight didChange ack path=${path} ver=${result.versionId ?? "?"} type=${result.ackType ?? "?"}`);
+    } catch (error) {
+      const message = errorMessage(error);
+      completionTrace.record("completion.sync.failed", { request });
+      runtime.warn("[completions] pre-flight didChange failed", message);
+      return { ok: false, error: `didChange_ack_failed: ${message}` };
+    }
+  }
+
+  return { ok: true };
 }

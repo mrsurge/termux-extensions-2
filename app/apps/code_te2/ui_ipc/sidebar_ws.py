@@ -492,6 +492,22 @@ async def handle_ui_sidebar_window_close_request(params: JsonObject) -> JsonObje
     return result
 
 
+async def handle_ui_sidebar_app_windows_close_request(params: JsonObject) -> JsonObject:
+    from .sidebar_window_state import close_sidebar_app_windows
+
+    body = _json_object(params)
+    result = _json_object(close_sidebar_app_windows(body))
+    closed = result.get("closed")
+    host_ids = [item for item in cast(list[object], closed) if isinstance(item, str)] if isinstance(closed, list) else []
+    forget_sidebar_window_runtime_state(host_ids)
+    await publish_sidebar_window_state_changed(
+        _json_object(result.get("state", {})),
+        source=_norm(body.get("source")) or "ui_sidebar_app_windows_close",
+        sidebar_scope="global",
+    )
+    return result
+
+
 def forget_sidebar_window_runtime_state(host_ids: list[str]) -> None:
     removed = {_norm(host_id) for host_id in host_ids if _norm(host_id)}
     if not removed:

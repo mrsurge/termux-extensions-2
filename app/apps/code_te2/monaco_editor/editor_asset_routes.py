@@ -4,6 +4,8 @@
 Grammar discovery/content uses WBA RPC, not these static resource routes.
 Keep resource URLs stable for native OTA/APK interception.
 """
+import asyncio
+import json
 from pathlib import Path
 from typing import cast
 
@@ -11,7 +13,7 @@ from starlette.requests import Request
 from starlette.routing import Route
 from starlette.responses import FileResponse, Response
 
-from ..code_te2_paths import code_te2_paths
+from ..theme_catalog import load_extension_theme
 
 
 def build_editor_asset_routes(mount_path: str = "/ui") -> list[Route]:
@@ -75,18 +77,13 @@ export default href;
             return Response("not found", status_code=404, media_type="text/plain")
         return FileResponse(str(target), media_type="application/json")
 
-    cs_ext_themes = code_te2_paths().code_server_extensions_dir
-
     async def _serve_cs_extension_theme(request: Request) -> Response:
         ext_id = cast(str, request.path_params["ext_id"])
         theme_file = cast(str, request.path_params["theme_file"])
-        base = (cs_ext_themes / ext_id / "themes").resolve()
-        target = (base / theme_file).resolve()
-        if not str(target).startswith(str(base) + "/") and target != base:
+        theme = await asyncio.to_thread(load_extension_theme, ext_id, theme_file)
+        if theme is None:
             return Response("not found", status_code=404, media_type="text/plain")
-        if not target.exists() or not target.is_file():
-            return Response("not found", status_code=404, media_type="text/plain")
-        return FileResponse(str(target), media_type="application/json")
+        return Response(json.dumps(theme), media_type="application/json")
 
     async def _serve_monaco_editor_textmate(request: Request) -> Response:
         file_path = cast(str, request.path_params["file_path"])

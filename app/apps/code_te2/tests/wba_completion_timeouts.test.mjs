@@ -3,7 +3,7 @@ import test from 'node:test';
 import { build } from 'esbuild';
 import { encode, decode } from '@msgpack/msgpack';
 import { completionTimeouts } from '../workbench_protocol_proxy/node_workbench_adapter/dist/protocol/completion-timeouts.mjs';
-import { provideCompletions } from '../workbench_protocol_proxy/node_workbench_adapter/dist/extensions/intelligence/completions.mjs';
+import { provideCompletions, synchronizeCompletionText } from '../workbench_protocol_proxy/node_workbench_adapter/dist/extensions/intelligence/completions.mjs';
 import { dispatchJsonRpcRequest } from '../workbench_protocol_proxy/node_workbench_adapter/dist/server/request-dispatch.mjs';
 import { ClientOperationGate } from '../workbench_protocol_proxy/node_workbench_adapter/dist/client/client-operation-gate.mjs';
 import { PendingExtRequestOwner } from '../workbench_protocol_proxy/node_workbench_adapter/dist/protocol/pending-requests.mjs';
@@ -58,7 +58,7 @@ function clock() {
 }
 
 let fixtureId = 0;
-function fixture({ replyMs = 20000, preflightMs = 0, queueMs = 0, secondQueueMs = 0, providerWaitMs = 0, pinned = false, neverReply = false } = {}) {
+function fixture({ replyMs = 20000, preflightMs = 0, queueMs = 0, secondQueueMs = 0, providerWaitMs = 0, pinned = false, neverReply = false, providerHandles = [23] } = {}) {
   const time = clock();
   const gate = new ClientOperationGate(time);
   const pending = new PendingExtRequestOwner(time);
@@ -71,7 +71,7 @@ function fixture({ replyMs = 20000, preflightMs = 0, queueMs = 0, secondQueueMs 
     ensureConnected() {}, defaultAuthority: () => 'test', documentScheme: () => 'file',
     languageFeaturesRpcId: 94, languageIdFromPath: () => 'python',
     didChange: async () => { await time.sleep(preflightMs); return { ok: true }; },
-    findAllProviderHandles: () => registered ? [23] : [],
+    findAllProviderHandles: () => registered ? providerHandles : [],
     waitFor: async () => { await time.sleep(providerWaitMs); registered = true; return true; },
     uriForPath: path => ({ scheme: 'file', path }), log() {}, warn() {},
     sendExtPending(_rpc, _method, _args, _cancellable, options) {
@@ -80,7 +80,7 @@ function fixture({ replyMs = 20000, preflightMs = 0, queueMs = 0, secondQueueMs 
       const promise = pending.createPromise(req, options);
       if (!neverReply) time.setTimeoutFn(() => pending.resolveReply({
         req, type: 9, result: { b: [{ a: 'example', h: 'example' }] },
-      }), replyMs);
+      }), typeof replyMs === 'function' ? replyMs(_args[0]) : replyMs);
       return { promise };
     },
   };
@@ -99,7 +99,14 @@ function fixture({ replyMs = 20000, preflightMs = 0, queueMs = 0, secondQueueMs 
         budgets.push(timeoutMs);
         return gate.run('client', operation, { label, timeoutMs });
       },
-      completions: params => provideCompletions(completionRuntime, params),
+      async prepareCompletions(params) {
+        const synced = await synchronizeCompletionText(completionRuntime, params);
+        return async () => {
+          if (synced.ok !== true) return synced;
+          const reply = await provideCompletions(completionRuntime, { ...params, text: undefined });
+          return reply.ok === true ? { ok: true, result: { sessionId: 'test-session', ...reply.result } } : reply;
+        };
+      },
     },
   };
   const socket = {
@@ -117,6 +124,7 @@ function fixture({ replyMs = 20000, preflightMs = 0, queueMs = 0, secondQueueMs 
   transport.attachSocket(socket);
   const path = `/completion-${++fixtureId}.py`;
   const deps = {
+    releaseCompletionItems: async () => {},
     languageId: 'python', model: {
       uri: { toString: () => `file://${path}` }, getValue: () => 'ex',
       getLanguageId: () => 'python', getVersionId: () => 1,
@@ -151,7 +159,7 @@ for (const pinned of [false, true]) test(`slow completion survives old deadlines
   await f.time.advance(1);
   assert.equal(completed, true);
   assert.equal((await result).suggestions[0].label, 'example');
-  assert.deepEqual(f.budgets, [195000, 45000, 45000, 30000]);
+  assert.deepEqual(f.budgets, [195000, 45000, 10000, 30000]);
   assert.equal(f.pending.pendingSize, 0);
   assert.equal(f.transport.getPendingRequests().size, 0);
   assert.equal(f.gate.snapshot().owner, null);
@@ -167,8 +175,24 @@ test('fast completion is not delayed by a larger budget or a stale short caller 
   assert.equal(f.time.pending, 0);
 });
 
+test('slow provider RPC does not hold the document gate or block another provider', async () => {
+  const f = fixture({ providerHandles: [23, 24], replyMs: handle => handle === 23 ? 20000 : 25 });
+  let slowDone = false;
+  const slow = provideWorkbenchCompletionItemsFromVscodeSuggest({ ...f.deps, providerHandle: 23 })
+    .then(result => { slowDone = true; return result; });
+  await f.time.advance(1);
+  assert.equal(f.gate.snapshot().owner, null);
+  const fast = provideWorkbenchCompletionItemsFromVscodeSuggest({ ...f.deps, providerHandle: 24 });
+  await f.time.advance(25);
+  assert.equal((await fast).suggestions.length, 1);
+  assert.equal(slowDone, false);
+  assert.equal(f.gate.snapshot().owner, null);
+  await f.time.advance(20000);
+  assert.equal((await slow).suggestions.length, 1);
+});
+
 test('outer RPC covers both gate admissions and late provider registration', async () => {
-  const f = fixture({ replyMs: 29000, preflightMs: 4000, providerWaitMs: 4000, queueMs: 49000, secondQueueMs: 49000 });
+  const f = fixture({ replyMs: 29000, preflightMs: 4000, providerWaitMs: 4000, queueMs: 49000, secondQueueMs: 14000 });
   const result = provideWorkbenchCompletionItemsFromVscodeSuggest(f.deps);
   await f.time.advance(135000);
   assert.equal((await result).suggestions[0].label, 'example');
