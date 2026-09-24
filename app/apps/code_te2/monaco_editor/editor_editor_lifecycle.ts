@@ -83,10 +83,6 @@ export function themeFromPrefs(state: unknown): string {
   return editor && typeof editor.theme === 'string' ? editor.theme : '';
 }
 
-function themeFromOptions(options: Record<string, unknown> | null | undefined): string {
-  return options && typeof options.theme === 'string' ? options.theme : '';
-}
-
 function restoreEditorViewState(
   editor: MonacoEditorLike | null,
   scrollTop: number | null,
@@ -288,7 +284,7 @@ export function ensureDiffEditorWithPrefs(deps: EditorLifecycleDeps): MonacoDiff
 
   try {
     const options = deps.buildMonacoOptionsFromPrefs(deps.getCachedPrefs());
-    const themeKey = themeFromOptions(options) || themeFromPrefs(deps.getCachedPrefs());
+    const themeKey = themeFromPrefs(deps.getCachedPrefs());
     const diffOptions = Object.assign({}, options, { minimap: { enabled: false } });
     delete diffOptions.theme;
     const originalOptions = Object.assign({}, options, { readOnly: true, contextmenu: false, minimap: { enabled: false } });

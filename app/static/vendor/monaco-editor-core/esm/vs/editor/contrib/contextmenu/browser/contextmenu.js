@@ -13,6 +13,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 };
 var ContextMenuController_1;
 import * as dom from '../../../../base/browser/dom.js';
+import { EventType as TouchEventType } from '../../../../base/browser/touch.js';
 import { ActionViewItem } from '../../../../base/browser/ui/actionbar/actionViewItems.js';
 import { Separator, SubmenuAction } from '../../../../base/common/actions.js';
 import { DisposableStore } from '../../../../base/common/lifecycle.js';
@@ -68,6 +69,11 @@ let ContextMenuController = class ContextMenuController {
         }));
     }
     _onContextMenu(e) {
+        // The source touch handler already selected the held word. Consumers may
+        // show touch controls, but desktop context-menu focus must not summon the IME.
+        if (e.event.browserEvent.type === TouchEventType.Hold) {
+            return;
+        }
         if (!this._editor.hasModel()) {
             return;
         }
@@ -330,4 +336,3 @@ class ShowContextMenu extends EditorAction {
 }
 registerEditorContribution(ContextMenuController.ID, ContextMenuController, 2 /* EditorContributionInstantiation.BeforeFirstInteraction */);
 registerEditorAction(ShowContextMenu);
-//# sourceMappingURL=contextmenu.js.map

@@ -9,9 +9,10 @@ export function completionTimeouts(requestedProviderMs?: unknown) {
   // didChange acknowledgement + missing-provider wait + reply processing margin.
   // Keep this within runClientDocumentOperation's existing 120-second ceiling.
   const operationMs = providerMs + 2 * preflightMs + 5000;
-  // Dispatch enters the gate twice: activation, then completion. Each admission
-  // can queue for operationMs + 5000 before running. Cover both and transport;
-  // these are worst-case ceilings, never added sleeps or provider runtime.
+  // Retain the established outer ceiling. Activation uses operationMs; the
+  // second admission now only synchronizes text (5s + 5s margin), after which
+  // providers run outside the gate. Both queues + sync + provider wait/reply
+  // fit this conservative budget. These allowances never add sleeps.
   const rpcMs = 2 * (2 * operationMs + 5000) + 5000;
   return { providerMs, preflightMs, operationMs, rpcMs };
 }

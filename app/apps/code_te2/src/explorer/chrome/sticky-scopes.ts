@@ -436,6 +436,7 @@ export function createExplorerStickyScopes({
     input.className = sourceInput.className;
     input.placeholder = sourceInput.placeholder;
     input.autocomplete = 'off';
+    input.autocapitalize = 'off';
     input.spellcheck = false;
     input.value = sourceInput.value;
     stickySearchSources.set(input, sourceInput);

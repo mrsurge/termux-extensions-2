@@ -46,6 +46,7 @@ export const UI_IPC_RPC_METHODS = {
   sidebarWindowCreate: 'ui.sidebar.window.create',
   sidebarWindowActivate: 'ui.sidebar.window.activate',
   sidebarWindowClose: 'ui.sidebar.window.close',
+  sidebarAppWindowsClose: 'ui.sidebar.appWindows.close',
   sidebarActiveShortcutSet: 'ui.sidebar.activeShortcut.set',
 } as const;
 

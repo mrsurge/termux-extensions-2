@@ -13,6 +13,8 @@ interface CodeInspectorPanelDeps {
       column?: number;
       focus?: boolean;
       scrollY?: string;
+      placeCursor?: boolean;
+      symbolRange?: JsonObject;
     },
   ): Promise<unknown>;
 }
@@ -118,6 +120,7 @@ export function createCodeInspectorPanel(
   const summary = requireElement<HTMLElement>('code-inspector-summary');
   const tree = requireElement<HTMLElement>('code-inspector-tree');
   const empty = requireElement<HTMLElement>('code-inspector-empty');
+  const clearHighlights = requireElement<HTMLButtonElement>('code-inspector-clear-highlights');
   const collapse = requireElement<HTMLButtonElement>('code-inspector-collapse');
   const expanded = new Set<string>();
   const pendingExpansions = new Set<string>();
@@ -231,6 +234,8 @@ export function createCodeInspectorPanel(
         column: location.column,
         focus: false,
         scrollY: 'center',
+        placeCursor: true,
+        ...(nodeType === 'symbol' && isRecord(node.range) ? { symbolRange: node.range } : {}),
       });
     });
 
@@ -285,6 +290,7 @@ export function createCodeInspectorPanel(
 
   function render(): void {
     const current = projection;
+    clearHighlights.hidden = !current;
     const targetData = current && isRecord(current.target) ? current.target : {};
     const summaryData = current && isRecord(current.summary) ? current.summary : {};
     const symbol = asString(targetData.symbol);
@@ -366,6 +372,15 @@ export function createCodeInspectorPanel(
     hydrate(projectionFromEvent(event), false);
   };
   const collapseHandler = () => deps.closeDrawer();
+  const clearHighlightsHandler = () => {
+    if (!projection) return;
+    void deps.requestCommand({
+      action: 'clearHighlights',
+      requestId: projection.requestId,
+    }).catch((error) => {
+      console.warn('[CodeInspector] clear highlights failed', error);
+    });
+  };
   const directionHandler = () => {
     const current = projection;
     if (!current || current.mode !== 'callHierarchy' || pendingDirection) return;
@@ -387,6 +402,7 @@ export function createCodeInspectorPanel(
   window.addEventListener('code-te2:code-inspector-changed', changedHandler);
   window.addEventListener('code-te2:code-inspector-hydrate', bootHydrateHandler);
   collapse.addEventListener('click', collapseHandler);
+  clearHighlights.addEventListener('click', clearHighlightsHandler);
   directionButton.addEventListener('click', directionHandler);
   render();
 
@@ -399,6 +415,7 @@ export function createCodeInspectorPanel(
       window.removeEventListener('code-te2:code-inspector-changed', changedHandler);
       window.removeEventListener('code-te2:code-inspector-hydrate', bootHydrateHandler);
       collapse.removeEventListener('click', collapseHandler);
+      clearHighlights.removeEventListener('click', clearHighlightsHandler);
       directionButton.removeEventListener('click', directionHandler);
     },
   };

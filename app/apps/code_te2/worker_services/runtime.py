@@ -18,6 +18,7 @@ from ..run_profile_events import register_run_profile_event_bus_handlers
 from ..run_profile_surfaces import register_run_profile_surface_event_handlers
 from ..search_highlight_events import register_search_highlight_event_bus_handlers
 from ..sidebar_window_events import register_sidebar_window_event_bus_handlers
+from ..textmate_projection_events import register_textmate_projection_event_handlers
 from ..workspace_events import register_workspace_event_bus_handlers
 from ..workbench_runtime_discovery import workbench_runtime_discovery
 from ..intelligence_bootstrap import attach_application, stop_early_intelligence
@@ -108,6 +109,7 @@ def bootstrap_worker_runtime(loop: asyncio.AbstractEventLoop | None = None) -> N
     register_run_profile_surface_event_handlers()
     register_search_highlight_event_bus_handlers()
     register_sidebar_window_event_bus_handlers()
+    register_textmate_projection_event_handlers()
     register_workspace_event_bus_handlers()
     register_explorer_render_state_bus_handlers()
     start_run_profile_fws_bridge()

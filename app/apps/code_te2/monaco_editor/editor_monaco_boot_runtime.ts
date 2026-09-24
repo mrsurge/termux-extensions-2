@@ -1,4 +1,5 @@
 import { loadMonaco as loadBundledMonaco } from '../../../static/vendor/monaco-editor-core/te2-lang/bootstrap/monaco.bootstrap.bundle.js';
+import { traceColdBoot } from './editor_cold_boot_trace.ts';
 
 interface WorkerCtorLike {
   new (url: string | URL, options?: WorkerOptions): Worker;
@@ -18,7 +19,9 @@ interface EditorMonacoBootRuntimeDeps {
   getWorkerLogOnce(): Record<string, boolean>;
   ensureTe2DiffTheme(): void;
   ensureDocumentTheme(): Promise<void>;
+  ensureDocumentSyntax(): Promise<void>;
   ensureEditorWithPrefs(): Promise<unknown>;
+  getActiveModelTrace?(): { uri: string; language: string; version: number; lines: number } | null;
   applyBootSnapshot(includeDocument?: boolean): void;
   ensureWorkbenchLanguageCatalogInstalled(): Promise<boolean>;
   installWorkbenchLanguageBridgeProviders(): void;
@@ -165,9 +168,16 @@ export async function bootMonacoRuntime(
     // a boot snapshot or live replay may create/attach a document model.
     deps.connectEditorHostActions();
     await Promise.resolve(deps.connectEditorSocket());
-    await deps.ensureDocumentTheme();
+    // Theme and backend-projected syntax can prepare concurrently. Both are
+    // first-paint prerequisites; neither waits for WBA or the extension host.
+    await Promise.all([
+      deps.ensureDocumentTheme(),
+      deps.ensureDocumentSyntax(),
+    ]);
     deps.applyBootSnapshot();
     await deps.ensureEditorWithPrefs();
+    const activeModel = deps.getActiveModelTrace?.();
+    if (activeModel) traceColdBoot('model.first_mount', activeModel);
     if (!languageWorkersEnabled) {
       // Catalog enrichment follows WBA availability, not editor readiness. A
       // cold extension host must not delay the editor-ready/open-model handshake.

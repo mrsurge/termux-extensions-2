@@ -1,11 +1,14 @@
 # pyright: strict
 from __future__ import annotations
 
+import asyncio
+from http.client import HTTPResponse
 import json
 import os
 from pathlib import Path
 import sys
 from typing import cast
+from urllib import request as urllib_request
 
 from starlette.types import Scope, Receive, Send
 
@@ -30,6 +33,17 @@ async def te2_app_stop() -> None:
 
 
 async def te2_app_backend_serving() -> None:
+    probe_url = os.environ.get("TE2_TEST_NATIVE_SERVING_PROBE_URL")
+    if probe_url:
+        def probe_listener() -> None:
+            with cast(
+                HTTPResponse,
+                urllib_request.urlopen(probe_url, timeout=2),
+            ) as response:
+                if response.status != 200:
+                    raise RuntimeError(f"listener probe returned {response.status}")
+
+        await asyncio.to_thread(probe_listener)
     record("worker.serving")
 
 

@@ -28,6 +28,7 @@ interface RunEditorOpenTransactionDeps {
   setModel(model: OpenModelLike | null): void;
   ensureEditorWithPrefs(): Promise<unknown>;
   languageFromPath(path: string): string;
+  prepareTextmateForDocument(path: string, fallbackLanguage: string): Promise<string>;
   monacoFileUri(monacoRef: unknown, path: string): EditorUriLike | null;
   applyLanguageToModel(model: OpenModelLike, lang: string, absPath: string): void;
   createFileModel(content: string, lang: string, absPath: string): OpenModelLike;
@@ -37,6 +38,7 @@ interface RunEditorOpenTransactionDeps {
   applyLineNumberSizing(): void;
   ensureTouchSelection(reason: string): void;
   syncDiagnosticsForCurrentModel(reason: string): void;
+  syncWbaForReadyModel?(reason: string): void;
   emitToHost(eventType: string, payload: Record<string, unknown>): void;
   emitModelReady(payload: { path: string; languageId: string; generation?: number; request_id?: string; source?: string }): boolean;
   requestDraftDiff(reason: string): void;
@@ -46,6 +48,8 @@ interface RunEditorOpenTransactionDeps {
   wbCurrentGeneration(): number;
   wbBumpGeneration(path: string, source: string): number;
   bcUpdatePath(path: string, shouldAnnounce: boolean): void;
+  clearSymbolTargetHighlight(): void;
+  showSymbolTargetHighlight(range: Record<string, unknown>): void;
   queueDidChange(path: string, text: string, languageId: string, generation: number): void;
   queueSymbols(path: string, generation: number): void;
   openFileFlow(payload: Record<string, unknown>): Promise<unknown>;
@@ -136,10 +140,13 @@ export async function runEditorOpenTransaction(
     deps.coercePositiveInt,
   );
   let postOpenJumpPayload: EditorOpenJumpPayload | null = null;
-  try { deps.bcUpdatePath(currentPath, true); } catch (_) {}
+  deps.clearSymbolTargetHighlight();
+  // Same-model jumps must not discard the breadcrumb symbol tree.
+  try { deps.bcUpdatePath(currentPath, !sameFileNavigationOnly); } catch (_) {}
 
   try {
-    const lang = deps.languageFromPath(currentPath);
+    const fallbackLanguage = deps.languageFromPath(currentPath);
+    const lang = await deps.prepareTextmateForDocument(currentPath, fallbackLanguage);
     let model = deps.getModel();
     const editor = deps.getEditor();
     const diffEditor = deps.getDiffEditor();
@@ -197,6 +204,9 @@ export async function runEditorOpenTransaction(
     deps.applyLineNumberSizing();
     deps.ensureTouchSelection('open');
     deps.syncDiagnosticsForCurrentModel('open_model_ready');
+    // WBA may have connected before this first model existed. Complete that
+    // deferred synchronization at the actual model-ready boundary.
+    deps.syncWbaForReadyModel?.('open_model_ready');
 
     deps.setLastContentSha256(payload.content_sha256 || deps.getLastContentSha256());
     deps.emitToHost('editor_cache_state', {
@@ -251,6 +261,10 @@ export async function runEditorOpenTransaction(
           column: tx && tx.hasExplicitNavigation ? tx.column : null,
         });
       } catch (_) {}
+    }
+
+    if (satisfied && payload.symbol_range) {
+      deps.showSymbolTargetHighlight(payload.symbol_range);
     }
 
     let languageOpenPromise: Promise<unknown> | null = null;

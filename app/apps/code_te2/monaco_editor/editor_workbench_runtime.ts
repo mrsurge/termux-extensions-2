@@ -419,6 +419,8 @@ export function createEditorWorkbenchRuntime(
   function isIntelligenceWorkbenchMethod(method: string): boolean {
     switch (method) {
       case 'completions':
+      case 'completions_resolve':
+      case 'completions_release':
       case 'hover':
       case 'document_highlights':
       case 'definition':

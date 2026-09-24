@@ -16,13 +16,72 @@ function dispatchTextAreaTap(viewHelper) {
     event.initEvent(TextAreaSyntethicEvents.Tap, false, true);
     viewHelper.dispatchTextAreaEvent(event);
 }
+// A touch hold selects through the same word-selection command as double click.
+// It never focuses the textarea; ordinary taps keep the existing IME activation.
+class EditorTouchMouseHandler extends MouseHandler {
+    constructor(context, viewController, viewHelper) {
+        super(context, viewController, viewHelper);
+        this.lastTouchAt = -Infinity;
+        this.touchActive = false;
+        const recordTouch = (e) => {
+            this.lastTouchAt = Date.now();
+            this.touchActive = e.touches.length > 0;
+        };
+        for (const type of ['touchstart', 'touchend', 'touchcancel']) {
+            this._register(dom.addDisposableListener(viewHelper.viewDomNode, type, recordTouch, { capture: true, passive: true }));
+        }
+        this._register(dom.addDisposableListener(dom.getWindow(viewHelper.viewDomNode), 'blur', () => { this.touchActive = false; }));
+        this._register(dom.addDisposableListener(viewHelper.linesContentDomNode, EventType.Hold, (e) => {
+            this.lastTouchAt = Date.now();
+            this._dispatchGesture(e, false);
+            // Expose the completed selection through the public context-menu event.
+            // The touch-menu contribution can present it without relocating the caret.
+            super._onContextMenu(new EditorMouseEvent(e, false, viewHelper.viewDomNode), false);
+        }));
+    }
+    isTouchMouseEvent(e) {
+        const event = e.browserEvent;
+        return event.pointerType === 'touch' || event.sourceCapabilities?.firesTouchEvents === true
+            || (!event.pointerType && (this.touchActive || Date.now() - this.lastTouchAt < 1000));
+    }
+    _onMouseMove(e) {
+        if (this.isTouchMouseEvent(e)) {
+            return;
+        }
+        super._onMouseMove(e);
+    }
+    _onContextMenu(e, testEventTarget) {
+        if (this.isTouchMouseEvent(e) && this.viewHelper.linesContentDomNode.contains(e.browserEvent.target)) {
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
+        super._onContextMenu(e, testEventTarget);
+    }
+    _dispatchGesture(event, inSelectionMode) {
+        const target = this._createMouseTarget(new EditorMouseEvent(event, false, this.viewHelper.viewDomNode), false);
+        if (target.position) {
+            this.viewController.dispatchMouse({
+                position: target.position,
+                mouseColumn: target.position.column,
+                startedOnLineNumbers: false,
+                revealType: 1 /* NavigationCommandRevealType.Minimal */,
+                mouseDownCount: event.tapCount,
+                inSelectionMode,
+                altKey: false, ctrlKey: false, metaKey: false, shiftKey: false,
+                leftButton: false, middleButton: false,
+                onInjectedText: target.type === 6 /* MouseTargetType.CONTENT_TEXT */ && target.detail.injectedText !== null
+            });
+        }
+    }
+}
 /**
  * Currently only tested on iOS 13/ iPadOS.
  */
-export class PointerEventHandler extends MouseHandler {
+export class PointerEventHandler extends EditorTouchMouseHandler {
     constructor(context, viewController, viewHelper) {
         super(context, viewController, viewHelper);
-        this._register(Gesture.addTarget(this.viewHelper.linesContentDomNode));
+        this._register(Gesture.addTarget(this.viewHelper.linesContentDomNode, true));
         this._register(dom.addDisposableListener(this.viewHelper.linesContentDomNode, EventType.Tap, (e) => this.onTap(e)));
         this._register(dom.addDisposableListener(this.viewHelper.linesContentDomNode, EventType.Change, (e) => this.onChange(e)));
         this._register(dom.addDisposableListener(this.viewHelper.linesContentDomNode, EventType.Contextmenu, (e) => this._onContextMenu(new EditorMouseEvent(e, false, this.viewHelper.viewDomNode), false)));
@@ -64,26 +123,6 @@ export class PointerEventHandler extends MouseHandler {
             this._dispatchGesture(event, /*inSelectionMode*/ true);
         }
     }
-    _dispatchGesture(event, inSelectionMode) {
-        const target = this._createMouseTarget(new EditorMouseEvent(event, false, this.viewHelper.viewDomNode), false);
-        if (target.position) {
-            this.viewController.dispatchMouse({
-                position: target.position,
-                mouseColumn: target.position.column,
-                startedOnLineNumbers: false,
-                revealType: 1 /* NavigationCommandRevealType.Minimal */,
-                mouseDownCount: event.tapCount,
-                inSelectionMode,
-                altKey: false,
-                ctrlKey: false,
-                metaKey: false,
-                shiftKey: false,
-                leftButton: false,
-                middleButton: false,
-                onInjectedText: target.type === 6 /* MouseTargetType.CONTENT_TEXT */ && target.detail.injectedText !== null
-            });
-        }
-    }
     _onMouseDown(e, pointerId) {
         if (e.browserEvent.pointerType === 'touch') {
             return;
@@ -91,10 +130,10 @@ export class PointerEventHandler extends MouseHandler {
         super._onMouseDown(e, pointerId);
     }
 }
-class TouchHandler extends MouseHandler {
+class TouchHandler extends EditorTouchMouseHandler {
     constructor(context, viewController, viewHelper) {
         super(context, viewController, viewHelper);
-        this._register(Gesture.addTarget(this.viewHelper.linesContentDomNode));
+        this._register(Gesture.addTarget(this.viewHelper.linesContentDomNode, true));
         this._register(dom.addDisposableListener(this.viewHelper.linesContentDomNode, EventType.Tap, (e) => this.onTap(e)));
         this._register(dom.addDisposableListener(this.viewHelper.linesContentDomNode, EventType.Change, (e) => this.onChange(e)));
         this._register(dom.addDisposableListener(this.viewHelper.linesContentDomNode, EventType.Contextmenu, (e) => this._onContextMenu(new EditorMouseEvent(e, false, this.viewHelper.viewDomNode), false)));
@@ -106,7 +145,7 @@ class TouchHandler extends MouseHandler {
         if (target.position) {
             // Send the tap event also to the <textarea> (for input purposes)
             dispatchTextAreaTap(this.viewHelper);
-            this.viewController.moveTo(target.position, 1 /* NavigationCommandRevealType.Minimal */);
+            this._dispatchGesture(event, false);
         }
     }
     onChange(e) {
@@ -131,4 +170,3 @@ export class PointerHandler extends Disposable {
         return this.handler.getTargetAtClientPoint(clientX, clientY);
     }
 }
-//# sourceMappingURL=pointerHandler.js.map

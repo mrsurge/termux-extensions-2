@@ -101,7 +101,6 @@ const workbenchAdapterConfig = {
     'workbench_protocol_proxy/node_workbench_adapter/src/server/runtime-debug.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/server/server.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/server/stdio-protocol.ts',
-    'workbench_protocol_proxy/node_workbench_adapter/src/server/textmate-grammars.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/server/webview-resource-response.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/workspace/document-registry.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/workspace/file-search.ts',

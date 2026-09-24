@@ -7,6 +7,7 @@ import {
   recordDiagnosticsLatency,
   rpcWireByteLength,
 } from '../diagnostics/latency-probe.ts';
+import { APP_WORKER_SOCKET_IO_TRANSPORTS } from './socketio-topology.ts';
 
 export const RPC_REQUEST_EVENT = 'rpc' as const;
 export const RPC_NOTIFICATION_EVENT = 'rpc.notify' as const;
@@ -252,7 +253,7 @@ export function createSocketIoJsonRpcClient(options: CreateSocketIoJsonRpcClient
         }
         socket = ioFactory(options.namespace, {
           path: options.path,
-          transports: ['websocket'],
+          transports: [...APP_WORKER_SOCKET_IO_TRANSPORTS],
           query: options.query || {},
           auth: options.auth || {},
         });

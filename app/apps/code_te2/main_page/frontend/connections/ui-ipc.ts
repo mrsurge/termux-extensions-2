@@ -5,7 +5,7 @@ import { RPC_NOTIFICATION_EVENT, RPC_REQUEST_EVENT } from '../../../src/rpc/tran
 import type { IoFactory, JsonObject, SocketLike } from '../../../src/rpc/transport.ts';
 import { UI_IPC_RPC_METHODS, UI_IPC_RPC_NOTIFICATIONS, type UiIpcRpcMethod } from '../../../src/ui_ipc/rpc_contract.ts';
 import { SIDEBAR_IPC_RPC_METHODS, SIDEBAR_IPC_RPC_NOTIFICATIONS, parseSidebarIpcRpcNotification, type SidebarIpcRpcMethod, type SidebarIpcRpcNotificationMethod } from '../../../src/sidebar_ipc/rpc_contract.ts';
-import { SOCKET_IO_NAMESPACES, SOCKET_IO_PATHS, fileEditorSocketQuery } from '../../../src/rpc/socketio-topology.ts';
+import { APP_WORKER_SOCKET_IO_TRANSPORTS, SOCKET_IO_NAMESPACES, SOCKET_IO_PATHS, fileEditorSocketQuery } from '../../../src/rpc/socketio-topology.ts';
 
 interface ConsoleBridgeOptions {
   workerId?: string;
@@ -233,7 +233,7 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
         }
         const socket = io(SOCKET_IO_NAMESPACES.sidebarIpc, {
           path: SOCKET_IO_PATHS.uiIpc,
-          transports: ['websocket'],
+          transports: [...APP_WORKER_SOCKET_IO_TRANSPORTS],
           query: getSocketQuery(),
         });
         sidebarIpcSocket = socket;

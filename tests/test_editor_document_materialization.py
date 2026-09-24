@@ -23,6 +23,7 @@ from app.apps.code_te2.monaco_editor.editor_backend_services.document_open_polic
     MAX_EDITOR_DOCUMENT_BYTES,
 )
 from app.apps.code_te2.monaco_editor.editor_backend_services.open_service import (
+    coerce_editor_open_request_fields,
     emit_editor_open_from_backend,
 )
 from app.apps.code_te2.open_state_backend import (
@@ -70,6 +71,39 @@ class _PreferencesStore:
 
 
 class DocumentMaterializationTests(unittest.TestCase):
+    def test_symbol_open_keeps_validated_navigation_without_focus(self) -> None:
+        symbol_range = {
+            "startLineNumber": 2,
+            "startColumn": 1,
+            "endLineNumber": 6,
+            "endColumn": 2,
+        }
+        fields = coerce_editor_open_request_fields(
+            {
+                "path": "/project/file.py",
+                "line": 3,
+                "focus": False,
+                "place_cursor": True,
+                "symbol_range": symbol_range,
+            },
+            "symbol-open",
+            active_project=lambda: "/project",
+            normalize_abs_path=lambda path: path,
+            is_under_project=lambda project, path: path.startswith(project + "/"),
+        )
+        self.assertIs(fields["focus"], False)
+        self.assertIs(fields["place_cursor"], True)
+        self.assertEqual(fields["symbol_range"], symbol_range)
+
+        invalid = coerce_editor_open_request_fields(
+            {"path": "/project/file.py", "symbol_range": {**symbol_range, "endLineNumber": 1}},
+            "bad-symbol-open",
+            active_project=lambda: "/project",
+            normalize_abs_path=lambda path: path,
+            is_under_project=lambda project, path: path.startswith(project + "/"),
+        )
+        self.assertIsNone(invalid["symbol_range"])
+
     def test_shell_script_extension_remains_supported(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             script = Path(temp_dir) / "build.sh"
@@ -284,6 +318,7 @@ class AsyncDocumentMaterializationTests(unittest.IsolatedAsyncioTestCase):
                 "exists": True,
                 "revision": 1,
                 "seededFromLegacy": False,
+                "clientRole": "primary",
                 "reason": "test",
                 "ts": 0,
             })

@@ -165,6 +165,35 @@ class SidebarWindowLedgerTests(unittest.TestCase):
         self.assertNotIn("activeHostId", state)
         self.assertNotIn("order", state)
 
+    def test_close_app_windows_removes_only_matching_app_slots_once(self) -> None:
+        def app_slot(host_id: str, app_id: str) -> dict[str, object]:
+            return {
+                "kind": "app", "app_id": app_id, "host_id": host_id,
+                "url": f"/app/{app_id}?embed=1", "base_url": f"/app/{app_id}",
+            }
+
+        store = _FakePreferencesStore({"version": 2, "slots": {
+            "alpha-one": app_slot("alpha-one", "alpha"),
+            "alpha-two": app_slot("alpha-two", "alpha"),
+            "beta": app_slot("beta", "beta"),
+            "url": _url_slot("url"),
+        }})
+        with (
+            patch.object(sidebar_window_state, "get_preferences_store", return_value=store),
+            patch.object(sidebar_window_state, "list_launcher_apps", return_value=[]),
+        ):
+            with self.assertRaisesRegex(ValueError, "unknown app dock slot"):
+                sidebar_window_state.close_sidebar_app_windows({"host_id": "url"})
+            self.assertEqual(0, store.update_count)
+            result = sidebar_window_state.close_sidebar_app_windows({"host_id": "alpha-one"})
+
+        self.assertEqual("alpha", result["app_id"])
+        self.assertEqual(["alpha-one", "alpha-two"], result["closed"])
+        self.assertEqual(1, store.update_count)
+        state = cast(dict[str, object], result["state"])
+        slots = cast(dict[str, object], state["slots"])
+        self.assertEqual({"beta", "url"}, set(slots))
+
     def test_extension_webview_surface_round_trips_as_url_slot(self) -> None:
         url = "/api/app/code_te2/services/wba/webview/vsix%3Aworkspace%3Aview"
         host_id = "vsix-webview:vsix:workspace:view"

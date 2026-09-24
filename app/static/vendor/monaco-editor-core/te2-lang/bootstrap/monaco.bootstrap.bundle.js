@@ -26586,6 +26586,41 @@ var init_coreCommands = __esm({
       }
       CoreNavigationCommands2.CursorMoveImpl = CursorMoveImpl;
       CoreNavigationCommands2.CursorMove = registerEditorCommand(new CursorMoveImpl());
+      for (const [suffix, direction, key] of [
+        [
+          "Up",
+          CursorMove.RawDirection.PrevBlankLine,
+          16
+          /* KeyCode.UpArrow */
+        ],
+        [
+          "Down",
+          CursorMove.RawDirection.NextBlankLine,
+          18
+          /* KeyCode.DownArrow */
+        ]
+      ]) {
+        for (const select of [false, true]) {
+          registerEditorCommand(new class extends CoreEditorCommand {
+            constructor() {
+              const modifiers = select ? 1024 : 0;
+              super({
+                id: `cursorParagraph${suffix}${select ? "Select" : ""}`,
+                precondition: void 0,
+                kbOpts: {
+                  weight: CORE_WEIGHT + 1,
+                  kbExpr: EditorContextKeys.textInputFocus,
+                  primary: 2048 | modifiers | key,
+                  mac: { primary: 256 | modifiers | key }
+                }
+              });
+            }
+            runCoreEditorCommand(viewModel, args) {
+              CoreNavigationCommands2.CursorMove.runCoreEditorCommand(viewModel, { to: direction, select, source: args.source });
+            }
+          }());
+        }
+      }
       class CursorMoveBasedCommand extends CoreEditorCommand {
         constructor(opts) {
           super(opts);
@@ -37785,6 +37820,58 @@ var init_mouseTarget = __esm({
   }
 });
 
+// app/static/vendor/monaco-editor-core/esm/vs/base/browser/editorTouchGesture.js
+var EditorTouchGesture;
+var init_editorTouchGesture = __esm({
+  "app/static/vendor/monaco-editor-core/esm/vs/base/browser/editorTouchGesture.js"() {
+    EditorTouchGesture = class {
+      constructor() {
+        this.phase = "cancel";
+        this.x = 0;
+        this.y = 0;
+      }
+      static {
+        this.holdDelay = 700;
+      }
+      start(x, y) {
+        this.x = x;
+        this.y = y;
+        this.phase = "pending";
+      }
+      move(x, y) {
+        if (this.phase === "pending" && Math.hypot(x - this.x, y - this.y) > 10) {
+          this.phase = "scroll";
+          this.lastTap = void 0;
+        }
+        return this.phase === "scroll";
+      }
+      hold() {
+        if (this.phase !== "pending") {
+          return false;
+        }
+        this.phase = "hold";
+        this.lastTap = void 0;
+        return true;
+      }
+      end(time) {
+        const phase = this.phase;
+        this.phase = "cancel";
+        if (phase !== "pending") {
+          return { kind: phase };
+        }
+        const previous = this.lastTap;
+        const doubleTap = previous && time - previous.time <= 400 && Math.hypot(previous.x - this.x, previous.y - this.y) <= 24;
+        this.lastTap = doubleTap ? void 0 : { x: this.x, y: this.y, time };
+        return { kind: "tap", count: doubleTap ? 2 : 1 };
+      }
+      cancel() {
+        this.phase = "cancel";
+        this.lastTap = void 0;
+      }
+    };
+  }
+});
+
 // app/static/vendor/monaco-editor-core/esm/vs/base/common/decorators.js
 function memoize(_target, key, descriptor) {
   let fnKey = null;
@@ -37825,6 +37912,7 @@ var __decorate6, EventType2, Gesture;
 var init_touch = __esm({
   "app/static/vendor/monaco-editor-core/esm/vs/base/browser/touch.js"() {
     init_dom();
+    init_editorTouchGesture();
     init_window();
     init_decorators();
     init_event();
@@ -37842,6 +37930,7 @@ var init_touch = __esm({
       EventType3.Start = "-monaco-gesturestart";
       EventType3.End = "-monaco-gesturesend";
       EventType3.Contextmenu = "-monaco-gesturecontextmenu";
+      EventType3.Hold = "-monaco-gesturehold";
     })(EventType2 || (EventType2 = {}));
     Gesture = class _Gesture extends Disposable {
       static {
@@ -37858,17 +37947,20 @@ var init_touch = __esm({
         super();
         this.dispatched = false;
         this.targets = new LinkedList();
+        this.editorTargets = /* @__PURE__ */ new Map();
         this.ignoreTargets = new LinkedList();
         this.activeTouches = {};
         this.handle = null;
         this._lastSetTapCountTime = 0;
         this._register(Event.runAndSubscribe(onDidRegisterWindow, ({ window: window2, disposables }) => {
           disposables.add(addDisposableListener(window2.document, "touchstart", (e) => this.onTouchStart(e), { passive: false }));
-          disposables.add(addDisposableListener(window2.document, "touchend", (e) => this.onTouchEnd(window2, e)));
+          disposables.add(addDisposableListener(window2.document, "touchend", (e) => this.onTouchEnd(window2, e), { passive: false }));
           disposables.add(addDisposableListener(window2.document, "touchmove", (e) => this.onTouchMove(e), { passive: false }));
+          disposables.add(addDisposableListener(window2.document, "touchcancel", (e) => this.onTouchCancel(e)));
+          disposables.add(addDisposableListener(window2, "blur", () => this.cancelEditorTouches()));
         }, { window: mainWindow, disposables: this._store }));
       }
-      static addTarget(element) {
+      static addTarget(element, editorGestures = false) {
         if (!_Gesture.isTouchDevice()) {
           return Disposable.None;
         }
@@ -37876,7 +37968,21 @@ var init_touch = __esm({
           _Gesture.INSTANCE = markAsSingleton(new _Gesture());
         }
         const remove = _Gesture.INSTANCE.targets.push(element);
-        return toDisposable(remove);
+        if (editorGestures) {
+          _Gesture.INSTANCE.editorTargets.set(element, new EditorTouchGesture());
+        }
+        return toDisposable(() => {
+          remove();
+          const gesture = _Gesture.INSTANCE.editorTargets.get(element);
+          gesture?.cancel();
+          for (const data of Object.values(_Gesture.INSTANCE.activeTouches)) {
+            if (gesture && data.editorGesture === gesture) {
+              clearTimeout(data.holdTimer);
+              delete _Gesture.INSTANCE.activeTouches[data.id];
+            }
+          }
+          _Gesture.INSTANCE.editorTargets.delete(element);
+        });
       }
       static ignoreTarget(element) {
         if (!_Gesture.isTouchDevice()) {
@@ -37892,11 +37998,31 @@ var init_touch = __esm({
         return "ontouchstart" in mainWindow || navigator.maxTouchPoints > 0;
       }
       dispose() {
+        this.cancelEditorTouches();
         if (this.handle) {
           this.handle.dispose();
           this.handle = null;
         }
         super.dispose();
+      }
+      cancelEditorTouches() {
+        for (const data of Object.values(this.activeTouches)) {
+          data.editorGesture?.cancel();
+          clearTimeout(data.holdTimer);
+        }
+      }
+      onTouchCancel(e) {
+        for (let i2 = 0; i2 < e.changedTouches.length; i2++) {
+          const id = e.changedTouches.item(i2).identifier;
+          const data = this.activeTouches[id];
+          if (data) {
+            data.editorGesture?.cancel();
+            clearTimeout(data.holdTimer);
+            this.dispatchEvent(this.newGestureEvent(EventType2.End, data.initialTarget));
+            delete this.activeTouches[id];
+          }
+        }
+        this.dispatched = false;
       }
       onTouchStart(e) {
         const timestamp = Date.now();
@@ -37904,8 +38030,11 @@ var init_touch = __esm({
           this.handle.dispose();
           this.handle = null;
         }
-        for (let i2 = 0, len = e.targetTouches.length; i2 < len; i2++) {
-          const touch = e.targetTouches.item(i2);
+        if (e.touches.length > 1) {
+          this.cancelEditorTouches();
+        }
+        for (let i2 = 0, len = e.changedTouches.length; i2 < len; i2++) {
+          const touch = e.changedTouches.item(i2);
           this.activeTouches[touch.identifier] = {
             id: touch.identifier,
             initialTarget: touch.target,
@@ -37916,6 +38045,30 @@ var init_touch = __esm({
             rollingPageX: [touch.pageX],
             rollingPageY: [touch.pageY]
           };
+          const data = this.activeTouches[touch.identifier];
+          for (const [target, gesture] of this.editorTargets) {
+            if (!target.contains(touch.target)) {
+              continue;
+            }
+            data.editorGesture = gesture;
+            gesture.start(touch.pageX, touch.pageY);
+            if (e.touches.length !== 1) {
+              gesture.cancel();
+              break;
+            }
+            data.holdTimer = setTimeout(() => {
+              if (this.activeTouches[touch.identifier] !== data || !target.isConnected || !gesture.hold()) {
+                return;
+              }
+              const hold = this.newGestureEvent(EventType2.Hold, data.initialTarget);
+              hold.pageX = data.initialPageX;
+              hold.pageY = data.initialPageY;
+              hold.tapCount = 2;
+              this.dispatchEvent(hold);
+              this.dispatched = false;
+            }, EditorTouchGesture.holdDelay);
+            break;
+          }
           const evt = this.newGestureEvent(EventType2.Start, touch.target);
           evt.pageX = touch.pageX;
           evt.pageY = touch.pageY;
@@ -37937,12 +38090,23 @@ var init_touch = __esm({
             continue;
           }
           const data = this.activeTouches[touch.identifier], holdTime = Date.now() - data.initialTimeStamp;
-          if (holdTime < _Gesture.HOLD_DELAY && Math.abs(data.initialPageX - data.rollingPageX.at(-1)) < 30 && Math.abs(data.initialPageY - data.rollingPageY.at(-1)) < 30) {
+          clearTimeout(data.holdTimer);
+          data.editorGesture?.move(touch.pageX, touch.pageY);
+          const editorResult = data.editorGesture?.end(timestamp);
+          if (editorResult?.kind === "hold" || editorResult?.kind === "cancel") {
+            this.dispatchEvent(this.newGestureEvent(EventType2.End, data.initialTarget));
+            delete this.activeTouches[touch.identifier];
+            continue;
+          }
+          if (editorResult?.kind === "tap" || !editorResult && holdTime < _Gesture.HOLD_DELAY && Math.abs(data.initialPageX - data.rollingPageX.at(-1)) < 30 && Math.abs(data.initialPageY - data.rollingPageY.at(-1)) < 30) {
             const evt = this.newGestureEvent(EventType2.Tap, data.initialTarget);
+            if (editorResult?.kind === "tap") {
+              evt.tapCount = editorResult.count;
+            }
             evt.pageX = data.rollingPageX.at(-1);
             evt.pageY = data.rollingPageY.at(-1);
             this.dispatchEvent(evt);
-          } else if (holdTime >= _Gesture.HOLD_DELAY && Math.abs(data.initialPageX - data.rollingPageX.at(-1)) < 30 && Math.abs(data.initialPageY - data.rollingPageY.at(-1)) < 30) {
+          } else if (!editorResult && holdTime >= _Gesture.HOLD_DELAY && Math.abs(data.initialPageX - data.rollingPageX.at(-1)) < 30 && Math.abs(data.initialPageY - data.rollingPageY.at(-1)) < 30) {
             const evt = this.newGestureEvent(EventType2.Contextmenu, data.initialTarget);
             evt.pageX = data.rollingPageX.at(-1);
             evt.pageY = data.rollingPageY.at(-1);
@@ -37954,24 +38118,26 @@ var init_touch = __esm({
             const deltaX = finalX - data.rollingPageX[0];
             const deltaY = finalY - data.rollingPageY[0];
             const dispatchTo = [...this.targets].filter((t) => data.initialTarget instanceof Node && t.contains(data.initialTarget));
-            this.inertia(
-              targetWindow,
-              dispatchTo,
-              timestamp,
-              // time now
-              Math.abs(deltaX) / deltaT,
-              // speed
-              deltaX > 0 ? 1 : -1,
-              // x direction
-              finalX,
-              // x now
-              Math.abs(deltaY) / deltaT,
-              // y speed
-              deltaY > 0 ? 1 : -1,
-              // y direction
-              finalY
-              // y now
-            );
+            if (deltaT > 0) {
+              this.inertia(
+                targetWindow,
+                dispatchTo,
+                timestamp,
+                // time now
+                Math.abs(deltaX) / deltaT,
+                // speed
+                deltaX > 0 ? 1 : -1,
+                // x direction
+                finalX,
+                // x now
+                Math.abs(deltaY) / deltaT,
+                // y speed
+                deltaY > 0 ? 1 : -1,
+                // y direction
+                finalY
+                // y now
+              );
+            }
           }
           this.dispatchEvent(this.newGestureEvent(EventType2.End, data.initialTarget));
           delete this.activeTouches[touch.identifier];
@@ -37990,7 +38156,7 @@ var init_touch = __esm({
         return event;
       }
       dispatchEvent(event) {
-        if (event.type === EventType2.Tap) {
+        if (event.type === EventType2.Tap && event.tapCount === 0) {
           const currentTime = (/* @__PURE__ */ new Date()).getTime();
           let setTapCount = 0;
           if (currentTime - this._lastSetTapCountTime > _Gesture.CLEAR_TAP_COUNT_TIME) {
@@ -38062,6 +38228,13 @@ var init_touch = __esm({
             continue;
           }
           const data = this.activeTouches[touch.identifier];
+          if (data.editorGesture) {
+            this.dispatched = true;
+            if (!data.editorGesture.move(touch.pageX, touch.pageY)) {
+              continue;
+            }
+            clearTimeout(data.holdTimer);
+          }
           const evt = this.newGestureEvent(EventType2.Change, data.initialTarget);
           evt.translationX = touch.pageX - data.rollingPageX.at(-1);
           evt.translationY = touch.pageY - data.rollingPageY.at(-1);
@@ -41441,7 +41614,7 @@ function dispatchTextAreaTap(viewHelper) {
   event.initEvent(TextAreaSyntethicEvents.Tap, false, true);
   viewHelper.dispatchTextAreaEvent(event);
 }
-var PointerEventHandler, TouchHandler, PointerHandler;
+var EditorTouchMouseHandler, PointerEventHandler, TouchHandler, PointerHandler;
 var init_pointerHandler = __esm({
   "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/pointerHandler.js"() {
     init_canIUse();
@@ -41453,10 +41626,70 @@ var init_pointerHandler = __esm({
     init_mouseHandler();
     init_editorDom();
     init_textAreaEditContextInput();
-    PointerEventHandler = class extends MouseHandler {
+    EditorTouchMouseHandler = class extends MouseHandler {
       constructor(context, viewController, viewHelper) {
         super(context, viewController, viewHelper);
-        this._register(Gesture.addTarget(this.viewHelper.linesContentDomNode));
+        this.lastTouchAt = -Infinity;
+        this.touchActive = false;
+        const recordTouch = (e) => {
+          this.lastTouchAt = Date.now();
+          this.touchActive = e.touches.length > 0;
+        };
+        for (const type of ["touchstart", "touchend", "touchcancel"]) {
+          this._register(addDisposableListener(viewHelper.viewDomNode, type, recordTouch, { capture: true, passive: true }));
+        }
+        this._register(addDisposableListener(getWindow(viewHelper.viewDomNode), "blur", () => {
+          this.touchActive = false;
+        }));
+        this._register(addDisposableListener(viewHelper.linesContentDomNode, EventType2.Hold, (e) => {
+          this.lastTouchAt = Date.now();
+          this._dispatchGesture(e, false);
+          super._onContextMenu(new EditorMouseEvent(e, false, viewHelper.viewDomNode), false);
+        }));
+      }
+      isTouchMouseEvent(e) {
+        const event = e.browserEvent;
+        return event.pointerType === "touch" || event.sourceCapabilities?.firesTouchEvents === true || !event.pointerType && (this.touchActive || Date.now() - this.lastTouchAt < 1e3);
+      }
+      _onMouseMove(e) {
+        if (this.isTouchMouseEvent(e)) {
+          return;
+        }
+        super._onMouseMove(e);
+      }
+      _onContextMenu(e, testEventTarget) {
+        if (this.isTouchMouseEvent(e) && this.viewHelper.linesContentDomNode.contains(e.browserEvent.target)) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+        super._onContextMenu(e, testEventTarget);
+      }
+      _dispatchGesture(event, inSelectionMode) {
+        const target = this._createMouseTarget(new EditorMouseEvent(event, false, this.viewHelper.viewDomNode), false);
+        if (target.position) {
+          this.viewController.dispatchMouse({
+            position: target.position,
+            mouseColumn: target.position.column,
+            startedOnLineNumbers: false,
+            revealType: 1,
+            mouseDownCount: event.tapCount,
+            inSelectionMode,
+            altKey: false,
+            ctrlKey: false,
+            metaKey: false,
+            shiftKey: false,
+            leftButton: false,
+            middleButton: false,
+            onInjectedText: target.type === 6 && target.detail.injectedText !== null
+          });
+        }
+      }
+    };
+    PointerEventHandler = class extends EditorTouchMouseHandler {
+      constructor(context, viewController, viewHelper) {
+        super(context, viewController, viewHelper);
+        this._register(Gesture.addTarget(this.viewHelper.linesContentDomNode, true));
         this._register(addDisposableListener(this.viewHelper.linesContentDomNode, EventType2.Tap, (e) => this.onTap(e)));
         this._register(addDisposableListener(this.viewHelper.linesContentDomNode, EventType2.Change, (e) => this.onChange(e)));
         this._register(addDisposableListener(this.viewHelper.linesContentDomNode, EventType2.Contextmenu, (e) => this._onContextMenu(new EditorMouseEvent(e, false, this.viewHelper.viewDomNode), false)));
@@ -41503,26 +41736,6 @@ var init_pointerHandler = __esm({
           );
         }
       }
-      _dispatchGesture(event, inSelectionMode) {
-        const target = this._createMouseTarget(new EditorMouseEvent(event, false, this.viewHelper.viewDomNode), false);
-        if (target.position) {
-          this.viewController.dispatchMouse({
-            position: target.position,
-            mouseColumn: target.position.column,
-            startedOnLineNumbers: false,
-            revealType: 1,
-            mouseDownCount: event.tapCount,
-            inSelectionMode,
-            altKey: false,
-            ctrlKey: false,
-            metaKey: false,
-            shiftKey: false,
-            leftButton: false,
-            middleButton: false,
-            onInjectedText: target.type === 6 && target.detail.injectedText !== null
-          });
-        }
-      }
       _onMouseDown(e, pointerId) {
         if (e.browserEvent.pointerType === "touch") {
           return;
@@ -41530,10 +41743,10 @@ var init_pointerHandler = __esm({
         super._onMouseDown(e, pointerId);
       }
     };
-    TouchHandler = class extends MouseHandler {
+    TouchHandler = class extends EditorTouchMouseHandler {
       constructor(context, viewController, viewHelper) {
         super(context, viewController, viewHelper);
-        this._register(Gesture.addTarget(this.viewHelper.linesContentDomNode));
+        this._register(Gesture.addTarget(this.viewHelper.linesContentDomNode, true));
         this._register(addDisposableListener(this.viewHelper.linesContentDomNode, EventType2.Tap, (e) => this.onTap(e)));
         this._register(addDisposableListener(this.viewHelper.linesContentDomNode, EventType2.Change, (e) => this.onChange(e)));
         this._register(addDisposableListener(this.viewHelper.linesContentDomNode, EventType2.Contextmenu, (e) => this._onContextMenu(new EditorMouseEvent(e, false, this.viewHelper.viewDomNode), false)));
@@ -41544,11 +41757,7 @@ var init_pointerHandler = __esm({
         const target = this._createMouseTarget(new EditorMouseEvent(event, false, this.viewHelper.viewDomNode), false);
         if (target.position) {
           dispatchTextAreaTap(this.viewHelper);
-          this.viewController.moveTo(
-            target.position,
-            1
-            /* NavigationCommandRevealType.Minimal */
-          );
+          this._dispatchGesture(event, false);
         }
       }
       onChange(e) {
@@ -119801,6 +120010,66 @@ var init_iconsStyleSheet = __esm({
   }
 });
 
+// app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneSemanticTokenRules.js
+function parseStandaloneSemanticTokenRules(colors) {
+  const rules = [];
+  const selectorPattern = /^(\w+[-_\w+]*|\*)(\.\w+[-_\w+]*)*(?::\w+[-_\w+]*)?$/;
+  for (const [key, setting] of Object.entries(colors ?? {})) {
+    if (!selectorPattern.test(key)) {
+      continue;
+    }
+    try {
+      const [classifier, language82] = key.split(":");
+      const [selectorType, ...selectorModifiers] = classifier.split(".");
+      const data = typeof setting === "string" ? { foreground: setting } : setting;
+      const style = {};
+      if (data.foreground) {
+        style.foreground = Color.fromHex(data.foreground);
+      }
+      if (data.fontStyle !== void 0) {
+        style.bold = style.italic = style.underline = style.strikethrough = false;
+        for (const match2 of data.fontStyle.matchAll(/italic|bold|underline|strikethrough/g)) {
+          style[match2[0]] = true;
+        }
+      } else {
+        style.bold = data.bold;
+        style.italic = data.italic;
+        style.underline = data.underline;
+        style.strikethrough = data.strikethrough;
+      }
+      rules.push({
+        style,
+        match(type, modifiers, modelLanguage) {
+          if (language82 !== void 0 && language82 !== modelLanguage) {
+            return -1;
+          }
+          let score3 = language82 !== void 0 ? 10 : 0;
+          if (selectorType !== "*") {
+            const level = type === selectorType ? 0 : type === "member" && selectorType === "method" ? 1 : -1;
+            if (level < 0) {
+              return -1;
+            }
+            score3 += 100 - level;
+          }
+          for (const modifier of selectorModifiers) {
+            if (!modifiers.includes(modifier)) {
+              return -1;
+            }
+          }
+          return score3 + selectorModifiers.length * 100;
+        }
+      });
+    } catch {
+    }
+  }
+  return rules;
+}
+var init_standaloneSemanticTokenRules = __esm({
+  "app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneSemanticTokenRules.js"() {
+    init_color();
+  }
+});
+
 // app/static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/standaloneThemeService.js
 function isBuiltinTheme(themeName) {
   return themeName === VS_LIGHT_THEME_NAME || themeName === VS_DARK_THEME_NAME || themeName === HC_BLACK_THEME_NAME || themeName === HC_LIGHT_THEME_NAME;
@@ -119840,6 +120109,7 @@ var init_standaloneThemeService = __esm({
     init_theme();
     init_iconsStyleSheet();
     init_window();
+    init_standaloneSemanticTokenRules();
     VS_LIGHT_THEME_NAME = "vs";
     VS_DARK_THEME_NAME = "vs-dark";
     HC_BLACK_THEME_NAME = "hc-black";
@@ -119865,6 +120135,10 @@ var init_standaloneThemeService = __esm({
         this.colors = null;
         this.defaultColors = /* @__PURE__ */ Object.create(null);
         this._tokenTheme = null;
+        this.semanticTokenRules = parseStandaloneSemanticTokenRules(standaloneThemeData.semanticTokenColors);
+      }
+      get label() {
+        return this.themeName;
       }
       get base() {
         return this.themeData.base;
@@ -119952,7 +120226,12 @@ var init_standaloneThemeService = __esm({
           }
           rules = rules.concat(this.themeData.rules);
           if (this.themeData.encodedTokensColors) {
-            encodedTokensColors = this.themeData.encodedTokensColors;
+            encodedTokensColors = [...this.themeData.encodedTokensColors];
+          }
+          for (const rule of this.semanticTokenRules) {
+            if (rule.style.foreground) {
+              encodedTokensColors.push(rule.style.foreground.toString());
+            }
           }
           this._tokenTheme = TokenTheme.createFromRawTokenTheme(rules, encodedTokensColors);
         }
@@ -119961,10 +120240,9 @@ var init_standaloneThemeService = __esm({
       getTokenStyleMetadata(type, modifiers, modelLanguage) {
         const style = this.tokenTheme._match([type].concat(modifiers).join("."));
         const metadata = style.metadata;
-        const foreground2 = TokenMetadata.getForeground(metadata);
         const fontStyle = TokenMetadata.getFontStyle(metadata);
-        return {
-          foreground: foreground2,
+        const result = {
+          foreground: TokenMetadata.getForeground(metadata),
           italic: Boolean(
             fontStyle & 1
             /* FontStyle.Italic */
@@ -119982,6 +120260,29 @@ var init_standaloneThemeService = __esm({
             /* FontStyle.Strikethrough */
           )
         };
+        const scores = { foreground: -1, italic: -1, bold: -1, underline: -1, strikethrough: -1 };
+        const colorMap = this.tokenTheme.getColorMap();
+        for (const rule of this.semanticTokenRules) {
+          const score3 = rule.match(type, modifiers, modelLanguage);
+          if (score3 < 0) {
+            continue;
+          }
+          if (rule.style.foreground && scores.foreground <= score3) {
+            const index = colorMap.findIndex((color) => color?.equals(rule.style.foreground));
+            if (index > 0) {
+              result.foreground = index;
+              scores.foreground = score3;
+            }
+          }
+          for (const property of ["bold", "italic", "underline", "strikethrough"]) {
+            const value = rule.style[property];
+            if (value !== void 0 && scores[property] <= score3) {
+              result[property] = value;
+              scores[property] = score3;
+            }
+          }
+        }
+        return result;
       }
       get tokenColorMap() {
         return [];
@@ -119992,6 +120293,8 @@ var init_standaloneThemeService = __esm({
         super();
         this._onColorThemeChange = this._register(new Emitter());
         this.onDidColorThemeChange = this._onColorThemeChange.event;
+        this._onFileIconThemeChange = this._register(new Emitter());
+        this.onDidFileIconThemeChange = this._onFileIconThemeChange.event;
         this._onProductIconThemeChange = this._register(new Emitter());
         this.onDidProductIconThemeChange = this._onProductIconThemeChange.event;
         this._environment = /* @__PURE__ */ Object.create(null);
@@ -197411,6 +197714,7 @@ registerEditorAction(BlockCommentAction);
 
 // app/static/vendor/monaco-editor-core/esm/vs/editor/contrib/contextmenu/browser/contextmenu.js
 init_dom();
+init_touch();
 init_actionViewItems();
 init_actions();
 init_lifecycle();
@@ -197482,6 +197786,9 @@ var ContextMenuController = class ContextMenuController2 {
     }));
   }
   _onContextMenu(e) {
+    if (e.event.browserEvent.type === EventType2.Hold) {
+      return;
+    }
     if (!this._editor.hasModel()) {
       return;
     }

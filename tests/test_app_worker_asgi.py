@@ -206,6 +206,9 @@ class WorkerASGISubprocessTests(unittest.TestCase):
             with socket.socket() as listener:
                 listener.bind(("127.0.0.1", 0))
                 port = cast(tuple[str, int], listener.getsockname())[1]
+            # The serving hook must run only after Uvicorn has bound a listener
+            # that can accept a real request; no fixed startup sleep may decide it.
+            env["TE2_TEST_NATIVE_SERVING_PROBE_URL"] = f"http://127.0.0.1:{port}/listener-ready"
             with (Path(scratch) / "stderr").open("wb") as errors:
                 process = subprocess.Popen([
                     sys.executable, "-m", "tests.fixtures.app_worker_import_guard",

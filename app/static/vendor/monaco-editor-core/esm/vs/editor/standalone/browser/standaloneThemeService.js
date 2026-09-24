@@ -18,6 +18,7 @@ import { Disposable } from '../../../base/common/lifecycle.js';
 import { ColorScheme, isDark, isHighContrast } from '../../../platform/theme/common/theme.js';
 import { getIconsStyleSheet, UnthemedProductIconTheme } from '../../../platform/theme/browser/iconsStyleSheet.js';
 import { mainWindow } from '../../../base/browser/window.js';
+import { parseStandaloneSemanticTokenRules } from './standaloneSemanticTokenRules.js';
 export const VS_LIGHT_THEME_NAME = 'vs';
 export const VS_DARK_THEME_NAME = 'vs-dark';
 export const HC_BLACK_THEME_NAME = 'hc-black';
@@ -45,6 +46,10 @@ class StandaloneTheme {
         this.colors = null;
         this.defaultColors = Object.create(null);
         this._tokenTheme = null;
+        this.semanticTokenRules = parseStandaloneSemanticTokenRules(standaloneThemeData.semanticTokenColors);
+    }
+    get label() {
+        return this.themeName;
     }
     get base() {
         return this.themeData.base;
@@ -129,25 +134,54 @@ class StandaloneTheme {
             }
             rules = rules.concat(this.themeData.rules);
             if (this.themeData.encodedTokensColors) {
-                encodedTokensColors = this.themeData.encodedTokensColors;
+                encodedTokensColors = [...this.themeData.encodedTokensColors];
+            }
+            for (const rule of this.semanticTokenRules) {
+                if (rule.style.foreground) {
+                    encodedTokensColors.push(rule.style.foreground.toString());
+                }
             }
             this._tokenTheme = TokenTheme.createFromRawTokenTheme(rules, encodedTokensColors);
         }
         return this._tokenTheme;
     }
     getTokenStyleMetadata(type, modifiers, modelLanguage) {
-        // use theme rules match
+        // TextMate-derived rules remain the fallback for selectors without an explicit style.
         const style = this.tokenTheme._match([type].concat(modifiers).join('.'));
         const metadata = style.metadata;
-        const foreground = TokenMetadata.getForeground(metadata);
         const fontStyle = TokenMetadata.getFontStyle(metadata);
-        return {
-            foreground: foreground,
+        const result = {
+            foreground: TokenMetadata.getForeground(metadata),
             italic: Boolean(fontStyle & 1 /* FontStyle.Italic */),
             bold: Boolean(fontStyle & 2 /* FontStyle.Bold */),
             underline: Boolean(fontStyle & 4 /* FontStyle.Underline */),
             strikethrough: Boolean(fontStyle & 8 /* FontStyle.Strikethrough */)
         };
+        // VS Code scores each explicit semantic property independently. A more
+        // specific selector can override color without erasing inherited font style.
+        const scores = { foreground: -1, italic: -1, bold: -1, underline: -1, strikethrough: -1 };
+        const colorMap = this.tokenTheme.getColorMap();
+        for (const rule of this.semanticTokenRules) {
+            const score = rule.match(type, modifiers, modelLanguage);
+            if (score < 0) {
+                continue;
+            }
+            if (rule.style.foreground && scores.foreground <= score) {
+                const index = colorMap.findIndex(color => color?.equals(rule.style.foreground));
+                if (index > 0) {
+                    result.foreground = index;
+                    scores.foreground = score;
+                }
+            }
+            for (const property of ['bold', 'italic', 'underline', 'strikethrough']) {
+                const value = rule.style[property];
+                if (value !== undefined && scores[property] <= score) {
+                    result[property] = value;
+                    scores[property] = score;
+                }
+            }
+        }
+        return result;
     }
     get tokenColorMap() {
         return [];
@@ -180,6 +214,8 @@ export class StandaloneThemeService extends Disposable {
         super();
         this._onColorThemeChange = this._register(new Emitter());
         this.onDidColorThemeChange = this._onColorThemeChange.event;
+        this._onFileIconThemeChange = this._register(new Emitter());
+        this.onDidFileIconThemeChange = this._onFileIconThemeChange.event;
         this._onProductIconThemeChange = this._register(new Emitter());
         this.onDidProductIconThemeChange = this._onProductIconThemeChange.event;
         this._environment = Object.create(null);

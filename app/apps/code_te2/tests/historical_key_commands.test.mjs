@@ -11,6 +11,10 @@ test('read-only navigation and selection map to Monaco core commands', () => {
   }
   assert.equal(command('Home', { ctrl: true, shift: true }), 'cursorTopSelect');
   assert.equal(command('End', { ctrl: true }), 'cursorBottom');
+  for (const [key, expected] of Object.entries({ ArrowUp: 'cursorParagraphUp', ArrowDown: 'cursorParagraphDown', ArrowLeft: 'cursorWordLeft', ArrowRight: 'cursorWordRight' })) {
+    assert.equal(command(key, { ctrl: true }), expected);
+    assert.equal(command(key, { ctrl: true, shift: true }), expected + 'Select');
+  }
 });
 test('find, copy and select all are permitted; edit and arbitrary keys are denied', () => {
   assert.equal(command('f', { ctrl: true }), 'actions.find');

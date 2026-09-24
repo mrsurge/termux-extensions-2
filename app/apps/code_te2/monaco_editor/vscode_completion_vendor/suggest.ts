@@ -5,12 +5,9 @@
  * Source: worktrees/vscode-te2-diff/src/vs/editor/contrib/suggest/browser/suggest.ts
  */
 
-import { inflateSuggestResultDtoFromMainThreadLanguageFeatures } from './mainThreadLanguageFeatures.js';
+import { inflateSuggestResultDtoFromMainThreadLanguageFeatures, inflateSuggestDtoFromMainThreadLanguageFeatures } from './mainThreadLanguageFeatures.js';
 import { completionTimeouts } from '../../workbench_protocol_proxy/node_workbench_adapter/src/protocol/completion-timeouts.ts';
-import {
-  normalizeVscodeCompletionListFromCompletionModel,
-  type VscodeCompletionListLike,
-} from './completionModel.js';
+import type { VscodeCompletionListLike } from './completionModel.js';
 import {
   normalizeVscodeSuggestCompletionContext,
   type VscodeSuggestBridgeContext,
@@ -53,6 +50,8 @@ export interface VscodeSuggestWorkbenchProviderDeps {
   context: VscodeSuggestBridgeContext | null | undefined;
   monacoTriggerKinds?: VscodeSuggestBridgeTriggerKinds | null;
   propertyKind: number;
+  isCancelled?(): boolean;
+  releaseCompletionItems(params: Record<string, unknown>): Promise<unknown>;
   adapterTimeoutMs?: number;
   callTimeoutMs?: number;
   getCurrentPath(): string | null;
@@ -65,10 +64,6 @@ export interface VscodeSuggestWorkbenchProviderDeps {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function asArray(value: unknown): unknown[] | null {
-  return Array.isArray(value) ? value : null;
 }
 
 function modelUriString(model: VscodeSuggestBridgeModel | null | undefined): string {
@@ -98,46 +93,36 @@ function modelVersion(model: VscodeSuggestBridgeModel | null | undefined): numbe
   }
 }
 
-function peelWorkbenchCompletionPayload(value: unknown): Record<string, unknown> | null {
-  let current = isRecord(value) ? value : null;
-  for (let i = 0; current && i < 3; i += 1) {
-    const inner = isRecord(current.result) ? current.result : null;
-    if (!inner) break;
-    if (
-      current.ok === true
-      || inner.dto !== undefined
-      || inner.suggestResults !== undefined
-      || inner.items !== undefined
-      || inner.b !== undefined
-    ) {
-      current = inner;
-      continue;
-    }
-    break;
-  }
-  return current;
+// Transport wrappers are distinct from the compact VS Code DTO. There is one
+// canonical payload; legacy expanded lists/raw aliases are deliberately rejected.
+function unwrapReply(value: unknown): unknown {
+  const reply = isRecord(value) && value.jsonrpc === '2.0' ? value.result : value;
+  if (!isRecord(reply) || reply.ok !== true) throw new Error('Invalid completion response');
+  return reply.result;
 }
 
-function suggestDtoFromWorkbenchCompletionPayload(payload: Record<string, unknown> | null): Record<string, unknown> | null {
-  if (!payload) return null;
-  const dto = isRecord(payload.dto) ? payload.dto : null;
-  if (dto) return dto;
-  const suggestResults = asArray(payload.suggestResults);
-  if (suggestResults) {
-    for (const candidate of suggestResults) {
-      if (isRecord(candidate)) return candidate;
-    }
-  }
-  return asArray(payload.b) ? payload : null;
+interface CompletionOwner {
+  sessionId: string;
+  handle: number;
+  disposed: boolean;
 }
+const completionOwners = new WeakMap<Record<string, unknown>, CompletionOwner>();
 
-function alreadyInflatedCompletionList(payload: Record<string, unknown> | null): VscodeWorkbenchCompletionList | null {
-  const items = asArray(payload ? payload.items : null);
-  if (!items) return null;
-  return {
-    suggestions: items.filter(isRecord),
-    incomplete: !!(payload && payload.isIncomplete),
-  };
+// Match MainThreadLanguageFeatures: resolve the provider's original item ID,
+// inflate once, then update the same suggestion object Monaco already owns.
+export async function resolveWorkbenchCompletionItem(
+  suggestion: Record<string, unknown>, propertyKind: number,
+  resolve: (params: Record<string, unknown>, options: { timeoutMs: number }) => Promise<unknown>,
+  isCancelled: () => boolean = () => false,
+): Promise<Record<string, unknown>> {
+  const owner = completionOwners.get(suggestion);
+  if (!owner || owner.disposed || !Array.isArray(suggestion._id) || isCancelled()) return suggestion;
+  const raw = unwrapReply(await resolve({ providerHandle: owner.handle, sessionId: owner.sessionId, id: suggestion._id },
+    { timeoutMs: completionTimeouts().rpcMs }));
+  if (owner.disposed || isCancelled() || !isRecord(raw)) return suggestion;
+  const resolved = inflateSuggestDtoFromMainThreadLanguageFeatures(suggestion.range, raw, { propertyKind });
+  if (resolved) Object.assign(suggestion, resolved);
+  return suggestion;
 }
 
 export async function provideWorkbenchCompletionItemsFromVscodeSuggest(
@@ -146,7 +131,7 @@ export async function provideWorkbenchCompletionItemsFromVscodeSuggest(
   const uri = modelUriString(deps.model);
   const path = uri ? (deps.absPathFromVscodeUri(uri) || String(deps.getCurrentPath() || '')) : String(deps.getCurrentPath() || '');
   if (!uri || !path) {
-    return normalizeVscodeCompletionListFromCompletionModel({ suggestions: [] });
+    return { suggestions: [] };
   }
 
   const trigger = normalizeVscodeSuggestCompletionContext(deps.context, deps.monacoTriggerKinds);
@@ -162,7 +147,7 @@ export async function provideWorkbenchCompletionItemsFromVscodeSuggest(
     triggerKind: trigger.triggerKind,
     timeoutMs: timeouts.providerMs,
   };
-  if (Number.isFinite(Number(deps.providerHandle))) {
+  if (typeof deps.providerHandle === 'number' && Number.isInteger(deps.providerHandle)) {
     params.providerHandle = Number(deps.providerHandle);
   }
   if (trigger.triggerCharacter) params.triggerCharacter = trigger.triggerCharacter;
@@ -175,18 +160,43 @@ export async function provideWorkbenchCompletionItemsFromVscodeSuggest(
     params as unknown as Record<string, unknown>,
     { timeoutMs: Number.isFinite(requestedCallMs) ? Math.max(timeouts.rpcMs, requestedCallMs) : timeouts.rpcMs },
   );
-  const payload = peelWorkbenchCompletionPayload(response);
-  const inflated = alreadyInflatedCompletionList(payload);
-  if (inflated) {
-    return normalizeVscodeCompletionListFromCompletionModel(inflated);
+  const payload = unwrapReply(response);
+  if (!isRecord(payload) || typeof payload.sessionId !== 'string' || !Array.isArray(payload.providers)) {
+    throw new Error('Invalid compact completion payload');
   }
-  const dto = suggestDtoFromWorkbenchCompletionPayload(payload);
-  if (dto) {
-    return normalizeVscodeCompletionListFromCompletionModel(
-      inflateSuggestResultDtoFromMainThreadLanguageFeatures(dto, { propertyKind: deps.propertyKind }),
-    );
+  const suggestions: Array<Record<string, unknown>> = [];
+  const owners: Array<{ owner: CompletionOwner; cacheId?: number }> = [];
+  let incomplete = false;
+  let duration = 0;
+  for (const entry of payload.providers) {
+    if (!isRecord(entry) || typeof entry.handle !== 'number' || !isRecord(entry.dto)) continue;
+    const dto = entry.dto;
+    const owner: CompletionOwner = { sessionId: payload.sessionId, handle: entry.handle, disposed: false };
+    const list = inflateSuggestResultDtoFromMainThreadLanguageFeatures(dto, { propertyKind: deps.propertyKind });
+    owners.push({ owner, cacheId: typeof dto.x === 'number' ? dto.x : undefined });
+    if (!list) continue;
+    for (const suggestion of list.suggestions) {
+      completionOwners.set(suggestion, owner);
+      suggestions.push(suggestion);
+    }
+    incomplete ||= list.incomplete;
+    duration = Math.max(duration, list.duration ?? 0);
   }
-  return normalizeVscodeCompletionListFromCompletionModel({ suggestions: [] });
+  // Monaco decides when this list is no longer reusable. Keep only cache
+  // identities in the closure, not a second copy of the original DTOs.
+  let disposed = false;
+  const dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    for (const { owner, cacheId } of owners) {
+      owner.disposed = true;
+      if (cacheId === undefined) continue;
+      void deps.releaseCompletionItems({ providerHandle: owner.handle, sessionId: owner.sessionId, cacheId })
+        .catch(() => {}); // Host/session teardown may already have freed the cache.
+    }
+  };
+  if (deps.isCancelled?.()) { dispose(); return { suggestions: [] }; }
+  return { suggestions, incomplete, duration, dispose };
 }
 
 /*

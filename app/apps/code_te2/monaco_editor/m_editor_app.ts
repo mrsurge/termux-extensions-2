@@ -28,10 +28,8 @@ import { resolveMonacoThemeId } from "./editor_theme_resolver_utils.ts";
 import { isAdapterReady } from "./editor_workbench_barrier_utils.js";
 import { buildMonacoOptionsFromPrefsState } from "./editor_monaco_options_utils.ts";
 import { ensureTe2DiffThemeApplied } from "./editor_diff_theme_utils.ts";
-import { getVscodeThemeJsonUrl } from "./editor_theme_url_utils.ts";
 import { vscodeThemeToMonacoTheme } from "./editor_theme_convert_utils.ts";
-import { ensureThemeRegistryState, createDocumentThemeGate, type ThemeRegistryState } from "./editor_theme_registry_state_utils.ts";
-import { loadVscodeTextmateThemesRuntime } from "./editor_theme_loader_runtime_utils.ts";
+import { createDocumentThemeGate } from "./editor_theme_registry_state_utils.ts";
 import { applyMonacoThemeRuntime } from "./editor_theme_apply_runtime_utils.ts";
 import { clearDraftDiffZonesState } from "./editor_draft_zone_clear_utils.ts";
 import { clearDraftDiffDecorationsState } from "./editor_draft_decorations_clear_utils.ts";
@@ -122,6 +120,7 @@ import {
 } from "../main_page/frontend/connections/extension-activity-bridge.ts";
 import { RPC_CODEC_MSGPACK_V1 } from "../src/rpc/codec.ts";
 import {
+  APP_WORKER_SOCKET_IO_TRANSPORTS,
   SOCKET_IO_NAMESPACES,
   SOCKET_IO_PATHS,
   fileEditorSocketQuery,
@@ -138,6 +137,8 @@ import {
 } from "./editor_code_inspector_runtime.ts";
 import {
   replaceCodeInspectorHighlights,
+  clearSymbolTargetHighlight,
+  showSymbolTargetHighlight,
 } from "./editor_search_highlight_runtime.ts";
 import { installTextmateDebugHooks } from "./editor_textmate_debug_runtime.ts";
 import { createEditorPrefRuntime } from "./editor_pref_runtime.ts";
@@ -277,7 +278,7 @@ interface LanguageBridgeStateLike {
     string,
     Record<
       string,
-      { handle: string; triggerCharacters: string[]; supportsResolve: boolean }
+      { handle: string; selector?: unknown; triggerCharacters: string[]; supportsResolve: boolean }
     >
   >;
   completionProviderDisposablesByLanguage: Record<
@@ -751,25 +752,37 @@ interface MonacoBootWindowLike extends Window {
     getWindow: function () {
       return window;
     },
-    getApiBase: function () {
-      return apiBase;
-    },
     fetchFn: _fetch,
-    fetchJsonWithBase: function (path, init) {
-      return fetchJsonWithBase(_fetch, apiBase, path, init);
-    },
     buildUiUrl: function (path) {
       return buildUiUrl(apiBase, path);
     },
     normalizeLanguage: normalizeLanguage,
-    editorWorkbenchCall: editorWorkbenchCall,
+    editorRpcCall: editorRpcCall,
   } as Parameters<typeof createEditorTextmateRuntime>[0]);
+  var ensureTextmateTokenization = textmateRuntime.ensureTextmateTokenization;
+
+  editorRpcTransport.onNotification(
+    EDITOR_RPC_NOTIFICATIONS.textmateProjectionChanged,
+    function (params) {
+      const revision = typeof params.revision === 'string' ? params.revision : null;
+      void textmateRuntime.refreshTextmateProjection(revision).then(function (changed) {
+        if (!changed) return;
+        const active = te2GetActiveEditorAndModel(diffEditor, editor);
+        const activeModel = active.model;
+        if (!activeModel) return;
+        const language = normalizeLanguage((activeModel as MonacoRuntimeModelLike).getLanguageId?.());
+        if (!language) return;
+        return ensureTextmateTokenization(language, currentPath);
+      }).catch(function (error) {
+        console.warn('[TextMate] projection refresh failed', error);
+      });
+    },
+  );
 
   function _applyThemeToTextmateRegistry(vscodeThemeJson: unknown): void {
     textmateRuntime.applyThemeToRegistry(vscodeThemeJson);
   }
 
-  var ensureTextmateTokenization = textmateRuntime.ensureTextmateTokenization;
   let textmateThemeOwnerRuntime: ReturnType<
     typeof createEditorTextmateThemeOwnerRuntime
   > | null = null;
@@ -844,7 +857,7 @@ interface MonacoBootWindowLike extends Window {
   }
 
   function languageFromPath(path: string | null): string {
-    return languageIdFromPath(
+    const fallback = languageIdFromPath(
       path,
       workbenchLanguageCatalogRuntime
         ? workbenchLanguageCatalogRuntime.getLanguageByFilename()
@@ -853,6 +866,19 @@ interface MonacoBootWindowLike extends Window {
         ? workbenchLanguageCatalogRuntime.getLanguageByExtension()
         : new Map<string, string>(),
     );
+    return textmateRuntime
+      ? textmateRuntime.resolveLanguageForPath(path, fallback)
+      : fallback;
+  }
+
+  async function prepareTextmateForDocument(
+    path: string,
+    fallbackLanguage = languageFromPath(path),
+  ): Promise<string> {
+    if (_languageWorkersEnabled() || !path || window.__debugDisableTextmate) {
+      return fallbackLanguage;
+    }
+    return textmateRuntime.prepareTextmateForDocument(path, fallbackLanguage);
   }
 
   function createFileModel(
@@ -1104,6 +1130,7 @@ interface MonacoBootWindowLike extends Window {
         ranges,
       );
     },
+    clearSymbolTargetHighlight,
     openLocation: function (location) {
       return editorRpcCall(
         EDITOR_RPC_METHODS.open,
@@ -1262,8 +1289,7 @@ interface MonacoBootWindowLike extends Window {
     return workbenchRuntime
       .replayOpenFileAfterBaton()
       .then(() => {
-        replayActiveModelLanguageAfterWbaConnect("baton");
-        refreshActiveLanguageIntelligenceAfterWbaConnect("baton");
+        requestWbaActiveModelSynchronization("baton");
       })
       .catch((error) => {
         console.warn("[readiness] baton active model flush failed", error);
@@ -1326,6 +1352,10 @@ interface MonacoBootWindowLike extends Window {
   }
 
   let providerSnapshotHydratePromise: Promise<void> | null = null;
+  let wbaConnectionRevision = 0;
+  let wbaResyncPromise: Promise<unknown> | null = null;
+  let wbaActiveModelSyncPromise: Promise<void> | null = null;
+  let wbaActiveModelSyncQueued = false;
 
   function hydrateWorkbenchProviderSnapshot(reason: string): Promise<void> {
     if (_languageWorkersEnabled()) return Promise.resolve();
@@ -1411,6 +1441,13 @@ interface MonacoBootWindowLike extends Window {
       console.warn("[wba] symbols flush failed after connect", error);
     }
     try {
+      _syncDiagnosticsForCurrentModel(
+        "wba_model_sync:" + String(reason || "unknown"),
+      );
+    } catch (error) {
+      console.warn("[wba] diagnostic replay failed after model sync", error);
+    }
+    try {
       const languageId =
         model && typeof model.getLanguageId === "function"
           ? String(model.getLanguageId() || "")
@@ -1438,34 +1475,82 @@ interface MonacoBootWindowLike extends Window {
     }
   }
 
-  function handleWbaSocketReadyForEditor(reason: string): void {
-    void editorWorkbenchCall("resync", {}, { timeoutMs: 5000 })
-      .catch((error) => {
-        console.warn("[wba] reconnect resync failed", error);
-        return null;
-      })
-      .then(() =>
-        workbenchRuntime
-          .wbFlushActiveModelOpen("wba_ready:" + String(reason || "connect"))
+  function requestWbaActiveModelSynchronization(reason: string): void {
+    wbaActiveModelSyncQueued = true;
+    if (wbaActiveModelSyncPromise) return;
+    if (!wbaRpcSocket?.connected || !currentPath || !model) return;
+
+    const revision = wbaConnectionRevision;
+    const syncReason = String(reason || "model_ready");
+    const replay = wbaResyncPromise || Promise.resolve(null);
+    wbaActiveModelSyncQueued = false;
+    let deferred = false;
+    let syncPromise: Promise<void>;
+    syncPromise = replay
+      .then(() => {
+        if (revision !== wbaConnectionRevision || !wbaRpcSocket?.connected) {
+          return null;
+        }
+        return workbenchRuntime
+          .wbFlushActiveModelOpen("wba_ready:" + syncReason)
           .catch((error) => {
             console.warn(
               "[wba] active model open flush failed after connect",
               error,
             );
             return null;
-          }),
-      )
+          });
+      })
       .then((result) => {
+        if (revision !== wbaConnectionRevision || !wbaRpcSocket?.connected) {
+          return;
+        }
         const record =
           result && typeof result === "object"
             ? (result as Record<string, unknown>)
             : {};
-        if (record.deferred === true) return null;
-        return hydrateWorkbenchProviderSnapshot(reason).finally(() => {
-          replayActiveModelLanguageAfterWbaConnect(reason);
-          refreshActiveLanguageIntelligenceAfterWbaConnect(reason);
+        if (record.deferred === true) {
+          deferred = true;
+          wbaActiveModelSyncQueued = true;
+          return;
+        }
+        return hydrateWorkbenchProviderSnapshot(syncReason).then(() => {
+          if (
+            revision !== wbaConnectionRevision ||
+            !wbaRpcSocket?.connected
+          ) {
+            return;
+          }
+          replayActiveModelLanguageAfterWbaConnect(syncReason);
+          refreshActiveLanguageIntelligenceAfterWbaConnect(syncReason);
         });
+      })
+      .finally(() => {
+        if (wbaActiveModelSyncPromise === syncPromise) {
+          wbaActiveModelSyncPromise = null;
+        }
+        // A model switch queued during a successful synchronization needs its
+        // own pass. A deferred pass waits for the next real readiness edge.
+        if (wbaActiveModelSyncQueued && !deferred) {
+          requestWbaActiveModelSynchronization("queued_after_" + syncReason);
+        }
       });
+    wbaActiveModelSyncPromise = syncPromise;
+  }
+
+  function handleWbaSocketReadyForEditor(reason: string): void {
+    const revision = ++wbaConnectionRevision;
+    const replay = editorWorkbenchCall("resync", {}, { timeoutMs: 5000 })
+      .catch((error) => {
+        console.warn("[wba] reconnect resync failed", error);
+        return null;
+      });
+    wbaResyncPromise = replay;
+    void replay.then(() => {
+      if (revision === wbaConnectionRevision) {
+        requestWbaActiveModelSynchronization(reason);
+      }
+    });
   }
 
   function _clearEditorDecorationStateRuntime() {
@@ -1575,10 +1660,7 @@ interface MonacoBootWindowLike extends Window {
     layoutEditors: _layoutEditors,
   }) as Parameters<typeof ensureEditorWithPrefsRuntime>[0];
 
-  // ensureTe2Themes / loadOfficialThemes — replaced by loadVscodeTextmateThemes() with dynamic registry.
-
-  // Catalog metadata uses this editor's RPC lane; resources retain local asset URLs.
-  const _themeRegistryState: ThemeRegistryState = {};
+  // Python projects the selected theme; the picker requests catalog metadata separately.
   const documentThemeGate = createDocumentThemeGate(
     () => editorRpcTransport.waitUntilConnected(),
     async (theme) => {
@@ -1586,21 +1668,6 @@ interface MonacoBootWindowLike extends Window {
       await textmateThemeOwnerRuntime.applyTheme(theme);
     },
   );
-
-  async function _ensureThemeRegistry() {
-    return ensureThemeRegistryState(_themeRegistryState,
-      () => editorRpcCall(EDITOR_RPC_METHODS.themesList, {}));
-  }
-
-  function _getVscodeThemeJsonUrl(themeId: string): string {
-    return (
-      getVscodeThemeJsonUrl(
-        themeId,
-        _themeRegistryState.registry,
-        apiBase,
-      ) || ""
-    );
-  }
 
   // ---------------------------------------------------------------------------
   // Semantic-token-type → TextMate-scope mapping (mirrors VS Code's
@@ -1649,14 +1716,10 @@ interface MonacoBootWindowLike extends Window {
     getDocument: function () {
       return document;
     },
-    fetchFn: _fetch,
     ensureTe2DiffTheme: ensureTe2DiffTheme,
-    loadVscodeTextmateThemesRuntime: loadVscodeTextmateThemesRuntime,
     applyMonacoThemeRuntime: applyMonacoThemeRuntime,
-    ensureThemeRegistry: _ensureThemeRegistry,
-    getVscodeThemeJsonUrl: _getVscodeThemeJsonUrl,
+    getSelectedTheme: () => editorRpcCall(EDITOR_RPC_METHODS.themeSelected, {}),
     vscodeThemeToMonacoTheme: _vscodeThemeToMonacoTheme,
-    resolveMonacoThemeId: resolveMonacoThemeId,
     applyThemeToTextmateRegistry: _applyThemeToTextmateRegistry,
     getLanguageWorkersEnabled: _languageWorkersEnabled,
     normalizeLanguage: normalizeLanguage,
@@ -1951,6 +2014,7 @@ interface MonacoBootWindowLike extends Window {
   }
 
   function clearActiveModel(reason: string): void {
+    clearSymbolTargetHighlight();
     const previousModel = model;
     model = null;
     currentPath = null;
@@ -2061,6 +2125,7 @@ interface MonacoBootWindowLike extends Window {
     },
     ensureEditorWithPrefs: ensureEditorWithPrefs,
     languageFromPath: languageFromPath,
+    prepareTextmateForDocument: prepareTextmateForDocument,
     monacoFileUri: function (monacoRef: unknown, path: string) {
       return monacoFileUri(
         monacoRef as MonacoRuntimeGlobal | null | undefined,
@@ -2079,6 +2144,7 @@ interface MonacoBootWindowLike extends Window {
     syncDiagnosticsForCurrentModel: function (reason: string) {
       _syncDiagnosticsForCurrentModel(reason);
     },
+    syncWbaForReadyModel: requestWbaActiveModelSynchronization,
     emitToHost: emitToHost,
     emitModelReady: emitModelReady,
     requestDraftDiff: requestDraftDiff,
@@ -2088,6 +2154,10 @@ interface MonacoBootWindowLike extends Window {
     wbCurrentGeneration: _wbCurrentGeneration,
     wbBumpGeneration: _wbBumpGeneration,
     bcUpdatePath: bcUpdatePath,
+    clearSymbolTargetHighlight: clearSymbolTargetHighlight,
+    showSymbolTargetHighlight: function (range: Record<string, unknown>) {
+      showSymbolTargetHighlight(diffEditor?.getModifiedEditor?.() ?? editor, range);
+    },
     queueDidChange: _wbQueueDidChange,
     queueSymbols: _wbQueueSymbols,
     openFileFlow: _wbOpenFileFlow,
@@ -2144,17 +2214,18 @@ interface MonacoBootWindowLike extends Window {
     );
   }
 
-  function connectEditorSocket(): boolean {
+  async function connectEditorSocket(): Promise<void> {
     try {
       if (editorRpcSocket) {
         if (editorRpcSocket) editorRpcTransport.attachSocket(editorRpcSocket);
         if (wbaRpcSocket) editorWbaRpcTransport.attachSocket(wbaRpcSocket);
-        return true;
+        await editorRpcTransport.waitUntilConnected();
+        return;
       }
-      if (!window.io) return false;
+      if (!window.io) throw new Error("Socket.IO runtime is unavailable");
       editorRpcSocket = window.io(SOCKET_IO_NAMESPACES.editorRpc, {
         path: SOCKET_IO_PATHS.editor,
-        transports: ["websocket"],
+        transports: [...APP_WORKER_SOCKET_IO_TRANSPORTS],
         query: fileEditorSocketQuery(),
         auth: { rpcCodec: RPC_CODEC_MSGPACK_V1 },
       }) as EditorSocketLike;
@@ -2224,6 +2295,7 @@ interface MonacoBootWindowLike extends Window {
           installMirrorPublisher: installMirrorPublisher,
           installScrollPublisher: installScrollPublisher,
           languageFromPath: languageFromPath,
+          prepareTextmateForDocument: prepareTextmateForDocument,
           monacoFileUri: function (path: string) {
             return monacoFileUri(
               window.monaco,
@@ -2504,6 +2576,9 @@ interface MonacoBootWindowLike extends Window {
         });
         wbaRpcSocket.on("disconnect", () => {
           console.warn("[wba] socket disconnected");
+          wbaConnectionRevision += 1;
+          wbaResyncPromise = null;
+          wbaActiveModelSyncQueued = true;
         });
       }
 
@@ -2513,10 +2588,13 @@ interface MonacoBootWindowLike extends Window {
         wbaRpcSocket?.connect();
       }
 
-      return true;
+      // Socket construction is not connection readiness. Cold native clients
+      // must finish their own authenticated editor handshake before any RPC-backed
+      // theme, grammar, or document operation can run.
+      await editorRpcTransport.waitUntilConnected();
     } catch (e) {
       console.warn("[Monaco] socket connect failed", e);
-      return false;
+      throw e instanceof Error ? e : new Error(String(e));
     }
   }
 
@@ -2592,6 +2670,25 @@ interface MonacoBootWindowLike extends Window {
     editorHostActionRuntime.bindEditorHooks();
   }
 
+  function initialBootDocumentPath(): string {
+    const snapshot = initialBootSnapshot && typeof initialBootSnapshot === 'object'
+      ? initialBootSnapshot as Record<string, unknown>
+      : null;
+    const editorSsot = snapshot?.editor_ssot && typeof snapshot.editor_ssot === 'object'
+      ? snapshot.editor_ssot as Record<string, unknown>
+      : null;
+    const hostState = snapshot?.host_state && typeof snapshot.host_state === 'object'
+      ? snapshot.host_state as Record<string, unknown>
+      : null;
+    const file = editorSsot?.file && typeof editorSsot.file === 'object'
+      ? editorSsot.file as Record<string, unknown>
+      : null;
+    for (const value of [file?.path, editorSsot?.currentPath, hostState?.currentPath, hostState?.lastFile]) {
+      if (typeof value === 'string' && value.trim()) return value;
+    }
+    return '';
+  }
+
   async function bootMonaco() {
     await bootMonacoRuntime(
       buildBootMonacoRuntimeDeps({
@@ -2613,7 +2710,27 @@ interface MonacoBootWindowLike extends Window {
         },
         ensureTe2DiffTheme: ensureTe2DiffTheme,
         ensureDocumentTheme: ensureDocumentTheme,
+        ensureDocumentSyntax: async function () {
+          if (_languageWorkersEnabled() || window.__debugDisableTextmate) return;
+          const path = initialBootDocumentPath();
+          if (path) {
+            await prepareTextmateForDocument(path);
+          } else {
+            // A live SSOT may have displaced the boot snapshot; keep its
+            // extension/filename mappings ready before any model can mount.
+            await textmateRuntime.refreshVscodeGrammarIndex();
+          }
+        },
         ensureEditorWithPrefs: ensureEditorWithPrefs,
+        getActiveModelTrace: function () {
+          if (!model) return null;
+          return {
+            uri: String(model.uri || '').slice(-160),
+            language: model.getLanguageId?.() || '',
+            version: model.getVersionId?.() || 0,
+            lines: model.getLineCount?.() || 0,
+          };
+        },
         applyBootSnapshot: applyBootSnapshot,
         ensureWorkbenchLanguageCatalogInstalled:
           ensureWorkbenchLanguageCatalogInstalled,

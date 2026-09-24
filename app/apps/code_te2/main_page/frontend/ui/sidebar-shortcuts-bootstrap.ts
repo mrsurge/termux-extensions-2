@@ -16,6 +16,7 @@ export interface SidebarShortcutsBootstrapDeps {
   closeAllMenus: () => void;
   setMenuChecked: (el: HTMLElement | null, checked: boolean) => void;
   emitSidebarUiRequest?: (method: UiIpcRpcMethod, payload?: UnknownRecord) => void;
+  requestSidebarUi?: (method: UiIpcRpcMethod, payload?: UnknownRecord) => Promise<unknown>;
   emitSidebarRpcRequest?: (method: SidebarIpcRpcMethod, payload?: UnknownRecord) => void;
   getClientId: () => string;
   getWindowId: () => string;
@@ -32,6 +33,7 @@ export function initSidebarShortcutsSafe(deps: SidebarShortcutsBootstrapDeps): S
       closeAllMenus: deps.closeAllMenus,
       setMenuChecked: deps.setMenuChecked,
       emitSidebarUiRequest: deps.emitSidebarUiRequest,
+      requestSidebarUi: deps.requestSidebarUi,
       emitSidebarRpcRequest: deps.emitSidebarRpcRequest,
       getClientId: deps.getClientId,
       getWindowId: deps.getWindowId,

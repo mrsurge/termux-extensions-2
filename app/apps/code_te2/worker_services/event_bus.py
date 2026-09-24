@@ -34,6 +34,7 @@ EventType = Literal[
     "RunProfileStateChanged",
     "SearchHighlightChanged",
     "SidebarWindowStateChanged",
+    "TextmateProjectionChanged",
     "ExplorerRenderStateChanged",
     "FileSaved",
     "WatcherConfigChanged",

@@ -1214,6 +1214,30 @@ def close_sidebar_window(params: JsonObject) -> JsonObject:
     return {"ok": True, "closed": host_id, "state": get_sidebar_window_state()}
 
 
+def close_sidebar_app_windows(params: JsonObject) -> JsonObject:
+    host_id = _norm(params.get("host_id") or params.get("hostId"))
+    if not host_id:
+        raise ValueError("host_id is required")
+    state = _load_pref_state()
+    slots = _as_object(state.get("slots"))
+    selected = _as_object(slots.get(host_id))
+    if _norm(selected.get("kind")) != "app":
+        raise ValueError(f"unknown app dock slot: {host_id}")
+    app_id = _norm(selected.get("app_id"))
+    if not app_id:
+        raise ValueError(f"app dock slot has no app id: {host_id}")
+    closed = [
+        slot_id for slot_id, value in slots.items()
+        if _norm(_as_object(value).get("kind")) == "app"
+        and _norm(_as_object(value).get("app_id")) == app_id
+    ]
+    for slot_id in closed:
+        slots.pop(slot_id, None)
+    state["slots"] = slots
+    _save_pref_state(state)
+    return {"ok": True, "app_id": app_id, "closed": closed, "state": get_sidebar_window_state()}
+
+
 def update_sidebar_window_readiness(params: JsonObject) -> JsonObject:
     host_id = _norm(params.get("host_id") or params.get("hostId"))
     if not host_id:

@@ -5,6 +5,10 @@ export const CODE_TE2_APP_ID = 'code_te2' as const;
 export const APP_WORKER_SOCKET_IO_PATH = `/api/app/${CODE_TE2_APP_ID}/socket.io` as const;
 export const WBA_SOCKET_IO_PATH = `/api/app/${CODE_TE2_APP_ID}/services/wba/socket.io` as const;
 
+// Try the app-worker RPC over HTTP immediately; Engine.IO upgrades to WebSocket
+// without replacing the connected namespace session.
+export const APP_WORKER_SOCKET_IO_TRANSPORTS = ['polling', 'websocket'] as const;
+
 export const SOCKET_IO_PATHS = {
   editor: APP_WORKER_SOCKET_IO_PATH,
   explorer: APP_WORKER_SOCKET_IO_PATH,

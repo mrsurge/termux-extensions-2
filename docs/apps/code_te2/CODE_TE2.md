@@ -44,8 +44,9 @@ switching, watcher resubscription, extension menus/navigation, webview backend,
 and logical-document reconcile remain backend control-plane work.
 
 TextMate uses the vendored workbench runtime in
-`monaco_editor/editor_textmate_runtime.ts` and WBA grammar metadata. A provider
-is still required for meaningful language features.
+`monaco_editor/editor_textmate_runtime.ts` and the persisted Python extension-
+registry grammar projection. This syntax path is available before WBA; a WBA
+provider is still required for semantic language features.
 
 ### Extension validation matrix (next milestone)
 We will validate at least 2 deterministic features (hover + symbols + diagnostics) per language:
@@ -219,7 +220,7 @@ Spinner / Status indicator (host UI):
 - Sidebar IPC retains its current codec. Migrating `/ui_ipc` must not implicitly change the sibling `/sidebar_ipc` namespace.
 - Shared document membership is the bounded `ProjectSidecar` recent/logical-document set. Each stable `clientInstanceId` owns one backend-projected foreground path through `open_state_backend.py`; `ProjectSidecar.last_file` is only a one-time migration seed. Frontend `currentPath` values are exact-client projections.
 - Shared content projections carry a durable per-path `document_revision` drawn from one monotonic project stream. Matched frontends reject missing or lower revisions before changing Monaco or active-path chrome; equal revisions are valid for the correlated mirror/cache pair emitted by one backend transition.
-- App-lane outbound traffic uses websocket-only `volatile.emit` with connected-state guards. Disconnected RPC requests fail, notifications and terminal input drop, and connect handlers rebuild authoritative state.
+- App-lane outbound traffic uses connected-state guards and `volatile.emit` for notifications. Editor, Explorer, host and Sidebar connect via Engine.IO polling first and upgrade to WebSocket; the terminal and WBA stay WebSocket-only. Disconnected RPC requests fail, notifications and terminal input drop, and connect handlers rebuild authoritative state.
 - Code Server launch, VSIX/Open VSX commands, and builtin-extension access use the same preference-owned pinned TE2-managed installation. System, `PATH`, NVM, and executable environment overrides are not runtime authorities.
 - Every WBA protocol actor, including language intelligence, commands, messages, and webviews, receives its resolved nid through named runtime-adapter fields. The imported `src/protocol/pinned-rpc-ids.ts` map is sole production authority for code-server 4.130.0; no runtime JSON override or extraction exists.
 - The installed WBA MessagePack codec is one self-contained bundled ESM file at `workbench_protocol_proxy/node_workbench_adapter/dist/protocol/messagepack-codec.mjs`.
@@ -429,7 +430,7 @@ Notes:
 Important:
 - The **framework** registers public app Socket.IO paths and proxies them to the worker.
 - The **worker** mounts one shared Socket.IO ASGI app at `/socket.io/` plus legacy alias mounts in `SUBAPPS`.
-- The transport is websocket-only; the route proxy is not a namespace dispatcher and does not inspect payloads.
+- Editor, Explorer, host and Sidebar use Engine.IO polling first, with WebSocket upgrade. This is a latency experiment, not an established startup improvement: compare first usable RPC and cold/warm boot against the previous WebSocket-only client. The Rust route forwards polling GET/POST and WebSocket upgrades to the same upstream worker; it is not a namespace dispatcher and does not inspect payloads. WBA and terminal client transports remain WebSocket-only.
 
 ---
 
@@ -1529,18 +1530,23 @@ The inline editor runtime builds Monaco options from SSOT preferences (`buildMon
 - font scale -> `fontSize`
 - font family (default `JetBrains Mono Nerd`)
 - font ligatures (`fontLigatures` enabled by default for the local Nerd Font)
-- theme (Monaco base: `vs` / `vs-dark`, plus official `monaco-editor-themes` ids)
+- theme (Monaco base: `vs` / `vs-dark`, plus catalogued GitHub and installed VSIX themes)
   - `github-dark` (fresh-install default)
   - `github-dark-default`
   - `github-light-default` (preferred)
-  - `github-light` (legacy alias -> `github-light-default`)
+  - `github-light`
   - the nine vendored GitHub themes under
     `monaco_editor/themes/vendored/github/`
+  - installed Code Server theme contributions, with `ext:` catalog IDs
   - `te2-vs-dark`, used only for the diff-scoped dark presentation
 
-Note: TE2 loads Monaco first (`editor.main.js`), then registers official themes from
-`/api/app/code_te2/ui/monaco_editor/themes/*.json`. If Monaco isn't loaded yet,
-theme registration is skipped (by design) to avoid caching a no-op run.
+The catalog supplies the resource URL for both built-in and installed themes.
+Built-in JSON remains on the native OTA/APK-intercepted asset path; installed
+theme JSON is resolved from the registered extension directory. Both feed the
+same converter and Monaco/TextMate theme application path.
+The catalog's `uiTheme` also supplies the Monaco base (`vs`, `vs-dark`,
+`hc-black`, or `hc-light`) for both sources; the static JSON need not duplicate
+extension-manifest metadata.
 
 ### Diff mode behavior
 
@@ -1742,9 +1748,9 @@ Code TE2 has two mutually exclusive language backends selected by the persisted
 
 - **Code Server mode** (the default) loads Monaco editor core without Monaco's
   basic/rich language contributions. It opens the direct strict-MessagePack
-  `/wba` lane, obtains language and grammar metadata from the WBA, installs
-  client-side TextMate tokenization from the contributed grammars, and registers
-  WBA-backed Monaco providers.
+  `/wba` lane, obtains language/provider metadata from the WBA, installs client-
+  side TextMate tokenization from the backend extension-registry projection, and
+  registers WBA-backed Monaco providers.
 - **Web Worker mode** lazy-loads Monaco's basic/rich language contributions and
   language workers. It does not open or probe the WBA, install the WBA language
   catalog, or register WBA-backed providers.
@@ -1788,8 +1794,8 @@ cleanup does not change extension activation policy or startup ordering.
 
 The Code Server path is data-driven:
 
-1. The WBA publishes language, language-configuration, grammar, theme, and
-   provider-registration metadata from the installed built-in and user
+1. The WBA publishes language, language-configuration, theme, and provider-
+   registration metadata from the installed built-in and user
    extensions. Contributions with the same language ID are composed rather
    than replaced: file-association arrays are unioned, higher-priority user
    metadata wins where it is present, and language configuration changes owner
@@ -1798,17 +1804,25 @@ The Code Server path is data-driven:
    auto-closing, or indentation rules.
 2. The inline editor registers the contributed language IDs and applies the
    contributed language configuration.
-3. `editor_textmate_runtime.ts` selects the first grammar contribution for the
-   language in WBA catalog order, loads the raw grammar through
-   `grammars_load`, and installs it in Monaco using the vendored TextMate and
+3. `extension_registry.py` persists complete built-in/user TextMate contribution
+   descriptors and one deterministic projection revision during its normal scan.
+   `editor_textmate_runtime.ts` requests that catalog through typed editor RPC,
+   selects the first contribution for a language, lazily requests only its body
+   under the same revision, and installs it using the vendored TextMate and
    Oniguruma runtimes.
 4. Provider registration events and reconnect snapshots install one stable
    Monaco bridge per advertised language and feature. There are no JavaScript,
    HTML, CSS, or other language-specific routing branches.
 
-Grammar discovery/content travels over the direct WBA socket as
-`vscode.textmate.grammars.list` / `vscode.textmate.grammars.load`. It does not use
-the Python asset router. The separate HTTP resource boundary in
+Active grammar discovery/content travels over `/rpc/editor` as
+`editor.textmate.catalog.get` / `editor.textmate.grammar.get`; there is no WBA or
+HTTP fallback. The obsolete WBA grammar aliases, handlers and duplicate scanner
+are removed. Catalog metadata is available from persisted registry state before
+WBA connects. Grammar bodies remain backend-owned lazy reads and are bounded to
+4 MiB. Each body read verifies the exact projection revision, managed extension
+root, relative path, recorded size and mtime. Install/update/uninstall scans publish
+a revision fact; editors atomically dispose stale token providers and rebuild only
+the active language without taking focus. The separate HTTP resource boundary in
 `monaco_editor/editor_asset_routes.py` serves `/ui/monaco_editor/textmate/onig.wasm`,
 Monaco ESM/language assets and theme JSON, retaining native OTA/APK interception
 and CSS-module shim behavior. `editor_backend.py` owns no HTTP routes or web
@@ -2295,17 +2309,18 @@ te2 console search "query" --worker <worker-id> --limit 100
 
 ## 26) Themes, TextMate palette, and retokenization
 
-Theme selection is a preference-backed editor concern. Code TE2 registers the
-catalog's themes, resolves the selected theme JSON, converts it to Monaco data,
-then applies it through the theme runtime. The live loader is
-loadVscodeTextmateThemesRuntime() and the live application path is
-applyMonacoThemeRuntime().
+Theme selection is a preference-backed editor concern. Python resolves only
+the selected theme and projects its JSON to the working editor, which converts
+it to Monaco data in `applyMonacoThemeRuntime()`. The editor does not load the
+entire catalog's theme definitions before opening a document.
 
 `theme_catalog.py` constructs typed catalog metadata off the event loop. The
 settings picker/summary use `ui.host.themes.list`; working editors use
-`editor.themes.list`. Historical secondary views inject their existing host-lane
-request into the theme loader, without starting an editor/WBA session. Both RPC
-handlers call the same service. The former `/ui/monaco_editor/available_themes`
+`editor.theme.selected`, which reads the current Python preferences and resolves
+only that definition. The catalog remains picker metadata, not a boot gate.
+Historical secondary views request metadata on their existing host lane and
+fetch only their selected theme, without starting an editor/WBA session. The
+former `/ui/monaco_editor/available_themes`
 HTTP endpoint is removed with no fallback. JSON theme files, TextMate resources
 and Monaco assets remain HTTP resource routes, retaining native OTA/APK asset
 interception.
@@ -2319,30 +2334,69 @@ loading select the latest theme before releasing model consumers. Live snapshots
 invalidate the older bootstrap document, and newer replays supersede pending
 ones, including empty-project snapshots. WBA readiness is not a dependency.
 Theme errors reject readiness rather than displaying a falsely themed document.
-Concurrent catalog requests share an in-flight promise; only validated successes
-are cached. Request failures clear the promise rather than caching an empty
-catalog, and the theme loader also clears rejected loading promises for retry.
+The selected-theme RPC resolves the preference's theme off the event loop; a
+cold load or another client's preference change cannot cause serial frontend
+fetches of every theme. Failed selections remain retryable. Concurrent picker
+catalog requests share an in-flight promise; only validated successes are
+cached. Request failures clear the promise rather than caching an empty catalog.
 The settings picker exposes failure separately from a genuinely empty catalog.
 
-This transport slice preserves catalog IDs and resource URLs, not new VSIX theme
-support. The current `extension_registry.get_extension_list()` summary omits
-`path`/`themes`, so its entries do not supply extension themes to the catalog.
-Full WBA/VSIX theme integration, JSONC and inheritance remain deferred; bundled
-GitHub themes are the currently populated catalog.
+The catalog contains the nine bundled GitHub themes and compatible installed
+Code Server theme contributions. Extension theme resources support JSONC and
+relative `include` inheritance. The backend merges inherited UI colors,
+TextMate rules, and explicit semantic-token rules; unsupported external
+`tokenColors` files and legacy `settings` formats remain excluded. Theme IDs
+and URLs are catalog-owned, not hardcoded by the editor frontend.
 
-The same raw VS Code theme is applied to the TextMate registry. Its color map is
-published to Monaco and every loaded model is reset for tokenization. This
-sequence keeps encoded TextMate scopes, semantic-token rules, and visible Monaco
-theme state aligned. It does not use the removed palette-index monkey patch.
+The same raw VS Code theme is applied to the TextMate registry. Its color map,
+extended with explicit semantic foregrounds, is published to Monaco and every
+loaded model is reset for tokenization. The patched standalone Monaco theme
+service applies VS Code-style type/modifier/language selector scoring per
+semantic style property. TextMate-derived rules remain the fallback when a
+theme has no explicit semantic style. This keeps encoded TextMate scopes,
+semantic-token rules, and visible Monaco theme state aligned without a
+separate built-in-theme parser.
+TextMate grammar catalog persistence is independent of selected-theme projection:
+the extension registry stores only bounded contribution descriptors, identities and
+filename/extension language associations, while raw grammar bodies are loaded on
+demand. Cold boot first awaits that exact client's authenticated editor RPC
+connection, then prepares the selected theme, catalog, Oniguruma factory and active
+grammar concurrently before creating the first document model. Socket construction
+is not readiness, and one warm client cannot satisfy another client's barrier. Later file-model
+replacements use the same syntax barrier. Neither path waits for WBA; its language
+configuration and intelligence attach asynchronously after syntax is visible. The
+browser never receives the installed grammar corpus or theme collection. A changed
+or missing grammar fails the revision-checked request until the next registry scan
+publishes a coherent catalog.
+On a cold live SSOT, the event may supersede the cached boot snapshot before
+Monaco reads its path. Boot still loads the projected grammar catalog with an
+empty path; the SSOT path awaits its active grammar before creating a model and
+rechecks snapshot/revision identity after that wait. Without this boundary a
+Rust document briefly mounted as `plaintext` and selected the frontmatter
+TextMate scope despite a correct `github-dark` theme and Rust catalog entry.
+The standalone matcher carries VS Code's built-in `member` -> `method` type
+inheritance; extension-defined semantic type hierarchies are not yet registered
+in the standalone editor.
 
-Theme changes are idempotent: load or reuse JSON, define the Monaco theme when
-needed, set the selected id, update the page base class, apply the TextMate
+With `--runtime-debug`/`TE2_RUNTIME_DEBUG`, the selected-theme RPC adds a
+debug-only marker. The editor holds at most 24 pre-reply boot milestones, then
+prints at most 64 `cold_boot_trace` events across theme application, TextMate
+catalog revision/scope and first-model mount. Normal runs discard them. The
+backend logs the selected theme's source and SHA prefix to stderr (never the
+MessagePack stdout pipe). The semantic bridge records request/current model
+versions and, for full-token replies only, the first out-of-range offset after
+bounded validation. It does not alter returned tokens or validate delta-token
+contents. The trace contains IDs, counts and offset summaries, not document text.
+
+Theme changes are idempotent: project the selected JSON, define the Monaco
+theme, set the selected id, update the page base class, apply the TextMate
 theme/color map, then reset tokenization. A missing contributed theme must fail
 locally without changing the active theme.
 
-Key sources: editor_theme_loader_runtime_utils.ts,
-editor_theme_apply_runtime_utils.ts, editor_textmate_runtime.ts, and the
-vendored GitHub theme directory.
+Key sources: `theme_catalog.py`, `editor_theme_apply_runtime_utils.ts`,
+`editor_theme_convert_utils.ts`, `editor_textmate_runtime.ts`, the vendored
+GitHub theme directory, and `standaloneSemanticTokenRules.ts` in the patched
+Monaco source checkout.
 
 ## 30) RPC Protocol IDs (`rpcId`) — How They Work and Auto-Discovery
 
@@ -2452,6 +2506,44 @@ editor origin, with document-coordinate handles and a matching negative scroll
 translation initialized during selection sync. Layout and content-size events
 resync selection geometry after inline diff changes.
 
+Monaco's pointer/touch handlers opt `.lines-content` into editor gesture arbitration
+in `base/browser/editorTouchGesture.ts` and `touch.ts`. Other gesture targets keep
+their existing behavior. Editor touches tolerate 10 px movement before scrolling;
+once scrolling begins, returning to the origin cannot select text. A stationary
+700 ms hold selects through native word selection without textarea focus. Release
+cannot then emit a tap or desktop context menu. Double taps are editor-local, at
+most 400 ms apart and within 24 px. Cancel, blur, multitouch and disposal invalidate
+pending holds. Existing Monaco scrolling/inertia remains the scroll implementation.
+
+The maintained touch fork owns handle/menu presentation. It appends handles to
+`.overflow-guard`, outside the text gesture target. Stems pass through touches;
+teardrops own dragging. A first-tap caret handle stays inert for 450 ms so it cannot
+intercept the second tap. Nonempty selections release this cooldown immediately.
+Hidden/repositioning handles also stop hit testing. Source hold events reach the
+public editor context-menu event; the fork presents the menu for the existing
+selection, while the desktop context-menu contribution skips its focus operation.
+
+Touch-origin mouse movement/context-menu duplicates are filtered in the source
+pointer handler. Explicit hover actions and real mouse hover remain available.
+`ContentHoverWidget._initTouchDrag` still moves an already-visible hover; it is not
+the automatic hover trigger. No changes to guarded textarea input are needed.
+
+`cursorParagraphUp/Down` and their `Select` variants bind Ctrl+vertical arrows to
+Monaco's `cursorMove` blank-line operations. Hardware and projected extra keys use
+the same commands; historical secondary keys explicitly allow them. Ctrl+horizontal
+arrows retain word navigation, and terminal/quick-input routing stays separate.
+Validation and native-client acceptance: backend_native_observability/TRACKER.md,
+Mobile Editor Gesture Ergonomics.
+
+Monaco publication is a dependency chain, not independent builds. Both
+`editor_monaco_boot_runtime.ts` and `historical_monaco_boot.ts` statically import
+`monaco.bootstrap.bundle.js`; Code TE2's host build embeds it. After publishing
+Monaco ESM modules, run `node scripts/build_monaco_bootstrap_bundle.mjs` from the
+repository root, then `node build.mjs` from `app/apps/code_te2`. Only then publish
+the native client assets. Rebuilding bootstrap after host does not update the
+embedded Monaco in `static/dist/host.js`. Verify the final host artifact and live
+command/handler registration rather than merely the separate bootstrap artifact.
+
 ## 33) Diagnostics owner-keyed markers
 
 Extension-host diagnostics preserve their original owner. Monaco marker writes are
@@ -2480,8 +2572,9 @@ wba_event_bridge.py, and diagnostics_bridge.py.
 Provider registration is WBA-driven and generic. The registry matches the exact
 document selector (language, scheme, authority, and path), not just a language
 id, and invokes every matching provider. Results are merged where meaningful:
-hover contents and completion/symbol lists combine; semantic-token requests use
-the richest compatible response.
+hover contents and symbol lists combine; semantic-token requests use the richest
+compatible response. Completion providers are projected separately to Monaco,
+which owns their grouping, result reuse and incomplete-list refresh.
 
 The editor installs public Monaco providers from WBA registration events and a
 reconnect snapshot. It registers a missing contributed language before applying
@@ -3144,9 +3237,14 @@ sibling `WebContentsView`. The request is declarative and bounded to labels,
 separators, enabled action ids, and coordinates. Electron returns only the
 selected id; Code TE2 executes the existing action, so Electron never becomes
 Sidebar lifecycle authority. Browser and Android retain one keyed DOM menu owner:
-the launcher tap and a repeated icon long-press toggle their own menu, while a
-different launcher/long-press replaces the prior menu. Tapping the icon that owns
-an open long-press menu closes it without activating the surface.
+the launcher tap toggles its menu, while an icon long-press opens its menu once
+per gesture. A matching native context-menu event cannot immediately close it.
+The release click is consumed; a later tap on the icon closes its open menu.
+Dock icons suppress text selection and native image dragging without changing
+the separate slot-reordering gesture. Both native and DOM menus offer Close all
+and kill for app slots: one backend ledger transaction closes all slots with
+the selected app id, publishes the shared membership snapshot, and the host
+then invokes the framework's existing app quit action once.
 
 The trusted header exposes Attach, Refresh, Console, DevTools, exact Stop, and
 Close. Attach or user Close publishes an exact reattach event. Extension
@@ -3414,9 +3512,24 @@ attached, the transaction invokes one canonical `openFileFlow`; visible
 
 `editor.modelReady` is only a frontend-to-Python lifecycle notification. It
 does not flush a WBA open or replay providers. A genuine direct-WBA Socket.IO
-connection calls `te2.resync`, then flushes the active model and hydrates the
-provider snapshot. This keeps late/reconnected clients complete without making
-ordinary file switches replay workspace, provider, and webview state.
+connection calls `te2.resync`; that replay remains socket-scoped. The active-model
+phase is separate because the socket can win the cold-start race before the first
+Monaco model exists. A deferred phase is retained and, when the model attaches,
+flushes its WBA open, hydrates providers, reapplies retained diagnostics, replays
+the language and invalidates semantic tokens. A semantic provider arriving after
+the model invalidates that matching language immediately. This covers both
+orderings without polling, synthetic typing, or making ordinary file switches
+replay workspace/provider/webview state.
+
+Semantic-token ownership follows VS Code: WBA pushes provider registration and
+change events, while an attached Monaco model pulls the actual full/range token
+DTO through that provider. Diagnostics remain extension-host pushes. The direct
+semantic bridge gives the ext-host operation 30 seconds and its outer WBA RPC
+36 seconds so a cold basedpyright provider is not discarded by the generic
+12-second browser deadline. Monaco cancellation is checked before dispatch and
+again before applying a late result. This bound is not polling or a retry; a
+future generalized queued-request lease/heartbeat protocol remains a separate
+transport change.
 
 WBA treats a same-client, same-path open with the same non-null generation as an
 idempotent duplicate. It does not reread disk, replace text, clear dirty state,
@@ -3440,7 +3553,8 @@ WBA extension activation is extension-agnostic:
   events; WBA does not choose one activation candidate.
 - Provider selection is a separate document-scoped step. WBA matches every
   registered selector against the exact language, scheme, authority, and path,
-  then aggregates all matching providers. This includes valid pattern-only
+  then aggregates where appropriate. Completions retain individual providers for
+  Monaco's suggest model, with WBA rechecking each pinned selector. This includes valid pattern-only
   selectors without a `language` field, such as HTML-to-CSS completion
   providers registered for `**/*.{css,scss,less,sass,styl}`.
 - Extension-host `workspace.findFiles` calls are handled generically through
@@ -3459,6 +3573,24 @@ The visible frontend open path does not wait for WBA background hydration. `edit
 ## 40) Code Inspector And Navigation
 
 Code Inspector is a backend-retained bottom-drawer projection for References, Implementations, Call Hierarchy and Document Symbols. It is not a direct frontend-to-frontend channel and does not add a new socket or HTTP endpoint.
+
+Symbol navigation carries `symbol_range` (full symbol extent), `place_cursor`
+and `focus: false`, with `scroll_y: center`, from the Inspector through host
+file-open to the editor. `host/file_ops_backend.py` forwards these bounded options,
+including existing scroll aliases; the shared editor-open service validates and
+canonicalizes them. Do not rebuild a host payload that retains line/column but
+silently discards the accent or no-focus cursor-placement intent. The renderer
+keeps symbol decoration separate from Find/Inspector-result highlights. Tests in
+`tests/test_host_symbol_navigation.py` exercise the real host handler and editor
+service together, mocking only persistence/file materialization and transport.
+
+The Inspector panel's bottom-right clear control sends `clearHighlights` through
+`ui.host.codeInspector.command` with the retained request ID. The backend rejects
+stale IDs and notifies the editor; it does not discard the result projection.
+The editor clears both result and symbol-target decoration channels, suppresses
+reapplication for the cleared request across ordinary editor resyncs, and reenables
+highlighting when a new inspection request starts. Search/Find decorations,
+cursor, selection, and drawer presentation are unaffected.
 
 ### Flow
 
@@ -4195,8 +4327,11 @@ Built-in backend module identity comes from package path rather than public app 
   Rust marks launch/spawn and readiness receipt/publication/catalog completion.
   Updated app-shell assets mark bootstrap, gate release, native prerequisites,
   template/module load and initialization when bootstrap enables runtime-debug.
-  Browser clocks may differ; readiness is not intelligence readiness. No polling
-  or gate changes; disabled runs are silent. Import timing requires a fresh worker.
+  Browser clocks may differ; readiness is not intelligence readiness. The generic
+  worker releases its serving hook immediately after Uvicorn confirms the bound
+  listener, replacing the old fixed lifespan delay; the hook's framework POST
+  remains asynchronous and lifecycle-owned. Disabled runs are silent. Import
+  timing requires a fresh worker.
 
 - The Python worker reserves `runtime.debug.*` on its existing framework pipe
   (now concatenated MessagePack maps, retaining the JSON-RPC-shaped envelope).
@@ -4623,11 +4758,12 @@ results; these are observation boundaries, not new readiness gates.
 
 During startup transport investigation, `[wba_startup_transport]` browser records
 are capped at 80 per editor realm, independently of backend runtime-debug. They
-trace Socket.IO manager/namespace boundaries and catalog/grammar RPC timing,
+trace Socket.IO manager/namespace boundaries and language/provider RPC timing,
 without RPC payloads or changing reconnect policy. Runtime-debug WBA records
 `socket.listener.ready` and up to 20 Engine.IO connection/error events. The static
-framework WBA proxy targets localhost:18181; TextMate catalog/grammar requests need
-that socket, but do not await document-open acknowledgements or language activation.
+framework WBA proxy targets localhost:18181. TextMate catalog/grammar requests use
+the editor lane and do not depend on that socket, document-open acknowledgement or
+language activation.
 
 Shared Rust proxy diagnostics under runtime-debug emit `websocket_startup_timing`
 for WBA public-route arrival and bridge upgrade/upstream-connect/closure boundaries.
@@ -5032,12 +5168,14 @@ Commands, target/projection details, live probes and reload requirements:
 Completion timeout policy is shared by the browser shim and WBA through
 `node_workbench_adapter/src/protocol/completion-timeouts.ts`. The default provider
 response limit is 30 s, the document-operation limit is 45 s, and the outer RPC
-ceiling is 195 s. That outer ceiling covers two existing gate admissions
-(activation and completion), each allowing 50 s queueing plus 45 s execution,
-and 5 s transport margin. Replies return immediately; none of these allowances
-are sleeps. This avoids discarding a slow mobile basedpyright response behind a
-shorter browser or gate deadline. Other language-feature deadlines and cancellation
-behavior are unchanged.
+ceiling remains 195 s. Activation retains the operation budget; completion text
+synchronization now uses a separate 10 s gate admission (5 s acknowledgement plus
+margin). Provider replies run outside the gate with their own 30 s limit, allowing
+independent providers to respond concurrently. The conservative outer ceiling
+covers both admissions, provider waits and transport. These are not sleeps.
+Other language-feature deadlines are unchanged. Cancelled completion results are
+discarded and their caches released when they arrive; no new transport-level
+cancellation protocol is introduced.
 
 WBA's `extensions/intelligence/completion-warmup.ts` handles one discarded
 completion invocation per matching provider/language/project session. Provider
@@ -5051,3 +5189,42 @@ Project/host session resets clear the keys. Result caches are released only to
 their originating host connection. Runtime-debug adds metadata-only trace events,
 not a prerequisite for warming. Evidence and acceptance are recorded in
 `docs/apps/backend_native_observability/WBA_RUNTIME_DEBUG.md` and `TRACKER.md`.
+
+### Compact Completion Projection And Lifecycle
+
+The extension-host leg remains VS Code's binary-framed RPC containing a compact
+JSON suggestion DTO. WBA decodes that object but does not inflate its suggestions.
+The browser leg sends one MessagePack RPC reply with this canonical payload:
+
+```text
+{ ok: true, result: { sessionId, providers: [{ handle, dto }] } }
+```
+
+Each original DTO occurs once. Normal Monaco calls pin one provider; the WBA
+non-pinned batch path retains each matching provider separately. There are no
+expanded `items`, repeated `suggestResults` or top-level `dto` aliases. Old
+expanded payloads are not accepted by the new frontend; update WBA and frontend
+together. Python does not inflate or aggregate these completion responses.
+
+`editor_language_bridge_providers.ts` registers one Monaco provider per extension
+host handle, retaining its selector, trigger characters and resolve capability.
+The cache uses one shared `*` registry bucket to deduplicate language notifications;
+it does not replace provider selectors with a wildcard. Remote document schemes
+are mapped to Monaco's file URIs while language/glob filters remain intact. WBA
+revalidates pinned handles against the actual remote document. Pattern-only
+providers reach the browser via registration events and snapshot replay.
+
+The vendored `mainThreadLanguageFeatures.ts` converter expands DTO fields once on
+the frontend, including default ranges, snippets, edits, commit characters,
+commands and `_id`. Monaco's own suggest model handles ordering and per-provider
+incomplete-result reuse; TE2 no longer presorts with a parallel implementation.
+
+`vscode.completions.resolve` forwards the original item ID to
+`$resolveCompletionItem`; the frontend inflates and updates that same suggestion.
+Monaco list `dispose()` forwards the provider/cache ID to `$releaseCompletionItems`
+once, including empty lists and zero-valued cache IDs. Cancellation observed when
+a reply arrives disposes the result instead of publishing it. A weak map associates
+suggestions with their originating session/provider, without retaining raw DTOs.
+Resolve/release RPCs do not enter the document gate or activate a language. A new
+session ID on project/host reset rejects late cache operations before they can
+touch reused IDs in the replacement host.

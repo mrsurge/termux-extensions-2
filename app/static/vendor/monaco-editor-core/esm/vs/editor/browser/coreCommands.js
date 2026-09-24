@@ -481,6 +481,33 @@ export var CoreNavigationCommands;
     }
     CoreNavigationCommands.CursorMoveImpl = CursorMoveImpl;
     CoreNavigationCommands.CursorMove = registerEditorCommand(new CursorMoveImpl());
+    // TE2 uses paragraph navigation for Ctrl+vertical arrows. Both hardware and
+    // projected mobile keys reuse the native blank-line movement/selection engine.
+    for (const [suffix, direction, key] of [
+        ['Up', CursorMove_.RawDirection.PrevBlankLine, 16 /* KeyCode.UpArrow */],
+        ['Down', CursorMove_.RawDirection.NextBlankLine, 18 /* KeyCode.DownArrow */]
+    ]) {
+        for (const select of [false, true]) {
+            registerEditorCommand(new class extends CoreEditorCommand {
+                constructor() {
+                    const modifiers = select ? 1024 /* KeyMod.Shift */ : 0;
+                    super({
+                        id: `cursorParagraph${suffix}${select ? 'Select' : ''}`,
+                        precondition: undefined,
+                        kbOpts: {
+                            weight: CORE_WEIGHT + 1,
+                            kbExpr: EditorContextKeys.textInputFocus,
+                            primary: 2048 /* KeyMod.CtrlCmd */ | modifiers | key,
+                            mac: { primary: 256 /* KeyMod.WinCtrl */ | modifiers | key }
+                        }
+                    });
+                }
+                runCoreEditorCommand(viewModel, args) {
+                    CoreNavigationCommands.CursorMove.runCoreEditorCommand(viewModel, { to: direction, select, source: args.source });
+                }
+            });
+        }
+    }
     class CursorMoveBasedCommand extends CoreEditorCommand {
         constructor(opts) {
             super(opts);
@@ -1728,4 +1755,3 @@ registerOverwritableCommand("compositionStart" /* Handler.CompositionStart */);
 registerOverwritableCommand("compositionEnd" /* Handler.CompositionEnd */);
 registerOverwritableCommand("paste" /* Handler.Paste */);
 registerOverwritableCommand("cut" /* Handler.Cut */);
-//# sourceMappingURL=coreCommands.js.map

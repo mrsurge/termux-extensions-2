@@ -24,6 +24,9 @@ JsonRpcId = str | int
 
 EDITOR_RPC_METHOD_PREFERENCE_UPDATE: Final = "editor.preference.update"
 EDITOR_RPC_METHOD_THEMES_LIST: Final = "editor.themes.list"
+EDITOR_RPC_METHOD_THEME_SELECTED: Final = "editor.theme.selected"
+EDITOR_RPC_METHOD_TEXTMATE_CATALOG_GET: Final = "editor.textmate.catalog.get"
+EDITOR_RPC_METHOD_TEXTMATE_GRAMMAR_GET: Final = "editor.textmate.grammar.get"
 EDITOR_RPC_METHOD_PREFERENCES_GET: Final = "editor.preferences.get"
 EDITOR_RPC_METHOD_OPEN: Final = "editor.open"
 EDITOR_RPC_METHOD_JUMP_TO_LINE: Final = "editor.jumpToLine"
@@ -52,6 +55,9 @@ EDITOR_RPC_METHOD_CODE_INSPECTOR_PUBLISH: Final = "editor.codeInspector.publish"
 
 EditorRpcMethod = Literal[
     "editor.themes.list",
+    "editor.theme.selected",
+    "editor.textmate.catalog.get",
+    "editor.textmate.grammar.get",
     "editor.preferences.get",
     "editor.preference.update",
     "editor.open",
@@ -109,6 +115,7 @@ EDITOR_RPC_NOTIFICATION_PROJECT_SWITCHING: Final = "editor.project.switching"
 EDITOR_RPC_NOTIFICATION_PROJECT_SWITCHED: Final = "editor.project.switched"
 EDITOR_RPC_NOTIFICATION_AGENT_EDITS_CHANGED: Final = "editor.agentEdits.changed"
 EDITOR_RPC_NOTIFICATION_CODE_INSPECTOR_COMMAND: Final = "editor.codeInspector.command"
+EDITOR_RPC_NOTIFICATION_TEXTMATE_PROJECTION_CHANGED: Final = "editor.textmate.projectionChanged"
 
 EditorRpcNotification = Literal[
     "editor.state.ssot",
@@ -140,6 +147,7 @@ EditorRpcNotification = Literal[
     "editor.project.switched",
     "editor.agentEdits.changed",
     "editor.codeInspector.command",
+    "editor.textmate.projectionChanged",
 ]
 
 

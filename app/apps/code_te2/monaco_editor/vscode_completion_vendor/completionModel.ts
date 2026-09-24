@@ -1,7 +1,7 @@
 /*
  * TE2 completion vendor shim. Full upstream VS Code completionModel.ts is
- * preserved below as comments; the live exports here normalize the completion
- * list before it is returned to Monaco's suggest pipeline.
+ * preserved below as comments; the live interface describes the list returned to Monaco. Sorting, filtering
+ * and result reuse belong to Monaco's actual suggest pipeline.
  * Source: worktrees/vscode-te2-diff/src/vs/editor/contrib/suggest/browser/completionModel.ts
  */
 
@@ -10,51 +10,6 @@ export interface VscodeCompletionListLike {
   incomplete?: boolean;
   duration?: number;
   dispose?(): void;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value != null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function completionLabelText(label: unknown): string {
-  if (typeof label === 'string') return label;
-  if (isRecord(label) && typeof label.label === 'string') return label.label;
-  return '';
-}
-
-function completionSortText(item: Record<string, unknown>): string {
-  const sortText = item.sortText;
-  if (typeof sortText === 'string') return sortText;
-  return completionLabelText(item.label);
-}
-
-function compareCompletionItemsByVsCodeDefaultOrder(a: Record<string, unknown>, b: Record<string, unknown>): number {
-  const aSort = completionSortText(a).toLowerCase();
-  const bSort = completionSortText(b).toLowerCase();
-  if (aSort < bSort) return -1;
-  if (aSort > bSort) return 1;
-  const aLabel = completionLabelText(a.label);
-  const bLabel = completionLabelText(b.label);
-  if (aLabel < bLabel) return -1;
-  if (aLabel > bLabel) return 1;
-  return Number(a.kind || 0) - Number(b.kind || 0);
-}
-
-export function normalizeVscodeCompletionListFromCompletionModel(
-  list: VscodeCompletionListLike | null | undefined,
-): VscodeCompletionListLike {
-  if (!list || !Array.isArray(list.suggestions)) {
-    return { suggestions: [] };
-  }
-  const suggestions = list.suggestions
-    .filter((item) => isRecord(item) && !!completionLabelText(item.label))
-    .sort(compareCompletionItemsByVsCodeDefaultOrder);
-  return {
-    suggestions,
-    incomplete: !!list.incomplete,
-    duration: typeof list.duration === 'number' ? list.duration : undefined,
-    dispose: typeof list.dispose === 'function' ? list.dispose : undefined,
-  };
 }
 
 /*
