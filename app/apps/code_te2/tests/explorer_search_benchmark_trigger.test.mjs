@@ -151,6 +151,22 @@ test("prepared benchmark searches use the normal input scheduler", async () => {
   assert.ok(state.renders.length >= 2);
 });
 
+test("closing content search publishes an authoritative highlight clear after state skew", async () => {
+  const { createExplorerSearchController } = await importSearchController();
+  const state = createSearchState();
+  const controller = createExplorerSearchController(state.deps);
+
+  controller.closeSearchOverlay("overlayClosed");
+
+  assert.deepEqual(
+    state.sends.filter(({ method }) => method === "explorer.search.highlight.clear"),
+    [{
+      method: "explorer.search.highlight.clear",
+      payload: { reason: "overlayClosed" },
+    }],
+  );
+});
+
 test("the benchmark overlay enters through the input scheduler", async () => {
   const source = await readFile(
     path.join(appRoot, "src/explorer/search/overlay-controller.ts"),

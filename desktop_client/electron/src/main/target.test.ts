@@ -28,6 +28,7 @@ function settings(
     frameworkPort: 8089,
     frameworkBookmarks: [],
     zoomLevel: 1,
+    startLocalFrameworkOnLaunch: false,
     autostart: false,
     preferredAppId: "",
     ...overrides,
@@ -84,6 +85,55 @@ test("desktop startup settings expose one clearly associated save action", async
   assert.ok(save > preferred);
   assert.match(source.slice(save, save + 180), /Save connection and startup/);
   assert.equal(source.match(/id="save-settings"/g)?.length, 1);
+});
+
+test("desktop startup settings separate local framework and preferred app policy", async () => {
+  const [html, source] = await Promise.all([
+    readFile(
+      fileURLToPath(new URL("../../../android_shell/settings.html", import.meta.url)),
+      "utf8",
+    ),
+    readFile(
+      fileURLToPath(new URL("../../../android_shell/settings.js", import.meta.url)),
+      "utf8",
+    ),
+  ]);
+
+  assert.match(html, /id="autostart-local-framework"/);
+  assert.match(html, /automatic local-framework startup is selected or the chosen framework is already reachable/);
+  assert.match(source, /startLocalFrameworkOnLaunch: autostartLocalFrameworkInput\.checked/);
+  assert.match(source, /autostartLocalFrameworkInput\.checked = settings\.startLocalFrameworkOnLaunch === true/);
+});
+
+test("desktop startup controls persist immediately through one serialized settings queue", async () => {
+  const source = await readFile(
+    fileURLToPath(new URL("../../../android_shell/settings.js", import.meta.url)),
+    "utf8",
+  );
+
+  assert.match(source, /let startupSettingsSaveQueue = Promise\.resolve\(\)/);
+  assert.match(source, /frameworkHost: persistedSettings\?\.frameworkHost \|\| hostInput\.value/);
+  assert.match(source, /frameworkPort: persistedSettings\?\.frameworkPort \|\| Number\(portInput\.value\)/);
+  assert.match(source, /startupSettingsSaveQueue = startupSettingsSaveQueue\s*\.catch\(\(\) => \{\}\)\s*\.then/);
+  assert.match(source, /autostartLocalFrameworkInput\?\.addEventListener\(\s*"change",\s*\(\) => void queueStartupSettingsSave\(\)/);
+  assert.match(source, /autostartPreferredAppInput\?\.addEventListener\("change", \(\) => \{\s*updatePreferredAppEnabled\(\);\s*void queueStartupSettingsSave\(\)/);
+  assert.match(source, /preferredAppSelect\?\.addEventListener\(\s*"change",\s*\(\) => void queueStartupSettingsSave\(\)/);
+  assert.match(source, /async function connectToFramework[\s\S]*await startupSettingsSaveQueue;/);
+});
+
+test("shared native launcher closes running apps only through its context menu", async () => {
+  const source = await readFile(
+    fileURLToPath(new URL("../../../android_shell/extensions/apps.js", import.meta.url)),
+    "utf8",
+  );
+
+  assert.doesNotMatch(source, /app-menu-button/);
+  assert.doesNotMatch(source, /menu\.textContent = "\.\.\."/);
+  assert.match(source, /card\.addEventListener\("contextmenu", openCardMenu\)/);
+  assert.match(source, /window\.setTimeout\(\(\) => openCardMenu\(event\), 520\)/);
+  assert.match(source, /<span>Close<\/span>/);
+  assert.match(source, /<svg viewBox="0 0 16 16"/);
+  assert.match(source, /await host\.quitApp\(app\.id\)/);
 });
 
 async function withScratch(
@@ -175,6 +225,7 @@ test("desktop settings recover valid bookmarks from malformed stored data", asyn
       { name: "Home", frameworkHost: "home.example", frameworkPort: 8089 },
       { name: "IPv6", frameworkHost: "[2001:db8::8]", frameworkPort: 9443 },
     ]);
+    assert.equal(loaded.startLocalFrameworkOnLaunch, false);
     assert.equal(loaded.autostart, false);
     assert.equal(loaded.preferredAppId, "");
   });
@@ -188,16 +239,19 @@ test("desktop settings migrate and validate preferred app startup state", async 
       version: 1,
       frameworkHost: "framework.example",
       frameworkPort: 8089,
+      startLocalFrameworkOnLaunch: true,
       autostart: true,
       preferredAppId: "code_te2",
     })}\n`, "utf8");
 
     const loaded = await readDesktopSettings(environment);
     assert.equal(loaded.version, DESKTOP_SETTINGS_VERSION);
+    assert.equal(loaded.startLocalFrameworkOnLaunch, true);
     assert.equal(loaded.autostart, true);
     assert.equal(loaded.preferredAppId, "code_te2");
 
     const written = await writeDesktopSettings(loaded, environment);
+    assert.equal(written.startLocalFrameworkOnLaunch, true);
     assert.equal(written.autostart, true);
     assert.equal(written.preferredAppId, "code_te2");
     await assert.rejects(

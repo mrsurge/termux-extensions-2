@@ -35,8 +35,9 @@ The distribution work also recognizes four intentionally different install
 modes. Source, editable, VCS, and sdist-built installs may build and cache the
 Rust server from source. A supported PyPI platform wheel carries the validated
 GNU/Linux server and the locked Electron source inputs. The unified Linux
-installer places that wheel in a private venv and, only when `--desktop` is
-selected, invokes the installed venv's existing `te2 desktop install` bootstrap.
+installer places that wheel in a private venv. `--desktop` opts a fresh install
+into the installed venv's existing `te2 desktop install` bootstrap; a retained
+desktop integration receipt makes subsequent upgrades reconcile it automatically.
 The Termux archive carries the Bionic/Android server. Termux reuses its shared
 interpreter without a venv. Distribution payloads must never stage Cargo's or
 Electron's intermediate build trees.
@@ -451,8 +452,12 @@ override remains only a higher-priority source/test seam.
 With `--desktop`, the installer invokes the exact versioned
 `venv/bin/te2 desktop install`. That existing bootstrap owns its fingerprinted
 source build, cache, runtime publication, `te2-desktop` wrapper, desktop entry,
-icon, and receipt. The installer then seeds the existing Electron local-
-framework configuration with the stable managed `te2` wrapper and
+icon, and receipt. The installed wrapper dispatches through the stable managed
+`te2 desktop launch` command, so the atomic release pointer—not an embedded old
+venv path—selects desktop code. Once the receipt exists, later Linux upgrades
+repeat this reconciliation without requiring `--desktop`. The installer then
+seeds the existing Electron local-framework configuration with the stable
+managed `te2` wrapper and
 `install/current/venv`; an already explicit command/venv configuration is left
 untouched. The desktop entry has a stable application id, does not open a
 terminal, and retains the intentional Electron `--no-sandbox` launcher behavior
@@ -1525,12 +1530,14 @@ application is atomically published beneath
 `$TE2_DATA_HOME/desktop/electron/runtimes`; an atomic relative `current` link
 selects it.
 
-The bootstrap writes a Python-environment-specific `~/.local/bin/te2-desktop`
-wrapper plus XDG desktop entry and icon. A private receipt records their hashes.
-Install/repair may replace only byte-identical files or files still matching a
-prior receipt; uninstall preserves modified or unrelated external files. Status
-does not require Node, and launch builds only when no valid current runtime is
-available.
+The source bootstrap writes a Python-environment-specific
+`~/.local/bin/te2-desktop` wrapper plus XDG desktop entry and icon. The managed
+release installer instead points that wrapper at its stable `te2 desktop launch`
+command. A private receipt records their hashes. Install/repair may replace only
+byte-identical files or files still matching a prior receipt; uninstall preserves
+modified or unrelated external files. Status does not require Node, while launch
+reconciles the runtime fingerprint against the executing TE2 source before it
+starts Electron.
 
 This is the current desktop materialization path for source provenance and the
 official Linux platform wheel alike. The wheel additionally carries the verified
@@ -1887,6 +1894,12 @@ candidate cannot move `current` or disturb either retained runtime. Running
 `.desktop` entry even when the current runtime fingerprint is already valid;
 runtime cache reuse must never skip integration repair.
 
+Managed Linux upgrades also treat an existing desktop integration receipt as
+an opt-in that persists across versions. They invoke the new release's desktop
+bootstrap after switching the transactional `current` pointer; a desktop
+reconciliation failure restores the prior release transaction rather than
+launching an old desktop runtime against newer shared presentation state.
+
 ### 9.2 Electron autostart and preferred-app routing
 
 `DesktopShellSettings` currently persists only the selected framework,
@@ -1900,13 +1913,17 @@ The product setting becomes a versioned desktop-shell contract with:
 ```ts
 type DesktopShellSettings = {
   // existing fields
+  startLocalFrameworkOnLaunch: boolean;
   autostart: boolean;
   preferredAppId: string;
 };
 ```
 
-Migration defaults `autostart` to `false` and `preferredAppId` to an empty
-string. Settings presents `preferredAppId` as a dropdown built from the
+Migration defaults both startup flags to `false` and `preferredAppId` to an
+empty string. The managed Linux installer seeds
+`startLocalFrameworkOnLaunch: true` only when it creates a fresh desktop-shell
+record; repair and upgrade preserve an existing user choice. Settings presents
+`preferredAppId` as a dropdown built from the
 selected framework's current `/api/apps/catalog` response, excluding the
 synthetic native Settings entry. The control is disabled unless `autostart` is
 enabled. It stores a canonical app id rather than a URL or display label. If a
@@ -1917,13 +1934,15 @@ Electron startup remains event/request-driven:
 
 1. Load and validate desktop settings, start/retarget the existing loopback
    relay, establish native control-plane clients, and load the launcher shell.
-2. When `autostart` is false or no preferred app is configured, stop at the
-   launcher.
-3. Probe the **selected configured framework origin** through the existing
-   catalog request. This phase does not implicitly start a missing local
-   framework; the existing explicit local-framework controls retain that
-   authority.
-4. If the framework is already reachable and the preferred id is present,
+2. When `startLocalFrameworkOnLaunch` is enabled, use the existing
+   `LocalFrameworkController.start()` transaction. It adopts an existing TE2
+   listener as externally owned or spawns the configured child and waits for
+   its control hello and HTTP readiness before continuing.
+3. When `autostart` is false or no preferred app is configured, stop at the
+   launcher. Otherwise probe the now-selected configured framework origin.
+   With local startup disabled, an already-running local, remote, or headless
+   framework remains eligible.
+4. If the framework is reachable and the preferred id is present,
    invoke its ordinary `POST /api/apps/{id}/open` action, project the returned
    URL through the existing relay, and navigate through the normal app shell.
    Apps with `readiness_support` continue through the established readiness and
@@ -1935,6 +1954,14 @@ Electron startup remains event/request-driven:
 The environment variables may remain explicit development/test overrides, but
 they are not persisted product state and do not mutate the user's selected
 framework or preferred app.
+
+Closing Electron awaits the existing bounded controller stop transaction only
+for an Electron-owned child. An adopted external local framework and every
+remote target remain outside Electron's process ownership and are never stopped.
+The distinct Electron and Android launcher implementations expose no
+always-visible destructive ellipsis: right-click or touch long-press on a
+running app opens a single SVG `X Close` menu action, while ordinary click/tap
+keeps its app-open behavior.
 
 ### 9.3 Sidebar extension presentation continuity
 
@@ -2023,9 +2050,10 @@ Before implementation is considered complete:
    current runtime;
 3. prove `command` and `venvPath` follow the newly active managed install while
    `broadcast`, `port`, and `env` remain unchanged;
-4. validate autostart off, reachable preferred app, unavailable framework,
-   missing preferred app, app-open failure, and a readiness-enabled app. The
-   unavailable cases must leave the launcher interactive;
+4. validate local startup on/off, fresh-install-on and upgrade-preserved policy,
+   owned/external framework shutdown, reachable preferred app, unavailable
+   framework, missing preferred app, app-open failure, and a readiness-enabled
+   app. The unavailable cases must leave the launcher interactive;
 5. validate browser, GeckoView, Cefrium, and Electron presentation restoration
    across Code TE2 app-worker restart, WBA restart, framework restart, project
    switch away/back, extension uninstall/reinstall, and native relay-port change
@@ -2058,6 +2086,42 @@ archive; validate immutable candidates through isolated Debian and physical
 Termux; then publish the exact files to PyPI and a normal/latest GitHub Release
 titled `TE2 0.2.343 alpha`. Publication remains forbidden until hidden/reopened
 state survives page, app-worker, WBA, framework, and native-process restarts.
+
+### 9.6 Shared drawer polish and next synchronized release
+
+Before the next publication cycle, the shared Code TE2 host adds one compact
+status-bar Panel control on both desktop and mobile. It toggles the existing
+bottom drawer in the last selected available tab. The control does not persist a
+second preference, add a backend fact, or poll the drawer: tab selection remains
+the existing page-local active-tab state, and the terminal controller publishes a
+local visibility event so every collapse path keeps `aria-expanded` accurate. If
+the prior tab is no longer available, Terminal is the deterministic fallback.
+Restoring Console, Second Window, Extensions, or Code Inspector must not create a
+PTY.
+
+The Code TE2 terminal drawer also adopts the standalone Terminal's vendored
+xterm web-font preload. It loads the already-published JetBrains Mono Nerd face
+through `addon-web-fonts.js` before xterm opens, retains the same monospace
+fallback stack, and degrades to the browser font loader without blocking terminal
+startup. This is shared frontend work; Android Kotlin and Electron main-process
+source do not change. Native acceptance still requires OTA-updating or rebundling
+the client-owned frontend assets because a page reload cannot acquire a server
+worktree bundle.
+
+This implementation slice stops after focused tests, Code TE2 TypeScript
+checking, and the production frontend build. It performs no version bump, tag,
+artifact construction, upload, or release mutation.
+
+The subsequent release rodeo is a separate approval boundary. Its intended order
+is: publish the already-versioned Agent Log Server 0.2.132 wheels/tag first; pin
+that immutable release in TE2; select and synchronize the next TE2 patch version;
+rebuild Code TE2, Terminal, Electron, Linux wheel/sdist, the physical-AArch64
+Termux archive, bundled Android assets, and both staging APKs from the clean tag;
+audit checksums, native build provenance, signatures, and 16 KiB alignment; then
+run isolated Debian SSH and physical Android acceptance before uploading the exact
+audited files to PyPI and a normal/latest (not GitHub prerelease) alpha-named
+GitHub Release. Any source, version, dependency, or tag mismatch stops that
+workflow before publication.
 
 ## 10. Validation and publication boundaries
 

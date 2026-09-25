@@ -21,6 +21,8 @@ class AndroidShellGateway(
     private val nativeRenderer: String,
     private val settingsRuntimeProvider: () -> JSONObject = { JSONObject() },
     private val onOpenBatterySettings: () -> Unit = {},
+    private val assetStatusProvider: () -> JSONObject = { JSONObject() },
+    private val onForceAssetUpdate: () -> Unit = {},
 ) {
     init {
         require(nativeRenderer.matches(Regex("[a-z0-9_-]+"))) {
@@ -81,6 +83,15 @@ class AndroidShellGateway(
                     request.path == "$API_PREFIX/power/settings" -> {
                     onOpenBatterySettings()
                     jsonResponse(200, JSONObject().put("opened", true))
+                }
+
+                request.method == "GET" && request.path == "$API_PREFIX/assets/status" -> {
+                    jsonResponse(200, assetStatusProvider())
+                }
+
+                request.method == "POST" && request.path == "$API_PREFIX/assets/update" -> {
+                    onForceAssetUpdate()
+                    jsonResponse(202, JSONObject().put("started", true))
                 }
 
                 request.method == "GET" && request.path == "$API_PREFIX/apps" -> {

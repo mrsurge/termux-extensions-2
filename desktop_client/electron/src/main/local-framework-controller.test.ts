@@ -11,6 +11,7 @@ import type {
 import {
   LocalFrameworkController,
   probeLocalFramework,
+  stopOwnedFrameworkForElectronExit,
   type LocalFrameworkProbe,
 } from "./local-framework-controller";
 
@@ -471,4 +472,27 @@ test("Electron exit sends shutdown and closes the bootstrap stdin owner channel"
   await new Promise((resolve) => setImmediate(resolve));
   assert.match(input, /"method":"shutdown"/);
   assert.equal(ended, true);
+});
+
+test("Electron exit awaits only an Electron-owned framework", async () => {
+  const events: string[] = [];
+  const externalStopped = await stopOwnedFrameworkForElectronExit({
+    ownsRunningProcess: () => false,
+    stop: async () => {
+      events.push("external-stop");
+      return {} as LocalFrameworkState;
+    },
+  });
+  assert.equal(externalStopped, false);
+
+  const ownedStopped = await stopOwnedFrameworkForElectronExit({
+    ownsRunningProcess: () => true,
+    stop: async () => {
+      await new Promise((resolve) => setImmediate(resolve));
+      events.push("owned-stop");
+      return {} as LocalFrameworkState;
+    },
+  });
+  assert.equal(ownedStopped, true);
+  assert.deepEqual(events, ["owned-stop"]);
 });

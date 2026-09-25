@@ -222,16 +222,54 @@ button {
   text-align: center;
 }
 
-.app-menu-button {
+.app-card-menu-group {
   position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 38px;
-  min-height: 38px;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.app-card-menu {
+  position: absolute;
+  display: none;
+  min-width: 108px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-raised);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.38);
+}
+
+.app-card-menu-group[data-open="true"] .app-card-menu {
+  display: block;
+  pointer-events: auto;
+}
+
+.app-card-menu-close {
+  display: flex;
+  width: 100%;
+  min-height: 36px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
   border: 0;
+  border-radius: 4px;
   background: transparent;
-  color: var(--muted);
-  font-weight: 700;
+  color: var(--text);
+}
+
+.app-card-menu-close:hover,
+.app-card-menu-close:focus-visible {
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+}
+
+.app-card-menu-close svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: var(--danger);
+  stroke-linecap: round;
+  stroke-width: 1.8;
 }
 
 .empty-state {

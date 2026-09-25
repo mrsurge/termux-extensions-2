@@ -28,10 +28,14 @@ const localFrameworkConfigPath = document.querySelector("#local-framework-config
 const saveLocalFrameworkConfigButton = document.querySelector("#save-local-framework-config");
 const addLocalFrameworkBroadcastButton = document.querySelector("#add-local-framework-broadcast");
 const addLocalFrameworkEnvironmentButton = document.querySelector("#add-local-framework-env");
+const autostartLocalFrameworkInput = document.querySelector("#autostart-local-framework");
 const autostartPreferredAppInput = document.querySelector("#autostart-preferred-app");
 const preferredAppSelect = document.querySelector("#preferred-app");
 const preferredAppStatus = document.querySelector("#preferred-app-status");
 let frameworkBookmarks = [];
+let persistedSettings = null;
+let startupSettingsSaveQueue = Promise.resolve();
+let startupSettingsSaveRevision = 0;
 
 function setStatus(element, state, text) {
   if (!element) return;
@@ -55,13 +59,16 @@ function endpointLabel(bookmark) {
 }
 
 async function connectToFramework(frameworkHost, frameworkPort, successMessage = null) {
+  await startupSettingsSaveQueue;
   setStatus(settingsStatus, "loading", "Switching framework target");
   const settings = await desktopShellHost.saveSettings({
     frameworkHost,
     frameworkPort: Number(frameworkPort),
+    startLocalFrameworkOnLaunch: autostartLocalFrameworkInput.checked,
     autostart: autostartPreferredAppInput.checked,
     preferredAppId: preferredAppSelect.value,
   });
+  persistedSettings = settings;
 
   hostInput.value = settings.frameworkHost;
   portInput.value = String(settings.frameworkPort);
@@ -78,6 +85,35 @@ async function connectToFramework(frameworkHost, frameworkPort, successMessage =
     refreshPreferredApps(settings),
   ]);
   return settings;
+}
+
+function queueStartupSettingsSave() {
+  const revision = ++startupSettingsSaveRevision;
+  const payload = {
+    frameworkHost: persistedSettings?.frameworkHost || hostInput.value,
+    frameworkPort: persistedSettings?.frameworkPort || Number(portInput.value),
+    startLocalFrameworkOnLaunch: autostartLocalFrameworkInput.checked,
+    autostart: autostartPreferredAppInput.checked,
+    preferredAppId: preferredAppSelect.value,
+  };
+  setStatus(settingsStatus, "loading", "Saving startup settings");
+  startupSettingsSaveQueue = startupSettingsSaveQueue
+    .catch(() => {})
+    .then(async () => {
+      const settings = await desktopShellHost.saveSettings(payload);
+      persistedSettings = settings;
+      if (revision !== startupSettingsSaveRevision) return;
+      preferredAppSelect.dataset.selected = settings.preferredAppId;
+      setStatus(settingsStatus, "online", "Startup settings saved");
+      desktopShellHost.toast("Startup settings saved");
+    })
+    .catch((error) => {
+      if (revision !== startupSettingsSaveRevision) return;
+      const message = error?.message || "Startup settings save failed";
+      setStatus(settingsStatus, "error", message);
+      desktopShellHost.toast(message);
+    });
+  return startupSettingsSaveQueue;
 }
 
 async function connectFromFields(button, failureMessage) {
@@ -158,8 +194,10 @@ async function loadFrameworkBookmarks() {
 
 async function loadSettings() {
   const settings = await desktopShellHost.getSettings();
+  persistedSettings = settings;
   hostInput.value = settings.frameworkHost || "127.0.0.1";
   portInput.value = String(settings.frameworkPort || 8089);
+  autostartLocalFrameworkInput.checked = settings.startLocalFrameworkOnLaunch === true;
   autostartPreferredAppInput.checked = settings.autostart === true;
   preferredAppSelect.disabled = !autostartPreferredAppInput.checked;
   preferredAppSelect.dataset.selected = String(settings.preferredAppId || "");
@@ -482,7 +520,20 @@ testButton?.addEventListener(
   () => void testFramework(),
 );
 
-autostartPreferredAppInput?.addEventListener("change", updatePreferredAppEnabled);
+autostartLocalFrameworkInput?.addEventListener(
+  "change",
+  () => void queueStartupSettingsSave(),
+);
+
+autostartPreferredAppInput?.addEventListener("change", () => {
+  updatePreferredAppEnabled();
+  void queueStartupSettingsSave();
+});
+
+preferredAppSelect?.addEventListener(
+  "change",
+  () => void queueStartupSettingsSave(),
+);
 
 document
   .querySelector("#refresh-fws")

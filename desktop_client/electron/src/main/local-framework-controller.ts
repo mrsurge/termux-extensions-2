@@ -517,3 +517,11 @@ export class LocalFrameworkController {
     return snapshot;
   }
 }
+
+export async function stopOwnedFrameworkForElectronExit(
+  controller: Pick<LocalFrameworkController, "ownsRunningProcess" | "stop"> | null,
+): Promise<boolean> {
+  if (!controller?.ownsRunningProcess()) return false;
+  await controller.stop();
+  return true;
+}

@@ -11,13 +11,23 @@ entering Gecko builds.
 
 ## Build
 
-The module pins the Cefrium SDK and Gradle plugin to `0.8.8`, targets arm64, and
+The module pins the Cefrium SDK and Gradle plugin to `0.9.0`, targets arm64, and
 requires Android API 29 or newer.
 
-Maven Central is the preferred source for the pinned SDK and plugin. The
-Codeberg mirror keeps only the latest release; the original migration's `0.8.0`
-artifacts no longer resolve there or on Central. The `0.8.8` SDK and plugin POMs
-have both been verified on Central. Keep both version pins aligned.
+The Codeberg mirror currently resolves the pinned SDK and plugin. It keeps only
+the latest release, so keep both version pins aligned. Maven Central remains the
+preferred immutable source once this release is present there.
+
+Cefrium 0.9.0 supplies the Window Extensions consumer R8 rule that TE2 previously
+carried locally. Its POM declares the interface artifact with Maven `provided`
+scope, which Gradle does not add to the consumer compile/R8 classpath, so TE2 must
+temporarily retain the extracted `window-extensions-core-1.0.0.jar` as
+`compileOnly`. Do not restore the duplicate local keep rule. Cefrium also exposes
+HTTP-triggered download handling. TE2 registers that handler before page load,
+serializes Android document-picker presentation, downloads into app-private
+staging storage, and copies completed bytes to the selected `content://`
+document. The integration requests no broad storage permission and removes
+owned staging or destination files after cancellation and failure.
 
 **`:cefrium` is no longer a subproject of the root `android/` Gradle build.**
 Cefrium `0.8.0` ships Chromium 152's Java 25 (class-file 69) bytecode, which
@@ -105,7 +115,7 @@ few non-obvious traps, recorded here so nobody has to rediscover them:
 ### Reliance on Cefrium internals (not public API)
 
 Two integration points in this module reach past Cefrium's public
-`com.cefrium.*` surface. They still work against `0.8.0`, but neither is a
+`com.cefrium.*` surface. They still work against `0.9.0`, but neither is a
 documented, versioned contract, so a future Cefrium release could silently
 break them without a deprecation notice:
 
@@ -129,7 +139,7 @@ against. Filed upstream as SDK feedback alongside this migration.
 
 `CefriumApplication.attachBaseContext` sets Chromium's
 `--javaless-renderers=disabled` before the SDK's auto-initializing content provider
-runs. The 0.8.8 AAR contains Java-backed sandboxed services but does not include
+runs. The 0.9.0 AAR contains Java-backed sandboxed services but does not include
 `NativeOnlySandboxedProcessService0`; allowing the Javaless Renderers feature to
 select that service caused a fatal `NameNotFoundException` on startup. Existing
 command-line switches are preserved. This is Cefrium-only and should be revisited
@@ -224,7 +234,7 @@ parser in the byte-for-byte relay.
 ## Validation Baseline
 
 The earlier desktop Android build environment verified the following baseline;
-this is not acceptance of the current 0.8.8 integration:
+this is not acceptance of the current 0.9.0 integration:
 
 - Cefrium unit tests, including local routing, HTTP forwarding, redirect
   rewriting, relay retargeting, and raw upgraded-socket streaming

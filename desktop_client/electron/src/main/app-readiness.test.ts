@@ -4,8 +4,9 @@ import { resolve } from "node:path";
 import { test } from "node:test";
 
 test("Electron app navigation delegates backend readiness to the shared app shell", async () => {
-  const [mainSource, appShell] = await Promise.all([
+  const [mainSource, rendererSource, appShell] = await Promise.all([
     readFile(new URL("./index.ts", import.meta.url), "utf8"),
+    readFile(new URL("../renderer/index.ts", import.meta.url), "utf8"),
     readFile(
       resolve(process.cwd(), "../../app/templates/app_shell.html"),
       "utf8",
@@ -47,6 +48,27 @@ test("Electron app navigation delegates backend readiness to the shared app shel
   assert.match(
     reconnectSource,
     /uiIpcClient\.ensureConnected\(configuredFrameworkOrigin\)/,
+  );
+
+  const configuredStartup = mainSource.indexOf(
+    "const startup = runConfiguredStartup(shellReady)",
+  );
+  const launcherNavigation = mainSource.indexOf(
+    "await mainWindow.loadURL(`${SHELL_SCHEME}://${SHELL_HOST}/index.html`)",
+  );
+  assert.ok(configuredStartup >= 0 && configuredStartup < launcherNavigation);
+
+  const shellReadyStart = mainSource.indexOf("const onShellReady");
+  const shellReadyEnd = mainSource.indexOf(
+    'ipcMain.on("te2-desktop:shell-ready", onShellReady)',
+    shellReadyStart,
+  );
+  const shellReadySource = mainSource.slice(shellReadyStart, shellReadyEnd);
+  assert.match(shellReadySource, /sendNavigation\(contents\)/);
+  assert.match(rendererSource, /const deferLauncherBoot = settings\.startLocalFrameworkOnLaunch/);
+  assert.match(
+    rendererSource,
+    /if \(!deferLauncherBoot\) launcherView\.src = "\.\/android_shell\/index\.html"/,
   );
 
   const lifecycle = appShell.indexOf(

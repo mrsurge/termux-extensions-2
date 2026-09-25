@@ -1776,6 +1776,10 @@ class MainActivity : AppCompatActivity() {
                     runtimeService.snapshot().toJson()
                 },
                 onOpenBatterySettings = runtimeService::openBatteryOptimizationSettings,
+                assetStatusProvider = { mgr.getStatus().toJson() },
+                onForceAssetUpdate = {
+                    runOnUiThread { updateTe2Ui() }
+                },
             )
             val server = LocalAssetServer(mgr.getAssetRoot(), gateway::handle)
             server.start()

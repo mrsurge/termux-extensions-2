@@ -58,3 +58,13 @@ test('terminal drawer has one touch owner with close and reopen lifecycle', () =
   assert.match(closeBody, /touchSelectionDisposable\?\.dispose\(\)/);
   assert.match(closeBody, /touchSelectionDisposable = null/);
 });
+
+test('terminal drawer preloads the shared Nerd Font before xterm opens', () => {
+  assert.match(source, /TERMINAL_WEB_FONT_FAMILY = 'JetBrains Mono Nerd'/);
+  assert.match(source, /\/static\/vendor\/xterm\/addon-web-fonts\.js/);
+  assert.match(source, /await addon\.loadFonts\(\[TERMINAL_WEB_FONT_FAMILY\]\)/);
+  assert.match(source, /fontFamily: TERMINAL_FONT_FAMILY/);
+  assert.ok(
+    source.indexOf('nextTerm.loadAddon(webFontsAddon)') < source.indexOf('nextTerm.open(container)'),
+  );
+});

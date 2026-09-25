@@ -8,6 +8,9 @@
   native Inspector app-header lifecycle and initial target reselection accepted.
   Cross-client model-transition and Rust scheduling fixes are implemented and
   automated validation is complete; post-restart latency traces remain pending.
+  Cefrium downloads are implemented and debug-build verified, with live device
+  download acceptance pending. Per-install preferred loopback origins are
+  planned but not implemented.
 
 ## Source-Backed Findings
 
@@ -16,8 +19,17 @@
   settings, assets, clipboard permission, context menus, and renderer recovery.
 - [x] Before this branch, Code TE2 interpreted `gv_native=1` without Electron
   as Gecko, causing Cefrium to wait on a Gecko-only identity bridge.
-- [x] Cefrium 0.7.0 exposes a page query handler suitable for exact-origin
+- [x] Cefrium exposes a page query handler suitable for exact-origin
   native commands.
+- [x] Cefrium 0.9.0 adds controllable downloads. TE2 now registers an
+  Activity-owned handler and routes accepted bytes through app-private staging
+  to an explicit Storage Access Framework destination.
+- [x] Cefrium's upstream Window Extensions keep rule is present, but Gradle
+  ignores the POM's Maven `provided` interface dependency. TE2 must retain the
+  extracted compile-only interface JAR until upstream Gradle metadata supplies it.
+- [x] Electron already uses a persistent framework partition; Gecko and Cefrium
+  already use app-private browser state. A global web-security bypass or shared
+  shipped TLS key is neither required nor acceptable.
 - [x] Cefrium lacks Tools persistence, the Processes browser, and GeckoView's
   remote-app health fallback.
 - [x] Cefrium's high-level wrapper does not expose CDP, but its bundled
@@ -66,8 +78,8 @@
 - [x] Consolidate shared native mobile labels/styles/content descriptions.
 - [x] Remove remaining Gecko-specific frontend semantics from generic native
   mobile paths.
-- [x] Update the isolated Cefrium plugin and SDK pin from removed `0.6.3` to the
-  currently published `0.7.0` artifact.
+- [x] Update the isolated Cefrium plugin and SDK pin through `0.9.0`; preserve
+  the compile-only Window Extensions interface JAR and use the upstream keep rule.
 - [x] Preserve the established Gecko installation identity for older APKs that
   receive the new frontend through OTA with only `gv_native=1`; retain strict
   failure for unknown explicit renderers and forward valid markers in the app
@@ -112,7 +124,7 @@
 
 ## Inspector And Target Ownership
 
-- [x] Inventory Cefrium 0.7.0 SDK/AAR, generated bindings, runtime switches,
+- [x] Inventory the Cefrium SDK/AAR, generated bindings, runtime switches,
   and official APIs for native DevTools or CDP transport.
 - [x] Prove a complete Kotlin-to-Chromium command/event path and identify the
   compatible DevTools frontend.
@@ -132,8 +144,7 @@
   delivered target generations across child-frame loads, and start the
   background Inspector only after the main relay-origin app page has loaded.
 - [x] Add unit coverage for the deferred-start and one-delivery-per-generation
-  lifecycle gates; `:cefrium:testDebugUnitTest` and `:cefrium:assembleDebug`
-  pass.
+  lifecycle gates; standalone Cefrium unit tests and debug assembly pass.
 - [x] Scope Inspector lifetime to one native app-header appearance. Overlay
   close, tab changes, and app background retain it; launcher return or header
   removal destroys its browser, CDP runtime, targets, and one-shot state.
@@ -205,6 +216,32 @@
 - [ ] Re-run direct-versus-proxied request benchmarks and model-switch traces.
 - [ ] Consider Tokio worker-count tuning or process separation only if the
   post-fix evidence still shows runtime starvation.
+
+## Cefrium HTTP Downloads
+
+- [x] Add an Activity-owned `CefriumDownloadHandler` before page load.
+- [x] Queue concurrent picker requests by download id and serialize picker UI.
+- [x] Stage downloads in app-private storage, then copy completed files to the
+  selected `content://` document without broad storage permission.
+- [x] Clean pending callbacks, destination documents, and staging files across
+  cancellation, interruption, browser close, and Activity teardown.
+- [ ] Cover filename sanitization, multiple downloads, picker cancellation,
+  completion copy failure, and lifecycle cleanup with Android/provider tests.
+- [x] Cover queue ordering, filename sanitization, terminal-state decisions,
+  stale staging cleanup, and Activity wiring with focused JVM tests.
+- [ ] Validate HTTP, `blob:`, and `data:` downloads from Code TE2 on device.
+
+## Preferred Loopback Origins
+
+- [ ] Persist a per-install preferred framework-relay port independently in
+  Electron, GeckoView, and Cefrium configuration.
+- [ ] Bind preferred-first and atomically fall back to port zero on collision.
+- [ ] Expose preferred/actual/fallback state through each native diagnostic path.
+- [ ] Test clean reuse, occupied preferred port, simultaneous clients, retarget,
+  process restart, and fallback restoration.
+- [ ] Preserve native client/presentation identity when the actual port changes.
+- [ ] Keep web security enabled and retain existing private browser profiles;
+  do not add global security-disable or arbitrary user-data-directory switches.
 
 ## Deferred
 

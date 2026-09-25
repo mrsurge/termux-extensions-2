@@ -92,6 +92,7 @@ class ServiceOutcomeTests(unittest.IsolatedAsyncioTestCase):
             ({}, "key is required"),
             ({"key": "no_such_key"}, "Invalid preference key: no_such_key"),
             ({"key": "fontScale", "value": 42}, "bad scale"),
+            ({"key": "cursorStyle", "value": "beam"}, "Unsupported cursor style: 'beam'"),
             ({"key": "comparisonMode", "value": "bad"}, "Invalid comparison mode"),
         ]
         for data, detail in cases:

@@ -116,6 +116,16 @@ async def handle_update_preference(
             value = scale
             for ed in editors:
                 ed.set_font_scale(scale)
+        elif key == "cursorStyle":
+            from app.apps.code_te2.preferences_store import validate_cursor_style
+
+            normalized_cursor_style = validate_cursor_style(value)
+            if normalized_cursor_style != value:
+                raise EditorServiceError(
+                    kind="invalid",
+                    detail=f"Unsupported cursor style: {value!r}",
+                )
+            value = normalized_cursor_style
         elif key == "colorPicker":
             for ed in editors:
                 ed.toggle_color_picker(bool(value))

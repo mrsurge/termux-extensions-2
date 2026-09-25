@@ -378,6 +378,51 @@ class LinuxInstallerTests(unittest.TestCase):
             self.assertEqual(config["port"], 8089)
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
+    def test_fresh_desktop_install_enables_owned_framework_startup(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            home = root / "home"
+            config_root = root / "config"
+            with patch.dict(
+                os.environ,
+                {"TE2_CONFIG_HOME": str(config_root)},
+                clear=False,
+            ):
+                path = installer._seed_desktop_shell_settings(home=home)
+
+            settings = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(settings["version"], 3)
+            self.assertTrue(settings["startLocalFrameworkOnLaunch"])
+            self.assertFalse(settings["autostart"])
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+    def test_desktop_install_preserves_existing_startup_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            home = root / "home"
+            config_root = root / "config"
+            config_root.mkdir()
+            path = config_root / "desktop-shell.json"
+            original = {
+                "version": 3,
+                "startLocalFrameworkOnLaunch": False,
+                "autostart": True,
+                "preferredAppId": "code_te2",
+            }
+            path.write_text(json.dumps(original) + "\n", encoding="utf-8")
+            with patch.dict(
+                os.environ,
+                {"TE2_CONFIG_HOME": str(config_root)},
+                clear=False,
+            ):
+                result = installer._seed_desktop_shell_settings(home=home)
+
+            self.assertEqual(result, path)
+            self.assertEqual(
+                json.loads(path.read_text(encoding="utf-8")),
+                original,
+            )
+
     def test_desktop_install_delegates_to_installed_te2_command(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
@@ -409,7 +454,25 @@ class LinuxInstallerTests(unittest.TestCase):
             self.assertEqual(command, [str(te2), "desktop", "install"])
             self.assertEqual(environment["VIRTUAL_ENV"], str(release / "venv"))
             self.assertEqual(environment["TE2_DATA_HOME"], str(data_home))
+            self.assertEqual(
+                environment["TE2_DESKTOP_TE2_COMMAND"], str(bin_dir / "te2")
+            )
             self.assertTrue((config_root / "desktop-local-framework.json").is_file())
+            desktop_settings = json.loads(
+                (config_root / "desktop-shell.json").read_text(encoding="utf-8")
+            )
+            self.assertTrue(desktop_settings["startLocalFrameworkOnLaunch"])
+
+    def test_existing_desktop_receipt_requests_upgrade_reconciliation(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            data_home = Path(raw)
+            self.assertFalse(installer._linux_desktop_integration_exists(data_home))
+            receipt = (
+                data_home / "desktop" / "electron" / "integration-receipt.json"
+            )
+            receipt.parent.mkdir(parents=True)
+            receipt.write_text("{}\n", encoding="utf-8")
+            self.assertTrue(installer._linux_desktop_integration_exists(data_home))
 
     def test_desktop_config_reconciles_managed_paths_and_preserves_user_policy(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

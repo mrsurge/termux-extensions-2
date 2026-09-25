@@ -130,6 +130,7 @@ def build_view_state_dict(
         "showInlineDiffs": editor_prefs.get("showInlineDiffs"),
         "trackAgentSidebarEdits": editor_prefs.get("trackAgentSidebarEdits"),
         "fontScale": editor_prefs.get("fontScale"),
+        "cursorStyle": editor_prefs.get("cursorStyle"),
         "showIndentGuides": editor_prefs.get("showIndentGuides"),
         "colorPicker": editor_prefs.get("colorPicker"),
         "readOnly": editor_prefs.get("readOnly"),

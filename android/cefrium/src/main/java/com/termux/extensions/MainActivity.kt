@@ -20,6 +20,7 @@ import android.widget.FrameLayout
 import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.ui.platform.ComposeView
@@ -67,11 +68,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var shellGateway: AndroidShellGateway
     private lateinit var toolsStateStore: AndroidToolsStateStore
     private lateinit var sidebarPresentationStore: AndroidSidebarPresentationStore
+    private lateinit var downloadCoordinator: CefriumDownloadCoordinator
 
     private val editorInputFilter = EditorInputFilter()
     private val imeDismissalReducer = CefriumImeDismissalReducer()
     private val consoleState = ComposeConsoleState()
     private val uiHandler = Handler(Looper.getMainLooper())
+    private val assetUpdateInFlight = AtomicBoolean(false)
     private val appHealthProbeInFlight = AtomicBoolean(false)
     private var clientRuntimeService: PersistentNetworkService? = null
     private var clientRuntimeBound = false
@@ -114,6 +117,14 @@ class MainActivity : AppCompatActivity() {
     private var pendingColdRestorePath: String? = null
     private var notificationPermissionRequestInFlight = false
     private var notificationPermissionDenied = false
+
+    private val downloadDestinationLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("*/*"),
+    ) { destination ->
+        if (::downloadCoordinator.isInitialized) {
+            downloadCoordinator.onDestinationSelected(destination)
+        }
+    }
 
     private val devToolsListener = object : CefriumDevToolsRuntime.Listener {
         override fun onStatusChanged(status: String) {
@@ -420,6 +431,10 @@ class MainActivity : AppCompatActivity() {
             nativeRenderer = "cefrium",
             settingsRuntimeProvider = { runtimeService.snapshot().toJson() },
             onOpenBatterySettings = runtimeService::openBatteryOptimizationSettings,
+            assetStatusProvider = { assetManager.getStatus().toJson() },
+            onForceAssetUpdate = {
+                runOnUiThread { forceAssetUpdate() }
+            },
         )
         runtimeService.configureLocalRelayRoutes(
             assetRoot = assetManager.getAssetRoot(),
@@ -433,6 +448,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun initializeBrowser() {
         browser = CefriumBrowser.createWithSurface(this)
+        downloadCoordinator = CefriumDownloadCoordinator(
+            context = this,
+            destinationLauncher = downloadDestinationLauncher,
+            browserProvider = { if (::browser.isInitialized) browser else null },
+            onMessage = { message ->
+                Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+            },
+        )
+        browser.setDownloadHandler(downloadCoordinator)
         // Apply the SDK's native pinch policy before any page loads.
         browser.setPinchToZoomEnabled(false)
         selectionIntegration = CefriumSelectionIntegration(browser)
@@ -1144,6 +1168,10 @@ class MainActivity : AppCompatActivity() {
         showFeedback: Boolean = true,
         completion: (Result<JSONObject>) -> Unit = {},
     ) {
+        if (!assetUpdateInFlight.compareAndSet(false, true)) {
+            completion(Result.failure(IllegalStateException("asset update already running")))
+            return
+        }
         if (showFeedback) {
             Toast.makeText(this, "Force-updating assets…", Toast.LENGTH_SHORT).show()
         }
@@ -1159,6 +1187,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             runOnUiThread {
+                assetUpdateInFlight.set(false)
                 if (result.isSuccess) {
                     val version = assetManager.getLocalVersion() ?: "?"
                     consoleTitle.text = "Tools · v$version"
@@ -1860,6 +1889,10 @@ class MainActivity : AppCompatActivity() {
         }
         inspectorBrowser = null
         if (::browser.isInitialized) {
+            if (::downloadCoordinator.isInitialized) {
+                downloadCoordinator.close()
+                browser.setDownloadHandler(null)
+            }
             selectionIntegration.close()
             browserContainer.removeView(browser.surfaceContainer)
             browser.close()

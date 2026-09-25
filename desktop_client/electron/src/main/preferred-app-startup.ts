@@ -14,10 +14,32 @@ export type PreferredAppStartupOptions = {
   request: PreferredAppFrameworkRequest;
 };
 
-function appIdFromCatalogEntry(value: unknown): string {
-  return value && typeof value === "object"
-    ? String((value as { id?: unknown }).id || "").trim()
-    : "";
+export type DesktopStartupSequenceOptions = {
+  startLocalFrameworkOnLaunch: boolean;
+  startLocalFramework: () => Promise<unknown>;
+  preparePreferredApp: () => Promise<string | null>;
+  navigatePreferredApp: (target: string) => Promise<void>;
+  onLocalFrameworkError: (error: unknown) => void;
+};
+
+export async function runDesktopStartupSequence({
+  startLocalFrameworkOnLaunch,
+  startLocalFramework,
+  preparePreferredApp,
+  navigatePreferredApp,
+  onLocalFrameworkError,
+}: DesktopStartupSequenceOptions): Promise<void> {
+  if (startLocalFrameworkOnLaunch) {
+    try {
+      await startLocalFramework();
+    } catch (error) {
+      onLocalFrameworkError(error);
+      return;
+    }
+  }
+  const target = await preparePreferredApp();
+  if (!target) return;
+  await navigatePreferredApp(target);
 }
 
 function projectConfiguredUrlToBrowserOrigin(
@@ -56,13 +78,6 @@ export async function resolvePreferredAppStartupUrl({
       configuredFrameworkOrigin,
       browserFrameworkOrigin,
     );
-  }
-
-  const catalog = await request({ path: "/api/apps/catalog" });
-  const available = Array.isArray(catalog)
-    && catalog.some((entry) => appIdFromCatalogEntry(entry) === appId);
-  if (!available) {
-    throw new Error(`Preferred app is unavailable: ${appId}`);
   }
 
   const result = await request({

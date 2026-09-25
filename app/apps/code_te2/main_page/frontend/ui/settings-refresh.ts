@@ -44,6 +44,7 @@ function createRawSettingsJsonField(
  *   getUiPrefs: () => Record<string, unknown>,
  *   settingsModalEl: HTMLElement,
  *   themeSummaryEl: HTMLElement,
+ *   cursorStyleEl: HTMLSelectElement,
  *   extSummaryEl: HTMLElement,
  *   customSettingsInputEl: HTMLTextAreaElement,
  *   customSettingsSaveEl: HTMLButtonElement,
@@ -52,7 +53,8 @@ function createRawSettingsJsonField(
  *   busNotify: (event: string, payload?: any) => void,
  *   requestLanguageBackendSet: (mode: "code-server" | "web-workers") => Promise<any>,
  *   toast: (msg: string, ms?: number) => void,
- *   reloadEditorFrame: () => void
+ *   reloadEditorFrame: () => void,
+ *   updatePreference: (key: string, value: unknown) => Promise<boolean>,
  * }} deps
  */
 export function createSettingsRefreshController(deps: any) {
@@ -192,6 +194,11 @@ export function createSettingsRefreshController(deps: any) {
   }
 
   async function refreshEditorSettingsModal() {
+    const cursorStyle = deps.getEditorViewState()?.cursorStyle;
+    deps.cursorStyleEl.value =
+      cursorStyle === "block" || cursorStyle === "block-outline"
+        ? cursorStyle
+        : "line";
     const languageBackendSummary = deps.settingsModalEl.querySelector(
       "#editor-settings-language-backend-summary",
     ) as HTMLElement | null;
@@ -214,7 +221,7 @@ export function createSettingsRefreshController(deps: any) {
     }
 
     const currentTheme =
-      deps.getEditorViewState()?.theme || "github-dark";
+      deps.getEditorViewState()?.theme || "github-dark-default";
     try {
       const { themes } = parseThemeCatalog(await requestThemeCatalog());
       const active = themes.find((theme) => theme.id === currentTheme);
@@ -245,6 +252,26 @@ export function createSettingsRefreshController(deps: any) {
         deps.busNotify(EXPLORER_RPC_METHODS.watcherConfigGet, {});
       }
     } catch (_) {}
+  }
+
+  function installCursorStylePreference() {
+    deps.cursorStyleEl.addEventListener("change", async () => {
+      const value = deps.cursorStyleEl.value;
+      if (value !== "line" && value !== "block" && value !== "block-outline") {
+        deps.cursorStyleEl.value = "line";
+        return;
+      }
+      deps.cursorStyleEl.disabled = true;
+      try {
+        const ok = await deps.updatePreference("cursorStyle", value);
+        if (!ok) {
+          deps.toast("Cursor style update failed");
+          await refreshEditorSettingsModal();
+        }
+      } finally {
+        deps.cursorStyleEl.disabled = false;
+      }
+    });
   }
 
   function installCustomSettingsSaveHandler() {
@@ -332,6 +359,7 @@ export function createSettingsRefreshController(deps: any) {
     installWorkspaceSettingsSaveHandler,
     installScopeTabs,
     installLanguageBackendPreference,
+    installCursorStylePreference,
     getActiveScope: () => activeScope,
   };
 }

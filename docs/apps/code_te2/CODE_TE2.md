@@ -1517,7 +1517,13 @@ Fix:
 
 ## 8) UI "knobs" (what you can safely tune)
 
-Fresh editor preferences use `github-dark`; the old `cm6-dark` seed migrates once, while explicit themes remain authoritative. Baseline debounce dependencies must wrap `window.setTimeout` and `window.clearTimeout`. Passing native methods unbound through an options object changes their receiver and can throw `Illegal invocation`, leaving enabled inline diff preferences stranded in a plain editor.
+Fresh editor preferences use `github-dark-default`; missing or unavailable theme
+values fall back to that same packaged theme. The old `cm6-dark` seed migrates
+once, while explicit registered themes remain authoritative. Baseline debounce
+dependencies must wrap `window.setTimeout` and `window.clearTimeout`. Passing
+native methods unbound through an options object changes their receiver and can
+throw `Illegal invocation`, leaving enabled inline diff preferences stranded in
+a plain editor.
 
 ### Preferences -> Monaco options mapping
 The inline editor runtime builds Monaco options from SSOT preferences (`buildMonacoOptionsFromPrefs()`):
@@ -1531,8 +1537,8 @@ The inline editor runtime builds Monaco options from SSOT preferences (`buildMon
 - font family (default `JetBrains Mono Nerd`)
 - font ligatures (`fontLigatures` enabled by default for the local Nerd Font)
 - theme (Monaco base: `vs` / `vs-dark`, plus catalogued GitHub and installed VSIX themes)
-  - `github-dark` (fresh-install default)
-  - `github-dark-default`
+  - `github-dark`
+  - `github-dark-default` (fresh-install and invalid-selection fallback)
   - `github-light-default` (preferred)
   - `github-light`
   - the nine vendored GitHub themes under
@@ -1547,6 +1553,8 @@ same converter and Monaco/TextMate theme application path.
 The catalog's `uiTheme` also supplies the Monaco base (`vs`, `vs-dark`,
 `hc-black`, or `hc-light`) for both sources; the static JSON need not duplicate
 extension-manifest metadata.
+
+`cursorStyle` is a validated `PreferencesStore` value. The Editor Settings selector maps `line`, `block`, and `block-outline` directly to Monaco and the preference projection updates live working editor surfaces; invalid persisted values migrate to `line`.
 
 ### Diff mode behavior
 
@@ -2863,6 +2871,18 @@ cd cefrium
 | `android/.../assets/asset_intercept/background.js` | URL pattern matching + redirect logic |
 | `android/.../MainActivity.kt` | `initEditorAssets()`, `installAssetExtension()`, lifecycle cleanup |
 
+### User-triggered OTA
+
+The canonical Android Settings page exposes the installed local asset version
+and an explicit **Update assets** action through the same-origin
+`AndroidShellGateway`. `GET /android-api/assets/status` reports whether the
+materialized tree is complete; `POST /android-api/assets/update` only schedules
+the renderer's existing native force-update path and returns immediately.
+GeckoView and Cefrium remain responsible for single-flight download,
+validation, atomic installation, cache clearing, native success/failure
+feedback, and page reload. The settings frontend does not poll and does not
+implement a second update lifecycle.
+
 ## 37) Run Profiles, Runtime Launchers, And Draft-Save Transaction
 
 Run Profile execution is backend-owned through `ui.host.file.run`. The frontend sends run intent; backend hooks resolve the active project/file, select a profile, decide what must be saved, and only then launch a runner shell or the default terminal fallback.
@@ -3139,7 +3159,28 @@ The Run Profiles modal is `main_page/frontend/ui/run-profiles-modal.ts`. It uses
 
 The active Linux desktop client is the Electron shell under `desktop_client/electron/`. `desktop_client/ui.py` remains a GTK/WebKit behavioral reference, not the current runtime.
 
-Electron settings v2 persists opt-in `autostart` and canonical `preferredAppId`. Launcher readiness triggers a catalog lookup against only the selected configured framework and then ordinary app-open/readiness. Missing framework/app/readiness leaves the launcher interactive; startup never implicitly launches a missing framework.
+Electron settings v3 separates `startLocalFrameworkOnLaunch` from preferred-app
+`autostart` and canonical `preferredAppId`. At process startup, Electron reads
+its independent settings, local-framework configuration, and stable identities
+concurrently. Local-framework adoption/spawn and the preferred-app open request
+then run while the launcher renderer boots. Framework selection retains the
+initial collision/health probe and post-spawn HTTP readiness check; the app open
+endpoint remains the framework authority for catalog validation and worker start.
+App-view creation and navigation begin as soon as the open request resolves and
+do not wait for launcher renderer readiness. The launcher's `shell-ready` event
+only replays current navigation into its header and releases deferred error
+presentation. When both startup options and a preferred app are configured, the
+renderer also defers loading the launcher iframe; any startup failure steers home
+and loads it on demand. With local startup disabled, an already reachable local,
+remote, or headless framework remains eligible. Failure leaves the launcher interactive.
+Fresh managed Linux installs enable local-framework startup, while existing user
+settings are preserved.
+
+The two startup checkboxes and preferred-app selector persist immediately
+through one serialized settings queue, so rapid UI changes cannot complete out of
+order. Host and port edits remain explicit and use the existing connection
+transaction. Automatic adoption skips rewriting connection settings when the
+selected loopback origin already matches the adopted port.
 
 ### Runtime shape
 
@@ -3149,6 +3190,10 @@ Electron settings v2 persists opt-in `autostart` and canonical `preferredAppId`.
 - Electron keeps Chromium's automatic native Ozone backend selection; Wayland sessions are not forced through X11.
 - Development and packaged launch paths intentionally pass `--no-sandbox` because the client runs from a user-owned tree and Ubuntu AppArmor blocks the unprivileged namespace sandbox.
 - Selecting a saved framework bookmark immediately enters the same Electron-main `saveConnection` transaction as the editable Save action. The launcher projects intent only; Electron main persists the endpoint, reconnects UI IPC, clears stale Run Target state, and retargets the stable loopback relay.
+- Electron exit awaits bounded shutdown only for its spawned framework child;
+  adopted local and remote frameworks remain external. Shared Electron/Android
+  launcher app cards expose close through right-click or touch long-press with
+  one SVG `X Close` action rather than an always-visible destructive ellipsis.
 
 ### Relay and assets
 
@@ -3592,6 +3637,8 @@ reapplication for the cleared request across ordinary editor resyncs, and reenab
 highlighting when a new inspection request starts. Search/Find decorations,
 cursor, selection, and drawer presentation are unaffected.
 
+Contents search, References, Implementations, and Call Hierarchy share one subtle navigation-result decoration style with minimap and overview-ruler markers. Call-hierarchy highlighting includes the retained root and expanded current-file call nodes. Document Symbol navigation keeps a separate outline-only target decoration, also represented in the minimap and overview ruler. Closing the Contents search overlay always publishes an authoritative highlight-clear fact even if frontend deduplication state was reconstructed or lost.
+
 ### Flow
 
 ```text
@@ -3677,7 +3724,7 @@ This artifact-driven path is required on Termux because Node reports the Android
 
 ## 42) Android Cefrium Client
 
-The standalone `android/cefrium` build pins Cefrium SDK/plugin 0.8.8 while reusing
+The standalone `android/cefrium` build pins Cefrium SDK/plugin 0.9.0 while reusing
 the shared Android source and packaged assets. It is no longer a subproject of
 `android/`: AGP 9.4 / Gradle 9.7.1 / JDK 25 / compileSdk 37 are isolated from
 GeckoView's existing toolchain. GeckoView in `android/app` remains the primary renderer.
@@ -3700,12 +3747,12 @@ Cefrium always loads TE2 through one dynamically allocated `127.0.0.1` relay ori
 
 `CefriumApplication.attachBaseContext` selects `--javaless-renderers=disabled`
 before the SDK initialization provider runs, preserving existing switches. SDK
-0.8.8 lacks the native-only sandboxed service that Chromium otherwise selects,
+0.9.0 lacks the native-only sandboxed service that Chromium otherwise selects,
 causing a fatal `NameNotFoundException`. Use the SDK's existing Java-backed
 services; reassess this compatibility policy when upgrading the SDK. Gecko is
 unaffected. Activity or application `onCreate` is too late for this policy.
 
-With SDK 0.8.8, main app, Inspector and Processes browser creation immediately
+With SDK 0.9.0, main app, Inspector and Processes browser creation immediately
 sets `setPinchToZoomEnabled(false)` before page loading. This native pinch policy
 is independent of the older main-surface selection/readability corrections
 described below, which remain intact. On 2026-09-18, Termux JDK 25/SDK 37 debug
@@ -3727,7 +3774,18 @@ The relay behavior is:
 
 Only paths declared by Cefrium asset routing are served from installed assets. Dynamic API, Socket.IO, terminal, and app-worker traffic pass through the relay.
 
-The activity provides shared launcher and Settings behavior, native controls, app-scoped quit, native context menus, trusted-localhost clipboard permission, file-picker forwarding, renderer recovery, lifecycle pause/resume, native diagnostics, and TE2 console access.
+The activity provides the Android launcher and Settings behavior, native controls, app-scoped quit, native context menus, trusted-localhost clipboard permission, file-picker forwarding, renderer recovery, lifecycle pause/resume, native diagnostics, and TE2 console access. Electron has a distinct launcher implementation.
+
+The main browser installs Cefrium's controllable download handler before any
+page navigation. Each request waits for an explicit Android `CreateDocument`
+result; picker presentation is serialized while accepted downloads may proceed
+concurrently. Cefrium writes only to an app-private staging file. On completion,
+TE2 copies those bytes off the UI thread into the chosen `content://` document
+and removes the staging file. Picker cancellation, native interruption, browser
+close, and Activity teardown cancel retained callbacks/download ids and remove
+owned partial state. This path requests no broad storage permission. Automated
+debug tests and APK assembly pass; live HTTP/`blob:`/`data:` acceptance remains
+a separate device check.
 
 Native app URLs retain `gv_native=1` for the established app-shell contract and add exact `te2_renderer=gecko|cefrium` identity. Code TE2 resolves Electron first, then the explicit Android renderer. A missing renderer on an established `gv_native=1` URL is legacy Gecko compatibility for APKs receiving newer OTA frontend assets; an unknown explicit renderer still fails instead of falling back to browser-local identity. Cefrium uses an exact-relay-origin `cefriumQuery` handler for stable installation identity and Run Profile surface registration, so it never waits for Gecko's WebExtension bridge. The app shell persists and forwards valid explicit renderer identity across its own navigation.
 
@@ -3786,7 +3844,7 @@ cd android
 Shared variant Kotlin directories are explicitly registered in Cefrium's AGP 9
 source sets; Java source registration alone does not include the debug reflection
 implementation, its tests, or non-debug stubs. `android/verify-native-debug.init.gradle`
-supports each independent build and checks source/dependency isolation. The 0.8.8
+supports each independent build and checks source/dependency isolation. The 0.9.0
 integration still requires a Cefrium build and live acceptance on the new toolchain.
 
 ---
@@ -4190,6 +4248,10 @@ host drawer.
 Project switch, explicit activation, active-shell close, and new-shell creation
 retain the established rebind event. There is no polling or transport fallback.
 
+The shared desktop/mobile status bar exposes one bottom-panel toggle. It restores the currently active available drawer tab, falls back to Terminal only when that tab is unavailable, and collapses the drawer when already open. Drawer selection remains page-local; the terminal controller emits only a local visibility event for `aria-expanded` synchronization. Restoring Console, Second Window, Extensions, or Code Inspector opens the existing drawer without creating a PTY.
+
+Before xterm opens, the drawer loads the vendored web-font addon and the template's `JetBrains Mono Nerd` face, matching the standalone Terminal's font-readiness contract and monospace fallback stack. Font preload failure is nonfatal and falls back to `document.fonts`; it does not block terminal startup.
+
 ## 47) Framework Runtime And Deployment Reference
 
 ### Generic Worker Module Identity
@@ -4454,8 +4516,12 @@ te2 framework eval --app code_te2 --shell SHELL_ID --instance INSTANCE_ID --code
 - Linux `install-te2 --desktop` delegates to that exact venv's existing
   `te2 desktop install` command. The established Electron bootstrap owns its
   fingerprint/cache, 3 GiB guard, runtime, receipt, wrapper, icon, and desktop
-  entry. The installer seeds the existing local-framework config with stable
-  managed command/venv paths while preserving explicit user policy and paths.
+  entry. A fresh install still requires `--desktop`; once its receipt exists,
+  later Linux upgrades reconcile it automatically. Its launcher follows the
+  stable managed `te2 desktop launch` command rather than one release venv, and
+  launch verifies the executing source fingerprint before starting Electron.
+  The installer seeds the existing local-framework config with stable managed
+  command/venv paths while preserving explicit user policy and paths.
 
 - The Linux prerequisite transaction is limited to `git`, `build-essential`,
   `python3-venv`, and the available Debian `libarchive` runtime. Termux's

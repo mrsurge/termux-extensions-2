@@ -1,4 +1,4 @@
-export const DESKTOP_SETTINGS_VERSION = 2;
+export const DESKTOP_SETTINGS_VERSION = 3;
 export const LOCAL_FRAMEWORK_CONFIG_VERSION = 1;
 
 export type DesktopFrameworkBookmark = {
@@ -17,6 +17,7 @@ export type DesktopShellSettings = {
   frameworkPort: number;
   frameworkBookmarks: DesktopFrameworkBookmark[];
   zoomLevel: number;
+  startLocalFrameworkOnLaunch: boolean;
   autostart: boolean;
   preferredAppId: string;
 };

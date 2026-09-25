@@ -315,7 +315,10 @@ function collectHighlightRanges(
   ranges: JsonObject[] = [],
 ): JsonObject[] {
   for (const node of nodes) {
-    if (node.type === 'location' && pathsEqual(asString(node.path), currentPath)) {
+    if (
+      (node.type === 'location' || node.type === 'call') &&
+      pathsEqual(asString(node.path), currentPath)
+    ) {
       const range = isRecord(node.selectionRange)
         ? node.selectionRange
         : isRecord(node.range)
@@ -346,7 +349,9 @@ export function createEditorCodeInspectorRuntime(
       !current ||
       current.requestId === clearedRequestId ||
       current.status !== 'ready' ||
-      (current.mode !== 'references' && current.mode !== 'implementations')
+      current.mode !== 'references' &&
+      current.mode !== 'implementations' &&
+      current.mode !== 'callHierarchy'
     ) {
       deps.replaceHighlights([]);
       return;

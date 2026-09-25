@@ -110,7 +110,10 @@ def _run_linux(
         release = _materialize_linux_release(install_root, version)
         try:
             post_activate: Callable[[Path], None] | None = None
-            if args.desktop:
+            install_desktop = args.desktop or _linux_desktop_integration_exists(
+                data_home
+            )
+            if install_desktop:
                 post_activate = lambda installed: _install_linux_desktop(
                     installed,
                     install_root=install_root,
@@ -977,6 +980,7 @@ def _install_linux_desktop(
             "HOME": str(home),
             "PATH": f"{venv / 'bin'}:{bin_dir}:{environment.get('PATH', '')}",
             "PYTHONNOUSERSITE": "1",
+            "TE2_DESKTOP_TE2_COMMAND": str(bin_dir / "te2"),
             "TE2_DATA_HOME": str(data_home),
             "VIRTUAL_ENV": str(venv),
         }
@@ -987,12 +991,19 @@ def _install_linux_desktop(
         bin_dir=bin_dir,
         home=home,
     )
+    _seed_desktop_shell_settings(home=home)
     subprocess.run(
         [str(te2), "desktop", "install"],
         env=environment,
         check=True,
         timeout=30 * 60,
     )
+
+
+def _linux_desktop_integration_exists(data_home: Path) -> bool:
+    return (
+        data_home / "desktop" / "electron" / "integration-receipt.json"
+    ).is_file()
 
 
 def _seed_desktop_local_framework_config(
@@ -1006,7 +1017,11 @@ def _seed_desktop_local_framework_config(
         config_home = Path(explicit).expanduser()
     else:
         xdg = str(os.environ.get("XDG_CONFIG_HOME") or "").strip()
-        config_home = Path(xdg).expanduser() / "te2" if xdg else home / ".config" / "te2"
+        config_home = (
+            Path(xdg).expanduser() / "te2"
+            if xdg
+            else home / ".config" / "te2"
+        )
     if not config_home.is_absolute():
         raise SystemExit(f"TE2 config root must be absolute: {config_home}")
     path = config_home / "desktop-local-framework.json"
@@ -1037,6 +1052,49 @@ def _seed_desktop_local_framework_config(
             "venvPath": str(install_root / "current" / "venv"),
             "version": 1,
         }
+    config_home.mkdir(mode=0o700, parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp-{os.getpid()}")
+    try:
+        temporary.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        temporary.chmod(0o600)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return path
+
+
+def _seed_desktop_shell_settings(*, home: Path) -> Path:
+    explicit = str(os.environ.get("TE2_CONFIG_HOME") or "").strip()
+    if explicit:
+        config_home = Path(explicit).expanduser()
+    else:
+        xdg = str(os.environ.get("XDG_CONFIG_HOME") or "").strip()
+        config_home = (
+            Path(xdg).expanduser() / "te2"
+            if xdg
+            else home / ".config" / "te2"
+        )
+    if not config_home.is_absolute():
+        raise SystemExit(f"TE2 config root must be absolute: {config_home}")
+    path = config_home / "desktop-shell.json"
+    if path.exists():
+        if not path.is_file():
+            raise SystemExit(f"Desktop shell configuration is not a file: {path}")
+        return path
+
+    payload = {
+        "autostart": False,
+        "frameworkBookmarks": [],
+        "frameworkHost": "127.0.0.1",
+        "frameworkPort": 8089,
+        "preferredAppId": "",
+        "startLocalFrameworkOnLaunch": True,
+        "version": 3,
+        "zoomLevel": 1,
+    }
     config_home.mkdir(mode=0o700, parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.tmp-{os.getpid()}")
     try:

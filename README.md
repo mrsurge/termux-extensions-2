@@ -193,9 +193,10 @@ architectures, and platforms fail explicitly.
 
 Linux installs the exact PyPI release into a versioned private venv beneath the
 canonical TE2 data root. It publishes a receipt, an atomic `current` pointer,
-and user-local command wrappers. `--desktop` then delegates to that venv's own
-`te2 desktop install`; the existing Electron bootstrap owns its locked source
-build, cache, runtime publication, `.desktop` file, icon, and launcher wrapper.
+and user-local command wrappers. `--desktop` opts a fresh installation into the
+existing Electron bootstrap; after that, ordinary Linux upgrades automatically
+reconcile the desktop runtime and integration. The `te2-desktop` wrapper follows
+the stable managed `te2` command instead of embedding one release venv.
 The installer seeds Electron's existing local-framework configuration with the
 stable managed command and `current/venv` paths, while preserving an explicit
 user configuration.

@@ -355,6 +355,7 @@ test("loads the first incoming call scope and switches to outgoing calls", async
   const state = createEditorState();
   const projections = [];
   const methods = [];
+  const highlights = [];
   const runtime = createEditorCodeInspectorRuntime({
     getEditor: () => state.editor,
     getCurrentPath: () => "/workspace/main.rs",
@@ -417,7 +418,9 @@ test("loads the first incoming call scope and switches to outgoing calls", async
       projections.push(structuredClone(projection));
       return true;
     },
-    replaceHighlights() {},
+    replaceHighlights(ranges) {
+      highlights.push(structuredClone(ranges));
+    },
     logError() {},
   });
 
@@ -434,6 +437,12 @@ test("loads the first incoming call scope and switches to outgoing calls", async
   assert.equal(incoming.tree[0].children[0].label, "caller");
   assert.equal(incoming.tree[0].children[0].description, "/workspace/lib.rs");
   assert.equal(incoming.tree[0].children[0].descriptionKind, "path");
+  assert.deepEqual(highlights.at(-1), [{
+    startLineNumber: 1,
+    startColumn: 1,
+    endLineNumber: 2,
+    endColumn: 2,
+  }]);
 
   runtime.handleCommand({
     action: "direction",
@@ -676,8 +685,11 @@ test("keeps Code Inspector and contents-search decorations independent", async (
   assert.equal(collections.length, 3);
   assert.deepEqual(collections[0].decorations[0].range, searchRange);
   assert.deepEqual(collections[1].decorations[0].range, inspectorRange);
-  assert.equal(collections[1].decorations[0].options.className, "findMatch");
+  assert.equal(collections[0].decorations[0].options.className, "te2-navigation-result-highlight");
+  assert.equal(collections[1].decorations[0].options.className, "te2-navigation-result-highlight");
   assert.equal(collections[2].decorations[0].options.className, "te2-symbol-target-highlight");
+  assert.ok(collections[2].decorations[0].options.minimap);
+  assert.ok(collections[2].decorations[0].options.overviewRuler);
 
   clearCodeInspectorHighlights();
   assert.equal(collections[1].decorations.length, 0);

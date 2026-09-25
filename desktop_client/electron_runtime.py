@@ -50,6 +50,7 @@ MINIMUM_NODE_VERSION: Final = (22, 12, 0)
 MINIMUM_FREE_BYTES: Final = 3 * 1024 * 1024 * 1024
 RUNTIME_MARKER: Final = ".te2-electron-runtime.json"
 INTEGRATION_RECEIPT: Final = "integration-receipt.json"
+DESKTOP_TE2_COMMAND_OVERRIDE: Final = "TE2_DESKTOP_TE2_COMMAND"
 ELECTRON_ROOT_INPUTS: Final = (
     "build.mjs",
     "package-lock.json",
@@ -696,12 +697,22 @@ def install_desktop_integration(
     environ: Mapping[str, str] | None = None,
     home: Path | None = None,
 ) -> DesktopIntegration:
-    paths = desktop_integration_paths(environ, home=home)
-    python = shlex.quote(str(Path(sys.executable)))
-    wrapper = (
-        "#!/bin/sh\n"
-        f"exec {python} -m desktop_client.electron_cli launch \"$@\"\n"
-    ).encode("utf-8")
+    source = environ if environ is not None else os.environ
+    paths = desktop_integration_paths(source, home=home)
+    launcher_override = str(source.get(DESKTOP_TE2_COMMAND_OVERRIDE) or "").strip()
+    if launcher_override:
+        launcher = _absolute_path(launcher_override, DESKTOP_TE2_COMMAND_OVERRIDE)
+        if not launcher.is_file():
+            raise ElectronRuntimeError(
+                f"{DESKTOP_TE2_COMMAND_OVERRIDE} is not a file: {launcher}"
+            )
+        invocation = f"exec {shlex.quote(str(launcher))} desktop launch \"$@\""
+    else:
+        python = shlex.quote(str(Path(sys.executable)))
+        invocation = (
+            f"exec {python} -m desktop_client.electron_cli launch \"$@\""
+        )
+    wrapper = (f"#!/bin/sh\n{invocation}\n").encode("utf-8")
     desktop_entry = (
         "[Desktop Entry]\n"
         "Type=Application\n"
@@ -842,9 +853,11 @@ def launch_desktop_runtime(
     environ: Mapping[str, str] | None = None,
     home: Path | None = None,
 ) -> int:
-    runtime = current_desktop_runtime(environ, home=home)
-    if runtime is None:
-        runtime = ensure_desktop_runtime(environ=environ, home=home)
+    runtime = ensure_desktop_runtime(
+        install_integration=False,
+        environ=environ,
+        home=home,
+    )
     try:
         return subprocess.run(
             [str(runtime.launcher), *arguments],

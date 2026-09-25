@@ -12,11 +12,13 @@ test('historical appearance shares font scaling and cannot enable mutation/intel
   const { appearance, theme } = historicalAppearance({ editor: {
     fontScale: 1.5, fontFamily: 'custom', theme: 'github-light', readOnly: false,
     autocompletion: true, showInlayHints: true, wordWrap: true, showLineNumbers: false,
+    cursorStyle: 'block-outline',
   } });
   assert.deepEqual(appearance, { fontSize: 21, fontFamily: 'custom', fontLigatures: true,
-    lineNumbers: 'off', wordWrap: 'on' });
+    lineNumbers: 'off', wordWrap: 'on', cursorStyle: 'block-outline' });
   assert.equal(theme, 'github-light');
   assert.equal(historicalAppearance({}).appearance.fontSize, 12);
+  assert.equal(historicalAppearance({}).theme, 'github-dark-default');
   assert.equal(historicalAppearance({ preferences: { editor: { fontScale: 18 } } }).appearance.fontSize, 18);
 });
 

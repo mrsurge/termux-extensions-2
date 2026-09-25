@@ -23,11 +23,11 @@ async function importThemeResolver() {
   );
 }
 
-test("uses vanilla GitHub Dark for fresh and legacy dark theme keys", async () => {
+test("uses GitHub Dark Default for missing and invalid keys", async () => {
   const { resolveMonacoThemeId } = await importThemeResolver();
 
-  assert.equal(resolveMonacoThemeId("", {}), "github-dark");
-  assert.equal(resolveMonacoThemeId("cm6-dark", {}), "github-dark");
+  assert.equal(resolveMonacoThemeId("", {}), "github-dark-default");
+  assert.equal(resolveMonacoThemeId("missing-theme", {}), "github-dark-default");
   assert.equal(resolveMonacoThemeId("vs-dark", {}), "github-dark");
 });
 

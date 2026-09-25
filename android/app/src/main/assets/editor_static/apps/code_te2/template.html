@@ -1032,6 +1032,26 @@
   #editor-frame .monaco-editor {
     font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   }
+  #editor-frame .monaco-editor .te2-symbol-target-highlight {
+    background-color: transparent;
+    border: 1px solid var(--vscode-editor-symbolHighlightBorder, var(--vscode-editorCursor-foreground));
+    box-sizing: border-box;
+    pointer-events: none;
+  }
+  #editor-frame .monaco-editor .te2-navigation-result-highlight {
+    background-color: color-mix(
+      in srgb,
+      var(--vscode-editor-findMatchHighlightBackground, #58a6ff) 42%,
+      transparent
+    );
+    border-bottom: 1px solid color-mix(
+      in srgb,
+      var(--vscode-editor-findMatchHighlightBorder, #58a6ff) 62%,
+      transparent
+    );
+    box-sizing: border-box;
+    pointer-events: none;
+  }
   #cm6-host { position:absolute; inset:0; display:flex; }
   .cm-editor { flex:1; height:100%; }
   .cm-empty-anchor { 
@@ -1475,7 +1495,8 @@
   #code-inspector-container {
     flex: 1;
     min-height: 0;
-    overflow: auto;
+    overflow: hidden;
+    position: relative;
     background:
       linear-gradient(90deg, color-mix(in srgb, var(--accent, #58a6ff) 5%, transparent), transparent 28%),
       var(--bg, #0b0f1a);
@@ -1483,6 +1504,30 @@
     font-family: var(--font-mono, 'JetBrains Mono Nerd', monospace);
     font-size: 12px;
   }
+  #code-inspector-scroll {
+    height: 100%;
+    overflow: auto;
+  }
+  #code-inspector-clear-highlights {
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    width: 40px;
+    height: 40px;
+    border: 1px solid var(--border, #333);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--bg, #0b0f1a) 72%, transparent);
+    color: var(--fg, #e6edf3);
+    font-size: 20px;
+    cursor: pointer;
+    z-index: 1;
+  }
+  #code-inspector-clear-highlights:hover,
+  #code-inspector-clear-highlights:focus-visible {
+    border-color: var(--accent, #58a6ff);
+    background: var(--bg, #0b0f1a);
+  }
+  #code-inspector-clear-highlights[hidden] { display: none; }
   #code-inspector-tree {
     padding: 5px 0 12px;
   }
@@ -1650,8 +1695,26 @@
     cursor: pointer;
   }
   .extension-status-health:hover,
-  .extension-status-entry:hover {
+  .extension-status-entry:hover,
+  .drawer-status-toggle:hover {
     background: rgba(255, 255, 255, 0.1);
+  }
+  .drawer-status-toggle {
+    flex: 0 0 auto;
+    height: 20px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 7px;
+    border: 0;
+    color: inherit;
+    background: transparent;
+    font: inherit;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .drawer-status-toggle[aria-expanded="true"] {
+    background: rgba(255, 255, 255, 0.08);
   }
   .extension-status-health.has-errors {
     background: #a52a2a;
@@ -2140,6 +2203,9 @@
   }
 
   .agent-drawer__icon-btn {
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
     width: 28px;
     height: 28px;
     display: inline-flex;
@@ -2164,6 +2230,9 @@
   }
 
   .agent-drawer__icon-btn img {
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-drag: none;
     width: 100%;
     height: 100%;
     object-fit: cover;
@@ -2659,8 +2728,11 @@
       <button class="console-clear-btn" id="code-inspector-collapse" type="button" title="Collapse Code Inspector" aria-label="Collapse Code Inspector">▼</button>
     </div>
     <div id="code-inspector-container" data-drawer-panel="code-inspector" style="display:none;">
-      <div id="code-inspector-tree" role="tree" aria-label="Code navigation results"></div>
-      <div id="code-inspector-empty" role="status" aria-live="polite">Choose a code navigation action from the editor context menu.</div>
+      <div id="code-inspector-scroll">
+        <div id="code-inspector-tree" role="tree" aria-label="Code navigation results"></div>
+        <div id="code-inspector-empty" role="status" aria-live="polite">Choose a code navigation action from the editor context menu.</div>
+      </div>
+      <button id="code-inspector-clear-highlights" type="button" aria-label="Clear Code Inspector highlights" title="Clear Code Inspector highlights" hidden>✕</button>
     </div>
   </div>
 
@@ -2668,6 +2740,7 @@
     <div id="comparison-status"></div>
     <div id="extension-status-left" class="extension-status-group"></div>
     <div id="extension-status-right" class="extension-status-group"></div>
+    <button id="drawer-status-toggle" class="drawer-status-toggle" type="button" aria-controls="terminal-drawer" aria-expanded="false" title="Toggle bottom panel">⌃ Panel</button>
     <button id="extension-status-health" class="extension-status-health" type="button">Extensions</button>
   </footer>
 
@@ -2741,6 +2814,20 @@
         <button class="fe-btn" id="editor-settings-client-copy" type="button">Copy</button>
         <button class="fe-btn" id="editor-settings-client-reset" type="button">Reset</button>
       </div>
+
+      <div class="fe-dd-separator" style="margin: 12px 0;"></div>
+
+      <label for="editor-settings-cursor-style" style="display:flex; align-items:center; gap:12px; padding:10px 12px; border:1px solid var(--border, #333); border-radius:4px;">
+        <span style="flex:1; min-width:0;">
+          <span style="display:block; font-weight:600;">Cursor style</span>
+          <span style="display:block; font-size:12px; opacity:0.7; margin-top:2px;">Choose the editor caret shape.</span>
+        </span>
+        <select id="editor-settings-cursor-style" class="fe-input" style="min-width:150px; padding:6px 8px; border:1px solid var(--border, #333); border-radius:4px; background:var(--bg, #0b0f1a); color:inherit;">
+          <option value="line">Normal</option>
+          <option value="block">Filled block</option>
+          <option value="block-outline">Outlined block</option>
+        </select>
+      </label>
 
       <div class="fe-dd-separator" style="margin: 12px 0;"></div>
 

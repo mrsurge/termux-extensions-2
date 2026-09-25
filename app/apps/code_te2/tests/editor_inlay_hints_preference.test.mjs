@@ -41,6 +41,22 @@ test('Monaco inlay hints follow the persisted editor preference', async () => {
   assert.deepEqual(defaulted.inlayHints, { enabled: 'on' });
 });
 
+test('Monaco cursor style accepts persisted line and block variants', async () => {
+  const { buildMonacoOptionsFromPrefsState } = await importModule(
+    'monaco_editor/editor_monaco_options_utils.ts',
+  );
+
+  for (const cursorStyle of ['line', 'block', 'block-outline']) {
+    const options = buildMonacoOptionsFromPrefsState({
+      preferences: { editor: { cursorStyle } },
+    }, {});
+    assert.equal(options.cursorStyle, cursorStyle);
+  }
+  assert.equal(buildMonacoOptionsFromPrefsState({
+    preferences: { editor: { cursorStyle: 'unsupported' } },
+  }, {}).cursorStyle, 'line');
+});
+
 test('Editor menu toggles the inlay hints preference', async () => {
   const { installSimplePreferenceMenuActions } = await importModule(
     'main_page/frontend/ui/menu-actions-preferences.ts',

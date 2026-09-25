@@ -67,6 +67,7 @@ export interface HostElements {
   editorSettingsExtSummary: HTMLElement;
   editorSettingsThemeStrip: HTMLElement;
   editorSettingsThemeSummary: HTMLElement;
+  editorSettingsCursorStyle: HTMLSelectElement;
   editorThemesModal: HTMLElement;
   editorThemesClose: HTMLElement;
   editorThemesList: HTMLElement;
@@ -152,6 +153,7 @@ export function captureHostElements(requireEl: RequireElement): HostElements {
     editorSettingsExtSummary: requireEl('#editor-settings-ext-summary'),
     editorSettingsThemeStrip: requireEl('#editor-settings-theme-strip'),
     editorSettingsThemeSummary: requireEl('#editor-settings-theme-summary'),
+    editorSettingsCursorStyle: requireEl('#editor-settings-cursor-style') as HTMLSelectElement,
     editorThemesModal: requireEl('#editor-themes-modal'),
     editorThemesClose: requireEl('#editor-themes-close'),
     editorThemesList: requireEl('#editor-themes-list'),
