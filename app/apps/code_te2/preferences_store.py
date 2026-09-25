@@ -26,7 +26,7 @@ DEFAULT_EDITOR_PREFS: JsonDict = {
     "autoCloseBrackets": True,
     "autocompletion": True,
     "showInlayHints": True,
-    "theme": "github-dark",
+    "theme": "github-dark-default",
     "autoSave": False,
     "showInlineDiffs": False,
     "showDraftDiffs": False,

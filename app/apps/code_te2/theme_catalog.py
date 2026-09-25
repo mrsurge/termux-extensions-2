@@ -14,6 +14,7 @@ from .code_te2_paths import code_te2_paths
 
 logger = logging.getLogger(__name__)
 VENDORED_THEMES_DIR = Path(__file__).with_name("monaco_editor") / "themes" / "vendored"
+DEFAULT_EDITOR_THEME_ID = "github-dark-default"
 
 
 class ThemeEntry(TypedDict):
@@ -219,7 +220,7 @@ def resolve_selected_theme(preferences: Mapping[str, object]) -> SelectedTheme:
     """Resolve only the backend-selected theme; never enumerate theme bytes at boot."""
     editor = _record(preferences.get("editor"))
     selected = editor.get("theme")
-    theme_id = selected if isinstance(selected, str) and selected else "github-dark"
+    theme_id = selected if isinstance(selected, str) and selected else DEFAULT_EDITOR_THEME_ID
 
     if VENDORED_THEMES_DIR.is_dir():
         for vendor_dir in sorted(VENDORED_THEMES_DIR.iterdir()):
@@ -269,7 +270,14 @@ def resolve_selected_theme(preferences: Mapping[str, object]) -> SelectedTheme:
             if data is not None:
                 _trace_selected_theme(theme_id, f"extension:{ext_id}:{path}", data)
                 return {"id": theme_id, "uiTheme": _string(item.get("uiTheme"), "vs-dark"), "theme": data}
-    raise ValueError(f"Selected editor theme is unavailable: {theme_id}")
+    if theme_id != DEFAULT_EDITOR_THEME_ID:
+        logger.warning(
+            "Selected editor theme is unavailable; using %s instead: %s",
+            DEFAULT_EDITOR_THEME_ID,
+            theme_id,
+        )
+        return resolve_selected_theme({"editor": {"theme": DEFAULT_EDITOR_THEME_ID}})
+    raise ValueError(f"Default editor theme is unavailable: {DEFAULT_EDITOR_THEME_ID}")
 
 
 def _trace_selected_theme(theme_id: str, source: str, data: dict[str, object]) -> None:

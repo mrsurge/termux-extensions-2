@@ -221,7 +221,7 @@ export function createSettingsRefreshController(deps: any) {
     }
 
     const currentTheme =
-      deps.getEditorViewState()?.theme || "github-dark";
+      deps.getEditorViewState()?.theme || "github-dark-default";
     try {
       const { themes } = parseThemeCatalog(await requestThemeCatalog());
       const active = themes.find((theme) => theme.id === currentTheme);

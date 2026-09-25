@@ -1517,7 +1517,13 @@ Fix:
 
 ## 8) UI "knobs" (what you can safely tune)
 
-Fresh editor preferences use `github-dark`; the old `cm6-dark` seed migrates once, while explicit themes remain authoritative. Baseline debounce dependencies must wrap `window.setTimeout` and `window.clearTimeout`. Passing native methods unbound through an options object changes their receiver and can throw `Illegal invocation`, leaving enabled inline diff preferences stranded in a plain editor.
+Fresh editor preferences use `github-dark-default`; missing or unavailable theme
+values fall back to that same packaged theme. The old `cm6-dark` seed migrates
+once, while explicit registered themes remain authoritative. Baseline debounce
+dependencies must wrap `window.setTimeout` and `window.clearTimeout`. Passing
+native methods unbound through an options object changes their receiver and can
+throw `Illegal invocation`, leaving enabled inline diff preferences stranded in
+a plain editor.
 
 ### Preferences -> Monaco options mapping
 The inline editor runtime builds Monaco options from SSOT preferences (`buildMonacoOptionsFromPrefs()`):
@@ -1531,8 +1537,8 @@ The inline editor runtime builds Monaco options from SSOT preferences (`buildMon
 - font family (default `JetBrains Mono Nerd`)
 - font ligatures (`fontLigatures` enabled by default for the local Nerd Font)
 - theme (Monaco base: `vs` / `vs-dark`, plus catalogued GitHub and installed VSIX themes)
-  - `github-dark` (fresh-install default)
-  - `github-dark-default`
+  - `github-dark`
+  - `github-dark-default` (fresh-install and invalid-selection fallback)
   - `github-light-default` (preferred)
   - `github-light`
   - the nine vendored GitHub themes under

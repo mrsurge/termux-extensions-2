@@ -27,7 +27,7 @@ export function historicalAppearance(preferences: unknown) {
     wordWrap: options.wordWrap === 'on' ? 'on' : 'off',
   };
   const selected = record(editor).theme;
-  return { appearance, theme: typeof selected === 'string' && selected ? selected : 'github-dark' };
+  return { appearance, theme: typeof selected === 'string' && selected ? selected : 'github-dark-default' };
 }
 
 /** Theme fetches are asynchronous; only the newest live view may publish them. */

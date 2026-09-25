@@ -20,6 +20,11 @@ from app.apps.code_te2.ui_ipc.rpc_contract import parse_ui_ipc_rpc_request
 
 
 class ThemeCatalogTests(unittest.IsolatedAsyncioTestCase):
+    def test_missing_selected_theme_uses_packaged_default(self) -> None:
+        selected = theme_catalog.resolve_selected_theme({"editor": {}})
+        self.assertEqual(selected["id"], "github-dark-default")
+        self.assertEqual(selected["theme"]["name"], "GitHub Dark Default")
+
     def test_runtime_debug_theme_trace_uses_stderr_and_no_theme_body(self) -> None:
         output = io.StringIO()
         with (patch.dict("os.environ", {"TE2_RUNTIME_DEBUG": "1"}),
@@ -37,8 +42,10 @@ class ThemeCatalogTests(unittest.IsolatedAsyncioTestCase):
             vendor.mkdir(parents=True)
             _ = (vendor / "theme_index.json").write_text(json.dumps({"vendored": [
                 {"id": "github-dark", "file": "dark.json", "uiTheme": "vs-dark"},
+                {"id": "github-dark-default", "file": "dark-default.json", "uiTheme": "vs-dark"},
             ]}))
             _ = (vendor / "dark.json").write_text('{"tokenColors":[]}')
+            _ = (vendor / "dark-default.json").write_text('{"name":"GitHub Dark Default","tokenColors":[]}')
             extension = root / "extensions/publisher.colors-1.0"
             extension.mkdir(parents=True)
             _ = (extension / "selected.json").write_text('{"semanticTokenColors":{"class":"#abc"}}')
@@ -60,10 +67,11 @@ class ThemeCatalogTests(unittest.IsolatedAsyncioTestCase):
                 }})
                 self.assertEqual(selected["uiTheme"], "hc-black")
                 self.assertEqual(selected["theme"]["semanticTokenColors"], {"class": "#abc"})
-                with self.assertRaisesRegex(ValueError, "unavailable"):
-                    _ = theme_catalog.resolve_selected_theme({"editor": {
+                with self.assertLogs(theme_catalog.logger, level="WARNING"):
+                    fallback = theme_catalog.resolve_selected_theme({"editor": {
                         "theme": "ext:publisher.colors:unselected",
                     }})
+                self.assertEqual(fallback["id"], "github-dark-default")
 
     def test_bundled_indexes_are_ordered_and_malformed_entries_are_skipped(self) -> None:
         with tempfile.TemporaryDirectory(prefix="te2-theme-catalog-") as directory:

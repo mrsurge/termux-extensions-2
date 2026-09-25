@@ -11,14 +11,14 @@ export function createDocumentThemeGate(
   waitUntilConnected: () => Promise<void>,
   applyTheme: (theme: string) => Promise<void>,
 ) {
-  let selectedTheme = 'github-dark';
+  let selectedTheme = 'github-dark-default';
   let appliedTheme: string | null = null;
   let pending: Promise<void> | null = null;
   // Model consumers share this barrier. A later preference supersedes an older
   // in-flight choice; no waiter may release until the latest choice is applied.
   return {
     async apply(theme: string): Promise<void> {
-      selectedTheme = theme || 'github-dark';
+      selectedTheme = theme || 'github-dark-default';
       while (pending || appliedTheme !== selectedTheme) {
         if (!pending) {
           pending = Promise.resolve().then(async () => {
