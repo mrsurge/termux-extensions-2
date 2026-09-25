@@ -4764,6 +4764,37 @@ These are recorded release-time provenance and acceptance facts, moved from repo
   health 0.2.350, discovered all eight apps, and launched a real File Explorer
   worker through `ferrous_framework_native` to ready/HTTP 200.
 
+- Production release `te2==0.2.351` is published from annotated tag
+  `0.2.351` at integrated main commit
+  `92b8a6195f9456c22bd071fabd4e8a2c3a9c91ef`. It pins exact dependencies
+  `framework-shells==0.0.64`, `agent-log-server==0.2.132`, and
+  `fastmcp==3.4.7`. The Linux wheel SHA-256 is
+  `7161fef8c8430f80cc10dad29ae8ae5a7b5f2acf56e36878bcbe4addaf7ef74c`,
+  the sdist is
+  `e00b7fb5cee7b9f6a1025169ae82ae125ab2c3643ace611e19b09f5383a89dbf`,
+  and the packaged Linux Ferrous-native server is
+  `7edb1bdc9e2769c82241809dc9bc3583aa77b6edfa956bf6ffdb9b6a71e0eecb`.
+  Agent Log Server 0.2.132 comes from commit
+  `2a7bf78d00024cfdfd4a5175f445e9db70bb9303`.
+
+- GitHub Release `0.2.351`, titled `TE2 0.2.351 alpha`, was promoted as the
+  normal/latest release with `prerelease: false` after all 13 private-draft
+  assets were downloaded and compared byte-for-byte. Public `SHA256SUMS`
+  SHA-256 is
+  `6105b33540a828a11197509014ff13d16f91c0b48d8353e7129e913bb01b4189`.
+  The deterministic 96-wheel Termux archive is
+  `1c15dc1f603da4cbbef8ec732865c471ff4740383e4c07ee59f99f78552e919f`;
+  its Android/AArch64 Ferrous server is
+  `b1061c135f70f7c5b7a12a0af054ce0e97d2fb03bc5083906a6d8981471bcb5f`.
+  GeckoView APK SHA-256 is
+  `e3b72e5ad596aae83afce410f3d72d88709682f288eeb9fd9e29caea88a90d22`
+  and Cefrium is
+  `7d94bdd8aaa377efceb796420ccd7965515d17abb1a3526534de233125c29684`.
+  Public latest-curl Debian desktop and physical Motorola Termux acceptance
+  both returned health 0.2.351, discovered all eight apps, and launched a real
+  Code TE2 worker through `ferrous_framework_native`; both APKs also installed
+  and launched successfully on the Motorola.
+
 ## 50) Worker Import And Run Profile Projection Boundaries
 
 Host, Monaco and editor-service package initializers do not eagerly re-export
