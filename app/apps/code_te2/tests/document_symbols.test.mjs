@@ -31,7 +31,7 @@ test('symbol normalization bounds malformed/huge trees and preserves source posi
 test('symbol row navigates without reloading; twisty independently expands children', () => {
   const win = new Window();
   Object.assign(globalThis, { document: win.document, window: win, HTMLElement: win.HTMLElement, CustomEvent: win.CustomEvent });
-  const ids = ['container', 'header', 'target', 'target-symbol', 'target-path', 'target-separator', 'direction', 'summary', 'tree', 'empty', 'collapse'];
+  const ids = ['container', 'header', 'target', 'target-symbol', 'target-path', 'target-separator', 'direction', 'summary', 'tree', 'empty', 'clear-highlights', 'collapse'];
   for (const id of ids) { const el = document.createElement('div'); el.id = `code-inspector-${id}`; document.body.append(el); }
   const opens = [];
   const panel = createCodeInspectorPanel({ openDrawer() {}, closeDrawer() {}, requestCommand: async () => {}, openFile: async (...args) => opens.push(args) });
@@ -43,6 +43,14 @@ test('symbol row navigates without reloading; twisty independently expands child
     row.querySelector('.code-inspector-twisty').click();
     assert.equal(opens.length, 0); assert.equal(document.querySelectorAll('.code-inspector-row').length, 2);
     document.querySelectorAll('.code-inspector-row')[1].click();
-    assert.deepEqual(opens[0], ['/workspace/file.py', { forceRefresh: false, line: 8, column: 6, focus: false, scrollY: 'center' }]);
+    assert.deepEqual(opens[0], ['/workspace/file.py', {
+      forceRefresh: false,
+      line: 8,
+      column: 6,
+      focus: false,
+      scrollY: 'center',
+      placeCursor: true,
+      symbolRange: range,
+    }]);
   } finally { panel.destroy(); win.happyDOM.abort(); }
 });

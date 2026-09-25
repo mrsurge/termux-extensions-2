@@ -16,6 +16,19 @@ function resolveIcon(app) {
   return { source: "", text };
 }
 
+let activeCardMenu = null;
+
+function closeActiveCardMenu() {
+  if (!activeCardMenu) return;
+  activeCardMenu.dataset.open = "false";
+  activeCardMenu = null;
+}
+
+function clampMenuOffset(value, min, max) {
+  if (!Number.isFinite(value) || max <= min) return min;
+  return Math.max(min, Math.min(max, value));
+}
+
 function renderApps(root, host, payload) {
   const apps = Array.isArray(payload?.apps) ? payload.apps : [];
   setFrameworkStatus(
@@ -24,6 +37,7 @@ function renderApps(root, host, payload) {
     String(payload?.error || ""),
   );
 
+  closeActiveCardMenu();
   root.innerHTML = "";
   if (apps.length === 0) {
     root.innerHTML = '<div class="empty-state">No applications available.</div>';
@@ -76,23 +90,101 @@ function renderApps(root, host, payload) {
 
     card.appendChild(launch);
     if (app.running && !app.local) {
-      const menu = document.createElement("button");
-      menu.type = "button";
-      menu.className = "app-menu-button";
-      menu.textContent = "...";
-      menu.title = `Quit ${app.name || app.id}`;
-      menu.setAttribute("aria-label", `Quit ${app.name || app.id}`);
-      menu.addEventListener("click", async () => {
-        menu.disabled = true;
+      let longPressTimer = 0;
+      let suppressClickUntil = 0;
+      let pointerId = null;
+      let startX = 0;
+      let startY = 0;
+
+      const menuGroup = document.createElement("div");
+      menuGroup.className = "app-card-menu-group";
+      menuGroup.dataset.open = "false";
+
+      const menu = document.createElement("div");
+      menu.className = "app-card-menu";
+      menu.setAttribute("role", "menu");
+
+      const closeButton = document.createElement("button");
+      closeButton.type = "button";
+      closeButton.className = "app-card-menu-close";
+      closeButton.setAttribute("role", "menuitem");
+      closeButton.setAttribute("aria-label", `Close ${app.name || app.id}`);
+      closeButton.innerHTML = `
+        <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+          <path d="M3 3l10 10M13 3L3 13"></path>
+        </svg>
+        <span>Close</span>
+      `;
+
+      const openCardMenu = (event) => {
+        event?.preventDefault?.();
+        event?.stopPropagation?.();
+        const rect = card.getBoundingClientRect();
+        const localX = typeof event?.clientX === "number"
+          ? event.clientX - rect.left
+          : rect.width - 20;
+        const localY = typeof event?.clientY === "number"
+          ? event.clientY - rect.top
+          : 18;
+        closeActiveCardMenu();
+        menu.style.left = `${clampMenuOffset(localX, 8, rect.width - 116)}px`;
+        menu.style.top = `${clampMenuOffset(localY, 8, rect.height - 44)}px`;
+        menuGroup.dataset.open = "true";
+        activeCardMenu = menuGroup;
+        suppressClickUntil = Date.now() + 900;
+        closeButton.focus({ preventScroll: true });
+      };
+
+      closeButton.addEventListener("click", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        closeButton.disabled = true;
         try {
           await host.quitApp(app.id);
+          closeActiveCardMenu();
           await refresh();
         } catch (error) {
           host.toast(error?.message || "Failed to quit app");
-          menu.disabled = false;
+          closeButton.disabled = false;
         }
       });
-      card.appendChild(menu);
+
+      card.addEventListener("contextmenu", openCardMenu);
+      card.addEventListener("pointerdown", (event) => {
+        if (event.pointerType !== "touch") return;
+        pointerId = event.pointerId;
+        startX = event.clientX;
+        startY = event.clientY;
+        longPressTimer = window.setTimeout(() => openCardMenu(event), 520);
+      });
+      card.addEventListener("pointermove", (event) => {
+        if (event.pointerId !== pointerId || !longPressTimer) return;
+        if (
+          Math.abs(event.clientX - startX) > 8
+          || Math.abs(event.clientY - startY) > 8
+        ) {
+          clearTimeout(longPressTimer);
+          longPressTimer = 0;
+        }
+      });
+      const clearLongPress = (event) => {
+        if (pointerId !== null && event.pointerId !== pointerId) return;
+        clearTimeout(longPressTimer);
+        longPressTimer = 0;
+        pointerId = null;
+      };
+      card.addEventListener("pointerup", clearLongPress);
+      card.addEventListener("pointercancel", clearLongPress);
+      launch.addEventListener("click", (event) => {
+        if (Date.now() >= suppressClickUntil) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        suppressClickUntil = 0;
+      }, { capture: true });
+
+      menu.appendChild(closeButton);
+      menuGroup.appendChild(menu);
+      card.appendChild(menuGroup);
     }
     grid.appendChild(card);
   });
@@ -155,9 +247,21 @@ export const appsExtension = {
     refreshTimer = window.setInterval(() => {
       if (document.visibilityState === "visible") void refresh();
     }, 5000);
+    const closeMenuOnPointerDown = (event) => {
+      if (!activeCardMenu || activeCardMenu.contains(event.target)) return;
+      closeActiveCardMenu();
+    };
+    const closeMenuOnKeyDown = (event) => {
+      if (event.key === "Escape") closeActiveCardMenu();
+    };
+    document.addEventListener("pointerdown", closeMenuOnPointerDown);
+    document.addEventListener("keydown", closeMenuOnKeyDown);
     return {
       refresh,
       dispose() {
+        document.removeEventListener("pointerdown", closeMenuOnPointerDown);
+        document.removeEventListener("keydown", closeMenuOnKeyDown);
+        closeActiveCardMenu();
         clearInterval(refreshTimer);
         refreshTimer = 0;
         activeRoot = null;

@@ -14,6 +14,30 @@ export type PreferredAppStartupOptions = {
   request: PreferredAppFrameworkRequest;
 };
 
+export type DesktopStartupSequenceOptions = {
+  startLocalFrameworkOnLaunch: boolean;
+  startLocalFramework: () => Promise<unknown>;
+  openPreferredApp: () => Promise<void>;
+  onLocalFrameworkError: (error: unknown) => void;
+};
+
+export async function runDesktopStartupSequence({
+  startLocalFrameworkOnLaunch,
+  startLocalFramework,
+  openPreferredApp,
+  onLocalFrameworkError,
+}: DesktopStartupSequenceOptions): Promise<void> {
+  if (startLocalFrameworkOnLaunch) {
+    try {
+      await startLocalFramework();
+    } catch (error) {
+      onLocalFrameworkError(error);
+      return;
+    }
+  }
+  await openPreferredApp();
+}
+
 function appIdFromCatalogEntry(value: unknown): string {
   return value && typeof value === "object"
     ? String((value as { id?: unknown }).id || "").trim()

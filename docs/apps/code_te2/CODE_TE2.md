@@ -1548,6 +1548,8 @@ The catalog's `uiTheme` also supplies the Monaco base (`vs`, `vs-dark`,
 `hc-black`, or `hc-light`) for both sources; the static JSON need not duplicate
 extension-manifest metadata.
 
+`cursorStyle` is a validated `PreferencesStore` value. The Editor Settings selector maps `line`, `block`, and `block-outline` directly to Monaco and the preference projection updates live working editor surfaces; invalid persisted values migrate to `line`.
+
 ### Diff mode behavior
 
 - `git.diffBase.updated` starts visible By changes enumeration immediately from
@@ -2863,6 +2865,18 @@ cd cefrium
 | `android/.../assets/asset_intercept/background.js` | URL pattern matching + redirect logic |
 | `android/.../MainActivity.kt` | `initEditorAssets()`, `installAssetExtension()`, lifecycle cleanup |
 
+### User-triggered OTA
+
+The canonical Android Settings page exposes the installed local asset version
+and an explicit **Update assets** action through the same-origin
+`AndroidShellGateway`. `GET /android-api/assets/status` reports whether the
+materialized tree is complete; `POST /android-api/assets/update` only schedules
+the renderer's existing native force-update path and returns immediately.
+GeckoView and Cefrium remain responsible for single-flight download,
+validation, atomic installation, cache clearing, native success/failure
+feedback, and page reload. The settings frontend does not poll and does not
+implement a second update lifecycle.
+
 ## 37) Run Profiles, Runtime Launchers, And Draft-Save Transaction
 
 Run Profile execution is backend-owned through `ui.host.file.run`. The frontend sends run intent; backend hooks resolve the active project/file, select a profile, decide what must be saved, and only then launch a runner shell or the default terminal fallback.
@@ -3139,7 +3153,19 @@ The Run Profiles modal is `main_page/frontend/ui/run-profiles-modal.ts`. It uses
 
 The active Linux desktop client is the Electron shell under `desktop_client/electron/`. `desktop_client/ui.py` remains a GTK/WebKit behavioral reference, not the current runtime.
 
-Electron settings v2 persists opt-in `autostart` and canonical `preferredAppId`. Launcher readiness triggers a catalog lookup against only the selected configured framework and then ordinary app-open/readiness. Missing framework/app/readiness leaves the launcher interactive; startup never implicitly launches a missing framework.
+Electron settings v3 separates `startLocalFrameworkOnLaunch` from preferred-app
+`autostart` and canonical `preferredAppId`. After launcher/control-plane
+readiness, the first option starts or adopts the configured local framework;
+preferred-app startup then uses the ordinary catalog/open/readiness transaction
+against the selected framework. With local startup disabled, an already
+reachable local, remote, or headless framework remains eligible. Failure leaves
+the launcher interactive. Fresh managed Linux installs enable local-framework
+startup, while existing user settings are preserved.
+
+The two startup checkboxes and preferred-app selector persist immediately
+through one serialized settings queue, so rapid UI changes cannot complete out
+of order. Host and port edits remain explicit and use the existing connection
+transaction.
 
 ### Runtime shape
 
@@ -3149,6 +3175,10 @@ Electron settings v2 persists opt-in `autostart` and canonical `preferredAppId`.
 - Electron keeps Chromium's automatic native Ozone backend selection; Wayland sessions are not forced through X11.
 - Development and packaged launch paths intentionally pass `--no-sandbox` because the client runs from a user-owned tree and Ubuntu AppArmor blocks the unprivileged namespace sandbox.
 - Selecting a saved framework bookmark immediately enters the same Electron-main `saveConnection` transaction as the editable Save action. The launcher projects intent only; Electron main persists the endpoint, reconnects UI IPC, clears stale Run Target state, and retargets the stable loopback relay.
+- Electron exit awaits bounded shutdown only for its spawned framework child;
+  adopted local and remote frameworks remain external. Shared Electron/Android
+  launcher app cards expose close through right-click or touch long-press with
+  one SVG `X Close` action rather than an always-visible destructive ellipsis.
 
 ### Relay and assets
 
@@ -3592,6 +3622,8 @@ reapplication for the cleared request across ordinary editor resyncs, and reenab
 highlighting when a new inspection request starts. Search/Find decorations,
 cursor, selection, and drawer presentation are unaffected.
 
+Contents search, References, Implementations, and Call Hierarchy share one subtle navigation-result decoration style with minimap and overview-ruler markers. Call-hierarchy highlighting includes the retained root and expanded current-file call nodes. Document Symbol navigation keeps a separate outline-only target decoration, also represented in the minimap and overview ruler. Closing the Contents search overlay always publishes an authoritative highlight-clear fact even if frontend deduplication state was reconstructed or lost.
+
 ### Flow
 
 ```text
@@ -3727,7 +3759,7 @@ The relay behavior is:
 
 Only paths declared by Cefrium asset routing are served from installed assets. Dynamic API, Socket.IO, terminal, and app-worker traffic pass through the relay.
 
-The activity provides shared launcher and Settings behavior, native controls, app-scoped quit, native context menus, trusted-localhost clipboard permission, file-picker forwarding, renderer recovery, lifecycle pause/resume, native diagnostics, and TE2 console access.
+The activity provides the Android launcher and Settings behavior, native controls, app-scoped quit, native context menus, trusted-localhost clipboard permission, file-picker forwarding, renderer recovery, lifecycle pause/resume, native diagnostics, and TE2 console access. Electron has a distinct launcher implementation.
 
 The main browser installs Cefrium's controllable download handler before any
 page navigation. Each request waits for an explicit Android `CreateDocument`

@@ -11,6 +11,7 @@ interface EditorPreferenceBag {
   autocompletion?: boolean;
   showInlayHints?: boolean;
   fontScale?: number;
+  cursorStyle?: string;
   fontFamily?: string;
   theme?: string;
 }
@@ -27,6 +28,7 @@ interface EditorPrefsStateLike {
   autocompletion?: boolean;
   showInlayHints?: boolean;
   fontScale?: number;
+  cursorStyle?: string;
   fontFamily?: string;
   theme?: string;
 }
@@ -66,6 +68,13 @@ export function buildMonacoOptionsFromPrefsState(
   try { if (typeof editorPrefs.autocompletion === 'boolean') autocompletion = editorPrefs.autocompletion; } catch (_) {}
   let showInlayHints = true;
   try { if (typeof editorPrefs.showInlayHints === 'boolean') showInlayHints = editorPrefs.showInlayHints; } catch (_) {}
+  let cursorStyle = 'line';
+  try {
+    const candidate = editorPrefs.cursorStyle;
+    if (candidate === 'line' || candidate === 'block' || candidate === 'block-outline') {
+      cursorStyle = candidate;
+    }
+  } catch (_) {}
 
   let fontSize = 14;
   try {
@@ -116,5 +125,6 @@ export function buildMonacoOptionsFromPrefsState(
     fontSize,
     fontFamily,
     fontLigatures: true,
+    cursorStyle,
   };
 }

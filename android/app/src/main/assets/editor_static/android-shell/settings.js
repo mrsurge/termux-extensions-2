@@ -21,6 +21,8 @@ const settingsStatus = document.querySelector("#settings-status");
 const powerPolicyStatus = document.querySelector("#power-policy-status");
 const notificationPermissionStatus = document.querySelector("#notification-permission-status");
 const openPowerSettingsButton = document.querySelector("#open-power-settings");
+const assetStatus = document.querySelector("#asset-status");
+const updateAssetsButton = document.querySelector("#update-assets");
 const fwsStatus = document.querySelector("#fws-status");
 const fwsFrame = document.querySelector("#fws-frame");
 const fwsUnavailable = document.querySelector("#fws-unavailable");
@@ -204,6 +206,24 @@ async function refreshFrameworkShells() {
   }
 }
 
+async function loadAssetStatus() {
+  setStatus(assetStatus, "loading", "Checking installed assets");
+  try {
+    const result = await androidShellHost.getAssetStatus();
+    const version = result?.localVersion ? `v${result.localVersion}` : "unknown version";
+    if (result?.valid) {
+      setStatus(assetStatus, "online", `Installed assets ${version}`);
+      return;
+    }
+    const detail = result?.missingRequiredAsset
+      ? `missing ${result.missingRequiredAsset}`
+      : "local asset tree is incomplete";
+    setStatus(assetStatus, "offline", `Installed assets ${version}; ${detail}`);
+  } catch (error) {
+    setStatus(assetStatus, "error", error?.message || "Asset status unavailable");
+  }
+}
+
 function persistToggle(toggle, settingName, readValue) {
   toggle?.addEventListener("change", async () => {
     const requested = toggle.checked;
@@ -298,6 +318,19 @@ openPowerSettingsButton?.addEventListener("click", async () => {
     openPowerSettingsButton.disabled = false;
   }
 });
+updateAssetsButton?.addEventListener("click", async () => {
+  updateAssetsButton.disabled = true;
+  try {
+    await androidShellHost.updateAssets();
+    setStatus(assetStatus, "loading", "Asset update started; waiting for app reload");
+    androidShellHost.toast("Asset update started");
+  } catch (error) {
+    setStatus(assetStatus, "error", error?.message || "Asset update failed to start");
+    androidShellHost.toast(error?.message || "Asset update failed to start");
+  } finally {
+    updateAssetsButton.disabled = false;
+  }
+});
 
 let foregroundRefresh = null;
 
@@ -319,7 +352,7 @@ document.addEventListener("visibilitychange", refreshSettingsOnForeground);
 
 try {
   await loadSettings();
-  await Promise.all([testFramework(), refreshFrameworkShells()]);
+  await Promise.all([testFramework(), refreshFrameworkShells(), loadAssetStatus()]);
 } catch (error) {
   setStatus(settingsStatus, "error", error?.message || "Failed to load settings");
 }

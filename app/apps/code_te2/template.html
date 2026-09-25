@@ -1033,8 +1033,22 @@
     font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   }
   #editor-frame .monaco-editor .te2-symbol-target-highlight {
-    background-color: var(--vscode-editor-symbolHighlightBackground);
+    background-color: transparent;
     border: 1px solid var(--vscode-editor-symbolHighlightBorder, var(--vscode-editorCursor-foreground));
+    box-sizing: border-box;
+    pointer-events: none;
+  }
+  #editor-frame .monaco-editor .te2-navigation-result-highlight {
+    background-color: color-mix(
+      in srgb,
+      var(--vscode-editor-findMatchHighlightBackground, #58a6ff) 42%,
+      transparent
+    );
+    border-bottom: 1px solid color-mix(
+      in srgb,
+      var(--vscode-editor-findMatchHighlightBorder, #58a6ff) 62%,
+      transparent
+    );
     box-sizing: border-box;
     pointer-events: none;
   }
@@ -2800,6 +2814,20 @@
         <button class="fe-btn" id="editor-settings-client-copy" type="button">Copy</button>
         <button class="fe-btn" id="editor-settings-client-reset" type="button">Reset</button>
       </div>
+
+      <div class="fe-dd-separator" style="margin: 12px 0;"></div>
+
+      <label for="editor-settings-cursor-style" style="display:flex; align-items:center; gap:12px; padding:10px 12px; border:1px solid var(--border, #333); border-radius:4px;">
+        <span style="flex:1; min-width:0;">
+          <span style="display:block; font-weight:600;">Cursor style</span>
+          <span style="display:block; font-size:12px; opacity:0.7; margin-top:2px;">Choose the editor caret shape.</span>
+        </span>
+        <select id="editor-settings-cursor-style" class="fe-input" style="min-width:150px; padding:6px 8px; border:1px solid var(--border, #333); border-radius:4px; background:var(--bg, #0b0f1a); color:inherit;">
+          <option value="line">Normal</option>
+          <option value="block">Filled block</option>
+          <option value="block-outline">Outlined block</option>
+        </select>
+      </label>
 
       <div class="fe-dd-separator" style="margin: 12px 0;"></div>
 

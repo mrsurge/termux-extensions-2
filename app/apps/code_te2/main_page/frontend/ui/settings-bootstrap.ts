@@ -26,6 +26,7 @@ import { createSettingsModalsController } from './settings-modals.ts';
  *     themesList: HTMLElement,
  *     settingsThemeStrip: HTMLElement,
  *     settingsThemeSummary: HTMLElement,
+ *     settingsCursorStyle: HTMLSelectElement,
  *     extConfigModal: HTMLElement,
  *     extConfigTitle: HTMLElement,
  *     extConfigForm: HTMLElement,
@@ -68,6 +69,7 @@ export function createSettingsBootstrap(deps: any) {
     getUiPrefs: deps.getUiPrefs,
     settingsModalEl: deps.els.settingsModal,
     themeSummaryEl: deps.els.settingsThemeSummary,
+    cursorStyleEl: deps.els.settingsCursorStyle,
     extSummaryEl: deps.els.extSummary,
     customSettingsInputEl: deps.els.extCustomSettingsInput,
     customSettingsSaveEl: deps.els.extCustomSettingsSave,
@@ -77,6 +79,7 @@ export function createSettingsBootstrap(deps: any) {
     requestLanguageBackendSet: deps.requestLanguageBackendSet,
     toast: deps.toast,
     reloadEditorFrame: deps.reloadEditorFrame,
+    updatePreference: deps.updatePreference,
   });
 
   function openExtConfigModal(extId: string, displayName: string, schema: any, currentValues: any) {
@@ -159,6 +162,7 @@ export function createSettingsBootstrap(deps: any) {
   settingsRefreshController.installWorkspaceSettingsSaveHandler();
   settingsRefreshController.installScopeTabs();
   settingsRefreshController.installLanguageBackendPreference();
+  settingsRefreshController.installCursorStylePreference();
 
   const settingsInstallController = createSettingsInstallController({
     installBtn: deps.els.extManagerInstallBtn,

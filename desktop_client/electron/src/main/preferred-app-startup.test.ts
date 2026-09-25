@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { resolvePreferredAppStartupUrl } from "./preferred-app-startup";
+import {
+  resolvePreferredAppStartupUrl,
+  runDesktopStartupSequence,
+} from "./preferred-app-startup";
 
 const configuredFrameworkOrigin = "http://100.64.0.5:8089";
 const browserFrameworkOrigin = "http://127.0.0.1:43127";
@@ -90,4 +93,43 @@ test("development auto-open keeps the historical code_te2 default", async () => 
     environment: { TE2_DESKTOP_AUTO_OPEN: "1" },
   }));
   assert.equal(target, `${browserFrameworkOrigin}/app/code_te2`);
+});
+
+test("desktop startup starts the local framework before opening the preferred app", async () => {
+  const events: string[] = [];
+  await runDesktopStartupSequence({
+    startLocalFrameworkOnLaunch: true,
+    startLocalFramework: async () => { events.push("framework"); },
+    openPreferredApp: async () => { events.push("app"); },
+    onLocalFrameworkError: () => { events.push("error"); },
+  });
+  assert.deepEqual(events, ["framework", "app"]);
+});
+
+test("desktop startup can open an app through an already-running framework", async () => {
+  const events: string[] = [];
+  await runDesktopStartupSequence({
+    startLocalFrameworkOnLaunch: false,
+    startLocalFramework: async () => { events.push("framework"); },
+    openPreferredApp: async () => { events.push("app"); },
+    onLocalFrameworkError: () => { events.push("error"); },
+  });
+  assert.deepEqual(events, ["app"]);
+});
+
+test("desktop startup leaves the launcher active when local startup fails", async () => {
+  const events: string[] = [];
+  await runDesktopStartupSequence({
+    startLocalFrameworkOnLaunch: true,
+    startLocalFramework: async () => {
+      events.push("framework");
+      throw new Error("unavailable");
+    },
+    openPreferredApp: async () => { events.push("app"); },
+    onLocalFrameworkError: (error) => {
+      assert.match(String(error), /unavailable/);
+      events.push("error");
+    },
+  });
+  assert.deepEqual(events, ["framework", "error"]);
 });

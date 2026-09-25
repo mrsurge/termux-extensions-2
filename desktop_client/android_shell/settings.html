@@ -45,10 +45,17 @@
           </div>
         </div>
       </header>
+      <label class="toggle-row" for="autostart-local-framework">
+        <span>
+          <strong>Start the configured local framework automatically</strong>
+          <small>Electron starts or adopts the local framework before opening a preferred app.</small>
+        </span>
+        <input id="autostart-local-framework" type="checkbox">
+      </label>
       <label class="toggle-row" for="autostart-preferred-app">
         <span>
           <strong>Open a preferred app at startup</strong>
-          <small>Only when the selected framework is already reachable. This will not start a local framework automatically.</small>
+          <small>The app opens only when automatic local-framework startup is selected or the chosen framework is already reachable when Electron launches.</small>
         </span>
         <input id="autostart-preferred-app" type="checkbox">
       </label>

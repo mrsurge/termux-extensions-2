@@ -28,13 +28,17 @@ import {
 import { startFrameworkRelay, type FrameworkRelay } from "./framework-relay";
 import {
   LocalFrameworkController,
+  stopOwnedFrameworkForElectronExit,
 } from "./local-framework-controller";
 import {
   readLocalFrameworkConfig,
   writeLocalFrameworkConfig,
 } from "./local-framework-config";
 import { DESKTOP_MODAL_WINDOW_POLICY } from "./modal-window-policy";
-import { resolvePreferredAppStartupUrl } from "./preferred-app-startup";
+import {
+  resolvePreferredAppStartupUrl,
+  runDesktopStartupSequence,
+} from "./preferred-app-startup";
 import { RunTargetRelayManager } from "./run-target-relay";
 import { ElectronRunProfileRuntime } from "./run-profile-runtime";
 import { SecondaryEditorRegistry } from "./secondary-editor-registry";
@@ -128,6 +132,8 @@ let detachedSurfaceRegistry: DetachedSidebarSurfaceRegistry | null = null;
 let secondaryEditorRegistry: SecondaryEditorRegistry | null = null;
 let dialogHost: DesktopDialogHost | null = null;
 let localFrameworkController: LocalFrameworkController | null = null;
+let configuredStartupPromise: Promise<void> | null = null;
+let desktopExitRequested = false;
 let localFrameworkConfig: LocalFrameworkConfigView;
 let electronClientIdentities: ElectronDesktopIdentities;
 const surfaceWindows = new Set<BrowserWindow>();
@@ -900,6 +906,9 @@ async function saveConnection(params: Record<string, unknown>): Promise<{
     ...settings,
     frameworkHost: String(params.frameworkHost || "").trim(),
     frameworkPort: Number(params.frameworkPort),
+    startLocalFrameworkOnLaunch: params.startLocalFrameworkOnLaunch === undefined
+      ? settings.startLocalFrameworkOnLaunch
+      : params.startLocalFrameworkOnLaunch === true,
     autostart: params.autostart === undefined
       ? settings.autostart
       : params.autostart === true,
@@ -1138,6 +1147,29 @@ async function autoOpenConfiguredApp(): Promise<void> {
   }
 }
 
+async function runConfiguredStartup(): Promise<void> {
+  await runDesktopStartupSequence({
+    startLocalFrameworkOnLaunch: settings.startLocalFrameworkOnLaunch,
+    startLocalFramework: async () => {
+      if (desktopExitRequested) return;
+      if (!localFrameworkController) {
+        throw new Error("Local framework controller is unavailable");
+      }
+      await refreshLocalFrameworkConfiguration();
+      if (desktopExitRequested) return;
+      await localFrameworkController.start();
+    },
+    openPreferredApp: async () => {
+      if (!desktopExitRequested) await autoOpenConfiguredApp();
+    },
+    onLocalFrameworkError: (error) => {
+      const message = `Local framework was not started: ${errorMessage(error)}`;
+      console.warn(`[te2-desktop-auto-start] ${message}`);
+      sendToShell("te2-desktop:status", message);
+    },
+  });
+}
+
 async function main(): Promise<void> {
   await app.whenReady();
   Menu.setApplicationMenu(null);
@@ -1256,7 +1288,18 @@ async function main(): Promise<void> {
     `desktop-session=${process.env.XDG_SESSION_TYPE || "unknown"}; relay=${relay.browserOrigin}`,
   );
   void automaticAssetUpdate();
-  void shellReady.then(autoOpenConfiguredApp);
+  void shellReady.then(() => {
+    if (desktopExitRequested) return;
+    const startup = runConfiguredStartup().catch((error) => {
+      const message = `Desktop startup failed: ${errorMessage(error)}`;
+      console.warn(`[te2-desktop-startup] ${message}`);
+      sendToShell("te2-desktop:status", message);
+    });
+    configuredStartupPromise = startup;
+    void startup.finally(() => {
+      if (configuredStartupPromise === startup) configuredStartupPromise = null;
+    });
+  });
 
   const exitAfterSeconds = Number(process.env.TE2_DESKTOP_EXIT_AFTER_SECONDS || 0);
   if (Number.isFinite(exitAfterSeconds) && exitAfterSeconds > 0) {
@@ -1264,9 +1307,41 @@ async function main(): Promise<void> {
   }
 }
 
+let ownedFrameworkShutdownStarted = false;
+let ownedFrameworkShutdownComplete = false;
+
 app.on("window-all-closed", () => app.quit());
-app.on("before-quit", () => {
-  localFrameworkController?.shutdownForElectronExit();
+app.on("before-quit", (event) => {
+  desktopExitRequested = true;
+  if (
+    !ownedFrameworkShutdownComplete
+    && (
+      configuredStartupPromise !== null
+      || localFrameworkController?.ownsRunningProcess()
+    )
+  ) {
+    event.preventDefault();
+    if (!ownedFrameworkShutdownStarted) {
+      ownedFrameworkShutdownStarted = true;
+      void Promise.resolve(configuredStartupPromise)
+        .catch((error) => {
+          console.warn(
+            `[te2-desktop] Startup interrupted during exit: ${errorMessage(error)}`,
+          );
+        })
+        .then(() => stopOwnedFrameworkForElectronExit(localFrameworkController))
+        .catch((error) => {
+          console.warn(
+            `[te2-desktop] Owned framework shutdown failed: ${errorMessage(error)}`,
+          );
+        })
+        .finally(() => {
+          ownedFrameworkShutdownComplete = true;
+          app.quit();
+        });
+    }
+    return;
+  }
   localFrameworkController = null;
   ipcMain.removeHandler("te2-desktop:app-view-control");
   ipcMain.removeListener(

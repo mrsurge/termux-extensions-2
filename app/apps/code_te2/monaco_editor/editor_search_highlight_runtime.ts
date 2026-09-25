@@ -169,15 +169,14 @@ function findRanges(
   }
 }
 
-function matchDecoration(range: MonacoRangeLike): MonacoDecorationLike {
+function navigationResultDecoration(range: MonacoRangeLike): MonacoDecorationLike {
   return {
     range,
     options: {
-      description: "te2-search-find-match",
+      description: "te2-navigation-result-match",
       stickiness: 1,
       zIndex: 10,
-      className: "findMatch",
-      inlineClassName: "findMatchInline",
+      className: "te2-navigation-result-highlight",
       showIfCollapsed: true,
       overviewRuler: {
         color: themeColorFromId(overviewRulerFindMatchForeground),
@@ -269,7 +268,7 @@ export function replaceCodeInspectorHighlights(
   }
   setDecorations(
     editor,
-    ranges.map(matchDecoration),
+    ranges.map(navigationResultDecoration),
     codeInspectorDecorationState,
   );
 }
@@ -293,6 +292,14 @@ export function showSymbolTargetHighlight(
       description: 'te2-inspector-symbol-target',
       className: 'te2-symbol-target-highlight',
       stickiness: 1,
+      overviewRuler: {
+        color: themeColorFromId(overviewRulerFindMatchForeground),
+        position: OVERVIEW_RULER_LANE_CENTER,
+      },
+      minimap: {
+        color: themeColorFromId(minimapFindMatch),
+        position: MINIMAP_POSITION_INLINE,
+      },
     },
   }], symbolTargetDecorationState);
 }
@@ -325,7 +332,9 @@ function applySearchHighlight(
     return true;
   }
 
-  const decorations = findRanges(editor, model, request).map(matchDecoration);
+  const decorations = findRanges(editor, model, request).map(
+    navigationResultDecoration,
+  );
   setDecorations(editor, decorations, searchDecorationState);
   return true;
 }

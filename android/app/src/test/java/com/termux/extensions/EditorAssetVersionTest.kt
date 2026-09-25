@@ -1,6 +1,7 @@
 package com.termux.extensions
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -49,6 +50,37 @@ class EditorAssetVersionTest {
             val codeMirrorPath = "static/vendor/codemirror.1/codemirror.bundle.js"
             assertTrue(File(root, codeMirrorPath).delete())
             assertEquals(codeMirrorPath, findMissingRequiredOtaAsset(root))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun reportsOnlyCompleteVersionedAssetTreesAsValid() {
+        val root = Files.createTempDirectory("te2-editor-asset-status").toFile()
+        try {
+            for (relativePath in REQUIRED_OTA_ASSET_FILES) {
+                File(root, relativePath).apply {
+                    parentFile?.mkdirs()
+                    writeText("test")
+                }
+            }
+
+            val valid = EditorAssetStatus(
+                localVersion = "0.2.350",
+                assetRootExists = true,
+                missingRequiredAsset = findMissingRequiredOtaAsset(root),
+            )
+            assertTrue(valid.valid)
+
+            val missing = EditorAssetStatus(
+                localVersion = valid.localVersion,
+                assetRootExists = true,
+                missingRequiredAsset = "android-shell/settings.js",
+            )
+            assertFalse(missing.valid)
+            assertFalse(valid.copy(localVersion = null).valid)
+            assertFalse(valid.copy(assetRootExists = false).valid)
         } finally {
             root.deleteRecursively()
         }

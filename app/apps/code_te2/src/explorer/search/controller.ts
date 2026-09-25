@@ -186,8 +186,8 @@ export function createExplorerSearchController(
     cancelSearchIdentity(identity, reason);
   }
 
-  function sendSearchHighlightClear(reason: string): void {
-    if (activeSearchHighlightKey === null) {
+  function sendSearchHighlightClear(reason: string, force = false): void {
+    if (activeSearchHighlightKey === null && !force) {
       return;
     }
     activeSearchHighlightKey = null;
@@ -517,7 +517,9 @@ export function createExplorerSearchController(
 
   function closeSearchOverlay(reason = "overlayClosed"): void {
     cancelActiveSearch(reason);
-    sendSearchHighlightClear(reason);
+    // Closing is authoritative user intent. Publish the clear even when the
+    // local dedupe key was lost during reconnect or frontend reconstruction.
+    sendSearchHighlightClear(reason, true);
     deps.setSearchOverlayVisible(false);
     clearSearchState();
     deps.renderSearchOverlay();

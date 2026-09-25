@@ -147,12 +147,15 @@ test('settings summary reads the host catalog and preserves selected name on RPC
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'document');
   globalThis.document = win.document;
   const summary = win.document.createElement('div');
+  const cursorStyle = win.document.createElement('select');
   let fails = false;
   const controller = createSettingsRefreshController({
     settingsModalEl: win.document.createElement('div'), themeSummaryEl: summary,
+    cursorStyleEl: cursorStyle,
     extSummaryEl: win.document.createElement('div'), extManagerModalEl: win.document.createElement('div'),
     customSettingsInputEl: win.document.createElement('textarea'),
     getEditorViewState: () => ({ theme: theme.id }), getUiPrefs: () => ({}),
+    updatePreference: async () => true,
     requestThemeCatalog: async () => {
       if (fails) throw Error('disconnected');
       return { themes: [theme] };

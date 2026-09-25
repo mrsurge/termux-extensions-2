@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONObject
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -39,6 +40,22 @@ internal fun findMissingRequiredOtaAsset(root: File): String? =
         !File(root, relativePath).isFile
     }
 
+internal data class EditorAssetStatus(
+    val localVersion: String?,
+    val assetRootExists: Boolean,
+    val missingRequiredAsset: String?,
+) {
+    val valid: Boolean
+        get() = assetRootExists && missingRequiredAsset == null && !localVersion.isNullOrBlank()
+
+    fun toJson(): JSONObject = JSONObject().apply {
+        put("localVersion", localVersion ?: JSONObject.NULL)
+        put("assetRootExists", assetRootExists)
+        put("valid", valid)
+        put("missingRequiredAsset", missingRequiredAsset ?: JSONObject.NULL)
+    }
+}
+
 /**
  * Manages bundled editor static assets:
  *  - Seeds filesDir/editor_static/ from APK assets on first boot
@@ -54,6 +71,12 @@ class EditorAssetManager(private val context: Context) {
 
     fun getLocalVersion(): String? =
         if (versionFile.exists()) versionFile.readText().trim() else null
+
+    internal fun getStatus(): EditorAssetStatus = EditorAssetStatus(
+        localVersion = getLocalVersion(),
+        assetRootExists = assetRoot.isDirectory,
+        missingRequiredAsset = findMissingRequiredOtaAsset(assetRoot),
+    )
 
     /**
      * Copy APK assets/editor_static/ → filesDir/editor_static/ if the local

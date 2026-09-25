@@ -74,6 +74,7 @@ class MainActivity : AppCompatActivity() {
     private val imeDismissalReducer = CefriumImeDismissalReducer()
     private val consoleState = ComposeConsoleState()
     private val uiHandler = Handler(Looper.getMainLooper())
+    private val assetUpdateInFlight = AtomicBoolean(false)
     private val appHealthProbeInFlight = AtomicBoolean(false)
     private var clientRuntimeService: PersistentNetworkService? = null
     private var clientRuntimeBound = false
@@ -430,6 +431,10 @@ class MainActivity : AppCompatActivity() {
             nativeRenderer = "cefrium",
             settingsRuntimeProvider = { runtimeService.snapshot().toJson() },
             onOpenBatterySettings = runtimeService::openBatteryOptimizationSettings,
+            assetStatusProvider = { assetManager.getStatus().toJson() },
+            onForceAssetUpdate = {
+                runOnUiThread { forceAssetUpdate() }
+            },
         )
         runtimeService.configureLocalRelayRoutes(
             assetRoot = assetManager.getAssetRoot(),
@@ -1163,6 +1168,10 @@ class MainActivity : AppCompatActivity() {
         showFeedback: Boolean = true,
         completion: (Result<JSONObject>) -> Unit = {},
     ) {
+        if (!assetUpdateInFlight.compareAndSet(false, true)) {
+            completion(Result.failure(IllegalStateException("asset update already running")))
+            return
+        }
         if (showFeedback) {
             Toast.makeText(this, "Force-updating assets…", Toast.LENGTH_SHORT).show()
         }
@@ -1178,6 +1187,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             runOnUiThread {
+                assetUpdateInFlight.set(false)
                 if (result.isSuccess) {
                     val version = assetManager.getLocalVersion() ?: "?"
                     consoleTitle.text = "Tools · v$version"

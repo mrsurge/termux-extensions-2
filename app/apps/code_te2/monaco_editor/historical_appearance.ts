@@ -16,10 +16,14 @@ export function historicalAppearance(preferences: unknown) {
   const bag = record(outer.preferences ?? outer);
   const editor = { fontScale: 0.85, ...record(bag.editor ?? bag) };
   const options = buildMonacoOptionsFromPrefsState({ editor }, null);
+  const cursorStyle = options.cursorStyle === 'block' || options.cursorStyle === 'block-outline'
+    ? options.cursorStyle
+    : 'line';
   // Appearance is an allowlist: preferences cannot enable writes or providers.
   const appearance: Monaco.editor.IEditorOptions = {
     fontSize: Number(options.fontSize), fontFamily: String(options.fontFamily),
     fontLigatures: true, lineNumbers: options.lineNumbers === 'off' ? 'off' : 'on',
+    cursorStyle,
     wordWrap: options.wordWrap === 'on' ? 'on' : 'off',
   };
   const selected = record(editor).theme;

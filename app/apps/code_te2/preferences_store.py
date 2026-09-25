@@ -32,6 +32,7 @@ DEFAULT_EDITOR_PREFS: JsonDict = {
     "showDraftDiffs": False,
     "trackAgentSidebarEdits": False,
     "fontScale": 0.85,  # NEW: Default to Medium preset
+    "cursorStyle": "line",
     "showIndentGuides": True,
     "showLineShading": False,
     "colorPicker": True,
@@ -73,6 +74,7 @@ DEFAULT_UI_PREFS: JsonDict = {
 
 # Font scale validation helper
 ALLOWED_FONT_SCALES = {0.70, 0.85, 1.0}
+ALLOWED_CURSOR_STYLES = {"line", "block", "block-outline"}
 
 def validate_font_scale(scale: float) -> float:
     """Validate and clamp font scale to allowed presets."""
@@ -80,6 +82,11 @@ def validate_font_scale(scale: float) -> float:
         # Find nearest preset
         return min(ALLOWED_FONT_SCALES, key=lambda x: abs(x - scale))
     return scale
+
+
+def validate_cursor_style(value: object) -> str:
+    """Return a supported Monaco cursor style, falling back to the default."""
+    return value if isinstance(value, str) and value in ALLOWED_CURSOR_STYLES else "line"
 
 
 def _ensure_dir(path: Path) -> None:
@@ -148,6 +155,10 @@ class PreferencesStore:
                 modified = True
             if editor_store.get("theme") == "cm6-dark":
                 editor_store["theme"] = "github-dark"
+                modified = True
+            cursor_style = validate_cursor_style(editor_store.get("cursorStyle"))
+            if editor_store.get("cursorStyle") != cursor_style:
+                editor_store["cursorStyle"] = cursor_style
                 modified = True
             for key, default_val in DEFAULT_EDITOR_PREFS.items():
                 if key not in editor_store:

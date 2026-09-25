@@ -130,6 +130,19 @@ class CodeTe2PathTests(unittest.TestCase):
         self.assertFalse(editor["showInlineDiffs"])
         self.assertFalse(editor["showDraftDiffs"])
         self.assertEqual("github-dark", editor["theme"])
+        self.assertEqual("line", editor["cursorStyle"])
+
+    def test_invalid_cursor_style_migrates_to_line(self) -> None:
+        preferences_path = self.root / "preferences.json"
+        preferences_path.write_text(
+            json.dumps({"editor": {"cursorStyle": "beam"}, "ui": {}, "projects": {}}),
+            encoding="utf-8",
+        )
+        editor = cast(
+            dict[str, object],
+            PreferencesStore(storage_path=preferences_path).get_preferences()["editor"],
+        )
+        self.assertEqual("line", editor["cursorStyle"])
 
     def test_legacy_default_theme_migrates_without_overwriting_explicit_theme(self) -> None:
         preferences_path = self.root / "preferences.json"

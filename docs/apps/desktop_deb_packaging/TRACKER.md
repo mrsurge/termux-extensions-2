@@ -1285,11 +1285,12 @@ does not authorize publication.
   catalog, excluding the synthetic native Settings app.
 - [x] Disable preferred-app selection unless autostart is enabled and preserve
   an unavailable prior id without silently changing it.
-- [x] After relay/control-plane and launcher initialization, probe only the
-  selected configured framework origin.
+- [x] After relay/control-plane and launcher initialization, optionally start or
+  adopt the configured local framework, then probe only the selected configured
+  framework origin.
 - [x] If reachable, open the preferred app through its ordinary framework
   `/open` plus app-shell/readiness path; do not navigate to a constructed direct
-  URL or implicitly start a missing local framework.
+  URL.
 - [x] Leave the launcher interactive with one bounded status/toast when the
   framework, preferred app, open action, or readiness transaction is unavailable.
 - [x] Keep the connection/startup Save action visually associated with the
@@ -1300,6 +1301,18 @@ does not authorize publication.
   server, open failure, and `readiness_support` in focused Electron tests and
   graphical live acceptance.
   Focused Electron coverage is green; graphical startup acceptance remains.
+- [x] Add an independent versioned local-framework startup policy. Fresh
+  installer-created desktop settings enable it; existing desktop settings keep
+  their explicit or migrated choice.
+- [x] Order startup as launcher/control-plane readiness, optional local
+  start/adoption, then ordinary preferred-app catalog/open/readiness.
+- [x] Await bounded framework shutdown on Electron exit only for the exact child
+  Electron spawned; preserve adopted external and remote frameworks.
+- [x] Replace the native launcher ellipsis quit affordance with right-click or
+  touch-long-press `X Close`, without changing ordinary app-card activation.
+- [ ] Live-accept fresh installed startup, opt-out, owned-child shutdown,
+  external-framework preservation, preferred-app ordering, and launcher context
+  close on desktop plus one Android renderer.
 
 ### Phase 6C — Sidebar extension preference restart continuity
 

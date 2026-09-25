@@ -1913,13 +1913,17 @@ The product setting becomes a versioned desktop-shell contract with:
 ```ts
 type DesktopShellSettings = {
   // existing fields
+  startLocalFrameworkOnLaunch: boolean;
   autostart: boolean;
   preferredAppId: string;
 };
 ```
 
-Migration defaults `autostart` to `false` and `preferredAppId` to an empty
-string. Settings presents `preferredAppId` as a dropdown built from the
+Migration defaults both startup flags to `false` and `preferredAppId` to an
+empty string. The managed Linux installer seeds
+`startLocalFrameworkOnLaunch: true` only when it creates a fresh desktop-shell
+record; repair and upgrade preserve an existing user choice. Settings presents
+`preferredAppId` as a dropdown built from the
 selected framework's current `/api/apps/catalog` response, excluding the
 synthetic native Settings entry. The control is disabled unless `autostart` is
 enabled. It stores a canonical app id rather than a URL or display label. If a
@@ -1930,13 +1934,15 @@ Electron startup remains event/request-driven:
 
 1. Load and validate desktop settings, start/retarget the existing loopback
    relay, establish native control-plane clients, and load the launcher shell.
-2. When `autostart` is false or no preferred app is configured, stop at the
-   launcher.
-3. Probe the **selected configured framework origin** through the existing
-   catalog request. This phase does not implicitly start a missing local
-   framework; the existing explicit local-framework controls retain that
-   authority.
-4. If the framework is already reachable and the preferred id is present,
+2. When `startLocalFrameworkOnLaunch` is enabled, use the existing
+   `LocalFrameworkController.start()` transaction. It adopts an existing TE2
+   listener as externally owned or spawns the configured child and waits for
+   its control hello and HTTP readiness before continuing.
+3. When `autostart` is false or no preferred app is configured, stop at the
+   launcher. Otherwise probe the now-selected configured framework origin.
+   With local startup disabled, an already-running local, remote, or headless
+   framework remains eligible.
+4. If the framework is reachable and the preferred id is present,
    invoke its ordinary `POST /api/apps/{id}/open` action, project the returned
    URL through the existing relay, and navigate through the normal app shell.
    Apps with `readiness_support` continue through the established readiness and
@@ -1948,6 +1954,14 @@ Electron startup remains event/request-driven:
 The environment variables may remain explicit development/test overrides, but
 they are not persisted product state and do not mutate the user's selected
 framework or preferred app.
+
+Closing Electron awaits the existing bounded controller stop transaction only
+for an Electron-owned child. An adopted external local framework and every
+remote target remain outside Electron's process ownership and are never stopped.
+The distinct Electron and Android launcher implementations expose no
+always-visible destructive ellipsis: right-click or touch long-press on a
+running app opens a single SVG `X Close` menu action, while ordinary click/tap
+keeps its app-open behavior.
 
 ### 9.3 Sidebar extension presentation continuity
 
@@ -2036,9 +2050,10 @@ Before implementation is considered complete:
    current runtime;
 3. prove `command` and `venvPath` follow the newly active managed install while
    `broadcast`, `port`, and `env` remain unchanged;
-4. validate autostart off, reachable preferred app, unavailable framework,
-   missing preferred app, app-open failure, and a readiness-enabled app. The
-   unavailable cases must leave the launcher interactive;
+4. validate local startup on/off, fresh-install-on and upgrade-preserved policy,
+   owned/external framework shutdown, reachable preferred app, unavailable
+   framework, missing preferred app, app-open failure, and a readiness-enabled
+   app. The unavailable cases must leave the launcher interactive;
 5. validate browser, GeckoView, Cefrium, and Electron presentation restoration
    across Code TE2 app-worker restart, WBA restart, framework restart, project
    switch away/back, extension uninstall/reinstall, and native relay-port change

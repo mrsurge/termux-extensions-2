@@ -214,6 +214,7 @@ export async function readDesktopSettings(
     frameworkPort: readPort(stored.frameworkPort),
     frameworkBookmarks: decodeFrameworkBookmarks(stored.frameworkBookmarks),
     zoomLevel: validZoom(stored.zoomLevel),
+    startLocalFrameworkOnLaunch: stored.startLocalFrameworkOnLaunch === true,
     autostart: stored.autostart === true,
     preferredAppId: readPreferredAppId(stored.preferredAppId),
   };
@@ -230,6 +231,7 @@ export async function writeDesktopSettings(
     frameworkPort: endpoint.frameworkPort,
     frameworkBookmarks: decodeFrameworkBookmarks(settings.frameworkBookmarks),
     zoomLevel: validZoom(settings.zoomLevel),
+    startLocalFrameworkOnLaunch: settings.startLocalFrameworkOnLaunch === true,
     autostart: settings.autostart === true,
     preferredAppId: validPreferredAppId(settings.preferredAppId),
   };

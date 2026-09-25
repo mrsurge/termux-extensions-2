@@ -40,6 +40,26 @@ test("installed WBA provider registry resolves only its vendored matcher", async
       ),
       isolatedRegistry,
     );
+    const isolatedRuntimeDebug = path.join(
+      isolatedCodeTe2,
+      "workbench_protocol_proxy",
+      "node_workbench_adapter",
+      "dist",
+      "server",
+      "runtime-debug.mjs",
+    );
+    await mkdir(path.dirname(isolatedRuntimeDebug), { recursive: true });
+    await cp(
+      path.join(
+        codeTe2Root,
+        "workbench_protocol_proxy",
+        "node_workbench_adapter",
+        "dist",
+        "server",
+        "runtime-debug.mjs",
+      ),
+      isolatedRuntimeDebug,
+    );
     await cp(
       path.join(codeTe2Root, "vendor", "picomatch"),
       path.join(isolatedCodeTe2, "vendor", "picomatch"),

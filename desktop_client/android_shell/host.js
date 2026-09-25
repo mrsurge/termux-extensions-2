@@ -1,6 +1,7 @@
 const DEFAULT_SETTINGS = {
   frameworkHost: "127.0.0.1",
   frameworkPort: 8089,
+  startLocalFrameworkOnLaunch: false,
   autostart: false,
   preferredAppId: "",
 };
@@ -86,6 +87,7 @@ function normalizeSettings(settings = {}) {
   return {
     frameworkHost,
     frameworkPort,
+    startLocalFrameworkOnLaunch: settings.startLocalFrameworkOnLaunch === true,
     autostart: settings.autostart === true,
     preferredAppId: String(settings.preferredAppId || "").trim(),
   };
@@ -102,6 +104,7 @@ export async function saveSettings(settings) {
   const result = await nativeRequest("save_settings", {
     frameworkHost: String(settings?.frameworkHost || "").trim(),
     frameworkPort: Number(settings?.frameworkPort),
+    startLocalFrameworkOnLaunch: settings?.startLocalFrameworkOnLaunch === true,
     autostart: settings?.autostart === true,
     preferredAppId: String(settings?.preferredAppId || "").trim(),
   });
