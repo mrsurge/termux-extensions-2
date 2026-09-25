@@ -3154,18 +3154,27 @@ The Run Profiles modal is `main_page/frontend/ui/run-profiles-modal.ts`. It uses
 The active Linux desktop client is the Electron shell under `desktop_client/electron/`. `desktop_client/ui.py` remains a GTK/WebKit behavioral reference, not the current runtime.
 
 Electron settings v3 separates `startLocalFrameworkOnLaunch` from preferred-app
-`autostart` and canonical `preferredAppId`. After launcher/control-plane
-readiness, the first option starts or adopts the configured local framework;
-preferred-app startup then uses the ordinary catalog/open/readiness transaction
-against the selected framework. With local startup disabled, an already
-reachable local, remote, or headless framework remains eligible. Failure leaves
-the launcher interactive. Fresh managed Linux installs enable local-framework
-startup, while existing user settings are preserved.
+`autostart` and canonical `preferredAppId`. At process startup, Electron reads
+its independent settings, local-framework configuration, and stable identities
+concurrently. Local-framework adoption/spawn and the preferred-app open request
+then run while the launcher renderer boots. Framework selection retains the
+initial collision/health probe and post-spawn HTTP readiness check; the app open
+endpoint remains the framework authority for catalog validation and worker start.
+App-view creation and navigation begin as soon as the open request resolves and
+do not wait for launcher renderer readiness. The launcher's `shell-ready` event
+only replays current navigation into its header and releases deferred error
+presentation. When both startup options and a preferred app are configured, the
+renderer also defers loading the launcher iframe; any startup failure steers home
+and loads it on demand. With local startup disabled, an already reachable local,
+remote, or headless framework remains eligible. Failure leaves the launcher interactive.
+Fresh managed Linux installs enable local-framework startup, while existing user
+settings are preserved.
 
 The two startup checkboxes and preferred-app selector persist immediately
-through one serialized settings queue, so rapid UI changes cannot complete out
-of order. Host and port edits remain explicit and use the existing connection
-transaction.
+through one serialized settings queue, so rapid UI changes cannot complete out of
+order. Host and port edits remain explicit and use the existing connection
+transaction. Automatic adoption skips rewriting connection settings when the
+selected loopback origin already matches the adopted port.
 
 ### Runtime shape
 

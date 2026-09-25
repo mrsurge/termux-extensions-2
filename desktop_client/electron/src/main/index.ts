@@ -1131,23 +1131,27 @@ async function automaticAssetUpdate(): Promise<void> {
   }
 }
 
-async function autoOpenConfiguredApp(): Promise<void> {
+async function prepareConfiguredApp(shellReady: Promise<void>): Promise<string | null> {
   try {
-    const target = await resolvePreferredAppStartupUrl({
+    return await resolvePreferredAppStartupUrl({
       settings,
       configuredFrameworkOrigin,
       browserFrameworkOrigin: relay.browserOrigin,
       request: frameworkRequest,
     });
-    if (target) await navigateApp(target);
   } catch (error) {
     const message = `Preferred app was not opened: ${errorMessage(error)}`;
     console.warn(`[te2-desktop-auto-open] ${message}`);
-    sendToShell("te2-desktop:status", message);
+    void shellReady.then(() => {
+      if (desktopExitRequested) return;
+      sendToShell("te2-desktop:status", message);
+      sendToShell("te2-desktop:steer", "home");
+    });
+    return null;
   }
 }
 
-async function runConfiguredStartup(): Promise<void> {
+async function runConfiguredStartup(shellReady: Promise<void>): Promise<void> {
   await runDesktopStartupSequence({
     startLocalFrameworkOnLaunch: settings.startLocalFrameworkOnLaunch,
     startLocalFramework: async () => {
@@ -1155,17 +1159,23 @@ async function runConfiguredStartup(): Promise<void> {
       if (!localFrameworkController) {
         throw new Error("Local framework controller is unavailable");
       }
-      await refreshLocalFrameworkConfiguration();
-      if (desktopExitRequested) return;
       await localFrameworkController.start();
     },
-    openPreferredApp: async () => {
-      if (!desktopExitRequested) await autoOpenConfiguredApp();
+    preparePreferredApp: async () => {
+      if (desktopExitRequested) return null;
+      return prepareConfiguredApp(shellReady);
+    },
+    navigatePreferredApp: async (target) => {
+      if (!desktopExitRequested) await navigateApp(target);
     },
     onLocalFrameworkError: (error) => {
       const message = `Local framework was not started: ${errorMessage(error)}`;
       console.warn(`[te2-desktop-auto-start] ${message}`);
-      sendToShell("te2-desktop:status", message);
+      void shellReady.then(() => {
+        if (desktopExitRequested) return;
+        sendToShell("te2-desktop:status", message);
+        sendToShell("te2-desktop:steer", "home");
+      });
     },
   });
 }
@@ -1175,9 +1185,11 @@ async function main(): Promise<void> {
   Menu.setApplicationMenu(null);
   await protocol.handle(SHELL_SCHEME, localShellResponse);
 
-  settings = await readDesktopSettings();
-  localFrameworkConfig = await readLocalFrameworkConfig();
-  electronClientIdentities = await readDesktopIdentities();
+  [settings, localFrameworkConfig, electronClientIdentities] = await Promise.all([
+    readDesktopSettings(),
+    readLocalFrameworkConfig(),
+    readDesktopIdentities(),
+  ]);
   configuredFrameworkOrigin = frameworkOrigin(settings);
   relay = await startFrameworkRelay(configuredFrameworkOrigin, assets);
   if (localFrameworkConfig.error) {
@@ -1187,6 +1199,8 @@ async function main(): Promise<void> {
     getLaunchConfig: () => localFrameworkConfig,
     getSelectedOrigin: () => configuredFrameworkOrigin,
     selectLocal: async (port) => {
+      const localOrigin = `http://127.0.0.1:${port}`;
+      if (configuredFrameworkOrigin === localOrigin) return;
       await saveConnection({
         frameworkHost: "127.0.0.1",
         frameworkPort: port,
@@ -1276,9 +1290,26 @@ async function main(): Promise<void> {
     const onShellReady = (event: IpcMainEvent) => {
       if (!mainWindow || event.sender !== mainWindow.webContents) return;
       ipcMain.off("te2-desktop:shell-ready", onShellReady);
+      const contents = appView?.webContents;
+      if (contents && !contents.isDestroyed() && contents.getURL()) {
+        sendNavigation(contents);
+      }
       resolve();
     };
     ipcMain.on("te2-desktop:shell-ready", onShellReady);
+  });
+  const startup = runConfiguredStartup(shellReady).catch((error) => {
+    const message = `Desktop startup failed: ${errorMessage(error)}`;
+    console.warn(`[te2-desktop-startup] ${message}`);
+    void shellReady.then(() => {
+      if (desktopExitRequested) return;
+      sendToShell("te2-desktop:status", message);
+      sendToShell("te2-desktop:steer", "home");
+    });
+  });
+  configuredStartupPromise = startup;
+  void startup.finally(() => {
+    if (configuredStartupPromise === startup) configuredStartupPromise = null;
   });
   await mainWindow.loadURL(`${SHELL_SCHEME}://${SHELL_HOST}/index.html`);
 
@@ -1288,18 +1319,6 @@ async function main(): Promise<void> {
     `desktop-session=${process.env.XDG_SESSION_TYPE || "unknown"}; relay=${relay.browserOrigin}`,
   );
   void automaticAssetUpdate();
-  void shellReady.then(() => {
-    if (desktopExitRequested) return;
-    const startup = runConfiguredStartup().catch((error) => {
-      const message = `Desktop startup failed: ${errorMessage(error)}`;
-      console.warn(`[te2-desktop-startup] ${message}`);
-      sendToShell("te2-desktop:status", message);
-    });
-    configuredStartupPromise = startup;
-    void startup.finally(() => {
-      if (configuredStartupPromise === startup) configuredStartupPromise = null;
-    });
-  });
 
   const exitAfterSeconds = Number(process.env.TE2_DESKTOP_EXIT_AFTER_SECONDS || 0);
   if (Number.isFinite(exitAfterSeconds) && exitAfterSeconds > 0) {

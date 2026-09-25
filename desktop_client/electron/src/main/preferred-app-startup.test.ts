@@ -16,7 +16,6 @@ function options(overrides: Record<string, unknown> = {}) {
     configuredFrameworkOrigin,
     browserFrameworkOrigin,
     request: async ({ path }: { path: string }) => {
-      if (path === "/api/apps/catalog") return [{ id: "code_te2" }];
       return { url: `${configuredFrameworkOrigin}/app/code_te2` };
     },
     ...overrides,
@@ -36,20 +35,17 @@ test("preferred-app startup is inert when autostart is disabled", async () => {
   assert.equal(requests, 0);
 });
 
-test("preferred-app startup uses catalog plus the ordinary app open action", async () => {
+test("preferred-app startup uses the ordinary app open action directly", async () => {
   const requests: Array<{ path: string; method?: string; body?: unknown }> = [];
   const target = await resolvePreferredAppStartupUrl(options({
     request: async (request: { path: string; method?: string; body?: unknown }) => {
       requests.push(request);
-      return request.path === "/api/apps/catalog"
-        ? [{ id: "terminal" }, { id: "code_te2" }]
-        : { url: `${configuredFrameworkOrigin}/app/code_te2?ready=1` };
+      return { url: `${configuredFrameworkOrigin}/app/code_te2?ready=1` };
     },
   }));
 
   assert.equal(target, `${browserFrameworkOrigin}/app/code_te2?ready=1`);
   assert.deepEqual(requests, [
-    { path: "/api/apps/catalog" },
     {
       path: "/api/apps/code_te2/open",
       method: "POST",
@@ -58,10 +54,12 @@ test("preferred-app startup uses catalog plus the ordinary app open action", asy
   ]);
 });
 
-test("preferred-app startup fails closed when the saved app is unavailable", async () => {
+test("preferred-app startup propagates an unavailable saved app", async () => {
   await assert.rejects(
     resolvePreferredAppStartupUrl(options({
-      request: async () => [{ id: "terminal" }],
+      request: async () => {
+        throw new Error("Preferred app is unavailable: code_te2");
+      },
     })),
     /Preferred app is unavailable: code_te2/,
   );
@@ -78,8 +76,7 @@ test("preferred-app startup propagates framework and open failures", async () =>
   );
   await assert.rejects(
     resolvePreferredAppStartupUrl(options({
-      request: async ({ path }: { path: string }) => {
-        if (path === "/api/apps/catalog") return [{ id: "code_te2" }];
+      request: async () => {
         throw new Error("open rejected");
       },
     })),
@@ -100,10 +97,14 @@ test("desktop startup starts the local framework before opening the preferred ap
   await runDesktopStartupSequence({
     startLocalFrameworkOnLaunch: true,
     startLocalFramework: async () => { events.push("framework"); },
-    openPreferredApp: async () => { events.push("app"); },
+    preparePreferredApp: async () => {
+      events.push("app");
+      return "/app/code_te2";
+    },
+    navigatePreferredApp: async () => { events.push("navigate"); },
     onLocalFrameworkError: () => { events.push("error"); },
   });
-  assert.deepEqual(events, ["framework", "app"]);
+  assert.deepEqual(events, ["framework", "app", "navigate"]);
 });
 
 test("desktop startup can open an app through an already-running framework", async () => {
@@ -111,7 +112,41 @@ test("desktop startup can open an app through an already-running framework", asy
   await runDesktopStartupSequence({
     startLocalFrameworkOnLaunch: false,
     startLocalFramework: async () => { events.push("framework"); },
-    openPreferredApp: async () => { events.push("app"); },
+    preparePreferredApp: async () => {
+      events.push("app");
+      return "/app/code_te2";
+    },
+    navigatePreferredApp: async () => { events.push("navigate"); },
+    onLocalFrameworkError: () => { events.push("error"); },
+  });
+  assert.deepEqual(events, ["app", "navigate"]);
+});
+
+test("desktop startup prepares and navigates the app without a renderer gate", async () => {
+  const events: string[] = [];
+  await runDesktopStartupSequence({
+    startLocalFrameworkOnLaunch: false,
+    startLocalFramework: async () => { events.push("framework"); },
+    preparePreferredApp: async () => {
+      events.push("app");
+      return "/app/code_te2";
+    },
+    navigatePreferredApp: async () => { events.push("navigate"); },
+    onLocalFrameworkError: () => { events.push("error"); },
+  });
+  assert.deepEqual(events, ["app", "navigate"]);
+});
+
+test("desktop startup leaves the launcher visible without an app target", async () => {
+  const events: string[] = [];
+  await runDesktopStartupSequence({
+    startLocalFrameworkOnLaunch: false,
+    startLocalFramework: async () => { events.push("framework"); },
+    preparePreferredApp: async () => {
+      events.push("app");
+      return null;
+    },
+    navigatePreferredApp: async () => { events.push("navigate"); },
     onLocalFrameworkError: () => { events.push("error"); },
   });
   assert.deepEqual(events, ["app"]);
@@ -125,7 +160,11 @@ test("desktop startup leaves the launcher active when local startup fails", asyn
       events.push("framework");
       throw new Error("unavailable");
     },
-    openPreferredApp: async () => { events.push("app"); },
+    preparePreferredApp: async () => {
+      events.push("app");
+      return "/app/code_te2";
+    },
+    navigatePreferredApp: async () => { events.push("navigate"); },
     onLocalFrameworkError: (error) => {
       assert.match(String(error), /unavailable/);
       events.push("error");

@@ -320,7 +320,10 @@ document.querySelector("#close-window")?.addEventListener(
   () => runUiTask(bridge.request("window_control", { action: "close" })),
 );
 
-launcherView.src = "./android_shell/index.html";
+const deferLauncherBoot = settings.startLocalFrameworkOnLaunch
+  && settings.autostart
+  && Boolean(settings.preferredAppId.trim());
+if (!deferLauncherBoot) launcherView.src = "./android_shell/index.html";
 const initialAssetStatus = await bridge.request("get_asset_status") as AssetStatus;
 setAssetBadge(initialAssetStatus.localVersion);
 renderZoom();
