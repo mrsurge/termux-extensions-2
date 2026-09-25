@@ -26,7 +26,7 @@ import { createSettingsModalsController } from './settings-modals.ts';
  *     themesList: HTMLElement,
  *     settingsThemeStrip: HTMLElement,
  *     settingsThemeSummary: HTMLElement,
- *     settingsCursorStyle: HTMLSelectElement,
+ *     settingsCursorStyle: HTMLElement,
  *     extConfigModal: HTMLElement,
  *     extConfigTitle: HTMLElement,
  *     extConfigForm: HTMLElement,

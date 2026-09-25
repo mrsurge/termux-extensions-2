@@ -1,6 +1,10 @@
 import { parseThemeCatalog, type RequestThemeCatalog } from '../../../src/theme_catalog.ts';
 import { EXPLORER_RPC_METHODS } from "../../../src/explorer/rpc/contract.ts";
 import { createJsonTextmateField } from "./cm6-json-textmate-field.ts";
+import {
+  createCustomSelectControl,
+  type CustomSelectHandle,
+} from "./declarative-modal.ts";
 
 interface RawSettingsJsonField {
   getValue: () => string;
@@ -44,7 +48,7 @@ function createRawSettingsJsonField(
  *   getUiPrefs: () => Record<string, unknown>,
  *   settingsModalEl: HTMLElement,
  *   themeSummaryEl: HTMLElement,
- *   cursorStyleEl: HTMLSelectElement,
+ *   cursorStyleEl: HTMLElement,
  *   extSummaryEl: HTMLElement,
  *   customSettingsInputEl: HTMLTextAreaElement,
  *   customSettingsSaveEl: HTMLButtonElement,
@@ -59,6 +63,7 @@ function createRawSettingsJsonField(
  */
 export function createSettingsRefreshController(deps: any) {
   const requestThemeCatalog: RequestThemeCatalog = deps.requestThemeCatalog;
+  let cursorStyleControl: CustomSelectHandle | null = null;
   // ── Scope tab switching ──
   let activeScope = "user";
   const extManagerModalEl = deps.extManagerModalEl as HTMLElement;
@@ -195,10 +200,11 @@ export function createSettingsRefreshController(deps: any) {
 
   async function refreshEditorSettingsModal() {
     const cursorStyle = deps.getEditorViewState()?.cursorStyle;
-    deps.cursorStyleEl.value =
+    cursorStyleControl?.setValue(
       cursorStyle === "block" || cursorStyle === "block-outline"
         ? cursorStyle
-        : "line";
+        : "line",
+    );
     const languageBackendSummary = deps.settingsModalEl.querySelector(
       "#editor-settings-language-backend-summary",
     ) as HTMLElement | null;
@@ -255,23 +261,38 @@ export function createSettingsRefreshController(deps: any) {
   }
 
   function installCursorStylePreference() {
-    deps.cursorStyleEl.addEventListener("change", async () => {
-      const value = deps.cursorStyleEl.value;
-      if (value !== "line" && value !== "block" && value !== "block-outline") {
-        deps.cursorStyleEl.value = "line";
-        return;
-      }
-      deps.cursorStyleEl.disabled = true;
-      try {
-        const ok = await deps.updatePreference("cursorStyle", value);
-        if (!ok) {
-          deps.toast("Cursor style update failed");
-          await refreshEditorSettingsModal();
+    cursorStyleControl = createCustomSelectControl({
+      document: deps.cursorStyleEl.ownerDocument,
+      value: "line",
+      ariaLabel: "Cursor style",
+      options: [
+        { value: "line", label: "Normal" },
+        { value: "block", label: "Filled block" },
+        { value: "block-outline", label: "Outlined block" },
+      ],
+      onChange: async (selectedValue) => {
+        const value = String(selectedValue);
+        if (
+          value !== "line" &&
+          value !== "block" &&
+          value !== "block-outline"
+        ) {
+          cursorStyleControl?.setValue("line");
+          return;
         }
-      } finally {
-        deps.cursorStyleEl.disabled = false;
-      }
+        cursorStyleControl?.setDisabled(true);
+        try {
+          const ok = await deps.updatePreference("cursorStyle", value);
+          if (!ok) {
+            deps.toast("Cursor style update failed");
+            await refreshEditorSettingsModal();
+          }
+        } finally {
+          cursorStyleControl?.setDisabled(false);
+        }
+      },
     });
+    deps.cursorStyleEl.replaceChildren(cursorStyleControl.element);
   }
 
   function installCustomSettingsSaveHandler() {

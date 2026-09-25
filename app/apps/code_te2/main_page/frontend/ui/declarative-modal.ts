@@ -75,6 +75,20 @@ interface FieldControlHandle {
   destroy?: () => void;
 }
 
+export interface CustomSelectOption {
+  value: unknown;
+  label?: string;
+}
+
+export interface CustomSelectHandle {
+  element: HTMLElement;
+  button: HTMLButtonElement;
+  getValue: () => unknown;
+  setValue: (value: unknown) => void;
+  setDisabled: (disabled: boolean) => void;
+  destroy: () => void;
+}
+
 interface SelectPopupState {
   menu: HTMLElement;
   cleanup: () => void;
@@ -182,12 +196,14 @@ function positionSelectMenu(button: HTMLElement, menu: HTMLElement): void {
   menu.style.maxHeight = `${Math.max(160, targetWindow.innerHeight - rect.bottom - 16)}px`;
 }
 
-function createSelectControl(
-  field: DeclarativeFieldContract,
-  current: unknown,
-  onValue: (key: string, value: unknown) => void,
-  document: Document,
-): FieldControlHandle {
+export function createCustomSelectControl(options: {
+  document: Document;
+  value: unknown;
+  options: CustomSelectOption[];
+  onChange: (value: unknown) => void;
+  ariaLabel?: string;
+}): CustomSelectHandle {
+  const document = options.document;
   const targetWindow = document.defaultView || window;
   const root = document.createElement("div");
   root.className = "declarative-select";
@@ -196,14 +212,15 @@ function createSelectControl(
   button.className = "declarative-input declarative-select-button";
   button.setAttribute("aria-haspopup", "listbox");
   button.setAttribute("aria-expanded", "false");
+  if (options.ariaLabel) button.setAttribute("aria-label", options.ariaLabel);
   root.appendChild(button);
 
-  const options = Array.isArray(field.options) ? field.options : [];
-  let selectedValue = current;
+  const selectOptions = Array.isArray(options.options) ? options.options : [];
+  let selectedValue = options.value;
   let popup: SelectPopupState | null = null;
 
   function updateButton(): void {
-    button.textContent = selectedOptionLabel(options, selectedValue);
+    button.textContent = selectedOptionLabel(selectOptions, selectedValue);
   }
 
   function closeMenu(): void {
@@ -215,12 +232,12 @@ function createSelectControl(
   }
 
   function openMenu(): void {
-    if (popup || !options.length) return;
+    if (popup || button.disabled || !selectOptions.length) return;
     const menu = document.createElement("div");
     menu.className = "declarative-select-menu";
     menu.setAttribute("role", "listbox");
 
-    options.forEach((item, index) => {
+    selectOptions.forEach((item, index) => {
       const option = document.createElement("button");
       option.type = "button";
       option.className = "declarative-select-option";
@@ -234,7 +251,7 @@ function createSelectControl(
         selectedValue = item.value;
         updateButton();
         closeMenu();
-        onValue(field.key, item.value);
+        options.onChange(item.value);
       });
       menu.appendChild(option);
       if (sameValue(item.value, selectedValue)) {
@@ -297,8 +314,33 @@ function createSelectControl(
 
   return {
     element: root,
+    button,
+    getValue: () => selectedValue,
+    setValue(value: unknown) {
+      selectedValue = value;
+      updateButton();
+    },
+    setDisabled(disabled: boolean) {
+      button.disabled = disabled;
+      if (disabled) closeMenu();
+    },
     destroy: closeMenu,
   };
+}
+
+function createSelectControl(
+  field: DeclarativeFieldContract,
+  current: unknown,
+  onValue: (key: string, value: unknown) => void,
+  document: Document,
+): FieldControlHandle {
+  return createCustomSelectControl({
+    document,
+    value: current,
+    options: Array.isArray(field.options) ? field.options : [],
+    onChange: (value) => onValue(field.key, value),
+    ariaLabel: field.label,
+  });
 }
 
 function createFieldLabel(
