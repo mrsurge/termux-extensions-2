@@ -67,7 +67,7 @@ class EditorAssetVersionTest {
             }
 
             val valid = EditorAssetStatus(
-                localVersion = "0.2.350",
+                localVersion = "0.2.351",
                 assetRootExists = true,
                 missingRequiredAsset = findMissingRequiredOtaAsset(root),
             )
