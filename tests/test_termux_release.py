@@ -409,7 +409,21 @@ class LinuxInstallerTests(unittest.TestCase):
             self.assertEqual(command, [str(te2), "desktop", "install"])
             self.assertEqual(environment["VIRTUAL_ENV"], str(release / "venv"))
             self.assertEqual(environment["TE2_DATA_HOME"], str(data_home))
+            self.assertEqual(
+                environment["TE2_DESKTOP_TE2_COMMAND"], str(bin_dir / "te2")
+            )
             self.assertTrue((config_root / "desktop-local-framework.json").is_file())
+
+    def test_existing_desktop_receipt_requests_upgrade_reconciliation(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            data_home = Path(raw)
+            self.assertFalse(installer._linux_desktop_integration_exists(data_home))
+            receipt = (
+                data_home / "desktop" / "electron" / "integration-receipt.json"
+            )
+            receipt.parent.mkdir(parents=True)
+            receipt.write_text("{}\n", encoding="utf-8")
+            self.assertTrue(installer._linux_desktop_integration_exists(data_home))
 
     def test_desktop_config_reconciles_managed_paths_and_preserves_user_policy(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

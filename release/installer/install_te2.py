@@ -110,7 +110,10 @@ def _run_linux(
         release = _materialize_linux_release(install_root, version)
         try:
             post_activate: Callable[[Path], None] | None = None
-            if args.desktop:
+            install_desktop = args.desktop or _linux_desktop_integration_exists(
+                data_home
+            )
+            if install_desktop:
                 post_activate = lambda installed: _install_linux_desktop(
                     installed,
                     install_root=install_root,
@@ -977,6 +980,7 @@ def _install_linux_desktop(
             "HOME": str(home),
             "PATH": f"{venv / 'bin'}:{bin_dir}:{environment.get('PATH', '')}",
             "PYTHONNOUSERSITE": "1",
+            "TE2_DESKTOP_TE2_COMMAND": str(bin_dir / "te2"),
             "TE2_DATA_HOME": str(data_home),
             "VIRTUAL_ENV": str(venv),
         }
@@ -993,6 +997,12 @@ def _install_linux_desktop(
         check=True,
         timeout=30 * 60,
     )
+
+
+def _linux_desktop_integration_exists(data_home: Path) -> bool:
+    return (
+        data_home / "desktop" / "electron" / "integration-receipt.json"
+    ).is_file()
 
 
 def _seed_desktop_local_framework_config(

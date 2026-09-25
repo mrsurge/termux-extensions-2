@@ -93,6 +93,19 @@ interface XtermFitAddon {
   fit: () => void;
 }
 
+interface XtermWebFontsAddon {
+  dispose?: () => void;
+  loadFonts: (fonts?: (string | FontFace)[]) => Promise<FontFace[]>;
+}
+
+interface XtermWebFontsAddonCtor {
+  new (initialRelayout?: boolean): XtermWebFontsAddon;
+}
+
+interface XtermWebFontsAddonNamespace {
+  WebFontsAddon?: XtermWebFontsAddonCtor;
+}
+
 interface XtermFitAddonCtor {
   new (): XtermFitAddon;
 }
@@ -129,7 +142,7 @@ interface XtermTerminal {
     end: { x: number; y: number };
   } | undefined;
   hasSelection?: () => boolean;
-  loadAddon: (addon: XtermFitAddon) => void;
+  loadAddon: (addon: XtermFitAddon | XtermWebFontsAddon) => void;
   onData: (handler: (data: string) => void) => void;
   onResize: (handler: (size: { cols: number; rows: number }) => void) => XtermDisposable;
   onScroll?: (handler: (viewportY: number) => void) => XtermDisposable;
@@ -160,6 +173,7 @@ interface XtermTerminalCtor {
 
 interface TerminalRuntimeWindow extends Window {
   FitAddon?: XtermFitAddonCtor | XtermFitAddonNamespace;
+  WebFontsAddon?: XtermWebFontsAddonCtor | XtermWebFontsAddonNamespace;
   Terminal?: XtermTerminalCtor;
   __fileEditorCm6DrawerTouchToMouseLoaded?: boolean;
   __fileEditorCm6TerminalHelpersActive?: boolean;
@@ -170,6 +184,9 @@ interface TerminalRuntimeWindow extends Window {
 }
 
 const MAX_PENDING_TERMINAL_OUTPUT_BYTES = 1024 * 1024;
+const TERMINAL_WEB_FONT_FAMILY = 'JetBrains Mono Nerd';
+const TERMINAL_FONT_FAMILY = `"${TERMINAL_WEB_FONT_FAMILY}", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace`;
+const DRAWER_VISIBILITY_EVENT = 'te2:drawer-visibility-changed';
 
 function asHTMLElement(value: Element | null): HTMLElement | null {
   return value instanceof HTMLElement ? value : null;
@@ -788,6 +805,31 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     return runtimeWindow.Terminal;
   }
 
+  function getWebFontsAddon(): XtermWebFontsAddonCtor | null {
+    const exported = getRuntimeWindow().WebFontsAddon;
+    if (!exported) return null;
+    return typeof exported === 'function' ? exported : exported.WebFontsAddon ?? null;
+  }
+
+  async function prepareTerminalWebFonts(): Promise<XtermWebFontsAddon | null> {
+    try {
+      if (!getWebFontsAddon()) {
+        await loadScript('/static/vendor/xterm/addon-web-fonts.js');
+      }
+      const WebFontsAddon = getWebFontsAddon();
+      if (!WebFontsAddon) throw new Error('WebFontsAddon constructor not loaded');
+      const addon = new WebFontsAddon(true);
+      await addon.loadFonts([TERMINAL_WEB_FONT_FAMILY]);
+      return addon;
+    } catch (error) {
+      console.warn('[terminal-drawer] Nerd Font preload failed; using browser font loading', error);
+      try {
+        await document.fonts?.load?.(`12px "${TERMINAL_WEB_FONT_FAMILY}"`);
+      } catch (_) {}
+      return null;
+    }
+  }
+
   function loadScript(src: string): Promise<void> {
     return new Promise((resolve, reject) => {
       const script = document.createElement('script');
@@ -1150,6 +1192,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
       throw new Error('Terminal container not found');
     }
     const Terminal = await loadXterm();
+    const webFontsAddon = await prepareTerminalWebFonts();
 
     // FitAddon might be nested in exports object or directly on window
     const fitAddonExport = getRuntimeWindow().FitAddon;
@@ -1166,7 +1209,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
       cursorBlink: true,
       scrollback: 5000,
       fontSize: 14,
-      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+      fontFamily: TERMINAL_FONT_FAMILY,
       theme: {
         background: '#0b0f1a',
         foreground: '#e5e7eb',
@@ -1176,6 +1219,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
 
     fitAddon = new FitAddon();
     nextTerm.loadAddon(fitAddon);
+    if (webFontsAddon) nextTerm.loadAddon(webFontsAddon);
     nextTerm.open(container);
     installViewportHandlers();
     await ensureDrawerTouchToMouseHelper();
@@ -1233,6 +1277,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     drawer.classList.add('open');
     setTerminalResizeHandleActive(true);
     isOpen = true;
+    document.dispatchEvent(new CustomEvent(DRAWER_VISIBILITY_EVENT, { detail: { open: true } }));
   }
 
   /** Activate the terminal surface and lazily create its renderer/session. */
@@ -1272,6 +1317,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     setDrawerCollapsedState(true);
     setTerminalResizeHandleActive(true);
     isOpen = false;
+    document.dispatchEvent(new CustomEvent(DRAWER_VISIBILITY_EVENT, { detail: { open: false } }));
     publishTerminalSpecialKeyFocus(window, false);
     emitTerminalImeIntent(false, 'drawer_close');
     setDrawerHelperFocusActive(false);

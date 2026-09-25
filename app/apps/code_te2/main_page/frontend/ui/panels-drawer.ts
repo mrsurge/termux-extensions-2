@@ -55,6 +55,8 @@ export function initPanelsAndDrawer(deps: any) {
     codeInspectorPanel,
     toggleTerminal: () => terminal.toggle(),
     openDrawer: () => terminal.openDrawer(),
+    closeDrawer: () => terminal.close(),
+    isDrawerOpen: () => terminal.isOpen(),
     activateTerminal: () => terminal.activateTerminal(),
     setFontScale: (preset: string) => deps.setFontScale(preset),
     triggerEditorSearchPanel: (reason: string, opts: any) => deps.triggerEditorSearchPanel(reason, opts),

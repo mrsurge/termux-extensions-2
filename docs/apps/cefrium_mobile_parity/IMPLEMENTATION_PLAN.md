@@ -20,8 +20,9 @@ shared by both renderers.
 - Code TE2 emits renderer-neutral intent. It must not infer GeckoView from the
   generic native-app URL marker.
 - Cefrium gaps must remain explicit when the pinned public API cannot implement
-  them safely. The isolated module now pins the only currently published
-  Cefrium release, `0.7.0`.
+  them safely. The isolated standalone module pins Cefrium `0.9.0` and retains
+  the extracted Window Extensions compile-only interface JAR because Gradle
+  drops the SDK POM's Maven `provided` dependency.
 
 ## Phase 1: Explicit Renderer Identity
 
@@ -205,6 +206,57 @@ contention while adding state-coordination complexity.
    Tokio worker count or consider process separation only if evidence still
    shows scheduler starvation after synchronous scans and writes are removed.
 
+## Phase 10: Cefrium HTTP Downloads
+
+1. Install one Activity-owned `CefriumDownloadHandler` before the main browser
+   loads content. Do not rely on Cefrium's implicit default destination: TE2
+   must make the user-visible destination and failure state explicit.
+2. Sanitize the suggested filename and serialize Android document-picker
+   presentation while retaining each pending request by Cefrium download id.
+   Multiple page-triggered downloads may be pending, but only one picker may be
+   foreground at a time.
+3. On approval, allocate an app-private staging file and pass its absolute path
+   to `BeforeDownloadCallback.allow`. On picker cancellation or invalid output,
+   call `cancel`; never leave the native request waiting indefinitely.
+4. Retain the selected `content://` destination with that download id. After a
+   successful completion event, stream the staged file through
+   `ContentResolver`, close and delete the staging file, and report the final
+   destination. A failed/interrupted/canceled transfer removes both staging and
+   any empty destination document when permitted.
+5. Cancel unresolved callbacks and clean up owned staging files when the browser
+   or Activity is destroyed. Do not request broad filesystem permissions and do
+   not treat a Storage Access Framework URI as a filesystem path.
+6. Keep pause/resume/cancel notification controls as a follow-up unless the
+   first implementation can add them without expanding the lifecycle contract.
+
+## Phase 11: Preferred Loopback Origins And Security Boundary
+
+1. Generate and persist one per-install preferred framework-relay port in each
+   Electron, GeckoView, and Cefrium app-private configuration. Do not hard-code
+   one shared port across independently runnable clients.
+2. Bind the preferred port directly. On `EADDRINUSE`/`BindException`, bind port
+   zero in the same startup transaction and continue with the actual assigned
+   port. Never probe then bind, and never connect to the process occupying the
+   preferred port.
+3. Publish preferred port, actual port, and fallback reason in native diagnostics.
+   Retargeting the configured framework keeps the live listener and origin.
+4. Treat a stable origin as a browser-storage/performance convenience only.
+   Stable client identity, Sidebar presentation, project association, and
+   reconnect restoration remain keyed by their native authorities, never by the
+   loopback port. A fallback run must remain fully functional.
+5. Keep Electron's persistent framework partition and the Android apps' private
+   browser profiles as the user-data authorities. Do not add an arbitrary
+   `--user-data-dir` escape hatch unless a separately designed portable-profile
+   feature supplies locking, migration, and ownership validation.
+6. Do not add `--disable-web-security`, Electron `webSecurity: false`, or an
+   equivalent Chromium/Gecko bypass. UI extensions and remote application pages
+   make a process-wide same-origin bypass materially unsafe; routing defects must
+   be fixed at the relay, CSP, or explicit native bridge boundary.
+7. Do not ship a shared certificate/private key. Optional user-owned HTTPS
+   upstream, certificate generation, or pinning is separate future work. Until
+   then, remote non-loopback HTTP has no transport confidentiality or peer
+   authentication and should continue to be documented for VPN/Tailscale use.
+
 ## Validation
 
 Code TE2:
@@ -232,10 +284,12 @@ Android, after confirming at least 2 GiB free:
 
 ```bash
 cd android
-./gradlew :cefrium:testDebugUnitTest
-./gradlew :cefrium:assembleDebug
 ./gradlew :app:testGeckoDebugUnitTest
 ./gradlew :app:assembleGeckoDebug
+
+cd cefrium
+JAVA_HOME=/path/to/jdk-25 ./gradlew testDebugUnitTest
+JAVA_HOME=/path/to/jdk-25 ./gradlew assembleDebug assembleStaging
 ```
 
 Bundled Android asset publication and shared TE2 framework restart remain
@@ -277,3 +331,11 @@ outside this slice. Cefrium APK installation is separately approved.
 - Mobile local file-switch and proxied-request latency no longer depends on a
   timing race that a faster desktop processor merely hides.
 - GeckoView comparison tests/build continue to pass.
+- HTTP-triggered Cefrium downloads reach an explicit user-selected document,
+  support multiple queued requests, and leave no orphaned staging files after
+  success, cancellation, interruption, or Activity teardown.
+- Each native client normally reuses its per-install preferred loopback port,
+  survives an occupied port through a free-port fallback, and never derives
+  client identity or authorization from that origin.
+- Code TE2 retains browser web security; preferred loopback origins do not
+  require a global same-origin bypass.
