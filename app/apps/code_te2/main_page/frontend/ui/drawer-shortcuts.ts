@@ -9,6 +9,8 @@
  *   codeInspectorPanel: { show: Function, hide: Function },
  *   toggleTerminal: () => void,
  *   openDrawer: () => void,
+ *   closeDrawer: () => void,
+ *   isDrawerOpen: () => boolean,
  *   activateTerminal: () => Promise<void>,
  *   setFontScale: (preset: 'small'|'medium'|'large') => void,
  *   triggerEditorSearchPanel: (reason?: string, opts?: any) => Promise<any>,
@@ -31,42 +33,78 @@ export function initDrawerAndShortcuts(deps: any) {
     const codeInspectorContainer = document.getElementById('code-inspector-container');
     const codeInspectorHeader = document.getElementById('code-inspector-header');
 
+    const statusToggle = document.getElementById('drawer-status-toggle');
+    const isAvailableTab = (tab: HTMLElement | null): tab is HTMLElement =>
+      !!tab && !tab.hidden && tab.getAttribute('aria-hidden') !== 'true';
+    const availableTerminalTab = () =>
+      tabBar?.querySelector<HTMLElement>('.drawer-tab[data-tab="terminal"]') ?? null;
+    const selectedTab = () => {
+      const active = tabBar?.querySelector<HTMLElement>('.drawer-tab.active') ?? null;
+      return isAvailableTab(active) ? active : availableTerminalTab();
+    };
+    const syncStatusToggle = (open = deps.isDrawerOpen()) => {
+      statusToggle?.setAttribute('aria-expanded', open ? 'true' : 'false');
+      statusToggle?.classList.toggle('active', open);
+    };
+    const activateTab = (tab: HTMLElement, openDrawer: boolean) => {
+      if (!isAvailableTab(tab)) return;
+      const target = tab.dataset.tab;
+      tabBar?.querySelectorAll<HTMLElement>('.drawer-tab').forEach(t => t.classList.toggle('active', t === tab));
+      if (terminalHeader) terminalHeader.style.display = 'none';
+      if (terminalContainer) terminalContainer.style.display = 'none';
+      if (consoleContainer) consoleContainer.style.display = 'none';
+      if (secondEditorContainer) secondEditorContainer.hidden = true;
+      if (extensionLogContainer) extensionLogContainer.style.display = 'none';
+      if (extensionLogHeader) extensionLogHeader.style.display = 'none';
+      if (codeInspectorContainer) codeInspectorContainer.style.display = 'none';
+      if (codeInspectorHeader) codeInspectorHeader.style.display = 'none';
+      deps.consoleDrawer.hide();
+      deps.mobileSecondEditor?.hide();
+      deps.extensionActivityPanel.hide();
+      deps.codeInspectorPanel.hide();
+
+      if (target === 'terminal') {
+        if (terminalHeader) terminalHeader.style.display = '';
+        if (terminalContainer) terminalContainer.style.display = '';
+        void deps.activateTerminal();
+      } else if (target === 'console') {
+        if (openDrawer) deps.openDrawer();
+        deps.consoleDrawer.show();
+      } else if (target === 'second-window') {
+        if (openDrawer) deps.openDrawer();
+        deps.mobileSecondEditor?.show();
+      } else if (target === 'extensions') {
+        if (openDrawer) deps.openDrawer();
+        deps.extensionActivityPanel.show();
+      } else if (target === 'code-inspector') {
+        if (openDrawer) deps.openDrawer();
+        deps.codeInspectorPanel.show();
+      }
+    };
+
     if (tabBar) {
       tabBar.addEventListener('click', (e) => {
         const tab = (e.target instanceof Element)
           ? e.target.closest<HTMLElement>('.drawer-tab')
           : null;
         if (!tab) return;
-        const target = tab.dataset.tab;
-        tabBar.querySelectorAll<HTMLElement>('.drawer-tab').forEach(t => t.classList.toggle('active', t === tab));
-        if (terminalHeader) terminalHeader.style.display = 'none';
-        if (terminalContainer) terminalContainer.style.display = 'none';
-        if (consoleContainer) consoleContainer.style.display = 'none';
-        if (secondEditorContainer) secondEditorContainer.hidden = true;
-        if (extensionLogContainer) extensionLogContainer.style.display = 'none';
-        if (extensionLogHeader) extensionLogHeader.style.display = 'none';
-        if (codeInspectorContainer) codeInspectorContainer.style.display = 'none';
-        if (codeInspectorHeader) codeInspectorHeader.style.display = 'none';
-        deps.consoleDrawer.hide();
-        deps.mobileSecondEditor?.hide();
-        deps.extensionActivityPanel.hide();
-        deps.codeInspectorPanel.hide();
-
-        if (target === 'terminal') {
-          if (terminalHeader) terminalHeader.style.display = '';
-          if (terminalContainer) terminalContainer.style.display = '';
-          void deps.activateTerminal();
-        } else if (target === 'console') {
-          deps.consoleDrawer.show();
-        } else if (target === 'second-window') {
-          deps.mobileSecondEditor?.show();
-        } else if (target === 'extensions') {
-          deps.extensionActivityPanel.show();
-        } else if (target === 'code-inspector') {
-          deps.codeInspectorPanel.show();
-        }
+        activateTab(tab, false);
       });
     }
+
+    statusToggle?.addEventListener('click', () => {
+      if (deps.isDrawerOpen()) {
+        deps.closeDrawer();
+        return;
+      }
+      const tab = selectedTab();
+      if (tab) activateTab(tab, true);
+    });
+    document.addEventListener('te2:drawer-visibility-changed', (event) => {
+      const detail = event instanceof CustomEvent ? event.detail : null;
+      syncStatusToggle(detail?.open === true);
+    });
+    syncStatusToggle();
   }
 
   const miToggleTerminal = deps.requireEl('#mi-toggle-terminal');

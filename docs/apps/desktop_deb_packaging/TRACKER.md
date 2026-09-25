@@ -1227,6 +1227,23 @@ Corrective implementation evidence recorded on 2026-08-23:
 This is the next implementation phase. It has no assigned release version and
 does not authorize publication.
 
+### Shared drawer polish before the next release
+
+- [x] Add one shared desktop/mobile status-bar Panel button that toggles the
+  existing bottom drawer in its last selected available tab.
+- [x] Keep drawer selection page-local, publish only a local visibility event,
+  fall back to Terminal when the selected tab disappears, and avoid PTY creation
+  when restoring any non-terminal panel.
+- [x] Preload Code TE2's JetBrains Mono Nerd face through the existing vendored
+  xterm web-font addon before opening the drawer terminal, with a non-blocking
+  browser-font fallback.
+- [x] Pass focused drawer tests, Code TE2 TypeScript checking, and the production
+  frontend build. Stop there: this slice does not bump versions or publish.
+- [ ] In a separately approved release run, publish ALS 0.2.132 first, pin it in
+  TE2, synchronize the next TE2 patch version, construct/audit all Linux,
+  Electron, Termux, and APK artifacts from clean tags, and complete Debian plus
+  physical-device acceptance before PyPI and a normal/latest GitHub alpha release.
+
 ### Phase 6A — bounded install and desktop-runtime upgrades
 
 - [x] Trace current Linux/Termux activation, same-version replacement,
@@ -1250,6 +1267,9 @@ does not authorize publication.
   fingerprint and prune older runtimes only after XDG integration succeeds.
 - [x] Ensure `te2 desktop install` repairs a missing owned `.desktop`, wrapper,
   or icon on a valid runtime cache hit without forcing an Electron rebuild.
+- [x] Make managed `te2-desktop` follow the stable installer-owned `te2`
+  command, reconcile an existing desktop receipt on every Linux upgrade, and
+  verify the executing source fingerprint before launching Electron.
 - [ ] Pass clean/new-version/same-version/failure/rollback/third-version Linux
   transactions in the accepted Debian SSH harness and the equivalent Termux
   transaction tests before any release work.

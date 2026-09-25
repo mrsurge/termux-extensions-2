@@ -1681,8 +1681,26 @@
     cursor: pointer;
   }
   .extension-status-health:hover,
-  .extension-status-entry:hover {
+  .extension-status-entry:hover,
+  .drawer-status-toggle:hover {
     background: rgba(255, 255, 255, 0.1);
+  }
+  .drawer-status-toggle {
+    flex: 0 0 auto;
+    height: 20px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 7px;
+    border: 0;
+    color: inherit;
+    background: transparent;
+    font: inherit;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .drawer-status-toggle[aria-expanded="true"] {
+    background: rgba(255, 255, 255, 0.08);
   }
   .extension-status-health.has-errors {
     background: #a52a2a;
@@ -2708,6 +2726,7 @@
     <div id="comparison-status"></div>
     <div id="extension-status-left" class="extension-status-group"></div>
     <div id="extension-status-right" class="extension-status-group"></div>
+    <button id="drawer-status-toggle" class="drawer-status-toggle" type="button" aria-controls="terminal-drawer" aria-expanded="false" title="Toggle bottom panel">⌃ Panel</button>
     <button id="extension-status-health" class="extension-status-health" type="button">Extensions</button>
   </footer>
 

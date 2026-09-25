@@ -6,7 +6,7 @@ import shlex
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from typing import Any, cast
 
 from desktop_client import electron_runtime
@@ -173,6 +173,60 @@ class DesktopElectronRuntimeTests(unittest.TestCase):
         self.assertEqual(first.root, second.root)
         self.assertTrue(integration.desktop_entry.is_file())
         self.assertEqual(len(self.labels), 3)
+
+    def test_managed_launcher_override_uses_stable_te2_command(self) -> None:
+        stable_te2 = self.home / ".local" / "bin" / "te2"
+        stable_te2.parent.mkdir(parents=True)
+        stable_te2.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        stable_te2.chmod(0o755)
+        environment = {
+            **self.environ,
+            electron_runtime.DESKTOP_TE2_COMMAND_OVERRIDE: str(stable_te2),
+        }
+        patches = self._patches()
+        with patches[0], patches[1], patches[2], patches[3], patches[4]:
+            electron_runtime.ensure_desktop_runtime(environ=environment)
+
+        integration = electron_runtime.desktop_integration_paths(environment)
+        wrapper = integration.wrapper.read_text(encoding="utf-8")
+        self.assertIn(f"exec {shlex.quote(str(stable_te2))} desktop launch", wrapper)
+        self.assertNotIn(shlex.quote(sys.executable), wrapper)
+
+    def test_launch_reconciles_runtime_with_current_source(self) -> None:
+        runtime = electron_runtime.ElectronRuntime(
+            root=self.home / "runtime",
+            executable=self.home / "runtime" / "TE2Desktop-bin",
+            launcher=self.home / "runtime" / "TE2Desktop",
+            fingerprint="current-source",
+            version="1.0.0",
+            identity=IDENTITY.copy(),
+        )
+        completed = Mock(returncode=0)
+        with (
+            patch.object(
+                electron_runtime,
+                "ensure_desktop_runtime",
+                return_value=runtime,
+            ) as ensure,
+            patch.object(
+                electron_runtime.subprocess,
+                "run",
+                return_value=completed,
+            ) as run,
+        ):
+            result = electron_runtime.launch_desktop_runtime(
+                ["--test"],
+                environ=self.environ,
+                home=self.home,
+            )
+
+        self.assertEqual(result, 0)
+        ensure.assert_called_once_with(
+            install_integration=False,
+            environ=self.environ,
+            home=self.home,
+        )
+        self.assertEqual(run.call_args.args[0], [str(runtime.launcher), "--test"])
 
     def test_integration_failure_restores_prior_runtime(self) -> None:
         patches = self._patches()
