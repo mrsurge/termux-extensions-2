@@ -1896,9 +1896,9 @@ interface MonacoBootWindowLike extends Window {
     // Preferences may advance while resources load. Recheck before releasing
     // boot, replay or open transactions to create/attach a model.
     while (true) {
-      const theme = themeFromPrefs(cachedPrefs) || 'github-dark';
+      const theme = themeFromPrefs(cachedPrefs) || 'github-dark-default';
       await applyMonacoTheme(theme);
-      if ((themeFromPrefs(cachedPrefs) || 'github-dark') === theme) return;
+      if ((themeFromPrefs(cachedPrefs) || 'github-dark-default') === theme) return;
     }
   }
 

@@ -18,6 +18,7 @@ test('historical appearance shares font scaling and cannot enable mutation/intel
     lineNumbers: 'off', wordWrap: 'on', cursorStyle: 'block-outline' });
   assert.equal(theme, 'github-light');
   assert.equal(historicalAppearance({}).appearance.fontSize, 12);
+  assert.equal(historicalAppearance({}).theme, 'github-dark-default');
   assert.equal(historicalAppearance({ preferences: { editor: { fontScale: 18 } } }).appearance.fontSize, 18);
 });
 

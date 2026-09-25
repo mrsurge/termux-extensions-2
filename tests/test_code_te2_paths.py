@@ -129,7 +129,7 @@ class CodeTe2PathTests(unittest.TestCase):
         self.assertFalse(editor["autoSave"])
         self.assertFalse(editor["showInlineDiffs"])
         self.assertFalse(editor["showDraftDiffs"])
-        self.assertEqual("github-dark", editor["theme"])
+        self.assertEqual("github-dark-default", editor["theme"])
         self.assertEqual("line", editor["cursorStyle"])
 
     def test_invalid_cursor_style_migrates_to_line(self) -> None:
