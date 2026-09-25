@@ -58,6 +58,25 @@ the server-side WBA payload; no native asset publication is needed for the fix.
 - [ ] Implement only the confirmed correction, if required.
 - [ ] Build/bundle and live-test Motorola and Pixel with verified client assets.
 
+## Release artifact reuse
+
+- [x] Preliminary source inspection of Linux wheel injection, runtime provenance,
+  native build info, bootstrap fingerprints and Termux version coupling.
+- [x] Record proposed separate package/native identities and fail-closed reuse.
+- [x] Define wheel/install-script-first publication and independent optional APK
+  releases, with separately tracked native, bundled and OTA asset identities.
+- [ ] Audit complete native inputs, protocol compatibility and version consumers.
+- [x] Select release-family numbering: native `0.2.352`, reuse releases
+  `0.2.352.1`, `.2`, then a new native family such as `0.2.353`.
+- [ ] Audit version consumers and define provenance migration for that scheme.
+- [ ] Define native/asset compatibility and APK resolution for wheel-only releases;
+  audit latest/download links and existing Electron upgrade/materialization.
+- [ ] Publish portable native artifact manifests and add verified reuse selection.
+- [ ] Prove frontend-only packaging needs no Cargo; cover invalid reuse tests.
+- [ ] Validate reused binaries through Debian/Termux fresh install and upgrade.
+- [ ] Validate old-APK OTA, incompatible/failed OTA handling and fresh APK discovery
+  when the newest release publishes only updated Python/frontend artifacts.
+
 ## Completion
 
 - [ ] Update architectural documentation/memory for verified contract changes.
