@@ -372,11 +372,17 @@ export async function provideColorPresentations(
     "plaintext";
   const colorInfo = normalizeRawColorInfo(input.colorInfo);
   if (!colorInfo) return { ok: false, error: "invalid colorInfo" };
+  const document: ProviderDocument = {
+    languageId,
+    scheme: runtime.documentScheme(),
+    authority,
+    path,
+  };
 
   const handles = await documentColorHandles(
     runtime,
     input,
-    languageId,
+    document,
     timeoutMs,
   );
   if (handles.length === 0) {
