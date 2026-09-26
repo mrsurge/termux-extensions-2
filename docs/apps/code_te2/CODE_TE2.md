@@ -4129,6 +4129,18 @@ snapshots preserve ledger membership and parked client preferences while the
 adapter rehydrates. Authoritative reconciliation preserves surviving local
 order, appends new slots, and chooses a local fallback foreground.
 
+During concurrent primary-view activation, WBA snapshots carry
+`membershipComplete: false`. Python upserts ready surfaces immediately but cannot
+prune absent ones until activation completes; ordinary complete snapshots retain
+their removal semantics. Cancellation fences the old activation batch.
+Persistent contributed-view identities (`vsix-webview:vsix:...`) retain their
+local hide/order preferences even when absent from live membership, including
+worker restart or a failed provider. Only live slots render or receive routing;
+stale foreground and mention identities are cleared. Disposable panels and run
+targets are not retained by this preference rule. Existing client-local stores
+remain the persistence authority; the proposed backend migration and expiry were
+cancelled after live acceptance of the reconciliation fix.
+
 The host also treats its pre-snapshot empty slot list as uninitialized, not as
 an authoritative empty ledger. Loading durable presentation state before the
 first ledger snapshot must never prune or rewrite it.

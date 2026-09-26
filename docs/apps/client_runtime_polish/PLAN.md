@@ -35,7 +35,7 @@ switches, reconnects, and multiple clients opening the same document.
 
 ## 2. Stable client identity and durable Sidebar preferences
 
-### Intended contract
+### Accepted correction; additional upgrades cancelled
 
 Assign one stable primary identity per native installation or browser profile.
 Each device/client has its own identity; devices do not share one global ID.
@@ -44,51 +44,38 @@ must never rotate it. Explicit reset may rotate it. Secondary editors retain
 their separate stable identities. Keep transient window/console/session identity
 out of durable preference keys.
 
-Prefer a compact cryptographically random opaque ID for new identities. Audit
-current validators and native stores before choosing its final length. Preserve
-existing valid identities instead of shortening them in place and orphaning
-preferences. Browser IDs use localStorage; native IDs use app-private storage.
+The reported loss was traced to destructive membership reconciliation, not missing
+persistence. The correction is implemented and user live-accepted. Retain existing
+IDs and client-owned storage: Electron's `desktop-state.json`, Android's private
+`android_sidebar_presentation` store, and browser localStorage. Native records use
+configured upstream identity rather than transient relay origin. No backend
+preference-store migration or compact-ID redesign is needed for this workstream.
 
-Store per-client Sidebar ordering and hidden/embedded/detached preferences in a
-dedicated on-disk configuration file under canonical TE2 config storage, scoped
-by project and the stable identity. This is the proposed backend projection;
-investigate migration from existing native/browser stores and select one clear
-authority rather than leaving competing persistence writers. Authenticate writes
-through the existing client lane; an ID alone is not authorization.
-
-Audit why Hide extension view is lost after Code TE2 exits: compare the saved
-record, client identity, upstream/project key, slot/extension identity, restart
-snapshot, and activation replay. Hidden preferences must survive regenerated
-runtime handles, non-authoritative empty snapshots, and delayed WBA activation.
+Keep the regression coverage: partial WBA activation snapshots must not prune
+not-yet-ready views; persistent contributed-view hide/order preferences survive
+temporary absence. Only live slots render and participate in routing. Disposable
+panels and run targets keep their established removal semantics.
 
 ### Startup and storage
 
-Load the small client preference projection once through an existing authenticated
-boot/preference exchange where practical. Measure before adding another request.
-Sidebar initialization runs asynchronously from editor/document/page readiness.
+Preserve existing asynchronous Sidebar loading and avoid extra startup round trips.
 Apply stored visibility before materializing extension views; extension activation
 and resource loading must not hold either editor or Sidebar shell readiness.
 Preserve exact-client routing, shared membership, and deliberate user reopen.
 
-Track last access for retained preference records, with coalesced writes rather
-than a disk write per interaction. Records unused for 14 days become eligible
-for cleanup after Sidebar initialization, off the critical path. Cleanup must
-protect active/reconnected clients and concurrent writes, never delete shared
-documents or extension state, and never rotate the client's installation ID.
-Returning after eviction retains that ID but starts with default presentation.
-Do not introduce recurring polling for housekeeping.
+Cancel the proposed 14-day expiry, last-access bookkeeping, backend boot projection,
+and related migration work. Preserve current storage bounds; add no housekeeping
+polling. Reopen optimization or identity work only with new evidence of a problem.
 
 Source starting points: frontend `client-identity.ts`, Sidebar
 `presentation-state.ts`/`runtime.ts`, Electron `desktop-state-store.ts`, Android
 `AndroidNativePageIdentity.kt`/`AndroidSidebarPresentationStore.kt`, backend
 `client_presentation.py`, and the existing PreferencesStore/Sidebar ledger.
 
-Acceptance: hide and reorder, then reload the page, restart the app worker,
-restart the framework, and restart the native app. Repeat on Electron, GeckoView,
-Cefrium, and browser with two independent clients, two projects, changed relay
-ports, delayed WBA, and unavailable extension providers. Verify no visible flash
-of hidden views and no editor startup dependency on Sidebar restoration. Cover
-14-day eviction and concurrent access with a controlled clock.
+Status: user reports the fix working and live-accepted. Automated coverage includes
+staggered activation, empty membership and retained preferences, with existing
+native/browser storage tests retained. This does not claim every conceivable
+multi-client/restart combination was manually tested.
 
 ## 3. Cefrium pinch-to-zoom suppression
 

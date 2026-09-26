@@ -268,6 +268,12 @@ class SidebarWindowLedgerTests(unittest.TestCase):
                 project,
                 desired,
             )
+            partial = sidebar_window_state.reconcile_extension_webview_slots(
+                project, {}, prune=False,
+            )
+            self.assertFalse(partial["changed"])
+            self.assertEqual([], partial["removed"])
+            self.assertIn(host_id, partial["state"]["slots"])
 
         self.assertTrue(first["changed"])
         self.assertFalse(second["changed"])

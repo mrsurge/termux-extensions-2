@@ -7,8 +7,8 @@ Working branch: `feature/desktop-deb-packaging`; no new branch needed for planni
 
 - [x] Record the three requested workstreams and initial source entry points.
 - [x] Separate verified source observations from unconfirmed bug explanations.
-- [x] Capture stable identity, dedicated persistence, asynchronous startup, and
-  deferred 14-day cleanup requirements.
+- [x] Capture the original persistence proposal; superseded below after the
+  reconciliation fix passed live acceptance.
 
 ## Color picker
 
@@ -41,15 +41,34 @@ the server-side WBA payload; no native asset publication is needed for the fix.
 
 ## Sidebar identity and preferences
 
-- [ ] Reproduce hide/order loss across Code TE2 worker restart and capture keys.
-- [ ] Audit native/browser identity creation, validation, reset, and propagation.
-- [ ] Decide compact new-ID format without rotating existing client identities.
-- [ ] Define dedicated backend config schema, migration, and single write owner.
-- [ ] Integrate one small initial preference projection with existing boot traffic.
-- [ ] Separate editor readiness, Sidebar shell readiness, and extension activation.
-- [ ] Add coalesced last-access tracking and deferred inactive-record cleanup.
-- [ ] Validate restart, multi-client/project, relay-port, stale snapshot, and
-  delayed-provider behavior across all four client types.
+### First correction — live membership is not durable preference authority
+
+Source investigation found concurrent primary-view activation publishing each
+individual view's snapshot as complete. Python could remove not-yet-created views,
+then frontend reconciliation discarded their hidden/order settings. Persistent
+contributed-view IDs are already deterministic; console IDs additionally contain
+a separate window identity, so their length alone does not establish identity churn.
+
+Implemented `membershipComplete` on WBA snapshots: activation progress upserts
+immediately without pruning; completion permits live-membership removal. Session
+reset remains non-authoritative. Frontend reconciliation retains order/mode for
+absent persistent contributed views, but projects only live slots and clears stale
+foreground/mention targets. Disposable panel/run-target removal is unchanged.
+Storage migration, shortened IDs and expiry were subsequently cancelled by the
+user; retain the existing client-local stores.
+
+Validation: 26 focused JS tests and 12 Python tests passed; Code TE2 typecheck and
+frontend/WBA build passed. User reports the correction working and live-accepted.
+The agent did not restart the shared runtime, perform native OTA, edit Android,
+bump versions or publish a release during implementation.
+
+- [x] Trace and correct the source-backed preference-loss path.
+- [x] Retain regression tests and record user live acceptance.
+- [x] Close this workstream with existing client-local persistence retained.
+
+Cancelled, not implemented: backend config migration, new boot projection,
+compact-ID redesign, last-access tracking and 14-day expiry. Preserve asynchronous
+Sidebar loading; no additional startup redesign without new evidence.
 
 ## Cefrium zoom
 

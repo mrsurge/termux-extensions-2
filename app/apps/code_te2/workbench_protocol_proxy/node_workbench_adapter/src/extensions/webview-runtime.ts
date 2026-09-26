@@ -636,6 +636,7 @@ window.addEventListener('blur',closeContextMenu);
 export class WebviewRuntime {
   // Background startup belongs to this workspace/session, never its successor.
   private activationController = new AbortController();
+  private pendingPrimaryActivations = 0;
   private readonly serverEpoch = crypto.randomUUID();
   private readonly providers = new Map<string, WebviewProvider>();
   private readonly surfaces = new Map<string, ExtensionWebviewSurface>();
@@ -692,31 +693,39 @@ export class WebviewRuntime {
   async activatePrimaryViews(): Promise<void> {
     const { signal } = this.activationController;
     const contributions = this.primaryContributions();
-    await Promise.all(
-      contributions.map(async (contribution) => {
-        try {
-          await this.runtime.activateByEvent(`onView:${contribution.viewType}`);
-          if (signal.aborted) return;
-          await this.waitForProvider(contribution.viewType, 5000, signal);
-          if (signal.aborted) return;
-          if (!this.findSurfaceByView(contribution.viewType)) {
-            await this.createSurface(contribution);
+    this.pendingPrimaryActivations++;
+    try {
+      await Promise.all(
+        contributions.map(async (contribution) => {
+          try {
+            await this.runtime.activateByEvent(`onView:${contribution.viewType}`);
+            if (signal.aborted) return;
+            await this.waitForProvider(contribution.viewType, 5000, signal);
+            if (signal.aborted) return;
+            if (!this.findSurfaceByView(contribution.viewType)) {
+              await this.createSurface(contribution);
+            }
+          } catch (error) {
+            if (signal.aborted) return;
+            this.runtime.log(
+              `[webview] activation failed view=${contribution.viewType}:`,
+              error instanceof Error ? error.message : String(error),
+            );
           }
-        } catch (error) {
-          if (signal.aborted) return;
-          this.runtime.log(
-            `[webview] activation failed view=${contribution.viewType}:`,
-            error instanceof Error ? error.message : String(error),
-          );
-        }
-      }),
-    );
+        }),
+      );
+    } finally {
+      if (this.activationController.signal === signal) {
+        this.pendingPrimaryActivations--;
+      }
+    }
     if (!signal.aborted) this.emitSnapshot();
   }
 
   clear(reason: string, clearProviders = true): void {
     this.activationController.abort();
     this.activationController = new AbortController();
+    this.pendingPrimaryActivations = 0;
     const oldWorkspace = this.workspaceFolder();
     for (const runtimeSurface of [...this.runtimeSurfaces.values()]) {
       try {
@@ -1783,6 +1792,9 @@ export class WebviewRuntime {
       workspaceFolder: projectPath || null,
       workspaceId: projectPath ? stableHash(projectPath) : null,
       authoritative,
+      // Individual views may be ready while other providers are still activating.
+      // Publish those views immediately, but absence is not removal yet.
+      membershipComplete: this.pendingPrimaryActivations === 0,
       reason,
       surfaces,
     };

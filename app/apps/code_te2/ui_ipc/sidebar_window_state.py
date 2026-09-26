@@ -912,11 +912,13 @@ def reconcile_extension_webview_slots(
     desired_slots: dict[str, JsonObject],
     *,
     upsert: bool = True,
+    prune: bool = True,
 ) -> JsonObject:
-    """Apply one complete WBA extension-surface membership snapshot.
+    """Apply WBA extension-surface membership or non-pruning activation progress.
 
     WBA snapshots are authoritative for extension-owned URL slots in one
-    project. The reconciliation performs at most one preference write and does
+    project. Incomplete activation snapshots may upsert but never prune. The
+    reconciliation performs at most one preference write and does
     not rewrite timestamps for an identical snapshot.
     """
     normalized_project = _norm(project_root)
@@ -934,7 +936,7 @@ def reconcile_extension_webview_slots(
         surface = _as_object(slot.get("webviewSurface") or slot.get("webview_surface"))
         if not surface or _norm(surface.get("projectPath")) != normalized_project:
             continue
-        if host_id not in desired_host_ids:
+        if prune and host_id not in desired_host_ids:
             slots.pop(host_id, None)
             removed.append(host_id)
             changed = True

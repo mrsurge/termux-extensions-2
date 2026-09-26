@@ -1184,6 +1184,35 @@ test("webview panel uses the shared secure surface and disposes through ExtHostW
 });
 
 // Deferred startup must not publish old-workspace surfaces after teardown.
+test("staggered view activation publishes progress without claiming complete membership", async (t) => {
+  let release;
+  const slow = new Promise(resolve => { release = resolve; });
+  const events = [];
+  const runtime = new WebviewRuntime({
+    reconstructionStoragePath: await reconstructionStorage(t),
+    rpcIds: RPC,
+    getWorkspaceFolder: () => process.cwd(),
+    getExtensions: () => [],
+    activateByEvent: event => event === 'onView:slow' ? slow : Promise.resolve(),
+    onLifecycleEvent: event => events.push(event),
+    log: () => {},
+  });
+  runtime.primaryContributions = () => ['fast', 'slow'].map(viewType => ({
+    viewType, extensionId: 'example.extension', title: viewType,
+  }));
+  runtime.providers.set('fast', {});
+  runtime.providers.set('slow', {});
+  const pending = runtime.activatePrimaryViews();
+  await waitFor(() => events.length > 0, 'fast view must publish before slow activation finishes');
+  assert.equal(events[0].surfaces.length, 1);
+  assert.equal(events[0].membershipComplete, false);
+  assert.equal(runtime.snapshot().membershipComplete, false);
+  release();
+  await pending;
+  assert.equal(events.at(-1).surfaces.length, 2);
+  assert.equal(events.at(-1).membershipComplete, true);
+});
+
 for (const boundary of ['activation', 'provider']) {
   test(`background webview startup is fenced during ${boundary} wait`, async (t) => {
     let release;

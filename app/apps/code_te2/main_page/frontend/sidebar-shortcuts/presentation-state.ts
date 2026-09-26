@@ -216,7 +216,12 @@ export function reconcileSidebarPresentationState(
     left.localeCompare(right),
   );
   const authoritativeIds = new Set(canonicalIds);
-  const survivingOrder = previous.order.filter((id) => authoritativeIds.has(id));
+  // Persistent contributed views can disappear during worker restart, provider
+  // failure or workspace parking. Their preferences are not live membership.
+  // Dynamic panels/run targets keep the existing removal semantics.
+  const survivingOrder = previous.order.filter((id) =>
+    authoritativeIds.has(id) || id.startsWith("vsix-webview:vsix:"),
+  );
   const survivingIds = new Set(survivingOrder);
   const order = [
     ...survivingOrder,
@@ -224,7 +229,7 @@ export function reconcileSidebarPresentationState(
   ];
   const foregroundHostId = chooseForegroundFallback(
     previous,
-    order,
+    order.filter((id) => authoritativeIds.has(id)),
     authoritativeIds,
   );
   const lastAgentHostId = authoritativeIds.has(previous.lastAgentHostId)

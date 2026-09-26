@@ -141,6 +141,29 @@ test("an uninitialized ledger cannot prune durable presentation state", async ()
   assert.equal(beforeSnapshot.presentations.gamma, "detached");
 });
 
+test("contributed view preferences survive empty and staggered restart membership", async () => {
+  const api = await importPresentationState();
+  const a = "vsix-webview:vsix:workspace:a";
+  const b = "vsix-webview:vsix:workspace:b";
+  const panel = "vsix-webview:vsix-panel:workspace:temporary";
+  const original = state({
+    order: [b, a, panel], foregroundHostId: b, lastAgentHostId: b,
+    presentations: { [a]: "embedded", [b]: "hidden", [panel]: "embedded" },
+  });
+  const empty = api.reconcileSidebarPresentationState(original, []);
+  assert.deepEqual(empty.order, [b, a]);
+  assert.equal(empty.foregroundHostId, "");
+  assert.equal(empty.lastAgentPresentationId, "");
+  assert.equal(empty.presentations[b], "hidden");
+  // Round-trip the persisted shape, as a new page would.
+  const first = api.reconcileSidebarPresentationState(JSON.parse(JSON.stringify(empty)), [a]);
+  assert.equal(first.foregroundHostId, a);
+  const complete = api.reconcileSidebarPresentationState(first, [a, b]);
+  assert.deepEqual(complete.order, [b, a]);
+  assert.equal(complete.presentations[b], "hidden");
+  assert.equal(complete.presentations[panel], undefined);
+});
+
 test("activation keeps foreground and last agent target as separate facts", async () => {
   const { activateSidebarPresentation } = await importPresentationState();
 

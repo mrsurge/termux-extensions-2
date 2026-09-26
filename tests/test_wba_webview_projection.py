@@ -8,6 +8,23 @@ from app.apps.code_te2 import wba_event_bridge
 
 
 class WbaWebviewProjectionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_activation_progress_cannot_prune_existing_membership(self) -> None:
+        with (
+            patch.object(wba_event_bridge, "_event_workspace_root", return_value="/workspace/project"),
+            patch(
+                "app.apps.code_te2.ui_ipc.sidebar_window_state.reconcile_extension_webview_slots",
+                return_value={"changed": False},
+            ) as reconcile,
+        ):
+            await wba_event_bridge.dispatch_wba_pipe_event({
+                "type": "webview/snapshot",
+                "workspaceFolder": "/workspace/project",
+                "surfaces": [],
+                "authoritative": True,
+                "membershipComplete": False,
+            })
+        reconcile.assert_called_once_with("/workspace/project", {}, upsert=True, prune=False)
+
     async def test_snapshot_projects_membership_without_forcing_activation(self) -> None:
         project = "/workspace/project"
         surface = {
@@ -157,7 +174,7 @@ class WbaWebviewProjectionTests(unittest.IsolatedAsyncioTestCase):
                 }
             )
 
-        reconcile.assert_called_once_with(project, {}, upsert=True)
+        reconcile.assert_called_once_with(project, {}, upsert=True, prune=True)
         forget.assert_called_once_with([host_id])
         publish.assert_awaited_once()
 

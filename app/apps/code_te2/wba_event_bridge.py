@@ -359,6 +359,7 @@ async def _handle_webview_snapshot(ev: JsonObject) -> None:
         project_root,
         desired_slots,
         upsert=backend_root == project_root,
+        prune=ev.get("membershipComplete") is not False,
     )
     if result.get("changed") is not True:
         return
