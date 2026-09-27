@@ -498,6 +498,10 @@ def editor_runtime_build_connect_snapshot(
 
     snapshot: dict[str, object] = {
         "project": project,
+        "comparison": {
+            "ref": (_history_store.get_diff_base(project) or "HEAD") if project else "HEAD",
+            "revision": time.monotonic_ns() // 1000,
+        },
         "session_state": session_state,
         "preferences": prefs,
         "currentPath": current_path,

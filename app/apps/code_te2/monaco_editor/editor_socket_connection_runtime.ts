@@ -194,6 +194,12 @@ export function registerEditorSocketConnectionHandlers(
         console.log((t != null ? ('t=' + t + 'ms ') : '') + 'now=' + Date.now(), '[editor:ssot] rx', { hasFile: !!snapshotFile, currentPath: snapshotRecord && snapshotRecord.currentPath });
       } catch (_) {}
       deps.setCachedPrefs(snapshot);
+      // A disconnected client may have missed the comparison-change fact.
+      // Restore its fence before any asynchronous model/baseline work begins.
+      const comparison = asRecord(snapshotRecord && snapshotRecord.comparison);
+      if (comparison && typeof comparison.ref === 'string' && typeof comparison.revision === 'number') {
+        updateComparisonBaselineFence(comparison.ref, comparison.revision);
+      }
       trace('preferences-applied');
       if (snapshotFile) {
         const file = snapshotFile;

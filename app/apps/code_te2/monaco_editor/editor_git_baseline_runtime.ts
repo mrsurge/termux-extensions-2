@@ -173,6 +173,15 @@ function scheduleLineChangeDebug(diffEditor: MonacoDiffEditorLike | null, deps: 
 let comparisonRevision = 0;
 let comparisonRef: string | null = null;
 
+// The RPC reply and client-room notification carry the same baseline. Only
+// suppress a completed application while its exact editor/models remain mounted.
+const completedApplications = new WeakMap<EditorGitBaselineRuntimeDeps, {
+  key: string;
+  editor: MonacoDiffEditorLike;
+  original: MonacoTextModelLike;
+  modified: MonacoTextModelLike;
+}>();
+
 export function updateComparisonBaselineFence(ref: string, revision: number): void {
   if (revision < comparisonRevision) return;
   comparisonRevision = revision;
@@ -203,6 +212,15 @@ export function applyGitBaselines(
     if (revision && revision < comparisonRevision) return;
     if (mode === 'commit' && comparisonRef && payload?.base_ref !== comparisonRef) return;
     if (revision) comparisonRevision = revision;
+
+    const applicationKey = JSON.stringify([payloadPath, mode, revision, payload?.base_ref]);
+    const completed = completedApplications.get(deps);
+    if (revision && completed && completed.key === applicationKey) {
+      const currentDiff = deps.getDiffEditor();
+      const mounted = currentDiff?.getModel?.();
+      if (currentDiff === completed.editor && deps.getModel() === completed.modified
+        && mounted?.original === completed.original && mounted?.modified === completed.modified) return;
+    }
 
     const monacoRef = deps.getMonaco();
     if (!monacoRef) {
@@ -343,6 +361,11 @@ export function applyGitBaselines(
       restoreViewState(restoreEditor, savedScrollTop, savedPosition);
       setTimeout(() => { restoreViewState(restoreEditor, savedScrollTop, savedPosition); }, 50);
       setTimeout(() => { restoreViewState(restoreEditor, savedScrollTop, savedPosition); }, 300);
+    }
+    if (revision && currentDiffEditor && originalModel && liveModel) {
+      completedApplications.set(deps, {
+        key: applicationKey, editor: currentDiffEditor, original: originalModel, modified: liveModel,
+      });
     }
   } catch (error) {
     console.warn('[Monaco] applyGitBaselines failed', error);

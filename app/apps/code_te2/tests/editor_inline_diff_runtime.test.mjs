@@ -112,3 +112,41 @@ test('obsolete comparison revisions, refs and modes never reach Monaco', async (
   applyGitBaselines(deps, { path: '/p/a', comparison_mode: 'commit', comparison_revision: 30, base_ref: 'new-ref' });
   assert.equal(reads, 1);
 });
+
+test('reconnect comparison fence permits the new baseline after a missed change event', async () => {
+  const { applyGitBaselines, updateComparisonBaselineFence } = await importTypeScript('monaco_editor/editor_git_baseline_runtime.ts');
+  let reads = 0;
+  const deps = { getCurrentPath: () => '/p/a', getShowInlineDiffs: () => true, getShowDraftDiffs: () => false, getMonaco: () => { reads++; return null; } };
+  updateComparisonBaselineFence('A', 100);
+  // The reconnect snapshot repairs the fence before requesting fresh baselines.
+  updateComparisonBaselineFence('B', 200);
+  applyGitBaselines(deps, { path: '/p/a', comparison_mode: 'commit', comparison_revision: 150, base_ref: 'A' });
+  assert.equal(reads, 0);
+  applyGitBaselines(deps, { path: '/p/a', comparison_mode: 'commit', comparison_revision: 201, base_ref: 'B' });
+  assert.equal(reads, 1);
+});
+
+test('duplicate baseline delivery skips layout but a replaced model reapplies it', async () => {
+  const { applyGitBaselines } = await importTypeScript('monaco_editor/editor_git_baseline_runtime.ts');
+  let mounted = null, head = null, disk = null, live = {}, layouts = 0;
+  const editor = { getModel: () => mounted, setModel: (value) => { mounted = value; }, getLineChanges: () => [1] };
+  const noop = () => {};
+  const deps = {
+    getCurrentPath: () => '/p/a', getShowInlineDiffs: () => true, getShowDraftDiffs: () => false,
+    getMonaco: () => ({ editor: { createModel: (text) => ({ getValue: () => text }), setModelLanguage: noop } }),
+    getDiffEditor: () => editor, getEditor: () => null, getModel: () => live,
+    getBaselineApplyIdleMs: () => 0, setLastGitBaselines: noop,
+    languageFromPath: () => 'text', getGitHeadModel: () => head, getGitDiskModel: () => disk,
+    setGitHeadModel: (value) => { head = value; }, setGitDiskModel: (value) => { disk = value; },
+    ensureDiffEditorWithPrefs: () => editor, applyLineNumberSizing: noop,
+    layoutEditors: () => { layouts++; }, installDraftZoneOrderingHook: noop,
+    getShowDraftInsertions: () => false, ensureTouchSelection: noop, setDebugGit: noop, setDebugFlags: noop,
+  };
+  const payload = { path: '/p/a', comparison_mode: 'commit', comparison_revision: 100, base_ref: 'A', head_content: 'old', disk_content: 'new' };
+  applyGitBaselines(deps, payload);
+  applyGitBaselines(deps, { ...payload });
+  assert.equal(layouts, 1);
+  live = {};
+  applyGitBaselines(deps, { ...payload });
+  assert.equal(layouts, 2);
+});
