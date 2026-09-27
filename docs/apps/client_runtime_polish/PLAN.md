@@ -94,6 +94,79 @@ surfaces after cold launch, resume, navigation, or renderer recreation; scrollin
 selection, and keyboard behavior remain usable. Android implementation/build work
 is a subsequent scope, not part of this documentation pass.
 
+### Cefrium CDP-over-ADB investigation workflow
+
+Use this when the TE2 console can inspect the page but a Chromium worker or
+renderer needs lower-level inspection. This complements the console, not a new
+production transport. Do not restart the shared framework or reload the failing
+page before capturing evidence.
+
+1. Discover the exact device with `adb devices -l` and the exact live frontend
+   and native console worker IDs with `te2 console list-workers`.
+2. Evaluate this JSON request in the **native Cefrium console worker**, not the
+   JavaScript main-page worker:
+   `{"jsonrpc":"2.0","method":"android.devTools.state.get","params":{}}`.
+   Read `bridgePort`, `controlConnected`, `activeTargetId`, and inspector readiness.
+   Ports and target/session IDs are runtime values; rediscover after restarts.
+3. Forward only that device's loopback CDP port through ADB:
+   `adb -s "$DEVICE" forward tcp:0 tcp:"$DEVICE_CDP_PORT"`.
+   Record the allocated local port as `LOCAL_PORT`. Inspect
+   `http://127.0.0.1:$LOCAL_PORT/json/list` and `/json/version`.
+   Select the target by its current type, URL and parent relationship, not its
+   display label alone. Keep CDP local; do not expose its unauthenticated control
+   interface on a public listener.
+4. Connect a WebSocket client to the discovered `webSocketDebuggerUrl`. The
+   investigation used the repo venv's Python `websockets` package. Use bounded
+   timeouts and correlate replies by request ID; unsolicited events may arrive
+   first. `/devtools/browser` and `/devtools/page/<target-id>` were available on
+   this build; prefer discovery over constructing URLs from remembered IDs.
+5. Inspect before mutating. The empty-diff investigation first established:
+   distinct live original/modified models, a received baseline, a null diff
+   result, `isDiffUpToDate=false`, and the worker's initialization reply pending.
+   Temporary classic/module Blob workers also failed to post a trivial startup
+   message. Probe workers were terminated and Blob URLs revoked afterward.
+6. With explicit approval, issue a narrowly scoped diagnostic intervention.
+   Here, a direct connection to the **exact Monaco worker** received
+   `{"id":1,"method":"Runtime.runIfWaitingForDebugger"}`. Its successful
+   response immediately restored two diff hunks and `upToDate=true`, without
+   navigation, model replacement or another baseline fetch. This command resumes
+   execution; it is not read-only and must not become a blanket startup workaround.
+7. Close probe sockets and remove only the forwarding created for this session:
+   `adb -s "$DEVICE" forward --remove tcp:"$LOCAL_PORT"`.
+   Never use `--remove-all`, which may disrupt other debugging sessions.
+
+Historical example only: local port 43335 forwarded device port 37873. Neither
+is a stable endpoint. The installed patched APK later reported device port 38983.
+
+Confirmed cause: the embedded DevTools frontend requests auto-attachment with
+`waitForDebuggerOnStart=true`. TE2's bridge consumed inspector child-target events
+as native monitor events and dropped child-session replies, preventing DevTools
+from completing worker initialization/resumption. Route the inspector's complete
+flattened session subtree before native monitor dispatch, preserve child session
+IDs, and prune detached descendants. Do not mix native monitoring and inspector
+ownership or simply disable the debugger wait to hide the routing defect.
+
+For unexpected renderer reloads, correlate device time, `logcat -b crash`, recent
+main/system logs, `dumpsys activity exit-info <package>`, and page navigation timing.
+Main-process survival does not rule out renderer failure. A later “isolated not
+needed” exit may be cleanup, not the initiating cause. Toast records may retain
+only package/token/timestamps, not text. The literal “Browser renderer restarted”
+is emitted by TE2's renderer-termination callback, but does not identify why the
+renderer terminated. Do not attribute a current incident to an older tombstone.
+
+### Follow-up: durable debugging guidance
+
+- Promote the verified workflow into CODE_TE2.md's Cefrium/debugging section,
+  with discovery commands, bounded request/reply handling, approval boundaries,
+  cleanup, and the distinction between native console, page console and CDP.
+- Add a short pointer and critical invariants to `.repo_memory.md`; retain the
+  existing CDP child-session ownership note rather than duplicating the runbook.
+- Locate the canonical repo-owned developer-instruction (devins) source before
+  editing it. Add the same discovery-first escalation path there, not a stale
+  injected copy or a hard-coded device/port/target example as configuration.
+- Validate the documented sequence on a fresh connection, including teardown.
+  Keep crash/reload causality explicitly unresolved until current evidence proves it.
+
 ## 4. Reuse verified Rust artifacts across package releases
 
 ### Preliminary source findings

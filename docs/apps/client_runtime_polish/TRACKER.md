@@ -77,6 +77,23 @@ Sidebar loading; no additional startup redesign without new evidence.
 - [ ] Implement only the confirmed correction, if required.
 - [ ] Build/bundle and live-test Motorola and Pixel with verified client assets.
 
+## Cefrium CDP worker recovery and debugging documentation
+
+- [x] Isolate missing diff computation to a paused worker using page-console probes.
+- [x] Discover native CDP port, forward through ADB, and inspect the exact worker.
+- [x] Confirm causality: targeted debugger resume restores the existing diff.
+- [x] Correct inspector child-session routing separately from native monitors.
+- [x] Pass three routing unit tests; build minified staging with current assets.
+- [x] Install on Motorola; classic/module probes start and two diff hunks compute
+  with DevTools connected. User reports live success.
+- [x] Record the investigation sequence, cleanup and evidence limits in PLAN.md.
+- [ ] Publish the reusable runbook in CODE_TE2.md and link it from repo memory.
+- [ ] Locate/update canonical developer instructions (devins) with that workflow.
+- [ ] Validate the published runbook from fresh endpoint discovery through cleanup.
+- [ ] Diagnose the separate unexpected renderer/page reload. Current incident:
+  page navigation reports reload at device time 2026-09-26 22:27:36; toast records
+  surround it, but no retained current termination status or crash cause is proven.
+
 ## Release artifact reuse
 
 - [x] Preliminary source inspection of Linux wheel injection, runtime provenance,

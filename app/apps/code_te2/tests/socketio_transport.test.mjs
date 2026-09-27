@@ -1547,6 +1547,47 @@ test('WBA startup tracing is bounded and does not initiate connections or expose
   assert.equal(JSON.stringify(records).includes('must-not-log'), false);
 });
 
+test('reconnect applies missed preferences to an existing editor with one baseline refresh', async () => {
+  const { registerEditorSocketConnectionHandlers } = await importTypeScript(
+    'monaco_editor/editor_socket_connection_runtime.ts',
+  );
+  const handlers = new Map();
+  let cached = null;
+  let diff = null;
+  let plainTransitions = 0;
+  const options = [], requests = [];
+  const editor = { updateOptions: value => options.push(value), layout() {} };
+  const model = { getValue: () => 'same', getLanguageId: () => 'python' };
+  const deps = new Proxy({
+    rpcNotifications: { onNotification(method, handler) { handlers.set(method, handler); } },
+    getCachedPrefs: () => cached, setCachedPrefs: value => { cached = value; },
+    ensureEditorWithPrefs: async () => editor,
+    getEditor: () => editor, getDiffEditor: () => diff, getModel: () => model,
+    getCurrentPath: () => '/workspace/reconnect.py',
+    prepareTextmateForDocument: async () => 'python',
+    buildMonacoOptionsFromPrefs: value => ({ wordWrap: value.preferences.editor.wordWrap ? 'on' : 'off' }),
+    getShowInlineDiffs: () => cached.preferences.editor.showInlineDiffs,
+    getShowDraftDiffs: () => false, getShowDraftInsertions: () => false,
+    ensurePlainEditorWithPrefs: () => { plainTransitions++; diff = null; },
+    requestGitBaselines: value => {
+      requests.push(value.reason);
+      if (cached.preferences.editor.showInlineDiffs) diff = {};
+    },
+    wbOpenFileFlow: async () => {}, requestAgentEditDocumentState: async () => {},
+  }, { get(target, property) { return property in target ? target[property] : () => {}; } });
+  registerEditorSocketConnectionHandlers({ on() {} }, deps);
+  const replay = handlers.get('editor.state.ssot');
+  for (const enabled of [true, false]) {
+    replay({ preferences: { editor: { showInlineDiffs: enabled, wordWrap: enabled } },
+      file: { path: '/workspace/reconnect.py', content: 'same', document_revision: 1 } });
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  assert.deepEqual(options, [{ wordWrap: 'on' }, { wordWrap: 'off' }]);
+  assert.deepEqual(requests, ['ssot', 'ssot']);
+  assert.equal(plainTransitions, 1);
+  assert.equal(diff, null);
+});
+
 test('a newer empty replay invalidates a document still waiting for its theme', async () => {
   const { registerEditorSocketConnectionHandlers } = await importTypeScript(
     'monaco_editor/editor_socket_connection_runtime.ts',

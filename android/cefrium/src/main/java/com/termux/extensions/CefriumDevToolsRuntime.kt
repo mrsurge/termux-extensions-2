@@ -212,6 +212,7 @@ internal class CefriumDevToolsRuntime(
     private val targets = linkedMapOf<String, CefriumDevToolsTarget>()
     private val browserTargets = linkedMapOf<String, CefriumDevToolsTarget>()
     private val monitorSessions = mutableMapOf<String, MonitorSession>()
+    private val inspectorSessions = CefriumInspectorSessions()
     private val monitorAttachTargets = mutableSetOf<String>()
     private val contexts = mutableMapOf<String, FrameContext>()
     private val contextTargets = mutableMapOf<String, String>()
@@ -346,9 +347,9 @@ internal class CefriumDevToolsRuntime(
             sessionId = activeSessionId ?: return false
         }
         val message = try {
-            JSONObject(payload).apply {
-                if (!has("sessionId")) put("sessionId", sessionId)
-            }.toString()
+            synchronized(lock) {
+                inspectorSessions.outgoing(JSONObject(payload), sessionId)
+            }?.toString() ?: return false
         } catch (_: Exception) {
             return false
         }
@@ -549,6 +550,17 @@ internal class CefriumDevToolsRuntime(
         val responseId = message.optLong("id", Long.MIN_VALUE)
         if (responseId != Long.MIN_VALUE && handlePendingResponse(responseId, message)) return
 
+        // Native monitor handlers deliberately consume their own context/target
+        // events. The inspector must receive these events for its separate CDP
+        // subtree first, including paused worker attachments and child replies.
+        val inspectorMessage = synchronized(lock) {
+            inspectorSessions.incoming(message, activeSessionId)
+        }
+        if (inspectorMessage != null) {
+            listener.onProtocolMessage(inspectorMessage.toString())
+            return
+        }
+
         val method = message.optString("method")
         val sessionId = message.optString("sessionId").takeIf(String::isNotBlank)
         when (method) {
@@ -604,11 +616,6 @@ internal class CefriumDevToolsRuntime(
             }
         }
 
-        val directSession = synchronized(lock) { activeSessionId }
-        if (sessionId != null && sessionId == directSession) {
-            message.remove("sessionId")
-            listener.onProtocolMessage(message.toString())
-        }
     }
 
     private fun updateBrowserTarget(info: JSONObject) {

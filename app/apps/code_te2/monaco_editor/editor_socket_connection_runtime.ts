@@ -239,6 +239,11 @@ export function registerEditorSocketConnectionHandlers(
           if (!shouldReuseBootModel) {
             applyModelLifecycle(deps, snapshotContent, lang, activePath);
           }
+          // Reconnect carries preferences even when no prefsChanged event was
+          // received. Reconcile the mounted editor, not just the cached flags.
+          // Use current preferences: a live update may have arrived during the
+          // grammar await. SSOT owns the single baseline/draft refresh below.
+          handlePrefsChangedPayload({ preferences: asRecord(deps.getCachedPrefs())?.preferences }, false);
           deps.ensureTouchSelection('ssot');
           trace('model-and-touch-ready');
           deps.setLastContentSha256(asString(file.content_sha256) || deps.getLastContentSha256());
@@ -366,7 +371,7 @@ export function registerEditorSocketConnectionHandlers(
     }
   };
 
-  const handlePrefsChangedPayload = (payload: unknown): void => {
+  const handlePrefsChangedPayload = (payload: unknown, refreshBaselines = true): void => {
     try {
       const payloadRecord = asRecord(payload);
       const nextPrefs = payloadRecord && payloadRecord.preferences ? asRecord(payloadRecord.preferences) : null;
@@ -423,12 +428,14 @@ export function registerEditorSocketConnectionHandlers(
       deps.updateDebug('prefs=ok');
 
       if (deps.getShowInlineDiffs() || deps.getShowDraftDiffs()) {
-        deps.requestGitBaselines({ immediate: true, reason: 'prefs' });
+        if (refreshBaselines) deps.requestGitBaselines({ immediate: true, reason: 'prefs' });
       } else {
         deps.disposeGitBaselines();
         if (diffEditor) deps.ensurePlainEditorWithPrefs();
       }
-      if (deps.getShowDraftInsertions()) deps.requestDraftDiff('prefs');
+      if (deps.getShowDraftInsertions()) {
+        if (refreshBaselines) deps.requestDraftDiff('prefs');
+      }
       else deps.clearDraftDiffDecorations();
       deps.ensureTouchSelection('prefs');
     } catch (error) {
