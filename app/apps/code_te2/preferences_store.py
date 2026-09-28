@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import sys
 import threading
 from pathlib import Path
@@ -8,6 +7,7 @@ from typing import TypeAlias, cast
 
 from .code_te2_paths import code_te2_paths
 from .intelligence_state import IntelligenceStateStore
+from . import persistence_io
 
 JsonDict: TypeAlias = dict[str, object]
 
@@ -127,9 +127,8 @@ class PreferencesStore:
             # Write to disk - MUST succeed
             tmp_path = self._path.with_suffix(".tmp")
             try:
-                payload = json.dumps(defaults, ensure_ascii=False, indent=2)
-                tmp_path.write_text(payload, encoding="utf-8")
-                tmp_path.replace(self._path)
+                payload = persistence_io.encode_json(defaults, ensure_ascii=False, indent=2)
+                persistence_io.write_bytes_atomic(self._path, payload, temporary_path=tmp_path)
                 print(f"[PREFS] Created preference file with defaults: {self._path}", file=sys.stderr)
             except Exception as e:
                 # FAIL HARD - cannot operate without preference file
@@ -190,14 +189,14 @@ class PreferencesStore:
         if not self._path.exists():
             raise RuntimeError(f"Preference file doesn't exist: {self._path}")
         try:
-            content = self._path.read_text(encoding="utf-8")
+            content = persistence_io.decode_utf8(persistence_io.read_bytes(self._path))
             if not content.strip():
                 raise RuntimeError(f"Preference file is empty: {self._path}")
-            decoded = cast(object, json.loads(content))
+            decoded = persistence_io.decode_json(content)
             if not isinstance(decoded, dict):
                 raise RuntimeError(f"Preference file is not a dict: {self._path}")
             return _as_dict(cast(object, decoded))
-        except json.JSONDecodeError as e:
+        except persistence_io.JsonDecodeError as e:
             raise RuntimeError(f"Preference file has invalid JSON: {self._path}: {e}") from e
 
     def _write_to_disk(self, data: JsonDict) -> None:
@@ -205,9 +204,8 @@ class PreferencesStore:
         tmp_path = self._path.with_suffix(".tmp")
         try:
             print(f"[PREFS] Writing preferences to {self._path}", file=sys.stderr)
-            payload = json.dumps(data, ensure_ascii=False, indent=2)
-            tmp_path.write_text(payload, encoding="utf-8")
-            tmp_path.replace(self._path)
+            payload = persistence_io.encode_json(data, ensure_ascii=False, indent=2)
+            persistence_io.write_bytes_atomic(self._path, payload, temporary_path=tmp_path)
         except Exception as e:
             raise RuntimeError(f"Failed to write preferences to {self._path}: {e}") from e
         finally:

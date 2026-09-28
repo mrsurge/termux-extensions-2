@@ -723,6 +723,17 @@ no first-paint speedup is claimed without a fresh measurement.
 
 ### Priority B: portable I/O and native worker shell
 
+The first approved persistence extraction introduces `persistence_io.py` for
+preferences, persisted registry and intelligence state: byte reads/atomic writes
+are separate from UTF-8/JSON conversion, while stores keep their policy and DTO
+construction. Preserve stdlib JSON byte formatting and corruption behavior in
+this slice; do not substitute msgspec based on the earlier decoding measurements.
+Hash-sensitive registry JSON remains unchanged. Tests cover format parity,
+replacement failure/cleanup, no caching, migrations and existing lock behavior.
+Run-profile inspection found launch imports and URL readiness HTTP already lazy;
+the startup FWS bridge restores active routes/terminal facts and must stay eager.
+No broader run-profile deferral is justified by that audit alone.
+
 Keep an explicit transport-neutral Python editor-services API. Rust owns I/O and
 structural DTO conversion; Python retains document/project authority, drafts,
 preferences policy, migrations and orchestration. Avoid introducing new transport

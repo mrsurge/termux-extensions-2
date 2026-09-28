@@ -6,12 +6,11 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 import fcntl
-import json
 from pathlib import Path
-import tempfile
 from typing import cast
 
 from .code_te2_paths import code_te2_paths
+from . import persistence_io
 
 
 def _object(value: object) -> dict[str, object]:
@@ -51,25 +50,16 @@ class IntelligenceStateStore:
                 fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
     def _write(self, state: IntelligenceState) -> None:
-        payload = json.dumps({
+        payload = persistence_io.encode_json({
             "version": 1,
             "webWorkersEnabled": state.web_workers_enabled,
             "codeServerInstallation": state.installation,
         })
-        # Unique temporary files avoid collisions even after an interrupted write.
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.path.parent,
-                                         prefix=self.path.name + ".", delete=False) as stream:
-            temporary = Path(stream.name)
-            try:
-                _ = stream.write(payload)
-                stream.flush()
-                _ = temporary.replace(self.path)
-            finally:
-                temporary.unlink(missing_ok=True)
+        persistence_io.write_bytes_atomic(self.path, payload, temporary_prefix=self.path.name + ".")
 
     def _read(self) -> IntelligenceState:
         if self.path.exists():
-            data = _object(cast(object, json.loads(self.path.read_text(encoding="utf-8"))))
+            data = _object(persistence_io.decode_json(persistence_io.decode_utf8(persistence_io.read_bytes(self.path))))
             mode = data.get("webWorkersEnabled")
             if data.get("version") != 1 or not isinstance(mode, bool) or "codeServerInstallation" not in data:
                 raise ValueError(f"Invalid intelligence state: {self.path}")
@@ -80,7 +70,7 @@ class IntelligenceStateStore:
         # must not resurrect stale preferences or silently launch code-server.
         legacy: dict[str, object] = {}
         if self.legacy_path.exists():
-            legacy = _object(cast(object, json.loads(self.legacy_path.read_text(encoding="utf-8"))))
+            legacy = _object(persistence_io.decode_json(persistence_io.decode_utf8(persistence_io.read_bytes(self.legacy_path))))
         ui = _object(legacy.get("ui", {}))
         mode = ui.get("webWorkersEnabled") is True
         raw = legacy.get("codeServerInstallation")

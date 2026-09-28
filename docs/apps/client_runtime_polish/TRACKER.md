@@ -192,6 +192,9 @@ Sidebar loading; no additional startup redesign without new evidence.
   and first-use cost before claiming a speedup.
 - [ ] Audit run-profile lazy loading while retaining required active-profile/proxy
   reconciliation before restored surfaces navigate.
+- [x] Inspect run-profile launch/import and startup snapshot ownership: manager/
+  orchestrator and HTTP readiness imports already lazy; shared FWS snapshot must
+  retain active-route and terminal restoration. No blanket deferral implemented.
 - [ ] Approve a concrete deferral slice with single-flight/error/shutdown semantics.
 - [ ] Validate first paint, deferred first use, primary/secondary clients, remote
   reconnect and active terminal/profile restoration without polling.
@@ -203,6 +206,14 @@ Sidebar loading; no additional startup redesign without new evidence.
 - [x] Record the intended disk DTO -> pipe inventory -> native worker shell ->
   dependency removal sequence. Documentation approval is not blanket code approval.
 - [ ] Specify and implement the approved disk DTO boundary before broad I/O migration.
+- [x] Extract shared persistence byte I/O and JSON conversion for preferences,
+  registry and intelligence state; retain store-owned schema/DTO policy, locks,
+  migration and recovery. Remaining filesystem consumers are not migrated.
+- [x] Validate 94 focused persistence/intelligence/registry/TextMate/path/terminal
+  and profiling-guard tests. Typecheck: new boundary clean; existing contextmanager Iterator
+  deprecation error and three preferences warnings remain. No runtime restart.
+- [x] User live acceptance completed for the persistence boundary; checkpoint
+  requested before proceeding to the framework/WBA pipe inventory.
 - [ ] Inventory framework pipe and WBA control FD/framing/ownership separately.
 - [ ] Inspect Ferrous Rust reuse and remaining Python framework-shells callers;
   distinguish process-control contracts from WBA application DTOs.

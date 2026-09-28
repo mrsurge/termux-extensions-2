@@ -14,13 +14,13 @@ import hashlib
 import json
 import os
 import subprocess
-import tempfile
 import time
 from pathlib import Path
 from typing import TypeAlias, cast
 
 
 from .code_te2_paths import code_te2_paths
+from . import persistence_io
 from .code_server_identity import (
     CodeServerInstallation as CodeServerInstallation,
     PINNED_CODE_SERVER_VERSION as PINNED_CODE_SERVER_VERSION,
@@ -47,7 +47,7 @@ _REGISTRY_PATH = _CODE_TE2_PATHS.code_server_registry_path
 
 def _json_object_from_text(text: str) -> JsonObject | None:
     try:
-        raw = cast(object, json.loads(text))
+        raw = persistence_io.decode_json(text)
     except Exception:
         return None
     if isinstance(raw, dict):
@@ -58,7 +58,7 @@ def _json_object_from_text(text: str) -> JsonObject | None:
 
 def _json_list_from_text(text: str) -> list[object] | None:
     try:
-        raw = cast(object, json.loads(text))
+        raw = persistence_io.decode_json(text)
     except Exception:
         return None
     return list(cast(list[object], raw)) if isinstance(raw, list) else None
@@ -129,24 +129,10 @@ def _registry_slot_count(registry: Registry) -> int:
 
 def _write_json_object_atomic(path: Path, value: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            "w",
-            encoding="utf-8",
-            dir=path.parent,
-            prefix=f".{path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as file_obj:
-            json.dump(value, file_obj, indent=2)
-            _ = file_obj.write("\n")
-            temp_path = Path(file_obj.name)
-        os.replace(temp_path, path)
-        temp_path = None
-    finally:
-        if temp_path is not None:
-            temp_path.unlink(missing_ok=True)
+    payload = persistence_io.encode_json(value, indent=2, trailing_newline=True)
+    persistence_io.write_bytes_atomic(
+        path, payload, temporary_prefix=f".{path.name}.", temporary_suffix=".tmp",
+    )
 
 
 def _path_is_executable(path: Path) -> bool:
@@ -680,7 +666,7 @@ def load_registry() -> Registry:
     if not _REGISTRY_PATH.is_file():
         return _empty_registry()
     try:
-        data = _json_object_from_text(_REGISTRY_PATH.read_text("utf-8"))
+        data = _json_object_from_text(persistence_io.decode_utf8(persistence_io.read_bytes(_REGISTRY_PATH)))
     except OSError:
         return _empty_registry()
     if isinstance(data, dict) and "extensions" in data:

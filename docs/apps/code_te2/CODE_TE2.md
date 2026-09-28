@@ -546,6 +546,29 @@ Editor preferences are stored per active project and used to initialize the inli
 Preferences changes use Monaco backend hooks and typed editor/UI IPC
 notifications. `/editor/*` routes are owned by `monaco_editor/editor_backend.py`.
 
+### Portable persistence I/O boundary
+
+`persistence_io.py` separates byte reads/atomic replacement from UTF-8/JSON
+conversion for preferences, the persisted extension registry, and intelligence
+state. It returns ordinary values to the existing store validators/DTO builders;
+it does not own schema, defaults, migrations, locking, recovery, or a cache.
+The codec remains stdlib JSON, preserving each store's Unicode escaping,
+indentation, trailing newline, and error behavior. Hash-sensitive registry
+serialization remains untouched.
+
+Preferences retain their instance lock, fixed `.tmp` sibling and fail-hard read
+policy. The registry retains unique private temporary files and empty-registry
+fallback, while migration-write failures still propagate. Intelligence state
+retains its stable-sibling `flock`, unique temporary file, canonical-file
+authority and missing-only legacy migration. The shared writer uses same-directory
+replacement with cleanup; it does not add fsync, cross-process transactions,
+new parent directories or a new durability guarantee.
+
+This is a replaceable I/O seam for a later native worker, not a native codec or
+full disk-I/O migration. Extension manifests, grammar bodies, file existence
+checks, lock acquisition and other stores remain outside this slice. No startup
+speedup is established by this extraction.
+
 ---
 
 ## 5) HTTP endpoints the Monaco editor runtime uses (worker API)

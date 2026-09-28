@@ -58,7 +58,7 @@ def child(root: Path, startup: bool = False, warm_bytecode: bool = False, seed_b
         elapsed = (time.perf_counter() - started) * 1000
         stats = pstats.Stats(profiler)
         selected = []
-        persistence_files = {"preferences_store.py", "extension_registry.py", "intelligence_state.py",
+        persistence_files = {"preferences_store.py", "extension_registry.py", "intelligence_state.py", "persistence_io.py",
                              "history_store.py", "project_sidecar.py", "draft_index_sidecar.py"}
         for (filename, line, name), (primitive, calls, own, cumulative, callers) in stats.stats.items():
             if Path(filename).name not in persistence_files and not (
