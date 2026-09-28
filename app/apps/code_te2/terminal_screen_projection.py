@@ -6,9 +6,10 @@ from collections import OrderedDict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, Protocol, cast, final
+from typing import TYPE_CHECKING, Final, Protocol, cast, final
 
-import pyte  # type: ignore[reportMissingTypeStubs]
+if TYPE_CHECKING:
+    from .terminal_pyte import TrackedByteStream
 
 
 DEFAULT_COLUMNS: Final = 80
@@ -72,17 +73,6 @@ class _TerminalScreen(Protocol):
     history: _TerminalHistory
     buffer: Mapping[int, _TerminalLine]
     cursor: _TerminalCursor
-
-
-@final
-class _TrackedByteStream(pyte.ByteStream):
-    @property
-    def parser_neutral(self) -> bool:
-        return self._taking_plain_text is True
-
-    def decoder_pending_bytes(self) -> bytes:
-        state = self.utf8_decoder.getstate()
-        return bytes(state[0])
 
 
 _FG_CODES: Final = {
@@ -243,7 +233,7 @@ class _TerminalProjection:
         self.columns = _bounded_dimension(columns, DEFAULT_COLUMNS, 1_000)
         self.lines = _bounded_dimension(lines, DEFAULT_LINES, 500)
         self.screen: _TerminalScreen
-        self.stream: _TrackedByteStream
+        self.stream: TrackedByteStream
         self.output_offset: int = 0
         self.log_identity: tuple[int, int] | None = None
         self.initialized: bool = False
@@ -254,13 +244,11 @@ class _TerminalProjection:
         self._reset_screen()
 
     def _reset_screen(self) -> None:
-        raw_screen = pyte.HistoryScreen(
-            self.columns,
-            self.lines,
-            history=MAX_HISTORY_LINES,
-        )
+        from .terminal_pyte import create_screen
+
+        raw_screen, stream = create_screen(self.columns, self.lines, MAX_HISTORY_LINES)
         self.screen = cast(_TerminalScreen, cast(object, raw_screen))
-        self.stream = _TrackedByteStream(raw_screen)
+        self.stream = stream
         self.output_offset = 0
         self.log_identity = None
         self.checkpoint_ready = False
@@ -406,7 +394,10 @@ class TerminalScreenProjectionRegistry:
         async with self._lock:
             state = self._states.get(shell_id)
             if state is None or state.log_path != log_path:
-                state = _TerminalProjection(shell_id, log_path, columns, lines)
+                # Parser import and initial screen construction must not block
+                # the worker loop. Publish only after construction succeeds;
+                # the registry lock serializes concurrent first requests.
+                state = await asyncio.to_thread(_TerminalProjection, shell_id, log_path, columns, lines)
                 self._states[shell_id] = state
             self._states.move_to_end(shell_id)
             while len(self._states) > self.capacity:

@@ -113,6 +113,113 @@ Sidebar loading; no additional startup redesign without new evidence.
 - [ ] Validate old-APK OTA, incompatible/failed OTA handling and fresh APK discovery
   when the newest release publishes only updated Python/frontend artifacts.
 
+## mypyc / Pixel performance
+
+- [x] Capture exploratory desktop JIT on/off and warmed Pixel startup timings;
+  verify JIT state inside each live worker, not just its launch environment.
+- [x] Record source/interpreter differences and the limits of those comparisons.
+- [x] Synchronize Pixel editable source to `3e7debd3` and mirror the plan/tracker;
+  preserve `apply_patch.py` and leave the running worker untouched.
+- [x] Identify and approve an isolated guarded import profiling entrypoint.
+- [x] Collect three source-matched isolated import samples on Pixel; record
+  instrumentation, empty-state and bytecode-cache caveats separately from live startup.
+- [x] Audit and select runner_profiles as the single-module workflow pilot.
+- [x] Obtain approval and build the isolated native pilot using existing Pixel tools;
+  no dependency install or replacement of the live editable installation.
+- [x] Compare 12 imports per variant/condition with valid interpreted bytecode;
+  focused behavior checks pass, no meaningful import-speed improvement found.
+- [x] Select/audit the five-module Git/history/pipe group and obtain build approval.
+- [x] Build the group in Pixel scratch; record exception/async-generator adapters
+  and the runtime msgspec annotation failure. Correctness gate failed; no group
+  timing claim or live deployment.
+- [x] Approve/test a revised boundary keeping runtime-inspected schemas interpreted;
+  four compiled modules pass focused Git/history/pipe checks.
+- [x] Measure the revised group with 12 imports per variant/condition: about 6 ms
+  median reduction, overlapping ranges; no whole-worker speedup claim.
+- [ ] Run broader integration parity and whole-import/startup measurements for that group.
+- [ ] Decide whether measured benefit warrants expansion and wheel integration.
+- [ ] Investigate search benchmark lockup separately; no unrestricted rerun.
+
+## Portable persistence boundary
+
+- [x] Record shared byte storage, replaceable codec/schema and DTO contracts;
+  domain stores retain migrations and state authority. Planning only.
+- [ ] Inventory JSON file consumers and existing format, corruption, concurrency
+  and hash-sensitive serialization contracts.
+- [x] Audit registry/preferences read/write/recovery contracts and their separate
+  intelligence-state dependency; broader consumer inventory remains pending.
+- [x] Add bounded isolated persistence probe; compare actual Pixel fixture JSON/
+  msgspec stages and current store loads across three fresh processes.
+- [x] Verify fixture decoder parity and encode round trips; ten local probe/guard
+  tests pass. Registry decoding was not faster; no live files changed or restart.
+- [ ] Count repeated persistence loads during full startup and measure aggregate
+  initialization/migration costs; single-file timings do not explain the delay.
+- [x] Count guarded backend-import reads: preferences/intelligence once each,
+  registry zero; JSON decoding under 1 ms. Later client/lifecycle phases excluded.
+- [x] Trace duplicate preference reads in one boot snapshot and independent
+  registry reads in TextMate/theme paths; runtime frequencies remain unmeasured.
+- [x] Attribute compilation: 88 stale repo pyc files cause 415–431 ms explicit
+  source compilation in the guarded probe; scratch-seeded caches remove it.
+  Generated attrs/annotation compilation remains (~35–39 ms). No live-cache edits.
+- [ ] Use cache-normalized profiles for subsequent dependency/module attribution;
+  verify live bytecode policy separately before claiming a production issue.
+- [ ] Measure read/decode/validation-migration/construction stages and total startup
+  on representative scratch data; distinguish import overhead from file parsing.
+- [ ] Approve an extension-registry plus preference-store pilot comparing the
+  existing JSON path with msgspec, without changing on-disk contracts.
+- [ ] Validate DTO/codec independence, round trips, migrations, error behavior,
+  atomic writes and concurrency before performance acceptance.
+- [ ] Review evidence before broader rollout or Rust/PyO3 replacement.
+
+## First-document readiness
+
+- [x] Establish `feature/code-te2-native-services`; committed snapshot `3e7debd3`
+  is on main. Uncommitted investigation work was preserved, not published.
+- [x] Prioritize document/theme/syntax readiness separately from listener and WBA
+  readiness; record terminal/run-profile deferral as a distinct workstream.
+- [ ] Map the critical import/lifecycle graph and capture first-highlighted-paint
+  plus intelligence timings with valid caches and installed-wheel baselines.
+- [ ] Audit terminal-stack lazy loading, including Pyte, FWS and restored sessions;
+  preserve no-PTY behavior for non-terminal drawer use.
+- [x] Audit gateway -> terminal backend -> Pyte import and existing lazy shellspec
+  launch. Retain FWS process ownership; WBA/watcher eager imports remain.
+- [x] Implement approved parser-only deferral with off-loop initial construction,
+  single publication, propagated failure and retry; no frontend/runtime restart.
+- [x] Validate 48 terminal/projection/transport/lifecycle and profiling-guard tests,
+  including isolated gateway import, concurrent first use and cancelled first use.
+  Both changed production modules pass basedpyright; diff whitespace check passes.
+- [ ] Live-validate deferred terminal first use and restoration; measure startup
+  and first-use cost before claiming a speedup.
+- [ ] Audit run-profile lazy loading while retaining required active-profile/proxy
+  reconciliation before restored surfaces navigate.
+- [ ] Approve a concrete deferral slice with single-flight/error/shutdown semantics.
+- [ ] Validate first paint, deferred first use, primary/secondary clients, remote
+  reconnect and active terminal/profile restoration without polling.
+
+## Native transport / editor services
+
+- [x] Record Socketioxide/PyO3 and worker-local Axum shell as optional objectives
+  after mypyc; superseded by the intended staged native-worker direction below.
+- [x] Record the intended disk DTO -> pipe inventory -> native worker shell ->
+  dependency removal sequence. Documentation approval is not blanket code approval.
+- [ ] Specify and implement the approved disk DTO boundary before broad I/O migration.
+- [ ] Inventory framework pipe and WBA control FD/framing/ownership separately.
+- [ ] Inspect Ferrous Rust reuse and remaining Python framework-shells callers;
+  distinguish process-control contracts from WBA application DTOs.
+- [x] Clarify startup/import reduction as the objective; Axum complements
+  Socketioxide, not a presumed Uvicorn/networking bottleneck.
+- [x] Record optional pipe/file codec ownership in Rust and direct PyO3 value
+  handoff; external MessagePack remains, and dependency removal needs a full audit.
+- [ ] Measure removable Socket.IO import costs and inventory all remaining uses;
+  keep transport hot-path measurements as a separate regression baseline.
+- [ ] Specify transport-neutral service, lifecycle and bounded async bridge contracts.
+- [ ] Audit HTTP/resource extraction and remaining Python client dependencies.
+- [ ] Approve and validate a one-lane native prototype on Linux and Termux.
+- [ ] Verify Python Socket.IO imports are actually eliminated before claiming
+  startup savings; include native initialization costs in the comparison.
+- [ ] Review native-worker milestones against parity/startup evidence before
+  expanding; retain Python authority and separate-worker crash isolation.
+
 ## Completion
 
 - [ ] Update architectural documentation/memory for verified contract changes.

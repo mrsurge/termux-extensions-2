@@ -507,7 +507,7 @@ def _config_object(decoded: object) -> JsonObject:
         return config
     if isinstance(decoded, list):
         decoded_profiles: list[object] = list(cast(list[object], decoded))
-        config: JsonObject = {"version": 1, "profiles": decoded_profiles}
+        config = {"version": 1, "profiles": decoded_profiles}
         return config
     raise ValueError("Run profile config must be an object or profile list")
 

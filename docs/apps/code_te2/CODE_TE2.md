@@ -4213,6 +4213,16 @@ checkpoint or list work. The browser supplies its current rows and columns in
 that registration. Shell-list decoration never gates identity, output, or
 writable state.
 
+The gateway registers lightweight terminal handlers without importing Pyte.
+`terminal_pyte.py` owns the demand-loaded parser implementation; the first
+projection constructs its screen and stream in `asyncio.to_thread` under the
+registry lock. Concurrent first requests share one published projection.
+Construction errors propagate without publishing state, allowing a later retry.
+Cancellation before publication also leaves no registered projection; an already
+running construction thread may finish, but owns no shell or open log handle.
+This deferral does not change Framework-Shells ownership or defer its other
+callers. No terminal process is created by importing the gateway.
+
 Historical state is not a raw ANSI log tail. Python retains up to five
 per-shell `pyte.HistoryScreen` projections with 5,000 lines of scrollback and
 feeds them through `pyte.ByteStream`. Initial construction incrementally parses
