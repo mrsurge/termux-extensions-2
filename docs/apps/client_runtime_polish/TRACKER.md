@@ -235,6 +235,13 @@ Sidebar loading; no additional startup redesign without new evidence.
   duplicate replies, close, write failure, identity and serialized frames.
   Both changed production modules typecheck clean; user reports no live errors
   and approves checkpoint/push before the inbound delivery slice.
+- [x] Extract decoded-envelope router with injected response/notification,
+  ordinary-dispatch/reply and existing debug-admission callbacks. Reader retains
+  framing/schema validation and EOF/error shutdown; no new queue or retry.
+- [x] Validate 57 pipe/worker/debug tests; update two older debug test fixtures
+  that patched the removed private writer field. New router typechecks clean;
+  app_worker retains one pre-existing asynccontextmanager annotation warning.
+  User live acceptance completed for the inbound slice; checkpoint requested.
 - [ ] Audit HTTP/resource extraction and remaining Python client dependencies.
 - [ ] Approve and validate a one-lane native prototype on Linux and Termux.
 - [ ] Verify Python Socket.IO imports are actually eliminated before claiming

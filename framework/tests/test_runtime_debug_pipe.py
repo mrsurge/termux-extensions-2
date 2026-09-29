@@ -9,6 +9,7 @@ from unittest import mock
 from typing import final, override
 
 from app.libs import pipe_runtime
+from app.libs.pipe_transport import StdioEnvelopeTransport
 from app.libs.pipe_protocol import PipeEnvelope, PipeIdentity
 from app.libs.runtime_debug_pipe import RuntimeDebugPipe
 
@@ -133,7 +134,7 @@ class DebugPipeTests(unittest.IsolatedAsyncioTestCase):
         async def handler(_request: PipeEnvelope) -> object:
             return await pipe_runtime.call_async("test.echo", timeout_seconds=2)
 
-        with mock.patch.object(pipe_runtime, "_transport_writer", Writer()), mock.patch.object(
+        with mock.patch.object(pipe_runtime, "_transport", StdioEnvelopeTransport(Writer())), mock.patch.object(
             pipe_runtime, "_identity", PipeIdentity(2100, "service.app")
         ), mock.patch.object(pipe_runtime, "_next_request_id", return_value="nested"):
             self.pipe = RuntimeDebugPipe(enabled=True, identity=PipeIdentity(2100, "service.app"), reply=self.reply, handler=handler)
@@ -169,7 +170,7 @@ class PipeWriterTests(unittest.TestCase):
             def flush(self) -> None:
                 pass
 
-        with mock.patch.object(pipe_runtime, "_transport_writer", Writer()):
+        with mock.patch.object(pipe_runtime, "_transport", StdioEnvelopeTransport(Writer())):
             thread = threading.Thread(target=pipe_runtime.write_envelope, args=(request(),))
             thread.start()
             try:

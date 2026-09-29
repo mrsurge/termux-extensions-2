@@ -555,7 +555,10 @@ serialization, pending replies, notification listeners and dispatch identity.
 Existing worker stdio setup/close APIs remain; alternate configuration is a
 setup-time seam, not live migration. Closing releases pending calls but cannot
 undo an already captured/in-flight write. The borrowed process stdout is not
-closed. Inbound decoding/debug admission stays in `app_worker`. See
+closed. `pipe_inbound.InboundEnvelopeRouter` routes validated envelopes using
+injected runtime/debug callbacks; ordinary dispatch remains synchronous. Inbound
+decoding and EOF/corruption cleanup stay in `app_worker`, and `RuntimeDebugPipe`
+retains its own bounded opt-in admission and event-loop handoff. See
 `docs/apps/client_runtime_polish/PIPE_BOUNDARY_INVENTORY.md` for ownership and
 future native-worker gates.
 

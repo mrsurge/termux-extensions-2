@@ -103,14 +103,24 @@ captured its transport. Configure is setup, not live transport migration. Errors
 and reply timeout semantics are unchanged. No native codec/dependency removal
 is claimed: stdin decoding and framing still belong to `app_worker`.
 
+## Implemented inbound delivery seam
+
+`app/libs/pipe_inbound.py` supplies `InboundEnvelopeRouter.deliver` for already
+validated envelopes. Its injected callbacks route replies and notifications to
+the runtime, offer requests to the existing debug admission owner, and dispatch
+ordinary requests synchronously on the caller thread. It has no queue, codec,
+reader, retry policy or event-loop owner. Unknown kinds retain the process-error
+reply; unmatched responses/notifications retain their diagnostic messages.
+
+The worker still owns incremental stdin decode, schema-error replies, EOF and
+corruption handling, pending-call closure and debug shutdown. A malformed
+envelope with intact framing receives an error and permits the next frame;
+corrupt/truncated bytes terminate the stream. RuntimeDebugPipe's opt-in checks,
+single-operation admission, loop handoff and release-before-write are unchanged.
+
 ## Recommended next slice (approval required)
 
-Extend the seam to inbound envelope delivery while retaining the existing worker
-reader and its debug-request admission rules. Keep wire DTOs stable and cover
-duplicate/late replies, cancellation, EOF/corruption, identity mismatch and
-concurrent writes. The first extraction above is deliberately outbound-only.
-
-Then specify the native worker's event-loop/thread handoff and bounded admission
+Specify the native worker's event-loop/thread handoff and bounded admission
 before implementing one lane with PyO3. No Python callbacks while holding native
 transport locks; no redundant serialize/deserialize loop across PyO3. Preserve
 Python domain authority, direct browser/WBA traffic and framework process isolation.

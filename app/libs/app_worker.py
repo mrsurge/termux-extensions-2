@@ -227,6 +227,7 @@ def _run_pipe_worker(
     debug_pipe: RuntimeDebugPipe | None = None,
 ) -> None:
     from app.libs import pipe_runtime
+    from app.libs.pipe_inbound import InboundEnvelopeRouter
     from app.libs.pipe_protocol import (
         PipeError,
         PipeIdentity,
@@ -248,6 +249,15 @@ def _run_pipe_worker(
     stdin = cast(PipeReader, getattr(sys.stdin, "buffer", sys.stdin))
     pipe_runtime.configure_stdio_transport(protocol_stdout)
     _write_response = pipe_runtime.write_envelope
+    router = InboundEnvelopeRouter(
+        identity=responder,
+        accept_response=pipe_runtime.accept_response,
+        accept_notification=pipe_runtime.accept_notification,
+        dispatch=pipe_runtime.dispatch_request,
+        reply=_write_response,
+        report=lambda message: print(message, file=sys.stderr),
+        debug=debug_pipe,
+    )
 
     # Pipe mode reserves stdout for MessagePack maps. Backend imports and
     # dispatchers can still log freely because main() redirects sys.stdout first.
@@ -279,41 +289,7 @@ def _run_pipe_worker(
             )
             continue
 
-        if request_envelope.kind in {"response", "error"}:
-            if not pipe_runtime.accept_response(request_envelope):
-                print(
-                    f"[app-worker] Unmatched pipe response id={request_envelope.id!r}",
-                    file=sys.stderr,
-                )
-            continue
-
-        if request_envelope.kind in {"notification", "progress"}:
-            if not pipe_runtime.accept_notification(request_envelope):
-                print(
-                    f"[app-worker] Unhandled pipe notification method={request_envelope.method!r}",
-                    file=sys.stderr,
-                )
-            continue
-
-        if request_envelope.kind != "request":
-            _write_response(
-                process_error_response(
-                    responder,
-                    PipeError(
-                        "protocol.expectedRequest",
-                        "pipe worker only accepts request/response/error envelopes",
-                        False,
-                    ),
-                )
-            )
-            continue
-
-        # Only the reserved diagnostic lane moves off the reader; ordinary app
-        # dispatch keeps its existing ordering and execution behavior.
-        if debug_pipe is not None and debug_pipe.submit(request_envelope):
-            continue
-        response = pipe_runtime.dispatch_request(request_envelope)
-        _write_response(response)
+        router.deliver(request_envelope)
 
 
 def main() -> None:
