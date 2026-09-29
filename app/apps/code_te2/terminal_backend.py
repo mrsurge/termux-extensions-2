@@ -6,7 +6,6 @@ Socket.IO owns control and PTY delivery; services return DTOs or typed errors.
 """
 
 import asyncio
-import importlib
 import shlex
 import re
 import shutil
@@ -101,9 +100,8 @@ async def _resize_editor_shell(shell_id: str, cols: int, rows: int) -> bool:
 
 
 async def _get_terminal_manager() -> TerminalShellManager:
-    module = importlib.import_module("framework_shells")
-    get_manager_fn = cast(Callable[[], Awaitable[object]], getattr(module, "get_manager"))
-    return cast(TerminalShellManager, await get_manager_fn())
+    from .native_shells import get_manager
+    return cast(TerminalShellManager, await get_manager())
 
 
 from app.apps.code_te2.stores import get_history_store as _get_shared_history_store

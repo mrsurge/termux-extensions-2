@@ -1,7 +1,6 @@
 """Typed application adapter for worker-owned Ferrous shell management.
 
-No framework-server calls or Python FWS fallback. The drawer shell retains its
-existing manager until its own migration slice.
+No framework-server calls or Python FWS fallback.
 """
 from __future__ import annotations
 
@@ -23,6 +22,9 @@ class NativeShellBridge(Protocol):
     def shell_unsubscribe(self, token: int) -> None: ...
     def shell_release(self, token: int) -> None: ...
     def shell_read(self, token: int) -> bytes: ...
+    def shell_spawn_terminal(self, path: str, entry: str, ctx: dict[str, str], label: str, subgroups: list[str]) -> object: ...
+    def shell_resize(self, shell_id: str, cols: int, rows: int) -> None: ...
+    def shell_remove(self, shell_id: str) -> bool: ...
 
 
 @dataclass
@@ -33,6 +35,9 @@ class ShellRecord:
     status: str
     env_overrides: object
     command: object
+    stdout_log: str = ""
+    exit_code: int | None = None
+    backend: str = "pipe"
 
 
 def _record(value: object) -> ShellRecord | None:
@@ -44,7 +49,10 @@ def _record(value: object) -> ShellRecord | None:
     shell_id, label, status, pid = row.get("id"), row.get("label"), row.get("status"), row.get("pid")
     if not isinstance(shell_id, str) or not isinstance(label, str) or not isinstance(status, str) or not isinstance(pid, int):
         raise TypeError("invalid native shell identity")
-    return ShellRecord(shell_id, label, pid, status, row.get("env_overrides"), row.get("command"))
+    log, exit_code, backend = row.get("stdout_log", ""), row.get("exit_code"), row.get("backend", "pipe")
+    if not isinstance(log, str) or not isinstance(backend, str) or (exit_code is not None and not isinstance(exit_code, int)):
+        raise TypeError("invalid native shell output metadata")
+    return ShellRecord(shell_id, label, pid, status, row.get("env_overrides"), row.get("command"), log, exit_code, backend)
 
 
 class OutputReader:
@@ -113,7 +121,7 @@ class ShellManager:
 
     async def get_shell_capabilities(self, record: ShellRecord) -> dict[str, object]:
         live = await asyncio.to_thread(self.bridge.shell_live, record.id)
-        return {"backend": "pipe", "stdin_write": live, "stdout_subscribe_bytes": live}
+        return {"backend": record.backend, "stdin_write": live, "stdout_subscribe_bytes": live and record.backend == "pipe"}
 
     async def terminate_shell(self, shell_id: str, *, force: bool = False) -> None:
         del force
@@ -121,6 +129,40 @@ class ShellManager:
 
     async def write_bytes(self, shell_id: str, data: bytes) -> None:
         await asyncio.to_thread(self.bridge.shell_write, shell_id, data)
+
+    async def write_to_pty(self, shell_id: str, data: str) -> None:
+        await self.write_bytes(shell_id, data.encode("utf-8"))
+
+    async def resize_pty(self, shell_id: str, cols: int, rows: int) -> None:
+        await asyncio.to_thread(self.bridge.shell_resize, shell_id, cols, rows)
+
+    async def remove_shell(self, shell_id: str, *, force: bool = False) -> bool:
+        del force
+        task = asyncio.create_task(asyncio.to_thread(self.bridge.shell_remove, shell_id))
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            _ = await task
+            raise
+
+    async def describe(self, record: ShellRecord) -> dict[str, object]:
+        return {"id": record.id, "label": record.label, "pid": record.pid,
+                "status": record.status, "stdout_log": record.stdout_log, "exit_code": record.exit_code}
+
+    async def spawn_terminal(self, path: Path, entry: str, ctx: dict[str, str], label: str,
+                             subgroups: list[str]) -> ShellRecord:
+        task = asyncio.create_task(asyncio.to_thread(self.bridge.shell_spawn_terminal,
+            str(path), entry, ctx, label, subgroups))
+        try:
+            record = _record(await asyncio.shield(task))
+        except asyncio.CancelledError:
+            record = _record(await task)
+            if record is not None:
+                _ = await self.remove_shell(record.id)
+            raise
+        if record is None:
+            raise RuntimeError("native terminal spawn returned no record")
+        return record
 
     async def subscribe_output_bytes(self, shell_id: str) -> OutputReader:
         allocation = asyncio.create_task(asyncio.to_thread(self.bridge.shell_subscribe, shell_id))

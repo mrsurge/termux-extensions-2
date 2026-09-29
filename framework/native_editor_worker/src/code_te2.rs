@@ -5,6 +5,7 @@ mod persistence;
 mod protocol;
 mod rpc_codec;
 mod shells;
+mod terminal_log;
 mod values;
 mod web;
 
@@ -139,6 +140,44 @@ impl Bridge {
     }
     fn shell_live(&self, py: Python<'_>, id: String) -> PyResult<bool> {
         py.detach(|| self.shells.live(&id)).map_err(shell_error)
+    }
+    fn shell_spawn_terminal(
+        &self,
+        py: Python<'_>,
+        path: PathBuf,
+        entry: String,
+        ctx: std::collections::HashMap<String, String>,
+        label: String,
+        subgroups: Vec<String>,
+    ) -> PyResult<Py<PyAny>> {
+        let record = py
+            .detach(|| {
+                self.shells.spawn_grouped(
+                    path,
+                    entry,
+                    ctx,
+                    label,
+                    "terminal".into(),
+                    false,
+                    Some(subgroups),
+                )
+            })
+            .map_err(shell_error)?;
+        values::to_python(py, &shells::record_value(Some(record)))
+    }
+    fn shell_resize(&self, py: Python<'_>, id: String, cols: u16, rows: u16) -> PyResult<()> {
+        py.detach(|| self.shells.resize(&id, cols, rows))
+            .map_err(shell_error)
+    }
+    fn shell_remove(&self, py: Python<'_>, id: String) -> PyResult<bool> {
+        py.detach(|| self.shells.remove(&id)).map_err(shell_error)
+    }
+    fn terminal_log_open(
+        &self,
+        py: Python<'_>,
+        path: PathBuf,
+    ) -> PyResult<Option<terminal_log::LogReader>> {
+        Ok(py.detach(|| terminal_log::LogReader::open(&path))?)
     }
     fn shell_terminate(&self, py: Python<'_>, id: String) -> PyResult<()> {
         py.detach(|| self.shells.terminate(&id))

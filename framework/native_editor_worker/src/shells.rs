@@ -23,6 +23,10 @@ struct Reader {
 struct Owner {
     manager: FerrousNativeManager,
 }
+struct Drainer {
+    cancel: Arc<AtomicBool>,
+    thread: std::thread::JoinHandle<()>,
+}
 pub struct Lifetime(pub Arc<Shells>);
 impl Drop for Lifetime {
     fn drop(&mut self) {
@@ -35,17 +39,20 @@ pub struct Shells {
     readers: Mutex<HashMap<u64, Arc<Reader>>>,
     next: std::sync::atomic::AtomicU64,
     stopping: Arc<AtomicBool>,
-    drainers: Mutex<HashMap<String, std::thread::JoinHandle<()>>>,
+    drainers: Mutex<HashMap<String, Drainer>>,
 }
 
 fn allowed_label(label: &str) -> bool {
     matches!(
         label,
-        "code_server:code_te2:global" | "workbench_adapter:code_te2:global"
+        "code_server:code_te2:global"
+            | "workbench_adapter:code_te2:global"
+            | "code-editor-terminal"
     ) || [
         "runner-profile:code_te2:",
         "page-preview:code_te2:",
         "watchexec:code_te2:",
+        "code-editor-terminal:",
     ]
     .iter()
     .any(|prefix| {
@@ -72,10 +79,14 @@ impl Shells {
     }
 
     pub fn get(&self, id: &str) -> Result<Option<FerrousNativeShellRecord>> {
-        Ok(self
-            .manager()?
-            .get_shell(id)?
-            .filter(|r| allowed_label(&r.label)))
+        let manager = self.manager()?;
+        let record = manager.get_shell(id)?.filter(|r| allowed_label(&r.label));
+        if record.as_ref().is_some_and(|r| r.backend == "pty")
+            && !manager.live_records()?.iter().any(|r| r.id == id)
+        {
+            return Ok(None);
+        }
+        Ok(record)
     }
     pub fn find(&self, label: &str) -> Result<Option<FerrousNativeShellRecord>> {
         ensure!(
@@ -87,6 +98,7 @@ impl Shells {
             .list_shells()?
             .into_iter()
             .filter(|r| r.label == label && r.status == FerrousNativeShellStatus::Running)
+            .filter(|r| r.backend != "pty" || self.get(&r.id).ok().flatten().is_some())
             .max_by_key(|r| r.created_at_ms))
     }
     pub fn list(&self) -> Result<Vec<FerrousNativeShellRecord>> {
@@ -106,6 +118,18 @@ impl Shells {
         spec_id: String,
         wait_ready: bool,
     ) -> Result<FerrousNativeShellRecord> {
+        self.spawn_grouped(path, entry, ctx, label, spec_id, wait_ready, None)
+    }
+    pub fn spawn_grouped(
+        &self,
+        path: PathBuf,
+        entry: String,
+        ctx: HashMap<String, String>,
+        label: String,
+        spec_id: String,
+        wait_ready: bool,
+        subgroups: Option<Vec<String>>,
+    ) -> Result<FerrousNativeShellRecord> {
         ensure!(
             allowed_label(&label),
             "shell label outside intelligence ownership"
@@ -119,9 +143,20 @@ impl Shells {
                 env: std::env::vars().collect(),
             },
         )?;
+        let terminal =
+            label == "code-editor-terminal" || label.starts_with("code-editor-terminal:");
+        if terminal {
+            spec.env.entry("TERM".into()).or_insert_with(|| {
+                std::env::var("TERM").unwrap_or_else(|_| "xterm-256color".into())
+            });
+        }
         ensure!(
-            spec.backend == "pipe",
-            "intelligence children require binary pipes"
+            spec.backend == if terminal { "pty" } else { "pipe" },
+            "invalid worker shell backend"
+        );
+        ensure!(
+            !terminal || !wait_ready,
+            "terminal readiness is not output-marker based"
         );
         let readiness = spec.readiness.take();
         let probe = if wait_ready {
@@ -153,9 +188,16 @@ impl Shells {
             FerrousShellLaunchOverrides {
                 label: Some(label),
                 spec_id: Some(spec_id),
+                subgroups,
                 ..Default::default()
             },
         )?;
+        if terminal {
+            if let Err(error) = self.start_log_drain(record.id.clone()) {
+                let _ = manager.shutdown_tree_blocking(vec![record.pid.into()]);
+                return Err(error);
+            }
+        }
         if let Some((pattern, timeout)) = probe {
             let ready = self
                 .wait_output(&record.id, &pattern, timeout)
@@ -213,6 +255,14 @@ impl Shells {
     }
     pub fn live(&self, id: &str) -> Result<bool> {
         ensure!(self.get(id)?.is_some(), "unknown intelligence shell");
+        if let Some(record) = self
+            .manager()?
+            .live_records()?
+            .into_iter()
+            .find(|r| r.id == id && r.backend == "pty")
+        {
+            return Ok(record.status == FerrousNativeShellStatus::Running);
+        }
         Ok(self
             .manager()?
             .get_pipe_state(id)?
@@ -243,8 +293,42 @@ impl Shells {
             data.len() <= crate::protocol::FRAME_LIMIT,
             "intelligence write exceeds frame limit"
         );
-        self.manager()?.write_to_pipe_blocking(id, data)?;
+        ensure!(
+            self.manager()?.write_blocking(id, data)?,
+            "native stdin unavailable"
+        );
         Ok(())
+    }
+    pub fn resize(&self, id: &str, cols: u16, rows: u16) -> Result<()> {
+        ensure!(
+            cols > 0 && rows > 0 && self.live(id)?,
+            "invalid terminal resize"
+        );
+        ensure!(
+            self.get(id)?.is_some_and(|r| r.backend == "pty"),
+            "not a terminal"
+        );
+        ensure!(
+            self.manager()?.resize_pty_blocking(id, cols, rows)?,
+            "terminal resize unavailable"
+        );
+        Ok(())
+    }
+    pub fn remove(&self, id: &str) -> Result<bool> {
+        let manager = self.manager()?;
+        ensure!(
+            manager
+                .live_records()?
+                .iter()
+                .any(|r| r.id == id && allowed_label(&r.label) && r.backend == "pty"),
+            "terminal is not locally owned"
+        );
+        self.terminate(id)?;
+        if let Some(drainer) = self.drainers.lock().unwrap().remove(id) {
+            drainer.cancel.store(true, Ordering::Release);
+            let _ = drainer.thread.join();
+        }
+        manager.remove_exited_shell_blocking(id)
     }
     pub fn subscribe(&self, id: String) -> Result<u64> {
         ensure!(
@@ -253,7 +337,7 @@ impl Shells {
         );
         let mut readers = self.readers.lock().unwrap();
         let mut drainers = self.drainers.lock().unwrap();
-        drainers.retain(|_, thread| !thread.is_finished());
+        drainers.retain(|_, drainer| !drainer.thread.is_finished());
         ensure!(
             !drainers.contains_key(&id),
             "intelligence stdout is logs-only"
@@ -306,36 +390,42 @@ impl Shells {
         let manager = self.manager()?;
         let stopping = self.stopping.clone();
         let mut drainers = self.drainers.lock().unwrap();
-        drainers.retain(|_, thread| !thread.is_finished());
+        drainers.retain(|_, drainer| !drainer.thread.is_finished());
         ensure!(drainers.len() < 64, "native log-drainer capacity exceeded");
         ensure!(
             !drainers.contains_key(&shell),
             "shell already has a log drainer"
         );
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cancelled = cancel.clone();
         drainers.insert(
             shell.clone(),
-            std::thread::spawn(move || {
-                while !stopping.load(Ordering::Acquire) {
-                    let read_started = std::time::Instant::now();
-                    match manager.read_stdout_chunk_blocking(&shell, Duration::from_millis(100)) {
-                        Ok(Some(_)) => {}
-                        Ok(None)
-                            if manager
-                                .get_shell(&shell)
-                                .ok()
-                                .flatten()
-                                .is_some_and(|r| r.status == FerrousNativeShellStatus::Running) =>
+            Drainer {
+                cancel,
+                thread: std::thread::spawn(move || {
+                    while !stopping.load(Ordering::Acquire) && !cancelled.load(Ordering::Acquire) {
+                        let read_started = std::time::Instant::now();
+                        match manager.read_stdout_chunk_blocking(&shell, Duration::from_millis(100))
                         {
-                            idle_read_pause(read_started)
-                        }
-                        Ok(None) => break,
-                        Err(error) => {
-                            eprintln!("[code-te2-worker] intelligence log drain failed: {error}");
-                            break;
+                            Ok(Some(_)) => {}
+                            Ok(None)
+                                if manager.get_shell(&shell).ok().flatten().is_some_and(|r| {
+                                    r.status == FerrousNativeShellStatus::Running
+                                }) =>
+                            {
+                                idle_read_pause(read_started)
+                            }
+                            Ok(None) => break,
+                            Err(error) => {
+                                eprintln!(
+                                    "[code-te2-worker] intelligence log drain failed: {error}"
+                                );
+                                break;
+                            }
                         }
                     }
-                }
-            }),
+                }),
+            },
         );
         Ok(())
     }
@@ -344,8 +434,8 @@ impl Shells {
         for reader in self.readers.lock().unwrap().values() {
             reader.cancelled.store(true, Ordering::Release);
         }
-        for (_, thread) in self.drainers.lock().unwrap().drain() {
-            let _ = thread.join();
+        for (_, drainer) in self.drainers.lock().unwrap().drain() {
+            let _ = drainer.thread.join();
         }
     }
     pub fn read(&self, token: u64) -> Result<Vec<u8>> {
@@ -403,7 +493,16 @@ pub fn record_value(record: Option<FerrousNativeShellRecord>) -> rmpv::Value {
     crate::protocol::map([
         ("id", record.id.into()),
         ("label", record.label.into()),
+        ("backend", record.backend.into()),
         ("pid", record.pid.into()),
+        (
+            "stdout_log",
+            record.stdout_log.to_string_lossy().to_string().into(),
+        ),
+        (
+            "exit_code",
+            record.exit_code.map_or(rmpv::Value::Nil, Into::into),
+        ),
         (
             "status",
             if record.status == FerrousNativeShellStatus::Running {

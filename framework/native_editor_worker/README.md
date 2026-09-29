@@ -26,7 +26,7 @@ existing FWS child ownership are unchanged.
 
 ### Worker-local intelligence shell manager
 
-`shells.rs` uses pinned Ferrous 0.2.14 inside this **independent worker**, not
+`shells.rs` uses Ferrous revision `f7ce068` (the native-drawer PTY branch) inside this **independent worker**, not
 inside the TE2 server. `native_shells.py` adapts WBA/code-server lifecycle and
 binary pipe operations through PyO3. The existing shellspecs, labels, discovery,
 code-server output readiness marker and WBA MessagePack handshake remain in use.
@@ -54,8 +54,21 @@ Code TE2 labels.
 Watchexec uses the binary reader with bounded 64 KiB newline framing in Python,
 not an asyncio subprocess handle. Start/stop/replacement serialize; old readers
 close before another project starts. JSON-to-workspace-event policy is unchanged.
-The drawer shell family and outbound Python FWS observation client remain on
-their previous paths. This slice does not yet
+The drawer also uses this manager with its interactive PTY shellspec. Ferrous
+establishes a controlling-terminal session, and resize uses the kernel's
+foreground-job notification rather than Python PID/group guesses. A native
+drainer flushes each PTY output batch to its raw log before FWS publication.
+Close performs exact-tree shutdown, stops the drainer, then removes the owned
+exited record/logs and publishes removal. Foreign persisted PTYs are not adopted.
+
+`terminal_log.rs` opens one log descriptor with identity/size from that descriptor
+and bounded 64 KiB reads. `terminal_log_io.py` installs this bridge before domain
+imports; its interpreted reference reader is for tests/tools, never failure retry.
+Pyte remains lazy Python domain code; checkpoint/delta, offsets, reset and resize
+semantics remain unchanged. Reads stop at the opened snapshot's size so a growing
+producer cannot make a single projection chase EOF indefinitely.
+
+The outbound Python FWS observation client remains on its previous path. This does not yet
 remove the framework-shells or python-socketio imports from the whole worker.
 Rebuild this worker before live testing; no frontend/APK update is required.
 

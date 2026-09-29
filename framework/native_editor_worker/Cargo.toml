@@ -23,7 +23,7 @@ mime_guess = "2"
 percent-encoding = "2"
 futures-util = "0.3"
 tempfile = "=3.27.0"
-ferrous_framework = { git = "https://github.com/mrsurge/ferrous-framework.git", tag = "0.2.14" }
+ferrous_framework = { git = "https://github.com/mrsurge/ferrous-framework.git", rev = "f7ce06845c98196c45514552db4610347593bcae" }
 serde_yaml = "0.9"
 regex = "1"
 

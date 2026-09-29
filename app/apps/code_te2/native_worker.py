@@ -57,6 +57,8 @@ def start(bridge: NativeBridge) -> dict[str, object]:
     configure_native(bridge)
     from .native_shells import configure_native as configure_native_shells
     configure_native_shells(bridge)
+    from .terminal_log_io import configure_native as configure_terminal_logs
+    configure_terminal_logs(bridge)
     identity = PipeIdentity.from_env()
     pipe_runtime.configure(lambda envelope: None, identity)
     pipe_runtime.configure_transport(NativePipeTransport(bridge))

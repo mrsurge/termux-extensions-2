@@ -5120,10 +5120,28 @@ Persisted metadata is not live pipe ownership: inaccessible/adopted children
 follow the existing replace policy. Exact PID-tree shutdown protects worker
 ancestry and avoids the persisted-record process-group termination path.
 Worker shutdown stops readers/drainers without claiming framework tree-cleanup
-authority. Drawer shells still use Python FWS, as does the outbound observation
-bridge; whole-worker dependency elimination
+authority. The outbound observation bridge still uses Python FWS/Socket.IO;
+whole-worker dependency elimination
 and startup measurements remain later gates. No Python-manager fallback exists
 for migrated intelligence children. Rebuild the independent worker for this slice.
+
+The drawer's interactive PTY shellspec now uses the same native manager (Ferrous
+revision `f7ce068`, native-drawer branch). It remains a shell process, not a
+separate Pyte parsing child. The native PTY establishes its own session and
+controlling terminal; the kernel delivers resize to the foreground job. Native
+log draining flushes bytes before publishing FWS output wakeups. Close first
+shuts down the exact owned process tree, stops its drainer, then removes the
+exited owned record/logs and publishes removal; foreign persisted PTYs do not
+grant control or reuse authority.
+
+Pyte and the checkpoint/delta protocol remain in Python. `terminal_log_io.py`
+uses `terminal_log.rs` for production descriptor ownership: open/fstat identify
+the same file, reads are bounded to 64 KiB and the captured size, and close runs
+even on parser failure. Existing offset, decoder-prefix, replacement/truncation
+and resize-reset policy stays in `terminal_screen_projection.py`. The interpreted
+reader supports isolated tests/tools, not retry after a native error. The FWS
+observer still supplies output wakeups; no polling or duplicate native observer
+is introduced here. Rebuild only the independent worker; no frontend update.
 
 Run-profile and page-preview launch/list/stop also use that native manager.
 Their `wait_ready=true` shellspec output markers are matched directly from live

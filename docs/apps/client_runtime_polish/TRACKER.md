@@ -365,10 +365,40 @@ Sidebar loading; no additional startup redesign without new evidence.
 - [x] Auxiliary slice automated validation: 19 Rust worker tests, 95 Python tests
   plus 7 subtests, 18 isolated worker integration tests; optimized build, Cargo
   formatting, five-module typecheck and diff whitespace checks pass.
-- [ ] Auxiliary slice live acceptance: run-profile launch/reuse/restart/stop,
+- [x] User live acceptance of auxiliary slice `1ffdbb94`: run-profile launch/reuse/restart/stop,
   page preview readiness/proxy/logs, and watchexec events/project replacement.
-- [ ] Later slices: drawer shell consumers and outbound FWS observer; then prove
+- [ ] Later slice: outbound FWS observer; then prove
   external import elimination.
+
+### Drawer native I/O prerequisites
+
+- [x] Audit actual drawer shellspec: interactive PTY, not dtach. The shell command
+  is launched by the worker's manager; Pyte runs in Code TE2 and stays there.
+- [x] Implement and validate Ferrous PTY session isolation/controlling terminal
+  and owned exited-shell removal with a lifecycle notification. User approved
+  changes in the separate `../ferrous-framework` repository; no publication or
+  shared runtime restart is included.
+- [x] Native-manager validation: 46 passed, 2 performance tests intentionally
+  ignored. Coverage includes kernel resize notification, small-output raw-log
+  visibility, running/foreign removal rejection, and no late record resurrection.
+  Correct the pre-existing raw-termios test's partial-output assumption by waiting
+  for an explicit completion marker. Final Ferrous library tests: 7 passed.
+- [x] User approved dependency checkpoint publication: Ferrous `f7ce068` pushed
+  on `feature/native-drawer-pty`, with main/tag/release untouched. Pin that exact
+  published revision in the independent worker; no local Cargo path dependency.
+- [x] Move drawer shell launch/control and bounded raw-log reads to Rust,
+  retaining Pyte, screen generation/offset semantics, checkpoint/delta DTOs and
+  lazy terminal creation. Outbound FWS observer remains a subsequent slice.
+- [x] Automated validation: 20 Rust worker tests, 121 selected Python tests plus
+  7 subtests, including split-UTF8/replacement-reset projection coverage.
+  Five changed Python modules typecheck clean. Optimized native build passes.
+- [x] Real-worker suite: 20 passed, including PTY launch/input/resize/raw-log
+  checkpoint/close over polling and WebSocket. Its isolated controller fixture
+  deliberately lacks FWS, so notification-driven live output is not certified by
+  this test; existing FWS observation remains unchanged.
+- [ ] Live acceptance: drawer input/resize, small prompt output, reconnect,
+  multiple sessions and close/removal on desktop and Pixel. No runtime restarted
+  by the agent, and no frontend/APK rebuild is needed for this backend slice.
 
 ### Readiness checkpoint
 

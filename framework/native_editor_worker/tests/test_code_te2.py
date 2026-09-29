@@ -322,3 +322,43 @@ def test_terminal_namespace_connect_does_not_create_shell(native_app, transport)
         assert "[terminal_ws] connect" in "".join(logs)
     finally:
         client.disconnect()
+
+
+@pytest.mark.parametrize("transport", ["polling", "websocket"])
+def test_drawer_native_pty_checkpoint_resize_and_close(native_app, transport):
+    url, _, _, logs = native_app
+    client = socketio.Client(reconnection=False)
+    registered = queue.Queue()
+    errors = []
+    client.on("terminal:shell_id", registered.put, namespace="/terminal")
+    client.on("terminal:error", errors.append, namespace="/terminal")
+    shell_id = None
+    def request(method, **params):
+        reply = client.call("terminal:request", {"id": method, "method": method, "params": params},
+                            namespace="/terminal", timeout=10)
+        assert reply["ok"], (reply, logs)
+        return reply["result"]
+    try:
+        client.connect(url, namespaces=["/terminal"], transports=[transport], wait_timeout=15)
+        client.call("terminal:register", {"shell_id": "auto", "client_id": "drawer-test"}, namespace="/terminal", timeout=10)
+        shell_id = registered.get(timeout=10)["shell_id"]
+        # This fixture deliberately has no FWS controller. Its observer's
+        # disconnected warning is expected; log checkpoints are tested directly.
+        assert all(error.get("source") == "fws_terminal_log_stream" for error in errors), (errors, logs)
+        client.call("terminal:resize", {"shell_id": shell_id, "cols": 91, "rows": 37}, namespace="/terminal", timeout=10)
+        client.call("terminal:input", {"shell_id": shell_id, "data": "printf 'native-%s\\n' drawer; stty size\n"}, namespace="/terminal", timeout=10)
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            checkpoint = request("shell.history", shell_id=shell_id, cols=91, rows=37)
+            if "native-drawer" in checkpoint["checkpoint_ansi"] and "37 91" in checkpoint["checkpoint_ansi"]:
+                break
+            time.sleep(.05)
+        else:
+            pytest.fail(f"Missing PTY output: {checkpoint!r}\n{''.join(logs)}")
+        assert checkpoint["output_offset"] > 0
+        request("shell.remove", shell_id=shell_id)
+        shell_id = None
+    finally:
+        if shell_id is not None and client.connected:
+            request("shell.remove", shell_id=shell_id)
+        client.disconnect()

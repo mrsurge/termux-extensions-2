@@ -7,6 +7,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Protocol, cast, final
+from .terminal_log_io import open_log
 
 if TYPE_CHECKING:
     from .terminal_pyte import TrackedByteStream
@@ -280,35 +281,25 @@ class _TerminalProjection:
             return self.parser_pending_bytes
         return self.stream.decoder_pending_bytes()
 
-    def _stat_identity(self) -> tuple[tuple[int, int], int] | None:
-        try:
-            stat = self.log_path.stat()
-        except FileNotFoundError:
-            return None
-        return (int(stat.st_dev), int(stat.st_ino)), int(stat.st_size)
-
     def _consume_log(self, *, collect: bool) -> tuple[tuple[TerminalOutputDelta, ...], bool]:
-        current = self._stat_identity()
         reset = False
-        if current is None:
-            if self.initialized and (self.log_identity is not None or self.output_offset):
+        deltas: list[TerminalOutputDelta] = []
+        with open_log(self.log_path) as handle:
+            if handle is None:
+                if self.initialized and (self.log_identity is not None or self.output_offset):
+                    self._reset_screen()
+                    reset = True
+                self.initialized = True
+                return (), reset
+            identity, size = handle.identity, handle.size
+            if self.initialized and (
+                self.log_identity is not None
+                and (identity != self.log_identity or size < self.output_offset)
+            ):
                 self._reset_screen()
                 reset = True
-            self.initialized = True
-            return (), reset
-
-        identity, size = current
-        if self.initialized and (
-            self.log_identity is not None
-            and (identity != self.log_identity or size < self.output_offset)
-        ):
-            self._reset_screen()
-            reset = True
-        self.log_identity = identity
-
-        deltas: list[TerminalOutputDelta] = []
-        with self.log_path.open("rb") as handle:
-            _ = handle.seek(self.output_offset)
+            self.log_identity = identity
+            handle.seek(self.output_offset)
             while True:
                 data = handle.read(READ_CHUNK_BYTES)
                 if not data:

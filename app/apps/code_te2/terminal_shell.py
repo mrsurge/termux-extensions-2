@@ -3,7 +3,6 @@
 import os
 import hashlib
 import shlex
-import signal
 from pathlib import Path
 from typing import cast
 
@@ -89,11 +88,9 @@ async def create_editor_shell(
         dict: Shell session info including ID
     """
     # Shell launch dependencies must not gate editor/router startup.
-    from framework_shells import get_manager
-    from framework_shells.orchestrator import Orchestrator
+    from .native_shells import get_manager
 
     mgr = await get_manager()
-    orch = Orchestrator(mgr)
     
     shell_cmd_value: ShellCommand = shell_cmd if shell_cmd is not None else ['bash', '-l', '-i']
     cwd_value = cwd or os.path.expanduser('~')
@@ -107,16 +104,15 @@ async def create_editor_shell(
 
     # Framework-Shells owns the persistent interactive PTY session.
     subgroups = _terminal_subgroups(project_path)
-    rec = await orch.start_from_ref(
-        SHELLSPEC_REF,
-        base_dir=SHELLSPEC_DIR,
+    filename, entry = SHELLSPEC_REF.split("#", 1)
+    rec = await mgr.spawn_terminal(
+        SHELLSPEC_DIR / filename, entry,
         ctx={
             "CWD": cwd_value,
             "SHELL_CMD": _shell_cmd_string(shell_cmd_value),
         },
         label=label,
-        wait_ready=False,
-        subgroups_overrides=subgroups,
+        subgroups=subgroups,
     )
     
     return _json_object(cast(object, await mgr.describe(rec)))
@@ -133,13 +129,12 @@ async def destroy_editor_shell(shell_id: str) -> bool:
     Returns:
         bool: True if successfully removed
     """
-    from framework_shells import get_manager
+    from .native_shells import get_manager
 
     mgr = await get_manager()
     try:
         # Force termination and remove metadata/logs
-        await mgr.remove_shell(shell_id, force=True)
-        return True
+        return await mgr.remove_shell(shell_id, force=True)
     except Exception:
         return False
 
@@ -153,46 +148,14 @@ async def resize_editor_shell(shell_id: str, cols: int, rows: int) -> bool:
         cols: Terminal columns
         rows: Terminal rows
     """
-    from framework_shells import get_manager
+    from .native_shells import get_manager
 
     mgr = await get_manager()
     try:
         await mgr.resize_pty(shell_id, cols, rows)
 
-        # Ensure the PTY front process and interactive shells observe the resize.
-        # Without SIGWINCH reaching the "front" process, readline can keep an
-        # old column count and you'll see wrap/overwrite glitches in xterm.
-        try:
-            proxy_pid: int | None = None
-            pty_map = cast(dict[str, object] | None, getattr(cast(object, mgr), "_pty", None))
-            pty_state = pty_map.get(shell_id) if pty_map is not None else None
-            if pty_state is not None:
-                proxy_pid_obj = cast(object, getattr(pty_state, "proxy_pid", None))
-                proxy_pid = proxy_pid_obj if isinstance(proxy_pid_obj, int) else None
-            if proxy_pid:
-                try:
-                    os.killpg(os.getpgid(proxy_pid), signal.SIGWINCH)
-                except Exception:
-                    try:
-                        os.kill(proxy_pid, signal.SIGWINCH)
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-
-        try:
-            rec = await mgr.get_shell(shell_id)
-        except Exception:
-            rec = None
-        pid = rec.pid if rec and isinstance(rec.pid, int) else None
-        if pid is not None:
-            try:
-                os.killpg(os.getpgid(pid), signal.SIGWINCH)
-            except Exception:
-                try:
-                    os.kill(pid, signal.SIGWINCH)
-                except Exception:
-                    pass
+        # The native PTY owns its controlling terminal; TIOCSWINSZ notifies
+        # the actual foreground job, without guessing process groups here.
         return True
     except Exception:
         return False
