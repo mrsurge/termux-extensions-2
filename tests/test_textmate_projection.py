@@ -141,6 +141,61 @@ class TextmateProjectionTests(TestCase):
                         "revision-1",
                     )
 
+    def test_body_resolves_only_requested_extension_and_allowed_roots_once(self) -> None:
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "test"
+            grammar_path = root / "syntaxes" / "test.tmLanguage.json"
+            grammar_path.parent.mkdir(parents=True)
+            _ = grammar_path.write_text('{"scopeName":"source.test"}', encoding="utf-8")
+            registry = self._registry(root)
+            extensions = cast(dict[str, dict[str, object]], registry["extensions"])
+            registry["extensions"] = {
+                "other.extension": {
+                    "path": str(Path(temp_dir) / "missing"),
+                    "active": True,
+                    "grammars": [{"path": "syntaxes/other.tmLanguage.json"}],
+                },
+                **extensions,
+            }
+
+            with (
+                patch("app.apps.code_te2.textmate_projection.load_registry", return_value=registry),
+                patch(
+                    "app.apps.code_te2.textmate_projection._allowed_extension_roots",
+                    return_value=(Path(temp_dir),),
+                ) as allowed_roots,
+            ):
+                body = get_textmate_grammar_body(
+                    "test.extension/syntaxes/test.tmLanguage.json", "revision-1",
+                )
+
+            self.assertIn("source.test", body["raw"])
+            allowed_roots.assert_called_once_with()
+
+    def test_body_rejects_declared_grammar_escaping_extension_root(self) -> None:
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "test"
+            grammar_path = root / "syntaxes" / "test.tmLanguage.json"
+            grammar_path.parent.mkdir(parents=True)
+            _ = grammar_path.write_text('{"scopeName":"source.test"}', encoding="utf-8")
+            registry = self._registry(root)
+            extensions = cast(dict[str, dict[str, object]], registry["extensions"])
+            grammars = cast(list[dict[str, object]], extensions["test.extension"]["grammars"])
+            grammars[0]["path"] = "../outside.tmLanguage.json"
+
+            with (
+                patch("app.apps.code_te2.textmate_projection.load_registry", return_value=registry),
+                patch("app.apps.code_te2.textmate_projection._allowed_extension_roots", return_value=(Path(temp_dir),)),
+            ):
+                with self.assertRaisesRegex(TextmateProjectionError, "path_outside_extension"):
+                    _ = get_textmate_grammar_body(
+                        "test.extension/../outside.tmLanguage.json", "revision-1",
+                    )
+
     def test_toggle_rotates_and_publishes_textmate_revision(self) -> None:
         registry = {
             "textmate_revision": "revision-1",

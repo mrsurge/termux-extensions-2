@@ -95,8 +95,8 @@ def _allowed_extension_roots() -> tuple[Path, ...]:
     return tuple(roots)
 
 
-def _is_allowed_extension_root(root: Path) -> bool:
-    for allowed in _allowed_extension_roots():
+def _is_allowed_extension_root(root: Path, allowed_roots: tuple[Path, ...]) -> bool:
+    for allowed in allowed_roots:
         try:
             _ = root.relative_to(allowed)
             return root != allowed
@@ -163,45 +163,46 @@ def get_textmate_grammar_body(grammar_id: str, revision: str) -> TextmateGrammar
     if not revision or revision != current_revision:
         raise TextmateProjectionError("textmate_projection_revision_changed")
 
-    for extension_id, extension in extensions.items():
-        if extension.get("active") is False:
+    extension_id, separator, requested_path = grammar_id.partition("/")
+    if not separator or not extension_id or not requested_path:
+        raise TextmateProjectionError("textmate_grammar_not_found")
+    extension = extensions.get(extension_id)
+    if extension is None or extension.get("active") is False:
+        raise TextmateProjectionError("textmate_grammar_not_found")
+    root_value = extension.get("path")
+    if not isinstance(root_value, str) or not root_value:
+        raise TextmateProjectionError("textmate_grammar_not_found")
+    root = Path(root_value).expanduser().resolve(strict=False)
+    if not _is_allowed_extension_root(root, _allowed_extension_roots()):
+        raise TextmateProjectionError("textmate_grammar_not_found")
+    for grammar in _records(extension.get("grammars", [])):
+        relative_path = grammar.get("path")
+        if relative_path != requested_path:
             continue
-        root_value = extension.get("path")
-        if not isinstance(root_value, str) or not root_value:
-            continue
-        root = Path(root_value).expanduser().resolve(strict=False)
-        if not _is_allowed_extension_root(root):
-            continue
-        for grammar in _records(extension.get("grammars", [])):
-            relative_path = grammar.get("path")
-            if not isinstance(relative_path, str) or not relative_path:
-                continue
-            if _grammar_id(extension_id, relative_path) != grammar_id:
-                continue
-            resource = (root / relative_path).resolve(strict=False)
-            try:
-                _ = resource.relative_to(root)
-            except ValueError as exc:
-                raise TextmateProjectionError("textmate_grammar_path_outside_extension") from exc
-            try:
-                stat = resource.stat()
-            except OSError as exc:
-                raise TextmateProjectionError("textmate_grammar_missing") from exc
-            expected_size = grammar.get("size")
-            expected_mtime_ns = grammar.get("mtime_ns")
-            if (
-                not isinstance(expected_size, int)
-                or not isinstance(expected_mtime_ns, int)
-                or stat.st_size != expected_size
-                or stat.st_mtime_ns != expected_mtime_ns
-            ):
-                raise TextmateProjectionError("textmate_projection_resource_changed")
-            if stat.st_size > _MAX_GRAMMAR_BYTES:
-                raise TextmateProjectionError("textmate_grammar_too_large")
-            try:
-                raw = resource.read_text("utf-8")
-            except (OSError, UnicodeError) as exc:
-                raise TextmateProjectionError("textmate_grammar_unreadable") from exc
-            return {"ok": True, "revision": current_revision, "raw": raw}
+        resource = (root / requested_path).resolve(strict=False)
+        try:
+            _ = resource.relative_to(root)
+        except ValueError as exc:
+            raise TextmateProjectionError("textmate_grammar_path_outside_extension") from exc
+        try:
+            stat = resource.stat()
+        except OSError as exc:
+            raise TextmateProjectionError("textmate_grammar_missing") from exc
+        expected_size = grammar.get("size")
+        expected_mtime_ns = grammar.get("mtime_ns")
+        if (
+            not isinstance(expected_size, int)
+            or not isinstance(expected_mtime_ns, int)
+            or stat.st_size != expected_size
+            or stat.st_mtime_ns != expected_mtime_ns
+        ):
+            raise TextmateProjectionError("textmate_projection_resource_changed")
+        if stat.st_size > _MAX_GRAMMAR_BYTES:
+            raise TextmateProjectionError("textmate_grammar_too_large")
+        try:
+            raw = resource.read_text("utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise TextmateProjectionError("textmate_grammar_unreadable") from exc
+        return {"ok": True, "revision": current_revision, "raw": raw}
 
     raise TextmateProjectionError("textmate_grammar_not_found")
