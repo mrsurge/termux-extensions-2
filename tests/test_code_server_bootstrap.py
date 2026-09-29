@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import os
 import tempfile
 import unittest
@@ -58,6 +59,18 @@ class CodeServerBootstrapTests(unittest.TestCase):
                 code_server_bootstrap.code_server_bootstrap_cache_dir(),
                 cache_home / "code_server" / "downloads",
             )
+
+    def test_download_helpers_use_urllib_when_invoked(self) -> None:
+        script = b"#!/bin/sh\nexit 0\n"
+        with patch("urllib.request.urlopen", return_value=io.BytesIO(script)) as urlopen:
+            self.assertEqual(code_server_bootstrap._fetch_install_script(), script)
+        urlopen.assert_called_once()
+
+        destination = self.root / "code-server.deb"
+        with patch("urllib.request.urlopen", return_value=io.BytesIO(b"package")) as urlopen:
+            code_server_bootstrap._download_to_path("https://example.test/code-server.deb", destination)
+        urlopen.assert_called_once()
+        self.assertEqual(destination.read_bytes(), b"package")
 
     def test_managed_installation_is_ready_without_command_version_gate(self) -> None:
         managed = _installation(self.root / "managed", source="te2-managed")

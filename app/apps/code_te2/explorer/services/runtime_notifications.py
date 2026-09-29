@@ -2,14 +2,10 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import os
-import urllib.request
 from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
-from types import TracebackType
-from typing import Protocol, cast
+from typing import cast
 
 from .file_ops import mark_draft_cache_dirty, mark_git_cache_dirty
 from .git_diff_base import project_diff_base
@@ -32,20 +28,7 @@ AsyncNoArg = Callable[[], Awaitable[None]]
 DebounceTasks = dict[str, asyncio.Task[None]]
 
 
-class UrlOpenResponse(Protocol):
-    def __enter__(self) -> "UrlOpenResponse": ...
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: TracebackType | None,
-    ) -> object: ...
-
-    def read(self) -> bytes: ...
-
 _explorer_event_loop: asyncio.AbstractEventLoop | None = None
-_draft_forward_tasks: DebounceTasks = {}
 _draft_decorations_tasks: DebounceTasks = {}
 _git_projection = LatestProjection("code_te2_git_projection")
 _git_content_revision = 0
@@ -289,47 +272,6 @@ def _git_tree_decorations(statuses: Mapping[str, str]) -> dict[str, object]:
     return cast(dict[str, object], build_git_tree_decorations(statuses))
 
 
-def _is_worker_process() -> bool:
-    return bool(os.getenv("TE_APP_ID") or os.getenv("TE_APP_WORKER_PORT"))
-
-
-def _framework_url() -> str:
-    return os.environ.get("TE_FRAMEWORK_URL", "http://127.0.0.1:8089").rstrip("/")
-
-
-def _forward_draft_notification(project_path: str) -> None:
-    url = f"{_framework_url()}/api/apps/code_te2/explorer/notify_drafts"
-    payload = {"project": project_path}
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers={"Content-Type": "application/json"},
-    )
-    try:
-        response = cast(UrlOpenResponse, urllib.request.urlopen(req, timeout=2.0))
-        with response as resp:
-            _ = resp.read()
-    except Exception as exc:
-        logger.debug("Failed to forward draft notify to main: %s", exc)
-
-
-def _schedule_forward_draft_refresh(project_path: str) -> None:
-    def _schedule() -> None:
-        async def do_forward() -> None:
-            await asyncio.to_thread(_forward_draft_notification, project_path)
-
-        _schedule_debounce_task(
-            _draft_forward_tasks,
-            f"drafts-forward:{project_path}",
-            delay=0.5,
-            name="code_te2_draft_forward",
-            callback=do_forward,
-        )
-
-    _ = _post_to_explorer_loop(_schedule)
-
-
 async def _broadcast_draft_decorations(project_path: str) -> None:
     try:
         from .. import review
@@ -372,10 +314,6 @@ def notify_draft_state_changed(project_path: str) -> None:
     normalized_path = str(Path(project_path).resolve())
 
     def _notify() -> None:
-        if _is_worker_process() and not manager.has_connections(normalized_path):
-            _schedule_forward_draft_refresh(normalized_path)
-            return
-
         if not manager.has_connections(normalized_path):
             return
 

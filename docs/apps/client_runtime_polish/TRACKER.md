@@ -388,6 +388,13 @@ Sidebar loading; no additional startup redesign without new evidence.
   pass; live Pixel acceptance and measured import/startup effects remain open.
 - [ ] Pixel live acceptance of native WBA control-pipe codec: extension host
   startup/handshake, provider RPC, diagnostics push and restart/reconnect.
+- [x] Remove Code TE2's uncalled Python HTTP serving-readiness callback and
+  orphaned no-client draft-forward POST. Defer Code Server urllib imports until
+  actual downloads; connected Explorer draft publication is unchanged. Fresh
+  main/socket-gateway import omits urllib.request, but no speedup is claimed.
+  Local checks: 20 native readiness, 16 draft/bootstrap and 17 Explorer/project
+  integration tests pass.
+- [ ] Pixel live acceptance of the HTTP/import cleanup after source update.
 
 ### Drawer native I/O prerequisites
 

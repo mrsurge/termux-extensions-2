@@ -1,15 +1,11 @@
 # /data/data/com.termux/files/home/mrselect/app/apps/code_te2/main.py
 
 import sys
-import os
-import json
 import faulthandler
 import threading
 import traceback
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, cast
-from urllib import request as urllib_request
-from urllib.parse import quote
+from typing import TYPE_CHECKING
 import asyncio
 from .explorer.services.file_ops import (
     get_project_root,
@@ -32,7 +28,7 @@ IGNORE_PATTERNS = [
 _CODE_TE2_PATHS = code_te2_paths()
 AGENT_ICON_DIR = _CODE_TE2_PATHS.agent_icons_dir
 JsonDict = dict[str, object]
-APP_ID = str(os.environ.get("TE_APP_ID") or "code_te2").strip() or "code_te2"
+
 
 if TYPE_CHECKING:
     from app.libs.pipe_protocol import PipeEnvelope
@@ -41,12 +37,6 @@ if TYPE_CHECKING:
 def te2_pipe_dispatch(envelope: "PipeEnvelope") -> JsonDict | None:
     del envelope
     return None
-
-
-class ReadableResponse(Protocol):
-    def read(self) -> bytes: ...
-
-    def close(self) -> None: ...
 
 
 def _install_crash_diagnostics() -> None:
@@ -100,41 +90,6 @@ def _install_loop_exception_handler() -> None:
 
     loop.set_exception_handler(_handle_loop_exception)
 
-
-def _framework_url() -> str:
-    explicit = str(os.environ.get("TE_FRAMEWORK_URL") or "").strip()
-    if explicit:
-        return explicit.rstrip("/")
-    port = str(os.environ.get("TE_PORT") or "8089").strip() or "8089"
-    return f"http://127.0.0.1:{port}"
-
-
-def _post_serving_readiness() -> None:
-    body = {
-        "app_id": APP_ID,
-        "status": "ready",
-        "phase": "serving",
-        "source": "code_te2_backend",
-    }
-    endpoint = f"{_framework_url()}/api/apps/{quote(APP_ID, safe='')}/readiness"
-    req = urllib_request.Request(
-        endpoint,
-        data=json.dumps(body).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    resp = cast(ReadableResponse, urllib_request.urlopen(req, timeout=5))
-    try:
-        resp.read()
-    finally:
-        resp.close()
-
-
-async def te2_app_backend_serving() -> None:
-    try:
-        await asyncio.to_thread(_post_serving_readiness)
-    except Exception as exc:
-        print(f"[code_te2] readiness post failed: {exc}", flush=True)
 
 # HTTP resources and Socket.IO listener are now owned by code-te2-worker (Rust).
 # Python retains application lifecycle and namespace domain handlers.

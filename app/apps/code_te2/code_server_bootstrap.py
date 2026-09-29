@@ -11,7 +11,6 @@ import platform
 import shutil
 import subprocess
 from typing import BinaryIO, Final, Literal, TypedDict, cast
-from urllib.request import Request, urlopen
 import uuid
 
 from app.te2_paths import te2_cache_home
@@ -197,6 +196,8 @@ def _run_checked(
 
 
 def _fetch_install_script() -> bytes:
+    from urllib.request import Request, urlopen
+
     request = Request(
         OFFICIAL_INSTALL_SCRIPT_URL,
         headers={"User-Agent": f"TE2/code-server-bootstrap-{REQUIRED_CODE_SERVER_VERSION}"},
@@ -358,6 +359,8 @@ def _sha256(path: Path) -> str:
 
 
 def _download_to_path(url: str, destination: Path) -> None:
+    from urllib.request import Request, urlopen
+
     request = Request(
         url,
         headers={"User-Agent": f"TE2/code-server-bootstrap-{REQUIRED_CODE_SERVER_VERSION}"},
