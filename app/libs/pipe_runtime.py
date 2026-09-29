@@ -13,10 +13,10 @@ from app.libs.pipe_protocol import (
     PipeEnvelope,
     PipeError,
     PipeIdentity,
-    encode_frame,
     error_response,
     success_response,
 )
+from app.libs.pipe_transport import EnvelopeTransport, PipeWriter, StdioEnvelopeTransport
 
 PipeDispatcher = Callable[[PipeEnvelope], object]
 class PipeNotificationQueue(Protocol):
@@ -26,17 +26,11 @@ class PipeNotificationQueue(Protocol):
 PipeNotificationListener = tuple[PipeNotificationQueue, set[str] | None]
 
 
-class PipeWriter(Protocol):
-    def write(self, data: bytes) -> object: ...
-
-    def flush(self) -> object: ...
-
-
 _lock = threading.RLock()
 _counter = itertools.count(1)
 _dispatcher: PipeDispatcher | None = None
 _identity: PipeIdentity | None = None
-_transport_writer: PipeWriter | None = None
+_transport: EnvelopeTransport | None = None
 _write_lock = threading.Lock()
 _pending: dict[str, queue.Queue[PipeEnvelope]] = {}
 _notification_listeners: list[PipeNotificationListener] = []
@@ -68,9 +62,14 @@ def configure(dispatcher: PipeDispatcher, identity: PipeIdentity | None = None) 
 def configure_stdio_transport(protocol_stdout: object) -> None:
     """Attach the worker stdio pipe used for app-origin framework service calls."""
     writer = getattr(protocol_stdout, "buffer", protocol_stdout)
+    configure_transport(StdioEnvelopeTransport(cast(PipeWriter, writer)))
+
+
+def configure_transport(transport: EnvelopeTransport) -> None:
+    """Attach one transport at worker setup; not a live migration/retry API."""
     with _lock:
-        global _transport_writer
-        _transport_writer = cast(PipeWriter, writer)
+        global _transport
+        _transport = transport
 
 
 def configured_identity() -> PipeIdentity:
@@ -81,10 +80,15 @@ def configured_identity() -> PipeIdentity:
 
 
 def close_stdio_transport(reason: str) -> None:
+    """Compatibility entrypoint for the worker's existing stdin EOF/error path."""
+    close_transport(reason)
+
+
+def close_transport(reason: str) -> None:
     """Fence writes and release waiters when the binary stream can no longer route."""
-    global _transport_writer
+    global _transport
     with _lock:
-        _transport_writer = None
+        _transport = None
         pending = list(_pending.items())
         _pending.clear()
     for request_id, waiter in pending:
@@ -194,17 +198,13 @@ def accept_response(envelope: PipeEnvelope) -> bool:
 def write_envelope(envelope: PipeEnvelope, before_write: Callable[[], None] | None = None) -> None:
     """Serialize replies and outbound requests through the same protocol writer."""
     with _lock:
-        writer = _transport_writer
-    if writer is None:
+        transport = _transport
+    if transport is None:
         raise PipeRuntimeError("Outbound pipe transport is not configured", code="pipe.transportNotConfigured")
-    payload = encode_frame(envelope)
     with _write_lock:
         # Release diagnostic admission only once its reply owns the writer, and
         # before the peer can observe the frame and issue its next request.
-        if before_write is not None:
-            before_write()
-        _ = writer.write(payload)
-        _ = writer.flush()
+        transport.write(envelope, before_write)
 
 
 def add_notification_listener(
@@ -336,8 +336,8 @@ def _send_outbound_request(
     if not request_id:
         raise PipeRuntimeError("Pipe request id is required", code="pipe.requestIdRequired")
     with _lock:
-        writer = _transport_writer
-        if writer is None:
+        transport = _transport
+        if transport is None:
             raise PipeRuntimeError(
                 "Outbound pipe transport is not configured",
                 code="pipe.transportNotConfigured",

@@ -214,9 +214,13 @@ Sidebar loading; no additional startup redesign without new evidence.
   deprecation error and three preferences warnings remain. No runtime restart.
 - [x] User live acceptance completed for the persistence boundary; checkpoint
   requested before proceeding to the framework/WBA pipe inventory.
-- [ ] Inventory framework pipe and WBA control FD/framing/ownership separately.
+- [x] Inventory framework pipe and WBA control FD/framing/ownership separately;
+  see PIPE_BOUNDARY_INVENTORY.md for current contracts and uncovered bound/deadline
+  differences. Investigation only, not transport implementation.
 - [ ] Inspect Ferrous Rust reuse and remaining Python framework-shells callers;
   distinguish process-control contracts from WBA application DTOs.
+- [x] Verify native byte-write/subscription/shellspec APIs and enumerate Python
+  FWS callers. Cross-process live-handle ownership remains a design gate.
 - [x] Clarify startup/import reduction as the objective; Axum complements
   Socketioxide, not a presumed Uvicorn/networking bottleneck.
 - [x] Record optional pipe/file codec ownership in Rust and direct PyO3 value
@@ -224,6 +228,13 @@ Sidebar loading; no additional startup redesign without new evidence.
 - [ ] Measure removable Socket.IO import costs and inventory all remaining uses;
   keep transport hot-path measurements as a separate regression baseline.
 - [ ] Specify transport-neutral service, lifecycle and bounded async bridge contracts.
+- [x] Extract outbound EnvelopeTransport/stdio adapter without changing public
+  calls, request correlation, notification or dispatch ownership. Inbound worker
+  decode/debug admission remains separate; no Rust or WBA migration performed.
+- [x] Validate 36 pipe/WBA/worker bootstrap tests, including cancellation, late/
+  duplicate replies, close, write failure, identity and serialized frames.
+  Both changed production modules typecheck clean; user reports no live errors
+  and approves checkpoint/push before the inbound delivery slice.
 - [ ] Audit HTTP/resource extraction and remaining Python client dependencies.
 - [ ] Approve and validate a one-lane native prototype on Linux and Termux.
 - [ ] Verify Python Socket.IO imports are actually eliminated before claiming

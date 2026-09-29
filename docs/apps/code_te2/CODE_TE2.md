@@ -546,6 +546,19 @@ Editor preferences are stored per active project and used to initialize the inli
 Preferences changes use Monaco backend hooks and typed editor/UI IPC
 notifications. `/editor/*` routes are owned by `monaco_editor/editor_backend.py`.
 
+### Framework pipe transport seam
+
+Framework pipe transport has a separate outbound seam in
+`app/libs/pipe_transport.py`: `EnvelopeTransport` accepts envelopes, and the stdio
+adapter owns MessagePack encoding/write/flush. `pipe_runtime` retains shared writer
+serialization, pending replies, notification listeners and dispatch identity.
+Existing worker stdio setup/close APIs remain; alternate configuration is a
+setup-time seam, not live migration. Closing releases pending calls but cannot
+undo an already captured/in-flight write. The borrowed process stdout is not
+closed. Inbound decoding/debug admission stays in `app_worker`. See
+`docs/apps/client_runtime_polish/PIPE_BOUNDARY_INVENTORY.md` for ownership and
+future native-worker gates.
+
 ### Portable persistence I/O boundary
 
 `persistence_io.py` separates byte reads/atomic replacement from UTF-8/JSON

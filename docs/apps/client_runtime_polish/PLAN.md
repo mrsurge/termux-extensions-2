@@ -723,6 +723,12 @@ no first-paint speedup is claimed without a fresh measurement.
 
 ### Priority B: portable I/O and native worker shell
 
+The source-backed [pipe boundary inventory](PIPE_BOUNDARY_INVENTORY.md) separates
+framework envelopes, WBA control records and PTY traffic. It records Ferrous's
+binary-safe API and the unresolved cross-process ownership gate. The next proposed
+slice is a transport-neutral framework-pipe interface with the existing Python
+implementation and parity tests, before any Rust/PyO3 worker implementation.
+
 The first approved persistence extraction introduces `persistence_io.py` for
 preferences, persisted registry and intelligence state: byte reads/atomic writes
 are separate from UTF-8/JSON conversion, while stores keep their policy and DTO

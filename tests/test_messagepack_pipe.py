@@ -14,7 +14,7 @@ from app.libs.pipe_protocol import PipeEnvelope, decode_envelope, encode_frame
 class MessagePackPipeTests(unittest.TestCase):
     def test_transport_close_releases_pending_calls(self) -> None:
         waiter: queue.Queue[PipeEnvelope] = queue.Queue(maxsize=1)
-        with patch.object(pipe_runtime, "_pending", {"request": waiter}), patch.object(pipe_runtime, "_transport_writer", None):
+        with patch.object(pipe_runtime, "_pending", {"request": waiter}), patch.object(pipe_runtime, "_transport", None):
             pipe_runtime.close_stdio_transport("stream failed")
             response = waiter.get_nowait()
             self.assertEqual(response.id, "request")
