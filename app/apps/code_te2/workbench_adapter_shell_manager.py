@@ -8,9 +8,7 @@ import logging
 import os
 import time
 
-from framework_shells import get_manager
-from framework_shells.orchestrator import Orchestrator
-from framework_shells.record import ShellRecord
+from .native_shells import get_manager, Orchestrator, ShellRecord, OutputReader
 from app.libs.runtime_startup_trace import StartupTrace
 from app.libs.messagepack_stream import MessagePackStream, encode_message
 
@@ -40,7 +38,7 @@ _spawn_lock = asyncio.Lock()
 _rpc_counter: int = 0
 _rpc_pending: dict[int, asyncio.Future[JsonObject]] = {}
 _stdout_reader_task: asyncio.Task[None] | None = None
-_stdout_bytes_queue: Optional[asyncio.Queue[bytes]] = None
+_stdout_bytes_queue: Optional[OutputReader] = None
 _stdout_subscription_shell_id: Optional[str] = None
 _rpc_write_lock: Optional[asyncio.Lock] = None
 _push_drain_task: asyncio.Task[None] | None = None
@@ -353,7 +351,7 @@ async def _ensure_live_adapter_io(shell_id: str) -> bool:
     return True
 
 
-async def _stdout_reader_loop(shell_id: str, queue: asyncio.Queue[bytes]) -> None:
+async def _stdout_reader_loop(shell_id: str, queue: OutputReader) -> None:
     """Decode structured pipe records without treating log text as protocol data."""
     global _stdout_reader_task
 
@@ -605,16 +603,7 @@ async def adapter_rpc(
 
         try:
             frame = encode_message(msg)
-            # FWS write_to_pipe is text-only. Use the same live binary stdin
-            # seam as Terminal, under this adapter's existing writer lock.
-            state = mgr.get_pipe_state(shell_id)
-            if state is None or not state.stdin_supported:
-                raise RuntimeError("Adapter pipe stdin unavailable")
-            stdin = state.process.stdin
-            if stdin is None or stdin.is_closing():
-                raise RuntimeError("Adapter pipe stdin closed")
-            stdin.write(frame)
-            await stdin.drain()
+            await mgr.write_bytes(shell_id, frame)
         except BaseException:
             _ = _rpc_pending.pop(rid, None)
             _ = fut.cancel()

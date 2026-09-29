@@ -7,7 +7,6 @@ import json as _json
 import re
 import shutil
 from collections.abc import Awaitable, Callable
-from importlib import import_module
 from pathlib import Path
 from typing import Protocol, cast
 
@@ -15,6 +14,7 @@ from app.te2_paths import ensure_runtime_home
 
 from .code_te2_paths import code_te2_paths
 from .node_compile_cache import node_compile_cache
+from .native_shells import get_manager, Orchestrator, ShellManager, ShellRecord
 
 JsonObject = dict[str, object]
 
@@ -28,52 +28,8 @@ class ConnectionRecord(Protocol):
     def command(self) -> object: ...
 
 
-class ShellRecord(Protocol):
-    id: str
-    label: str
-    pid: int | None
-    status: str
-    env_overrides: object | None
-    command: object | None
-
-
-class ShellManager(Protocol):
-    def get_shell(self, shell_id: str) -> Awaitable[ShellRecord | None]: ...
-
-    def get_shell_capabilities(self, record: ShellRecord) -> Awaitable[JsonObject]: ...
-
-    def subscribe_output_bytes(self, shell_id: str) -> Awaitable[asyncio.Queue[bytes]]: ...
-
-    def unsubscribe_output_bytes(
-        self, shell_id: str, queue: asyncio.Queue[bytes]
-    ) -> Awaitable[None]: ...
-
-    def terminate_shell(self, shell_id: str, *, force: bool = False) -> Awaitable[None]: ...
-
-    def find_shell_by_label(
-        self, label: str, *, status: str | None = None
-    ) -> Awaitable[ShellRecord | None]: ...
-
-
-class OrchestratorInstance(Protocol):
-    def start_from_ref(
-        self,
-        ref: str,
-        *,
-        base_dir: Path,
-        ctx: JsonObject,
-        label: str,
-        record_spec_id: str,
-        wait_ready: bool,
-    ) -> Awaitable[ShellRecord]: ...
-
-
-class OrchestratorFactory(Protocol):
-    def __call__(self, manager: ShellManager) -> OrchestratorInstance: ...
-
-
-class ManagerGetter(Protocol):
-    def __call__(self) -> Awaitable[ShellManager]: ...
+OrchestratorFactory = Callable[[ShellManager], Orchestrator]
+ManagerGetter = Callable[[], Awaitable[ShellManager]]
 
 APP_ID = "code_te2"
 SHELLSPEC_DIR = Path(__file__).parent / "shellspec"
@@ -119,15 +75,11 @@ def _read_json_object_list(path: Path) -> list[JsonObject]:
 
 
 def _framework_get_manager() -> ManagerGetter:
-    module = import_module("framework_shells")
-    value = cast(object, module.__dict__["get_manager"])
-    return cast(ManagerGetter, value)
+    return get_manager
 
 
 def _orchestrator_factory() -> OrchestratorFactory:
-    module = import_module("framework_shells.orchestrator")
-    value = cast(object, module.__dict__["Orchestrator"])
-    return cast(OrchestratorFactory, value)
+    return Orchestrator
 
 
 async def _get_manager() -> ShellManager:

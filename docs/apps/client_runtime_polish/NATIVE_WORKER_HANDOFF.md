@@ -154,5 +154,11 @@ gate, after results and user acceptance; do not replace the live framework.
    are accounted for, especially the run-profile FWS bridge. Measure full worker
    startup including native/interpreter initialization and first useful document.
 
-WBA/FWS live-handle ownership remains a separate gate. Ferrous API availability
-does not grant a new process access to another manager's existing child handles.
+WBA/code-server now use a worker-local Ferrous manager through `native_shells.py`
+and PyO3. The independent editor executable owns newly spawned child handles;
+persisted/adopted records do not grant live pipe access and retain the existing
+replace policy. Native writes forward opaque WBA MessagePack bytes; Python keeps
+its codec/correlation. Code-server stdout drains natively after marker readiness.
+Other shell families and the outbound FWS observer remain Python-owned; migrate
+those consumers before claiming framework-shells/socketio import elimination.
+Automated isolated tests and Pixel live acceptance are separate gates.

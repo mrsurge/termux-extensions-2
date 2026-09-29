@@ -5099,6 +5099,32 @@ do not release a package with an unresolved source-target executable path. See
 `framework/native_editor_worker/README.md` for exact Pixel build/test commands.
 Isolated real-worker tests are not live Pixel acceptance or measured startup gains.
 
+#### Native Intelligence Child Ownership
+
+The independent `code-te2-worker` now owns a worker-local Ferrous manager for
+WBA and managed code-server. `native_shells.py` supplies typed async application
+adapters to the PyO3 shell methods; `shells.rs` renders the existing shellspecs
+and owns subprocess handles, binary pipe reads/writes and code-server log draining.
+It reuses the inherited FWS roots/secret and Ferrous's automatic parent peer.
+This does not embed the editor in the framework, move child launch decisions to
+the framework, or introduce an HTTP orchestration round trip.
+
+Python retains intelligence policy, readiness marker/protocol handshakes, WBA
+MessagePack framing/DTO codecs and RPC correlation. Native writes do not parse
+WBA payloads. One native read remains in flight across Python timeouts; release
+cancels and joins that read before retiring its token. After code-server's
+readiness subscription ends, stdout becomes logs-only in Rust. A second consumer
+cannot compete with that drainer. The registry bounds application readers.
+
+Persisted metadata is not live pipe ownership: inaccessible/adopted children
+follow the existing replace policy. Exact PID-tree shutdown protects worker
+ancestry and avoids the persisted-record process-group termination path.
+Worker shutdown stops readers/drainers without claiming framework tree-cleanup
+authority. Run-profile, watcher, page-preview and drawer shells still use Python
+FWS, as does the outbound observation bridge; whole-worker dependency elimination
+and startup measurements remain later gates. No Python-manager fallback exists
+for migrated intelligence children. Rebuild the independent worker for this slice.
+
 ### Editor Service Outcome Boundary
 
 Preference/view-setting services use `editor_backend_services/outcomes.py` for

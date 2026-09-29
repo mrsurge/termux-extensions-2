@@ -24,6 +24,30 @@ notification and leaves the readiness gate closed. No frontend OTA is needed.
 FWS still owns the separate worker; WBA/browser intelligence and
 existing FWS child ownership are unchanged.
 
+### Worker-local intelligence shell manager
+
+`shells.rs` uses pinned Ferrous 0.2.14 inside this **independent worker**, not
+inside the TE2 server. `native_shells.py` adapts WBA/code-server lifecycle and
+binary pipe operations through PyO3. The existing shellspecs, labels, discovery,
+code-server output readiness marker and WBA MessagePack handshake remain in use.
+Ferrous starts its own parent-dashboard peer from the inherited FWS environment;
+the adapter does not construct another peer or a framework HTTP control client.
+
+Each WBA reader has one bounded native read in flight, retained across Python
+timeout/cancellation. Releasing it waits for that read to stop. Code-server's
+one-shot readiness reader hands stdout to a Rust logs-only drainer, so a full OS
+pipe cannot stall it later. Native byte writes preserve the Python WBA codec and
+writer serialization. Persisted records alone never grant live stdin/stdout;
+the existing adoption policy replaces inaccessible children. Explicit child
+termination uses Ferrous's exact PID-tree shutdown, not process-group killing.
+Worker teardown stops its readers/drainers; framework lifecycle still owns tree
+cleanup. There is no fallback to Python FWS for these two consumers.
+
+Run profiles, watcher/page-preview/drawer shell families and the outbound Python
+FWS observation client remain on their previous paths. This slice does not yet
+remove the framework-shells or python-socketio imports from the whole worker.
+Rebuild this worker before live testing; no frontend/APK update is required.
+
 The common Engine.IO parser remains in use: application RPC payloads are binary
 `msgpack-v1`, not Socket.IO's optional MessagePack packet parser. Cargo.lock pins
 Engineioxide 0.17.7: 0.17.3's waiting-poll encoder concatenated binary packet

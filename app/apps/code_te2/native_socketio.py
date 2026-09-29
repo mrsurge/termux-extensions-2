@@ -9,9 +9,10 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Protocol, cast
 from .persistence_io import NativePersistence
+from .native_shells import NativeShellBridge
 
 
-class NativeBridge(NativePersistence, Protocol):
+class NativeBridge(NativePersistence, NativeShellBridge, Protocol):
     def socket_op(self, operation: dict[str, object]) -> None: ...
     def pipe_send(self, envelope: dict[str, object]) -> None: ...
 

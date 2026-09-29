@@ -4,6 +4,7 @@ mod persistence;
 #[allow(dead_code)] // Shared helpers also compile into the isolated pipe harness.
 mod protocol;
 mod rpc_codec;
+mod shells;
 mod values;
 mod web;
 
@@ -92,9 +93,59 @@ impl State {
 struct Bridge {
     state: Arc<State>,
     sockets: Arc<web::Sockets>,
+    shells: Arc<shells::Shells>,
 }
 #[pymethods]
 impl Bridge {
+    fn shell_get(&self, py: Python<'_>, id: String) -> PyResult<Py<PyAny>> {
+        let record = py.detach(|| self.shells.get(&id)).map_err(shell_error)?;
+        values::to_python(py, &shells::record_value(record))
+    }
+    fn shell_find(&self, py: Python<'_>, label: String) -> PyResult<Py<PyAny>> {
+        let record = py
+            .detach(|| self.shells.find(&label))
+            .map_err(shell_error)?;
+        values::to_python(py, &shells::record_value(record))
+    }
+    fn shell_spawn(
+        &self,
+        py: Python<'_>,
+        path: PathBuf,
+        entry: String,
+        ctx: std::collections::HashMap<String, String>,
+        label: String,
+        spec_id: String,
+    ) -> PyResult<Py<PyAny>> {
+        let record = py
+            .detach(|| self.shells.spawn(path, entry, ctx, label, spec_id))
+            .map_err(shell_error)?;
+        values::to_python(py, &shells::record_value(Some(record)))
+    }
+    fn shell_live(&self, py: Python<'_>, id: String) -> PyResult<bool> {
+        py.detach(|| self.shells.live(&id)).map_err(shell_error)
+    }
+    fn shell_terminate(&self, py: Python<'_>, id: String) -> PyResult<()> {
+        py.detach(|| self.shells.terminate(&id))
+            .map_err(shell_error)
+    }
+    fn shell_write(&self, py: Python<'_>, id: String, data: Vec<u8>) -> PyResult<()> {
+        py.detach(|| self.shells.write(&id, &data))
+            .map_err(shell_error)
+    }
+    fn shell_subscribe(&self, py: Python<'_>, id: String) -> PyResult<u64> {
+        py.detach(|| self.shells.subscribe(id)).map_err(shell_error)
+    }
+    fn shell_unsubscribe(&self, py: Python<'_>, token: u64) {
+        py.detach(|| self.shells.unsubscribe(token));
+    }
+    fn shell_release(&self, py: Python<'_>, token: u64) -> PyResult<()> {
+        py.detach(|| self.shells.release(token))
+            .map_err(shell_error)
+    }
+    fn shell_read(&self, py: Python<'_>, token: u64) -> PyResult<Py<pyo3::types::PyBytes>> {
+        let bytes = py.detach(|| self.shells.read(token)).map_err(shell_error)?;
+        Ok(pyo3::types::PyBytes::new(py, &bytes).unbind())
+    }
     fn persistence_read(
         &self,
         py: Python<'_>,
@@ -137,6 +188,10 @@ impl Bridge {
         py.detach(|| self.sockets.operation(&value))
             .map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
+}
+
+fn shell_error(error: impl std::fmt::Display) -> PyErr {
+    PyRuntimeError::new_err(error.to_string())
 }
 
 #[derive(Clone)]
@@ -265,11 +320,15 @@ async fn run(root: PathBuf, port: u16) -> Result<()> {
     let start_state = state.clone();
     let start_sockets = sockets.clone();
     let start_module = module.clone();
+    let shells = Arc::new(shells::Shells::default());
+    let _shell_lifetime = shells::Lifetime(shells.clone());
+    let start_shells = shells.clone();
     let info = tokio::task::spawn_blocking(move || {
         Python::attach(|py| -> PyResult<Value> {
             let bridge = Py::new(
                 py,
                 Bridge {
+                    shells: start_shells,
                     state: start_state,
                     sockets: start_sockets,
                 },
@@ -303,6 +362,7 @@ async fn run(root: PathBuf, port: u16) -> Result<()> {
         })
     });
     let _ = tokio::time::timeout(Duration::from_secs(6), stopping).await;
+    shells.stop();
     state.output.lock().unwrap().take();
     if state.failed.load(Ordering::Acquire) {
         bail!("native framework pipe failed");

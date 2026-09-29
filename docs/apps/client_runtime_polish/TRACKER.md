@@ -344,6 +344,26 @@ Sidebar loading; no additional startup redesign without new evidence.
 
 ## Completion
 
+### Worker-local Ferrous intelligence slice
+
+- [x] Keep `code-te2-worker` independent; install its worker-local native shell
+  adapter before Python domain initialization. Migrate WBA/code-server only.
+- [x] Reuse shellspecs, target matching/adoption and domain readiness. Native
+  binary writes retain Python MessagePack framing/correlation without reparsing.
+- [x] Single-flight cancelable stdout readers and Rust code-server log draining
+  after readiness; persisted records do not grant live pipe ownership. Exact
+  child PID-tree shutdown avoids group termination; shared runtime untouched.
+- [x] Automated checks: 16 Rust worker tests (including five real-child Ferrous
+  tests), 39 targeted Python tests, 18 isolated real-worker socket/startup tests;
+  optimized build and formatting pass. Four-module typecheck clean; including
+  WBA has zero errors and its 14 existing warnings.
+- [ ] Pixel live acceptance: rebuild independent worker, verify language startup,
+  WBA communication and code-server/adapter replacement on worker relaunch.
+- [ ] Later slices: remaining run-profile/watcher/page-preview/drawer shell
+  consumers and outbound FWS observer; then prove external import elimination.
+
+### Readiness checkpoint
+
 - [x] Code TE2 declares `readiness_support: "pipe"` and publishes serving readiness
   over its existing MessagePack worker pipe after domain startup/listener bind.
   HTTP updates are forbidden for this mode; shell probes cannot substitute.
@@ -351,7 +371,8 @@ Sidebar loading; no additional startup redesign without new evidence.
 - [x] Native worker integration suite: 18 passed with pipe readiness required.
 - [x] Framework readiness tests: 5 passed (strict mode, exact owner and
   non-fallback probe behavior); native release build and framework check passed.
-- [ ] Pixel/live acceptance of paired framework + worker readiness changes.
+- [x] User confirmed desktop and Pixel live acceptance of paired framework +
+  worker pipe-readiness checkpoint `388a3ea9`.
 
 - [ ] Update architectural documentation/memory for verified contract changes.
 - [ ] Record automated checks and user live acceptance separately.
