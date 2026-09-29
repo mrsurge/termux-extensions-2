@@ -68,8 +68,21 @@ Pyte remains lazy Python domain code; checkpoint/delta, offsets, reset and resiz
 semantics remain unchanged. Reads stop at the opened snapshot's size so a growing
 producer cannot make a single projection chase EOF indefinitely.
 
-The outbound Python FWS observation client remains on its previous path. This does not yet
-remove the framework-shells or python-socketio imports from the whole worker.
+`fws_observer.rs` now owns the outbound FWS observer connection, distinct from
+Ferrous's publishing peer. The existing `/fws` JSON/ack protocol stays intact.
+`native_fws.py` delivers its structural events to Python domain handlers without
+Python Socket.IO/Engine.IO. Native generations, bounded events (256 / 8 MiB tree
+budget) and pending calls (16 / ten seconds) prevent stale replies or silently
+gapped streams. Overflow disconnects and resynchronizes. Snapshot application
+precedes serial notification replay; reconnect restores terminal subscriptions.
+The terminal subscription uses `projection: true`, avoiding full historical log
+transfer because native raw-log projection already owns history.
+
+A fresh main-module import test blocks socketio, engineio, aiohttp and
+framework_shells. This is not proof that every lazy feature import is eliminated;
+msgspec, WBA codecs and remaining Python filesystem/HTTP consumers stay in scope
+for subsequent work. See CODE_TE2.md, Native FWS Observation, for lifecycle and
+underlying-library timeout limits.
 Rebuild this worker before live testing; no frontend/APK update is required.
 
 The common Engine.IO parser remains in use: application RPC payloads are binary

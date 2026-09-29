@@ -5072,9 +5072,10 @@ existing namespace handlers to native emit/room/session operations through typed
 local namespace helpers, not Python Socket.IO server classes. Domain state,
 client identity, validation and effects stay Python-owned. Rust decodes/encodes
 framework pipe frames and frontend RPC payloads; PyO3 carries structural values.
-msgspec DTO validation, WBA codecs, FWS AsyncClient networking and remaining
-Python persistence work remain. The domain
-import test blocks FastAPI, Pydantic, Starlette and Uvicorn, not all networking.
+msgspec DTO validation, WBA codecs and remaining Python persistence/HTTP work
+remain. FWS observation networking is Rust-owned. Fresh main-module import tests
+also block socketio, engineio, aiohttp and framework_shells; this does not certify
+every optional feature's later import graph or eliminate every external import.
 
 The listener binds after application startup; native code emits the serving
 readiness fact through the framework MessagePack pipe, not HTTP. The manifest's
@@ -5148,8 +5149,9 @@ the same file, reads are bounded to 64 KiB and the captured size, and close runs
 even on parser failure. Existing offset, decoder-prefix, replacement/truncation
 and resize-reset policy stays in `terminal_screen_projection.py`. The interpreted
 reader supports isolated tests/tools, not retry after a native error. The FWS
-observer still supplies output wakeups; no polling or duplicate native observer
-is introduced here. Rebuild only the independent worker; no frontend update.
+observer now supplies output wakeups through the Rust transport described below;
+no state polling or duplicate observation connection is introduced. Rebuild only
+the independent worker; no frontend update is needed for that transport slice.
 
 Run-profile and page-preview launch/list/stop also use that native manager.
 Their `wait_ready=true` shellspec output markers are matched directly from live
@@ -5165,6 +5167,41 @@ Watchexec remains a worker-owned shell; its native binary reader feeds bounded
 project replacement serialize so a stale reader cannot attach to the replacement
 shell. Raw-log writes remain Ferrous-owned. This removes direct Python subprocess
 handles from the watcher, not its polling mode or workspace event semantics.
+
+#### Native FWS Observation
+
+`fws_observer.rs` replaces the outbound Python Socket.IO client, not Ferrous's
+manager-publishing peer. It uses the existing `/fws` namespace and
+`/fws_ws/socket.io` WebSocket endpoint and JSON acknowledgement protocol.
+URL precedence remains `FRAMEWORK_SHELLS_FWS_SOCKETIO_URL`, `TE_FRAMEWORK_URL`,
+then loopback 8089. The Rust Socket.IO dependency is the same locked 0.8.1
+implementation already used by Ferrous; no separate network protocol is added.
+
+`native_fws.py` consumes structural events on the domain asyncio loop. Python
+retains shell facts, run-profile route/surface decisions and Pyte projection.
+The reconnect snapshot finishes before serial notification replay; buffered
+notifications are retained because an acknowledgement is not a revision fence
+and must not erase a lifecycle change concurrent with snapshot capture.
+Native connection generations reject old acknowledgements/callbacks. Disconnect,
+overflow or failed snapshot rejects pending requests and reconnects for fresh
+state, with one-second transport backoff and no state polling. Terminal log
+subscriptions are restored through the existing reconnect handler.
+
+The native queue is bounded to 256 events and an 8 MiB conservative retained-tree
+budget; at most 16 requests wait for ten-second acknowledgements. The namespace
+handshake has a five-second deadline after Engine.IO connection establishment.
+These application bounds do not change the underlying library's wire parser or
+connection-establishment timeout. Stop releases blocked reads and pending calls
+immediately, fences callbacks, and signals native transport cleanup. An in-flight
+library connection attempt may outlive domain shutdown until that call returns;
+it then disconnects without publishing or retrying. Domain cleanup does not
+wait on that network handshake, and this layer claims no new bound on it.
+
+`fws.logs.open` sets `projection: true`: subscribe to live wakeups without reading
+or sending the entire historical log. Rust descriptor reads remain terminal
+history authority. There is no Python networking fallback. This removes the
+displaced networking/FWS modules from a fresh main-module import, not msgspec,
+all lazy HTTP clients, or the remaining Python filesystem operations.
 
 ### Editor Service Outcome Boundary
 

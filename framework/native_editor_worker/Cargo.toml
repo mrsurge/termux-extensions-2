@@ -26,6 +26,7 @@ tempfile = "=3.27.0"
 ferrous_framework = { git = "https://github.com/mrsurge/ferrous-framework.git", rev = "f7ce06845c98196c45514552db4610347593bcae" }
 serde_yaml = "0.9"
 regex = "1"
+tf-rust-socketio = "=0.8.1"
 
 [[bin]]
 name = "code-te2-worker"

@@ -293,6 +293,15 @@ class CodeTe2TerminalFwsFactTests(unittest.TestCase):
 
 
 class CodeTe2TerminalFwsStreamTests(unittest.IsolatedAsyncioTestCase):
+    async def test_old_reconnect_cannot_replace_new_terminal_subscription(self) -> None:
+        previous = run_profile_fws_bridge._terminal_log_requested_shell_id
+        run_profile_fws_bridge._terminal_log_requested_shell_id = "new-shell"
+        try:
+            # An old reconnect must stop before touching the client at all.
+            await run_profile_fws_bridge._open_terminal_log_stream("old-shell")
+        finally:
+            run_profile_fws_bridge._terminal_log_requested_shell_id = previous
+
     async def test_log_stream_open_is_idempotent_for_the_active_shell(self) -> None:
         original_client = run_profile_fws_bridge._client
         original_requested = run_profile_fws_bridge._terminal_log_requested_shell_id
@@ -331,6 +340,7 @@ class CodeTe2TerminalFwsStreamTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0].get("method"), "fws.logs.open")
+        self.assertEqual(calls[0].get("params"), {"shell_id": "shell-a", "projection": True})
 
     async def test_only_requested_stdout_chunks_are_forwarded(self) -> None:
         original_handler = run_profile_fws_bridge._terminal_log_chunk_handler

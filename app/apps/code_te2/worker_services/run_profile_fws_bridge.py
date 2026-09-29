@@ -7,7 +7,7 @@ import os
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Protocol, cast
 
-import socketio
+from ..native_fws import ObserverClient
 
 from ..host.run_target_service import release_run_target_route
 from ..run_profile_events import refresh_run_profile_state
@@ -124,6 +124,8 @@ async def ensure_terminal_log_stream(shell_id: str) -> None:
 async def _open_terminal_log_stream(shell_id: str) -> None:
     global _terminal_log_open_shell_id, _terminal_log_stream_ready
     async with _terminal_log_lock:
+        if _terminal_log_requested_shell_id != shell_id:
+            return
         if (
             _terminal_log_stream_ready
             and _terminal_log_open_shell_id == shell_id
@@ -138,7 +140,8 @@ async def _open_terminal_log_stream(shell_id: str) -> None:
                 "jsonrpc": "2.0",
                 "id": f"code_te2_terminal_logs_{shell_id}",
                 "method": FWS_LOGS_OPEN_METHOD,
-                "params": {"shell_id": shell_id},
+                # Raw-log projection owns history; request only live wakeups.
+                "params": {"shell_id": shell_id, "projection": True},
             },
             namespace=FWS_NAMESPACE,
             timeout=10,
@@ -159,16 +162,7 @@ def start_run_profile_fws_bridge() -> None:
     if _client is not None:
         return
 
-    client = cast(
-        AsyncSocketIoClient,
-        socketio.AsyncClient(
-            reconnection=True,
-            reconnection_attempts=0,
-            reconnection_delay=1,
-            reconnection_delay_max=5,
-            logger=False,
-        ),
-    )
+    client: AsyncSocketIoClient = ObserverClient()
     _client = client
     _ = client.on("connect", _on_connect, namespace=FWS_NAMESPACE)
     _ = client.on(
@@ -177,6 +171,7 @@ def start_run_profile_fws_bridge() -> None:
         namespace=FWS_NAMESPACE,
     )
     _ = client.on("connect_error", _on_connect_error, namespace=FWS_NAMESPACE)
+    _ = client.on("disconnect", _on_disconnect, namespace=FWS_NAMESPACE)
     _connect_task = asyncio.create_task(
         _connect(client),
         name="code_te2_run_profile_fws_bridge",
@@ -236,13 +231,19 @@ async def _on_connect() -> None:
         _open_dashboard_snapshot(reconnect_shell_id),
         name="code_te2_run_profile_fws_snapshot",
     )
+    # Serial native event consumption: finish the reconnect snapshot before
+    # applying later lifecycle notifications to those facts.
+    await _snapshot_task
+
+
+async def _on_disconnect() -> None:
+    global _terminal_log_open_shell_id, _terminal_log_stream_ready
+    _terminal_log_open_shell_id = ""
+    _terminal_log_stream_ready = False
 
 
 async def _open_dashboard_snapshot(reconnect_shell_id: str = "") -> None:
-    # python-socketio invokes the namespace connect callback before completing
-    # its own connect-packet bookkeeping. Yield once so call() sees /fws as
-    # connected; this is a handshake boundary, not a polling loop.
-    await asyncio.sleep(0)
+    # Native connect is published only after the namespace socket is usable.
     client = _client
     if client is None or not client.connected:
         return
@@ -264,7 +265,12 @@ async def _open_dashboard_snapshot(reconnect_shell_id: str = "") -> None:
         if reconnect_shell_id:
             await _open_terminal_log_stream(reconnect_shell_id)
             reconnect_handler = _terminal_log_reconnect_handler
-            if reconnect_handler is not None:
+            if (
+                reconnect_handler is not None
+                and _terminal_log_requested_shell_id == reconnect_shell_id
+                and _terminal_log_open_shell_id == reconnect_shell_id
+                and _terminal_log_stream_ready
+            ):
                 await reconnect_handler(reconnect_shell_id)
         _ = await reconcile_run_profile_surfaces(set(_relevant_shell_labels))
         _ = await refresh_run_profile_state(
@@ -275,6 +281,7 @@ async def _open_dashboard_snapshot(reconnect_shell_id: str = "") -> None:
         raise
     except Exception as exc:
         logger.warning("[run_profile] FWS snapshot failed: %s", exc)
+        raise
 
 
 async def _on_notification(payload: object) -> None:

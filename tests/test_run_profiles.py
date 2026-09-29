@@ -1676,8 +1676,8 @@ class RunProfileProjectionTests(unittest.IsolatedAsyncioTestCase):
             ["fws.shell.updated", "fws.shell.removed"],
         )
 
-    async def test_fws_snapshot_waits_one_turn_for_namespace_connect(self) -> None:
-        namespace_ready = False
+    async def test_fws_snapshot_uses_already_ready_native_namespace(self) -> None:
+        namespace_ready = True
 
         class _HandshakeClient:
             connected = True
@@ -1699,11 +1699,6 @@ class RunProfileProjectionTests(unittest.IsolatedAsyncioTestCase):
         run_profile_shell_facts.reset_run_profile_shell_facts()
         run_profile_fws_bridge._client = cast(object, _HandshakeClient())
 
-        def mark_namespace_ready() -> None:
-            nonlocal namespace_ready
-            namespace_ready = True
-
-        asyncio.get_running_loop().call_soon(mark_namespace_ready)
         try:
             with (
                 patch.object(

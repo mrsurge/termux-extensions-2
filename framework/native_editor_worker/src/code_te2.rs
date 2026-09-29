@@ -1,5 +1,6 @@
 //! Branch-native Code TE2 entrypoint. No Python HTTP/Socket.IO server fallback.
 mod decode;
+mod fws_observer;
 mod persistence;
 #[allow(dead_code)] // Shared helpers also compile into the isolated pipe harness.
 mod protocol;
@@ -95,9 +96,36 @@ struct Bridge {
     state: Arc<State>,
     sockets: Arc<web::Sockets>,
     shells: Arc<shells::Shells>,
+    fws: Arc<fws_observer::Observer>,
 }
 #[pymethods]
 impl Bridge {
+    fn fws_start(&self, url: String) -> PyResult<()> {
+        self.fws.start(url).map_err(shell_error)
+    }
+    fn fws_read(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let value = py.detach(|| self.fws.read()).map_err(shell_error)?;
+        let value = rmpv::ext::to_value(value).map_err(shell_error)?;
+        values::to_python(py, &value)
+    }
+    fn fws_call(
+        &self,
+        py: Python<'_>,
+        epoch: u64,
+        request: &Bound<'_, PyAny>,
+    ) -> PyResult<Py<PyAny>> {
+        let request = rmpv::ext::from_value(values::from_python(request)?).map_err(shell_error)?;
+        let response = py
+            .detach(|| self.fws.call(epoch, request))
+            .map_err(shell_error)?;
+        values::to_python(py, &rmpv::ext::to_value(response).map_err(shell_error)?)
+    }
+    fn fws_reconnect(&self, epoch: u64) -> PyResult<()> {
+        self.fws.reconnect(epoch).map_err(shell_error)
+    }
+    fn fws_stop(&self) {
+        self.fws.stop();
+    }
     fn shell_get(&self, py: Python<'_>, id: String) -> PyResult<Py<PyAny>> {
         let record = py.detach(|| self.shells.get(&id)).map_err(shell_error)?;
         values::to_python(py, &shells::record_value(record))
@@ -378,11 +406,14 @@ async fn run(root: PathBuf, port: u16) -> Result<()> {
     let shells = Arc::new(shells::Shells::default());
     let _shell_lifetime = shells::Lifetime(shells.clone());
     let start_shells = shells.clone();
+    let fws = Arc::new(fws_observer::Observer::default());
+    let start_fws = fws.clone();
     let info = tokio::task::spawn_blocking(move || {
         Python::attach(|py| -> PyResult<Value> {
             let bridge = Py::new(
                 py,
                 Bridge {
+                    fws: start_fws,
                     shells: start_shells,
                     state: start_state,
                     sockets: start_sockets,
@@ -417,6 +448,7 @@ async fn run(root: PathBuf, port: u16) -> Result<()> {
         })
     });
     let _ = tokio::time::timeout(Duration::from_secs(6), stopping).await;
+    fws.stop();
     shells.stop();
     state.output.lock().unwrap().take();
     if state.failed.load(Ordering::Acquire) {

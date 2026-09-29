@@ -1813,6 +1813,7 @@ dependencies = [
  "serde_yaml",
  "socketioxide",
  "tempfile",
+ "tf-rust-socketio",
  "tokio",
  "tokio-util",
 ]

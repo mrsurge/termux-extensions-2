@@ -367,8 +367,19 @@ Sidebar loading; no additional startup redesign without new evidence.
   formatting, five-module typecheck and diff whitespace checks pass.
 - [x] User live acceptance of auxiliary slice `1ffdbb94`: run-profile launch/reuse/restart/stop,
   page preview readiness/proxy/logs, and watchexec events/project replacement.
-- [ ] Later slice: outbound FWS observer; then prove
-  external import elimination.
+- [x] Outbound FWS observer transport moved to Rust; domain facts and effects
+  stay Python-owned. Generations, bounded queues/pending calls, reconnect snapshot
+  ordering and shutdown fencing cover the native-to-domain handoff.
+- [x] Fresh main-module import blocks socketio/engineio/aiohttp/framework_shells.
+  This is import-path evidence, not whole-feature dependency elimination or a
+  measured startup improvement. msgspec and remaining disk/HTTP work stay pending.
+- [ ] Pixel live acceptance of native FWS observation: run-profile lifecycle,
+  drawer output/list/close, reconnect and worker shutdown.
+- [x] Observer validation: 25 Rust tests; 127 selected Python tests plus 7 subtests; 20 real
+  worker tests; five changed/new Python files typecheck without warnings.
+  Native transport tests cover actual Socket.IO snapshots/ACKs/events/reconnect,
+  stale generations, queue/byte overflow, pending-call rejection and shutdown.
+  Optimized worker build and Cargo formatting pass. No shared runtime restart.
 
 ### Drawer native I/O prerequisites
 
@@ -401,8 +412,10 @@ Sidebar loading; no additional startup redesign without new evidence.
   (observations, not controlled benchmarks).
 - [x] Follow-up: hide exited/missing drawer entries, use project sequence labels,
   and forget stale membership without purging foreign Ferrous history.
-- [ ] Live acceptance of drawer list/label follow-up after native worker restart
-  and client asset OTA. No shared runtime restart performed by the agent.
+- [x] User live acceptance of drawer list/label follow-up `b2653b20` on mobile.
+- [x] Remove experimental `.python-version` pin; supported native builds select
+  matching system Python explicitly. Three user-requested benchmark deletions
+  are included in the next checkpoint's scope.
 
 ### Readiness checkpoint
 
