@@ -1747,16 +1747,9 @@ Historical Explorer appearance is separate from actual Git safety state:
 - Confirm Rust framework Socket.IO route proxy:
   `framework/rust/crates/te2-server/src/sio_proxy.rs`.
 - Confirm file_editor route config: `app/apps/code_te2/sio_service.json`.
-- Confirm worker `SUBAPPS` mount shape:
-  ```python
-  SUBAPPS = [
-      ("/socket.io", CODE_TE2_ASGI_APP),
-      ("/editor_ws/socket.io", CODE_TE2_ASGI_APP),
-      ("/explorer_ws/socket.io", CODE_TE2_ASGI_APP),
-      ("/ui_ipc_ws/socket.io", CODE_TE2_ASGI_APP),
-      ("/terminal_ws/socket.io", CODE_TE2_ASGI_APP),
-  ]
-  ```
+- Confirm `framework/native_editor_worker/src/web.rs` maps `/socket.io` and
+  `/editor_ws/socket.io`, `/explorer_ws/socket.io`, `/ui_ipc_ws/socket.io`,
+  `/terminal_ws/socket.io` aliases to its single Socketioxide gateway.
 - Editor RPC: canonical path `/api/app/code_te2/socket.io`, alias `/editor_ws/socket.io`, namespace `/rpc/editor`.
 - Explorer RPC: canonical path `/api/app/code_te2/socket.io`, alias `/explorer_ws/socket.io`, namespace `/rpc/explorer`.
 - UI IPC: canonical path `/api/app/code_te2/socket.io`, alias `/ui_ipc_ws/socket.io`, namespace `/ui_ipc`.
@@ -4324,7 +4317,7 @@ Before xterm opens, the drawer loads the vendored web-font addon and the templat
 
 ### Generic Worker Module Identity
 
-Built-in backend module identity comes from package path rather than public app id. Code TE2 exports `TE2_ASGI_APP`; router-based apps retain explicit `TE2_APP_ROUTER` or legacy `<app_id>_bp` via lazy FastAPI assembly. The legacy watcher bridge and `te2.onFilesChanged` API are removed, not compatibility mechanisms.
+Built-in backend module identity comes from package path rather than public app id. Code TE2's branch-default native executable imports its domain module through PyO3; router-based apps retain explicit `TE2_APP_ROUTER` or legacy `<app_id>_bp` via lazy FastAPI assembly. The legacy watcher bridge and `te2.onFilesChanged` API are removed, not compatibility mechanisms.
 
 ### Framework Runtime And State
 
@@ -5054,23 +5047,38 @@ Paired application hooks still surround Uvicorn serving inside signal capture.
 
 Router-based apps retain `TE2_APP_ROUTER` or the legacy `<app_id>_bp` contract via
 lazy `app_worker_fastapi.py` assembly and existing mounted-subapp lifespans.
-Pipe-only workers import no HTTP stack; native network workers import Uvicorn
-and Starlette but not FastAPI/Pydantic. Code TE2 now uses this native path:
-`main.py` exports `TE2_ASGI_APP`, assembled by `http_app.py` from health/static
-routes, `build_editor_asset_routes()` and the existing Socket.IO gateway.
-It exports neither `TE2_APP_ROUTER` nor `SUBAPPS`. The five physical socket mounts
-retain their previous scope/root-path semantics and gateway instance. Worker
-start/stop, readiness, diagnostics and intelligence priming are unchanged.
+Pipe-only workers import no HTTP stack; ASGI network workers import Uvicorn
+and Starlette but not necessarily FastAPI/Pydantic. Those generic contracts
+remain available to other apps.
 
-Resource URLs, MIME/bytes, CSS shims and explicit GET/HEAD sets are preserved.
-Health and HTTP exception responses retain JSON envelopes; static resources are
-confined to their root, including symlink resolution. Auto-generated FastAPI
-docs/OpenAPI endpoints are gone. The native app does not introduce a second
-application lifecycle or new control routes. Tests import the real backend with
-FastAPI/Pydantic blocked and isolated stores, exercise its resources and every
-Engine.IO WebSocket mount, and verify native lifespan through the worker wrapper.
-Other apps' lazy FastAPI path remains tested. This does not uninstall package
-dependencies, change socket protocols, or move networking to another process.
+On the native-services branch, Code TE2 instead launches the separate FWS-owned
+`framework/native_editor_worker/target/release/code-te2-worker` executable. Rust
+Hyper owns health/resources and Socketioxide owns the five existing namespaces,
+rooms, polling/WebSocket transport and binary packet framing. It uses the common
+Engine.IO parser with application `msgpack-v1` bytes, not the optional Socket.IO
+MessagePack parser. The lockfile requires Engineioxide 0.17.7 to avoid the 0.17.3
+waiting-poll binary-batch separator defect.
+
+`native_worker.py` owns one Python asyncio thread with real intelligence bootstrap,
+application start/stop and runtime-debug dispatch. `native_socketio.py` adapts the
+existing namespace handlers to native emit/room/session operations. Domain state,
+client identity, validation and effects stay Python-owned. Rust decodes/encodes
+framework pipe frames; PyO3 carries structural values. Frontend RPC codecs,
+msgspec DTOs, FWS AsyncClient networking and Python persistence remain. The domain
+import test blocks FastAPI, Pydantic, Starlette and Uvicorn, not all networking.
+
+The listener binds after application startup; native code posts the serving
+readiness fact. Resource containment resolves symlinks; existing resource paths,
+CSS shims and GET/HEAD distinctions remain. Conditional/range static responses
+are not implemented in this initial native slice. The old Python HTTP resource
+module remains a parity fixture, not a fallback listener. Direct WBA transport,
+existing shell ownership and native-client frontend asset authority do not change.
+
+This branch requires a manual independent Cargo build against the matching system
+CPython ABI before opening Code TE2. Bootstrap/wheel integration remains deferred;
+do not release a package with an unresolved source-target executable path. See
+`framework/native_editor_worker/README.md` for exact Pixel build/test commands.
+Isolated real-worker tests are not live Pixel acceptance or measured startup gains.
 
 ### Editor Service Outcome Boundary
 

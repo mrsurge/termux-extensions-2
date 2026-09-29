@@ -1,9 +1,69 @@
-# Native editor-services worker prototype
+# Native editor-services worker
 
-Independent internal Rust/PyO3 executable. **Not a production Code TE2 worker**:
-it does not replace the app manifest, bootstrap, FWS manager, HTTP/Socket.IO
-server, WBA, or the release build. Its empty `[workspace]` keeps Cargo separate
-from `framework/rust`. Do not add it to production launch paths yet.
+Independent internal Rust/PyO3 crate. On this experimental branch Code TE2's
+default shellspec launches **`code-te2-worker`** from this crate's release target.
+Build it before opening Code TE2. There is no Python-server fallback. The empty
+`[workspace]` keeps Cargo separate from `framework/rust`; wheel/bootstrap build
+integration is deliberately not implemented yet. Do not publish this branch as
+an installed release without that integration.
+
+## Actual Code TE2 worker
+
+Rust owns Hyper HTTP resources, Socketioxide's five existing namespaces, rooms,
+Engine.IO lifecycle and framework MessagePack stdin/stdout. A dedicated Python
+asyncio thread runs the real `main.py` lifecycle and existing namespace/domain
+handlers through PyO3. Framework replies remain independent of socket dispatch.
+The worker binds loopback only after application startup, then posts serving
+readiness. FWS still owns the separate worker; WBA/browser intelligence and
+existing FWS child ownership are unchanged.
+
+The common Engine.IO parser remains in use: application RPC payloads are binary
+`msgpack-v1`, not Socket.IO's optional MessagePack packet parser. Cargo.lock pins
+Engineioxide 0.17.7: 0.17.3's waiting-poll encoder concatenated binary packet
+batches without separators. Repeated real polling RPC tests cover that path.
+
+There are 64 concurrent application calls and 16 control calls, with a 120-second
+domain-future deadline. Pipe frames retain the 32 MiB cap, 64-item queue and
+64 MiB queued/active output budget. Socket buffers are bounded; these limits are
+not total RSS caps. Disconnect cleanup uses the existing domain handlers; no
+disconnected-event replay or mutation retry is introduced.
+
+The adapter preserves Python domain state and validation, not a general ASGI
+emulator. Python Socket.IO namespace/client imports, the FWS client bridge,
+frontend MessagePack codecs, persistence and other file I/O remain. No complete
+dependency elimination or startup speedup is claimed. HTTP conditional/range
+responses and release packaging are not part of this first cutover.
+
+Embedded Python loads the inherited matching-version `VIRTUAL_ENV` site-packages
+and editable `.pth` files. Compile and run with the same regular CPython ABI;
+do not supply a free-threaded or different-version venv.
+
+### Pixel build and live test
+
+From `~/mrselect6`, after pulling this branch:
+
+```bash
+PYO3_PYTHON=/data/data/com.termux/files/usr/bin/python cargo build --release --locked --manifest-path framework/native_editor_worker/Cargo.toml
+```
+
+Then launch/restart Code TE2 through its normal framework app lifecycle with the
+system Python environment (or its matching `.jitenv`). The shellspec selects
+`target/release/code-te2-worker`; do not run the fixture executable below as the
+app. No frontend assets changed in this slice. Live Pixel acceptance is pending.
+
+The isolated integration suite uses temporary stores, a fake framework pipe peer
+and disabled managed intelligence, not the shared runtime. It requires the
+repository `.jitenv` with the normal app dependencies plus pytest, msgpack,
+requests and websocket-client:
+
+```bash
+env -u PYTHONPATH .jitenv/bin/python -m pytest -q framework/native_editor_worker/tests/test_code_te2.py tests/test_code_te2_socketio_polling.py
+```
+
+## Retained pipe-only fixture executable
+
+The separate `te2-native-editor-worker` executable below remains the bounded
+transport test harness, not the actual application entrypoint.
 
 ## What runs
 
@@ -88,7 +148,8 @@ native modules from a different-ABI venv through PYTHONPATH. The Pixel build usi
 subprocess tests. Its truncated-EOF test exposed a reader shutdown ordering race,
 not an interpreter mismatch. The correction retains the queue sender until
 terminal status/pending cleanup are published, with deterministic and repeated
-regression coverage. Pixel retesting of that correction remains pending.
+regression coverage. The user waived Pixel retesting of that correction; this is
+not recorded as an observed Pixel pass.
 The executable links to libpython; the ~939 KiB Linux optimized binary is not a
 self-contained distribution of Python or Code TE2.
 
@@ -100,8 +161,7 @@ clippy was unavailable in the installed toolchain. No startup speedup claimed.
 
 ## Next gate
 
-Compile/test on the Pixel before connecting real editor services. Then implement
-the Python application-loop adapter and worker-local Axum/Socketioxide lane,
-preserving domain ownership and the direct browser/WBA connection. Real FWS
-launch integration and existing-child adoption need their own ownership review.
+Live-test the actual branch-default worker on Pixel, especially document/draft
+state, intelligence, sidebar, terminal, reconnect and clean shutdown. Keep the
+remaining Python imports visible and measure startup before further removal.
 See `docs/apps/client_runtime_polish/NATIVE_WORKER_HANDOFF.md`.

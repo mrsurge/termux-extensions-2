@@ -1,29 +1,18 @@
-"""Verify the real Code TE2 ASGI mount accepts Engine.IO polling handshakes."""
-
+"""Verify the real Rust-owned Code TE2 gateway offers Engine.IO upgrades."""
 import json
-import unittest
-from pathlib import Path
+import urllib.request
 
-import httpx
-
-from app.apps.code_te2.http_app import build_code_te2_asgi_app
-from app.apps.code_te2.socketio_gateway import CODE_TE2_ASGI_APP
+from framework.native_editor_worker.tests.test_code_te2 import native_app
 
 
-class SocketIoPollingTests(unittest.IsolatedAsyncioTestCase):
-    async def test_polling_handshake_offers_websocket_upgrade(self) -> None:
-        app_root = Path(__file__).resolve().parents[1] / "app/apps/code_te2"
-        app = build_code_te2_asgi_app(
-            static_dir=app_root / "static",
-            agent_icon_dir=app_root / "static",
-            socket_app=CODE_TE2_ASGI_APP,
-        )
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test.local") as client:
-            response = await client.get("/socket.io/?EIO=4&transport=polling")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.text.startswith("0"))
-        handshake = json.loads(response.text[1:])
-        self.assertIn("sid", handshake)
-        self.assertIn("websocket", handshake["upgrades"])
+def test_polling_handshake_offers_websocket_upgrade(native_app):
+    url, *_ = native_app
+    for path in ("/socket.io/", "/editor_ws/socket.io/", "/explorer_ws/socket.io/",
+                 "/ui_ipc_ws/socket.io/", "/terminal_ws/socket.io/"):
+        with urllib.request.urlopen(url + path + "?EIO=4&transport=polling") as response:
+            packet = response.read().decode()
+            assert response.status == 200
+        assert packet.startswith("0")
+        handshake = json.loads(packet[1:])
+        assert "sid" in handshake
+        assert "websocket" in handshake["upgrades"]

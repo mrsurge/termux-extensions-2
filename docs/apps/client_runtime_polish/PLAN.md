@@ -774,8 +774,8 @@ that decision is independent of lazy loading and requires its own parity scope.
 Primary motivation is mobile worker startup/module-loading cost, specifically
 the Python Socket.IO/Engine.IO dependency tree. Python networking is not an
 established bottleneck, and replacing Uvicorn is not a performance objective.
-Axum is attractive as Socketioxide's complementary native HTTP host if that
-transition removes the Python dependency tree. Transport throughput or scheduling
+The initial native slice uses Hyper directly alongside Socketioxide; Axum remains
+an option if richer HTTP routing becomes necessary. Transport throughput or scheduling
 improvements are secondary possible benefits, not the justification for this work.
 This complements mypyc for our own modules; neither route replaces measurement.
 
@@ -787,14 +787,14 @@ Keep application MessagePack bytes opaque across the bridge where possible,
 decode once, and preserve the current binary-event wire format. Application
 `msgpack-v1` is not Socket.IO's alternative MessagePack packet parser.
 
-The intended broader target is a worker-local Axum/Socketioxide native shell calling
+The implemented branch target is a worker-local Hyper/Socketioxide native shell calling
 Python editor services through PyO3, owning HTTP resource routes as well as socket
 transport. This reverses control at the service boundary without requiring Python
 to live inside the shared framework process. The existing framework proxy and
 FWS-owned worker isolation must remain. The intended host is a Rust executable
 embedding Python; a Python-loaded native adapter may be a bounded intermediate
 prototype, not a silent change of target. Interpreter discovery and ABI packaging
-still need validation. Axum extraction can validate transport metadata/envelopes but
+still need release validation. Native extraction can validate transport metadata/envelopes but
 must not steal Python's document/project authority or duplicate business rules.
 
 The same candidate boundary can include the framework MessagePack pipe and file
@@ -805,10 +805,11 @@ second internal serialization round trip. Removing msgspec requires inventorying
 all codec and Struct consumers, including persistence if adopted; eliminating
 Python transport import trees is the hypothesis, not an established speedup.
 
-Do not equate this with extracting an Axum app from today's ASGI export. Current
-`TE2_ASGI_APP`/WorkerASGI is an ASGI callable; a native shell needs an explicit
-route/resource and lifecycle handoff. Inventory resources, health, readiness,
-runtime-debug, pipe dispatch, shutdown and errors before replacing Uvicorn.
+This is not extraction of an Axum app from the former ASGI export. The branch
+uses explicit native resource routing and `native_worker.py` lifecycle/dispatch;
+Code TE2 no longer exports `TE2_ASGI_APP`. Other app-worker ASGI contracts remain.
+Real isolated Linux tests precede Pixel live validation; remaining Python client
+dependencies and release packaging must not be mistaken for completed migration.
 Embedding Python directly in te2-server is a separate, higher-risk alternative:
 it changes crash isolation, independent worker restart, interpreter dependency
 loading and framework lifecycle. Do not do so implicitly to remove a proxy hop.

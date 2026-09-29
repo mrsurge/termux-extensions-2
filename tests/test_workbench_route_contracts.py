@@ -48,4 +48,5 @@ class WorkbenchRouteContractTests(unittest.TestCase):
         self.assertIn("start_worker_runtime(_initialize_application_project, _eager_start_code_server)", source)
         self.assertNotIn("_ensure_workbench_json_sync", source)
         self.assertIn("IntelligenceStateStore().read().web_workers_enabled", source)
-        self.assertIn("socket_app=CODE_TE2_ASGI_APP", source)
+        self.assertNotIn("TE2_ASGI_APP =", source)
+        self.assertIn("code-te2-worker", (root / "shellspec/app_worker.yaml").read_text())

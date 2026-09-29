@@ -1,20 +1,22 @@
 # Native editor-services worker: handoff design
 
-## Prototype status
+## Branch implementation status
 
-The independent `framework/native_editor_worker` crate now implements the
-pipe-only vertical slice described in its [README](../../../framework/native_editor_worker/README.md).
-It embeds system CPython with pinned PyO3, invokes a synchronous fixture service,
-and exchanges structural values without Python codec/network imports. Linux
-builds and subprocess tests pass; Pixel compilation/testing is pending.
-No production launcher, Cargo workspace, HTTP/Socket.IO or WBA change was made.
-The application asyncio loop adapter and full wire/error-schema parity remain
-future work; the prototype is not the complete worker design below.
+User approved the actual Code TE2 shellspec cutover rather than another fixture
+slice. `framework/native_editor_worker` now builds `code-te2-worker`, a Hyper /
+Socketioxide listener with a PyO3-hosted Python application loop. The real domain
+handlers/lifecycle run unchanged behind native socket and pipe adapters. The
+original pipe-only fixture executable remains for regression coverage.
 
-Proposed contract, not implemented behavior. Builds on the outbound and inbound
-pipe seams through checkpoint `0b557949`; Pixel acceptance now includes the
-inbound slice published through `c499e2aa`. No runtime replacement,
-dependency installation, ABI selection or release change is authorized here.
+See the [build and validation notes](../../../framework/native_editor_worker/README.md).
+This is a source-checkout experiment, not integrated into wheel/release builds.
+Linux isolated checks are distinct from pending Pixel live acceptance. The Pixel
+fixture build exposed the EOF race fixed in `638f62b8`; user waived its rerun.
+No shared framework/worker restart was performed by the agent.
+
+The following design records the wider target. Native HTTP/server transport is
+implemented, but remaining Python Socket.IO clients, codecs, disk I/O and full
+startup/behavior parity still need measurement and migration.
 
 ## Source constraints
 
@@ -112,9 +114,10 @@ gate, after results and user acceptance; do not replace the live framework.
    nested requests, duplicate/late replies, callback order, overload, shutdown,
    corruption and identity replacement; do not launch live Code TE2.
 3. Validate interpreter discovery, CPython ABI and packaging on Linux and Termux.
-   Keep the harness separate from normal manifests until parity is established.
+   The user subsequently approved switching the branch's real app shellspec;
+   release/build integration remains separate until live parity is established.
 4. Audit/adapt one real socket service to the existing Python owner loop, then
-   add worker-local Axum/Socketioxide transport. No browser/WBA lane migration.
+   add worker-local Hyper/Socketioxide transport. No browser/WBA lane migration.
 5. Remove Python networking imports only after all remaining server/client uses
    are accounted for, especially the run-profile FWS bridge. Measure full worker
    startup including native/interpreter initialization and first useful document.

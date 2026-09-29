@@ -11,7 +11,7 @@ import msgpack
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-BINARY = Path(os.environ.get("TE2_NATIVE_WORKER_BIN", ROOT / "target/debug/te2-native-editor-worker"))
+BINARY = Path(os.environ.get("TE2_NATIVE_WORKER_BIN", ROOT / "target/release/te2-native-editor-worker"))
 
 
 class Worker:

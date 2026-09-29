@@ -136,17 +136,8 @@ async def te2_app_backend_serving() -> None:
     except Exception as exc:
         print(f"[code_te2] readiness post failed: {exc}", flush=True)
 
-# The native app owns resource routes and socket mounts, never worker services.
-# app_worker wraps this export with readiness/debug lifespan and invokes our
-# existing te2_app_start/stop hooks around Uvicorn on the same event loop.
-from .http_app import build_code_te2_asgi_app
-from .socketio_gateway import CODE_TE2_ASGI_APP
-
-TE2_ASGI_APP = build_code_te2_asgi_app(
-    static_dir=Path(__file__).parent / "static",
-    agent_icon_dir=AGENT_ICON_DIR,
-    socket_app=CODE_TE2_ASGI_APP,
-)
+# HTTP resources and Socket.IO listener are now owned by code-te2-worker (Rust).
+# Python retains application lifecycle and namespace domain handlers.
 
 _history_store = get_history_store()
 

@@ -271,9 +271,24 @@ Sidebar loading; no additional startup redesign without new evidence.
   through error/EOF publication and pending cleanup, then disconnect queue.
   Local system-Python `.jitenv` validation: 5 Rust tests + 17 subprocess tests,
   including deterministic blocked-cleanup ordering and 30 repeated EOF failures.
-- [ ] Publish/retest EOF race correction on Pixel; do not mark full acceptance yet.
-- [ ] Audit HTTP/resource extraction and remaining Python client dependencies.
-- [ ] Approve and validate a one-lane native prototype on Linux and Termux.
+- [x] Checkpoint EOF correction as `638f62b8`; user waived Pixel rerun, not an
+  observed device pass.
+- [x] User approved actual branch-default shellspec cutover instead of another
+  one-lane fixture: Hyper/Socketioxide owns HTTP/sockets, PyO3 hosts the real
+  Python domain loop, Rust owns framework pipe bytes. No shared runtime restart.
+- [x] Audit remaining imports: namespace bases and FWS AsyncClient retain Python
+  Socket.IO; domain/frontend codecs and persistence I/O remain. No full removal claim.
+- [x] Real isolated native-worker tests cover HTTP resources/containment, health,
+  polling and WebSocket binary host RPC, preference updates, editor/Explorer
+  connect/error delivery, missing-codec refusal and legacy mount upgrades.
+  Engineioxide 0.17.3 waiting-poll binary batching bug requires locked 0.17.7.
+- [x] Final Linux checkpoint validation: 89 Python/integration tests, 8 Rust unit
+  tests, release build, Cargo fmt and two-module basedpyright pass. Real-worker
+  coverage includes CORS preflight and fatal truncated pipe input. Tests use the
+  current release binaries; no live shared runtime restart or speedup claim.
+- [ ] Pixel live acceptance of the actual Code TE2 worker; source-only Cargo
+  build instructions are in framework/native_editor_worker/README.md.
+- [ ] Integrate native worker into packaged/build bootstrap only after parity.
 - [ ] Verify Python Socket.IO imports are actually eliminated before claiming
   startup savings; include native initialization costs in the comparison.
 - [ ] Review native-worker milestones against parity/startup evidence before
