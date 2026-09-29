@@ -107,6 +107,18 @@ impl Bridge {
             .map_err(shell_error)?;
         values::to_python(py, &shells::record_value(record))
     }
+    fn shell_list(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let records = py.detach(|| self.shells.list()).map_err(shell_error)?;
+        values::to_python(
+            py,
+            &Value::Array(
+                records
+                    .into_iter()
+                    .map(|record| shells::record_value(Some(record)))
+                    .collect(),
+            ),
+        )
+    }
     fn shell_spawn(
         &self,
         py: Python<'_>,
@@ -115,9 +127,13 @@ impl Bridge {
         ctx: std::collections::HashMap<String, String>,
         label: String,
         spec_id: String,
+        wait_ready: bool,
     ) -> PyResult<Py<PyAny>> {
         let record = py
-            .detach(|| self.shells.spawn(path, entry, ctx, label, spec_id))
+            .detach(|| {
+                self.shells
+                    .spawn(path, entry, ctx, label, spec_id, wait_ready)
+            })
             .map_err(shell_error)?;
         values::to_python(py, &shells::record_value(Some(record)))
     }

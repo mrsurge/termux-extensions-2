@@ -3,15 +3,14 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 import hashlib
-from importlib import import_module
 import json
 from pathlib import Path
 import shlex
 import sys
-from typing import Protocol, cast
+from .native_shells import get_manager, Orchestrator, ShellManager, ShellRecord
 
 from .run_profile_shell_facts import (
     record_run_profile_shell,
@@ -33,40 +32,8 @@ LAUNCHER_ENTRYPOINT = Path(__file__).parent / "runner_profile" / "launcher.py"
 _spawn_locks: dict[str, asyncio.Lock] = {}
 
 
-class ShellRecord(Protocol):
-    id: str
-    label: str | None
-    pid: int | None
-    status: str
-
-
-class ShellManager(Protocol):
-    def find_shell_by_label(
-        self, label: str, *, status: str | None = None
-    ) -> Awaitable[ShellRecord | None]: ...
-
-    def terminate_shell(self, shell_id: str, *, force: bool = False) -> Awaitable[object]: ...
-
-
-class OrchestratorInstance(Protocol):
-    def start_from_ref(
-        self,
-        ref: str,
-        *,
-        base_dir: Path,
-        ctx: JsonObject,
-        label: str,
-        record_spec_id: str,
-        wait_ready: bool,
-    ) -> Awaitable[ShellRecord]: ...
-
-
-class OrchestratorFactory(Protocol):
-    def __call__(self, manager: ShellManager) -> OrchestratorInstance: ...
-
-
-class ManagerGetter(Protocol):
-    def __call__(self) -> Awaitable[ShellManager]: ...
+OrchestratorFactory = Callable[[ShellManager], Orchestrator]
+ManagerGetter = Callable[[], Awaitable[ShellManager]]
 
 
 @dataclass(frozen=True)
@@ -86,15 +53,11 @@ class RunnerProfileShellState:
 
 
 def _framework_get_manager() -> ManagerGetter:
-    module = import_module("framework_shells")
-    value = cast(object, module.__dict__["get_manager"])
-    return cast(ManagerGetter, value)
+    return get_manager
 
 
 def _orchestrator_factory() -> OrchestratorFactory:
-    module = import_module("framework_shells.orchestrator")
-    value = cast(object, module.__dict__["Orchestrator"])
-    return cast(OrchestratorFactory, value)
+    return Orchestrator
 
 
 async def ensure_runner_profile_shell(

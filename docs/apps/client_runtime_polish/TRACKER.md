@@ -357,10 +357,18 @@ Sidebar loading; no additional startup redesign without new evidence.
   tests), 39 targeted Python tests, 18 isolated real-worker socket/startup tests;
   optimized build and formatting pass. Four-module typecheck clean; including
   WBA has zero errors and its 14 existing warnings.
-- [ ] Pixel live acceptance: rebuild independent worker, verify language startup,
-  WBA communication and code-server/adapter replacement on worker relaunch.
-- [ ] Later slices: remaining run-profile/watcher/page-preview/drawer shell
-  consumers and outbound FWS observer; then prove external import elimination.
+- [x] User live acceptance of intelligence slice `51ebe765`.
+- [x] Next approved slice implemented: run-profile/page-preview/watchexec use
+  the same worker-local manager. Readiness consumes bounded pipe output instead
+  of whole-log polling; logs drain natively afterward. Watcher JSON event policy
+  stays Python-owned with bounded newline framing and serialized replacement.
+- [x] Auxiliary slice automated validation: 19 Rust worker tests, 95 Python tests
+  plus 7 subtests, 18 isolated worker integration tests; optimized build, Cargo
+  formatting, five-module typecheck and diff whitespace checks pass.
+- [ ] Auxiliary slice live acceptance: run-profile launch/reuse/restart/stop,
+  page preview readiness/proxy/logs, and watchexec events/project replacement.
+- [ ] Later slices: drawer shell consumers and outbound FWS observer; then prove
+  external import elimination.
 
 ### Readiness checkpoint
 

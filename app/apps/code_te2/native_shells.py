@@ -1,7 +1,7 @@
-"""Typed application adapter for the worker-owned Ferrous intelligence manager.
+"""Typed application adapter for worker-owned Ferrous shell management.
 
-No framework-server calls or Python FWS fallback. Other shell families retain
-their existing manager until their own migration slices.
+No framework-server calls or Python FWS fallback. The drawer shell retains its
+existing manager until its own migration slice.
 """
 from __future__ import annotations
 
@@ -14,7 +14,8 @@ from typing import Protocol, cast
 class NativeShellBridge(Protocol):
     def shell_get(self, shell_id: str) -> object: ...
     def shell_find(self, label: str) -> object: ...
-    def shell_spawn(self, path: str, entry: str, ctx: dict[str, str], label: str, spec_id: str) -> object: ...
+    def shell_list(self) -> object: ...
+    def shell_spawn(self, path: str, entry: str, ctx: dict[str, str], label: str, spec_id: str, wait_ready: bool) -> object: ...
     def shell_live(self, shell_id: str) -> bool: ...
     def shell_terminate(self, shell_id: str) -> None: ...
     def shell_write(self, shell_id: str, data: bytes) -> None: ...
@@ -93,6 +94,18 @@ class ShellManager:
     async def get_shell(self, shell_id: str) -> ShellRecord | None:
         return _record(await asyncio.to_thread(self.bridge.shell_get, shell_id))
 
+    async def list_shells(self) -> list[ShellRecord]:
+        value = await asyncio.to_thread(self.bridge.shell_list)
+        if not isinstance(value, list):
+            raise TypeError("native shell list must be an array")
+        records: list[ShellRecord] = []
+        for item in cast(list[object], value):
+            record = _record(item)
+            if record is None:
+                raise TypeError("native shell list contains null")
+            records.append(record)
+        return records
+
     async def find_shell_by_label(self, label: str, *, status: str | None = None) -> ShellRecord | None:
         if status not in (None, "running"):
             raise ValueError("intelligence lookup supports running shells only")
@@ -146,13 +159,11 @@ class Orchestrator:
 
     async def start_from_ref(self, ref: str, *, base_dir: Path, ctx: dict[str, object],
                              label: str, record_spec_id: str, wait_ready: bool) -> ShellRecord:
-        if wait_ready:
-            raise ValueError("intelligence readiness belongs to domain handshakes")
         filename, entry = ref.split("#", 1)
         if any(not isinstance(value, str) for value in ctx.values()):
             raise TypeError("native shellspec context values must be strings")
         spawn = asyncio.create_task(asyncio.to_thread(self.manager.bridge.shell_spawn,
-            str(base_dir / filename), entry, cast(dict[str, str], ctx), label, record_spec_id))
+            str(base_dir / filename), entry, cast(dict[str, str], ctx), label, record_spec_id, wait_ready))
         try:
             record = _record(await asyncio.shield(spawn))
         except asyncio.CancelledError:

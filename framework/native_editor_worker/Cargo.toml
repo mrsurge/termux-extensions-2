@@ -25,6 +25,7 @@ futures-util = "0.3"
 tempfile = "=3.27.0"
 ferrous_framework = { git = "https://github.com/mrsurge/ferrous-framework.git", tag = "0.2.14" }
 serde_yaml = "0.9"
+regex = "1"
 
 [[bin]]
 name = "code-te2-worker"

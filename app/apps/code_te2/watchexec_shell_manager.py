@@ -11,12 +11,9 @@ import json
 import logging
 import shutil
 from pathlib import Path
-from typing import Optional, cast
+from typing import cast
 
-from framework_shells import get_manager
-from framework_shells.orchestrator import Orchestrator
-from framework_shells.pty import PipeState
-from framework_shells.record import ShellRecord
+from .native_shells import get_manager, Orchestrator, OutputReader, ShellRecord
 
 APP_ID = "code_te2"
 SHELLSPEC_DIR = Path(__file__).parent / "shellspec"
@@ -26,9 +23,11 @@ log = logging.getLogger("watchexec_shell_manager")
 
 JsonObject = dict[str, object]
 
-_active_shell_id: Optional[str] = None
-_pipe_state: Optional[PipeState] = None
-_stdout_reader_task: Optional[asyncio.Task[None]] = None
+_active_shell_id: str | None = None
+_output_reader: OutputReader | None = None
+_stdout_reader_task: asyncio.Task[None] | None = None
+_lifecycle_lock = asyncio.Lock()
+_MAX_EVENT_BYTES = 65536
 
 
 def _json_object(value: object) -> JsonObject:
@@ -50,7 +49,7 @@ def is_watchexec_available() -> bool:
     return shutil.which("watchexec") is not None
 
 
-async def _get_alive(shell_id: str) -> Optional[ShellRecord]:
+async def _get_alive(shell_id: str) -> ShellRecord | None:
     mgr = await get_manager()
     record = await mgr.get_shell(shell_id)
     if record and record.pid and record.status == "running":
@@ -58,31 +57,38 @@ async def _get_alive(shell_id: str) -> Optional[ShellRecord]:
     return None
 
 
-async def _stdout_reader_loop(proc: asyncio.subprocess.Process, project_root: str) -> None:
+async def _stdout_reader_loop(reader: OutputReader, project_root: str) -> None:
     """Read watchexec JSON events from stdout and forward as watcher:files."""
-    import sys
-    stdout = proc.stdout
-    if stdout is None:
-        return
+    pending = bytearray()
     try:
         while True:
-            line = await stdout.readline()
-            if not line:
-                break
-            raw = line.decode("utf-8", errors="replace").strip()
-            if not raw:
-                continue
-            # Fan out to stderr for observability
-            print(f"[watchexec] {raw}", file=sys.stderr, flush=True)
-            try:
-                evt = _json_object(cast(object, json.loads(raw)))
-            except json.JSONDecodeError:
-                continue
-            _forward_watchexec_event(evt, project_root)
+            chunks = (await reader.get()).split(b"\n")
+            for index, chunk in enumerate(chunks):
+                if len(pending) + len(chunk) > _MAX_EVENT_BYTES:
+                    raise ValueError("watchexec event exceeds line limit")
+                pending.extend(chunk)
+                if index < len(chunks) - 1:
+                    _consume_watchexec_line(bytes(pending), project_root)
+                    pending.clear()
     except asyncio.CancelledError:
         pass
     except Exception as exc:
         log.warning("[watchexec] stdout reader error: %s", exc)
+    finally:
+        await reader.close()
+
+
+def _consume_watchexec_line(line: bytes, project_root: str) -> None:
+    import sys
+    raw = line.decode("utf-8", errors="replace").strip()
+    if not raw:
+        return
+    print(f"[watchexec] {raw}", file=sys.stderr, flush=True)
+    try:
+        evt = _json_object(cast(object, json.loads(raw)))
+    except json.JSONDecodeError:
+        return
+    _forward_watchexec_event(evt, project_root)
 
 
 def _forward_watchexec_event(evt: JsonObject, project_root: str) -> None:
@@ -137,7 +143,7 @@ def _forward_watchexec_event(evt: JsonObject, project_root: str) -> None:
 
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            loop.create_task(
+            _ = loop.create_task(
                 publish_file_change_event(
                     str(project_root),
                     created_abs=[path_abs] if created else [],
@@ -152,12 +158,19 @@ def _forward_watchexec_event(evt: JsonObject, project_root: str) -> None:
 async def ensure_watchexec_shell(
     project_root: str,
     poll_interval_ms: int = 1500,
-) -> Optional[ShellRecord]:
+) -> ShellRecord | None:
+    async with _lifecycle_lock:
+        return await _ensure_watchexec_shell(project_root, poll_interval_ms)
+
+
+async def _ensure_watchexec_shell(
+    project_root: str, poll_interval_ms: int,
+) -> ShellRecord | None:
     """Start the watchexec framework shell for the given project.
 
     Returns the ShellRecord on success, None if watchexec is unavailable.
     """
-    global _active_shell_id, _pipe_state, _stdout_reader_task
+    global _active_shell_id, _output_reader, _stdout_reader_task
 
     if not is_watchexec_available():
         log.warning("[watchexec] binary not found on PATH")
@@ -165,24 +178,22 @@ async def ensure_watchexec_shell(
 
     mgr = await get_manager()
     orch = Orchestrator(mgr)
-    label = _label(project_root)
+    project_root_abs = str(Path(project_root).resolve(strict=False))
+    label = _label(project_root_abs)
 
     # Reuse if alive
     if _active_shell_id:
         cached = await _get_alive(_active_shell_id)
         if cached and cached.label == label:
-            if _pipe_state is not None:
+            if (_output_reader is not None and not _output_reader.closed
+                    and _stdout_reader_task is not None and not _stdout_reader_task.done()):
                 return cached
-            await mgr.terminate_shell(cached.id, force=True)
-            await asyncio.sleep(0.5)
-        _active_shell_id = None
+        await _stop_watchexec_shell()
 
     existing = await mgr.find_shell_by_label(label, status="running")
     if existing:
         await mgr.terminate_shell(existing.id, force=True)
         await asyncio.sleep(0.5)
-
-    project_root_abs = str(Path(project_root).resolve(strict=False))
 
     shell = await orch.start_from_ref(
         SHELLSPEC_REF,
@@ -199,31 +210,38 @@ async def ensure_watchexec_shell(
     )
 
     _active_shell_id = shell.id
-    mgr_inst = await get_manager()
-    ps = mgr_inst.get_pipe_state(shell.id)
-    if ps is not None:
-        _pipe_state = ps
-        if _stdout_reader_task is None or _stdout_reader_task.done():
-            _stdout_reader_task = asyncio.create_task(
-                _stdout_reader_loop(ps.process, project_root_abs),
-                name="watchexec_stdout_reader",
-            )
-        log.info("[watchexec] started for %s (poll=%dms)", project_root_abs, poll_interval_ms)
+    try:
+        _output_reader = await mgr.subscribe_output_bytes(shell.id)
+        _stdout_reader_task = asyncio.create_task(
+            _stdout_reader_loop(_output_reader, project_root_abs),
+            name="watchexec_stdout_reader",
+        )
+    except BaseException:
+        await _stop_watchexec_shell()
+        raise
+    log.info("[watchexec] started for %s (poll=%dms)", project_root_abs, poll_interval_ms)
     return shell
 
 
 async def stop_watchexec_shell() -> None:
+    async with _lifecycle_lock:
+        await _stop_watchexec_shell()
+
+
+async def _stop_watchexec_shell() -> None:
     """Stop the running watchexec framework shell."""
-    global _active_shell_id, _pipe_state, _stdout_reader_task
+    global _active_shell_id, _output_reader, _stdout_reader_task
 
     if _stdout_reader_task and not _stdout_reader_task.done():
-        _stdout_reader_task.cancel()
+        _ = _stdout_reader_task.cancel()
         try:
             await _stdout_reader_task
         except (asyncio.CancelledError, Exception):
             pass
     _stdout_reader_task = None
-    _pipe_state = None
+    if _output_reader is not None:
+        await _output_reader.close()
+        _output_reader = None
 
     if _active_shell_id:
         try:

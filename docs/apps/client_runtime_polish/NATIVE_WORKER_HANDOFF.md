@@ -159,6 +159,9 @@ and PyO3. The independent editor executable owns newly spawned child handles;
 persisted/adopted records do not grant live pipe access and retain the existing
 replace policy. Native writes forward opaque WBA MessagePack bytes; Python keeps
 its codec/correlation. Code-server stdout drains natively after marker readiness.
-Other shell families and the outbound FWS observer remain Python-owned; migrate
-those consumers before claiming framework-shells/socketio import elimination.
+Run-profile/page-preview/watchexec shell management now uses the same native
+manager. Output readiness is bounded native pipe matching, followed by logs-only
+draining; watcher event interpretation stays Python-owned. Drawer shells and the
+outbound FWS observer remain Python-owned; migrate those consumers before
+claiming framework-shells/socketio import elimination.
 Automated isolated tests and Pixel live acceptance are separate gates.

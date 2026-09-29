@@ -1807,6 +1807,7 @@ dependencies = [
  "mime_guess",
  "percent-encoding",
  "pyo3",
+ "regex",
  "rmpv",
  "serde_json",
  "serde_yaml",

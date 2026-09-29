@@ -5120,10 +5120,25 @@ Persisted metadata is not live pipe ownership: inaccessible/adopted children
 follow the existing replace policy. Exact PID-tree shutdown protects worker
 ancestry and avoids the persisted-record process-group termination path.
 Worker shutdown stops readers/drainers without claiming framework tree-cleanup
-authority. Run-profile, watcher, page-preview and drawer shells still use Python
-FWS, as does the outbound observation bridge; whole-worker dependency elimination
+authority. Drawer shells still use Python FWS, as does the outbound observation
+bridge; whole-worker dependency elimination
 and startup measurements remain later gates. No Python-manager fallback exists
 for migrated intelligence children. Rebuild the independent worker for this slice.
+
+Run-profile and page-preview launch/list/stop also use that native manager.
+Their `wait_ready=true` shellspec output markers are matched directly from live
+pipe bytes, with bounded 64 KiB context and the declared timeout (maximum 120s),
+not repeated whole-log reads. Invalid probes fail before spawn; failed readiness
+reaps the exact child; successful readiness switches to native logs-only draining.
+The drainer registry admits at most 64 concurrent logs-only children. Existing
+profile locks, reuse/replace behavior, preview port conflicts and post-readiness
+proxy publication stay in Python. Native listing exposes only migrated labels.
+
+Watchexec remains a worker-owned shell; its native binary reader feeds bounded
+64 KiB newline framing and existing Python JSON/event policy. Start, stop and
+project replacement serialize so a stale reader cannot attach to the replacement
+shell. Raw-log writes remain Ferrous-owned. This removes direct Python subprocess
+handles from the watcher, not its polling mode or workspace event semantics.
 
 ### Editor Service Outcome Boundary
 

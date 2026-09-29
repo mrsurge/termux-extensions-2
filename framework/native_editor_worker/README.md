@@ -43,8 +43,19 @@ termination uses Ferrous's exact PID-tree shutdown, not process-group killing.
 Worker teardown stops its readers/drainers; framework lifecycle still owns tree
 cleanup. There is no fallback to Python FWS for these two consumers.
 
-Run profiles, watcher/page-preview/drawer shell families and the outbound Python
-FWS observation client remain on their previous paths. This slice does not yet
+Run profiles and page previews also use this manager: native `output_match`
+readiness consumes live pipe bytes with at most 64 KiB retained match context,
+honors shellspec deadlines and reaps the exact child on failure. Success hands
+stdout to logs-only draining (maximum 64 active drainers), without periodic
+whole-log reads. Existing profile reuse/replace, proxy publication and preview
+port-conflict policy remain Python-owned. Shell listing is scoped to migrated
+Code TE2 labels.
+
+Watchexec uses the binary reader with bounded 64 KiB newline framing in Python,
+not an asyncio subprocess handle. Start/stop/replacement serialize; old readers
+close before another project starts. JSON-to-workspace-event policy is unchanged.
+The drawer shell family and outbound Python FWS observation client remain on
+their previous paths. This slice does not yet
 remove the framework-shells or python-socketio imports from the whole worker.
 Rebuild this worker before live testing; no frontend/APK update is required.
 

@@ -1,4 +1,4 @@
-//! Worker-owned intelligence children. Never constructs a TE2 server/host.
+//! Worker-owned app children. Never constructs a TE2 server/host.
 use anyhow::{Context, Result, bail, ensure};
 use ferrous_framework::shellspec::{ShellspecRenderInput, render_shellspec_entry};
 use ferrous_framework::{
@@ -42,7 +42,17 @@ fn allowed_label(label: &str) -> bool {
     matches!(
         label,
         "code_server:code_te2:global" | "workbench_adapter:code_te2:global"
-    )
+    ) || [
+        "runner-profile:code_te2:",
+        "page-preview:code_te2:",
+        "watchexec:code_te2:",
+    ]
+    .iter()
+    .any(|prefix| {
+        label
+            .strip_prefix(prefix)
+            .is_some_and(|suffix| !suffix.is_empty())
+    })
 }
 
 impl Shells {
@@ -79,6 +89,14 @@ impl Shells {
             .filter(|r| r.label == label && r.status == FerrousNativeShellStatus::Running)
             .max_by_key(|r| r.created_at_ms))
     }
+    pub fn list(&self) -> Result<Vec<FerrousNativeShellRecord>> {
+        Ok(self
+            .manager()?
+            .list_shells()?
+            .into_iter()
+            .filter(|record| allowed_label(&record.label))
+            .collect())
+    }
     pub fn spawn(
         &self,
         path: PathBuf,
@@ -86,6 +104,7 @@ impl Shells {
         ctx: HashMap<String, String>,
         label: String,
         spec_id: String,
+        wait_ready: bool,
     ) -> Result<FerrousNativeShellRecord> {
         ensure!(
             allowed_label(&label),
@@ -104,17 +123,93 @@ impl Shells {
             spec.backend == "pipe",
             "intelligence children require binary pipes"
         );
-        // Domain code owns code-server's listening marker and WBA's protocol ping.
-        spec.readiness = None;
-        self.manager()?
-            .spawn_rendered_shellspec_with_overrides_blocking(
-                spec,
-                FerrousShellLaunchOverrides {
-                    label: Some(label),
-                    spec_id: Some(spec_id),
-                    ..Default::default()
-                },
-            )
+        let readiness = spec.readiness.take();
+        let probe = if wait_ready {
+            let probe = readiness.context("shellspec readiness missing")?;
+            ensure!(
+                probe.probe_type == "output_match",
+                "unsupported native worker readiness"
+            );
+            ensure!(
+                probe.timeout_seconds.is_finite()
+                    && probe.timeout_seconds > 0.0
+                    && probe.timeout_seconds <= 120.0,
+                "invalid shell readiness timeout"
+            );
+            let pattern = probe.pattern.context("shell readiness pattern missing")?;
+            ensure!(pattern.len() <= 4096, "shell readiness pattern too large");
+            Some((
+                regex::bytes::Regex::new(&pattern)?,
+                Duration::from_secs_f64(probe.timeout_seconds),
+            ))
+        } else {
+            None
+        };
+        // Code-server/WBA retain their domain handshakes. The run-profile
+        // marker is consumed directly, not via repeated whole-log reads.
+        let manager = self.manager()?;
+        let record = manager.spawn_rendered_shellspec_with_overrides_blocking(
+            spec,
+            FerrousShellLaunchOverrides {
+                label: Some(label),
+                spec_id: Some(spec_id),
+                ..Default::default()
+            },
+        )?;
+        if let Some((pattern, timeout)) = probe {
+            let ready = self
+                .wait_output(&record.id, &pattern, timeout)
+                .and_then(|()| self.start_log_drain(record.id.clone()));
+            if let Err(error) = ready {
+                let cleanup = manager.shutdown_tree_blocking(vec![record.pid.into()])?;
+                ensure!(
+                    cleanup.ok,
+                    "readiness failed ({error}); child cleanup failed: {:?}",
+                    cleanup.stats.errors
+                );
+                return Err(error);
+            }
+        }
+        Ok(record)
+    }
+
+    fn wait_output(
+        &self,
+        id: &str,
+        pattern: &regex::bytes::Regex,
+        timeout: Duration,
+    ) -> Result<()> {
+        let manager = self.manager()?;
+        let deadline = std::time::Instant::now() + timeout;
+        let mut retained = Vec::new();
+        while std::time::Instant::now() < deadline {
+            ensure!(
+                !self.stopping.load(Ordering::Acquire),
+                "shell manager stopping"
+            );
+            let started = std::time::Instant::now();
+            if let Some(bytes) =
+                manager.read_stdout_chunk_blocking(id, Duration::from_millis(100))?
+            {
+                for chunk in bytes.chunks(32768) {
+                    retained.extend_from_slice(chunk);
+                    if pattern.is_match(&retained) {
+                        return Ok(());
+                    }
+                    if retained.len() > 32768 {
+                        retained.drain(..retained.len() - 32768);
+                    }
+                }
+            }
+            ensure!(
+                manager
+                    .get_shell(id)?
+                    .is_some_and(|r| r.status == FerrousNativeShellStatus::Running),
+                "shell exited before readiness"
+            );
+            idle_read_pause(started);
+        }
+        bail!("shell output readiness timed out")
     }
     pub fn live(&self, id: &str) -> Result<bool> {
         ensure!(self.get(id)?.is_some(), "unknown intelligence shell");
@@ -197,45 +292,51 @@ impl Shells {
         if self.stopping.load(Ordering::Acquire) {
             return Ok(());
         }
-        let manager = self.manager()?;
         if self
             .get(&reader.shell)?
             .is_some_and(|r| r.label == "code_server:code_te2:global")
         {
             // Code-server stdout becomes logs-only after its one-shot readiness
             // consumer. Keep draining in Rust so its OS pipe never blocks it.
-            let stopping = self.stopping.clone();
-            let mut drainers = self.drainers.lock().unwrap();
-            drainers.retain(|_, thread| !thread.is_finished());
-            let shell = reader.shell.clone();
-            drainers.insert(
-                shell,
-                std::thread::spawn(move || {
-                    while !stopping.load(Ordering::Acquire) {
-                        let read_started = std::time::Instant::now();
-                        match manager
-                            .read_stdout_chunk_blocking(&reader.shell, Duration::from_millis(100))
+            self.start_log_drain(reader.shell.clone())?;
+        }
+        Ok(())
+    }
+    fn start_log_drain(&self, shell: String) -> Result<()> {
+        let manager = self.manager()?;
+        let stopping = self.stopping.clone();
+        let mut drainers = self.drainers.lock().unwrap();
+        drainers.retain(|_, thread| !thread.is_finished());
+        ensure!(drainers.len() < 64, "native log-drainer capacity exceeded");
+        ensure!(
+            !drainers.contains_key(&shell),
+            "shell already has a log drainer"
+        );
+        drainers.insert(
+            shell.clone(),
+            std::thread::spawn(move || {
+                while !stopping.load(Ordering::Acquire) {
+                    let read_started = std::time::Instant::now();
+                    match manager.read_stdout_chunk_blocking(&shell, Duration::from_millis(100)) {
+                        Ok(Some(_)) => {}
+                        Ok(None)
+                            if manager
+                                .get_shell(&shell)
+                                .ok()
+                                .flatten()
+                                .is_some_and(|r| r.status == FerrousNativeShellStatus::Running) =>
                         {
-                            Ok(Some(_)) => {}
-                            Ok(None)
-                                if manager.get_shell(&reader.shell).ok().flatten().is_some_and(
-                                    |r| r.status == FerrousNativeShellStatus::Running,
-                                ) =>
-                            {
-                                idle_read_pause(read_started)
-                            }
-                            Ok(None) => break,
-                            Err(error) => {
-                                eprintln!(
-                                    "[code-te2-worker] intelligence log drain failed: {error}"
-                                );
-                                break;
-                            }
+                            idle_read_pause(read_started)
+                        }
+                        Ok(None) => break,
+                        Err(error) => {
+                            eprintln!("[code-te2-worker] intelligence log drain failed: {error}");
+                            break;
                         }
                     }
-                }),
-            );
-        }
+                }
+            }),
+        );
         Ok(())
     }
     pub fn stop(&self) {
@@ -496,12 +597,96 @@ mod tests {
                 HashMap::from([("MARKER".into(), "configured".into())]),
                 "workbench_adapter:code_te2:global".into(),
                 "test".into(),
+                false,
             )
             .unwrap();
         let token = shells.subscribe(record.id.clone()).unwrap();
         assert_eq!(shells.read(token).unwrap(), b"configured");
         shells.unsubscribe(token);
         shells.release(token).unwrap();
+        shells.terminate(&record.id).unwrap();
+    }
+
+    #[test]
+    fn auxiliary_marker_readiness_and_logs_survive_split_output() {
+        let (root, shells) = isolated();
+        let _lifetime = Lifetime(shells.clone());
+        let path = root.path().join("ready.yaml");
+        std::fs::write(&path, "version: '1'\nshells:\n  runner:\n    backend: pipe\n    command: [sh, -c, 'printf runner-; sleep 0.05; printf \"profile-ready\\n\"; cat']\n    readiness:\n      type: output_match\n      pattern: runner-profile-ready\n      timeout: 2\n").unwrap();
+        for label in [
+            "runner-profile:code_te2:project:profile",
+            "page-preview:code_te2:project:preview",
+        ] {
+            let record = shells
+                .spawn(
+                    path.clone(),
+                    "runner".into(),
+                    HashMap::new(),
+                    label.into(),
+                    "test".into(),
+                    true,
+                )
+                .unwrap();
+            assert!(shells.subscribe(record.id.clone()).is_err());
+            assert!(shells.list().unwrap().iter().any(|r| r.id == record.id));
+            shells.write(&record.id, b"after-ready\n").unwrap();
+            let deadline = std::time::Instant::now() + Duration::from_secs(2);
+            let drained = loop {
+                shells
+                    .manager()
+                    .unwrap()
+                    .flush_stdout_log_blocking(&record.id)
+                    .unwrap();
+                if std::fs::read(&record.stdout_log)
+                    .unwrap()
+                    .windows(12)
+                    .any(|w| w == b"after-ready\n")
+                {
+                    break true;
+                }
+                if std::time::Instant::now() > deadline {
+                    break false;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            };
+            shells.terminate(&record.id).unwrap();
+            assert!(drained);
+        }
+    }
+
+    #[test]
+    fn failed_marker_readiness_reaps_the_child() {
+        let (root, shells) = isolated();
+        let path = root.path().join("timeout.yaml");
+        std::fs::write(&path, "version: '1'\nshells:\n  runner:\n    backend: pipe\n    command: [cat]\n    readiness:\n      type: output_match\n      pattern: never-ready\n      timeout: 0.15\n").unwrap();
+        let error = shells
+            .spawn(
+                path,
+                "runner".into(),
+                HashMap::new(),
+                "runner-profile:code_te2:project:timeout".into(),
+                "test".into(),
+                true,
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("timed out"));
+        let records = shells.list().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].status, FerrousNativeShellStatus::Exited);
+    }
+
+    #[test]
+    fn watcher_keeps_the_binary_reader_instead_of_a_log_only_drain() {
+        let (_root, shells) = isolated();
+        let record = child(&shells, "watchexec:code_te2:project");
+        let token = shells.subscribe(record.id.clone()).unwrap();
+        shells.write(&record.id, b"{\"tags\":[]}\n").unwrap();
+        assert_eq!(shells.read(token).unwrap(), b"{\"tags\":[]}\n");
+        shells.unsubscribe(token);
+        shells.release(token).unwrap();
+        let replacement = shells.subscribe(record.id.clone()).unwrap();
+        shells.unsubscribe(replacement);
+        shells.release(replacement).unwrap();
         shells.terminate(&record.id).unwrap();
     }
 }
