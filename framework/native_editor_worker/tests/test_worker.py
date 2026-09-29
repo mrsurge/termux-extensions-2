@@ -158,6 +158,19 @@ def test_corruption_or_truncation_is_fatal(worker, raw):
     assert worker.finish() != 0
 
 
+def test_truncated_eof_repeatedly_exits_with_transport_failure():
+    # Catch process-exit ordering regressions in addition to the deterministic
+    # native test. No live framework or persistent state is involved.
+    for _ in range(30):
+        instance = Worker()
+        try:
+            instance.raw(b"\x81")
+            assert instance.finish() == 1
+            assert b"input failed" in instance.errors
+        finally:
+            instance.cleanup()
+
+
 def test_overload_rejects_new_requests_but_nested_reply_still_arrives(worker):
     worker.request("nested", id="held")
     outbound = worker.receive()

@@ -191,7 +191,7 @@ impl NativeBridge {
 
 fn read_loop(
     output: Output,
-    requests: SyncSender<Frame<Value>>,
+    requests: &SyncSender<Frame<Value>>,
     budget: Arc<AtomicUsize>,
 ) -> Result<()> {
     let mut reader = BufReader::new(io::stdin());
@@ -314,6 +314,20 @@ fn writer_loop(rx: Receiver<Frame<Vec<u8>>>, shared: Arc<Shared>) {
     }
 }
 
+fn finish_input(shared: &Shared, requests: SyncSender<Frame<Value>>, result: Result<()>) {
+    // Queue closure is a completion signal observed by the dispatcher. Keep
+    // its sender alive until terminal status and pending-call failures have
+    // been published, on both EOF and malformed input.
+    match result {
+        Err(error) => {
+            eprintln!("[native-worker] input failed: {error}");
+            shared.fail(&error.to_string());
+        }
+        Ok(()) => shared.stop_pending("framework EOF"),
+    }
+    drop(requests);
+}
+
 fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     if args.len() != 3 {
@@ -369,12 +383,8 @@ fn run() -> Result<()> {
     let reader_output = output.clone();
     let reader_shared = shared.clone();
     let _reader = thread::spawn(move || {
-        if let Err(error) = read_loop(reader_output, request_tx, Arc::new(AtomicUsize::new(0))) {
-            eprintln!("[native-worker] input failed: {error}");
-            reader_shared.fail(&error.to_string());
-        } else {
-            reader_shared.stop_pending("framework EOF");
-        }
+        let result = read_loop(reader_output, &request_tx, Arc::new(AtomicUsize::new(0)));
+        finish_input(&reader_shared, request_tx, result);
         // A blocked Python handler or stdout must not strand process shutdown.
         thread::sleep(Duration::from_secs(3));
         if !reader_shared.finished.load(Ordering::Acquire) {
@@ -449,5 +459,59 @@ mod tests {
         drop(lease);
         assert_eq!(budget.load(Ordering::Acquire), 0);
         assert!(Lease::acquire(&budget, 1).is_ok());
+    }
+
+    #[test]
+    fn queue_disconnect_cannot_overtake_terminal_status_or_pending_cleanup() {
+        for malformed in [false, true] {
+            let shared = Arc::new(Shared {
+                pending: Mutex::new(HashMap::new()),
+                counter: AtomicU64::new(1),
+                input_closed: AtomicBool::new(false),
+                output_closed: AtomicBool::new(false),
+                failed: AtomicBool::new(false),
+                finished: AtomicBool::new(false),
+                output_budget: Arc::new(AtomicUsize::new(0)),
+                reply_budget: Arc::new(AtomicUsize::new(0)),
+                nid: 2100,
+                name: "test".into(),
+            });
+            let (tx, rx) = mpsc::sync_channel(1);
+            let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+            shared
+                .pending
+                .lock()
+                .unwrap()
+                .insert("pending".into(), reply_tx);
+            // Hold pending cleanup mid-flight to expose the ordering reliably,
+            // without depending on a fast dispatcher or slow device scheduling.
+            let guard = shared.pending.lock().unwrap();
+            let reader_shared = shared.clone();
+            let reader = thread::spawn(move || {
+                let result = if malformed {
+                    Err(anyhow::anyhow!("truncated frame"))
+                } else {
+                    Ok(())
+                };
+                finish_input(&reader_shared, tx, result);
+            });
+            let deadline = std::time::Instant::now() + Duration::from_secs(2);
+            while !shared.input_closed.load(Ordering::Acquire) {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "reader did not publish status"
+                );
+                thread::yield_now();
+            }
+            assert_eq!(shared.failed.load(Ordering::Acquire), malformed);
+            assert!(matches!(rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+            drop(guard);
+            reader.join().unwrap();
+            assert!(matches!(reply_rx.recv().unwrap(), Err(_)));
+            assert!(matches!(
+                rx.try_recv(),
+                Err(mpsc::TryRecvError::Disconnected)
+            ));
+        }
     }
 }

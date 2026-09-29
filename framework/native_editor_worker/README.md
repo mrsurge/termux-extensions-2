@@ -78,18 +78,24 @@ Run tests as their own command. The **test runner** needs pytest and msgpack;
 the embedded fixture service needs only system Python. It never launches TE2.
 
 ```bash
-env -u PYTHONPATH TE2_NATIVE_WORKER_BIN="$PWD/framework/native_editor_worker/target/release/te2-native-editor-worker" .venv/bin/python -m pytest -q framework/native_editor_worker/tests/test_worker.py
+env -u PYTHONPATH TE2_NATIVE_WORKER_BIN="$PWD/framework/native_editor_worker/target/release/te2-native-editor-worker" .jitenv/bin/python -m pytest -q framework/native_editor_worker/tests/test_worker.py
 ```
 
 On the Pixel after the approved commit/pull, use `PYO3_PYTHON="$PREFIX/bin/python"`
 for Cargo, and the system Python with pytest/msgpack to run tests. Do not borrow
-native modules from a different-ABI venv through PYTHONPATH. Android/Termux
-embedding/linker compatibility remains **unvalidated** until that device build.
+native modules from a different-ABI venv through PYTHONPATH. The Pixel build using
+`/data/data/com.termux/files/usr/bin/python` succeeded and ran 15/16 initial
+subprocess tests. Its truncated-EOF test exposed a reader shutdown ordering race,
+not an interpreter mismatch. The correction retains the queue sender until
+terminal status/pending cleanup are published, with deterministic and repeated
+regression coverage. Pixel retesting of that correction remains pending.
 The executable links to libpython; the ~939 KiB Linux optimized binary is not a
 self-contained distribution of Python or Code TE2.
 
-Local evidence: 4 Rust unit tests, 16 subprocess tests, and 75 surrounding Python
-pipe/worker/debug tests passed (91 Python tests together). Cargo fmt passes;
+Current local correction: 5 Rust unit tests and 17 subprocess tests pass using
+the system-Python `.jitenv` runner, including 30 truncated-EOF process launches.
+The original slice also passed 75 surrounding Python pipe/worker/debug tests.
+Cargo fmt passes;
 clippy was unavailable in the installed toolchain. No startup speedup claimed.
 
 ## Next gate

@@ -262,8 +262,16 @@ Sidebar loading; no additional startup redesign without new evidence.
 - [x] Linux debug/release builds; 4 Rust unit tests and 91 Python tests (16 native
   subprocess + 75 existing boundary/worker tests) pass. Rust fmt passes; clippy
   unavailable. Production manifest/build/launch untouched; no runtime restart.
-- [ ] Commit/push this vertical slice, then pull/build/run on Pixel system Python;
-  no Termux compatibility or full editor startup benefit claimed yet.
+- [x] Commit/push the vertical slice and run the initial Pixel system-Python
+  build/test attempt; full parity and editor startup benefit remain unproven.
+- [x] Prototype published as `af040ed9`; user built on Pixel with system Python
+  `/data/data/com.termux/files/usr/bin/python`. 15/16 tests passed; truncated EOF
+  sometimes returned success because sender-drop preceded reader failure status.
+- [x] Fix reader terminal ordering: borrow sender during decode, retain ownership
+  through error/EOF publication and pending cleanup, then disconnect queue.
+  Local system-Python `.jitenv` validation: 5 Rust tests + 17 subprocess tests,
+  including deterministic blocked-cleanup ordering and 30 repeated EOF failures.
+- [ ] Publish/retest EOF race correction on Pixel; do not mark full acceptance yet.
 - [ ] Audit HTTP/resource extraction and remaining Python client dependencies.
 - [ ] Approve and validate a one-lane native prototype on Linux and Termux.
 - [ ] Verify Python Socket.IO imports are actually eliminated before claiming
