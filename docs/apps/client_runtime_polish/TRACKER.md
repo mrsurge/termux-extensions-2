@@ -344,6 +344,15 @@ Sidebar loading; no additional startup redesign without new evidence.
 
 ## Completion
 
+- [x] Code TE2 declares `readiness_support: "pipe"` and publishes serving readiness
+  over its existing MessagePack worker pipe after domain startup/listener bind.
+  HTTP updates are forbidden for this mode; shell probes cannot substitute.
+  Current worker identity gates publication. Boolean callback apps/ALS unchanged.
+- [x] Native worker integration suite: 18 passed with pipe readiness required.
+- [x] Framework readiness tests: 5 passed (strict mode, exact owner and
+  non-fallback probe behavior); native release build and framework check passed.
+- [ ] Pixel/live acceptance of paired framework + worker readiness changes.
+
 - [ ] Update architectural documentation/memory for verified contract changes.
 - [ ] Record automated checks and user live acceptance separately.
 - [ ] Commit/push/merge or release only under the corresponding user instruction.

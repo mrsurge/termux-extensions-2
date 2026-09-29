@@ -133,6 +133,12 @@ pub fn launch_app(
                 env: render_env,
             };
             let mut rendered_shell = render_shellspec_entry(&document, &entry_name, &input)?;
+            anyhow::ensure!(
+                !app.pipe_readiness()
+                    || !is_app_worker_shell(shell)
+                    || rendered_shell.backend == "pipe",
+                "pipe readiness requires a pipe app-worker shell"
+            );
             let label = shell
                 .label
                 .clone()
@@ -143,8 +149,8 @@ pub fn launch_app(
                 primary_shell_id.clone()
             };
 
-            // App-level readiness is the Python framework parity path for larger apps:
-            // launch the worker, then let /api/apps/{app_id}/readiness become authority.
+            // Explicit worker readiness owns the gate (HTTP callback or pipe-only
+            // mode). A shell probe must never substitute for that fact.
             if should_bypass_shellspec_readiness(app, shell) {
                 rendered_shell.readiness = None;
             }

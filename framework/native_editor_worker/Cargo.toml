@@ -21,7 +21,6 @@ socketioxide = "=0.18.3"
 serde_json = "1"
 mime_guess = "2"
 percent-encoding = "2"
-reqwest = { version = "0.12", default-features = false, features = ["json"] }
 futures-util = "0.3"
 tempfile = "=3.27.0"
 

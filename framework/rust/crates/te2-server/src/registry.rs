@@ -264,6 +264,12 @@ fn resolve_app_asset(app: &AppDefinition, filename: &str) -> Option<PathBuf> {
 }
 
 impl AppDefinition {
+    pub(crate) fn pipe_readiness(&self) -> bool {
+        self.raw_manifest
+            .get("readiness_support")
+            .and_then(Value::as_str)
+            == Some("pipe")
+    }
     pub fn backend_module(&self) -> Option<&str> {
         self.entrypoints
             .get("backend_blueprint")
@@ -515,10 +521,7 @@ fn load_app_definition(
         icon_text: string_field(&manifest, "icon_text").unwrap_or_default(),
         icon_emoji: string_field(&manifest, "icon_emoji").unwrap_or_default(),
         fullscreen: bool_field(&manifest, "fullscreen"),
-        readiness_support: manifest
-            .get("readiness_support")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
+        readiness_support: parse_readiness_support(manifest.get("readiness_support"))?,
         enabled: manifest
             .get("enabled")
             .and_then(Value::as_bool)
@@ -526,6 +529,15 @@ fn load_app_definition(
         raw_manifest: manifest,
         registry_errors: alias_errors,
     })
+}
+
+fn parse_readiness_support(value: Option<&Value>) -> Result<bool> {
+    match value {
+        None | Some(Value::Bool(false)) => Ok(false),
+        Some(Value::Bool(true)) => Ok(true),
+        Some(Value::String(mode)) if mode == "pipe" => Ok(true),
+        _ => anyhow::bail!("readiness_support must be a boolean or \"pipe\""),
+    }
 }
 
 fn broken_app_definition(
@@ -716,6 +728,17 @@ fn file_name_string(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn readiness_mode_is_explicit_and_strict() {
+        use serde_json::json;
+        assert!(!super::parse_readiness_support(None).unwrap());
+        assert!(!super::parse_readiness_support(Some(&json!(false))).unwrap());
+        assert!(super::parse_readiness_support(Some(&json!(true))).unwrap());
+        assert!(super::parse_readiness_support(Some(&json!("pipe"))).unwrap());
+        for invalid in [json!("pip"), json!(1), json!({}), json!(null)] {
+            assert!(super::parse_readiness_support(Some(&invalid)).is_err());
+        }
+    }
     use super::{AppRegistry, AppRoot};
     use serde_json::json;
     use std::{fs, path::Path};

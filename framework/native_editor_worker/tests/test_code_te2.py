@@ -37,6 +37,7 @@ def native_app(tmp_path):
                                env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     logs = []
     lock = threading.Lock()
+    ready = threading.Event()
 
     def log_reader():
         for line in process.stderr:
@@ -48,6 +49,12 @@ def native_app(tmp_path):
             while data := process.stdout.read1(65536):
                 decoder.feed(data)
                 for request in decoder:
+                    if request.get("method") == "app.readiness":
+                        assert request["kind"] == "notification"
+                        assert request["targetName"] == "framework.rust"
+                        assert request["params"] == {"status": "ready", "phase": "serving"}
+                        ready.set()
+                        continue
                     if request.get("kind") != "request":
                         continue
                     # The empty test project needs no real fs/git/shell work.
@@ -97,6 +104,8 @@ def native_app(tmp_path):
                 time.sleep(0.05)
         else:
             pytest.fail("Native worker not ready:\n" + "".join(logs))
+        assert ready.wait(3), "worker did not publish readiness over its pipe"
+        assert not any("readiness post" in line for line in logs)
         yield url, process, tmp_path, logs
     finally:
         if process.poll() is None:

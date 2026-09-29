@@ -29,6 +29,7 @@ mod native {
         shell_id: impl Into<String>,
         app_id: impl Into<String>,
         scheduler: FrameworkServiceScheduler,
+        state: crate::AppState,
     ) {
         let Some(manager) = manager else {
             return;
@@ -46,7 +47,7 @@ mod native {
         }
         let handle = Handle::current();
         tokio::task::spawn_blocking(move || {
-            if let Err(error) = run_bridge(manager, &shell_id, &app_id, scheduler, handle) {
+            if let Err(error) = run_bridge(manager, &shell_id, &app_id, scheduler, handle, state) {
                 warn!(%error, %shell_id, %app_id, "app-worker pipe bridge stopped with error");
             }
             if let Some(active) = ACTIVE_BRIDGES.get() {
@@ -63,6 +64,7 @@ mod native {
         app_id: &str,
         scheduler: FrameworkServiceScheduler,
         handle: Handle,
+        state: crate::AppState,
     ) -> anyhow::Result<()> {
         let (sink, writer) = start_pipe_writer(manager.clone(), shell_id, app_id)?;
         let registration = crate::runtime_debug_pipe::register(app_id, shell_id, sink.clone());
@@ -80,8 +82,15 @@ mod native {
                 registration.route.close();
             }
         }
-        let read_result =
-            run_bridge_read(manager, shell_id, app_id, scheduler, handle, sink.clone());
+        let read_result = run_bridge_read(
+            manager,
+            shell_id,
+            app_id,
+            scheduler,
+            handle,
+            sink.clone(),
+            state,
+        );
         sink.close();
         drop(registration);
         let write_result = writer
@@ -98,6 +107,7 @@ mod native {
         scheduler: FrameworkServiceScheduler,
         handle: Handle,
         sink: Arc<FerrousPipeSink>,
+        state: crate::AppState,
     ) -> anyhow::Result<()> {
         let mut decoder = PipeDecoder::default();
         loop {
@@ -107,6 +117,14 @@ mod native {
             match manager.read_stdout_chunk_blocking(shell_id, Duration::from_millis(250))? {
                 Some(chunk) => {
                     for envelope in decoder.feed(&chunk)? {
+                        if envelope.method.as_deref() == Some("app.readiness") {
+                            // Consume in stream order. Identity comes from this owned pipe,
+                            // never an app ID supplied by the worker payload.
+                            handle.block_on(crate::apps_lifecycle::set_pipe_readiness(
+                                &state, app_id, shell_id, &envelope,
+                            ))?;
+                            continue;
+                        }
                         handle_stdout_envelope(
                             shell_id,
                             app_id,
@@ -359,5 +377,6 @@ pub(crate) fn ensure_bridge(
     _: impl Into<String>,
     _: impl Into<String>,
     _: crate::framework_services::scheduler::FrameworkServiceScheduler,
+    _: crate::AppState,
 ) {
 }

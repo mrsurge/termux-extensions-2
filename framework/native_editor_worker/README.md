@@ -13,8 +13,15 @@ Rust owns Hyper HTTP resources, Socketioxide's five existing namespaces, rooms,
 Engine.IO lifecycle and framework MessagePack stdin/stdout. A dedicated Python
 asyncio thread runs the real `main.py` lifecycle and existing namespace/domain
 handlers through PyO3. Framework replies remain independent of socket dispatch.
-The worker binds loopback only after application startup, then posts serving
-readiness. FWS still owns the separate worker; WBA/browser intelligence and
+The worker binds loopback only after application startup, then emits the
+`app.readiness` MessagePack notification over its framework stdout pipe, with
+`params: {status: "ready", phase: "serving"}`. The manifest declares
+`"readiness_support": "pipe"`; the framework rejects HTTP readiness updates for
+this mode and never substitutes a shell probe. The pipe's registered app and
+current shell identity, not payload identity, authorize the fact. Rebuild both
+the framework and this worker before testing; an older framework ignores this
+notification and leaves the readiness gate closed. No frontend OTA is needed.
+FWS still owns the separate worker; WBA/browser intelligence and
 existing FWS child ownership are unchanged.
 
 The common Engine.IO parser remains in use: application RPC payloads are binary

@@ -352,6 +352,78 @@ async fn quit_app(State(state): State<AppState>, Path(app_id): Path<String>) -> 
     .into_response()
 }
 
+#[cfg(feature = "ferrous-framework-native")]
+fn validate_pipe_readiness(
+    pipe_mode: bool,
+    current_shell: Option<&str>,
+    shell_id: &str,
+    envelope: &crate::framework_services::pipe::protocol::PipeEnvelope,
+) -> anyhow::Result<()> {
+    use crate::framework_services::pipe::protocol::PipeMessageKind;
+    anyhow::ensure!(
+        envelope.method.as_deref() == Some("app.readiness")
+            && envelope.kind == PipeMessageKind::Notification
+            && envelope.target_name.as_deref() == Some("framework.rust")
+            && envelope.target_nid == Some(1),
+        "invalid pipe readiness envelope"
+    );
+    anyhow::ensure!(pipe_mode, "app does not declare pipe readiness");
+    anyhow::ensure!(
+        current_shell == Some(shell_id),
+        "readiness came from a non-current worker"
+    );
+    let params = envelope
+        .params
+        .as_ref()
+        .and_then(Value::as_object)
+        .ok_or_else(|| anyhow::anyhow!("pipe readiness params must be an object"))?;
+    anyhow::ensure!(
+        params.get("status").and_then(Value::as_str) == Some("ready")
+            && params.get("phase").and_then(Value::as_str) == Some("serving")
+            && params.len() == 2,
+        "invalid pipe readiness payload"
+    );
+    Ok(())
+}
+
+#[cfg(feature = "ferrous-framework-native")]
+pub(crate) async fn set_pipe_readiness(
+    state: &AppState,
+    app_id: &str,
+    shell_id: &str,
+    envelope: &crate::framework_services::pipe::protocol::PipeEnvelope,
+) -> anyhow::Result<()> {
+    let registry = state.app_registry_snapshot();
+    let app = registry
+        .get_app(app_id)
+        .ok_or_else(|| anyhow::anyhow!("unknown readiness app"))?;
+    let readiness = json!({"app_id": app_id, "status": "ready", "phase": "serving",
+        "source": "worker_pipe", "shell_id": shell_id})
+    .as_object()
+    .unwrap()
+    .clone();
+    {
+        let mut store = state.readiness_store().write().await;
+        let running = state.running_apps.read().unwrap_or_else(|e| e.into_inner());
+        validate_pipe_readiness(
+            app.pipe_readiness(),
+            running.get(app_id).map(|app| app.shell_id.as_str()),
+            shell_id,
+            envelope,
+        )?;
+        store.insert(app_id.to_owned(), readiness.clone());
+    }
+    publish_apps_event(
+        state,
+        AppsEvent::new(
+            "app_readiness_changed",
+            json!({"app_id": app_id, "readiness": readiness}),
+        ),
+    );
+    publish_catalog_snapshot(state).await;
+    Ok(())
+}
+
 async fn set_app_readiness(
     State(state): State<AppState>,
     Path(app_id): Path<String>,
@@ -369,6 +441,12 @@ async fn set_app_readiness(
     };
     let canonical_app_id = app.app_id.clone();
     let body = payload.map(|Json(body)| body).unwrap_or_default();
+    if app.pipe_readiness() {
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "app readiness requires its worker pipe",
+        );
+    }
     let status = body
         .get("status")
         .and_then(Value::as_str)
@@ -695,16 +773,6 @@ pub(crate) fn start_fws_lifecycle_app_bridge(
                     let Some(app_id) = event.shell.app_id.clone() else {
                         continue;
                     };
-                    if event.shell.backend == "pipe"
-                        && event.shell.status == FerrousNativeShellStatus::Running
-                    {
-                        app_worker_pipe_bridge::ensure_bridge(
-                            Some(manager.clone()),
-                            event.shell_id.clone(),
-                            app_id.clone(),
-                            state.service_scheduler().clone(),
-                        );
-                    }
                     let (trigger, running_override) = match event.kind {
                         FerrousNativeLifecycleEventKind::Spawned => {
                             let indexed = if let Some(running) =
@@ -730,6 +798,44 @@ pub(crate) fn start_fws_lifecycle_app_bridge(
                             ("fws_shell_exited", Some(false))
                         }
                     };
+                    if event.shell.backend == "pipe"
+                        && event.shell.status == FerrousNativeShellStatus::Running
+                    {
+                        let registry = state.app_registry_snapshot();
+                        if registry
+                            .get_app(&app_id)
+                            .is_some_and(|app| app.pipe_readiness())
+                        {
+                            let mut readiness = state.readiness_store().write().await;
+                            let running =
+                                state.running_apps.read().unwrap_or_else(|e| e.into_inner());
+                            if running
+                                .get(&app_id)
+                                .is_some_and(|app| app.shell_id == event.shell_id)
+                                && readiness
+                                    .get(&app_id)
+                                    .and_then(|v| v.get("shell_id"))
+                                    .and_then(Value::as_str)
+                                    != Some(event.shell_id.as_str())
+                            {
+                                readiness.insert(
+                                    app_id.clone(),
+                                    json!({"app_id": app_id,
+                                    "status": "starting", "shell_id": event.shell_id})
+                                    .as_object()
+                                    .unwrap()
+                                    .clone(),
+                                );
+                            }
+                        }
+                        app_worker_pipe_bridge::ensure_bridge(
+                            Some(manager.clone()),
+                            event.shell_id.clone(),
+                            app_id.clone(),
+                            state.service_scheduler().clone(),
+                            state.clone(),
+                        );
+                    }
                     publish_app_running_changed(&state, &app_id, trigger, None, running_override)
                         .await;
                 }
@@ -751,6 +857,7 @@ fn ensure_pipe_bridge_for_running_app(state: &AppState, running: &RunningApp) {
         running.shell_id.clone(),
         running.app_id.clone(),
         state.service_scheduler().clone(),
+        state.clone(),
     );
 }
 
@@ -1014,6 +1121,41 @@ fn catalog_payloads_with_running_and_readiness(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "ferrous-framework-native")]
+    #[test]
+    fn pipe_readiness_requires_exact_live_owner_and_explicit_mode() {
+        use crate::framework_services::pipe::protocol::PipeEnvelope;
+        let value = serde_json::json!({"jsonrpc":"2.0", "protocolVersion":1,
+            "kind":"notification", "method":"app.readiness", "originNid":0,
+            "originName":"not-authority", "targetNid":1, "targetName":"framework.rust",
+            "params":{"status":"ready", "phase":"serving"}});
+        let envelope: PipeEnvelope = serde_json::from_value(value.clone()).unwrap();
+        assert!(super::validate_pipe_readiness(true, Some("live"), "live", &envelope).is_ok());
+        for (mode, owner) in [
+            (false, Some("live")),
+            (true, None),
+            (true, Some("replacement")),
+        ] {
+            assert!(super::validate_pipe_readiness(mode, owner, "live", &envelope).is_err());
+        }
+        for (field, invalid) in [
+            ("kind", serde_json::json!("request")),
+            ("targetName", serde_json::json!("other")),
+            (
+                "params",
+                serde_json::json!({"status":"ready","phase":"serving","app_id":"other"}),
+            ),
+            (
+                "params",
+                serde_json::json!({"status":"starting","phase":"serving"}),
+            ),
+        ] {
+            let mut invalid_value = value.clone();
+            invalid_value[field] = invalid;
+            let envelope: PipeEnvelope = serde_json::from_value(invalid_value).unwrap();
+            assert!(super::validate_pipe_readiness(true, Some("live"), "live", &envelope).is_err());
+        }
+    }
     use super::{build_app_bootstrap_payload, normalized_app_id};
     use serde_json::json;
 

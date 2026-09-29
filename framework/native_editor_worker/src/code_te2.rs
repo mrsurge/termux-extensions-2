@@ -283,24 +283,7 @@ async fn run(root: PathBuf, port: u16) -> Result<()> {
     }
     let icon_dir = protocol::text(&info, "agentIconDir").context("missing icon directory")?;
     let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).await?;
-    let framework = std::env::var("TE_FRAMEWORK_URL").unwrap_or_else(|_| {
-        format!(
-            "http://127.0.0.1:{}",
-            std::env::var("TE_PORT").unwrap_or_else(|_| "8089".into())
-        )
-    });
-    tokio::spawn(async move {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(5))
-            .build();
-        if let Ok(client) = client {
-            match client.post(format!("{}/api/apps/code_te2/readiness", framework.trim_end_matches('/')))
-                .json(&serde_json::json!({"app_id":"code_te2","status":"ready","phase":"serving","source":"code_te2_native"})).send().await {
-                Ok(response) if response.status().is_success() => {},
-                other => eprintln!("[code-te2-worker] readiness post: {other:?}"),
-            }
-        }
-    });
+    state.write(&protocol::serving_ready())?;
     eprintln!("[code-te2-worker] native HTTP ready 127.0.0.1:{port}");
     let serving = web::serve(
         listener,

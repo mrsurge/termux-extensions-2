@@ -5076,8 +5076,18 @@ msgspec DTO validation, WBA codecs, FWS AsyncClient networking and remaining
 Python persistence work remain. The domain
 import test blocks FastAPI, Pydantic, Starlette and Uvicorn, not all networking.
 
-The listener binds after application startup; native code posts the serving
-readiness fact. Resource containment resolves symlinks; existing resource paths,
+The listener binds after application startup; native code emits the serving
+readiness fact through the framework MessagePack pipe, not HTTP. The manifest's
+`readiness_support: "pipe"` mode requires a pipe app-worker shell and rejects
+HTTP readiness POST/PUT with 403. Boolean `true` retains the existing callback
+behavior for other apps (including ALS, not migrated in this slice). Catalogs
+project the supported mode as boolean `true` for existing frontend gates.
+`app.readiness` is a notification addressed to `framework.rust` (NID 1), with
+exact params `{status: "ready", phase: "serving"}`. The framework attributes it
+to the owned pipe's app/current shell; stale shells, undeclared mode and invalid
+payloads fail closed. New shell generations reset the gate; no HTTP/TCP-probe
+fallback or periodic readiness polling is introduced. Both native binaries must
+be rebuilt together. Resource containment resolves symlinks; existing resource paths,
 CSS shims and GET/HEAD distinctions remain. Conditional/range static responses
 are not implemented in this initial native slice. The old Python HTTP resource
 module remains a parity fixture, not a fallback listener. Direct WBA transport,

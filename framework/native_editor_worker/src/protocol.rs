@@ -5,6 +5,23 @@ pub const FRAME_LIMIT: usize = 32 * 1024 * 1024;
 pub const BYTE_BUDGET: usize = 64 * 1024 * 1024;
 pub const CAPACITY: usize = 64;
 
+pub fn serving_ready() -> Value {
+    map([
+        ("jsonrpc", "2.0".into()),
+        ("protocolVersion", 1.into()),
+        ("kind", "notification".into()),
+        ("method", "app.readiness".into()),
+        ("originNid", 0.into()),
+        ("originName", "code_te2".into()),
+        ("targetNid", 1.into()),
+        ("targetName", "framework.rust".into()),
+        (
+            "params",
+            map([("status", "ready".into()), ("phase", "serving".into())]),
+        ),
+    ])
+}
+
 pub fn get<'a>(value: &'a Value, name: &str) -> Option<&'a Value> {
     value
         .as_map()?
