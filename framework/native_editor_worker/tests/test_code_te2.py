@@ -300,3 +300,16 @@ def test_sidebar_rpc_remains_structured_not_frontend_messagepack(native_app):
         assert isinstance(reply, dict) and "error" in reply, reply
     finally:
         client.disconnect()
+
+
+@pytest.mark.parametrize("transport", ["polling", "websocket"])
+def test_terminal_namespace_connect_does_not_create_shell(native_app, transport):
+    url, _, _, logs = native_app
+    client = socketio.Client(reconnection=False)
+    try:
+        client.connect(url, namespaces=["/terminal"], transports=[transport], wait_timeout=15)
+        # Unknown events are ignored; simply opening the lane must not launch a PTY.
+        assert client.call("not_a_terminal_command", {}, namespace="/terminal", timeout=5) is None
+        assert "[terminal_ws] connect" in "".join(logs)
+    finally:
+        client.disconnect()

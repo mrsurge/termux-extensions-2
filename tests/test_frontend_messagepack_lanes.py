@@ -5,7 +5,7 @@ import unittest
 from typing import cast
 from unittest.mock import AsyncMock, patch
 
-from socketio.exceptions import ConnectionRefusedError
+from app.apps.code_te2.native_socketio import ConnectionRefusedError
 
 from app.apps.code_te2.frontend_rpc_codec import (
     RPC_CODEC_AUTH_FIELD,

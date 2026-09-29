@@ -312,7 +312,8 @@ Sidebar loading; no additional startup redesign without new evidence.
   subtests, 15 Rust tests, release build and three-module Python typecheck pass.
   Rust tests cover replacement cleanup, private/existing permissions and Python
   exception/errno mapping; real-worker RPC tests verify preference bytes on disk.
-- [ ] Pixel live acceptance of native persistence byte slice.
+- [x] Pixel live acceptance of native persistence byte slice and History repair
+  at `0018e3ce`: user reports everything looks good and live acceptance passes.
 - [x] Investigate Pixel History regression: native outbound conversion rejected
   tuple fields retained by History dataclass projections. Pixel logs confirm
   unsupported-service-value failures; this desktop was still running the Python
@@ -321,7 +322,16 @@ Sidebar loading; no additional startup redesign without new evidence.
   tests reproduce the pre-fix failure over both polling and WebSocket.
   After repair: 33 native-worker integration tests, 17 Rust tests, release build,
   Cargo formatting and diff checks pass; coverage includes History file replies.
-- [ ] Pixel live acceptance of History tuple-conversion repair.
+- [x] Pixel live acceptance of History tuple-conversion repair (see above).
+- [x] Approved next slice: replace Python Socket.IO server namespace inheritance
+  across all five lanes with typed local native-server adapters; keep domain
+  handlers/auth/rooms and the outbound FWS client unchanged.
+- [x] Namespace-adapter automated validation: 177 Python/integration tests plus
+  3 subtests; additional terminal/namespace selection passes 29 tests. Five-module
+  adapter/lane/gateway typecheck is clean; including terminal_backend has zero
+  errors and 34 warnings in that module. Native binary is unchanged. No live
+  runtime restart or full Socket.IO dependency-removal claim.
+- [ ] Pixel live acceptance of namespace-adapter slice.
 - [ ] Compile the remaining connected local domain graph with mypyc and verify
   interpreted/compiled parity, Pixel behavior and total startup/runtime costs.
 - [ ] After those stages, replace remaining msgspec codec/Struct/validation uses

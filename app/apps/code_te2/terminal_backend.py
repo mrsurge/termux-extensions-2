@@ -15,7 +15,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Protocol, TypeAlias, cast
 from .terminal_outcomes import TerminalServiceError
-import socketio  # type: ignore[reportMissingTypeStubs]
+from .native_socketio import NativeNamespace, NativeSocketServer
 
 JsonObject: TypeAlias = dict[str, object]
 
@@ -126,7 +126,7 @@ from app.apps.code_te2.worker_services.run_profile_fws_bridge import (
 )
 
 _shell_create_locks: dict[str, asyncio.Lock] = {}
-_terminal_sio: socketio.AsyncServer | None = None
+_terminal_sio: NativeSocketServer | None = None
 _active_terminal_sids: dict[str, str | None] = {}
 _terminal_sid_shells: dict[str, str] = {}
 _terminal_sid_clients: dict[str, str] = {}
@@ -136,7 +136,7 @@ _terminal_history_tasks: dict[str, asyncio.Task[None]] = {}
 _terminal_output_locks: dict[str, asyncio.Lock] = {}
 
 
-def attach_terminal_socketio_server(server: socketio.AsyncServer) -> None:
+def attach_terminal_socketio_server(server: NativeSocketServer) -> None:
     global _terminal_sio
     _terminal_sio = server
 
@@ -479,7 +479,7 @@ async def _resolve_terminal_event_shell(
     return None, None
 
 
-class TerminalSocketIONamespace(socketio.AsyncNamespace):
+class TerminalSocketIONamespace(NativeNamespace):
     async def trigger_event(self, event: str, *args: object) -> object | None:
         normalized = event.replace(":", "_") if event else event
         handler = cast(Callable[..., Awaitable[object | None]] | None, getattr(self, "on_" + (normalized or ""), None))

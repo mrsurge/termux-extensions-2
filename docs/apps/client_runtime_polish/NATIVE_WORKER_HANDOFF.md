@@ -27,7 +27,16 @@ The subsequent persistence byte slice installs Rust read/atomic-write methods
 before domain startup for the three stores already using `persistence_io.py`.
 JSON, locking/schema policy and other disk consumers remain Python-owned.
 Interpreted tools retain a reference implementation; native failures never fall
-back or retry. This slice requires separate Pixel live acceptance.
+back or retry. Pixel live acceptance includes this slice and the subsequent
+History tuple-conversion repair at `0018e3ce`.
+
+The next namespace slice removes Python Socket.IO server class inheritance from
+all five lanes, using local typed emit/room/session/dispatch helpers over the
+native server. It does not replace the outbound FWS AsyncClient, move domain
+handlers or establish full Socket.IO import elimination. Handler exceptions are
+not retried as legacy disconnect signatures; all domain disconnect handlers
+already accept the reason argument. Async cancellation retains its former
+no-result dispatch behavior. This slice needs its own Pixel acceptance.
 
 Follow PLAN.md §6, "Coherent end goal": Rust owns the dependency-heavy I/O
 perimeter; Python retains domain policy/state behind a narrow PyO3 boundary.

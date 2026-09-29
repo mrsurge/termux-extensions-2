@@ -17,9 +17,9 @@ CODE_TE2_SOCKETIO_MAX_HTTP_BUFFER_SIZE = 8 * 1024 * 1024
 CODE_TE2_SIO = NativeSocketServer()
 set_code_te2_socketio_server(CODE_TE2_SIO)
 
-CODE_TE2_SIO.register_namespace(EditorRpcSocketIONamespace("/rpc/editor"))  # pyright: ignore[reportUnknownMemberType]
-CODE_TE2_SIO.register_namespace(ExplorerRpcSocketIONamespace("/rpc/explorer"))  # pyright: ignore[reportUnknownMemberType]
-CODE_TE2_SIO.register_namespace(UIIPCNamespace("/ui_ipc"))  # pyright: ignore[reportUnknownMemberType]
-CODE_TE2_SIO.register_namespace(UIIPCNamespace("/sidebar_ipc"))  # pyright: ignore[reportUnknownMemberType]
-CODE_TE2_SIO.register_namespace(TerminalSocketIONamespace("/terminal"))  # pyright: ignore[reportUnknownMemberType]
-attach_terminal_socketio_server(CODE_TE2_SIO)  # type: ignore[arg-type]
+CODE_TE2_SIO.register_namespace(EditorRpcSocketIONamespace("/rpc/editor"))
+CODE_TE2_SIO.register_namespace(ExplorerRpcSocketIONamespace("/rpc/explorer"))
+CODE_TE2_SIO.register_namespace(UIIPCNamespace("/ui_ipc"))
+CODE_TE2_SIO.register_namespace(UIIPCNamespace("/sidebar_ipc"))
+CODE_TE2_SIO.register_namespace(TerminalSocketIONamespace("/terminal"))
+attach_terminal_socketio_server(CODE_TE2_SIO)

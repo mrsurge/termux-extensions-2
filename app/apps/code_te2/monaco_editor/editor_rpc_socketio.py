@@ -4,8 +4,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import cast
 
-import socketio
-from socketio.exceptions import ConnectionRefusedError
+from ..native_socketio import NativeNamespace, ConnectionRefusedError
 
 from ..frontend_rpc_codec import (
     FrontendRpcCodecError,
@@ -38,7 +37,7 @@ from .editor_rpc_emit import emit_editor_rpc_error, emit_editor_rpc_notification
 from .editor_ws import editor_runtime_build_connect_snapshot, editor_runtime_emit_open_state_changed
 
 
-class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
+class EditorRpcSocketIONamespace(NativeNamespace):
     async def _emit_to_sid(self, sid: str, event_name: str, payload: object) -> None:
         emit_to_room = cast(Callable[..., Awaitable[object]], self.emit)
         _ = await emit_to_room(event_name, payload, room=sid)

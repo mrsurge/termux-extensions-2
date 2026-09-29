@@ -5068,10 +5068,12 @@ waiting-poll binary-batch separator defect.
 
 `native_worker.py` owns one Python asyncio thread with real intelligence bootstrap,
 application start/stop and runtime-debug dispatch. `native_socketio.py` adapts the
-existing namespace handlers to native emit/room/session operations. Domain state,
+existing namespace handlers to native emit/room/session operations through typed
+local namespace helpers, not Python Socket.IO server classes. Domain state,
 client identity, validation and effects stay Python-owned. Rust decodes/encodes
 framework pipe frames and frontend RPC payloads; PyO3 carries structural values.
-msgspec DTO validation, WBA codecs, FWS AsyncClient networking and Python persistence remain. The domain
+msgspec DTO validation, WBA codecs, FWS AsyncClient networking and remaining
+Python persistence work remain. The domain
 import test blocks FastAPI, Pydantic, Starlette and Uvicorn, not all networking.
 
 The listener binds after application startup; native code posts the serving

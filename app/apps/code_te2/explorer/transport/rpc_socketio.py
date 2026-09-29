@@ -5,7 +5,9 @@ import asyncio
 import logging
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import cast
+from ...native_socketio import NativeNamespace as _SocketIOAsyncNamespace
+from ...native_socketio import ConnectionRefusedError as _SocketIOConnectionRefusedError
 
 from ...frontend_rpc_codec import (
     FrontendRpcCodecError,
@@ -59,27 +61,6 @@ async def refresh_active_explorer_project(project_root: Path, project_generation
                 return True
     # With no Explorer connected, its normal connection bootstrap hydrates later.
     return False
-
-
-if TYPE_CHECKING:
-    class _SocketIOConnectionRefusedError(Exception): ...
-
-    class _SocketIOAsyncNamespace:
-        def __init__(self, namespace: str = "/rpc/explorer") -> None: ...
-
-        async def emit(
-            self,
-            event: str,
-            data: object,
-            *,
-            room: str | None = None,
-            namespace: str | None = None,
-        ) -> None: ...
-else:
-    import socketio
-
-    _SocketIOAsyncNamespace = socketio.AsyncNamespace
-    _SocketIOConnectionRefusedError = socketio.exceptions.ConnectionRefusedError
 
 
 class ExplorerRpcSocketShim:

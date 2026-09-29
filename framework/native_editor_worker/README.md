@@ -29,7 +29,8 @@ not total RSS caps. Disconnect cleanup uses the existing domain handlers; no
 disconnected-event replay or mutation retry is introduced.
 
 The adapter preserves Python domain state and validation, not a general ASGI
-emulator. Python Socket.IO namespace/client imports, the FWS client bridge,
+emulator. Server namespace helpers are local typed domain adapters, not Python
+Socket.IO classes. Python Socket.IO client imports through the FWS client bridge,
 msgspec domain validation, JSON conversion and other file I/O remain. No complete
 dependency elimination or startup speedup is claimed. HTTP conditional/range
 responses and release packaging are not part of this first cutover.

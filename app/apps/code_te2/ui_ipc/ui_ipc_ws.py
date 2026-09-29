@@ -21,8 +21,7 @@ from collections.abc import Mapping
 from typing import Protocol, cast, override
 from urllib.parse import parse_qs
 
-import socketio
-from socketio.exceptions import ConnectionRefusedError
+from ..native_socketio import NativeNamespace, ConnectionRefusedError
 
 from ..client_presentation import (
     client_presentation_identity_from_environ,
@@ -169,9 +168,9 @@ async def _emit_browser_connect_adapter_state(
         print(f"[ui_ipc] adapter connect projection failed sid={sid}: {exc}", flush=True)
 
 
-class UIIPCNamespace(socketio.AsyncNamespace):
+class UIIPCNamespace(NativeNamespace):
 
-    # python-socketio dispatches via 'on_' + event_name. Translate colons to
+    # The domain adapter dispatches via 'on_' + event_name. Translate colons to
     # underscores for typed event names such as rpc.notify.
     @override
     async def trigger_event(self, event: str, *args: object) -> object | None:

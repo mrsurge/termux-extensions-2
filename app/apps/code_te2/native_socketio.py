@@ -22,6 +22,54 @@ class Namespace(Protocol):
     async def trigger_event(self, event: str, *args: object) -> object: ...
 
 
+class ConnectionRefusedError(Exception):
+    """Domain admission refusal; the native namespace handshake owns delivery."""
+
+
+class NativeNamespace:
+    """Only the domain helpers used by TE2; no Python Socket.IO server runtime."""
+
+    def __init__(self, namespace: str = "/") -> None:
+        self.namespace: str = namespace
+        self.server: NativeSocketServer | None = None
+
+    def _set_server(self, server: object) -> None:
+        self.server = cast(NativeSocketServer, server)
+
+    def _server(self) -> NativeSocketServer:
+        if self.server is None:
+            raise RuntimeError("native namespace is not registered")
+        return self.server
+
+    async def trigger_event(self, event: str, *args: object) -> object:
+        handler = cast(Callable[..., Awaitable[object]] | None, getattr(self, "on_" + event, None))
+        if handler is None:
+            return None
+        try:
+            return await handler(*args)
+        except asyncio.CancelledError:
+            # Preserve the previous async namespace dispatch cancellation result.
+            return None
+
+    async def emit(self, event: str, data: object = None, *, to: str | None = None,
+                   room: str | None = None, skip_sid: str | None = None,
+                   namespace: str | None = None) -> None:
+        await self._server().emit(event, data, to=to, room=room, skip_sid=skip_sid,
+                                  namespace=namespace or self.namespace)
+
+    async def enter_room(self, sid: str, room: str, namespace: str | None = None) -> None:
+        await self._server().enter_room(sid, room, namespace or self.namespace)
+
+    async def leave_room(self, sid: str, room: str, namespace: str | None = None) -> None:
+        await self._server().leave_room(sid, room, namespace or self.namespace)
+
+    async def save_session(self, sid: str, session: dict[str, object], namespace: str | None = None) -> None:
+        await self._server().save_session(sid, session, namespace or self.namespace)
+
+    async def get_session(self, sid: str, namespace: str | None = None) -> dict[str, object]:
+        return await self._server().get_session(sid, namespace or self.namespace)
+
+
 class NativeSocketServer:
     def __init__(self) -> None:
         self.namespace_handlers: dict[str, Namespace] = {}
