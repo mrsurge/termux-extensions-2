@@ -120,6 +120,12 @@ single-operation admission, loop handoff and release-before-write are unchanged.
 
 ## Recommended next slice (approval required)
 
+The structural DTO/codec split is now implemented: `pipe_dto.py` owns the same
+msgspec classes/response builders, `pipe_codec.py` owns conversion and encoding,
+and `pipe_protocol.py` preserves public aliases and lazy codec entrypoints.
+Structural imports no longer initialize the stream codec/msgpack. This does not
+remove msgspec, change the wire schema or establish a startup speedup.
+
 Specify the native worker's event-loop/thread handoff and bounded admission
 before implementing one lane with PyO3. No Python callbacks while holding native
 transport locks; no redundant serialize/deserialize loop across PyO3. Preserve

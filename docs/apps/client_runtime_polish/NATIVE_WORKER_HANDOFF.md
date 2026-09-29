@@ -1,8 +1,19 @@
 # Native editor-services worker: handoff design
 
+## Prototype status
+
+The independent `framework/native_editor_worker` crate now implements the
+pipe-only vertical slice described in its [README](../../../framework/native_editor_worker/README.md).
+It embeds system CPython with pinned PyO3, invokes a synchronous fixture service,
+and exchanges structural values without Python codec/network imports. Linux
+builds and subprocess tests pass; Pixel compilation/testing is pending.
+No production launcher, Cargo workspace, HTTP/Socket.IO or WBA change was made.
+The application asyncio loop adapter and full wire/error-schema parity remain
+future work; the prototype is not the complete worker design below.
+
 Proposed contract, not implemented behavior. Builds on the outbound and inbound
-pipe seams through checkpoint `0b557949`; Pixel acceptance covers `061f7890`,
-with inbound-slice live testing pending. No runtime replacement,
+pipe seams through checkpoint `0b557949`; Pixel acceptance now includes the
+inbound slice published through `c499e2aa`. No runtime replacement,
 dependency installation, ABI selection or release change is authorized here.
 
 ## Source constraints
@@ -10,9 +21,9 @@ dependency installation, ABI selection or release change is authorized here.
 - `code_te2/main.py:te2_pipe_dispatch` currently returns `None`. Editor/Explorer
   operations are not secretly ordinary inbound framework-pipe methods. A pipe
   harness proves transport integration, not full editor service migration.
-- `pipe_protocol.py` uses msgspec Structs and eagerly imports
-  `messagepack_stream`, which imports both msgspec and msgpack. The new envelope
-  interfaces alone therefore do not eliminate Python codec imports.
+- Structural DTOs now live in `pipe_dto.py` as msgspec Structs. Public aliases
+  remain in `pipe_protocol.py`; conversion/encoding lazily loads `pipe_codec.py`.
+  Structural consumers avoid messagepack_stream/msgpack, but still import msgspec.
 - `pipe_runtime.call_async` offloads a synchronous call; cancellation does not
   stop its thread or retract a sent request. Its timeout begins after write.
 - Ordinary inbound dispatch is synchronous. Diagnostic admission is separate,

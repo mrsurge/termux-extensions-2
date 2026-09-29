@@ -548,6 +548,13 @@ notifications. `/editor/*` routes are owned by `monaco_editor/editor_backend.py`
 
 ### Framework pipe transport seam
 
+Structural DTOs/response builders live in `app/libs/pipe_dto.py`, retaining
+msgspec Structs. `pipe_protocol.py` preserves public names as class aliases and
+lazy codec entrypoints; `pipe_codec.py` owns strict conversion and encoding.
+Structural/runtime imports do not initialize `messagepack_stream` or `msgpack`;
+the Python wire path still uses both. This is not removal of msgspec or a wire
+format change.
+
 Framework pipe transport has a separate outbound seam in
 `app/libs/pipe_transport.py`: `EnvelopeTransport` accepts envelopes, and the stdio
 adapter owns MessagePack encoding/write/flush. `pipe_runtime` retains shared writer

@@ -247,8 +247,23 @@ Sidebar loading; no additional startup redesign without new evidence.
 - [x] Validate 57 pipe/worker/debug tests; update two older debug test fixtures
   that patched the removed private writer field. New router typechecks clean;
   app_worker retains one pre-existing asynccontextmanager annotation warning.
-- [ ] Pixel live acceptance for inbound checkpoint `0b557949`: pending user pull
-  and test. Earlier acceptance was corrected before this publication.
+- [x] Pixel live acceptance for the inbound slice confirmed by user after pulling
+  the publication through `c499e2aa` (includes `0b557949`).
+- [x] Separate structural pipe DTOs and response builders into `pipe_dto.py`;
+  `pipe_protocol` retains public aliases/lazy codec entrypoints. msgspec remains;
+  structural imports no longer load messagepack_stream/msgpack.
+- [x] Validate 75 codec/pipe/worker/debug tests, including import isolation, public
+  class identity, byte parity and invalid-envelope error parity. All three
+  DTO/protocol/codec modules typecheck clean. User elected to batch subsequent
+  acceptance around the native vertical slice, not manually test each extraction.
+- [x] Implement independent `framework/native_editor_worker` crate: embedded
+  Python fixture service, bounded native MessagePack I/O, direct value conversion,
+  independent nested-call reply path, overload/error/EOF/deadline handling.
+- [x] Linux debug/release builds; 4 Rust unit tests and 91 Python tests (16 native
+  subprocess + 75 existing boundary/worker tests) pass. Rust fmt passes; clippy
+  unavailable. Production manifest/build/launch untouched; no runtime restart.
+- [ ] Commit/push this vertical slice, then pull/build/run on Pixel system Python;
+  no Termux compatibility or full editor startup benefit claimed yet.
 - [ ] Audit HTTP/resource extraction and remaining Python client dependencies.
 - [ ] Approve and validate a one-lane native prototype on Linux and Termux.
 - [ ] Verify Python Socket.IO imports are actually eliminated before claiming
