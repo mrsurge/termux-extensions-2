@@ -29,6 +29,36 @@ class History:
 
 
 class TerminalServiceTests(unittest.IsolatedAsyncioTestCase):
+    def test_labels_use_project_sequence_not_opaque_id(self) -> None:
+        self.assertEqual(terminal._terminal_display_label(None, "code-editor-terminal:project:abcd1234:2"), "Terminal 2")
+        self.assertEqual(terminal._terminal_display_label("build", "code-editor-terminal:project:abcd1234:2"), "build")
+        self.assertEqual(terminal._terminal_display_label(None, "code-editor-terminal"), "Terminal 1")
+
+    async def test_shell_projection_hides_dead_and_unknown_without_pruning(self) -> None:
+        from app.apps.code_te2.terminal_shell_facts import TerminalShellFact
+        class Sidecar:
+            def get_terminal_shell_ids(self) -> list[str]:
+                return ["live", "dead", "unknown"]
+            def get_active_terminal_shell_id(self) -> str:
+                return "dead"
+            def get_terminal_shell_title(self, _id: str) -> None:
+                return None
+            def remove_terminal_shell_id(self, _id: str) -> None:
+                raise AssertionError("projection must not prune membership")
+            def save(self) -> None:
+                raise AssertionError("projection must not save membership")
+        sidecar = Sidecar()
+        facts = {
+            "live": TerminalShellFact("live", "code-editor-terminal:project:abcd1234:2", "running", 123, None, ""),
+            "dead": TerminalShellFact("dead", "code-editor-terminal:project:abcd1234:3", "exited", None, 0, ""),
+        }
+        with (
+            patch.object(terminal.ProjectSidecar, "load_or_create", return_value=sidecar),
+            patch.object(terminal, "get_terminal_shell_fact", side_effect=facts.get),
+        ):
+            result = await terminal._build_terminal_shell_list("/project")
+        self.assertEqual(result, {"active_shell_id": None, "shells": [{"id": "live", "title": None, "display_label": "Terminal 2", "status": "live", "pid": 123}]})
+
     def test_no_legacy_routes_or_fastapi_imports(self) -> None:
         source = (ROOT / "app/apps/code_te2/terminal_backend.py").read_text()
         for removed in ("terminal_router", "fastapi", "HTTPException", "\n_active_terminal_sockets:"):

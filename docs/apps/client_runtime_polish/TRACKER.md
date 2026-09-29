@@ -396,9 +396,13 @@ Sidebar loading; no additional startup redesign without new evidence.
   checkpoint/close over polling and WebSocket. Its isolated controller fixture
   deliberately lacks FWS, so notification-driven live output is not certified by
   this test; existing FWS observation remains unchanged.
-- [ ] Live acceptance: drawer input/resize, small prompt output, reconnect,
-  multiple sessions and close/removal on desktop and Pixel. No runtime restarted
-  by the agent, and no frontend/APK rebuild is needed for this backend slice.
+- [x] User live acceptance of native drawer slice `0aed2445`; reported Termux
+  editor startup around 3.5 seconds and first terminal under one second
+  (observations, not controlled benchmarks).
+- [x] Follow-up: hide exited/missing drawer entries, use project sequence labels,
+  and forget stale membership without purging foreign Ferrous history.
+- [ ] Live acceptance of drawer list/label follow-up after native worker restart
+  and client asset OTA. No shared runtime restart performed by the agent.
 
 ### Readiness checkpoint
 

@@ -67,16 +67,9 @@ class CodeTe2TerminalFactTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "id": "shell-a",
                     "title": "build",
-                    "display_label": "build/ll-a",
+                    "display_label": "build",
                     "status": "live",
                     "pid": 123,
-                },
-                {
-                    "id": "shell-b",
-                    "title": None,
-                    "display_label": "Terminal/ll-b",
-                    "status": "missing",
-                    "pid": None,
                 },
             ],
         )

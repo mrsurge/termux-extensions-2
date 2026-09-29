@@ -5134,6 +5134,14 @@ shuts down the exact owned process tree, stops its drainer, then removes the
 exited owned record/logs and publishes removal; foreign persisted PTYs do not
 grant control or reuse authority.
 
+The drawer projects live shells only. Missing observer facts hide entries without
+pruning persisted membership. Default display names use the project shell-label
+sequence (`Terminal 1`, `Terminal 2`), not opaque Ferrous ID suffixes; custom
+titles are displayed unchanged. Close of a missing or foreign exited record
+forgets drawer membership without deleting retained Ferrous history; foreign
+live shells remain protected. This follow-up requires the rebuilt host assets
+(native-client OTA) as well as the independent native worker.
+
 Pyte and the checkpoint/delta protocol remain in Python. `terminal_log_io.py`
 uses `terminal_log.rs` for production descriptor ownership: open/fstat identify
 the same file, reads are bounded to 64 KiB and the captured size, and close runs

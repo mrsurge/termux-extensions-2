@@ -291,16 +291,10 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     } catch (_) {}
   }
 
-  function formatShellLabel(id: string | null | undefined): string {
-    if (!id) return 'Terminal';
-    return `Terminal ${String(id).slice(-4)}`;
-  }
-
   function formatShellDisplayLabel(shell: TerminalShell | null | undefined): string {
     if (!shell) return 'Terminal';
     if (shell.display_label) return String(shell.display_label);
-    if (shell.title) return `${String(shell.title).trim()}/${String(shell.id || '').slice(-4)}`;
-    if (shell.id) return `Terminal/${String(shell.id).slice(-4)}`;
+    if (shell.title) return String(shell.title).trim();
     return 'Terminal';
   }
 
@@ -328,7 +322,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
       return;
     }
     if (activeIdFallback) {
-      shellToggle.textContent = `Terminal/${String(activeIdFallback).slice(-4)}`;
+      shellToggle.textContent = 'Terminal';
       shellToggle.classList.remove('terminal-shell-toggle-exited');
       return;
     }

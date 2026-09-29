@@ -381,7 +381,7 @@ async def _emit_terminal_shell_list_to_sid(sid: str, project_path: str | None) -
     if not project_path:
         return
     try:
-        snapshot = await _build_terminal_shell_list(project_path, include_exited=True)
+        snapshot = await _build_terminal_shell_list(project_path)
         await _emit_terminal_to_sid("terminal:shell_list", snapshot, sid)
     except Exception:
         pass
@@ -644,7 +644,8 @@ class TerminalSocketIONamespace(NativeNamespace):
             )
             return
         try:
-            await _destroy_editor_shell(shell_id)
+            if not await _destroy_editor_shell(shell_id):
+                raise TerminalServiceError("internal", "Failed to destroy shell")
             if project_path:
                 sidecar = ProjectSidecar.load_or_create(project_path)
                 sidecar.remove_terminal_shell_id(shell_id)
@@ -676,10 +677,14 @@ async def close_active_terminal_sockets(reason: str = "project switch") -> None:
                 pass
 
 
-def _terminal_display_label(title: str | None, shell_id: str) -> str:
-    base = (title or "").strip() or "Terminal"
-    suffix = str(shell_id)[-4:] if shell_id else "????"
-    return f"{base}/{suffix}"
+def _terminal_sequence(label: str) -> int:
+    # Project sequence belongs to the app label, never Ferrous's opaque ID.
+    match = re.fullmatch(r"code-editor-terminal:.+:[0-9a-f]{8}:([1-9][0-9]*)", label)
+    return int(match.group(1)) if match else 1
+
+
+def _terminal_display_label(title: str | None, shell_label: str) -> str:
+    return (title or "").strip() or f"Terminal {_terminal_sequence(shell_label)}"
 
 
 def _terminal_status_tag(status: str, pid: int | None) -> str:
@@ -693,7 +698,7 @@ def _terminal_status_tag(status: str, pid: int | None) -> str:
     return status or "unknown"
 
 
-async def _build_terminal_shell_list(project_path: str, *, include_exited: bool = True) -> JsonObject:
+async def _build_terminal_shell_list(project_path: str) -> JsonObject:
     sidecar = ProjectSidecar.load_or_create(project_path)
     shell_ids = sidecar.get_terminal_shell_ids()
     active_id = sidecar.get_active_terminal_shell_id()
@@ -705,23 +710,25 @@ async def _build_terminal_shell_list(project_path: str, *, include_exited: bool 
         pid = fact.pid if fact else None
         title = sidecar.get_terminal_shell_title(sid)
         tag = _terminal_status_tag(raw_status, pid)
-        if not include_exited and tag != "live":
+        # Unknown/missing observer facts are hidden, not destructively pruned.
+        if tag != "live":
             continue
         shells.append({
             "id": sid,
             "title": title,
-            "display_label": _terminal_display_label(title, sid),
+            "display_label": _terminal_display_label(title, fact.label if fact else ""),
             "status": tag,
             "pid": pid,
         })
 
-    return {"active_shell_id": active_id, "shells": shells}
+    visible_ids = {shell["id"] for shell in shells}
+    return {"active_shell_id": active_id if active_id in visible_ids else None, "shells": shells}
 
 
 async def _broadcast_terminal_shell_list(project_path: str) -> None:
     payload: JsonObject = {"type": "shell_list"}
     try:
-        payload.update(await _build_terminal_shell_list(project_path, include_exited=True))
+        payload.update(await _build_terminal_shell_list(project_path))
     except Exception:
         return
 
@@ -873,15 +880,8 @@ async def _next_sequence_for_project(
             rec = await mgr.get_shell(sid)
         except Exception:
             rec = None
-        if rec and rec.label:
-            m = re.search(r":(\d+)$", rec.label)
-            if m:
-                try:
-                    max_seq = max(max_seq, int(m.group(1)))
-                except Exception:
-                    pass
-    if max_seq <= 0:
-        max_seq = len(sidecar.get_terminal_shell_ids())
+        if rec and rec.label and rec.status == "running" and rec.pid:
+            max_seq = max(max_seq, _terminal_sequence(rec.label))
     return max_seq + 1
 
 def _active_terminal_project() -> str:
@@ -895,7 +895,7 @@ async def _terminal_shell_list_data() -> JsonObject:
     project_path = get_history_store().get_active_project()
     if not project_path:
         return {"active_shell_id": None, "shells": []}
-    return await _build_terminal_shell_list(project_path, include_exited=True)
+    return await _build_terminal_shell_list(project_path)
 
 
 async def _create_terminal_shell_data() -> JsonObject:
@@ -920,8 +920,8 @@ async def _create_terminal_shell_data() -> JsonObject:
     title = sidecar.get_terminal_shell_title(shell_id)
     return {
         "shell_id": shell_id,
-        "label": _terminal_display_label(title, shell_id),
-        "shell_list": await _build_terminal_shell_list(project_path, include_exited=True),
+        "label": _terminal_display_label(title, str(shell_rec.get("label") or "")),
+        "shell_list": await _build_terminal_shell_list(project_path),
     }
 
 
@@ -939,7 +939,7 @@ async def _set_terminal_shell_title_data(shell_id: str, title: object) -> JsonOb
     return {
         "shell_id": shell_id,
         "title": new_title,
-        "shell_list": await _build_terminal_shell_list(project_path, include_exited=True),
+        "shell_list": await _build_terminal_shell_list(project_path),
     }
 
 
@@ -960,7 +960,7 @@ async def _activate_terminal_shell_data(shell_id: str) -> JsonObject:
     await close_active_terminal_sockets("terminal activate")
     return {
         "shell_id": shell_id,
-        "shell_list": await _build_terminal_shell_list(project_path, include_exited=True),
+        "shell_list": await _build_terminal_shell_list(project_path),
     }
 
 
@@ -986,7 +986,7 @@ async def _destroy_terminal_shell_data(shell_id: str) -> JsonObject:
     return {
         "id": shell_id,
         "shell_list": (
-            await _build_terminal_shell_list(project_path, include_exited=True)
+            await _build_terminal_shell_list(project_path)
             if project_path
             else {"active_shell_id": None, "shells": []}
         ),

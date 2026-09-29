@@ -316,13 +316,24 @@ impl Shells {
     }
     pub fn remove(&self, id: &str) -> Result<bool> {
         let manager = self.manager()?;
+        let Some(record) = manager.get_shell(id)? else {
+            // Already absent: let the domain forget its stale membership.
+            return Ok(true);
+        };
         ensure!(
-            manager
-                .live_records()?
-                .iter()
-                .any(|r| r.id == id && allowed_label(&r.label) && r.backend == "pty"),
-            "terminal is not locally owned"
+            allowed_label(&record.label) && record.backend == "pty",
+            "not a drawer terminal"
         );
+        let owned = manager.live_records()?.iter().any(|r| r.id == id);
+        if !owned {
+            ensure!(
+                record.status == FerrousNativeShellStatus::Exited,
+                "terminal is not locally owned"
+            );
+            // Ferrous retains this history and owns its eventual cleanup.
+            // Success here only authorizes forgetting the drawer membership.
+            return Ok(true);
+        }
         self.terminate(id)?;
         if let Some(drainer) = self.drainers.lock().unwrap().remove(id) {
             drainer.cancel.store(true, Ordering::Release);
@@ -682,6 +693,68 @@ mod tests {
         assert!(observer.subscribe(record.id.clone()).is_err());
         assert!(observer.write(&record.id, b"no ownership").is_err());
         shells.terminate(&record.id).unwrap();
+    }
+
+    #[test]
+    fn stale_drawer_close_leaves_foreign_history_but_rejects_live_shell() {
+        let (root, shells) = isolated();
+        let _lifetime = Lifetime(shells.clone());
+        let path = root.path().join("terminal.yaml");
+        std::fs::write(&path, "version: '1'\nshells:\n  terminal:\n    backend: pty\n    command: [sh, -c, 'sleep 30']\n").unwrap();
+        let record = shells
+            .spawn(
+                path,
+                "terminal".into(),
+                HashMap::new(),
+                "code-editor-terminal:project:abcd1234:1".into(),
+                "test".into(),
+                false,
+            )
+            .unwrap();
+        let store = FerrousNativeStore::from_base_dir_fingerprint_secret(
+            root.path().join("store"),
+            "test".into(),
+            "test-secret".into(),
+        )
+        .unwrap();
+        let observer = Shells::default();
+        *observer.owner.lock().unwrap() = Some(Owner {
+            manager: FerrousNativeManager::with_store_and_env(
+                store,
+                FerrousNativeEnv {
+                    secret: "test-secret".into(),
+                    run_id: "observer".into(),
+                    fws_socketio_url: None,
+                    te_framework_url: None,
+                    extra: HashMap::new(),
+                },
+            ),
+        });
+        assert!(observer.remove(&record.id).is_err());
+        shells.terminate(&record.id).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while observer
+            .manager()
+            .unwrap()
+            .get_shell(&record.id)
+            .unwrap()
+            .unwrap()
+            .status
+            != FerrousNativeShellStatus::Exited
+        {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(observer.remove(&record.id).unwrap());
+        assert!(
+            observer
+                .manager()
+                .unwrap()
+                .get_shell(&record.id)
+                .unwrap()
+                .is_some()
+        );
+        assert!(observer.remove("missing").unwrap());
     }
 
     #[test]
