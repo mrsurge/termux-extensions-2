@@ -14,11 +14,26 @@ The listener cutover at `8e46ae91` has user-confirmed Pixel live acceptance. The
 fixture build exposed the EOF race fixed in `638f62b8`; user waived its rerun.
 No shared framework/worker restart was performed by the agent.
 
-The following design records the wider target. Native HTTP/server transport is
-implemented. The next slice moves frontend RPC payload codecs into Rust before
-PyO3 dispatch; Python retains domain-envelope validation. Remaining Python
+The following design records the wider target. Native HTTP/server transport and
+frontend RPC payload codecs are implemented. The codec checkpoint `72e0b13b`
+has user-confirmed Pixel build/run acceptance with no observed live errors.
+Python retains domain-envelope validation. Remaining Python
 Socket.IO clients, WBA codecs, disk I/O and startup benefits still need inventory
 and measurement. Each subsequent slice requires its own live acceptance.
+
+## Architectural destination and sequencing
+
+Follow PLAN.md §6, "Coherent end goal": Rust owns the dependency-heavy I/O
+perimeter; Python retains domain policy/state behind a narrow PyO3 boundary.
+Finish the native boundaries, remove displaced external imports, then compile
+the connected local domain graph with mypyc. Prefer cohesive compilation units
+where compatible; preserve interpreted parity and Linux/Termux ABI validation.
+
+Keep msgspec for now. Its omission is a late gate after the native conversion
+and mypyc stage, once all remaining codec/Struct/validation responsibilities have
+tested replacements. Mypyc does not replace input validation. The current
+rmpv-to-Python object conversion remains the baseline, not a demonstrated
+performance optimum; optimizing that allocation path is not the next slice.
 
 ## Source constraints
 

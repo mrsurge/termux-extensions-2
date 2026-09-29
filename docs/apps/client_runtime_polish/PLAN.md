@@ -661,6 +661,47 @@ publish them. This section supersedes the earlier optional-only native-shell
 proposal: the intended target is a Rust-owned worker shell with Python domain
 services, delivered through separately approved, measured implementation slices.
 
+### Coherent end goal: native perimeter, compiled Python domain core
+
+The objective is not a wholesale Python-to-Rust rewrite or an assumption that
+Python networking is slow. Rust absorbs the dependency-heavy I/O perimeter so
+the remaining local Python domain graph becomes a compact, typed, cohesive
+mypyc compilation target. Preserve Python ownership of application state,
+policy, orchestration, project/document authority and domain decisions.
+
+Proceed in this order:
+
+1. Complete the worker-local Rust/PyO3 boundaries for network, framework/WBA
+   pipes, filesystem/serialization and process/FD integration where owned by
+   this worker. Reuse existing framework/Ferrous services, not duplicate them.
+2. Remove displaced external Python imports only after their remaining users
+   have migrated. Verify the actual startup import graph and first-document
+   readiness on Linux and Termux; lazy loading is not dependency elimination.
+3. Compile the remaining connected local domain graph with mypyc, preferring
+   a cohesive compilation unit where supported. Expand from the existing pilot
+   evidence; strict ty/basedpyright annotations are preparation, not proof of
+   mypyc compatibility. Keep runtime annotation-dependent schemas isolated until
+   deliberately replaced; preserve an interpreted correctness reference.
+4. Retire msgspec only after the Rust conversion and coherent mypyc stage have
+   established tested replacements for its remaining codec, Struct and runtime
+   validation responsibilities. Compilation alone does not supply those checks.
+   External requests and persisted data must remain validated in both compiled
+   and interpreted execution. Optional interpreted validation may retain msgspec
+   only if the compiled production path no longer imports or requires it.
+
+Keep msgspec wherever it currently performs useful work; removing it is a late
+gate, not a prerequisite or a competing immediate optimization project. The
+accepted codec checkpoint `72e0b13b` remains the baseline. It decodes into an
+intermediate rmpv value tree then constructs Python objects through PyO3;
+avoiding that tree is a possible later optimization, not a reason to reverse
+the current migration. No opaque-payload experiment is scheduled now.
+
+Acceptance requires domain/protocol parity and user live verification, measured
+startup/import and steady-state costs (including native/interpreter loading and
+boundary allocations), and eventual Linux/Termux wheel/ABI validation. Do not
+equate passing tests, a smaller import graph or Rust ownership with a proven
+speedup. Main build/release integration remains separately gated.
+
 ### Priority A: document and syntax readiness
 
 Optimize time to the correct document rendered with its selected theme and syntax,
@@ -783,8 +824,9 @@ For the native transport slice, investigate a Socketioxide/PyO3 adapter. Current
 RPC envelopes and codec boundary are promising seams. Rust could own connections,
 Engine.IO framing/upgrades/heartbeats, rooms, acknowledgements and bounded queues;
 Python retains domain validation, client/project authority and service dispatch.
-Keep application MessagePack bytes opaque across the bridge where possible,
-decode once, and preserve the current binary-event wire format. Application
+The accepted codec slice decodes application MessagePack in Rust and passes
+structural values through PyO3; preserve the current binary-event wire format.
+Opaque payload delivery is an alternative, not the current workstream. Application
 `msgpack-v1` is not Socket.IO's alternative MessagePack packet parser.
 
 The implemented branch target is a worker-local Hyper/Socketioxide native shell calling

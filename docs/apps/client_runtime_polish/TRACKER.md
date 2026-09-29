@@ -299,7 +299,16 @@ Sidebar loading; no additional startup redesign without new evidence.
   reports the existing adapter_lifecycle_events → ui_ipc_ws →
   workbench_adapter_shell_manager import cycle (all three edges exist at HEAD),
   plus 7 warnings; no clean full-typecheck claim.
-- [ ] Pixel live acceptance of the frontend RPC codec slice.
+- [x] Pixel live acceptance of frontend RPC codec checkpoint `72e0b13b`: user
+  reports it builds and runs with no observed live errors.
+- [x] Establish coherent goal and sequencing in PLAN.md §6: native I/O perimeter,
+  external-import reduction, cohesive mypyc domain compilation, then msgspec exit.
+- [ ] Complete remaining native I/O boundaries and inventory retained external
+  Python imports; preserve domain authority and existing framework services.
+- [ ] Compile the remaining connected local domain graph with mypyc and verify
+  interpreted/compiled parity, Pixel behavior and total startup/runtime costs.
+- [ ] After those stages, replace remaining msgspec codec/Struct/validation uses
+  explicitly; prove production import removal without weakening input checks.
 - [ ] Integrate native worker into packaged/build bootstrap only after parity.
 - [ ] Verify Python Socket.IO imports are actually eliminated before claiming
   startup savings; include native initialization costs in the comparison.
