@@ -587,7 +587,12 @@ authority and missing-only legacy migration. The shared writer uses same-directo
 replacement with cleanup; it does not add fsync, cross-process transactions,
 new parent directories or a new durability guarantee.
 
-This is a replaceable I/O seam for a later native worker, not a native codec or
+The native worker installs its PyO3 byte-read/atomic-write implementation before
+domain initialization. Rust filesystem calls release interpreter attachment but
+retain synchronous completion; existing off-loop callers stay off-loop. Python
+JSON conversion remains unchanged. Interpreted tools/tests use the reference
+implementation, never a retry fallback after native failure. Native errors retain
+OS exception categories and errno. This is not a native JSON codec or
 full disk-I/O migration. Extension manifests, grammar bodies, file existence
 checks, lock acquisition and other stores remain outside this slice. No startup
 speedup is established by this extraction.

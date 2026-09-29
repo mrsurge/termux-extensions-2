@@ -30,7 +30,7 @@ disconnected-event replay or mutation retry is introduced.
 
 The adapter preserves Python domain state and validation, not a general ASGI
 emulator. Python Socket.IO namespace/client imports, the FWS client bridge,
-msgspec domain validation, persistence and other file I/O remain. No complete
+msgspec domain validation, JSON conversion and other file I/O remain. No complete
 dependency elimination or startup speedup is claimed. HTTP conditional/range
 responses and release packaging are not part of this first cutover.
 
@@ -52,6 +52,20 @@ system Python environment (or its matching `.jitenv`). The shellspec selects
 app. No frontend assets changed. The native listener cutover at `8e46ae91` has
 user-confirmed Pixel live acceptance. The subsequent codec slice needs its own
 live check; acceptance of the listener does not establish its performance.
+
+### Persistence byte boundary
+
+Before domain initialization, the native worker installs PyO3 byte reads and
+atomic writes for `persistence_io.py` (preferences, extension registry and
+intelligence state). Blocking filesystem calls release interpreter attachment;
+this preserves synchronous completion and does not make a domain-loop call async.
+Python retains JSON formatting/validation, locks, defaults and corruption policy.
+Fixed temporary files retain normal creation/existing permissions; unique files
+are private (0600). Writers close before rename, clean temporary files, and add
+neither directory creation nor fsync. OS errors retain exception class and errno.
+Interpreted tools/tests retain the reference Python byte implementation; an
+installed native backend never retries failed operations through that reference.
+Other filesystem users, flock and WBA/FWS I/O are not migrated by this slice.
 
 ### Frontend RPC codec boundary
 

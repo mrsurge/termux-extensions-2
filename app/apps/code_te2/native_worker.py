@@ -53,6 +53,8 @@ def start(bridge: NativeBridge) -> dict[str, object]:
     global _thread, _router
     if _thread is not None:
         raise RuntimeError("native worker already started")
+    from .persistence_io import configure_native
+    configure_native(bridge)
     identity = PipeIdentity.from_env()
     pipe_runtime.configure(lambda envelope: None, identity)
     pipe_runtime.configure_transport(NativePipeTransport(bridge))

@@ -23,6 +23,12 @@ and measurement. Each subsequent slice requires its own live acceptance.
 
 ## Architectural destination and sequencing
 
+The subsequent persistence byte slice installs Rust read/atomic-write methods
+before domain startup for the three stores already using `persistence_io.py`.
+JSON, locking/schema policy and other disk consumers remain Python-owned.
+Interpreted tools retain a reference implementation; native failures never fall
+back or retry. This slice requires separate Pixel live acceptance.
+
 Follow PLAN.md §6, "Coherent end goal": Rust owns the dependency-heavy I/O
 perimeter; Python retains domain policy/state behind a narrow PyO3 boundary.
 Finish the native boundaries, remove displaced external imports, then compile

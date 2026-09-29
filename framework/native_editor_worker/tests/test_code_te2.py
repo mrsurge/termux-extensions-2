@@ -136,6 +136,8 @@ def test_real_host_rpc_binary_ack(native_app, transport):
                                "params": {"key": "wordWrap", "value": True}}, use_bin_type=True)
         updated = msgpack.unpackb(client.call("rpc", update, namespace="/ui_ipc", timeout=15), raw=False)
         assert "result" in updated, updated
+        persisted = json.loads((state / "config/code_te2/preferences.json").read_text())
+        assert persisted["editor"]["wordWrap"] is True
         # Force the long-poll waiting path repeatedly, not just its buffered path.
         for _ in range(10):
             time.sleep(0.02)

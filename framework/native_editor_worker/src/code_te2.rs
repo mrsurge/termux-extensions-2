@@ -1,5 +1,6 @@
 //! Branch-native Code TE2 entrypoint. No Python HTTP/Socket.IO server fallback.
 mod decode;
+mod persistence;
 #[allow(dead_code)] // Shared helpers also compile into the isolated pipe harness.
 mod protocol;
 mod rpc_codec;
@@ -94,6 +95,36 @@ struct Bridge {
 }
 #[pymethods]
 impl Bridge {
+    fn persistence_read(
+        &self,
+        py: Python<'_>,
+        path: PathBuf,
+    ) -> PyResult<Py<pyo3::types::PyBytes>> {
+        let bytes = py
+            .detach(|| std::fs::read(&path))
+            .map_err(|e| persistence::python_error(e, &path))?;
+        Ok(pyo3::types::PyBytes::new(py, &bytes).unbind())
+    }
+    fn persistence_write(
+        &self,
+        py: Python<'_>,
+        path: PathBuf,
+        payload: Vec<u8>,
+        temporary_path: Option<PathBuf>,
+        temporary_prefix: Option<String>,
+        temporary_suffix: String,
+    ) -> PyResult<()> {
+        py.detach(|| {
+            persistence::write_atomic(
+                &path,
+                &payload,
+                temporary_path.as_deref(),
+                temporary_prefix.as_deref(),
+                &temporary_suffix,
+            )
+        })
+        .map_err(|e| persistence::python_error(e, &path))
+    }
     fn pipe_send(&self, py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<()> {
         let value = values::from_python(value)?;
         py.detach(|| self.state.write(&value)).map_err(|e| {

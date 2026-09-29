@@ -7,13 +7,31 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-import tempfile
-from typing import cast
+from typing import Protocol, cast
 
 JsonDecodeError = json.JSONDecodeError
 
 
+class NativePersistence(Protocol):
+    def persistence_read(self, path: Path) -> bytes: ...
+    def persistence_write(self, path: Path, payload: bytes, temporary_path: Path | None,
+                          temporary_prefix: str | None, temporary_suffix: str) -> None: ...
+
+
+_native: NativePersistence | None = None
+
+
+def configure_native(bridge: NativePersistence) -> None:
+    """Install before domain imports; never switch a running store's backend."""
+    global _native
+    if _native is not None:
+        raise RuntimeError("native persistence already configured")
+    _native = bridge
+
+
 def read_bytes(path: Path) -> bytes:
+    if _native is not None:
+        return _native.persistence_read(path)
     return path.read_bytes()
 
 
@@ -52,6 +70,12 @@ def write_bytes_atomic(
     NamedTemporaryFile's private permissions. No fsync or directory creation is
     added. Store-level locking must cover the complete read/modify/write cycle.
     """
+    if _native is not None:
+        _native.persistence_write(path, payload, temporary_path, temporary_prefix, temporary_suffix)
+        return
+    # Interpreted tools/tests retain their reference implementation. A configured
+    # native failure propagates; it never retries through Python I/O.
+    import tempfile
     temporary = temporary_path
     try:
         if temporary is None:

@@ -10,6 +10,31 @@ from app.apps.code_te2 import persistence_io as io
 from app.apps.code_te2.preferences_store import PreferencesStore
 
 
+def test_native_byte_boundary_is_setup_only_and_never_falls_back(tmp_path, monkeypatch):
+    calls = []
+
+    class Bridge:
+        def persistence_read(self, path):
+            calls.append(("read", path))
+            return b"native"
+
+        def persistence_write(self, path, payload, temporary_path, temporary_prefix, temporary_suffix):
+            calls.append(("write", path, payload, temporary_path, temporary_prefix, temporary_suffix))
+            raise PermissionError("native denied")
+
+    monkeypatch.setattr(io, "_native", None)
+    bridge = Bridge()
+    io.configure_native(bridge)
+    path = tmp_path / "missing"
+    assert io.read_bytes(path) == b"native"
+    with pytest.raises(RuntimeError, match="already configured"):
+        io.configure_native(bridge)
+    with pytest.raises(PermissionError, match="native denied"):
+        io.write_bytes_atomic(path, b"payload", temporary_prefix="prefix", temporary_suffix="suffix")
+    assert not path.exists()
+    assert calls == [("read", path), ("write", path, b"payload", None, "prefix", "suffix")]
+
+
 @pytest.mark.parametrize("ascii_only,indent,newline", [
     (False, 2, False), (True, 2, True), (True, None, False),
 ])

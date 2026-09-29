@@ -305,6 +305,14 @@ Sidebar loading; no additional startup redesign without new evidence.
   external-import reduction, cohesive mypyc domain compilation, then msgspec exit.
 - [ ] Complete remaining native I/O boundaries and inventory retained external
   Python imports; preserve domain authority and existing framework services.
+- [x] Implement approved persistence byte seam in Rust/PyO3 before domain startup;
+  preserve store JSON/locks/policy, atomic replacement, cleanup and permissions.
+  Interpreted reference remains; native failures never trigger Python retries.
+- [x] Persistence automated validation: 172 Python/integration tests plus 3
+  subtests, 15 Rust tests, release build and three-module Python typecheck pass.
+  Rust tests cover replacement cleanup, private/existing permissions and Python
+  exception/errno mapping; real-worker RPC tests verify preference bytes on disk.
+- [ ] Pixel live acceptance of native persistence byte slice.
 - [ ] Compile the remaining connected local domain graph with mypyc and verify
   interpreted/compiled parity, Pixel behavior and total startup/runtime costs.
 - [ ] After those stages, replace remaining msgspec codec/Struct/validation uses
