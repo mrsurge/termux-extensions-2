@@ -15,6 +15,7 @@ from .code_server_runtime_hooks import set_code_server_runtime_primer
 from . import edit_tracker
 from .diff_helper import invalidate_diff_cache
 from .project_sidecar import ProjectSidecar, cleanup_orphaned_sidecars
+from .sidecar_profile import emit_window as emit_sidecar_profile_window
 from .code_te2_paths import code_te2_paths
 from .stores import get_history_store
 from .intelligence_state import IntelligenceStateStore
@@ -205,6 +206,7 @@ async def te2_app_start() -> None:
     from .worker_services.runtime import start_worker_runtime
 
     await start_worker_runtime(_initialize_application_project, _eager_start_code_server)
+    emit_sidecar_profile_window("worker_start")
 
 
 async def te2_app_stop() -> None:

@@ -27,9 +27,11 @@ from .monaco_editor.editor_backend_services.contracts import JsonMap
 from .open_state_backend import read_client_foreground, read_sidecar_open_state
 from .run_profile_state import build_run_profile_state_projection
 from .project_sidecar import ProjectSidecar
+from .sidecar_profile import emit_window as emit_sidecar_profile_window
 from .history_store import HistoryStore
 from .host.secondary_content_backend import secondary_content_projection
 from .stores import get_history_store, get_preferences_store
+from app.libs.runtime_startup_trace import StartupTrace
 
 log = logging.getLogger(__name__)
 _boot_prepare_tasks: dict[str, asyncio.Task[None]] = {}
@@ -254,6 +256,8 @@ def _build_boot_snapshot_core() -> BootSnapshotCore:
 
 
 async def _build_full_boot_snapshot() -> JsonMap:
+    trace = StartupTrace("code_te2.boot_snapshot")
+    trace.mark("shared.begin")
     core_task = asyncio.create_task(
         asyncio.to_thread(_build_boot_snapshot_core),
         name="code_te2_boot_snapshot_core",
@@ -271,6 +275,7 @@ async def _build_full_boot_snapshot() -> JsonMap:
         code_server_task,
         run_profile_task,
     )
+    trace.mark("shared.inputs_ready")
     active_project = core["active_project"]
     if code_server.compatible and core["ui_prefs"].get("webWorkersEnabled") is not True:
         _ensure_backend_runtime_task(active_project)
@@ -285,6 +290,7 @@ async def _build_full_boot_snapshot() -> JsonMap:
         "code_server": code_server.payload(),
         "run_profile_state": run_profile_state,
     }
+    trace.mark("shared.ready")
     return {
         "ok": True,
         "snapshot": snapshot,
@@ -399,17 +405,21 @@ async def handle_boot_snapshot_request(
     *,
     source_name: str,
 ) -> JsonMap:
+    trace = StartupTrace("code_te2.boot_snapshot_request")
+    trace.mark("request.begin")
     client_instance_id = _client_identity(_data, source_name=source_name)
     client_role = normalize_client_role((_data or {}).get("clientRole"))
     scope = str((_data or {}).get("scope") or "").strip()
     if scope == "hostState":
         host_state = await asyncio.to_thread(_build_host_state_payload)
+        trace.mark("host_state.ready")
         response = await asyncio.to_thread(
             _overlay_client_foreground,
             {"ok": True, "snapshot": {"host_state": host_state}},
             client_instance_id=client_instance_id,
             client_role=client_role,
         )
+        trace.mark("host_state.overlay_ready")
         return _overlay_secondary_content(response, client_instance_id, client_role)
 
     global _boot_snapshot_task
@@ -422,12 +432,14 @@ async def handle_boot_snapshot_request(
         _boot_snapshot_task = task
     try:
         shared_snapshot = await asyncio.shield(task)
+        trace.mark("shared.received")
         client_snapshot = await asyncio.to_thread(
             _overlay_client_foreground,
             shared_snapshot,
             client_instance_id=client_instance_id,
             client_role=client_role,
         )
+        trace.mark("client.overlay_ready")
         raw_snapshot = client_snapshot.get("snapshot")
         if isinstance(raw_snapshot, dict):
             snapshot = cast(dict[str, object], raw_snapshot)
@@ -440,7 +452,11 @@ async def handle_boot_snapshot_request(
             snapshot["run_profile_state"] = await build_run_profile_state_projection(
                 {"path": path} if isinstance(path, str) and path else {"path": ""}
             )
-        return _overlay_secondary_content(client_snapshot, client_instance_id, client_role)
+            trace.mark("client.run_profiles_ready")
+        response = _overlay_secondary_content(client_snapshot, client_instance_id, client_role)
+        trace.mark("response.ready")
+        emit_sidecar_profile_window("first_full_boot_snapshot")
+        return response
     finally:
         if task.done() and _boot_snapshot_task is task:
             _boot_snapshot_task = None

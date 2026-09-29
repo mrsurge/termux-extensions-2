@@ -5,12 +5,14 @@ import hashlib
 import os
 import secrets
 import tempfile
+from time import perf_counter_ns
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import ClassVar, Literal, TypeAlias, cast
 
 from .code_te2_paths import code_te2_paths
+from . import sidecar_profile
 
 JsonDict: TypeAlias = dict[str, object]
 StringDict: TypeAlias = dict[str, str]
@@ -127,11 +129,16 @@ class ProjectSidecar:
     _instances: ClassVar[dict[str, "ProjectSidecar"]] = {}
 
     def __post_init__(self) -> None:
-        normalized = _normalize_project_path(self.project_path)
-        self.project_path = normalized
-        self._path = self.get_sidecar_path(self.project_path)
-        self._data = self._default_data()
-        self._load()
+        started = perf_counter_ns() if sidecar_profile.ENABLED else 0
+        try:
+            normalized = _normalize_project_path(self.project_path)
+            self.project_path = normalized
+            self._path = self.get_sidecar_path(self.project_path)
+            self._data = self._default_data()
+            self._load()
+        finally:
+            if sidecar_profile.ENABLED:
+                sidecar_profile.record("constructor.inclusive", perf_counter_ns() - started)
 
     # --------------------------------------------------------------------- #
     # Construction helpers
@@ -156,8 +163,14 @@ class ProjectSidecar:
         normalized = _normalize_project_path(project_path)
         existing = cls._instances.get(normalized)
         if existing is not None:
+            sidecar_profile.record("load_or_create.cache_hit")
             return existing
-        instance = cls(normalized)
+        started = perf_counter_ns() if sidecar_profile.ENABLED else 0
+        try:
+            instance = cls(normalized)
+        finally:
+            if sidecar_profile.ENABLED:
+                sidecar_profile.record("load_or_create.cache_miss_inclusive", perf_counter_ns() - started)
         cls._instances[normalized] = instance
         return instance
 
@@ -248,18 +261,30 @@ class ProjectSidecar:
 
     def _load(self) -> None:
         """Load existing sidecar data from disk, if present."""
-        if not self._path.exists():
+        started = perf_counter_ns() if sidecar_profile.ENABLED else 0
+        exists = self._path.exists()
+        if sidecar_profile.ENABLED:
+            sidecar_profile.record("load.exists", perf_counter_ns() - started)
+        if not exists:
+            sidecar_profile.record("load.missing")
             return
         try:
+            started = perf_counter_ns() if sidecar_profile.ENABLED else 0
             raw = self._path.read_text(encoding="utf-8")
+            if sidecar_profile.ENABLED:
+                sidecar_profile.record("load.read_text", perf_counter_ns() - started, chars=len(raw))
             if not raw.strip():
                 return
+            started = perf_counter_ns() if sidecar_profile.ENABLED else 0
             decoded = cast(object, json.loads(raw))
+            if sidecar_profile.ENABLED:
+                sidecar_profile.record("load.json_decode", perf_counter_ns() - started)
             if not isinstance(decoded, dict):
                 return
             data = _as_dict(cast(object, decoded))
         except Exception:
             # Corrupt or unreadable sidecar; treat as fresh.
+            sidecar_profile.record("load.error")
             return
 
         # Versioned merge: on mismatch, wipe drafts (session_cache) and avoid migrations.
@@ -289,11 +314,17 @@ class ProjectSidecar:
 
     def reload(self) -> None:
         """Re-read sidecar data from disk (picks up cross-process writes)."""
-        self._data = self._default_data()
-        self._load()
+        started = perf_counter_ns() if sidecar_profile.ENABLED else 0
+        try:
+            self._data = self._default_data()
+            self._load()
+        finally:
+            if sidecar_profile.ENABLED:
+                sidecar_profile.record("reload.inclusive", perf_counter_ns() - started)
 
     def save(self) -> None:
         """Atomically persist current sidecar state to disk."""
+        save_started = perf_counter_ns() if sidecar_profile.ENABLED else 0
         _ensure_dir(self._path.parent)
         tmp_path: Path | None = None
         try:
@@ -306,13 +337,27 @@ class ProjectSidecar:
                 suffix=".tmp",
             ) as tmp_file:
                 tmp_path = Path(tmp_file.name)
+                started = perf_counter_ns() if sidecar_profile.ENABLED else 0
                 json.dump(self._data, tmp_file, ensure_ascii=False, indent=2)
+                if sidecar_profile.ENABLED:
+                    sidecar_profile.record("save.json_dump", perf_counter_ns() - started)
+                started = perf_counter_ns() if sidecar_profile.ENABLED else 0
                 tmp_file.flush()
+                if sidecar_profile.ENABLED:
+                    sidecar_profile.record("save.flush", perf_counter_ns() - started)
+                started = perf_counter_ns() if sidecar_profile.ENABLED else 0
                 os.fsync(tmp_file.fileno())
+                if sidecar_profile.ENABLED:
+                    sidecar_profile.record("save.fsync", perf_counter_ns() - started)
+            started = perf_counter_ns() if sidecar_profile.ENABLED else 0
             os.replace(tmp_path, self._path)
+            if sidecar_profile.ENABLED:
+                sidecar_profile.record("save.replace", perf_counter_ns() - started)
         finally:
             if tmp_path is not None and tmp_path.exists():
                 tmp_path.unlink(missing_ok=True)
+            if sidecar_profile.ENABLED:
+                sidecar_profile.record("save.inclusive", perf_counter_ns() - save_started)
 
     def dump_raw(self) -> JsonDict:
         """Return the raw in-memory sidecar state (debug endpoint helper)."""

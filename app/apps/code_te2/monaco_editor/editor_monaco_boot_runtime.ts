@@ -140,6 +140,7 @@ function configureMonacoEnvironment(
 export async function bootMonacoRuntime(
   deps: EditorMonacoBootRuntimeDeps,
 ): Promise<void> {
+  traceColdBoot('editor.boot.started', {});
   try {
     const apiBase = deps.getApiBase() || '';
     const base = apiBase + '/ui/monaco_vscode/esm';
@@ -156,6 +157,7 @@ export async function bootMonacoRuntime(
 
     const languageWorkersEnabled = deps.languageWorkersEnabled();
     const monacoNs = await loadBundledMonaco({ languageWorkersEnabled });
+    traceColdBoot('editor.monaco.loaded', {});
     win._loadedMonacoBundle = 'host.js';
     console.log(
       `[Monaco] loaded from host.js mode=${languageWorkersEnabled ? 'web-workers' : 'code-server'}`,
@@ -168,13 +170,16 @@ export async function bootMonacoRuntime(
     // a boot snapshot or live replay may create/attach a document model.
     deps.connectEditorHostActions();
     await Promise.resolve(deps.connectEditorSocket());
+    traceColdBoot('editor.socket.connected', {});
     // Theme and backend-projected syntax can prepare concurrently. Both are
     // first-paint prerequisites; neither waits for WBA or the extension host.
     await Promise.all([
       deps.ensureDocumentTheme(),
       deps.ensureDocumentSyntax(),
     ]);
+    traceColdBoot('editor.theme_syntax.ready', {});
     deps.applyBootSnapshot();
+    traceColdBoot('editor.snapshot.applied', {});
     await deps.ensureEditorWithPrefs();
     const activeModel = deps.getActiveModelTrace?.();
     if (activeModel) traceColdBoot('model.first_mount', activeModel);
@@ -197,6 +202,7 @@ export async function bootMonacoRuntime(
     deps.updateDebug('boot=ok');
     deps.onReady?.();
   } catch (error) {
+    traceColdBoot('editor.boot.failed', {});
     console.error('[Monaco] boot failed', error);
     deps.updateDebug('boot=fail');
     deps.onError?.(error);

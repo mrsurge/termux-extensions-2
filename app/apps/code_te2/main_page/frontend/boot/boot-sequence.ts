@@ -8,6 +8,7 @@ import {
   requestHostBootSnapshot,
   type HostBootSnapshot,
 } from './boot-snapshot.ts';
+import { traceColdBoot } from '../../../monaco_editor/editor_cold_boot_trace.ts';
 
 interface RestoredPathStateArgs {
   restoredPath: string;
@@ -183,6 +184,7 @@ export async function prepareCodeServer(
 }
 
 export async function runBootSequence(deps: BootSequenceDeps): Promise<void> {
+  traceColdBoot('host.boot.started', {});
   deps.initResponsiveLayout();
   deps.loadLayoutPreferences();
   deps.initResizeManager();
@@ -190,13 +192,17 @@ export async function runBootSequence(deps: BootSequenceDeps): Promise<void> {
   await deps.initExplorerUI().catch((error) => {
     console.error('Failed to initialize explorer UI:', error);
   });
+  traceColdBoot('host.explorer.initialized', {});
 
   let bootSnapshot: HostBootSnapshot | null = null;
   try {
+    traceColdBoot('host.snapshot.requested', {});
     bootSnapshot = await requestHostBootSnapshot({
       requestBackendBootSnapshot: (payload) => deps.requestBackendBootSnapshot(payload),
     });
+    traceColdBoot('host.snapshot.received', { available: bootSnapshot !== null });
   } catch (error) {
+    traceColdBoot('host.snapshot.failed', {});
     console.warn('Boot snapshot request failed:', error);
   }
 
@@ -228,6 +234,7 @@ export async function runBootSequence(deps: BootSequenceDeps): Promise<void> {
   deps.setBranchMenuHandle(deps.initBranchMenu());
 
   const useWorkbenchAdapter = await prepareCodeServer(bootSnapshot, snapshotUiPrefs, deps);
+  traceColdBoot('host.language_backend.prepared', { wba: useWorkbenchAdapter });
   if (useWorkbenchAdapter) {
     // Document display is independent of extension-host readiness. Existing WBA
     // state/baton handlers replay the active model when intelligence connects.
@@ -236,8 +243,13 @@ export async function runBootSequence(deps: BootSequenceDeps): Promise<void> {
       console.warn('Workbench adapter readiness failed:', error);
     });
   }
-  try { await deps.connectUIIPC(); } catch (error) { console.warn('Failed to connect UI IPC channel:', error); }
-  try { await deps.mountInlineEditorHost(bootSnapshot); } catch (error) { console.error('Inline editor boot failed:', error); }
+  let uiIpcConnected = false;
+  try { await deps.connectUIIPC(); uiIpcConnected = true; } catch (error) { console.warn('Failed to connect UI IPC channel:', error); }
+  traceColdBoot('host.ui_ipc.complete', { connected: uiIpcConnected });
+  traceColdBoot('host.inline_editor.mount_begin', {});
+  let inlineEditorMounted = false;
+  try { await deps.mountInlineEditorHost(bootSnapshot); inlineEditorMounted = true; } catch (error) { console.error('Inline editor boot failed:', error); }
+  traceColdBoot('host.inline_editor.mount_end', { mounted: inlineEditorMounted });
 
   try { deps.connectSidebarIPC(); } catch (error) { console.warn('Failed to connect Sidebar IPC channel:', error); }
 
