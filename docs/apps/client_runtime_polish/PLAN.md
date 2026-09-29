@@ -723,6 +723,12 @@ no first-paint speedup is claimed without a fresh measurement.
 
 ### Priority B: portable I/O and native worker shell
 
+The [native handoff design](NATIVE_WORKER_HANDOFF.md) specifies proposed thread
+ownership, independent reply delivery, value conversion, prototype admission
+budgets, cancellation and shutdown gates. These are design targets, not current
+runtime guarantees. The next concrete extraction is codec-independent structural
+pipe DTO imports; a native harness then needs separate implementation approval.
+
 The source-backed [pipe boundary inventory](PIPE_BOUNDARY_INVENTORY.md) separates
 framework envelopes, WBA control records and PTY traffic. It records Ferrous's
 binary-safe API and the unresolved cross-process ownership gate. The next proposed

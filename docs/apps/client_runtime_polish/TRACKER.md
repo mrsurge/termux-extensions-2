@@ -212,8 +212,9 @@ Sidebar loading; no additional startup redesign without new evidence.
 - [x] Validate 94 focused persistence/intelligence/registry/TextMate/path/terminal
   and profiling-guard tests. Typecheck: new boundary clean; existing contextmanager Iterator
   deprecation error and three preferences warnings remain. No runtime restart.
-- [x] User live acceptance completed for the persistence boundary; checkpoint
-  requested before proceeding to the framework/WBA pipe inventory.
+- [x] Pixel live acceptance confirmed after checkout of `061f7890`, covering the
+  persistence and outbound transport slices. Earlier acceptance statements were
+  clarified by the user: the Pixel had not yet received those changes then.
 - [x] Inventory framework pipe and WBA control FD/framing/ownership separately;
   see PIPE_BOUNDARY_INVENTORY.md for current contracts and uncovered bound/deadline
   differences. Investigation only, not transport implementation.
@@ -228,20 +229,26 @@ Sidebar loading; no additional startup redesign without new evidence.
 - [ ] Measure removable Socket.IO import costs and inventory all remaining uses;
   keep transport hot-path measurements as a separate regression baseline.
 - [ ] Specify transport-neutral service, lifecycle and bounded async bridge contracts.
+- [x] Draft native handoff contract and proof sequence in NATIVE_WORKER_HANDOFF.md:
+  preserve serial legacy dispatch, separate reply resolution, Python loop ownership,
+  proposed count/byte budgets and teardown. Implementation/ABI parity still pending.
+- [ ] Separate structural pipe DTO imports from codecs; preserve public names,
+  wire validation and errors before introducing a native harness.
 - [x] Extract outbound EnvelopeTransport/stdio adapter without changing public
   calls, request correlation, notification or dispatch ownership. Inbound worker
   decode/debug admission remains separate; no Rust or WBA migration performed.
 - [x] Validate 36 pipe/WBA/worker bootstrap tests, including cancellation, late/
   duplicate replies, close, write failure, identity and serialized frames.
-  Both changed production modules typecheck clean; user reports no live errors
-  and approves checkpoint/push before the inbound delivery slice.
+  Both changed production modules typecheck clean; Pixel live acceptance now
+  confirmed at `061f7890`.
 - [x] Extract decoded-envelope router with injected response/notification,
   ordinary-dispatch/reply and existing debug-admission callbacks. Reader retains
   framing/schema validation and EOF/error shutdown; no new queue or retry.
 - [x] Validate 57 pipe/worker/debug tests; update two older debug test fixtures
   that patched the removed private writer field. New router typechecks clean;
   app_worker retains one pre-existing asynccontextmanager annotation warning.
-  User live acceptance completed for the inbound slice; checkpoint requested.
+- [ ] Pixel live acceptance for inbound checkpoint `0b557949`: pending user pull
+  and test. Earlier acceptance was corrected before this publication.
 - [ ] Audit HTTP/resource extraction and remaining Python client dependencies.
 - [ ] Approve and validate a one-lane native prototype on Linux and Termux.
 - [ ] Verify Python Socket.IO imports are actually eliminated before claiming
