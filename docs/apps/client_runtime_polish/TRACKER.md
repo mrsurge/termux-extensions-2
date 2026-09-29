@@ -313,6 +313,15 @@ Sidebar loading; no additional startup redesign without new evidence.
   Rust tests cover replacement cleanup, private/existing permissions and Python
   exception/errno mapping; real-worker RPC tests verify preference bytes on disk.
 - [ ] Pixel live acceptance of native persistence byte slice.
+- [x] Investigate Pixel History regression: native outbound conversion rejected
+  tuple fields retained by History dataclass projections. Pixel logs confirm
+  unsupported-service-value failures; this desktop was still running the Python
+  site-package worker, explaining its unaffected behavior. Restore generic tuple
+  array conversion, not a History-only workaround. Real History snapshot/page
+  tests reproduce the pre-fix failure over both polling and WebSocket.
+  After repair: 33 native-worker integration tests, 17 Rust tests, release build,
+  Cargo formatting and diff checks pass; coverage includes History file replies.
+- [ ] Pixel live acceptance of History tuple-conversion repair.
 - [ ] Compile the remaining connected local domain graph with mypyc and verify
   interpreted/compiled parity, Pixel behavior and total startup/runtime costs.
 - [ ] After those stages, replace remaining msgspec codec/Struct/validation uses

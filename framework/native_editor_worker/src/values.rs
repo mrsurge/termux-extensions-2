@@ -1,6 +1,6 @@
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PyList, PyString};
+use pyo3::types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
 use rmpv::Value;
 
 const MAX_DEPTH: usize = 64;
@@ -102,6 +102,14 @@ fn convert_from(value: &Bound<'_, PyAny>, depth: usize, left: &mut usize) -> PyR
             .map(|v| convert_from(&v, depth + 1, left))
             .collect::<PyResult<Vec<_>>>()
             .map(Value::Array)
+    } else if let Ok(tuple) = value.cast::<PyTuple>() {
+        // MessagePack arrays have no tuple/list distinction. Domain dataclass
+        // projections preserve tuples; match the previous msgspec encoder.
+        tuple
+            .iter()
+            .map(|v| convert_from(&v, depth + 1, left))
+            .collect::<PyResult<Vec<_>>>()
+            .map(Value::Array)
     } else if let Ok(dict) = value.cast::<PyDict>() {
         let mut result = Vec::new();
         for (key, value) in dict.iter() {
@@ -118,5 +126,35 @@ fn convert_from(value: &Bound<'_, PyAny>, depth: usize, left: &mut usize) -> PyR
         Err(PyTypeError::new_err(
             "unsupported service value (expected structural builtins)",
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nested_tuples_are_arrays_not_arbitrary_iterables() {
+        Python::attach(|py| {
+            let value = py
+                .eval(
+                    c"{'refs': ({'name': 'main'},), 'parents': ('a', 'b'), 'empty': ()}",
+                    None,
+                    None,
+                )
+                .unwrap();
+            let converted = from_python(&value).unwrap();
+            let expected = py
+                .eval(
+                    c"{'refs': [{'name': 'main'}], 'parents': ['a', 'b'], 'empty': []}",
+                    None,
+                    None,
+                )
+                .unwrap();
+            assert_eq!(converted, from_python(&expected).unwrap());
+            for expression in [c"iter([1])", c"{1, 2}"] {
+                assert!(from_python(&py.eval(expression, None, None).unwrap()).is_err());
+            }
+        });
     }
 }

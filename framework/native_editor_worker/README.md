@@ -69,6 +69,11 @@ Other filesystem users, flock and WBA/FWS I/O are not migrated by this slice.
 
 ### Frontend RPC codec boundary
 
+Python lists and tuples both become MessagePack arrays at the structural PyO3
+boundary. This preserves the former codec behavior for dataclass projections
+such as History refs, commit parents and file pages; arbitrary iterators and
+sets remain rejected. Incoming MessagePack arrays become Python lists.
+
 `rpc_codec.rs` owns application MessagePack for `/rpc/editor`, `/rpc/explorer`
 and `/ui_ipc`. Incoming `rpc` must carry binary bytes containing exactly one
 bounded value; Rust decodes before entering Python. Python receives DTOs and

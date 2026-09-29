@@ -51,8 +51,30 @@ def native_app(tmp_path):
                     if request.get("kind") != "request":
                         continue
                     # The empty test project needs no real fs/git/shell work.
+                    result = {}
+                    method = request.get("method", "")
+                    params = request.get("params") or {}
+                    if method == "git.historyGraph.open":
+                        result = {"dto": "GitHistoryOpened", "version": 1, "sessionId": params["sessionId"],
+                                  "snapshot": {"dto": "GitHistorySnapshot", "version": 1,
+                                    "snapshotId": "a" * 64, "headId": "b" * 40, "headRef": "refs/heads/main",
+                                    "refs": [{"name": "refs/heads/main", "commitId": "b" * 40}]}}
+                    elif method == "git.historyGraph.next":
+                        result = {"dto": "GitHistoryPageResult", "version": 1, "sessionId": params["sessionId"],
+                                  "page": {"dto": "GitHistoryPage", "version": 1,
+                                    "snapshotId": "a" * 64, "offset": params["offset"], "complete": True,
+                                    "commits": [{"id": "b" * 40, "parentIds": ["c" * 40],
+                                                 "subject": "History bridge regression", "author": "test", "timestamp": 1}]}}
+                    elif method == "git.historyGraph.files":
+                        result = {"dto": "GitHistoryFilesResult", "version": 1, "sessionId": params["sessionId"],
+                                  "page": {"dto": "GitHistoryFilesPage", "version": 1,
+                                    "commitId": params["commitId"], "parentId": "c" * 40, "offset": 0,
+                                    "nextOffset": None, "totalFiles": 1,
+                                    "files": [{"index": 0, "status": "modified", "oldPath": "test.py",
+                                               "newPath": "test.py", "oldBlob": "d" * 40, "newBlob": "e" * 40,
+                                               "counts": {"state": "ready", "additions": 2, "deletions": 1}}]}}
                     reply = {"jsonrpc": "2.0", "protocolVersion": 1, "kind": "response",
-                             "id": request["id"], "result": {}}
+                             "id": request["id"], "result": result}
                     with lock:
                         process.stdin.write(msgpack.packb(reply, use_bin_type=True))
                         process.stdin.flush()
@@ -145,6 +167,41 @@ def test_real_host_rpc_binary_ack(native_app, transport):
         assert notifications, logs
         assert all(isinstance(item, bytes) for item in notifications)
         assert all(msgpack.unpackb(item, raw=False)["jsonrpc"] == "2.0" for item in notifications)
+    finally:
+        client.disconnect()
+
+
+@pytest.mark.parametrize("transport", ["polling", "websocket"])
+def test_history_dataclass_tuples_reach_explorer(native_app, transport):
+    url, _, _, logs = native_app
+    client = socketio.Client(reconnection=False)
+    events = queue.Queue()
+    client.on("rpc.notify", lambda data: events.put(msgpack.unpackb(data, raw=False)), namespace="/rpc/explorer")
+    try:
+        client.connect(url + "?client_instance_id=client_nativetest000001&client_role=primary",
+                       namespaces=["/rpc/explorer"], auth={"rpcCodec": "msgpack-v1"}, transports=[transport])
+        reply = client.call("rpc", msgpack.packb({"jsonrpc": "2.0", "id": "history",
+                            "method": "explorer.history.open", "params": {}}), namespace="/rpc/explorer", timeout=10)
+        assert "result" in msgpack.unpackb(reply, raw=False), logs
+        received = {}
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and not {"snapshot", "page"} <= received.keys():
+            try:
+                event = events.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            if event.get("method") == "explorer.history.updated":
+                payload = event["params"]
+                received[payload["kind"]] = payload
+        assert {"snapshot", "page"} <= received.keys(), (received, "".join(logs))
+        assert received["snapshot"]["snapshot"]["refs"] == [{"name": "refs/heads/main", "commit_id": "b" * 40}]
+        assert received["page"]["page"]["commits"][0]["parents"] == ["c" * 40]
+        files_reply = client.call("rpc", msgpack.packb({"jsonrpc": "2.0", "id": "files",
+            "method": "explorer.history.files", "params": {"generation": received["page"]["generation"],
+            "commitId": "b" * 40, "offset": 0}}), namespace="/rpc/explorer", timeout=10)
+        decoded = msgpack.unpackb(files_reply, raw=False)
+        assert decoded["result"]["page"]["files"][0]["new_path"] == "test.py", decoded
+        assert "unsupported service value" not in "".join(logs)
     finally:
         client.disconnect()
 
