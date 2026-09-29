@@ -7,11 +7,43 @@ import unittest
 from unittest.mock import patch
 
 from framework_shells.record import ShellRecord
+from app.apps.code_te2 import wba_pipe_codec
 from app.apps.code_te2 import workbench_adapter_shell_manager as manager
 from app.libs.messagepack_stream import MessagePackStream, encode_message
 
 
 class AdapterPipeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_native_codec_seam_preserves_domain_reader_and_writer(self) -> None:
+        streams: list[MessagePackStream] = []
+        encoded: list[object] = []
+
+        class Bridge:
+            def wba_stream(self) -> MessagePackStream:
+                stream = MessagePackStream()
+                streams.append(stream)
+                return stream
+
+            def wba_encode(self, value: object) -> bytes:
+                encoded.append(value)
+                return encode_message(value)
+
+        queue: asyncio.Queue[bytes] = asyncio.Queue()
+        pending: asyncio.Future[dict[str, object]] = asyncio.get_running_loop().create_future()
+        with (
+            patch.object(wba_pipe_codec, "_native", Bridge()),
+            patch.dict(manager._rpc_pending, {8: pending}, clear=True),
+        ):
+            task = asyncio.create_task(manager._stdout_reader_loop("test", queue))
+            try:
+                queue.put_nowait(encode_message({"kind": "reply", "payload": {"id": 8, "result": {"ok": True}}}))
+                self.assertEqual(await asyncio.wait_for(pending, 1), {"id": 8, "result": {"ok": True}})
+                self.assertEqual(wba_pipe_codec.encode_message({"id": 8}), encode_message({"id": 8}))
+                self.assertEqual(encoded, [{"id": 8}])
+                self.assertEqual(len(streams), 1)
+            finally:
+                task.cancel()
+                await task
+
     async def test_fragmented_replies_and_pushes_preserve_order(self) -> None:
         queue: asyncio.Queue[bytes] = asyncio.Queue()
         pending: asyncio.Future[dict[str, object]] = asyncio.get_running_loop().create_future()
@@ -64,26 +96,10 @@ class AdapterPipeTests(unittest.IsolatedAsyncioTestCase):
         written: list[bytes] = []
         drained = asyncio.Event()
 
-        class Stdin:
-            def is_closing(self) -> bool:
-                return False
-
-            def write(self, data: bytes) -> None:
-                written.append(data)
-
-            async def drain(self) -> None:
-                drained.set()
-
-        class Process:
-            stdin: Stdin = Stdin()
-
-        class State:
-            process: Process = Process()
-            stdin_supported: bool = True
-
         class Manager:
-            def get_pipe_state(self, _shell_id: str) -> State:
-                return State()
+            async def write_bytes(self, _shell_id: str, data: bytes) -> None:
+                written.append(data)
+                drained.set()
 
         async def get_manager() -> Manager:
             return Manager()

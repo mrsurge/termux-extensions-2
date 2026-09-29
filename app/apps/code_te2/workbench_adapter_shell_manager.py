@@ -10,7 +10,7 @@ import time
 
 from .native_shells import get_manager, Orchestrator, ShellRecord, OutputReader
 from app.libs.runtime_startup_trace import StartupTrace
-from app.libs.messagepack_stream import MessagePackStream, encode_message
+from .wba_pipe_codec import new_stream, encode_message
 
 from .code_te2_paths import code_te2_paths
 from .node_compile_cache import node_compile_cache
@@ -355,7 +355,7 @@ async def _stdout_reader_loop(shell_id: str, queue: OutputReader) -> None:
     """Decode structured pipe records without treating log text as protocol data."""
     global _stdout_reader_task
 
-    stream = MessagePackStream()
+    stream = new_stream()
     try:
         while True:
             chunk = await queue.get()

@@ -36,9 +36,13 @@ the adapter does not construct another peer or a framework HTTP control client.
 Each WBA reader has one bounded native read in flight, retained across Python
 timeout/cancellation. Releasing it waits for that read to stop. Code-server's
 one-shot readiness reader hands stdout to a Rust logs-only drainer, so a full OS
-pipe cannot stall it later. Native byte writes preserve the Python WBA codec and
-writer serialization. Persisted records alone never grant live stdin/stdout;
-the existing adoption policy replaces inaccessible children. Explicit child
+pipe cannot stall it later. `wba_codec.rs` owns bounded concatenated control
+records and native encode; Python retains writer serialization, JSON-RPC reply
+matching, pushes and domain policy. A decoder belongs to one stdout subscription,
+so replacement cannot join partial records from separate shells. Interpreted
+tests/tools retain the existing Python codec, never as a native-failure retry.
+Persisted records alone never grant live stdin/stdout; the existing adoption
+policy replaces inaccessible children. Explicit child
 termination uses Ferrous's exact PID-tree shutdown, not process-group killing.
 Worker teardown stops its readers/drainers; framework lifecycle still owns tree
 cleanup. There is no fallback to Python FWS for these two consumers.
@@ -80,8 +84,8 @@ transfer because native raw-log projection already owns history.
 
 A fresh main-module import test blocks socketio, engineio, aiohttp and
 framework_shells. This is not proof that every lazy feature import is eliminated;
-msgspec, WBA codecs and remaining Python filesystem/HTTP consumers stay in scope
-for subsequent work. See CODE_TE2.md, Native FWS Observation, for lifecycle and
+msgspec, WBA domain DTOs and remaining Python filesystem/HTTP consumers stay in
+scope for subsequent work. See CODE_TE2.md, Native FWS Observation, for lifecycle and
 underlying-library timeout limits.
 Rebuild this worker before live testing; no frontend/APK update is required.
 
@@ -157,7 +161,8 @@ remain Python `-32600` validation. The native decoder bounds depth to 64, nodes
 to 1,000,000 and payloads to 8 MiB; DTO maps require unique UTF-8 string keys.
 Extension markers, trailing frames and reserved markers are rejected. These are
 transport validity checks, not domain normalization. Sidebar's structured RPC,
-terminal events, direct WBA traffic and the WBA control pipe are unchanged.
+terminal events and direct WBA traffic are unchanged. The separate WBA control
+pipe uses `wba_codec.rs` as described above.
 
 `CODE_TE2_RPC_CODEC_METRICS=1` now reports native codec duration/byte metadata to
 stderr, never framework stdout. Disabled metrics take no timestamps. Explorer

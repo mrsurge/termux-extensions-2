@@ -5072,7 +5072,7 @@ existing namespace handlers to native emit/room/session operations through typed
 local namespace helpers, not Python Socket.IO server classes. Domain state,
 client identity, validation and effects stay Python-owned. Rust decodes/encodes
 framework pipe frames and frontend RPC payloads; PyO3 carries structural values.
-msgspec DTO validation, WBA codecs and remaining Python persistence/HTTP work
+msgspec DTO validation and remaining Python persistence/HTTP work
 remain. FWS observation networking is Rust-owned. Fresh main-module import tests
 also block socketio, engineio, aiohttp and framework_shells; this does not certify
 every optional feature's later import graph or eliminate every external import.
@@ -5111,9 +5111,14 @@ This does not embed the editor in the framework, move child launch decisions to
 the framework, or introduce an HTTP orchestration round trip.
 
 Python retains intelligence policy, readiness marker/protocol handshakes, WBA
-MessagePack framing/DTO codecs and RPC correlation. Native writes do not parse
-WBA payloads. One native read remains in flight across Python timeouts; release
-cancels and joins that read before retiring its token. After code-server's
+JSON-RPC correlation, push dispatch and domain DTO validation. The native
+`wba_codec.rs` owns bounded concatenated MessagePack records on the WBA control
+pipe: `wba_pipe_codec.py` selects its per-subscription decoder and encoder before
+domain imports. Shell replacement discards partial records from the old stream.
+The interpreted codec remains a tests/tools reference, never a native-error
+fallback. This does not move direct browser-to-WBA traffic or remove msgspec
+from other Python uses. One native read remains in flight across Python timeouts;
+release cancels and joins that read before retiring its token. After code-server's
 readiness subscription ends, stdout becomes logs-only in Rust. A second consumer
 cannot compete with that drainer. The registry bounds application readers.
 
@@ -5121,9 +5126,8 @@ Persisted metadata is not live pipe ownership: inaccessible/adopted children
 follow the existing replace policy. Exact PID-tree shutdown protects worker
 ancestry and avoids the persisted-record process-group termination path.
 Worker shutdown stops readers/drainers without claiming framework tree-cleanup
-authority. The outbound observation bridge still uses Python FWS/Socket.IO;
-whole-worker dependency elimination
-and startup measurements remain later gates. No Python-manager fallback exists
+authority. The outbound FWS observer is now native; whole-worker dependency
+elimination and startup measurements remain later gates. No Python-manager fallback exists
 for migrated intelligence children. Rebuild the independent worker for this slice.
 
 The drawer's interactive PTY shellspec now uses the same native manager (Ferrous

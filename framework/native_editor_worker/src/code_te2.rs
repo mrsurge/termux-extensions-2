@@ -8,6 +8,7 @@ mod rpc_codec;
 mod shells;
 mod terminal_log;
 mod values;
+mod wba_codec;
 mod web;
 
 use anyhow::{Context, Result, bail};
@@ -98,8 +99,94 @@ struct Bridge {
     shells: Arc<shells::Shells>,
     fws: Arc<fws_observer::Observer>,
 }
+
+#[pyclass]
+struct WbaStream {
+    decoder: Mutex<wba_codec::Stream>,
+}
+
+#[pymethods]
+impl WbaStream {
+    fn feed(&self, py: Python<'_>, chunk: Vec<u8>) -> PyResult<Vec<Py<PyAny>>> {
+        let records = py
+            .detach(|| self.decoder.lock().unwrap().feed(&chunk))
+            .map_err(shell_error)?;
+        records
+            .iter()
+            .map(|record| values::to_python(py, record))
+            .collect()
+    }
+
+    fn finish(&self) -> PyResult<()> {
+        self.decoder.lock().unwrap().finish().map_err(shell_error)
+    }
+}
+
+#[cfg(test)]
+mod wba_python_tests {
+    use super::*;
+
+    #[test]
+    fn native_stream_returns_python_records_across_partial_reads() {
+        Python::attach(|py| {
+            let stream = Py::new(
+                py,
+                WbaStream {
+                    decoder: Mutex::new(wba_codec::Stream::default()),
+                },
+            )
+            .unwrap();
+            let frame =
+                wba_codec::encode(&Value::Map(vec![(Value::from("id"), Value::from(7))])).unwrap();
+            let first = stream
+                .call_method1(py, "feed", (frame[..1].to_vec(),))
+                .unwrap();
+            assert_eq!(first.bind(py).len().unwrap(), 0);
+            let second = stream
+                .call_method1(py, "feed", (frame[1..].to_vec(),))
+                .unwrap();
+            let records = second.bind(py).cast::<pyo3::types::PyList>().unwrap();
+            assert_eq!(records.len(), 1);
+            let record = records
+                .get_item(0)
+                .unwrap()
+                .cast::<pyo3::types::PyDict>()
+                .unwrap()
+                .clone();
+            assert_eq!(
+                record
+                    .get_item("id")
+                    .unwrap()
+                    .unwrap()
+                    .extract::<i64>()
+                    .unwrap(),
+                7
+            );
+            stream.call_method0(py, "finish").unwrap();
+        });
+    }
+}
+
 #[pymethods]
 impl Bridge {
+    fn wba_stream(&self) -> WbaStream {
+        WbaStream {
+            decoder: Mutex::new(wba_codec::Stream::default()),
+        }
+    }
+
+    fn wba_encode(
+        &self,
+        py: Python<'_>,
+        value: &Bound<'_, PyAny>,
+    ) -> PyResult<Py<pyo3::types::PyBytes>> {
+        let value = values::from_python(value)?;
+        let bytes = py
+            .detach(|| wba_codec::encode(&value))
+            .map_err(shell_error)?;
+        Ok(pyo3::types::PyBytes::new(py, &bytes).unbind())
+    }
+
     fn fws_start(&self, url: String) -> PyResult<()> {
         self.fws.start(url).map_err(shell_error)
     }

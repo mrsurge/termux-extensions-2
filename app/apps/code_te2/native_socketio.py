@@ -12,9 +12,10 @@ from .persistence_io import NativePersistence
 from .native_shells import NativeShellBridge
 from .terminal_log_io import NativeTerminalLog
 from .native_fws import NativeFwsBridge
+from .wba_pipe_codec import NativeWbaCodec
 
 
-class NativeBridge(NativePersistence, NativeShellBridge, NativeTerminalLog, NativeFwsBridge, Protocol):
+class NativeBridge(NativePersistence, NativeShellBridge, NativeTerminalLog, NativeFwsBridge, NativeWbaCodec, Protocol):
     def socket_op(self, operation: dict[str, object]) -> None: ...
     def pipe_send(self, envelope: dict[str, object]) -> None: ...
 

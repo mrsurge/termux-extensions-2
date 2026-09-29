@@ -380,6 +380,14 @@ Sidebar loading; no additional startup redesign without new evidence.
   Native transport tests cover actual Socket.IO snapshots/ACKs/events/reconnect,
   stale generations, queue/byte overflow, pending-call rejection and shutdown.
   Optimized worker build and Cargo formatting pass. No shared runtime restart.
+- [x] WBA control-pipe MessagePack records now have a per-subscription Rust
+  decoder and native encoder. Python retains JSON-RPC correlation, serialized
+  writes, push dispatch and domain validation; direct WBA sockets are unchanged.
+  Interpreted tests/tools retain the old codec as a reference, not a native
+  failure fallback. Focused Rust/PyO3 and Python seam tests plus release build
+  pass; live Pixel acceptance and measured import/startup effects remain open.
+- [ ] Pixel live acceptance of native WBA control-pipe codec: extension host
+  startup/handshake, provider RPC, diagnostics push and restart/reconnect.
 
 ### Drawer native I/O prerequisites
 

@@ -61,6 +61,8 @@ def start(bridge: NativeBridge) -> dict[str, object]:
     configure_terminal_logs(bridge)
     from .native_fws import configure_native as configure_native_fws
     configure_native_fws(bridge)
+    from .wba_pipe_codec import configure_native as configure_native_wba_codec
+    configure_native_wba_codec(bridge)
     identity = PipeIdentity.from_env()
     pipe_runtime.configure(lambda envelope: None, identity)
     pipe_runtime.configure_transport(NativePipeTransport(bridge))
