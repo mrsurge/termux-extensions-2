@@ -2,6 +2,7 @@
 mod decode;
 #[allow(dead_code)] // Shared helpers also compile into the isolated pipe harness.
 mod protocol;
+mod rpc_codec;
 mod values;
 mod web;
 

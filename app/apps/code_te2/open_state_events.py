@@ -8,7 +8,6 @@ from typing import cast
 from .client_presentation import client_presentation_room
 from .monaco_editor.editor_rpc_contract import EDITOR_RPC_NOTIFICATION_OPEN_STATE_CHANGED
 from .monaco_editor.editor_rpc_emit import emit_editor_rpc_notification
-from .frontend_rpc_codec import encode_frontend_rpc_message
 from .open_state_backend import ClientForegroundPayload, SidecarOpenStatePayload
 from .host.secondary_content_backend import (
     reconcile_secondary_foreground,
@@ -327,7 +326,7 @@ def _surface_payload(
 
 async def _emit_editor_open_state(payload: JsonObject) -> None:
     try:
-        async def _emit(event_name: str, notification_payload: bytes) -> None:
+        async def _emit(event_name: str, notification_payload: object) -> None:
             await emit_code_te2_socketio(
                 event_name,
                 notification_payload,
@@ -349,11 +348,7 @@ async def _emit_ui_open_state(payload: JsonObject) -> None:
         method = UI_IPC_RPC_NOTIFICATION_OPEN_STATE_CHANGED
         await emit_code_te2_socketio(
             UI_IPC_RPC_NOTIFICATION_EVENT,
-            encode_frontend_rpc_message(
-                build_jsonrpc_notification(method, payload),
-                lane="ui_ipc",
-                method=method,
-            ),
+            build_jsonrpc_notification(method, payload),
             namespace="/ui_ipc",
             room="ui_ipc",
         )
@@ -391,11 +386,7 @@ async def _emit_host_active_file_changed(
         method = UI_IPC_RPC_NOTIFICATION_HOST_ACTIVE_FILE_CHANGED
         await emit_code_te2_socketio(
             UI_IPC_RPC_NOTIFICATION_EVENT,
-            encode_frontend_rpc_message(
-                build_jsonrpc_notification(method, payload),
-                lane="ui_ipc",
-                method=method,
-            ),
+            build_jsonrpc_notification(method, payload),
             namespace="/ui_ipc",
             room=client_presentation_room(client_foreground["clientInstanceId"]),
         )

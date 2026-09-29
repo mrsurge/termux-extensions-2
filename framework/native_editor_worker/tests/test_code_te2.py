@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 from pathlib import Path
 import socket
 import subprocess
@@ -116,7 +117,9 @@ def test_real_host_rpc_binary_ack(native_app, transport):
     url, process, state, logs = native_app
     client = socketio.Client(reconnection=False)
     errors = []
+    notifications = []
     client.on("connect_error", lambda data: errors.append(data), namespace="/ui_ipc")
+    client.on("rpc.notify", lambda data: notifications.append(data), namespace="/ui_ipc")
     try:
         try:
             client.connect(url + "?client_instance_id=client_nativetest000001&client_role=primary", namespaces=["/ui_ipc"],
@@ -137,6 +140,9 @@ def test_real_host_rpc_binary_ack(native_app, transport):
         for _ in range(10):
             time.sleep(0.02)
             assert isinstance(client.call("rpc", payload, namespace="/ui_ipc", timeout=5), bytes)
+        assert notifications, logs
+        assert all(isinstance(item, bytes) for item in notifications)
+        assert all(msgpack.unpackb(item, raw=False)["jsonrpc"] == "2.0" for item in notifications)
     finally:
         client.disconnect()
 
@@ -181,3 +187,57 @@ def test_real_worker_truncated_pipe_is_fatal(native_app):
     process.stdin.flush()
     process.stdin.close()
     assert process.wait(timeout=10) != 0, logs
+
+
+@pytest.mark.parametrize("transport", ["polling", "websocket"])
+@pytest.mark.parametrize("namespace", ["/rpc/editor", "/rpc/explorer", "/ui_ipc"])
+def test_native_rpc_rejects_bad_bytes_and_keeps_domain_validation(native_app, transport, namespace):
+    url, _, _, logs = native_app
+    client = socketio.Client(reconnection=False)
+    received = queue.Queue()
+    client.on("rpc", lambda data: received.put(data), namespace=namespace)
+
+    def request(payload):
+        if namespace != "/rpc/editor":
+            reply = client.call("rpc", payload, namespace=namespace, timeout=5)
+        else:
+            client.emit("rpc", payload, namespace=namespace)
+            deadline = time.monotonic() + 5
+            while True:
+                reply = received.get(timeout=max(0.01, deadline - time.monotonic()))
+                decoded = msgpack.unpackb(reply, raw=False)
+                if "error" in decoded:
+                    break
+        assert isinstance(reply, bytes), (reply, logs)
+        return msgpack.unpackb(reply, raw=False)
+
+    try:
+        client.connect(url + "?client_instance_id=client_nativetest000001&client_role=primary",
+                       namespaces=[namespace], auth={"rpcCodec": "msgpack-v1"},
+                       transports=[transport], wait_timeout=15)
+        for payload, message in [({"jsonrpc": "2.0"}, "binary_rpc_payload_required"),
+                                 (b"\xc1", "invalid_msgpack_payload"),
+                                 (b"\x81", "invalid_msgpack_payload"),
+                                 (b"\xc0\xc0", "invalid_msgpack_payload"),
+                                 (b"\xc6\xff\xff\xff\xff", "invalid_msgpack_payload")]:
+            reply = request(payload)
+            assert reply == {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": message}}
+            assert client.connected
+        # Valid MessagePack with invalid RPC shape still reaches Python's existing validator.
+        assert request(msgpack.packb({}))["error"]["code"] == -32600
+        reply = request(msgpack.packb({"jsonrpc": "2.0", "id": "unknown", "method": "nonexistent.method", "params": {}}, use_bin_type=True))
+        assert "error" in reply and reply["error"]["code"] != -32700, reply
+    finally:
+        client.disconnect()
+
+
+def test_sidebar_rpc_remains_structured_not_frontend_messagepack(native_app):
+    url, *_ = native_app
+    client = socketio.Client(reconnection=False)
+    try:
+        client.connect(url, namespaces=["/sidebar_ipc"], transports=["websocket"], wait_timeout=15)
+        reply = client.call("rpc", {"jsonrpc": "2.0", "id": "unknown", "method": "nonexistent.method", "params": {}},
+                            namespace="/sidebar_ipc", timeout=5)
+        assert isinstance(reply, dict) and "error" in reply, reply
+    finally:
+        client.disconnect()

@@ -9,7 +9,6 @@ from socketio.exceptions import ConnectionRefusedError
 
 from ..frontend_rpc_codec import (
     FrontendRpcCodecError,
-    decode_frontend_rpc_message,
     require_msgpack_v1_auth,
 )
 from ..client_presentation import (
@@ -40,11 +39,11 @@ from .editor_ws import editor_runtime_build_connect_snapshot, editor_runtime_emi
 
 
 class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
-    async def _emit_to_sid(self, sid: str, event_name: str, payload: bytes) -> None:
+    async def _emit_to_sid(self, sid: str, event_name: str, payload: object) -> None:
         emit_to_room = cast(Callable[..., Awaitable[object]], self.emit)
         _ = await emit_to_room(event_name, payload, room=sid)
 
-    async def _emit_to_room(self, room: str, event_name: str, payload: bytes) -> None:
+    async def _emit_to_room(self, room: str, event_name: str, payload: object) -> None:
         emit_to_room = cast(Callable[..., Awaitable[object]], self.emit)
         _ = await emit_to_room(event_name, payload, room=room)
 
@@ -116,16 +115,8 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
 
     async def on_rpc(self, sid: str, data: object) -> None:
         request_id: object = None
-        try:
-            decoded = decode_frontend_rpc_message(data, lane="editor")
-        except FrontendRpcCodecError as exc:
-            await emit_editor_rpc_error(
-                lambda event_name, payload: self._emit_to_sid(sid, event_name, payload),
-                None,
-                -32700,
-                str(exc),
-            )
-            return
+        # Native transport has decoded the binary payload; validation stays here.
+        decoded = data
         source_client = self._client_id(sid)
 
         try:

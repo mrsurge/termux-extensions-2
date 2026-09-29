@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import patch
 
-from app.apps.code_te2.frontend_rpc_codec import decode_frontend_rpc_message, encode_frontend_rpc_message
 from app.apps.code_te2.monaco_editor.editor_rpc_messages import (
     build_editor_rpc_result, build_editor_rpc_error, build_editor_rpc_notification,
 )
@@ -63,11 +62,11 @@ class EditorRpcMessageTests(unittest.TestCase):
 
 
 class EditorRpcBoundaryTests(unittest.IsolatedAsyncioTestCase):
-    async def test_emit_wrappers_encode_completed_builder_values(self) -> None:
+    async def test_emit_wrappers_deliver_completed_builder_values(self) -> None:
         received: list[object] = []
-        async def emit(event: str, payload: bytes) -> None:
+        async def emit(event: str, payload: object) -> None:
             self.assertEqual(event, "rpc")
-            received.append(decode_frontend_rpc_message(payload, lane="editor"))
+            received.append(payload)
         await emit_editor_rpc_result(emit, "r", {"x": (1, 2)})
         await emit_editor_rpc_error(emit, "r", -1, "bad", data={"x": (1, 2)})
         await emit_editor_rpc_notification(emit, EDITOR_RPC_NOTIFICATION_DRAFT_DIFF, {"x": (1, 2)})
@@ -84,10 +83,10 @@ class EditorRpcBoundaryTests(unittest.IsolatedAsyncioTestCase):
         async def dispatch(method: str, params: dict[str, object], *, source_client: str) -> object:
             calls.append((method, params, source_client))
             return {"path": "file.py"}
-        async def emit(target: str, event: str, data: bytes) -> None:
+        async def emit(target: str, event: str, data: object) -> None:
             self.assertEqual(target, "sid")
             self.assertEqual(event, "rpc")
-            received.append(decode_frontend_rpc_message(data, lane="editor"))
+            received.append(data)
         with (
             patch.object(adapter, "dispatch_editor_runtime_request", dispatch),
             patch.object(namespace, "_client_id", return_value="client_aaaaaaaaaaaa"),
@@ -95,10 +94,10 @@ class EditorRpcBoundaryTests(unittest.IsolatedAsyncioTestCase):
             patch.object(namespace, "_emit_to_room", emit),
         ):
             payload: dict[str, object] = {"jsonrpc": "2.0", "method": EDITOR_RPC_METHOD_DRAFT_DIFF_GET, "params": {"path": "file.py"}}
-            await namespace.on_rpc("sid", encode_frontend_rpc_message(payload, lane="editor"))
+            await namespace.on_rpc("sid", payload)
             self.assertEqual(received, [])
             payload["id"] = "r1"
-            await namespace.on_rpc("sid", encode_frontend_rpc_message(payload, lane="editor"))
+            await namespace.on_rpc("sid", payload)
         self.assertEqual(calls, [(EDITOR_RPC_METHOD_DRAFT_DIFF_GET, {"path": "file.py"}, "client_aaaaaaaaaaaa")] * 2)
         self.assertEqual(received, [
             build_editor_rpc_notification(EDITOR_RPC_NOTIFICATION_DRAFT_DIFF, {"path": "file.py"}),
@@ -111,17 +110,17 @@ class EditorRpcBoundaryTests(unittest.IsolatedAsyncioTestCase):
         async def dispatch(method: str, params: dict[str, object], *, source_client: str) -> object:
             del method, params, source_client
             raise EditorRpcDispatchError(-32000, "rejected", data={"reason": "test"})
-        async def emit(target: str, event: str, data: bytes) -> None:
+        async def emit(target: str, event: str, data: object) -> None:
             del target, event
-            received.append(decode_frontend_rpc_message(data, lane="editor"))
+            received.append(data)
         with (
             patch.object(adapter, "dispatch_editor_runtime_request", dispatch),
             patch.object(namespace, "_client_id", return_value="client_aaaaaaaaaaaa"),
             patch.object(namespace, "_emit_to_sid", emit),
         ):
-            await namespace.on_rpc("sid", encode_frontend_rpc_message({
+            await namespace.on_rpc("sid", {
                 "jsonrpc": "2.0", "id": 12, "method": "editor.open", "params": {},
-            }, lane="editor"))
+            })
         self.assertEqual(received, [build_editor_rpc_error(12, -32000, "rejected", data={"reason": "test"})])
 
     async def test_runtime_binding_keeps_client_on_outbound_events(self) -> None:

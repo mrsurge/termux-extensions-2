@@ -592,7 +592,7 @@ async def _emit_editor_rpc_notification_to_room(
     *,
     room: str,
 ) -> None:
-    async def _emit(event_name: str, notification_payload: bytes) -> None:
+    async def _emit(event_name: str, notification_payload: object) -> None:
         await emit_code_te2_socketio(
             event_name,
             notification_payload,

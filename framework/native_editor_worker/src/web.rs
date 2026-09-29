@@ -1,6 +1,7 @@
 use crate::{
     Backend, State,
     protocol::{get, map, text},
+    rpc_codec,
 };
 use anyhow::{Result, bail};
 use bytes::Bytes;
@@ -78,6 +79,16 @@ impl Sockets {
             Some("emit") => {
                 let event = text(value, "event").ok_or_else(|| anyhow::anyhow!("missing event"))?;
                 let data = get(value, "data").unwrap_or(&Value::Nil);
+                // Encode once before room fan-out, never once per recipient.
+                let encoded = if rpc_codec::encoded_event(namespace, event) {
+                    Some(rpc_codec::encode(
+                        data,
+                        rpc_codec::lane(namespace).unwrap(),
+                    )?)
+                } else {
+                    None
+                };
+                let data = encoded.as_ref().unwrap_or(data);
                 let room = text(value, "room");
                 let skip = text(value, "skipSid");
                 for ((ns, sid), entry) in entries.iter_mut() {
@@ -144,6 +155,24 @@ fn register(io: &SocketIo, backend: Backend, sockets: Arc<Sockets>, namespace: &
                   ack: AckSender| {
                 let backend = event_backend.clone();
                 async move {
+                    let lane = rpc_codec::lane(namespace).filter(|_| event == "rpc");
+                    let data = match (data, lane) {
+                        (Ok(data), Some(lane)) => match rpc_codec::decode(data, lane) {
+                            Ok(data) => Ok(data),
+                            Err(message) => {
+                                let error =
+                                    rpc_codec::encode(&rpc_codec::parse_error(message), lane)
+                                        .unwrap();
+                                if namespace == "/rpc/editor" {
+                                    let _ = socket.emit("rpc", &error);
+                                } else {
+                                    let _ = ack.send(&error);
+                                }
+                                return;
+                            }
+                        },
+                        (data, _) => data.map_err(|e| e.to_string()),
+                    };
                     let result = match data {
                         Ok(data) => {
                             backend
@@ -157,7 +186,20 @@ fn register(io: &SocketIo, backend: Backend, sockets: Arc<Sockets>, namespace: &
                     }
                     match result {
                         Ok(value) => {
-                            let _ = ack.send(&value);
+                            let result = if let Some(lane) = lane.filter(|_| !value.is_nil()) {
+                                rpc_codec::encode(&value, lane)
+                            } else {
+                                Ok(value)
+                            };
+                            match result {
+                                Ok(value) => {
+                                    let _ = ack.send(&value);
+                                }
+                                Err(error) => {
+                                    eprintln!("[native-socket] ack encode failed: {error}");
+                                    let _ = socket.disconnect();
+                                }
+                            }
                         }
                         Err(error) => {
                             eprintln!("[native-socket] {namespace}/{event}: {error}");

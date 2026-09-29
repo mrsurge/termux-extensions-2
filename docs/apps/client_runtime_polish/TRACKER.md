@@ -286,8 +286,20 @@ Sidebar loading; no additional startup redesign without new evidence.
   tests, release build, Cargo fmt and two-module basedpyright pass. Real-worker
   coverage includes CORS preflight and fatal truncated pipe input. Tests use the
   current release binaries; no live shared runtime restart or speedup claim.
-- [ ] Pixel live acceptance of the actual Code TE2 worker; source-only Cargo
-  build instructions are in framework/native_editor_worker/README.md.
+- [x] User confirmed Pixel live acceptance of the actual worker at `8e46ae91`.
+  Source-only Cargo build instructions remain in framework/native_editor_worker/README.md.
+- [x] Approved next slice: move frontend RPC payload codecs for editor, Explorer
+  and host into Rust; Python receives/returns DTOs and retains JSON-RPC validation.
+  No changes to Sidebar, terminal, direct WBA or WBA control-pipe codecs.
+- [x] Codec cutover validation: 162 Python/integration tests (plus 3 subtests),
+  11 Rust unit tests, release build and Cargo fmt pass. Actual native workers
+  cover all three RPC lanes over polling/WebSocket, invalid payload recovery
+  and unchanged Sidebar structured replies. No shared runtime restart.
+  Metrics-enabled native integration rerun: 14 passed. Expanded Python typecheck
+  reports the existing adapter_lifecycle_events → ui_ipc_ws →
+  workbench_adapter_shell_manager import cycle (all three edges exist at HEAD),
+  plus 7 warnings; no clean full-typecheck claim.
+- [ ] Pixel live acceptance of the frontend RPC codec slice.
 - [ ] Integrate native worker into packaged/build bootstrap only after parity.
 - [ ] Verify Python Socket.IO imports are actually eliminated before claiming
   startup savings; include native initialization costs in the comparison.

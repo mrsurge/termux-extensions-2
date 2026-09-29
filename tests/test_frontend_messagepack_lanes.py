@@ -10,8 +10,6 @@ from socketio.exceptions import ConnectionRefusedError
 from app.apps.code_te2.frontend_rpc_codec import (
     RPC_CODEC_AUTH_FIELD,
     RPC_CODEC_MSGPACK_V1,
-    decode_frontend_rpc_message,
-    encode_frontend_rpc_message,
 )
 from app.apps.code_te2.client_presentation import client_presentation_room
 from app.apps.code_te2.monaco_editor import editor_ws
@@ -76,10 +74,10 @@ class EditorMessagePackTests(unittest.IsolatedAsyncioTestCase):
             client_instance_id=client_instance_id,
         )
 
-    async def test_notification_helper_emits_messagepack(self) -> None:
-        emitted: list[tuple[str, bytes]] = []
+    async def test_notification_helper_emits_dto(self) -> None:
+        emitted: list[tuple[str, object]] = []
 
-        async def record(event: str, payload: bytes) -> None:
+        async def record(event: str, payload: object) -> None:
             emitted.append((event, payload))
 
         await emit_editor_rpc_notification(
@@ -97,10 +95,10 @@ class EditorMessagePackTests(unittest.IsolatedAsyncioTestCase):
                 "method": EDITOR_RPC_NOTIFICATION_READY,
                 "params": {"path": "/project/main.py"},
             },
-            decode_frontend_rpc_message(payload, lane="editor"),
+            payload,
         )
 
-    async def test_malformed_editor_frame_emits_binary_parse_error(self) -> None:
+    async def test_invalid_editor_envelope_retains_domain_validation(self) -> None:
         namespace = EditorRpcSocketIONamespace("/rpc/editor")
         emitted: list[object] = []
 
@@ -114,13 +112,14 @@ class EditorMessagePackTests(unittest.IsolatedAsyncioTestCase):
             emitted.append(payload)
 
         namespace.emit = record_emit  # type: ignore[method-assign]
-        await namespace.on_rpc("editor-sid", b"\xc1")
+        with patch.object(namespace, "_client_id", return_value="client_aaaaaaaaaaaa"):
+            await namespace.on_rpc("editor-sid", {})
 
         self.assertEqual(1, len(emitted))
-        decoded = decode_frontend_rpc_message(emitted[0], lane="editor")
+        decoded = emitted[0]
         error = cast(dict[str, object], decoded).get("error")
         self.assertIsInstance(error, dict)
-        self.assertEqual(-32700, cast(dict[str, object], error).get("code"))
+        self.assertEqual(-32600, cast(dict[str, object], error).get("code"))
 
     async def test_editor_connect_rejects_missing_codec_auth(self) -> None:
         namespace = EditorRpcSocketIONamespace("/rpc/editor")
@@ -130,7 +129,7 @@ class EditorMessagePackTests(unittest.IsolatedAsyncioTestCase):
 
 
 class UiIpcMessagePackTests(unittest.IsolatedAsyncioTestCase):
-    async def test_binary_ui_request_returns_binary_ack(self) -> None:
+    async def test_ui_request_returns_ack_dto(self) -> None:
         namespace = UIIPCNamespace("/ui_ipc")
         request = {
             "jsonrpc": "2.0",
@@ -154,29 +153,29 @@ class UiIpcMessagePackTests(unittest.IsolatedAsyncioTestCase):
         ):
             response = await namespace.on_rpc(
                 "ui-sid",
-                encode_frontend_rpc_message(request, lane="ui_ipc"),
+                request,
             )
 
-        self.assertIsInstance(response, bytes)
+        self.assertIsInstance(response, dict)
         self.assertEqual(
             {
                 "jsonrpc": "2.0",
                 "id": "ui_ipc_1",
                 "result": {"ok": True},
             },
-            decode_frontend_rpc_message(cast(bytes, response), lane="ui_ipc"),
+            response,
         )
 
-    async def test_malformed_ui_frame_returns_binary_parse_error(self) -> None:
+    async def test_invalid_ui_envelope_retains_domain_validation(self) -> None:
         namespace = UIIPCNamespace("/ui_ipc")
 
-        response = await namespace.on_rpc("ui-sid", b"\xc1")
+        response = await namespace.on_rpc("ui-sid", {})
 
-        self.assertIsInstance(response, bytes)
-        decoded = decode_frontend_rpc_message(cast(bytes, response), lane="ui_ipc")
+        self.assertIsInstance(response, dict)
+        decoded = response
         error = cast(dict[str, object], decoded).get("error")
         self.assertIsInstance(error, dict)
-        self.assertEqual(-32700, cast(dict[str, object], error).get("code"))
+        self.assertEqual(-32600, cast(dict[str, object], error).get("code"))
 
     async def test_ui_connect_rejects_wrong_codec_auth(self) -> None:
         namespace = UIIPCNamespace("/ui_ipc")
@@ -298,7 +297,7 @@ class UiIpcMessagePackTests(unittest.IsolatedAsyncioTestCase):
             entered,
         )
         decoded = [
-            decode_frontend_rpc_message(cast(bytes, payload), lane="ui_ipc")
+            payload
             for _, payload, _ in emitted
         ]
         self.assertIn(

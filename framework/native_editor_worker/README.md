@@ -30,7 +30,7 @@ disconnected-event replay or mutation retry is introduced.
 
 The adapter preserves Python domain state and validation, not a general ASGI
 emulator. Python Socket.IO namespace/client imports, the FWS client bridge,
-frontend MessagePack codecs, persistence and other file I/O remain. No complete
+msgspec domain validation, persistence and other file I/O remain. No complete
 dependency elimination or startup speedup is claimed. HTTP conditional/range
 responses and release packaging are not part of this first cutover.
 
@@ -49,7 +49,32 @@ PYO3_PYTHON=/data/data/com.termux/files/usr/bin/python cargo build --release --l
 Then launch/restart Code TE2 through its normal framework app lifecycle with the
 system Python environment (or its matching `.jitenv`). The shellspec selects
 `target/release/code-te2-worker`; do not run the fixture executable below as the
-app. No frontend assets changed in this slice. Live Pixel acceptance is pending.
+app. No frontend assets changed. The native listener cutover at `8e46ae91` has
+user-confirmed Pixel live acceptance. The subsequent codec slice needs its own
+live check; acceptance of the listener does not establish its performance.
+
+### Frontend RPC codec boundary
+
+`rpc_codec.rs` owns application MessagePack for `/rpc/editor`, `/rpc/explorer`
+and `/ui_ipc`. Incoming `rpc` must carry binary bytes containing exactly one
+bounded value; Rust decodes before entering Python. Python receives DTOs and
+keeps JSON-RPC validation/dispatch. Replies and notifications cross back as DTOs;
+Rust encodes once before room fan-out. Editor replies remain `rpc` events;
+Explorer/host replies remain acknowledgements and their pushes `rpc.notify`.
+`None`/no-reply behavior is unchanged. No Python fallback codec is installed.
+
+Bad bytes/nonbinary requests receive the existing `-32700` error envelopes and
+do not tear down an otherwise healthy connection. Invalid decoded envelopes
+remain Python `-32600` validation. The native decoder bounds depth to 64, nodes
+to 1,000,000 and payloads to 8 MiB; DTO maps require unique UTF-8 string keys.
+Extension markers, trailing frames and reserved markers are rejected. These are
+transport validity checks, not domain normalization. Sidebar's structured RPC,
+terminal events, direct WBA traffic and the WBA control pipe are unchanged.
+
+`CODE_TE2_RPC_CODEC_METRICS=1` now reports native codec duration/byte metadata to
+stderr, never framework stdout. Disabled metrics take no timestamps. Explorer
+diagnostics emission timing no longer pretends its Python emit time is encoding
+time; actual encoding lives in the native codec metrics.
 
 The isolated integration suite uses temporary stores, a fake framework pipe peer
 and disabled managed intelligence, not the shared runtime. It requires the

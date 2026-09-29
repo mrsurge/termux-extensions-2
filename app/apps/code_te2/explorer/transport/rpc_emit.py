@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from typing import Protocol, cast
 
-from ...frontend_rpc_codec import encode_frontend_rpc_message
 from .rpc_contract import (
     EXPLORER_RPC_NAMESPACE,
     EXPLORER_RPC_NOTIFICATION_EVENT,
@@ -27,11 +26,7 @@ async def emit_explorer_rpc_notification(method: str, params: dict[str, object])
     sio = cast(SocketIOEmitter, EXPLORER_SIO)
     await sio.emit(
         EXPLORER_RPC_NOTIFICATION_EVENT,
-        encode_frontend_rpc_message(
-            build_jsonrpc_notification(method, params),
-            lane="explorer",
-            method=method,
-        ),
+        build_jsonrpc_notification(method, params),
         namespace=EXPLORER_RPC_NAMESPACE,
     )
 

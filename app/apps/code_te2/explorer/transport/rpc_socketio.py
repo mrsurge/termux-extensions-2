@@ -9,8 +9,6 @@ from typing import TYPE_CHECKING, cast
 
 from ...frontend_rpc_codec import (
     FrontendRpcCodecError,
-    decode_frontend_rpc_message,
-    encode_frontend_rpc_message,
     require_msgpack_v1_auth,
 )
 from ...client_presentation import client_presentation_identity_from_environ
@@ -141,8 +139,8 @@ class ExplorerRpcSocketShim:
             future.set_exception(error)
 
     async def send_message(self, message: JsonMessage) -> None:
-        # Services supply complete envelopes. Only this adapter encodes bytes;
-        # pending request replies retain their existing acknowledgement path.
+        # Services supply complete DTOs; native transport owns encoding. Pending
+        # request replies retain their existing acknowledgement path.
         payload = dict(message)
         metrics_enabled = diagnostics_latency_metrics_enabled()
 
@@ -158,30 +156,22 @@ class ExplorerRpcSocketShim:
                 if method != "explorer.diagnostics.detail" or not metrics_enabled:
                     await self.namespace.emit(
                         "rpc.notify",
-                        encode_frontend_rpc_message(payload, lane="explorer", method=method),
+                        payload,
                         room=self.sid,
                     )
                     return
 
-                encode_started_ns = time.perf_counter_ns()
-                encoded = encode_frontend_rpc_message(
-                    payload,
-                    lane="explorer",
-                    method=method,
-                )
-                encode_ms = elapsed_ms(encode_started_ns)
                 queue_before = sample_engineio_queues(self.namespace)
                 emit_started_ns = time.perf_counter_ns()
                 await self.namespace.emit(
                     "rpc.notify",
-                    encoded,
+                    payload,
                     room=self.sid,
                 )
                 record_latency_event(
                     "diagnostics_socketio_emit",
                     {
-                        "wire_bytes": len(encoded),
-                        "msgpack_encode_ms": encode_ms,
+                        "codec_owner": "native",
                         "emit_ms": elapsed_ms(emit_started_ns),
                         "queue_before": queue_before,
                         "queue_after": sample_engineio_queues(self.namespace),
@@ -235,29 +225,8 @@ class ExplorerRpcSocketIONamespace(_SocketIOAsyncNamespace):
         self,
         sid: str,
         data: object,
-    ) -> bytes | None:
-        try:
-            decoded = decode_frontend_rpc_message(data, lane="explorer")
-        except FrontendRpcCodecError as exc:
-            return encode_frontend_rpc_message(
-                build_jsonrpc_error(
-                    request_id=None,
-                    code=-32700,
-                    message=str(exc),
-                ),
-                lane="explorer",
-            )
-
-        response = await self._dispatch_rpc(sid, decoded)
-        if response is None:
-            return None
-        decoded_obj = cast(dict[object, object], decoded) if isinstance(decoded, dict) else {}
-        method = decoded_obj.get("method")
-        return encode_frontend_rpc_message(
-            response,
-            lane="explorer",
-            method=method if isinstance(method, str) else None,
-        )
+    ) -> JsonRpcSuccessEnvelope | JsonRpcErrorEnvelope | None:
+        return await self._dispatch_rpc(sid, data)
 
     async def _dispatch_rpc(
         self,

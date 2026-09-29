@@ -10,13 +10,15 @@ original pipe-only fixture executable remains for regression coverage.
 
 See the [build and validation notes](../../../framework/native_editor_worker/README.md).
 This is a source-checkout experiment, not integrated into wheel/release builds.
-Linux isolated checks are distinct from pending Pixel live acceptance. The Pixel
+The listener cutover at `8e46ae91` has user-confirmed Pixel live acceptance. The Pixel
 fixture build exposed the EOF race fixed in `638f62b8`; user waived its rerun.
 No shared framework/worker restart was performed by the agent.
 
 The following design records the wider target. Native HTTP/server transport is
-implemented, but remaining Python Socket.IO clients, codecs, disk I/O and full
-startup/behavior parity still need measurement and migration.
+implemented. The next slice moves frontend RPC payload codecs into Rust before
+PyO3 dispatch; Python retains domain-envelope validation. Remaining Python
+Socket.IO clients, WBA codecs, disk I/O and startup benefits still need inventory
+and measurement. Each subsequent slice requires its own live acceptance.
 
 ## Source constraints
 

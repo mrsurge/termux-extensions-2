@@ -2,7 +2,6 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from app.apps.code_te2.client_presentation import client_presentation_room
-from app.apps.code_te2.frontend_rpc_codec import encode_frontend_rpc_message
 from app.apps.code_te2.host import comparison_actions_backend as actions
 from app.apps.code_te2.monaco_editor import editor_preferences_backend, editor_ws
 from app.apps.code_te2.ui_ipc import notifications
@@ -11,7 +10,7 @@ from app.apps.code_te2.ui_ipc.ui_ipc_ws import emit_ui_ipc_rpc_notification
 
 
 class ComparisonNotificationContractTests(unittest.IsolatedAsyncioTestCase):
-    async def test_sender_preserves_bytes_rooms_sid_and_public_import(self) -> None:
+    async def test_sender_preserves_dtos_rooms_sid_and_public_import(self) -> None:
         self.assertIs(emit_ui_ipc_rpc_notification, notifications.emit_ui_ipc_rpc_notification)
         sent: list[dict[str, object]] = []
 
@@ -22,7 +21,7 @@ class ComparisonNotificationContractTests(unittest.IsolatedAsyncioTestCase):
 
         method = 'ui.comparison.changed'
         params: dict[str, object] = {'projectPath': '/project', 'mode': 'disk'}
-        expected = encode_frontend_rpc_message(build_jsonrpc_notification(method, params), lane='ui_ipc', method=method)
+        expected = build_jsonrpc_notification(method, params)
         with patch.object(notifications, 'emit_code_te2_socketio', new=emit):
             await emit_ui_ipc_rpc_notification(method, params, client_instance_id='client_123456789abc', skip_sid='origin')
             await emit_ui_ipc_rpc_notification(method, params, to_sid='exact')

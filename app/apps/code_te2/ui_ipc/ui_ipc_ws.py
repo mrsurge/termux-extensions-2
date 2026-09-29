@@ -31,8 +31,6 @@ from ..client_presentation import (
 )
 from ..frontend_rpc_codec import (
     FrontendRpcCodecError,
-    decode_frontend_rpc_message,
-    encode_frontend_rpc_message,
     require_msgpack_v1_auth,
 )
 from . import sidebar_ws
@@ -52,7 +50,7 @@ from .sidebar_rpc_contract import SIDEBAR_IPC_RPC_NAMESPACE
 from ..host.run_target_service import set_run_target_routes_emitter
 from .notifications import (
     emit_ui_ipc_rpc_notification as emit_ui_ipc_rpc_notification,
-    encode_ui_ipc_notification as _encode_ui_ipc_notification,
+    build_ui_ipc_notification as _build_ui_ipc_notification,
 )
 from ..file_tabs_projection import (
     set_file_tabs_projection_emitter,
@@ -140,10 +138,6 @@ def _namespace(ns: object) -> SocketIONamespace:
     return cast(SocketIONamespace, ns)
 
 
-def _encode_ui_ipc_envelope(envelope: object, *, method: str | None = None) -> bytes:
-    return encode_frontend_rpc_message(envelope, lane="ui_ipc", method=method)
-
-
 async def _emit_run_target_routes_to_native(projection: JsonObject) -> None:
     await emit_ui_ipc_rpc_notification(
         UI_IPC_RPC_NOTIFICATION_RUN_TARGET_ROUTES_CHANGED,
@@ -165,7 +159,7 @@ async def _emit_browser_connect_adapter_state(
 
         await ns.emit(
             UI_IPC_RPC_NOTIFICATION_EVENT,
-            _encode_ui_ipc_notification(
+            _build_ui_ipc_notification(
                 UI_IPC_RPC_NOTIFICATION_ADAPTER_STATE,
                 _json_object(get_adapter_state()),
             ),
@@ -246,7 +240,7 @@ class UIIPCNamespace(socketio.AsyncNamespace):
                 async def emit_native_snapshot(projection: JsonObject) -> None:
                     await ns.emit(
                         UI_IPC_RPC_NOTIFICATION_EVENT,
-                        _encode_ui_ipc_notification(
+                        _build_ui_ipc_notification(
                             UI_IPC_RPC_NOTIFICATION_RUN_TARGET_ROUTES_CHANGED,
                             projection,
                         ),
@@ -290,7 +284,7 @@ class UIIPCNamespace(socketio.AsyncNamespace):
     ) -> None:
         await _namespace(self).emit(
             UI_IPC_RPC_NOTIFICATION_EVENT,
-            _encode_ui_ipc_notification(method, params),
+            _build_ui_ipc_notification(method, params),
             room="ui_ipc",
             skip_sid=skip_sid,
         )
@@ -307,16 +301,7 @@ class UIIPCNamespace(socketio.AsyncNamespace):
                 message="UI IPC RPC is only available on /ui_ipc",
             )
 
-        try:
-            decoded = decode_frontend_rpc_message(data, lane="ui_ipc")
-        except FrontendRpcCodecError as exc:
-            return _encode_ui_ipc_envelope(
-                build_jsonrpc_error(
-                    request_id=None,
-                    code=-32700,
-                    message=str(exc),
-                )
-            )
+        decoded = data
 
         try:
             parsed_request = parse_ui_ipc_rpc_request(decoded)
@@ -342,17 +327,12 @@ class UIIPCNamespace(socketio.AsyncNamespace):
                 params,
                 source_name=client_instance_id or "ui_ipc_rpc",
             )
-            return _encode_ui_ipc_envelope(
-                build_jsonrpc_result(parsed_request["request_id"], result),
-                method=parsed_request["method"],
-            )
+            return build_jsonrpc_result(parsed_request["request_id"], result)
         except UiIpcRpcProtocolError as exc:
-            return _encode_ui_ipc_envelope(exc.to_json())
+            return exc.to_json()
         except Exception as exc:
-            return _encode_ui_ipc_envelope(
-                build_jsonrpc_error(
-                    request_id=None,
-                    code=-32603,
-                    message=str(exc),
-                )
+            return build_jsonrpc_error(
+                request_id=None,
+                code=-32603,
+                message=str(exc),
             )

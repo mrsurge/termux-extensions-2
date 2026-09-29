@@ -133,15 +133,14 @@ class EditorSessionServiceTests(unittest.IsolatedAsyncioTestCase):
             await publish_editor_result(method=EDITOR_RPC_METHOD_JUMP_TO_LINE, request_id="r", result={}, deliver=h.deliver, reply=h.reply)
         self.assertEqual(h.events, [])
 
-    async def test_adapter_resolves_recipients_and_encodes_existing_envelope(self) -> None:
+    async def test_adapter_resolves_recipients_and_delivers_existing_envelope(self) -> None:
         from app.apps.code_te2.monaco_editor.editor_rpc_socketio import EditorRpcSocketIONamespace
-        from app.apps.code_te2.frontend_rpc_codec import decode_frontend_rpc_message
 
         namespace = EditorRpcSocketIONamespace("/rpc/editor")
         received: list[tuple[str, str, object]] = []
 
-        async def record(room: str, event: str, payload: bytes) -> None:
-            received.append((room, event, decode_frontend_rpc_message(payload, lane="editor")))
+        async def record(room: str, event: str, payload: object) -> None:
+            received.append((room, event, payload))
 
         with (
             patch.object(namespace, "_emit_to_room", record),
@@ -159,7 +158,6 @@ class EditorSessionServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_connect_adapter_registers_rooms_before_bootstrap_and_disconnect_cleans_identity(self) -> None:
         from app.apps.code_te2.monaco_editor import editor_rpc_socketio as adapter
         from app.apps.code_te2.monaco_editor.editor_client_registry import editor_client_identity, unregister_editor_client
-        from app.apps.code_te2.frontend_rpc_codec import decode_frontend_rpc_message
 
         h = SessionHarness()
         namespace = adapter.EditorRpcSocketIONamespace("/rpc/editor")
@@ -170,8 +168,8 @@ class EditorSessionServiceTests(unittest.IsolatedAsyncioTestCase):
         async def leave(sid: str, room: str) -> None:
             h.events.append(("leave", sid, room))
 
-        async def record(room: str, event: str, payload: bytes) -> None:
-            h.events.append(("emit", room, event, decode_frontend_rpc_message(payload, lane="editor")))
+        async def record(room: str, event: str, payload: object) -> None:
+            h.events.append(("emit", room, event, payload))
 
         with (
             patch.object(namespace, "enter_room", enter),

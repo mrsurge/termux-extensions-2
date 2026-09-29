@@ -216,7 +216,7 @@ Spinner / Status indicator (host UI):
 
 ## 0.6) Current cross-cutting contracts
 
-- Explorer, editor/Python, direct editor/WBA, and UI IPC use strict `msgpack-v1` application payloads on their Socket.IO namespaces. Browser encoding is owned by `src/rpc/codec.ts`; Python encoding/decoding is owned by `frontend_rpc_codec.py`; WBA runtime encoding is owned by `workbench_protocol_proxy/node_workbench_adapter/src/protocol/messagepack-codec.ts`.
+- Explorer, editor/Python, direct editor/WBA, and UI IPC use strict `msgpack-v1` application payloads on their Socket.IO namespaces. Browser encoding is owned by `src/rpc/codec.ts`; native worker encoding/decoding is owned by `framework/native_editor_worker/src/rpc_codec.rs`; WBA runtime encoding is owned by `workbench_protocol_proxy/node_workbench_adapter/src/protocol/messagepack-codec.ts`. Python frontend handlers exchange DTOs, not encoded bytes.
 - Sidebar IPC retains its current codec. Migrating `/ui_ipc` must not implicitly change the sibling `/sidebar_ipc` namespace.
 - Shared document membership is the bounded `ProjectSidecar` recent/logical-document set. Each stable `clientInstanceId` owns one backend-projected foreground path through `open_state_backend.py`; `ProjectSidecar.last_file` is only a one-time migration seed. Frontend `currentPath` values are exact-client projections.
 - Shared content projections carry a durable per-path `document_revision` drawn from one monotonic project stream. Matched frontends reject missing or lower revisions before changing Monaco or active-path chrome; equal revisions are valid for the correlated mirror/cache pair emitted by one backend transition.
@@ -2084,7 +2084,8 @@ The editor, host/main page, Explorer, sidebar, and terminal surfaces remain sepa
 ```text
 Host/main page frontend
   -> /ui_ipc msgpack-v1 JSON-RPC
-  -> ui_ipc_ws.py decodes and validates with frontend_rpc_codec.py
+  -> native rpc_codec.rs decodes MessagePack, PyO3 carries structural values
+  -> ui_ipc_ws.py validates the JSON-RPC envelope
   -> ui_ipc.rpc_contract dispatch method
   -> backend hook/service
   -> target surface notification when needed
@@ -2098,16 +2099,17 @@ Host/main page frontend
 | Native/Android IME focus hints | Typed focus/blur facts on `/ui_ipc`; Android consumes strict msgpack-v1, not raw JSON `ui_event`. |
 | Secondary-editor close | `ui.host.clientForeground.clear` accepts only the authenticated secondary browser client, clears that exact foreground, and requests an exact-client editor SSOT projection. |
 | Cross-surface actions | Frontend -> own backend -> target backend hook/service -> target notification. |
-| Metrics | `CODE_TE2_RPC_CODEC_METRICS=1` enables default-off codec metadata on stdout. |
+| Metrics | `CODE_TE2_RPC_CODEC_METRICS=1` enables default-off native codec metadata on stderr; stdout remains the framework pipe. |
 
 ### Key files
 
-- `app/apps/code_te2/ui_ipc/ui_ipc_ws.py` — `/ui_ipc` namespace, msgpack-v1 decode, JSON-RPC parsing, dispatch.
+- `app/apps/code_te2/ui_ipc/ui_ipc_ws.py` — `/ui_ipc` domain namespace, JSON-RPC parsing, dispatch.
 - `app/apps/code_te2/ui_ipc/rpc_contract.py` — Python UI IPC method/notification contract.
 - `app/apps/code_te2/src/ui_ipc/rpc_contract.ts` — TypeScript UI IPC contract.
 - `app/apps/code_te2/main_page/frontend/connections/ui-ipc-rpc.ts` — browser `/ui_ipc` JSON-RPC connection.
 - `app/apps/code_te2/main_page/frontend/connections/ui-ipc.ts` — host/main-page UI IPC fact handling.
-- `app/apps/code_te2/frontend_rpc_codec.py` — strict Python msgpack-v1 encode/decode and auth validation.
+- `app/apps/code_te2/frontend_rpc_codec.py` — codec auth negotiation only; no Python wire codec.
+- `framework/native_editor_worker/src/rpc_codec.rs` — bounded MessagePack decode/encode for the three frontend RPC lanes. No JSON fallback; one value per payload, string-key DTO maps, no extension/reserved markers. Bad wire payloads retain `-32700`; Python domain-envelope validation retains `-32600`.
 - `app/apps/code_te2/sio_service.json` — route proxy declaration for canonical app Socket.IO path and legacy alias.
 
 ### Extending
@@ -5063,8 +5065,8 @@ waiting-poll binary-batch separator defect.
 application start/stop and runtime-debug dispatch. `native_socketio.py` adapts the
 existing namespace handlers to native emit/room/session operations. Domain state,
 client identity, validation and effects stay Python-owned. Rust decodes/encodes
-framework pipe frames; PyO3 carries structural values. Frontend RPC codecs,
-msgspec DTOs, FWS AsyncClient networking and Python persistence remain. The domain
+framework pipe frames and frontend RPC payloads; PyO3 carries structural values.
+msgspec DTO validation, WBA codecs, FWS AsyncClient networking and Python persistence remain. The domain
 import test blocks FastAPI, Pydantic, Starlette and Uvicorn, not all networking.
 
 The listener binds after application startup; native code posts the serving
