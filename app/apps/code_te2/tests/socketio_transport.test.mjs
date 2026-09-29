@@ -1208,12 +1208,15 @@ test('TextMate catalog and factory initialization are shared across concurrent c
     buildUiUrl: (value) => value,
     normalizeLanguage: (value) => String(value || ''),
     editorRpcCall: async (method, params) => {
-      if (method === 'editor.textmate.grammar.get') {
-        grammarLoads.push(params.id);
+      if (method === 'editor.textmate.grammars.get') {
+        grammarLoads.push(...params.ids);
         assert.equal(params.revision, 'grammar-revision-1');
-        return { ok: true, revision: 'grammar-revision-1', raw: JSON.stringify({ scopeName: 'source.test', patterns: [
-          { match: 'hello', name: 'keyword.test' },
-        ] }) };
+        return { revision: 'grammar-revision-1', bodies: Object.fromEntries(params.ids.map((id) => [id, {
+          ok: true,
+          raw: JSON.stringify({ scopeName: 'source.test', patterns: [
+            { match: 'hello', name: 'keyword.test' },
+          ] }),
+        }])) };
       }
       assert.equal(method, 'editor.textmate.catalog.get');
       grammarListCalls += 1;
@@ -1241,6 +1244,126 @@ test('TextMate catalog and factory initialization are shared across concurrent c
   assert.equal(wasmFetches, 1);
 });
 
+test('TextMate body loader bounds fan-out, reuses successful bodies, and rotates revisions', async () => {
+  const { createTextmateGrammarBodyLoader } = await importTypeScript(
+    'monaco_editor/editor_textmate_grammar_loader.ts',
+  );
+  const calls = [];
+  let rejectOnce = true;
+  const loader = createTextmateGrammarBodyLoader(async (method, params) => {
+    assert.equal(method, 'editor.textmate.grammars.get');
+    calls.push({ revision: params.revision, ids: params.ids });
+    return {
+      revision: params.revision,
+      bodies: Object.fromEntries(params.ids.map((id) => [id,
+        id === 'retry' && rejectOnce
+          ? { ok: false, error: 'temporary failure' }
+          : { ok: true, raw: `grammar:${params.revision}:${id}` },
+      ])),
+    };
+  });
+  const ids = Array.from({ length: 45 }, (_, index) => `grammar-${index}`);
+  assert.deepEqual(await Promise.all(ids.map((id) => loader.load(id, 'rev-1'))),
+    ids.map((id) => `grammar:rev-1:${id}`));
+  assert.equal(calls.length, 3);
+  assert.ok(calls.every((call) => call.ids.length <= 16));
+  assert.equal(await loader.load(ids[0], 'rev-1'), `grammar:rev-1:${ids[0]}`);
+  assert.equal(calls.length, 3, 'successful bodies remain cached');
+  await assert.rejects(loader.load('retry', 'rev-1'), /temporary failure/);
+  rejectOnce = false;
+  assert.equal(await loader.load('retry', 'rev-1'), 'grammar:rev-1:retry');
+  assert.equal(await loader.load(ids[0], 'rev-2'), `grammar:rev-2:${ids[0]}`);
+  assert.equal(calls.at(-1).revision, 'rev-2');
+});
+
+test('TextMate body loader rejects stale pending reads without poisoning a new revision', async () => {
+  const { createTextmateGrammarBodyLoader } = await importTypeScript(
+    'monaco_editor/editor_textmate_grammar_loader.ts',
+  );
+  const firstReply = deferred();
+  let calls = 0;
+  const loader = createTextmateGrammarBodyLoader(async (_method, params) => {
+    calls += 1;
+    if (params.revision === 'old') return firstReply.promise;
+    return { revision: 'new', bodies: { shared: { ok: true, raw: 'new body' } } };
+  });
+  const old = loader.load('shared', 'old');
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const rejected = assert.rejects(old, /projection superseded/);
+  const current = loader.load('shared', 'new');
+  firstReply.resolve({ revision: 'old', bodies: { shared: { ok: true, raw: 'old body' } } });
+  await rejected;
+  assert.equal(await current, 'new body');
+  assert.equal(await loader.load('shared', 'new'), 'new body');
+  assert.equal(calls, 2);
+});
+
+test('TextMate retries a failed dependency without refetching a successful root body', async () => {
+  const { createEditorTextmateRuntime } = await importTypeScript(
+    'monaco_editor/editor_textmate_runtime.ts',
+  );
+  const wasm = fs.readFileSync(path.join(appRoot, 'monaco_editor/textmate/onig.wasm'));
+  const loads = [];
+  const installed = [];
+  let failDependency = true;
+  let wasmFetches = 0;
+  const runtime = createEditorTextmateRuntime({
+    getWindow: () => ({
+      monaco: {
+        editor: { getModels: () => [] },
+        languages: {
+          setColorMap: () => {},
+          getLanguages: () => [{ id: 'test' }],
+          setTokensProvider: (language) => { installed.push(language); },
+          getEncodedLanguageId: () => 1,
+        },
+      },
+    }),
+    fetchFn: async () => { wasmFetches += 1; return new Response(wasm); },
+    buildUiUrl: (value) => value,
+    normalizeLanguage: (value) => String(value || ''),
+    editorRpcCall: async (method, params) => {
+      if (method === 'editor.textmate.catalog.get') {
+        return {
+          revision: 'revision-1',
+          grammars: [
+            { id: 'test.ext/root.json', scopeName: 'source.test', language: 'test' },
+            { id: 'test.ext/dependency.json', scopeName: 'source.dependency', language: null },
+          ],
+        };
+      }
+      assert.equal(method, 'editor.textmate.grammars.get');
+      loads.push(...params.ids);
+      return {
+        revision: 'revision-1',
+        bodies: Object.fromEntries(params.ids.map((id) => [id,
+          id.endsWith('dependency.json') && failDependency
+            ? { ok: false, error: 'transient dependency failure' }
+            : { ok: true, raw: id.endsWith('root.json')
+              ? JSON.stringify({ scopeName: 'source.test', patterns: [{ include: 'source.dependency' }] })
+              : JSON.stringify({ scopeName: 'source.dependency', patterns: [{ match: 'hello', name: 'keyword.test' }] }),
+            },
+        ])),
+      };
+    },
+  });
+
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  try {
+    assert.equal(await runtime.ensureTextmateTokenization('test', '/workspace/file.test'), false);
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.deepEqual(installed, []);
+  failDependency = false;
+  assert.equal(await runtime.ensureTextmateTokenization('test', '/workspace/file.test'), true);
+  assert.deepEqual(installed, ['test']);
+  assert.equal(loads.filter((id) => id.endsWith('root.json')).length, 1);
+  assert.equal(loads.filter((id) => id.endsWith('dependency.json')).length, 2);
+  assert.equal(wasmFetches, 1);
+});
+
 test('TextMate resolves and installs document syntax before WBA language enrichment', async () => {
   const { createEditorTextmateRuntime } = await importTypeScript(
     'monaco_editor/editor_textmate_runtime.ts',
@@ -1263,7 +1386,7 @@ test('TextMate resolves and installs document syntax before WBA language enrichm
     fetchFn: async () => new Response(wasm),
     buildUiUrl: (value) => value,
     normalizeLanguage: (value) => String(value || ''),
-    editorRpcCall: async (method) => {
+    editorRpcCall: async (method, params) => {
       if (method === 'editor.textmate.catalog.get') {
         return {
           revision: 'grammar-revision-1',
@@ -1271,11 +1394,10 @@ test('TextMate resolves and installs document syntax before WBA language enrichm
           grammars: [{ id: 'test.ext/syntaxes/test.json', scopeName: 'source.test', language: 'test' }],
         };
       }
-      return {
-        ok: true,
-        revision: 'grammar-revision-1',
-        raw: JSON.stringify({ scopeName: 'source.test', patterns: [] }),
-      };
+      assert.equal(method, 'editor.textmate.grammars.get');
+      return { revision: 'grammar-revision-1', bodies: Object.fromEntries(
+        params.ids.map((id) => [id, { ok: true, raw: JSON.stringify({ scopeName: 'source.test', patterns: [] }) }]),
+      ) };
     },
   });
 
@@ -1359,17 +1481,16 @@ test('TextMate projection revisions dispose stale providers and reinstall from t
           }],
         };
       }
-      assert.equal(method, 'editor.textmate.grammar.get');
+      assert.equal(method, 'editor.textmate.grammars.get');
       assert.equal(params.revision, currentRevision);
-      grammarLoads.push(params.id);
-      return {
+      grammarLoads.push(...params.ids);
+      return { revision: currentRevision, bodies: Object.fromEntries(params.ids.map((id) => [id, {
         ok: true,
-        revision: currentRevision,
         raw: JSON.stringify({
           scopeName: 'source.test',
           patterns: [{ match: `revision-${revision}`, name: `keyword.revision-${revision}` }],
         }),
-      };
+      }])) };
     },
   });
 

@@ -38,11 +38,23 @@ class TextmateGrammarBodyDto(TypedDict):
     raw: str
 
 
+class TextmateGrammarErrorDto(TypedDict):
+    ok: bool
+    error: str
+
+
+class TextmateGrammarBatchDto(TypedDict):
+    revision: str
+    bodies: dict[str, TextmateGrammarBodyDto | TextmateGrammarErrorDto]
+
+
 class TextmateProjectionError(ValueError):
     pass
 
 
 _MAX_GRAMMAR_BYTES = 4 * 1024 * 1024
+MAX_GRAMMAR_BATCH_SIZE = 16
+_MAX_GRAMMAR_BATCH_BYTES = 8 * 1024 * 1024
 
 
 def _record(value: object) -> dict[str, object]:
@@ -162,6 +174,37 @@ def get_textmate_grammar_body(grammar_id: str, revision: str) -> TextmateGrammar
     current_revision, extensions = _extension_entries()
     if not revision or revision != current_revision:
         raise TextmateProjectionError("textmate_projection_revision_changed")
+    return _grammar_body_from_snapshot(grammar_id, current_revision, extensions, _allowed_extension_roots())
+
+
+def get_textmate_grammar_bodies(grammar_ids: list[str], revision: str) -> TextmateGrammarBatchDto:
+    if not grammar_ids or len(grammar_ids) > MAX_GRAMMAR_BATCH_SIZE or len(set(grammar_ids)) != len(grammar_ids):
+        raise TextmateProjectionError("textmate_grammar_batch_invalid")
+    current_revision, extensions = _extension_entries()
+    if not revision or revision != current_revision:
+        raise TextmateProjectionError("textmate_projection_revision_changed")
+    allowed_roots = _allowed_extension_roots()
+    bodies: dict[str, TextmateGrammarBodyDto | TextmateGrammarErrorDto] = {}
+    total_bytes = 0
+    for grammar_id in grammar_ids:
+        try:
+            body = _grammar_body_from_snapshot(grammar_id, current_revision, extensions, allowed_roots)
+            body_bytes = len(body["raw"].encode("utf-8"))
+            if total_bytes + body_bytes > _MAX_GRAMMAR_BATCH_BYTES:
+                raise TextmateProjectionError("textmate_grammar_batch_too_large")
+            total_bytes += body_bytes
+            bodies[grammar_id] = body
+        except TextmateProjectionError as exc:
+            bodies[grammar_id] = {"ok": False, "error": str(exc)}
+    return {"revision": current_revision, "bodies": bodies}
+
+
+def _grammar_body_from_snapshot(
+    grammar_id: str,
+    current_revision: str,
+    extensions: dict[str, dict[str, object]],
+    allowed_roots: tuple[Path, ...],
+) -> TextmateGrammarBodyDto:
 
     extension_id, separator, requested_path = grammar_id.partition("/")
     if not separator or not extension_id or not requested_path:
@@ -173,7 +216,7 @@ def get_textmate_grammar_body(grammar_id: str, revision: str) -> TextmateGrammar
     if not isinstance(root_value, str) or not root_value:
         raise TextmateProjectionError("textmate_grammar_not_found")
     root = Path(root_value).expanduser().resolve(strict=False)
-    if not _is_allowed_extension_root(root, _allowed_extension_roots()):
+    if not _is_allowed_extension_root(root, allowed_roots):
         raise TextmateProjectionError("textmate_grammar_not_found")
     for grammar in _records(extension.get("grammars", [])):
         relative_path = grammar.get("path")

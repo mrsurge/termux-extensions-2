@@ -98,7 +98,7 @@ export class TMGrammarFactory extends Disposable {
           return vscodeTextmate.parseRawGrammar(content, location.path);
         } catch (error) {
           this._host.logError(`Unable to load and parse grammar for scope ${scopeName} from ${location}`, error);
-          return null;
+          throw error;
         }
       },
       getInjections: (scopeName: string) => {

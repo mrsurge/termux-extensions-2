@@ -12,9 +12,11 @@ from app.apps.code_te2.extension_registry import (
     toggle_extension,
 )
 from app.apps.code_te2.textmate_projection import (
+    MAX_GRAMMAR_BATCH_SIZE,
     TextmateProjectionError,
     get_textmate_catalog,
     get_textmate_grammar_body,
+    get_textmate_grammar_bodies,
 )
 
 
@@ -173,6 +175,47 @@ class TextmateProjectionTests(TestCase):
 
             self.assertIn("source.test", body["raw"])
             allowed_roots.assert_called_once_with()
+
+    def test_batch_uses_one_registry_snapshot_and_isolates_bad_grammar(self) -> None:
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "test"
+            grammar_path = root / "syntaxes" / "test.tmLanguage.json"
+            grammar_path.parent.mkdir(parents=True)
+            _ = grammar_path.write_text('{"scopeName":"source.test"}', encoding="utf-8")
+            registry = self._registry(root)
+            with (
+                patch("app.apps.code_te2.textmate_projection.load_registry", return_value=registry) as load,
+                patch("app.apps.code_te2.textmate_projection._allowed_extension_roots", return_value=(Path(temp_dir),)) as roots,
+            ):
+                result = get_textmate_grammar_bodies(
+                    ["test.extension/syntaxes/test.tmLanguage.json", "test.extension/syntaxes/missing.json"],
+                    "revision-1",
+                )
+
+            self.assertEqual(result["revision"], "revision-1")
+            self.assertTrue(result["bodies"]["test.extension/syntaxes/test.tmLanguage.json"]["ok"])
+            self.assertFalse(result["bodies"]["test.extension/syntaxes/missing.json"]["ok"])
+            load.assert_called_once_with()
+            roots.assert_called_once_with()
+
+    def test_batch_rejects_stale_revision_and_unbounded_or_duplicate_requests(self) -> None:
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "test"
+            grammar_path = root / "syntaxes" / "test.tmLanguage.json"
+            grammar_path.parent.mkdir(parents=True)
+            _ = grammar_path.write_text('{"scopeName":"source.test"}', encoding="utf-8")
+            registry = self._registry(root)
+            with patch("app.apps.code_te2.textmate_projection.load_registry", return_value=registry):
+                with self.assertRaisesRegex(TextmateProjectionError, "revision_changed"):
+                    _ = get_textmate_grammar_bodies(["test.extension/syntaxes/test.tmLanguage.json"], "old")
+                with self.assertRaisesRegex(TextmateProjectionError, "batch_invalid"):
+                    _ = get_textmate_grammar_bodies(["same", "same"], "revision-1")
+                with self.assertRaisesRegex(TextmateProjectionError, "batch_invalid"):
+                    _ = get_textmate_grammar_bodies([f"id/{index}" for index in range(MAX_GRAMMAR_BATCH_SIZE + 1)], "revision-1")
 
     def test_body_rejects_declared_grammar_escaping_extension_root(self) -> None:
         from tempfile import TemporaryDirectory

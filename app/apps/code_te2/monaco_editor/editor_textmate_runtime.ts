@@ -11,7 +11,8 @@ import * as vscodeOniguruma from '../vendor/vscode-oniguruma';
 import { resolveMonacoLanguageId } from './editor_language_utils.ts';
 import { semanticTokenForegrounds } from './editor_semantic_theme_utils.ts';
 import { traceColdBoot } from './editor_cold_boot_trace.ts';
-import { TMGrammarFactory, missingTMGrammarErrorMessage } from './vscode_workbench_textmate_vendor/TMGrammarFactory.js';
+import { createTextmateGrammarBodyLoader } from './editor_textmate_grammar_loader.ts';
+import { TMGrammarFactory, missingTMGrammarErrorMessage, type ICreateGrammarResult } from './vscode_workbench_textmate_vendor/TMGrammarFactory.js';
 import {
   IValidEmbeddedLanguagesMap,
   IValidGrammarDefinition,
@@ -186,8 +187,10 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
   let tmVscodeIndex: VscodeGrammarIndexLike | null = null;
   let tmVscodeIndexInflight: Promise<VscodeGrammarIndexLike> | null = null;
   let tmReadyInflight: Promise<unknown> | null = null;
+  let tmOnigReady: Promise<void> | null = null;
   let tmProjectionEpoch = 0;
   const tmProviderDisposables: Record<string, { dispose?(): void } | undefined> = Object.create(null);
+  const grammarBodyLoader = createTextmateGrammarBodyLoader(deps.editorRpcCall);
 
   function resetTokenizationForAllModels(): void {
     try {
@@ -359,6 +362,7 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
     if (normalizedExpected && normalizedExpected === tmVscodeIndex?.revision) return false;
 
     tmProjectionEpoch += 1;
+    grammarBodyLoader.reset();
     for (const language of Object.keys(tmProviderDisposables)) {
       try {
         tmProviderDisposables[language]?.dispose?.();
@@ -482,12 +486,17 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
       throw new Error('TextMate grammar index unavailable');
     }
 
-    const wasmResp = await deps.fetchFn(deps.buildUiUrl('monaco_editor/textmate/onig.wasm'), { cache: 'force-cache' });
-    if (!wasmResp.ok) {
-      throw new Error(`onig.wasm HTTP ${wasmResp.status}`);
+    if (!tmOnigReady) {
+      tmOnigReady = (async () => {
+        const wasmResp = await deps.fetchFn(deps.buildUiUrl('monaco_editor/textmate/onig.wasm'), { cache: 'force-cache' });
+        if (!wasmResp.ok) throw new Error(`onig.wasm HTTP ${wasmResp.status}`);
+        await vscodeOniguruma.loadWASM(await wasmResp.arrayBuffer());
+      })().catch((error: unknown) => {
+        tmOnigReady = null;
+        throw error;
+      });
     }
-    const wasmBuf = await wasmResp.arrayBuffer();
-    await vscodeOniguruma.loadWASM(wasmBuf);
+    await tmOnigReady;
 
     const onigLib = Promise.resolve({
       createOnigScanner(sources: string[]) {
@@ -509,21 +518,12 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
           console.warn('[TextMate]', msg, err);
         },
         async readFile(resource: URI): Promise<string> {
+          if (epoch !== tmProjectionEpoch) throw new Error('TextMate projection superseded');
           const grammarId = grammarIdFromLocation(resource) || grammarIndex.byLocation[resource.toString()] || '';
           if (!grammarId) {
             throw new Error(`Unknown grammar resource: ${resource.toString()}`);
           }
-          const payload = asRecord(await deps.editorRpcCall(
-            'editor.textmate.grammar.get',
-            { id: grammarId, revision: grammarIndex.revision },
-            { timeoutMs: 8000 },
-          ));
-          const ok = payload?.ok === true;
-          const raw = asString(payload?.raw);
-          if (!ok || !raw) {
-            throw new Error(asString(payload?.error) || `Failed to load grammar ${grammarId}`);
-          }
-          return raw;
+          return grammarBodyLoader.load(grammarId, grammarIndex.revision);
         },
       },
       grammarDefinitions,
@@ -593,7 +593,17 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
           return false;
         }
 
-        const created = await grammarFactory.createGrammar(lang, encodedLanguageId);
+        let created: ICreateGrammarResult;
+        try {
+          created = await grammarFactory.createGrammar(lang, encodedLanguageId);
+        } catch (error) {
+          // A failed dependency read must not poison the factory's raw-grammar
+          // repository. Keep successful bodies but retry unresolved ones next time.
+          if (epoch === tmProjectionEpoch && tmGrammarFactory === grammarFactory) {
+            tmGrammarFactory = null;
+          }
+          throw error;
+        }
         if (epoch !== tmProjectionEpoch) return false;
         const grammar = created.grammar as TextmateGrammarLike | null;
         if (!grammar) {

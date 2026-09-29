@@ -37,6 +37,7 @@ from .editor_rpc_contract import (
     EDITOR_RPC_METHOD_SCROLL_STATE_PUBLISH,
     EDITOR_RPC_METHOD_TEXTMATE_CATALOG_GET,
     EDITOR_RPC_METHOD_TEXTMATE_GRAMMAR_GET,
+    EDITOR_RPC_METHOD_TEXTMATE_GRAMMARS_GET,
     JSONRPC_METHOD_NOT_FOUND,
     EditorRpcDispatchError,
 )
@@ -129,6 +130,28 @@ async def dispatch_editor_rpc_request(
             raise EditorRpcDispatchError(-32602, "textmate_revision_required")
         try:
             return await asyncio.to_thread(get_textmate_grammar_body, grammar_id, revision)
+        except TextmateProjectionError as exc:
+            raise EditorRpcDispatchError(-32000, str(exc)) from exc
+
+    if method == EDITOR_RPC_METHOD_TEXTMATE_GRAMMARS_GET:
+        from typing import cast
+        from ..textmate_projection import (
+            MAX_GRAMMAR_BATCH_SIZE,
+            TextmateProjectionError,
+            get_textmate_grammar_bodies,
+        )
+
+        raw_ids = params.get("ids")
+        revision = params.get("revision")
+        if not isinstance(raw_ids, list) or not raw_ids or len(raw_ids) > MAX_GRAMMAR_BATCH_SIZE:
+            raise EditorRpcDispatchError(-32602, "textmate_grammar_batch_invalid")
+        ids = cast(list[object], raw_ids)
+        if any(not isinstance(item, str) or not item for item in ids) or len(set(cast(list[str], ids))) != len(ids):
+            raise EditorRpcDispatchError(-32602, "textmate_grammar_batch_invalid")
+        if not isinstance(revision, str) or not revision:
+            raise EditorRpcDispatchError(-32602, "textmate_revision_required")
+        try:
+            return await asyncio.to_thread(get_textmate_grammar_bodies, cast(list[str], ids), revision)
         except TextmateProjectionError as exc:
             raise EditorRpcDispatchError(-32000, str(exc)) from exc
 

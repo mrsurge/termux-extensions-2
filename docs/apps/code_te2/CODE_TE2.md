@@ -1859,22 +1859,32 @@ The Code Server path is data-driven:
 3. `extension_registry.py` persists complete built-in/user TextMate contribution
    descriptors and one deterministic projection revision during its normal scan.
    `editor_textmate_runtime.ts` requests that catalog through typed editor RPC,
-   selects the first contribution for a language, lazily requests only its body
-   under the same revision, and installs it using the vendored TextMate and
+   selects the first contribution for a language, lazily requests its body and
+   any referenced/injected grammar bodies under the same revision, and installs
+   it using the vendored TextMate and
    Oniguruma runtimes.
 4. Provider registration events and reconnect snapshots install one stable
    Monaco bridge per advertised language and feature. There are no JavaScript,
    HTML, CSS, or other language-specific routing branches.
 
 Active grammar discovery/content travels over `/rpc/editor` as
-`editor.textmate.catalog.get` / `editor.textmate.grammar.get`; there is no WBA or
+`editor.textmate.catalog.get` / bounded `editor.textmate.grammars.get` batches;
+the single-body `editor.textmate.grammar.get` remains available to editor RPC
+callers. There is no WBA or
 HTTP fallback. The obsolete WBA grammar aliases, handlers and duplicate scanner
 are removed. Catalog metadata is available from persisted registry state before
 WBA connects. Grammar bodies remain backend-owned lazy reads and are bounded to
 4 MiB. Each body read verifies the exact projection revision, managed extension
 root, relative path, recorded size and mtime. Install/update/uninstall scans publish
 a revision fact; editors atomically dispose stale token providers and rebuild only
-the active language without taking focus. The separate HTTP resource boundary in
+the active language without taking focus. Batch reads share one registry/root
+snapshot, cap at 16 unique IDs and 8 MiB of returned bodies, and isolate per-ID
+resource errors. The client coalesces at most two in-flight batches and retains
+successful raw bodies for its current page and revision; failed dependencies do
+not enter the cache. A failed dependency load discards the partial TextMate
+factory so a later open retries only missing bodies. Oniguruma initialization is
+shared across those retries. No grammar-body cache survives a page reload.
+The separate HTTP resource boundary in
 `monaco_editor/editor_asset_routes.py` serves `/ui/monaco_editor/textmate/onig.wasm`,
 Monaco ESM/language assets and theme JSON, retaining native OTA/APK interception
 and CSS-module shim behavior. `editor_backend.py` owns no HTTP routes or web
