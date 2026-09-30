@@ -43,6 +43,7 @@ interface ExplorerChangesPayload {
 interface ExplorerChangesResultsRendererDeps {
   remoteAction?(action: 'push' | 'pull' | 'fetch'): Promise<void>;
   hasStagedChanges?(): boolean;
+  getFileStaging?(rel: string): { staged: boolean; unstaged: boolean };
   stageFile?(rel: string): Promise<void>;
   commitStagedChanges?(): Promise<void>;
   getFileIcon?(name: string): Promise<{ svg?: string; color?: string } | null>;
@@ -272,7 +273,26 @@ export function createExplorerChangesResultsRenderer(
     const list = container.querySelector<HTMLElement>(':scope > .fe-search-changes') || document.createElement('div');
     list.className = 'fe-search-changes';
     const keep = new Set<HTMLElement>();
+    const updateStaging = (group: HTMLElement): void => {
+      const rel = group.dataset.rel || '';
+      const { staged, unstaged } = deps.getFileStaging?.(rel) || { staged: false, unstaged: false };
+      const badge = group.querySelector<HTMLElement>('.fe-search-change-staging');
+      if (badge) {
+        badge.hidden = !staged;
+        badge.textContent = unstaged ? 'Staged + edits' : 'Staged';
+        badge.title = unstaged ? 'Index contains staged changes; additional disk changes are not staged' : 'Changes are staged in the index';
+      }
+      const stage = group.querySelector<HTMLButtonElement>('.fe-search-change-stage');
+      if (stage) {
+        stage.textContent = staged && !unstaged ? '✓' : '+';
+        stage.title = staged && !unstaged ? `Changes in ${rel} are staged` : `Stage disk changes in ${rel}`;
+        stage.setAttribute('aria-label', stage.title);
+        stage.disabled = !headView() || (staged && !unstaged);
+        stage.classList.toggle('is-staged', staged && !unstaged);
+      }
+    };
     const place = (group: HTMLElement, index: number): void => {
+      updateStaging(group);
       group.querySelector('.fe-search-change-header')?.classList.toggle('is-recent',
         data.recentChanges?.paths.includes(group.dataset.rel || '') === true);
       keep.add(group);
@@ -283,8 +303,6 @@ export function createExplorerChangesResultsRenderer(
       const cached = renderedGroups.get(change);
       if (cached) {
         labelRestore(cached);
-        const stage = cached.querySelector<HTMLButtonElement>('.fe-search-change-stage');
-        if (stage) stage.disabled = !headView();
         place(cached, index); return;
       }
       const rel = change.rel || '';
@@ -371,6 +389,10 @@ export function createExplorerChangesResultsRenderer(
       statusText.title = change.statusText || '';
       statusText.classList.toggle('is-added', untracked);
       meta.appendChild(statusText);
+      const staging = document.createElement('span');
+      staging.className = 'fe-search-change-staging';
+      staging.hidden = true;
+      meta.appendChild(staging);
       const hunks = Array.isArray(change.hunks) ? change.hunks : [];
       const stats = changeStatistics(change);
       const { added, deleted } = stats || { added: 0, deleted: 0 };
@@ -396,7 +418,7 @@ export function createExplorerChangesResultsRenderer(
           if (!headView() || stage.disabled) return;
           stage.disabled = true;
           try { await deps.stageFile?.(rel); }
-          finally { stage.disabled = !headView(); }
+          finally { updateStaging(group); }
         };
         header.appendChild(stage);
       }

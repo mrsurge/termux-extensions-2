@@ -5,6 +5,33 @@ Working branch: `feature/desktop-deb-packaging`; no new branch needed for planni
 
 ## Planning
 
+### Editor/framework UI corrections before release
+
+- [x] Reproduce inline gutter wrap mismatch and isolate stale inlay-hint alignment.
+- [x] Restore transient diagnostic options; retain original gutter wrap policy.
+- [x] Shallow-clone the authoritative Monaco fork and implement lifecycle-owned
+  injected-text alignment invalidation.
+- [x] Validate hint add/remove and model-replacement regression behavior in a
+  real Chromium renderer: four transitions aligned; detached model caused no
+  alignment update. The same test fails on the pre-fix vendored runtime.
+- [x] Build Monaco editor-distro (zero compilation errors); publish only the
+  changed generated alignment module/map, rebuild bootstrap and host, and pass
+  Code TE2 typecheck. Rerun the browser test against the published ESM: passed.
+- [x] User confirms live acceptance of inline diff gutter alignment.
+
+Fork source and runnable regression test are retained as
+`monaco-inline-gutter.patch` beside this tracker because the nested checkout is
+ignored by the TE2 repository. No version bump, APK build, runtime restart or
+agent-driven client OTA was performed in this slice. User confirms live validation.
+
+- [x] Disable autocapitalization in shared inputs, registered custom dialog
+  surfaces and editor/framework/native launcher UI roots.
+- [x] By Changes displays live staged status and additional unstaged edits;
+  retained headers update through existing Git-status publication.
+- [x] Validate targeted dialog/staging tests (15), shared dialog tests (6),
+  Code TE2/Electron typechecks and frontend/Electron builds.
+- [ ] Live acceptance after native asset OTA.
+
 ### Installed frontend staged startup
 
 - [x] Inspect local asset delivery, readiness gate and initial layout ordering.

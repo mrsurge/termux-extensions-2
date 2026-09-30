@@ -32,6 +32,7 @@ test("inline dialogs stack, trap focus, settle, and restore focus", async () => 
   assert.equal(layers[1].getAttribute("aria-hidden"), "false");
 
   const input = layers[1].querySelector("input");
+  assert.equal(input.getAttribute("autocapitalize"), "off");
   input.value = "after";
   layers[1].querySelector('[data-primary="true"]').click();
   assert.equal(await innerResult, "after");

@@ -148,11 +148,13 @@ test('file staging and shared commit are HEAD-only while historical Restore stay
     let ref = 'HEAD';
     const staged = [], restored = [];
     let commits = 0;
+    let staging = { staged: false, unstaged: true };
     const renderer = createExplorerChangesResultsRenderer({
       getGitDiffBase: () => ({ ref }),
       ensureInlineDiffs: async () => assert.fail('action must not navigate'),
       openFileAndMaybeJump: async () => assert.fail('action must not navigate'),
       stageFile: async rel => staged.push(rel),
+      getFileStaging: () => staging,
       commitStagedChanges: async () => { commits++; },
       restoreFile: async rel => restored.push(rel), restoreHunk: async () => {},
     });
@@ -168,6 +170,17 @@ test('file staging and shared commit are HEAD-only while historical Restore stay
     container.querySelector('.fe-search-changes-commit').click(); await Promise.resolve();
     assert.deepEqual(staged, ['a.py']); assert.equal(commits, 1);
     assert.equal(container.querySelector('.fe-search-change-body').hidden, true);
+    staging = { staged: true, unstaged: false }; render();
+    assert.equal(container.querySelector('.fe-search-change-staging').textContent, 'Staged');
+    assert.equal(container.querySelector('.fe-search-change-staging').hidden, false);
+    assert.equal(stage.textContent, '✓');
+    assert.equal(stage.disabled, true);
+    staging = { staged: true, unstaged: true }; render();
+    assert.equal(container.querySelector('.fe-search-change-staging').textContent, 'Staged + edits');
+    assert.equal(stage.textContent, '+');
+    assert.equal(stage.disabled, false);
+    staging = { staged: false, unstaged: true }; render();
+    assert.equal(container.querySelector('.fe-search-change-staging').hidden, true);
     ref = 'abc123';
     stage.click(); await Promise.resolve(); // Live guard also protects old DOM before projection.
     assert.equal(staged.length, 1);

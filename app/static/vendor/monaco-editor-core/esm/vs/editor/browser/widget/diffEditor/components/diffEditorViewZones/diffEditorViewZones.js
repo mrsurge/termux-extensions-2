@@ -31,6 +31,7 @@ import { IClipboardService } from '../../../../../../platform/clipboard/common/c
 import { IContextMenuService } from '../../../../../../platform/contextview/browser/contextView.js';
 import { Range } from '../../../../../common/core/range.js';
 import { InlineDecoration } from '../../../../../common/viewModel/inlineDecorations.js';
+import { ModelInjectedTextChangedEvent } from '../../../../../common/textModelEvents.js';
 /**
  * Ensures both editors have the same height by aligning unchanged lines.
  * In inline view mode, inserts viewzones to show deleted code from the original text model in the modified code editor.
@@ -61,6 +62,26 @@ let DiffEditorViewZones = class DiffEditorViewZones extends Disposable {
         const updateImmediately = this._register(new RunOnceScheduler(() => {
             state.set(state.get() + 1, undefined);
         }, 0));
+        // Inlay hints can change wrapping without changing the wrapping column or
+        // the document diff. Recompute after both view models process injected text.
+        const injectedTextListeners = this._register(new DisposableStore());
+        const observeInjectedText = () => {
+            injectedTextListeners.clear();
+            for (const editor of [this._editors.original, this._editors.modified]) {
+                const model = editor.getModel();
+                if (model) {
+                    injectedTextListeners.add(model.onDidChangeContentOrInjectedText(event => {
+                        if (event instanceof ModelInjectedTextChangedEvent) {
+                            updateImmediately.schedule();
+                        }
+                    }));
+                }
+            }
+            updateImmediately.schedule();
+        };
+        this._register(this._editors.original.onDidChangeModel(observeInjectedText));
+        this._register(this._editors.modified.onDidChangeModel(observeInjectedText));
+        observeInjectedText();
         this._register(this._editors.original.onDidChangeViewZones((_args) => { if (!this._canIgnoreViewZoneUpdateEvent()) {
             updateImmediately.schedule();
         } }));

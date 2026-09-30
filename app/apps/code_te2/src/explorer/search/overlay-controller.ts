@@ -33,6 +33,7 @@ type ExplorerSearchTimer = ReturnType<typeof setTimeout> | null;
 
 interface ExplorerSearchOverlayControllerDeps {
   hasStagedChanges(): boolean;
+  getFileStaging(rel: string): { staged: boolean; unstaged: boolean };
   commitStagedChanges(): Promise<void>;
   toast(message: string): void;
   hasExplorerRpc(): boolean;
@@ -190,6 +191,7 @@ export function createExplorerSearchOverlayController(
       } catch (error) { deps.toast(error instanceof Error ? error.message : 'Git operation failed'); }
     },
     hasStagedChanges: () => deps.hasStagedChanges(),
+    getFileStaging: (rel) => deps.getFileStaging(rel),
     commitStagedChanges: () => deps.commitStagedChanges(),
     stageFile: async (rel) => {
       if ((deps.getGitDiffBase().ref || 'HEAD') !== 'HEAD') return;

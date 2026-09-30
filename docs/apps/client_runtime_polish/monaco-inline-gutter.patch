@@ -1,0 +1,150 @@
+diff --git a/src/vs/editor/browser/widget/diffEditor/components/diffEditorViewZones/diffEditorViewZones.ts b/src/vs/editor/browser/widget/diffEditor/components/diffEditorViewZones/diffEditorViewZones.ts
+index 62bf7ec..cd9b1dc 100644
+--- a/src/vs/editor/browser/widget/diffEditor/components/diffEditorViewZones/diffEditorViewZones.ts
++++ b/src/vs/editor/browser/widget/diffEditor/components/diffEditorViewZones/diffEditorViewZones.ts
+@@ -31,6 +31,7 @@ import { IContextMenuService } from '../../../../../../platform/contextview/brow
+ import { DiffEditorOptions } from '../../diffEditorOptions.js';
+ import { Range } from '../../../../../common/core/range.js';
+ import { InlineDecoration, InlineDecorationType } from '../../../../../common/viewModel/inlineDecorations.js';
++import { ModelInjectedTextChangedEvent } from '../../../../../common/textModelEvents.js';
+ 
+ /**
+  * Ensures both editors have the same height by aligning unchanged lines.
+@@ -78,6 +79,27 @@ export class DiffEditorViewZones extends Disposable {
+ 			state.set(state.get() + 1, undefined);
+ 		}, 0));
+ 
++		// Inlay hints can change wrapping without changing the wrapping column or
++		// the document diff. Recompute after both view models process injected text.
++		const injectedTextListeners = this._register(new DisposableStore());
++		const observeInjectedText = () => {
++			injectedTextListeners.clear();
++			for (const editor of [this._editors.original, this._editors.modified]) {
++				const model = editor.getModel();
++				if (model) {
++					injectedTextListeners.add(model.onDidChangeContentOrInjectedText(event => {
++						if (event instanceof ModelInjectedTextChangedEvent) {
++							updateImmediately.schedule();
++						}
++					}));
++				}
++			}
++			updateImmediately.schedule();
++		};
++		this._register(this._editors.original.onDidChangeModel(observeInjectedText));
++		this._register(this._editors.modified.onDidChangeModel(observeInjectedText));
++		observeInjectedText();
++
+ 		this._register(this._editors.original.onDidChangeViewZones((_args) => { if (!this._canIgnoreViewZoneUpdateEvent()) { updateImmediately.schedule(); } }));
+ 		this._register(this._editors.modified.onDidChangeViewZones((_args) => { if (!this._canIgnoreViewZoneUpdateEvent()) { updateImmediately.schedule(); } }));
+ 		this._register(this._editors.original.onDidChangeConfiguration((args) => {
+diff --git a/test/te2/inline-diff-injected-text.mjs b/test/te2/inline-diff-injected-text.mjs
+new file mode 100644
+index 0000000..b891672
+--- /dev/null
++++ b/test/te2/inline-diff-injected-text.mjs
+@@ -0,0 +1,104 @@
++// Run after `gulp editor-distro`. Exercises actual browser wrapping and gutter zones.
++import assert from 'node:assert/strict';
++import fs from 'node:fs/promises';
++import http from 'node:http';
++import path from 'node:path';
++import { fileURLToPath } from 'node:url';
++import { build } from '../../build/node_modules/esbuild/lib/main.js';
++import { chromium } from 'playwright';
++
++const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
++const output = await fs.mkdtemp(path.join(process.env.TMPDIR || path.join(root, '.build'), 'te2-gutter-'));
++const esm = process.env.MONACO_ESM_ROOT || path.join(root, 'out-monaco-editor-core/esm');
++await build({
++	stdin: { contents: `import * as monaco from ${JSON.stringify(path.join(esm, 'vs/editor/editor.main.js'))}; window.monaco = monaco;`, resolveDir: root },
++	bundle: true, format: 'iife', outfile: path.join(output, 'editor.js'),
++	loader: { '.ttf': 'dataurl' },
++});
++await build({
++	entryPoints: [path.join(esm, 'vs/editor/common/services/editorWebWorkerMain.js')],
++	bundle: true, format: 'iife', outfile: path.join(output, 'worker.js'),
++});
++const server = http.createServer(async (req, res) => {
++	const name = req.url?.slice(1);
++	if (!['editor.js', 'editor.css', 'worker.js'].includes(name)) {
++		res.setHeader('content-type', 'text/html');
++		res.end('<link rel="stylesheet" href="/editor.css"><div id="editor" style="width:320px;height:400px"></div><script>window.MonacoEnvironment={getWorker:()=>new Worker("/worker.js")}</script><script src="/editor.js"></script>');
++		return;
++	}
++	res.setHeader('content-type', name.endsWith('.css') ? 'text/css' : 'text/javascript');
++	res.end(await fs.readFile(path.join(output, name)));
++});
++await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
++let browser;
++try {
++	browser = await chromium.launch({ executablePath: process.env.CHROME_BIN || '/usr/bin/google-chrome', args: ['--no-sandbox'] });
++	const page = await browser.newPage();
++	page.on('pageerror', error => console.error(error.message));
++	await page.goto(`http://127.0.0.1:${server.address().port}`);
++	const result = await page.evaluate(async () => {
++		const { monaco } = window;
++		const diff = monaco.editor.createDiffEditor(document.querySelector('#editor'), {
++			renderSideBySide: false, wordWrap: 'on', fontSize: 14, lineHeight: 20,
++			minimap: { enabled: false }, automaticLayout: false,
++		});
++		const text = 'first\nconst short = 1;\nthird\nfourth';
++		const pairs = [];
++		const settle = async predicate => {
++			for (let i = 0; i < 100; i++) {
++				await new Promise(resolve => setTimeout(resolve, 20));
++				if (predicate()) { return; }
++			}
++			throw new Error(`Diff alignment did not settle: ${JSON.stringify({ changes: diff.getLineChanges(), originalTop: diff.getOriginalEditor().getTopForLineNumber(3), modifiedTop: diff.getModifiedEditor().getTopForLineNumber(3), zones: diff.getOriginalEditor().getWhitespaces(), wraps: diff.getModifiedEditor()._getViewModel()?.coordinatesConverter.getModelLineViewLineCount(2) })}`);
++		};
++		const attach = async () => {
++			const pair = { original: monaco.editor.createModel(text), modified: monaco.editor.createModel(text) };
++			pairs.push(pair);
++			diff.setModel(pair);
++			await settle(() => diff.getLineChanges()?.length === 0);
++			return pair;
++		};
++		const orig = diff.getOriginalEditor(), mod = diff.getModifiedEditor();
++		const measure = () => {
++			const wraps = mod._getViewModel().coordinatesConverter.getModelLineViewLineCount(2);
++			const zone = orig.getWhitespaces().filter(z => z.afterLineNumber === 2).reduce((sum, z) => sum + z.height, 0);
++			return { wraps, zone, wanted: (wraps - 1) * 20, aligned: orig.getTopForLineNumber(3) === mod.getTopForLineNumber(3) };
++		};
++		const snapshots = [];
++		const hints = [{ range: new monaco.Range(2, 6, 2, 6), options: { showIfCollapsed: true, after: { content: ': VeryLongInjectedTypeNameRepeatedSeveralTimesForWrapping' } } }];
++		try {
++			const first = await attach();
++			let ids = first.modified.deltaDecorations([], hints);
++			await settle(() => { const s = measure(); return s.wraps > 1 && s.zone === s.wanted && s.aligned; });
++			snapshots.push(measure());
++			first.modified.deltaDecorations(ids, []);
++			await settle(() => { const s = measure(); return s.wraps === 1 && s.zone === 0 && s.aligned; });
++			snapshots.push(measure());
++			const second = await attach();
++			let changes = 0;
++			const listener = orig.onDidChangeViewZones(() => changes++);
++			await new Promise(resolve => setTimeout(resolve, 100));
++			changes = 0;
++			first.modified.deltaDecorations([], hints);
++			await new Promise(resolve => setTimeout(resolve, 100));
++			if (changes !== 0) { throw new Error('Detached model invalidated current alignment'); }
++			listener.dispose();
++			ids = second.modified.deltaDecorations([], hints);
++			await settle(() => { const s = measure(); return s.wraps > 1 && s.zone === s.wanted && s.aligned; });
++			snapshots.push(measure());
++			second.modified.deltaDecorations(ids, []);
++			await settle(() => { const s = measure(); return s.wraps === 1 && s.zone === 0 && s.aligned; });
++			snapshots.push(measure());
++			return snapshots;
++		} finally {
++			diff.dispose();
++			for (const pair of pairs) { pair.original.dispose(); pair.modified.dispose(); }
++		}
++	});
++	assert.equal(result.length, 4);
++	console.log(JSON.stringify({ passed: true, snapshots: result }));
++} finally {
++	await browser?.close();
++	await new Promise(resolve => server.close(resolve));
++	await fs.rm(output, { recursive: true, force: true });
++}

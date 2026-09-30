@@ -985,6 +985,11 @@ User live acceptance and broader end-to-end concurrency validation remain pendin
   semantics. Final metadata supplies the exact bounded total and continuation
   token before `search.job.done`. Existing
   frontend metadata merging preserves file DOM and local expansion during this final update. Compact gapless file headers expose per-file Stage (`+`) and a shared Stage and commit all action when the index is empty, otherwise Commit selected (the index), through existing Explorer RPCs; both are HEAD-only. Restore remains confirmation-gated, labeled `×` at HEAD and `Restore` in history. There is no hunk staging. The shared commit prompt rejects project/comparison changes before dispatch; the backend waits for staging and stops if staging fails. SVG fe-btn Push/Pull/Fetch controls reuse Git services. Fetch updates origin refs without merging; History separates Fetch from its local Refresh button. Untracked files retain real Git +/- statistics without bodies and follow tracked results across pagination; bodyless preview headers open the file directly. Status labels use `M` and green `A` for modified/untracked.
+  Staging cues come from the live project Git-status snapshot, independently of
+  preview status. Headers show `Staged` with a disabled checkmark when fully
+  staged, or `Staged + edits` with Stage still available for additional disk
+  changes. Existing status notifications update retained headers without losing
+  their expansion state or restarting search.
   HEAD browsing retains HEAD status enumeration; historical discovery uses
   index-backed candidates with per-path selected-tree-to-disk verification.
   Every hunk reads the pinned baseline. Continuations validate the full token
@@ -1545,12 +1550,35 @@ Because the VS Code Monaco ESM imports CSS files, the harness serves `.css` as:
 ### Publication boundary
 The committed deployed ESM tree is
 `app/static/vendor/monaco-editor-core/esm/`. Its patched VS Code source checkout
-is external and user-local; this repository does not contain a rebuildable
-`worktrees/vscode-te2-diff` checkout. Do not treat source-map paths inside the
-vendored bundle as a dependency or issue a guessed build command.
+is user-local at `worktrees/vscode-te2-diff`, shallow-cloned from
+`https://github.com/mrsurge/vscode-te2-diff.git`, branch
+`te2/pinned-baseline-diff` (baseline `f2d5196`). The nested checkout is not shipped
+or tracked by TE2. Do not treat source-map paths as dependency discovery.
 
 When an approved external publication is available, copy its verified ESM output
-into the committed vendor tree, then rebuild Code TE2 with `node build.mjs`.
+into the committed vendor tree, rebuild `node scripts/build_monaco_bootstrap_bundle.mjs`
+from the TE2 root, then rebuild Code TE2 with `node build.mjs`. Native clients
+require an explicit asset OTA before live validation; reload alone is insufficient.
+
+The inline original editor deliberately has wrapping disabled because it is a
+narrow line-number gutter. Diff alignment zones mirror the modified editor's
+wrapped line heights. Inlay hints can change those heights without changing the
+wrapping column or textual diff; the fork now observes injected-text changes on
+both current models and coalesces alignment updates after view-model processing.
+Model replacement clears old listeners, and disposal cancels queued work.
+Do not toggle line height or enable wrapping in the narrow gutter as a workaround.
+
+Reproduction/source patch and browser regression test are preserved in
+`docs/apps/client_runtime_polish/monaco-inline-gutter.patch`. Apply to the nested
+baseline, install root and `build/` locked npm dependencies with `npm ci --ignore-scripts`,
+run `node node_modules/gulp/bin/gulp.js editor-distro`, then
+`node test/te2/inline-diff-injected-text.mjs` (Chrome path configurable with
+`CHROME_BIN`). The test checks hint add/remove wrapping and detached-model
+listener cleanup. The old vendor failed with modified line 3 at 120px and original
+at 40px; the patched build aligns all four tested transitions. Only the generated
+alignment module and map are published for this fix; unrelated ESM is retained.
+Fork source/test commit: `4fe94d7` on `te2/pinned-baseline-diff`; user live
+acceptance confirmed after the frontend rebuild.
 
 ### Common failure mode: inline editor boot is blank but worker is running
 Symptom:

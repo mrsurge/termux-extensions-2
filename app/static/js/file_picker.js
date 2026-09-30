@@ -284,7 +284,7 @@ const TEMPLATE = `
         </div>
         <div class="te-fp-save-row te-fp-hidden">
           <label for="te-fp-input-name">File name</label>
-          <input id="te-fp-input-name" type="text" class="te-fp-input te-fp-input-name" placeholder="example.txt" />
+          <input id="te-fp-input-name" type="text" autocapitalize="off" class="te-fp-input te-fp-input-name" placeholder="example.txt" />
         </div>
         <div class="te-fp-scroll">
           <ul class="te-fp-list"></ul>

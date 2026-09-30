@@ -283,6 +283,10 @@ const explorerChromeController = createExplorerChromeController({
 });
 explorerSearchOverlayController = createExplorerSearchOverlayController({
   hasStagedChanges: () => Boolean(explorerRuntimeState.getGitStatus()?.staged?.length),
+  getFileStaging: (rel) => {
+    const status = explorerRuntimeState.getGitStatus();
+    return { staged: status?.staged?.includes(rel) === true, unstaged: status?.unstaged?.includes(rel) === true };
+  },
   commitStagedChanges: () => explorerGitFooterUtils.commitStagedChanges(true),
   toast,
   hasExplorerRpc: () => hasExplorerRpc(),

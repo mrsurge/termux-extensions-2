@@ -2,6 +2,36 @@
 
 ## Scope
 
+### Editor/framework UI corrections before the next release
+
+Inline diff gutter alignment is the current approved slice. Live inspection of
+identical Python models found four missing alignment-zone heights, all on lines
+with injected inlay hints. A temporary, restored line-height refresh removed the
+mismatches: normal wrapping calculations work, but injected-text updates do not
+invalidate the diff alignment. Keep the deliberately unwrapped narrow original
+editor; fix lifecycle-owned injected-text listeners in the Monaco source fork,
+coalescing updates after view-model processing. Test hint insertion/removal and
+model replacement, then publish Monaco ESM, rebuild bootstrap and host, and OTA
+the native client before acceptance. No runtime line-height workaround.
+
+Source checkout: shallow single-branch `worktrees/vscode-te2-diff`, upstream
+`mrsurge/vscode-te2-diff`, branch `te2/pinned-baseline-diff`, baseline `f2d5196`.
+Build only `editor-distro`, not the VS Code application. Preserve accepted
+native/mypyc checkpoint archives and monitor disk usage during dependency/build
+setup. Fork edits remain a separate Git scope; no release/version/tag yet.
+
+Disable automatic capitalization in shared dialog inputs and registered custom
+surfaces, including surfaces moved into a dialog portal. Apply the same inherited
+policy to Code TE2, framework pages and both native launcher/settings roots, so
+names, commit text, URLs and settings retain the user's typed case.
+
+By Changes must project staged status from the existing project Git snapshot:
+show a staged badge/checkmark, distinguish additional unstaged edits, and update
+retained headers on the existing status notification. No extra status request or
+optimistic staging authority is needed. Validate dialog behavior, retained-row
+staging transitions, typecheck and frontend builds; native acceptance requires
+asset OTA. Release/branch switching follows remaining bug fixes and user direction.
+
 Investigation-first maintenance work covering color-picker latency, persistent
 Sidebar presentation, and Cefrium zoom suppression. Keep the existing working
 branch for now; no release, version bump, or implementation is authorized by

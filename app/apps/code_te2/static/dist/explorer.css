@@ -2056,6 +2056,16 @@
 .fe-search-change-stage:disabled,
 .fe-search-changes-actions button:disabled { opacity: 0.4; cursor: default; }
 .fe-search-change-stage:focus-visible { outline: 2px solid #7dd3fc; }
+.fe-search-change-staging {
+  color: #86efac;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.fe-search-change-stage.is-staged:disabled { color: #86efac; opacity: 0.85; }
 .fe-search-changes-actions { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
 .fe-search-changes-expand { margin-right: auto; }
 .fe-search-change-header .fe-search-change-restore.is-historical,

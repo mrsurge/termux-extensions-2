@@ -2314,7 +2314,7 @@ var init_event = __esm({
         return fn;
       }
       Event2.chain = chain;
-      const HaltChainable = /* @__PURE__ */ Symbol("HaltChainable");
+      const HaltChainable = Symbol("HaltChainable");
       class ChainableSynthesis {
         constructor() {
           this.steps = [];
@@ -3107,7 +3107,7 @@ var init_cancellation = __esm({
 var MicrotaskDelay;
 var init_symbols = __esm({
   "app/static/vendor/monaco-editor-core/esm/vs/base/common/symbols.js"() {
-    MicrotaskDelay = /* @__PURE__ */ Symbol("MicrotaskDelay");
+    MicrotaskDelay = Symbol("MicrotaskDelay");
   }
 });
 
@@ -3246,7 +3246,7 @@ function createCancelableAsyncIterableProducer(callback) {
     }
   });
 }
-var Throttler, timeoutDeferred, microtaskDeferred, Delayer, ThrottledDelayer, TaskQueue, TimeoutTimer, IntervalTimer, RunOnceScheduler, runWhenGlobalIdle, _runWhenIdle, AbstractIdleValue, GlobalIdleValue, DeferredPromise, Promises, ProducerConsumer, AsyncIterableProducer, CancelableAsyncIterableProducer;
+var Throttler, timeoutDeferred, microtaskDeferred, Delayer, ThrottledDelayer, TaskQueue, TimeoutTimer, IntervalTimer, RunOnceScheduler, runWhenGlobalIdle, _runWhenIdle, AbstractIdleValue, GlobalIdleValue, DeferredPromise, Promises, ProducerConsumer, AsyncIterableProducer, CancelableAsyncIterableProducer, AsyncReaderEndOfStream;
 var init_async = __esm({
   "app/static/vendor/monaco-editor-core/esm/vs/base/common/async.js"() {
     init_cancellation();
@@ -3882,6 +3882,7 @@ var init_async = __esm({
         this._source.cancel();
       }
     };
+    AsyncReaderEndOfStream = Symbol("AsyncReaderEndOfStream");
   }
 });
 
@@ -64001,7 +64002,7 @@ var init_textModelEditSource = __esm({
   "app/static/vendor/monaco-editor-core/esm/vs/editor/common/textModelEditSource.js"() {
     init_uuid();
     init_textLength();
-    privateSymbol = /* @__PURE__ */ Symbol("TextModelEditSource");
+    privateSymbol = Symbol("TextModelEditSource");
     TextModelEditSource = class {
       constructor(metadata, _privateCtorGuard) {
         this.metadata = metadata;
@@ -82618,12 +82619,13 @@ var init_hotReloadHelpers = __esm({
 });
 
 // app/static/vendor/monaco-editor-core/esm/vs/platform/accessibilitySignal/browser/accessibilitySignalService.js
-var IAccessibilitySignalService, Sound, SoundSource, AccessibilitySignal;
+var IAccessibilitySignalService, AcknowledgeDocCommentsToken, Sound, SoundSource, AccessibilitySignal;
 var init_accessibilitySignalService = __esm({
   "app/static/vendor/monaco-editor-core/esm/vs/platform/accessibilitySignal/browser/accessibilitySignalService.js"() {
     init_nls();
     init_instantiation();
     IAccessibilitySignalService = createDecorator("accessibilitySignalService");
+    AcknowledgeDocCommentsToken = Symbol("AcknowledgeDocCommentsToken");
     Sound = class _Sound {
       static register(options2) {
         const sound = new _Sound(options2.fileName);
@@ -97848,6 +97850,7 @@ var init_diffEditorViewZones = __esm({
     init_contextView();
     init_range();
     init_inlineDecorations();
+    init_textModelEvents();
     __decorate32 = function(decorators, target, key, desc) {
       var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
       if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
@@ -97882,6 +97885,24 @@ var init_diffEditorViewZones = __esm({
         const updateImmediately = this._register(new RunOnceScheduler(() => {
           state.set(state.get() + 1, void 0);
         }, 0));
+        const injectedTextListeners = this._register(new DisposableStore());
+        const observeInjectedText = () => {
+          injectedTextListeners.clear();
+          for (const editor2 of [this._editors.original, this._editors.modified]) {
+            const model = editor2.getModel();
+            if (model) {
+              injectedTextListeners.add(model.onDidChangeContentOrInjectedText((event) => {
+                if (event instanceof ModelInjectedTextChangedEvent) {
+                  updateImmediately.schedule();
+                }
+              }));
+            }
+          }
+          updateImmediately.schedule();
+        };
+        this._register(this._editors.original.onDidChangeModel(observeInjectedText));
+        this._register(this._editors.modified.onDidChangeModel(observeInjectedText));
+        observeInjectedText();
         this._register(this._editors.original.onDidChangeViewZones((_args) => {
           if (!this._canIgnoreViewZoneUpdateEvent()) {
             updateImmediately.schedule();
@@ -105000,7 +105021,7 @@ var init_ternarySearchTree = __esm({
     };
     Undef = class _Undef {
       static {
-        this.Val = /* @__PURE__ */ Symbol("undefined_placeholder");
+        this.Val = Symbol("undefined_placeholder");
       }
       static wrap(value) {
         return value === void 0 ? _Undef.Val : value;
@@ -207683,7 +207704,7 @@ DataChannelForwardingTelemetryService = __decorate103([
   __param97(0, ITelemetryService),
   __param97(1, IDataChannelService)
 ], DataChannelForwardingTelemetryService);
-var shouldForwardToChannel = /* @__PURE__ */ Symbol("shouldForwardToChannel");
+var shouldForwardToChannel = Symbol("shouldForwardToChannel");
 function forwardToChannelIf(value) {
   return {
     // This will not be sent via telemetry, it is just a marker
