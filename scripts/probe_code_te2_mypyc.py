@@ -18,10 +18,13 @@ import sys
 import tempfile
 import time
 
+REPO = Path(__file__).resolve().parents[1]
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
+
 from scripts.profile_code_te2_import import check_event
 
 
-REPO = Path(__file__).resolve().parents[1]
 STARTUP_IMPORTS = (
     "app.apps.code_te2.native_worker",
     "app.apps.code_te2.intelligence_bootstrap",
