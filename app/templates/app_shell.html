@@ -1219,6 +1219,9 @@
                 startupMark('shell.native_prerequisites_ready');
                 preparedPage ??= prepareAppPage(appDef, sidebarVersion, preparationAbort.signal);
                 const { scriptUrl } = await preparedPage;
+                // Locally prepared pages can be shown as soon as readiness lifts.
+                // Content boot remains awaited for error handling, not visibility.
+                if (appDef.frontend_preparation === true) finishAppPreparation();
 
                 if (scriptUrl) {
                     const module = await import(scriptUrl);

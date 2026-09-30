@@ -38,7 +38,7 @@ test('readiness overlay preserves prepared content and releases interaction on f
   assert.match(placeholder, /startupOverlay\.innerHTML/);
 });
 
-test('managed startup keeps overlay until initializer and layout frame complete', async () => {
+for (const earlyReveal of [false, true]) test(`managed startup early reveal=${earlyReveal} preserves awaited initialization`, async () => {
   const calls = [];
   let completeModel;
   let layoutFrame;
@@ -46,10 +46,13 @@ test('managed startup keeps overlay until initializer and layout frame complete'
   const context = vm.createContext({
     AbortController, appId: 'code_te2', appContainer: {}, host: {},
     sidebarShortcutVersion: () => '', startupMark: () => {},
-    waitForAppLifecycle: async () => ({ entrypoints: {} }),
+    waitForAppLifecycle: async () => ({ entrypoints: {}, frontend_preparation: earlyReveal }),
     waitForNativeAppPrerequisites: async () => {},
     prepareAppPage: async () => ({ scriptUrl: 'host.js' }),
-    loadModule: async () => ({ managesStartupReveal: true, default: () => modelReady }),
+    loadModule: async () => {
+      assert.deepEqual(calls, earlyReveal ? ['reveal'] : []);
+      return { managesStartupReveal: true, default: () => modelReady };
+    },
     activatePreparedApp: () => { calls.push('early-reveal'); },
     finishAppPreparation: () => { calls.push('reveal'); },
     window: { requestAnimationFrame: callback => { layoutFrame = callback; } },
@@ -59,15 +62,15 @@ test('managed startup keeps overlay until initializer and layout frame complete'
   const end = shell.indexOf("document.addEventListener('DOMContentLoaded'", start);
   vm.runInContext(shell.slice(start, end).replace('await import(scriptUrl)', 'await loadModule(scriptUrl)'), context);
   const running = context.loadApp();
-  for (let i = 0; i < 8; i++) await Promise.resolve();
-  assert.deepEqual(calls, []);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(calls, earlyReveal ? ['reveal'] : []);
   completeModel();
-  for (let i = 0; i < 8; i++) await Promise.resolve();
-  assert.deepEqual(calls, []);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(calls, earlyReveal ? ['reveal'] : []);
   assert.equal(typeof layoutFrame, 'function');
   layoutFrame();
   await running;
-  assert.deepEqual(calls, ['reveal']);
+  assert.deepEqual(calls, earlyReveal ? ['reveal', 'reveal'] : ['reveal']);
 });
 
 test('host boot start returns completion and propagates errors instead of detaching boot', async () => {

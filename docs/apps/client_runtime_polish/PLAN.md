@@ -1068,8 +1068,8 @@ Implementation sequence:
 3. Settle authoritative panel geometry before Monaco construction. Avoid repeated
    preference application and intermediate drawer/secondary/sidebar resize work.
    Do not introduce a second persistence authority or hide legitimate user state.
-4. Reveal on initial usable model/layout or legitimate empty-project state, not
-   merely HTTP readiness. Preserve theme/grammar/model barriers and independent
+4. Reveal the prepared page when worker/native readiness clears; document content
+   may finish afterward. Preserve theme/grammar/model barriers and independent
    WBA/extension readiness. Extension content must not gate first document display.
 5. Cover readiness-before/after-preparation, failure/stopped states, duplicate
    lifecycle snapshots, non-opt-in apps and primary/secondary boot. Typecheck and
@@ -1101,7 +1101,13 @@ non-opt-in apps keep readiness-first loading. No new transport or native asset
 mapping is added.
 
 Reveal slice: the host boot runtime returns its actual promise rather than
-fire-and-forget. `managesStartupReveal` opts into retaining the shell overlay
+fire-and-forget. Locally prepared apps now reveal immediately after worker/native
+readiness and page preparation, before host import/initialization. Content loads
+visibly; initialization remains awaited for error handling. Finished preparation
+prevents consent-dialog cleanup from re-covering the page. User live acceptance
+passed on desktop and mobile, with observed total load times around 2 seconds
+and 3 seconds respectively (not controlled benchmarks). For other apps,
+`managesStartupReveal` retains the shell overlay
 through initialization and a layout frame. Code Server consent/error dialogs
 use the optional shell interaction hook to yield and restore the overlay; older
 shells/apps preserve their previous behavior. Mount failures propagate to the
@@ -1110,7 +1116,7 @@ boot completion after grammar/model attachment, without waiting for WBA.
 Missing initial UI preferences settle before mount; duplicate post-mount sidebar
 preference replay is removed. Deferred sidebar extension hydration is unchanged.
 Live panel/secondary resize measurement and full host import-side-effect audit
-remain outstanding; no speedup or device acceptance claimed.
+remain outstanding; no isolated performance improvement is claimed.
 
 ## Execution and publication
 
