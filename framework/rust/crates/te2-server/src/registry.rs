@@ -315,6 +315,10 @@ impl AppDefinition {
             Value::Object(self.entrypoints.clone()),
         );
         payload.insert("fullscreen".to_owned(), Value::Bool(self.fullscreen));
+        payload.insert(
+            "frontend_preparation".to_owned(),
+            Value::Bool(bool_field(&self.raw_manifest, "frontend_preparation")),
+        );
         payload.insert("icon_src".to_owned(), Value::String(self.icon_src()));
         payload.insert(
             "icon_src_raw".to_owned(),
@@ -404,6 +408,10 @@ impl AppDefinition {
 
     fn to_catalog_payload(&self, running: bool) -> Value {
         let mut payload = Map::new();
+        payload.insert(
+            "frontend_preparation".to_owned(),
+            Value::Bool(bool_field(&self.raw_manifest, "frontend_preparation")),
+        );
         payload.insert("id".to_owned(), Value::String(self.app_id.clone()));
         payload.insert("name".to_owned(), Value::String(self.name.clone()));
         payload.insert(
@@ -759,6 +767,33 @@ mod tests {
             source_kind: "test".to_owned(),
             path: root.to_path_buf(),
         }])
+    }
+
+    #[test]
+    fn frontend_preparation_opt_in_reaches_bootstrap_and_catalog_payloads() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        for (id, value, expected) in [
+            ("prepared", Some(json!(true)), true),
+            ("disabled", Some(json!(false)), false),
+            ("absent", None, false),
+            ("invalid", Some(json!("true")), false),
+        ] {
+            let mut manifest = json!({ "id": id, "readiness_support": "pipe" });
+            if let Some(value) = value {
+                manifest["frontend_preparation"] = value;
+            }
+            write_app(temp.path(), id, manifest);
+            let registry = load(temp.path());
+            let app = registry.get_app(id).expect("app");
+            assert_eq!(app.to_payload()["frontend_preparation"], expected);
+            for running in [false, true] {
+                assert_eq!(
+                    app.to_catalog_payload(running)["frontend_preparation"],
+                    expected
+                );
+            }
+            assert_eq!(app.to_payload()["readiness_support"], true);
+        }
     }
 
     #[test]

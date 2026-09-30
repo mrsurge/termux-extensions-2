@@ -34,6 +34,17 @@ agent-driven client OTA was performed in this slice. User confirms live validati
 
 ### Installed frontend staged startup
 
+- [x] Follow-up: identify dropped `frontend_preparation` in Rust registry
+  projection. Live Gecko receives readiness promptly but never imports the
+  layout preparer, leaving the splash attached to full initialization.
+- [x] Project the strict boolean opt-in in app/bootstrap and catalog payloads;
+  retain existing pipe readiness and layout-completion reveal ordering.
+- [x] Registry/bootstrap payload regressions pass (2 tests); frontend startup
+  ordering/service-worker tests pass (15), including already-ready ordering and
+  reveal before awaited model initialization. Build updated optimized framework
+  through the normal bootstrap cache without launching/restarting it.
+- [ ] Restart by user, then live-check warm worker splash release on Gecko/Cefrium.
+
 - [x] Inspect local asset delivery, readiness gate and initial layout ordering.
 - [x] Record approved preparation/activation and stable-geometry design (PLAN §7).
 - [x] Foundation: independent readiness overlay preserves app DOM; early responsive

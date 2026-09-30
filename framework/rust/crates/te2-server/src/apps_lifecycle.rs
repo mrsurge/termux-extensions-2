@@ -1176,6 +1176,7 @@ mod tests {
             json!({
                 "id": "code_te2",
                 "entrypoints": { "frontend_template": "template.html" },
+                "frontend_preparation": true,
             }),
             json!({ "activeProject": "/workspace" }),
             true,
@@ -1187,6 +1188,7 @@ mod tests {
             "template.html"
         );
         assert_eq!(payload["state_key"], "app_state:code_te2");
+        assert_eq!(payload["app"]["frontend_preparation"], true);
         assert_eq!(payload["state"]["activeProject"], "/workspace");
         assert_eq!(payload["debug_full_stack"], true);
     }

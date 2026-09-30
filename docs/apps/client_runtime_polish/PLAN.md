@@ -1075,6 +1075,17 @@ Investigation/acceptance gates:
 
 ## 7. Overlap installed frontend preparation with worker startup
 
+Warm-worker follow-up (2026-09-30): the source manifest opted into
+`frontend_preparation`, but Rust's explicit app/catalog projections omitted it.
+Live Gecko received readiness in under a second yet never imported the layout
+preparer, so early reveal was disabled and full initialization retained the splash.
+Project the existing strict boolean into both payloads; cover enabled, disabled,
+missing and non-boolean values and ready/running catalog variants. Preserve pipe
+readiness for cold workers. For ready workers, only local layout preparation
+remains before reveal; Monaco/content/intelligence/sidebar hydration is not a
+splash gate. Build the updated framework, with no agent restart of the shared
+runtime; user restart and Gecko/Cefrium live acceptance remain separate.
+
 Approved direction (2026-09-29): optimize client-owned installed/OTA assets, not
 network bundle delivery. Electron, GeckoView and Cefrium should prepare the same
 page behind an independent splash while the worker starts. Browser delivery stays
