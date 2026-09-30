@@ -1220,7 +1220,7 @@ def _file_items(values: list[object]) -> list[CachedNameItem]:
             CachedNameItem(
                 path=_string(raw.get("path")),
                 relative_path=_string(raw.get("relativePath")),
-                kind=kind,
+                kind="file" if kind == "file" else "dir",
                 name=_string(raw.get("name")),
             )
         )

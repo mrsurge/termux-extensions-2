@@ -130,7 +130,9 @@ group, and records its interpreted islands in `manifest.json`. It does not copy
 extensions into the source tree or change the running TE2 worker. The desktop
 preflight compiled and imported 135 modules; compiled-overlay tests exposed
 mock-rebinding/native-class differences still to resolve before any runtime
-cutover. See `docs/apps/client_runtime_polish/PLAN.md` §5 for evidence and gates.
+cutover. The matching-ABI Pixel/Termux probe also built and imported all 135
+compiled wrappers; it did not install them or switch the worker. See
+`docs/apps/client_runtime_polish/PLAN.md` §6 for evidence and gates.
 
 ### Pixel build and live test
 

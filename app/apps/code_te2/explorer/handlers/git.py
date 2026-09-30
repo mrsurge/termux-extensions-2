@@ -219,11 +219,11 @@ async def handle_git_reset(
 ) -> None:
     del msg_id
     require_head(context.project_root)
-    _ = await asyncio.to_thread(head_action, context.project_root, partial(worker_git_service.reset_hard,
+    await asyncio.to_thread(head_action, context.project_root, partial(worker_git_service.reset_hard,
         context.project_root,
         params["commit"],
     ))
-    _ = await _mark_dirty_and_refresh(context)
+    await _mark_dirty_and_refresh(context)
 
 
 async def handle_git_init(

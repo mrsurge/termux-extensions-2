@@ -783,6 +783,17 @@ explicit structural injection seams where needed; do not weaken production
 types solely to satisfy a mock. Pixel compile/ABI proof follows the desktop
 build, while live worker replacement remains a separate approval gate.
 
+The Pixel/Termux regular-CPython 3.14.6 probe completed the same 135-module
+shared mypyc build and imported all 135 canonical compiled wrappers. Two
+transitive mypyc type diagnostics required narrow source corrections: do not
+assign the `None` result of the Git reset refresh helper, and explicitly
+construct the `Literal["file", "dir"]` name-search DTO field after checking its
+wire value. An installed third-party `scripts` package initially shadowed the
+repo's namespace directory; the probe now imports its sibling audit helper
+directly. Single isolated import checks measured 875 ms interpreted and 270 ms
+compiled on that Pixel run. These are **not** full worker startup, parity or
+repeatable benchmark results; no active worker was restarted or switched.
+
 ### Priority A: document and syntax readiness
 
 Optimize time to the correct document rendered with its selected theme and syntax,

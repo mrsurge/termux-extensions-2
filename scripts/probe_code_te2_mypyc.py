@@ -21,8 +21,10 @@ import time
 REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
+if str(REPO / "scripts") not in sys.path:
+    sys.path.insert(0, str(REPO / "scripts"))
 
-from scripts.profile_code_te2_import import check_event
+from profile_code_te2_import import check_event
 
 
 STARTUP_IMPORTS = (
