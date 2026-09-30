@@ -109,7 +109,7 @@ _cache_persist_timer: asyncio.TimerHandle | None = None
 # When multiple clients are connected, cache persistence must use the editor that
 # actually triggered the change (not whichever client connected last).
 _cache_persist_source_editor: EditorLike | None = None
-_cache_persist_source_client_id = None
+_cache_persist_source_client_id: str | None = None
 
 # Live (non-disk) mirroring of the active buffer between connected clients.
 # NOTE: Mirror emission logic has been moved to codemirror.js to avoid
@@ -416,7 +416,7 @@ def _schedule_diff_refresh(
     )
 
 
-def _persist_to_cache_debounced():
+def _persist_to_cache_debounced() -> None:
     """Debounced cache persistence called on editor change."""
     global _cache_persist_timer
     _cache_persist_timer = None

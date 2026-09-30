@@ -37,7 +37,6 @@ async def handle_host_git_branches_list_request(
     *,
     source_name: str,
 ) -> dict[str, object]:
-    del params, source_name
     return _branches_payload(worker_git_service.list_branches(_active_project_root()))
 
 
@@ -46,7 +45,6 @@ async def handle_host_git_branch_checkout_request(
     *,
     source_name: str,
 ) -> dict[str, object]:
-    del source_name
     name = _string_param(params, "name")
     if not name:
         raise RuntimeError("Branch name required")
@@ -61,7 +59,6 @@ async def handle_host_git_branch_create_request(
     *,
     source_name: str,
 ) -> dict[str, object]:
-    del source_name
     name = _string_param(params, "name")
     if not name:
         raise RuntimeError("Branch name required")
@@ -76,7 +73,6 @@ async def handle_host_git_remote_add_request(
     *,
     source_name: str,
 ) -> dict[str, object]:
-    del source_name
     name = _string_param(params, "name")
     url = _string_param(params, "url")
     if not name or not url:

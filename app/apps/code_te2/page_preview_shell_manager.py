@@ -131,7 +131,7 @@ async def stop_page_preview_shell(
             _ = remove_run_profile_shell(label=label)
             return PagePreviewShellState(shell_id="", label=label, running=False)
         shell_id = shell.id
-        _ = await mgr.terminate_shell(shell_id, force=True)
+        await mgr.terminate_shell(shell_id, force=True)
         _ = remove_run_profile_shell(shell_id=shell_id, label=label)
         return PagePreviewShellState(shell_id=shell_id, label=label, running=False)
 

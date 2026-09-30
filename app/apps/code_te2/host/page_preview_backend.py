@@ -15,7 +15,6 @@ async def handle_host_page_preview_template_install_request(
     *,
     source_name: str,
 ) -> JsonMap:
-    del source_name
     project_root = _active_project()
     if not project_root:
         return {"ok": False, "error": "No active project selected"}

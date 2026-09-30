@@ -111,6 +111,27 @@ Embedded Python loads the inherited matching-version `VIRTUAL_ENV` site-packages
 and editable `.pth` files. Compile and run with the same regular CPython ABI;
 do not supply a free-threaded or different-version venv.
 
+### Experimental mypyc domain compile probe
+
+This is a **developer-only compile/import proof**, not an installed worker or
+wheel. Use the matching regular CPython, a C compiler, `mypy==2.3.0` (which
+supplies mypyc), and `setuptools==84.0.0`. From the repository root, choose a
+new output path under `$TMPDIR` when set, otherwise under `.codex-scratch`:
+
+```bash
+MYPYC_OUT="${TMPDIR:-.codex-scratch}/mypyc-domain-check"
+python -B scripts/probe_code_te2_mypyc.py build --output "$MYPYC_OUT"
+python -B scripts/probe_code_te2_mypyc.py validate --manifest "$MYPYC_OUT/manifest.json"
+python -B scripts/probe_code_te2_mypyc.py validate --manifest "$MYPYC_OUT/manifest.json" --lib "$MYPYC_OUT/lib"
+```
+
+The build inventories the startup-loaded local modules, compiles one shared
+group, and records its interpreted islands in `manifest.json`. It does not copy
+extensions into the source tree or change the running TE2 worker. The desktop
+preflight compiled and imported 135 modules; compiled-overlay tests exposed
+mock-rebinding/native-class differences still to resolve before any runtime
+cutover. See `docs/apps/client_runtime_polish/PLAN.md` §5 for evidence and gates.
+
 ### Pixel build and live test
 
 From `~/mrselect6`, after pulling this branch:

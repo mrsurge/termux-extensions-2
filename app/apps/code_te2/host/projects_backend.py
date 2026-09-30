@@ -101,7 +101,6 @@ async def handle_projects_reset(params: JsonObject, *, source_name: str) -> Json
 
 
 async def handle_projects_remove(params: JsonObject, *, source_name: str) -> JsonObject:
-    del source_name
     path = _known_path(params)
     if _is_active(path):
         raise ValueError("Project is now active; refresh Projects and confirm Reset instead")

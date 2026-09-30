@@ -1,7 +1,7 @@
 # pyright: strict
 from __future__ import annotations
 
-from typing import Final, Literal, TypedDict, cast
+from typing import Final, Literal, TypeAlias, TypedDict, cast
 
 from ..socketio_jsonrpc import (
     JsonRpcEnvelopeError,
@@ -21,6 +21,7 @@ JSONRPC_INTERNAL_ERROR: Final = -32603
 JSONRPC_APPLICATION_ERROR: Final = -32000
 
 JsonRpcId = str | int
+OpaqueValue: TypeAlias = object
 
 EDITOR_RPC_METHOD_PREFERENCE_UPDATE: Final = "editor.preference.update"
 EDITOR_RPC_METHOD_THEMES_LIST: Final = "editor.themes.list"
@@ -175,7 +176,7 @@ class JsonRpcNotificationEnvelope(TypedDict):
 class JsonRpcSuccessEnvelope(TypedDict):
     jsonrpc: Literal["2.0"]
     id: JsonRpcId
-    result: object
+    result: OpaqueValue
 
 
 class JsonRpcErrorEnvelope(TypedDict):

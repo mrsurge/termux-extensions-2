@@ -702,6 +702,87 @@ boundary allocations), and eventual Linux/Termux wheel/ABI validation. Do not
 equate passing tests, a smaller import graph or Rust ownership with a proven
 speedup. Main build/release integration remains separately gated.
 
+### Desktop mypyc whole-startup-graph preflight (2026-09-29)
+
+This is an isolated build probe, **not** the native worker's build or a runtime
+cutover. The regular-CPython `.jitenv` uses Python 3.14.4; mypy/mypyc 2.3.0 and
+setuptools 84.0.0 were installed into that local, ignored build environment.
+No source package, live worker or Pixel installation was replaced.
+
+An audit-guarded import of `native_worker`, `intelligence_bootstrap`, `main` and
+`socketio_gateway` reached 159 local `app.apps.code_te2` / `app.libs` modules.
+After package initializers and the runtime-annotation-sensitive `pipe_protocol`
+schema were left interpreted, the first joint mypyc candidate contained 147
+source modules. This inventory is import-order and startup-mode dependent, not
+the full set of modules reachable through later features.
+
+- Mypyc's type pass found 16 diagnostics across eight local modules: exception
+  binding scope, `None` return values used as results, narrowed role/notification
+  types, reused variables across mutually exclusive run-profile branches,
+  callable arity, and an `object` indexed as a map. These need source-backed
+  corrections and behavior tests; strict `ty` acceptance alone is not mypyc
+  acceptance. An untyped-function note in `editor_backend.py` also caused the
+  mypyc invocation to exit, although direct mypy checking of the reduced group
+  reported no errors.
+- Once those modules were left interpreted, code generation exposed builtin
+  `RuntimeError` subclass limitations in `code_server_bootstrap` and
+  `pipe_runtime`, unsupported async generators in `intelligence_bootstrap` and
+  `history_service`, and coroutine variable-deletion failures across host,
+  socket, shell and sidebar modules. The approved older Git/history pilot already
+  showed `native_class=False` and an interpreted async-generator helper as
+  possible *scratch* adaptations; do not silently apply them to production.
+- With 26 candidates left interpreted (including the protocol schema), 122
+  modules compiled in one shared library and 122 canonical wrappers. A fresh
+  interpreted import passed, but the compiled import failed: mypyc exposed
+  `DraftIndexSidecar._instances: ClassVar[dict[...]] = {}` to `dataclasses` as a
+  mutable field. Compile success is therefore **not** runtime parity. The
+  `ProjectSidecar` ClassVar cache has the same source pattern but was already
+  excluded for a type diagnostic; both need explicit parity checks.
+
+No incompatible **external** import was observed in this preflight. Keep a
+separate list if one appears: name the external module, the local importers,
+whether it remains interpreted, and the choice between retaining it and a
+native DTO boundary. Do not replace an external import merely because it exists.
+
+The approved direction is to adapt the startup graph while retaining explicit
+interpreted islands for constructs that mypyc cannot currently preserve. Do
+not equate compilation with a runnable worker or a speedup. The reproducible
+developer recipe is `scripts/probe_code_te2_mypyc.py`; output stays in an
+isolated, ignored directory and is not installed into Code TE2 or a wheel.
+
+The follow-up did not stop at the 122-module pilot. A 140-module shared build
+passed mypyc and C compilation but failed on
+an `object`-annotated shell DTO during import. A 135-module build with the
+dataclass-exception contracts interpreted moved the import forward and exposed
+the same issue in a `TypedDict` field. A minimal independent probe established
+that `OpaqueValue: TypeAlias = object` preserves the Python type while avoiding
+that mypyc 2.3.0 runtime lookup failure; the affected DTO fields now use the
+alias. The next compiled import reached a `@runtime_checkable` Protocol that
+mypyc generated as a non-Protocol class, so that module is interpreted in the
+current probe. Dataclass ClassVar caches, async generators, the protocol schema,
+and frozen dataclass exceptions also remain interpreted islands; these are
+local compiler-shape limitations, not incompatible external imports. Passing
+only C compilation does not satisfy this gate. The shared build must import and
+exercise the actual worker domain before Pixel validation or a runtime cutover.
+
+The next 135-module single-group build **did** load all 135 canonical compiled
+wrappers in an audit-isolated desktop process; the interpreted baseline loaded
+the same 135 from source. This proves the local typing/C/link/import procedure,
+not runtime parity or a benchmark. A compiled-overlay unit run passed 83 and
+failed 29 tests; a further Explorer/history run passed 48 and failed 15. Most
+failures use `unittest.mock` to rebind Python globals or pass fake objects where
+mypyc early binding/native slots require concrete compiled classes. One genuine
+compiled behavior mismatch assigned `asyncio.gather`'s runtime list to a
+tuple-inferred `_`; source now just awaits it. The final 135-module artifact
+was rebuilt with that fix, passed both audit-isolated import checks (135/135
+compiled origins), and passed 23 focused compiled-overlay tests, including the
+FWS observer case that caught the mismatch. Before runtime opt-in, run broader
+domain parity that does not rely on monkeypatching compiled call targets, then
+exercise an isolated native worker. Keep dynamic integration adapters interpreted or expose
+explicit structural injection seams where needed; do not weaken production
+types solely to satisfy a mock. Pixel compile/ABI proof follows the desktop
+build, while live worker replacement remains a separate approval gate.
+
 ### Priority A: document and syntax readiness
 
 Optimize time to the correct document rendered with its selected theme and syntax,

@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
-from typing import TypedDict
+from typing import TypeAlias, TypedDict
 
 JsonMap = dict[str, object]
 ReadonlyJsonMap = Mapping[str, object]
+OpaqueValue: TypeAlias = object
 
 
 class RuntimeMeta(TypedDict):
@@ -58,7 +59,7 @@ class EditorOpenPayload(TypedDict, total=False):
     has_draft: bool
     reason: str
     scroll_line: float
-    preferences: object
+    preferences: OpaqueValue
 
 
 class SnapshotResponse(TypedDict, total=False):

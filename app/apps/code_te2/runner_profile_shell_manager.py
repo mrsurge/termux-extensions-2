@@ -89,7 +89,7 @@ async def ensure_runner_profile_shell(
                     reused=True,
                     command_preview=command_preview,
                 )
-            _ = await mgr.terminate_shell(existing.id, force=True)
+            await mgr.terminate_shell(existing.id, force=True)
             _ = remove_run_profile_shell(shell_id=existing.id, label=label)
             await asyncio.sleep(0.2)
 
@@ -152,7 +152,7 @@ async def stop_runner_profile_shell(
             _ = remove_run_profile_shell(label=label)
             return RunnerProfileShellState(shell_id="", label=label, running=False)
         shell_id = shell.id
-        _ = await mgr.terminate_shell(shell_id, force=True)
+        await mgr.terminate_shell(shell_id, force=True)
         _ = remove_run_profile_shell(shell_id=shell_id, label=label)
         return RunnerProfileShellState(shell_id=shell_id, label=label, running=False)
 

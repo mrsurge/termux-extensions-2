@@ -7,15 +7,16 @@ import stat
 import time
 from pathlib import Path
 from collections.abc import Awaitable, Callable
-from typing import Protocol, cast
+from typing import Protocol, TypeAlias, cast
 
 from ..code_te2_paths import code_te2_paths
 
 JsonObject = dict[str, object]
+OpaqueValue: TypeAlias = object
 
 
 class SidebarBackchannelApp(Protocol):
-    state: object
+    state: OpaqueValue
 
     def add_event_handler(
         self,

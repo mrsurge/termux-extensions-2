@@ -49,6 +49,7 @@ class AsyncPipeEventQueue:
 
 PipeEventQueue = AsyncPipeEventQueue
 PipeNotificationListener: TypeAlias = pipe_runtime.PipeNotificationListener
+OpaqueValue: TypeAlias = object
 SearchKind = Literal["name", "content", "changes"]
 GetProjectRoot = Callable[[], Path]
 SearchRange: TypeAlias = tuple[int, int]
@@ -164,7 +165,7 @@ class PipeSearchEvent:
     truncated_reason: str
     match_limit: int | None
     code: str
-    raw_result: object
+    raw_result: OpaqueValue
 
 
 class ExplorerSearchSessions:

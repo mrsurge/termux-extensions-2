@@ -97,7 +97,6 @@ class NativeSocketServer:
                    room: str | None = None, skip_sid: str | None = None,
                    namespace: str | None = None, callback: object = None,
                    ignore_queue: bool = False) -> None:
-        del ignore_queue
         if callback is not None:
             raise RuntimeError("native emit callbacks require explicit ack support")
         self._send({"op": "emit", "event": event, "data": data, "room": to or room,

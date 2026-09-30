@@ -93,7 +93,6 @@ class EditorRpcSocketIONamespace(NativeNamespace):
         )
 
     async def on_disconnect(self, sid: str, reason: object | None = None) -> None:
-        del reason
         identity = unregister_editor_client(sid)
         try:
             leave_room = cast(Callable[..., Awaitable[object]], self.leave_room)

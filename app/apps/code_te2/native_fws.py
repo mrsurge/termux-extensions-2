@@ -115,5 +115,5 @@ class ObserverClient:
         # the domain consumer; cancellation alone cannot cancel a blocking read.
         self.bridge.fws_stop()
         if self.reader is not None:
-            _ = await asyncio.gather(self.reader, return_exceptions=True)
+            await asyncio.gather(self.reader, return_exceptions=True)
             self.reader = None

@@ -24,7 +24,6 @@ async def handle_host_language_backend_set_request(
     *,
     source_name: str,
 ) -> JsonMap:
-    del source_name
     mode_value = data.get("mode")
     if mode_value not in {"code-server", "web-workers"}:
         return {"ok": False, "error": "mode must be 'code-server' or 'web-workers'."}

@@ -723,7 +723,6 @@ async def route_backend_open_request(
 
 async def on_sidebar_mention(ns: SidebarNamespace, sid: str, data: object) -> JsonObject:
     """Route a typed sidebar.mention to one validated agent app target."""
-    del ns
     data = _json_object(data)
     if not data:
         raise ValueError("missing mention payload")

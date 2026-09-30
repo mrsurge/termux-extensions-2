@@ -239,13 +239,13 @@ async def handle_save_current_file(
     except SaveValidationError as exc:
         return {"ok": False, "error": exc.message}
     except base_mismatch_error_type as exc_obj:
-        exc = cast(BaseMismatchMetaLike, cast(object, exc_obj))
-        actual = exc.current_meta.get("sha256") if getattr(exc, "current_meta", None) else "unknown"
+        mismatch = cast(BaseMismatchMetaLike, cast(object, exc_obj))
+        actual = mismatch.current_meta.get("sha256") if getattr(mismatch, "current_meta", None) else "unknown"
         print(
             f"[SAVE] BASE_MISMATCH path={current_file!r} expected={base_snapshot} actual={actual}",
             file=sys.stderr,
         )
-        return SaveConflict(current=exc.current_meta)
+        return SaveConflict(current=mismatch.current_meta)
     except Exception as exc:
         print(f"[SAVE] ERROR path={current_file!r} error={exc}", file=sys.stderr)
         return {"ok": False, "error": str(exc)}

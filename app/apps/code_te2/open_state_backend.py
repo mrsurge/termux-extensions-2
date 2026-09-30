@@ -5,7 +5,7 @@ import os
 import threading
 import time
 from pathlib import Path
-from typing import Literal, TypedDict
+from typing import Literal, TypeAlias, TypedDict
 
 from .client_presentation import (
     ClientRole,
@@ -15,6 +15,7 @@ from .client_presentation import (
 from .project_sidecar import ProjectSidecar
 
 _OPEN_STATE_LOCK = threading.RLock()
+OpaqueValue: TypeAlias = object
 
 OpenStateReason = Literal[
     "file_open",
@@ -44,9 +45,9 @@ class SidecarOpenStatePayload(TypedDict):
 class RecentFilePayload(TypedDict):
     path: str
     label: str
-    opened_at: object
+    opened_at: OpaqueValue
     exists: bool
-    scroll_line: object
+    scroll_line: OpaqueValue
 
 
 class ClientForegroundPayload(TypedDict):

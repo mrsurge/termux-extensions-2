@@ -231,7 +231,7 @@ async def _emit_project_switch_notification(
         payload["openState"] = dict(open_state)
 
     if phase == "begin":
-        editor_method = EDITOR_RPC_NOTIFICATION_PROJECT_SWITCHING
+        editor_method: EditorRpcNotification = EDITOR_RPC_NOTIFICATION_PROJECT_SWITCHING
         ui_method = UI_IPC_RPC_NOTIFICATION_PROJECT_SWITCHING
     else:
         editor_method = EDITOR_RPC_NOTIFICATION_PROJECT_SWITCHED
@@ -516,8 +516,9 @@ def editor_runtime_build_connect_snapshot(
         abs_path = _normalize_abs_path(str(current_path))
         if abs_path and _is_under_project(project, abs_path):
             connect_request_id = f"diag_{int(time.time() * 1000)}_rpc"
-            snapshot["file"] = _read_file_payload(project, abs_path)
-            snapshot["file"]["request_id"] = connect_request_id
+            file_payload = _read_file_payload(project, abs_path)
+            file_payload["request_id"] = connect_request_id
+            snapshot["file"] = file_payload
     return snapshot
 
 
@@ -759,7 +760,6 @@ async def editor_runtime_handle_issues_dump_response(source_client: str, data: d
 
 
 async def editor_runtime_handle_breadcrumb_navigate(source_client: str, data: dict[str, object]) -> None:
-    del source_client
     abs_path_obj = data.get("path", "")
     abs_path = abs_path_obj if isinstance(abs_path_obj, str) else ""
     open_drawer = data.get("open_drawer", False)

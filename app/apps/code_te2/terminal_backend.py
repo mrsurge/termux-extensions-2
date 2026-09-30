@@ -1044,6 +1044,7 @@ async def handle_run_active_file_request(
 
     project_path = history_store.get_active_project()
     current_file_obj = data.get("path") if isinstance(data, Mapping) else None
+    current_file: str | None
     if isinstance(current_file_obj, str) and current_file_obj.strip():
         current_file = current_file_obj
     else:

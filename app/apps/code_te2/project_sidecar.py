@@ -829,7 +829,7 @@ class ProjectSidecar:
         for client_id, entry in self._client_foreground_entries().items():
             if entry.get("path") != normalized:
                 continue
-            role = "secondary" if entry.get("client_role") == "secondary" else "primary"
+            role: ClientRole = "secondary" if entry.get("client_role") == "secondary" else "primary"
             self.set_client_foreground(
                 client_id,
                 None if role == "secondary" else fallback,

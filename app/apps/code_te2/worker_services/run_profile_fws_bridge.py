@@ -313,9 +313,9 @@ async def _on_notification(payload: object) -> None:
         shell_id = _text(params.get("shell_id")).strip()
         stream = _text(params.get("stream")).strip()
         if shell_id and stream == "stdout":
-            handler = _terminal_log_reset_handler
-            if handler is not None:
-                await handler(shell_id)
+            reset_handler = _terminal_log_reset_handler
+            if reset_handler is not None:
+                await reset_handler(shell_id)
         return
     if method not in FWS_LIFECYCLE_METHODS:
         return

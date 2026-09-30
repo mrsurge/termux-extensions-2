@@ -20,7 +20,6 @@ async def handle_host_run_profiles_get_request(
     *,
     source_name: str,
 ) -> JsonMap:
-    del data, source_name
     project_root = _active_project()
     if not project_root:
         return {"ok": False, "error": "No active project selected"}
@@ -54,7 +53,6 @@ async def handle_host_run_profiles_save_request(
     *,
     source_name: str,
 ) -> JsonMap:
-    del source_name
     project_root = _active_project()
     if not project_root:
         return {"ok": False, "error": "No active project selected"}

@@ -91,16 +91,16 @@ async def handle_runner_profile_run_request(
 ) -> JsonMap:
     profile = match.profile
     if profile.runner == "pagePreview":
-        shell = await ensure_page_preview_shell(
+        preview_shell = await ensure_page_preview_shell(
             project_root=str(match.project_root),
             profile_id=profile.profile_id,
             entry=profile.entry,
         )
-        url = profile.sidebar_url or shell.url or DEFAULT_PAGE_PREVIEW_URL
+        url = profile.sidebar_url or preview_shell.url or DEFAULT_PAGE_PREVIEW_URL
         try:
-            run_target_route = await register_run_target_routes(
-                owner_id=shell.label,
-                shell_id=shell.shell_id,
+            preview_route = await register_run_target_routes(
+                owner_id=preview_shell.label,
+                shell_id=preview_shell.shell_id,
                 primary_port=PAGE_PREVIEW_PORT,
                 primary_url=url,
                 additional_ports=(
@@ -110,26 +110,26 @@ async def handle_runner_profile_run_request(
             await wait_for_run_profile_url(
                 project_root=match.project_root,
                 profile_id=profile.profile_id,
-                shell_id=shell.shell_id,
+                shell_id=preview_shell.shell_id,
                 url=url,
             )
-            sidebar_result = await open_run_profile_surface(
+            preview_sidebar = await open_run_profile_surface(
                 project_root=match.project_root,
                 profile=profile,
-                shell_id=shell.shell_id,
-                shell_label=shell.label,
+                shell_id=preview_shell.shell_id,
+                shell_label=preview_shell.label,
                 url=url,
                 title="Page Preview",
                 label="Page Preview",
                 source_name=source_name,
-                run_target_route=run_target_route,
+                run_target_route=preview_route,
             )
         except Exception as exc:
             await _cleanup_failed_launch(
                 match=match,
-                shell_id=shell.shell_id,
-                shell_label=shell.label,
-                reused=shell.reused,
+                shell_id=preview_shell.shell_id,
+                shell_label=preview_shell.label,
+                reused=preview_shell.reused,
             )
             return {
                 "ok": False,
@@ -148,13 +148,13 @@ async def handle_runner_profile_run_request(
                 "running": True,
                 "profileId": profile.profile_id,
                 "runner": profile.runner,
-                "shell_id": shell.shell_id,
+                "shell_id": preview_shell.shell_id,
                 "url": url,
-                "reused": shell.reused,
+                "reused": preview_shell.reused,
                 "entry": profile.entry,
                 "path": str(match.active_file),
                 "matchedPath": match.relative_path,
-                "sidebar": sidebar_result,
+                "sidebar": preview_sidebar,
                 "command_preview": f"Page Preview {profile.entry}",
             },
         }

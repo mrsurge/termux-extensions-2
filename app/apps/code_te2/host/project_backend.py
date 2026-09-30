@@ -114,7 +114,6 @@ async def handle_sidebar_project_lookup_request(
     *,
     source_name: str,
 ) -> JsonMap:
-    del source_name
     return lookup_project(_project_service_deps(), _path_param(data))
 
 

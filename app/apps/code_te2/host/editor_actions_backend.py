@@ -187,7 +187,6 @@ async def handle_host_diagnostics_mention_request(
     *,
     source_name: str,
 ) -> JsonMap:
-    del source_name
     from ..ui_ipc.sidebar_ws import emit_sidebar_mention_targeted
 
     path = data.get("path")

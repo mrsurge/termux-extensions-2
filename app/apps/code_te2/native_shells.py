@@ -7,7 +7,9 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Protocol, TypeAlias, cast
+
+OpaqueValue: TypeAlias = object
 
 
 class NativeShellBridge(Protocol):
@@ -33,8 +35,8 @@ class ShellRecord:
     label: str
     pid: int | None
     status: str
-    env_overrides: object
-    command: object
+    env_overrides: OpaqueValue
+    command: OpaqueValue
     stdout_log: str = ""
     exit_code: int | None = None
     backend: str = "pipe"
@@ -124,7 +126,6 @@ class ShellManager:
         return {"backend": record.backend, "stdin_write": live, "stdout_subscribe_bytes": live and record.backend == "pipe"}
 
     async def terminate_shell(self, shell_id: str, *, force: bool = False) -> None:
-        del force
         await asyncio.to_thread(self.bridge.shell_terminate, shell_id)
 
     async def write_bytes(self, shell_id: str, data: bytes) -> None:
@@ -137,7 +138,6 @@ class ShellManager:
         await asyncio.to_thread(self.bridge.shell_resize, shell_id, cols, rows)
 
     async def remove_shell(self, shell_id: str, *, force: bool = False) -> bool:
-        del force
         task = asyncio.create_task(asyncio.to_thread(self.bridge.shell_remove, shell_id))
         try:
             return await asyncio.shield(task)
@@ -175,7 +175,6 @@ class ShellManager:
         return OutputReader(self.bridge, token)
 
     async def unsubscribe_output_bytes(self, shell_id: str, queue: OutputReader) -> None:
-        del shell_id
         await queue.close()
 
 

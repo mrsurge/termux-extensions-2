@@ -46,7 +46,6 @@ async def handle_host_file_scroll_update_request(
     *,
     source_name: str,
 ) -> JsonMap:
-    del source_name
 
     history = get_history_store()
     path = _path_value(data)
