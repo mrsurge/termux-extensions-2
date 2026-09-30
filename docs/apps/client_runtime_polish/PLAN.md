@@ -1043,6 +1043,44 @@ Investigation/acceptance gates:
    bypass the intended worker isolation or Python domain-service boundary.
    Python code does not become compiled/faster merely because Rust invokes it.
 
+## 7. Overlap installed frontend preparation with worker startup
+
+Approved direction (2026-09-29): optimize client-owned installed/OTA assets, not
+network bundle delivery. Electron, GeckoView and Cefrium should prepare the same
+page behind an independent splash while the worker starts. Browser delivery stays
+supported without becoming the optimization target.
+
+Source findings: app_shell waits for lifecycle readiness before loading the app
+template/module; its placeholder replaces the app container. Code TE2 initially
+has no responsive class, so Explorer starts offscreen before desktop grid rules
+make it visible. Saved widths follow responsive classification. Explorer setup
+mixes local chrome creation with RPC connection. Initial sidebar preferences are
+applied during snapshot seeding and again after editor mounting.
+
+Implementation sequence:
+1. Add an explicit opt-in preparation contract. Use the existing lifecycle stream
+   to start local template/module preparation when catalog metadata arrives;
+   backend activation still awaits pipe-authoritative readiness and native route
+   prerequisites. Other apps retain their existing gate.
+2. Separate the splash from app content. Prepare measurable, inert DOM, responsive
+   classes and saved dimensions without transitions or backend connections.
+   Do not use display:none for the prepared editor surface.
+3. Settle authoritative panel geometry before Monaco construction. Avoid repeated
+   preference application and intermediate drawer/secondary/sidebar resize work.
+   Do not introduce a second persistence authority or hide legitimate user state.
+4. Reveal on initial usable model/layout or legitimate empty-project state, not
+   merely HTTP readiness. Preserve theme/grammar/model barriers and independent
+   WBA/extension readiness. Extension content must not gate first document display.
+5. Cover readiness-before/after-preparation, failure/stopped states, duplicate
+   lifecycle snapshots, non-opt-in apps and primary/secondary boot. Typecheck and
+   build frontend, then explicitly OTA clients before user live acceptance.
+
+No new readiness polling/socket/eval transport, backend authority in frontend,
+shared-runtime restart, APK build or release publication is implied. Measure
+preparation/readiness/model milestones and resize counts; no speedup is claimed
+from source inspection alone. Implement in coherent checkpoints rather than
+discarding the existing startup contract wholesale.
+
 ## Execution and publication
 
 Investigate in the order above, recording findings before implementation. Treat

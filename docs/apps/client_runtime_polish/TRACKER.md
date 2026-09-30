@@ -5,6 +5,16 @@ Working branch: `feature/desktop-deb-packaging`; no new branch needed for planni
 
 ## Planning
 
+### Installed frontend staged startup
+
+- [x] Inspect local asset delivery, readiness gate and initial layout ordering.
+- [x] Record approved preparation/activation and stable-geometry design (PLAN §7).
+- [ ] Implement opt-in local preparation behind independent inert overlay.
+- [ ] Settle initial panel geometry and deduplicate restoration before Monaco.
+- [ ] Release splash on usable editor or empty-project state; retain error paths.
+- [ ] Typecheck/build and exercise startup ordering/failure regression tests.
+- [ ] OTA then live-validate Electron, GeckoView and Cefrium; measure separately.
+
 - [x] Record the three requested workstreams and initial source entry points.
 - [x] Separate verified source observations from unconfirmed bug explanations.
 - [x] Capture the original persistence proposal; superseded below after the
