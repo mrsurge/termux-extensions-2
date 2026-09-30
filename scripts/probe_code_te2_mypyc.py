@@ -33,9 +33,34 @@ STARTUP_IMPORTS = (
     "app.apps.code_te2.main",
     "app.apps.code_te2.socketio_gateway",
 )
+
+
+def link_resources(library: Path) -> None:
+    """Keep the developer overlay's __file__-relative assets source-owned."""
+    for relative in (
+        "app/apps/code_te2/shellspec",
+        "app/apps/code_te2/runner_profile",
+        "app/apps/code_te2/page_preview",
+        "app/apps/code_te2/workbench_protocol_proxy",
+        "app/apps/code_te2/monaco_editor/themes",
+        "app/apps/code_te2/monaco_editor/textmate",
+        "app/apps/code_te2/static",
+    ):
+        source = REPO / relative
+        target = library / relative
+        if not source.is_dir():
+            raise RuntimeError(f"missing source resource directory: {source}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.is_symlink() and target.resolve() == source.resolve():
+            continue
+        if target.exists() or target.is_symlink():
+            raise RuntimeError(f"refusing to replace overlay resource: {target}")
+        target.symlink_to(source, target_is_directory=True)
+
 # Interpreted islands are local compiler/runtime-shape limits, not an external
 # dependency fallback. Re-evaluate each after the domain/transport split.
 INTERPRETED = frozenset({
+    "app.libs.pipe_dto",  # msgspec Struct fields require runtime annotations
     "app.libs.pipe_protocol",  # runtime-inspected pipe annotations
     "app.libs.pipe_runtime",  # RuntimeError subclass codegen
     "app.apps.code_te2.code_server_bootstrap",  # RuntimeError subclass codegen
@@ -147,6 +172,7 @@ def build(output: Path) -> None:
     except BaseException:
         print("\n".join(log_path.read_text().splitlines()[-35:]), file=sys.stderr)
         raise
+    link_resources(output / "lib")
     print(f"Built shared group: {output / 'lib'} (details: {log_path})")
 
 

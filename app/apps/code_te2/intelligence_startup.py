@@ -57,4 +57,4 @@ async def prime_intelligence_runtime(project_root: str) -> None:
         if preparation.task is not None:
             if not preparation.task.done():
                 _ = preparation.task.cancel()
-            _ = await asyncio.gather(preparation.task, return_exceptions=True)
+            await asyncio.gather(preparation.task, return_exceptions=True)

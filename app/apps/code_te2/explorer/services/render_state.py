@@ -114,10 +114,15 @@ async def build_bootstrap_snapshot(
     *,
     extra_open_directories: list[str] | None = None,
 ) -> ExplorerBootstrapSnapshot:
-    root_listing, open_directories = await asyncio.gather(
-        build_directory_listing("."),
-        asyncio.to_thread(load_pruned_open_directories, project_root),
+    root_task = asyncio.create_task(build_directory_listing("."))
+    directories_task = asyncio.create_task(
+        asyncio.to_thread(load_pruned_open_directories, project_root)
     )
+    # gather returns a runtime list despite its heterogeneous tuple annotation.
+    # Read typed task results rather than imposing that tuple shape under mypyc.
+    await asyncio.gather(root_task, directories_task)
+    root_listing = root_task.result()
+    open_directories = directories_task.result()
     open_directories = _merge_open_directories(open_directories, extra_open_directories or [])
     open_directory_listings = await build_open_directory_listings(open_directories)
     return ExplorerBootstrapSnapshot(

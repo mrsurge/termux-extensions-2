@@ -112,7 +112,7 @@ async def cancel_backend_runtime_prepare_tasks() -> None:
     for task in tasks:
         _ = task.cancel()
     if tasks:
-        _ = await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 def _normalize_ui_preferences(value: object) -> JsonMap:
@@ -270,11 +270,14 @@ async def _build_full_boot_snapshot() -> JsonMap:
         build_run_profile_state_projection(),
         name="code_te2_boot_snapshot_run_profiles",
     )
-    core, code_server, run_profile_state = await asyncio.gather(
+    await asyncio.gather(
         core_task,
         code_server_task,
         run_profile_task,
     )
+    core = core_task.result()
+    code_server = code_server_task.result()
+    run_profile_state = run_profile_task.result()
     trace.mark("shared.inputs_ready")
     active_project = core["active_project"]
     if code_server.compatible and core["ui_prefs"].get("webWorkersEnabled") is not True:

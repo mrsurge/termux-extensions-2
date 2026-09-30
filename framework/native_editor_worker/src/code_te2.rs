@@ -422,6 +422,18 @@ fn initialize(root: &std::path::Path) -> Result<Arc<Py<PyAny>>> {
             }
         }
         path.call_method1("insert", (0, root.to_string_lossy().as_ref()))?;
+        if let Ok(output) = std::env::var("CODE_TE2_MYPYC_DIR") {
+            if !output.is_empty() {
+                let count: usize = py
+                    .import("app.apps.code_te2.mypyc_overlay")?
+                    .call_method1(
+                        "install",
+                        (root.to_string_lossy().as_ref(), output.as_str()),
+                    )?
+                    .extract()?;
+                eprintln!("[code-te2-worker] mypyc overlay enabled: {count} modules from {output}");
+            }
+        }
         Ok(Arc::new(
             py.import("app.apps.code_te2.native_worker")?
                 .into_any()

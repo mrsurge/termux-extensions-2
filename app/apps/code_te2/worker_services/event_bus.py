@@ -133,7 +133,7 @@ async def stop_worker_event_loop() -> None:
         for task in tasks:
             _ = task.cancel()
         if tasks:
-            _ = await asyncio.gather(*tasks, return_exceptions=True)
+            await asyncio.gather(*tasks, return_exceptions=True)
         _loop = None
         _queue = None
         _dispatcher_task = _metrics_summary_task = None

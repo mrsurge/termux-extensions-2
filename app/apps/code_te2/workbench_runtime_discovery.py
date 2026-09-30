@@ -60,7 +60,7 @@ class WorkbenchRuntimeDiscovery:
         task, self._task = self._task, None
         if task is not None:
             _ = task.cancel()
-            _ = await asyncio.gather(task, return_exceptions=True)
+            await asyncio.gather(task, return_exceptions=True)
 
 
 workbench_runtime_discovery = WorkbenchRuntimeDiscovery()

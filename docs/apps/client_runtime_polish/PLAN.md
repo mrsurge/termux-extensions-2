@@ -794,6 +794,73 @@ directly. Single isolated import checks measured 875 ms interpreted and 270 ms
 compiled on that Pixel run. These are **not** full worker startup, parity or
 repeatable benchmark results; no active worker was restarted or switched.
 
+The approved runtime experiment now uses `CODE_TE2_MYPYC_DIR` and the
+`.codex-scratch/mypyc-active` overlay selected by the experimental shellspec.
+The 134-module desktop group passes 20/20 isolated native-worker tests. Only
+`pipe_dto` was additionally excluded: compiled msgspec Struct annotations caused
+valid pipe reply IDs to fail validation. Ordinary msgspec consumers stay compiled.
+Distinct exception locals repair the compiled editor RPC error path; History
+and terminal logic are retained in the compiled group. Source-resource symlinks
+in the developer overlay preserve shellspec/theme/WBA lookup beside compiled
+modules. This is not release artifact packaging. Pixel builds the same group;
+live restarts remain user-owned and no startup speedup is claimed yet.
+The matching Pixel build subsequently loaded all 134 compiled modules and
+passed the same 20 isolated native-worker tests (51.22 seconds). Both local
+and Pixel shellspecs now select their tested overlay; neither live worker
+was restarted by the agent. Full user live acceptance remains pending.
+
+Local live testing exposed further mypyc `asyncio.gather` runtime shape checks:
+Explorer directory bootstrap and the combined host snapshot unpacked a list as
+an annotated tuple, while reader cleanup assigned an unused gather result and
+failed before releasing its native token. Preserve concurrent tasks, await the
+group without assigning its result, then read typed task results as needed.
+The follow-up local 134-module build passes 21 tests, including bootstrap
+publications and cancellation/release. Those new checks fail on the prior
+artifact. CPython 3.14 can still report the expected closed-reader exception
+from a cancelled shield waiter even after cleanup retrieves it; release must
+complete regardless. The local active overlay selects `mypyc-domain-gather-fix-1`.
+Desktop live acceptance was reported after the gather correction: no observed
+worker or WBA failures. The user approved transferring this correction to the
+Pixel next. Device compilation and isolated validation precede changing its
+active overlay; the live restart remains user-owned. The Pixel correction
+subsequently built all 134 modules and passed all 21 isolated tests (24.89 s).
+Its active overlay now selects `mypyc-domain-gather-fix-1`; the previous build
+is retained. Pixel live acceptance passed. User-observed timings were approximately
+1 s HTTP ready, 2 s page loaded, and 2.5 s model loaded; these are separate
+milestones, not controlled benchmark samples. Desktop acceptance also passed.
+
+#### Retain and package the accepted compiled worker
+
+Preserve both the independent Rust `code-te2-worker` executable and its matching
+134-module mypyc shared library/wrappers plus manifest. Checkpoint archives live
+under `.release/mypyc-checkpoint-20260929/` for Linux x86_64 CPython 3.14 and
+Termux aarch64 CPython 3.14; retain the device copy too. These are development
+evidence, not distributable wheels: resource symlinks and absolute manifest paths
+must be replaced by packaged resources/relative provenance before release.
+
+Archive SHA-256:
+- `linux-x86_64-cp314.tar.gz`: `6699c95f4f20354db04181c4c0a0c6e65476231fe7447a3a8bcb94c7a49fa524`
+- `termux-aarch64-cp314.tar.gz`: `9a2d07f0e8817ce33ca2a53b74ca964623a166ebe2401c6d512cd2919490633f`
+
+Next packaging work must integrate these artifacts into both Linux and Termux
+wheel assembly and the installer workflow. Validate Python ABI/platform, native
+worker/library compatibility, source fingerprints and checksums; carry interpreted
+islands and msgspec dependencies. Installed workers must not depend on scratch
+paths or silently fall back to compilation. Exercise clean installs and upgrades
+on the existing Linux and Android acceptance targets before publication. No
+wheel/release is produced by this checkpoint.
+
+#### Cefrium diff failure with CDP enabled — follow-up
+
+User reports an editor soft-crash-like stall during diff loading, limited to
+Cefrium with CDP enabled. Suspected recurrence: debugger auto-attachment pauses
+Monaco diff workers before execution. This is **not yet confirmed** for the new
+incident. Reuse the existing ADB/CDP runbook: inspect exact page/worker targets,
+flattened child sessions, waiting-for-debugger state and resume delivery; compare
+CDP on/off and confirm whether targeted resume restores the same diff without
+reload. Keep native monitor and DevTools ownership separate. Do not change the
+diff pipeline or disable debugging based solely on the symptom.
+
 ### Priority A: document and syntax readiness
 
 Optimize time to the correct document rendered with its selected theme and syntax,

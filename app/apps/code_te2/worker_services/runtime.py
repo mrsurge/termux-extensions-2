@@ -68,7 +68,7 @@ async def stop_intelligence_startup() -> None:
     task, _startup_task = _startup_task, None
     if task is not None:
         _ = task.cancel()
-        _ = await asyncio.gather(task, return_exceptions=True)
+        await asyncio.gather(task, return_exceptions=True)
     await stop_early_intelligence()
     await workbench_runtime_discovery.stop()
 

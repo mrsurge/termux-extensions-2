@@ -92,7 +92,7 @@ class OutputReader:
         self.closed = True
         self.bridge.shell_unsubscribe(self.token)
         if self.pending is not None:
-            _ = await asyncio.gather(self.pending, return_exceptions=True)
+            await asyncio.gather(self.pending, return_exceptions=True)
             self.pending = None
         await asyncio.to_thread(self.bridge.shell_release, self.token)
 

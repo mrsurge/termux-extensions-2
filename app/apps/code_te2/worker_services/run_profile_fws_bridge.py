@@ -189,7 +189,7 @@ async def stop_run_profile_fws_bridge() -> None:
     for task in tasks:
         _ = task.cancel()
     if tasks:
-        _ = await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.gather(*tasks, return_exceptions=True)
     try:
         if client is not None:
             await client.shutdown()

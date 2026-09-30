@@ -61,7 +61,11 @@ def native_app(tmp_path):
                     result = {}
                     method = request.get("method", "")
                     params = request.get("params") or {}
-                    if method == "git.historyGraph.open":
+                    if method == "fs.listDirectory":
+                        result = {"dto": "FsDirectoryListing", "version": 1,
+                                  "root": params["root"], "path": params["path"],
+                                  "resolvedPath": params["path"], "entries": []}
+                    elif method == "git.historyGraph.open":
                         result = {"dto": "GitHistoryOpened", "version": 1, "sessionId": params["sessionId"],
                                   "snapshot": {"dto": "GitHistorySnapshot", "version": 1,
                                     "snapshotId": "a" * 64, "headId": "b" * 40, "headRef": "refs/heads/main",
@@ -163,6 +167,11 @@ def test_real_host_rpc_binary_ack(native_app, transport):
         decoded = msgpack.unpackb(reply, raw=False)
         assert decoded["id"] == "test", decoded
         assert "result" in decoded, decoded
+        boot = msgpack.packb({"jsonrpc": "2.0", "id": "boot", "method": "ui.host.bootSnapshot.get",
+                             "params": {"clientInstanceId": "client_nativetest000001"}}, use_bin_type=True)
+        boot_reply = msgpack.unpackb(client.call("rpc", boot, namespace="/ui_ipc", timeout=15), raw=False)
+        assert "result" in boot_reply, (boot_reply, "".join(logs))
+        assert boot_reply["result"]["ok"] is True
         update = msgpack.packb({"jsonrpc": "2.0", "id": "update", "method": "ui.host.editorPreference.update",
                                "params": {"key": "wordWrap", "value": True}}, use_bin_type=True)
         updated = msgpack.unpackb(client.call("rpc", update, namespace="/ui_ipc", timeout=15), raw=False)
@@ -194,15 +203,17 @@ def test_history_dataclass_tuples_reach_explorer(native_app, transport):
         assert "result" in msgpack.unpackb(reply, raw=False), logs
         received = {}
         deadline = time.monotonic() + 5
-        while time.monotonic() < deadline and not {"snapshot", "page"} <= received.keys():
+        while time.monotonic() < deadline and not {"snapshot", "page", "listing"} <= received.keys():
             try:
                 event = events.get(timeout=0.2)
             except queue.Empty:
                 continue
+            if event.get("method") == "explorer.list.updated":
+                received["listing"] = event["params"]
             if event.get("method") == "explorer.history.updated":
                 payload = event["params"]
                 received[payload["kind"]] = payload
-        assert {"snapshot", "page"} <= received.keys(), (received, "".join(logs))
+        assert {"snapshot", "page", "listing"} <= received.keys(), (received, "".join(logs))
         assert received["snapshot"]["snapshot"]["refs"] == [{"name": "refs/heads/main", "commit_id": "b" * 40}]
         assert received["page"]["page"]["commits"][0]["parents"] == ["c" * 40]
         files_reply = client.call("rpc", msgpack.packb({"jsonrpc": "2.0", "id": "files",
@@ -341,7 +352,10 @@ def test_drawer_native_pty_checkpoint_resize_and_close(native_app, transport):
     try:
         client.connect(url, namespaces=["/terminal"], transports=[transport], wait_timeout=15)
         client.call("terminal:register", {"shell_id": "auto", "client_id": "drawer-test"}, namespace="/terminal", timeout=10)
-        shell_id = registered.get(timeout=10)["shell_id"]
+        try:
+            shell_id = registered.get(timeout=10)["shell_id"]
+        except queue.Empty:
+            pytest.fail(f"Terminal registration failed: {errors!r}\n{''.join(logs)}")
         # This fixture deliberately has no FWS controller. Its observer's
         # disconnected warning is expected; log checkpoints are tested directly.
         assert all(error.get("source") == "fws_terminal_log_stream" for error in errors), (errors, logs)

@@ -113,8 +113,8 @@ do not supply a free-threaded or different-version venv.
 
 ### Experimental mypyc domain compile probe
 
-This is a **developer-only compile/import proof**, not an installed worker or
-wheel. Use the matching regular CPython, a C compiler, `mypy==2.3.0` (which
+This is a **developer-only compiled-domain experiment**, not a release wheel.
+Use the matching regular CPython, a C compiler, `mypy==2.3.0` (which
 supplies mypyc), and `setuptools==84.0.0`. From the repository root, choose a
 new output path under `$TMPDIR` when set, otherwise under `.codex-scratch`:
 
@@ -131,8 +131,25 @@ extensions into the source tree or change the running TE2 worker. The desktop
 preflight compiled and imported 135 modules; compiled-overlay tests exposed
 mock-rebinding/native-class differences still to resolve before any runtime
 cutover. The matching-ABI Pixel/Termux probe also built and imported all 135
-compiled wrappers; it did not install them or switch the worker. See
+compiled wrappers; that initial probe did not switch the worker. See
 `docs/apps/client_runtime_polish/PLAN.md` §6 for evidence and gates.
+
+The native worker now accepts `CODE_TE2_MYPYC_DIR` pointing to a matching
+build's manifest/lib directory. The experimental shellspec selects
+`.codex-scratch/mypyc-active`; build and validate that directory before starting
+the worker, or remove that shellspec environment entry to run interpreted.
+There is no automatic build or silent fallback. Startup reports the compiled
+module count. The overlay links source-owned resource directories into its lib
+layout because compiled modules resolve sibling assets relative to their `.so`.
+These development symlinks are not a portable wheel packaging solution.
+
+The 134-module desktop group passes all 20 isolated native-worker tests,
+including History and terminal over polling and WebSocket. `pipe_dto` remains
+interpreted because its msgspec Struct annotations fail runtime validation when
+compiled; msgspec consumers remain compiled. Distinct exception bindings in the
+editor RPC coroutine avoid a compiled error-path type mismatch. Live acceptance
+remains a separate gate; the matching Pixel group also passed all 20 isolated
+native-worker tests.
 
 ### Pixel build and live test
 

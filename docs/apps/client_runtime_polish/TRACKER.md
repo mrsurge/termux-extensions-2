@@ -79,6 +79,10 @@ Sidebar loading; no additional startup redesign without new evidence.
 
 ## Cefrium CDP worker recovery and debugging documentation
 
+- [ ] Investigate reported recurrence after mypyc acceptance: Cefrium diff
+  loading stalls only with CDP enabled. Verify paused Monaco worker/session
+  routing against the prior runbook; suspected debugger pause is not proven.
+
 - [x] Isolate missing diff computation to a paused worker using page-console probes.
 - [x] Discover native CDP port, forward through ADB, and inspect the exact worker.
 - [x] Confirm causality: targeted debugger resume restores the existing diff.
@@ -332,8 +336,14 @@ Sidebar loading; no additional startup redesign without new evidence.
   errors and 34 warnings in that module. Native binary is unchanged. No live
   runtime restart or full Socket.IO dependency-removal claim.
 - [ ] Pixel live acceptance of namespace-adapter slice.
-- [ ] Compile the remaining connected local domain graph with mypyc and verify
-  interpreted/compiled parity, Pixel behavior and total startup/runtime costs.
+- [x] Compile the 134-module startup domain group; 21 isolated worker/cleanup
+  tests pass on desktop and Pixel. User live acceptance passes on both.
+  Pixel observed approximately 1 s HTTP ready, 2 s page loaded, 2.5 s model
+  loaded; not a controlled benchmark. Explicit interpreted islands remain.
+- [ ] Integrate accepted Rust worker plus mypyc group into Linux and Termux
+  wheels/install workflow, with ABI/provenance checks and packaged resources
+  instead of scratch paths/source symlinks. Preserve checkpoint artifacts in
+  `.release/mypyc-checkpoint-20260929/` until replacement releases are verified.
 - [ ] After those stages, replace remaining msgspec codec/Struct/validation uses
   explicitly; prove production import removal without weakening input checks.
 - [ ] Integrate native worker into packaged/build bootstrap only after parity.

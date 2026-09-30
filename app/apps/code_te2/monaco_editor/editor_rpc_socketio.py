@@ -141,41 +141,41 @@ class EditorRpcSocketIONamespace(NativeNamespace):
                     result,
                 ),
             )
-        except EditorRpcProtocolError as exc:
+        except EditorRpcProtocolError as protocol_error:
             await emit_editor_rpc_error(
                 lambda event_name, payload: self._emit_to_sid(sid, event_name, payload),
                 None,
-                exc.code,
-                exc.message,
-                data=exc.data,
+                protocol_error.code,
+                protocol_error.message,
+                data=protocol_error.data,
             )
-        except EditorRpcDispatchError as exc:
+        except EditorRpcDispatchError as dispatch_error:
             await emit_editor_rpc_error(
                 lambda event_name, payload: self._emit_to_sid(sid, event_name, payload),
                 request_id if isinstance(request_id, (str, int)) else None,
-                exc.code,
-                exc.message,
-                data=exc.data,
+                dispatch_error.code,
+                dispatch_error.message,
+                data=dispatch_error.data,
             )
-        except ValueError as exc:
+        except ValueError as value_error:
             await emit_editor_rpc_error(
                 lambda event_name, payload: self._emit_to_sid(sid, event_name, payload),
                 None,
                 JSONRPC_INVALID_PARAMS,
-                str(exc),
+                str(value_error),
             )
-        except PermissionError as exc:
+        except PermissionError as permission_error:
             await emit_editor_rpc_error(
                 lambda event_name, payload: self._emit_to_sid(sid, event_name, payload),
                 None,
                 JSONRPC_INVALID_PARAMS,
-                str(exc),
+                str(permission_error),
             )
-        except Exception as exc:
+        except Exception as internal_error:
             await emit_editor_rpc_error(
                 lambda event_name, payload: self._emit_to_sid(sid, event_name, payload),
                 None,
                 JSONRPC_INTERNAL_ERROR,
-                str(exc),
+                str(internal_error),
                 data={"kind": "editor_rpc_internal"},
             )
