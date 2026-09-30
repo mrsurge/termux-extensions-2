@@ -58,6 +58,14 @@ const hostConfig = {
   } }],
 };
 
+// Pure geometry only; served from the existing native-local static/js tree.
+const preparationConfig = {
+  ...shared,
+  entryPoints: ['main_page/frontend/boot/prepare-page.ts'],
+  outfile: '../../static/js/code-te2-prepare.js',
+  format: 'esm',
+};
+
 /** Workbench Adapter typed helper modules (Node ESM) */
 const workbenchAdapterConfig = {
   entryPoints: [
@@ -143,15 +151,17 @@ const workbenchAdapterPipeCodecConfig = {
 };
 
 if (isWatch) {
-  const [hostCtx, workbenchAdapterCtx, workbenchAdapterCodecCtx, pipeCodecCtx] = await Promise.all([
+  const [hostCtx, workbenchAdapterCtx, workbenchAdapterCodecCtx, pipeCodecCtx, preparationCtx] = await Promise.all([
     context(hostConfig),
     context(workbenchAdapterConfig),
     context(workbenchAdapterCodecConfig),
     context(workbenchAdapterPipeCodecConfig),
+    context(preparationConfig),
   ]);
   await copyHostCss();
   await Promise.all([
     hostCtx.watch(),
+    preparationCtx.watch(),
     pipeCodecCtx.watch(),
     workbenchAdapterCtx.watch(),
     workbenchAdapterCodecCtx.watch(),
@@ -160,6 +170,7 @@ if (isWatch) {
 } else {
   await Promise.all([
     build(hostConfig),
+    build(preparationConfig),
     build(workbenchAdapterConfig),
     build(workbenchAdapterCodecConfig),
     build(workbenchAdapterPipeCodecConfig),

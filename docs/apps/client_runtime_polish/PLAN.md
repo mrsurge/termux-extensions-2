@@ -1081,6 +1081,37 @@ preparation/readiness/model milestones and resize counts; no speedup is claimed
 from source inspection alone. Implement in coherent checkpoints rather than
 discarding the existing startup contract wholesale.
 
+Foundation implementation: the shell readiness overlay owns separate DOM,
+leaving app content measurable and inert during preparation. Transition suppression
+lasts through initialization. Code TE2 applies
+responsive classification and saved widths before its first asynchronous identity
+wait; responsive setup is idempotent across the separate preparer and host bundles
+using DOM markers rather than module-local state.
+
+Preparation slice: `frontend_preparation: true` in the manifest opts into early
+template mounting and host modulepreload after the lifecycle catalog arrives.
+The local template declares `data-te2-prepare-module`; this imports a tiny pure
+layout module from the already native-local `/static/js/` tree. CSS completion
+precedes geometry reads. No app RPC or document model is created in this phase.
+Repeated catalog snapshots share one preparation promise; failure closes the
+startup lifecycle stream and aborts outstanding template/style work. Backend
+activation and full host execution still await readiness and native routes.
+Older templates without a preparer remain supported by the host initializer;
+non-opt-in apps keep readiness-first loading. No new transport or native asset
+mapping is added.
+
+Reveal slice: the host boot runtime returns its actual promise rather than
+fire-and-forget. `managesStartupReveal` opts into retaining the shell overlay
+through initialization and a layout frame. Code Server consent/error dialogs
+use the optional shell interaction hook to yield and restore the overlay; older
+shells/apps preserve their previous behavior. Mount failures propagate to the
+shell error surface. Pending initial live SSOT projection participates in Monaco
+boot completion after grammar/model attachment, without waiting for WBA.
+Missing initial UI preferences settle before mount; duplicate post-mount sidebar
+preference replay is removed. Deferred sidebar extension hydration is unchanged.
+Live panel/secondary resize measurement and full host import-side-effect audit
+remain outstanding; no speedup or device acceptance claimed.
+
 ## Execution and publication
 
 Investigate in the order above, recording findings before implementation. Treat

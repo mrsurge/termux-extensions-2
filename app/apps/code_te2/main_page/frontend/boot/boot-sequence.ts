@@ -18,7 +18,6 @@ interface RestoredPathStateArgs {
 
 interface BootSequenceDeps {
   initResponsiveLayout(): void;
-  loadLayoutPreferences(): void;
   initResizeManager(): void;
   initExplorerUI(): Promise<unknown>;
   connectUIIPC(): void | Promise<unknown>;
@@ -29,7 +28,7 @@ interface BootSequenceDeps {
   initBranchMenu(): unknown;
   waitForInitialUiPrefs(ms?: number): Promise<Record<string, unknown>>;
   seedUiPrefsSnapshot(prefs: Record<string, unknown>): void;
-  applySidebarUiPrefs(prefs: Record<string, unknown>): void;
+  setStartupInteraction?(active: boolean): void;
   syncEditorState(force?: boolean): Promise<Record<string, unknown> | null>;
   hydrateEditorState(state: Record<string, unknown> | null): Record<string, unknown> | null;
   broadcastRecentsUpdate(state: Record<string, unknown> | null): void;
@@ -56,6 +55,15 @@ interface BootSequenceDeps {
 
 function asString(value: unknown): string {
   return typeof value === 'string' ? value : '';
+}
+
+async function withStartupInteraction<T>(deps: BootSequenceDeps, show: () => Promise<T>): Promise<T> {
+  deps.setStartupInteraction?.(true);
+  try {
+    return await show();
+  } finally {
+    deps.setStartupInteraction?.(false);
+  }
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -108,7 +116,7 @@ export async function prepareCodeServer(
 
   let result: Awaited<ReturnType<typeof window.teUI.dialog.open>>;
   try {
-    result = await window.teUI.dialog.open({
+    result = await withStartupInteraction(deps, () => window.teUI.dialog.open({
       kind: 'confirm',
       title: 'Choose Language Backend',
       message: reason,
@@ -127,7 +135,7 @@ export async function prepareCodeServer(
       defaultAction: 'install',
       cancelAction: 'continue',
       width: 'medium',
-    });
+    }));
   } catch (error) {
     console.warn('[code-server] prerequisite dialog failed:', error);
     return false;
@@ -148,10 +156,10 @@ export async function prepareCodeServer(
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       deps.spinnerSetStep('Language backend update failed', true);
-      await window.teUI.dialog.alert(message, {
+      await withStartupInteraction(deps, () => window.teUI.dialog.alert(message, {
         title: 'Language Backend Update Failed',
         severity: 'danger',
-      });
+      }));
       return false;
     }
   }
@@ -175,10 +183,10 @@ export async function prepareCodeServer(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     deps.spinnerSetStep('Code Server installation failed', true);
-    await window.teUI.dialog.alert(message, {
+    await withStartupInteraction(deps, () => window.teUI.dialog.alert(message, {
       title: 'Code Server Installation Failed',
       severity: 'danger',
-    });
+    }));
     return false;
   }
 }
@@ -186,7 +194,6 @@ export async function prepareCodeServer(
 export async function runBootSequence(deps: BootSequenceDeps): Promise<void> {
   traceColdBoot('host.boot.started', {});
   deps.initResponsiveLayout();
-  deps.loadLayoutPreferences();
   deps.initResizeManager();
 
   await deps.initExplorerUI().catch((error) => {
@@ -246,17 +253,19 @@ export async function runBootSequence(deps: BootSequenceDeps): Promise<void> {
   let uiIpcConnected = false;
   try { await deps.connectUIIPC(); uiIpcConnected = true; } catch (error) { console.warn('Failed to connect UI IPC channel:', error); }
   traceColdBoot('host.ui_ipc.complete', { connected: uiIpcConnected });
+  // Snapshot seeding/live prefs handlers already apply sidebar preferences.
+  // If the snapshot lacked them, settle the existing live-prefs wait before
+  // Monaco measures its container, never replay the same prefs after mounting.
+  if (!Object.keys(snapshotUiPrefs).length) await deps.waitForInitialUiPrefs(2200);
   traceColdBoot('host.inline_editor.mount_begin', {});
   let inlineEditorMounted = false;
-  try { await deps.mountInlineEditorHost(bootSnapshot); inlineEditorMounted = true; } catch (error) { console.error('Inline editor boot failed:', error); }
+  try { await deps.mountInlineEditorHost(bootSnapshot); inlineEditorMounted = true; } catch (error) {
+    console.error('Inline editor boot failed:', error);
+    throw error;
+  }
   traceColdBoot('host.inline_editor.mount_end', { mounted: inlineEditorMounted });
 
   try { deps.connectSidebarIPC(); } catch (error) { console.warn('Failed to connect Sidebar IPC channel:', error); }
-
-  const initialUiPrefs = Object.keys(snapshotUiPrefs).length
-    ? snapshotUiPrefs
-    : await deps.waitForInitialUiPrefs(2200);
-  try { deps.applySidebarUiPrefs(initialUiPrefs || {}); } catch (error) { console.warn('[Sidebar] Failed to apply initial prefs:', error); }
 
   const serverState = snapshotServerState || await deps.syncEditorState(true);
   deps.broadcastRecentsUpdate(serverState);

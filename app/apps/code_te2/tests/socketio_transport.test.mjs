@@ -1820,6 +1820,36 @@ test('a newer SSOT invalidates an older document during grammar preparation', as
   assert.equal(currentPath, '/workspace/new.py');
 });
 
+test('initial SSOT reveal waits for grammar/model but not WBA completion', async () => {
+  const { registerEditorSocketConnectionHandlers } = await importTypeScript('monaco_editor/editor_socket_connection_runtime.ts');
+  const handlers = new Map();
+  const syntax = deferred();
+  const language = deferred();
+  const calls = [];
+  let model = null;
+  const deps = new Proxy({
+    rpcNotifications: { onNotification(method, handler) { handlers.set(method, handler); } },
+    onSsotSnapshot: hasFile => calls.push(hasFile ? 'pending' : 'empty'),
+    onSsotProjectionReady: () => calls.push('visible'),
+    ensureEditorWithPrefs: async () => {},
+    getCurrentPath: () => '/workspace/reveal.py', getModel: () => model,
+    setModel: value => { model = value; },
+    prepareTextmateForDocument: () => syntax.promise,
+    createFileModel: () => ({ getValue: () => 'text', getLanguageId: () => 'python' }),
+    getEditor: () => ({ setModel() { calls.push('attached'); } }), getDiffEditor: () => null,
+    wbOpenFileFlow: () => { calls.push('wba'); return language.promise; },
+    requestAgentEditDocumentState: async () => {},
+  }, { get(target, property) { return property in target ? target[property] : () => {}; } });
+  registerEditorSocketConnectionHandlers({ on() {} }, deps);
+  handlers.get('editor.state.ssot')({ file: { path: '/workspace/reveal.py', content: 'text', document_revision: 1 } });
+  await settlePromises();
+  assert.deepEqual(calls, ['pending']);
+  syntax.resolve('python');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(calls, ['pending', 'attached', 'visible', 'wba']);
+  language.resolve();
+});
+
 test('boot loads grammar catalog even when a live SSOT displaced its boot document', () => {
   const source = fs.readFileSync(path.join(appRoot, 'monaco_editor/m_editor_app.ts'), 'utf8');
   assert.match(source, /ensureDocumentSyntax: async function \(\) \{[\s\S]*?if \(path\) \{[\s\S]*?await prepareTextmateForDocument\(path\);[\s\S]*?\} else \{[\s\S]*?await textmateRuntime\.refreshVscodeGrammarIndex\(\);/);

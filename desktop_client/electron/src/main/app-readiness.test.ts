@@ -72,15 +72,14 @@ test("Electron app navigation delegates backend readiness to the shared app shel
   );
 
   const lifecycle = appShell.indexOf(
-    "const appDef = await waitForAppLifecycle()",
+    "const appDef = await waitForAppLifecycle(candidate =>",
   );
   const nativePrerequisite = appShell.indexOf(
     "await waitForNativeAppPrerequisites(appId)",
   );
-  const templateFetch = appShell.indexOf(
-    "const template = await fetch",
-    nativePrerequisite,
-  );
+  const activation = appShell.indexOf('const module = await import(scriptUrl)', nativePrerequisite);
   assert.ok(lifecycle >= 0 && lifecycle < nativePrerequisite);
-  assert.ok(nativePrerequisite < templateFetch);
+  assert.ok(nativePrerequisite < activation);
+  assert.match(appShell, /candidate\.frontend_preparation !== true/);
+  assert.match(appShell, /preparedPage \?\?= prepareAppPage/);
 });

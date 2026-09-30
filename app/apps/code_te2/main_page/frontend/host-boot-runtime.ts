@@ -26,7 +26,6 @@ interface BootStatusElementLike {
 
 interface HostBootRuntimeDeps {
   initResponsiveLayout: () => void;
-  loadLayoutPreferences: () => void;
   initResizeManager: () => void;
   initExplorerUI: (deps: ExplorerUiInitOptions) => Promise<unknown>;
   ensureSocketIoLoaded: () => Promise<IoFactory | null | undefined>;
@@ -48,7 +47,7 @@ interface HostBootRuntimeDeps {
   setBranchMenuHandle: (handle: unknown) => void;
   waitForInitialUiPrefs: (ms?: number) => Promise<UnknownRecord>;
   seedUiPrefsSnapshot: (prefs: UnknownRecord) => void;
-  applySidebarUiPrefs: (prefs: UnknownRecord) => void;
+  setStartupInteraction?: (active: boolean) => void;
   syncEditorState: (force?: boolean) => Promise<UnknownRecord | null>;
   hydrateEditorState: (state: UnknownRecord | null) => UnknownRecord | null;
   broadcastRecentsUpdate: (state: UnknownRecord | null) => void;
@@ -118,10 +117,9 @@ function runPostBootSidebarHydration(deps: HostBootRuntimeDeps): void {
 }
 
 export function createHostBootRuntime(deps: HostBootRuntimeDeps) {
-  function start(): void {
-    void runBootSequence({
+  async function start(): Promise<void> {
+    await runBootSequence({
       initResponsiveLayout: () => deps.initResponsiveLayout(),
-      loadLayoutPreferences: () => deps.loadLayoutPreferences(),
       initResizeManager: () => deps.initResizeManager(),
       initExplorerUI: () => deps.initExplorerUI({
         ensureSocketIoLoaded: deps.ensureSocketIoLoaded,
@@ -146,7 +144,7 @@ export function createHostBootRuntime(deps: HostBootRuntimeDeps) {
       }),
       waitForInitialUiPrefs: (ms) => deps.waitForInitialUiPrefs(ms),
       seedUiPrefsSnapshot: (prefs) => deps.seedUiPrefsSnapshot(prefs || {}),
-      applySidebarUiPrefs: (prefs) => deps.applySidebarUiPrefs(prefs || {}),
+      setStartupInteraction: deps.setStartupInteraction,
       syncEditorState: (force) => deps.syncEditorState(force),
       hydrateEditorState: (state) => deps.hydrateEditorState(state),
       broadcastRecentsUpdate: (state) => deps.broadcastRecentsUpdate(state),

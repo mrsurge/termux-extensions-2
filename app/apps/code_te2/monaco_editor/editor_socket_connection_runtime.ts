@@ -46,7 +46,9 @@ interface EditorSocketConnectionDeps {
   emitToHost(eventName: string, payload: Record<string, unknown>): void;
   getCachedPrefs(): unknown;
   setCachedPrefs(snapshot: unknown): void;
-  onSsotSnapshot?(): void;
+  onSsotSnapshot?(hasFile: boolean): void;
+  onSsotProjectionReady?(): void;
+  onSsotProjectionError?(error: unknown): void;
   getBaseSha256(): string | null;
   setBaseSha256(value: string | null): void;
   getCurrentPath(): string | null;
@@ -171,7 +173,6 @@ export function registerEditorSocketConnectionHandlers(
   let snapshotSequence = 0;
   const handleSsotSnapshot = (snapshot: unknown): void => {
     const sequence = ++snapshotSequence;
-    deps.onSsotSnapshot?.();
     let stage = 'snapshot';
     const trace = (nextStage: string): void => {
       stage = nextStage;
@@ -187,6 +188,7 @@ export function registerEditorSocketConnectionHandlers(
     try {
       const snapshotRecord = asRecord(snapshot);
       const snapshotFile = asRecord(snapshotRecord && snapshotRecord.file);
+      deps.onSsotSnapshot?.(!!snapshotFile);
       try {
         const t = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function')
           ? (Math.round(performance.now() * 10) / 10)
@@ -284,6 +286,8 @@ export function registerEditorSocketConnectionHandlers(
             });
           } catch (_) {}
           deps.updateDebug('ws=ssot');
+          // Visible document completion precedes language/extension work below.
+          deps.onSsotProjectionReady?.();
           deps.requestGitBaselines({ reason: 'ssot' });
           trace('baseline-request-scheduled');
           let languageOpenPromise: Promise<unknown> | null = null;
@@ -319,6 +323,7 @@ export function registerEditorSocketConnectionHandlers(
             console.warn('[AgentEditReview] document state request failed after ssot open', error);
           }
         }).catch((error: unknown) => {
+          if (sequence === snapshotSequence) deps.onSsotProjectionError?.(error);
           traceInlineDiffInit('snapshot-failed', { sequence, stage, error: String(error), stack: error instanceof Error ? error.stack : undefined });
           console.error('[InlineDiffInit] snapshot initialization failed', {
             sequence,
@@ -331,6 +336,7 @@ export function registerEditorSocketConnectionHandlers(
         deps.updateDebug('ws=ssot-empty');
       }
     } catch (error) {
+      if (sequence === snapshotSequence) deps.onSsotProjectionError?.(error);
       console.warn('[Monaco] ssot apply failed', error);
     }
   };

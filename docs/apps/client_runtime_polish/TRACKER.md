@@ -9,11 +9,30 @@ Working branch: `feature/desktop-deb-packaging`; no new branch needed for planni
 
 - [x] Inspect local asset delivery, readiness gate and initial layout ordering.
 - [x] Record approved preparation/activation and stable-geometry design (PLAN §7).
-- [ ] Implement opt-in local preparation behind independent inert overlay.
-- [ ] Settle initial panel geometry and deduplicate restoration before Monaco.
-- [ ] Release splash on usable editor or empty-project state; retain error paths.
+- [x] Foundation: independent readiness overlay preserves app DOM; early responsive
+  classification/saved dimensions precede async identity resolution, with
+  idempotent responsive listener installation and startup transition suppression.
+- [x] Implement opt-in local preparation behind independent inert overlay.
+- [x] Apply initial sidebar preferences before Monaco; remove duplicate post-mount
+  preference replay. Deferred extension hydration remains independent.
+- [x] Await host/Monaco boot and pending initial live-document projection before
+  splash release; retain empty-project, explicit dialog and failure paths.
+- [ ] Live-check panel/secondary restoration geometry and resize counts.
 - [ ] Typecheck/build and exercise startup ordering/failure regression tests.
 - [ ] OTA then live-validate Electron, GeckoView and Cefrium; measure separately.
+
+Preparation validation: startup/transport tests plus Electron's navigation-readiness
+test, Code TE2 typecheck and frontend build. Catalog delivery now starts the
+opt-in template/CSS/layout preparation and host modulepreload while readiness is
+pending. The ~2 KB pure preparer uses the existing local static/js asset tree.
+Host module execution and backend activation remain gated. Opt-in host initializers
+now return the boot promise; the overlay remains until it and a layout frame
+complete. Startup consent dialogs explicitly yield/restore interaction. Pending
+initial live SSOT grammar/model work participates in editor readiness, before
+WBA work. Full host early execution remains pending.
+No runtime restart, client OTA, version bump or APK build performed; no measured
+startup gain or live acceptance claimed. New templates declare their preparer;
+older installed templates without it retain normal initializer-owned geometry.
 
 - [x] Record the three requested workstreams and initial source entry points.
 - [x] Separate verified source observations from unconfirmed bug explanations.

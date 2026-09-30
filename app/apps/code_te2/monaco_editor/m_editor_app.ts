@@ -374,6 +374,11 @@ interface MonacoBootWindowLike extends Window {
   let initialBootSnapshot = bootWindow.__te2InlineMonacoBootSnapshot || null;
   let resolveInlineRuntimeBoot: (() => void) | null = null;
   let rejectInlineRuntimeBoot: ((error: unknown) => void) | null = null;
+  let inlineRuntimeReady = false;
+  let initialProjectionPending = false;
+  function resolveUsableInlineBoot(): void {
+    if (inlineRuntimeReady && !initialProjectionPending) resolveInlineRuntimeBoot?.();
+  }
   if (bootWindow.__te2InlineMonacoHost) {
     bootWindow.__te2InlineMonacoRuntimeBoot = new Promise<void>((resolve, reject) => {
       resolveInlineRuntimeBoot = resolve;
@@ -2248,9 +2253,18 @@ interface MonacoBootWindowLike extends Window {
         >[0],
         buildSocketConnectionDeps({
           rpcNotifications: editorRpcTransport,
-          onSsotSnapshot: function () {
+          onSsotSnapshot: function (hasFile: boolean) {
             // Live state supersedes the bootstrap cache before awaiting themes.
             initialBootSnapshot = null;
+            initialProjectionPending = hasFile;
+            resolveUsableInlineBoot();
+          },
+          onSsotProjectionReady: function () {
+            initialProjectionPending = false;
+            resolveUsableInlineBoot();
+          },
+          onSsotProjectionError: function (error: unknown) {
+            if (initialProjectionPending) rejectInlineRuntimeBoot?.(error);
           },
           emitToHost: emitToHost,
           getCachedPrefs: function () {
@@ -2754,7 +2768,8 @@ interface MonacoBootWindowLike extends Window {
         emitToHost: emitToHost,
         updateDebug: updateDebug,
         onReady: function () {
-          resolveInlineRuntimeBoot?.();
+          inlineRuntimeReady = true;
+          resolveUsableInlineBoot();
         },
         onError: function (error) {
           rejectInlineRuntimeBoot?.(error);

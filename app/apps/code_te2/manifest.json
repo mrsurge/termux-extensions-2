@@ -24,5 +24,6 @@
   },
   "sio_service": "sio_service.json",
   "readiness_support": "pipe",
+  "frontend_preparation": true,
   "fullscreen": true
 }

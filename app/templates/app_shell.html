@@ -72,6 +72,21 @@
             background: var(--background);
         }
 
+        #app-startup-overlay {
+            position: fixed;
+            inset: var(--framework-toolbar-height, 0px) 0 0;
+            z-index: 10000;
+            overflow: auto;
+            background: var(--background);
+        }
+        #app-startup-overlay[hidden] { display: none; }
+        #app-container.app-preparing *,
+        #app-container.app-preparing *::before,
+        #app-container.app-preparing *::after {
+            transition: none !important;
+            animation: none !important;
+        }
+
         .app-readiness-card {
             width: min(360px, 100%);
             border: 1px solid var(--border);
@@ -485,6 +500,39 @@
 
         const appContainer = document.getElementById('app-container');
         const appTitleEl = document.getElementById('app-title');
+        // Independent ownership: lifecycle updates must never replace prepared DOM.
+        const startupOverlay = document.createElement('div');
+        startupOverlay.id = 'app-startup-overlay';
+        startupOverlay.setAttribute('role', 'status');
+        startupOverlay.setAttribute('aria-live', 'polite');
+        startupOverlay.hidden = true;
+        document.body.appendChild(startupOverlay);
+        let preparationFinished = false;
+
+        function beginAppPreparation() {
+            appContainer.inert = true;
+            appContainer.setAttribute('aria-busy', 'true');
+            appContainer.classList.add('app-preparing');
+            startupOverlay.hidden = false;
+        }
+
+        function activatePreparedApp() {
+            startupOverlay.hidden = true;
+            appContainer.inert = false;
+            appContainer.removeAttribute('aria-busy');
+        }
+
+        function finishAppPreparation() {
+            preparationFinished = true;
+            activatePreparedApp();
+            appContainer.classList.remove('app-preparing');
+        }
+
+        function setStartupInteraction(active) {
+            if (preparationFinished) return;
+            if (active) activatePreparedApp();
+            else beginAppPreparation();
+        }
         const btnHome = document.getElementById('btn-home');
         const btnReload = document.getElementById('btn-reload');
 
@@ -565,7 +613,8 @@
                 : status === 'stopped'
                     ? `${appName} stopped`
                     : `Preparing ${appName}`;
-            appContainer.innerHTML = `
+            beginAppPreparation();
+            startupOverlay.innerHTML = `
                 <div class="app-readiness-placeholder" data-readiness-status="${escapeHtml(status)}">
                     <div class="app-readiness-card">
                         <div class="app-readiness-kicker">${escapeHtml(kicker)}</div>
@@ -576,7 +625,7 @@
         }
 
         // Rust lifecycle snapshots and readiness facts are the only release authority.
-        async function waitForAppLifecycle() {
+        async function waitForAppLifecycle(onCatalog = () => {}) {
             renderBackendReadinessPlaceholder(null, { app_id: appId, status: 'starting' });
             let done = false;
             let events = null;
@@ -657,6 +706,10 @@
                         return;
                     }
                     host.setTitle(appDef.name || 'TE2 App');
+                    Promise.resolve(onCatalog(appDef)).catch(error => {
+                        cleanup();
+                        reject(error);
+                    });
                     if (!appRequiresBackend(appDef) || !appSupportsReadiness(appDef)) {
                         resolveApp();
                         return;
@@ -751,6 +804,7 @@
 
         // Host API exposed to apps
         const host = {
+            setStartupInteraction,
             id: appId,
             saveState: (state) => {
                 stateCache.set(stateKey, state);
@@ -1085,29 +1139,88 @@
             }
         }
 
-        async function loadApp() {
-            try {
-                if (!appId) throw new Error('App ID not available for app shell');
-                const sidebarVersion = sidebarShortcutVersion();
-                const appDef = await waitForAppLifecycle();
-                startupMark('shell.lifecycle_resolved');
-                await waitForNativeAppPrerequisites(appId);
-                startupMark('shell.native_prerequisites_ready');
+        function appAssetUrl(appDef, path, sidebarVersion) {
                 const assetBaseUrl = typeof appDef.asset_base_url === 'string' ? appDef.asset_base_url.trim() : '';
-                const templatePath = assetBaseUrl
-                    ? `${assetBaseUrl.replace(/\/+$/, '')}/${appDef.entrypoints.frontend_template.replace(/^\/+/, '')}`
-                    : `/apps/${appDef._dir}/${appDef.entrypoints.frontend_template}`;
-                const templateUrl = withSidebarShortcutVersion(templatePath, sidebarVersion, window.location.href);
-                const template = await fetch(templateUrl, sidebarVersion ? { cache: 'reload' } : undefined).then(res => res.text());
+                const assetPath = assetBaseUrl
+                    ? `${assetBaseUrl.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`
+                    : `/apps/${appDef._dir}/${path}`;
+                return withSidebarShortcutVersion(assetPath, sidebarVersion, window.location.href);
+        }
+
+        async function prepareAppPage(appDef, sidebarVersion, signal) {
+                const templateUrl = appAssetUrl(appDef, appDef.entrypoints.frontend_template, sidebarVersion);
+                const response = await fetch(templateUrl, { signal, ...(sidebarVersion ? { cache: 'reload' } : {}) });
+                if (!response.ok) throw new Error(`App template failed (${response.status})`);
+                const template = await response.text();
+                signal.throwIfAborted();
                 startupMark('shell.template_loaded');
                 appContainer.innerHTML = rewriteTemplateVersionedAssets(template, templateUrl, sidebarVersion);
                 window.refreshAppShellLayoutMetrics?.();
+                const stylesReady = Promise.all((appDef.frontend_preparation === true ? Array.from(appContainer.querySelectorAll('link[rel="stylesheet"]')) : []).map(link => {
+                    if (link.sheet) return Promise.resolve();
+                    return new Promise((resolve, reject) => {
+                        const cleanup = () => {
+                            link.removeEventListener('load', loaded);
+                            link.removeEventListener('error', failed);
+                            signal.removeEventListener('abort', aborted);
+                        };
+                        const loaded = () => { cleanup(); resolve(); };
+                        const failed = () => { cleanup(); reject(new Error(`App stylesheet failed: ${link.getAttribute('href')}`)); };
+                        const aborted = () => { cleanup(); reject(signal.reason); };
+                        link.addEventListener('load', loaded, { once: true });
+                        link.addEventListener('error', failed, { once: true });
+                        signal.addEventListener('abort', aborted, { once: true });
+                        if (signal.aborted) aborted();
+                    });
+                }));
+                // Import and stylesheet completion overlap, but geometry uses
+                // loaded CSS. Attach rejection handling before awaiting imports.
+                void stylesReady.catch(() => {});
+                const scriptUrl = appDef.entrypoints.frontend_script
+                    ? appAssetUrl(appDef, appDef.entrypoints.frontend_script, sidebarVersion)
+                    : null;
+                if (scriptUrl) {
+                    // Native clients read this from installed assets. Modulepreload
+                    // prepares the host graph without executing its side effects.
+                    const preload = document.createElement('link');
+                    preload.rel = 'modulepreload';
+                    preload.href = scriptUrl;
+                    document.head.appendChild(preload);
+                }
+                const preparePath = appContainer.querySelector('[data-te2-prepare-module]')?.getAttribute('data-te2-prepare-module');
+                if (appDef.frontend_preparation === true && preparePath) {
+                    const prepareUrl = new URL(preparePath, window.location.href);
+                    if (prepareUrl.origin !== window.location.origin) throw new Error('App preparation must be same-origin');
+                    const preparation = await import(withSidebarShortcutVersion(prepareUrl.href, sidebarVersion, window.location.href));
+                    await stylesReady;
+                    signal.throwIfAborted();
+                    if (typeof preparation.default !== 'function') throw new Error('Invalid app preparation entrypoint');
+                    await preparation.default(appContainer);
+                }
+                await stylesReady;
+                startupMark('shell.page_prepared');
+                return { scriptUrl };
+        }
 
-                if (appDef.entrypoints.frontend_script) {
-                    const scriptPath = assetBaseUrl
-                        ? `${assetBaseUrl.replace(/\/+$/, '')}/${appDef.entrypoints.frontend_script.replace(/^\/+/, '')}`
-                        : `/apps/${appDef._dir}/${appDef.entrypoints.frontend_script}`;
-                    const scriptUrl = withSidebarShortcutVersion(scriptPath, sidebarVersion, window.location.href);
+        async function loadApp() {
+            const preparationAbort = new AbortController();
+            try {
+                if (!appId) throw new Error('App ID not available for app shell');
+                const sidebarVersion = sidebarShortcutVersion();
+                let preparedPage = null;
+                const appDef = await waitForAppLifecycle(candidate => {
+                    if (candidate.frontend_preparation !== true) return;
+                    // Repeated catalog snapshots must not replace prepared DOM.
+                    preparedPage ??= prepareAppPage(candidate, sidebarVersion, preparationAbort.signal);
+                    return preparedPage;
+                });
+                startupMark('shell.lifecycle_resolved');
+                await waitForNativeAppPrerequisites(appId);
+                startupMark('shell.native_prerequisites_ready');
+                preparedPage ??= prepareAppPage(appDef, sidebarVersion, preparationAbort.signal);
+                const { scriptUrl } = await preparedPage;
+
+                if (scriptUrl) {
                     const module = await import(scriptUrl);
                     startupMark('shell.module_loaded');
                     const api = {
@@ -1116,16 +1229,25 @@
                         delete: (endpoint) => teFetch(`/api/app/${appId}/${endpoint}`, { method: 'DELETE' })
                     };
                     // Pass host as a 3rd param (backward compatible)
+                    // Only opted-in initializers promise an awaitable editor
+                    // lifecycle and explicitly yield for startup consent dialogs.
+                    if (module.managesStartupReveal !== true) activatePreparedApp();
                     const initResult = module.default(appContainer, api, host);
                     if (initResult && typeof initResult.then === 'function') {
                         await initResult;
                     }
+                    if (module.managesStartupReveal === true) {
+                        await new Promise(resolve => window.requestAnimationFrame(resolve));
+                    }
                     startupMark('shell.app_initialized');
                 }
                 window.refreshAppShellLayoutMetrics?.();
+                finishAppPreparation();
             } catch (error) {
+                preparationAbort.abort();
                 const details = debugFullStack && error?.stack ? error.stack : error.message;
                 appContainer.innerHTML = `<pre style=\"color: red; white-space: pre-wrap;\">Error loading app: ${escapeHtml(details)}</pre>`;
+                finishAppPreparation();
                 console.error("Failed to load app:", error);
             }
         }

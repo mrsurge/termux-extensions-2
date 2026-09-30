@@ -118,6 +118,56 @@ test('host mounts and restores a document while WBA readiness is pending', async
   } finally { ready(false); win.happyDOM.abort(); }
 });
 
+test('startup settles missing UI preferences before mount, handles empty projects, and propagates mount failure', async () => {
+  const win = new Window();
+  globalThis.window = win;
+  globalThis.CustomEvent = win.CustomEvent;
+  const { runBootSequence } = await importBootSequence();
+  const calls = [];
+  const noop = () => {};
+  const snapshot = { ui_prefs: {}, code_server: { compatible: true }, session_state: {}, host_state: { activeProject: null } };
+  const deps = {
+    initResponsiveLayout: noop, initResizeManager: noop, initExplorerUI: async () => {},
+    requestBackendBootSnapshot: async () => ({ ok: true, snapshot }),
+    seedUiPrefsSnapshot: () => { calls.push('prefs'); }, seedPersistedSessionState: noop,
+    hydrateEditorState: noop, setBranchMenuHandle: noop, initBranchMenu: noop,
+    ensureWorkbenchAdapterReady: async () => {}, connectUIIPC: async () => {},
+    waitForInitialUiPrefs: async () => { calls.push('prefs'); return {}; },
+    mountInlineEditorHost: async () => { calls.push('mount'); }, connectSidebarIPC: noop,
+    applySidebarUiPrefs: () => { throw new Error('must not replay prefs after mount'); },
+    broadcastRecentsUpdate: noop, refreshMenuState: async () => {},
+    initSessionStateContext: noop, queueSessionStateUpdate: noop,
+    resetSavedState: noop, markUnsaved: noop,
+    setNoProjectState: () => { calls.push('empty'); },
+  };
+  await runBootSequence(deps);
+  assert.deepEqual(calls, ['prefs', 'mount', 'empty']);
+  deps.mountInlineEditorHost = async () => { throw new Error('grammar failed'); };
+  await assert.rejects(runBootSequence(deps), /grammar failed/);
+  win.happyDOM.abort();
+});
+
+test('startup installation dialog explicitly yields and restores overlay interaction', async () => {
+  const { prepareCodeServer } = await importBootSequence();
+  const calls = [];
+  const win = new Window();
+  globalThis.window = win;
+  win.teUI = { dialog: { open: async () => {
+    assert.deepEqual(calls, [true]);
+    return { status: 'cancelled', action: 'continue' };
+  } } };
+  const snapshot = { ui_prefs: {}, code_server: { compatible: false } };
+  const result = await prepareCodeServer(snapshot, snapshot.ui_prefs, {
+    requestBackendBootSnapshot: async () => ({ ok: true, snapshot }),
+    requestBackendLanguageBackendSet: async () => ({ ok: true }),
+    seedUiPrefsSnapshot() {}, spinnerSetStep() {},
+    setStartupInteraction: active => { calls.push(active); },
+  });
+  assert.equal(result, false);
+  assert.deepEqual(calls, [true, false]);
+  win.happyDOM.abort();
+});
+
 async function importMonacoBoot() {
   const built = await build({
     entryPoints: [path.join(appRoot, 'monaco_editor/editor_monaco_boot_runtime.ts')],

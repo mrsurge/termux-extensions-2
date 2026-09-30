@@ -69,7 +69,8 @@ import {
 import { bootSecondaryEditorRuntime } from './main_page/frontend/secondary-editor-runtime.ts';
 import { createMobileSecondaryEditorController } from './main_page/frontend/mobile-secondary-editor.ts';
 import { configureCodeTe2SocketIdentity } from './src/rpc/socketio-topology.ts';
-import { initResizeManager, loadLayoutPreferences } from './main_page/frontend/host-resize-manager.ts';
+import { initResizeManager } from './main_page/frontend/host-resize-manager.ts';
+import preparePage from './main_page/frontend/boot/prepare-page.ts';
 import type { ProblemsPanelController } from './src/diagnostics/problems-panel.ts';
 import type { OpenFileOptions } from './main_page/frontend/file-ops/open-flow.ts';
 import { UI_IPC_RPC_METHODS, type UiIpcRpcMethod } from './src/ui_ipc/rpc_contract.ts';
@@ -89,7 +90,11 @@ interface HostApi {
 interface HostBridge {
   toast: (message: string, kind?: unknown) => void;
   onBeforeExit: (cb: () => UnknownRecord) => void;
+  setStartupInteraction?: (active: boolean) => void;
 }
+
+// The shared shell may retain its overlay until this initializer resolves.
+export const managesStartupReveal = true;
 
 interface EditorViewState extends UnknownRecord {
   autoSave?: boolean;
@@ -196,6 +201,9 @@ function asUnknownRecord(value: unknown): UnknownRecord {
 // ---- host/api contract (injected by framework) ----
 /* global host, api */
 export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, host: HostBridge) {
+  // Establish geometry before the first async identity/native bridge wait.
+  // The shell keeps this measurable DOM inert behind its startup overlay.
+  preparePage(rootEl);
   const appContext = createAppContext({ rootEl, api, host });
   window.__feAppContext = appContext;
   window.host = host;
@@ -1567,9 +1575,8 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
   });
   stateInitController.installOpenHooks();
 
-  createHostBootRuntime({
+  await createHostBootRuntime({
     initResponsiveLayout,
-    loadLayoutPreferences,
     initResizeManager,
     initExplorerUI,
     ensureSocketIoLoaded,
@@ -1593,7 +1600,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     },
     waitForInitialUiPrefs: (ms?: number) => hostUiPrefsRuntime.waitForInitialUiPrefs(ms),
     seedUiPrefsSnapshot: (prefs: UnknownRecord) => hostUiPrefsRuntime.seedUiPrefsSnapshot(prefs || {}),
-    applySidebarUiPrefs: (prefs: UnknownRecord) => hostUiPrefsRuntime.applySidebarUiPrefs(prefs || {}),
+    setStartupInteraction: (active: boolean) => host.setStartupInteraction?.(active),
     syncEditorState: (force?: boolean) => editorStateController.syncEditorState(force),
     hydrateEditorState: (state: UnknownRecord | null) => editorStateController.hydrateEditorState(state),
     broadcastRecentsUpdate: (state: UnknownRecord | null) => fileTabsController.broadcastOpenState(state),
