@@ -258,6 +258,29 @@ client-runtime pattern in its own process.
 
 Shared UI source lives in `main_page/frontend/ui/component-runtime/` (synchronous document-aware JSX, refs, ownership/disposal, small projections; no VDOM or durable state authority) and `main_page/frontend/ui/modal-kit/`. `ui/modal-kit/jsx-runtime.ts` is the compatibility re-export. Async `teUI.dialog` stays inline on browser/Android; Electron uses portable child-window IPC and same-origin portal adoption. Listbox popups belong to the active dialog layer. Retain CM6 JSON fields in Run Profiles/Settings. Android per-app settings use `SharedPreferences`, not framework Settings APIs; relay retargeting stays in `PersistentNetworkService.configure`. Shared `teUI.toast` messages in `app/static/js/te_ui.js` are click/tap/keyboard copy targets. They copy original plain text without the close glyph or feedback, preserve dismissal/expiry and report copy status in place. A user-initiated copy-event fallback supports HTTP contexts without focusing a helper textarea; concurrent copies are suppressed. `tests/toast_copy.test.mjs` validates shared behavior.
 
+### Shared UI And Input Policy
+
+Authored Code TE2 controls use app-owned popup/listboxes; native browser `<select>`
+dropdowns are prohibited by the source regression gate. Use asynchronous `teUI`
+dialogs rather than browser prompts. Electron dialogs retain same-origin portal
+ownership, and popup listboxes belong to the dialog layer rather than clipped
+modal bodies. The dependency-free component runtime owns synchronous JSX, refs
+and disposal, not durable state or a VDOM; modal-kit re-exports its JSX runtime.
+Keep the CodeMirror JSON editor fields in Settings and Run Profiles.
+
+Shared teUI dialog controls and layers disable autocapitalization. Code TE2 and
+both native launcher UI roots inherit `autocapitalize="off"` for authored
+settings/URL/name fields. Preserve it on separately hosted dialog controls and
+new input surfaces, including both source and sticky Explorer search inputs.
+
+Fresh preference seeds use draft mode, diff overlays off and vendored
+`github-dark-default`; explicit persisted choices override seeds. Product
+preferences are not agent policy. Draft discard remains confirmation-gated.
+Menus/tabs/Monaco use the stacking policy in **Z-index policy**. Focused secondary
+key rails, hold-repeat modifier snapshots, Android composition/selection and
+historical read-only touch controls retain their separate owners; see **Android /
+GeckoView IME and Browser Text Input** and **Touch selection**.
+
 ### Monaco editor runtime (worker)
 - `app/apps/code_te2/monaco_editor/inline_host.ts`
   - Mounts the inline editor into `#editor-frame`
@@ -813,6 +836,12 @@ Explorer frontend -> /rpc/explorer -> Explorer backend -> editor backend hook/se
 Used by review save/discard, open/jump, search highlighting, and project-switch notifications.
 
 ## 6.6) Search system (progressive Rust pipe provider)
+
+Explorer filename search has both its source-tree input and a separately created
+sticky-scope input. Set mobile input attributes, including `autocapitalize="off"`,
+on both: the sticky control can own Android focus even when the source input is
+correctly configured. Sticky projection preserves the bound input/IME element;
+subtree limits use the source directory's border-box geometry, not estimates.
 
 Comparison scheduling source anchors: `handle_git_set_diff_base` only persists/validates and publishes `GitDiffBaseChanged`. Separate `LatestProjection` runners fence active and newest pending reads without cancelling underlying `to_thread` work. The retired `search:query` event and temporary `changes_timing` logs are not part of the production path.
 
@@ -3292,15 +3321,51 @@ Shared desktop assets reuse `/api/editor_version` and `/api/editor_assets_bundle
 
 Successful asset installs clear the `persist:te2-framework` HTTP cache and generated V8 code cache, then reload an active app view with cache bypass. Forced same-version updates must activate without requiring an Electron restart.
 
+#### Native Client Asset Publication And Validation
+
 The relay origin does not make the framework worktree the frontend asset
-authority. Electron serves its installed inventory from the desktop asset root;
-GeckoView and Cefrium serve their materialized Android asset trees. Rebuilding
-Code TE2 on the framework host and reloading a native app therefore reloads the
-client's existing bytes only. Native-client validation after a frontend change
-must first invoke that client's explicit asset update/OTA path (or install a
-package carrying the rebuilt asset seed) and verify the resulting client asset
-version. This invariant applies even when the visible URL is a loopback relay
-whose remaining HTTP, Socket.IO, WebSocket, and API traffic reaches the server.
+authority. Electron's local asset mode serves its installed inventory from the
+desktop asset root; GeckoView and Cefrium serve their materialized Android asset
+trees. Building Code TE2 on the framework host does not update those client trees.
+Before native-client frontend validation, explicitly invoke that client's OTA/
+asset-update path or install a package/APK carrying the rebuilt seed. Verify local
+version, update result and served bytes. Reload alone reloads the installed copy;
+do not interpret it as publication or blame cache without concrete asset evidence.
+
+Electron has a specific incomplete-tree exception: `framework-relay.ts` enables
+local interception only when `DesktopAssetManager.missingRequiredAsset()` finds
+all inventory-required files. If required files are missing, interception is
+disabled and requests can proxy upstream. With local serving enabled, a missing
+mapped file returns 404 instead of a per-file upstream retry. Inspect client asset
+status and response provenance rather than assuming every loopback response is local.
+Update activation refreshes this relay state, clears `persist:te2-framework` HTTP
+and generated-code caches after installation, and reloads requested primary and
+secondary views. Forced same-version updates use the existing updater, not an
+Electron restart or deletion of valid Sidebar state.
+
+Android's declared assets resolve only into `filesDir/editor_static`; a missing
+mapped file fails locally, never through upstream fallback. Local responses carry
+`X-TE2-Android-Asset-Source: files-dir`. APK seeding skips equal or newer local
+versions, so a stale same-version seed is not repaired by page reload. Android
+Settings schedules the existing renderer-owned, single-flight OTA transaction;
+download, validation, atomic install, cache clearing, feedback and reload remain
+native-owned. The relay blocks exact root `/sw.js`, not every Service Worker path;
+cleanup must be scoped rather than a blanket Service Worker ban.
+
+Launcher source names are misleading: `desktop_client/android_shell/` is
+Electron-only source; `app/android_shell/` is canonical Android source.
+`android/app/src/main/assets/editor_static/android-shell/` is generated APK output.
+Trace source → build → inventory/bundle → client install → served response before
+editing or validating; do not infer shared ownership from the directory name.
+
+For Monaco changes, publish the changed ESM, run
+`node scripts/build_monaco_bootstrap_bundle.mjs` from the TE2 root, then
+`node build.mjs` in `app/apps/code_te2`, followed by the approved client update.
+The bootstrap is embedded in `host.js`; regenerating bootstrap alone leaves the
+host bundle unchanged even after successful OTA. Synchronize release-facing
+frontend/native versions and never bundle a stale host build. Dynamic framework
+documents, APIs, Socket.IO and WebSocket traffic remain upstream; asset inventory,
+installation and activation are distinct from backend/intelligence readiness.
 
 ### Native app-view bridge
 
@@ -3551,6 +3616,11 @@ Validation owner docs live in `desktop_client/desktop_client.md` and `desktop_cl
 ---
 
 ## 39) WBA Logical Documents And Multi-File Extension Handling
+
+Editor admission precedes sidecar mutation. Source files including `.sh` are
+accepted; known binary/media/object/font formats, extensionless executables and
+disk/draft content above 375 KiB are rejected. Background hydration does not
+bypass this policy or turn browser model residency into logical membership.
 
 Code TE2 now separates each client's visible editor from semantic working-set
 hydration. Every stable client renders at most one foreground Monaco model per
@@ -3907,6 +3977,65 @@ lifecycle transitions, GeckoView, and cross-origin documents do not
 participate. There is no IME polling, viewport inference, synthetic click,
 native focus sink/query, timer loop, or alternate fallback path.
 
+### Cefrium CDP-over-ADB investigation workflow
+
+Use this when TE2 console can inspect a page but a Chromium worker or renderer
+needs lower-level inspection. Page JavaScript console, native Cefrium console,
+and CDP have different owners; this is a debugging path, not a production
+framework transport. Capture evidence before reloading the failing page or
+restarting the shared framework.
+
+1. Discover the exact device with `adb devices -l` and the exact live page/native
+   workers with `te2 console list-workers`. Labels alone are not unique.
+2. Evaluate this request in the **native Cefrium console worker**, not the
+   JavaScript main-page worker:
+   `{"jsonrpc":"2.0","method":"android.devTools.state.get","params":{}}`.
+   Read `bridgePort`, `controlConnected`, `activeTargetId` and inspector readiness.
+   Ports, target IDs and session IDs are runtime values; rediscover after restart.
+3. Set `DEVICE` to that device's serial and `DEVICE_CDP_PORT` to its reported
+   bridge port. Forward only that device's loopback endpoint:
+   `adb -s "$DEVICE" forward tcp:0 tcp:"$DEVICE_CDP_PORT"`.
+   Record the returned host port as `LOCAL_PORT`. Inspect
+   `http://127.0.0.1:$LOCAL_PORT/json/list` and `/json/version`. Select by current
+   type, URL and parent relationship, not display label. Keep this unauthenticated
+   control interface loopback-only; do not expose it publicly.
+4. Connect a WebSocket client to the discovered `webSocketDebuggerUrl`. If its
+   authority still names the device-side port, rebase only the authority to
+   `127.0.0.1:$LOCAL_PORT`, preserving the discovered path and query. Do not
+   construct target URLs from remembered IDs. Use bounded timeouts and correlate
+   replies by request ID; unsolicited events can arrive before the reply.
+5. Inspect before mutating. For stalled diff computation, distinguish live
+   original/modified models, baseline receipt, diff result/up-to-date state and
+   worker initialization. Temporary worker probes change runtime state; use them
+   only in approved scope and terminate them/revoke Blob URLs afterward.
+6. With explicit approval, a narrowly scoped diagnostic intervention may send
+   `{"id":1,"method":"Runtime.runIfWaitingForDebugger"}` to the **exact worker**.
+   This resumes execution; it is not read-only and must not become a blanket
+   startup workaround. Record the response and changed state without substituting
+   page navigation/model replacement for evidence.
+7. Close probe sockets and remove only the forwarding created for this session:
+   `adb -s "$DEVICE" forward --remove tcp:"$LOCAL_PORT"`.
+   Never use `--remove-all`, which disrupts other debugging sessions.
+
+The Inspector's complete flattened CDP subtree must route before native monitor
+dispatch. Preserve `Target.attachedToTarget`, execution-context events and child
+`sessionId` values on commands/replies; prune detached descendants. The embedded
+DevTools frontend can request `waitForDebuggerOnStart=true`, then resume workers
+with `Runtime.runIfWaitingForDebugger`. Swallowing attachment events or replies
+strands worker initialization. Keep native monitor sessions separate; do not
+disable debugger waits to mask a routing defect. Source ownership is in
+`CefriumDevToolsRuntime.kt`, `CefriumInspectorSessions.kt` and
+`CefriumDevToolsSocketBridge.kt` under `android/cefrium/src/main/java/com/termux/extensions/`.
+
+For unexpected renderer reloads, correlate device time, `logcat -b crash`, recent
+main/system logs, `dumpsys activity exit-info <package>` and page navigation timing.
+Main-process survival does not rule out renderer failure. Later “isolated not
+needed” exits may be cleanup, not the initiating cause. Toast records may omit
+text; TE2's “Browser renderer restarted” callback identifies a termination event,
+not its cause. Do not attribute a current incident to an older tombstone.
+Incident evidence remains in `docs/apps/client_runtime_polish/PLAN.md`; its old
+port examples are not stable endpoints or configuration.
+
 ### Validation
 
 Validate the Cefrium module with:
@@ -4247,6 +4376,13 @@ Neither is shared Sidebar membership authority, and `presentationId` is never
 durable state. A re-created host must publish its fresh presentation identity
 before exact-client mention routing may succeed. Canonical legacy slot and
 presentation identities migrate once; canonical records win collisions.
+
+### Stateful App Peer Routing
+
+ALS-RS Sidebar traffic resolves injected `TE_FRAMEWORK_URL`, then `TE_PORT`, then
+standalone loopback 8089; its own 12459 listener is not the framework destination.
+Reconnect registers its peer before exact-client effects can route. Frontends
+do not bypass their backend or use another surface's private API.
 
 ### Exact-client Sidebar mentions
 
@@ -5245,6 +5381,50 @@ history authority. There is no Python networking fallback. This removes the
 displaced networking/FWS modules from a fresh main-module import, not msgspec,
 all lazy HTTP clients, or the remaining Python filesystem operations.
 
+#### Native Domain Compilation And Artifact Preservation
+
+The native worker's independent build requires matching regular CPython and
+venv ABI. Its branch shellspec selects `CODE_TE2_MYPYC_DIR` at
+`.codex-scratch/mypyc-active`; the matching manifest/lib group must exist before
+startup. Missing artifacts fail closed: no automatic compile or silent
+interpreted fallback. Developer resource symlinks are not wheel packaging.
+Build/bootstrap integration remains deferred; do not publish an installed release
+that depends on an unresolved source-target executable or absolute overlay path.
+
+Mypyc type-check/shared-library success does not prove domain runtime parity.
+Retain interpreted islands or adapt them with behavior tests: mutable `ClassVar`
+dataclass caches, async-generator/coroutine deletion, builtin-exception inheritance
+and compiled `@runtime_checkable` Protocol identity have exposed incompatibilities.
+Direct `object` annotations in compiled DTOs can fail import; a local
+`TypeAlias = object` preserves the type while avoiding that lookup failure.
+Keep msgspec Struct schema modules interpreted until annotation/runtime-validation
+parity is proven. Do not remove msgspec until all codec/Struct/validation uses
+have tested replacements; compiling Python is not a replacement for validation.
+
+Avoid assigning heterogeneous `asyncio.gather` results in compiled code: its
+runtime list can conflict with tuple annotations. Preserve concurrency by awaiting
+the group then reading typed task results; discard unused group returns directly.
+Reader cleanup must reach native token release. CPython 3.14 `shield` can report
+an expected cancelled-reader error after cleanup retrieves it; distinguish that
+report from failed release. EOF/error status and pending-call cleanup must precede
+application-queue sender drop, which is itself observable completion. The
+pipe-only fixture demonstrates handoff, not full editor migration/startup savings.
+
+Production PyO3 structural conversion accepts lists and tuples as MessagePack
+arrays; dataclass `asdict` preserves tuple fields such as History refs/parents/pages.
+Rejecting tuples loses real publications. Sets/arbitrary iterators remain
+unsupported; verify real History payloads over polling and WebSocket, not only
+generic DTOs. This is the production frontend boundary, not the separately
+documented pipe-only fixture's more restrictive DTO contract.
+
+Preserve `.release/mypyc-checkpoint-20260929/`: accepted Linux x86_64 and Termux
+aarch64 native-worker/domain groups for regular CPython 3.14. Scratch cleanup must
+not delete the only accepted copies. Both platforms have recorded user live
+acceptance; wheel publication remains planned. Package resources and validate
+ABI/provenance rather than shipping developer symlinks. Exact compile counts,
+test results and acceptance evidence live in `framework/native_editor_worker/README.md`
+and `docs/apps/client_runtime_polish/PLAN.md`, not always-loaded memory.
+
 ### Editor Service Outcome Boundary
 
 Preference/view-setting services use `editor_backend_services/outcomes.py` for
@@ -5255,7 +5435,9 @@ removed. Normal saves retain their socket `BASE_MISMATCH` response/confirmation
 flow. Ordinary save results remain dictionaries. Socket callers keep
 their existing generic error handling; application error strings deliberately
 retain the old numeric prefix for wire compatibility. Cancellation is not caught.
-Service isolation is separate from the completed native-ASGI transport cutover.
+Service isolation is separate from transport ownership. Code TE2 on this branch
+uses the Hyper/Socketioxide worker described in **Worker Transport Exports**;
+generic Python ASGI workers retain their separately scoped contracts.
 
 Host preference state comes from `ui.host.editorState.get`; session telemetry is
 updated with `ui.host.session.update` and does not own project/client foreground.
@@ -5443,8 +5625,15 @@ of the current pin. No shared-runtime restart is performed by these state helper
 
 ### Early Intelligence Preparation And Backend Assembly
 
-Code TE2's worker shellspec passes
-`--bootstrap-module app.apps.code_te2.intelligence_bootstrap`. The generic runner
+The Uvicorn/bootstrap-module procedure below describes the generic Python-worker
+path. The current Code TE2 shellspec instead selects the independent native
+worker; its Python domain lifecycle is hosted by PyO3, and Rust listener bind plus
+pipe readiness follows **Worker Transport Exports**. Do not require Uvicorn or
+an ASGI serving callback for branch-native Code TE2.
+
+The generic Python runner selects the Code TE2 preparation hook through
+`--bootstrap-module app.apps.code_te2.intelligence_bootstrap` when using that
+worker path; this is not the branch-native shellspec command. The generic runner
 enters that module's `te2_worker_bootstrap()` async context inside Uvicorn's signal
 scope, before backend assembly and HTTP listening. Non-opted-in workers retain
 synchronous assembly; pipe-only workers do not accept this option.

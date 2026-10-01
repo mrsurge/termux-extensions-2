@@ -126,6 +126,11 @@ is a subsequent scope, not part of this documentation pass.
 
 ### Cefrium CDP-over-ADB investigation workflow
 
+The operational runbook is now maintained in
+`docs/apps/code_te2/CODE_TE2.md`, **Cefrium CDP-over-ADB investigation workflow**.
+The incident observations and historical port examples below remain investigation
+evidence, not current endpoint configuration.
+
 Use this when the TE2 console can inspect the page but a Chromium worker or
 renderer needs lower-level inspection. This complements the console, not a new
 production transport. Do not restart the shared framework or reload the failing
@@ -184,13 +189,12 @@ only package/token/timestamps, not text. The literal “Browser renderer restart
 is emitted by TE2's renderer-termination callback, but does not identify why the
 renderer terminated. Do not attribute a current incident to an older tombstone.
 
-### Follow-up: durable debugging guidance
+### Durable debugging guidance
 
-- Promote the verified workflow into CODE_TE2.md's Cefrium/debugging section,
-  with discovery commands, bounded request/reply handling, approval boundaries,
-  cleanup, and the distinction between native console, page console and CDP.
-- Add a short pointer and critical invariants to `.repo_memory.md`; retain the
-  existing CDP child-session ownership note rather than duplicating the runbook.
+- The workflow now lives in CODE_TE2.md's **Cefrium CDP-over-ADB investigation
+  workflow**, including discovery, bounded request/reply handling, approval
+  boundaries, cleanup and native/page-console/CDP ownership. `.repo_memory.md`
+  retains a short access sequence and the critical child-session routing guard.
 - Locate the canonical repo-owned developer-instruction (devins) source before
   editing it. Add the same discovery-first escalation path there, not a stale
   injected copy or a hard-coded device/port/target example as configuration.
