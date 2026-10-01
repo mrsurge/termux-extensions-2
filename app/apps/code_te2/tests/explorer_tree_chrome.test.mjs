@@ -9,6 +9,38 @@ import { Window } from 'happy-dom';
 const appRoot = path.resolve(import.meta.dirname, '..');
 let moduleSequence = 0;
 
+test('directory child lists retain compact waterfall spacing without changing indentation', () => {
+  const window = new Window();
+  const { document } = window;
+  const style = document.createElement('style');
+  style.textContent = fs.readFileSync(path.join(appRoot, 'main_page/frontend/explorer.css'), 'utf8');
+  document.head.append(style);
+  document.body.innerHTML = `<ul class="fe-tree"><li class="fe-tree-node fe-tree-root">
+    <span>icon</span><span>project</span><button>menu</button>
+    <ul><li id="first"><span>folder</span><ul><li id="nested">file</li></ul></li>
+      <li id="second">other file</li></ul></li></ul>`;
+  for (const card of document.querySelectorAll('.fe-tree li:has(> ul)')) {
+    const cardStyle = window.getComputedStyle(card);
+    const childrenStyle = window.getComputedStyle(card.querySelector(':scope > ul'));
+    assert.equal(parseFloat(cardStyle.rowGap), 0);
+    assert.equal(cardStyle.gap, '8px');
+    assert.equal(cardStyle.paddingTop, '6px');
+    assert.equal(parseFloat(childrenStyle.marginTop), 0);
+    assert.equal(childrenStyle.paddingTop, '3px');
+    assert.equal(parseFloat(childrenStyle.paddingLeft), 0);
+    assert.equal(parseFloat(childrenStyle.paddingRight), 0);
+    assert.equal(parseFloat(childrenStyle.paddingBottom), 0);
+  }
+  for (const id of ['first', 'nested']) {
+    const cardStyle = window.getComputedStyle(document.getElementById(id));
+    assert.equal(cardStyle.marginTop, '4px');
+    assert.equal(cardStyle.marginLeft, '4px');
+    assert.equal(cardStyle.marginBottom, '4px');
+  }
+  assert.equal(window.getComputedStyle(document.getElementById('second')).marginTop, '4px');
+  window.happyDOM.abort();
+});
+
 async function importTypeScript(relativePath) {
   const result = await build({
     entryPoints: [path.join(appRoot, relativePath)],

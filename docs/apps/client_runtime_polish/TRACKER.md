@@ -7,6 +7,16 @@ Working branch: `feature/desktop-deb-packaging`; no new branch needed for planni
 
 ### Editor/framework UI corrections before release
 
+- [x] Reduce expanded-directory header gap: live Cefrium showed stacked
+  8px grid gap + 6px list margin + 4px first-child margin. Real Chromium layout
+  initially verified 18px became zero. User requested a softer result: retain
+  the first child's 4px margin plus 3px top-only list padding. Live Cefrium
+  measured the prior undocked step at ~34.5px versus docked ~37px; the added
+  padding closes that difference without modifying sticky scopes or indentation.
+- [x] Explorer chrome tests (8), typecheck and frontend build pass.
+- [x] User rebuilt and live-accepted the directory spacing and standard
+  `line-clamp` compatibility declaration; the CSS warning is resolved.
+
 - [x] Reproduce inline gutter wrap mismatch and isolate stale inlay-hint alignment.
 - [x] Restore transient diagnostic options; retain original gutter wrap policy.
 - [x] Shallow-clone the authoritative Monaco fork and implement lifecycle-owned

@@ -1095,6 +1095,11 @@ User live acceptance and broader end-to-end concurrency validation remain pendin
   that boundary by one lower-left card radius (currently 8 px) so the rounded
   edge cannot bleed through. Never infer scope end from the next row or a fixed
   ancestor-climb allowance.
+- Expanded Explorer directory cards retain 3px of child-list top padding plus
+  the first child's 4px top margin. Grid row gap and list margin are zero;
+  this compact undocked waterfall approximates the existing sticky row steps.
+  Horizontal indentation, 8px column gaps, header padding and later sibling
+  spacing remain intact. This is CSS geometry, not a sticky-scope offset fix.
 - Extremely large, deeply expanded trees may still show minor transient sticky
   animation artifacts while browser layout and live DOM measurements settle.
   This is a known presentation limitation, not a reason to reintroduce inferred

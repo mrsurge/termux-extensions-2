@@ -200,6 +200,7 @@
   display: grid;
   grid-template-columns: 20px 1fr auto; /* icon, text, menu (twisty removed) */
   gap: 8px;
+  row-gap: 0; /* No extra grid spacing between directory header and children. */
   padding: 6px 1px 6px 10px;
   cursor: pointer;
   border-radius: 8px 1px 1px 8px;
@@ -380,8 +381,8 @@
 
 .fe-tree li > ul {
   grid-column: 1 / -1;
-  margin: 6px 0 0;
-  padding: 0;
+  margin: 0;
+  padding: 3px 0 0; /* Match the undocked waterfall more closely to sticky row steps. */
   list-style: none;
 }
 /* ACTUAL CARD DIMENSIONS */
@@ -1060,6 +1061,7 @@
   font-size: 12px;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 
 .fe-marketplace-more {
