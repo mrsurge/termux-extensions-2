@@ -11,6 +11,7 @@ import type { ExplorerJumpOptions } from '../host/file-open-bridge.ts';
 import type { HunkRestoreIdentity } from '../tree/restore-action.ts';
 import { gitActionButton } from '../git/action-button.ts';
 import { changeStatistics } from './change-statistics.ts';
+import { renderPathLabel } from './results-renderer.ts';
 
 interface ExplorerChangeLine {
   type?: string;
@@ -45,6 +46,7 @@ interface ExplorerChangesResultsRendererDeps {
   hasStagedChanges?(): boolean;
   getFileStaging?(rel: string): { staged: boolean; unstaged: boolean };
   stageFile?(rel: string): Promise<void>;
+  unstageFile?(rel: string): Promise<void>;
   commitStagedChanges?(): Promise<void>;
   getFileIcon?(name: string): Promise<{ svg?: string; color?: string } | null>;
   restoreFile(rel: string): Promise<void>;
@@ -283,6 +285,11 @@ export function createExplorerChangesResultsRenderer(
         badge.title = unstaged ? 'Index contains staged changes; additional disk changes are not staged' : 'Changes are staged in the index';
       }
       const stage = group.querySelector<HTMLButtonElement>('.fe-search-change-stage');
+      const unstage = group.querySelector<HTMLButtonElement>('.fe-search-change-unstage');
+      if (unstage) {
+        unstage.hidden = !staged;
+        unstage.disabled = !headView();
+      }
       if (stage) {
         stage.textContent = staged && !unstaged ? '✓' : '+';
         stage.title = staged && !unstaged ? `Changes in ${rel} are staged` : `Stage disk changes in ${rel}`;
@@ -293,7 +300,7 @@ export function createExplorerChangesResultsRenderer(
     };
     const place = (group: HTMLElement, index: number): void => {
       updateStaging(group);
-      group.querySelector('.fe-search-change-header')?.classList.toggle('is-recent',
+      group.classList.toggle('is-recent',
         data.recentChanges?.paths.includes(group.dataset.rel || '') === true);
       keep.add(group);
       if (list.children[index] !== group) list.insertBefore(group, list.children[index] || null);
@@ -314,8 +321,9 @@ export function createExplorerChangesResultsRenderer(
       group.className = 'fe-search-file-group fe-search-change-group';
       group.dataset.line = String(firstDiffLine(change) || 1);
       group.onclick = async (event) => {
-        await deps.ensureInlineDiffs();
         const target = event.target;
+        if (!(target instanceof HTMLElement) || !target.closest('.fe-search-diff-row')) return;
+        await deps.ensureInlineDiffs();
         const currentTarget = event.currentTarget;
         const lineEl =
           target instanceof HTMLElement ? target.closest<HTMLElement>('[data-line]') : null;
@@ -338,7 +346,7 @@ export function createExplorerChangesResultsRenderer(
         if (!lastChangesData?.recentChanges) return;
         lastChangesData.recentChanges.paths = [rel];
         list.querySelectorAll<HTMLElement>('.fe-search-change-group').forEach(row => {
-          row.querySelector('.fe-search-change-header')?.classList.toggle('is-recent', row.dataset.rel === rel);
+          row.classList.toggle('is-recent', row.dataset.rel === rel);
         });
       }, true);
 
@@ -354,6 +362,7 @@ export function createExplorerChangesResultsRenderer(
       toggle.onclick = (event) => {
         event.stopPropagation();
         fileBody.hidden = !fileBody.hidden;
+        group.classList.toggle('is-expanded', !fileBody.hidden);
         toggle.setAttribute('aria-expanded', String(!fileBody.hidden));
         toggle.setAttribute('aria-label', `${fileBody.hidden ? 'Expand' : 'Collapse'} changes in ${rel}`);
       };
@@ -371,12 +380,8 @@ export function createExplorerChangesResultsRenderer(
 
       const title = document.createElement('span');
       title.className = 'fe-search-change-path';
-      title.title = rel;
-      const pathText = document.createElement('bdi');
-      pathText.dir = 'ltr';
-      pathText.textContent = rel;
-      highlightFilterMatches(pathText, filterQuery);
-      title.appendChild(pathText);
+      renderPathLabel(title, rel);
+      highlightFilterMatches(title, filterQuery);
       toggle.appendChild(title);
 
       const meta = document.createElement('div');
@@ -436,6 +441,28 @@ export function createExplorerChangesResultsRenderer(
         finally { restore.disabled = false; }
       };
       header.appendChild(restore);
+      if (deps.unstageFile) {
+        const unstage = document.createElement('button');
+        unstage.type = 'button';
+        unstage.className = 'fe-search-change-unstage';
+        unstage.textContent = '−';
+        unstage.title = `Unstage changes in ${rel}`;
+        unstage.setAttribute('aria-label', unstage.title);
+        unstage.onclick = async event => {
+          event.stopPropagation();
+          if (!headView() || unstage.disabled) return;
+          unstage.disabled = true;
+          try { await deps.unstageFile?.(rel); }
+          finally { updateStaging(group); }
+        };
+        header.insertBefore(unstage, restore);
+      }
+      header.onclick = event => {
+        event.stopPropagation();
+        const target = event.target;
+        if (target instanceof HTMLElement && target.closest('button')) return;
+        toggle.click();
+      };
       group.appendChild(header);
 
       // Bodyless previews navigate from the header; they have nothing to expand.

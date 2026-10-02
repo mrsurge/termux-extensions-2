@@ -7,6 +7,16 @@ Working branch: `feature/desktop-deb-packaging`; no new branch needed for planni
 
 ### Editor/framework UI corrections before release
 
+- [x] Unify Contents/Changes chrome, compact file/hunk header geometry, Restore
+  alignment, muted path prefixes, complete-group MRU/expanded outlines, and
+  whole-line emphasis for unpaired added/deleted lines. Expandable file-header
+  clicks toggle only; bodyless headers and diff rows retain navigation.
+- [x] Expose Unstage for actual fully/partially staged files through the existing
+  Explorer RPC with historical mutation guards intact.
+- [x] 31 targeted tests, TypeScript checking and frontend build pass. Chromium
+  fixture confirms file/hunk headers both measure 34px and Restore right edges align.
+- [x] User live-accepted the Contents/Changes chrome/action changes.
+
 - [x] Reduce expanded-directory header gap: live Cefrium showed stacked
   8px grid gap + 6px list margin + 4px first-child margin. Real Chromium layout
   initially verified 18px became zero. User requested a softer result: retain

@@ -1693,8 +1693,18 @@ extension-manifest metadata.
   two separately timed refresh queues. This does not parallelize mutation facts.
 
 - By changes file headers use the same `src/explorer/tree/restore-action.ts`
-  guarded whole-file Restore flow as tree menus. Hunk header buttons collapse
-  their bodies independently. Each hunk initially displays at most 50 lines
+  guarded whole-file Restore flow as tree menus. Hunk header buttons toggle
+  their bodies without navigation; the complete expandable file header likewise
+  toggles only, including padding outside its title button. Bodyless previews
+  still open the file. MRU outlines enclose the complete file group, while other
+  expanded files use a fainter outline. Contents and Changes share dark chrome;
+  file/hunk rows share compact geometry and right-aligned Restore controls.
+  Split path prefixes are muted without dimming the basename. Unstage is shown
+  whenever actual index state contains any staged changes (including partial
+  staging), using the existing Explorer Git lane and HEAD mutation guards.
+  Unpaired added/deleted lines receive full changed-text emphasis; replacements
+  retain word-level emphasis and syntax highlighting.
+  Each hunk initially displays at most 50 lines
   including context; larger hunks offer a dark fade/blind control to snap fully
   open or retract. This is visual clipping, not backend truncation or deferred
   diff construction. Expansion lives only in the rendered DOM; progressive

@@ -198,6 +198,11 @@ export function createExplorerSearchOverlayController(
       if (!deps.hasExplorerRpc()) { deps.toast('Explorer connection unavailable.'); return; }
       deps.notifyExplorer(EXPLORER_RPC_METHODS.gitStage, { paths: [rel] });
     },
+    unstageFile: async (rel) => {
+      if ((deps.getGitDiffBase().ref || 'HEAD') !== 'HEAD') return;
+      if (!deps.hasExplorerRpc()) { deps.toast('Explorer connection unavailable.'); return; }
+      deps.notifyExplorer(EXPLORER_RPC_METHODS.gitUnstage, { paths: [rel] });
+    },
     getFileIcon: getSetiIcon,
     restoreHunk: (rel, identity) => restoreExplorerHunk({
       getProjectPath: () => deps.getProjectPath(),

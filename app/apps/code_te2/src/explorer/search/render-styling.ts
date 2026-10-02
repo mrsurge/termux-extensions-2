@@ -519,7 +519,13 @@ export function renderHighlightedDiffText(
 
   const compareAgainst = options?.compareAgainst ?? null;
   const mode = options?.mode ?? null;
-  if (!compareAgainst || !mode || typeof diffWordsWithSpace !== "function") {
+  if (mode && (compareAgainst === null || compareAgainst === '')) {
+    target.appendChild(createHighlightedSegment(text, filePath, [
+      'fe-search-diff-token', mode === 'added' ? 'is-added' : 'is-removed',
+    ]));
+    return;
+  }
+  if (compareAgainst === null || !mode || typeof diffWordsWithSpace !== "function") {
     target.innerHTML = highlightToHtml(text, filePath);
     return;
   }

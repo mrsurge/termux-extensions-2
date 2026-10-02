@@ -34,7 +34,7 @@ function splitPathForDisplay(path: string): { parent: string; name: string } {
   };
 }
 
-function renderPathLabel(target: HTMLElement, path: string): void {
+export function renderPathLabel(target: HTMLElement, path: string): void {
   target.classList.add("fe-search-path-label");
   target.title = path;
   target.replaceChildren();

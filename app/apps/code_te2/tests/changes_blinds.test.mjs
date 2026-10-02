@@ -5,6 +5,51 @@ import { build } from 'esbuild';
 import { Window } from 'happy-dom';
 const bundled = await build({ entryPoints: ['src/explorer/search/changes-results-renderer.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
 const { createExplorerChangesResultsRenderer } = await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString('base64')}`);
+test('file header chrome toggles, group MRU persists, and partial staging exposes Unstage', async () => {
+  const win = new Window();
+  Object.assign(globalThis, { window: win, document: win.document, HTMLElement: win.HTMLElement, HTMLInputElement: win.HTMLInputElement });
+  try {
+    const opens = [], unstages = [];
+    let staged = true, ref = 'HEAD';
+    const renderer = createExplorerChangesResultsRenderer({
+      getGitDiffBase: () => ({ ref }), ensureInlineDiffs: async () => {},
+      openFileAndMaybeJump: async (...args) => opens.push(args),
+      restoreFile: async () => {}, restoreHunk: async () => {},
+      getFileStaging: () => ({ staged, unstaged: true }),
+      stageFile: async () => {}, unstageFile: async rel => { unstages.push(rel); staged = false; },
+    });
+    const container = document.createElement('div'); document.body.append(container);
+    const entry = { rel: 'src/example.py', hunks: [{ oldStart: 1, newStart: 1, lines: [
+      { type: 'add', text: 'new_line()' }, { type: 'context', text: 'context()' },
+      { type: 'del', text: 'old_line()' },
+    ] }] };
+    const payload = { changes: [entry], recentChanges: { paths: [entry.rel] } };
+    renderer.renderChangesResults(container, payload);
+    const group = container.querySelector('.fe-search-change-group');
+    const header = group.querySelector('.fe-search-change-header');
+    header.click();
+    assert.equal(group.querySelector('.fe-search-change-body').hidden, false);
+    assert.ok(group.classList.contains('is-expanded'));
+    assert.ok(group.classList.contains('is-recent'));
+    assert.equal(opens.length, 0);
+    assert.equal(group.querySelector('.fe-search-path-parent').textContent, 'src/');
+    assert.equal(group.querySelector('.fe-search-path-name').textContent, 'example.py');
+    assert.equal(group.querySelector('.fe-search-diff-token.is-added').textContent, 'new_line()');
+    assert.equal(group.querySelector('.fe-search-diff-token.is-removed').textContent, 'old_line()');
+    const unstage = group.querySelector('.fe-search-change-unstage');
+    assert.equal(unstage.hidden, false);
+    unstage.click(); await Promise.resolve(); await Promise.resolve();
+    assert.deepEqual(unstages, [entry.rel]);
+    assert.equal(unstage.hidden, true);
+    assert.equal(opens.length, 0);
+    staged = true; ref = 'abc123';
+    renderer.renderChangesResults(container, payload);
+    assert.equal(unstage.hidden, false);
+    assert.equal(unstage.disabled, true);
+    header.click();
+    assert.equal(group.classList.contains('is-expanded'), false);
+  } finally { win.happyDOM.abort(); }
+});
 test('blinds and Restore isolate actions and retain controls during streaming', async () => {
   const win = new Window();
   Object.assign(globalThis, { window: win, document: win.document, HTMLElement: win.HTMLElement, HTMLInputElement: win.HTMLInputElement });
@@ -109,7 +154,7 @@ test('collapsed file summaries resolve basename icons, preserve paths, and isola
     assert.equal(container.querySelector('.fe-search-change-body').hidden, true);
     assert.equal(toggle.getAttribute('aria-expanded'), 'false');
     const css = await readFile('main_page/frontend/explorer.css', 'utf8');
-    assert.match(css, /\.fe-search-change-path\s*\{[^}]*direction: rtl/);
+    assert.match(css, /\.fe-search-path-parent\s*\{[^}]*direction: rtl/);
   } finally { win.happyDOM.abort(); }
 });
 
