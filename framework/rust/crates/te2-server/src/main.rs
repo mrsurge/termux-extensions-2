@@ -1,4 +1,5 @@
 mod android_assets;
+mod app_intent_pipe;
 mod app_proxy;
 mod app_worker_pipe_bridge;
 mod apps_lifecycle;

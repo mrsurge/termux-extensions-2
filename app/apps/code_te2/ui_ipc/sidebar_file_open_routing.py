@@ -39,6 +39,7 @@ def resolve_sidebar_file_open_target(
     registered_presentations: dict[tuple[str, str], str],
     active_windows: dict[str, str],
     requester_app_id: str,
+    require_presentation: bool = False,
 ) -> tuple[str, JsonObject]:
     target = _object(payload.get("target"))
     client_id = normalize_client_instance_id(
@@ -55,6 +56,8 @@ def resolve_sidebar_file_open_target(
     presentation_id = _text(registered_presentations.get((client_id, host_id)))
     if not presentation_id:
         raise ValueError("file open target presentation is not registered")
+    if require_presentation and _text(target.get("presentationId") or target.get("presentation_id")) != presentation_id:
+        raise ValueError("file open target presentation is stale")
 
     slots = _object(sidebar_state.get("slots"))
     slot = _object(slots.get(host_id))

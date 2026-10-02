@@ -7,7 +7,7 @@ from typing import Protocol, final
 from app.libs.pipe_protocol import PipeEnvelope, PipeError, PipeIdentity, process_error_response
 
 
-class DebugAdmission(Protocol):
+class RequestAdmission(Protocol):
     def submit(self, request: PipeEnvelope) -> bool: ...
 
 
@@ -15,8 +15,8 @@ class DebugAdmission(Protocol):
 class InboundEnvelopeRouter:
     """Route one validated envelope without queues, retries or background dispatch.
 
-    The reader owns decoding and stream shutdown. DebugAdmission owns its own
-    admission and execution; all other callbacks run synchronously on the caller.
+    The reader owns decoding and stream shutdown. Production/debug adapters own
+    bounded admission and execution; other callbacks run synchronously.
     """
 
     def __init__(
@@ -26,7 +26,8 @@ class InboundEnvelopeRouter:
         dispatch: Callable[[PipeEnvelope], PipeEnvelope],
         reply: Callable[[PipeEnvelope], None],
         report: Callable[[str], None],
-        debug: DebugAdmission | None = None,
+        debug: RequestAdmission | None = None,
+        production: RequestAdmission | None = None,
     ) -> None:
         self._identity = identity
         self._accept_response = accept_response
@@ -35,6 +36,7 @@ class InboundEnvelopeRouter:
         self._reply = reply
         self._report = report
         self._debug = debug
+        self._production = production
 
     def deliver(self, envelope: PipeEnvelope) -> None:
         if envelope.kind in {"response", "error"}:
@@ -53,5 +55,7 @@ class InboundEnvelopeRouter:
             )))
             return
         if self._debug is not None and self._debug.submit(envelope):
+            return
+        if self._production is not None and self._production.submit(envelope):
             return
         self._reply(self._dispatch(envelope))

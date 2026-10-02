@@ -1,7 +1,40 @@
 # Sidebar App Intents Tracker
 
 Plan: [PLAN.md](PLAN.md). Branch: `feature/code-te2-native-services`.
-Status: documentation baseline only; runtime implementation not started.
+Status: production pipe foundation and native document-open adapter implemented
+and unit-validated; remaining intents and UI integration pending. Shared framework
+not restarted; compiled runtime group not rebuilt/activated for this slice.
+
+Validation cadence: per user direction, use synthetic and regression tests during
+incremental implementation. Defer live acceptance until a working end-to-end
+model exists; do not request a live test for each transport/adapter checkpoint.
+The mobile sticky-scope investigation still requires explicit advance notice
+and joint debugging when its scheduled slice is reached.
+
+## Production Pipe Foundation
+
+- [x] Documentation checkpoint committed/pushed as `3acfa576`.
+- [x] Approval obtained for broker/app-open foundation only, without UI/Android
+  edits or shared-framework restart.
+- [x] Reuse app lifecycle launch/query builder for worker-pipe `app.open`.
+- [x] Register exact owned app pipes separately from runtime-debug routes.
+- [x] Allowlist intent delivery; derive source from bridge ownership and reject
+  non-current workers. Target backend remains responsible for client/presentation
+  validation before effects.
+- [x] Bound correlation/admission; clean up timeout, cancellation, writer failure,
+  caller disconnect and target replacement; no automatic mutation replay.
+- [x] Eight broker tests and two existing writer tests pass with
+  `ferrous-framework-native` enabled.
+- [x] Existing 24 framework-pipe tests and three app-lifecycle tests pass;
+  formatting and diff whitespace checks pass (37 targeted tests total).
+- [x] Bounded Code TE2 domain-loop admission and lifecycle cleanup, independent
+  of runtime-debug; nonblocking pipe-reader scheduling and off-loop replies.
+- [x] Shared document-open service for Sidebar socket and pipe callers; pipe
+  context requires current client/slot/presentation and app ownership.
+- [x] 24 targeted Python tests pass; five changed modules pass Mypy and mypyc
+  code generation. This is not a compiled-group rebuild or live acceptance.
+- [ ] Project/app-tab/terminal intent services and remaining routing policies.
+- [ ] User-facing workflows and live acceptance (not supplied by the foundation).
 
 ## Direction And Plan Formation
 
@@ -96,4 +129,5 @@ Status: documentation baseline only; runtime implementation not started.
   without scrolling; desktop and initial reveal remain correct.
 - [ ] Dock overflow on desktop/mobile retains controls and popup visibility.
 - [ ] Targeted backend/frontend tests, applicable typechecks and builds pass.
-- [ ] User live acceptance recorded per slice; commit/release only when requested.
+- [ ] User live acceptance at working end-to-end milestones; commit/release only
+  when requested.

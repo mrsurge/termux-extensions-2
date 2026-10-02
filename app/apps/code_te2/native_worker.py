@@ -15,11 +15,13 @@ from app.libs.pipe_inbound import InboundEnvelopeRouter
 from app.libs.pipe_protocol import PipeEnvelope, PipeIdentity, PipeError, PipeProtocolError, decode_envelope, process_error_response
 from app.libs.runtime_debug_pipe import RuntimeDebugPipe
 from .native_socketio import NativeBridge
+from .app_intent_pipe import AppIntentPipe, dispatch_app_intent
 
 _loop: asyncio.AbstractEventLoop | None = None
 _stop: asyncio.Event | None = None
 _router: InboundEnvelopeRouter | None = None
 _debug: RuntimeDebugPipe | None = None
+_intents: AppIntentPipe | None = None
 _ready: concurrent.futures.Future[dict[str, object]] = concurrent.futures.Future()
 _done: concurrent.futures.Future[None] = concurrent.futures.Future()
 _thread: threading.Thread | None = None
@@ -74,12 +76,12 @@ def start(bridge: NativeBridge) -> dict[str, object]:
     )
 
     def run() -> None:
-        global _loop, _stop, _debug, _router
+        global _loop, _stop, _debug, _router, _intents
         _loop = asyncio.new_event_loop()
         asyncio.set_event_loop(_loop)
 
         async def lifecycle() -> None:
-            global _stop, _debug, _router
+            global _stop, _debug, _router, _intents
             from .intelligence_bootstrap import te2_worker_bootstrap
             _stop = asyncio.Event()
             async with te2_worker_bootstrap():
@@ -98,18 +100,23 @@ def start(bridge: NativeBridge) -> dict[str, object]:
                     identity=identity, reply=pipe_runtime.write_envelope, backend=main,
                 )
                 _debug.bind(asyncio.get_running_loop())
+                _intents = AppIntentPipe(identity=identity, reply=pipe_runtime.write_envelope,
+                                         handler=dispatch_app_intent)
                 _router = InboundEnvelopeRouter(
                     identity=identity, accept_response=pipe_runtime.accept_response,
                     accept_notification=pipe_runtime.accept_notification,
                     dispatch=pipe_runtime.dispatch_request, reply=pipe_runtime.write_envelope,
                     report=lambda message: print(message, file=sys.stderr), debug=_debug,
+                    production=_intents,
                 )
                 await main.te2_app_start()
+                _intents.bind(asyncio.get_running_loop())
                 _ready.set_result({"namespaces": list(CODE_TE2_SIO.namespace_handlers), "agentIconDir": str(main.AGENT_ICON_DIR)})
                 try:
                     _ = await _stop.wait()
                 finally:
                     _debug.close()
+                    _intents.close()
                     await main.te2_app_stop()
         try:
             _loop.run_until_complete(lifecycle())
@@ -120,6 +127,8 @@ def start(bridge: NativeBridge) -> dict[str, object]:
         else:
             _done.set_result(None)
         finally:
+            if _intents is not None:
+                _intents.close()
             pending = asyncio.all_tasks(_loop)
             for task in pending:
                 _ = task.cancel()
@@ -161,6 +170,8 @@ def submit(value: dict[str, object]) -> concurrent.futures.Future[object]:
 
 
 def stop(reason: str) -> None:
+    if _intents is not None:
+        _intents.close()
     pipe_runtime.close_transport(reason)
     if _debug is not None:
         _debug.close()

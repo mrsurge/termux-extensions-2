@@ -734,6 +734,31 @@ async def on_sidebar_mention(ns: SidebarNamespace, sid: str, data: object) -> Js
     return await emit_sidebar_mention_targeted(data, skip_sid=sid)
 
 
+async def handle_sidebar_document_open(
+    params: JsonObject, *, requester_app_id: str, require_presentation: bool = False,
+) -> JsonObject:
+    """Shared domain service; pipe callers do not fabricate Socket.IO sessions."""
+    from .sidebar_file_open_routing import resolve_sidebar_file_open_target
+    from .sidebar_window_state import get_sidebar_window_state
+    from ..host.file_ops_backend import handle_host_open_request
+
+    live_host_client_ids = {
+        client_id for host_sid, client_id in _client_ids_by_sid.items()
+        if host_sid in _registered_hosts and client_id
+    }
+    target_client_id, routed_params = resolve_sidebar_file_open_target(
+        params, sidebar_state=_json_object(get_sidebar_window_state()),
+        live_host_client_ids=live_host_client_ids,
+        registered_presentations=dict(_client_presentations),
+        active_windows=dict(_client_active_windows), requester_app_id=requester_app_id,
+        require_presentation=require_presentation,
+    )
+    routed_params.setdefault("focus", False)
+    await handle_host_open_request(routed_params, source_name=target_client_id,
+                                   request_prefix="sidebar_rpc")
+    return {"ok": True}
+
+
 async def _dispatch_sidebar_rpc_request(ns: SidebarNamespace, sid: str, method: str, params: JsonObject) -> object:
     if method == SIDEBAR_IPC_RPC_METHOD_REGISTER:
         await on_sidebar_register(ns, sid, params)
@@ -747,30 +772,7 @@ async def _dispatch_sidebar_rpc_request(ns: SidebarNamespace, sid: str, method: 
         await emit_sidebar_cwd_set(ns, reason=reason or "authoritative")
         return {"ok": True}
     if method == SIDEBAR_IPC_RPC_METHOD_FILE_OPEN:
-        from .sidebar_file_open_routing import resolve_sidebar_file_open_target
-        from .sidebar_window_state import get_sidebar_window_state
-
-        live_host_client_ids = {
-            client_id
-            for host_sid, client_id in _client_ids_by_sid.items()
-            if host_sid in _registered_hosts and client_id
-        }
-        target_client_id, routed_params = resolve_sidebar_file_open_target(
-            params,
-            sidebar_state=_json_object(get_sidebar_window_state()),
-            live_host_client_ids=live_host_client_ids,
-            registered_presentations=dict(_client_presentations),
-            active_windows=dict(_client_active_windows),
-            requester_app_id=_norm(_app_ids_by_sid.get(sid)),
-        )
-        await route_backend_open_request(
-            ns,
-            routed_params,
-            source_name=target_client_id,
-            log_prefix="[sidebar_ipc_rpc] file_open",
-            request_prefix="sidebar_rpc",
-        )
-        return {"ok": True}
+        return await handle_sidebar_document_open(params, requester_app_id=_norm(_app_ids_by_sid.get(sid)))
     if method == SIDEBAR_IPC_RPC_METHOD_FILE_EDIT:
         from ..host.agent_edit_review_backend import handle_sidebar_file_edit_review_signal
 

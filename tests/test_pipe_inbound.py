@@ -59,6 +59,27 @@ def test_unhandled_records_and_disabled_debug_never_dispatch():
     assert [reply.error.code for reply in replies] == ["protocol.expectedRequest", "runtimeDebug.disabled"]
 
 
+def test_production_admission_consumes_only_its_request_without_sync_dispatch():
+    admitted = []
+    class Production:
+        def submit(self, envelope):
+            if envelope.method != "app.intent.deliver":
+                return False
+            admitted.append(envelope.id)
+            return True
+    replies = []
+    router = InboundEnvelopeRouter(
+        identity=PipeIdentity(2100, "code_te2"), accept_response=lambda e: True,
+        accept_notification=lambda e: True,
+        dispatch=lambda e: PipeEnvelope(kind="response", id=e.id), reply=replies.append,
+        report=lambda text: pytest.fail(text), production=Production(),
+    )
+    router.deliver(PipeEnvelope(kind="request", id="production", method="app.intent.deliver"))
+    router.deliver(PipeEnvelope(kind="request", id="existing", method="existing"))
+    assert admitted == ["production"]
+    assert [reply.id for reply in replies] == ["existing"]
+
+
 @pytest.mark.parametrize("tail", [b"", b"\xc1", b"\x81"])
 def test_worker_reader_preserves_invalid_envelope_recovery_and_stream_close(monkeypatch, tail):
     from app.libs import app_worker, pipe_runtime

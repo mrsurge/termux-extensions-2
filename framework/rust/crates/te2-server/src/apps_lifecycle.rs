@@ -242,10 +242,19 @@ async fn open_app(
     payload: Option<Json<OpenAppRequest>>,
 ) -> Response {
     let params = payload.map(|Json(body)| body.params).unwrap_or_default();
-    let (canonical_app_id, app_info) = match start_app_inner(&state, &app_id).await {
-        Ok(result) => result,
-        Err(response) => return response,
-    };
+    match open_app_data(&state, &app_id, params).await {
+        Ok(data) => Json(ApiResponse { ok: true, data }).into_response(),
+        Err(response) => response,
+    }
+}
+
+/// Shared launch/URL authority for HTTP and owned worker-pipe callers.
+pub(crate) async fn open_app_data(
+    state: &AppState,
+    app_id: &str,
+    params: JsonMap<String, Value>,
+) -> Result<Value, Response> {
+    let (canonical_app_id, app_info) = start_app_inner(state, app_id).await?;
     publish_app_running_changed(&state, &canonical_app_id, "open", Some(&app_info), None).await;
 
     let mut url = format!("/app/{canonical_app_id}");
@@ -269,14 +278,10 @@ async fn open_app(
         }
     }
 
-    Json(ApiResponse {
-        ok: true,
-        data: json!({
-            "url": url,
-            "app_info": app_info,
-        }),
-    })
-    .into_response()
+    Ok(json!({
+        "url": url,
+        "app_info": app_info,
+    }))
 }
 
 async fn quit_app(State(state): State<AppState>, Path(app_id): Path<String>) -> Response {

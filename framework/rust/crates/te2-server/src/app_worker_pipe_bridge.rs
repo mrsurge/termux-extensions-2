@@ -67,6 +67,12 @@ mod native {
         state: crate::AppState,
     ) -> anyhow::Result<()> {
         let (sink, writer) = start_pipe_writer(manager.clone(), shell_id, app_id)?;
+        let production =
+            crate::app_intent_pipe::register(&state.instance_id, app_id, shell_id, sink.clone());
+        let _ = sink.intent_route.set(Arc::downgrade(&production.route));
+        if sink.closed.load(Ordering::Acquire) {
+            production.route.close();
+        }
         let registration = crate::runtime_debug_pipe::register(app_id, shell_id, sink.clone());
         let registration = match registration {
             Ok(registration) => registration,
@@ -92,6 +98,7 @@ mod native {
             state,
         );
         sink.close();
+        drop(production);
         drop(registration);
         let write_result = writer
             .join()
@@ -132,6 +139,7 @@ mod native {
                             scheduler.clone(),
                             handle.clone(),
                             sink.clone(),
+                            state.clone(),
                         );
                     }
                 }
@@ -153,11 +161,17 @@ mod native {
         scheduler: FrameworkServiceScheduler,
         handle: Handle,
         sink: Arc<FerrousPipeSink>,
+        state: crate::AppState,
     ) {
         if matches!(
             &request.kind,
             PipeMessageKind::Response | PipeMessageKind::Error
         ) {
+            if let Some(route) = sink.intent_route.get().and_then(Weak::upgrade) {
+                if route.accept(request.clone()) {
+                    return;
+                }
+            }
             if let Some(route) = sink.debug_route.get().and_then(Weak::upgrade) {
                 let _ = route.accept(request);
             }
@@ -184,6 +198,16 @@ mod native {
         let event_sink: Arc<dyn PipeEventSink> = sink.clone();
         let response_sink = sink;
         handle.spawn(async move {
+            if let Some(route) = response_sink.intent_route.get().and_then(Weak::upgrade) {
+                if let Some(response) =
+                    crate::app_intent_pipe::dispatch(&state, &route, &request).await
+                {
+                    if let Err(error) = response_sink.send(response) {
+                        warn!(%error, "failed to write app intent response");
+                    }
+                    return;
+                }
+            }
             let response =
                 dispatch_request(request, &responder, &scheduler, Some(event_sink)).await;
             if let Err(error) = response_sink.send(response) {
@@ -193,6 +217,7 @@ mod native {
     }
 
     struct FerrousPipeSink {
+        intent_route: Arc<OnceLock<Weak<crate::app_intent_pipe::Route>>>,
         debug_route: Arc<OnceLock<Weak<crate::runtime_debug_pipe::DebugRoute>>>,
         sender: SyncSender<Vec<u8>>,
         closed: Arc<AtomicBool>,
@@ -221,6 +246,9 @@ mod native {
 
         fn close(&self) {
             self.closed.store(true, Ordering::Release);
+            if let Some(route) = self.intent_route.get().and_then(Weak::upgrade) {
+                route.close();
+            }
             if let Some(route) = self.debug_route.get().and_then(Weak::upgrade) {
                 route.close();
             }
@@ -241,7 +269,9 @@ mod native {
         let (sender, receiver) = sync_channel(PIPE_WRITER_QUEUE_CAPACITY);
         let closed = Arc::new(AtomicBool::new(false));
         let debug_route = Arc::new(OnceLock::<Weak<crate::runtime_debug_pipe::DebugRoute>>::new());
+        let intent_route = Arc::new(OnceLock::<Weak<crate::app_intent_pipe::Route>>::new());
         let sink = Arc::new(FerrousPipeSink {
+            intent_route: intent_route.clone(),
             debug_route: debug_route.clone(),
             sender,
             closed: closed.clone(),
@@ -261,6 +291,9 @@ mod native {
                     closed.clone(),
                 );
                 closed.store(true, Ordering::Release);
+                if let Some(route) = intent_route.get().and_then(Weak::upgrade) {
+                    route.close();
+                }
                 if let Some(route) = debug_route.get().and_then(Weak::upgrade) {
                     route.close();
                 }
@@ -314,6 +347,7 @@ mod native {
         fn bounded_writer_queue_preserves_order_and_fails_explicitly() {
             let (sender, receiver) = sync_channel(2);
             let sink = FerrousPipeSink {
+                intent_route: Arc::default(),
                 debug_route: Arc::default(),
                 sender,
                 closed: Arc::new(AtomicBool::new(false)),

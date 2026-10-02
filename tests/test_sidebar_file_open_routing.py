@@ -75,6 +75,24 @@ class SidebarFileOpenRoutingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "does not belong"):
             _ = self.resolve()
 
+    def test_pipe_requires_matching_live_presentation(self) -> None:
+        for supplied in (None, "old-incarnation", "iframe_1"):
+            target = self.payload["target"]
+            assert isinstance(target, dict)
+            target["presentationId"] = supplied
+            def resolve_pipe():
+                return resolve_sidebar_file_open_target(
+                    self.payload, sidebar_state=self.state,
+                    live_host_client_ids={"client_123456789abc"},
+                    registered_presentations=self.presentations, active_windows=self.active,
+                    requester_app_id="als-rs", require_presentation=True,
+                )
+            if supplied == "iframe_1":
+                self.assertEqual(resolve_pipe()[0], "client_123456789abc")
+            else:
+                with self.assertRaisesRegex(ValueError, "presentation is stale"):
+                    resolve_pipe()
+
 
 if __name__ == "__main__":
     _ = unittest.main()

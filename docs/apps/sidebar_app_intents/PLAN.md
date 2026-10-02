@@ -248,7 +248,12 @@ again. Reuse the existing session creation owner. A supplied explicit CWD must
 not be replaced by the active project CWD; unspecified/manual New behavior can
 retain its current defaults. Confirm supported shell cleanup/error semantics.
 
-### Proposed Boundary (Not Yet Implementation-Approved)
+### Boundary And Approval Scope
+
+The production pipe foundation was explicitly approved and implemented first.
+The native adapter and in-project document-open service were then approved as
+a separate slice. Remaining intent services and user-facing integration below
+are subsequent slices; the foundation does not yet enable all their effects.
 
 1. A small production framework pipe broker derives caller identity from its
    owned app pipe, validates an allowlisted intent, correlates the result, and
@@ -263,8 +268,81 @@ retain its current defaults. Confirm supported shell cleanup/error semantics.
 4. App launch URLs keep the existing generic lifecycle/query builder. Stateful
    app launches create the correct Sidebar tab through existing ledger services.
 5. Production broker failures/disconnects terminate pending calls without replaying
-   mutations. Concrete capacity, timeout, operation deduplication and worker-start
-   policy remain decisions for the cohesive implementation plan.
+   mutations. Foundation limits and target-start policy are recorded below;
+   durable operation deduplication, if needed by a domain mutation, remains a
+   domain-service decision rather than permission to replay uncertain calls.
+
+### Production Pipe Foundation
+
+Source: `framework/rust/crates/te2-server/src/app_intent_pipe.rs`, owned by the
+app-worker bridge, not the runtime-debug registry. Each server-instance/app key
+resolves one captured live worker pipe; replacement closes the prior route and
+its pending waiters. Both caller and target must match the framework's current
+running-app shell identity. Request `originName`/`originNid` are not caller
+authentication.
+
+- `app.open`: `{appId, params}` uses the same lifecycle start/publication/query
+  builder as HTTP app-open. It returns `{url, app_info}`, **not domain-effect or
+  HTTP-readiness completion**. It sends no HTTP request to implement this operation.
+- `app.intent.dispatch`: `{targetApp, intent, context, payload}` forwards
+  `app.intent.deliver` to the exact registered target pipe. It does not start an
+  absent target. Parameters reject extra top-level fields such as forged `source`.
+- Initial target is `code_te2`. `sidebar.openApp` / `terminal.createSession`
+  admit Code TE2, File Explorer, File Editor and Terminal callers;
+  `project.openDirectory` / `document.open` admit File Explorer and File Editor.
+  Unknown methods/apps are not arbitrary forwarding capabilities.
+- Forwarded `source: {appId, shellId}` is framework-derived. `context` must be an
+  object; its client/project/presentation claims are **not authenticated by the
+  broker**. The forthcoming target adapter must validate these against the
+  existing live ledger/registry before performing any effect. No active-client
+  fallback is permitted.
+- Caller supplies a nonempty envelope `opId`; this is correlation metadata, not
+  a durable deduplication guarantee. The broker generates fresh request/reply
+  IDs and requires matching reply ID/correlation and framework reply destination.
+- Up to 16 concurrent operations per source; up to 16 pending deliveries per
+  target. Serialized parameter size is bounded at 64 KiB; delivery wait is 15s.
+  Timeout/disconnect means the effect may already have happened. Errors are
+  nonretryable; caller cancellation, transport close and worker replacement
+  release waiters. No replay, cancellation of accepted domain execution, or
+  rollback is implied.
+
+Validation: native-feature Cargo check, eight production-broker tests, two
+existing bounded/ordered pipe-writer tests, 24 framework-pipe tests and three
+app-lifecycle tests passed (37 targeted tests). Tests cover correlation,
+framework-derived identity, forged parameters, allowlisting, unavailable/stale
+workers, replacement ownership, timeout/late reply, disconnect, send failure,
+capacity and cancellation. This is unit validation, not end-to-end acceptance.
+The shared framework was not restarted; no frontend/assets/APKs were changed.
+
+### Native Domain Adapter And Document Open
+
+`app/apps/code_te2/app_intent_pipe.py` admits only `app.intent.deliver` from the
+framework identity (NID 1 / `framework.rust`) with matching ID/correlation and a
+nonempty operation ID. The native worker binds it to its existing domain asyncio
+loop after application startup. Admission is bounded to 16 operations; the pipe
+reader never waits for async domain work. Replies are written off-loop. Shutdown
+fences admission and cancels pending tasks cooperatively, without retries or
+rollback promises. Runtime-debug remains a separate admission surface.
+
+The first implemented intent is `document.open`, from canonical File Explorer
+or File Editor workers. Context is exactly `{clientId, hostId, presentationId}`;
+`payload.target` cannot override it. Framework-derived source identifies the
+requester app. The shared `handle_sidebar_document_open` service validates the
+connected host client, active Sidebar slot, registered presentation and ledger
+app ownership before invoking the existing host/editor open service. Pipe callers
+must supply the current presentation incarnation; existing Sidebar socket callers
+retain their established registration behavior. No synthetic Socket.IO SID is
+created. The host service retains active-project containment checks.
+
+This slice does not implement out-of-project CM6 fallback, project switching,
+app-tab creation, or terminal creation. Those intents return explicit unsupported
+errors rather than silently invoking partial workflows. Caller integration also
+remains pending; no frontend assets were changed.
+
+Validation: 24 targeted Python tests passed, including actual shared-service
+ownership checks before mocked file opening; five changed modules passed Mypy
+and mypyc code generation. No compiled runtime group was rebuilt/activated and
+the shared framework was not restarted. Live acceptance remains pending.
 
 Remaining investigation: standalone Code TE2 project-query consumption and draft
 guard sequencing, new-tab stateful launch identifiers, drawer new-session/CWD
