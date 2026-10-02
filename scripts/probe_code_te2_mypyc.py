@@ -1,7 +1,7 @@
 """Build and import-check Code TE2's startup Python graph with mypyc.
 
-This is a developer probe, not a wheel build or native-worker runtime switch.
-The output directory must be new and is never installed into the source tree.
+This is a developer workflow, not a wheel build or automatic runtime switch.
+Build intermediates are cached; validated snapshot output directories must be new.
 """
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ from __future__ import annotations
 import argparse
 from contextlib import redirect_stderr, redirect_stdout
 import importlib
-from importlib.machinery import EXTENSION_SUFFIXES, ExtensionFileLoader
+from importlib.machinery import EXTENSION_SUFFIXES, ExtensionFileLoader, ModuleSpec
 from importlib.util import spec_from_file_location
 import json
 import os
@@ -17,6 +17,9 @@ from pathlib import Path
 import sys
 import tempfile
 import time
+import subprocess
+from types import ModuleType
+from typing import Sequence
 
 REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
@@ -25,6 +28,10 @@ if str(REPO / "scripts") not in sys.path:
     sys.path.insert(0, str(REPO / "scripts"))
 
 from profile_code_te2_import import check_event
+from mypyc_build_workflow import (
+    activate, build_lock, cache_key, compiler_cache, publish_snapshot,
+    prune, source_digest, toolchain,
+)
 
 
 STARTUP_IMPORTS = (
@@ -91,7 +98,8 @@ class CompiledFinder:
         self.root = root
         self.names = names
 
-    def find_spec(self, fullname: str, path: object = None, target: object = None) -> object:
+    def find_spec(self, fullname: str, path: Sequence[str] | None = None,
+                  target: ModuleType | None = None) -> ModuleSpec | None:
         if fullname not in self.names:
             return None
         stem = self.root / fullname.replace(".", "/")
@@ -140,40 +148,52 @@ def inventory(output: Path) -> None:
         print(f"Inventoried {len(modules)} local startup modules: {output}")
 
 
-def build(output: Path) -> None:
-    if output.exists():
+def build(output: Path, cache_root: Path) -> None:
+    if output.exists() or output.is_symlink():
         raise SystemExit(f"output already exists: {output}")
-    output.mkdir(parents=True)
-    import subprocess
-
+    cache_root.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ, PYTHONPATH=str(REPO), PYTHON_JIT="0", PYTHONDONTWRITEBYTECODE="1")
-    subprocess.run(
-        [sys.executable, "-B", str(Path(__file__).resolve()), "inventory", "--output", str(output / "startup.json")],
-        cwd=REPO, env=env, check=True,
-    )
-    modules: dict[str, str] = json.loads((output / "startup.json").read_text())["modules"]
+    with tempfile.TemporaryDirectory(prefix='inventory-', dir=cache_root) as temporary:
+        inventory_path = Path(temporary) / 'startup.json'
+        subprocess.run(
+            [sys.executable, "-B", str(Path(__file__).resolve()), "inventory", "--output", str(inventory_path)],
+            cwd=REPO, env=env, check=True,
+        )
+        inventory_bytes = inventory_path.read_bytes()
+    modules: dict[str, str] = json.loads(inventory_bytes)["modules"]
     sources = [str(Path(path).relative_to(REPO)) for name, path in modules.items()
                if not path.endswith("/__init__.py") and name not in INTERPRETED]
-    manifest = {"modules": modules, "compiled_sources": sources, "interpreted": sorted(INTERPRETED)}
-    (output / "manifest.json").write_text(json.dumps(manifest, indent=2))
+    manifest: dict[str, object] = {"modules": modules, "compiled_sources": sources, "interpreted": sorted(INTERPRETED)}
+    digest = source_digest(REPO, modules)
+    identity = toolchain(REPO, sources)
+    cache = cache_root / cache_key(identity)
     print(f"Compiling {len(sources)} local modules in one mypyc group", flush=True)
     from setuptools import setup
     from mypyc.build import mypycify
 
     os.environ.setdefault("MAX_JOBS", "2")
-    log_path = output / "build.log"
-    try:
-        with log_path.open("w") as log, redirect_stdout(log), redirect_stderr(log):
-            setup(
-                name="te2-mypyc-domain-probe",
-                ext_modules=mypycify(sources, opt_level="3", multi_file=True, target_dir=str(output / "csrc")),
-                script_args=["build_ext", "--build-lib", str(output / "lib"), "--build-temp", str(output / "temp")],
-            )
-    except BaseException:
-        print("\n".join(log_path.read_text().splitlines()[-35:]), file=sys.stderr)
-        raise
-    link_resources(output / "lib")
-    print(f"Built shared group: {output / 'lib'} (details: {log_path})")
+    with build_lock(cache_root / '.build.lock'):
+        cache.mkdir(parents=True, exist_ok=True)
+        (cache / 'startup.json').write_bytes(inventory_bytes)
+        (cache / 'toolchain.json').write_text(json.dumps(identity, indent=2))
+        started = time.monotonic()
+        log_path = cache / "build.log"
+        try:
+            with compiler_cache(cache_root, identity) as cached:
+                print(f'Build cache: {cache}; ccache: {"enabled (512M limit)" if cached else "unavailable; full changed-extension rebuilds"}', flush=True)
+                with log_path.open("w") as log, redirect_stdout(log), redirect_stderr(log):
+                    extensions = mypycify(sources, opt_level="3", multi_file=True, target_dir=str(cache / "csrc"))
+                    setup(
+                        name="te2-mypyc-domain-probe", ext_modules=extensions,
+                        script_args=["build_ext", "--build-lib", str(cache / "lib"), "--build-temp", str(cache / "temp")],
+                    )
+            publish_snapshot(REPO, cache, output, manifest, [ext.name for ext in extensions],
+                             identity, digest, time.monotonic() - started, link_resources)
+        except BaseException:
+            if log_path.is_file():
+                print("\n".join(log_path.read_text().splitlines()[-35:]), file=sys.stderr)
+            raise
+    print(f"Published validated snapshot: {output} (build {time.monotonic() - started:.2f}s)")
 
 
 def validate(manifest_path: Path, lib: Path | None) -> None:
@@ -207,7 +227,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("inventory").add_argument("--output", type=Path, required=True)
-    commands.add_parser("build").add_argument("--output", type=Path, required=True)
+    build_parser = commands.add_parser("build")
+    build_parser.add_argument("--output", type=Path, required=True)
+    build_parser.add_argument("--cache-dir", type=Path,
+                              default=Path(os.environ.get('TMPDIR') or REPO / '.codex-scratch') / 'mypyc-build-cache')
+    activate_parser = commands.add_parser('activate')
+    activate_parser.add_argument('--snapshot', type=Path, required=True)
+    activate_parser.add_argument('--link', type=Path, default=REPO / '.codex-scratch/mypyc-active')
+    prune_parser = commands.add_parser('prune')
+    prune_parser.add_argument('--root', type=Path, default=REPO / '.codex-scratch/mypyc-snapshots')
+    prune_parser.add_argument('--link', type=Path, default=REPO / '.codex-scratch/mypyc-active')
+    prune_parser.add_argument('--keep', type=int, default=2)
+    prune_parser.add_argument('--apply', action='store_true')
     check = commands.add_parser("validate")
     check.add_argument("--manifest", type=Path, required=True)
     check.add_argument("--lib", type=Path)
@@ -215,7 +246,11 @@ def main() -> None:
     if args.command == "inventory":
         inventory(args.output.resolve())
     elif args.command == "build":
-        build(args.output.resolve())
+        build(args.output.resolve(), args.cache_dir.resolve())
+    elif args.command == 'activate':
+        activate(args.snapshot, args.link.absolute())
+    elif args.command == 'prune':
+        prune(args.root.resolve(), args.link.absolute(), keep=args.keep, apply=args.apply)
     else:
         validate(args.manifest.resolve(), args.lib)
 

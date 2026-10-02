@@ -884,6 +884,46 @@ paths or silently fall back to compilation. Exercise clean installs and upgrades
 on the existing Linux and Android acceptance targets before publication. No
 wheel/release is produced by this checkpoint.
 
+#### Developer mypyc cached build workflow
+
+Source-backed finding (2026-10-02): the old probe required new C/object/library
+directories for every invocation. Approximately 1.5 GB of legacy experiment
+directories accumulated under `.codex-scratch/mypyc*`; the protected release
+checkpoint adds 26 MB. After the overhaul, the user explicitly approved removing
+legacy scratch iterations: old build/probe/inventory/test directories were removed,
+recovering approximately 1.3 GB. The mapped active `mypyc-sidebar-reveal`, new cache/
+snapshots and protected release checkpoint remain.
+
+The new workflow retains one mutable build generation per checkout/toolchain/ABI/
+compiled-module membership, with a dedicated 512 MB ccache when available. Ordinary
+source edits reuse that generation. Setuptools rebuilds a changed shared extension
+as a whole; ccache avoids rerunning compilation for unchanged translation units.
+One shared compilation unit and early-bound internal calls are retained. Without
+ccache, unchanged builds still skip up-to-date extensions, but changed extensions
+pay the uncached compilation cost. Generated shared-header changes can invalidate
+much or all of the group; no universal small-edit timing promise is made.
+
+Build output becomes a new validated snapshot containing only libraries, manifest,
+log and provenance (resource symlinks remain source-owned). It never changes an
+active worker. Explicit `activate` verifies ABI/checksums and preserves a previous
+target; `prune` defaults to a dry run and only recognizes new managed snapshots,
+keeping newest two plus active/previous. Legacy directories, release checkpoints
+and toolchain cache generations are not deleted. Refer to the native worker README
+for commands and running-worker caveats. This is still developer workflow only,
+not the wheel integration described above.
+
+Validation: isolated two-module shared-group benchmark measured clean/no-change/
+single-function edit at 12.179/2.238/3.358 seconds. The changed build reused 17
+compiler results and had one miss; imports verified the new return value and the
+unchanged module. These numbers prove the cache mechanism, not whole-worker
+startup performance. Full 135-module cache population took 538.16 seconds on this
+run; the unchanged cached rebuild took 35.11 seconds and compiled no C translation
+units. Both snapshots passed all 135 compiled imports; the first snapshot also
+passed 21 isolated native-worker/reader tests. Each runtime snapshot occupies
+32 MB, versus roughly 155 MB for an old combined C/object/library iteration.
+Thirteen workflow safety tests pass; the opt-in real compiler fixture passed too.
+Both workflow scripts pass Mypy. Current live worker selection remains untouched.
+
 #### Cefrium diff failure with CDP enabled — follow-up
 
 User reports an editor soft-crash-like stall during diff loading, limited to

@@ -116,18 +116,23 @@ do not supply a free-threaded or different-version venv.
 This is a **developer-only compiled-domain experiment**, not a release wheel.
 Use the matching regular CPython, a C compiler, `mypy==2.3.0` (which
 supplies mypyc), and `setuptools==84.0.0`. From the repository root, choose a
-new output path under `$TMPDIR` when set, otherwise under `.codex-scratch`:
+new snapshot path under `$TMPDIR` when set, otherwise under `.codex-scratch`:
 
 ```bash
-MYPYC_OUT="${TMPDIR:-.codex-scratch}/mypyc-domain-check"
+MYPYC_OUT="${TMPDIR:-.codex-scratch}/mypyc-snapshots/check-$(date +%Y%m%d-%H%M%S)"
 python -B scripts/probe_code_te2_mypyc.py build --output "$MYPYC_OUT"
-python -B scripts/probe_code_te2_mypyc.py validate --manifest "$MYPYC_OUT/manifest.json"
+# Build already validates compiled imports before publishing the snapshot.
+# Optional explicit revalidation:
 python -B scripts/probe_code_te2_mypyc.py validate --manifest "$MYPYC_OUT/manifest.json" --lib "$MYPYC_OUT/lib"
+# Explicit selection only; does NOT restart the worker/framework:
+python -B scripts/probe_code_te2_mypyc.py activate --snapshot "$MYPYC_OUT"
 ```
 
 The build inventories the startup-loaded local modules, compiles one shared
 group, and records its interpreted islands in `manifest.json`. It does not copy
-extensions into the source tree or change the running TE2 worker. The desktop
+extensions into the source tree or change the running TE2 worker. Build output
+is a validated runtime snapshot (libraries, manifest, resource symlinks, provenance
+and log), not another copy of all generated C/object intermediates. The desktop
 preflight compiled and imported 135 modules; compiled-overlay tests exposed
 mock-rebinding/native-class differences still to resolve before any runtime
 cutover. The matching-ABI Pixel/Termux probe also built and imported all 135
@@ -136,12 +141,63 @@ compiled wrappers; that initial probe did not switch the worker. See
 
 The native worker now accepts `CODE_TE2_MYPYC_DIR` pointing to a matching
 build's manifest/lib directory. The experimental shellspec selects
-`.codex-scratch/mypyc-active`; build and validate that directory before starting
+`.codex-scratch/mypyc-active`; build/validate a snapshot and explicitly select it before starting
 the worker, or remove that shellspec environment entry to run interpreted.
 There is no automatic build or silent fallback. Startup reports the compiled
 module count. The overlay links source-owned resource directories into its lib
 layout because compiled modules resolve sibling assets relative to their `.so`.
 These development symlinks are not a portable wheel packaging solution.
+
+#### Cached build and retention workflow
+
+`build` keeps intermediates under `${TMPDIR:-.codex-scratch}/mypyc-build-cache`.
+`--cache-dir` overrides that root. Separate cache generations are keyed by checkout,
+CPython ABI/version, compiler/version/flags, mypy/setuptools versions and compiled
+module membership; ordinary source-content changes reuse the same generation.
+An exclusive writer lock protects the cache. Generated C and objects remain there;
+never point `CODE_TE2_MYPYC_DIR` at the mutable cache.
+
+The installed setuptools recompiles a changed shared extension as a whole. When
+`ccache` is present, the workflow uses a dedicated **512 MB** compiler cache with
+content-based compiler checking; unchanged C/header/flag combinations reuse cached
+objects. Without ccache, builds still work and explicitly report the slower mode.
+On Termux, `pkg install ccache` supplies this optional **development** tool; it is
+not a runtime/user-install dependency. Shared generated-header changes can invalidate
+many objects. We retain a single shared compilation unit and `multi_file=True`.
+
+Snapshot publication copies only this build's extension libraries (no hard links
+to mutable compiler outputs), validates all compiled imports in a separate isolated
+process, checks startup-source consistency and atomically publishes only on success.
+`artifact.json` records toolchain/source/checksum provenance. Explicit `activate`
+checks ABI and snapshot checksums, atomically switches the active symlink and keeps
+the former target at `mypyc-active-previous`. Neither action restarts a process;
+already-running workers retain old imports until an approved app-worker restart.
+Snapshot resource links still refer to editable source, as in the existing probe.
+
+No automatic deletion occurs. For new managed snapshots only:
+
+```bash
+python -B scripts/probe_code_te2_mypyc.py prune --root "${TMPDIR:-.codex-scratch}/mypyc-snapshots"
+# Inspect the dry run first, then explicitly opt in:
+python -B scripts/probe_code_te2_mypyc.py prune --root "${TMPDIR:-.codex-scratch}/mypyc-snapshots" --apply
+```
+
+Pruning keeps the newest two snapshots plus active/previous targets. It ignores
+symlink aliases, unrecognized legacy directories and `.release` artifacts.
+It cannot discover every manually selected/running process's artifact ownership:
+do not apply pruning while unrelated workers use older snapshots, or increase
+`--keep` appropriately. Toolchain cache generations and legacy experiment folders
+are not deleted by this command. Preserve `.release/mypyc-checkpoint-20260929/`.
+
+The opt-in real-compiler regression benchmark is:
+
+```bash
+TE2_MYPYC_CACHE_BENCHMARK=1 python -B -m pytest -q -s tests/test_mypyc_build_workflow.py
+```
+
+It verifies unchanged-object reuse and changed code behavior using an isolated
+two-module shared group. Full worker import/native tests and live acceptance remain
+separate checks; fixture timings are not release/startup performance claims.
 
 The 134-module desktop group passes all 20 isolated native-worker tests,
 including History and terminal over polling and WebSocket. `pipe_dto` remains

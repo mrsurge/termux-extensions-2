@@ -225,6 +225,32 @@ Sidebar loading; no additional startup redesign without new evidence.
 
 ## mypyc / Pixel performance
 
+### Cached developer builds and snapshot retention
+
+- [x] Inspect legacy accumulation: approximately 1.5 GB of scratch experiments;
+  protected release checkpoint 26 MB. No legacy deletion approved/performed.
+- [x] Reuse toolchain/ABI/module-set-keyed C/object build storage and optional
+  dedicated 512 MB ccache; preserve one shared compilation unit.
+- [x] Publish validated library-only snapshots; detect source changes, serialize
+  builders, and never mutate running-worker artifacts.
+- [x] Explicit ABI/checksum-checked activation retains the prior target; managed
+  snapshot prune is dry-run-first and protects active/previous, newest two,
+  symlink aliases, legacy directories and release checkpoints.
+- [x] 13 workflow safety tests, opt-in shared-group compiler benchmark, script
+  Mypy and 21 isolated native-worker/reader tests pass. Both full snapshots load
+  all 135 compiled modules. Full first-cache build 538.16s; unchanged rebuild
+  35.11s with no C compilation. Snapshot size 32 MB versus old combined 155 MB.
+- [x] Small-change fixture proves 17 compiler-cache hits / one miss and correct
+  updated code; 12.179s clean, 2.238s unchanged, 3.358s changed. These are not
+  whole-worker startup or Pixel performance claims.
+- [ ] Pixel cached-build timings and live acceptance of a newly activated snapshot.
+- [x] User approved deliberate legacy mypyc scratch cleanup. Removed old build/
+  probe/inventory/test iterations; retained the mapped active `mypyc-sidebar-reveal`,
+  new reusable cache/snapshots and `.release/mypyc-checkpoint-20260929/`.
+
+Commands and caveats: native-worker README, **Cached build and retention workflow**.
+No active worker/link, framework restart, wheel/release or automatic cleanup.
+
 - [x] Capture exploratory desktop JIT on/off and warmed Pixel startup timings;
   verify JIT state inside each live worker, not just its launch environment.
 - [x] Record source/interpreter differences and the limits of those comparisons.
