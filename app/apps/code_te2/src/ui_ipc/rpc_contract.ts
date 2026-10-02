@@ -10,6 +10,7 @@ export const UI_IPC_RPC_METHODS = {
   hostProjectsReset: 'ui.host.projects.reset',
   hostProjectsRemove: 'ui.host.projects.remove',
   hostProjectsOpen: 'ui.host.projects.open',
+  hostProjectDirectory: 'ui.host.project.directory',
   hostSessionUpdate: 'ui.host.session.update',
   hostDiagnosticsExport: 'ui.host.diagnostics.export',
   hostHistoryOpen: 'ui.host.history.open',

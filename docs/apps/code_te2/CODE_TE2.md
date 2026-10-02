@@ -5533,6 +5533,12 @@ The old `history_routes.py` assembly and its `/debug/projects`, raw state,
 history touch/list/remove routes are removed. Deploy worker and generated host
 frontend together. Shared HistoryStore/ProjectSidecar services remain authoritative.
 
+File Explorer's **Open as Project** uses `project.openDirectory` through its own backend and the production framework pipe when embedded. Standalone navigation supplies a one-shot `project` query; the host consumes it before its boot snapshot/model restoration and uses `ui.host.project.directory` on its own authenticated UI IPC lane. Failed/cancelled launch intent does not prevent loading the current project.
+
+`host/project_intent_backend.py` prepares a 120-second, single-use confirmation ticket bound to client, exact embedded presentation/app (when applicable), canonical directory/device/inode, and current project root/generation. One pending ticket per client and 64 globally bound admission; expiry is lazy, with no polling. Cancel has no project effects; acceptance consumes before asynchronous work and never retries an uncertain switch. Embedded proof uses the live Sidebar host/presentation; standalone proof uses the registered browser host UI IPC session. Shared project-switch logic revalidates before and after asynchronous watcher cleanup, immediately before root mutation. Known projects retain normal history/sidecar restoration; unknown existing directories are adopted through the same switch service without creating a nested directory or overwriting project files.
+
+File Explorer's list/grid right-click, long-press and keyboard context menu reuse enabled File/Edit command buttons and existing operation guards. Context actions select the exact item and clear unrelated batch selection. Movement cancels long-press; its generated click is suppressed. Outside pointer, Escape, tree scroll, rerender and page exit dismiss the menu; scrolling the menu itself remains usable.
+
 ### Framework Pipe Codec
 
 Rust framework <-> Python `app_worker --pipe` uses concatenated MessagePack maps,

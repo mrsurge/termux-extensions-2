@@ -139,6 +139,7 @@ test('startup settles missing UI preferences before mount, handles empty project
     initSessionStateContext: noop, queueSessionStateUpdate: noop,
     resetSavedState: noop, markUnsaved: noop,
     setNoProjectState: () => { calls.push('empty'); },
+    getUrlSearch: () => '',
   };
   await runBootSequence(deps);
   assert.deepEqual(calls, ['prefs', 'mount', 'empty']);

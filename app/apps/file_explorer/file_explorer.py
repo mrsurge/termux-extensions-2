@@ -28,7 +28,7 @@ async def dispatch_embedded_intent(payload: Dict[str, Any] = Body(...)) -> Dict[
     intent = payload.get('intent')
     context = payload.get('context')
     body = payload.get('payload')
-    if intent not in {'document.open', 'terminal.createSession'}:
+    if intent not in {'document.open', 'terminal.createSession', 'project.openDirectory'}:
         raise HTTPException(status_code=400, detail='unsupported File Explorer intent')
     if not isinstance(context, dict) or set(context) != {'clientId', 'hostId', 'presentationId'}:
         raise HTTPException(status_code=400, detail='exact embedded context is required')

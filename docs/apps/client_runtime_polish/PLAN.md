@@ -1212,3 +1212,43 @@ For native live tests, explicitly OTA the freshly built frontend or bundle it
 into the APK and verify its asset version; reload alone cannot update assets.
 Synchronize versions and bundle assets when client/backend contracts require it.
 Do not publish a release or merge as part of this maintenance planning pass.
+
+## Code TE2 native artifact installation contract
+
+Approved direction (documentation only; not implemented): publish the independent
+Code TE2 executable and matching mypyc domain as a validated artifact set, not
+runtime dependencies on Cargo `target/release` or `.codex-scratch`.
+
+- Editable/source installs publish under the existing
+  `$TE2_CACHE_HOME/code_te2/build` (normally `~/.cache/te2/code_te2/build`).
+  Separate compiler/Cargo intermediates from immutable runtime sets; select only
+  a validated set atomically.
+- Binary wheels own `app/release_runtime/code_te2/`, containing
+  `bin/code-te2-worker`, domain libraries/manifest, interpreted islands and
+  required resources. Resolve package-relative paths; no developer symlinks or
+  absolute build-machine paths.
+- Launcher/bootstrap resolves concrete worker/domain paths once for the shellspec.
+  Preserve the independent executable and pipe readiness; do not fold the worker
+  into the framework server.
+- Validate CPython minor/ABI (including regular/free-threaded), architecture,
+  libc, linked libpython and component checksums/provenance. Existing `py3-none`
+  framework wheel tagging is insufficient for ABI-specific mypyc extensions.
+- Preserve separate Rust/domain fingerprints, reusing unchanged Rust artifacts
+  across Python/frontend changes; a matched-set manifest records both.
+- Missing/incompatible binary-install artifacts fail clearly without Cargo or
+  interpreted fallback. Source build/publication remains explicit until the
+  implementation slice defines startup policy.
+
+Implementation gates:
+
+1. Source-cache publication, artifact-set resolver and shellspec handoff. Test
+   overridden roots, missing/invalid artifacts, ABI mismatch, atomic selection
+   and unchanged-Rust reuse.
+2. Desktop/Termux wheel resources, provenance and ABI/platform tagging, including
+   interpreted islands and resource materialization without developer links.
+3. Clean desktop SSH and Motorola/Pixel install acceptance without checkout or
+   build-tool life support, then integrate the release workflow.
+
+No executable relocation, automatic build, wheel publication or runtime restart
+occurred in this documentation pass. Full contract:
+`framework/native_editor_worker/README.md`, Planned installed artifact placement.

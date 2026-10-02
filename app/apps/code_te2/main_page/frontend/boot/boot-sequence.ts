@@ -9,6 +9,7 @@ import {
   type HostBootSnapshot,
 } from './boot-snapshot.ts';
 import { traceColdBoot } from '../../../monaco_editor/editor_cold_boot_trace.ts';
+import { consumeProjectLaunch } from './project-launch.ts';
 
 interface RestoredPathStateArgs {
   restoredPath: string;
@@ -51,6 +52,7 @@ interface BootSequenceDeps {
   setBranchMenuHandle(handle: unknown): void;
   requestBackendBootSnapshot(payload?: Record<string, unknown>): Promise<unknown>;
   mountInlineEditorHost(snapshot: HostBootSnapshot | null): Promise<unknown>;
+  requestProjectDirectory(params: Record<string, unknown>): Promise<unknown>;
 }
 
 function asString(value: unknown): string {
@@ -200,6 +202,21 @@ export async function runBootSequence(deps: BootSequenceDeps): Promise<void> {
     console.error('Failed to initialize explorer UI:', error);
   });
   traceColdBoot('host.explorer.initialized', {});
+
+  try { await consumeProjectLaunch({
+    search: deps.getUrlSearch(),
+    connect: async () => deps.connectUIIPC(),
+    request: (params) => deps.requestProjectDirectory(params),
+    confirm: (message, options) => withStartupInteraction(deps, () => window.teUI.dialog.confirm(message, options)),
+    consume: () => {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('project');
+      window.history.replaceState(window.history.state, '', url);
+    },
+  }); } catch (error) {
+    await withStartupInteraction(deps, () => window.teUI.dialog.alert(
+      error instanceof Error ? error.message : String(error), { title: 'Project opening failed' }));
+  }
 
   let bootSnapshot: HostBootSnapshot | null = null;
   try {

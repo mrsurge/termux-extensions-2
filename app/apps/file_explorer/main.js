@@ -1125,6 +1125,9 @@ export default function initFileExplorer(root, api, host) {
     const hasSelection = !!state.selected;
     const hasBatchSelection = state.selectedPaths.size > 0;
     const hasSingleSelection = state.selectedPaths.size === 1;
+    for (const button of container.querySelectorAll('[data-command="file:open-terminal"], [data-command="file:open-project"]')) {
+      button.disabled = !hasSelection || state.selected.type !== 'directory';
+    }
 
     // Open and properties only work with single selection
     setDisabledState(
@@ -1232,6 +1235,7 @@ export default function initFileExplorer(root, api, host) {
     "file:open": () => openSelected(),
     "file:open-editor": () => openSelectedInEditor(),
     "file:open-terminal": () => openSelectedInTerminal(),
+    "file:open-project": () => openSelectedAsProject(),
     "file:download": () => downloadSelected(),
     "file:extract": () => extractSelectedArchive(),
     "edit:properties": () => openSelectedProperties(),
@@ -1276,6 +1280,14 @@ export default function initFileExplorer(root, api, host) {
       toast(host, error?.message || "Unable to complete action");
     }
   }
+
+  const contextMenuReady = import('/static/js/te_file_explorer_context.mjs').then(({ createItemContextMenu }) =>
+    createItemContextMenu({ container, dispatch: handleMenuCommand, select: (entry, nodes) => {
+      closeAllMenus();
+      // Context actions target this item, never a stale unrelated batch selection.
+      selectAllItems(false);
+      selectEntry(entry, nodes);
+    } }));
 
   function renderBreadcrumbs() {
     if (!ui.breadcrumbs) return;
@@ -1332,6 +1344,7 @@ export default function initFileExplorer(root, api, host) {
   }
 
   function renderEntries() {
+    void contextMenuReady.then((menu) => menu.close());
     if (!ui.listContainer || !ui.gridContainer) return;
     ui.listContainer.innerHTML = "";
     ui.gridContainer.innerHTML = "";
@@ -1426,6 +1439,12 @@ export default function initFileExplorer(root, api, host) {
       // Create tile for grid view
       const tile = document.createElement("div");
       tile.className = "fx-tile";
+      row.tabIndex = 0;
+      tile.tabIndex = 0;
+      void contextMenuReady.then((menu) => {
+        menu.bind(row, entry, { row, tile });
+        menu.bind(tile, entry, { row, tile });
+      });
       if (isSymlink) tile.classList.add("fx-symlink");
       tile.innerHTML = `
         <div class="fx-icon-lg">${TYPE_ICON[entry.type] || TYPE_ICON.unknown}</div>
@@ -2044,6 +2063,15 @@ export default function initFileExplorer(root, api, host) {
       await (await intentsReady).openFile(filePath);
     } catch (error) {
       toast(host, error?.message || 'Failed to open file');
+    }
+  }
+
+  async function openSelectedAsProject() {
+    if (!state.selected || state.selected.type !== 'directory') return;
+    try {
+      await (await intentsReady).openProject(state.selected.path);
+    } catch (error) {
+      toast(host, error?.message || 'Unable to open project');
     }
   }
 

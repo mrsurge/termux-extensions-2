@@ -35,6 +35,7 @@ def build_inspect_result(
     exclude_signature: str | None = None,
     text_limit: int = _DEFAULT_TEXT_LIMIT,
     json_limit: int = _DEFAULT_JSON_LIMIT,
+    record_limit: int | None = None,
 ) -> FwsLogInspectResult:
     records: list[FwsLogInspectRecord] = []
     stream_meta: list[FwsLogStreamMeta] = []
@@ -64,16 +65,22 @@ def build_inspect_result(
             for item in inspected_items:
                 if not isinstance(item, dict):
                     continue
-                ordinal += 1
-                records.append(
-                    _analyze_inspected_record(
+                record = _analyze_inspected_record(
                         raw_record=item,
                         stream=stream_name,
-                        ordinal=ordinal,
+                        ordinal=ordinal + 1,
                         text_limit=text_limit,
                         json_limit=json_limit,
                     )
-                )
+                if not _record_matches(
+                    record, raw_text=str(item.get("text") or ""),
+                    format_filter=format_filter, signature_filter=signature_filter,
+                    regex=regex, ignore_case=ignore_case,
+                    exclude_query=exclude_query, exclude_signature=exclude_signature,
+                ):
+                    continue
+                ordinal += 1
+                records.append(record)
             continue
 
         source_items = stream_payload.get("matches") if mode == "search" else stream_payload.get("lines")
@@ -115,6 +122,8 @@ def build_inspect_result(
                 record.partial_head = True
             records.append(record)
 
+    if record_limit is not None:
+        records = records[:record_limit]
     summary = _build_summary(
         mode=mode,
         query=query,
@@ -235,10 +244,10 @@ def _analyze_inspected_record(
     formats_detected = _coerce_string_list(raw_record.get("formats_detected"))
     if not formats_detected:
         formats_detected = _collect_formats_detected(fragments)
-    kinds = _coerce_string_list(raw_record.get("kinds"))
+    kinds = _collect_kinds(fragments) if fragments else _coerce_string_list(raw_record.get("kinds"))
     if not kinds:
         kinds = _collect_kinds(fragments)
-    event_signature = str(raw_record.get("event_signature") or "").strip() or _select_event_signature(fragments)
+    event_signature = _select_event_signature(fragments) if fragments else str(raw_record.get("event_signature") or "").strip()
     json_payloads = [fragment.parsed for fragment in fragments if fragment.format in {"json", "jsonrpc"}]
     if not json_payloads:
         json_payloads = _sanitize_list(raw_record.get("json_payloads"), json_limit=json_limit)
@@ -544,9 +553,9 @@ def _looks_like_jsonrpc(value: Any) -> bool:
 def _jsonrpc_kind(value: Any) -> str | None:
     if not isinstance(value, dict):
         return None
-    has_method = "method" in value
-    has_id = "id" in value
-    has_error = "error" in value
+    has_method = value.get("method") is not None
+    has_id = value.get("id") is not None
+    has_error = value.get("error") is not None
     has_result = "result" in value
 
     if has_error:

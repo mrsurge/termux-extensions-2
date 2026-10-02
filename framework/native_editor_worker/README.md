@@ -148,7 +148,36 @@ module count. The overlay links source-owned resource directories into its lib
 layout because compiled modules resolve sibling assets relative to their `.so`.
 These development symlinks are not a portable wheel packaging solution.
 
-#### Cached build and retention workflow
+#### Planned installed artifact placement
+
+The repo-local Cargo executable and `.codex-scratch/mypyc-active` are the current
+experimental launch paths, **not the intended installed runtime locations**.
+The next packaging/launcher slice must publish a matched Code TE2 artifact set:
+
+- Editable/source installs: the existing resolved Code TE2 cache root,
+  `$TE2_CACHE_HOME/code_te2/build` (normally `~/.cache/te2/code_te2/build`).
+  Immutable validated artifact sets contain `bin/code-te2-worker`, the compiled
+  domain libraries/manifest, and provenance. Build intermediates remain separate;
+  the runtime never launches from a mutable Cargo/compiler cache or scratch path.
+- Binary wheels: package-owned `app/release_runtime/code_te2/`, with
+  `bin/code-te2-worker`, domain libraries and required resources/interpreted islands.
+  Resolve paths relative to the installed package, not the checkout. No developer
+  symlinks or absolute build-host paths may be required.
+
+The executable remains independent of `te2-server`. Match CPython minor/ABI
+(including regular versus free-threaded), architecture, libc and linked libpython,
+and verify component checksums/provenance before selecting the artifact set.
+The existing framework wheel's `py3-none` tag cannot simply be reused for a wheel
+containing ABI-specific mypyc extensions. Preserve separate Rust/domain build
+fingerprints so changing Python source does not force a Rust rebuild.
+
+The launcher/bootstrap must resolve the source-cache or verified wheel payload
+once and supply its concrete paths to the app shellspec. Binary-install missing
+or incompatible artifacts fail explicitly, never silently invoke Cargo or fall
+back to interpreted execution. Source build/publish and activation remain explicit
+until that workflow is implemented. This section is a plan, not current behavior.
+
+#### Cached build and retention workflow (current developer behavior)
 
 `build` keeps intermediates under `${TMPDIR:-.codex-scratch}/mypyc-build-cache`.
 `--cache-dir` overrides that root. Separate cache generations are keyed by checkout,

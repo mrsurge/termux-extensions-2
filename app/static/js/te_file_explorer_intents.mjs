@@ -1,4 +1,5 @@
 import { chooseTerminalDestination } from './te_terminal_destination.mjs';
+import { openProjectDirectory } from './te_project_directory_intent.mjs';
 
 export function embeddedContext(search) {
   const params = new URLSearchParams(search);
@@ -18,6 +19,18 @@ export function createFileExplorerIntents({ api, location, dialog, randomId }) {
     return true;
   }
   return {
+    async openProject(directory) {
+      const context = embeddedContext(location.search);
+      if (!context) {
+        location.href = `/app/code_te2?project=${encodeURIComponent(directory)}`;
+        return;
+      }
+      await openProjectDirectory({ directory, dialog, request: async (payload) => {
+        const response = await api.post('intent', { intent: 'project.openDirectory', context, payload });
+        if (response?.ok !== true) throw new Error('Project intent failed');
+        return response;
+      } });
+    },
     async openFile(path) {
       if (!await dispatch('document.open', { path })) {
         location.href = `/app/file_editor?file=${encodeURIComponent(path)}`;

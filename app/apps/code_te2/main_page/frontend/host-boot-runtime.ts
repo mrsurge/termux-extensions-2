@@ -8,6 +8,7 @@ import {
 import type { ExplorerUiInitOptions } from '../../src/explorer/app/bootstrap.ts';
 import type { IoFactory } from '../../src/rpc/transport.ts';
 import type { UiIpcRpcMethod } from '../../src/ui_ipc/rpc_contract.ts';
+import { UI_IPC_RPC_METHODS } from '../../src/ui_ipc/rpc_contract.ts';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -135,6 +136,7 @@ export function createHostBootRuntime(deps: HostBootRuntimeDeps) {
           deps.buildSidebarMentionPayload(payload),
       }),
       connectUIIPC: () => deps.connectUIIPC(),
+      requestProjectDirectory: (params) => deps.requestUiIpc(UI_IPC_RPC_METHODS.hostProjectDirectory, params, 90_000),
       connectSidebarIPC: () => deps.connectSidebarIPC(),
       ensureWorkbenchAdapterReady: () => deps.ensureWorkbenchAdapterReady(),
       requestBackendLanguageBackendSet: (payload) => deps.requestBackendLanguageBackendSet(payload),

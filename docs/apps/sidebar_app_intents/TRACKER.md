@@ -3,7 +3,8 @@
 Plan: [PLAN.md](PLAN.md). Branch: `feature/code-te2-native-services`.
 Status: production pipe foundation, native document-open/app-open adapters and
 Explorer File Explorer integration implemented and unit-validated. Remaining
-project intents and other app UI integration pending. Terminal intent and Explorer
+other app UI integration pending. Guarded project intents and File Explorer item
+context menus are now implemented and user live-accepted. Terminal intent and Explorer
 menu implemented; validation recorded below. Shared framework
 not restarted; compiled runtime group not rebuilt/activated for this slice.
 
@@ -117,9 +118,21 @@ and joint debugging when its scheduled slice is reached.
 
 ## File Explorer
 
-- [ ] Long-press/right-click menu reuses applicable File/Edit actions and guards.
-- [ ] Directory Open as project: existing sidecar/history open or normal project
-  creation; embedded pipe intent versus standalone Code TE2 launch query.
+- [x] Long-press/right-click and keyboard menu reuse enabled File/Edit actions
+  and existing guards in both list/grid; unrelated batch selection is cleared.
+- [x] Directory Open as Project: known sidecar/history restoration or adoption of
+  an existing directory, embedded pipe intent versus one-shot standalone launch
+  query. Backend-owned, expiring single-use consent tickets fence the exact
+  client/presentation, current project generation and directory identity.
+- [x] User live acceptance of project opening and File Explorer context menus.
+- Live preparation failure identified at the frontend HTTP adapter: app-shell
+  `api.post` already returns `body.data`; the project helper must not unwrap it
+  again. Corrected the helper and added a regression using the actual template's
+  `teFetch` function, not an independently shaped response mock. User subsequently
+  confirmed the updated snapshot works live.
+- Project/context slice validation: 54 Python tests plus three subtests, 20 Node
+  tests, TypeScript checking, frontend build, five-module Mypy and mypyc C
+  generation. This is not a full compiled-group rebuild/activation or native OTA.
 - [x] Directory Open in Terminal: embedded shared choice; standalone Terminal
   navigation; always a new session at the selected CWD.
 - [x] Embedded in-project text open reaches initiating client's Code TE2 editor.

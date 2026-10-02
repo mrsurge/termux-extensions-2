@@ -22,6 +22,13 @@ Current tools:
 - `te2_fws_shell_write` (writes text to live shell stdin; explicit EOF remains a low-level option)
 - `te2_fws_log_search`
 - `te2_fws_log_inspect` (supports opt-in `include_io_metadata`, `include_stdin`, `include_timestamps`, and `include_output_metadata`)
+
+Inspection queries and tails use FWS's codec-aware inspector, including framed
+MessagePack streams declared by `log_codecs`. Queries filter the bounded recent
+event window selected by `lines`; `limit` caps returned matches. This is not an
+unbounded historical search. Raw tail/search tools remain separate. The adapter
+preserves byte offsets and normalizes nullable pipe-envelope fields before
+JSON-RPC classification and signature filtering. A null `error` is not a failure.
 - `te2_apps_templates`
 - `te2_scaffold_proxy_wrapper`
 - `te2_validate_proxy_wrapper`

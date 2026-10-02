@@ -46,7 +46,10 @@ async def switch_project_connection(
     switch_adapter_workspace: bool,
     open_state_reason: str = "project_open",
     open_state_source: str = "explorer_project_open",
+    before_switch: Callable[[], None] | None = None,
 ) -> ExplorerProjectSwitchResult:
+    if before_switch is not None:
+        before_switch()
     sync_explorer_project, refresh_explorer_project = _get_explorer_project_hooks()
 
     normalized_display_path = display_path or os.path.abspath(
@@ -63,6 +66,8 @@ async def switch_project_connection(
     except Exception:
         pass
 
+    if before_switch is not None:
+        before_switch()
     new_root = set_project_root(project_path)
     project_generation = next_project_generation(new_root)
     switch_id = _next_project_switch_id()
@@ -84,7 +89,7 @@ async def switch_project_connection(
     await asyncio.sleep(0)
     adapter_status = "unchanged"
 
-    del initialize_watcher
+    _ = initialize_watcher
 
     was_new_sidecar = await reset_project_session(normalized_display_path)
     _require_current_switch(new_root, project_generation)

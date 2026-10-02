@@ -20,6 +20,7 @@ UI_IPC_RPC_METHOD_HOST_PROJECTS_LIST: Final = "ui.host.projects.list"
 UI_IPC_RPC_METHOD_HOST_PROJECTS_RESET: Final = "ui.host.projects.reset"
 UI_IPC_RPC_METHOD_HOST_PROJECTS_REMOVE: Final = "ui.host.projects.remove"
 UI_IPC_RPC_METHOD_HOST_PROJECTS_OPEN: Final = "ui.host.projects.open"
+UI_IPC_RPC_METHOD_HOST_PROJECT_DIRECTORY: Final = "ui.host.project.directory"
 UI_IPC_RPC_METHOD_HOST_SESSION_UPDATE: Final = "ui.host.session.update"
 UI_IPC_RPC_METHOD_HOST_DIAGNOSTICS_EXPORT: Final = "ui.host.diagnostics.export"
 UI_IPC_RPC_METHOD_HOST_FILE_OPEN: Final = "ui.host.file.open"
@@ -71,6 +72,7 @@ UiIpcRpcMethod = Literal[
     "ui.host.projects.reset",
     "ui.host.projects.remove",
     "ui.host.projects.open",
+    "ui.host.project.directory",
     "ui.host.diagnostics.export",
     "ui.host.session.update",
     "ui.host.editorState.get",
@@ -186,6 +188,7 @@ ALLOWED_REQUEST_METHODS: Final[set[str]] = {
     UI_IPC_RPC_METHOD_HOST_PROJECTS_RESET,
     UI_IPC_RPC_METHOD_HOST_PROJECTS_REMOVE,
     UI_IPC_RPC_METHOD_HOST_PROJECTS_OPEN,
+    UI_IPC_RPC_METHOD_HOST_PROJECT_DIRECTORY,
     UI_IPC_RPC_METHOD_HOST_COMPARISON,
     UI_IPC_RPC_METHOD_HOST_EDITOR_STATE_GET,
     UI_IPC_RPC_METHOD_HOST_SESSION_UPDATE,

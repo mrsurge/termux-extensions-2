@@ -106,7 +106,7 @@ async def dispatch_app_intent(request: PipeEnvelope) -> object:
     shell_id = source.get("shellId")
     if not isinstance(app_id, str) or not isinstance(shell_id, str) or not shell_id:
         raise ValueError("missing framework-derived source")
-    if params["intent"] not in {"document.open", "sidebar.openApp", "terminal.createSession"}:
+    if params["intent"] not in {"document.open", "sidebar.openApp", "terminal.createSession", "project.openDirectory"}:
         raise ValueError("app intent is not implemented")
     if app_id not in {"file_explorer", "file_editor", "terminal"}:
         raise ValueError("embedded app caller is not allowed")
@@ -116,6 +116,17 @@ async def dispatch_app_intent(request: PipeEnvelope) -> object:
     if set(context) != {"clientId", "hostId", "presentationId"}:
         raise ValueError("app intent requires exact presentation context")
     payload = dict(_object(params["payload"], "payload"))
+    if params["intent"] == "project.openDirectory":
+        if app_id not in {"file_explorer", "file_editor"}:
+            raise ValueError("project open caller is not allowed")
+        from .ui_ipc.sidebar_ws import resolve_sidebar_request_client
+        from .host.project_intent_backend import handle_project_directory_intent
+        client_id, _ = resolve_sidebar_request_client(
+            {"target": context}, requester_app_id=app_id, require_presentation=True,
+        )
+        return await handle_project_directory_intent(
+            payload, client_id=client_id, source_context=context, requester_app_id=app_id,
+        )
     if params["intent"] == "terminal.createSession":
         if set(payload) != {"directory", "destination"} or not all(isinstance(value, str) for value in payload.values()):
             raise ValueError("invalid terminal intent payload")

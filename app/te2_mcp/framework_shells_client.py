@@ -12,11 +12,9 @@ import urllib.request
 
 from framework_shells import get_manager
 from framework_shells.auth import derive_api_token, get_secret
-
-try:
-    from framework_shells.log_inspection import inspect_log_file
-except Exception:  # pragma: no cover - compatibility fallback for older framework_shells builds.
-    inspect_log_file = None
+from framework_shells.log_codecs import stream_codec
+from framework_shells.log_inspection import inspect_log_file
+from framework_shells.log_projection import Codec
 
 from .fws_log_analysis import build_inspect_result
 
@@ -197,37 +195,24 @@ class FrameworkShellsClient:
     ) -> dict[str, Any]:
         mgr = await get_manager()
         normalized_shell_id = str(shell_id or "").strip()
-        if query:
-            data = await mgr.search_logs(
-                normalized_shell_id,
-                stream=stream,
-                query=str(query),
-                limit=limit,
-                regex=regex,
-                ignore_case=ignore_case,
-            )
-            mode = "search"
-        else:
-            if inspect_log_file is None:
-                data = await mgr.get_log_tail(normalized_shell_id, stream=stream, lines=lines)
-            else:
-                data = await self._inspect_tail_logs(
-                    mgr,
-                    normalized_shell_id,
-                    stream=stream,
-                    lines=lines,
-                    regex=regex,
-                    ignore_case=ignore_case,
-                    format=format,
-                    signature=signature,
-                    exclude_query=exclude_query,
-                    exclude_signature=exclude_signature,
-                    include_io_metadata=include_io_metadata,
-                    include_stdin=include_stdin,
-                    include_timestamps=include_timestamps,
-                    include_output_metadata=include_output_metadata,
-                )
-            mode = "tail"
+        data = await self._inspect_tail_logs(
+            mgr,
+            normalized_shell_id,
+            stream=stream,
+            lines=lines,
+            query=query,
+            regex=regex,
+            ignore_case=ignore_case,
+            format=format,
+            signature=signature,
+            exclude_query=exclude_query,
+            exclude_signature=exclude_signature,
+            include_io_metadata=include_io_metadata,
+            include_stdin=include_stdin,
+            include_timestamps=include_timestamps,
+            include_output_metadata=include_output_metadata,
+        )
+        mode = "search" if query else "tail"
         result = build_inspect_result(
             shell_id=normalized_shell_id,
             status=str(data.get("status") or ""),
@@ -240,6 +225,7 @@ class FrameworkShellsClient:
             ignore_case=ignore_case,
             exclude_query=str(exclude_query or "").strip() or None,
             exclude_signature=str(exclude_signature or "").strip() or None,
+            record_limit=max(1, min(int(limit), 1000)) if query else None,
         )
         return {"ok": True, "data": result.model_dump(mode="json"), "source": "framework_shells.direct"}
 
@@ -250,6 +236,7 @@ class FrameworkShellsClient:
         *,
         stream: str,
         lines: int,
+        query: str | None,
         regex: bool,
         ignore_case: bool,
         format: str | None,
@@ -266,13 +253,13 @@ class FrameworkShellsClient:
                 shell_id,
                 stream=stream,
                 lines=lines,
-                query=None,
+                query=query,
                 exclude_query=exclude_query,
                 regex=regex,
                 ignore_case=ignore_case,
-                format=format,
-                signature=signature,
-                exclude_signature=exclude_signature,
+                format=None,
+                signature=None,
+                exclude_signature=None,
                 include_io_metadata=include_io_metadata,
                 include_stdin=include_stdin,
                 include_timestamps=include_timestamps,
@@ -280,8 +267,6 @@ class FrameworkShellsClient:
             )
         except TypeError:
             pass
-        if inspect_log_file is None:
-            raise RuntimeError("framework_shells.log_inspection.inspect_log_file is unavailable")
         shell = await mgr.get_shell(shell_id)
         if not shell:
             raise KeyError(f"Shell not found: {shell_id}")
@@ -302,6 +287,8 @@ class FrameworkShellsClient:
                 mgr,
                 path=Path(str(self._shell_attr(shell, "stdout_log", "") or "")),
                 stream="stdout",
+                codec=stream_codec(self._shell_attr(shell, "log_codecs"), "stdout"),
+                query=query,
                 lines=lines,
                 regex=regex,
                 ignore_case=ignore_case,
@@ -316,6 +303,8 @@ class FrameworkShellsClient:
                 mgr,
                 path=Path(str(self._shell_attr(shell, "stderr_log", "") or "")),
                 stream="stderr",
+                codec=stream_codec(self._shell_attr(shell, "log_codecs"), "stderr"),
+                query=query,
                 lines=lines,
                 regex=regex,
                 ignore_case=ignore_case,
@@ -333,6 +322,8 @@ class FrameworkShellsClient:
         *,
         path: Path,
         stream: str,
+        codec: Codec,
+        query: str | None,
         lines: int,
         regex: bool,
         ignore_case: bool,
@@ -343,16 +334,17 @@ class FrameworkShellsClient:
     ) -> dict[str, Any]:
         inspection = await inspect_log_file(
             path,
+            codec=codec,
             stream=stream,
             lines=max(0, int(lines)),
             max_bytes=int(getattr(mgr, "LOG_TAIL_BYTES", 4096)),
-            query=None,
+            query=query,
             exclude_query=str(exclude_query or "").strip() or None,
             regex=regex,
             ignore_case=ignore_case,
-            format_filter=str(format or "").strip().lower() or None,
-            signature_filter=str(signature or "").strip() or None,
-            exclude_signature=str(exclude_signature or "").strip() or None,
+            format_filter=None,
+            signature_filter=None,
+            exclude_signature=None,
         )
         return await mgr._log_stream_payload(path, extra=inspection)
 

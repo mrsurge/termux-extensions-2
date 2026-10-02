@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 import { createFileExplorerIntents, embeddedContext } from './te_file_explorer_intents.mjs';
 
 function fixture(search = '') {
@@ -49,4 +50,54 @@ test('standalone terminal launch carries CWD and fresh-session seed', async () =
   assert.equal(url.searchParams.get('cwd'), '/project/space name');
   assert.equal(url.searchParams.get('new_session'), 'a'.repeat(32));
   assert.equal(calls.length, 0);
+});
+
+test('standalone project action navigates with one directory intent', async () => {
+  const { intents, calls, location } = fixture();
+  await intents.openProject('/project/space name');
+  assert.equal(new URL(location.href, 'http://localhost').searchParams.get('project'), '/project/space name');
+  assert.equal(calls.length, 0);
+});
+
+test('embedded project prepare and consent stay on own backend lane', async () => {
+  for (const accepted of [true, false]) {
+    const calls = [];
+    const location = { search: contextSearch, href: '/app/file_explorer' };
+    const intents = createFileExplorerIntents({ location, randomId: () => 'id',
+      dialog: { confirm: async () => accepted }, api: { post: async (route, body) => {
+        calls.push([route, body]);
+        // app_shell teFetch already unwraps the HTTP body's data field.
+        return body.payload.action === 'prepare'
+          ? { ok: true, ticket: 'bound', path: '/chosen', requiresConfirmation: true }
+          : { ok: true };
+      } } });
+    await intents.openProject('/chosen');
+    assert.equal(calls[0][1].intent, 'project.openDirectory');
+    assert.deepEqual(calls[0][1].payload, { action: 'prepare', directory: '/chosen' });
+    assert.deepEqual(calls[1][1].payload, { action: accepted ? 'commit' : 'cancel', ticket: 'bound' });
+    assert.equal(location.href, '/app/file_explorer');
+  }
+});
+
+test('project intent works through the actual app-shell HTTP data unwrap', async () => {
+  const shell = readFileSync(new URL('../../templates/app_shell.html', import.meta.url), 'utf8');
+  const start = shell.indexOf('async function teFetch(');
+  const end = shell.indexOf('function appRequiresBackend(', start);
+  assert.ok(start >= 0 && end > start);
+  const requests = [];
+  const teFetch = new Function('fetch', `${shell.slice(start, end)}; return teFetch;`)(async (url, options) => {
+    const body = JSON.parse(options.body);
+    requests.push(body);
+    return { ok: true, json: async () => ({ ok: true, data: body.payload.action === 'prepare'
+      ? { ok: true, ticket: 'real-ticket', path: '/chosen', requiresConfirmation: true }
+      : { ok: true } }) };
+  });
+  const intents = createFileExplorerIntents({
+    location: { search: contextSearch, href: '/app/file_explorer' },
+    dialog: { confirm: async () => true }, randomId: () => 'id',
+    api: { post: (endpoint, body) => teFetch(`/api/app/file_explorer/${endpoint}`, { body: JSON.stringify(body) }) },
+  });
+  await intents.openProject('/chosen');
+  assert.deepEqual(requests.map((request) => request.payload.action), ['prepare', 'commit']);
+  assert.equal(requests[1].payload.ticket, 'real-ticket');
 });

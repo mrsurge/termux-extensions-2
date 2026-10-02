@@ -412,8 +412,44 @@ sidecar; `create_project_from_path(adopt_existing=True)` can adopt an existing
 directory and open it through the same project-switch service. For a selected
 existing folder with no project sidecar, **adopt it**, not create a nested folder
 or overwrite its contents. Preserve history/sidecar lookup distinctions and
-normal project-switch publication. Draft confirmation and launch consumption
-still need concrete sequencing in the implementation contract.
+normal project-switch publication. The Project Intent Slice below defines the
+implemented confirmation and one-shot launch sequencing.
+
+### Project Intent Slice
+
+File Explorer's directory action and item context menu reuse its existing
+File/Edit command dispatcher and guards. Right-click, 600ms touch long-press
+(cancelled after 8px movement), and keyboard context-menu keys work in list/grid.
+Opening a context menu clears unrelated checkbox selection, so destructive
+actions cannot silently apply to a previously selected batch. Disabled commands
+are omitted. Existing rename/delete/transfer dialogs remain authoritative.
+
+Embedded project opening goes through File Explorer's own `/intent` backend and
+`project.openDirectory` on the production framework pipe. Standalone navigation
+supplies `project=<directory>` to Code TE2; boot consumes/removes that query before
+requesting the authoritative boot snapshot or restoring/mounting models, connects
+the host's own lane, and uses `ui.host.project.directory`. Cancellation/failure
+continues normal boot of the current project; no reconnect or refresh replay.
+
+Both use prepare/commit/cancel with a backend-owned 120-second ticket: canonical
+directory plus device/inode, client, optional exact Sidebar presentation/app,
+current project root and generation. One pending ticket per client, 64 globally;
+lazy expiry, no polling. Prepare has no project effects. Existing teUI confirmation
+warns drafts **could** be lost if files change externally, not certain loss.
+Cancel consumes the ticket without switching. Acceptance consumes before any
+await; failure is never automatically retried. Embedded proof uses the live
+Sidebar presentation; standalone proof uses the authenticated host UI IPC session.
+The shared project switch revalidates before cleanup and immediately before root
+mutation after asynchronous watcher cleanup. A known project restores its normal
+sidecar; an unknown existing directory is adopted by that same service, with no
+nested directory creation, draft reset or project-file overwrite.
+
+Validation includes project ticket expiry/replay/cancellation, changed generation,
+directory replacement, disconnected client and presentation mismatch, cleanup
+race guard, shared project projection regressions, own-lane frontend routing,
+one-shot query handling, context-menu command reuse, TypeScript/frontend build
+and Mypy/mypyc code generation. No live acceptance is claimed; no runtime restart,
+compiled-group activation, native OTA, Android edits, commit or push in this slice.
 
 ### Sidebar Tab Identity
 

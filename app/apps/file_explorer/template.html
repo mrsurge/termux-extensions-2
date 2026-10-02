@@ -155,6 +155,14 @@
 .fx-menu-dropdown button:hover {
   background: rgba(59, 130, 246, 0.2);
 }
+.fx-context-menu {
+  display: block;
+  position: fixed;
+  z-index: 10000;
+  max-height: calc(100vh - 8px);
+  overflow-y: auto;
+  width: max-content;
+}
 .fx-menu-dropdown button.fx-menu-item-checked::before {
   content: '✓';
   color: var(--primary, #3b82f6);
@@ -672,6 +680,7 @@
             <button type="button" data-command="file:open">Open</button>
             <button type="button" data-command="file:open-editor">Open in Editor</button>
             <button type="button" data-command="file:open-terminal">Open in Terminal</button>
+            <button type="button" data-command="file:open-project">Open as Project</button>
             <button type="button" data-command="file:download">Download</button>
             <button type="button" data-command="file:extract">Extract</button>
           </div>

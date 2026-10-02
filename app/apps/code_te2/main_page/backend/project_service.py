@@ -164,6 +164,7 @@ async def open_project(
     require_known_sidecar: bool,
     reason: str,
     file_target: str | None = None,
+    before_switch: Callable[[], None] | None = None,
 ) -> JsonObject:
     display_path = normalize_history_project_path(path)
     if not display_path:
@@ -202,6 +203,7 @@ async def open_project(
         switch_adapter_workspace=True,
         open_state_reason=replay_reason,
         open_state_source=reason,
+        before_switch=before_switch,
     )
     project_root = switch_result.project_root
     state = deps.build_state_payload()
