@@ -5,6 +5,15 @@ Working branch: `feature/desktop-deb-packaging`; no new branch needed for planni
 
 ## Planning
 
+### Sidebar app intents and unified app behavior
+
+Full intended direction and phased contract investigation are recorded in
+[Sidebar App Intents plan](../sidebar_app_intents/PLAN.md) and
+[tracker](../sidebar_app_intents/TRACKER.md). This includes Explorer/File Explorer/
+Terminal routing, all CM6 settings persisted in localStorage, CM6 navigation
+guard/statefulness, source-tree sticky reveal, and dock overflow. Documentation
+baseline only: implementation requires the cohesive contract/plan approval gate.
+
 ### Editor/framework UI corrections before release
 
 - [x] Add native sticky result scopes: Contents files with 3+ displayed hits;
