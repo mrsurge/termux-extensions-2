@@ -30,6 +30,7 @@ export type ExplorerTreeMenuActionType =
   | 'createFile'
   | 'createDir'
   | 'openExternal'
+  | 'openTerminal'
   | 'openSecondWindow'
   | 'copyName'
   | 'copyPath'

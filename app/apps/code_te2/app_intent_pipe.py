@@ -106,14 +106,45 @@ async def dispatch_app_intent(request: PipeEnvelope) -> object:
     shell_id = source.get("shellId")
     if not isinstance(app_id, str) or not isinstance(shell_id, str) or not shell_id:
         raise ValueError("missing framework-derived source")
-    if params["intent"] != "document.open":
+    if params["intent"] not in {"document.open", "sidebar.openApp", "terminal.createSession"}:
         raise ValueError("app intent is not implemented")
-    if app_id not in {"file_explorer", "file_editor"}:
+    if app_id not in {"file_explorer", "file_editor", "terminal"}:
+        raise ValueError("embedded app caller is not allowed")
+    if params["intent"] == "document.open" and app_id not in {"file_explorer", "file_editor"}:
         raise ValueError("document open caller is not allowed")
     context = _object(params["context"], "context")
     if set(context) != {"clientId", "hostId", "presentationId"}:
-        raise ValueError("document open requires exact presentation context")
+        raise ValueError("app intent requires exact presentation context")
     payload = dict(_object(params["payload"], "payload"))
+    if params["intent"] == "terminal.createSession":
+        if set(payload) != {"directory", "destination"} or not all(isinstance(value, str) for value in payload.values()):
+            raise ValueError("invalid terminal intent payload")
+        from .ui_ipc.sidebar_ws import resolve_sidebar_request_client
+        from .host.terminal_intent_backend import open_directory_terminal
+        client_id, _ = resolve_sidebar_request_client(
+            {"target": context}, requester_app_id=app_id, require_presentation=True,
+        )
+        return await open_directory_terminal(
+            directory=cast(str, payload["directory"]), destination=cast(str, payload["destination"]),
+            client_id=client_id, operation_id=request.op_id or "",
+            source_context=context, requester_app_id=app_id,
+        )
+    if params["intent"] == "sidebar.openApp":
+        if set(payload) != {"appId", "params"}:
+            raise ValueError("invalid app open payload")
+        target_app = payload["appId"]
+        if not isinstance(target_app, str) or not target_app:
+            raise ValueError("appId is required")
+        from .ui_ipc.sidebar_ws import resolve_sidebar_request_client
+        from .host.sidebar_app_backend import open_sidebar_app
+        client_id, _ = resolve_sidebar_request_client(
+            {"target": context}, requester_app_id=app_id, require_presentation=True,
+        )
+        return await open_sidebar_app(
+            app_id=target_app, params=_object(payload["params"], "launch params"),
+            client_id=client_id, operation_id=request.op_id or "",
+            source_context=context, requester_app_id=app_id,
+        )
     if "target" in payload:
         raise ValueError("document target belongs in context")
     payload["target"] = dict(context)

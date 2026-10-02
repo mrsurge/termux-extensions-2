@@ -701,6 +701,14 @@ class ExplorerDispatcher:
 
         await handle_editor_open(self._build_file_tree_context(), params, msg_id)
 
+    async def handle_explorer_openInFileExplorer(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.handlers.app_intents import handle_open_in_file_explorer
+        await handle_open_in_file_explorer(self._build_file_tree_context(), payload, msg_id)
+
+    async def handle_explorer_openInTerminal(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.handlers.app_intents import handle_open_in_terminal
+        await handle_open_in_terminal(self._build_file_tree_context(), payload, msg_id)
+
     async def handle_explorer_editor_openSecondWindow(
         self,
         payload: JsonObject,

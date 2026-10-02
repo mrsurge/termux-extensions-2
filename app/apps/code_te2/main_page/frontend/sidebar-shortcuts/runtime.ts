@@ -1542,7 +1542,7 @@ export function initSidebarShortcuts(
     includeWindowId: boolean,
   ): string {
     const surface = _extensionWebviewSurface(sc);
-    if (_normStr(surface.dto) !== "ExtensionWebviewSurface") return rawUrl;
+    if (_normStr(surface.dto) !== "ExtensionWebviewSurface" && !_isAppDockEntry(sc)) return rawUrl;
     const clientInstanceId = _normStr(getClientId());
     const normalizedPresentationId = _normStr(presentationId);
     if (!clientInstanceId || !normalizedPresentationId) {

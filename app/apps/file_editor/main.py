@@ -5,10 +5,39 @@ from pathlib import Path
 from fastapi import APIRouter, Query, Body, HTTPException
 from typing import Optional, Dict, Any
 from urllib import request as urllib_request
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 file_editor_bp = APIRouter()
 APP_ID = str(os.environ.get("TE_APP_ID") or "file_editor").strip() or "file_editor"
+
+
+@file_editor_bp.post('/sidebar/window/state')
+async def publish_sidebar_file_state(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    from app.libs.sidebar_rpc import call_sidebar_rpc
+    host_id = str(payload.get('host_id') or '').strip()
+    token_id = str(payload.get('token_id') or '').strip()
+    worker_id = str(payload.get('console_worker_id') or '').strip()
+    if not host_id or not token_id:
+        raise HTTPException(status_code=400, detail='Sidebar slot identity is required')
+    raw_path = payload.get('file')
+    if not isinstance(raw_path, str):
+        raise HTTPException(status_code=400, detail='file is required')
+    resolved, error = _expand_and_validate_path(raw_path)
+    if error or resolved is None or not Path(resolved).is_file():
+        raise HTTPException(status_code=400, detail=error or 'file must exist')
+    query = {'embed': '1', 'te2_host_id': host_id, 'te2_token_id': token_id,
+             'file': resolved}
+    if worker_id:
+        query['te2_console_worker_id'] = worker_id
+    result = await call_sidebar_rpc(APP_ID, 'sidebar.window.state.update', {
+        'lane': {'app_id': APP_ID, 'base_url': '/app/file_editor'}, 'app_id': APP_ID,
+        'base_url': '/app/file_editor', 'host_id': host_id, 'token_id': token_id,
+        'console_worker_id': worker_id, 'state_kind': 'file',
+        'query_state': {'file': resolved}, 'url': '/app/file_editor?' + urlencode(query),
+        'label': Path(resolved).name, 'load': 'eager', 'activate': False,
+        'source': 'file_editor_backend',
+    })
+    return {'ok': True, 'data': result}
 
 
 def _framework_url() -> str:
@@ -50,7 +79,7 @@ def _expand_and_validate_path(path: str) -> tuple[Optional[str], Optional[str]]:
     except Exception:
         return None, 'Invalid path'
     
-    if not str(expanded).startswith(str(base_home)):
+    if not expanded.is_relative_to(base_home.resolve()):
         return None, 'Access denied'
     
     return str(expanded), None

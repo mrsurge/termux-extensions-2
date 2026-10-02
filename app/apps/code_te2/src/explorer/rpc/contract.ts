@@ -18,6 +18,8 @@ export const EXPLORER_RPC_METHODS = {
   entriesMove: "explorer.entries.move",
   editorOpen: "explorer.editor.open",
   editorOpenSecondWindow: "explorer.editor.openSecondWindow",
+  directoryOpenInFileExplorer: "explorer.directory.openInFileExplorer",
+  directoryOpenInTerminal: "explorer.directory.openInTerminal",
   entryCopy: "explorer.entry.copy",
   entryCopyFrom: "explorer.entry.copyFrom",
   entryDelete: "explorer.entry.delete",

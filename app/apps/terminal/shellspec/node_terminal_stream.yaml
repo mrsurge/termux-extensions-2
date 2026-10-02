@@ -11,6 +11,7 @@ shells:
       - ${ctx:BROKER_ENTRY}
     env:
       TE_APP_ID: ${ctx:APP_ID}
+      TE2_TERMINAL_LAUNCH_ID: ${ctx:LAUNCH_ID}
       PATH: ${ctx:NODE_PATH}
       TERMINAL_STREAM_CWD: ${ctx:CWD}
       TERMINAL_STREAM_COLS: ${ctx:COLS}

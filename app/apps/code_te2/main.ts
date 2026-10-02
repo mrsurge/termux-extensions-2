@@ -1551,8 +1551,11 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
       });
     },
   });
-  window.addEventListener('code-te2:terminal-open', () => {
-    void Promise.resolve(terminal.open()).catch((error: unknown) => {
+  window.addEventListener('code-te2:terminal-open', (event) => {
+    const detail: unknown = (event as CustomEvent<unknown>).detail;
+    const requestedShell = detail && typeof detail === 'object' && 'shell_id' in detail
+      && typeof detail.shell_id === 'string' ? detail.shell_id : undefined;
+    void Promise.resolve(terminal.open(requestedShell)).catch((error: unknown) => {
       console.warn('[Terminal] failed to open from backend notification', error);
     });
   });

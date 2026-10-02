@@ -35,7 +35,7 @@ interface TerminalDrawerOptions {
 }
 
 interface TerminalDrawerController {
-  open: () => Promise<void>;
+  open: (requestedShellId?: string) => Promise<void>;
   openDrawer: () => void;
   activateTerminal: () => Promise<void>;
   close: () => void;
@@ -1295,7 +1295,12 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
   }
 
   /** Open the drawer with the terminal explicitly selected. */
-  async function open(): Promise<void> {
+  async function open(requestedShellId?: string): Promise<void> {
+    if (requestedShellId) {
+      desiredShellId = requestedShellId;
+      shellId = requestedShellId;
+      shellHistoryPrimed = false;
+    }
     openDrawer();
     await activateTerminal();
   }

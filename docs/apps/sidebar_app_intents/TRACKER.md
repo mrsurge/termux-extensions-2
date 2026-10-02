@@ -1,8 +1,10 @@
 # Sidebar App Intents Tracker
 
 Plan: [PLAN.md](PLAN.md). Branch: `feature/code-te2-native-services`.
-Status: production pipe foundation and native document-open adapter implemented
-and unit-validated; remaining intents and UI integration pending. Shared framework
+Status: production pipe foundation, native document-open/app-open adapters and
+Explorer File Explorer integration implemented and unit-validated. Remaining
+project intents and other app UI integration pending. Terminal intent and Explorer
+menu implemented; validation recorded below. Shared framework
 not restarted; compiled runtime group not rebuilt/activated for this slice.
 
 Validation cadence: per user direction, use synthetic and regression tests during
@@ -33,7 +35,17 @@ and joint debugging when its scheduled slice is reached.
   context requires current client/slot/presentation and app ownership.
 - [x] 24 targeted Python tests pass; five changed modules pass Mypy and mypyc
   code generation. This is not a compiled-group rebuild or live acceptance.
-- [ ] Project/app-tab/terminal intent services and remaining routing policies.
+- [ ] Project intent services and remaining out-of-project routing policies.
+- [x] Terminal directory intent service: exact-client drawer activation and
+  Sidebar fresh-session seeds with retained FWS claim matching.
+- [x] Shared app-tab launch service uses framework pipe `app.open`, validates
+  live initiating client before and after launch, and preserves project-generation
+  and source-presentation fences. Membership is shared; activation is client-scoped.
+- [x] Pipe `sidebar.openApp` uses the same service with validated embedded context.
+- [x] Explorer's Open in File Explorer uses its own RPC/backend and creates a
+  distinct stateful Sidebar tab; no frontend framework fetch/page navigation.
+- [x] App-tab slice: 51 Python and 16 Node regression tests, TypeScript typecheck,
+  frontend build and six-module Mypy/mypyc validation. No live test or OTA.
 - [ ] User-facing workflows and live acceptance (not supplied by the foundation).
 
 ## Direction And Plan Formation
@@ -73,9 +85,30 @@ and joint debugging when its scheduled slice is reached.
 
 ## Code TE2 Explorer
 
-- [ ] Open directory in File Explorer as a new Sidebar tab; never leave Code TE2.
-- [ ] Place Open in Terminal immediately below Open in File Explorer.
-- [ ] Reuse shared Sidebar/drawer choice dialog; every invocation creates a new session.
+- [x] Open directory in File Explorer as a new Sidebar tab; never leave Code TE2
+  (synthetic acceptance; live acceptance deferred until the working model milestone).
+- [x] Place Open in Terminal immediately below Open in File Explorer.
+- [x] User live accepted File Explorer and Terminal menu launch behavior.
+- [x] Successful app-intent activation explicitly requests sidebar reveal on
+  desktop/mobile and closes the Explorer drawer only in mobile layout. Existing
+  restore activation does not reveal; cancelled/failed launches publish no reveal.
+  Terminal bottom-drawer behavior remains unchanged. 48 Python and 10 Node
+  regression tests pass; updated compiled group and client OTA are needed before
+  live acceptance of this additional layout behavior.
+- [x] User rebuilt the compiled group and live accepted the sidebar reveal /
+  mobile Explorer-close behavior. File Explorer and Terminal menu workflows
+  now have live acceptance; remaining workflows retain their separate gates.
+- [x] Shared Sidebar/drawer choice dialog and fresh-session directory intent;
+  Cancel has no effects. Remembered choice remains pending.
+- [x] Drawer exact-client activation avoids global rebind/shared selection changes.
+- [x] Terminal consumes launch CWD/new-session seed on its own lifecycle lane;
+  FWS metadata claims prevent duplicates while their shell records remain retained.
+- [x] 92 targeted Python tests and 41 Node tests pass; both app frontend
+  typechecks and bundle builds pass. Five Code TE2 Python modules pass Mypy.
+  The same five modules pass isolated mypyc code generation; this does not
+  rebuild or activate the installed compiled runtime group.
+  Standalone Terminal's broader Mypy check still reports its unchanged existing
+  `connections.pop(conn_id, None)` typing error; not silently waived as passing.
 - [ ] Investigate and fix mobile-only sticky scopes missing after the Explorer
   drawer stays closed for some time and reopens without user motion; keep
   accepted scrolling behavior unchanged. Desktop/initial reveal are regression checks.
@@ -87,14 +120,30 @@ and joint debugging when its scheduled slice is reached.
 - [ ] Long-press/right-click menu reuses applicable File/Edit actions and guards.
 - [ ] Directory Open as project: existing sidecar/history open or normal project
   creation; embedded pipe intent versus standalone Code TE2 launch query.
-- [ ] Directory Open in Terminal: embedded shared choice; standalone Terminal
+- [x] Directory Open in Terminal: embedded shared choice; standalone Terminal
   navigation; always a new session at the selected CWD.
-- [ ] Embedded in-project text open reaches initiating client's Code TE2 editor.
-- [ ] Embedded outside-project text open creates a new CM6 Sidebar tab.
-- [ ] Standalone text open retains existing CM6 behavior.
+- [x] Embedded in-project text open reaches initiating client's Code TE2 editor.
+- [x] Embedded outside-project text open creates a new CM6 Sidebar tab.
+- [x] Standalone text open retains existing CM6 behavior.
 - [ ] Generalize outside-project routing at the shared Code TE2 open boundary.
 - [ ] Diagnose Show hidden persistence through the existing saved-state mechanism.
 - [ ] Verify generalized app launch/query intents across all applicable apps.
+- [x] Ordinary app presentations carry exact client/presentation context, just
+  like extension views. Incomplete embedded context rejects rather than navigating.
+- [x] File Explorer routes existing text-file opens through its own backend and
+  the framework pipe; shared Terminal destination dialog has no Cancel effects.
+- [x] Canonical resolved paths distinguish project files from outside files,
+  including symlink escapes and similarly prefixed sibling directories.
+- [x] Routing slice: 101 Python regression tests pass; shared frontend helper
+  tests, Code TE2 typecheck/build and targeted Python Mypy checks pass. Global
+  static modules are included by the existing native asset tree and package graft.
+  No live acceptance, OTA, Android edits, runtime restart or compiled-group activation.
+- [x] Subsequent live attempt exposed an old compiled `sidebar_ws` without the
+  new routing exports. Rebuilt `mypyc-sidebar-intents-20261002`: all 135 compiled
+  imports and both routing exports verified; 21 isolated native-worker/reader
+  tests passed. Switched `mypyc-active` to the new group, preserving
+  `mypyc-domain-gather-fix-1`. No shared runtime restart: existing workers retain
+  old imports until restarted. Live routing acceptance remains pending.
 
 ## CM6 File Editor
 
@@ -102,9 +151,12 @@ and joint debugging when its scheduled slice is reached.
   inventory table proves complete coverage, with safe defaults/error handling.
 - [ ] Discard resumes the originally requested navigation exactly once; Cancel
   and failed Save remain guarded, across file/app navigation and supported close.
-- [ ] Add Sidebar statefulness/query launch and existing backend state publication;
+- [x] Add Sidebar statefulness/query launch and existing backend state publication;
   multiple tabs/clients restore their own file identity without cross-client leakage.
 - [ ] Keep preferences distinct from unsaved document data and routing credentials.
+- Embedded CM6 query state owns its file; app-global last-file/draft restoration
+  is suppressed for that tab, without deleting the existing shared saved state.
+  Complete settings persistence and navigation guard repairs remain pending.
 
 ## Dock
 

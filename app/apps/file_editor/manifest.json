@@ -13,5 +13,18 @@
     "frontend_script": "main.js"
   },
   "readiness_support": true,
-  "fullscreen": true
+  "fullscreen": true,
+  "sidebar_state": {
+    "enabled": true,
+    "kind": "file",
+    "launcher": true,
+    "base_url": "/app/file_editor",
+    "token_source": "console_worker_id",
+    "console_worker_prefix": "file_editor",
+    "host_id_param": "te2_host_id",
+    "token_id_param": "te2_token_id",
+    "console_worker_id_param": "te2_console_worker_id",
+    "url_state": {"param": "file", "opaque": true},
+    "load": {"default": "eager"}
+  }
 }

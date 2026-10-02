@@ -898,12 +898,19 @@ async def _terminal_shell_list_data() -> JsonObject:
     return await _build_terminal_shell_list(project_path)
 
 
-async def _create_terminal_shell_data() -> JsonObject:
+async def _create_terminal_shell_data(*, cwd: str | None = None, client_id: str | None = None) -> JsonObject:
     project_path = _active_terminal_project()
+    async with _get_shell_create_lock(project_path):
+        return await _create_terminal_shell_for_project(project_path, cwd=cwd, client_id=client_id)
+
+
+async def _create_terminal_shell_for_project(project_path: str, *, cwd: str | None, client_id: str | None) -> JsonObject:
     sidecar = ProjectSidecar.load_or_create(project_path)
     mgr = await _get_terminal_manager()
     sequence = await _next_sequence_for_project(project_path, sidecar, mgr)
-    cwd = project_path if Path(project_path).is_dir() else str(Path.home())
+    cwd = cwd or (project_path if Path(project_path).is_dir() else str(Path.home()))
+    if not Path(cwd).is_dir():
+        raise TerminalServiceError("invalid", "Terminal CWD must be a directory")
     shell_rec = await _create_editor_shell(
         cwd=cwd,
         project_path=project_path,
@@ -913,9 +920,10 @@ async def _create_terminal_shell_data() -> JsonObject:
     if not shell_id:
         raise TerminalServiceError("internal", "Terminal shell creation returned no id")
     _ = record_terminal_shell_fact(shell_rec)
-    sidecar.add_terminal_shell_id(shell_id)
+    sidecar.add_terminal_shell_id(shell_id, activate=client_id is None)
     sidecar.save()
-    await close_active_terminal_sockets("new terminal")
+    if client_id is None:
+        await close_active_terminal_sockets("new terminal")
     await _broadcast_terminal_shell_list(project_path)
     title = sidecar.get_terminal_shell_title(shell_id)
     return {

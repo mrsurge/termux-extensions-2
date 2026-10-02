@@ -429,6 +429,8 @@ async def handle_ui_sidebar_window_create_request(params: JsonObject) -> JsonObj
         _client_active_windows[client_id] = host_id
         _client_active_shortcuts[client_id] = ""
         activated = _sidebar_window_activated_payload(client_id, host_id)
+        if body.get("reveal_sidebar") is True:
+            activated["revealSidebar"] = True
         await _emit_sidebar_window_focused_global(
             client_id,
             host_id,
@@ -734,26 +736,65 @@ async def on_sidebar_mention(ns: SidebarNamespace, sid: str, data: object) -> Js
     return await emit_sidebar_mention_targeted(data, skip_sid=sid)
 
 
-async def handle_sidebar_document_open(
+def require_live_sidebar_host(client_id: str) -> None:
+    if not client_id or not any(
+        host_sid in _registered_hosts and bound_client == client_id
+        for host_sid, bound_client in _client_ids_by_sid.items()
+    ):
+        raise ValueError("Sidebar target client is not connected")
+
+
+def resolve_sidebar_request_client(
     params: JsonObject, *, requester_app_id: str, require_presentation: bool = False,
-) -> JsonObject:
-    """Shared domain service; pipe callers do not fabricate Socket.IO sessions."""
+) -> tuple[str, JsonObject]:
+    """Shared live-client/slot/app proof for embedded app effects."""
     from .sidebar_file_open_routing import resolve_sidebar_file_open_target
     from .sidebar_window_state import get_sidebar_window_state
-    from ..host.file_ops_backend import handle_host_open_request
 
     live_host_client_ids = {
         client_id for host_sid, client_id in _client_ids_by_sid.items()
         if host_sid in _registered_hosts and client_id
     }
-    target_client_id, routed_params = resolve_sidebar_file_open_target(
+    return resolve_sidebar_file_open_target(
         params, sidebar_state=_json_object(get_sidebar_window_state()),
         live_host_client_ids=live_host_client_ids,
         registered_presentations=dict(_client_presentations),
         active_windows=dict(_client_active_windows), requester_app_id=requester_app_id,
         require_presentation=require_presentation,
     )
+
+
+async def handle_sidebar_document_open(
+    params: JsonObject, *, requester_app_id: str, require_presentation: bool = False,
+) -> JsonObject:
+    """Shared domain service; pipe callers do not fabricate Socket.IO sessions."""
+    from ..host.file_ops_backend import handle_host_open_request
+    target_client_id, routed_params = resolve_sidebar_request_client(
+        params, requester_app_id=requester_app_id, require_presentation=require_presentation,
+    )
     routed_params.setdefault("focus", False)
+    raw_path = routed_params.get("path")
+    if isinstance(raw_path, str) and raw_path:
+        import uuid
+        from pathlib import Path
+        from ..explorer.services.file_ops import get_project_root
+        from ..host.sidebar_app_backend import open_sidebar_app
+        project = get_project_root().resolve()
+        target_path = (project / Path(raw_path).expanduser()).resolve()
+        try:
+            _ = target_path.relative_to(project)
+        except ValueError:
+            if not target_path.is_file():
+                raise ValueError("external document must be an existing file")
+            return await open_sidebar_app(
+                app_id="file_editor", params={"file": str(target_path)},
+                client_id=target_client_id,
+                operation_id=str(routed_params.get("request_id") or uuid.uuid4().hex),
+                expected_project_root=project,
+                source_context=_json_object(routed_params.get("target")),
+                requester_app_id=requester_app_id,
+            )
+        routed_params["path"] = str(target_path)
     await handle_host_open_request(routed_params, source_name=target_client_id,
                                    request_prefix="sidebar_rpc")
     return {"ok": True}

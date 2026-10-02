@@ -344,6 +344,52 @@ ownership checks before mocked file opening; five changed modules passed Mypy
 and mypyc code generation. No compiled runtime group was rebuilt/activated and
 the shared framework was not restarted. Live acceptance remains pending.
 
+### Sidebar App Open And Explorer Caller Integration
+
+The next approved slice implements `host/sidebar_app_backend.py::open_sidebar_app`.
+It accepts an authenticated backend client identity, verifies live host presence,
+checks the manifest-backed launcher catalog, calls framework `app.open` over the
+owned pipe, then reuses existing Sidebar ledger creation/publication. Stateful
+manifests (including File Explorer) allocate distinct slot/console identities for
+every explicit invocation. Nonstateful manifests retain their existing fixed-base
+slot policy; CM6 statefulness is still a later slice.
+
+Before and after the asynchronous launch, validate client presence, current project
+root/generation and, for embedded callers, the source slot/app/current presentation.
+If a fence fails after launch, no new Sidebar slot is committed: the app process
+may already have started, with no rollback, retry or mutation replay. Launch timeout
+is 30s. Ledger membership publication stays global; foreground activation targets
+only the initiating client through the existing backend projection path.
+
+`sidebar.openApp` now supports embedded File Explorer/File Editor/Terminal sources.
+Context retains `{clientId, hostId, presentationId}` and payload is exactly
+`{appId, params}`. Target app identity is catalog/manifest-derived, not a new
+hardcoded app registry. Internal Code TE2 surfaces call the same backend service
+directly with their authenticated connection identity, rather than round-tripping
+through their own inbound pipe or borrowing Sidebar socket sessions.
+
+Explorer's `explorer.directory.openInFileExplorer` replaces its direct frontend
+HTTP app-open call and full-page navigation. The frontend sends only `rel` through
+its Explorer RPC lane. `explorer/handlers/app_intents.py` resolves and validates a
+real directory under the active project (including resolved symlink containment),
+uses the connection's client identity rather than payload identity, and launches
+File Explorer with that path. A directory containing spaces retains its query
+state and embedding identity in the created Sidebar URL.
+
+Synthetic/regression validation: 51 Python tests and 16 Node tests pass; TypeScript
+typecheck, frontend build, six-module Mypy and mypyc code generation pass. The new
+handler has its own focused module; existing lazy file-tree handlers are unchanged
+(compiling that older module in isolation exposes pre-existing async-local `del`
+limitations). Source whitespace checks exclude generated `host.js`, which contains
+esbuild-preserved vendor whitespace. No generated bundle was manually edited.
+
+No runtime restart, compiled-group activation, native OTA or APK publication.
+Before the future live working-model milestone, rebuild/activate the matched domain
+group and explicitly publish native frontend assets through the established OTA
+flow; a frontend build alone does not update an installed client. Terminal session
+creation, project switching, CM6 fallback/statefulness and the mobile sticky-scope
+investigation remain pending; notify the user before that joint mobile debugging.
+
 Remaining investigation: standalone Code TE2 project-query consumption and draft
 guard sequencing, new-tab stateful launch identifiers, drawer new-session/CWD
 owner, source-peer proof across multiple presentations, and complete File
@@ -461,6 +507,73 @@ choosing a lifecycle fix. No confirmed race diagnosis yet. Dock layout/gesture
 inspection is likewise pending, not an inferred CSS-only change.
 
 ## Phases
+
+### Terminal Intent Slice (implemented; synthetic validation only)
+
+Explorer's directory menu places Open in Terminal immediately beneath Open in
+File Explorer. An app-owned teUI choice offers Sidebar, Drawer and Cancel; Drawer
+is the initial default. Remembered choice/reset policy remains pending.
+
+`host/terminal_intent_backend.py` serves Explorer RPC and pipe
+`terminal.createSession`. It validates directory, live client, embedded source
+presentation when provided, and project generation before creation/activation.
+Explorer also enforces project containment. Stale/disconnected callers cannot
+activate results; uncertain creation is never retried or destructively rolled back.
+
+Drawer creation uses the existing PTY owner with explicit CWD, shared membership
+and exact-client `ui.terminal.open` carrying the created shell ID. It does not
+change the shared active-shell fallback or globally rebind sockets. Existing bind
+generation/checkpoint handling owns selection. At a cap of one, sidecar membership
+protects the prior active and new shell rather than evicting an active client.
+Ordinary drawer create/activate behavior remains unchanged.
+
+Sidebar launches use the existing app-tab service with CWD and a UUID
+`new_session` seed. Terminal waits for its lifecycle snapshot, then creates on its
+own lane. Serialized backend admission matches seed/CWD in retained FWS shell
+metadata (`TE2_TERMINAL_LAUNCH_ID`): repeated requests reuse the running claim;
+exited claims and different CWDs reject. This is not a permanent exactly-once
+journal after FWS record removal. Success replaces the seed with `shell_id` in
+the page URL and publishes concrete Sidebar state. Failures are not automatically
+retried. Standalone launches can consume the same seed; supplied CWD is honored.
+
+Remembered destination, native-client OTA,
+compiled runtime/group activation and live acceptance remain pending. Android and
+the shared framework runtime were not modified/restarted.
+
+### File Explorer Text/Terminal And CM6 Statefulness Slice
+
+Ordinary framework-app Sidebar presentations now receive the stable initiating
+client and concrete presentation identifiers. File Explorer sends embedded
+document/terminal intent to its own backend, which supplies the fixed Code TE2
+target over the owned framework pipe. Missing embedded identity is an error,
+not a standalone navigation fallback. Standalone file opens retain CM6 navigation;
+standalone terminal opens carry CWD and a fresh session seed. Embedded Terminal
+choice uses the same app-owned dialog source as Code TE2 Explorer.
+
+The shared Sidebar document-open adapter resolves paths before containment checks.
+In-project files use the existing exact-client editor hook; outside-project files
+open a distinct CM6 app tab without changing the editor foreground. This covers
+pipe and existing Sidebar document callers, not every editor/host open entrypoint.
+New-file creation navigation remains unchanged in this bounded slice.
+
+CM6 declares existing file-shaped Sidebar statefulness and publishes its concrete
+file URL through its own backend on open/Save As. Shared first-party state transport
+is extracted rather than duplicated. Embedded boot does not restore an unrelated
+app-global last file or unsaved draft; existing preferences remain available.
+Full CM6 settings persistence and save/discard navigation continuation remain later
+work. Guarded project adoption and File Explorer context-menu expansion are next:
+project opening must preserve the existing draft-consent workflow, not bypass it
+with an unconditional backend switch.
+
+These changes are source/unit validated only; native asset publication and matching
+compiled runtime activation are prerequisites for later live acceptance.
+
+Successful app-intent Sidebar creation carries an explicit `revealSidebar` flag
+on the existing exact-client activation event. The host uses its normal open
+operation (never toggle) and existing mobile-only Explorer-close helper. Desktop
+Explorer remains visible. Reconnect/restoration activation does not carry this
+layout intent; cancellation/failure does not reveal. Bottom terminal drawer
+activation retains its existing behavior.
 
 1. **Contract map:** inspect framework pipe routing, generic app launch intents,
    embedded context, exact-client targeting, and project/open/session owners.

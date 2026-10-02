@@ -1,4 +1,5 @@
 import { restoreExplorerFile } from './restore-action.ts';
+import { chooseTerminalDestination } from './terminal-destination.ts';
 import type { JsonObject } from '../../rpc/transport.ts';
 import type { ExplorerJumpOptions } from '../host/file-open-bridge.ts';
 import {
@@ -11,13 +12,6 @@ import type {
   ExplorerTreeMenuEntry,
   ExplorerTreeMenuItem,
 } from './types.ts';
-
-interface FileExplorerOpenResponse {
-  ok?: boolean;
-  data?: {
-    url?: string;
-  };
-}
 
 interface ExplorerTreeMenuControllerDeps {
   isHistoricalComparison?(): boolean;
@@ -81,12 +75,6 @@ function hasSaveChoice(
     typeof (value as { directory?: unknown }).directory === 'string' &&
     typeof (value as { name?: unknown }).name === 'string'
   );
-}
-
-function isFileExplorerOpenResponse(
-  value: unknown,
-): value is FileExplorerOpenResponse {
-  return value !== null && typeof value === 'object';
 }
 
 function buildAbsolutePath(projectPath: string, relPath: string): string {
@@ -345,6 +333,7 @@ export function createExplorerTreeMenuController(
       items.push({ label: 'New Folder…', type: 'createDir' });
       items.push({ divider: true });
       items.push({ label: 'Open in File Explorer', type: 'openExternal' });
+      items.push({ label: 'Open in Terminal', type: 'openTerminal' });
       items.push({ divider: true });
     }
 
@@ -598,32 +587,22 @@ export function createExplorerTreeMenuController(
         return;
       }
       case 'openExternal': {
-        const projectPath = deps.getProjectPath();
-        if (!projectPath) {
-          deps.toast('No project open');
-          return;
-        }
-        const fullPath = buildAbsolutePath(projectPath, rel);
+        if (!ensureExplorerRpc()) return;
         try {
-          const response = await fetch('/api/apps/file_explorer/open', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ params: { path: fullPath } }),
-          });
-          const payload: unknown = await response.json();
-          if (
-            isFileExplorerOpenResponse(payload) &&
-            payload.ok &&
-            typeof payload.data?.url === 'string'
-          ) {
-            window.location.href = payload.data.url;
-            return;
-          }
-          console.error('Launch failed', payload);
-          deps.toast('Failed to open File Explorer');
+          await deps.requestExplorer(EXPLORER_RPC_METHODS.directoryOpenInFileExplorer, { rel }, 45_000);
         } catch (error) {
-          console.error(error);
-          deps.toast('Failed to open File Explorer');
+          deps.toast(deps.getErrorMessage(error, 'Failed to open File Explorer'));
+        }
+        return;
+      }
+      case 'openTerminal': {
+        if (!ensureExplorerRpc()) return;
+        const destination = await chooseTerminalDestination();
+        if (!destination) return;
+        try {
+          await deps.requestExplorer(EXPLORER_RPC_METHODS.directoryOpenInTerminal, { rel, destination }, 45_000);
+        } catch (error) {
+          deps.toast(deps.getErrorMessage(error, 'Failed to open Terminal'));
         }
         return;
       }

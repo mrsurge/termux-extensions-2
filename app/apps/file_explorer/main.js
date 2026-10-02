@@ -688,6 +688,9 @@ export default function initFileExplorer(root, api, host) {
 
   // Check for path in URL query params (deep linking)
   const urlParams = new URLSearchParams(window.location.search);
+  const intentsReady = import('/static/js/te_file_explorer_intents.mjs').then(({ createFileExplorerIntents }) =>
+    createFileExplorerIntents({ api, location: window.location, dialog: window.teUI.dialog,
+      randomId: () => crypto.randomUUID().replaceAll('-', '') }));
   const queryPath = urlParams.get("path");
   const statefulHostId = (urlParams.get("te2_host_id") || "").trim();
   const statefulTokenId = (urlParams.get("te2_token_id") || "").trim();
@@ -1228,6 +1231,7 @@ export default function initFileExplorer(root, api, host) {
     "file:new-file": () => createNewFile(),
     "file:open": () => openSelected(),
     "file:open-editor": () => openSelectedInEditor(),
+    "file:open-terminal": () => openSelectedInTerminal(),
     "file:download": () => downloadSelected(),
     "file:extract": () => extractSelectedArchive(),
     "edit:properties": () => openSelectedProperties(),
@@ -1989,7 +1993,7 @@ export default function initFileExplorer(root, api, host) {
             });
           } else {
             // Open target file in editor
-            window.location.href = `/app/file_editor?file=${encodeURIComponent(response.target)}`;
+            await openInEditor(response.target);
           }
         } else if (response.target_type === "symlink") {
           toast(host, "Target is another symlink. Following...");
@@ -2003,7 +2007,7 @@ export default function initFileExplorer(root, api, host) {
         if (entry.type === "directory") {
           loadDirectory(entry.path);
         } else {
-          window.location.href = `/app/file_editor?file=${encodeURIComponent(entry.path)}`;
+          await openInEditor(entry.path);
         }
       }
     } catch (error) {
@@ -2031,13 +2035,28 @@ export default function initFileExplorer(root, api, host) {
       }
       // Open file in editor
       const target = state.selected.path;
-      window.location.href = `/app/file_editor?file=${encodeURIComponent(target)}`;
+      await openInEditor(target);
     }
   }
 
-  function openInEditor(filePath) {
-    // Open file directly in the file_editor app
-    window.location.href = `/app/file_editor?file=${encodeURIComponent(filePath)}`;
+  async function openInEditor(filePath) {
+    try {
+      await (await intentsReady).openFile(filePath);
+    } catch (error) {
+      toast(host, error?.message || 'Failed to open file');
+    }
+  }
+
+  async function openSelectedInTerminal() {
+    if (!state.selected || state.selected.type !== 'directory') {
+      toast(host, 'Select a directory to open in Terminal');
+      return;
+    }
+    try {
+      await (await intentsReady).openTerminal(state.selected.path);
+    } catch (error) {
+      toast(host, error?.message || 'Failed to open Terminal');
+    }
   }
 
   async function openSelectedInEditor() {
@@ -2096,7 +2115,7 @@ export default function initFileExplorer(root, api, host) {
       return;
     }
 
-    openInEditor(targetPath);
+    await openInEditor(targetPath);
   }
 
   async function extractArchive(entry) {

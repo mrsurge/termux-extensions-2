@@ -15,14 +15,35 @@ from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 from urllib import request as urllib_request
 from urllib.parse import quote, urlencode
 
-import socketio
-
 from fastapi import APIRouter, Request, HTTPException, Body, Query
 from fastapi.responses import JSONResponse, FileResponse
 
 from app.libs.jobs import JobCancelled, register_job_handler
 from app.libs import pipe_runtime
 file_explorer_bp = APIRouter()
+
+
+@file_explorer_bp.post('/intent')
+async def dispatch_embedded_intent(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    intent = payload.get('intent')
+    context = payload.get('context')
+    body = payload.get('payload')
+    if intent not in {'document.open', 'terminal.createSession'}:
+        raise HTTPException(status_code=400, detail='unsupported File Explorer intent')
+    if not isinstance(context, dict) or set(context) != {'clientId', 'hostId', 'presentationId'}:
+        raise HTTPException(status_code=400, detail='exact embedded context is required')
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail='intent payload must be an object')
+    try:
+        result = await pipe_runtime.call_async(
+            'app.intent.dispatch', {'targetApp': 'code_te2', 'intent': intent,
+                                    'context': context, 'payload': body},
+            target_name='framework.rust', target_nid=1,
+            op_id=os.urandom(16).hex(), timeout_seconds=45,
+        )
+    except pipe_runtime.PipeRuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {'ok': True, 'data': result}
 
 if TYPE_CHECKING:
     from app.libs.pipe_protocol import PipeEnvelope
@@ -101,54 +122,8 @@ async def _pipe_list_directory(abs_path: Path, hidden: bool) -> Dict[str, Any]:
 
 
 async def _call_sidebar_rpc(method: str, params: Dict[str, Any] | None = None, *, timeout: float = 5.0) -> Dict[str, Any]:
-    safe_method = str(method or '').strip()
-    if not safe_method:
-        raise ValueError('method is required')
-    client = socketio.AsyncClient(reconnection=False, logger=False, engineio_logger=False)
-    timeout_seconds = max(1, int(timeout))
-    try:
-        await client.connect(
-            _framework_url(),
-            namespaces=[SIDEBAR_IPC_NAMESPACE],
-            socketio_path=SIDEBAR_IPC_SOCKET_PATH.lstrip('/'),
-            transports=['websocket', 'polling'],
-        )
-        register = {
-            'jsonrpc': '2.0',
-            'id': f'{APP_ID}:register:{int(asyncio.get_running_loop().time() * 1000)}',
-            'method': 'sidebar.register',
-            'params': {
-                'role': 'iframe',
-                'app': APP_ID,
-                'client_id': _sidebar_backend_client_id(),
-                'capabilities': ['sidebar.windows'],
-            },
-        }
-        await client.call(SIDEBAR_IPC_RPC_EVENT, register, namespace=SIDEBAR_IPC_NAMESPACE, timeout=timeout_seconds)
-        request = {
-            'jsonrpc': '2.0',
-            'id': f'{APP_ID}:{int(asyncio.get_running_loop().time() * 1000)}',
-            'method': safe_method,
-            'params': params or {},
-        }
-        response = await client.call(
-            SIDEBAR_IPC_RPC_EVENT,
-            request,
-            namespace=SIDEBAR_IPC_NAMESPACE,
-            timeout=timeout_seconds,
-        )
-        if not isinstance(response, dict):
-            raise RuntimeError('sidebar RPC returned a non-object response')
-        error = response.get('error')
-        if isinstance(error, dict):
-            raise RuntimeError(str(error.get('message') or error))
-        result = response.get('result')
-        return result if isinstance(result, dict) else {'result': result}
-    finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
+    from app.libs.sidebar_rpc import call_sidebar_rpc
+    return await call_sidebar_rpc(APP_ID, method, params or {}, timeout=timeout)
 
 
 def _resolve_sidebar_directory(path_value: object) -> Path:

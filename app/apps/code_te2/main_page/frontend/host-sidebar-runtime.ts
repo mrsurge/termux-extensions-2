@@ -2,6 +2,7 @@ import {
   SIDEBAR_IPC_RPC_NOTIFICATIONS,
   type SidebarIpcRpcNotificationMethod,
 } from '../../src/sidebar_ipc/rpc_contract.ts';
+import { createExplorerUiHelpers } from '../../src/explorer/chrome/ui-helpers.ts';
 
 export interface HostSidebarRuntimeDeps {
   drawerEl: HTMLElement;
@@ -45,6 +46,7 @@ function isOpen(drawerEl: HTMLElement): boolean {
 
 export function createHostSidebarRuntime(deps: HostSidebarRuntimeDeps): HostSidebarRuntime {
   let installed = false;
+  const explorerUi = createExplorerUiHelpers();
 
   function publishState(open: boolean): void {
     try {
@@ -79,6 +81,16 @@ export function createHostSidebarRuntime(deps: HostSidebarRuntimeDeps): HostSide
     const detail = isRecord(customEvent.detail) ? customEvent.detail : {};
     const type = normalizeEventType(detail.type);
     if (!type || type === DRAWER_STATE_EVENT) return;
+    if (type === SIDEBAR_IPC_RPC_NOTIFICATIONS.windowActivated) {
+      const payload = isRecord(detail.payload) ? detail.payload : {};
+      // Only explicit successful launches reveal the layout. Reconnect/restore
+      // activation must not override the user's collapsed presentation.
+      if (payload.revealSidebar === true) {
+        explorerUi.closeDrawerIfMobile();
+        setDrawerOpen(true);
+      }
+      return;
+    }
     if (DRAWER_OPEN_EVENTS.has(type)) {
       setDrawerOpen(true, { publish: false });
       return;

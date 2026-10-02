@@ -940,8 +940,8 @@ class ProjectSidecar:
         self._migrate_terminal_legacy()
         return _as_string_list(self._data.get("terminal_shell_ids"))
 
-    def add_terminal_shell_id(self, shell_id: str) -> str:
-        """Append a shell id to the list, enforce cap, and mark active."""
+    def add_terminal_shell_id(self, shell_id: str, *, activate: bool = True) -> str:
+        """Append membership; exact-client creation does not change shared selection."""
         if not shell_id:
             return shell_id
         self._migrate_terminal_legacy()
@@ -951,18 +951,24 @@ class ProjectSidecar:
         if sid not in ids:
             ids.append(sid)
         cap = _as_int(self._data.get("terminal_shell_cap"), 5)
+        protected_active = self.get_active_terminal_shell_id() if not activate else None
         if cap > 0 and len(ids) > cap:
             # Trim oldest, but never drop the active/new shell.
-            while len(ids) > cap and ids[0] != sid:
-                removed = ids.pop(0)
+            while len(ids) > cap:
+                removable = next((item for item in ids if item not in {sid, protected_active}), None)
+                if removable is None:
+                    break
+                ids.remove(removable)
+                removed = removable
                 try:
                     titles.pop(str(removed), None)
                 except Exception:
                     pass
         self._data["terminal_shell_ids"] = ids
-        self._data["active_terminal_shell_id"] = sid
-        # Mirror to legacy field for compatibility.
-        self._data["terminal_shell_id"] = sid
+        if activate:
+            self._data["active_terminal_shell_id"] = sid
+            # Mirror to legacy field for compatibility.
+            self._data["terminal_shell_id"] = sid
         self._data["terminal_shell_titles"] = titles
         return sid
 

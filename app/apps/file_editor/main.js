@@ -52,6 +52,19 @@ export default async function initFileEditor(rootEl, api, host) {
 
 window.host = host;
 window.api  = api;
+const sidebarParams = new URLSearchParams(window.location.search);
+const sidebarHostId = sidebarParams.get('te2_host_id') || '';
+async function publishSidebarFile(path) {
+  if (!sidebarHostId) return;
+  try {
+    await apiPost('sidebar/window/state', {
+      host_id: sidebarHostId, token_id: sidebarParams.get('te2_token_id') || '',
+      console_worker_id: sidebarParams.get('te2_console_worker_id') || '', file: path,
+    });
+  } catch (error) {
+    console.warn('[file_editor] Sidebar file state publication failed', error);
+  }
+}
 const HOME_DIR = '/data/data/com.termux/files/home';
 const HOME_PREFIX = `${HOME_DIR}/`;
 
@@ -296,6 +309,7 @@ async function openFile(path) {
     markUnsaved(false);
     updatePathDisplay();
     statusEl.textContent = '';
+    void publishSidebarFile(currentPath);
   } catch (e) {
     statusEl.textContent = '';
     host.toast(`Failed to open: ${e.message}`);
@@ -334,6 +348,7 @@ async function saveAsDialog() {
     lastSavedContent = content;
     markUnsaved(false);
     updatePathDisplay();
+    void publishSidebarFile(currentPath);
     host.toast('Saved');
   } catch (e) {
     host.toast(`Save failed: ${e.message}`);
@@ -465,11 +480,16 @@ btnSaveConfirm.addEventListener('click', async () => { await saveFile(); hideCon
 
 // ---------- State load/init ----------
 host.setTitle('Code Viewer (CM6)');
-const state = host.loadState({
+const state = { ...(host.loadState({
   lastPath: null, draft: null,
   showLineNumbers: true, showLineShading: false,
   showSyntaxHighlight: true, wordWrap: false, theme: 'cm6-dark',
-}) || {};
+}) || {}) };
+if (sidebarHostId) {
+  // Shared app settings are not authority for another slot's file/draft.
+  state.lastPath = null;
+  state.draft = null;
+}
 
 showLineNumbers = state.showLineNumbers !== false;
 showLineShading = !!state.showLineShading;

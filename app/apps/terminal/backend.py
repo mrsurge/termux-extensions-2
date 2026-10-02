@@ -281,6 +281,7 @@ class CreateShellRequest(BaseModel):
     cwd: str = "~"
     cols: int = DEFAULT_COLS
     rows: int = DEFAULT_ROWS
+    launch_id: str = ""
 
 
 class ShellInputRequest(BaseModel):
@@ -628,6 +629,7 @@ async def _create_shell_record(payload: CreateShellRequest | None = None) -> Jso
                 "ROWS": str(rows),
                 "SCROLLBACK": str(DEFAULT_SCROLLBACK),
                 "SHELL_CMD_JSON": json.dumps(shell_cmd),
+                "LAUNCH_ID": request.launch_id,
             },
             label=label,
             wait_ready=False,
@@ -1254,8 +1256,30 @@ from .terminal_lifecycle import (
 )
 
 
+_launch_creation_lock = asyncio.Lock()
+
+
 async def _lifecycle_create_shell(params: JsonObject) -> JsonObject:
-    return await _create_shell_record(CreateShellRequest.model_validate(params))
+    request = CreateShellRequest.model_validate(params)
+    if not request.launch_id:
+        return await _create_shell_record(request)
+    if not re.fullmatch(r"[0-9a-f]{32}", request.launch_id):
+        raise ValueError("invalid terminal launch identity")
+    # Claims live in FWS shell metadata, not a browser origin/localStorage key.
+    # Serial admission prevents two presentations claiming the same launch.
+    async with _launch_creation_lock:
+        manager = await mgr()
+        for record in await manager.list_shells():
+            if not _is_supported_terminal_record(record):
+                continue
+            if record.env_overrides.get("TE2_TERMINAL_LAUNCH_ID") != request.launch_id:
+                continue
+            if record.env_overrides.get("TERMINAL_STREAM_CWD") != _normalize_cwd(request.cwd):
+                raise ValueError("terminal launch identity already belongs to another directory")
+            if record.status != "running" or not record.pid:
+                raise ValueError("terminal launch was already consumed by an exited session")
+            return await manager.describe(record)
+        return await _create_shell_record(request)
 
 
 configure_terminal_lifecycle(

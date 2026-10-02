@@ -330,6 +330,7 @@ interface SidebarStateContext {
   consoleWorkerId: string;
   initialShellId: string;
   initialCwd: string;
+  initialNewSession: string;
 }
 
 type InputBatchMode = 'normal' | 'fast' | 'repeat';
@@ -700,6 +701,7 @@ function parseSidebarStateContext(): SidebarStateContext {
     ),
     initialShellId: nonEmptyString(params.get('shell_id')),
     initialCwd: nonEmptyString(params.get('cwd')),
+    initialNewSession: nonEmptyString(params.get('new_session')),
   };
 }
 
@@ -847,7 +849,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   }
 
   async function resolveNewShellCwd(): Promise<string> {
-    if (!sidebarState.enabled) return '~';
+    if (!sidebarState.enabled) return sidebarState.initialCwd || '~';
     try {
       const payload = await requireLifecycleClient().request<SidebarCwdPayload>('sidebar.cwd.get');
       return nonEmptyString(payload.cwd) || sidebarState.initialCwd || '~';
@@ -1557,9 +1559,28 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   }
 
   async function applyInitialSidebarShellState(): Promise<void> {
-    if (!sidebarState.enabled || initialSidebarStateApplied || !state.shellsReady) return;
+    if (initialSidebarStateApplied || !state.shellsReady) return;
     initialSidebarStateApplied = true;
     const requestedShellId = sidebarState.initialShellId;
+    if (!requestedShellId && sidebarState.initialNewSession) {
+      try {
+        const data = await requireLifecycleClient().request<LifecycleShellMutationResult>(
+          'shell.create', { cwd: sidebarState.initialCwd || '~', launch_id: sidebarState.initialNewSession },
+        );
+        // Consume the seed locally before state publication/reload; ownership
+        // remains backend/FWS, and failures are never automatically retried.
+        const url = new URL(window.location.href);
+        url.searchParams.delete('new_session');
+        url.searchParams.set('shell_id', data.shell_id);
+        window.history.replaceState(null, '', url);
+        applyShellSnapshot(data.snapshot);
+        await selectShell(data.shell_id);
+      } catch (error) {
+        console.error('[terminal] launch session failed (not replayed)', error);
+        setStatus(`Session launch failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      return;
+    }
     if (!requestedShellId) return;
     const rec = state.shells.find((item) => item.id === requestedShellId) || null;
     if (rec && isShellAlive(rec)) {

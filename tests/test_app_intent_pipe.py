@@ -137,6 +137,9 @@ def test_document_adapter_reuses_shared_service_and_context_cannot_be_overridden
 
 @pytest.mark.parametrize("failure", [None, "disconnected", "inactive", "stale", "cross-app"])
 def test_shared_document_service_checks_live_ownership_before_open(monkeypatch, failure):
+    from pathlib import Path
+    from app.apps.code_te2.explorer.services import file_ops
+    monkeypatch.setattr(file_ops, "get_project_root", lambda: Path('/project'))
     from app.apps.code_te2.ui_ipc import sidebar_ws, sidebar_window_state
     from app.apps.code_te2.host import file_ops_backend
     client = "client_123456789abc"
@@ -158,5 +161,5 @@ def test_shared_document_service_checks_live_ownership_before_open(monkeypatch, 
         assert opened.call_args.kwargs["source_name"] == client
         assert opened.call_args.args[0]["focus"] is False
     envelope = request(); envelope.params["intent"] = "terminal.createSession"
-    with pytest.raises(ValueError, match="not implemented"):
+    with pytest.raises(ValueError, match="invalid terminal intent payload"):
         asyncio.run(dispatch_app_intent(envelope))
