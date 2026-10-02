@@ -7,6 +7,14 @@ Working branch: `feature/desktop-deb-packaging`; no new branch needed for planni
 
 ### Editor/framework UI corrections before release
 
+- [x] Add native sticky result scopes: Contents files with 3+ displayed hits;
+  Changes file+hunk stack, hunk push-off, and file-boundary release. Original
+  controls remain mounted and group outlines do not close under docked headers.
+- [x] Chromium fixture verifies both-level docking/push-off, scope release and
+  short Contents exclusion. Automated eligibility/action tests cover rendering.
+- [x] User live-accepted Contents/Changes sticky scopes. All 25 targeted tests,
+  TypeScript checking and frontend build passed.
+
 - [x] Unify Contents/Changes chrome, compact file/hunk header geometry, Restore
   alignment, muted path prefixes, complete-group MRU/expanded outlines, and
   whole-line emphasis for unpaired added/deleted lines. Expandable file-header

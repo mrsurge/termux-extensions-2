@@ -2122,3 +2122,35 @@
   background: #20262e;
 }
 .fe-search-change-restore.is-historical { min-width: 58px; }
+
+/* Live result headers retain their handlers; real file/hunk boxes bound push-off.
+   Unlike overflow:hidden, clip does not create an intermediate scroll container. */
+.fe-search-content-group,
+.fe-search-change-group { overflow: clip; }
+.fe-search-content-group.has-sticky-scope > .fe-search-file-header,
+.fe-search-change-group > .fe-search-change-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.fe-search-change-group .fe-search-hunk-header-row {
+  position: sticky;
+  top: 34px; /* The compact file-header row remains mounted above this scope. */
+  z-index: 1;
+}
+/* The outline tracks the shrinking file body, never the bottom of a docked row. */
+.fe-search-change-group.is-expanded::after,
+.fe-search-change-group.is-recent::after { z-index: 3; }
+.fe-search-change-group.is-expanded > .fe-search-change-header::after,
+.fe-search-change-group.is-recent > .fe-search-change-header::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(155, 213, 245, 0.25);
+  border-bottom: 0;
+  pointer-events: none;
+}
+.fe-search-change-group.is-recent > .fe-search-change-header::after {
+  border-width: 2px;
+  border-color: #9bd5f5;
+}

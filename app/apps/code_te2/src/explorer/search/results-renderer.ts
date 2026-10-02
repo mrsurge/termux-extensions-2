@@ -66,9 +66,10 @@ export function renderContentResults(
     const rel =
       fileResult.rel || fileResult.relativePath || fileResult.path || "";
     const fileGroup = document.createElement("div");
-    fileGroup.className = "fe-search-file-group";
+    fileGroup.className = "fe-search-file-group fe-search-content-group";
 
     const matches = Array.isArray(fileResult.matches) ? fileResult.matches : [];
+    fileGroup.classList.toggle('has-sticky-scope', matches.length >= 3);
     const fileHeader = document.createElement("div");
     fileHeader.className = "fe-search-file-header";
     const fileTitle = document.createElement("span");

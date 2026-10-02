@@ -1704,6 +1704,14 @@ extension-manifest metadata.
   staging), using the existing Explorer Git lane and HEAD mutation guards.
   Unpaired added/deleted lines receive full changed-text emphasis; replacements
   retain word-level emphasis and syntax highlighting.
+  Contents file headers dock only for groups with at least three displayed hits.
+  Changes file headers dock at the results viewport top; hunk headers dock below
+  the 34px file row and push off at the end of their own hunk. File boundaries
+  release the whole stack. Native CSS sticky retains the original controls and
+  handlers; `overflow: clip` avoids an intermediate scrolling ancestor. Group
+  outlines follow the remaining body; docked headers have no bottom outline.
+  This is independent of the source-tree sticky-scope projection and requires
+  no clones, scroll-time DOM reconstruction, or backend state.
   Each hunk initially displays at most 50 lines
   including context; larger hunks offer a dark fade/blind control to snap fully
   open or retract. This is visual clipping, not backend truncation or deferred
