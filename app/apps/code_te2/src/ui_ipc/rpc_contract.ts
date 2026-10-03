@@ -75,6 +75,7 @@ export const UI_IPC_RPC_NOTIFICATIONS = {
   preferencesChanged: 'ui.preferences.changed',
   terminalOpen: 'ui.terminal.open',
   sidebarWindowsChanged: 'ui.sidebar.windows.changed',
+  sidebarDrawerClose: 'ui.sidebar.drawer.close',
   sidebarWindowActivated: 'ui.sidebar.window.activated',
   sidebarWindowReadinessChanged: 'ui.sidebar.window.readiness.changed',
   codeInspectorChanged: 'ui.codeInspector.changed',

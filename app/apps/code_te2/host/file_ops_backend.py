@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import TypedDict
+from typing import TypedDict, NotRequired
 
 from ..explorer.services.file_ops import get_project_root
 from ..stores import get_history_store
@@ -29,6 +29,7 @@ class HostOpenResult(TypedDict):
     request_id: str
     path: str
     rel: str
+    surface: NotRequired[str]
 
 
 async def handle_host_open_request(
@@ -36,12 +37,14 @@ async def handle_host_open_request(
     *,
     source_name: str,
     request_prefix: str,
+    external_source_context: dict[str, object] | None = None,
+    external_requester_app_id: str | None = None,
 ) -> HostOpenResult:
     history = get_history_store()
     project = history.get_active_project() or str(get_project_root())
     if not project:
         raise ValueError('no active project')
-    project_path = Path(project).expanduser()
+    project_path = Path(project).expanduser().resolve()
     raw_path = str(data.get('path') or data.get('abs') or data.get('file') or data.get('rel') or '').strip()
     if not raw_path:
         raise ValueError('missing path')
@@ -51,20 +54,11 @@ async def handle_host_open_request(
     else:
         target = (project_path / raw_path.lstrip('/')).expanduser()
 
-    rel: str | None = None
-    for proj_candidate, tgt_candidate in [
-        (project_path, target),
-        (project_path.resolve(strict=False), target.resolve(strict=False)),
-    ]:
-        try:
-            rel = str(tgt_candidate.relative_to(proj_candidate))
-            target = tgt_candidate
-            break
-        except ValueError:
-            continue
-
-    if rel is None:
-        raise PermissionError('path is outside active project root')
+    target = target.resolve()
+    try:
+        rel = str(target.relative_to(project_path))
+    except ValueError:
+        rel = ''  # shared open boundary routes external files; never records them.
     if not target.exists():
         raise FileNotFoundError('target does not exist')
     if target.is_dir():
@@ -96,7 +90,7 @@ async def handle_host_open_request(
         payload['line'] = line
 
     request_id = str(data.get('request_id') or f'{request_prefix}_{int(time.time() * 1000)}')
-    _ = await emit_editor_open_from_backend(
+    opened = await emit_editor_open_from_backend(
         payload,
         source_client=source_name,
         request_id=request_id,
@@ -111,13 +105,18 @@ async def handle_host_open_request(
         ),
         record_sidecar_open_file=editor_runtime_record_sidecar_open_file,
         emit_open_state_changed=editor_runtime_emit_open_state_changed,
+        external_source_context=external_source_context,
+        external_requester_app_id=external_requester_app_id,
     )
-    return {
+    result: HostOpenResult = {
         'ok': True,
         'request_id': request_id,
         'path': str(target),
         'rel': rel,
     }
+    if opened.get('state') == 'external_sidebar':
+        result['surface'] = 'sidebar'
+    return result
 
 
 async def handle_host_save_request(

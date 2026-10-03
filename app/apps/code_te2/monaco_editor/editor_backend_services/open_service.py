@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
+from pathlib import Path
 import time
 from typing import Protocol, cast
 
@@ -122,8 +123,30 @@ async def emit_editor_open_from_backend(
     emit_editor_open: Callable[[EditorOpenPayload], Awaitable[None]],
     record_sidecar_open_file: RecordSidecarOpenFileFn,
     emit_open_state_changed: EmitOpenStateChangedFn,
+    external_source_context: dict[str, object] | None = None,
+    external_requester_app_id: str | None = None,
 ) -> EditorOpenPayload:
     normalized = dict(payload_in) if isinstance(payload_in, Mapping) else {}
+    # All runtime open lanes meet here before file reads, recent membership,
+    # foreground changes or editor notifications. Resolve symlink escapes too.
+    raw_path = normalize_abs_path(get_str(normalized, "path", ""))
+    project_root = active_project()
+    if raw_path and project_root:
+        canonical_project = Path(project_root).expanduser().resolve()
+        canonical_path = (canonical_project / Path(raw_path).expanduser()).resolve()
+        normalized["path"] = str(canonical_path)
+        try:
+            canonical_path.relative_to(canonical_project)
+        except ValueError:
+            from ...host.external_document_backend import open_external_document
+            await open_external_document(
+                path=str(canonical_path), project=str(canonical_project),
+                client_id=source_client, request_id=request_id,
+                source_context=external_source_context,
+                requester_app_id=external_requester_app_id,
+            )
+            return {"path": str(canonical_path), "source_client": source_client,
+                    "request_id": request_id, "state": "external_sidebar"}
     fields = coerce_editor_open_request_fields(
         normalized,
         request_id,

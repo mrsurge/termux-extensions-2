@@ -138,9 +138,14 @@ and joint debugging when its scheduled slice is reached.
 - [x] Embedded in-project text open reaches initiating client's Code TE2 editor.
 - [x] Embedded outside-project text open creates a new CM6 Sidebar tab.
 - [x] Standalone text open retains existing CM6 behavior.
-- [ ] Generalize outside-project routing at the shared Code TE2 open boundary.
-- [ ] Diagnose Show hidden persistence through the existing saved-state mechanism.
-- [ ] Verify generalized app launch/query intents across all applicable apps.
+- [x] Generalize outside-project routing at the shared Code TE2 open boundary:
+  canonical paths (including symlink escapes) route to exact-client CM6 Sidebar
+  tabs before model/recents/WBA effects. Sidebar caller identity fences remain.
+- [x] Show hidden uses the existing saved-state mechanism: both controls update
+  the effective listing flag and persist immediately, including before a failed list.
+- [x] Verify first-party launch/query contracts: File Explorer `path`, CM6 `file`,
+  Code TE2 one-shot `project`, Terminal `cwd`/`new_session` followed by `shell_id`.
+  No additional generic launcher or frontend-to-frontend transport introduced.
 - [x] Ordinary app presentations carry exact client/presentation context, just
   like extension views. Incomplete embedded context rejects rather than navigating.
 - [x] File Explorer routes existing text-file opens through its own backend and
@@ -160,16 +165,34 @@ and joint debugging when its scheduled slice is reached.
 
 ## CM6 File Editor
 
-- [ ] Persist and restore **every configurable/menu setting** in localStorage;
+- [x] Persist and restore **every configurable/menu setting** in localStorage;
   inventory table proves complete coverage, with safe defaults/error handling.
-- [ ] Discard resumes the originally requested navigation exactly once; Cancel
+- [x] Discard resumes the originally requested navigation exactly once; Cancel
   and failed Save remain guarded, across file/app navigation and supported close.
 - [x] Add Sidebar statefulness/query launch and existing backend state publication;
   multiple tabs/clients restore their own file identity without cross-client leakage.
-- [ ] Keep preferences distinct from unsaved document data and routing credentials.
+- [x] Keep preferences distinct from unsaved document data and routing credentials.
 - Embedded CM6 query state owns its file; app-global last-file/draft restoration
   is suppressed for that tab, without deleting the existing shared saved state.
-  Complete settings persistence and navigation guard repairs remain pending.
+  All five preferences persist immediately in a dedicated localStorage record.
+  Supported shell exits await the original guarded callback; browser unload uses
+  a separate synchronous dirty check. Failed/cancelled Save retains the dialog,
+  Discard restores saved text, and duplicate pending navigation is ignored.
+  This combined slice and the cached local build entrypoint have user live
+  acceptance. The agent did not restart the runtime.
+  Validation: 80 Python tests plus three subtests, 19 Node tests (including
+  actual CM6 modal/app-shell continuation handlers and both hidden controls),
+  four-module Mypy, isolated mypyc C generation, Code TE2 TypeScript checking
+  and frontend build all pass. C generation is not a rebuilt active domain group.
+
+- [x] Mobile Sidebar-to-editor document opens close the sidebar and toast
+  "Opening in code editor" through exact-client backend notification after
+  successful open dispatch. Desktop and external CM6 opens are unchanged.
+  Corrected a dropped cross-lane notification: explicit `ui.sidebar.drawer.close`
+  is parsed by the host and mapped to the local Sidebar event.
+  Additional validation: 17 Python and 48 transport/host Sidebar UI tests, TypeScript
+  check and frontend build pass. User rebuilt and verified this feedback working
+  live; acceptance is complete.
 
 ## Dock
 

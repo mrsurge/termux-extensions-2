@@ -8,6 +8,7 @@ export interface HostSidebarRuntimeDeps {
   drawerEl: HTMLElement;
   toggleButtonEl: HTMLElement | null;
   closeButtonEl: HTMLElement | null;
+  toast?: (message: string) => void;
   emitSidebarRpcNotification?: (
     method: SidebarIpcRpcNotificationMethod,
     payload: Record<string, unknown>,
@@ -96,7 +97,11 @@ export function createHostSidebarRuntime(deps: HostSidebarRuntimeDeps): HostSide
       return;
     }
     if (DRAWER_CLOSE_EVENTS.has(type)) {
+      const payload = isRecord(detail.payload) ? detail.payload : {};
+      if (payload.mobileOnly === true
+        && document.querySelector('.fe-root')?.classList.contains('layout-mobile') !== true) return;
       setDrawerOpen(false, { publish: false });
+      if (typeof payload.message === 'string' && payload.message) deps.toast?.(payload.message);
       return;
     }
     if (DRAWER_TOGGLE_EVENTS.has(type)) {

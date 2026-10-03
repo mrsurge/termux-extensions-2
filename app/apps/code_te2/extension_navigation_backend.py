@@ -86,7 +86,7 @@ async def _run_extension_open(event: JsonObject) -> None:
     try:
         from .host.file_ops_backend import handle_host_open_request
 
-        _ = await handle_host_open_request(
+        opened = await handle_host_open_request(
             {
                 "path": path,
                 "request_id": request_id,
@@ -99,10 +99,11 @@ async def _run_extension_open(event: JsonObject) -> None:
             source_name=client_instance_id,
             request_prefix="extension_open",
         )
-        completed = await asyncio.wait_for(completion, timeout=20.0)
-        completed_path = str(completed.get("path") or "")
-        if completed_path and completed_path != path:
-            raise RuntimeError("editor open completed for a different path")
+        if opened.get("surface") != "sidebar":
+            completed = await asyncio.wait_for(completion, timeout=20.0)
+            completed_path = str(completed.get("path") or "")
+            if completed_path and completed_path != path:
+                raise RuntimeError("editor open completed for a different path")
         await _notify_wba(
             {
                 "ok": True,

@@ -625,6 +625,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     warn: (...args) => console.warn(...args),
   });
   const hostSidebarRuntime = createHostSidebarRuntime({
+    toast: (message) => host.toast(message),
     drawerEl: sidebarDrawerEl,
     toggleButtonEl: document.getElementById('fe-agent-toggle'),
     closeButtonEl: document.getElementById('agent-close'),

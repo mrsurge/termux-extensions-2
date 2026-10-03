@@ -351,6 +351,11 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
             dispatchWindowCustomEvent('code-te2:code-inspector-changed', params);
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.runProfileStateChanged) {
             dispatchWindowCustomEvent('code-te2:run-profile-state-changed', params);
+          } else if (method === UI_IPC_RPC_NOTIFICATIONS.sidebarDrawerClose) {
+            dispatchSidebarEvent({
+              type: SIDEBAR_IPC_RPC_NOTIFICATIONS.drawerClose,
+              payload: params,
+            });
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.sidebarWindowsChanged) {
             dispatchSidebarEvent({
               type: SIDEBAR_IPC_RPC_NOTIFICATIONS.windowsChanged,

@@ -260,6 +260,16 @@ Shared UI source lives in `main_page/frontend/ui/component-runtime/` (synchronou
 
 ### Shared UI And Input Policy
 
+First-party CM6 File Editor preferences (line numbers, line shading, syntax,
+wrap and theme) persist immediately in `te2:file-editor:preferences:v1`
+localStorage, separately from document/query/draft state. Supported app-shell
+navigation awaits its async before-exit handler, retaining the original action
+through Save/Discard/Cancel. CM6 supplies a separate synchronous before-unload
+dirty check; a native browser unload is not resumable. Failed/cancelled Save
+does not release the guard; Discard restores saved text before continuing.
+See `docs/apps/sidebar_app_intents/PLAN.md`, Combined File Explorer / CM6
+Completion Slice, for shared canonical external-file routing and launch contracts.
+
 Authored Code TE2 controls use app-owned popup/listboxes; native browser `<select>`
 dropdowns are prohibited by the source regression gate. Use asynchronous `teUI`
 dialogs rather than browser prompts. Electron dialogs retain same-origin portal

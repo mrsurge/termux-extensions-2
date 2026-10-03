@@ -13,6 +13,7 @@ from ..socketio_jsonrpc import (
 UI_IPC_RPC_NAMESPACE: Final = "/ui_ipc"
 UI_IPC_RPC_REQUEST_EVENT: Final = "rpc"
 UI_IPC_RPC_NOTIFICATION_EVENT: Final = "rpc.notify"
+UI_IPC_RPC_NOTIFICATION_SIDEBAR_DRAWER_CLOSE: Final = "ui.sidebar.drawer.close"
 
 UI_IPC_RPC_METHOD_HOST_EDITOR_STATE_GET: Final = "ui.host.editorState.get"
 UI_IPC_RPC_METHOD_HOST_THEMES_LIST: Final = "ui.host.themes.list"
@@ -152,6 +153,7 @@ UI_IPC_RPC_NOTIFICATION_RUN_TARGET_ROUTES_CHANGED: Final = (
 )
 
 UiIpcRpcNotification = Literal[
+    "ui.sidebar.drawer.close",
     "ui.editor.save",
     "ui.editor.focus",
     "ui.editor.blur",
@@ -233,6 +235,7 @@ ALLOWED_REQUEST_METHODS: Final[set[str]] = {
 ALLOWED_NOTIFICATION_METHODS: Final[set[str]] = {
     UI_IPC_RPC_NOTIFICATION_COMPARISON_CHANGED,
     UI_IPC_RPC_NOTIFICATION_EDITOR_SAVE,
+    UI_IPC_RPC_NOTIFICATION_SIDEBAR_DRAWER_CLOSE,
     UI_IPC_RPC_NOTIFICATION_EDITOR_FOCUS,
     UI_IPC_RPC_NOTIFICATION_EDITOR_BLUR,
     UI_IPC_RPC_NOTIFICATION_IME_FOCUS,

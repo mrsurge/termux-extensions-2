@@ -964,7 +964,7 @@ export default function initFileExplorer(root, api, host) {
     if (host && typeof host.saveState === "function") {
       host.saveState({
         path: state.currentPath,
-        showHidden: !!(ui.toggleHidden && ui.toggleHidden.checked),
+        showHidden,
         view: state.view,
         sortBy: state.sortBy,
         sortAsc: state.sortAsc,
@@ -1257,6 +1257,7 @@ export default function initFileExplorer(root, api, host) {
         ui.toggleHidden.checked = showHidden;
       }
       updateViewMenuState();
+      persistState();
       loadDirectory(state.currentPath);
     },
     "view:sort-name": () => setSort("name"),
@@ -2835,6 +2836,9 @@ export default function initFileExplorer(root, api, host) {
   }
   if (ui.toggleHidden) {
     ui.toggleHidden.addEventListener("change", () => {
+      showHidden = !!ui.toggleHidden.checked;
+      updateViewMenuState();
+      persistState();
       loadDirectory(state.currentPath);
     });
   }

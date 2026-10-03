@@ -179,6 +179,33 @@ until that workflow is implemented. This section is a plan, not current behavior
 
 #### Cached build and retention workflow (current developer behavior)
 
+Preferred editable entrypoint (uses the invoking Python/venv; callable from any
+working directory):
+
+```bash
+python -B app/apps/code_te2/build_mypyc.py
+```
+
+Publishes validated mypyc snapshots under the resolved
+`TE2_CACHE_HOME/code_te2/build/mypyc-snapshots/` (normally
+`~/.cache/te2/code_te2/build/mypyc-snapshots/`). The finished shared objects are in
+the snapshot's `lib/`, alongside its manifest/provenance. The existing cached
+build helper remains the authority; compiler intermediates stay in its existing
+`${TMPDIR:-<repo>/.codex-scratch}/mypyc-build-cache` to retain cache reuse.
+Default jobs is `MAX_JOBS`, otherwise one; override with `--jobs N`.
+`--print-commands` resolves everything without changing state; `--no-activate`
+publishes without selecting it. Default activation reuses the existing atomic
+`.codex-scratch/mypyc-active` selector and preserves its previous selection;
+the selector now points outside scratch, to the canonical published snapshot.
+No worker restart, Rust rebuild, wheel packaging or resource copying is implied.
+Editable resource links still point to this checkout. The planned matched
+Rust/domain deployment resolver above remains a separate slice.
+
+Cache existence does not guarantee incremental speedup. A shared group-header
+change can invalidate all native C objects; verify unchanged/body-only/signature
+edit builds before claiming effective reuse. No cache or release checkpoints are
+automatically deleted by this entrypoint.
+
 `build` keeps intermediates under `${TMPDIR:-.codex-scratch}/mypyc-build-cache`.
 `--cache-dir` overrides that root. Separate cache generations are keyed by checkout,
 CPython ABI/version, compiler/version/flags, mypy/setuptools versions and compiled

@@ -48,6 +48,8 @@ def routing(monkeypatch, tmp_path):
     open_editor = AsyncMock(return_value={'ok': True})
     open_app = AsyncMock(return_value={'ok': True, 'route': 'cm6'})
     monkeypatch.setattr(file_ops_backend, 'handle_host_open_request', open_editor)
+    from app.apps.code_te2.ui_ipc import notifications
+    monkeypatch.setattr(notifications, 'emit_ui_ipc_rpc_notification', AsyncMock())
     monkeypatch.setattr(sidebar_app_backend, 'open_sidebar_app', open_app)
     return root, open_editor, open_app
 
@@ -67,14 +69,40 @@ def test_resolved_document_routing_retains_project_and_exact_client(routing, kin
         target = outside
     asyncio.run(sidebar_ws.handle_sidebar_document_open({'path': str(target), 'request_id': 'op'},
         requester_app_id='file_explorer', require_presentation=True))
-    if kind == 'inside':
-        app.assert_not_awaited()
-        assert editor.call_args.kwargs['source_name'] == 'client_111111111111'
+    # Sidebar authenticates the caller; the common open service owns path routing.
+    app.assert_not_awaited()
+    assert editor.call_args.kwargs['source_name'] == 'client_111111111111'
+    assert editor.call_args.kwargs['external_source_context']['presentationId'] == 'current'
+    assert editor.call_args.kwargs['external_requester_app_id'] == 'file_explorer'
+
+
+@pytest.mark.parametrize('surface', ['editor', 'sidebar'])
+def test_sidebar_open_feedback_is_exact_client_and_editor_only(routing, monkeypatch, surface):
+    from app.apps.code_te2.ui_ipc import notifications
+    root, editor, _ = routing
+    editor.return_value = {'ok': True, 'surface': surface}
+    notify = AsyncMock()
+    monkeypatch.setattr(notifications, 'emit_ui_ipc_rpc_notification', notify)
+    asyncio.run(sidebar_ws.handle_sidebar_document_open({'path': str(root / 'file')},
+        requester_app_id='file_explorer', require_presentation=True))
+    if surface == 'sidebar':
+        notify.assert_not_awaited()
     else:
-        editor.assert_not_awaited()
-        assert app.call_args.kwargs['app_id'] == 'file_editor'
-        assert app.call_args.kwargs['params'] == {'file': str(target.resolve())}
-        assert app.call_args.kwargs['client_id'] == 'client_111111111111'
+        notify.assert_awaited_once_with('ui.sidebar.drawer.close',
+            {'mobileOnly': True, 'message': 'Opening in code editor'},
+            client_instance_id='client_111111111111')
+
+
+def test_sidebar_failed_open_has_no_success_feedback(routing, monkeypatch):
+    from app.apps.code_te2.ui_ipc import notifications
+    root, editor, _ = routing
+    editor.side_effect = FileNotFoundError('missing')
+    notify = AsyncMock()
+    monkeypatch.setattr(notifications, 'emit_ui_ipc_rpc_notification', notify)
+    with pytest.raises(FileNotFoundError):
+        asyncio.run(sidebar_ws.handle_sidebar_document_open({'path': str(root / 'missing')},
+            requester_app_id='file_explorer', require_presentation=True))
+    notify.assert_not_awaited()
 
 
 def test_cm6_state_publication_carries_file_slot_and_never_activates(monkeypatch, tmp_path):

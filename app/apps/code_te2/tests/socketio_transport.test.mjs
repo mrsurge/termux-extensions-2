@@ -128,6 +128,39 @@ async function settlePromises() {
   await Promise.resolve();
 }
 
+test('host-lane sidebar close survives MessagePack and notification parsing', async () => {
+  const { createUiIpcConnections } = await importTypeScript('main_page/frontend/connections/ui-ipc.ts');
+  const { messagePackRpcWireCodec } = await importTypeScript('src/rpc/codec.ts');
+  const previousWindow = globalThis.window;
+  const previousCustomEvent = globalThis.CustomEvent;
+  const events = [];
+  globalThis.window = { dispatchEvent: event => { events.push(event); return true; } };
+  globalThis.CustomEvent = class { constructor(type, options) { this.type = type; this.detail = options.detail; } };
+  try {
+    const socket = new FakeSocket();
+    const connections = createUiIpcConnections({
+      ensureSocketIoLoaded: async () => () => socket,
+      getSocketQuery: () => ({ client_instance_id: 'client_abcdefghijkl' }),
+      initConsoleBridge: () => ({}), getClientId: () => 'client_abcdefghijkl',
+      getConsoleWorkerId: () => 'main_page:test',
+    });
+    const connecting = connections.connectUIIPC();
+    await settlePromises();
+    socket.trigger('connect');
+    await connecting;
+    const params = { mobileOnly: true, message: 'Opening in code editor' };
+    socket.trigger('rpc.notify', messagePackRpcWireCodec.encode({
+      jsonrpc: '2.0', method: 'ui.sidebar.drawer.close', params,
+    }));
+    assert.deepEqual(events.map(event => ({ type: event.type, detail: event.detail })), [{
+      type: 'code-te2:sidebar-event', detail: { type: 'sidebar.drawer.close', payload: params },
+    }]);
+  } finally {
+    globalThis.window = previousWindow;
+    globalThis.CustomEvent = previousCustomEvent;
+  }
+});
+
 test('editor theme connection wait is event-driven, bounded, and retryable', async () => {
   const { createEditorRpcTransport } = await importTypeScript('monaco_editor/editor_rpc_transport.ts');
   const socket = new FakeSocket();

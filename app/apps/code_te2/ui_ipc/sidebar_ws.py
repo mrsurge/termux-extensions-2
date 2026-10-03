@@ -773,30 +773,18 @@ async def handle_sidebar_document_open(
         params, requester_app_id=requester_app_id, require_presentation=require_presentation,
     )
     routed_params.setdefault("focus", False)
-    raw_path = routed_params.get("path")
-    if isinstance(raw_path, str) and raw_path:
-        import uuid
-        from pathlib import Path
-        from ..explorer.services.file_ops import get_project_root
-        from ..host.sidebar_app_backend import open_sidebar_app
-        project = get_project_root().resolve()
-        target_path = (project / Path(raw_path).expanduser()).resolve()
-        try:
-            _ = target_path.relative_to(project)
-        except ValueError:
-            if not target_path.is_file():
-                raise ValueError("external document must be an existing file")
-            return await open_sidebar_app(
-                app_id="file_editor", params={"file": str(target_path)},
-                client_id=target_client_id,
-                operation_id=str(routed_params.get("request_id") or uuid.uuid4().hex),
-                expected_project_root=project,
-                source_context=_json_object(routed_params.get("target")),
-                requester_app_id=requester_app_id,
-            )
-        routed_params["path"] = str(target_path)
-    await handle_host_open_request(routed_params, source_name=target_client_id,
-                                   request_prefix="sidebar_rpc")
+    opened = await handle_host_open_request(routed_params, source_name=target_client_id,
+                                   request_prefix="sidebar_rpc",
+                                   external_source_context=_json_object(routed_params.get("target")),
+                                   external_requester_app_id=requester_app_id)
+    if opened.get("ok") is True and opened.get("surface") != "sidebar":
+        from .notifications import emit_ui_ipc_rpc_notification
+        from .rpc_contract import UI_IPC_RPC_NOTIFICATION_SIDEBAR_DRAWER_CLOSE
+        await emit_ui_ipc_rpc_notification(
+            UI_IPC_RPC_NOTIFICATION_SIDEBAR_DRAWER_CLOSE,
+            {"mobileOnly": True, "message": "Opening in code editor"},
+            client_instance_id=target_client_id,
+        )
     return {"ok": True}
 
 

@@ -500,7 +500,7 @@ by `app_state:<appId>` through `window.teState`, not per Sidebar file tab. Do no
 confuse this shared app state with the requested localStorage preference record
 or use it to restore another tab's document.
 
-Concrete guard mismatch: CM6's Discard and Save-confirm call `host.requestExit()`,
+Original guard mismatch (now repaired): CM6's Discard and Save-confirm called `host.requestExit()`,
 but `app/templates/app_shell.html` exposes no such host method. Its
 `attemptExit(navigateFn)` returns immediately on `{cancel:true}` without retaining
 the original callback. A supported pending-navigation continuation is therefore
@@ -513,6 +513,50 @@ Implement one guarded-intent path for those actions and app-shell navigation,
 not just a button-specific redirect. Ordinary browser unload cannot be resumed
 with an arbitrary stored callback; distinguish supported shell navigation from
 browser-native unload prompts in tests and documentation.
+
+### Combined File Explorer / CM6 Completion Slice
+
+Implemented after the project/context slice: Show hidden updates the live listing
+flag and existing host state synchronously from either control; listing failures
+cannot revert the preference. CM6 stores only the five inventoried preferences
+under `te2:file-editor:preferences:v1`; unavailable storage, malformed values and
+missing themes use safe defaults. Existing state is a one-time seed, not authority
+over a persisted local preference. No draft/path/credential enters that record.
+
+CM6's modal resolves an awaited guarded user intent. New/Open/Browse/Close/Quit and
+supported app-shell exits retain the original action, reject duplicate pending
+actions, and execute once after successful Save or Discard. Failed or cancelled
+Save remains guarded; Discard restores saved text before continuing. App-shell
+`onBeforeUnload` is a distinct synchronous dirty check; arbitrary native browser
+unload is not resumable. No nonexistent `requestExit` or synthetic navigation.
+
+The common editor-open service routes canonical external paths to backend-owned
+CM6 Sidebar creation before project file reads, sidecar membership or WBA model
+effects. Authenticated client identity remains required; Sidebar callers retain
+presentation checks through launch. Extension-origin external opens use Sidebar
+completion rather than waiting for a Monaco acknowledgement that cannot occur.
+Historical immutable/secondary project-only model contracts remain unchanged.
+
+First-party launch parity uses the existing framework `app.open` query mechanism:
+File Explorer `path`, CM6 `file`, Code TE2 one-shot `project`, and Terminal
+`cwd`/`new_session` transitioning to published `shell_id`. No new transport or
+frontend relay. Unit/source validation does not claim live acceptance or OTA.
+
+The combined slice subsequently received user live acceptance, including the
+cached Code TE2 local mypyc build wrapper. Mobile follow-up: a successful Sidebar
+document-open dispatch into the project editor sends the existing drawer-close
+notification to the exact host client with `mobileOnly` and feedback text. The
+host closes its sidebar and toasts "Opening in code editor" only in mobile
+layout. External CM6 Sidebar opens and desktop layout are unchanged; failures
+send no success feedback. This feedback describes dispatch, not completed model
+mounting. Its live gate requires rebuilt domain libraries and client asset OTA.
+
+The initial implementation used the Sidebar notification name on the UI IPC
+lane, whose parser silently dropped it. Corrected delivery is the explicitly
+declared `ui.sidebar.drawer.close` host notification, mapped to the existing
+local Sidebar event. Regression coverage now runs through MessagePack decoding,
+the actual host parser and event dispatch; DOM-only tests are insufficient.
+The user subsequently rebuilt and verified the corrected feedback working live.
 
 ### File Explorer And Sticky Reveal: Still Live Investigation Items
 

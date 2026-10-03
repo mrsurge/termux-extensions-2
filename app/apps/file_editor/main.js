@@ -207,6 +207,10 @@ let wordWrap = false;
 let currentTheme = 'cm6-dark';
 let lastPickerPath = HOME_DIR;
 let currentModeLanguage = null;
+const preferences = createEditorPreferences({ storage: () => window.localStorage, themes: THEMES });
+function persistPreferences() {
+  preferences.save({ showLineNumbers, showLineShading, showSyntaxHighlight, wordWrap, theme: currentTheme });
+}
 
 function makeExtensions() {
   const exts = [
@@ -324,10 +328,12 @@ async function saveFile() {
     const content = getText();
     await apiPost('write', { path: currentPath, content });
     lastSavedContent = content;
-    markUnsaved(false);
+    markUnsaved(getText() !== content);
     host.toast('Saved');
+    return !unsaved;
   } catch (e) {
     host.toast(`Save failed: ${e.message}`);
+    return false;
   } finally {
     statusEl.textContent = '';
   }
@@ -335,8 +341,8 @@ async function saveFile() {
 
 async function saveAsDialog() {
   const target = await pickSaveTarget();
-  if (!target || !target.path) return;
-  if (target.existed && !(await window.teUI.dialog.confirm('File exists. Overwrite?'))) return;
+  if (!target || !target.path) return false;
+  if (target.existed && !(await window.teUI.dialog.confirm('File exists. Overwrite?'))) return false;
   statusEl.textContent = 'Saving...';
   try {
     const content = getText();
@@ -346,12 +352,14 @@ async function saveAsDialog() {
     lastPickerPath = parentDir(currentPath);
     currentModeLanguage = detectLanguageFromFilename(currentPath);
     lastSavedContent = content;
-    markUnsaved(false);
+    markUnsaved(getText() !== content);
     updatePathDisplay();
     void publishSidebarFile(currentPath);
     host.toast('Saved');
+    return !unsaved;
   } catch (e) {
     host.toast(`Save failed: ${e.message}`);
+    return false;
   } finally {
     statusEl.textContent = '';
   }
@@ -407,15 +415,16 @@ menuThemeBtn.addEventListener('click', (e) => { e.stopPropagation(); const open 
 document.addEventListener('click', () => closeAllMenus());
 
 bindMenuToggle(miNew, () => {
-  if (unsaved) { showConfirm(); return; }
+  return guardedNavigation(() => {
   currentPath = ''; currentPathExists = false; lastPickerPath = HOME_DIR; currentModeLanguage = null;
   setText(''); lastSavedContent = ''; markUnsaved(false); updatePathDisplay();
+  });
 });
-bindMenuToggle(miOpen, async () => { const p = await pickFile(); if (p) await openFile(p); });
+bindMenuToggle(miOpen, async () => { const p = await pickFile(); if (p) await guardedNavigation(() => openFile(p)); });
 bindMenuToggle(miSave, () => saveFile());
 bindMenuToggle(miSaveAs, () => saveAsDialog());
-bindMenuToggle(miClose, () => { currentPath=''; currentPathExists=false; lastPickerPath=HOME_DIR; currentModeLanguage=null; setText(''); lastSavedContent=''; markUnsaved(false); updatePathDisplay(); });
-bindMenuToggle(miQuit, () => { try{ host.clearState(); }catch{} currentPath=''; currentPathExists=false; setText(''); lastSavedContent=''; markUnsaved(false); updatePathDisplay(); });
+bindMenuToggle(miClose, () => guardedNavigation(() => { currentPath=''; currentPathExists=false; lastPickerPath=HOME_DIR; currentModeLanguage=null; setText(''); lastSavedContent=''; markUnsaved(false); updatePathDisplay(); }));
+bindMenuToggle(miQuit, () => guardedNavigation(() => { try{ host.clearState(); }catch{} currentPath=''; currentPathExists=false; setText(''); lastSavedContent=''; markUnsaved(false); updatePathDisplay(); }));
 
 bindMenuToggle(miUndo, () => { if (view && undo) undo(view); });
 bindMenuToggle(miRedo, () => { if (view && redo) redo(view); });
@@ -436,17 +445,18 @@ bindMenuToggle(miSelectAll, () => {
   view.focus(); 
 });
 
-bindMenuToggle(miToggleLines, () => { showLineNumbers = !showLineNumbers; setMenuChecked(miToggleLines, showLineNumbers); createView(getText()); });
-bindMenuToggle(miToggleShading, () => { showLineShading = !showLineShading; setMenuChecked(miToggleShading, showLineShading); createView(getText()); });
-bindMenuToggle(miToggleSyntax, () => { showSyntaxHighlight = !showSyntaxHighlight; setMenuChecked(miToggleSyntax, showSyntaxHighlight); createView(getText()); });
+bindMenuToggle(miToggleLines, () => { showLineNumbers = !showLineNumbers; persistPreferences(); setMenuChecked(miToggleLines, showLineNumbers); createView(getText()); });
+bindMenuToggle(miToggleShading, () => { showLineShading = !showLineShading; persistPreferences(); setMenuChecked(miToggleShading, showLineShading); createView(getText()); });
+bindMenuToggle(miToggleSyntax, () => { showSyntaxHighlight = !showSyntaxHighlight; persistPreferences(); setMenuChecked(miToggleSyntax, showSyntaxHighlight); createView(getText()); });
 bindMenuToggle(miToggleWrap, () => {
   wordWrap = !wordWrap; setMenuChecked(miToggleWrap, wordWrap);
+  persistPreferences();
   createView(getText());
 });
 bindMenuToggle(miFind, () => { if (view && openSearchPanel) openSearchPanel(view); });
 bindMenuToggle(miGoto, async () => { const input = await window.teUI.dialog.prompt('Go to line'); const line = Number.parseInt(input || '', 10); if (!Number.isNaN(line)) { const ln = Math.max(1, line); const pos = view.state.doc.line(ln).from; view.dispatch({ selection:{anchor:pos}, scrollIntoView:true }); view.focus(); } });
 
-btnBrowse.addEventListener('click', async () => { const path = await pickFile(); if (path) await openFile(path); });
+btnBrowse.addEventListener('click', async () => { const path = await pickFile(); if (path) await guardedNavigation(() => openFile(path)); });
 
 // Unsaved tracking
 function onAnyChange() {
@@ -473,10 +483,32 @@ function hideConfirm() {
   confirmModal.classList.remove('show');
   confirmModal.setAttribute('aria-hidden', 'true');
 }
-confirmClose.addEventListener('click', hideConfirm);
-btnCancel.addEventListener('click', hideConfirm);
-btnDiscard.addEventListener('click', () => { hideConfirm(); markUnsaved(false); host.requestExit(); });
-btnSaveConfirm.addEventListener('click', async () => { await saveFile(); hideConfirm(); host.requestExit(); });
+let confirmResolve = null;
+let confirmSaving = false;
+function finishConfirm(accepted) {
+  const resolve = confirmResolve;
+  confirmResolve = null;
+  hideConfirm();
+  resolve?.(accepted);
+}
+const guardedNavigation = createGuardedNavigation({
+  needsConsent: () => unsaved,
+  confirm: () => new Promise(resolve => { confirmResolve = resolve; showConfirm(); }),
+});
+confirmClose.addEventListener('click', () => { if (!confirmSaving) finishConfirm(false); });
+btnCancel.addEventListener('click', () => { if (!confirmSaving) finishConfirm(false); });
+btnDiscard.addEventListener('click', () => {
+  if (confirmSaving) return;
+  setText(lastSavedContent);
+  markUnsaved(false);
+  finishConfirm(true);
+});
+btnSaveConfirm.addEventListener('click', async () => {
+  if (confirmSaving) return;
+  confirmSaving = true;
+  try { if (await saveFile()) finishConfirm(true); }
+  finally { confirmSaving = false; }
+});
 
 // ---------- State load/init ----------
 host.setTitle('Code Viewer (CM6)');
@@ -491,11 +523,13 @@ if (sidebarHostId) {
   state.draft = null;
 }
 
-showLineNumbers = state.showLineNumbers !== false;
-showLineShading = !!state.showLineShading;
-showSyntaxHighlight = state.showSyntaxHighlight !== false;
-wordWrap = !!state.wordWrap;
-currentTheme = (state.theme && THEMES[state.theme]) ? state.theme : 'cm6-dark';
+const savedPreferences = preferences.load(state);
+showLineNumbers = savedPreferences.showLineNumbers;
+showLineShading = savedPreferences.showLineShading;
+showSyntaxHighlight = savedPreferences.showSyntaxHighlight;
+wordWrap = savedPreferences.wordWrap;
+currentTheme = savedPreferences.theme;
+persistPreferences();
 setMenuChecked(miToggleLines, showLineNumbers);
 setMenuChecked(miToggleShading, showLineShading);
 setMenuChecked(miToggleSyntax, showSyntaxHighlight);
@@ -519,6 +553,7 @@ themeMenuItems.forEach((item) => {
   const handle = () => {
     if (isAvailable) {
       currentTheme = themeId;
+      persistPreferences();
       // Update checkmarks for all items
       themeMenuItems.forEach((it) => {
         setMenuChecked(it, it.getAttribute('data-theme') === currentTheme);
@@ -561,8 +596,8 @@ if (fileFromUrl) {
 }
 
 // Save state on exit
-host.onBeforeExit(() => {
-  if (unsaved) { showConfirm(); host.toast('Unsaved changes — Save or Discard before leaving.'); return { cancel:true }; }
+host.onBeforeExit(async () => {
+  if (!await guardedNavigation(() => {})) return { cancel: true };
   return {
     lastPath: currentPath || null,
     draft: unsaved ? getText() : null,
@@ -570,9 +605,12 @@ host.onBeforeExit(() => {
     showSyntaxHighlight, wordWrap, theme: currentTheme,
   };
 });
+host.onBeforeUnload?.(() => ({ cancel: unsaved }));
 
 // Track changes: refresh unsaved flag
 // (We don't wire CM6 transactions directly since we're using bare ESM; use a lightweight observer)
 const observer = new MutationObserver(() => onAnyChange());
 observer.observe(cmHost, { childList:true, subtree:true, characterData:true });
 }
+import { createGuardedNavigation } from '/static/js/te_guarded_navigation.mjs';
+import { createEditorPreferences } from '/static/js/te_file_editor_preferences.mjs';

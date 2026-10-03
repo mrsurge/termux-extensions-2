@@ -491,6 +491,7 @@
     </script>
     
     <script type="module">
+        import { createGuardedNavigation } from '/static/js/te_guarded_navigation.mjs';
         function escapeHtml(value) {
             return String(value == null ? '' : value)
                 .replace(/&/g, '&amp;')
@@ -820,30 +821,35 @@
             },
             setTitle: (title) => { document.title = title || 'TE2 App'; appTitleEl.textContent = title || 'App'; },
             onBeforeExit: (handler) => { window.__appBeforeExitHandler = handler; },
+            onBeforeUnload: (handler) => { window.__appBeforeUnloadHandler = handler; },
             toast: (msg) => { try { if (window.teUI && window.teUI.toast) window.teUI.toast(msg); } catch (_) {} },
         };
 
+        const guardedExit = createGuardedNavigation({ needsConsent: () => false, confirm: async () => true });
         async function attemptExit(navigateFn) {
-            try {
-                const handler = window.__appBeforeExitHandler;
-                if (typeof handler === 'function') {
-                    const res = await Promise.resolve(handler());
-                    if (res && typeof res === 'object') {
-                        if (res.cancel) return; // abort navigation
-                        if ('state' in res) host.saveState(res.state);
-                        else host.saveState(res);
-                    } else if (res !== undefined) {
-                        host.saveState(res);
+            return guardedExit(async () => {
+                try {
+                    const handler = window.__appBeforeExitHandler;
+                    if (typeof handler === 'function') {
+                        const res = await Promise.resolve(handler());
+                        if (res && typeof res === 'object') {
+                            if (res.cancel) return; // abort navigation
+                            if ('state' in res) host.saveState(res.state);
+                            else host.saveState(res);
+                        } else if (res !== undefined) {
+                            host.saveState(res);
+                        }
                     }
+                } catch (e) {
+                    console.error('beforeExit handler error:', e);
+                    return;
                 }
-            } catch (e) {
-                console.error('beforeExit handler error:', e);
-            }
-            await Promise.resolve(navigateFn());
+                await Promise.resolve(navigateFn());
+            });
         }
 
         window.addEventListener('beforeunload', (e) => {
-            const handler = window.__appBeforeExitHandler;
+            const handler = window.__appBeforeUnloadHandler || window.__appBeforeExitHandler;
             if (typeof handler === 'function') {
                 try { const res = handler(); if (res && res.cancel) { e.preventDefault(); e.returnValue = ''; } } catch (_) {}
             }

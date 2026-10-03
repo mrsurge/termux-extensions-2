@@ -12,6 +12,25 @@ const { createHostSidebarRuntime } = await import(
 );
 
 for (const mobile of [true, false]) {
+  test(`sidebar document open feedback mobile=${mobile}`, () => {
+    const dom = new Window();
+    Object.assign(globalThis, { window: dom, document: dom.document, HTMLElement: dom.HTMLElement });
+    document.body.innerHTML = `<div class="fe-root ${mobile ? 'layout-mobile' : ''}"></div><div id="sidebar" class="open"></div>`;
+    const drawer = document.getElementById('sidebar');
+    const messages = [];
+    createHostSidebarRuntime({ drawerEl: drawer, toggleButtonEl: null, closeButtonEl: null,
+      toast: (message) => messages.push(message),
+    }).install();
+    window.dispatchEvent(new dom.CustomEvent('code-te2:sidebar-event', {
+      detail: { type: 'sidebar.drawer.close', payload: { mobileOnly: true, message: 'Opening in code editor' } },
+    }));
+    assert.equal(drawer.classList.contains('open'), !mobile);
+    assert.deepEqual(messages, mobile ? ['Opening in code editor'] : []);
+    dom.happyDOM.abort();
+  });
+}
+
+for (const mobile of [true, false]) {
   for (const reveal of [true, false]) {
     test(`explicit sidebar reveal=${reveal}, mobile=${mobile}`, () => {
       const dom = new Window();
