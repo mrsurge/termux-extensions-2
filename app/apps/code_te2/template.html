@@ -2084,8 +2084,8 @@
     align-items: center;
     gap: 8px;
     order: 2;
-    flex: 1 1 auto;
-    min-width: 0;
+    flex: 0 1 120px;
+    min-width: 80px;
     justify-content: flex-end;
     text-align: right;
   }
@@ -2104,6 +2104,7 @@
     width: 1.1rem;
     height: 1.1rem;
     line-height: 0;
+    flex-shrink: 0;
   }
 
   .agent-drawer__icon img {
@@ -2139,12 +2140,19 @@
 
   .agent-drawer__chrome {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     align-items: flex-start;
-    gap: 2px;
+    gap: 6px;
     min-width: 0;
     position: relative;
     order: 1;
+    flex: 1 1 0;
+  }
+
+  .agent-drawer__fixed-controls {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
     flex: 0 0 auto;
   }
 
@@ -2152,7 +2160,16 @@
     display: none;
     align-items: flex-start;
     gap: 6px;
+    flex: 1 1 0;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    overscroll-behavior-x: contain;
+    touch-action: pan-y;
   }
+
+  .agent-drawer__icon-grid::-webkit-scrollbar { display: none; }
 
   .agent-drawer__icon-cell {
     display: grid;
@@ -2160,6 +2177,7 @@
     justify-items: center;
     align-items: center;
     row-gap: 2px;
+    flex: 0 0 28px;
   }
 
   .agent-drawer__icon-cell--explorer {
@@ -2755,6 +2773,7 @@
         <span class="agent-drawer__title-text" id="agent-drawer-title-text">Sidebar</span>
       </div>
       <div class="agent-drawer__chrome">
+        <div class="agent-drawer__fixed-controls" aria-label="Sidebar controls"></div>
         <div class="agent-drawer__icon-grid" id="agent-drawer-icon-grid" aria-label="Sidebar app dock"></div>
         <div class="fe-dropdown agent-drawer__icon-menu" id="agent-drawer-icon-menu"></div>
       </div>

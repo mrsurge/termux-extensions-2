@@ -8,6 +8,7 @@
 // - Iframe stack lifecycle (lazy/eager) with framework app start-before-load
 
 import { EXPLORER_RPC_METHODS } from "../../../src/explorer/rpc/contract.ts";
+import { bindDockOverflowScroll } from "./dock-scroll.ts";
 import {
   notifyExplorerRpc,
   requestExplorerRpc,
@@ -350,6 +351,7 @@ export function initSidebarShortcuts(
   let sidebarHeaderIconEl: HTMLElement | null = null;
   let sidebarHeaderTitleEl: HTMLElement | null = null;
   let sidebarHeaderIconGridEl: HTMLElement | null = null;
+  let disposeDockScroll: (() => void) | null = null;
   let sidebarHeaderIconMenuEl: HTMLElement | null = null;
   let sidebarRefreshBtn: HTMLElement | null = null;
   let sidebarRefreshMenuEl: HTMLElement | null = null;
@@ -3212,6 +3214,18 @@ export function initSidebarShortcuts(
   ) {
     const gridEl = sidebarHeaderIconGridEl;
     if (!gridEl) return;
+    // Keep utility controls outside the app-icon scroll viewport. Materialize
+    // the group when an older host template is paired with updated scripts.
+    let fixedControls = gridEl.parentElement?.querySelector<HTMLElement>(
+      ".agent-drawer__fixed-controls",
+    );
+    if (!fixedControls) {
+      fixedControls = document.createElement("div");
+      fixedControls.className = "agent-drawer__fixed-controls";
+      fixedControls.setAttribute("aria-label", "Sidebar controls");
+      gridEl.before(fixedControls);
+    }
+    fixedControls.replaceChildren();
 
     const resolvedShortcuts = Array.isArray(shortcuts)
       ? shortcuts
@@ -3225,8 +3239,11 @@ export function initSidebarShortcuts(
     const isMobileLayout = !!document.querySelector(".fe-root.layout-mobile");
     const dockDebugNumbers = _dockDebugNumbersEnabled();
 
+    const retainedDockScrollLeft = gridEl.scrollLeft;
     gridEl.innerHTML = "";
     gridEl.style.display = "flex";
+    disposeDockScroll?.();
+    const cancelPointerGestures: Array<() => void> = [];
 
     let headerDragState: HeaderDragState | null = null;
     let dropBeforeCell: HTMLElement | null = null;
@@ -3331,6 +3348,12 @@ export function initSidebarShortcuts(
       dropInsertionIndex = -1;
     };
 
+    disposeDockScroll = bindDockOverflowScroll(gridEl, () => {
+      cancelPointerGestures.forEach((cancel) => cancel());
+      finishDrag(false);
+      _closeHeaderIconMenu();
+    });
+
     if (isMobileLayout) {
       const cell = document.createElement("div");
       cell.className =
@@ -3362,7 +3385,7 @@ export function initSidebarShortcuts(
 
       cell.appendChild(btn);
       cell.appendChild(dot);
-      gridEl.appendChild(cell);
+      fixedControls.appendChild(cell);
     }
 
     const launcherCell = document.createElement("div");
@@ -3392,7 +3415,7 @@ export function initSidebarShortcuts(
     launcherDot.className = "agent-drawer__running-dot is-placeholder";
     launcherDot.setAttribute("aria-hidden", "true");
     launcherCell.appendChild(launcherDot);
-    gridEl.appendChild(launcherCell);
+    fixedControls.appendChild(launcherCell);
 
     headerItems.forEach((sc) => {
       const renderedIndex = renderedHeaderItems.length;
@@ -3441,6 +3464,11 @@ export function initSidebarShortcuts(
         startX = 0;
         startY = 0;
       };
+
+      cancelPointerGestures.push(() => {
+        clearLp();
+        clearPointer();
+      });
 
       const openGestureMenu = () => {
         suppressGestureClick = true;
@@ -3610,6 +3638,8 @@ export function initSidebarShortcuts(
       cell.appendChild(dot);
       gridEl.appendChild(cell);
     });
+
+    gridEl.scrollLeft = retainedDockScrollLeft;
 
     if (!renderedHeaderItems.length && !launcherCell.isConnected) {
       gridEl.style.display = "none";

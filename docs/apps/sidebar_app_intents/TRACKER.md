@@ -110,7 +110,7 @@ and joint debugging when its scheduled slice is reached.
   rebuild or activate the installed compiled runtime group.
   Standalone Terminal's broader Mypy check still reports its unchanged existing
   `connections.pop(conn_id, None)` typing error; not silently waived as passing.
-- [ ] Investigate and fix mobile-only sticky scopes missing after the Explorer
+- [x] Investigate and fix mobile-only sticky scopes missing after the Explorer
   drawer stays closed for some time and reopens without user motion; keep
   accepted scrolling behavior unchanged. Desktop/initial reveal are regression checks.
   **Notify the user explicitly before starting this bug's live investigation;
@@ -121,6 +121,7 @@ and joint debugging when its scheduled slice is reached.
   explicitly refreshes on mobile drawer open, settled transform and visibility
   reveal, with cleanup. Twelve tree/result-scope tests, typecheck and bundle build
   pass; force-OTA live acceptance of this source remains pending.
+- User subsequently verified the sticky-scope fix working live; acceptance complete.
 
 ## File Explorer
 
@@ -202,9 +203,21 @@ and joint debugging when its scheduled slice is reached.
 
 ## Dock
 
-- [ ] Bound horizontal overflow; wheel and touch-drag scrolling like the tab bar.
-- [ ] Preserve activation/context/long-press/reorder gestures and unclipped menus.
-- [ ] Agree on and implement useful minimum title/label geometry.
+- [x] Bound horizontal overflow; dominant-axis wheel and horizontal touch-swipe
+  scrolling with retained scroll position across icon projection refreshes.
+- [x] Preserve tap/long-press/context menus and mouse reorder. In overflowing
+  docks, vertical-start touch drag retains reorder while horizontal swipe scrolls;
+  scrolling cancels pending long press/reorder and suppresses accidental activation.
+  Existing popups stay outside the scrolling strip, and listeners are rebound
+  without accumulation on icon rerender.
+- [x] Approved 80px minimum title area, with ellipsis and a nonshrinking title icon.
+- [x] User live accepted overflow behavior, then requested fixed Explorer/launcher
+  controls. Both now sit outside the scroll strip on its left; only app icons
+  scroll up to the title. Tests check this boundary; refined-layout acceptance
+  remains pending force OTA.
+- [ ] User live acceptance after force OTA on desktop/mobile. No native APK or
+  version change, backend edits, or runtime restart. Forty-one dock/presentation/
+  reveal/file-tab regression tests, TypeScript checking and frontend build pass.
 
 ## Acceptance Matrix
 
@@ -219,7 +232,7 @@ and joint debugging when its scheduled slice is reached.
   duplicates, accidental reuse, wrong CWD, or eager unrelated PTY creation.
 - [ ] File Explorer Show hidden and CM6 settings survive reload/reopen.
 - [ ] CM6 dirty navigation: Save, Discard, Cancel, failed Save and pending intent.
-- [ ] Mobile source-tree sticky scopes render after delayed drawer close/reopen
+- [x] Mobile source-tree sticky scopes render after delayed drawer close/reopen
   without scrolling; desktop and initial reveal remain correct.
 - [ ] Dock overflow on desktop/mobile retains controls and popup visibility.
 - [ ] Targeted backend/frontend tests, applicable typechecks and builds pass.

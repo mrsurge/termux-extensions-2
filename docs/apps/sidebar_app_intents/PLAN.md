@@ -589,7 +589,32 @@ without animation. Observers/listeners are cleaned up on destruction; there is
 no polling, scroll nudge, changed scope geometry or backend state mutation.
 Twelve targeted tree/result-scope tests, TypeScript checking and frontend build
 pass. Updated-client live acceptance remains pending force OTA; the diagnostic
-manual update is not acceptance of the new source. Dock inspection remains pending.
+manual update is not acceptance of the new source. The user subsequently live
+verified the source fix; sticky-scope acceptance is now complete.
+
+### Sidebar Dock Overflow Slice
+
+The approved header layout bounds the icon grid to the remaining header width,
+reserves at least 80px for the title (ellipsis retained), and keeps fixed-size
+icon cells on one horizontally scrolling strip. The title icon does not shrink.
+Popup menus remain siblings of the strip, not children of its overflow box.
+After the user's first live acceptance, the boundary was refined: Explorer and
+launcher occupy a fixed left-hand control group. Only app icons scroll between
+that group and the window title; utility menus and their button behavior stay
+unchanged. Updated-client acceptance of this refinement remains pending.
+
+Wheel input follows the file-tab dominant-axis convention, normalizes line/page
+units and does not consume Ctrl-wheel or wheel input at a scroll boundary.
+Horizontal touch swipes scroll only when icons overflow. Vertical-start touch
+gestures retain the existing reorder lane; mouse drags and nonoverflow touch
+drags are unchanged. Claiming a scroll cancels pending icon long-press/reorder,
+closes the HTML icon menu and suppresses the resulting activation click. A new
+tap remains active. Gesture listeners are disposed on projection refresh, and
+the scroll offset is retained. No new persistence or backend authority is added.
+
+Forty-one dock/presentation/reveal/file-tab tests, full TypeScript checking and
+frontend build pass. User live acceptance after force OTA remains pending;
+the slice does not publish APKs, bump versions or restart runtime processes.
 
 ## Phases
 
