@@ -1261,6 +1261,14 @@ Cargo source; binary installs fail instead of silently building missing workers.
 Mypyc still requires explicit build/activation; the existing selected overlay is
 not automatically compiled or republished by framework bootstrap.
 
+Source-launch handoff correction: render shellspecs with inherited server env,
+then Ferrous's authoritative child overlay, then app launch overrides. The overlay
+alone omitted the bootstrap-selected executable and caused the reported spawn
+failure on both desktop and Pixel. Regression coverage uses the actual Code TE2
+shellspec; full spawn cause chains are logged. Local launcher tests pass; live
+desktop/Pixel acceptance remains pending a user-controlled framework rebuild and
+restart. No runtime was restarted during this fix.
+
 Release gate: prepare server and configured worker binaries before wheel assembly,
 then package the ABI-matched compiled domain, interpreted islands, resources and
 component provenance. Implement the appropriate CPython/platform tags and package

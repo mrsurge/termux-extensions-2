@@ -206,7 +206,7 @@ async fn start_app_inner(state: &AppState, app_id: &str) -> Result<(String, Valu
     {
         Ok(Ok(result)) => result,
         Ok(Err(error)) => {
-            warn!(%error, %app_id, "failed to launch app worker");
+            warn!(error = %format!("{error:#}"), %app_id, "failed to launch app worker");
             return Err(json_error(StatusCode::BAD_GATEWAY, &error.to_string()));
         }
         Err(error) => {

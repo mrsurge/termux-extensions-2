@@ -294,6 +294,15 @@ there is no pipe-facing Python bootstrap wrapper. This requires a newly launched
 framework to ingest the resolved environment; an app-worker restart under an old
 framework cannot manufacture the new environment key.
 
+The Rust launcher renders shellspecs from the complete inherited server
+environment, then applies the authoritative Ferrous overlay and app launch
+overrides in that order. Ferrous's child overlay alone is not a complete
+environment: using it alone drops `CODE_TE2_WORKER_BIN` before command rendering
+and prevents spawning on both desktop and Termux. Launcher regression coverage
+renders the actual Code TE2 shellspec and checks the raw executable and inherited
+`PYTHONPATH`. Spawn failures log the full cause chain. Changes to this handoff
+require rebuilding the framework server, not only the worker.
+
 Mypyc compilation/activation is still explicit through `build_mypyc.py`; this
 slice does not build it automatically or replace its selected domain overlay.
 Source installs include the independent worker's Cargo manifest/lockfile/source.

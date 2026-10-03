@@ -125,8 +125,11 @@ pub fn launch_app(
                     .get("TE2_RUNTIME_DEBUG")
                     .is_some_and(|value| value == "1"),
             );
-            let mut render_env = framework_shells_env.clone();
-            render_env.extend(launch_env_overrides.clone());
+            let render_env = shellspec_render_environment(
+                std::env::vars().collect(),
+                framework_shells_env,
+                &launch_env_overrides,
+            );
 
             let input = ShellspecRenderInput {
                 ctx: ctx.clone(),
@@ -212,6 +215,19 @@ pub fn launch_app(
             source: "ferrous_framework_native",
         })
     }
+}
+
+#[cfg(feature = "ferrous-framework-native")]
+fn shellspec_render_environment(
+    mut parent: HashMap<String, String>,
+    framework: &HashMap<String, String>,
+    overrides: &HashMap<String, String>,
+) -> HashMap<String, String> {
+    // Ferrous supplies an overlay, not the complete inherited environment.
+    // Bootstrap-selected executable paths must also be available to templates.
+    parent.extend(framework.clone());
+    parent.extend(overrides.clone());
+    parent
 }
 
 #[cfg(feature = "ferrous-framework-native")]
@@ -388,6 +404,44 @@ fn json_scalar_string(value: &Value) -> Option<String> {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn native_worker_shellspec_receives_bootstrap_environment() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+        let document =
+            load_shellspec_document(&root.join("app/apps/code_te2/shellspec/app_worker.yaml"))
+                .unwrap();
+        let worker = "/cache/te2/code_te2/build/bin/fingerprint/release/code-te2-worker";
+        let parent = HashMap::from([
+            ("CODE_TE2_WORKER_BIN".to_owned(), worker.to_owned()),
+            ("PYTHONPATH".to_owned(), "/parent/python".to_owned()),
+            ("TE_FRAMEWORK_URL".to_owned(), "parent".to_owned()),
+        ]);
+        let framework = HashMap::from([
+            ("TE_FRAMEWORK_URL".to_owned(), "framework".to_owned()),
+            ("TE_PORT".to_owned(), "8089".to_owned()),
+        ]);
+        let overrides = HashMap::from([("TE_PORT".to_owned(), "8081".to_owned())]);
+        let env = shellspec_render_environment(parent, &framework, &overrides);
+        assert_eq!(env["TE_FRAMEWORK_URL"], "framework");
+        assert_eq!(env["TE_PORT"], "8081");
+        let rendered = render_shellspec_entry(
+            &document,
+            "app-worker",
+            &ShellspecRenderInput {
+                ctx: HashMap::from([
+                    ("PROJECT_ROOT".to_owned(), "/checkout".to_owned()),
+                    ("APP_ID".to_owned(), "code_te2".to_owned()),
+                ]),
+                env,
+            },
+        )
+        .unwrap();
+        assert_eq!(rendered.command[0], worker);
+        assert_eq!(rendered.command[1], "/checkout");
+        assert_eq!(rendered.backend, "pipe");
+        assert_eq!(rendered.env["PYTHONPATH"], "/parent/python:/checkout");
+    }
 
     fn shell(subgroup: &str) -> AppShell {
         AppShell {
