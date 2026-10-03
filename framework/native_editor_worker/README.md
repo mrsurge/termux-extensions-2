@@ -193,6 +193,12 @@ the snapshot's `lib/`, alongside its manifest/provenance. The existing cached
 build helper remains the authority; compiler intermediates stay in its existing
 `${TMPDIR:-<repo>/.codex-scratch}/mypyc-build-cache` to retain cache reuse.
 Default jobs is `MAX_JOBS`, otherwise one; override with `--jobs N`.
+The entrypoint requires `ccache` on PATH and exits with failure before inventory
+or compilation if missing. Install it, or explicitly opt into a slower build:
+`python -B app/apps/code_te2/build_mypyc.py --no-cache` (equivalently
+`NO_CACHE=1 python -B app/apps/code_te2/build_mypyc.py`). These overrides disable
+compiler caching for that invocation, including a user-supplied ccache wrapper;
+they do not delete the persistent intermediates or existing cached objects.
 `--print-commands` resolves everything without changing state; `--no-activate`
 publishes without selecting it. Default activation reuses the existing atomic
 `.codex-scratch/mypyc-active` selector and preserves its previous selection;
@@ -216,8 +222,9 @@ never point `CODE_TE2_MYPYC_DIR` at the mutable cache.
 The installed setuptools recompiles a changed shared extension as a whole. When
 `ccache` is present, the workflow uses a dedicated **512 MB** compiler cache with
 content-based compiler checking; unchanged C/header/flag combinations reuse cached
-objects. Without ccache, builds still work and explicitly report the slower mode.
-On Termux, `pkg install ccache` supplies this optional **development** tool; it is
+objects. The low-level probe can still run without ccache, but the preferred local
+entrypoint requires explicit opt-out instead of silently accepting that mode.
+On Termux, `pkg install ccache` supplies this **development** tool; it is
 not a runtime/user-install dependency. Shared generated-header changes can invalidate
 many objects. We retain a single shared compilation unit and `multi_file=True`.
 

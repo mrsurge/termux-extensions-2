@@ -109,6 +109,7 @@ def test_prune_is_dry_run_and_protects_active_previous_legacy_and_release(tmp_pa
 
 
 def test_compiler_cache_restores_environment_and_sets_bound(tmp_path, monkeypatch):
+    monkeypatch.delenv('NO_CACHE', raising=False)
     monkeypatch.setenv('CC', 'old-cc')
     monkeypatch.delenv('CCACHE_DIR', raising=False)
     monkeypatch.setattr(workflow.shutil, 'which', lambda name: '/usr/bin/ccache')
@@ -118,6 +119,18 @@ def test_compiler_cache_restores_environment_and_sets_bound(tmp_path, monkeypatc
         assert os.environ['CCACHE_MAXSIZE'] == '512M'
     assert os.environ['CC'] == 'old-cc'
     assert 'CCACHE_DIR' not in os.environ
+
+
+def test_explicit_no_cache_disables_even_user_wrapped_compiler(tmp_path, monkeypatch):
+    monkeypatch.setenv('NO_CACHE', '1')
+    monkeypatch.setenv('CC', 'ccache cc')
+    monkeypatch.setenv('CCACHE_DISABLE', 'old')
+    monkeypatch.setattr(workflow.shutil, 'which', lambda name: pytest.fail('must not enable cache'))
+    with workflow.compiler_cache(tmp_path, {'cc': ['ccache', 'cc']}) as enabled:
+        assert not enabled
+        assert os.environ['CCACHE_DISABLE'] == '1'
+        assert os.environ['CC'] == 'ccache cc'
+    assert os.environ['CCACHE_DISABLE'] == 'old'
 
 
 @pytest.mark.parametrize('failure', [None, 'validation', 'source-change'])

@@ -73,6 +73,17 @@ def build_lock(path: Path) -> Iterator[None]:
 @contextmanager
 def compiler_cache(cache_root: Path, identity: dict[str, object]) -> Iterator[bool]:
     """Content/header/flags-aware compiler reuse; never cache linking."""
+    if os.environ.get('NO_CACHE') == '1':
+        previous = os.environ.get('CCACHE_DISABLE')
+        os.environ['CCACHE_DISABLE'] = '1'
+        try:
+            yield False
+        finally:
+            if previous is None:
+                os.environ.pop('CCACHE_DISABLE', None)
+            else:
+                os.environ['CCACHE_DISABLE'] = previous
+        return
     executable = shutil.which('ccache')
     keys = ('CC', 'CCACHE_DIR', 'CCACHE_MAXSIZE', 'CCACHE_COMPILERCHECK')
     saved = {key: os.environ.get(key) for key in keys}

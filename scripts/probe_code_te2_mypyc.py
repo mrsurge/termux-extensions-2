@@ -180,7 +180,10 @@ def build(output: Path, cache_root: Path) -> None:
         log_path = cache / "build.log"
         try:
             with compiler_cache(cache_root, identity) as cached:
-                print(f'Build cache: {cache}; ccache: {"enabled (512M limit)" if cached else "unavailable; full changed-extension rebuilds"}', flush=True)
+                cache_status = "enabled (512M limit)" if cached else (
+                    "explicitly disabled; full changed-extension rebuilds" if os.environ.get('NO_CACHE') == '1'
+                    else "unavailable; full changed-extension rebuilds")
+                print(f'Build cache: {cache}; ccache: {cache_status}', flush=True)
                 with log_path.open("w") as log, redirect_stdout(log), redirect_stderr(log):
                     extensions = mypycify(sources, opt_level="3", multi_file=True, target_dir=str(cache / "csrc"))
                     setup(
