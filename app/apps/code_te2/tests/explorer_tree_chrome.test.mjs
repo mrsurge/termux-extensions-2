@@ -94,6 +94,98 @@ function rect(top, height = 40, left = 0, width = 320) {
   };
 }
 
+test('mobile drawer opening explicitly refreshes sticky scopes without scrolling', async () => {
+  const win = installDom();
+  const { createExplorerChromeController } = await importTypeScript(
+    'src/explorer/chrome/explorer-chrome-controller.ts',
+  );
+  document.body.innerHTML = '<div class="fe-root layout-mobile"></div>';
+  let updates = 0;
+  win.__explorerStickyScopes = { update: () => { updates += 1; }, destroy() {} };
+  const controller = createExplorerChromeController({});
+  controller.toggleDrawer(true);
+  assert.equal(updates, 1);
+  controller.toggleDrawer(false);
+  assert.equal(updates, 1);
+  controller.toggleDrawer();
+  assert.equal(updates, 2);
+  win.happyDOM.abort();
+});
+
+test('sticky scopes recover after offscreen rendering and drawer reveal, with lifecycle cleanup', async () => {
+  const win = installDom();
+  const { createExplorerStickyScopes } = await importTypeScript(
+    'src/explorer/chrome/sticky-scopes.ts',
+  );
+  document.body.innerHTML = `<div class="fe-drawer"><div class="fe-drawer-body">
+    <ul id="fe-file-tree"><li class="fe-tree-node fe-tree-root" data-kind="dir" data-open="true" data-rel=".">
+      <span class="fe-tree-text">project</span><ul class="fe-tree">
+      <li class="fe-tree-node" data-kind="dir" data-open="true" data-rel="src">
+        <span class="fe-tree-text">src</span><ul class="fe-tree">
+        <li class="fe-tree-node" data-kind="file" data-rel="src/file.ts"><span class="fe-tree-text">file.ts</span></li>
+      </ul></li></ul></li></ul></div></div>`;
+  const drawer = document.querySelector('.fe-drawer');
+  const body = document.querySelector('.fe-drawer-body');
+  const tree = document.getElementById('fe-file-tree');
+  const file = tree.querySelector('[data-kind="file"]');
+  tree.getBoundingClientRect = body.getBoundingClientRect = () => rect(0, 600);
+  for (const node of tree.querySelectorAll('li')) {
+    node.getBoundingClientRect = () => node === file ? rect(100, 40) : rect(-100, 1000);
+  }
+  tree.scrollTop = 300;
+  let visible = false;
+  document.elementsFromPoint = () => visible ? [file] : [];
+  document.elementFromPoint = () => visible ? file : null;
+  const savedIntersection = globalThis.IntersectionObserver;
+  let visibilityCallback;
+  let disconnected = false;
+  globalThis.IntersectionObserver = class {
+    constructor(callback) { visibilityCallback = callback; }
+    observe(element) { assert.equal(element, tree); }
+    disconnect() { disconnected = true; }
+  };
+  const settle = async () => {
+    for (let i = 0; i < 4; i++) await new Promise(resolve => win.requestAnimationFrame(resolve));
+  };
+  const scopes = () => [...body.querySelectorAll('.fe-sticky-scope')].map(e => e.dataset.rel);
+  let sticky;
+  try {
+    sticky = createExplorerStickyScopes({ treeElement: tree, drawerBodyEl: body, openCardMenuForEntry() {} });
+    await settle();
+    assert.deepEqual(scopes(), ['.']);
+    visible = true;
+    const transition = new win.Event('transitionend', { bubbles: true });
+    Object.defineProperty(transition, 'propertyName', { value: 'transform' });
+    drawer.dispatchEvent(transition);
+    await settle();
+    assert.deepEqual(scopes(), ['.', 'src']);
+    assert.equal(tree.scrollTop, 300);
+
+    // Rendering while hidden can replace the chain; reveal without animation
+    // (reduced motion / desktop) must repair it too, without a scroll event.
+    visible = false;
+    sticky.update();
+    await settle();
+    assert.deepEqual(scopes(), ['.']);
+    visible = true;
+    visibilityCallback([{ isIntersecting: true }]);
+    await settle();
+    assert.deepEqual(scopes(), ['.', 'src']);
+    assert.equal(tree.scrollTop, 300);
+    sticky.destroy();
+    assert.equal(disconnected, true);
+    drawer.dispatchEvent(transition);
+    visibilityCallback([{ isIntersecting: true }]);
+    await settle();
+    assert.equal(body.querySelector('#fe-sticky-scopes'), null);
+  } finally {
+    sticky?.destroy();
+    if (savedIntersection === undefined) delete globalThis.IntersectionObserver;
+    else globalThis.IntersectionObserver = savedIntersection;
+    win.happyDOM.abort();
+  }
+});
+
 test('project switch dialogs describe draft loss as a risk, not a certainty', () => {
   const projectSwitchWarning =
     'Any unsaved changes in the current project could be lost. Continue?';

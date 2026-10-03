@@ -1,4 +1,5 @@
 import { loadMonaco as loadBundledMonaco } from '../../../static/vendor/monaco-editor-core/te2-lang/bootstrap/monaco.bootstrap.bundle.js';
+import type { Environment } from '../../../static/vendor/monaco-editor-core/esm/vs/editor/editor.api';
 import { traceColdBoot } from './editor_cold_boot_trace.ts';
 
 interface WorkerCtorLike {
@@ -6,7 +7,7 @@ interface WorkerCtorLike {
 }
 
 type WindowWithMonacoBoot = Window & {
-  MonacoEnvironment?: Record<string, unknown>;
+  MonacoEnvironment?: Environment;
   _loadedMonacoBundle?: string;
 };
 
@@ -163,7 +164,9 @@ export async function bootMonacoRuntime(
       `[Monaco] loaded from host.js mode=${languageWorkersEnabled ? 'web-workers' : 'code-server'}`,
     );
 
-    win.monaco = monacoNs || undefined;
+    // The pinned bootstrap namespace includes private runtime hooks not exposed
+    // by Monaco's public editor.api declarations. Keep adaptation at this edge.
+    win.monaco = (monacoNs || undefined) as WindowWithMonacoBoot['monaco'];
     deps.ensureTe2DiffTheme();
 
     // Subscribe before connecting, then apply the selected theme before either

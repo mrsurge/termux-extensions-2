@@ -1007,6 +1007,24 @@ export function createExplorerStickyScopes({
       : null;
   resizeObserver?.observe(treeElement);
 
+  // A translated mobile drawer keeps its size while offscreen. Tree renders
+  // there can sample the root-only fallback, with no subsequent resize/scroll
+  // to repair it. Resample on reveal and once the slide has actually settled.
+  const visibilityObserver =
+    typeof IntersectionObserver === 'function'
+      ? new IntersectionObserver((entries) => {
+          if (entries.some((entry) => entry.isIntersecting)) scheduleUpdate();
+        })
+      : null;
+  visibilityObserver?.observe(treeElement);
+  const drawer = drawerBodyEl.closest('.fe-drawer');
+  function onDrawerTransitionEnd(event: Event): void {
+    if (event.target !== drawer) return;
+    if ((event as TransitionEvent).propertyName !== 'transform') return;
+    scheduleUpdate();
+  }
+  drawer?.addEventListener('transitionend', onDrawerTransitionEnd);
+
   lastScrollTop = treeElement.scrollTop || 0;
   function onScroll(): void {
     const nextTop = treeElement.scrollTop || 0;
@@ -1029,6 +1047,8 @@ export function createExplorerStickyScopes({
       disposed = true;
       observer.disconnect();
       resizeObserver?.disconnect();
+      visibilityObserver?.disconnect();
+      drawer?.removeEventListener('transitionend', onDrawerTransitionEnd);
       treeElement.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', scheduleUpdate);
       if (rafId) {

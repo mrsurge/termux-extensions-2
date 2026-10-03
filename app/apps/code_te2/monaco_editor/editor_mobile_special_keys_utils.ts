@@ -627,7 +627,7 @@ export function bindMobileEditorSpecialKeys(
     if (role !== 'primary') return;
     const detail = (event as CustomEvent<MobileEditorPanelToggleDetail>).detail;
     if (detail?.role !== 'secondary') return;
-    setPanelOpen(panel.hidden);
+    setPanelOpen(Boolean(panel.hidden));
     markMobileEditorPanelToggleHandled(event);
   };
   win.addEventListener(MOBILE_EDITOR_PANEL_TOGGLE_EVENT, handlePanelToggle);
@@ -651,7 +651,7 @@ export function bindMobileEditorSpecialKeys(
         requestMobileEditorPanelToggle(win, role);
         return;
       }
-      setPanelOpen(panel.hidden);
+      setPanelOpen(Boolean(panel.hidden));
     }),
     bindPointerAction(saveTrigger, () => {
       state.consumeOneShot();

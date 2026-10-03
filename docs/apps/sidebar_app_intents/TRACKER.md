@@ -115,6 +115,12 @@ and joint debugging when its scheduled slice is reached.
   accepted scrolling behavior unchanged. Desktop/initial reveal are regression checks.
   **Notify the user explicitly before starting this bug's live investigation;
   reproduce/debug it together when its scheduled slice is reached.**
+- Joint reproduction completed on local Electron's mobile breakpoint and Android:
+  root-only sticky projection survived despite intact nested tree ancestry. One
+  existing `update()` restored scopes on both clients without scrolling. The fix
+  explicitly refreshes on mobile drawer open, settled transform and visibility
+  reveal, with cleanup. Twelve tree/result-scope tests, typecheck and bundle build
+  pass; force-OTA live acceptance of this source remains pending.
 
 ## File Explorer
 

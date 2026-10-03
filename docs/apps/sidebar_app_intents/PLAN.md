@@ -573,18 +573,23 @@ state restore and embedded versus standalone preferences before attributing the
 reported loss to a missing write. Immediate preference persistence can be
 selected after tracing those owners, independent of directory-load success.
 
-The reported sticky defect is mobile-only after delayed drawer close/reopen;
-desktop and general initial rendering are regression checks, not the reproducer.
-When this bug reaches its scheduled investigation slice, explicitly notify the
-user before live probing or attempting a fix: they want to reproduce/debug it
-together. Do not silently fold it into the pipe-intent foundation work.
-Source-tree `sticky-scopes.ts` already schedules on scroll, tree mutations,
-tree ResizeObserver and window resize, and exposes `update()`. Hidden-ancestor
-reveal is not covered by a direct tree-attribute observation. Trace
-`chrome/explorer-chrome-controller.ts` and host drawer reveal/render ordering;
-capture geometry at the failed reveal and compare with a successful one before
-choosing a lifecycle fix. No confirmed race diagnosis yet. Dock layout/gesture
-inspection is likewise pending, not an inferred CSS-only change.
+The user reproduced the sticky defect on Android and local Electron at the mobile
+breakpoint, particularly after file switching/rendering. Joint live inspection
+found only the root sticky row despite several open ancestor scopes in the live
+tree. Hit-testing found the expected nested rows; calling the existing `update()`
+once restored five local/four Android scopes without changing scroll position.
+This establishes a stale geometry projection, not lost directory state.
+
+The mobile drawer translates without changing tree dimensions. Offscreen tree
+renders can sample a root-only fallback; reopening previously had no explicit
+refresh and did not necessarily trigger tree mutations or ResizeObserver.
+The approved fix requests `update()` from mobile drawer opening, resamples at
+the drawer's transform transition end, and observes tree visibility for reveals
+without animation. Observers/listeners are cleaned up on destruction; there is
+no polling, scroll nudge, changed scope geometry or backend state mutation.
+Twelve targeted tree/result-scope tests, TypeScript checking and frontend build
+pass. Updated-client live acceptance remains pending force OTA; the diagnostic
+manual update is not acceptance of the new source. Dock inspection remains pending.
 
 ## Phases
 

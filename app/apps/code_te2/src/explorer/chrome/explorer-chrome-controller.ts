@@ -174,6 +174,9 @@ export function createExplorerChromeController(
       root.classList.remove('drawer-open');
     }
     syncDrawerOpenButton(root);
+    if (root.classList.contains('drawer-open')) {
+      window.__explorerStickyScopes?.update();
+    }
   }
 
   function renderBranchLabel(): void {
