@@ -478,7 +478,13 @@ No active worker/link, framework restart, wheel/release or automatic cleanup.
   `.release/mypyc-checkpoint-20260929/` until replacement releases are verified.
 - [ ] After those stages, replace remaining msgspec codec/Struct/validation uses
   explicitly; prove production import removal without weakening input checks.
-- [ ] Integrate native worker into packaged/build bootstrap only after parity.
+- [x] Integrate configured source Cargo workers into framework bootstrap:
+  normal startup and `--build-only`, per-app fingerprint/cache publication and
+  direct raw-binary shellspec handoff. Registry/source inclusion and 26 targeted
+  bootstrap/release/cache tests pass; no actual cache build or runtime restart
+  performed in this slice. Source live acceptance remains pending.
+- [ ] Complete packaged worker/domain assembly, ABI tagging and clean-install
+  acceptance before any integrated release. Mypyc activation remains explicit.
 - [ ] Verify Python Socket.IO imports are actually eliminated before claiming
   startup savings; include native initialization costs in the comparison.
 - [ ] Review native-worker milestones against parity/startup evidence before

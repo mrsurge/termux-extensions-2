@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "workers": [
+    {
+      "appId": "code_te2",
+      "manifest": "native_editor_worker/Cargo.toml",
+      "binary": "code-te2-worker",
+      "environmentKey": "CODE_TE2_WORKER_BIN",
+      "pythonAbi": true
+    }
+  ]
+}

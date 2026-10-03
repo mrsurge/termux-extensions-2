@@ -1215,7 +1215,8 @@ Do not publish a release or merge as part of this maintenance planning pass.
 
 ## Code TE2 native artifact installation contract
 
-Approved direction (documentation only; not implemented): publish the independent
+Approved direction (source executable/bootstrap slice implemented; matched-set
+and wheel assembly still pending): publish the independent
 Code TE2 executable and matching mypyc domain as a validated artifact set, not
 runtime dependencies on Cargo `target/release` or `.codex-scratch`.
 
@@ -1249,6 +1250,22 @@ Implementation gates:
 3. Clean desktop SSH and Motorola/Pixel install acceptance without checkout or
    build-tool life support, then integrate the release workflow.
 
-No executable relocation, automatic build, wheel publication or runtime restart
-occurred in this documentation pass. Full contract:
+Source bootstrap implementation: `app/native_worker_builds.json` declares Code
+TE2's independent manifest/binary/ABI/env key. Normal startup and `--build-only`
+build/reuse and atomically publish its raw executable under
+`TE2_CACHE_HOME/code_te2/build/bin/<fingerprint>/<profile>/`, with separate retained
+Cargo intermediates. The shellspec uses the resolved `CODE_TE2_WORKER_BIN` directly;
+no wrapper enters the worker pipe. `--force-build` applies to workers and
+`--print-command` does not build. Source wheels include the registry and worker
+Cargo source; binary installs fail instead of silently building missing workers.
+Mypyc still requires explicit build/activation; the existing selected overlay is
+not automatically compiled or republished by framework bootstrap.
+
+Release gate: prepare server and configured worker binaries before wheel assembly,
+then package the ABI-matched compiled domain, interpreted islands, resources and
+component provenance. Implement the appropriate CPython/platform tags and package
+resolver before attempting the next release rodeo; current `py3-none` server-only
+wheel machinery is insufficient. Validate desktop/Termux clean installs after
+that packaging slice. No wheel publication or runtime restart occurred here.
+Full contract:
 `framework/native_editor_worker/README.md`, Planned installed artifact placement.

@@ -16,7 +16,7 @@ shells:
           bg: rgba(0, 0, 0, 0.88)
           border: rgba(29, 70, 126, 0.88)
     command:
-      - ${ctx:PROJECT_ROOT}/framework/native_editor_worker/target/release/code-te2-worker
+      - ${env:CODE_TE2_WORKER_BIN}
       - ${ctx:PROJECT_ROOT}
       - ${free_port}
     env:

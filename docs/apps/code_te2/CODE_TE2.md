@@ -4816,6 +4816,15 @@ te2 framework eval --app code_te2 --shell SHELL_ID --instance INSTANCE_ID --code
 
 The standalone Terminal is a separate app from Code TE2's Python/Pyte drawer (section 46). Its Node/headless-xterm ownership and local UI controls are preserved here for shared-input maintenance.
 
+Both standalone and native drawer PTYs set `TERM=xterm-256color` explicitly at
+creation. The framework's parent may be tmux (`TERM=tmux-256color`), but that
+terminal is not the emulator serving the new PTY. The standalone broker sets
+both node-pty's terminal name and child environment; the native drawer launcher
+overrides the rendered shell environment. Existing sessions are not rewritten.
+Starting tmux inside the new shell remains normal: tmux owns its inner terminal
+identity. The inherited mismatch was live-verified to break htop touch/mouse input;
+the two terminfo definitions advertise different mouse encodings.
+
 - The standalone terminal supports only the Node shellspec. Browser traffic is
   strict one-object-per-frame MessagePack; FWS pipe traffic is length-prefixed
   MessagePack. Node owns pty, headless xterm, 5,000-row scrollback, sequence,
@@ -5266,7 +5275,9 @@ and Starlette but not necessarily FastAPI/Pydantic. Those generic contracts
 remain available to other apps.
 
 On the native-services branch, Code TE2 instead launches the separate FWS-owned
-`framework/native_editor_worker/target/release/code-te2-worker` executable. Rust
+raw `code-te2-worker` executable resolved by framework bootstrap through
+`CODE_TE2_WORKER_BIN`. Source startup and `--build-only` prepare the registry's
+independent Cargo builds under per-app TE2 cache roots; no wrapper sits on the pipe. Rust
 Hyper owns health/resources and Socketioxide owns the five existing namespaces,
 rooms, polling/WebSocket transport and binary packet framing. It uses the common
 Engine.IO parser with application `msgpack-v1` bytes, not the optional Socket.IO
@@ -5421,8 +5432,10 @@ venv ABI. Its branch shellspec selects `CODE_TE2_MYPYC_DIR` at
 `.codex-scratch/mypyc-active`; the matching manifest/lib group must exist before
 startup. Missing artifacts fail closed: no automatic compile or silent
 interpreted fallback. Developer resource symlinks are not wheel packaging.
-Build/bootstrap integration remains deferred; do not publish an installed release
-that depends on an unresolved source-target executable or absolute overlay path.
+Source executable bootstrap/cache integration is implemented through
+`app/native_worker_builds.json`. Mypyc remains explicit; atomic matched-set and
+binary-wheel packaging/ABI tagging are still deferred. Do not publish an installed
+release that depends on an unresolved domain overlay or developer resource link.
 
 Mypyc type-check/shared-library success does not prove domain runtime parity.
 Retain interpreted islands or adapt them with behavior tests: mutable `ClassVar`

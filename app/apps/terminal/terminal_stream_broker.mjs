@@ -78,7 +78,8 @@ const cwd = process.env.TERMINAL_STREAM_CWD || process.cwd();
 let cols = parsePositiveInt(process.env.TERMINAL_STREAM_COLS, DEFAULT_COLS);
 let rows = parsePositiveInt(process.env.TERMINAL_STREAM_ROWS, DEFAULT_ROWS);
 const scrollback = parsePositiveInt(process.env.TERMINAL_STREAM_SCROLLBACK, DEFAULT_SCROLLBACK);
-const termName = process.env.TERM || DEFAULT_TERM;
+// This PTY is served by xterm.js, not the terminal (e.g. tmux) hosting TE2.
+const termName = DEFAULT_TERM;
 const env = { ...process.env, TERM: termName };
 
 const stateTerminal = new HeadlessTerminal({

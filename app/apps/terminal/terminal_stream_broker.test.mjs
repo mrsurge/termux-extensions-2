@@ -11,6 +11,7 @@ test('broker restores parsed PTY state at a reconnect sequence boundary', { time
     cwd: process.cwd(),
     env: {
       ...process.env,
+      TERM: 'tmux-256color',
       TERMINAL_STREAM_PROTOCOL: 'msgpack-v1',
       TERMINAL_STREAM_COLS: '90',
       TERMINAL_STREAM_ROWS: '30',
@@ -42,11 +43,11 @@ test('broker restores parsed PTY state at a reconnect sequence boundary', { time
       } else if (message.type === 'checkpoint' && message.request_id === 'first') {
         child.stdin.write(encodePipeFrame({
           type: 'input',
-          data: Buffer.from("printf '__TE2_SMOKE__\\n'\n"),
+          data: Buffer.from("printf '__TE2_SMOKE__:%s\\n' \"$TERM\"\n"),
         }));
       } else if (message.type === 'output') {
         output += Buffer.from(message.data).toString('utf8');
-        if (!requestedReconnect && output.includes('__TE2_SMOKE__')) {
+        if (!requestedReconnect && output.includes('__TE2_SMOKE__:xterm-256color')) {
           markerSequence = message.sequence;
           requestedReconnect = true;
           child.stdin.write(encodePipeFrame({
@@ -59,6 +60,7 @@ test('broker restores parsed PTY state at a reconnect sequence boundary', { time
       } else if (message.type === 'checkpoint' && message.request_id === 'second') {
         const state = Buffer.from(message.state).toString('utf8');
         assert.match(state, /__TE2_SMOKE__/);
+        assert.match(state, /__TE2_SMOKE__:xterm-256color/);
         assert.ok(message.sequence >= markerSequence);
         passed = true;
         child.stdin.write(encodePipeFrame({ type: 'destroy' }));

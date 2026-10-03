@@ -270,18 +270,53 @@ editor RPC coroutine avoid a compiled error-path type mismatch. Live acceptance
 remains a separate gate; the matching Pixel group also passed all 20 isolated
 native-worker tests.
 
-### Pixel build and live test
+### Framework bootstrap-managed native executable (source installs)
+
+Normal `te2` startup and `te2 --build-only` now prepare the workers listed in
+`app/native_worker_builds.json`. Each entry declares an app ID, framework-relative
+Cargo manifest, binary name, environment key and whether Python ABI participates
+in its build identity. The initial entry is Code TE2; do not add arbitrary launch
+commands to this registry.
+
+The Code TE2 executable publishes atomically under
+`$TE2_CACHE_HOME/code_te2/build/bin/<fingerprint>/<release|debug>/code-te2-worker`.
+Intermediates remain in `code_te2/build/cargo-target`. A per-app lock and the
+existing framework publication/pruning helpers protect the final cache; mypyc
+snapshots and checkpoints are not pruned. Rust source/lockfile, profile, platform,
+compiler identity/flags and invoking Python ABI determine reuse. `--force-build`
+also rebuilds configured workers. `--print-command` resolves paths without build
+or publication. Worker builds use `--locked` and the invoking `sys.executable`
+as `PYO3_PYTHON`, independently of the server's Cargo target cache.
+
+Bootstrap exports `CODE_TE2_WORKER_BIN` to the framework process. The app shellspec
+launches this exact raw executable directly with the existing project/port args;
+there is no pipe-facing Python bootstrap wrapper. This requires a newly launched
+framework to ingest the resolved environment; an app-worker restart under an old
+framework cannot manufacture the new environment key.
+
+Mypyc compilation/activation is still explicit through `build_mypyc.py`; this
+slice does not build it automatically or replace its selected domain overlay.
+Source installs include the independent worker's Cargo manifest/lockfile/source.
+Binary release wheels still require matched executable/domain/resources and ABI
+tagging: the new source-build path refuses to compile a worker as a fallback for
+a binary release lacking integrated worker payloads. No integrated release is
+claimed, and wheel assembly remains the next gate.
+
+### Pixel source build and live test
 
 From `~/mrselect6`, after pulling this branch:
 
 ```bash
-PYO3_PYTHON=/data/data/com.termux/files/usr/bin/python cargo build --release --locked --manifest-path framework/native_editor_worker/Cargo.toml
+te2 --build-only
 ```
 
-Then launch/restart Code TE2 through its normal framework app lifecycle with the
-system Python environment (or its matching `.jitenv`). The shellspec selects
-`target/release/code-te2-worker`; do not run the fixture executable below as the
-app. No frontend assets changed. The native listener cutover at `8e46ae91` has
+Use the regular system Python environment (or matching `.jitenv`) for bootstrap.
+Then, only when approved, launch the framework anew so it receives the published
+`CODE_TE2_WORKER_BIN`; Code TE2 launches through the normal app lifecycle.
+The manual Cargo command remains available for isolated worker test builds, but
+its target output is no longer the app shellspec's runtime path. Do not run the
+fixture executable below as the app. No frontend assets changed. The native
+listener cutover at `8e46ae91` has
 user-confirmed Pixel live acceptance. The subsequent codec slice needs its own
 live check; acceptance of the listener does not establish its performance.
 

@@ -146,9 +146,9 @@ impl Shells {
         let terminal =
             label == "code-editor-terminal" || label.starts_with("code-editor-terminal:");
         if terminal {
-            spec.env.entry("TERM".into()).or_insert_with(|| {
-                std::env::var("TERM").unwrap_or_else(|_| "xterm-256color".into())
-            });
+            // A drawer PTY is rendered by our terminal frontend, not by the
+            // tmux/SSH terminal which happened to launch the framework.
+            spec.env.insert("TERM".into(), "xterm-256color".into());
         }
         ensure!(
             spec.backend == if terminal { "pty" } else { "pipe" },
@@ -692,6 +692,29 @@ mod tests {
         assert!(!observer.live(&record.id).unwrap());
         assert!(observer.subscribe(record.id.clone()).is_err());
         assert!(observer.write(&record.id, b"no ownership").is_err());
+        shells.terminate(&record.id).unwrap();
+    }
+
+    #[test]
+    fn drawer_pty_uses_own_terminal_identity() {
+        let (root, shells) = isolated();
+        let _lifetime = Lifetime(shells.clone());
+        let path = root.path().join("terminal.yaml");
+        std::fs::write(&path, "version: '1'\nshells:\n  terminal:\n    backend: pty\n    command: [sh, -c, 'sleep 30']\n    env:\n      TERM: tmux-256color\n").unwrap();
+        let record = shells
+            .spawn(
+                path,
+                "terminal".into(),
+                HashMap::new(),
+                "code-editor-terminal:project:term-test:1".into(),
+                "test".into(),
+                false,
+            )
+            .unwrap();
+        assert_eq!(
+            record.env_overrides.get("TERM").map(String::as_str),
+            Some("xterm-256color")
+        );
         shells.terminate(&record.id).unwrap();
     }
 

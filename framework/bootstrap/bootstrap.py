@@ -14,6 +14,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import sysconfig
 import threading
 import time
 from collections.abc import Callable, Generator, Mapping, MutableMapping, Sequence
@@ -73,6 +74,15 @@ class ServerCommand:
 
 
 @dataclass(frozen=True)
+class NativeWorkerBuild:
+    app_id: str
+    manifest: Path
+    binary: str
+    environment_key: str
+    python_abi: bool
+
+
+@dataclass(frozen=True)
 class InterfaceAddress:
     name: str
     address: str
@@ -115,14 +125,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     env = _build_env(args)
     if args.print_command:
         command = _server_command(args, env, build=False)
+        _prepare_native_workers(args, env, build=False)
         print(" ".join(_memory_profile_server_command(args, command.argv)))
         return 0
     with _framework_migration_guard(env):
         command = _server_command(args, env, build=True)
         if args.build_only:
-            if command.build_already_done:
-                return 0
-            return subprocess.run(command.argv, env=env, check=False).returncode
+            if not command.build_already_done:
+                result = subprocess.run(command.argv, env=env, check=False).returncode
+                if result != 0:
+                    return result
+            _prepare_native_workers(args, env, build=True)
+            return 0
+        _prepare_native_workers(args, env, build=True)
         child_command = _memory_profile_server_command(args, command.argv)
         return _run_child(child_command, env, stdio_control=args.stdio_control)
 
@@ -185,7 +200,7 @@ def _parse_args(argv: Sequence[str] | None) -> BootstrapArgs:
         default=_env_flag("TE2_SERVER_NO_BUILD_CACHE"),
         help="Use cargo run/build directly instead of the fingerprinted binary cache.",
     )
-    parser.add_argument("--build-only", action="store_true", help="Build the Rust server and exit without launching it.")
+    parser.add_argument("--build-only", action="store_true", help="Build the Rust server and configured native workers, then exit without launching them.")
     parser.add_argument("--print-command", action="store_true", help="Print the resolved child command and exit.")
     parser.add_argument(
         "--stdio-control",
@@ -474,6 +489,121 @@ def _cached_server_command(
         _publish_cached_binary(built_binary, cached_binary)
         _prune_final_binary_cache(cache_dir / "bin", cached_binary)
     return ServerCommand([str(cached_binary)], build_already_done=True)
+
+
+def _native_worker_registry() -> list[NativeWorkerBuild]:
+    registry = _project_root() / "app" / "native_worker_builds.json"
+    try:
+        document = cast(object, json.loads(registry.read_text(encoding="utf-8")))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"Native worker build registry is unreadable: {registry}: {exc}") from exc
+    if not isinstance(document, dict) or document.get("schemaVersion") != 1:
+        raise SystemExit("Unsupported native worker build registry")
+    entries = document.get("workers")
+    if not isinstance(entries, list):
+        raise SystemExit("Native worker registry requires a workers array")
+    builds: list[NativeWorkerBuild] = []
+    ids: set[str] = set()
+    keys: set[str] = set()
+    source_root = _source_root().resolve()
+    for raw in entries:
+        if not isinstance(raw, dict):
+            raise SystemExit("Native worker registry entry must be an object")
+        entry = cast(dict[str, object], raw)
+        values: dict[str, str] = {}
+        for field in ("appId", "manifest", "binary", "environmentKey"):
+            value = entry.get(field)
+            if not isinstance(value, str) or not value:
+                raise SystemExit(f"Native worker registry requires {field}")
+            values[field] = value
+        app_id, binary, key = values["appId"], values["binary"], values["environmentKey"]
+        if any(not (part.isascii() and (part.isalnum() or part in "_-")) for part in app_id + binary + key):
+            raise SystemExit("Native worker registry identifiers must be safe path/env components")
+        if not (key[0].isalpha() or key[0] == '_') or '-' in key:
+            raise SystemExit("Native worker registry environmentKey is invalid")
+        relative = Path(values["manifest"])
+        manifest = (source_root / relative).resolve()
+        if relative.is_absolute() or not manifest.is_relative_to(source_root) or manifest.name != 'Cargo.toml':
+            raise SystemExit("Native worker manifest must remain within the framework source root")
+        python_abi = entry.get("pythonAbi", False)
+        if not isinstance(python_abi, bool):
+            raise SystemExit("Native worker pythonAbi must be boolean")
+        if app_id in ids or key in keys:
+            raise SystemExit("Duplicate native worker appId/environmentKey")
+        ids.add(app_id)
+        keys.add(key)
+        builds.append(NativeWorkerBuild(app_id, manifest, binary, key, python_abi))
+    return builds
+
+
+def _native_worker_fingerprint(worker: NativeWorkerBuild, profile: str, env: Mapping[str, str]) -> str:
+    if not worker.manifest.is_file():
+        raise SystemExit(f"Native worker Cargo manifest is missing: {worker.manifest}")
+    workspace = worker.manifest.parent
+    paths = set(_rust_fingerprint_paths(workspace))
+    paths.update(path for path in (workspace / "src").rglob("*") if path.is_file())
+    build_script = workspace / "build.rs"
+    if build_script.is_file():
+        paths.add(build_script)
+    hasher = hashlib.sha256()
+    identity: dict[str, object] = {
+        "schema": 1, "app": worker.app_id, "binary": worker.binary,
+        "workspace": str(workspace), "profile": profile,
+        "platform": sys.platform, "machine": os.uname().machine,
+        "flags": {key: env.get(key, '') for key in ('RUSTFLAGS', 'CARGO_ENCODED_RUSTFLAGS', 'CC', 'CFLAGS')},
+    }
+    if worker.python_abi:
+        identity['python'] = {
+            "executable": str(Path(sys.executable).resolve()), "version": sys.version,
+            "soabi": sysconfig.get_config_var('SOABI'), "libdir": sysconfig.get_config_var('LIBDIR'),
+            "library": sysconfig.get_config_var('LDLIBRARY'),
+        }
+    try:
+        identity['rustc'] = subprocess.check_output(['rustc', '-vV'], env=dict(env), text=True).strip()
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise SystemExit(f"Native worker build requires rustc: {exc}") from exc
+    hasher.update(json.dumps(identity, sort_keys=True).encode())
+    for path in sorted(paths):
+        hasher.update(b'\0' + path.relative_to(workspace).as_posix().encode() + b'\0')
+        hasher.update(path.read_bytes())
+    return hasher.hexdigest()[:24]
+
+
+def _prepare_native_workers(args: BootstrapArgs, env: MutableMapping[str, str], *, build: bool) -> None:
+    workers = _native_worker_registry()
+    if not workers:
+        return
+    if not args.cargo_manifest and packaged_server_path() is not None:
+        raise SystemExit("This binary release lacks integrated native-worker payloads. Reinstall a release with matched worker/domain artifacts; refusing a Cargo fallback.")
+    profile = 'release' if args.release else 'debug'
+    paths = resolve_te2_paths(env)
+    for worker in workers:
+        fingerprint = _native_worker_fingerprint(worker, profile, env)
+        root = paths.cache_home / worker.app_id / 'build'
+        binary_name = worker.binary + ('.exe' if sys.platform == 'win32' else '')
+        selected = root / 'bin' / fingerprint / profile / binary_name
+        if build:
+            with _exclusive_build_cache_lock(root):
+                if not _cached_binary_is_usable(selected) or args.force_build:
+                    command = ['cargo', 'build', '--locked', '--manifest-path', str(worker.manifest), '--bin', worker.binary]
+                    if profile == 'release':
+                        command.append('--release')
+                    build_env = dict(env, CARGO_TARGET_DIR=str(root / 'cargo-target'))
+                    if worker.python_abi:
+                        build_env['PYO3_PYTHON'] = sys.executable
+                    print(f"[te2] Building native worker {worker.app_id}: {selected}", flush=True)
+                    result = subprocess.run(command, env=build_env, check=False)
+                    if result.returncode:
+                        raise SystemExit(result.returncode)
+                    source = root / 'cargo-target' / profile / binary_name
+                    if not _cached_binary_is_usable(source):
+                        raise SystemExit(f"Native worker build produced no usable executable: {source}")
+                    if _native_worker_fingerprint(worker, profile, env) != fingerprint:
+                        raise SystemExit("Native worker source/toolchain changed during build; refusing stale publication. Run the build again.")
+                    _publish_cached_binary(source, selected)
+                _prune_final_binary_cache(root / 'bin', selected)
+        env[worker.environment_key] = str(selected)
+        print(f"[te2] Native worker {worker.app_id}: {selected}", flush=True)
 
 
 def _rust_build_profile(args: BootstrapArgs) -> str:
