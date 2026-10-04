@@ -4,6 +4,23 @@ Last updated: 2026-09-18
 
 ## Program status
 
+### Native Code TE2 Linux wheel integration (2026-10-04)
+
+- [x] Accepted native-services branch fast-forwarded into this packaging branch.
+- [x] Source-backed gap audit and Linux-first sequencing recorded in
+  `../client_runtime_polish/PLAN.md`, **Linux-first packaging handoff**.
+- [ ] Portable matched worker/domain manifest, validation and bootstrap handoff.
+- [ ] Materialized resources and checkout-independent compiled-module inventory.
+- [ ] CPython/ABI-specific Linux wheel assembly and final ELF/libpython audit.
+- [ ] Clean SSH install at `mrsurge@100.74.145.70`; retain candidate for user testing.
+- [ ] User live acceptance of the complete installed Linux runtime.
+- [ ] Adapt accepted packaging contract to Android/Termux, then release workflow.
+
+Use the SSH machine for acceptance; remote building is an optional space fallback.
+Do not rebuild/publish Android packages or tag/merge/publish a release in these
+implementation checkpoints. Older release records below are historical evidence,
+not validation of the new native-worker/mypyc wheel.
+
 | Phase | Status | Approval boundary |
 |---|---|---|
 | Phase 0: dependency cleanup | Complete, validated, and committed as `0c02c033` | Keep the audited Python runtime input; target locks belong to the selected distribution design |

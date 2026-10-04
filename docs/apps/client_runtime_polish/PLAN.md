@@ -1215,6 +1215,58 @@ Do not publish a release or merge as part of this maintenance planning pass.
 
 ## Code TE2 native artifact installation contract
 
+### Linux-first packaging handoff (2026-10-04)
+
+Work continues on `feature/desktop-deb-packaging`, fast-forwarded to the accepted
+native-services snapshot. Build and validate a complete Linux wheel first, then
+reuse its artifact contract for Android/Termux. Do not publish/tag/merge main as
+part of the implementation checkpoints.
+
+The clean installation/live acceptance target is `ssh mrsurge@100.74.145.70`.
+Read-only discovery found Debian Python 3.13.5, Docker and about 167 GiB free;
+no shared libpython was found in the standard system library directory. This
+machine is primarily the acceptance target, not a mandatory remote builder.
+Prefer local builds while storage permits (the user reports about 15 GiB local
+headroom); optionally use the existing SSH builder path if local space becomes
+tight. No remote cleanup, broad process termination or framework restart is
+implicitly authorized. Keep an installed candidate available for the user's
+live acceptance; do not equate import/CLI smoke tests with working app acceptance.
+
+Linux implementation order:
+
+1. Portable matched-set metadata and fail-closed resolver. Record independent
+   Rust/domain source identities, CPython minor/SOABI/free-threaded status,
+   architecture/libc, linked libpython and checksums. Replace checkout-absolute
+   module inventory with relative paths and materialize resources as regular
+   packaged files, not developer links. Resolve executable/domain once through
+   bootstrap and pass both to the raw-worker shellspec. Retain explicit source
+   build/activation and existing cache roots.
+2. Extend existing Linux wheel construction (setup.py, pinned builder, archive
+   validator), not a parallel user installer. Include framework server plus
+   `app/release_runtime/code_te2/` worker/domain/resources. Emit exact CPython/ABI
+   wheel tags rather than `py3-none`. Start clean-target coverage with ordinary
+   CPython 3.13; local CPython 3.14 is a separate ABI, not a reusable candidate.
+   Prove shared-libpython resolution, interpreter stdlib/venv selection and
+   OpenSSL/native dependencies under the declared manylinux floor before
+   choosing final bundling/rpath policy. Never depend on build-host /opt paths.
+   Preserve unchanged-Rust reuse and verify final post-auditwheel payload hashes.
+3. Install a candidate in a fresh SSH venv without source checkout, scratch
+   selectors, Cargo or compiler assistance for Code TE2. Validate framework
+   launch, pipe readiness, compiled imports, resources, WBA, document/diff flows,
+   Sidebar apps and terminal ownership; retain the existing standalone Terminal
+   first-use node-pty build prerequisite. Leave the install for user acceptance.
+
+Android/APK assembly, Termux wheel adaptation and publication are later gates.
+Android will reuse portable artifact metadata/layout, not Linux ELF binaries,
+libc tags or CPython ABI assumptions. The current server-only wheel pipeline and
+scratch-selected domain cannot be presented as an integrated native release.
+
+Investigation evidence: setup.py packages only the server; bootstrap rejects
+missing binary-release worker payloads; the shellspec selects mypyc-active in
+scratch; mypyc resource links and absolute inventory need release materialization.
+The current local worker links libpython3.14.so.1.0, libssl.so.3 and libcrypto.so.3.
+
+
 Approved direction (source executable/bootstrap slice implemented; matched-set
 and wheel assembly still pending): publish the independent
 Code TE2 executable and matching mypyc domain as a validated artifact set, not
