@@ -152,6 +152,8 @@ def test_shared_document_service_checks_live_ownership_before_open(monkeypatch, 
     })
     opened = AsyncMock(return_value={"ok": True})
     monkeypatch.setattr(file_ops_backend, "handle_host_open_request", opened)
+    from app.apps.code_te2.ui_ipc import notifications
+    monkeypatch.setattr(notifications, "emit_ui_ipc_rpc_notification", AsyncMock())
     if failure is not None:
         with pytest.raises(ValueError):
             asyncio.run(dispatch_app_intent(request()))

@@ -35,6 +35,7 @@ interface UiIpcConnectionsDeps {
   getSocketQuery?: () => JsonObject;
   onHostStateResync?: () => Promise<void> | void;
   onSidebarConnected?: () => void;
+  onTerminalDestination?: (params: JsonObject) => Promise<void>;
 }
 
 type UiIpcRpcConnection = ReturnType<typeof createUiIpcRpcConnection>;
@@ -345,6 +346,8 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
             dispatchWindowCustomEvent('code-te2:comparison-changed', params);
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.preferencesChanged) {
             dispatchWindowCustomEvent('code-te2:preferences-changed', params);
+          } else if (method === UI_IPC_RPC_NOTIFICATIONS.terminalDestination) {
+            void deps.onTerminalDestination?.(params);
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.terminalOpen) {
             dispatchWindowCustomEvent('code-te2:terminal-open', params);
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.codeInspectorChanged) {

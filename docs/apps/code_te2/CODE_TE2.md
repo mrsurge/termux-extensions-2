@@ -4410,6 +4410,10 @@ durable state. A re-created host must publish its fresh presentation identity
 before exact-client mention routing may succeed. Canonical legacy slot and
 presentation identities migrate once; canonical records win collisions.
 
+Terminal directory destination is a separate client/framework-wide preference (`ask`, `drawer`, `sidebar`), independent of dock layout and project membership. The initiating Code TE2 host owns the shared dialog for its Explorer and embedded File Explorer; Don't ask again persists the choice, and the app-owned selector beneath Cursor style in Editor Settings can restore Ask every time. Electron stores a bounded map in existing `desktop-state.json`; GeckoView/Cefrium store separate records in their existing application-private state container through the native bridge, keyed by stable client and configured upstream origin. Browser clients use localStorage; native clients never silently use random relay-origin storage. Reads are lazy/cached, and preference changes create no PTY. Storage errors are reported without pretending persistence succeeded.
+
+`ui.terminal.destination` is an exact-client host notification, answered by `ui.host.terminal.destination` on the host's own RPC lane. The originating intent returns pending immediately rather than holding the 15-second framework broker window open. Backend single-use choice records are bounded (64 overall, one/client), expire after 120 seconds and are cancelled on host disconnect. Replies revalidate the saved project generation and embedded presentation before the existing fresh-session service runs; cancellation, stale/wrong-client/replayed replies have no creation effects. See sidebar-app PLAN, Terminal Intent Slice. New native bridge methods require matching native/client publication, not just a server reload.
+
 ### Stateful App Peer Routing
 
 ALS-RS Sidebar traffic resolves injected `TE_FRAMEWORK_URL`, then `TE_PORT`, then

@@ -40,6 +40,7 @@ export type ElectronDesktopState = {
   version: 1;
   identities: ElectronDesktopIdentities;
   sidebar: ElectronSidebarPresentationStore;
+  terminalDestinations: Record<string, string>;
   editorSurfaces: {
     secondary: {
       projects: Record<string, ElectronEditorSurfacePresentation>;
@@ -310,6 +311,15 @@ function validateDesktopState(value: unknown): ElectronDesktopState {
       secondaryClientInstanceId,
     },
     sidebar: validateDesktopSidebarPresentationStore(raw.sidebar),
+    terminalDestinations: Object.fromEntries(
+      Object.entries(raw.terminalDestinations && typeof raw.terminalDestinations === "object"
+        && !Array.isArray(raw.terminalDestinations)
+        ? raw.terminalDestinations as Record<string, unknown> : {}).filter((entry): entry is [string, string] => {
+          const [key, value] = entry;
+          return key.length <= 4096 && typeof value === "string"
+            && ["ask", "drawer", "sidebar"].includes(value);
+        }).slice(-64),
+    ),
     editorSurfaces: { secondary: { projects } },
   };
 }
@@ -325,6 +335,7 @@ function createDesktopState(
       secondaryClientInstanceId: generatedClientId(),
     },
     sidebar: emptyDesktopSidebarPresentationStore(sidebar),
+    terminalDestinations: {},
     editorSurfaces: { secondary: { projects: {} } },
   };
 }
@@ -445,8 +456,31 @@ export function resetDesktopIdentities(
       secondaryClientInstanceId: generatedClientId(),
     };
     state.editorSurfaces.secondary.projects = {};
+    state.terminalDestinations = {};
     const written = await writeDesktopStateUnlocked(state, environment);
     return { ...written.identities };
+  });
+}
+
+export function desktopTerminalDestination(
+  frameworkOrigin: string, value?: unknown, environment = process.env,
+): Promise<string> {
+  const origin = new URL(frameworkOrigin);
+  if (!/^https?:$/.test(origin.protocol) || origin.username || origin.password) {
+    throw new Error("Terminal preference framework origin is invalid");
+  }
+  if (value !== undefined && (typeof value !== "string" || !["ask", "drawer", "sidebar"].includes(value))) {
+    throw new Error("Invalid terminal destination");
+  }
+  return withStateLock(async () => {
+    const state = await readDesktopStateUnlocked(environment);
+    const key = `${origin.origin}\u0000${state.identities.primaryClientInstanceId}`;
+    if (value !== undefined) {
+      delete state.terminalDestinations[key];
+      state.terminalDestinations[key] = String(value);
+      await writeDesktopStateUnlocked(state, environment);
+    }
+    return state.terminalDestinations[key] || "ask";
   });
 }
 

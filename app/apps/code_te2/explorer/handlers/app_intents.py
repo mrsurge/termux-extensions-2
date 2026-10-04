@@ -34,7 +34,7 @@ async def handle_open_in_terminal(
     context: ExplorerFileTreeHandlerContext, params: dict[str, object], msg_id: str | None,
 ) -> None:
     from ...host.terminal_intent_backend import open_directory_terminal
-    rel, destination = params.get("rel"), params.get("destination")
+    rel, destination = params.get("rel"), params.get("destination", "ask")
     if not isinstance(rel, str) or not isinstance(destination, str):
         raise ValueError("directory and terminal destination are required")
     project = context.project_root.expanduser().resolve(strict=True)

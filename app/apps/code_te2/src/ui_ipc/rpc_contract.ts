@@ -4,6 +4,7 @@ import type { JsonObject, JsonRpcNotificationEnvelope } from '../rpc/transport.t
 export const UI_IPC_RPC_NAMESPACE = RPC_NAMESPACES.uiIpc;
 
 export const UI_IPC_RPC_METHODS = {
+  hostTerminalDestination: 'ui.host.terminal.destination',
   hostThemesList: 'ui.host.themes.list',
   hostEditorStateGet: 'ui.host.editorState.get',
   hostProjectsList: 'ui.host.projects.list',
@@ -52,6 +53,7 @@ export const UI_IPC_RPC_METHODS = {
 } as const;
 
 export const UI_IPC_RPC_NOTIFICATIONS = {
+  terminalDestination: 'ui.terminal.destination',
   comparisonChanged: 'ui.comparison.changed',
   editorSave: 'ui.editor.save',
   editorFocus: 'ui.editor.focus',

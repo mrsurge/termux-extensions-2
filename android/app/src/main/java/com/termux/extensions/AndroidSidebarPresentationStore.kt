@@ -98,6 +98,23 @@ internal class AndroidSidebarPresentationStore internal constructor(
         check(writePayload(store.toString())) { "Unable to persist Sidebar presentation state" }
     }
 
+    fun terminalDestination(clientInstanceId: String, frameworkOrigin: String, value: String? = null): String = synchronized(LOCK) {
+        // Reuse identity normalization, but keep this preference independent of project/dock state.
+        val identity = normalizedIdentity(clientInstanceId, frameworkOrigin, "/")
+        require(value == null || value in setOf("ask", "drawer", "sidebar")) { "Invalid terminal destination" }
+        val store = readStore()
+        val preferences = store.optJSONObject("terminalDestinations") ?: JSONObject().also {
+            store.put("terminalDestinations", it)
+        }
+        if (value != null) {
+            preferences.remove(identity.key)
+            preferences.put(identity.key, value)
+            while (preferences.length() > 64) preferences.remove(preferences.keys().next())
+            check(writePayload(store.toString())) { "Unable to persist terminal destination" }
+        }
+        preferences.optString(identity.key, "ask").takeIf { it in setOf("ask", "drawer", "sidebar") } ?: "ask"
+    }
+
     private fun readStore(): JSONObject {
         val raw = readPayload() ?: return emptyStore()
         return try {
@@ -241,6 +258,12 @@ internal fun handleAndroidSidebarPresentationRequest(
     }
     val projectPath = params.optString("projectPath")
     return when (method) {
+        "readTerminalDestination" -> JSONObject().put("ok", true)
+            .put("value", store.terminalDestination(clientInstanceId, frameworkOrigin))
+        "writeTerminalDestination" -> {
+            val value = params.getString("value")
+            JSONObject().put("ok", true).put("value", store.terminalDestination(clientInstanceId, frameworkOrigin, value))
+        }
         "read" -> {
             val state = store.read(clientInstanceId, frameworkOrigin, projectPath)
             JSONObject()

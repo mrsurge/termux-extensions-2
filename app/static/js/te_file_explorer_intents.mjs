@@ -1,4 +1,3 @@
-import { chooseTerminalDestination } from './te_terminal_destination.mjs';
 import { openProjectDirectory } from './te_project_directory_intent.mjs';
 
 export function embeddedContext(search) {
@@ -41,8 +40,7 @@ export function createFileExplorerIntents({ api, location, dialog, randomId }) {
         location.href = `/app/terminal?cwd=${encodeURIComponent(directory)}&new_session=${randomId()}`;
         return;
       }
-      const destination = await chooseTerminalDestination(dialog);
-      if (destination) await dispatch('terminal.createSession', { directory, destination });
+      await dispatch('terminal.createSession', { directory });
     },
   };
 }

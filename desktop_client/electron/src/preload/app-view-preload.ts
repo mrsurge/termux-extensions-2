@@ -93,6 +93,12 @@ const electronBridge: ElectronAppViewBridge = Object.freeze({
   ): Promise<ElectronSidebarPresentationState> {
     return invokeElectron("read_sidebar_presentation_state", { projectPath });
   },
+  readTerminalDestination(): Promise<string> {
+    return invokeElectron("read_terminal_destination");
+  },
+  writeTerminalDestination(value: string): Promise<string> {
+    return invokeElectron("write_terminal_destination", { value });
+  },
   writeSidebarPresentationState(
     projectPath: string,
     state: ElectronSidebarPresentationState,

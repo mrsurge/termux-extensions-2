@@ -26,10 +26,11 @@ then approve a cohesive end-to-end contract before implementing bounded slices.
    whole page away from the editor.
 2. **Open in Terminal:** add a directory menu entry immediately below Open in
    File Explorer. Show a standard app-owned dialog offering **Sidebar** or
-   **drawer**, with a possible **Don't ask again** checkbox. Both choices always
+   **drawer**, with a **Don't ask again** checkbox. Both choices always
    create a **new session**, rooted at the selected directory. Reuse the same
-   dialog and remembered-choice policy from File Explorer; exact preference
-   ownership/reset affordance and checkbox inclusion remain contract decisions.
+   host-owned dialog and client/framework-wide remembered-choice policy from
+   File Explorer. Editor Settings below Cursor style offers Ask every time,
+   Drawer and Sidebar; native storage is independent of relay origin and project.
 3. **Sticky scopes on reveal:** the user clarified this occurs **only on mobile**,
    after the Explorer drawer is closed for some time and then reopened. Diagnose
    missing source-tree sticky scopes on that delayed reveal without scrolling.
@@ -622,7 +623,29 @@ the slice does not publish APKs, bump versions or restart runtime processes.
 
 Explorer's directory menu places Open in Terminal immediately beneath Open in
 File Explorer. An app-owned teUI choice offers Sidebar, Drawer and Cancel; Drawer
-is the initial default. Remembered choice/reset policy remains pending.
+is the initial default. The host now owns the shared remembered choice for both
+Explorer entry points: `ask`, `drawer`, or `sidebar`, scoped to the stable client
+and configured framework origin across projects. The dialog includes Don't ask
+again; Editor Settings exposes a custom selector directly below Cursor style,
+including Ask every time to restore the prompt.
+
+The preference is a separate bounded record in existing native state storage
+(Electron `desktop-state.json`, Android application-private presentation store),
+not a dock-layout field or shared backend preference. Browsers use localStorage.
+Native clients never fall back to random relay-origin localStorage. Reads are
+demand-loaded and cached; changing the preference creates no terminal.
+
+The backend validates the initiating intent, publishes exact-client
+`ui.terminal.destination`, and immediately returns `{pending: true}`. It does
+not hold the framework broker's 15-second request window open for a dialog.
+The host resolves its preference/dialog and replies over its own UI IPC lane
+with `ui.host.terminal.destination`. Backend single-use tickets expire after
+120 seconds, with at most 64 total and one per client; lazy expiry and host
+disconnect clean them up. The reply revalidates project generation, live client
+and source presentation before creating a fresh session. Wrong-client, late,
+replayed, cancelled and stale-project replies cannot create one. Storage failure
+is reported; an explicit one-time choice may still proceed, without claiming it
+was remembered. No new transport or mutation retry was added.
 
 `host/terminal_intent_backend.py` serves Explorer RPC and pipe
 `terminal.createSession`. It validates directory, live client, embedded source
@@ -646,9 +669,10 @@ journal after FWS record removal. Success replaces the seed with `shell_id` in
 the page URL and publishes concrete Sidebar state. Failures are not automatically
 retried. Standalone launches can consume the same seed; supplied CWD is honored.
 
-Remembered destination, native-client OTA,
-compiled runtime/group activation and live acceptance remain pending. Android and
-the shared framework runtime were not modified/restarted.
+The user subsequently assembled the Android client and reported everything
+working live. Remembered destination has user live acceptance. Native bridge
+source and release-facing asset versions are synchronized to 0.2.352; no release
+or shared framework restart was performed by the agent in this slice.
 
 ### File Explorer Text/Terminal And CM6 Statefulness Slice
 
@@ -658,7 +682,8 @@ document/terminal intent to its own backend, which supplies the fixed Code TE2
 target over the owned framework pipe. Missing embedded identity is an error,
 not a standalone navigation fallback. Standalone file opens retain CM6 navigation;
 standalone terminal opens carry CWD and a fresh session seed. Embedded Terminal
-choice uses the same app-owned dialog source as Code TE2 Explorer.
+choice is resolved by its initiating Code TE2 host, using the same app-owned
+dialog and native-backed preference as Code TE2 Explorer.
 
 The shared Sidebar document-open adapter resolves paths before containment checks.
 In-project files use the existing exact-client editor hook; outside-project files

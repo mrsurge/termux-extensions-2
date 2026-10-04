@@ -79,7 +79,8 @@ and joint debugging when its scheduled slice is reached.
 - [ ] Inventory File Explorer/File Editor/Terminal context detection and state
   publication; verify generic launch behavior beyond File Explorer.
 - [ ] Inventory all CM6 settings and File/Edit item actions before selecting edits.
-- [ ] Finalize shared Terminal dialog/remembered-choice/reset policy.
+- [x] Finalize shared Terminal dialog/remembered-choice/reset policy: per stable
+  client/framework across projects, with Ask every time reset under Cursor style.
 - [ ] Trace source-tree hidden/reveal geometry callbacks and dock gesture/layout owners.
 - [ ] Update plan with source-backed contract matrix and concrete edit/test slices.
 - [ ] Obtain cohesive implementation-plan approval.
@@ -100,7 +101,22 @@ and joint debugging when its scheduled slice is reached.
   mobile Explorer-close behavior. File Explorer and Terminal menu workflows
   now have live acceptance; remaining workflows retain their separate gates.
 - [x] Shared Sidebar/drawer choice dialog and fresh-session directory intent;
-  Cancel has no effects. Remembered choice remains pending.
+  Cancel has no effects. Remembered choice is implemented and user live accepted.
+- [x] Host-owned client/framework-wide remembered destination, Don't ask again,
+  and custom reset selector directly beneath Cursor settings. Separate native
+  preference records reuse existing desktop/Android containers; browsers use
+  localStorage. Native clients never silently persist to random relay origins.
+- [x] Pending choice acknowledgement releases the originating pipe call before
+  user input. Exact-client host replies consume bounded 120s tickets and preserve
+  project/presentation fences; cancellation/disconnect has no creation effect.
+- [x] User reports the updated build working live, including remembered terminal
+  destination. Agent validation and user live acceptance are separate evidence.
+- Validation: 42 targeted Python intent/host-contract tests, 40 targeted Node tests (shared
+  dialog/File Explorer, client preference/wire parser, native desktop store,
+  Sidebar persistence and native-select gate), both TypeScript checks and bundle
+  builds pass. Gecko and Cefrium unit builds pass with their respective JDKs.
+  Five changed Python modules pass Mypy and isolated mypyc code generation;
+  this is not a full compiled-group rebuild or native asset publication.
 - [x] Drawer exact-client activation avoids global rebind/shared selection changes.
 - [x] Terminal consumes launch CWD/new-session seed on its own lifecycle lane;
   FWS metadata claims prevent duplicates while their shell records remain retained.

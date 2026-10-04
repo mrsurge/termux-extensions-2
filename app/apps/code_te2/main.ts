@@ -44,6 +44,7 @@ import { createAutosaveRuntimeController } from './main_page/frontend/ui/autosav
 import { configureProjectsModal, showProjectsDebugModal } from './main_page/frontend/ui/projects-debug-modal.ts';
 import { initWatcherUI, drainPendingWatcherEvents, showWatcherLimitModal } from './main_page/frontend/ui/watcher-settings.ts';
 import { createUiIpcConnections } from './main_page/frontend/connections/ui-ipc.ts';
+import { createTerminalDestinationPreference, installTerminalDestinationSettings, resolveHostTerminalDestination } from './main_page/frontend/ui/terminal-destination-preference.ts';
 import { EXPLORER_RPC_NOTIFICATIONS } from './src/explorer/rpc/contract.ts';
 import { notifyExplorerRpc, requestExplorerRpc } from './src/explorer/rpc/client.ts';
 import { ensureSocketIoLoaded, ensureVConsoleLoaded } from './main_page/frontend/connections/vendor-loaders.ts';
@@ -216,6 +217,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     return;
   }
   const clientId = clientIdentity.clientInstanceId;
+  const terminalDestinationPreference = createTerminalDestinationPreference(clientId);
   let problemsPanel: ProblemsPanelController = createProblemsState();
   let editorViewState: EditorViewState | null = null; // Projected from the host RPC state snapshot
   let cachedProjectRoot: string | null = null;
@@ -273,6 +275,16 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     ensureSocketIoLoaded,
     initConsoleBridge,
     getClientId: () => clientId,
+    onTerminalDestination: async (params) => {
+      let destination: 'drawer' | 'sidebar' | null = null;
+      try { destination = await resolveHostTerminalDestination(terminalDestinationPreference, message => host.toast(message)); }
+      catch (error) { host.toast(String(error)); }
+      try {
+        await uiIpcConnections.requestUiIpc(UI_IPC_RPC_METHODS.hostTerminalDestination, {
+          requestId: params.requestId, destination,
+        }, 45_000);
+      } catch (error) { host.toast(String(error)); }
+    },
     getConsoleWorkerId: () => clientIdentity.consoleWorkerId,
     onHostStateResync: async () => {
       const state = await editorStateController.syncEditorState(true);
@@ -496,7 +508,12 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     return hostEditorEventsRuntime.awaitEditorOpen(requestId, path, timeoutMs);
   }
 
+  const refreshTerminalDestinationSettings = installTerminalDestinationSettings(
+    hostElements.editorSettingsTerminalDestination, terminalDestinationPreference,
+    message => host.toast(message),
+  );
   createSettingsBootstrap({
+    refreshTerminalDestinationSettings,
     els: {
       settingsModal: editorSettingsModal,
       settingsClose: editorSettingsClose,

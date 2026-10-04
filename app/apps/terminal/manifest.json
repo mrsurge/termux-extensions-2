@@ -2,7 +2,7 @@
   "id": "terminal",
   "name": "Terminal",
   "icon_emoji": ">_",
-  "version": "0.2.351",
+  "version": "0.2.352",
   "description": "Checkpointed Node PTY terminals for TE2.",
   "shellspec": {
     "app_worker": "shellspec/app_worker.yaml#app-worker"

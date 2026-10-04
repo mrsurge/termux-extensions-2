@@ -96,6 +96,7 @@ export function createSettingsBootstrap(deps: any) {
   }
 
   async function refreshEditorSettingsModal() {
+    await deps.refreshTerminalDestinationSettings?.();
     return settingsRefreshController.refreshEditorSettingsModal();
   }
 

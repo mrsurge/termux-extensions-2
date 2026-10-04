@@ -68,6 +68,7 @@ UI_IPC_RPC_METHOD_SIDEBAR_APP_WINDOWS_CLOSE: Final = "ui.sidebar.appWindows.clos
 UI_IPC_RPC_METHOD_SIDEBAR_ACTIVE_SHORTCUT_SET: Final = "ui.sidebar.activeShortcut.set"
 
 UiIpcRpcMethod = Literal[
+    "ui.host.terminal.destination",
     "ui.host.themes.list",
     "ui.host.projects.list",
     "ui.host.projects.reset",
@@ -153,6 +154,7 @@ UI_IPC_RPC_NOTIFICATION_RUN_TARGET_ROUTES_CHANGED: Final = (
 )
 
 UiIpcRpcNotification = Literal[
+    "ui.terminal.destination",
     "ui.sidebar.drawer.close",
     "ui.editor.save",
     "ui.editor.focus",
@@ -185,6 +187,7 @@ UiIpcRpcNotification = Literal[
 ]
 
 ALLOWED_REQUEST_METHODS: Final[set[str]] = {
+    "ui.host.terminal.destination",
     UI_IPC_RPC_METHOD_HOST_THEMES_LIST,
     UI_IPC_RPC_METHOD_HOST_PROJECTS_LIST,
     UI_IPC_RPC_METHOD_HOST_PROJECTS_RESET,
@@ -233,6 +236,7 @@ ALLOWED_REQUEST_METHODS: Final[set[str]] = {
 }
 
 ALLOWED_NOTIFICATION_METHODS: Final[set[str]] = {
+    "ui.terminal.destination",
     UI_IPC_RPC_NOTIFICATION_COMPARISON_CHANGED,
     UI_IPC_RPC_NOTIFICATION_EDITOR_SAVE,
     UI_IPC_RPC_NOTIFICATION_SIDEBAR_DRAWER_CLOSE,

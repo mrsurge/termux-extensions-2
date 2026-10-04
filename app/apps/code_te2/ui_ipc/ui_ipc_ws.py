@@ -268,7 +268,10 @@ class UIIPCNamespace(NativeNamespace):
 
     async def on_disconnect(self, sid: object, reason: object | None = None) -> None:
         sid_text = _sid(sid)
-        _ = _BROWSER_CLIENT_BY_SID.pop(sid_text, None)
+        client_id = _BROWSER_CLIENT_BY_SID.pop(sid_text, None)
+        if client_id is not None and self.namespace == "/ui_ipc":
+            from ..host.terminal_intent_backend import cancel_terminal_destination
+            cancel_terminal_destination(client_id)
         ns = _namespace(self)
         room = "sidebar_ipc" if ns.namespace == "/sidebar_ipc" else "ui_ipc"
         print(f"[{room}] disconnect sid={sid_text} reason={reason}", flush=True)

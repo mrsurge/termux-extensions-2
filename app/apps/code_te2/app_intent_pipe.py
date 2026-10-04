@@ -128,7 +128,7 @@ async def dispatch_app_intent(request: PipeEnvelope) -> object:
             payload, client_id=client_id, source_context=context, requester_app_id=app_id,
         )
     if params["intent"] == "terminal.createSession":
-        if set(payload) != {"directory", "destination"} or not all(isinstance(value, str) for value in payload.values()):
+        if set(payload) not in ({"directory"}, {"directory", "destination"}) or not all(isinstance(value, str) for value in payload.values()):
             raise ValueError("invalid terminal intent payload")
         from .ui_ipc.sidebar_ws import resolve_sidebar_request_client
         from .host.terminal_intent_backend import open_directory_terminal
@@ -136,7 +136,7 @@ async def dispatch_app_intent(request: PipeEnvelope) -> object:
             {"target": context}, requester_app_id=app_id, require_presentation=True,
         )
         return await open_directory_terminal(
-            directory=cast(str, payload["directory"]), destination=cast(str, payload["destination"]),
+            directory=cast(str, payload["directory"]), destination=cast(str, payload.get("destination", "ask")),
             client_id=client_id, operation_id=request.op_id or "",
             source_context=context, requester_app_id=app_id,
         )

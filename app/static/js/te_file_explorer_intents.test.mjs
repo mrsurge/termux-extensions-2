@@ -33,14 +33,14 @@ test('incomplete embedded context fails rather than navigating away', async () =
   await assert.rejects(intents.openFile('/file'), /incomplete/);
   assert.equal(location.href, '/app/file_explorer');
 });
-test('embedded terminal uses shared destination dialog; cancellation has no effects', async () => {
+test('embedded terminal delegates the choice to its exact-client Code TE2 host', async () => {
   const { calls, intents, dialog } = fixture(contextSearch);
   await intents.openTerminal('/project/nested');
   assert.equal(calls[0][1].intent, 'terminal.createSession');
-  assert.deepEqual(calls[0][1].payload, { directory: '/project/nested', destination: 'drawer' });
-  dialog.open = async () => ({ status: 'cancelled', action: 'cancel' });
+  assert.deepEqual(calls[0][1].payload, { directory: '/project/nested' });
+  dialog.open = async () => { throw new Error('child must not prompt'); };
   await intents.openTerminal('/project/nested');
-  assert.equal(calls.length, 1);
+  assert.equal(calls.length, 2);
 });
 test('standalone terminal launch carries CWD and fresh-session seed', async () => {
   const { calls, location, intents } = fixture();

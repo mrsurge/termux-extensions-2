@@ -105,6 +105,9 @@ async def dispatch_ui_ipc_rpc_request(
     *,
     source_name: str,
 ) -> object:
+    if method == "ui.host.terminal.destination":
+        from ..host.terminal_intent_backend import resolve_terminal_destination
+        return await resolve_terminal_destination(params, client_id=source_name)
     if method == UI_IPC_RPC_METHOD_HOST_THEMES_LIST:
         return await get_theme_catalog()
     if method == UI_IPC_RPC_METHOD_HOST_PROJECTS_LIST:

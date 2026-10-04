@@ -1,5 +1,4 @@
 import { restoreExplorerFile } from './restore-action.ts';
-import { chooseTerminalDestination } from './terminal-destination.ts';
 import type { JsonObject } from '../../rpc/transport.ts';
 import type { ExplorerJumpOptions } from '../host/file-open-bridge.ts';
 import {
@@ -597,10 +596,8 @@ export function createExplorerTreeMenuController(
       }
       case 'openTerminal': {
         if (!ensureExplorerRpc()) return;
-        const destination = await chooseTerminalDestination();
-        if (!destination) return;
         try {
-          await deps.requestExplorer(EXPLORER_RPC_METHODS.directoryOpenInTerminal, { rel, destination }, 45_000);
+          await deps.requestExplorer(EXPLORER_RPC_METHODS.directoryOpenInTerminal, { rel }, 45_000);
         } catch (error) {
           deps.toast(deps.getErrorMessage(error, 'Failed to open Terminal'));
         }

@@ -50,6 +50,7 @@ import {
 import { ElectronUiIpcClient } from "./ui-ipc-client";
 import {
   readDesktopIdentities,
+  desktopTerminalDestination,
   resetDesktopIdentities,
   type ElectronDesktopIdentities,
 } from "./desktop-state-store";
@@ -540,6 +541,14 @@ async function handleAppViewControl(
       configuredFrameworkOrigin,
       String(request?.projectPath || ""),
     );
+  }
+  if (command === "read_terminal_destination") {
+    return desktopTerminalDestination(configuredFrameworkOrigin);
+  }
+  if (command === "write_terminal_destination") {
+    const request = payload as { value?: unknown } | null;
+    if (request?.value === undefined) throw new Error("Terminal destination is missing");
+    return desktopTerminalDestination(configuredFrameworkOrigin, request.value);
   }
   if (command === "write_sidebar_presentation_state") {
     const request = payload as {

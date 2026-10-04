@@ -39,6 +39,87 @@ def test_drawer_creates_at_directory_and_notifies_only_initiator(environment):
     assert emit.call_args.kwargs == {"client_instance_id": "client_111111111111"}
 
 
+@pytest.mark.parametrize("destination", [None, "drawer"])
+def test_host_choice_is_exact_client_single_use_and_cancel_has_no_effect(environment, destination):
+    from app.apps.code_te2.host import terminal_intent_backend as service
+    root, create, emit = environment
+    async def run():
+        pending = await service.open_directory_terminal(directory=str(root), destination="ask",
+            client_id="client_111111111111", operation_id="op")
+        assert pending == {"pending": True}
+        create.assert_not_awaited()
+        assert emit.call_args.kwargs == {"client_instance_id": "client_111111111111"}
+        reply = {"requestId": emit.call_args.args[1]["requestId"], "destination": destination}
+        with pytest.raises(ValueError):
+            await service.resolve_terminal_destination(reply, client_id="client_222222222222")
+        result = await service.resolve_terminal_destination(reply, client_id="client_111111111111")
+        with pytest.raises(ValueError):
+            await service.resolve_terminal_destination(reply, client_id="client_111111111111")
+        return result
+    result = asyncio.run(run())
+    assert not service._pending_choices
+    if destination is None:
+        assert result == {"cancelled": True}
+        create.assert_not_awaited()
+    else:
+        assert result == {"shell_id": "new-shell"}
+        create.assert_awaited_once()
+
+
+def test_host_choice_revalidates_project_and_disconnect_cancels(environment, monkeypatch):
+    from app.apps.code_te2.host import terminal_intent_backend as service
+    from app.apps.code_te2.worker_services import event_bus
+    root, create, emit = environment
+    async def run():
+        await service.open_directory_terminal(directory=str(root), destination="ask",
+            client_id="client_111111111111", operation_id="op")
+        reply = {"requestId": emit.call_args.args[1]["requestId"], "destination": "drawer"}
+        monkeypatch.setattr(event_bus, "_project_generation", 2)
+        with pytest.raises(ValueError, match="project changed"):
+            await service.resolve_terminal_destination(reply, client_id="client_111111111111")
+        await service.open_directory_terminal(directory=str(root), destination="ask",
+            client_id="client_111111111111", operation_id="op")
+        reply["requestId"] = emit.call_args.args[1]["requestId"]
+        service.cancel_terminal_destination("client_111111111111")
+        with pytest.raises(ValueError, match="no longer active"):
+            await service.resolve_terminal_destination(reply, client_id="client_111111111111")
+    asyncio.run(run())
+    create.assert_not_awaited()
+    assert not service._pending_choices
+
+
+def test_pending_choice_expires_and_duplicate_admission_creates_nothing(environment, monkeypatch):
+    from app.apps.code_te2.host import terminal_intent_backend as service
+    root, create, emit = environment
+    clock = [0.0]
+    monkeypatch.setattr(service, "monotonic", lambda: clock[0])
+    async def run():
+        await service.open_directory_terminal(directory=str(root), destination="ask",
+            client_id="client_111111111111", operation_id="op")
+        token = emit.call_args.args[1]["requestId"]
+        with pytest.raises(ValueError, match="already pending"):
+            await service.open_directory_terminal(directory=str(root), destination="ask",
+                client_id="client_111111111111", operation_id="op2")
+        clock[0] = 121.0
+        with pytest.raises(ValueError, match="no longer active"):
+            await service.resolve_terminal_destination({"requestId": token, "destination": "drawer"},
+                client_id="client_111111111111")
+    asyncio.run(run())
+    create.assert_not_awaited()
+    assert not service._pending_choices
+
+
+def test_failed_choice_publication_cleans_up_ticket(environment):
+    from app.apps.code_te2.host import terminal_intent_backend as service
+    root, create, emit = environment
+    emit.side_effect = RuntimeError("connection lost")
+    with pytest.raises(RuntimeError, match="connection lost"):
+        asyncio.run(service.open_directory_terminal(directory=str(root), destination="ask",
+            client_id="client_111111111111", operation_id="op"))
+    create.assert_not_awaited()
+    assert not service._pending_choices
+
+
 @pytest.mark.parametrize("failure", ["disconnect", "project-switch", "generation"])
 def test_stale_creation_never_activates_or_retries(environment, monkeypatch, failure):
     root, create, emit = environment

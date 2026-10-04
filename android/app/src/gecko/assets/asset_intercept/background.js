@@ -305,7 +305,7 @@ browser.runtime.onMessage.addListener((message, sender) => {
       nativePort.postMessage({
         type: "sidebar_presentation_request",
         requestId,
-        method: message.method === "write" ? "write" : "read",
+        method: message.method,
         params: message.params,
       });
     });

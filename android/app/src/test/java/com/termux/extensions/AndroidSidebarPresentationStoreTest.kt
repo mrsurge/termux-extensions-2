@@ -8,6 +8,24 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AndroidSidebarPresentationStoreTest {
+    @Test
+    fun terminalPreferenceIsClientFrameworkScopedAndPreservesDockState() {
+        var payload: String? = null
+        val store = AndroidSidebarPresentationStore({ payload }, { payload = it; true })
+        val client = "client_aaaaaaaaaaaa"
+        val origin = "http://server-a:8089"
+        assertEquals("ask", store.terminalDestination(client, origin))
+        store.write(client, origin, "/project/a", state())
+        assertEquals("drawer", store.terminalDestination(client, origin, "drawer"))
+        store.write(client, origin, "/project/b", state())
+        val recreated = AndroidSidebarPresentationStore({ payload }, { payload = it; true })
+        assertEquals("drawer", recreated.terminalDestination(client, origin))
+        assertEquals("hidden", recreated.read(client, origin, "/project/a")?.getJSONObject("presentations")?.getString("extension-a"))
+        assertEquals("ask", recreated.terminalDestination("client_bbbbbbbbbbbb", origin))
+        assertEquals("ask", recreated.terminalDestination(client, "http://server-b:8089"))
+        assertEquals("ask", recreated.terminalDestination(client, origin, "ask"))
+    }
+
     private fun state(mode: String = "hidden"): JSONObject = JSONObject()
         .put("version", 1)
         .put("order", JSONArray().put("extension-a"))

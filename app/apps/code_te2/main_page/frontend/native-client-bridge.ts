@@ -65,7 +65,7 @@ export function requestCefriumNative(
 }
 
 function requestGeckoSidebarPresentation(
-  method: "read" | "write",
+  method: "read" | "write" | "readTerminalDestination" | "writeTerminalDestination",
   params: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
@@ -111,7 +111,7 @@ function requestGeckoSidebarPresentation(
 }
 
 async function requestAndroidSidebarPresentation(
-  method: "read" | "write",
+  method: "read" | "write" | "readTerminalDestination" | "writeTerminalDestination",
   params: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
   const renderer = androidNativeRenderer();
@@ -122,6 +122,14 @@ async function requestAndroidSidebarPresentation(
     return requestGeckoSidebarPresentation(method, params);
   }
   throw new Error("Android Sidebar presentation bridge is unavailable");
+}
+
+export async function androidTerminalDestination(clientInstanceId: string, value?: string): Promise<unknown> {
+  const result = await requestAndroidSidebarPresentation(
+    value === undefined ? "readTerminalDestination" : "writeTerminalDestination",
+    { clientInstanceId, ...(value === undefined ? {} : { value }) },
+  );
+  return result.value;
 }
 
 export async function readAndroidSidebarPresentationState(

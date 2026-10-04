@@ -908,6 +908,8 @@ class MainActivity : AppCompatActivity() {
                     .put("clientInstanceId", androidClientInstanceId(applicationContext, role))
             }
             "te2.sidebarPresentation.read",
+            "te2.sidebarPresentation.readTerminalDestination",
+            "te2.sidebarPresentation.writeTerminalDestination",
             "te2.sidebarPresentation.write" -> {
                 try {
                     handleAndroidSidebarPresentationRequest(

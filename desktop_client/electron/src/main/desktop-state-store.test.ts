@@ -5,6 +5,7 @@ import { test } from "node:test";
 
 import {
   desktopEditorProjectKey,
+  desktopTerminalDestination,
   desktopStatePath,
   readDesktopIdentities,
   readDesktopSidebarState,
@@ -17,6 +18,22 @@ import {
 function testEnvironment(root: string): NodeJS.ProcessEnv {
   return { ...process.env, TE2_CONFIG_HOME: root, XDG_CONFIG_HOME: "" };
 }
+
+test("terminal destination survives reload independently of dock/project state and can reset", async () => {
+  const root = await mkdtemp(join(await temporaryRoot(), "terminal-pref-"));
+  const env = testEnvironment(root);
+  try {
+    assert.equal(await desktopTerminalDestination("http://server-a:8089", undefined, env), "ask");
+    await desktopTerminalDestination("http://server-a:8089", "sidebar", env);
+    await readDesktopSidebarState("http://server-a:8089", "/project/a", env);
+    await readDesktopSidebarState("http://server-a:8089", "/project/b", env);
+    assert.equal(await desktopTerminalDestination("http://server-a:8089/other", undefined, env), "sidebar");
+    assert.equal(await desktopTerminalDestination("http://server-b:8089", undefined, env), "ask");
+    await desktopTerminalDestination("http://server-a:8089", "ask", env);
+    assert.equal(await desktopTerminalDestination("http://server-a:8089", undefined, env), "ask");
+    assert.throws(() => desktopTerminalDestination("http://server-a:8089", "bad", env));
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 
 async function temporaryRoot(): Promise<string> {
   const root =

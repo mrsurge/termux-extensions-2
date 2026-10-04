@@ -20,6 +20,8 @@ export const ELECTRON_APP_VIEW_COMMANDS = [
   "register_run_target_surface",
   "release_run_target_surface",
   "read_sidebar_presentation_state",
+  "read_terminal_destination",
+  "write_terminal_destination",
   "write_sidebar_presentation_state",
   "open_sidebar_menu",
   "place_sidebar_surface",
@@ -258,6 +260,8 @@ export type ElectronAppViewBridge = {
   readSidebarPresentationState(
     projectPath: string,
   ): Promise<ElectronSidebarPresentationState>;
+  readTerminalDestination(): Promise<string>;
+  writeTerminalDestination(value: string): Promise<string>;
   writeSidebarPresentationState(
     projectPath: string,
     state: ElectronSidebarPresentationState,

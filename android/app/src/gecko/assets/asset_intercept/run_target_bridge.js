@@ -51,7 +51,8 @@ window.addEventListener("message", async (event) => {
     event.data.channel !== SIDEBAR_PRESENTATION_REQUEST
   ) return;
   const requestId = String(event.data.requestId || "");
-  const method = event.data.method === "write" ? "write" : "read";
+  const method = event.data.method;
+  if (!["read", "write", "readTerminalDestination", "writeTerminalDestination"].includes(method)) return;
   if (!requestId) return;
   let result;
   try {
