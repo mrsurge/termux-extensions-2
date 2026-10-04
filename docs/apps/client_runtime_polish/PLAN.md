@@ -2,6 +2,18 @@
 
 ## Scope
 
+### Android keyboard support declaration
+
+For Android editing, require Gboard version 18 or newer as the supported
+keyboard baseline. Older Gboard versions may work, but are unsupported; do not
+claim compatibility or add older-version workarounds to this release scope.
+This is a documented support requirement, not a runtime keyboard/version gate.
+
+README wording to include before release:
+
+> Android editing requires Gboard 18 or newer for supported operation. Older
+> Gboard versions may work, but are not supported.
+
 ### Editor/framework UI corrections before the next release
 
 Inline diff gutter alignment is the current approved slice. Live inspection of
@@ -1222,6 +1234,31 @@ native-services snapshot. Build and validate a complete Linux wheel first, then
 reuse its artifact contract for Android/Termux. Do not publish/tag/merge main as
 part of the implementation checkpoints.
 
+#### Supported Python baseline (supersedes the initial 3.13 target)
+
+Use ordinary GIL-enabled CPython 3.14 as the sole initial native release target
+on Linux and Termux. Raise package metadata to `requires-python = ">=3.14"`
+during implementation; drop the proposed 3.13 build/acceptance matrix rather
+than maintaining two Python minor versions. Support for 3.15 is deferred until
+there is a practical need, not automatically promised by the metadata minimum.
+`cp314` worker/domain wheels are not compatible with `cp315` or free-threaded
+`cp314t`; each future ABI needs matching artifacts and acceptance.
+
+On desktop Linux, use uv-managed Python 3.14 and explicitly create/select the
+TE2 3.14 venv even if a newer interpreter is installed. Do not replace Debian's
+`/usr/bin/python3` or modify the distro Python environment. Install the managed
+interpreter for the test user on the SSH acceptance host; its existing system
+3.13.5 is no longer the candidate runtime. Termux retains its native Python/apt
+installation path, not desktop uv binaries. Prior device evidence already
+records ordinary Termux CPython 3.14; revalidate against the final artifact set.
+
+Next gate: inspect/prove the manylinux builder's **3.14** embedding/linkage and
+the uv-managed target's stdlib/venv resolution, then complete container assembly
+and post-auditwheel validation. The earlier 3.13 static-libpython discovery is
+historical evidence only; do not assume it establishes the 3.14 configuration.
+This documentation change does not install uv/Python, change package metadata,
+build binaries or start/restart any runtime.
+
 The clean installation/live acceptance target is `ssh mrsurge@100.74.145.70`.
 Read-only discovery found Debian Python 3.13.5, Docker and about 167 GiB free;
 no shared libpython was found in the standard system library directory. This
@@ -1245,7 +1282,8 @@ Linux implementation order:
    validator), not a parallel user installer. Include framework server plus
    `app/release_runtime/code_te2/` worker/domain/resources. Emit exact CPython/ABI
    wheel tags rather than `py3-none`. Start clean-target coverage with ordinary
-   CPython 3.13; local CPython 3.14 is a separate ABI, not a reusable candidate.
+   CPython 3.14 on both builder and uv-managed acceptance venv. The local 3.14
+   probe demonstrates the payload contract, not manylinux portability.
    Prove shared-libpython resolution, interpreter stdlib/venv selection and
    OpenSSL/native dependencies under the declared manylinux floor before
    choosing final bundling/rpath policy. Never depend on build-host /opt paths.
@@ -1265,6 +1303,64 @@ Investigation evidence: setup.py packages only the server; bootstrap rejects
 missing binary-release worker payloads; the shellspec selects mypyc-active in
 scratch; mypyc resource links and absolute inventory need release materialization.
 The current local worker links libpython3.14.so.1.0, libssl.so.3 and libcrypto.so.3.
+
+First implementation checkpoint: `app/release_runtime/code_te2.py` validates a
+portable Linux worker/domain file set (relative contained paths, regular files,
+checksums, exact Python/libpython metadata, architecture and separate component
+fingerprints). Portable domain manifest schema 2 records module source paths
+relative to the package; the import hook retains schema-1 developer snapshots.
+Binary-release bootstrap selects the verified pair and exports both paths;
+the actual shellspec now consumes `CODE_TE2_MYPYC_DIR` from bootstrap rather than
+overwriting it with a scratch path. Editable startup retains its existing explicit
+active-snapshot selector and honors an explicit domain environment value.
+
+Validation: 47 targeted release-runtime/native-bootstrap/editable-build tests
+pass, plus Mypy on the new resolver and modified overlay. Fixture shared objects
+test metadata/selection only; they are not an ELF, compiled-import or wheel proof.
+No full compiled-group rebuild, Rust build, worker/framework restart, remote
+install, artifact materialization or release publication was performed. Wheel
+assembly still needs real materialized resources, a production manifest producer,
+ABI-specific tags and libpython/stdlib/venv loader validation. The resolver's
+libpython field checks declared identity, not shared-library loader availability.
+
+Second implementation checkpoint: `scripts/materialize_code_te2_runtime.py`
+consumes the existing validated developer snapshot, verifies its manifest/library
+checksums and source digest against the selected checkout, and publishes a new
+regular-file payload atomically. It converts absolute source inventory to schema
+2, requires module wrappers plus the common mypyc group, and copies the seven
+existing resource roots without developer links, nested symlinks, node_modules,
+Python caches or Cargo/build intermediates. It never activates/restarts a worker.
+Interpreted islands continue to come from the matching installed app package.
+
+`setup.py` now requires `TE2_RELEASE_CODE_TE2_RUNTIME` alongside the server for
+binary-release assembly, validates package-version/ABI identity, copies the
+complete payload and emits exact CPython/ABI tags. Source builds remove any stale
+native payload. The existing container driver still needs native compilation,
+materialization and post-auditwheel rehash wiring before it can produce a wheel;
+this checkpoint does not make the old server-only driver release-ready.
+
+Validation: 57 focused tests pass and Mypy passes for the materializer/resolver/
+overlay. The actual accepted local CPython 3.14 snapshot materialized to a 64 MiB
+probe under `.release/linux-native-payload-probe-cp314`; the existing isolated
+import validator loaded all 136 compiled startup modules, with none missing.
+Its Rust fingerprint is the executable digest for this local packaging probe,
+not a final production build-input identity. This is not an audited Linux wheel or
+clean-install proof. No active runtime selection or shared framework changed.
+Local and remote unprivileged Docker access are denied, and noninteractive sudo
+requires authentication on both hosts. Existing root SSH access to the remote
+does reach Docker and its retained manylinux builder images; no permission or
+group changes are required. The remote remains the retained-install acceptance
+target as well as the available container builder.
+
+Read-only builder discovery: its ordinary CPython 3.13.15 reports SOABI
+`cpython-313-x86_64-linux-gnu`, `Py_ENABLE_SHARED=0` and only `libpython3.13.a`
+under `/opt/_internal/cpython-3.13.15/lib`. Do not assume auditwheel can bundle
+a shared libpython from this image. The next gate must prove an explicit
+embedding/linkage policy (including CPython symbol export and the installed
+interpreter's stdlib/site-packages), then distinguish that worker linkage
+provenance from the target interpreter ABI. The initial resolver compares
+declared libpython identity exactly; it is not yet a cross-static/shared loader
+policy. The remote system interpreter is 3.13.5, not the builder's patch version.
 
 
 Approved direction (source executable/bootstrap slice implemented; matched-set

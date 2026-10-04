@@ -20,7 +20,7 @@ shells:
       - ${ctx:PROJECT_ROOT}
       - ${free_port}
     env:
-      CODE_TE2_MYPYC_DIR: ${ctx:PROJECT_ROOT}/.codex-scratch/mypyc-active
+      CODE_TE2_MYPYC_DIR: ${env:CODE_TE2_MYPYC_DIR}
       PYTHONPATH: ${env:PYTHONPATH}:${ctx:PROJECT_ROOT}
       TE_APP_ID: ${ctx:APP_ID}
       TE_APP_WORKER_PORT: ${free_port}

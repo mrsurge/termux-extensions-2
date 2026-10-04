@@ -4,13 +4,29 @@ Last updated: 2026-09-18
 
 ## Program status
 
+- [ ] Before release, add the Android keyboard support requirement to README:
+  Gboard 18 or newer is required for supported operation. Older versions may
+  work, but are unsupported. Wording is recorded in the client-runtime PLAN;
+  no runtime keyboard detection or enforcement is planned.
+
 ### Native Code TE2 Linux wheel integration (2026-10-04)
 
 - [x] Accepted native-services branch fast-forwarded into this packaging branch.
 - [x] Source-backed gap audit and Linux-first sequencing recorded in
   `../client_runtime_polish/PLAN.md`, **Linux-first packaging handoff**.
 - [ ] Portable matched worker/domain manifest, validation and bootstrap handoff.
-- [ ] Materialized resources and checkout-independent compiled-module inventory.
+  Initial resolver and portable domain schema are implemented and tested; the
+  binary-release path exports the verified executable/domain pair.
+  Production materialization and setuptools pair/tag hooks now exist; full
+  builder, libpython and final archive integration remain.
+- [x] Materialized resources and checkout-independent compiled-module inventory.
+  Actual local CPython 3.14 payload is 64 MiB and all 136 compiled startup modules
+  import through its portable inventory; CPython 3.14 clean wheel proof is pending.
+- [ ] Set package minimum to Python 3.14; target ordinary `cp314` only for this
+  release. No 3.13 matrix, free-threaded artifacts or 3.15 support in this slice.
+- [ ] Select 3.14 in the Linux builder and installer; install uv-managed 3.14
+  for the remote test user and create a fresh acceptance venv without replacing
+  Debian's system Python. Termux keeps native Python/apt provisioning.
 - [ ] CPython/ABI-specific Linux wheel assembly and final ELF/libpython audit.
 - [ ] Clean SSH install at `mrsurge@100.74.145.70`; retain candidate for user testing.
 - [ ] User live acceptance of the complete installed Linux runtime.
@@ -20,6 +36,17 @@ Use the SSH machine for acceptance; remote building is an optional space fallbac
 Do not rebuild/publish Android packages or tag/merge/publish a release in these
 implementation checkpoints. Older release records below are historical evidence,
 not validation of the new native-worker/mypyc wheel.
+
+Initial foundation validation: 47 targeted Python tests and two-module Mypy
+pass. No wheel, full compiled import validation, native rebuild or SSH install
+has been produced by this checkpoint; it must not be treated as release-ready.
+
+Materializer/setuptools checkpoint: 57 focused tests pass; three-module Mypy
+passes. No wheel or remote installation yet. Both hosts currently deny Docker
+access to the unprivileged user and require interactive sudo authentication;
+existing root SSH access reaches the remote builder without changing permissions.
+Container native build, libpython/stdlib/venv selection and post-repair hashes
+must be completed before the full build/SSH acceptance gates can be checked.
 
 | Phase | Status | Approval boundary |
 |---|---|---|

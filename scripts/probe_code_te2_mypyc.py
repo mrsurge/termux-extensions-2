@@ -201,8 +201,12 @@ def build(output: Path, cache_root: Path) -> None:
 
 def validate(manifest_path: Path, lib: Path | None) -> None:
     manifest = json.loads(manifest_path.read_text())
-    names = {name for name, path in manifest["modules"].items()
-             if str(Path(path).relative_to(REPO)) in manifest["compiled_sources"]}
+    if manifest.get("schemaVersion") == 2:
+        from app.release_runtime.code_te2 import compiled_module_names
+        names = compiled_module_names(manifest)
+    else:
+        names = {name for name, path in manifest["modules"].items()
+                 if str(Path(path).relative_to(REPO)) in manifest["compiled_sources"]}
     with tempfile.TemporaryDirectory(prefix="te2-mypyc-validate-", dir=manifest_path.parent) as temporary:
         guarded = _isolate(Path(temporary))
         try:

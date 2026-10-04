@@ -574,7 +574,17 @@ def _prepare_native_workers(args: BootstrapArgs, env: MutableMapping[str, str], 
     if not workers:
         return
     if not args.cargo_manifest and packaged_server_path() is not None:
-        raise SystemExit("This binary release lacks integrated native-worker payloads. Reinstall a release with matched worker/domain artifacts; refusing a Cargo fallback.")
+        from importlib.metadata import version
+        from app.release_runtime.code_te2 import packaged_runtime
+        if {worker.app_id for worker in workers} != {"code_te2"}:
+            raise SystemExit("Binary release has unsupported native-worker registry entries")
+        try:
+            runtime = packaged_runtime(version("te2"))
+        except ReleaseRuntimeError as exc:
+            raise SystemExit(f"Binary release native-worker payload is unusable: {exc}; refusing a Cargo fallback.") from exc
+        env[workers[0].environment_key] = str(runtime.executable)
+        env["CODE_TE2_MYPYC_DIR"] = str(runtime.domain)
+        return
     profile = 'release' if args.release else 'debug'
     paths = resolve_te2_paths(env)
     for worker in workers:
@@ -603,6 +613,8 @@ def _prepare_native_workers(args: BootstrapArgs, env: MutableMapping[str, str], 
                     _publish_cached_binary(source, selected)
                 _prune_final_binary_cache(root / 'bin', selected)
         env[worker.environment_key] = str(selected)
+        if worker.app_id == 'code_te2':
+            env.setdefault('CODE_TE2_MYPYC_DIR', str(_project_root() / '.codex-scratch' / 'mypyc-active'))
         print(f"[te2] Native worker {worker.app_id}: {selected}", flush=True)
 
 

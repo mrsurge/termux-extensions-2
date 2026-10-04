@@ -13,6 +13,8 @@ from setuptools.command.build_py import build_py
 from setuptools.errors import SetupError
 from wheel.bdist_wheel import bdist_wheel
 
+from app.release_runtime.code_te2 import validate_runtime
+
 
 _RELEASE_ENVIRONMENT = (
     "TE2_RELEASE_SERVER_BIN",
@@ -20,12 +22,14 @@ _RELEASE_ENVIRONMENT = (
     "TE2_RELEASE_MINIMUM_GLIBC",
     "TE2_RELEASE_TAG",
     "TE2_RELEASE_COMMIT",
+    "TE2_RELEASE_CODE_TE2_RUNTIME",
 )
 
 
 @dataclass(frozen=True)
 class ReleaseWheelConfig:
     server: Path
+    code_te2: Path
     platform_tag: str
     minimum_glibc: str
     release_tag: str
@@ -46,6 +50,11 @@ def _release_wheel_config() -> ReleaseWheelConfig | None:
     server = Path(values["TE2_RELEASE_SERVER_BIN"]).expanduser().resolve()
     if not server.is_file():
         raise SetupError(f"TE2 release server is missing: {server}")
+    code_te2 = Path(values["TE2_RELEASE_CODE_TE2_RUNTIME"]).expanduser().absolute()
+    try:
+        validate_runtime(code_te2)
+    except RuntimeError as exc:
+        raise SetupError(f"Invalid TE2 native editor release payload: {exc}") from exc
     platform_tag = values["TE2_RELEASE_PLATFORM_TAG"]
     if not re.fullmatch(r"manylinux_[0-9]+_[0-9]+_x86_64", platform_tag):
         raise SetupError(f"Unsupported TE2 release wheel platform tag: {platform_tag}")
@@ -57,6 +66,7 @@ def _release_wheel_config() -> ReleaseWheelConfig | None:
         raise SetupError("TE2_RELEASE_COMMIT must be a full lowercase Git commit id")
     return ReleaseWheelConfig(
         server=server,
+        code_te2=code_te2,
         platform_tag=platform_tag,
         minimum_glibc=minimum_glibc,
         release_tag=values["TE2_RELEASE_TAG"],
@@ -71,6 +81,7 @@ class Te2BuildPy(build_py):
         package_root = Path(self.build_lib) / "app" / "release_runtime"
         if config is None:
             shutil.rmtree(package_root / "bin", ignore_errors=True)
+            shutil.rmtree(package_root / "code_te2", ignore_errors=True)
             (package_root / "provenance.json").write_text(
                 json.dumps(
                     {
@@ -92,6 +103,14 @@ class Te2BuildPy(build_py):
         package_version = str(self.distribution.metadata.version or "").strip()
         if not package_version:
             raise SetupError("TE2 package version is unavailable during release wheel assembly")
+        try:
+            validate_runtime(config.code_te2, package_version=package_version)
+        except RuntimeError as exc:
+            raise SetupError(f"Invalid TE2 native editor release payload: {exc}") from exc
+        native_target = package_root / "code_te2"
+        shutil.rmtree(native_target, ignore_errors=True)
+        shutil.copytree(config.code_te2, native_target, symlinks=False)
+        validate_runtime(native_target, package_version=package_version)
         manifest = {
             "architecture": "x86_64",
             "commit": config.commit,
@@ -122,7 +141,10 @@ class Te2BdistWheel(bdist_wheel):
         config = _release_wheel_config()
         if config is None:
             return super().get_tag()
-        return ("py3", "none", config.platform_tag)
+        python_tag, abi_tag, _ = super().get_tag()
+        if not python_tag.startswith("cp") or abi_tag == "none":
+            raise SetupError("Native Code TE2 release wheels require an exact CPython ABI tag")
+        return (python_tag, abi_tag, config.platform_tag)
 
 
 class Te2Distribution(Distribution):
