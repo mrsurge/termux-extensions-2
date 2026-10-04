@@ -172,6 +172,11 @@ button {
   object-fit: contain;
 }
 
+.app-icon-code-te2 img {
+  width: 40px;
+  height: 40px;
+}
+
 .app-name {
   max-width: 100%;
   color: var(--text);

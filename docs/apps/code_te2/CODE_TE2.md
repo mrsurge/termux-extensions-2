@@ -3400,6 +3400,12 @@ frontend/native versions and never bundle a stale host build. Dynamic framework
 documents, APIs, Socket.IO and WebSocket traffic remain upstream; asset inventory,
 installation and activation are distinct from backend/intelligence readiness.
 
+Launcher icon delivery uses the same local asset authority as the app frontend. Android catalog normalization applies the service-owned framework relay URL rewrite to `icon_src` and `asset_base_url`; Electron already projects framework-owned asset URLs to its browser relay origin. External-origin URLs remain external. Code TE2's packaged `/apps/code_te2/static/icons/CODE_TE2.png` is included in both inventories; no duplicate icon download/store is needed. The launchers retain a 52px icon container and render the Code TE2 image at 40px. Android URL changes require a new APK, while launcher JS/CSS require client asset publication; server rebuilding/reloading alone does not publish these changes.
+
+Launcher icon routing and the smaller Code TE2 image subsequently received user
+live acceptance after client publication. Regression coverage verifies local
+icon delivery with an unreachable upstream and preserves external icon URLs.
+
 ### Native app-view bridge
 
 Code TE2 app views in Electron expose frozen `window.te2Electron` from `desktop_client/electron/src/preload/app-view-preload.ts`. The shared contract is `desktop_client/electron/src/shared/app-view-contracts.ts`.

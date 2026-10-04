@@ -51,6 +51,7 @@ function renderApps(root, host, payload) {
 
     const icon = document.createElement("span");
     icon.className = "app-icon";
+    if (app.id === "code_te2") icon.classList.add("app-icon-code-te2");
     const resolvedIcon = resolveIcon(app);
     if (resolvedIcon.source) {
       const image = document.createElement("img");

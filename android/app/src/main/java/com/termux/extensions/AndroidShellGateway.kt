@@ -134,7 +134,7 @@ class AndroidShellGateway(
             for (index in 0 until catalog.length()) {
                 val app = catalog.optJSONObject(index) ?: continue
                 if (app.optString("id") == LOCAL_SETTINGS_APP_ID) continue
-                apps.put(normalizeAppAssets(app, settings.frameworkBaseUrl))
+                apps.put(normalizeAppAssets(app, settings.frameworkBaseUrl, appUrlRewriter))
             }
             online = true
         } catch (error: Exception) {
@@ -258,25 +258,50 @@ class AndroidShellGateway(
         }
     }
 
-    private fun normalizeAppAssets(app: JSONObject, frameworkBaseUrl: String): JSONObject {
-        val normalized = JSONObject(app.toString())
-        val assetBase = normalized.optString("asset_base_url")
-        if (assetBase.isNotBlank()) {
-            normalized.put("asset_base_url", absoluteFrameworkUrl(frameworkBaseUrl, assetBase))
-        }
-        val iconSource = normalized.optString("icon_src")
-        if (iconSource.isNotBlank()) {
-            val absoluteIcon = when {
-                iconSource.startsWith("http://") || iconSource.startsWith("https://") -> iconSource
-                iconSource.startsWith('/') -> absoluteFrameworkUrl(frameworkBaseUrl, iconSource)
-                assetBase.isNotBlank() -> {
-                    "${absoluteFrameworkUrl(frameworkBaseUrl, assetBase).trimEnd('/')}/${iconSource.trimStart('/')}"
-                }
-                else -> absoluteFrameworkUrl(frameworkBaseUrl, iconSource)
+    internal companion object AssetUrls {
+        internal fun normalizeAppAssets(
+            app: JSONObject,
+            frameworkBaseUrl: String,
+            rewriteFrameworkUrl: (String) -> String,
+        ): JSONObject {
+            val normalized = JSONObject(app.toString())
+            val assetBase = normalized.optString("asset_base_url")
+            if (assetBase.isNotBlank()) {
+                normalized.put(
+                    "asset_base_url",
+                    rewriteFrameworkUrl(absoluteFrameworkUrl(frameworkBaseUrl, assetBase)),
+                )
             }
-            normalized.put("icon_src", absoluteIcon)
+            val iconSource = normalized.optString("icon_src")
+            if (iconSource.isNotBlank()) {
+                val absoluteIcon = when {
+                    iconSource.startsWith("http://") || iconSource.startsWith("https://") -> iconSource
+                    iconSource.startsWith('/') -> absoluteFrameworkUrl(frameworkBaseUrl, iconSource)
+                    assetBase.isNotBlank() -> {
+                        "${absoluteFrameworkUrl(frameworkBaseUrl, assetBase).trimEnd('/')}/${iconSource.trimStart('/')}"
+                    }
+                    else -> absoluteFrameworkUrl(frameworkBaseUrl, iconSource)
+                }
+                normalized.put("icon_src", rewriteFrameworkUrl(absoluteIcon))
+            }
+            return normalized
         }
-        return normalized
+
+        private const val API_PREFIX = "/android-api"
+        private const val LOCAL_SETTINGS_APP_ID = "settings"
+        private const val LOCAL_SETTINGS_URL = "/android-shell/settings.html"
+        private val APP_ACTION_PATTERN = Regex("^$API_PREFIX/apps/([^/]+)/(open|quit)$")
+        private val APP_ID_PATTERN = Regex("[A-Za-z0-9._-]+")
+        private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+
+        private fun absoluteFrameworkUrl(frameworkBaseUrl: String, raw: String): String {
+            if (raw.startsWith("http://") || raw.startsWith("https://")) return raw
+            return if (raw.startsWith('/')) {
+                frameworkBaseUrl.trimEnd('/') + raw
+            } else {
+                frameworkBaseUrl.trimEnd('/') + "/" + raw
+            }
+        }
     }
 
     private fun localSettingsApp(): JSONObject = JSONObject().apply {
@@ -299,15 +324,6 @@ class AndroidShellGateway(
         "bookmarks",
         JSONArray().apply { bookmarks.forEach { put(it.toJson()) } },
     )
-
-    private fun absoluteFrameworkUrl(frameworkBaseUrl: String, raw: String): String {
-        if (raw.startsWith("http://") || raw.startsWith("https://")) return raw
-        return if (raw.startsWith('/')) {
-            frameworkBaseUrl.trimEnd('/') + raw
-        } else {
-            frameworkBaseUrl.trimEnd('/') + "/" + raw
-        }
-    }
 
     private fun jsonResponse(status: Int, data: Any): LocalHttpResponse {
         val body = JSONObject().apply {
@@ -333,13 +349,4 @@ class AndroidShellGateway(
         )
     }
 
-    companion object {
-        private const val API_PREFIX = "/android-api"
-        private const val LOCAL_SETTINGS_APP_ID = "settings"
-        private const val LOCAL_SETTINGS_URL = "/android-shell/settings.html"
-        private val APP_ACTION_PATTERN =
-            Regex("^$API_PREFIX/apps/([^/]+)/(open|quit)$")
-        private val APP_ID_PATTERN = Regex("[A-Za-z0-9._-]+")
-        private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
-    }
 }
