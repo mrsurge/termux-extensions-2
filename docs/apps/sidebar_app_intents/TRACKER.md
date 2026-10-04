@@ -1,18 +1,17 @@
 # Sidebar App Intents Tracker
 
 Plan: [PLAN.md](PLAN.md). Branch: `feature/code-te2-native-services`.
-Status: production pipe foundation, native document-open/app-open adapters and
-Explorer File Explorer integration implemented and unit-validated. Remaining
-other app UI integration pending. Guarded project intents and File Explorer item
-context menus are now implemented and user live-accepted. Terminal intent and Explorer
-menu implemented; validation recorded below. Shared framework
-not restarted; compiled runtime group not rebuilt/activated for this slice.
+Status: planned Sidebar app-intent workflows are implemented, regression-tested
+and user live-accepted. This includes File Explorer, Terminal, CM6, mobile
+feedback/sticky scopes, dock behavior and remembered terminal destination.
+Acceptance was reconfirmed by the user on 2026-10-04. Earlier checkpoint notes
+describe the evidence available then; they are not current outstanding gates.
+Native-worker/mypyc packaging and release integration remain a separate plan.
 
 Validation cadence: per user direction, use synthetic and regression tests during
 incremental implementation. Defer live acceptance until a working end-to-end
 model exists; do not request a live test for each transport/adapter checkpoint.
-The mobile sticky-scope investigation still requires explicit advance notice
-and joint debugging when its scheduled slice is reached.
+The mobile sticky-scope joint investigation and live acceptance are complete.
 
 ## Production Pipe Foundation
 
@@ -36,7 +35,7 @@ and joint debugging when its scheduled slice is reached.
   context requires current client/slot/presentation and app ownership.
 - [x] 24 targeted Python tests pass; five changed modules pass Mypy and mypyc
   code generation. This is not a compiled-group rebuild or live acceptance.
-- [ ] Project intent services and remaining out-of-project routing policies.
+- [x] Project intent services and remaining out-of-project routing policies.
 - [x] Terminal directory intent service: exact-client drawer activation and
   Sidebar fresh-session seeds with retained FWS claim matching.
 - [x] Shared app-tab launch service uses framework pipe `app.open`, validates
@@ -47,7 +46,7 @@ and joint debugging when its scheduled slice is reached.
   distinct stateful Sidebar tab; no frontend framework fetch/page navigation.
 - [x] App-tab slice: 51 Python and 16 Node regression tests, TypeScript typecheck,
   frontend build and six-module Mypy/mypyc validation. No live test or OTA.
-- [ ] User-facing workflows and live acceptance (not supplied by the foundation).
+- [x] User-facing workflows and live acceptance completed by subsequent slices.
 
 ## Direction And Plan Formation
 
@@ -184,7 +183,7 @@ and joint debugging when its scheduled slice is reached.
   imports and both routing exports verified; 21 isolated native-worker/reader
   tests passed. Switched `mypyc-active` to the new group, preserving
   `mypyc-domain-gather-fix-1`. No shared runtime restart: existing workers retain
-  old imports until restarted. Live routing acceptance remains pending.
+  old imports until restarted. Subsequent user live routing acceptance is complete.
 
 ## CM6 File Editor
 
@@ -230,27 +229,30 @@ and joint debugging when its scheduled slice is reached.
 - [x] User live accepted overflow behavior, then requested fixed Explorer/launcher
   controls. Both now sit outside the scroll strip on its left; only app icons
   scroll up to the title. Tests check this boundary; refined-layout acceptance
-  remains pending force OTA.
-- [ ] User live acceptance after force OTA on desktop/mobile. No native APK or
+  was subsequently confirmed by the user.
+- [x] User live acceptance on desktop/mobile. No native APK or
   version change, backend edits, or runtime restart. Forty-one dock/presentation/
   reveal/file-tab regression tests, TypeScript checking and frontend build pass.
 
 ## Acceptance Matrix
 
-- [ ] Electron embedded app workflows, warm and cold worker launch.
-- [ ] Mobile embedded app workflows after verified force OTA.
-- [ ] Standalone File Explorer -> Code TE2/Terminal/CM6 launch intent behavior.
-- [ ] Two clients plus multiple tabs: effects target the initiating client;
+The user reconfirmed completion of the walkthrough/live acceptance on 2026-10-04.
+These checks record user acceptance, not a newly executed agent/device test run.
+
+- [x] Electron embedded app workflows, warm and cold worker launch.
+- [x] Mobile embedded app workflows after client asset publication.
+- [x] Standalone File Explorer -> Code TE2/Terminal/CM6 launch intent behavior.
+- [x] Two clients plus multiple tabs: effects target the initiating client;
   project changes still follow the shared runtime project contract.
-- [ ] In/out-of-project paths, symlinks, similarly prefixed siblings and stale targets.
-- [ ] Existing/new project, draft guard acceptance/cancellation and switch publication.
-- [ ] Fresh terminal session per invocation in Sidebar/drawer/standalone; no replay
+- [x] In/out-of-project paths, symlinks, similarly prefixed siblings and stale targets.
+- [x] Existing/new project, draft guard acceptance/cancellation and switch publication.
+- [x] Fresh terminal session per invocation in Sidebar/drawer/standalone; no replay
   duplicates, accidental reuse, wrong CWD, or eager unrelated PTY creation.
-- [ ] File Explorer Show hidden and CM6 settings survive reload/reopen.
-- [ ] CM6 dirty navigation: Save, Discard, Cancel, failed Save and pending intent.
+- [x] File Explorer Show hidden and CM6 settings survive reload/reopen.
+- [x] CM6 dirty navigation: Save, Discard, Cancel, failed Save and pending intent.
 - [x] Mobile source-tree sticky scopes render after delayed drawer close/reopen
   without scrolling; desktop and initial reveal remain correct.
-- [ ] Dock overflow on desktop/mobile retains controls and popup visibility.
-- [ ] Targeted backend/frontend tests, applicable typechecks and builds pass.
-- [ ] User live acceptance at working end-to-end milestones; commit/release only
+- [x] Dock overflow on desktop/mobile retains controls and popup visibility.
+- [x] Targeted backend/frontend tests, applicable typechecks and builds pass.
+- [x] User live acceptance at working end-to-end milestones; commit/release only
   when requested.

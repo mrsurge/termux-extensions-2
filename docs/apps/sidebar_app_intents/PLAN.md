@@ -1,6 +1,9 @@
 # Sidebar App Intents And Unified App Behavior
 
-Status: intended direction recorded; end-to-end contract investigation pending.
+Status: planned end-to-end workflows implemented and user live-accepted;
+completion reconfirmed on 2026-10-04. Earlier slice notes retain historical
+validation boundaries, not outstanding acceptance gates. Native-worker/mypyc
+packaging and release integration are tracked separately.
 Working branch: `feature/code-te2-native-services`. No new branch, release,
 runtime restart, or implementation is authorized by this documentation pass.
 Execution checklist: [TRACKER.md](TRACKER.md).
@@ -602,7 +605,7 @@ Popup menus remain siblings of the strip, not children of its overflow box.
 After the user's first live acceptance, the boundary was refined: Explorer and
 launcher occupy a fixed left-hand control group. Only app icons scroll between
 that group and the window title; utility menus and their button behavior stay
-unchanged. Updated-client acceptance of this refinement remains pending.
+unchanged. The user subsequently confirmed live acceptance of this refinement.
 
 Wheel input follows the file-tab dominant-axis convention, normalizes line/page
 units and does not consume Ctrl-wheel or wheel input at a scroll boundary.
@@ -614,7 +617,7 @@ tap remains active. Gesture listeners are disposed on projection refresh, and
 the scroll offset is retained. No new persistence or backend authority is added.
 
 Forty-one dock/presentation/reveal/file-tab tests, full TypeScript checking and
-frontend build pass. User live acceptance after force OTA remains pending;
+frontend build pass. User live acceptance is complete;
 the slice does not publish APKs, bump versions or restart runtime processes.
 
 ## Phases
