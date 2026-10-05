@@ -64,7 +64,7 @@ Last updated: 2026-09-18
   including extension install/uninstall restart recovery. The
   `closed intelligence reader` shutdown warning is a separate follow-up.
 - [ ] Adapt accepted packaging contract to Android/Termux, then release workflow.
-- [ ] Pre-release reader-shutdown cleanup: replace `OutputReader.get()`'s
+- [x] Pre-release reader-shutdown cleanup: replace `OutputReader.get()`'s
   cancelled-shield reporting path with cancellation-safe completion waiting,
   preserving one native read and unsubscribe/join/release ordering. CPython 3.14
   explicitly reports a later shielded exception despite current collection.
@@ -73,8 +73,29 @@ Last updated: 2026-09-18
   client-runtime PLAN, **Intelligence reader shutdown reporting cleanup**;
   implementation complete: 24 interpreted tests/four subtests and the compiled
   cleanup regression pass; a separate 136-module group built/validated without
-  activation. Live acceptance and private-runtime wheel integration remain
+  activation. User live acceptance on 2026-10-05 confirmed no exceptions or
+  tracebacks during WBA restart. Private-runtime wheel integration remains
   pending, no repackaging yet.
+
+- [x] Extension changes without full-page reload: first make orderly backend
+  restart own replacement runtime preparation through the existing primer; then
+  cover authoritative contribution/theme/sidebar refresh and reconnect before
+  removing extension-operation page reloads. Preserve manual/mode-change reloads
+  and native OTA publication rules. See client-runtime PLAN, **Extension changes
+  without full-page reload**. Backend restart foundation implemented: 43 tests
+  and four subtests passed; matching 136-module compiled imports and cleanup
+  regression passed. Frontend contribution refresh/reload removal and both
+  schema-aware install dialogs are implemented: 45 Python tests, 84 frontend
+  regressions, TypeScript and bundle build pass. A separate 136-module mypyc
+  group built and validated all compiled imports; compiled reader cleanup passes.
+  User live acceptance passed after the uninstall follow-up. Synchronized native
+  asset/version publication remains a release gate, not part of this slice.
+  Live uninstall exposed pre-handshake WBA application sends and a reply held
+  behind recovery. The handshake send fence and retained asynchronous uninstall
+  recovery are implemented; 47 Python tests, 77 selected frontend regressions,
+  TypeScript/bundle build, 136 compiled imports and compiled cleanup pass.
+  Latest separately built snapshot is recorded in the client-runtime PLAN;
+  user confirmed the previously failing uninstall/restart works on 2026-10-05.
 
 Use the SSH machine for acceptance; remote building is an optional space fallback.
 Do not rebuild/publish Android packages or tag/merge/publish a release in these

@@ -132,7 +132,6 @@ export function createSettingsManagerController(deps: any) {
               ext_id: extId,
               active: !isActive,
             }, 10000);
-            deps.reloadEditorFrame();
             void refreshEditorExtManagerModal();
           } catch (e) {
             deps.toast((e as { message?: string })?.message || 'Toggle failed');
@@ -200,8 +199,7 @@ export function createSettingsManagerController(deps: any) {
                 ext_id: extId,
               }, 30000);
               if (res?.ok) {
-                deps.toast(`Uninstalled: ${label} — reloading…`);
-                deps.reloadEditorFrame();
+                deps.toast(`Uninstalled: ${label} — restarting adapter…`);
                 void refreshEditorExtManagerModal();
               } else {
                 deps.toast(res?.error || 'Uninstall failed');

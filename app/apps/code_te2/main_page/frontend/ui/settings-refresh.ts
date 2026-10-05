@@ -185,7 +185,6 @@ export function createSettingsRefreshController(deps: any) {
           deps.toast(
             `Workspace settings saved (${res.count} keys) — reloading adapter…`,
           );
-          deps.reloadEditorFrame();
         } else {
           deps.toast(res?.error || "Save failed");
         }
@@ -323,7 +322,6 @@ export function createSettingsRefreshController(deps: any) {
           deps.toast(
             `User settings saved (${res.count} keys) — reloading adapter…`,
           );
-          deps.reloadEditorFrame();
         } else {
           deps.toast(res?.error || "Save failed");
         }

@@ -404,6 +404,7 @@ export interface ExtHostDispatchRuntimeDeps {
 
 export interface TransportRuntimeDeps {
   requestOwner: SentRequestOwnerLike;
+  isHandshakeInitialized: () => boolean;
   extProtocol: TransportRuntime["refs"]["extProtocol"];
   mgmtProtocol: TransportRuntime["refs"]["mgmtProtocol"];
   mgmtIpc: TransportRuntime["refs"]["mgmtIpc"];
@@ -856,6 +857,7 @@ export function createTransportRuntime(deps: TransportRuntimeDeps): TransportRun
     },
     state: deps.state,
     wrapPayload: (payload: Uint8Array) => deps.wrapPayload(payload),
+    isHandshakeInitialized: () => deps.isHandshakeInitialized(),
     encodeJsonRequest: (input: { req: number; rpcId: number; method: string; args?: readonly unknown[] | null; cancellable?: boolean }) => deps.encodeJsonRequest(input),
     encodeMixedRequest: (input: { req: number; rpcId: number; method: string; args?: readonly unknown[] | null; cancellable?: boolean }) => deps.encodeMixedRequest(input),
     onEvent: (payload: Record<string, unknown>) => deps.onEvent(payload),

@@ -102,6 +102,7 @@ export const EDITOR_RPC_NOTIFICATIONS = {
   agentEditsChanged: "editor.agentEdits.changed",
   codeInspectorCommand: "editor.codeInspector.command",
   textmateProjectionChanged: "editor.textmate.projectionChanged",
+  extensionContributionsChanged: "editor.extensions.contributionsChanged",
 } as const;
 
 export type EditorRpcNotificationName =

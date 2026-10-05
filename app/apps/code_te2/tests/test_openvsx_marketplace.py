@@ -214,6 +214,10 @@ class OpenVsxMarketplaceHandlerTests(unittest.IsolatedAsyncioTestCase):
                 "app.apps.code_te2.explorer.handlers.extensions.restart_code_server_and_adapter",
                 restart_mock,
             ),
+            patch(
+                "app.apps.code_te2.extension_registry.get_extension_config_schema",
+                return_value={"properties": {"sample.setting": {"type": "boolean"}}},
+            ),
         ):
             await handle_ext_marketplace_install(
                 context,
@@ -227,6 +231,7 @@ class OpenVsxMarketplaceHandlerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(vsix_path.exists())
         self.assertEqual(emitted[0][0], "ext:marketplace_installed")
+        self.assertIn("sample.setting", emitted[0][1]["config_schema"]["properties"])
         restart_mock.assert_awaited_once()
 
 

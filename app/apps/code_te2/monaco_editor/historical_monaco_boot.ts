@@ -8,7 +8,7 @@ import { ensureHistoricalTouchAssets } from './inline_host.ts';
 import { isMobileUserAgent } from './editor_mobile_special_keys_utils.ts';
 
 export interface HistoricalEditorView extends HistoricalDiffView {
-  updatePreferences(preferences: unknown): void;
+  updatePreferences(preferences: unknown, refreshContributions?: boolean): void;
 }
 
 const CSS_URL = '/api/app/code_te2/ui/monaco_vscode/lang/bootstrap/monaco.bootstrap.bundle.css?raw=1';
@@ -112,11 +112,11 @@ export async function bootHistoricalDiff(
     signal.removeEventListener('abort', abort);
     throw error;
   }
-  const updatePreferences = (value: unknown): void => {
+  const updatePreferences = (value: unknown, refreshContributions = false): void => {
     if (lifetime.signal.aborted) return;
     const next = historicalAppearance(value);
     view.updateAppearance(next.appearance);
-    void applyTheme(next.theme).catch((error: unknown) => {
+    void applyTheme(next.theme, refreshContributions).catch((error: unknown) => {
       if (!lifetime.signal.aborted) console.warn('[historical-editor] Theme unavailable', error);
     });
   };

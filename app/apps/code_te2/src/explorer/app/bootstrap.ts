@@ -352,6 +352,9 @@ explorerMarketplaceController = createExplorerMarketplaceController({
     explorerSearchOverlayController.closeSearchOverlay(reason);
   },
   confirm: (message) => window.teUI.dialog.confirm(message),
+  onInstalled: (extension, schema) => {
+    window.dispatchEvent(new CustomEvent('code-te2:extension-installed', { detail: { extension, schema } }));
+  },
 });
 const explorerTreeDecorationsController =
   createExplorerTreeDecorationsController({

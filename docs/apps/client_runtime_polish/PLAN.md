@@ -1412,8 +1412,9 @@ replace a loaded shared object in a running runtime or restart the shared server
 
 #### Intelligence reader shutdown reporting cleanup (pre-release)
 
-Status: targeted implementation and interpreted/compiled validation complete;
-live extension-restart acceptance pending. This is
+Status: targeted implementation, interpreted/compiled validation and user live
+extension-restart acceptance complete. The user confirmed WBA restart produces
+no exceptions or tracebacks on 2026-10-05. This is
 separate from the live-accepted compiled launch-dictionary segfault workaround.
 
 Source ownership:
@@ -1480,8 +1481,155 @@ subtests passed. A separate full 136-module mypyc group built successfully in
 413.26s and validated all 136 compiled imports. Its compiled cleanup regression
 passed with zero loop-handler events. Snapshot:
 `~/.cache/te2/code_te2/build/mypyc-snapshots/check-20261005-073242-1791185562539956722`.
-The active selector and running worker were not changed. No wheels/APKs rebuilt;
-the private-runtime wheel and live extension-restart check remain later gates.
+The active selector and running worker were not changed during implementation.
+Subsequent user live acceptance passed. No wheels/APKs rebuilt; private-runtime
+wheel integration remains a later packaging gate.
+
+#### Extension changes without full-page reload
+
+Goal: install/uninstall/enable/disable/configure extensions and restart WBA
+without recreating the host page or its editor models. Retain explicit manual
+page reload and required reloads for distinct runtime-mode/identity changes.
+Preserve the existing post-install configuration dialog for manual VSIX installs
+from Extension Settings. Extend it to marketplace installs for extensions with
+configuration schemas; no-schema installs need no empty configuration dialog.
+This dialog must survive recovery instead of being torn down by page reload.
+Status: backend restart, contribution refresh, both install configuration paths
+and extension-operation reload removal implemented; static/regression validation
+passes, including matching compiled-domain imports. User live acceptance passed
+after the uninstall handshake/reply follow-up. This follows live acceptance of
+reader-shutdown cleanup. Packaging/version publication remains a separate gate.
+
+Current source paths and gaps:
+
+- Before this foundation, `explorer/services/extension_restarts.py` stopped
+  adapter/code-server and emitted `explorer.extensions.adapter.restarting`
+  without starting replacements. It now serializes stop/reset/notification and
+  replacement preparation through the registered runtime primer.
+  `boot_snapshot_backend.py` currently primes runtime during page boot through
+  `code_server_runtime_hooks.py`, registered by `main.py` and ultimately using
+  `intelligence_startup.prime_intelligence_runtime()`. Removing page reload must
+  not remove that restart completion implicitly.
+- The former restart-notification and install/uninstall/toggle/configuration
+  reload calls are removed. `main_page/frontend/ui/adapter-ui.ts` retains the
+  full-page reload helper only for explicit/manual or runtime-mode changes.
+- `monaco_editor/m_editor_app.ts` reconnect already replays WBA state, active
+  model open, dynamic providers, diagnostics, semantic tokens, symbols/structure
+  and editor menus. Verify this for primary/secondary and multiple clients;
+  do not manufacture model edits or use a frontend to restart backend processes.
+- Extension registry/TextMate projection already publishes grammar revision
+  changes to editor RPC and invalidates/reloads grammar state. Reuse that path.
+- Theme picker requests current backend metadata, but successful editor catalog
+  state is cached. Account for installed/updated/removed selected themes and
+  historical-secondary appearance without requiring a preference value change.
+- Backend `webview/snapshot` reconciliation and webview epoch/reconstruction
+  mechanisms already exist. Verify final authoritative snapshots remove missing
+  contributions while temporary resets preserve hidden/ordered membership.
+
+Implementation order:
+
+1. Backend restart foundation: reuse the registered runtime primer after orderly
+   termination/reset; serialize overlapping restart operations, honor intelligence
+   mode and resolve the current project from backend authority. Completion must
+   mean the replacement runtime is prepared, not merely that termination finished.
+   Propagate failures through existing RPC/error paths without mutation replay.
+   Retain automatic page reload during this preparatory slice.
+2. Contribution refresh: use authoritative backend revision/readiness facts to
+   refresh theme metadata/selected theme and existing grammar/provider/menu/UI
+   projections. Refresh must reach every affected live client, with reconnect
+   reconciliation for clients that missed the fact; avoid polling, HTTP launch
+   round trips, redundant snapshots and disposal of working editor models.
+3. Remove automatic page reloads from extension restart/install/uninstall/toggle
+   and applicable configuration flows only after steps 1–2 are covered. Keep
+   editor content, caret/selection, drafts, drawer sessions, sidebar visibility,
+   ordering and primary/secondary presentation intact during recovery. UI webview
+   reconstruction can reload its own document when required, not the host page.
+
+Validation: backend ordering/serialization/failure/mode/project tests; frontend
+notification/controller and cache invalidation tests; reconnect/provider and
+sidebar snapshot regressions; Code TE2 TypeScript checks and bundle build; matching
+compiled-domain validation after backend edits. Later user live matrix covers
+language extension install/remove, UI extensions, theme install/update/removal,
+primary/secondary, two clients and a disconnected/reconnected client. Native live
+testing requires explicit client OTA; rebuilding server assets/reloading alone
+does not publish them. No shared framework restart, artifact activation,
+Android source/APK edits, wheel assembly, release/tag or push is implied.
+
+Foundation validation (2026-10-05): 43 Python tests/four subtests passed,
+including adapter-only/full restart ordering, queued cancellation, serialization,
+failure propagation, web-worker mode, backend project selection and generation
+change rejection. A separate 136-module compiled group built in 26.95s and
+validated all compiled imports; its reader cleanup regression also passed.
+Snapshot: `~/.cache/te2/code_te2/build/mypyc-snapshots/check-20261005-125301-1791204781999786437`.
+No activation, runtime restart or client asset publication occurred. Current
+frontend reloads deliberately remained during this foundation phase.
+
+Contribution/reload-removal implementation (2026-10-05): after registry/settings
+mutation, the backend publishes `editor.extensions.contributionsChanged` and
+`ui.extensions.contributionsChanged` through existing owned lanes. Editors
+coalesce refreshes, reload selected-theme and grammar projection, and reconcile
+again on editor-RPC/WBA reconnect. Historical secondary viewers refresh their
+catalog/theme bytes with stale-request fencing; a removed selected extension
+theme uses the bundled default without rewriting the saved preference. Existing
+WBA provider/menu/model replay and authoritative webview snapshot reconstruction
+remain the owners of intelligence/sidebar recovery; no model edits, polling or
+new transport is introduced. Visible settings panels refresh on the host hint.
+
+Manual VSIX configuration remains intact. Marketplace install replies now carry
+the installed schema; its overlay closes before the initiating host opens the
+same configuration dialog. No-schema installs do not open an empty dialog.
+Extension operations no longer reload the host page. Manual, identity-reset and
+language-backend-mode reloads remain available.
+
+Validation so far: 45 targeted Python tests, 84 frontend regressions, TypeScript
+check and frontend bundle build pass. A separate 136-module mypyc group built in
+419.08s and validated all 136 compiled imports; its compiled reader-cleanup
+regression also passed. Snapshot:
+`~/.cache/te2/code_te2/build/mypyc-snapshots/check-20261005-135041-1791208241075300026`.
+No artifact activation, app/framework restart, native OTA or packaging occurred.
+Before native live acceptance/publication, synchronize release-facing frontend
+versions and explicitly publish matching client assets using OTA/package seeds;
+reload alone cannot activate this frontend slice. Live matrix above remains open.
+
+Uninstall live investigation (2026-10-05): removal of `astral-sh.ty` succeeded,
+then the replacement WBA sent ordinary extension RPC packets before its
+`ext_handshake INIT_SENT` message. It received READY and sent initialization but
+never received INITIALIZED; `adapter.connect` returned `ext host handshake timeout`
+after 60 seconds. A running WBA/connected browser socket was not proof of an
+initialized extension host. Evidence: worker shell
+`frs_1791208750952_144752_15_15`, replacement WBA
+`frs_1791208820880_246023_6_6`, code-server
+`frs_1791208820854_246023_5_5`; logs under the local FWS runtime
+`a837e7dabd3fa514/a8e1db0f3634421a`. These are incident IDs, not discovery defaults.
+
+The confirmed protocol hole is in WBA `client/transport-session.ts`: ordinary
+sends previously required only a non-null protocol. All JSON/mixed/pending sends
+now require the live handshake's initialized fact before request allocation or
+transmission. Initialization JSON and teardown bypass this application gate.
+This addresses the observed pre-initialization traffic; reproducing the live
+uninstall on the updated runtime remains the acceptance gate, not a proven
+uninstall-specific extension incompatibility.
+
+Explorer also awaited the entire uninstall handler before returning its completed
+mutation reply, so the 60-second recovery failure surfaced as a generic request
+timeout. Uninstall now schedules a retained backend recovery task through the
+existing serialized restart helper after publishing the successful removal.
+Recovery failure uses the existing `explorer.error` notification separately;
+the mutation is never retried. Manual restart still awaits recovery explicitly.
+No generic RPC dispatch or client timeout inflation is introduced.
+
+Follow-up validation: handshake-fence and actual WorkbenchClient initialization/
+teardown tests, uninstall reply/recovery ownership/error tests, TypeScript and
+frontend/WBA build pass. Latest separate mypyc group validated 136 imports in
+32.51s, with compiled reader cleanup passing:
+`~/.cache/te2/code_te2/build/mypyc-snapshots/check-20261005-141220-1791209540437199643`.
+No active selector, running worker, installed client assets or package changed.
+
+User live acceptance (2026-10-05): the updated slice works, including the
+previously failing uninstall/restart scenario; user approved checkpoint commit
+and push. This records user-run acceptance, not an agent-performed runtime
+activation or an independently enumerated full multi-client/theme test matrix.
+No release/tag, wheel/APK assembly or version publication is part of this checkpoint.
 
 #### Historical host-3.14 proposal (superseded)
 

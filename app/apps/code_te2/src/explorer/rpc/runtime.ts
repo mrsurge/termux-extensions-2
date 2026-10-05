@@ -130,7 +130,6 @@ export function createExplorerRpcRuntime(deps: ExplorerRpcRuntimeDeps): Explorer
     }
     if (method === EXPLORER_RPC_NOTIFICATIONS.extensionsAdapterRestarting) {
       log('[adapter_restart] received', payload);
-      deferCall(() => deps.reloadEditorFrame());
     }
     if (method === EXPLORER_RPC_NOTIFICATIONS.extensionsSettingsChanged) {
       log('[adapter_restart] settings changed', payload);

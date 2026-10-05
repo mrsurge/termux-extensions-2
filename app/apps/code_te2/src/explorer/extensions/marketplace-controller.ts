@@ -18,6 +18,7 @@ interface MarketplaceControllerDeps {
   ): Promise<JsonObject>;
   closeSearchOverlay(reason?: string): void;
   confirm(message: string): Promise<boolean>;
+  onInstalled?(extension: JsonObject, schema: JsonObject): void;
 }
 
 interface MarketplaceSummary {
@@ -647,6 +648,7 @@ export function createExplorerMarketplaceController(
     mutationActive = true;
     actionError = null;
     renderDetail();
+    let installedConfiguration: { extension: JsonObject; schema: JsonObject } | null = null;
     try {
       const response = await deps.requestExplorer(
         EXPLORER_RPC_METHODS.extensionsMarketplaceInstall,
@@ -660,11 +662,22 @@ export function createExplorerMarketplaceController(
       detail = { ...current, installedVersion };
       updateItemsInstalledVersion(current.id, installedVersion);
       renderResults();
+      if (isRecord(response.extension) && isRecord(response.config_schema)) {
+        const properties = isRecord(response.config_schema.properties)
+          ? response.config_schema.properties : response.config_schema;
+        if (Object.keys(properties).length) {
+          installedConfiguration = { extension: response.extension, schema: response.config_schema };
+        }
+      }
     } catch (error) {
       actionError = getErrorMessage(error, "Extension install failed.");
     } finally {
       mutationActive = false;
       renderDetail();
+    }
+    if (installedConfiguration) {
+      closeMarketplace('installed');
+      deps.onInstalled?.(installedConfiguration.extension, installedConfiguration.schema);
     }
   }
 

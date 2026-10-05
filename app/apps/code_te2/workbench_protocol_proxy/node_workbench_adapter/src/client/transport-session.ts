@@ -42,6 +42,7 @@ export interface TransportRuntime {
   requestOwner: SentRequestOwnerLike;
   refs: TransportRefs;
   state: DisconnectState;
+  isHandshakeInitialized: () => boolean;
   wrapPayload: (payload: Uint8Array) => unknown;
   encodeJsonRequest: (input: { req: number; rpcId: number; method: string; args?: readonly unknown[] | null; cancellable?: boolean }) => Uint8Array;
   encodeMixedRequest: (input: { req: number; rpcId: number; method: string; args?: readonly unknown[] | null; cancellable?: boolean }) => Uint8Array;
@@ -60,6 +61,15 @@ function isTerminalReply(message: unknown): boolean {
   if (!message || typeof message !== "object") return false;
   const type = (message as { type?: unknown }).type;
   return (type === 7 || type === 8 || type === 9 || type === 10 || type === 11 || type === 12) && type !== 12;
+}
+
+function requireApplicationProtocol(runtime: TransportRuntime) {
+  const protocol = runtime.refs.extProtocol;
+  if (!protocol) throw new Error("not connected");
+  // The extension host's first application payload must be its initialization
+  // JSON, not a reconnecting editor's ordinary RPC request.
+  if (!runtime.isHandshakeInitialized()) throw new Error("extension host is initializing");
+  return protocol;
 }
 
 export function allocExtReqId(runtime: TransportRuntime): number {
@@ -90,8 +100,7 @@ export function sendExt(
   args: unknown[],
   cancellable = false,
 ): number {
-  const protocol = runtime.refs.extProtocol;
-  if (!protocol) throw new Error("not connected");
+  const protocol = requireApplicationProtocol(runtime);
   const req = allocExtReqId(runtime);
   const payload = runtime.encodeJsonRequest({ req, rpcId, method, args, cancellable });
   protocol.send(runtime.wrapPayload(payload));
@@ -113,8 +122,7 @@ export function sendExtPending(
   pendingOptions: TransportPendingOptions = {},
   eventExtra: Record<string, unknown> = {},
 ): { req: number; promise: Promise<unknown> } {
-  const protocol = runtime.refs.extProtocol;
-  if (!protocol) throw new Error("not connected");
+  const protocol = requireApplicationProtocol(runtime);
   const req = allocExtReqId(runtime);
   const payload = runtime.encodeJsonRequest({ req, rpcId, method, args, cancellable });
   const promise = createExtPending(runtime, req, {
@@ -154,8 +162,7 @@ export function sendExtMixed(
   args: unknown[],
   cancellable = false,
 ): number {
-  const protocol = runtime.refs.extProtocol;
-  if (!protocol) throw new Error("not connected");
+  const protocol = requireApplicationProtocol(runtime);
   const req = allocExtReqId(runtime);
   const payload = runtime.encodeMixedRequest({ req, rpcId, method, args, cancellable });
   protocol.send(runtime.wrapPayload(payload));

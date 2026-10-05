@@ -59,6 +59,50 @@ function tick(delay = 0) {
   return new Promise((resolve) => setTimeout(resolve, delay));
 }
 
+test("marketplace install hands configuration to the host after closing its overlay", async () => {
+  const window = new Window({ url: "http://localhost/" });
+  const restore = installDomGlobals(window);
+  try {
+    const { createExplorerMarketplaceController } = await importTypeScript(
+      "src/explorer/extensions/marketplace-controller.ts",
+    );
+    const button = window.document.createElement("button");
+    const overlay = window.document.createElement("div");
+    window.document.body.append(button, overlay);
+    const extension = { id: "vendor.example", namespace: "vendor", name: "example",
+      displayName: "Example", version: "1.0.0", installSupported: true };
+    const schema = { properties: { "example.enabled": { type: "boolean" } } };
+    const configured = [];
+    const controller = createExplorerMarketplaceController({
+      closeSearchOverlay() {}, confirm: async () => true,
+      async requestExplorer(method) {
+        if (method.endsWith(".search")) return { items: [extension], total: 1, offset: 0 };
+        if (method.endsWith(".detail")) return { extension };
+        if (method.endsWith(".install")) return { ok: true, extension, config_schema: schema };
+        throw Error(method);
+      },
+      onInstalled(installed, configuration) {
+        assert.equal(overlay.style.display, "none");
+        configured.push([installed, configuration]);
+      },
+    });
+    controller.bindUi({ button, overlay });
+    controller.openMarketplace();
+    const input = overlay.querySelector(".fe-marketplace-search-input");
+    input.value = "example";
+    input.dispatchEvent(new window.Event("input", { bubbles: true }));
+    await tick(400);
+    overlay.querySelector(".fe-marketplace-result").click();
+    await tick();
+    findButton(overlay, "Install").click();
+    await tick();
+    assert.deepEqual(configured, [[extension, schema]]);
+  } finally {
+    restore();
+    window.close();
+  }
+});
+
 test("marketplace overlay can reopen details and install without losing search state", async () => {
   const window = new Window({ url: "http://localhost/" });
   const restore = installDomGlobals(window);

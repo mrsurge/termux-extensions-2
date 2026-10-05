@@ -40,6 +40,7 @@ interface EditorRpcTransportDeps {
   clearTimeoutFn(timer: ReturnType<typeof setTimeout>): void;
   onProtocolError?(error: unknown): void;
   onReliablePublishError?(method: EditorRpcMethodName, error: Error): void;
+  onReconnect?(): void;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -67,6 +68,7 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
   getPendingRequests(): Map<string, PendingRequestEntry>;
 } {
   const pending = new Map<string, PendingRequestEntry>();
+  let hasConnected = false;
   const connectionWaiters = new Set<ConnectionWaiter>();
   const notificationHandlers = new Map<string, Set<(params: Record<string, unknown>) => void>>();
   let nextId = 1;
@@ -157,7 +159,11 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
     if (attached || !socket || typeof socket.on !== 'function') return;
     attached = true;
     socket.on(EDITOR_RPC_EVENT, handleMessage);
-    socket.on('connect', () => settleConnectionWaiters());
+    socket.on('connect', () => {
+      settleConnectionWaiters();
+      if (hasConnected) deps.onReconnect?.();
+      hasConnected = true;
+    });
     socket.on('disconnect', () => {
       settleConnectionWaiters(new Error('editor rpc socket disconnected'));
       clearSocketReplayBuffer(socket);

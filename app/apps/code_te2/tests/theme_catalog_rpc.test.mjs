@@ -91,6 +91,26 @@ test('failed theme gate rejects model waiters and retries without caching succes
   assert.equal(attempts, 2);
 });
 
+test('contribution refresh reapplies an unchanged theme and fences a refresh during application', async () => {
+  const calls = [];
+  let release;
+  const gate = createDocumentThemeGate(async () => {}, async key => {
+    calls.push(key);
+    if (calls.length === 2) await new Promise(resolve => { release = resolve; });
+  });
+  await gate.apply('ext:theme');
+  await gate.apply('ext:theme');
+  assert.equal(calls.length, 1);
+  const first = gate.refresh();
+  await new Promise(resolve => setImmediate(resolve));
+  const newer = gate.refresh();
+  release();
+  await Promise.all([first, newer]);
+  assert.deepEqual(calls, ['ext:theme', 'ext:theme', 'ext:theme']);
+  await gate.apply('ext:theme');
+  assert.equal(calls.length, 3);
+});
+
 test('theme picker uses injected host RPC, preserves selection, and displays request failures', async (t) => {
   const warning = t.mock.method(console, 'warn', () => {});
   const win = new Window();

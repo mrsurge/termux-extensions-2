@@ -21,6 +21,7 @@ from ..context import ExplorerExtensionHandlerContext
 from ..services.extension_restarts import (
     restart_adapter_only,
     restart_code_server_and_adapter,
+    schedule_code_server_and_adapter_restart,
 )
 
 logger = logging.getLogger(__name__)
@@ -171,12 +172,17 @@ async def handle_ext_marketplace_install(
     finally:
         await asyncio.to_thread(vsix_path.unlink, missing_ok=True)
     extension = _as_object(result.get("extension")) or {}
+    installed_id = extension.get("id")
+    config_schema = extension_registry.get_extension_config_schema(
+        installed_id if isinstance(installed_id, str) else params["ext_id"],
+    )
     registry_summary = _as_object(result.get("registry_summary")) or {}
     await context.emit_personal(
         "ext:marketplace_installed",
         {
             "ok": True,
             "extension": extension,
+            "config_schema": config_schema,
             "registry_summary": registry_summary,
         },
         msg_id,
@@ -210,7 +216,7 @@ async def handle_ext_uninstall(
         },
         msg_id,
     )
-    await restart_code_server_and_adapter(context.emit_personal, "ext_uninstall")
+    schedule_code_server_and_adapter_restart(context.emit_personal, "ext_uninstall")
 
 
 async def handle_ext_configure(

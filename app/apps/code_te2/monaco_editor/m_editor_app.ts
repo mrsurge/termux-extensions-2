@@ -30,6 +30,7 @@ import { buildMonacoOptionsFromPrefsState } from "./editor_monaco_options_utils.
 import { ensureTe2DiffThemeApplied } from "./editor_diff_theme_utils.ts";
 import { vscodeThemeToMonacoTheme } from "./editor_theme_convert_utils.ts";
 import { createDocumentThemeGate } from "./editor_theme_registry_state_utils.ts";
+import { createContributionRefresher } from "./editor_contribution_refresh.ts";
 import { applyMonacoThemeRuntime } from "./editor_theme_apply_runtime_utils.ts";
 import { clearDraftDiffZonesState } from "./editor_draft_zone_clear_utils.ts";
 import { clearDraftDiffDecorationsState } from "./editor_draft_decorations_clear_utils.ts";
@@ -707,6 +708,7 @@ interface MonacoBootWindowLike extends Window {
     },
     setTimeoutFn: _setTimeoutBound,
     clearTimeoutFn: _clearTimeoutBound,
+    onReconnect: () => refreshExtensionContributions(),
     onProtocolError: function (error: unknown) {
       console.error("[editor-rpc] MessagePack protocol error", error);
     },
@@ -765,6 +767,26 @@ interface MonacoBootWindowLike extends Window {
     editorRpcCall: editorRpcCall,
   } as Parameters<typeof createEditorTextmateRuntime>[0]);
   var ensureTextmateTokenization = textmateRuntime.ensureTextmateTokenization;
+  const contributionRefresher = createContributionRefresher(
+    () => editorRpcTransport.isConnected(),
+    () => Promise.all([
+      documentThemeGate.refresh(),
+      textmateRuntime.refreshTextmateProjection().then(async () => {
+        const activeModel = te2GetActiveEditorAndModel(diffEditor, editor).model;
+        const language = normalizeLanguage((activeModel as { getLanguageId?(): string } | null)?.getLanguageId?.());
+        if (language) await ensureTextmateTokenization(language, currentPath);
+      }),
+    ]),
+    (error) => console.warn('[extensions] contribution refresh failed', error),
+  );
+  function refreshExtensionContributions(): void {
+    if (!editor && !diffEditor) return; // Initial barriers read current backend state.
+    void contributionRefresher.request();
+  }
+  editorRpcTransport.onNotification(
+    EDITOR_RPC_NOTIFICATIONS.extensionContributionsChanged,
+    refreshExtensionContributions,
+  );
 
   editorRpcTransport.onNotification(
     EDITOR_RPC_NOTIFICATIONS.textmateProjectionChanged,
@@ -2583,6 +2605,7 @@ interface MonacoBootWindowLike extends Window {
 
       if (wbaRpcSocket && typeof wbaRpcSocket.on === "function") {
         wbaRpcSocket.on("connect", () => {
+          refreshExtensionContributions();
           console.log("[wba] socket connected");
           notifyExtensionActivityBridgeReady();
           void extensionEditorMenuRuntime?.refresh("wba_connect");

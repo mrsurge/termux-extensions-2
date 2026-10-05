@@ -35,9 +35,8 @@ export function createSettingsInstallController(deps: any) {
         if (res?.ok) {
           const ext = res.extension || {};
           const schema = res.config_schema || {};
-          deps.toast(`Installed: ${ext.display_name || ext.id || 'ok'} — reloading…`);
+          deps.toast(`Installed: ${ext.display_name || ext.id || 'ok'} — restarting adapter…`);
           void deps.refreshExtManager();
-          deps.reloadEditorFrame();
           if (schema && Object.keys(schema.properties || schema || {}).length) {
             deps.openExtConfigModal(ext.id, ext.display_name, schema, {});
           }

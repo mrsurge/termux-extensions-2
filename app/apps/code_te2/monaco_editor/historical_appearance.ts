@@ -36,7 +36,7 @@ export function createHistoricalThemeApplier(
   requestCatalog: RequestThemeCatalog,
   fetchTheme: typeof fetch = (...args) => fetch(...args),
 ) {
-  const registry = {};
+  let registry = {};
   let revision = 0;
   let current = '';
   const themes = new Map<string, Promise<Monaco.editor.IStandaloneThemeData>>();
@@ -45,8 +45,13 @@ export function createHistoricalThemeApplier(
     document.documentElement.classList.add(base === 'vs' || base === 'hc-light' ? 'vs' : 'vs-dark');
     if (base === 'hc-black' || base === 'hc-light') document.documentElement.classList.add(base);
   };
-  return async (theme: string): Promise<void> => {
+  return async (theme: string, refresh = false): Promise<void> => {
     const epoch = ++revision;
+    if (refresh) {
+      registry = {};
+      themes.clear();
+      current = '';
+    }
     if (signal.aborted || current === theme) return;
     if (['vs', 'vs-dark', 'hc-black', 'hc-light'].includes(theme)) {
       monaco.editor.setTheme(theme);
@@ -58,18 +63,21 @@ export function createHistoricalThemeApplier(
     if (!pending) {
       pending = (async () => {
         const entries = await ensureThemeRegistryState(registry, requestCatalog);
-        const url = getVscodeThemeJsonUrl(theme, entries, '/api/app/code_te2');
+        // Match the existing selected-theme resolver's bundled fallback without
+        // changing the persisted preference when an extension is removed.
+        const resolved = entries[theme] ? theme : 'github-dark-default';
+        const url = getVscodeThemeJsonUrl(resolved, entries, '/api/app/code_te2');
         if (!url) throw new Error(`Historical theme unavailable: ${theme}`);
-        const response = await fetchTheme(url);
+        const response = await fetchTheme(url, refresh ? { cache: 'no-store' } : undefined);
         if (!response.ok) throw new Error(`Historical theme failed: ${response.status}`);
         const value: unknown = await response.json();
         if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`Invalid historical theme: ${theme}`);
-        const json = themeJsonWithUiTheme(value as Record<string, unknown>, entries[theme]?.uiTheme);
+        const json = themeJsonWithUiTheme(value as Record<string, unknown>, entries[resolved]?.uiTheme);
         // The existing converter produces Monaco theme data with opaque rule declarations.
         return vscodeThemeToMonacoTheme(theme, json) as Monaco.editor.IStandaloneThemeData;
       })();
       themes.set(theme, pending);
-      void pending.catch(() => { themes.delete(theme); });
+      void pending.catch(() => { if (themes.get(theme) === pending) themes.delete(theme); });
     }
     const data = await pending;
     if (signal.aborted || epoch !== revision) return;

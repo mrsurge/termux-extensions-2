@@ -286,6 +286,7 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
           const reconnect = uiIpcHasConnected;
           uiIpcHasConnected = true;
           if (reconnect) {
+            dispatchWindowCustomEvent('code-te2:extension-contributions-changed', { reason: 'reconnect' });
             try {
               void Promise.resolve(deps.onHostStateResync?.()).catch((error: unknown) => {
                 console.warn('[UI_IPC_RPC] host state resync failed', error);
@@ -342,6 +343,8 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
             dispatchWindowCustomEvent('code-te2:project-switched', params);
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.adapterState) {
             dispatchWindowCustomEvent('code-te2:adapter-state', params);
+          } else if (method === UI_IPC_RPC_NOTIFICATIONS.extensionContributionsChanged) {
+            dispatchWindowCustomEvent('code-te2:extension-contributions-changed', params);
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.comparisonChanged) {
             dispatchWindowCustomEvent('code-te2:comparison-changed', params);
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.preferencesChanged) {

@@ -779,7 +779,6 @@ export function createSettingsConfigModalController(deps: any) {
             deps.toast("Workspace configuration saved — reloading adapter…");
             closeExtConfigModal();
             void deps.refreshExtManager();
-            deps.reloadEditorFrame();
           } else {
             deps.toast(res?.error || "Save failed");
           }
@@ -797,7 +796,6 @@ export function createSettingsConfigModalController(deps: any) {
             deps.toast("Configuration saved — reloading adapter…");
             closeExtConfigModal();
             void deps.refreshExtManager();
-            deps.reloadEditorFrame();
           } else {
             deps.toast(res?.error || "Save failed");
           }

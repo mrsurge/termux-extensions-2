@@ -8,6 +8,39 @@ const bundle = await build({ entryPoints: [import.meta.dirname + '/../monaco_edi
 const { historicalAppearance, createHistoricalThemeApplier } = await import(
   `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
 
+test('historical contribution refresh reloads unchanged theme bytes and falls back after removal', async () => {
+  const win = new Window();
+  const previous = globalThis.document;
+  globalThis.document = win.document;
+  try {
+    let installed = true, catalogCalls = 0;
+    const urls = [], colors = [];
+    const apply = createHistoricalThemeApplier({ editor: {
+      defineTheme: (name, value) => colors.push(value.colors['editor.background']),
+      setTheme: () => {},
+    } }, new AbortController().signal, async () => {
+      catalogCalls++;
+      return { themes: [ ...(installed ? ['ext:theme'] : []), 'github-dark-default' ].map(id => ({
+        id, label: id, uiTheme: 'vs-dark', source: 'vendored', sourceLabel: 'test',
+        serveUrl: `monaco_editor/themes/${id}.json`,
+      })) };
+    }, async url => {
+      urls.push(url);
+      return { ok: true, json: async () => ({ colors: { 'editor.background': installed ? '#123456' : '#654321' } }) };
+    });
+    await apply('ext:theme');
+    await apply('ext:theme');
+    assert.equal(urls.length, 1);
+    await apply('ext:theme', true);
+    assert.equal(urls.length, 2);
+    installed = false;
+    await apply('ext:theme', true);
+    assert.ok(urls[2].endsWith('github-dark-default.json'));
+    assert.equal(catalogCalls, 3);
+    assert.deepEqual(colors, ['#123456', '#123456', '#654321']);
+  } finally { globalThis.document = previous; }
+});
+
 test('historical appearance shares font scaling and cannot enable mutation/intelligence', () => {
   const { appearance, theme } = historicalAppearance({ editor: {
     fontScale: 1.5, fontFamily: 'custom', theme: 'github-light', readOnly: false,

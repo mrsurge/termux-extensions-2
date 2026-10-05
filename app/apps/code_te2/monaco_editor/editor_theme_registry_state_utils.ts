@@ -14,19 +14,27 @@ export function createDocumentThemeGate(
   let selectedTheme = 'github-dark-default';
   let appliedTheme: string | null = null;
   let pending: Promise<void> | null = null;
+  let requestedRevision = 0;
+  let appliedRevision = -1;
   // Model consumers share this barrier. A later preference supersedes an older
   // in-flight choice; no waiter may release until the latest choice is applied.
-  return {
+  const gate = {
+    refresh(): Promise<void> {
+      requestedRevision += 1;
+      return gate.apply(selectedTheme);
+    },
     async apply(theme: string): Promise<void> {
       selectedTheme = theme || 'github-dark-default';
-      while (pending || appliedTheme !== selectedTheme) {
+      while (pending || appliedTheme !== selectedTheme || appliedRevision !== requestedRevision) {
         if (!pending) {
           pending = Promise.resolve().then(async () => {
             await waitUntilConnected();
-            while (appliedTheme !== selectedTheme) {
+            while (appliedTheme !== selectedTheme || appliedRevision !== requestedRevision) {
               const next = selectedTheme;
+              const revision = requestedRevision;
               await applyTheme(next);
               appliedTheme = next;
+              appliedRevision = revision;
             }
           }).finally(() => { pending = null; });
         }
@@ -34,6 +42,7 @@ export function createDocumentThemeGate(
       }
     },
   };
+  return gate;
 }
 
 export async function ensureThemeRegistryState(

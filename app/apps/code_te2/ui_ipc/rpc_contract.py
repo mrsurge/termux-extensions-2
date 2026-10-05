@@ -129,6 +129,7 @@ UI_IPC_RPC_NOTIFICATION_EDITOR_SCROLL_STATE: Final = "ui.editor.scroll.state"
 UI_IPC_RPC_NOTIFICATION_EDITOR_NOTIFY: Final = "ui.editor.notify"
 UI_IPC_RPC_NOTIFICATION_EDITOR_DIAGNOSTICS_COUNTS: Final = "ui.editor.diagnostics.counts"
 UI_IPC_RPC_NOTIFICATION_ADAPTER_STATE: Final = "ui.adapter.state"
+UI_IPC_RPC_NOTIFICATION_EXTENSION_CONTRIBUTIONS_CHANGED: Final = "ui.extensions.contributionsChanged"
 UI_IPC_RPC_NOTIFICATION_HOST_ACTIVE_FILE_CHANGED: Final = "ui.host.activeFile.changed"
 UI_IPC_RPC_NOTIFICATION_HOST_SECOND_EDITOR_OPEN: Final = (
     "ui.host.secondEditor.open"
@@ -169,6 +170,7 @@ UiIpcRpcNotification = Literal[
     "ui.editor.notify",
     "ui.editor.diagnostics.counts",
     "ui.adapter.state",
+    "ui.extensions.contributionsChanged",
     "ui.host.activeFile.changed",
     "ui.host.secondEditor.open",
     "ui.openState.changed",
@@ -252,6 +254,7 @@ ALLOWED_NOTIFICATION_METHODS: Final[set[str]] = {
     UI_IPC_RPC_NOTIFICATION_EDITOR_NOTIFY,
     UI_IPC_RPC_NOTIFICATION_EDITOR_DIAGNOSTICS_COUNTS,
     UI_IPC_RPC_NOTIFICATION_ADAPTER_STATE,
+    UI_IPC_RPC_NOTIFICATION_EXTENSION_CONTRIBUTIONS_CHANGED,
     UI_IPC_RPC_NOTIFICATION_HOST_ACTIVE_FILE_CHANGED,
     UI_IPC_RPC_NOTIFICATION_HOST_SECOND_EDITOR_OPEN,
     UI_IPC_RPC_NOTIFICATION_OPEN_STATE_CHANGED,

@@ -119,6 +119,7 @@ EDITOR_RPC_NOTIFICATION_PROJECT_SWITCHED: Final = "editor.project.switched"
 EDITOR_RPC_NOTIFICATION_AGENT_EDITS_CHANGED: Final = "editor.agentEdits.changed"
 EDITOR_RPC_NOTIFICATION_CODE_INSPECTOR_COMMAND: Final = "editor.codeInspector.command"
 EDITOR_RPC_NOTIFICATION_TEXTMATE_PROJECTION_CHANGED: Final = "editor.textmate.projectionChanged"
+EDITOR_RPC_NOTIFICATION_EXTENSION_CONTRIBUTIONS_CHANGED: Final = "editor.extensions.contributionsChanged"
 
 EditorRpcNotification = Literal[
     "editor.state.ssot",
@@ -151,6 +152,7 @@ EditorRpcNotification = Literal[
     "editor.agentEdits.changed",
     "editor.codeInspector.command",
     "editor.textmate.projectionChanged",
+    "editor.extensions.contributionsChanged",
 ]
 
 

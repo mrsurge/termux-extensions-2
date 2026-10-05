@@ -1568,6 +1568,7 @@ export class WorkbenchClient {
   _transportRuntime() {
     return createTransportRuntime({
       requestOwner: this._extRequests,
+      isHandshakeInitialized: () => this._extHandshake.initialized,
       extProtocol: this.ext?.protocol ?? null,
       mgmtProtocol: isTransportMgmtProtocol(this.mgmt?.protocol)
         ? this.mgmt.protocol

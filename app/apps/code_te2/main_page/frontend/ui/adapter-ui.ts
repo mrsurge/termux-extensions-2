@@ -47,7 +47,6 @@ export function createAdapterUiController(deps: any) {
     try {
       deps.spinnerSetStep('Restarting adapter…');
       await requestExplorerRpc(EXPLORER_RPC_METHODS.extensionsAdapterRestart, {}, 15000);
-      reloadEditorFrame();
     } catch (e) {
       console.warn('[adapter_restart] request failed:', e);
     }

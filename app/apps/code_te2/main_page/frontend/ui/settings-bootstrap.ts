@@ -178,4 +178,17 @@ export function createSettingsBootstrap(deps: any) {
   });
   settingsInstallController.install();
 
+  window.addEventListener('code-te2:extension-installed', (event) => {
+    if (!(event instanceof CustomEvent)) return;
+    const { extension, schema } = event.detail || {};
+    if (!extension || typeof extension.id !== 'string' || !schema || typeof schema !== 'object') return;
+    if (!Object.keys(schema.properties || schema).length) return;
+    openExtConfigModal(extension.id, extension.display_name || extension.id, schema, {});
+  });
+  window.addEventListener('code-te2:extension-contributions-changed', () => {
+    if (deps.els.extManagerModal.classList.contains('show')) void refreshEditorExtManagerModal();
+    if (deps.els.settingsModal.classList.contains('show')) void refreshEditorSettingsModal();
+    if (deps.els.themesModal.classList.contains('show')) void settingsThemesController.refreshEditorThemesModal();
+  });
+
 }

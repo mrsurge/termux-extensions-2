@@ -772,7 +772,9 @@ export async function bootSecondaryEditorRuntime(
     method: UiIpcRpcNotificationMethod,
     params: JsonObject,
   ): void {
-    if (method === UI_IPC_RPC_NOTIFICATIONS.preferencesChanged) {
+    if (method === UI_IPC_RPC_NOTIFICATIONS.extensionContributionsChanged) {
+      historicalView?.updatePreferences(historicalPreferences, true);
+    } else if (method === UI_IPC_RPC_NOTIFICATIONS.preferencesChanged) {
       if (params.preferences !== undefined) {
         ++preferenceEpoch;
         historicalPreferences = params.preferences;
@@ -823,6 +825,7 @@ export async function bootSecondaryEditorRuntime(
   const connection = createUiIpcRpcConnection({
     ensureSocketIoLoaded,
     onConnect: () => {
+      if (bootComplete) historicalView?.updatePreferences(historicalPreferences, true);
       if (bootComplete) void requestHostState().catch((error) => {
         setStatus(`State unavailable: ${errorMessage(error)}`);
       });
