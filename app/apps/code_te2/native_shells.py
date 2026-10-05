@@ -72,7 +72,12 @@ class OutputReader:
             self.pending = asyncio.create_task(asyncio.to_thread(self.bridge.shell_read, self.token))
         task = self.pending
         try:
-            result = await asyncio.shield(task)
+            # wait() does not cancel the owned read when this consumer times out.
+            # Unlike shield(), it also does not report the intentional unsubscribe
+            # error after consumer cancellation; close() owns collecting it.
+            if not task.done():
+                await asyncio.wait({task})
+            result = task.result()
         except asyncio.CancelledError:
             # wait_for timeouts must not leave multiple native reads competing.
             raise

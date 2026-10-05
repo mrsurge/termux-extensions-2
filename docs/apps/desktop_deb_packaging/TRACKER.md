@@ -64,6 +64,17 @@ Last updated: 2026-09-18
   including extension install/uninstall restart recovery. The
   `closed intelligence reader` shutdown warning is a separate follow-up.
 - [ ] Adapt accepted packaging contract to Android/Termux, then release workflow.
+- [ ] Pre-release reader-shutdown cleanup: replace `OutputReader.get()`'s
+  cancelled-shield reporting path with cancellation-safe completion waiting,
+  preserving one native read and unsubscribe/join/release ordering. CPython 3.14
+  explicitly reports a later shielded exception despite current collection.
+  Interpreted and compiled tests must require no loop-error event on intentional
+  close and preserve genuine read-error propagation. Approach documented in
+  client-runtime PLAN, **Intelligence reader shutdown reporting cleanup**;
+  implementation complete: 24 interpreted tests/four subtests and the compiled
+  cleanup regression pass; a separate 136-module group built/validated without
+  activation. Live acceptance and private-runtime wheel integration remain
+  pending, no repackaging yet.
 
 Use the SSH machine for acceptance; remote building is an optional space fallback.
 Do not rebuild/publish Android packages or tag/merge/publish a release in these

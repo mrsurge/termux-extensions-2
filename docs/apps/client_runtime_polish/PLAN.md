@@ -1410,6 +1410,79 @@ and `.codex-scratch/launch-context-positive-20261004/stress.log`.
 Remote build outputs must retain the rejected candidate and old domain; never
 replace a loaded shared object in a running runtime or restart the shared server.
 
+#### Intelligence reader shutdown reporting cleanup (pre-release)
+
+Status: targeted implementation and interpreted/compiled validation complete;
+live extension-restart acceptance pending. This is
+separate from the live-accepted compiled launch-dictionary segfault workaround.
+
+Source ownership:
+
+- `app/apps/code_te2/workbench_adapter_shell_manager.py`:
+  `_clear_stdout_subscription()` cancels/awaits the consumer task before
+  unsubscribing; `_stdout_reader_loop()` obtains bytes from `OutputReader.get()`.
+- `app/apps/code_te2/native_shells.py`: `OutputReader.get()` retains one
+  `asyncio.to_thread(bridge.shell_read, token)` task. Before this fix, it awaited
+  that task with `shield()`; it now uses `asyncio.wait()` and `task.result()`.
+  `_close()` marks closed, unsubscribes, gathers the pending read with
+  `return_exceptions=True`, then releases the native token. Collection already
+  exists; this is not simply an unobserved-task exception.
+- `framework/native_editor_worker/src/shells.rs`: `unsubscribe()` marks the
+  reader cancelled; `read()` reports `closed intelligence reader`; `release()`
+  forbids retiring an actively reading token.
+- `framework/native_editor_worker/src/code_te2.rs`: `shell_read()` releases the
+  GIL during the native read and maps its error to Python.
+
+Confirmed reporting mechanism: ordinary CPython 3.14 `asyncio/tasks.py`
+`shield()` attaches `_log_on_exception` when its outer waiter is cancelled while
+the inner task is pending. That callback explicitly calls the event-loop error
+handler on a later inner exception, even when `_close()` gathers it. The current
+`framework/native_editor_worker/tests/test_mypyc_reader_cleanup.py` previously
+permitted this report; it now requires zero loop-handler events. An isolated
+local comparison confirmed cancelled shield +
+late `RuntimeError` reports the exact logged message; waiting on the same task
+with `asyncio.wait()` then reading `task.result()` reports nothing during cleanup
+and does not cancel the underlying read.
+
+Implemented narrow fix:
+
+1. In `OutputReader.get()`, retain the current single-flight task and wait for
+   completion using public `asyncio.wait()` when pending, then obtain its result.
+   Cancellation/timeout must leave the same background read owned by the reader;
+   no second native read, private asyncio callback manipulation, or global
+   exception-handler filtering.
+2. Preserve close ordering: mark closed → native unsubscribe → join/collect the
+   pending read → native release. Keep the existing shielded single-flight close.
+   No Rust transport/ABI change, EOF reinterpretation, or string-based exception
+   suppression is needed for this proposal.
+3. Genuine read errors still propagate from `get()` to its owner. Validate errors
+   after a timed-out waiter as well as directly awaited reads; do not suppress
+   all RuntimeErrors or change mutation retry behavior.
+
+Validation gates:
+
+- Extend `tests/test_native_intelligence_shells.py`: cancelled consumer followed
+  by explicit close produces zero loop-handler events; repeated timeouts reuse
+  exactly one native read; read/release ordering, repeated close and cancelled
+  close remain correct; genuine non-shutdown failures propagate.
+- Tighten `framework/native_editor_worker/tests/test_mypyc_reader_cleanup.py` to
+  require zero loop-handler events instead of accepting the shutdown warning.
+- Run interpreted tests/static validation, rebuild a separate matching compiled
+  domain, and run the compiled cleanup regression. Preserve active/accepted sets.
+- User-controlled live extension install/uninstall check must retain working WBA
+  recovery and eliminate this shutdown report. No shared framework restart,
+  artifact activation, wheel/APK assembly, publication or commit is implied by
+  this slice. The user approved implementation and isolated compiled validation,
+  not activation or runtime restart.
+
+Validation evidence (2026-10-05): 24 interpreted shell/adapter tests and four
+subtests passed. A separate full 136-module mypyc group built successfully in
+413.26s and validated all 136 compiled imports. Its compiled cleanup regression
+passed with zero loop-handler events. Snapshot:
+`~/.cache/te2/code_te2/build/mypyc-snapshots/check-20261005-073242-1791185562539956722`.
+The active selector and running worker were not changed. No wheels/APKs rebuilt;
+the private-runtime wheel and live extension-restart check remain later gates.
+
 #### Historical host-3.14 proposal (superseded)
 
 Use ordinary GIL-enabled CPython 3.14 as the sole initial native release target

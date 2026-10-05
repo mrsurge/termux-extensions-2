@@ -11,6 +11,64 @@ from app.apps.code_te2.native_shells import Orchestrator, OutputReader, ShellMan
 
 
 class NativeIntelligenceShellTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cancelled_consumer_close_collects_error_without_loop_report(self):
+        gate, started = threading.Event(), threading.Event()
+        bridge = Mock()
+        errors = []
+        loop = asyncio.get_running_loop()
+        previous_handler = loop.get_exception_handler()
+        loop.set_exception_handler(lambda loop, context: errors.append(context))
+
+        def read(token):
+            started.set()
+            gate.wait(2)
+            raise RuntimeError("closed intelligence reader")
+
+        bridge.shell_read.side_effect = read
+        bridge.shell_unsubscribe.side_effect = lambda token: gate.set()
+        reader = OutputReader(bridge, 17)
+        consumer = asyncio.create_task(reader.get())
+        try:
+            self.assertTrue(await asyncio.to_thread(started.wait, 2))
+            consumer.cancel()
+            await asyncio.gather(consumer, return_exceptions=True)
+            await reader.close()
+            await reader.close()
+            await asyncio.sleep(0)
+            self.assertEqual(errors, [])
+            self.assertIsNone(reader.pending)
+            bridge.shell_release.assert_called_once_with(17)
+        finally:
+            gate.set()
+            await asyncio.gather(consumer, return_exceptions=True)
+            await reader.close()
+            loop.set_exception_handler(previous_handler)
+
+    async def test_real_read_error_propagates_directly_and_after_timeout(self):
+        for timeout_first in (False, True):
+            with self.subTest(timeout_first=timeout_first):
+                gate = threading.Event()
+                bridge = Mock()
+
+                def read(token):
+                    gate.wait(2)
+                    raise OSError("unexpected pipe failure")
+
+                bridge.shell_read.side_effect = read
+                reader = OutputReader(bridge, 19)
+                try:
+                    if timeout_first:
+                        with self.assertRaises(TimeoutError):
+                            await asyncio.wait_for(reader.get(), 0.02)
+                    gate.set()
+                    with self.assertRaisesRegex(OSError, "unexpected pipe failure"):
+                        await reader.get()
+                    self.assertIsNone(reader.pending)
+                    bridge.shell_read.assert_called_once_with(19)
+                finally:
+                    gate.set()
+                    await reader.close()
+
     async def test_timeout_reuses_the_same_read(self):
         gate = threading.Event()
         bridge = Mock()

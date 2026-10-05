@@ -50,15 +50,7 @@ async def run():
     await asyncio.sleep(0)
     assert bridge.releases == [17], bridge.releases
     assert reader.pending is None
-    # CPython 3.14 shield explicitly reports a later inner exception after the
-    # outer waiter is cancelled, even when close() retrieves that exception.
-    # The regression is failed release, not this expected shutdown report.
-    assert all(
-        item.get("message") == "RuntimeError exception in shielded future"
-        and type(item.get("exception")) is RuntimeError
-        and str(item["exception"]) == "closed intelligence reader"
-        for item in errors
-    ), errors
+    assert errors == [], errors
 
 asyncio.run(run())
 '''
