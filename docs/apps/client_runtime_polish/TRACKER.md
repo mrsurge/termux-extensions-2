@@ -5,6 +5,16 @@ Working branch: `feature/desktop-deb-packaging`; no new branch needed for planni
 
 ## Planning
 
+### Touch-menu lifecycle correction
+
+- [x] Trace live duplicate mobile long-press menus to surviving touch helpers
+  after Monaco model-view DOM replacement.
+- [x] Fix touch-fork editor ownership and view cleanup/rebinding; rebuild vendor
+  UMD and Code TE2 frontend. Regression fails on the old bundle and passes on new.
+- [x] Validate 15 targeted tests, touch-fork build and Code TE2 typecheck/build.
+- [x] User live-accepted the fix after native-client asset publication.
+- [x] Commit/push both touch-fork source and TE2 snapshot after acceptance.
+
 ### Sidebar app intents and unified app behavior
 
 Full intended direction and phased contract investigation are recorded in

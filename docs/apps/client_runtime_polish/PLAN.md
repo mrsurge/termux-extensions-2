@@ -1855,3 +1855,32 @@ wheel machinery is insufficient. Validate desktop/Termux clean installs after
 that packaging slice. No wheel publication or runtime restart occurred here.
 Full contract:
 `framework/native_editor_worker/README.md`, Planned installed artifact placement.
+
+## Touch-menu model-view lifecycle correction (2026-10-05)
+
+Live Cefrium inspection found two registered touch-helper instances and two
+visible menu stacks, but only one Monaco editor and one connected handle overlay.
+The stale menu appeared at viewport origin; the current menu was at the selection.
+Monaco's `setModel()` detaches/attaches its view before `onDidChangeModel`, without
+disposing the editor. Host DOM-marker initialization therefore admitted another
+helper while the old editor-level `-monaco-gesturehold` subscriber survived.
+
+The touch fork now owns one helper per editor in a WeakMap and replaces its
+view-owned binding on model changes. Cleanup removes menu/handles, observers,
+timers, DOM listeners and all view-owned editor subscriptions; model-null removes
+the UI, and editor disposal also removes the owner. Preserve historical/tool
+policy across rebinding. No Monaco fork or native Android change is required.
+
+The old deployed bundle failed the new model-replacement/long-press regression
+with two menus. The rebuilt bundle passes that test, repeated initialization,
+model-null/historical policy and disposal coverage. All 15 targeted frontend tests,
+Code TE2 typecheck, touch-fork TypeScript/Vite build and Code TE2 build pass.
+The fork source is in `worktrees/monaco-touch-selection/src/index.ts`, with its
+rebuilt UMD copied into Code TE2's vendor assets. The user live-accepted the fix
+after native-client asset publication and approved separate touch-fork and TE2
+commits/pushes. No runtime restart, APK assembly or release publication is part
+of this checkpoint.
+
+Touch-fork source checkpoint: `mrsurge/monaco-touch-selection@fb08274` (`master`).
+The vendored UMD matches that rebuilt source output (SHA-256
+`7c79f4fc2bf60d0177756513e1754e85651b74726cf60f10c761c8dd72fd73ed`).

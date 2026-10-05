@@ -2646,6 +2646,17 @@ editor_touch_menu_utils.ts initializes the helper after editor DOM readiness.
 It passes the current mobile flag plus leading and navigation tools; it does not
 rely on an implicit all-tools default. inline_host.ts loads the UMD asset.
 
+The helper owns one registration per Monaco editor instance. Monaco `setModel()`
+can replace `getDomNode()` without disposing that editor: the fork listens to
+`onDidChangeModel`, disposes the old view's menu, handles, observer, timers and
+editor/DOM listeners, then attaches to the new view with the same tool policy.
+A null model removes the view binding; editor disposal removes the owner too.
+Repeated initialization is idempotent. Do not rely only on the host's handle DOM
+marker: after a file switch it disappears while stale editor-level long-press
+subscriptions otherwise survive. `tests/historical_touch_menu.test.mjs` exercises
+view replacement followed by `-monaco-gesturehold`, repeated initialization,
+null-model transitions and historical read-only policy.
+
 The editable fork on this development device is `worktrees/monaco-touch-selection`
 (remote `mrsurge/monaco-touch-selection`). Run its `npm run build` and copy
 `dist/index.umd.cjs` to the vendored `monaco-touch-selection.patched.umd.js`.
