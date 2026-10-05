@@ -16,6 +16,7 @@ use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use rmpv::Value;
 use std::{
+    ffi::{CStr, CString},
     io::{BufRead, BufReader, Write},
     path::PathBuf,
     sync::{
@@ -397,14 +398,144 @@ impl Backend {
     }
 }
 
+fn initialize_selected_python() -> Result<bool> {
+    let isolated = match std::env::var("CODE_TE2_PYTHON_ISOLATED").as_deref() {
+        Ok("1") => true,
+        Ok(_) => bail!("invalid native Python isolation mode"),
+        Err(std::env::VarError::NotPresent) => false,
+        Err(error) => bail!("invalid native Python isolation value: {error}"),
+    };
+    let home = std::env::var("CODE_TE2_PYTHON_HOME").ok();
+    let executable = std::env::var("CODE_TE2_PYTHON_EXECUTABLE").ok();
+    let (home, executable) = match (home, executable) {
+        (None, None) if !isolated => return Ok(false), // Explicit standalone diagnostic mode.
+        (Some(home), Some(executable)) if !home.is_empty() && !executable.is_empty() => {
+            (CString::new(home)?, CString::new(executable)?)
+        }
+        _ => bail!("native Python selection requires both home and executable"),
+    };
+    // Configure only this embedded interpreter, not PYTHONHOME in the process
+    // environment inherited by terminal shells and other child applications.
+    // This runs before the first Python::attach; PyConfig copies these strings.
+    unsafe {
+        if pyo3::ffi::Py_IsInitialized() != 0 {
+            bail!("Python initialized before native interpreter selection");
+        }
+        let mut config = std::mem::MaybeUninit::<pyo3::ffi::PyConfig>::uninit();
+        pyo3::ffi::PyConfig_InitPythonConfig(config.as_mut_ptr());
+        let mut config = config.assume_init();
+        config.parse_argv = 0;
+        if isolated {
+            config.isolated = 1;
+            config.use_environment = 0;
+            config.user_site_directory = 0;
+            config.site_import = 0;
+            config.safe_path = 1;
+            config.write_bytecode = 0;
+            config.module_search_paths_set = 1;
+        }
+        let mut status =
+            pyo3::ffi::PyConfig_SetBytesString(&mut config, &mut config.home, home.as_ptr());
+        if pyo3::ffi::PyStatus_Exception(status) == 0 {
+            status = pyo3::ffi::PyConfig_SetBytesString(
+                &mut config,
+                &mut config.program_name,
+                executable.as_ptr(),
+            );
+        }
+        if isolated && pyo3::ffi::PyStatus_Exception(status) == 0 {
+            let base = PathBuf::from(home.to_str()?);
+            // Pip may populate adjacent caches using the host Python. Never
+            // read those; this reserved prefix is absent from the verified
+            // payload and writes are disabled above.
+            let cache = CString::new(
+                base.join(".disabled-bytecode-cache")
+                    .to_string_lossy()
+                    .as_bytes(),
+            )?;
+            status = pyo3::ffi::PyConfig_SetBytesString(
+                &mut config,
+                &mut config.pycache_prefix,
+                cache.as_ptr(),
+            );
+            for relative in [
+                "lib/python3.14",
+                "lib/python3.14/lib-dynload",
+                "lib/python3.14/site-packages",
+            ] {
+                if pyo3::ffi::PyStatus_Exception(status) != 0 {
+                    break;
+                }
+                let path = CString::new(base.join(relative).to_string_lossy().as_bytes())?;
+                let wide = pyo3::ffi::Py_DecodeLocale(path.as_ptr(), std::ptr::null_mut());
+                if wide.is_null() {
+                    pyo3::ffi::PyConfig_Clear(&mut config);
+                    bail!("cannot decode private Python search path");
+                }
+                status = pyo3::ffi::PyWideStringList_Append(&mut config.module_search_paths, wide);
+                pyo3::ffi::PyMem_RawFree(wide.cast());
+                if pyo3::ffi::PyStatus_Exception(status) != 0 {
+                    break;
+                }
+            }
+        }
+        if pyo3::ffi::PyStatus_Exception(status) == 0 {
+            status = pyo3::ffi::Py_InitializeFromConfig(&config);
+        }
+        let error = if pyo3::ffi::PyStatus_Exception(status) != 0 {
+            Some(if status.err_msg.is_null() {
+                "unknown Python initialization failure".to_owned()
+            } else {
+                CStr::from_ptr(status.err_msg)
+                    .to_string_lossy()
+                    .into_owned()
+            })
+        } else {
+            None
+        };
+        pyo3::ffi::PyConfig_Clear(&mut config);
+        if let Some(error) = error {
+            bail!("native interpreter selection: {error}");
+        }
+        // PyO3's attach expects an initialized interpreter with its initial GIL
+        // released. Python::initialize performs this same handoff.
+        pyo3::ffi::PyEval_SaveThread();
+    }
+    Ok(true)
+}
+
 fn initialize(root: &std::path::Path) -> Result<Arc<Py<PyAny>>> {
+    let isolated = std::env::var("CODE_TE2_PYTHON_ISOLATED").as_deref() == Ok("1");
+    let private_root = if isolated {
+        Some(std::fs::canonicalize(
+            std::env::var("CODE_TE2_PYTHON_SOURCE")
+                .context("private Python requires its packaged source root")?,
+        )?)
+    } else {
+        None
+    };
+    let import_root = private_root.as_deref().unwrap_or(root);
+    let selected = initialize_selected_python()?;
     Python::attach(|py| -> PyResult<_> {
         let sys = py.import("sys")?;
+        if isolated {
+            let version = sys.getattr("version_info")?;
+            let major: u8 = version.get_item(0)?.extract()?;
+            let minor: u8 = version.get_item(1)?.extract()?;
+            if (major, minor) != (3, 14) {
+                return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                    "private Code TE2 Python must be ordinary 3.14",
+                ));
+            }
+        }
         sys.setattr("stdout", sys.getattr("stderr")?)?;
         let path = sys.getattr("path")?;
-        // Embedding does not automatically activate an inherited venv. Select
-        // only its matching-version site-packages, never another Python ABI.
-        if let Ok(prefix) = std::env::var("VIRTUAL_ENV") {
+        // Bootstrap-selected PyConfig already resolves the venv. Retain the
+        // inherited matching-version site path only for standalone diagnostics.
+        if let Some(prefix) = (!selected)
+            .then(|| std::env::var("VIRTUAL_ENV").ok())
+            .flatten()
+        {
             let version = sys.getattr("version_info")?;
             let major: u8 = version.get_item(0)?.extract()?;
             let minor: u8 = version.get_item(1)?.extract()?;
@@ -421,14 +552,14 @@ fn initialize(root: &std::path::Path) -> Result<Arc<Py<PyAny>>> {
                 )?;
             }
         }
-        path.call_method1("insert", (0, root.to_string_lossy().as_ref()))?;
+        path.call_method1("insert", (0, import_root.to_string_lossy().as_ref()))?;
         if let Ok(output) = std::env::var("CODE_TE2_MYPYC_DIR") {
             if !output.is_empty() {
                 let count: usize = py
                     .import("app.apps.code_te2.mypyc_overlay")?
                     .call_method1(
                         "install",
-                        (root.to_string_lossy().as_ref(), output.as_str()),
+                        (import_root.to_string_lossy().as_ref(), output.as_str()),
                     )?
                     .extract()?;
                 eprintln!("[code-te2-worker] mypyc overlay enabled: {count} modules from {output}");

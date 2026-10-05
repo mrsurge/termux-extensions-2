@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 import hashlib
+import os
+from pathlib import Path
 import re
 import secrets
 import time
 from typing import cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from app.extensions.apps.registry import AppRegistry
+from app.extensions.apps.registry import AppRegistry, default_app_roots
 
 from ..stores import get_preferences_store
 
@@ -125,7 +127,14 @@ def _canonicalize_legacy_code_te2_slot(
 
 def _iter_app_manifests() -> list[JsonObject]:
     try:
-        registry = AppRegistry()
+        roots = default_app_roots()
+        host_root = os.environ.get("CODE_TE2_HOST_PACKAGE_ROOT")
+        if host_root:
+            # Catalog data remains owned by the installed framework package;
+            # its site-packages are not an embedded Python import path.
+            roots = [(kind, Path(host_root) / "app/apps" if kind == "builtin" else root)
+                     for kind, root in roots]
+        registry = AppRegistry(roots=roots)
         return [app_def.to_payload() for app_def in registry.reload()]
     except Exception:
         return []

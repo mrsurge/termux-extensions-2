@@ -10,6 +10,39 @@ import subprocess
 import time
 import urllib.request
 from pathlib import Path
+from typing import cast
+
+
+def _probe_wba_runtime(venv: Path, source: Path, root: Path) -> dict[str, object]:
+    """Import the actual installed Node graph, without a shared framework/upstream."""
+    node = venv / 'bin/node'
+    code = '''
+import path from 'node:path';
+import {createRequire} from 'node:module';
+import {pathToFileURL} from 'node:url';
+const app=path.join(process.argv[1],'app/apps/code_te2');
+const require=createRequire(path.join(app,'probe.cjs'));
+const socketio=require(path.join(app,'vendor/node_socketio/node_modules/socket.io/dist/index.js'));
+if(typeof socketio.Server !== 'function') throw new Error('Socket.IO Server export missing');
+await import(pathToFileURL(path.join(app,'workbench_protocol_proxy/node_workbench_adapter/dist/server/server.mjs')));
+process.stdout.write('\\nTE2_WBA_IMPORT='+JSON.stringify({node:process.version,socketio:true,wbaEntry:true})+'\\n',
+    () => process.exit(0));
+'''
+    environment = {'PATH': str(venv / 'bin') + os.pathsep + os.defpath,
+                   'HOME': str(root / 'native-import-probe'),
+                   'TE2_ADAPTER_HOST': '127.0.0.1', 'TE2_ADAPTER_PORT': '0',
+                   'TE2_CODE_SERVER_HTTP': 'http://127.0.0.1:1',
+                   'TE2_EXTENSION_STORAGE_PATH': str(root / 'native-import-probe/extensions'),
+                   'TE2_WEBVIEW_RECONSTRUCTION_STORAGE_PATH': str(root / 'native-import-probe/webviews')}
+    result = subprocess.run([str(node), '--input-type=module', '-e', code, str(source)],
+                            cwd=root, env=environment, capture_output=True, timeout=30)
+    marker = b'TE2_WBA_IMPORT='
+    if result.returncode != 0 or marker not in result.stdout:
+        raise RuntimeError('Installed WBA import failed: ' + result.stderr.decode(errors='replace')[-8000:])
+    value: object = json.loads(result.stdout.split(marker)[-1].splitlines()[0])
+    if not isinstance(value, dict) or value.get('socketio') is not True or value.get('wbaEntry') is not True:
+        raise RuntimeError('Installed WBA import returned an invalid result')
+    return cast(dict[str, object], value)
 
 
 def main() -> int:
@@ -36,10 +69,51 @@ def main() -> int:
     if selected.name != "te2-server" or not selected.is_file():
         raise RuntimeError(f"bootstrap selected an invalid packaged server: {selected}")
 
+    # Resolve with the host Python, then verify imports with the private one.
+    # Do not test native extensions through the host's ABI/site-packages.
+    native = subprocess.run([str(python), '-I', '-c',
+        'import json; from importlib.metadata import version; '
+        'from app.release_runtime.code_te2 import packaged_runtime; '
+        'r=packaged_runtime(version("te2")); '
+        'print(json.dumps({"executable":str(r.executable),"domain":str(r.domain),'
+        '"python":str(r.python_executable),"home":str(r.python_home),"source":str(r.source_root)}))'],
+        check=True, capture_output=True, text=True)
+    native_paths = json.loads(native.stdout)
+    for value in native_paths.values():
+        if expected_parent not in Path(value).parents:
+            raise RuntimeError(f'private native path escapes candidate venv: {value}')
+    probe_code = '''
+import importlib,json,sys
+from pathlib import Path
+source,domain,home=map(Path,sys.argv[1:])
+sys.path[:]=[str(source),str(home/'lib/python3.14'),
+             str(home/'lib/python3.14/lib-dynload'),str(home/'lib/python3.14/site-packages')]
+from app.apps.code_te2.mypyc_overlay import install
+count=install(str(source),str(domain))
+from app.release_runtime.code_te2 import compiled_module_names
+for name in sorted(compiled_module_names(json.loads((domain/'manifest.json').read_text()))):
+    importlib.import_module(name)
+print(json.dumps({'python':sys.version,'compiledModules':count}))
+'''
+    probe_environment = dict(os.environ)
+    for name in ('CONFIG', 'DATA', 'CACHE', 'RUNTIME'):
+        probe_environment[f'TE2_{name}_HOME'] = str(root / 'native-import-probe' / name.lower())
+    probe = subprocess.run([native_paths['python'], '-I', '-S', '-B', '-X',
+        'pycache_prefix=' + str(Path(native_paths['home']) / '.disabled-bytecode-cache'),
+        '-c', probe_code,
+        native_paths['source'], native_paths['domain'], native_paths['home']],
+        env=probe_environment, check=True, capture_output=True, text=True, timeout=90)
+    print(probe.stdout)
+    wba_probe = _probe_wba_runtime(venv, Path(native_paths['source']), root)
+    print(json.dumps(wba_probe, sort_keys=True))
+
     if args.install_only:
         result = {
             "mode": "install-only",
             "packagedServer": str(selected),
+            "nativeRuntime": native_paths,
+            "nativeImportProbe": probe.stdout,
+            "wbaImportProbe": wba_probe,
             "schemaVersion": 1,
             "te2": str(te2),
             "venv": str(venv),
@@ -121,6 +195,9 @@ def main() -> int:
 
     result = {
         "appCount": len(apps["data"]),
+        "nativeRuntime": native_paths,
+        "nativeImportProbe": probe.stdout,
+        "wbaImportProbe": wba_probe,
         "appIds": app_ids,
         "frameworkVersion": health.get("version"),
         "health": "ok",

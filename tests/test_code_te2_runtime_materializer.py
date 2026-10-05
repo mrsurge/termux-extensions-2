@@ -4,10 +4,11 @@ import json
 import os
 from pathlib import Path
 import sysconfig
+import subprocess
 
 import pytest
 
-from app.release_runtime.code_te2 import MANIFEST, sha256, validate_runtime
+from app.release_runtime.code_te2 import MANIFEST, sha256, validate_runtime, python_identity
 from scripts import materialize_code_te2_runtime as builder
 from scripts.mypyc_build_workflow import source_digest
 
@@ -24,6 +25,7 @@ def inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, object]
     (resource / 'node_modules').mkdir()
     (resource / 'node_modules/dev.js').write_text('excluded')
     monkeypatch.setattr(builder, 'RESOURCE_PATHS', ('app/apps/code_te2/static',))
+    monkeypatch.setattr(builder, 'PRIVATE_VENDOR_PATHS', ())
     snapshot = tmp_path / 'snapshot'
     library = snapshot / 'lib/app/apps/code_te2'
     library.mkdir(parents=True)
@@ -65,6 +67,33 @@ def test_materialized_payload_relocates_without_checkout(inputs: dict[str, objec
     assert str(inputs['snapshot']) not in (destination / MANIFEST).read_text()
 
 
+def test_declared_vendor_preserves_package_build_outputs(tmp_path: Path) -> None:
+    source, target = tmp_path / 'vendor', tmp_path / 'copied'
+    runtime = source / 'node_modules/engine.io/build/engine.io.js'
+    runtime.parent.mkdir(parents=True)
+    runtime.write_text('module.exports = {};')
+    nested = source / 'node_modules/example/target/index.js'
+    nested.parent.mkdir(parents=True)
+    nested.write_text('module.exports = {};')
+    builder._copy_resources(source, target, vendored=True)
+    assert (target / runtime.relative_to(source)).read_bytes() == runtime.read_bytes()
+    assert (target / nested.relative_to(source)).read_bytes() == nested.read_bytes()
+    builder._copy_resources(source, tmp_path / 'ordinary')
+    assert not (tmp_path / 'ordinary/node_modules').exists()
+
+
+def test_actual_socketio_vendor_has_a_complete_copy(tmp_path: Path) -> None:
+    source = builder.REPO / 'app/apps/code_te2/vendor/node_socketio'
+    builder._copy_resources(source, tmp_path / 'vendor', vendored=True)
+    expected = {p.relative_to(source).as_posix(): sha256(p)
+                for p in source.rglob('*') if p.is_file()
+                and not any(part in {'.git', '__pycache__'} for part in p.relative_to(source).parts)}
+    actual = {p.relative_to(tmp_path / 'vendor').as_posix(): sha256(p)
+              for p in (tmp_path / 'vendor').rglob('*') if p.is_file()}
+    assert actual == expected
+    assert 'node_modules/engine.io/build/engine.io.js' in actual
+
+
 @pytest.mark.parametrize('failure', ['source', 'library', 'manifest', 'abi', 'resource', 'missing', 'output'])
 def test_bad_inputs_do_not_publish(inputs: dict[str, object], failure: str) -> None:
     repo, snapshot, output = (Path(str(inputs[key])) for key in ('repo', 'snapshot', 'output'))
@@ -97,3 +126,39 @@ def test_bad_inputs_do_not_publish(inputs: dict[str, object], failure: str) -> N
     else:
         assert not output.exists()
     assert not list(output.parent.glob('.code-te2-publish-*'))
+
+
+def test_private_payload_materializes_contained_links_and_sources(inputs: dict[str, object],
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    prefix = tmp_path / 'python'
+    for relative in ('bin/python3.14', 'lib/libpython3.14.so.1.0', 'lib/python3.14/encodings/__init__.py'):
+        path = prefix / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b'fixture runtime')
+    (prefix / 'bin/python3.14').chmod(0o755)
+    (prefix / 'lib/libpython3.14.so').symlink_to('libpython3.14.so.1.0')
+    dependencies = tmp_path / 'dependencies'
+    dependencies.mkdir()
+    (dependencies / 'dependency.py').write_text('value = 1')
+    monkeypatch.setattr(builder.subprocess, 'run', lambda *args, **kwargs:
+        subprocess.CompletedProcess([], 0, stdout=json.dumps(python_identity())))
+    inputs.update(private_python=prefix, private_dependencies=dependencies)
+    output = builder.materialize(**inputs)  # type: ignore[arg-type]
+    selected = validate_runtime(output)
+    assert selected.source_root == output / 'domain/lib'
+    assert selected.python_home == output / 'python'
+    assert (output / 'python/lib/libpython3.14.so').is_file()
+    assert not (output / 'python/lib/libpython3.14.so').is_symlink()
+    assert (output / 'python/lib/python3.14/site-packages/dependency.py').is_file()
+    assert (output / 'domain/lib/app/apps/code_te2/native_worker.py').is_file()
+
+
+@pytest.mark.parametrize('failure', ['escape', 'cycle'])
+def test_private_runtime_rejects_unsafe_links(tmp_path: Path, failure: str) -> None:
+    root = tmp_path / 'root'
+    root.mkdir()
+    target = tmp_path / 'outside' if failure == 'escape' else root
+    target.mkdir(exist_ok=True)
+    (root / 'link').symlink_to(target, target_is_directory=True)
+    with pytest.raises(RuntimeError, match='escape|cycle'):
+        builder._copy_private_tree(root, tmp_path / 'out', boundary=root)

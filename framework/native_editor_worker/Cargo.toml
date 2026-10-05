@@ -2,6 +2,7 @@
 name = "te2-native-editor-worker"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.94"
 publish = false
 
 # Deliberately independent of the production framework workspace.

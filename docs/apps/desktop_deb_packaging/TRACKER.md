@@ -14,22 +14,55 @@ Last updated: 2026-09-18
 - [x] Accepted native-services branch fast-forwarded into this packaging branch.
 - [x] Source-backed gap audit and Linux-first sequencing recorded in
   `../client_runtime_polish/PLAN.md`, **Linux-first packaging handoff**.
-- [ ] Portable matched worker/domain manifest, validation and bootstrap handoff.
+- [x] Portable matched worker/domain manifest, validation and bootstrap handoff.
   Initial resolver and portable domain schema are implemented and tested; the
   binary-release path exports the verified executable/domain pair.
-  Production materialization and setuptools pair/tag hooks now exist; full
-  builder, libpython and final archive integration remain.
+  Production materialization and setuptools pair/tag hooks pass the complete
+  Linux builder and clean install-only validation; user runtime acceptance remains.
 - [x] Materialized resources and checkout-independent compiled-module inventory.
   Actual local CPython 3.14 payload is 64 MiB and all 136 compiled startup modules
   import through its portable inventory; CPython 3.14 clean wheel proof is pending.
-- [ ] Set package minimum to Python 3.14; target ordinary `cp314` only for this
-  release. No 3.13 matrix, free-threaded artifacts or 3.15 support in this slice.
-- [ ] Select 3.14 in the Linux builder and installer; install uv-managed 3.14
-  for the remote test user and create a fresh acceptance venv without replacing
-  Debian's system Python. Termux keeps native Python/apt provisioning.
-- [ ] CPython/ABI-specific Linux wheel assembly and final ELF/libpython audit.
-- [ ] Clean SSH install at `mrsurge@100.74.145.70`; retain candidate for user testing.
-- [ ] User live acceptance of the complete installed Linux runtime.
+- [x] Isolate Code TE2's private ordinary CPython 3.14 on desktop; keep the
+  hosting TE2 Python independent. Restore host metadata minimum only after
+  compatibility validation. Termux initially selects its regular system 3.14.
+- [x] Select shared 3.14 in the Linux builder, package libpython/stdlib and the
+  reduced dependency/source closure, and validate using Debian's Python 3.13.5
+  acceptance venv. No mandatory end-user uv provisioning or system replacement.
+  Builder source and test-user 3.14.6 provisioning are implemented. Standalone
+  shared-Python embedding/venv/stdlib probe passed; corrected builder image
+  builds successfully. Final wheel and clean Debian install-only validation pass.
+  Explicit worker PyConfig selection passes Cargo
+  check/build plus 22 isolated native-worker tests and 57 packaging tests.
+- [x] Private-runtime wheel assembly, accurate host-facing tags and final
+  ELF/libpython/post-repair inventory audit.
+  Private schema-2 resolver/bootstrap/PyConfig isolation is implemented: 63
+  packaging tests, 23 native tests, and 52 discovery/profile tests pass.
+  Host-path contamination is covered. Complete runtime/source/dependency
+  materialization and final wheel/SSH install-only acceptance pass; live runtime
+  acceptance remains separate. Builder corrections: Rust 1.94,
+  OpenSSL development headers and pkg-config. Server is synchronized to 0.2.352
+  with independent serverVersion provenance for future unchanged-Rust reuse.
+  Completed validation-only 119 MiB private-3.14.6 wheel; structured Auditwheel
+  policy and full ELF/libpython/hash checks pass. Raw show report is retained;
+  only independently audited bundled libpython is excluded from policy analysis.
+  Pip-generated caches are source-associated and never consumed by the private
+  worker; nested dependency RECORDs remain intact. No shipping claim yet.
+- [x] Clean SSH install at `mrsurge@100.74.145.70`; retain candidate for user testing.
+  Host Python 3.13.5 selects packaged artifacts; private Python 3.14.6 imports
+  all 136 compiled modules. Latest venv: `~/.cache/te2-release-acceptance/private-code-te2-0.2.352/candidate-wba-fixed/venv`.
+  The initial Python-only probe missed excluded vendored `build/` files. Complete
+  vendor copying now has regression coverage; installed Socket.IO and actual
+  WBA server-entry imports pass with Node 24.16.0 and are recorded in acceptance.
+  Install-only validation deliberately leaves the framework stopped.
+- [x] User live acceptance of the complete installed Linux runtime.
+  WBA-fixed candidate rejected: extension install/uninstall crashes the compiled
+  adapter restart path. Isolated embedded-await dictionary probe reproduces SIGSEGV
+  with system CPython; hoisted lookup passes 10,000 iterations per launcher.
+  Source workaround/regression implemented; rebuilt 136-module candidate at
+  `~/.cache/te2-release-acceptance/private-code-te2-0.2.352/candidate-restart-fixed/venv`.
+  User live acceptance confirmed the corrected candidate on 2026-10-04,
+  including extension install/uninstall restart recovery. The
+  `closed intelligence reader` shutdown warning is a separate follow-up.
 - [ ] Adapt accepted packaging contract to Android/Termux, then release workflow.
 
 Use the SSH machine for acceptance; remote building is an optional space fallback.

@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import subprocess
 import sys
 import sysconfig
 import tempfile
@@ -35,6 +36,80 @@ RESOURCE_PATHS = (
     "app/apps/code_te2/static",
 )
 _EXCLUDED = {"node_modules", "__pycache__", ".git", "target", "build"}
+PRIVATE_VENDOR_PATHS = (
+    "app/apps/code_te2/vendor/picomatch",
+    "app/apps/code_te2/vendor/node_socketio",
+)
+
+
+def _copy_private_tree(source: Path, target: Path, *, boundary: Path,
+                       ancestors: tuple[Path, ...] = ()) -> None:
+    """Materialize contained interpreter symlinks as regular files, never escapes."""
+    resolved = source.resolve(strict=True)
+    if not resolved.is_relative_to(boundary):
+        raise RuntimeError(f"private runtime symlink escapes its input root: {source}")
+    if resolved.is_dir():
+        if resolved in ancestors:
+            raise RuntimeError(f"private runtime symlink cycle: {source}")
+        target.mkdir(parents=True, exist_ok=True)
+        for item in sorted(resolved.iterdir()):
+            if item.name in _EXCLUDED or item.name == "site-packages" or item.suffix in {".pyc", ".pyo", ".a"}:
+                continue
+            _copy_private_tree(item, target / item.name, boundary=boundary,
+                               ancestors=(*ancestors, resolved))
+    elif resolved.is_file():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(resolved, target)
+    else:
+        raise RuntimeError(f"private runtime input is not regular: {source}")
+
+
+def _private_runtime(stage: Path, repo: Path, prefix: Path, dependencies: Path) -> dict[str, object]:
+    prefix, dependencies = prefix.resolve(strict=True), dependencies.resolve(strict=True)
+    interpreter = prefix / "bin/python3.14"
+    probe = subprocess.run([str(interpreter), "-I", "-S", "-c",
+        "import json,sys,sysconfig; print(json.dumps({"
+        "'implementation':sys.implementation.name,'version':f'{sys.version_info.major}.{sys.version_info.minor}',"
+        "'soabi':sysconfig.get_config_var('SOABI'),'freeThreaded':bool(sysconfig.get_config_var('Py_GIL_DISABLED')) ,"
+        "'libpython':sysconfig.get_config_var('INSTSONAME') or sysconfig.get_config_var('LDLIBRARY')}))"],
+        check=True, capture_output=True, text=True, timeout=15)
+    if json.loads(probe.stdout) != python_identity() or sys.version_info[:2] != (3, 14):
+        raise RuntimeError("private Python does not match the worker/domain packaging ABI")
+    _copy_private_tree(prefix / "lib", stage / "python/lib", boundary=prefix)
+    _copy_private_tree(interpreter, stage / "python/bin/python3.14", boundary=prefix)
+    # The dependency input is an explicitly prepared runtime-only installation,
+    # not the builder venv (which contains compiler/build tooling and .pth files).
+    for file in dependencies.rglob("*"):
+        if file.suffix == ".pth" or file.name in {"pyvenv.cfg", "sitecustomize.py", "usercustomize.py"}:
+            raise RuntimeError(f"private dependency input contains executable site customization: {file}")
+    _copy_private_tree(dependencies, stage / "python/lib/python3.14/site-packages", boundary=dependencies)
+    # pip --target creates console scripts with builder-interpreter shebangs.
+    # They are not this app's launch surface and must not ship /opt paths.
+    shutil.rmtree(stage / "python/lib/python3.14/site-packages/bin", ignore_errors=True)
+    source = stage / "domain/lib"
+    # Include lazy application/helper modules, not just startup inventory. Native
+    # wrappers and source coexist; the explicit overlay still requires every SO.
+    for directory in ("app/libs", "app/extensions", "app/release_runtime", "app/apps/code_te2"):
+        for file in sorted((repo / directory).rglob("*.py")):
+            relative = file.relative_to(repo)
+            if any(part in _EXCLUDED or part == "tests" for part in relative.parts):
+                continue
+            if file.is_symlink():
+                raise RuntimeError(f"private application source symlink cannot be shipped: {file}")
+            target = source / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if not target.exists():
+                shutil.copy2(file, target)
+    for file in sorted((repo / "app").glob("*.py")):
+        shutil.copy2(file, source / "app" / file.name)
+    for file in sorted((repo / "app/apps").glob("*.py")):
+        shutil.copy2(file, source / "app/apps" / file.name)
+    # WBA's published bundle resolves these vendored runtime dependencies from
+    # its __file__/import.meta.url tree; they are not source npm fallback trees.
+    for vendor_relative in PRIVATE_VENDOR_PATHS:
+        _copy_resources(repo / vendor_relative, source / vendor_relative, vendored=True)
+    return {"mode": "bundled", "home": "python", "executable": "python/bin/python3.14",
+            "sourceRoot": "domain/lib", "extensionSuffix": sysconfig.get_config_var("EXT_SUFFIX")}
 
 
 def _mapping(value: object, label: str) -> dict[str, object]:
@@ -50,19 +125,22 @@ def _relative(value: str) -> Path:
     return path
 
 
-def _copy_resources(source: Path, target: Path) -> None:
+def _copy_resources(source: Path, target: Path, *, vendored: bool = False) -> None:
     """Dereference only the known snapshot root links, never arbitrary children."""
     if not source.is_dir():
         raise RuntimeError(f"missing resource directory: {source}")
     target.mkdir(parents=True, exist_ok=True)
     for item in sorted(source.iterdir()):
-        if item.name in _EXCLUDED or item.suffix in {".pyc", ".pyo"}:
+        # Published npm packages use build/ and sometimes target/ for runtime
+        # JS. Only declared vendor roots bypass the source-intermediate filter.
+        excluded = {".git", "__pycache__"} if vendored else _EXCLUDED
+        if item.name in excluded or item.suffix in {".pyc", ".pyo"}:
             continue
         if item.is_symlink():
             raise RuntimeError(f"resource child symlink cannot be shipped: {item}")
         destination = target / item.name
         if item.is_dir():
-            _copy_resources(item, destination)
+            _copy_resources(item, destination, vendored=vendored)
         elif item.is_file():
             if destination.exists():
                 raise RuntimeError(f"resource collides with compiled artifact: {destination}")
@@ -72,8 +150,11 @@ def _copy_resources(source: Path, target: Path) -> None:
 
 
 def materialize(*, repo: Path, snapshot: Path, worker: Path, output: Path,
-                package_version: str, rust_fingerprint: str) -> Path:
+                package_version: str, rust_fingerprint: str,
+                private_python: Path | None = None, private_dependencies: Path | None = None) -> Path:
     repo, snapshot = repo.resolve(strict=True), snapshot.resolve(strict=True)
+    if (private_python is None) != (private_dependencies is None):
+        raise RuntimeError("private packaging requires both Python prefix and prepared dependencies")
     if not re.fullmatch(r"[0-9a-f]{64}", rust_fingerprint):
         raise RuntimeError("rust fingerprint must be a full SHA-256 build identity")
     if not package_version.strip():
@@ -143,8 +224,11 @@ def materialize(*, repo: Path, snapshot: Path, worker: Path, output: Path,
                 raise RuntimeError(f"snapshot resource does not match this checkout: {relative}")
             _copy_resources(source, stage / "domain/lib" / relative)
         (stage / "domain/manifest.json").write_text(json.dumps(portable_manifest, indent=2) + "\n")
+        private = None
+        if private_python is not None and private_dependencies is not None:
+            private = _private_runtime(stage, repo, private_python, private_dependencies)
         runtime_manifest: dict[str, object] = {
-            "schemaVersion": 1, "appId": "code_te2", "packageVersion": package_version,
+            "schemaVersion": 2 if private else 1, "appId": "code_te2", "packageVersion": package_version,
             "python": python_identity(), "platform": sys.platform,
             "machine": os.uname().machine, "libc": "glibc",
             "executable": "bin/code-te2-worker", "domain": "domain",
@@ -152,6 +236,8 @@ def materialize(*, repo: Path, snapshot: Path, worker: Path, output: Path,
             "files": {path.relative_to(stage).as_posix(): sha256(path)
                       for path in sorted(stage.rglob("*")) if path.is_file()},
         }
+        if private is not None:
+            runtime_manifest["pythonRuntime"] = private
         (stage / MANIFEST).write_text(json.dumps(runtime_manifest, indent=2, sort_keys=True) + "\n")
         validate_runtime(stage, package_version=package_version)
         if source_digest(repo, modules) != expected_source:
@@ -168,10 +254,13 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--package-version", required=True)
     parser.add_argument("--rust-fingerprint", required=True)
+    parser.add_argument("--private-python", type=Path, help="Matching shared CPython prefix, not a venv")
+    parser.add_argument("--private-dependencies", type=Path, help="Prepared runtime-only site directory")
     args = parser.parse_args()
     print(materialize(repo=args.repo, snapshot=args.snapshot, worker=args.worker,
                       output=args.output, package_version=args.package_version,
-                      rust_fingerprint=args.rust_fingerprint))
+                      rust_fingerprint=args.rust_fingerprint, private_python=args.private_python,
+                      private_dependencies=args.private_dependencies))
 
 
 if __name__ == "__main__":

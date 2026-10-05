@@ -22,7 +22,8 @@ def discover_runtime(environ: Mapping[str, str]) -> str:
     if bun:
         return bun
     # Desktop installations can ship Node alongside the Python interpreter.
-    bundled_node = Path(sys.executable).parent / "node"
+    host_python = environ.get("CODE_TE2_HOST_PYTHON_EXECUTABLE") or sys.executable
+    bundled_node = Path(host_python).parent / "node"
     if bundled_node.is_file() and os.access(bundled_node, os.X_OK):
         return str(bundled_node)
     return shutil.which("node", path=environ.get("PATH", os.defpath)) or "node"

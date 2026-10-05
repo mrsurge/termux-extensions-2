@@ -22,6 +22,9 @@ _DIGEST = re.compile(r"[0-9a-f]{64}")
 class CodeTe2Runtime:
     executable: Path
     domain: Path
+    python_home: Path | None = None
+    python_executable: Path | None = None
+    source_root: Path | None = None
 
 
 def python_identity() -> dict[str, object]:
@@ -115,12 +118,32 @@ def validate_runtime(root: Path, *, package_version: str | None = None) -> CodeT
         raise ReleaseRuntimeError("Code TE2 runtime root may not be a symlink")
     root = root.resolve()
     manifest = _json(_file(root, Path(MANIFEST)))
-    if manifest.get("schemaVersion") != 1 or manifest.get("appId") != "code_te2":
+    schema = manifest.get("schemaVersion")
+    if schema not in (1, 2) or manifest.get("appId") != "code_te2":
         raise ReleaseRuntimeError("Unsupported Code TE2 runtime manifest")
     if package_version is not None and manifest.get("packageVersion") != package_version:
         raise ReleaseRuntimeError("Code TE2 runtime does not match the installed package version")
-    if manifest.get("python") != python_identity():
-        raise ReleaseRuntimeError("Code TE2 runtime Python ABI/libpython identity mismatch")
+    identity = _object(manifest.get("python"), "Python identity")
+    private: dict[str, object] | None = None
+    if schema == 1:
+        if identity != python_identity():
+            raise ReleaseRuntimeError("Code TE2 runtime Python ABI/libpython identity mismatch")
+        suffix = str(sysconfig.get_config_var("EXT_SUFFIX"))
+    else:
+        # This ABI belongs to the embedded app, not the invoking CLI Python.
+        if (identity.get("implementation") != "cpython" or identity.get("version") != "3.14"
+                or identity.get("freeThreaded") is not False
+                or identity.get("libpython") != "libpython3.14.so.1.0"):
+            raise ReleaseRuntimeError("Private Code TE2 runtime requires ordinary shared CPython 3.14")
+        soabi = _text(identity.get("soabi"), "private SOABI")
+        if not re.fullmatch(r"cpython-314-[A-Za-z0-9_-]+", soabi):
+            raise ReleaseRuntimeError("Invalid private Code TE2 SOABI")
+        private = _object(manifest.get("pythonRuntime"), "private Python runtime")
+        if private.get("mode") != "bundled":
+            raise ReleaseRuntimeError("Linux private Code TE2 runtime must be bundled")
+        suffix = _text(private.get("extensionSuffix"), "private extension suffix")
+        if suffix != f".{soabi}.so":
+            raise ReleaseRuntimeError("Private extension suffix does not match SOABI")
     if manifest.get("platform") != sys.platform or manifest.get("machine") != os.uname().machine:
         raise ReleaseRuntimeError("Code TE2 runtime platform/architecture mismatch")
     if manifest.get("libc") != "glibc":
@@ -140,7 +163,36 @@ def validate_runtime(root: Path, *, package_version: str | None = None) -> CodeT
         expected = _text(digest, "file digest")
         if not _DIGEST.fullmatch(expected) or sha256(path) != expected:
             raise ReleaseRuntimeError(f"Code TE2 artifact checksum mismatch: {name}")
-    actual = {path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()}
+    wheel_libraries = _object(manifest.get("wheelLibraries", {}), "wheel library checksums")
+    if wheel_libraries:
+        package_root = root.parents[2]
+        if root.relative_to(package_root).as_posix() != "app/release_runtime/code_te2":
+            raise ReleaseRuntimeError("Wheel library inventory requires installed package layout")
+        for name, digest in wheel_libraries.items():
+            relative = _relative(name, "wheel library")
+            if relative.parts[0] != "te2.libs":
+                raise ReleaseRuntimeError("Unexpected wheel-owned library directory")
+            expected = _text(digest, "wheel library digest")
+            if not _DIGEST.fullmatch(expected) or sha256(_file(package_root, relative)) != expected:
+                raise ReleaseRuntimeError(f"Code TE2 wheel library checksum mismatch: {name}")
+        actual_libraries = {path.relative_to(package_root).as_posix()
+                            for path in (package_root / "te2.libs").rglob("*") if path.is_file()}
+        if actual_libraries != set(wheel_libraries):
+            raise ReleaseRuntimeError("Code TE2 wheel library inventory is incomplete")
+    actual = set()
+    for path in root.rglob('*'):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(root)
+        name = relative.as_posix()
+        cache = re.fullmatch(r'(.+)\.cpython-[0-9]{2,3}(?:\.opt-[12])?\.pyc', relative.name)
+        if (schema == 2 and name not in files and relative.parent.name == '__pycache__'
+                and cache is not None
+                and (relative.parent.parent / (cache.group(1) + '.py')).as_posix() in files):
+            # Pip may compile the private source with the *host* interpreter.
+            # Isolated native PyConfig never reads adjacent bytecode caches.
+            continue
+        actual.add(name)
     if any(path.is_symlink() for path in root.rglob("*")) or actual != set(files) | {MANIFEST}:
         raise ReleaseRuntimeError("Code TE2 runtime contains untracked files or symlinks")
     executable_relative = _relative(manifest.get("executable"), "executable")
@@ -151,11 +203,20 @@ def validate_runtime(root: Path, *, package_version: str | None = None) -> CodeT
     domain = root / domain_relative
     domain_manifest = _json(_file(root, domain_relative / "manifest.json"))
     names = compiled_module_names(domain_manifest)
-    suffix = str(sysconfig.get_config_var("EXT_SUFFIX"))
     for name in names:
         _file(root, domain_relative / "lib" / (name.replace(".", "/") + suffix))
     # mypyc's common group library is captured by the full file inventory too.
-    return CodeTe2Runtime(executable, domain)
+    if private is None:
+        return CodeTe2Runtime(executable, domain)
+    home_relative = _relative(private.get("home"), "private Python home")
+    interpreter = _file(root, _relative(private.get("executable"), "private Python executable"))
+    if not os.access(interpreter, os.X_OK):
+        raise ReleaseRuntimeError("Private Python executable is not executable")
+    _file(root, home_relative / "lib/libpython3.14.so.1.0")
+    _file(root, home_relative / "lib/python3.14/encodings/__init__.py")
+    source_relative = _relative(private.get("sourceRoot"), "private source root")
+    _file(root, source_relative / "app/apps/code_te2/native_worker.py")
+    return CodeTe2Runtime(executable, domain, root / home_relative, interpreter, root / source_relative)
 
 
 def packaged_runtime(package_version: str) -> CodeTe2Runtime:

@@ -584,6 +584,16 @@ def _prepare_native_workers(args: BootstrapArgs, env: MutableMapping[str, str], 
             raise SystemExit(f"Binary release native-worker payload is unusable: {exc}; refusing a Cargo fallback.") from exc
         env[workers[0].environment_key] = str(runtime.executable)
         env["CODE_TE2_MYPYC_DIR"] = str(runtime.domain)
+        env["CODE_TE2_HOST_PYTHON_EXECUTABLE"] = sys.executable
+        env["CODE_TE2_HOST_PACKAGE_ROOT"] = str(_project_root())
+        env["CODE_TE2_PYTHON_HOME"] = str(runtime.python_home) if runtime.python_home else sys.base_prefix
+        env["CODE_TE2_PYTHON_EXECUTABLE"] = str(runtime.python_executable) if runtime.python_executable else sys.executable
+        if runtime.source_root is not None:
+            env["CODE_TE2_PYTHON_ISOLATED"] = "1"
+            env["CODE_TE2_PYTHON_SOURCE"] = str(runtime.source_root)
+        else:
+            env.pop("CODE_TE2_PYTHON_ISOLATED", None)
+            env.pop("CODE_TE2_PYTHON_SOURCE", None)
         return
     profile = 'release' if args.release else 'debug'
     paths = resolve_te2_paths(env)
@@ -615,6 +625,12 @@ def _prepare_native_workers(args: BootstrapArgs, env: MutableMapping[str, str], 
         env[worker.environment_key] = str(selected)
         if worker.app_id == 'code_te2':
             env.setdefault('CODE_TE2_MYPYC_DIR', str(_project_root() / '.codex-scratch' / 'mypyc-active'))
+            env['CODE_TE2_PYTHON_HOME'] = sys.base_prefix
+            env['CODE_TE2_PYTHON_EXECUTABLE'] = sys.executable
+            env['CODE_TE2_HOST_PYTHON_EXECUTABLE'] = sys.executable
+            env['CODE_TE2_HOST_PACKAGE_ROOT'] = str(_project_root())
+            env.pop('CODE_TE2_PYTHON_ISOLATED', None)
+            env.pop('CODE_TE2_PYTHON_SOURCE', None)
         print(f"[te2] Native worker {worker.app_id}: {selected}", flush=True)
 
 

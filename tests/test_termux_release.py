@@ -38,6 +38,9 @@ linux_validator = _load(
     "te2_linux_release_validator",
     ROOT / "release" / "linux-wheel" / "validate-artifacts.py",
 )
+linux_acceptance = _load(
+    "te2_linux_acceptance", ROOT / "release/linux-wheel/remote-acceptance.py",
+)
 
 
 def _digest(payload: bytes) -> str:
@@ -287,6 +290,43 @@ class TermuxReleaseBuilderTests(unittest.TestCase):
                     invalid,
                     expected_version="0.2.338",
                 )
+
+
+class PrivateNativePolicyTests(unittest.TestCase):
+    def test_wba_probe_uses_installed_node_and_accepts_binary_beacon(self) -> None:
+        output = b'\x81\xa4type\x00\nTE2_WBA_IMPORT={"node":"v24.16.0","socketio":true,"wbaEntry":true}\n'
+        with patch.object(linux_acceptance.subprocess, 'run',
+                return_value=subprocess.CompletedProcess([], 0, output, b'')) as run:
+            result = linux_acceptance._probe_wba_runtime(Path('/venv'), Path('/source'), Path('/probe'))
+        self.assertTrue(result['wbaEntry'])
+        self.assertEqual(run.call_args.args[0][0], '/venv/bin/node')
+        self.assertEqual(run.call_args.kwargs['env']['TE2_ADAPTER_PORT'], '0')
+        self.assertNotIn('FRAMEWORK_SHELLS_SECRET', run.call_args.kwargs['env'])
+
+    def test_wba_probe_rejects_missing_dependency(self) -> None:
+        with patch.object(linux_acceptance.subprocess, 'run', return_value=
+                subprocess.CompletedProcess([], 1, b'', b'MODULE_NOT_FOUND engine.io/build/engine.io.js')):
+            with self.assertRaisesRegex(RuntimeError, 'MODULE_NOT_FOUND'):
+                linux_acceptance._probe_wba_runtime(Path('/venv'), Path('/source'), Path('/probe'))
+
+    def test_policy_checks_overall_compatibility_not_report_substrings(self) -> None:
+        valid = {'overallPolicy': 'manylinux_2_28_x86_64',
+                 'externalLibraries': [], 'blacklistedLibraries': [],
+                 'excludedBundledLibraries': ['libpython3.14.so.1.0']}
+        with patch.object(linux_validator.subprocess, 'run', return_value=
+                subprocess.CompletedProcess([], 0, json.dumps(valid), '')):
+            self.assertEqual(linux_validator._validate_native_platform_policy(
+                Path('candidate.whl'), 'manylinux_2_28_x86_64', (2, 28)), valid)
+        for change in ({'overallPolicy': 'linux_x86_64'},
+                       {'overallPolicy': 'manylinux_2_34_x86_64'},
+                       {'externalLibraries': ['libmissing.so']},
+                       {'blacklistedLibraries': ['libz.so.1']}):
+            with self.subTest(change=change), patch.object(linux_validator.subprocess,
+                    'run', return_value=subprocess.CompletedProcess(
+                        [], 0, json.dumps({**valid, **change}), '')):
+                with self.assertRaisesRegex(RuntimeError, 'structured platform policy'):
+                    linux_validator._validate_native_platform_policy(
+                        Path('candidate.whl'), 'manylinux_2_28_x86_64', (2, 28))
 
 
 class LinuxInstallerTests(unittest.TestCase):

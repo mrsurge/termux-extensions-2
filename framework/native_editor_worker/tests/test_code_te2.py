@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import json
 import os
+import py_compile
 import queue
 from pathlib import Path
 import socket
 import subprocess
+import sys
 import threading
 import time
 import urllib.error
@@ -20,6 +22,58 @@ REPO = Path(__file__).resolve().parents[3]
 BINARY = REPO / "framework/native_editor_worker/target/release/code-te2-worker"
 
 
+@pytest.mark.parametrize('present', ['CODE_TE2_PYTHON_HOME', 'CODE_TE2_PYTHON_EXECUTABLE'])
+def test_partial_interpreter_selection_fails_before_domain_start(present, tmp_path):
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith(('CODE_TE2_', 'PYTHON'))}
+    env[present] = sys.base_prefix if present.endswith('HOME') else sys.executable
+    result = subprocess.run([str(BINARY), str(REPO), '0'], env=env, cwd=tmp_path,
+                            input=b'', capture_output=True, timeout=10)
+    assert result.returncode != 0
+    assert b'native Python selection requires both home and executable' in result.stderr
+    assert not result.stdout
+
+
+def test_private_python_ignores_host_paths_and_sites(tmp_path):
+    source = tmp_path / 'private-source'
+    module = source / 'app/apps/code_te2/native_worker.py'
+    module.parent.mkdir(parents=True)
+    cached_module = source / 'cache_probe.py'
+    cached_module.write_text('raise RuntimeError("adjacent bytecode must never execute")\n')
+    py_compile.compile(str(cached_module), doraise=True,
+        invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH)
+    cached_module.write_text('SAFE = True\n')
+    module.write_text('import sys, json, importlib.util\n'
+        'import cache_probe\n'
+        'print("PRIVATE_PROBE=" + json.dumps({"path": sys.path, '
+        '"isolated": sys.flags.isolated, "site": sys.flags.no_site, '
+        '"bytecodeDisabled": sys.dont_write_bytecode, "cachePrefix": sys.pycache_prefix, '
+        '"poison": importlib.util.find_spec("host_poison") is not None}), file=sys.stderr)\n')
+    poison = tmp_path / 'host-site'
+    poison.mkdir()
+    (poison / 'host_poison.py').write_text('raise RuntimeError("must not import")')
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith(('CODE_TE2_', 'PYTHON'))}
+    env.update(CODE_TE2_PYTHON_HOME=sys.base_prefix,
+        CODE_TE2_PYTHON_EXECUTABLE=sys.executable, CODE_TE2_PYTHON_ISOLATED='1',
+        CODE_TE2_PYTHON_SOURCE=str(source), PYTHONPATH=str(poison),
+        PYTHONHOME=str(poison), PYTHONUSERBASE=str(poison), VIRTUAL_ENV=str(poison))
+    result = subprocess.run([str(BINARY), str(REPO), '0'], env=env,
+        input=b'', capture_output=True, timeout=10)
+    # Deliberately incomplete domain fails after its import-time probe.
+    assert result.returncode != 0
+    report = next(line.removeprefix('PRIVATE_PROBE=')
+        for line in result.stderr.decode().splitlines() if line.startswith('PRIVATE_PROBE='))
+    values = json.loads(report)
+    assert values['isolated'] == 1 and values['site'] == 1
+    assert values['poison'] is False
+    assert values['bytecodeDisabled'] is True
+    assert values['cachePrefix'] == str(Path(sys.base_prefix) / '.disabled-bytecode-cache')
+    assert str(poison) not in values['path']
+    assert str(REPO) not in values['path']
+    assert values['path'][0] == str(source)
+
+
 @pytest.fixture
 def native_app(tmp_path):
     assert BINARY.exists(), "build code-te2-worker first"
@@ -31,6 +85,7 @@ def native_app(tmp_path):
         port = reservation.getsockname()[1]
     env = {k: v for k, v in os.environ.items() if not k.startswith(("TE_", "TE2_", "FRAMEWORK_SHELLS_", "PYTHON", "XDG_"))}
     env.update(HOME=str(tmp_path), VIRTUAL_ENV=str(REPO / ".jitenv"), TE_FRAMEWORK_URL="http://127.0.0.1:1", TE_APP_ID="code_te2")
+    env.update(CODE_TE2_PYTHON_HOME=sys.base_prefix, CODE_TE2_PYTHON_EXECUTABLE=sys.executable)
     for name in ("CONFIG", "DATA", "CACHE", "RUNTIME"):
         env[f"TE2_{name}_HOME"] = str(tmp_path / name.lower())
     process = subprocess.Popen([str(BINARY), str(REPO), str(port)], cwd=tmp_path,

@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -13,6 +14,9 @@ from setuptools.command.build_py import build_py
 from setuptools.errors import SetupError
 from wheel.bdist_wheel import bdist_wheel
 
+# PEP 517 executes setup.py without necessarily placing its checkout on the
+# import path. Resolve the build-owned validator from this source tree.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from app.release_runtime.code_te2 import validate_runtime
 
 
@@ -46,6 +50,9 @@ def _release_wheel_config() -> ReleaseWheelConfig | None:
         raise SetupError(
             "Incomplete TE2 binary-release build environment; missing " + ", ".join(missing)
         )
+    component_version = os.environ.get("TE2_RELEASE_SERVER_VERSION")
+    if component_version is not None and not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?", component_version):
+        raise SetupError("TE2_RELEASE_SERVER_VERSION must be an explicit Rust semantic version")
 
     server = Path(values["TE2_RELEASE_SERVER_BIN"]).expanduser().resolve()
     if not server.is_file():
@@ -112,6 +119,7 @@ class Te2BuildPy(build_py):
         shutil.copytree(config.code_te2, native_target, symlinks=False)
         validate_runtime(native_target, package_version=package_version)
         manifest = {
+            "serverVersion": os.environ.get("TE2_RELEASE_SERVER_VERSION", package_version),
             "architecture": "x86_64",
             "commit": config.commit,
             "distributionMode": "binary-release",
@@ -141,6 +149,10 @@ class Te2BdistWheel(bdist_wheel):
         config = _release_wheel_config()
         if config is None:
             return super().get_tag()
+        if validate_runtime(config.code_te2).python_home is not None:
+            # CPython extensions are private to the embedded app, never imported
+            # by the hosting interpreter. Its ABI stays in runtime.json.
+            return ("py3", "none", config.platform_tag)
         python_tag, abi_tag, _ = super().get_tag()
         if not python_tag.startswith("cp") or abi_tag == "none":
             raise SetupError("Native Code TE2 release wheels require an exact CPython ABI tag")

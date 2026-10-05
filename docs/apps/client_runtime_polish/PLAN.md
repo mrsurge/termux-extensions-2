@@ -1234,7 +1234,183 @@ native-services snapshot. Build and validate a complete Linux wheel first, then
 reuse its artifact contract for Android/Termux. Do not publish/tag/merge main as
 part of the implementation checkpoints.
 
-#### Supported Python baseline (supersedes the initial 3.13 target)
+#### Private Code TE2 runtime boundary (current approved direction)
+
+The native ABI baseline remains ordinary GIL-enabled CPython 3.14, but it is
+**Code TE2's runtime**, not a new requirement for every Python hosting TE2.
+This supersedes the host-3.14 installer/minimum proposal below.
+
+- Linux wheels bundle a private 3.14 runtime: shared libpython, matching stdlib,
+  required native stdlib libraries, remaining third-party dependencies,
+  interpreted application islands/resources and the matching mypyc group.
+  Use package-relative loader paths and isolated PyConfig; do not ingest the
+  host's PYTHONPATH, user site, venv site-packages or arbitrary system Python.
+- Termux initially uses the explicitly resolved regular system Python 3.14
+  with matching Bionic artifacts. No redundant runtime and no arbitrary venv
+  preference. A Termux minor-version upgrade requires matching artifacts or a
+  separately approved private-runtime design.
+- Desktop binary releases always use the private runtime, even when the host
+  Python happens to match. Source/editable builds retain explicit ABI selection.
+  Missing/corrupt payloads never trigger Cargo or interpreted fallback.
+- Preserve the host interpreter identity separately for run-profile launcher
+  execution and Node-wheel discovery. Current source uses sys.executable for
+  both; private embedding must not silently change those child/runtime choices.
+- Restore the original host minimum (>=3.12) only after host-side compatibility
+  checks. Wheel tags describe the host-facing ABI, not merely embedded cp314
+  libraries; a platform-only tag requires proof those libraries are private.
+  Keep CPython 3.14 ABI/provenance in the component manifest regardless of tag.
+- Use uv-managed shared Python in the build environment, not as a mandatory
+  end-user desktop installer dependency. Validate on the SSH target's ordinary
+  Debian Python 3.13.5 venv, leaving a candidate for user acceptance.
+
+Implementation gates: (1) explicit private manifest/loader/bootstrap selection
+and contamination rejection; (2) complete source/dependency/runtime materialization,
+relative ELF linkage and wheel-driver integration; (3) post-repair checksum/tag
+audit and clean SSH install/live acceptance. Startup inventory alone is not a
+complete closure: include lazy feature imports and run-profile launcher needs.
+Do not claim the first contract slice is a self-contained shipping wheel.
+
+Private-boundary contract checkpoint: runtime schema 2 identifies bundled home,
+interpreter, source root and extension suffix; the host resolver validates the
+embedded ordinary 3.14 identity rather than comparing it with the host Python.
+Schema 1 remains the earlier same-ABI validation format, not a private payload.
+Bootstrap passes private paths/isolation and preserves
+`CODE_TE2_HOST_PYTHON_EXECUTABLE` separately. Run-profile launchers and Node-wheel
+discovery use that host identity. The Rust worker disables environment/site
+initialization and admits only private stdlib/dynload/site-packages plus the
+declared application source and selected compiled overlay. Source builds keep
+their existing interpreter selection; no active runtime was restarted.
+
+Validation: 63 focused packaging/bootstrap tests, 23 real native-worker tests
+(including hostile Python home/path/user-site/venv contamination), 52
+discovery/run-profile tests plus 7 subtests, three-module Mypy, release Cargo
+build and formatting pass. Private manifest tests use synthetic files; they
+do not establish ELF linkage or a complete stdlib/dependency closure. No new
+wheel or SSH candidate has been installed. The materializer/wheel driver still
+produces the initial same-ABI format, and wheel tags/package minimum are not
+yet widened; private payload construction and final integration are next.
+
+Assembly integration checkpoint (in progress): the materializer now accepts
+paired private CPython prefix/runtime-only dependency inputs, dereferences only
+contained interpreter links, rejects dependency site customization, and includes
+lazy Code TE2/helper source in the existing domain library/resource tree. The
+wheel driver builds both Cargo workspaces and mypyc, sets relative loader paths,
+repairs ELF dependencies, refreshes inner hashes/outer RECORD, and audits all
+final ELF glibc/linkage. Host-independent `py3-none` platform tag selection is
+limited to schema-2 bundled payloads. Sidebar catalog data uses the separately
+resolved installed framework root without importing its site-packages.
+
+The original host minimum >=3.12 is restored: 35 host-facing sources pass 3.12
+grammar checks and Debian 3.13.5 imports bootstrap/resolver. Clean installation
+and host dependency resolution remain acceptance gates, not proven by parsing.
+158 focused tests plus 7 subtests, Mypy and shell syntax checks pass.
+
+Remote build exposed two prerequisites previously hidden by the server-only
+pipeline: Engineioxide requires Rust 1.94 (builder raised from 1.93), and the
+independent worker needs OpenSSL development headers/pkg-config. Preserve Cargo
+caches during retry. User approved both synchronizing this server to package
+0.2.352 and adding explicit `serverVersion` provenance; the final validator
+checks that component version rather than assuming every future package bump
+requires a new Rust version. Reuse still requires unchanged-input/provenance
+checks; this field alone does not authorize arbitrary older server binaries.
+
+Remote validation context: `/root/.cache/te2-release-build/private-wheel-source`,
+mutable work/cache in sibling `private-wheel-work`, outputs in
+`private-wheel-output`, logs `private-wheel-image.log` and
+`private-wheel-build.log`. Candidate release label is `validation-private-0.2.352`
+and publication eligibility is false. No tag, wheel upload, Android build or
+shared-runtime restart. Completed wheel and retained user SSH install are still
+pending; do not mark live acceptance from these synthetic tests.
+
+Completed Linux candidate checkpoint: both Rust workspaces and the 136-module
+mypyc group build in the corrected manylinux container (domain build 319.19s).
+The validation-only wheel is approximately 119 MiB and contains private ordinary
+CPython 3.14.6. PEP 517 setup source-path resolution, nested dependency RECORD
+preservation, standalone ABI-stub loader normalization and private-library repair
+are covered in the build path. Auditwheel repair excludes only bundled libpython:
+its extension-oriented default would remove the embedding link. Retain the raw
+`auditwheel show` report (which defaults to `linux_x86_64` for embedded libpython),
+but require structured Auditwheel policy analysis with that independently
+verified bundled library excluded. Overall policy is `manylinux_2_28_x86_64`,
+with no remaining external/blacklisted libraries at that policy; every ELF and
+the exact worker-to-bundled-libpython resolution are separately audited.
+
+Clean Debian install-only acceptance passes on host Python 3.13.5: bootstrap
+selects the installed server/worker and private Python 3.14.6 imports all 136
+compiled modules. Pip-generated adjacent source caches are tolerated only for
+inventoried `.py` files; the private worker disables writes and uses an absent
+reserved bytecode prefix, preventing cache consumption. A real poisoned-cache
+native test passes. Local validation: 122 focused tests plus 7 subtests, 23 native
+tests, 30 installer/release tests plus 4 subtests, Mypy and formatting checks.
+The bootstrap suite explicitly unsets the inherited `CODE_TE2_WORKER_BIN` test
+environment; otherwise two fixture assertions see the shared harness selection.
+
+Retained user candidate on `mrsurge@100.74.145.70`:
+`~/.cache/te2-release-acceptance/private-code-te2-0.2.352/candidate/venv`.
+`candidate/acceptance-result.json` and sibling `install.log` record install/import
+proof. The framework was **not started** by this install-only acceptance; user
+live acceptance remains pending. Remote mypyc cache is retained separately in
+`private-wheel-work/code-te2-mypyc-cache`, outside disposable source staging.
+This dirty-source candidate is not publication eligible; no upload/tag/merge/APK.
+
+WBA acceptance correction: the first candidate's Python-only import probe missed
+83 tracked vendored Node files under `build/`. The general intermediate filter
+had stripped `engine.io/build`, `engine.io-parser/build` and related published
+runtime output. Declared vendor roots now copy their complete runtime tree
+(including `node_modules`, `build` and `target`), while ordinary resource roots
+retain intermediate exclusions and all copies retain symlink/VCS/cache guards.
+Synthetic nested-build and real Socket.IO tree checksum comparisons pass.
+
+Installed acceptance now imports both Socket.IO and the actual WBA server
+entrypoint using the candidate's Node runtime, binding only an ephemeral
+loopback port and exiting immediately after import. It never connects to the
+shared framework or a real Code Server. The probe reproduces the old candidate's
+exact missing-engine.io error and passes on the repackaged candidate with Node
+24.16.0. Existing Rust/mypyc artifacts were reused; no compilation was needed.
+156 focused tests plus 11 subtests and materializer Mypy pass. Retained latest
+venv is `~/.cache/te2-release-acceptance/private-code-te2-0.2.352/candidate-wba-fixed/venv`;
+its `acceptance-result.json` includes `wbaImportProbe`, and sibling
+`install-wba-fixed.log` records the clean install. The previous candidate/runtime
+was untouched; the new framework remains stopped pending user live acceptance.
+
+#### Compiled intelligence restart crash gate
+
+User install/uninstall testing rejected the WBA-fixed candidate: two worker
+segfaults map to the mypyc `_ensure_workbench_adapter_shell` launch-context
+dictionary, one in `CPyDict_Build` and one in its temporary decref cleanup.
+The local source worker logged the same `closed intelligence reader` shutdown
+exception but recovered; its live `CODE_TE2_MYPYC_DIR` was empty and process maps
+contained system libpython, not the packaged compiled group.
+
+`scripts/probe_code_te2_launch_context.py` compiles the actual launcher dictionary
+expressions with mypyc 2.3.0/opt-level 3 into an isolated fixture. It starts no
+framework/WBA and installs no extensions. The embedded-await negative control
+segfaults with ordinary desktop CPython 3.14.4; moving the cache lookup outside
+both launch dictionaries passes 10,000 iterations each, including repeated GC.
+This isolates a compiler/suspension-path defect independently of the private
+interpreter, although it does not establish the compiler's exact ownership bug.
+The normal Linux wheel build now runs the positive compiled probe. The AST
+regression forbids suspension inside both launch contexts. Release-toolchain
+CPython 3.14.6 reproduced the negative control and passed the positive 10,000
+iterations per launcher. All 136 modules rebuilt/import-validated in 300.12s
+at `/root/.cache/te2-release-build/private-wheel-work/code-te2-domain-restart-fixed`.
+The separate wheel passed ELF/hash/platform validation and is installed at
+`~/.cache/te2-release-acceptance/private-code-te2-0.2.352/candidate-restart-fixed/venv`.
+Wheel SHA-256: `72d6c4df305a45a132bfa90461f3b089cccc59b4cbfe646a5d6899aaef8fc832`.
+Install-only acceptance passed: host 3.13.5 selects the bundled runtime; private
+3.14.6 imports all 136 compiled modules; candidate Node 24.16.0 imports Socket.IO
+and the actual WBA entrypoint. Evidence is `candidate-restart-fixed/acceptance-result.json`
+and sibling `install-restart-fixed.log`. Install-only automation left it stopped;
+the user then launched it and confirmed live acceptance on 2026-10-04, including
+the extension install/uninstall restart fix. The reader-shutdown exception
+is a separate cleanup follow-up, not claimed fixed or proven causal.
+
+Local evidence: `.codex-scratch/launch-context-negative-20261004/stress.log`
+and `.codex-scratch/launch-context-positive-20261004/stress.log`.
+Remote build outputs must retain the rejected candidate and old domain; never
+replace a loaded shared object in a running runtime or restart the shared server.
+
+#### Historical host-3.14 proposal (superseded)
 
 Use ordinary GIL-enabled CPython 3.14 as the sole initial native release target
 on Linux and Termux. Raise package metadata to `requires-python = ">=3.14"`
@@ -1269,7 +1445,7 @@ tight. No remote cleanup, broad process termination or framework restart is
 implicitly authorized. Keep an installed candidate available for the user's
 live acceptance; do not equate import/CLI smoke tests with working app acceptance.
 
-Linux implementation order:
+Original Linux implementation order (apply the private-runtime amendment above):
 
 1. Portable matched-set metadata and fail-closed resolver. Record independent
    Rust/domain source identities, CPython minor/SOABI/free-threaded status,
@@ -1361,6 +1537,39 @@ interpreter's stdlib/site-packages), then distinguish that worker linkage
 provenance from the target interpreter ABI. The initial resolver compares
 declared libpython identity exactly; it is not yet a cross-static/shared loader
 policy. The remote system interpreter is 3.13.5, not the builder's patch version.
+
+3.14 embedding checkpoint (after `aa38164d`): the manylinux image's own CPython
+3.14.7 is also static-only. The user approved shared uv-managed 3.14 in the
+builder/test-user environment instead. Builder source now pins uv 0.11.26 and
+ordinary CPython 3.14.6, uses the manylinux GCC toolchain, and asserts shared/GIL
+configuration in a dedicated builder venv (uv's managed base is externally
+managed and is not modified). Package metadata now declares `>=3.14`; installer provisioning
+and full wheel driver integration remain pending.
+
+Installed uv and ordinary 3.14.6 for the SSH test user without modifying system
+Python or shell startup. Its SOABI is `cpython-314-x86_64-linux-gnu`, and
+`Py_ENABLE_SHARED=1` with `libpython3.14.so.1.0`. A standalone C `PyConfig`
+embedding probe under `~/.cache/te2-release-acceptance/python314-embedding`
+selected a fresh venv, reported correct prefix/base-prefix/executable and imported
+math, SSL, SQLite and zlib. Its absolute-rpath diagnostic executable is not a
+shipping artifact or final manylinux-loader proof.
+
+Bootstrap now sends the invoking interpreter's base-prefix/executable through
+worker-specific environment values. The worker uses `PyConfig` before the first
+Python attachment and releases the initial GIL for PyO3; terminal children do not
+inherit a newly set global PYTHONHOME. Standalone diagnostics retain the existing
+VIRTUAL_ENV adapter only when no explicit interpreter pair is supplied.
+Cargo check/release build pass; 22 isolated real-worker tests and 57 focused
+packaging/bootstrap tests pass. The active shared framework was not restarted.
+The corrected remote builder image `te2-linux-wheel:python314-probe` builds
+successfully and its shared/GIL interpreter assertions pass. This validates
+toolchain-image provisioning, not the still-incomplete wheel driver. The same
+C embedding probe passes inside that image with its builder venv; versioned
+GLIBC requirements in the selected libpython reach 2.17 (below the 2.28 floor).
+This checks libpython alone, not every final worker/extension/native dependency.
+Private library placement/relative loader paths, final wheel assembly,
+post-auditwheel hashes, installer selection and retained user acceptance remain
+uncompleted gates.
 
 
 Approved direction (source executable/bootstrap slice implemented; matched-set

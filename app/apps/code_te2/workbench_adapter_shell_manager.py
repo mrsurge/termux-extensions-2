@@ -758,6 +758,9 @@ async def _ensure_workbench_adapter_shell(
     await _publish_adapter_state_fact()
 
     try:
+        # Keep suspension outside the launch dictionary. mypyc's retained
+        # expression temporaries across this await crashed during WBA restart.
+        compile_cache_path = await asyncio.to_thread(node_compile_cache, "workbench-adapter")
         shell = await orch.start_from_ref(
             SHELLSPEC_REF,
             base_dir=SHELLSPEC_DIR,
@@ -770,7 +773,7 @@ async def _ensure_workbench_adapter_shell(
                 "WORKBENCH_ADAPTER_PORT": str(WORKBENCH_ADAPTER_FIXED_PORT),
                 "WORKBENCH_ADAPTER_ENTRY": str(adapter_entry),
                 "WORKBENCH_ADAPTER_NODE": str(node_binary),
-                "NODE_COMPILE_CACHE": await asyncio.to_thread(node_compile_cache, "workbench-adapter"),
+                "NODE_COMPILE_CACHE": compile_cache_path,
                 "TE2_RUNTIME_DEBUG": os.environ.get("TE2_RUNTIME_DEBUG", "0"),
                 "CODE_SERVER_HTTP": str(code_server_http),
                 "CODE_SERVER_SOCKET": str(code_server_socket_path or ""),

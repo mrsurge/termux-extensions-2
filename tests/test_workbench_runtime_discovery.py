@@ -32,6 +32,12 @@ class RuntimeDiscoveryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(runtime.discover_runtime({"TE2_WORKBENCH_ADAPTER_NODE_BIN": "/custom/node"}), "/custom/node")
             which.assert_not_called()
 
+    def test_node_discovery_uses_host_not_private_python(self) -> None:
+        with patch.object(shutil, "which", return_value=None), patch.object(Path, "is_file", return_value=True), patch.object(os, "access", return_value=True):
+            self.assertEqual(runtime.discover_runtime({
+                "CODE_TE2_HOST_PYTHON_EXECUTABLE": "/host/venv/bin/python",
+            }), "/host/venv/bin/node")
+
     async def test_pending_discovery_does_not_block_launch(self) -> None:
         release = threading.Event()
         entered = threading.Event()

@@ -424,6 +424,9 @@ async def _ensure_code_server_shell(
             print(f"[code_server] watcher settings sync failed (non-fatal): {exc}", flush=True)
 
         try:
+            # Do not retain a partially evaluated launch dictionary across an
+            # await: this pattern crashes in the mypyc restart path.
+            compile_cache_path = await asyncio.to_thread(node_compile_cache, "code-server")
             shell = await orch.start_from_ref(
                 SHELLSPEC_REF,
                 base_dir=SHELLSPEC_DIR,
@@ -437,7 +440,7 @@ async def _ensure_code_server_shell(
                     "CODE_SERVER_DATA_DIR": str(data_dir),
                     "CODE_SERVER_SOCKET": _expected_socket_path(),
                     "CODE_SERVER_PROBE_OUT": str(_CODE_SERVER_PROBE_OUTPUT_PATH),
-                    "NODE_COMPILE_CACHE": await asyncio.to_thread(node_compile_cache, "code-server"),
+                    "NODE_COMPILE_CACHE": compile_cache_path,
                 },
                 label=label,
                 record_spec_id=f"service:{APP_ID}:code_server",

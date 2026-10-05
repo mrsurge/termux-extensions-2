@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 import hashlib
 import json
+import os
 from pathlib import Path
 import shlex
 import sys
@@ -105,7 +106,7 @@ async def ensure_runner_profile_shell(
                 "PROFILE_ID": profile.profile_id,
                 "PROFILE_HASH": _hash_text(profile.profile_id),
                 "RUNNER": profile.runner,
-                "PYTHON_EXECUTABLE": sys.executable,
+                "PYTHON_EXECUTABLE": os.environ.get("CODE_TE2_HOST_PYTHON_EXECUTABLE") or sys.executable,
                 "RUN_PROFILE_LAUNCHER": str(LAUNCHER_ENTRYPOINT),
                 "RUN_PROFILE_COMMAND_B64": _command_payload_b64(
                     argv=argv,
