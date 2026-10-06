@@ -4,6 +4,51 @@ Last updated: 2026-10-05
 
 ## Program status
 
+### 0.2.352 wheel-size gate (2026-10-06)
+
+- PyPI rejected the 124,201,395-byte Linux wheel with HTTP 400; the
+  user confirmed the 100 MB upload limit. No 0.2.352 PyPI artifact was
+  published; GitHub release 404672172 remains a private, non-prerelease draft.
+- Approved release-only exclusions: source maps, `.bak`/`.bak2`/`.save`
+  files, deprecated Monaco assets, and Linux's identical unversioned
+  libpython linker alias. Keep the versioned runtime SONAME, fonts, grammars,
+  full Node runtime trees and optional Python components. Editable files
+  remain intact. Assembly and post-repair finalization enforce a strict
+  100,000,000-byte wheel budget before upload.
+- Repacked validation copies retain the original binaries/compiled domain;
+  regenerate native inventories and wheel RECORD after trimming. They are
+  not clean-source publication artifacts and must not overwrite tag 0.2.352.
+  Local evidence: `.release/size-validation-0.2.352/`.
+  Subsequent explicit user approval permits deleting/recreating the existing
+  public tag 0.2.352 on the corrected main snapshot, because its GitHub release
+  is still a draft and no PyPI artifact exists. This is a one-time unreleased
+  tag correction, not permission to move published release tags. Rebuild clean
+  tagged wheel/archive artifacts; do not publish the repacked test candidates.
+- Linux candidate: 91,725,239 bytes, SHA-256
+  `154c9e2ca2fc745aeba481538e84a07144526972d4f52658fb7ee9bd972cdd01`.
+  Debian host Python 3.13.5/private 3.14.6:
+  all 136 compiled imports, actual Node 24.16.0/WBA imports, deliberate
+  server corruption/reinstall repair, framework health and eight-app catalog
+  pass. Retained venv:
+  `~/.cache/te2-release-acceptance/154c9e2ca2fc745a/venv`.
+- Motorola candidate: 49,520,838 bytes. Installed separately under
+  `~/.cache/te2-size-validation-0.2.352/installed-nopyc`, using managed
+  dependencies and the installer's established `--no-compile` behavior.
+  Ordinary Python 3.14.6 loads all 136 compiled modules; Node 24.18.0 loads
+  actual Socket.IO/WBA entrypoint. Isolated framework health/catalog and
+  Code TE2 pipe `ready/serving` pass; owned test runtimes stopped afterward.
+  Initial probe mistakes (pip bytecode enabled and wrong readiness field)
+  were corrected without changes to runtime contracts.
+- Motorola candidate SHA-256:
+  `668e1a0b77e9e238645e4a559689d92f777f6e4447f7c206c7c269a438b8a72a`.
+  Independent original/candidate ZIP comparison confirms every retained
+  payload file is byte-identical on both platforms; only native runtime.json
+  and the outer wheel RECORD changed. Removed files: 1010 Linux/1009 Android.
+- Focused packaging tests: 48 passed. Installed checks are automated
+  acceptance, not a new user live-UI acceptance claim. No new APK build,
+  OTA, publication, commit or tag move is part of this trim validation.
+
+
 - [ ] Before release, add the Android keyboard support requirement to README:
   Gboard 18 or newer is required for supported operation. Older versions may
   work, but are unsupported. Wording is recorded in the client-runtime PLAN;

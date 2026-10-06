@@ -58,3 +58,14 @@ only after inspecting ownership/process state. Preserve project/config/draft
 data; do not clear Termux app data. User live acceptance must include editor,
 terminal, intelligence and extension install/uninstall recovery. APK seed/OTA
 publication remains separate from the Python wheel installation.
+
+## Release file budget
+
+Release packages omit source maps, backup files and deprecated Monaco assets;
+editable source files remain untouched. Keep full runtime Node build trees,
+grammars and fonts. Wheel assembly/finalization rejects files at or above
+100,000,000 bytes before upload. Linux's private interpreter retains only the
+versioned libpython runtime library, not its identical unversioned linker alias.
+Trimmed copies of previously built wheels are validation candidates only: they
+must regenerate native inventories and the outer RECORD, pass installed target
+checks, and never silently replace an immutable tag's publication provenance.

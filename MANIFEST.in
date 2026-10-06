@@ -11,3 +11,5 @@ exclude desktop_client/electron/*.tracemalloc
 exclude desktop_client/electron/te2-server.heaptrack*
 recursive-exclude desktop_client/electron/src *.test.ts
 global-exclude __pycache__/* *.pyc
+global-exclude *.map *.bak *.bak2 *.save
+prune app/static/vendor/monaco-editor-core/te2-lang/bootstrap/_deprecated

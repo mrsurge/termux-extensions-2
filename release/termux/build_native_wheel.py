@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT))
 
 from scripts.materialize_code_te2_runtime import materialize
 from app.release_runtime.code_te2 import sha256
+from app.release_runtime.package_policy import validate_wheel_size
 
 
 def validate_release_source(tag: str | None, version: str, commit: str,
@@ -87,6 +88,7 @@ def main() -> None:
                         '--outdir', str(output / 'dist'), str(source)], env=env, check=True,
                        stdout=log, stderr=subprocess.STDOUT)
     wheel, = (output / 'dist').glob('*.whl')
+    validate_wheel_size(wheel)
     with ZipFile(wheel) as archive:
         if any('node_modules' in Path(name).parts and '/vendor/' not in name
                for name in archive.namelist()):

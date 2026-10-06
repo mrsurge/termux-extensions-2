@@ -25,6 +25,7 @@ from app.release_runtime.code_te2 import (
     MANIFEST, compiled_module_names, python_identity, sha256, validate_runtime,
 )
 from scripts.mypyc_build_workflow import read_artifact, source_digest
+from app.release_runtime.package_policy import development_asset
 
 RESOURCE_PATHS = (
     "app/apps/code_te2/shellspec",
@@ -76,6 +77,14 @@ def _private_runtime(stage: Path, repo: Path, prefix: Path, dependencies: Path) 
     if json.loads(probe.stdout) != python_identity() or sys.version_info[:2] != (3, 14):
         raise RuntimeError("private Python does not match the worker/domain packaging ABI")
     _copy_private_tree(prefix / "lib", stage / "python/lib", boundary=prefix)
+    # The unversioned linker alias becomes a second full copy after symlink
+    # materialization. Runtime consumers use the versioned SONAME instead.
+    alias = stage / "python/lib/libpython3.14.so"
+    library = stage / "python/lib/libpython3.14.so.1.0"
+    if alias.exists():
+        if not library.is_file() or sha256(alias) != sha256(library):
+            raise RuntimeError("private libpython linker alias is not an identical runtime copy")
+        alias.unlink()
     _copy_private_tree(interpreter, stage / "python/bin/python3.14", boundary=prefix)
     # The dependency input is an explicitly prepared runtime-only installation,
     # not the builder venv (which contains compiler/build tooling and .pth files).
@@ -137,7 +146,7 @@ def _copy_resources(source: Path, target: Path, *, vendored: bool = False) -> No
         # Published npm packages use build/ and sometimes target/ for runtime
         # JS. Only declared vendor roots bypass the source-intermediate filter.
         excluded = {".git", "__pycache__"} if vendored else _EXCLUDED
-        if item.name in excluded or item.suffix in {".pyc", ".pyo"}:
+        if item.name in excluded or item.suffix in {".pyc", ".pyo"} or development_asset(item):
             continue
         if item.is_symlink():
             raise RuntimeError(f"resource child symlink cannot be shipped: {item}")

@@ -18,6 +18,7 @@ from wheel.bdist_wheel import bdist_wheel
 # import path. Resolve the build-owned validator from this source tree.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from app.release_runtime.code_te2 import validate_runtime
+from app.release_runtime.package_policy import development_asset, validate_wheel_size
 
 
 _RELEASE_ENVIRONMENT = (
@@ -90,6 +91,10 @@ def _release_wheel_config() -> ReleaseWheelConfig | None:
 class Te2BuildPy(build_py):
     def run(self) -> None:
         super().run()
+        # Prune only packaged copies, never the developer's source tree.
+        for path in Path(self.build_lib).rglob("*"):
+            if path.is_file() and development_asset(path):
+                path.unlink()
         config = _release_wheel_config()
         package_root = Path(self.build_lib) / "app" / "release_runtime"
         if config is None:
@@ -146,6 +151,12 @@ class Te2BuildPy(build_py):
 
 
 class Te2BdistWheel(bdist_wheel):
+    def run(self) -> None:
+        super().run()
+        for _, _, filename in self.distribution.dist_files:
+            if filename.endswith(".whl"):
+                validate_wheel_size(Path(filename))
+
     def finalize_options(self) -> None:
         super().finalize_options()
         if _release_wheel_config() is not None:

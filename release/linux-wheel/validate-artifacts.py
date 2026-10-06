@@ -19,6 +19,7 @@ if not (source_root / 'app/release_runtime').is_dir():
     source_root = Path.cwd()
 sys.path.insert(0, str(source_root))
 from app.release_runtime.code_te2 import validate_runtime
+from app.release_runtime.package_policy import validate_wheel_size
 
 
 SERVER_MEMBER: Final = "app/release_runtime/bin/te2-server"
@@ -40,6 +41,7 @@ def main() -> int:
     output = Path(args.output).resolve()
     output.mkdir(parents=True, exist_ok=True)
     wheel = Path(args.wheel).resolve()
+    validate_wheel_size(wheel)
     sdist = Path(args.sdist).resolve()
     server = Path(args.server).resolve()
     minimum_glibc = _numeric_version(args.minimum_glibc)
