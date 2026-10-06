@@ -36,8 +36,11 @@ libraries. Paths above assume no external `CARGO_TARGET_DIR`; use the actual
 selected artifact paths when the build environment overrides it.
 
 The wheel materializer checks the source/library fingerprints, ABI, resource
-inventory and complete Node vendor roots. The candidate receipt always marks
-`publicationEligible: false`. Production clean-tag assembly is a separate gate.
+inventory and complete Node vendor roots. Without `--release-tag`, the receipt
+marks `publicationEligible: false`. Production assembly requires `--release-tag
+0.2.352`, the matching version tag at clean source HEAD, and a matching compiled
+snapshot. No command here uploads artifacts. Build the production archive without
+`--allow-dirty-first-party`; retain the receipt and independent installed checks.
 
 ## Archive and installation acceptance
 

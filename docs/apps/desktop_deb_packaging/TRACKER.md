@@ -2101,6 +2101,22 @@ does not authorize publication.
 
 ## Deferred work
 
+### 0.2.352 release execution (approved 2026-10-06)
+
+- [x] Linux and Termux native packaging candidates have user live acceptance.
+- [x] Checkpoint the accepted source; keep the existing 0.2.352 versions.
+- [ ] Finalize clean-tag production Termux assembly and regression checks.
+- [ ] Push/merge main while retaining the packaging branch locally; tag 0.2.352.
+- [ ] Build clean-tag Linux wheel/sdist and Termux worker/domain wheel/archive.
+- [ ] Rebuild frontend/Electron, rebundle Android assets, and build both staging APKs.
+- [ ] Verify asset versions, signer, alignment, hashes, installed native runtime
+  and Node/WBA imports; retain exact artifact receipts.
+- [ ] Publish PyPI and normal/latest GitHub `TE2 0.2.352 alpha` (not prerelease).
+
+The editable-install Electron source-build wait issue is deferred by explicit
+user approval to a follow-up source tag; no further release version bump is
+requested. Validation-only artifacts are not promoted by renaming them.
+
 - [ ] Linux arm64 Electron package.
 - [ ] Non-APK artifact signing and automatic installer-channel publication.
 - [ ] Automatic package updates.

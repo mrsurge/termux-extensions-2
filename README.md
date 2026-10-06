@@ -35,6 +35,9 @@ native controls differ, but features introduced for one form factor are designed
 to remain meaningfully usable from the other rather than making mobile a
 read-only or reduced companion.
 
+Android editor input is supported with **Gboard 18 or newer**. Older Gboard
+versions may work, but are unsupported.
+
 Observed load times on the validated preview setups are approximately:
 
 - **Warm project restoration:** 1–2 seconds.
