@@ -13,6 +13,7 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 import tarfile
 import tempfile
 from typing import Final
@@ -20,6 +21,7 @@ from zipfile import ZipFile
 
 
 ROOT: Final = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
 RELEASE_ROOT: Final = Path(__file__).resolve().parent
 TARGET_PLATFORM: Final = "android_24_arm64_v8a"
 TARGET_TRIPLE: Final = "aarch64-linux-android"
@@ -29,6 +31,9 @@ FIRST_PARTY_REQUIRED_MEMBERS: Final = {
     "te2": (
         "app/cli/run_rust_framework.py",
         "te2/framework/bootstrap/bootstrap.py",
+        "app/release_runtime/code_te2/runtime.json",
+        "app/release_runtime/code_te2/bin/code-te2-worker",
+        "app/release_runtime/code_te2/domain/manifest.json",
     ),
     "framework-shells": (
         "framework_shells/fws_pipe_pump.so",
@@ -67,6 +72,7 @@ def main() -> int:
         "agent-log-server": args.agent_log_server_version,
     }
     wheels = _audit_wheelhouse(wheelhouse, expected)
+    _validate_editor_payload(wheels, args.version)
     dirty_first_party = _audit_first_party_provenance(wheels, args)
     source_date_epoch = int(args.source_date_epoch)
     archive_stem = f"te2-{args.version}-termux-aarch64"
@@ -179,6 +185,28 @@ def _audit_wheelhouse(wheelhouse: Path, expected: dict[str, str]) -> list[dict[s
     for name, members in FIRST_PARTY_REQUIRED_MEMBERS.items():
         _require_wheel_members(Path(str(found[name]["sourcePath"])), members)
     return [found[name] for name in sorted(found)]
+
+
+def _validate_editor_payload(wheels: list[dict[str, object]], version: str) -> None:
+    from app.release_runtime.code_te2 import validate_runtime
+
+    wheel = next(Path(str(item["sourcePath"])) for item in wheels if item["name"] == "te2")
+    prefix = "app/release_runtime/code_te2/"
+    with tempfile.TemporaryDirectory(prefix="te2-editor-audit-", dir=_scratch_parent()) as raw:
+        root = Path(raw)
+        with ZipFile(wheel) as archive:
+            for name in archive.namelist():
+                if not name.startswith(prefix) or name.endswith("/"):
+                    continue
+                relative = Path(name[len(prefix):])
+                if relative.is_absolute() or ".." in relative.parts:
+                    raise RuntimeError("Unsafe editor payload wheel path")
+                target = root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(archive.read(name))
+                target.chmod((archive.getinfo(name).external_attr >> 16) & 0o777)
+        runtime = validate_runtime(root, package_version=version)
+        _validate_aarch64_elf(runtime.executable)
 
 
 def _audit_wheel(path: Path) -> dict[str, object]:
@@ -406,7 +434,7 @@ def _manifest(
         "releaseLocalWheels": clean_wheels,
         "releaseProvenance": {
             "dirtyFirstParty": dirty_first_party,
-            "publicationEligible": not dirty_first_party,
+            "publicationEligible": not dirty_first_party and not bool(getattr(args, "allow_dirty_first_party", False)),
         },
         "schemaVersion": 1,
         "server": {

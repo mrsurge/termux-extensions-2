@@ -146,13 +146,18 @@ def validate_runtime(root: Path, *, package_version: str | None = None) -> CodeT
             raise ReleaseRuntimeError("Private extension suffix does not match SOABI")
     if manifest.get("platform") != sys.platform or manifest.get("machine") != os.uname().machine:
         raise ReleaseRuntimeError("Code TE2 runtime platform/architecture mismatch")
-    if manifest.get("libc") != "glibc":
+    if sys.platform == "android":
+        if schema != 1 or manifest.get("libc") != "bionic":
+            raise ReleaseRuntimeError("Android Code TE2 runtime requires system Python and Bionic")
+        if identity.get("version") != "3.14" or identity.get("freeThreaded") is not False:
+            raise ReleaseRuntimeError("Android Code TE2 runtime requires ordinary CPython 3.14")
+    elif manifest.get("libc") != "glibc":
         raise ReleaseRuntimeError("This Code TE2 runtime resolver currently supports Linux glibc only")
     try:
         libc = os.confstr("CS_GNU_LIBC_VERSION")
-    except (OSError, ValueError):
+    except (AttributeError, OSError, ValueError):
         libc = None
-    if not libc or not libc.startswith("glibc "):
+    if sys.platform != "android" and (not libc or not libc.startswith("glibc ")):
         raise ReleaseRuntimeError("Code TE2 runtime requires glibc")
     for key in ("rustFingerprint", "domainFingerprint"):
         if not _DIGEST.fullmatch(_text(manifest.get(key), key)):

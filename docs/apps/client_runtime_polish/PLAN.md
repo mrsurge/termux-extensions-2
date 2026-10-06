@@ -2,6 +2,23 @@
 
 ## Scope
 
+### Deferred Electron source-build wait follow-up
+
+- [ ] Investigate and fix the user-reported local-framework startup path that does not await a bootstrap source build. Retain the existing owned-child/readiness and parallel UI startup contracts; validate a real build-triggered launch and a failing build before a follow-up source tag. User approval on 2026-10-06 explicitly defers this editable-install issue beyond the 0.2.352 binary release. Details: `../code_te2/OUTSTANDING_ISSUES.md`.
+
+### Termux native packaging acceptance target
+
+Build the matched ordinary CPython 3.14 native-worker/mypyc candidate on the Pixel (`~/mrselect6`). Use the connected Motorola as the install/live acceptance target. The user approves replacing any previous TE2 test build on that device, not clearing Termux userspace or project/config/draft data. Do not restart the shared development framework or publish a release during candidate preparation.
+
+2026-10-05: validation-only candidate assembled and installed on Motorola at
+`~/.local/share/te2/install/releases/0.2.352`. All 136 installed compiled imports,
+actual Node/WBA imports and compiled reader cleanup pass; compiler dependencies
+are not imported at runtime. Old managed test builds were removed with the
+existing uninstall path; user data was preserved. Framework remains stopped for
+user live acceptance, which is pending. Exact hashes, build caveats and retained
+paths: desktop-packaging TRACKER, **Native Code TE2 Linux wheel integration**.
+Native client asset force-update remains a distinct prerequisite for UI testing.
+
 ### Android keyboard support declaration
 
 For Android editing, require Gboard version 18 or newer as the supported
@@ -1884,3 +1901,37 @@ of this checkpoint.
 Touch-fork source checkpoint: `mrsurge/monaco-touch-selection@fb08274` (`master`).
 The vendored UMD matches that rebuilt source output (SHA-256
 `7c79f4fc2bf60d0177756513e1754e85651b74726cf60f10c761c8dd72fd73ed`).
+
+## Consolidated Linux private-runtime candidate (2026-10-05)
+
+Approved consolidation builds a fresh candidate, not a release: archive exact
+`d37252a4` with the existing Linux wheel driver, using root SSH/Podman on the
+Debian build/acceptance host. Label:
+`validation-consolidated-0.2.352-d37252a4`; builder image:
+`te2-linux-wheel:fc39bb2e46c0e723`. Local outputs:
+`.release/linux-wheel/consolidated-d37252a4/`.
+
+Both release Rust executables and a fresh 136-module domain built successfully
+(mypyc 328.96s). The compiled suspension-free launcher probe passes 10,000
+iterations each. Final wheel is 124,200,631 bytes; SHA-256:
+`84e6db88357e776f4e18aa7aa453feebc3e8a905755437d2f6ec4ab00aae192f`.
+Structured platform audit is manylinux 2.28 with no external/blacklisted
+libraries; exact bundled libpython linkage and post-repair inventories pass.
+The wheel's touch UMD matches the accepted fork output hash above. Local focused
+packaging/restart/reader/bootstrap checks pass: 84 tests and four subtests.
+
+Fresh install-only acceptance on `mrsurge@100.74.145.70` retained:
+`~/.cache/te2-release-acceptance/84e6db88357e776f/venv`.
+Sibling `acceptance-result.json` records packaged artifact selection, host
+Python 3.13.5/private ordinary CPython 3.14.6, all 136 compiled imports and the
+Node 24.16.0 Socket.IO/actual-WBA-entrypoint import probe. The installed private
+interpreter also ran the existing compiled reader regression (copied beside
+the acceptance result), passing with zero loop-error events. No test started
+the framework or connected to the shared WBA; older accepted installs were
+preserved. Metadata explicitly sets `publicationEligible: false`.
+
+User confirmed live acceptance of this exact candidate on 2026-10-05. It is
+the accepted Linux packaging baseline for subsequent work. Termux adaptation,
+synchronized native asset publication and the final clean tag/release workflow
+remain subsequent gates. No APK assembly, tag, merge, commit/push or upload was
+performed in this consolidation slice.

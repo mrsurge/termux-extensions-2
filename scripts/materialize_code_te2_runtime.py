@@ -86,6 +86,11 @@ def _private_runtime(stage: Path, repo: Path, prefix: Path, dependencies: Path) 
     # pip --target creates console scripts with builder-interpreter shebangs.
     # They are not this app's launch surface and must not ship /opt paths.
     shutil.rmtree(stage / "python/lib/python3.14/site-packages/bin", ignore_errors=True)
+    return {"mode": "bundled", "home": "python", "executable": "python/bin/python3.14",
+            "sourceRoot": "domain/lib", "extensionSuffix": sysconfig.get_config_var("EXT_SUFFIX")}
+
+
+def _copy_domain_sources(stage: Path, repo: Path) -> None:
     source = stage / "domain/lib"
     # Include lazy application/helper modules, not just startup inventory. Native
     # wrappers and source coexist; the explicit overlay still requires every SO.
@@ -108,8 +113,6 @@ def _private_runtime(stage: Path, repo: Path, prefix: Path, dependencies: Path) 
     # its __file__/import.meta.url tree; they are not source npm fallback trees.
     for vendor_relative in PRIVATE_VENDOR_PATHS:
         _copy_resources(repo / vendor_relative, source / vendor_relative, vendored=True)
-    return {"mode": "bundled", "home": "python", "executable": "python/bin/python3.14",
-            "sourceRoot": "domain/lib", "extensionSuffix": sysconfig.get_config_var("EXT_SUFFIX")}
 
 
 def _mapping(value: object, label: str) -> dict[str, object]:
@@ -224,13 +227,14 @@ def materialize(*, repo: Path, snapshot: Path, worker: Path, output: Path,
                 raise RuntimeError(f"snapshot resource does not match this checkout: {relative}")
             _copy_resources(source, stage / "domain/lib" / relative)
         (stage / "domain/manifest.json").write_text(json.dumps(portable_manifest, indent=2) + "\n")
+        _copy_domain_sources(stage, repo)
         private = None
         if private_python is not None and private_dependencies is not None:
             private = _private_runtime(stage, repo, private_python, private_dependencies)
         runtime_manifest: dict[str, object] = {
             "schemaVersion": 2 if private else 1, "appId": "code_te2", "packageVersion": package_version,
             "python": python_identity(), "platform": sys.platform,
-            "machine": os.uname().machine, "libc": "glibc",
+            "machine": os.uname().machine, "libc": "bionic" if sys.platform == "android" else "glibc",
             "executable": "bin/code-te2-worker", "domain": "domain",
             "rustFingerprint": rust_fingerprint, "domainFingerprint": expected_source,
             "files": {path.relative_to(stage).as_posix(): sha256(path)

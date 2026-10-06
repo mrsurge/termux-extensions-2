@@ -102,7 +102,8 @@ def _validate_binary_identity(
             package_version,
             f"release manifest version {manifest_version} does not match installed package",
         )
-    if _required_string(manifest, "platform") != "linux" or sys.platform != "linux":
+    target_platform = _required_string(manifest, "platform")
+    if target_platform not in ("linux", "android") or sys.platform != target_platform:
         raise _release_error(package_version, f"binary release does not support {sys.platform}")
 
     expected_arch = _required_string(manifest, "architecture")
@@ -112,6 +113,12 @@ def _validate_binary_identity(
             package_version,
             f"binary release architecture {expected_arch} does not match {actual_arch}",
         )
+    if target_platform == "android":
+        if (expected_arch != "aarch64" or _required_string(manifest, "libc") != "bionic"
+                or _required_string(manifest, "platformTag") != "android_24_arm64_v8a"):
+            raise _release_error(package_version, "unsupported Android binary release identity")
+        _validate_release_source(manifest, package_version)
+        return
     if _required_string(manifest, "libc") != "glibc":
         raise _release_error(package_version, "binary release manifest does not declare glibc")
 
@@ -131,6 +138,10 @@ def _validate_binary_identity(
             package_version,
             f"release platform tag {platform_tag!r} does not match {expected_tag!r}",
         )
+    _validate_release_source(manifest, package_version)
+
+
+def _validate_release_source(manifest: Mapping[str, object], package_version: str) -> None:
     _ = _required_string(manifest, "releaseTag")
     commit = _required_string(manifest, "commit")
     if not re.fullmatch(r"[0-9a-f]{40}", commit):

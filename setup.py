@@ -59,14 +59,20 @@ def _release_wheel_config() -> ReleaseWheelConfig | None:
         raise SetupError(f"TE2 release server is missing: {server}")
     code_te2 = Path(values["TE2_RELEASE_CODE_TE2_RUNTIME"]).expanduser().absolute()
     try:
-        validate_runtime(code_te2)
+        native_runtime = validate_runtime(code_te2)
     except RuntimeError as exc:
         raise SetupError(f"Invalid TE2 native editor release payload: {exc}") from exc
     platform_tag = values["TE2_RELEASE_PLATFORM_TAG"]
-    if not re.fullmatch(r"manylinux_[0-9]+_[0-9]+_x86_64", platform_tag):
+    android = platform_tag == "android_24_arm64_v8a"
+    if android and (sys.platform != "android" or os.uname().machine != "aarch64"
+                    or native_runtime.python_home is not None):
+        raise SetupError("Android release wheels require the Termux system-Python native payload")
+    if not android and sys.platform != "linux":
+        raise SetupError("Manylinux release wheels require a Linux native payload")
+    if not android and not re.fullmatch(r"manylinux_[0-9]+_[0-9]+_x86_64", platform_tag):
         raise SetupError(f"Unsupported TE2 release wheel platform tag: {platform_tag}")
     minimum_glibc = values["TE2_RELEASE_MINIMUM_GLIBC"]
-    if not re.fullmatch(r"[0-9]+\.[0-9]+", minimum_glibc):
+    if not (android and minimum_glibc == "none") and not re.fullmatch(r"[0-9]+\.[0-9]+", minimum_glibc):
         raise SetupError(f"Invalid TE2 release minimum glibc: {minimum_glibc}")
     commit = values["TE2_RELEASE_COMMIT"].lower()
     if not re.fullmatch(r"[0-9a-f]{40}", commit):
@@ -120,13 +126,13 @@ class Te2BuildPy(build_py):
         validate_runtime(native_target, package_version=package_version)
         manifest = {
             "serverVersion": os.environ.get("TE2_RELEASE_SERVER_VERSION", package_version),
-            "architecture": "x86_64",
+            "architecture": "aarch64" if config.platform_tag == "android_24_arm64_v8a" else "x86_64",
             "commit": config.commit,
             "distributionMode": "binary-release",
-            "libc": "glibc",
+            "libc": "bionic" if config.platform_tag == "android_24_arm64_v8a" else "glibc",
             "minimumGlibc": config.minimum_glibc,
             "packageVersion": package_version,
-            "platform": "linux",
+            "platform": "android" if config.platform_tag == "android_24_arm64_v8a" else "linux",
             "platformTag": config.platform_tag,
             "releaseTag": config.release_tag,
             "schemaVersion": 1,

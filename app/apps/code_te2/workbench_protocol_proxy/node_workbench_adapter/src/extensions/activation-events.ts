@@ -85,6 +85,9 @@ const IMPLICIT_ACTIVATION_GENERATORS: Readonly<
   terminal: function* (contributions) {
     for (const contribution of contributions) {
       if (!isRecord(contribution)) continue;
+      // TODO(next release): validate profiles with Array.isArray before iteration.
+      // TS2488: nullish fallback does not narrow unknown to an iterable.
+      // Tracked in docs/apps/code_te2/OUTSTANDING_ISSUES.md; behavior unchanged.
       for (const profile of contribution.profiles ?? []) {
         const id = stringField(profile, "id");
         if (id) yield `onTerminalProfile:${id}`;

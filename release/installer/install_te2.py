@@ -617,6 +617,10 @@ def _validate_installed_tree(
         f"assert m.version('te2') == {str(versions['version'])!r}; "
         f"assert m.version('framework-shells') == {str(versions['frameworkShellsVersion'])!r}; "
         f"assert m.version('agent-log-server') == {str(versions['agentLogServerVersion'])!r}"
+        "; from pathlib import Path; "
+        "from app.release_runtime.code_te2 import validate_runtime; "
+        "validate_runtime(Path(app.__file__).parent / 'release_runtime/code_te2', "
+        "package_version=m.version('te2'))"
     )
     subprocess.run([sys.executable, "-c", script], env=env, check=True, timeout=60)
     for command in (

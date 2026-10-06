@@ -60,6 +60,31 @@ def amend(root: Path, **values: object) -> None:
     file.write_text(json.dumps(manifest))
 
 
+def test_android_runtime_requires_bionic_and_system_abi(payload: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(runtime.sys, 'platform', 'android')
+    amend(payload, platform='android', libc='bionic')
+    assert runtime.validate_runtime(payload).python_home is None
+    amend(payload, libc='glibc')
+    with pytest.raises(ReleaseRuntimeError, match='Bionic'):
+        runtime.validate_runtime(payload)
+
+
+def test_android_framework_release_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app import release_runtime
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(release_runtime.sys, 'platform', 'android')
+    monkeypatch.setattr(release_runtime.os, 'uname', lambda: SimpleNamespace(machine='aarch64'))
+    manifest = {'packageVersion': '0.2.352', 'platform': 'android',
+                'architecture': 'aarch64', 'libc': 'bionic',
+                'platformTag': 'android_24_arm64_v8a', 'releaseTag': 'validation',
+                'commit': 'a' * 40}
+    release_runtime._validate_binary_identity(manifest, package_version='0.2.352')
+    manifest['libc'] = 'glibc'
+    with pytest.raises(ReleaseRuntimeError, match='Android'):
+        release_runtime._validate_binary_identity(manifest, package_version='0.2.352')
+
+
 def private_payload(root: Path) -> None:
     """Manifest fixture only; real ELF/stdlib proof is a separate build gate."""
     paths = {
@@ -265,6 +290,12 @@ def test_release_wheel_requires_pair_and_uses_exact_cpython_tag(payload: Path, m
     monkeypatch.setenv('TE2_RELEASE_CODE_TE2_RUNTIME', str(payload))
     config = namespace['_release_wheel_config']()
     assert config.code_te2 == payload
+    monkeypatch.setenv('TE2_RELEASE_PLATFORM_TAG', 'android_24_arm64_v8a')
+    monkeypatch.setenv('TE2_RELEASE_MINIMUM_GLIBC', 'none')
+    with pytest.raises(SetupError, match='Termux system-Python'):
+        namespace['_release_wheel_config']()
+    monkeypatch.setenv('TE2_RELEASE_PLATFORM_TAG', 'manylinux_2_28_x86_64')
+    monkeypatch.setenv('TE2_RELEASE_MINIMUM_GLIBC', '2.28')
     command = namespace['Te2BdistWheel'](setuptools.Distribution())
     command.ensure_finalized()
     python_tag, abi_tag, platform_tag = command.get_tag()

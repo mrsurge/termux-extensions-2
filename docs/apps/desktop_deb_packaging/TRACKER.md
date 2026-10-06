@@ -1,6 +1,6 @@
 # Unified Linux And Termux Release Installer Tracker
 
-Last updated: 2026-09-18
+Last updated: 2026-10-05
 
 ## Program status
 
@@ -10,6 +10,33 @@ Last updated: 2026-09-18
   no runtime keyboard detection or enforcement is planned.
 
 ### Native Code TE2 Linux wheel integration (2026-10-04)
+
+#### Consolidated Linux candidate (2026-10-05)
+
+- [x] Build clean validation-only wheel/sdist from `d37252a4`, including reader
+  cleanup, extension contribution refresh/no-reload and WBA handshake/uninstall
+  recovery, plus the live-accepted touch-menu lifecycle bundle.
+- [x] Rebuild both Rust executables and all 136 mypyc modules using the pinned
+  manylinux/private CPython 3.14.6 toolchain. Launch-context stress passes 10,000
+  iterations per launcher; compiled imports and final ELF/inventory audits pass.
+- [x] Fresh Debian host-Python-3.13.5 venv install-only validation: selects
+  packaged server/worker/private runtime; 136 compiled imports and Node 24.16.0
+  Socket.IO/WBA entrypoint probes pass. Installed compiled reader cleanup passes
+  with zero loop-error events. Framework not started; previous installs untouched.
+- [x] User confirmed live acceptance of this exact consolidated wheel on
+  2026-10-05. This is the accepted Linux packaging baseline for the next
+  Termux adaptation/release slice.
+
+Latest candidate venv on `mrsurge@100.74.145.70`:
+`~/.cache/te2-release-acceptance/84e6db88357e776f/venv`.
+Local artifacts: `.release/linux-wheel/consolidated-d37252a4/`.
+Wheel SHA-256:
+`84e6db88357e776f4e18aa7aa453feebc3e8a905755437d2f6ec4ab00aae192f`.
+Candidate metadata explicitly has `publicationEligible: false`; no tags,
+release uploads, APKs, merge or framework restart were performed.
+
+The older status entries below describe their named checkpoints; use this
+consolidated candidate for the next Linux live gate.
 
 - [x] Accepted native-services branch fast-forwarded into this packaging branch.
 - [x] Source-backed gap audit and Linux-first sequencing recorded in
@@ -64,6 +91,56 @@ Last updated: 2026-09-18
   including extension install/uninstall restart recovery. The
   `closed intelligence reader` shutdown warning is a separate follow-up.
 - [ ] Adapt accepted packaging contract to Android/Termux, then release workflow.
+
+  **Validation candidate installed (2026-10-05); user live acceptance passed (2026-10-06).**
+  Pixel built the current native worker, framework server and 136-module group
+  (474.78s uncached; ccache has a host libc++ symbol error). All compiled imports,
+  the compiled reader cleanup and 10,000-iteration-per-launcher stress pass.
+  Native subprocess tests: 39 initially pass with one polling-history timeout;
+  both history transports pass on isolated rerun. Local packaging regression
+  suite: 86 tests/four subtests pass. Linux-specific fixture failures on Android
+  are not represented as passing target tests.
+
+  Clean candidate wheel assembly uses Git archive plus the explicit packaging
+  patch; building directly from the editable checkout was rejected because
+  old CM6 development node_modules entered package discovery. The first attempt
+  was stopped; only the clean candidate below was installed. Production assembly
+  and final source-guard tests remain separate from this validation receipt.
+
+  - Pixel wheel: `~/.cache/te2-termux-native-validation-0.2.352/wheel-clean/dist/te2-0.2.352-cp314-cp314-android_24_arm64_v8a.whl` (about 68 MiB).
+  - Wheel SHA-256: `c7255100ef81109d96eb7c833c62ec190b5b857cbfa50db9195641d98f375233`.
+  - Worker SHA-256: `ee1f9aeed57cb87569a04fbfb590d93bb28097ebcd516947b62efa2d45f4395a`.
+  - Server SHA-256: `db5ea577a280eac4358b6193e6cbd544c90309775e887c84e59ecb5a3fcf8531`.
+  - Local archive: `.release/termux-native-validation-0.2.352/te2-0.2.352-termux-aarch64.tar.gz` (100,918,346 bytes).
+  - Archive SHA-256: `65a88222d0f20e1608902ddb68ab5a44a92a9e81846f6df4a2ffa6f216322de8`.
+  - Motorola installed root: `~/.local/share/te2/install/releases/0.2.352`;
+    `te2 --print-command` selects its packaged `libexec/te2-server`, no Cargo.
+    The existing installer removed old managed 0.2.350/0.2.351 test builds and
+    preserved settings/app state; only 0.2.352 remains.
+  - Installed ordinary system Python 3.14.6 loads all 136 compiled modules with
+    no mypy/mypyc/librt/ast_serialize imported. Node 24.18.0 imports Socket.IO
+    and the actual WBA entrypoint from the compiled-domain resource tree.
+    Installed compiled reader cleanup passes. No main framework was started.
+  - Both wheel receipt and archive are nonpublication candidates. No tag,
+    release upload, APK assembly or native-client OTA was performed. Before live
+    testing, force-update the native client's assets from the installed candidate;
+    wheel installation does not change its locally hosted UI.
+
+  Termux candidate implementation is underway: Android/Bionic system-3.14
+  runtime/provenance resolution, exact `cp314-cp314-android_24_arm64_v8a` wheel
+  assembly, and archive worker/domain validation now have source changes.
+  `release/termux/build_native_wheel.py` is validation-only, never activates or
+  publishes. The shared materializer includes lazy sources and complete Node
+  vendors for both runtime modes. Local checks: 86 tests/four subtests pass;
+  Pixel Android-specific tests pass. Pixel source is synchronized to `d37252a4`
+  plus the explicit packaging patch. Native worker built; mypyc compilation is
+  in progress with explicit `NO_CACHE=1` because installed ccache fails dynamic
+  linking. No system-library upgrade or framework restart was attempted.
+  Motorola installation, installed resource/compiled checks and user live acceptance
+  are complete. The user approved the 0.2.352 release workflow on 2026-10-06,
+  without another version bump. Final clean-source publication builds remain
+  separate from these nonpublication candidates. The Electron source-build wait
+  issue is explicitly deferred to a follow-up source tag, not this binary release.
 - [x] Pre-release reader-shutdown cleanup: replace `OutputReader.get()`'s
   cancelled-shield reporting path with cancellation-safe completion waiting,
   preserving one native read and unsubscribe/join/release ordering. CPython 3.14
