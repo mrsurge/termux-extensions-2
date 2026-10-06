@@ -204,7 +204,102 @@ Existing Cefrium and GeckoView clients remain intact; any shared-source changes
 require explicit scope and regression coverage for those clients. Include
 side-by-side installation and independent settings/lifecycle acceptance.
 
-## Current slice boundaries
+## Desktop-parity POC direction (2026-10-06)
+
+The independent repo's `docs/DESKTOP_API_INVENTORY.md` records the source-backed
+21 launcher commands, 28 app-view commands, event/dialog boundaries and actual
+portable-source candidates. The first approved implementation adds native-owned
+consumer descriptors and a guarded request/reply/event foundation to the
+independent sample only. Events currently accompany replies; unsolicited native
+streaming, stable-origin hosting and actual Desktop-source integration remain
+later gates. Existing TE2 runtime/clients are unchanged; no APK/device or
+publication acceptance follows from synthetic tests.
+
+This approved direction supersedes a sample-only/extraction-first sequence.
+The independent sample's Pixel IPC acceptance provides the foundation; next
+build a working TE2 Termux POC using TE2 Desktop as the design/API language,
+then stabilize/extract the reusable SDK. Electromux means a Termux application
+host for Android: Termux is the execution environment, not an optional generic
+Linux provider. Cefrium remains its rendering engine.
+
+The target is one-to-one TE2 Desktop application functionality with explicit
+Android platform equivalents, not compatibility with every Electron API.
+Prefer actual portable JS/TS reuse over separately reimplementing behavior.
+Keep Electron's current behavior and existing Android clients unchanged while
+proving the new consumer. No literal whole-Activity or whole-main-process copy.
+
+### Source-backed reuse map
+
+| Reference | Planned reuse / boundary |
+| --- | --- |
+| `desktop_client/electron/src/shared/contracts.ts`, shell preload | Promise request/reply and subscribable events; platform adapter replaces Electron IPC. TE2-specific method names remain in the consumer. |
+| `desktop_client/android_shell/host.js`, launcher/settings | Reuse browser-compatible code/assets after isolating bridge/global assumptions. This directory is Electron-owned despite its name; do not confuse it with `app/android_shell`. |
+| `local-framework-controller.ts`, `local-framework-config.ts`, tests | Preserve ownership/state-machine/configuration semantics and translate Node process/FD adapters to the Termux helper. Extract pure policies for actual TS reuse where practical. |
+| `preferred-app-startup.ts`, startup tests | Preserve ordered local launch then preferred-app preparation, parallel renderer load, already-running attach and failure escape paths. |
+| Android `PersistentNetworkService`, relay, settings/assets, Cefrium page policy | Reuse proven Android lifecycle and remote/local relay behavior behind the new consumer/host boundary. Activity does not become the transport owner. |
+| Existing Cefrium resources and TE2 client bundles | Feed packaged assets into Electromux hosting APIs; keep OTA/inventory/version authority and framework-to-relay URL rewriting. |
+
+Desktop main-process imports such as Electron and `node:child_process` are not
+browser-portable. A JavaScript engine does not itself implement Electron or Node
+APIs. Do not add `androidx.javascriptengine` merely for nominal API completeness;
+first identify a specific reusable headless-JS workload and missing execution
+capability. Keep its selection behind a measured implementation gate.
+
+### Host versus consumer
+
+Electromux provides configurable branding (application ID, label, icon/splash),
+bundled entrypoints, explicit local asset/custom route mappings, guarded bridge
+registration, process configuration/ownership, readiness, request/event transport
+and lifecycle. Route access and bridge capability are separate permissions:
+serving a route or navigating a remote page does not grant native execution.
+Reject traversal, undeclared resources and untrusted callers; credentials remain
+native/helper-owned. Public signatures/shared UID are compatibility, not sandboxing.
+
+TE2 provides framework commands/configuration, dependency installer recipes,
+health/app-catalog adapters, bookmarks/preferences, OTA policy and TE2-specific
+native methods. Reuse existing logic; generic Electromux must neither import TE2
+nor know its app IDs/endpoints. A second differently branded non-TE2 consumer
+must eventually prove these boundaries are reusable, without premature extraction.
+
+### Local and remote are one client model
+
+Selected framework endpoint and owned local backend are distinct state. Remote
+connection must work with local installation/autostart disabled. An existing
+local framework is external unless this host actually launched/owns it; observing
+an endpoint never grants shutdown authority. Switching endpoints retargets the
+existing relay and reconciles connected surfaces without spawning a second
+control architecture. Closing the app stops only its owned local framework;
+remote/external frameworks stay alive. Preserve existing TE2 stdio/FD3 bootstrap
+control and worker pipe readiness rather than replacing them with the sample's
+ping/ready protocol. Installer/source-build completion precedes launch readiness.
+
+### Coherent implementation sequence and gates
+
+1. Define configurable consumer descriptor and narrow platform bridge/event
+   contract. Inventory each desktop method/event as shared, Android-adapted or
+   explicitly platform-specific; preserve response shapes and disposal semantics.
+2. Build the new branded TE2 Termux target with packaged Cefrium/TE2 resources,
+   reusable launcher/settings logic and existing Android remote relay. Prove
+   remote-only operation before introducing framework launch ownership.
+3. Adapt local framework configuration/start/attach/stop through the owned
+   Termux helper, including existing stdio-control/FD3 readiness, logs, source
+   build waits and installer progress. Share the desktop state-machine tests.
+4. Add automatic local launch/preferred app, early UI load, settings/bookmarks,
+   OTA, navigation, dialogs, downloads, sidebar/secondary surfaces and debugging
+   parity. Keep one launch/connection model; publish a per-feature parity matrix.
+5. Validate Pixel and Motorola: remote-only, owned local, already-running
+   external, failed/long build, endpoint switch, background/recreation/reconnect,
+   renderer recovery and exit ownership. Never infer parity from compilation.
+6. Publish a working POC only under separate approval; afterward extract stable
+   host APIs/library/plugin and prove custom branding/routes with another consumer.
+
+The initial direction approval covered documentation only. Subsequent explicit
+first-slice approval covers the independent consumer descriptor, guarded bridge,
+sample wiring and targeted synthetic/compilation tests. It does not authorize
+APK assembly/device changes, TE2 runtime changes, commits/tags/publication or
+automatic merges. Request separate approval for the TE2 consumer target.
+
+## Historical initial slice boundaries
 
 This slice creates a local branch and planning documents only. No SDK/helper,
 Android source edits, APK builds, device changes, shared runtime restarts,

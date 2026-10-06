@@ -27,6 +27,15 @@ Plan: [PLAN.md](PLAN.md). Proposal: [onboarding draft](../../../electromux-onboa
 
 ## Additional TE2 host
 
+- [x] Approve Desktop-parity POC direction and reusable branding/custom routes.
+- [x] Inventory Desktop request/event APIs and actual reusable JS/TS modules.
+- [x] Implement independent native-owned descriptor/request/reply-event foundation.
+- [ ] Complete consumer/platform adapters and unsolicited event lifecycle without Node/Electron leakage.
+- [ ] Prove new TE2 Termux remote-only client before local launch integration.
+- [ ] Adapt owned local framework/stdin-FD3 control and desktop startup policies.
+- [ ] Complete per-feature Desktop parity matrix and both-device lifecycle gates.
+- [ ] Publish approved working POC, then stabilize reusable host/library interfaces.
+
 - [ ] Approve pinned submodule or Gradle/Maven integration.
 - [ ] Add a separate Electromux-based app/build target with a distinct application ID.
 - [ ] Reuse generic reference patterns behind interfaces, preserving existing clients.
@@ -85,3 +94,49 @@ select a matching external key, approve signed sample build/install, verify
 diagnostic completion, then repeat on the second device. No ADB device was
 visible when this procedure was recorded; reconnect before proceeding. No
 Termux wipe, existing TE2 APK replacement or public RUN_COMMAND fallback.
+
+Pixel diagnostic gate progressed on 2026-10-06: signed arm64 sample assembled
+and installed alongside existing clients, matching Termux certificate and actual
+UID 10321. Native identity checks pass and bundled page renders. Diagnostic
+dispatch succeeds, but available logs do not prove command completion; that
+gate remains open. Next scope is a narrow correlated completion observer before
+the page/helper bridge. Exact APK hash/device evidence is in the independent
+Electromux `docs/TRACKER.md`; Termux/user data were not reset.
+
+The Pixel completion blocker is now closed by the correlated non-exported
+PendingIntent observer: stdout `Python 3.14.6`, empty stderr, exit code 0.
+Termux's `err=-1` is its Activity.RESULT_OK success sentinel. Six JVM and ten
+Python tests pass; the updated signed arm64 sample is installed on Pixel.
+See the independent tracker for exact APK hash and bounded acceptance evidence.
+No helper/backend readiness or Motorola acceptance follows from this diagnostic;
+the next slice is authenticated filesystem socket/native bridge integration.
+
+Authenticated helper bridge implementation is now in the independent sample:
+bundled Python provisioning, exact-page/fixed-method policy, native credentials,
+bounded framed socket requests and explicit detach/stop/shutdown. Twelve Python
+tests, nine JVM tests, bundled-page JS regression and signed assembly pass.
+Pixel bridge acceptance remains pending: the first Connect was rejected before
+provisioning; a diagnostic follow-up APK is installed, but the device locked
+before its rejection code could be inspected. Keep this distinct from the
+already accepted diagnostic execution callback. Independent tracker carries
+the current investigation; shared TE2 runtime and existing clients are unchanged.
+
+Pixel native helper bridge is now physically accepted after registering Cefrium
+0.9.0's native callback target through its public loading-state listener. Exact
+trusted-page policy remains intact. Connect/Start/Ping, retained-PID detach and
+reconnect, Stop and authenticated Shutdown passed; owned helper/backend and
+socket were cleaned up. Session directory/token/socket modes were 0700/0600/0600.
+Thirteen Python tests, nine JVM tests and bundled-page JS checks pass. Independent
+tracker records corrected APK hash and the idle-expiry/manual-reconnect detail.
+Motorola repeat, lifecycle stress, installer and TE2 consumer remain separate.
+
+## Desktop API / consumer bridge foundation
+
+The independent `docs/DESKTOP_API_INVENTORY.md` maps 21 launcher requests,
+28 separately guarded app-view commands, event/dialog APIs and portable source
+candidates. Its sample now uses native-owned consumer descriptors and registered
+handlers with bounded browser request/reply and disposable reply-event listeners.
+Android compilation, 11 JVM tests, 13 Python tests and browser regressions pass.
+Actual Desktop-source reuse, unsolicited events and the remote-only TE2 Termux
+target are next integration gates. No new APK/device or TE2 runtime change,
+commit/push or publication is claimed by this slice.
