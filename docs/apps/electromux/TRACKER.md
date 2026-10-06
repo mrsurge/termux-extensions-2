@@ -13,7 +13,7 @@ Plan: [PLAN.md](PLAN.md). Proposal: [onboarding draft](../../../electromux-onboa
 - [x] Record source revisions and initial extraction inventory.
 - [x] Investigate Tasker direct service versus public RUN_COMMAND execution.
 - [x] Record signing/UID, private IPC and installer/build-wait contract baseline.
-- [ ] Approve concrete independent repo location and prototype implementation.
+- [x] Approve `~/knowhere/electromux`, private `mrsurge/electromux`, and initial scaffold.
 
 ## Independent sample
 
@@ -49,3 +49,19 @@ execution for the first shared-UID sample, not public RUN_COMMAND by accident.
 Current TE2 Cefrium also has a consumer-specific UID placeholder and development
 key, so this requires a new independent sample identity. Helper-owned filesystem
 AF_UNIX IPC is proposed; actual service/socket access remains a physical gate.
+
+## Independent scaffold checkpoint (2026-10-06)
+
+Local repo: `/home/mrsurge/knowhere/electromux`. GitHub owner: `mrsurge`;
+visibility: private. No TE2 submodule is added in this slice.
+The independent scaffold implements bounded control framing, real Unix-socket
+helper/backend lifecycle, detach/reconnect and correlated sample responses.
+Ten standard-library unittest cases pass. Android/Cefrium Gradle task discovery
+passes with pinned AGP 9.4.0, Gradle 9.7.1 and Cefrium 0.9.0.
+
+The sample identity is `dev.mrsurge.electromux.sample`, not TE2 Termux's final
+application ID. The sample page explicitly disables its pending Start control.
+No APK compilation/installation, Termux execution-service wiring or native
+socket/bridge acceptance is claimed. Repository licensing, pinned source
+submodule, robust transport deadlines/concurrency and installer integration
+remain tracked in the independent repo's `docs/TRACKER.md`.
