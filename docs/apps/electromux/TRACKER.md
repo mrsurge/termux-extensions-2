@@ -65,3 +65,23 @@ No APK compilation/installation, Termux execution-service wiring or native
 socket/bridge acceptance is claimed. Repository licensing, pinned source
 submodule, robust transport deadlines/concurrency and installer integration
 remain tracked in the independent repo's `docs/TRACKER.md`.
+
+## Native launch adapter checkpoint (2026-10-06)
+
+The independent sample now checks installed Termux UID, signing certificates and
+service availability before explicitly dispatching the native-configured
+`python --version` diagnostic to TermuxService. No page/incoming Intent controls
+the executable or arguments. Native UI distinguishes dispatch from completion;
+completion observation and the page/helper bridge remain pending.
+
+Android source compilation and 3 JVM launch-contract tests passed; all 10 Python
+regressions passed. No APK assembly, signing-key acquisition, installation or
+device changes were performed. Signed shared-UID/service-start acceptance is
+still a physical-device gate, not established by these tests.
+
+The next gate is defined in the independent repo's
+`docs/DEVICE_LAUNCH_PROCEDURE.md`: inspect the installed Termux signer/UID,
+select a matching external key, approve signed sample build/install, verify
+diagnostic completion, then repeat on the second device. No ADB device was
+visible when this procedure was recorded; reconnect before proceeding. No
+Termux wipe, existing TE2 APK replacement or public RUN_COMMAND fallback.
