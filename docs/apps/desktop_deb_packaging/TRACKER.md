@@ -2150,13 +2150,52 @@ does not authorize publication.
 
 - [x] Linux and Termux native packaging candidates have user live acceptance.
 - [x] Checkpoint the accepted source; keep the existing 0.2.352 versions.
-- [ ] Finalize clean-tag production Termux assembly and regression checks.
-- [ ] Push/merge main while retaining the packaging branch locally; tag 0.2.352.
-- [ ] Build clean-tag Linux wheel/sdist and Termux worker/domain wheel/archive.
-- [ ] Rebuild frontend/Electron, rebundle Android assets, and build both staging APKs.
-- [ ] Verify asset versions, signer, alignment, hashes, installed native runtime
+- [x] Finalize clean-tag production Termux assembly and regression checks.
+- [x] Push/merge main while retaining the packaging branch locally; tag 0.2.352.
+- [x] Build clean-tag Linux wheel/sdist and Termux worker/domain wheel/archive.
+- [x] Rebuild frontend/Electron, rebundle Android assets, and build both staging APKs.
+- [x] Verify asset versions, signer, alignment, hashes, installed native runtime
   and Node/WBA imports; retain exact artifact receipts.
-- [ ] Publish PyPI and normal/latest GitHub `TE2 0.2.352 alpha` (not prerelease).
+- [x] Publish PyPI and normal/latest GitHub `TE2 0.2.352 alpha` (not prerelease).
+
+Final publication evidence (2026-10-06):
+
+- Release source/tag: `fb6a3a511e3c4f760be76cdca5ec79d653e43bc6`.
+  The user explicitly approved replacing the old tag while its release was
+  still a private draft and before PyPI publication. Future published tags
+  remain immutable. Main and the staging branch contain the release source;
+  the local checkout remains on `feature/desktop-deb-packaging`.
+- Final artifacts: `.release/0.2.352-final/`. All 13 GitHub server-computed
+  digests match local files; both PyPI distribution digests match. GitHub's
+  latest endpoint confirms `0.2.352`, `draft=false`, `prerelease=false`.
+- Linux wheel: 91,726,464 bytes, SHA-256
+  `e4db20c3c2f1677dec17e9418611a754ed71a47a3870f202a64e37e34cb35430`.
+  Source archive: 20,217,938 bytes, SHA-256
+  `c27972dc2045af945adf4ba568c4a28dd2321ee14afbb911367e8c66c575641d`.
+- Termux archive: 79,660,231 bytes, SHA-256
+  `657bf0f8160c8d877f9a5b5c96e00061e9f63ac333263c003603625b7861cee4`;
+  two production assemblies were byte-identical. Matching native binaries
+  and compiled domain were reused with audited provenance. Unchanged staging
+  APKs retain bundled asset version 0.2.352 and their audited signer/alignment.
+- Final Debian acceptance used host CPython 3.13.5/private CPython 3.14.6:
+  all 136 compiled imports, actual Node/WBA imports, corruption rejection,
+  reinstall repair, framework health and eight-app catalog passed. Retained
+  venv: `~/.cache/te2-release-acceptance/e4db20c3c2f1677d/venv`.
+  Local receipt: `.release/linux-wheel/release-0.2.352-size-fixed/acceptance-result.json`.
+- Motorola installed this exact archive under
+  `~/.local/share/te2/install/releases/0.2.352`; compiled imports, Node/WBA,
+  framework health/catalog and real Code TE2 pipe readiness passed. Receipt:
+  `.release/0.2.352-size-fixed-inputs/motorola-acceptance.json`.
+  These are automated final-artifact checks, separate from prior user live
+  source/APK acceptance. Isolated acceptance processes were stopped afterward.
+- Instrumentation caveat: two Motorola installer runs completed activation
+  then aborted at process exit in system OpenSSL cleanup with Scudo heap
+  corruption. `astermux` injected `LD_PRELOAD=libtermux-exec.so`; the same
+  archive installed and exited successfully with that preload removed for
+  the installer process. This establishes preload dependence, not a complete
+  root cause. No product workaround or validation bypass was added. Device
+  logs live in `~/.cache/te2-production-size-fixed-0.2.352/` as
+  `installation.log`, `installation-repeat.log`, `installation-no-preload.log`.
 
 The editable-install Electron source-build wait issue is deferred by explicit
 user approval to a follow-up source tag; no further release version bump is
