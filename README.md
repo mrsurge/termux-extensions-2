@@ -17,6 +17,80 @@ Code TE2 is the flagship workspace app: a Monaco-based editor with an Explorer,
 terminal surfaces, language tooling through code-server, diagnostics, drafts,
 diff/review flows, and stateful sidebar apps.
 
+## Install
+
+The current release is **0.2.352 alpha**: a normal GitHub Release under an
+alpha moniker, available through `latest`.
+
+### Recommended: Linux or Termux
+
+Install the framework and CLI. The installer detects the platform, installs
+system prerequisites, and selects the prebuilt release artifacts:
+
+```sh
+curl -fsSL https://github.com/mrsurge/termux-extensions-2/releases/latest/download/install-te2 | sh -s -- --yes
+```
+
+For Linux with the Electron desktop client, use this command instead:
+
+```sh
+curl -fsSL https://github.com/mrsurge/termux-extensions-2/releases/latest/download/install-te2 | sh -s -- --yes --desktop
+```
+
+The desktop option builds/registers Electron and installs a user-local
+`.desktop` application entry. It requires at least 3 GiB of free build space
+and does not launch the application automatically. Linux uses a managed
+private venv; Termux uses its shared system Python without a venv.
+
+After installation, run `te2`, or `te2-desktop` for the desktop client.
+
+### Alternative: pip on Linux
+
+On supported x86-64 Debian/Ubuntu Linux, you can install directly from PyPI
+without the installer. Supply the system prerequisites yourself:
+
+```sh
+sudo apt-get update
+sudo apt-get install -y git build-essential python3-venv libarchive13t64
+python3 -m venv ~/.local/share/te2-venv
+. ~/.local/share/te2-venv/bin/activate
+python -m pip install te2
+te2
+```
+
+`build-essential` is needed for the Terminal's first-use `node-pty` build.
+The libarchive package name can vary by distribution; use its equivalent
+runtime package if `libarchive13t64` is unavailable.
+
+To add Electron to that pip installation, run these commands in the same venv:
+
+```sh
+te2 desktop install
+te2-desktop
+```
+
+This also installs the user-local `.desktop` application entry. A supported
+Linux wheel includes the framework/native Code TE2 binaries; source or Git
+installs instead require the build toolchain described below.
+
+### Termux pip installs
+
+Direct pip/source installation is also possible in Termux, but you must supply
+system dependencies and native build toolchains yourself. Dependencies without
+compatible Android wheels may compile from source, making installation lengthy.
+The recommended installer above uses our prebuilt GitHub release wheel archive
+and apt-supplied dependencies to avoid those builds.
+
+Further dependency reduction is planned; it does not remove the current
+source-install prerequisites.
+
+For a pinned installation, use the matching tagged download URL instead of
+`latest` and set `TE2_RELEASE_TAG` for the script process:
+
+```sh
+curl -fsSL https://github.com/mrsurge/termux-extensions-2/releases/download/0.2.352/install-te2 | TE2_RELEASE_TAG=0.2.352 sh -s -- --yes
+```
+
 ## Remote-First Workspace
 
 TE2 specializes in remote multi-client project mirroring, shared drafting, and
@@ -215,43 +289,7 @@ public installer and target archives. They are not copied into an ordinary
 install or exposed as user installation entrypoints; users see them only in a
 cloned or editable source checkout.
 
-## Install And Run
-
-From the current `0.2.344` alpha release. The alpha label describes product
-maturity; this is a normal GitHub Release and is available through `latest`:
-
-```bash
-# Framework and CLI only.
-curl -fsSL https://github.com/mrsurge/termux-extensions-2/releases/latest/download/install-te2 \
-  | sh -s -- --yes
-
-# Linux only: also build and register the Electron desktop client.
-curl -fsSL https://github.com/mrsurge/termux-extensions-2/releases/latest/download/install-te2 \
-  | sh -s -- --desktop --yes
-```
-
-Set `TE2_RELEASE_TAG=0.2.344` and use the matching tagged download URL when an
-immutable pinned install is required.
-
-The desktop option uses the exact private venv selected by the installer; it
-does not depend on an unrelated system Python or Node installation. Electron's
-existing 3 GiB build-space guard still applies. The installer does not launch
-the desktop application automatically.
-
-For the supported x86-64 Debian/Ubuntu Linux alpha from PyPI:
-
-```bash
-sudo apt-get update
-sudo apt-get install -y build-essential
-python -m venv ~/.local/share/te2-alpha-venv
-. ~/.local/share/te2-alpha-venv/bin/activate
-python -m pip install "te2==0.2.344"
-te2
-```
-
-`build-essential` supplies the compiler and `make` needed by the Terminal's
-first-use `node-pty` build. It is a system prerequisite, not part of TE2's
-Python environment.
+## Source Installs And Running The Framework
 
 For a source checkout:
 
