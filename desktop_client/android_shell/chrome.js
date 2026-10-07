@@ -5,11 +5,6 @@ let bridge = null;
 let disposed = false;
 let refresh = null;
 const documentId = crypto.randomUUID().replaceAll('-', '');
-function render(state) {
-  const lock = buttons.find(button => button.dataset.action === 'lock');
-  lock.textContent = state.locked ? 'Unlock' : 'Lock';
-  lock.setAttribute('aria-pressed', String(Boolean(state.locked)));
-}
 function ready() {
   if (disposed || typeof window.cefriumQuery !== 'function') return;
   if (!bridge) {
@@ -21,9 +16,8 @@ function ready() {
     // Same request/subscription shape as Electron shell-preload, not app-view-preload.
     window.te2Desktop = Object.freeze({ request: bridge.request,
       onStatus: callback => bridge.on('chrome-state', callback) });
-    window.te2Desktop.onStatus(render);
   }
-  if (!refresh) refresh = bridge.request('get_chrome_state').then(render)
+  if (!refresh) refresh = bridge.request('get_chrome_state').then(() => { errorBox.textContent = ''; })
     .catch(error => { errorBox.textContent = error.message; })
     .finally(() => { refresh = null; });
 }
@@ -31,7 +25,7 @@ for (const button of buttons) button.addEventListener('click', async () => {
   if (!bridge || button.disabled) return;
   button.disabled = true;
   errorBox.textContent = '';
-  try { render(await window.te2Desktop.request('view_action', {action: button.dataset.action})); }
+  try { await window.te2Desktop.request('view_action', {action: button.dataset.action}); }
   catch (error) { errorBox.textContent = error.message; }
   finally { button.disabled = false; }
 });

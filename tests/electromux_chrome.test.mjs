@@ -2,7 +2,12 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 const source = readFileSync(new URL('../desktop_client/android_shell/chrome.js', import.meta.url), 'utf8');
-const buttons = ['home', 'reload', 'recents', 'lock', 'quit', 'tools'].map(action => ({
+const html = readFileSync(new URL('../desktop_client/android_shell/chrome.html', import.meta.url), 'utf8');
+const css = readFileSync(new URL('../desktop_client/android_shell/chrome.css', import.meta.url), 'utf8');
+const actions = [...html.matchAll(/data-action="([^"]+)"/g)].map(match => match[1]);
+assert.deepEqual(actions, ['home', 'reload', 'recents', 'quit', 'tools']);
+assert.match(css, /button\[data-action="recents"\]\s*\{\s*margin-inline-start:\s*auto;/);
+const buttons = actions.map(action => ({
   dataset: {action}, disabled: false, textContent: '', attributes: {},
   setAttribute(key, value) { this.attributes[key] = value; },
   addEventListener(name, handler) { this[name] = handler; },
@@ -36,10 +41,10 @@ listeners.get('electromux:page-ready')();
 listeners.get('electromux:page-ready')();
 await new Promise(resolve => setImmediate(resolve));
 assert.equal(requests.length, 1, 'read-only startup reconciliation is single-flight');
-assert.equal(buttons[3].textContent, 'Lock');
+const statuses = [];
+window.te2Desktop.onStatus(value => statuses.push(value));
 status({locked: true});
-assert.equal(buttons[3].textContent, 'Unlock');
-assert.equal(buttons[3].attributes['aria-pressed'], 'true');
+assert.equal(statuses.length, 1, 'status subscription remains available without a lock button');
 for (const button of buttons) {
   await button.click();
   assert.equal(requests.at(-1).method, 'view_action');

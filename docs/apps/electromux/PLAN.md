@@ -42,13 +42,19 @@ consumer supplies HTML/CSS/JS; the Android adapter attaches a small separate
 Cefrium browser. Do not import the desktop toolbar or inject privileged controls
 into application pages.
 
-TE2 Termux supplies the mobile Home/Reload/Recents/Lock/Quit/Tools toolbar in
+TE2 Termux supplies the mobile Home/Reload/Recents/Quit/Tools toolbar in
 `desktop_client/android_shell/chrome.*`. JavaScript exposes the Electron
 shell-preload-shaped `te2Desktop.request(method, params)` and `onStatus(callback)`
 returning an unsubscribe function. This is a declared subset, not BrowserWindow
 or arbitrary ipcRenderer compatibility. TE2 retains action semantics. Native
 tools-overlay contents and dialogs remain unchanged; ordinary Cefrium retains
 its native header and Gecko is unaffected.
+
+User live-accepted the first toolbar APK. The subsequent approved layout polish
+keeps Home/Reload on the left and Recents/Quit/Tools on the right, removing the
+Lock button and its JavaScript rendering. Existing native lock semantics/API
+are not removed from other clients. This APK-owned UI needs a rebundle, not an
+editor OTA; the polished APK's installation/live check is separate.
 
 Use the generic query/envelope/event bridge with exact browser/document identity,
 request-size bounds, navigation generation fencing and disposal. State updates
