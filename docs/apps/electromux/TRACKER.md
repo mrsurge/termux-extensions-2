@@ -2,6 +2,45 @@
 
 Plan: [PLAN.md](PLAN.md). Proposal: [onboarding draft](../../../electromux-onboarding-draft.md).
 
+## Release-compatible mobile launch wait (2026-10-07)
+
+- [x] Record mobile-first compatibility direction and Desktop deferral in PLAN.
+- [x] Remove mobile's redundant `--build-only` preparation; launch normally once.
+- [x] Wait without startup deadline, show latest bootstrap stdout line, retain
+  stderr diagnostics and existing readiness authority.
+- [x] Add Cancel sending SIGTERM only to the owned launch; fence late readiness.
+- [x] Synthetic release-compatible/delayed startup, progress, cancellation and
+  ownership regressions; real installed release acceptance remains pending.
+- [x] Build/rebundle/install approved APK; user confirms local launch works after
+  manually clearing app storage (launcher asset isolation remains a follow-up).
+- [ ] Later Desktop wheel update with equivalent semantics.
+- [ ] Later bootstrap structured build events and phase-specific deadlines.
+
+Source validation: seven real-process actor tests, fourteen shared controller
+tests (including late-hello cancellation and readiness beyond Desktop's attempt
+limit), four browser suites including the actual Cancel UI, Electron and actor
+strict typechecks, actor bundling, and Termux Kotlin/JVM build checks pass.
+Startup failure also covers control-pipe closure/EPIPE without crashing the
+actor. No bootstrap/server edits, installed-device changes or publication.
+Prior preparation entries describe the superseded separate-build source.
+
+APK assembly and in-place installation completed on Motorola Razr 2024
+(`motorola-razr-2024-xt2453v:5555`) on 2026-10-07. Installed APK SHA-256 equals
+the built artifact: `cdfc50858753ae3d48eb3d9bbe6a96e5a932e253b4044948dee76730490f6c62`.
+Signer is the existing Termux-compatible `b6da01480eefd5fbf2cd3771b8d1021ec791304bdd6c4bf41d3faabad48ee5e1`;
+shared UID remains `com.termux/10517`. Bundled actor hash matches its source build.
+Agent installation preserved app data and did not launch the app/framework.
+User subsequently cleared app storage because the framework launch card was
+missing; it returned and local launch worked. This is conditional live acceptance
+of launch behavior, not proof that upgrade/OTA launcher preservation works.
+
+Next slice: automatic local launch/preferred app plus launcher asset isolation.
+Investigate the user's OTA-poisoning hypothesis without assuming the cause.
+Either a client-aware unified Android launcher or a separate APK-owned self-hosted
+launch location is acceptable; choose from the actual relay/materialization
+source. Test APK upgrade/editor OTA without storage clearing and retain ordinary
+Cefrium/Gecko behavior. Do not treat clearing storage as the product fix.
+
 ## API-declared mobile chrome (2026-10-07)
 
 - [x] Approved reusable Electromux API plus TE2 Termux adapter source/build scope.

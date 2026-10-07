@@ -1,11 +1,10 @@
 // TE2 consumer process, not Electromux core. stdout is framed host IPC;
 // framework stdout/stderr remain logs and its inherited FD3 remains control.
-import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { LocalFrameworkController } from '../electron/src/main/local-framework-controller';
-import { readLocalFrameworkConfig, writeLocalFrameworkConfig,
-  localFrameworkChildEnvironment } from '../electron/src/main/local-framework-config';
+import { readLocalFrameworkConfig, writeLocalFrameworkConfig } from '../electron/src/main/local-framework-config';
 
 const MAX_FRAME = 65536;
 // Isolate launcher configuration without changing TE2 child config/data roots.
@@ -16,7 +15,8 @@ let selectedOrigin = '';
 const stateSessionId = randomUUID();
 let stateRevision = 0;
 let selectionRevision = 0;
-let preparing: ChildProcess | null = null;
+let startupOutput = '';
+let stdoutPartial = '';
 let closing = false;
 let pending: Promise<unknown> | null = null;
 let operationError: string | null = null;
@@ -48,23 +48,20 @@ const controller = new LocalFrameworkController({
   getSelectedOrigin: () => selectedOrigin,
   selectLocal: async port => { selectedOrigin = `http://127.0.0.1:${port}`; selectionRevision++; },
   publish: publishState,
-  prepareFramework: async launch => {
+  spawnFramework: ((...args: Parameters<typeof spawn>) => {
     if (closing) throw new Error('Consumer is closing');
-    const child = spawn(launch.resolvedCommand, ['--build-only'], {
-      env: localFrameworkChildEnvironment(launch), detached: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    preparing = child;
+    return spawn(...args);
+  }) as typeof spawn,
+  waitIndefinitelyForStartup: true,
+  log: (stream, text) => {
+    process.stderr.write(`[framework:${stream}] ${text}`);
+    if (stream !== 'stdout' || controller.snapshot().phase !== 'starting') return;
+    const lines = (stdoutPartial + text).split(/\r\n|\r|\n/);
+    stdoutPartial = (lines.pop() || '').slice(-2048);
+    if (lines.length) startupOutput = lines[lines.length - 1].slice(-2048);
+    if (stdoutPartial) startupOutput = stdoutPartial;
     publishState();
-    // Forward continuously: no unbounded transcript or retained log accumulator.
-    child.stdout?.pipe(process.stderr, {end: false});
-    child.stderr?.pipe(process.stderr, {end: false});
-    try {
-      const [code] = await once(child, 'close');
-      if (closing || code !== 0) throw new Error(`Framework preparation failed (${code})`);
-    } finally { preparing = null; publishState(); }
   },
-  log: (stream, text) => process.stderr.write(`[framework:${stream}] ${text}`),
 });
 
 async function send(value: unknown) {
@@ -86,18 +83,14 @@ function schedule(operation: () => Promise<unknown>) {
 }
 function state() {
   return {...controller.snapshot(), operationPending: pending !== null,
-    preparing: preparing !== null, operationError, selectedOrigin, selectionRevision,
+    cancellableStartup: controller.snapshot().phase === 'starting' && controller.ownsRunningProcess(),
+    startupOutput, operationError, selectedOrigin, selectionRevision,
     stateSessionId, stateRevision: ++stateRevision};
 }
 async function shutdown() {
   closing = true;
-  if (preparing?.pid) {
-    const child = preparing;
-    try { process.kill(-child.pid!, 'SIGTERM'); } catch { /* already exited */ }
-    const force = setTimeout(() => { try { process.kill(-child.pid!, 'SIGKILL'); } catch {} }, 2000);
-    try { await pending; } finally { clearTimeout(force); }
-  } else { await pending; }
   if (controller.ownsRunningProcess()) await controller.stop();
+  await pending;
 }
 async function dispatch(method: string, params: unknown) {
   switch (method) {
@@ -116,9 +109,17 @@ async function dispatch(method: string, params: unknown) {
       config = await writeLocalFrameworkConfig(params, configEnvironment); return config;
     case 'get_local_framework_state': return state();
     case 'refresh_local_framework': await controller.refresh(); return state();
-    case 'start_local_framework': return schedule(() => controller.start());
+    case 'start_local_framework':
+      if (!pending) { startupOutput = ''; stdoutPartial = ''; }
+      return schedule(() => controller.start());
     case 'stop_local_framework':
-      if (pending) throw new Error('Local lifecycle operation is active');
+      if (pending) {
+        if (controller.snapshot().phase !== 'starting' || !controller.ownsRunningProcess())
+          throw new Error('Local lifecycle operation is active');
+        await controller.stop();
+        await pending;
+        return state();
+      }
       return schedule(() => controller.stop());
     case 'use_local_framework': await controller.useLocal(); return state();
     case 'shutdown': await shutdown(); return {stopped: true};

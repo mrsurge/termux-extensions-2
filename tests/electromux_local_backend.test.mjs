@@ -48,7 +48,7 @@ async function harness(t, env = {}, isolateLauncherConfig = false) {
     const existing = events.findLast(predicate);
     if (existing) return Promise.resolve(existing);
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { eventWaiters = eventWaiters.filter(x => x !== receive); reject(new Error('state event timeout')); }, 15000);
+      const timer = setTimeout(() => { eventWaiters = eventWaiters.filter(x => x !== receive); reject(new Error(`state event timeout: ${JSON.stringify(events.at(-1))}; ${stderr}`)); }, 12000);
       const receive = value => {
         if (!predicate(value)) return;
         clearTimeout(timer); eventWaiters = eventWaiters.filter(x => x !== receive); resolve(value);
@@ -59,7 +59,7 @@ async function harness(t, env = {}, isolateLauncherConfig = false) {
   return {child, call, port, waitState, frameworkConfigHome, logs: () => stderr};
 }
 
-test('slow preparation precedes FD3 deadline; real controller starts once and shuts down owned child', {timeout: 20000}, async t => {
+test('normal launch waits beyond old FD3 deadline and starts only once', {timeout: 20000}, async t => {
   const h = await harness(t, {TEST_BUILD_DELAY: '5300'});
   const start = await h.call('start_local_framework'); assert.equal(start.result.operationPending, true);
   assert.equal((await h.call('start_local_framework')).result.operationPending, true);
@@ -118,12 +118,12 @@ test('consumer launch configuration does not change framework child roots', {tim
   assert.ok(h.logs().includes(`framework-config-home=${h.frameworkConfigHome}`));
 });
 
-test('failed preparation never starts framework', {timeout: 10000}, async t => {
+test('bootstrap failure ends indefinite startup wait', {timeout: 15000}, async t => {
   const h = await harness(t, {TEST_BUILD_EXIT: '7'});
   await h.call('start_local_framework');
   const state = await h.waitState(value => value.phase === 'failed' && !value.operationPending);
   assert.equal(state.phase, 'failed'); assert.equal(state.processId, null);
-  assert.match(state.operationError, /preparation failed/);
+  assert.match(state.operationError, /exited before|closed before hello/);
 });
 
 test('consumer signal during preparation reaps only its owned build child', {timeout: 10000}, async t => {
@@ -139,4 +139,16 @@ test('consumer signal during preparation reaps only its owned build child', {tim
   const exit = once(h.child, 'close'); h.child.kill('SIGTERM');
   assert.equal((await exit)[0], 0);
   assert.throws(() => process.kill(pid, 0), {code: 'ESRCH'});
+});
+
+test('Cancel SIGTERMs pending normal bootstrap without selecting local', {timeout: 10000}, async t => {
+  const h = await harness(t, {TEST_BUILD_DELAY: '30000'});
+  await h.call('start_local_framework');
+  const pending = await h.waitState(value => value.cancellableStartup && value.startupOutput === 'bootstrap preparing');
+  assert.equal(pending.phase, 'starting');
+  const stopped = await h.call('stop_local_framework');
+  assert.equal(stopped.result.phase, 'exited');
+  assert.equal(stopped.result.operationPending, false);
+  assert.equal(stopped.result.selectionRevision, 0);
+  assert.throws(() => process.kill(pending.processId, 0), {code: 'ESRCH'});
 });

@@ -496,3 +496,41 @@ test("Electron exit awaits only an Electron-owned framework", async () => {
   assert.equal(ownedStopped, true);
   assert.deepEqual(events, ["owned-stop"]);
 });
+
+test("mobile wait retains readiness beyond Desktop attempt limit", async () => {
+  const child = fakeChild(99999999);
+  let probes = 0;
+  const controller = new LocalFrameworkController({
+    ...controllerOptions({
+      spawnFramework: (() => { setImmediate(() => hello(child)); return child; }) as typeof spawn,
+      probeFramework: async () => ++probes > 5
+        ? {kind: "te2", instanceId: "test", version: "test"}
+        : {kind: "free"},
+    }),
+    waitIndefinitelyForStartup: true,
+  });
+  assert.equal((await controller.start()).phase, "running");
+  child.emitClose(0);
+});
+
+test("mobile cancellation fences a late hello and endpoint selection", async () => {
+  const child = fakeChild(99999999);
+  let selections = 0;
+  const controller = new LocalFrameworkController({
+    ...controllerOptions({
+      spawnFramework: (() => child) as typeof spawn,
+      probeFramework: async () => ({kind: "free"}),
+      selectLocal: async () => { selections++; },
+    }),
+    waitIndefinitelyForStartup: true,
+  });
+  const start = controller.start();
+  const rejected = assert.rejects(start, /cancelled/);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(controller.snapshot().phase, "starting");
+  const stop = controller.stop();
+  hello(child);
+  assert.equal((await stop).phase, "exited");
+  await rejected;
+  assert.equal(selections, 0);
+});

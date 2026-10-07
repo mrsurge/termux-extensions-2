@@ -4,6 +4,64 @@ Status: approved planning direction; implementation requires a separate scope ap
 Date: 2026-10-06.
 TE2 integration branch: `feature/electromux-host`.
 
+## Release-compatible mobile launch wait (2026-10-07)
+
+Approved direction; mobile source implementation is now present, with physical
+launch behavior live-accepted after user-cleared app storage. Preserve
+compatibility with the last published TE2 release: do not change the Python
+bootstrap, Rust server, wheel, or release version for the first mobile fix.
+
+Launch the configured `te2` normally once, without a separate `--build-only`
+preparation process. Bootstrap already chooses the installed release binary or
+automatically builds an editable/source install. The release installer wrapper
+sets `TE2_SERVER_BIN`; unconditional `--build-only` currently fails with
+`--build-only cannot be used with --server-bin` on the new Motorola.
+
+While the owned launch is pending, wait indefinitely for the existing bootstrap
+control handshake and established readiness checks; do not fail merely because
+compilation exceeds the current short deadlines. Display the latest bootstrap
+stdout line in the launcher as progress, replacing rather than accumulating
+lines. Keep stderr flowing through existing diagnostics. Output text is feedback,
+not parsed build-state or readiness authority. Exit/spawn/control failures still
+end the wait with an error; only elapsed-time startup failure is removed.
+
+Provide a Cancel button during this pending operation. It sends SIGTERM to the
+exact owned launch process/process group (including its build), not an external
+or remote framework. Cancellation must unwind the wait and prevent late
+readiness from selecting the endpoint or launching the preferred app. No
+automatic restart or mutation replay. Preserve bounded output and existing
+document/selection/ownership fences.
+
+Desktop has the same desired waiting/progress/cancellation semantics, but its
+implementation is deferred because Electron is delivered through the Python
+wheel. Keep this first change mobile-scoped even though the controller source is
+shared; do not silently alter Desktop defaults. A later coordinated release may
+add explicit preparation/build phase events in `framework/bootstrap/bootstrap.py`
+and phase-specific deadlines for both clients. Those events are not required of
+the last release and must not become a prerequisite for this mobile fix.
+
+Validation for the eventual implementation: published release startup without
+Cargo/prebuild, delayed editable build beyond the old deadlines, last-line
+progress, cancellation during compilation, early exit, late-ready cancellation
+fencing, and external/remote ownership preservation. Implementation/build/APK
+installation require their own approved scope. Source/tests and bundling are
+validated and APK installed on the Razr. User accepted launch behavior after
+clearing app storage; this does not validate upgrade/OTA launcher preservation.
+
+### Integrate launcher isolation into the next slice
+
+The user reported that the framework launch card was absent until app storage
+was cleared, and suspects an OTA-overwritten launcher. Root cause remains
+unverified. Include source-backed investigation and correction with the next
+automatic-startup/preferred-app slice, rather than an unrelated release.
+Acceptable directions are a unified client-aware Android launcher or a distinct
+APK-owned self-hosted launch location analogous to Desktop. Existing client
+identification, asset routing and materialization contracts must decide the
+implementation; do not introduce guessed client identity or an extra transport.
+Keep TE2 Termux's host adapter available across APK upgrade and editor OTA,
+preserve user settings/data, and test without clearing app storage. Existing
+Gecko/Cefrium launchers and remote framework selection must remain intact.
+
 ## Goal and ownership
 
 Create a framework-agnostic Electromux repository: an Electron-like Android

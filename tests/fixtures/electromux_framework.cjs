@@ -2,9 +2,13 @@
 const fs = require('node:fs');
 const http = require('node:http');
 if (process.argv.includes('--build-only')) {
-  console.log(`build-pid=${process.pid}`);
-  setTimeout(() => process.exit(Number(process.env.TEST_BUILD_EXIT || 0)), Number(process.env.TEST_BUILD_DELAY || 0));
+  console.error('--build-only cannot be used with --server-bin');
+  process.exit(1);
 } else {
+  console.log(`build-pid=${process.pid}`);
+  console.log('bootstrap preparing');
+  setTimeout(() => {
+  if (Number(process.env.TEST_BUILD_EXIT || 0)) process.exit(Number(process.env.TEST_BUILD_EXIT));
   console.log(`framework-config-home=${process.env.TE2_CONFIG_HOME || ''}`);
   const port = Number(process.argv[process.argv.indexOf('--port') + 1]);
   const server = http.createServer((req, res) => {
@@ -18,4 +22,5 @@ if (process.argv.includes('--build-only')) {
   process.stdin.on('data', text => {
     if (JSON.parse(text).method === 'shutdown') server.close(() => process.exit(0));
   });
+  }, Number(process.env.TEST_BUILD_DELAY || 0));
 }

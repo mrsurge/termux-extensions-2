@@ -35,6 +35,8 @@ type LocalFrameworkControllerOptions = {
   readinessDelayMs?: number;
   controlHelloTimeoutMs?: number;
   stopTimeoutMs?: number;
+  // Mobile alpha compatibility: normal bootstrap may compile before FD3 hello.
+  waitIndefinitelyForStartup?: boolean;
   // Consumer preparation (e.g. source compilation) precedes the bounded FD3
   // hello/readiness window. It must not launch the framework itself.
   prepareFramework?: (config: LocalFrameworkConfigView) => Promise<void>;
@@ -62,6 +64,7 @@ type ResolvedControllerOptions = {
   readinessDelayMs: number;
   controlHelloTimeoutMs: number;
   stopTimeoutMs: number;
+  waitIndefinitelyForStartup?: boolean;
 };
 
 function nestedErrorCode(error: unknown): string {
@@ -341,6 +344,13 @@ export class LocalFrameworkController {
     this.#state.processId = child.pid || null;
     this.#publish();
     this.#forwardLogs(child);
+    if (this.#options.waitIndefinitelyForStartup) {
+      // A bootstrap failure can close stdin before the child close event.
+      // Cleanup must not turn that ordinary exit into a host-process EPIPE crash.
+      child.stdin?.on("error", (error) => {
+        this.#options.log("stderr", `Local TE2 control input closed: ${error.message}\n`);
+      });
+    }
     const hello = this.#readControlHello(child);
     this.#exitPromise = new Promise((resolve) => {
       child.once("close", (code, signal) => {
@@ -377,17 +387,26 @@ export class LocalFrameworkController {
     });
 
     try {
-      await Promise.all([
-        this.#withTimeout(hello, this.#options.controlHelloTimeoutMs),
-        this.#waitForReadiness(port),
-      ]);
-      if (this.#child !== child || !childIsRunning(child)) {
+      if (this.#options.waitIndefinitelyForStartup) {
+        await hello;
+        await this.#waitForReadiness(port);
+      } else {
+        await Promise.all([
+          this.#withTimeout(hello, this.#options.controlHelloTimeoutMs),
+          this.#waitForReadiness(port),
+        ]);
+      }
+      if (this.#child !== child || !childIsRunning(child) || this.#state.phase !== "starting") {
         throw new Error("Local TE2 exited before readiness");
       }
       this.#setState({ phase: "running", ownership: "electron", error: null });
       await this.#options.selectLocal(port);
       return this.#publish();
     } catch (error) {
+      if (this.#options.waitIndefinitelyForStartup &&
+          (this.#state.phase === "stopping" || this.#state.phase === "exited")) {
+        throw new Error("Local TE2 startup cancelled");
+      }
       await this.#stopOwnedChild(child);
       this.#setState({
         phase: "failed",
@@ -407,7 +426,9 @@ export class LocalFrameworkController {
       }
       return this.#publish();
     }
+    const cancelStartup = this.#options.waitIndefinitelyForStartup && this.#state.phase === "starting";
     this.#setState({ phase: "stopping", ownership: "electron", error: null });
+    if (cancelStartup) signalOwnedProcess(child, "SIGTERM");
     await this.#stopOwnedChild(child);
     return this.snapshot();
   }
@@ -443,7 +464,7 @@ export class LocalFrameworkController {
 
   async #waitForReadiness(port: number): Promise<void> {
     const origin = localOrigin(port);
-    for (let attempt = 0; attempt < this.#options.readinessAttempts; attempt += 1) {
+    for (let attempt = 0; this.#options.waitIndefinitelyForStartup || attempt < this.#options.readinessAttempts; attempt += 1) {
       if (!this.#child || !childIsRunning(this.#child)) {
         throw new Error("Local TE2 exited before readiness");
       }
@@ -465,9 +486,11 @@ export class LocalFrameworkController {
         if (settled) return;
         settled = true;
         stream.off("data", onData);
+        child.off("close", onClose);
         if (error) reject(error);
         else resolve();
       };
+      const onClose = () => finish(new Error("Local TE2 exited before control hello"));
       const onData = (chunk: string) => {
         buffer += chunk;
         if (Buffer.byteLength(buffer) > CONTROL_MAX_BUFFER_BYTES) {
@@ -497,6 +520,7 @@ export class LocalFrameworkController {
       };
       stream.setEncoding("utf8");
       stream.on("data", onData);
+      child.once("close", onClose);
       stream.once("end", () => finish(new Error("Local TE2 control FD closed before hello")));
       stream.once("error", (error) => finish(error));
     });

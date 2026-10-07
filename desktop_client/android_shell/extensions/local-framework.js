@@ -94,6 +94,12 @@ export const localFrameworkExtension = {
         ? `TE2 detected (${source}): ${state.command}`
         : "TE2 executable not detected";
       details.appendChild(command);
+      if (state.phase === "starting" && state.startupOutput) {
+        const progress = document.createElement("span");
+        progress.textContent = state.startupOutput;
+        progress.setAttribute("role", "status");
+        details.appendChild(progress);
+      }
       if (state.venv) {
         const venv = document.createElement("span");
         venv.textContent = state.phase === "running" && state.ownership === "electron"
@@ -144,6 +150,17 @@ export const localFrameworkExtension = {
           void runAction(() => host.startLocalFramework());
         });
         actions.appendChild(startButton);
+        if (state.cancellableStartup) {
+          const cancelButton = document.createElement("button");
+          cancelButton.type = "button";
+          cancelButton.className = "secondary-button";
+          cancelButton.textContent = "Cancel";
+          cancelButton.disabled = actionPending;
+          cancelButton.addEventListener("click", () => {
+            void runAction(() => host.stopLocalFramework());
+          });
+          actions.appendChild(cancelButton);
+        }
       }
 
       card.append(summary, actions);
