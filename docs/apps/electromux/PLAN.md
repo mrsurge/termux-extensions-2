@@ -395,6 +395,17 @@ native socket client and service ownership, then binds the exact APK-owned
 launcher/settings pages; a loopback origin alone is insufficient because
 remote framework pages share it. No Android source/device mutation in this slice.
 
+## Electron-subset portability acceptance
+
+Electromux targets a useful Electron-compatible subset for Termux apps, not all
+Electron APIs and not conversion of TE2 into the generic host. After the TE2 POC,
+accept an unrelated small Electron application supplied by the user and prove
+an almost-drop-in build/runtime workflow. Keep supported contracts familiar,
+unsupported operations explicit, and record any required application edits.
+Until this passes, Electron compatibility is a goal rather than an established
+capability. Future transparent FS/process adapters may use the shared-UID Termux
+root `/data/data/com.termux/files/`; implementing them is separately scoped.
+
 ## Historical initial slice boundaries
 
 This slice creates a local branch and planning documents only. No SDK/helper,

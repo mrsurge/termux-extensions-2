@@ -256,3 +256,35 @@ Electromux repositories. See actor README for limitations.
 
 No Android source, APK, device state, shared framework, tags or releases changed.
 Changes remain uncommitted in both repositories.
+
+Checkpoint: TE2 `79aaca83`, independent Electromux `fdfb3f1` commit the backend
+and helper-event foundations locally (not pushed by this checkpoint).
+
+## Generic Kotlin transport follow-up
+
+- [x] Reusable FrameCodec/FramedTransport under Electromux host package.
+- [x] Adapt sample HelperClient with optional native-declared events, disabled by default.
+- [x] Seven JVM transport regressions and Android Kotlin compilation.
+- [ ] Renderer event delivery and persistent-service ownership.
+- [ ] TE2 provisioning, exact APK-owned page bridge, endpoint synchronization.
+- [ ] APK/device acceptance, separately approved.
+
+Source-only follow-up in independent Electromux; no TE2 Android edits or runtime
+restart. Installed clients remain unchanged. Independent docs/CONTRACT.md owns
+the native transport contract. Generic native changes are not yet checkpointed.
+
+## Document-fenced renderer event delivery
+
+- [x] Generic browser receiveEvent accepts only declared, current-document events.
+- [x] Native RendererEventGate fences requests/replies/events to exact current page and generation.
+- [x] Sample opts into helper events, emits independent sample.state frames and
+  delivers quoted JSON through a bounded UI-post lane.
+- [x] Native navigation disconnects client without stopping retained helper/backend.
+- [x] 22 JVM tests, 21 Python tests, browser regressions and Kotlin compilation pass.
+- [ ] APK/device validation of actual callback ordering/reload/event delivery.
+- [ ] TE2 generic provisioning, persistent service and relay endpoint integration.
+
+Source-only slice; no installed client assets, APKs, device state, shared framework,
+signing, launch authority or release changed. Changes remain uncommitted.
+Electron-subset compatibility will require an unrelated user-selected small
+Electron app's almost-drop-in build/behavior acceptance after the TE2 POC.
