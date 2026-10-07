@@ -542,7 +542,7 @@ class PersistentNetworkService : Service() {
     }
 
     private fun rendererName(): String = when {
-        packageName.endsWith(".cefrium") -> "cefrium"
+        packageName.endsWith(".cefrium") || packageName.endsWith(".te2termux") -> "cefrium"
         else -> "gecko"
     }
 

@@ -16,6 +16,9 @@ const LOCAL_SETTINGS_APP = {
 };
 
 const nativeBridge = globalThis.webkit?.messageHandlers?.native;
+// Consumer bootstrap installs this before importing launcher/settings. Native
+// sender authorization remains in the platform host, not in this browser object.
+const platformBridge = globalThis.__te2ShellPlatform;
 const parentBridge = (() => {
   try {
     return globalThis.parent !== globalThis &&
@@ -27,7 +30,7 @@ const parentBridge = (() => {
   }
 })();
 
-if (!nativeBridge && !parentBridge) {
+if (!nativeBridge && !parentBridge && typeof platformBridge?.request !== "function") {
   throw new Error("Desktop native bridge is unavailable");
 }
 
@@ -38,13 +41,23 @@ let cachedLocalFrameworkState = null;
 const pendingRequests = new Map();
 const localFrameworkListeners = new Set();
 
-window.addEventListener("message", (event) => {
-  if (event.source !== globalThis.parent) return;
-  if (event.data?.type !== "te2-desktop:local-framework-state") return;
-  const state = event.data.state;
+function publishLocalFrameworkState(state) {
   if (!state || typeof state !== "object") return;
   cachedLocalFrameworkState = state;
   for (const listener of localFrameworkListeners) listener(state);
+}
+
+const unsubscribePlatformState = typeof platformBridge?.on === "function"
+  ? platformBridge.on("local-framework-state", publishLocalFrameworkState)
+  : null;
+window.addEventListener("pagehide", () => {
+  if (typeof unsubscribePlatformState === "function") unsubscribePlatformState();
+}, { once: true });
+
+window.addEventListener("message", (event) => {
+  if (event.source !== globalThis.parent) return;
+  if (event.data?.type !== "te2-desktop:local-framework-state") return;
+  publishLocalFrameworkState(event.data.state);
 });
 
 globalThis.__te2NativeReply = (id, ok, value) => {
@@ -61,6 +74,7 @@ globalThis.__te2NativeReply = (id, ok, value) => {
 };
 
 function nativeRequest(method, params = {}) {
+  if (typeof platformBridge?.request === "function") return platformBridge.request(method, params);
   if (parentBridge) return parentBridge(method, params);
   const id = String(++nextRequestId);
 
@@ -333,6 +347,10 @@ export const desktopShellHost = {
   getAssetStatus: () => nativeRequest("get_asset_status"),
   updateAssets: () => nativeRequest("update_assets"),
   navigate: (url) => {
+    if (typeof platformBridge?.navigate === "function") {
+      platformBridge.navigate(String(url));
+      return;
+    }
     try {
       if (
         globalThis.parent !== globalThis &&

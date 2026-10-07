@@ -299,6 +299,59 @@ sample wiring and targeted synthetic/compilation tests. It does not authorize
 APK assembly/device changes, TE2 runtime changes, commits/tags/publication or
 automatic merges. Request separate approval for the TE2 consumer target.
 
+## Actual Desktop host reuse seam (2026-10-06)
+
+Separately approved source/test slice: `desktop_client/android_shell/host.js`
+accepts an injected `__te2ShellPlatform` request/event/navigation adapter before
+its existing Electron/WebKit paths. Existing Electron paths remain the default;
+pagehide unsubscribes the injected local-framework-state listener.
+`electromux-platform.js` is TE2 consumer code mapping the Desktop methods onto
+the existing Android gateway DTOs/routes. It creates no network client or relay;
+native bootstrap must supply gateway request, current browser origin and trusted
+navigation. Gateway request returns `body.data` exactly once. Native authorization
+remains mandatory; injection is not a security boundary.
+
+Remote catalog/settings/bookmarks/open/quit/reload routes reuse the existing
+gateway. Local execution/startup and asset update actions explicitly remain
+unsupported, rather than silently claiming persistence or completion. This is
+not wired into an installed client yet; no new APK target or asset publication.
+The actual Desktop host import regression and all 113 Electron tests pass.
+Next gate is a separately approved branded remote-only target/bootstrap that
+provides the real native adapter and visibly disables unsupported controls.
+
+## Separate TE2 Termux native consumer checkpoint (2026-10-06)
+
+Approved source/compilation slice: `android/termux` selects the actual standalone
+Cefrium build definition with a distinct app ID `com.termux.extensions.te2termux`
+and label TE2 Termux. Both targets compile the same Cefrium activity/application
+and shared Android service/bridge source. BuildConfig gates the new consumer;
+existing Cefrium and Gecko entrypoints remain unchanged. Termux package renderer
+classification explicitly remains Cefrium. No activity copy or second relay.
+
+Generated APK-owned `electromux_shell/` resources are copied from the actual
+Desktop launcher/settings source; only generated HTML selects the remote consumer
+bootstrap. The native handler uses an exact `/android-shell/` asset allowlist and
+returns local errors for missing/unlisted resources before the OTA tree. Editor
+resources retain their existing seed/OTA path. This prevents editor OTA from
+overwriting the consumer bootstrap with the older Android launcher.
+
+The consumer uses the existing gateway for endpoints/bookmarks/catalog/app
+actions; unavailable local/startup/update settings are visibly disabled and
+mutations rejected. The eventual goal remains full local launch/configuration,
+environment/venv, ownership/stdin-FD3 shutdown, automatic/preferred startup,
+sidebar preference and second-editor parity. Native desktop window detachment is
+the exception. No local backend is launched by this interim target. Generic
+Electromux helper/library extraction is not complete merely because this consumer
+target compiles; integrated POC first remains the approved sequencing.
+
+Target compilation/9 JVM tests, original Cefrium compilation/58 JVM tests,
+113 Electron regressions and both browser adapter/bootstrap tests pass. Merged
+debug manifest confirms distinct identity/shared UID/private runtime/provider;
+signer/installed UID, actual remote navigation, sidebar/second-editor persistence
+and lifecycle still require separately approved signed APK/both-device testing.
+No APK assembly/install or shared runtime restart occurred. See
+`android/termux/README.md` and `NATIVE_TARGET_SECURITY.md`.
+
 ## Historical initial slice boundaries
 
 This slice creates a local branch and planning documents only. No SDK/helper,

@@ -440,7 +440,8 @@ class MainActivity : AppCompatActivity() {
             assetRoot = assetManager.getAssetRoot(),
             assetPathResolver = CefriumAssetRoutes::localPath,
             requestHandler = { request ->
-                CefriumInspectorAssetRoute.handle(assets, request)
+                (if (BuildConfig.TE2_TERMUX) TermuxShellAssets.handle(assets, request) else null)
+                    ?: CefriumInspectorAssetRoute.handle(assets, request)
                     ?: shellGateway.handle(request)
             },
         )

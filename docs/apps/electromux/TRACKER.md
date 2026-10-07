@@ -132,6 +132,31 @@ Motorola repeat, lifecycle stress, installer and TE2 consumer remain separate.
 
 ## Desktop API / consumer bridge foundation
 
+- [x] Prove actual Desktop host module reuse via injected platform adapter.
+- [x] Cover existing Electron parent request/navigation/state behavior unchanged.
+- [x] Wire native gateway/bootstrap and disable unavailable remote-only settings in new target.
+
+Source/test reuse seam passes `node tests/electromux_desktop_reuse.test.mjs` and
+113 Electron regressions. New adapter is not yet loaded by any native client;
+no asset publication, APK or live acceptance is claimed. This follow-up remains
+uncommitted after the requested pushed checkpoint.
+
+## Separate native consumer source checkpoint
+
+- [x] Add standalone `android/termux` identity/manifest using the existing Cefrium build/source.
+- [x] Generate actual Desktop shell resources with consumer-only bootstrap.
+- [x] Serve consumer assets from APK before editor OTA; retain existing editor asset ownership.
+- [x] Compile target and pass 9 JVM, 58 existing Cefrium, 113 Electron and browser regressions.
+- [x] Inspect merged debug identity/shared UID/private runtime/provider boundary.
+- [ ] Separately approve signed assembly/install and remote-only live acceptance.
+- [ ] Add full local execution/launch environment/ownership/stdin-FD3/startup parity.
+- [ ] Physically verify Sidebar settings and second-editor parity on both devices.
+
+No APK was assembled or installed. Explicit Termux-compatible signing is required
+for APK tasks; target/service/renderer source reuse does not establish installed
+signing/UID, lifecycle or full Desktop parity. Local controls remain disabled only
+for this interim checkpoint. Source and documentation are uncommitted.
+
 The independent `docs/DESKTOP_API_INVENTORY.md` maps 21 launcher requests,
 28 separately guarded app-view commands, event/dialog APIs and portable source
 candidates. Its sample now uses native-owned consumer descriptors and registered
