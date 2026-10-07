@@ -14,12 +14,22 @@ Plan: [PLAN.md](PLAN.md). Proposal: [onboarding draft](../../../electromux-onboa
   `compileDebugKotlin testDebugUnitTest`, generic host tests, browser regression,
   generated chrome/bridge asset inspection and whitespace checks pass.
 - [x] Electromux API published at `9922abf`; TE2 submodule updated to that pin.
-- [ ] TE2 source checkpoint and approved APK assembly for live testing.
+- [x] TE2 source checkpoint `bf17e8fc` pushed on `feature/electromux-host`.
+- [x] Approved debug APK assembly succeeded; signature and packaged chrome verified.
 - [ ] Approved APK assembly/install and live acceptance; startup/memory comparison.
 
 No client install, framework lifecycle change, release or version bump in this
 slice. Ordinary Cefrium keeps its native header; native tools panel contents
 are outside this replacement scope.
+
+APK: `android/termux/build/outputs/apk/debug/te2-termux-debug.apk`.
+SHA-256: `d207ef89c9ee48acc55f0e472822aea31806c9dc4eb86cbc982352f1a88b49d1`.
+Signer SHA-256: `b6da01480eefd5fbf2cd3771b8d1021ec791304bdd6c4bf41d3faabad48ee5e1`
+(existing GitHub-Termux-compatible test signer). APK contains chrome HTML/CSS/JS
+and the generic browser bridge, with the expected script entrypoints. No install,
+app-data reset or framework lifecycle change was performed; live acceptance is
+pending. Inherited submodule `android/gradlew.bat` line-ending changes remain
+unstaged and untouched.
 
 ## Planning
 
