@@ -33,6 +33,35 @@ toolchain; a submodule does not isolate incompatible AGP versions.
 
 ## Phase 0: contracts and reference inventory
 
+### API-declared mobile chrome slice (approved 2026-10-07)
+
+Electromux declares packaged chrome through `ChromeSurfaceSpec`: consumer
+descriptor, exact entrypoint, placement and bounded height. `ChromeSurfaceHost`
+is the renderer attachment/disposal seam, independent of TE2 and Cefrium. The
+consumer supplies HTML/CSS/JS; the Android adapter attaches a small separate
+Cefrium browser. Do not import the desktop toolbar or inject privileged controls
+into application pages.
+
+TE2 Termux supplies the mobile Home/Reload/Recents/Lock/Quit/Tools toolbar in
+`desktop_client/android_shell/chrome.*`. JavaScript exposes the Electron
+shell-preload-shaped `te2Desktop.request(method, params)` and `onStatus(callback)`
+returning an unsubscribe function. This is a declared subset, not BrowserWindow
+or arbitrary ipcRenderer compatibility. TE2 retains action semantics. Native
+tools-overlay contents and dialogs remain unchanged; ordinary Cefrium retains
+its native header and Gecko is unaffected.
+
+Use the generic query/envelope/event bridge with exact browser/document identity,
+request-size bounds, navigation generation fencing and disposal. State updates
+follow async lock completion, without polling. Toolbar renderer recovery reloads
+only its own packaged document once, never the framework or application.
+
+Approved scope: reusable-library and TE2 source, asset generation, unit/browser
+regressions and Kotlin build checks. No APK installation, runtime restart,
+release or version bump. Checkpoint the independent Electromux source and matching
+submodule changes before updating the pin. Next: rebundle/install an approved
+APK, user live-test all actions and lifecycle transitions, and measure the extra
+browser's startup/memory cost before claiming full parity.
+
 Record exact source revisions and extraction candidates, not whole-activity copies:
 
 - `android/cefrium`: MainActivity, CefriumApplication, asset relay/native query,

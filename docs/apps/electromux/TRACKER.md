@@ -2,6 +2,25 @@
 
 Plan: [PLAN.md](PLAN.md). Proposal: [onboarding draft](../../../electromux-onboarding-draft.md).
 
+## API-declared mobile chrome (2026-10-07)
+
+- [x] Approved reusable Electromux API plus TE2 Termux adapter source/build scope.
+- [x] Generic `ChromeSurfaceSpec`/`ChromeSurfaceHost` declaration and disposal test.
+- [x] Separate packaged Cefrium toolbar; exact-page/document query authorization.
+- [x] Mobile HTML/CSS buttons and Electron-shaped request/subscription bridge.
+- [x] Reuse existing native Home/Reload/Recents/Lock/Quit/Tools handlers.
+- [x] Browser startup coalescing, action/state/disposal and asset-generation tests.
+- [x] Final source/build validation: TE2 Termux and ordinary Cefrium
+  `compileDebugKotlin testDebugUnitTest`, generic host tests, browser regression,
+  generated chrome/bridge asset inspection and whitespace checks pass.
+- [x] Electromux API published at `9922abf`; TE2 submodule updated to that pin.
+- [ ] TE2 source checkpoint and approved APK assembly for live testing.
+- [ ] Approved APK assembly/install and live acceptance; startup/memory comparison.
+
+No client install, framework lifecycle change, release or version bump in this
+slice. Ordinary Cefrium keeps its native header; native tools panel contents
+are outside this replacement scope.
+
 ## Planning
 
 - [x] Clarify Electron-like Android hosting; remove generated HTML/srcdoc design.

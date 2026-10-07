@@ -5,6 +5,7 @@ import android.content.res.AssetManager
 /** Consumer shell is APK-owned, independent of editor OTA. Never proxy missing pages. */
 internal object TermuxShellAssets {
     private val files = setOf("index.html", "settings.html", "shell.css", "host.js",
+        "chrome.html", "chrome.css", "chrome.js",
         "launcher.js", "settings.js", "electromux-platform.js", "electromux-bootstrap.js",
         "extensions/apps.js", "extensions/registry.js", "extensions/local-framework.js")
 

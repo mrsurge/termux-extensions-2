@@ -1,0 +1,9 @@
+:root { color-scheme: dark; font: 14px system-ui, sans-serif; background: #050c1f; color: #dae1ee; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+nav { display: flex; align-items: center; gap: 4px; height: 48px; padding: 2px 4px; overflow-x: auto; scrollbar-width: none; }
+button { flex: 0 0 auto; min-width: 40px; min-height: 44px; padding: 0 8px; border: 1px solid #263249; border-radius: 6px; background: #111b2e; color: inherit; font: inherit; touch-action: manipulation; }
+button:active, button[aria-pressed="true"] { background: #283957; }
+button:focus-visible { outline: 2px solid #9dacf0; outline-offset: -3px; }
+#chrome-error { position: fixed; inset: auto 0 0; background: #502434; font-size: 11px; pointer-events: none; }
+#chrome-error:empty { display: none; }

@@ -2,6 +2,35 @@
 
 Priority: High. Shared-UID execution must not be exposed to remote pages merely because they share the native relay origin.
 
+## API-declared toolbar security (2026-10-07)
+
+The new toolbar is a separate packaged Cefrium browser attached through the
+generic Electromux chrome contract. Only its dedicated query handler accepts
+`view_action` and `get_chrome_state`; the app browser does not gain these methods.
+Exact current page, native route declaration and per-navigation document ID
+are required. Only six named actions are accepted, with no script, shell command
+or process-control channel. Native and JavaScript pending requests are bounded
+to eight; protocol request/reply size limits remain 4 KiB/64 KiB.
+
+No exported Android component or Intent forwarding is added. Existing native
+handlers remain the action authority. Pause/resume/disposal affect only chrome;
+one bounded renderer-recovery attempt never touches the framework. Packaged CSP
+disallows network connections, child frames and external scripts. Source/JVM
+tests are not device evidence; live lifecycle and memory checks remain pending.
+
+Security-relevant diff excerpt (ordinary Cefrium retains existing listeners):
+
+```diff
+     private fun bindControls() {
++        if (!BuildConfig.TE2_TERMUX) bindNativeToolbarControls()
++
++        bindToolsControls()
++    }
++
++    private fun bindNativeToolbarControls() {
+         findViewById<Button>(R.id.btnHome).setOnClickListener { loadLauncher() }
+```
+
 Scope: AndroidLocalFrameworkRuntime, PersistentNetworkService, CefriumApplication, MainActivity, TermuxLocalFrameworkRegistration, TermuxLocalControlPolicy and TermuxLocalPageBridge; Termux-only pinned Electromux host dependency and packaged browser/actor assets. No new exported component, receiver, PendingIntent or nested-Intent forwarding is introduced. Existing TermuxHelperLauncher retains installed UID/signature checks and an explicit private TermuxService target.
 
 Implementation: exact APK-owned launcher/settings URL and method allowlists; current browser URL plus document/generation fences; bounded request/event queues; native-only helper credentials and backend declarations. Service owns transport; page close unsubscribes; service close disconnects without an implicit process mutation. A newly armed single-use local-selection revision must still match the selected upstream before relay retarget. Observe/refresh cannot manufacture selection intent.

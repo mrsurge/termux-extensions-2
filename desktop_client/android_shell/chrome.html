@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'none'; frame-src 'none'; base-uri 'none'">
+  <link rel="stylesheet" href="./chrome.css">
+  <title>TE2 Termux toolbar</title>
+</head>
+<body>
+  <nav aria-label="Application toolbar">
+    <button type="button" data-action="home" aria-label="Home" title="Home">⌂</button>
+    <button type="button" data-action="reload" aria-label="Reload" title="Reload">↻</button>
+    <button type="button" data-action="recents">Recents</button>
+    <button type="button" data-action="lock" aria-pressed="false">Lock</button>
+    <button type="button" data-action="quit">Quit</button>
+    <button type="button" data-action="tools" aria-label="Tools" title="Tools">⚒</button>
+  </nav>
+  <div id="chrome-error" role="status" aria-live="polite"></div>
+  <script type="module" src="./chrome.js"></script>
+</body>
+</html>

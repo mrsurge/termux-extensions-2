@@ -55,6 +55,13 @@
                 android:text="@string/native_action_tools_symbol" />
         </LinearLayout>
 
+        <!-- Electromux declares content/height; this is only the attachment slot. -->
+        <FrameLayout
+            android:id="@+id/chromeContainer"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:visibility="gone" />
+
         <FrameLayout
             android:id="@+id/browserContainer"
             android:layout_width="match_parent"

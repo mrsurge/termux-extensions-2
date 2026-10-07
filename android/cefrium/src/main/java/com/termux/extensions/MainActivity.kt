@@ -42,6 +42,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 class MainActivity : AppCompatActivity() {
     private var termuxLocalPageBridge: TermuxLocalPageBridge? = null
+    private var termuxChrome: TermuxChromeSurface? = null
     private var termuxNavigationLoading = false
     private lateinit var browser: CefriumBrowser
     private lateinit var selectionIntegration: CefriumSelectionIntegration
@@ -378,6 +379,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun bindControls() {
+        if (!BuildConfig.TE2_TERMUX) bindNativeToolbarControls()
+
+        bindToolsControls()
+    }
+
+    private fun bindNativeToolbarControls() {
         findViewById<Button>(R.id.btnHome).setOnClickListener { loadLauncher() }
         findViewById<Button>(R.id.btnReload).setOnClickListener {
             if (::browser.isInitialized) browser.reload()
@@ -386,6 +393,9 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnLock).setOnClickListener { toggleLock() }
         findViewById<Button>(R.id.btnQuit).setOnClickListener { quitCurrentApp() }
         findViewById<Button>(R.id.btnConsole).setOnClickListener { toggleTools() }
+    }
+
+    private fun bindToolsControls() {
         findViewById<Button>(R.id.btnConsoleBack).setOnClickListener { hideTools() }
         findViewById<Button>(R.id.btnConsoleStart).setOnClickListener { flushBrowserCache() }
         findViewById<Button>(R.id.btnUpdateTe2).setOnClickListener { forceAssetUpdate() }
@@ -538,6 +548,28 @@ class MainActivity : AppCompatActivity() {
         browser.surfaceContainer.post { selectionIntegration.installWhenReady() }
         configureDevToolsInspector()
         restoreToolsSurfaceState()
+        if (BuildConfig.TE2_TERMUX) {
+            val service = checkNotNull(clientRuntimeService)
+            termuxChrome = TermuxChromeSurface(this, findViewById(R.id.chromeContainer),
+                service.browserFrameworkBaseUrl(), { action ->
+                    when (action) {
+                        "home" -> loadLauncher()
+                        "reload" -> browser.reload()
+                        "recents" -> showRecents()
+                        "lock" -> toggleLock()
+                        "quit" -> quitCurrentApp()
+                        "tools" -> toggleTools()
+                    }
+                }, { JSONObject().put("inAppShell", inAppShell).put("locked", isLocked)
+                    .put("appId", currentAppId) },
+                { message -> Toast.makeText(this, message, Toast.LENGTH_SHORT).show() })
+            updateToolbar()
+        }
+    }
+
+    private fun updateToolbar() {
+        nativeHeader.visibility = if (inAppShell && !BuildConfig.TE2_TERMUX) View.VISIBLE else View.GONE
+        termuxChrome?.update(inAppShell)
     }
 
     private fun installImeInsetsObserver() {
@@ -753,7 +785,6 @@ class MainActivity : AppCompatActivity() {
             !wasInAppShell && inAppShell -> beginAppShellInspectorSession()
             wasInAppShell && !inAppShell -> endAppShellInspectorSession()
         }
-        nativeHeader.visibility = if (inAppShell) View.VISIBLE else View.GONE
         if (inAppShell) {
             parsed.path
                 ?.takeIf { it.startsWith("/app/") }
@@ -762,6 +793,7 @@ class MainActivity : AppCompatActivity() {
                 ?.takeIf { it.isNotBlank() }
                 ?.let { currentAppId = it }
         }
+        updateToolbar()
         updatePersistentNetworkService()
         appHealthFailureCount = 0
         updateAppHealthMonitoring(immediate = true)
@@ -876,6 +908,7 @@ class MainActivity : AppCompatActivity() {
         inAppShell = false
         if (wasInAppShell) endAppShellInspectorSession()
         nativeHeader.visibility = View.GONE
+        termuxChrome?.update(false)
         if (!preservePendingRestore) {
             prefs().edit().putString(KEY_LAST_PATH, currentPath).apply()
         }
@@ -888,6 +921,7 @@ class MainActivity : AppCompatActivity() {
         currentAppId = appId
         isLocked = false
         findViewById<Button>(R.id.btnLock).text = "Lock"
+        updateToolbar()
         browser.loadUrl(
             withAndroidNativePageIdentity(
                 clientRuntimeService?.frameworkUrl("/app/$appId") ?: return,
@@ -1080,6 +1114,7 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     findViewById<Button>(R.id.btnLock).text =
                         if (isLocked) "Unlock" else "Lock"
+                    updateToolbar()
                 }
             } catch (error: Exception) {
                 runOnUiThread {
@@ -1850,6 +1885,7 @@ class MainActivity : AppCompatActivity() {
             ViewCompat.requestApplyInsets(browserContainer)
         }
         if (::browser.isInitialized) browser.onResume()
+        termuxChrome?.resume()
         if (inAppShell) {
             ensureInspectorBrowser(resumeExisting = true)
         }
@@ -1863,6 +1899,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onPause() {
+        termuxChrome?.pause()
         activityResumed = false
         imeDismissalReducer.reset()
         uiHandler.removeCallbacks(appHealthCheckRunnable)
@@ -1891,6 +1928,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        termuxChrome?.close()
+        termuxChrome = null
         termuxLocalPageBridge?.close()
         termuxLocalPageBridge = null
         NativeRuntimeDebug.unregister("activity", this)

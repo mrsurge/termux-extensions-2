@@ -14,6 +14,8 @@ class TermuxConsumerTest {
     }
     @Test fun shellAllowlistRejectsEscapesAndUnlistedResources() {
         assertEquals("electromux_shell/host.js", TermuxShellAssets.assetPath("/android-shell/host.js"))
+        for (file in listOf("chrome.html", "chrome.css", "chrome.js"))
+            assertEquals("electromux_shell/$file", TermuxShellAssets.assetPath("/android-shell/$file"))
         for (path in listOf("/android-shell/../secret", "/android-shell/%2e%2e/secret",
             "/android-shell/unknown.js", "/api/apps/catalog")) assertNull(TermuxShellAssets.assetPath(path))
     }
@@ -33,5 +35,9 @@ class TermuxConsumerTest {
             assertTrue(File(root, page).readText().contains("src=\"./electromux-bootstrap.js\""))
         assertEquals(File("../../desktop_client/android_shell/host.js").readText(), File(root, "host.js").readText())
         assertTrue(File(root, "electromux-platform.js").isFile)
+        val chrome = File(root, "chrome.html").readText()
+        assertTrue(chrome.contains("src=\"./electromux-bridge.js\""))
+        assertTrue(chrome.contains("src=\"./chrome.js\""))
+        assertEquals(File("../../desktop_client/android_shell/chrome.js").readText(), File(root, "chrome.js").readText())
     }
 }
