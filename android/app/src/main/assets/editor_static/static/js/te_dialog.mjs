@@ -416,6 +416,8 @@ export function createSurfaceRegistry(targetWindow, options = {}) {
     else if (prior) throw new Error(`Dialog surface already registered: ${surfaceId}`);
 
     element.dataset.teDialogSurface = surfaceId;
+    // Custom surfaces may be portaled out of their original UI root.
+    element.setAttribute("autocapitalize", "off");
     const entry = {
       id: surfaceId,
       element,
@@ -587,6 +589,7 @@ function createFieldControl(document, field, popupHost) {
     if (field.kind === "textarea" || field.kind === "stringList" || field.kind === "json") {
       const textarea = document.createElement("textarea");
       textarea.className = "te-dialog-textarea";
+      textarea.setAttribute("autocapitalize", "off");
       textarea.rows = field.rows;
       textarea.placeholder = field.placeholder;
       textarea.value = field.kind === "stringList" && Array.isArray(field.value)
@@ -710,6 +713,7 @@ function createFieldControl(document, field, popupHost) {
     } else {
       const input = document.createElement("input");
       input.className = "te-dialog-input";
+      input.setAttribute("autocapitalize", "off");
       input.type = field.kind === "password" ? "password" : field.kind === "number" ? "number" : "text";
       input.placeholder = field.placeholder;
       input.value = formatFieldValue(field.value);
@@ -756,6 +760,7 @@ export function createInlineDialogPresenter(targetWindow) {
       const settlement = createSettlement(resolve);
       const layer = document.createElement("div");
       layer.className = "te-dialog-layer";
+      layer.setAttribute("autocapitalize", "off");
       layer.setAttribute("role", "presentation");
       const card = document.createElement("section");
       card.className = "te-dialog-card";

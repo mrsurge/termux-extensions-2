@@ -165,3 +165,55 @@ Android compilation, 11 JVM tests, 13 Python tests and browser regressions pass.
 Actual Desktop-source reuse, unsolicited events and the remote-only TE2 Termux
 target are next integration gates. No new APK/device or TE2 runtime change,
 commit/push or publication is claimed by this slice.
+
+## Pixel signed consumer validation (2026-10-06)
+
+Supersedes the source-only checkpoint's uncommitted/no-assembly status: source
+checkpoint `78fabd36` is pushed on `feature/electromux-host`. The user approved
+signed debug assembly and installation on Pixel only, with no Termux reset,
+existing client replacement, or shared framework restart.
+
+- [x] Recover official GitHub Termux public test signing configuration; confirm
+  installed Termux and candidate certificate SHA-256 match
+  `b6da01480eefd5fbf2cd3771b8d1021ec791304bdd6c4bf41d3faabad48ee5e1`.
+- [x] Assemble `android/termux` debug successfully (36 seconds), arm64-only,
+  separate ID `com.termux.extensions.te2termux`, label TE2 Termux, 237 MiB.
+- [x] Verify APK-owned Desktop shell inventory and consumer bootstrap in index.html.
+- [x] Complete ADB installation and verify shared UID `10321`, matching Termux.
+- [ ] Verify remote launcher/settings and obtain user live acceptance.
+
+Candidate: `android/termux/build/outputs/apk/debug/te2-termux-debug.apk`.
+SHA-256: `ee5511b8e949902e29e9a41d7d5999c35dff509845b7999cc6ab5f79e26947b5`.
+Signing material remains in ignored local state, not source. No publication.
+
+Launcher renders and the user started the existing local framework; catalog
+connects. App navigation currently produces a blank content area (reproduced
+with File Explorer); this blocks live acceptance. No framework restart/reset
+was performed. Investigate native app-shell navigation/asset readiness separately
+from signing: package install and launcher rendering succeeded.
+
+Future parity requirement: generic Electromux native window management and
+decorator/chrome APIs should deliver the Electron-style experience. The reused
+Jetpack header buttons are interim, not the final window API/design. This is
+future work, not part of the current remote-only validation/fix scope.
+
+### Fresh APK seed correction
+
+The user confirmed Android OTA repaired app loading. Source inspection found
+the bundle manifest already includes `app/static/js`; the APK seed was stale,
+not the manifest. Ran the existing `scripts/bundle_gecko_assets.sh`, publishing
+217 files / 40 MiB at version `0.2.352`, then assembled the signed consumer APK
+(incremental Gradle build: 3 seconds). Verified all five literal app-shell static
+script/module dependencies exist; the APK's `te_guarded_navigation.mjs` checksum
+matches source. No source-level navigation or worker change was needed.
+
+Corrected APK SHA-256:
+`7ceaabcb055dd45a422b3bc91658b46492341ec282bfb0207f2fa3bfee1d1ab3`.
+Signing certificate remains the installed Termux GitHub test certificate.
+
+Installed on Pixel, cleared only `com.termux.extensions.te2termux` with explicit
+user approval, and relaunched. No OTA was invoked. Launcher connected to the
+existing framework and File Explorer rendered its toolbar, home path and
+directory listing from fresh app storage. The shared framework was not restarted;
+Termux, Cefrium and Gecko data were not cleared. This resolves the reproduced
+blank app-shell bootstrap failure; broad UI/parity acceptance remains separate.

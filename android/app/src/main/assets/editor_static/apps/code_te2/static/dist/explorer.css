@@ -200,6 +200,7 @@
   display: grid;
   grid-template-columns: 20px 1fr auto; /* icon, text, menu (twisty removed) */
   gap: 8px;
+  row-gap: 0; /* No extra grid spacing between directory header and children. */
   padding: 6px 1px 6px 10px;
   cursor: pointer;
   border-radius: 8px 1px 1px 8px;
@@ -380,8 +381,8 @@
 
 .fe-tree li > ul {
   grid-column: 1 / -1;
-  margin: 6px 0 0;
-  padding: 0;
+  margin: 0;
+  padding: 3px 0 0; /* Match the undocked waterfall more closely to sticky row steps. */
   list-style: none;
 }
 /* ACTUAL CARD DIMENSIONS */
@@ -1060,6 +1061,7 @@
   font-size: 12px;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 
 .fe-marketplace-more {
@@ -1409,8 +1411,10 @@
   min-width: 0;
   overflow: hidden;
   gap: 4px;
-  padding: 8px 12px;
-  background: var(--explorer-bg);
+  min-height: 34px;
+  box-sizing: border-box;
+  padding: 2px 8px;
+  background: #20262e;
   border-radius: 0;
   font-size: 13px;
   font-weight: 500;
@@ -1465,7 +1469,7 @@
   cursor: pointer;
   border-radius: 0;
   margin-left: 0;
-  background: #333;
+  background: #161b22;
 }
 
 .fe-search-line-num {
@@ -1496,7 +1500,28 @@
 .fe-search-change-group {
   border-bottom: 1px solid var(--border);
   padding-bottom: 0;
+  box-shadow: none;
+  border-radius: 3px;
 }
+
+.fe-search-change-group.is-expanded {
+  box-shadow: inset 0 0 0 1px rgba(155, 213, 245, 0.25);
+}
+.fe-search-change-group.is-recent {
+  box-shadow: inset 0 0 0 2px #9bd5f5;
+}
+.fe-search-change-group.is-expanded,
+.fe-search-change-group.is-recent { position: relative; }
+.fe-search-change-group.is-expanded::after,
+.fe-search-change-group.is-recent::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(155, 213, 245, 0.25);
+  border-radius: inherit;
+  pointer-events: none;
+}
+.fe-search-change-group.is-recent::after { border: 2px solid #9bd5f5; }
 
 .fe-search-change-group:last-child {
   border-bottom: none;
@@ -1544,17 +1569,12 @@
 .fe-changes-progress { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .fe-changes-progress-heading { display: flex; align-items: flex-start; gap: 8px; width: 100%; }
 .fe-changes-total { margin-left: auto; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 4px; font-variant-numeric: tabular-nums; text-align: right; }
-/* Match History selection exactly, but isolate the accent to the file header. */
-.fe-search-change-header.is-recent {
-  outline: none !important;
-  box-shadow: inset 0 0 0 2px #9bd5f5 !important;
-  background: #343c46 !important; color: #e2e8ee !important; border-radius: 0;
-}
+/* MRU outlines the entire file projection, not just its header. */
+.fe-search-change-group.is-recent > .fe-search-change-header { background: #343c46; }
 
 .fe-search-change-path {
   flex: 1;
   min-width: 0;
-  direction: rtl;
   text-align: left;
   font-size: 13px;
   white-space: nowrap;
@@ -1616,11 +1636,11 @@
   display: flex;
   flex-direction: column;
   gap: 0;
-  background: #0a1120;
+  background: #161b22;
 }
 
 .fe-search-hunk {
-  margin-bottom: 8px;
+  margin-bottom: 0;
 }
 
 .fe-search-hunk:last-child {
@@ -1630,8 +1650,8 @@
 .fe-search-hunk-header {
   font-size: 12px;
   font-family: monospace;
-  padding: 4px 12px;
-  background: rgba(148, 163, 184, 0.18); /* hunk-header */
+  padding: 2px 0;
+  background: transparent;
   color: #e5e7eb;
 }
 
@@ -1646,7 +1666,7 @@
   padding: 2px 2px 2px 4px;
   font-family: monospace;
   font-size: 12px;
-  background: rgba(15, 23, 42, 0.85);
+  background: #161b22;
 }
 
 .fe-search-diff-row.is-add {
@@ -2005,7 +2025,7 @@
   border: 0;
   text-align: left;
   cursor: pointer;
-  min-height: 36px;
+  min-height: 30px;
 }
 .fe-search-hunk-toggle::before { content: '\25BE'; margin-right: 8px; }
 .fe-search-hunk-toggle[aria-expanded='false']::before { content: '\25B8'; }
@@ -2039,7 +2059,8 @@
 /* Compact file rows keep independent, labeled touch targets instead of text action labels. */
 .fe-search-change-header .fe-search-change-restore,
 .fe-search-hunk-header-row .fe-search-change-restore,
-.fe-search-change-stage {
+.fe-search-change-stage,
+.fe-search-change-unstage {
   flex: 0 0 30px;
   width: 30px;
   min-height: 30px;
@@ -2053,9 +2074,22 @@
   border-radius: 4px;
   cursor: pointer;
 }
+.fe-search-change-unstage[hidden] { display: none; }
+.fe-search-change-unstage { color: #facc15; border-color: #a18a38; }
+.fe-search-change-unstage:disabled { opacity: 0.4; cursor: default; }
 .fe-search-change-stage:disabled,
 .fe-search-changes-actions button:disabled { opacity: 0.4; cursor: default; }
 .fe-search-change-stage:focus-visible { outline: 2px solid #7dd3fc; }
+.fe-search-change-staging {
+  color: #86efac;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.fe-search-change-stage.is-staged:disabled { color: #86efac; opacity: 0.85; }
 .fe-search-changes-actions { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
 .fe-search-changes-expand { margin-right: auto; }
 .fe-search-change-header .fe-search-change-restore.is-historical,
@@ -2080,3 +2114,43 @@
 }
 .fe-search-hunk-header-row { display: flex; align-items: stretch; }
 .fe-search-hunk-header-row .fe-search-hunk-toggle { flex: 1; min-width: 0; width: auto; }
+.fe-search-hunk-header-row {
+  box-sizing: border-box;
+  min-height: 34px;
+  padding: 2px 8px;
+  gap: 4px;
+  background: #20262e;
+}
+.fe-search-change-restore.is-historical { min-width: 58px; }
+
+/* Live result headers retain their handlers; real file/hunk boxes bound push-off.
+   Unlike overflow:hidden, clip does not create an intermediate scroll container. */
+.fe-search-content-group,
+.fe-search-change-group { overflow: clip; }
+.fe-search-content-group.has-sticky-scope > .fe-search-file-header,
+.fe-search-change-group > .fe-search-change-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.fe-search-change-group .fe-search-hunk-header-row {
+  position: sticky;
+  top: 34px; /* The compact file-header row remains mounted above this scope. */
+  z-index: 1;
+}
+/* The outline tracks the shrinking file body, never the bottom of a docked row. */
+.fe-search-change-group.is-expanded::after,
+.fe-search-change-group.is-recent::after { z-index: 3; }
+.fe-search-change-group.is-expanded > .fe-search-change-header::after,
+.fe-search-change-group.is-recent > .fe-search-change-header::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(155, 213, 245, 0.25);
+  border-bottom: 0;
+  pointer-events: none;
+}
+.fe-search-change-group.is-recent > .fe-search-change-header::after {
+  border-width: 2px;
+  border-color: #9bd5f5;
+}
