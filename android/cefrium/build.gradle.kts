@@ -1,18 +1,34 @@
 plugins {
     id("com.android.application") version "9.4.0"
+    id("com.android.library") version "9.4.0" apply false
     id("org.jetbrains.kotlin.plugin.compose") version "2.4.10"
     id("com.cefrium") version "0.9.0"
 }
 
 val termuxConsumer = rootProject.name == "te2-termux"
 val termuxKey = providers.environmentVariable("ELECTROMUX_KEYSTORE").orNull
+val termuxBackendAssets = if (termuxConsumer) tasks.register<Exec>("bundleTermuxBackend") {
+    workingDir("../..")
+    commandLine("node", "desktop_client/electromux/build.mjs")
+    inputs.files(fileTree("../../desktop_client/electromux") { include("*.ts", "*.mjs") },
+        fileTree("../../desktop_client/electron/src/main") { include("**/*.ts") },
+        fileTree("../../desktop_client/electron/src/shared") { include("**/*.ts") })
+    outputs.file("../../desktop_client/electromux/dist/local-framework-backend.mjs")
+} else null
 val termuxShellAssets = if (termuxConsumer) tasks.register<Sync>("bundleTermuxShell") {
+    dependsOn(checkNotNull(termuxBackendAssets))
     from("../../desktop_client/android_shell")
     into(layout.buildDirectory.dir("generated/termuxShellAssets/electromux_shell"))
     filesMatching("*.html") {
         filter { line: String -> line.replace("src=\"./launcher.js\"", "src=\"./electromux-bootstrap.js\"")
-            .replace("src=\"./settings.js\"", "src=\"./electromux-bootstrap.js\"") }
+            .replace("src=\"./settings.js\"", "src=\"./electromux-bootstrap.js\"")
+            .replace("<script type=\"module\"", "<script src=\"./electromux-bridge.js\"></script><script type=\"module\"") }
     }
+} else null
+val termuxActorAssets = if (termuxConsumer) tasks.register<Sync>("bundleTermuxActorAssets") {
+    dependsOn(checkNotNull(termuxBackendAssets))
+    from("../../desktop_client/electromux/dist/local-framework-backend.mjs")
+    into(layout.buildDirectory.dir("generated/termuxShellAssets/electromux_backend"))
 } else null
 
 android {
@@ -127,7 +143,14 @@ android {
             kotlin.srcDir("../app/src/main/java")
             res.srcDir("../app/src/main/res")
             assets.srcDir("../app/src/main/assets")
-            if (termuxConsumer) assets.srcDir(layout.buildDirectory.dir("generated/termuxShellAssets").get().asFile)
+            if (termuxConsumer) {
+                assets.srcDir(layout.buildDirectory.dir("generated/termuxShellAssets").get().asFile)
+                java.srcDir("../termux/src/main/java")
+                kotlin.srcDir("../termux/src/main/java")
+            } else {
+                java.srcDir("src/nonTermux/java")
+                kotlin.srcDir("src/nonTermux/java")
+            }
         }
     }
 }
@@ -137,6 +160,7 @@ configurations.all {
 }
 
 dependencies {
+    if (termuxConsumer) implementation(project(":electromux-host"))
     debugImplementation("org.jetbrains.kotlin:kotlin-reflect:2.2.10")
     val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
 
@@ -171,6 +195,7 @@ dependencies {
 }
 
 if (termuxShellAssets != null) tasks.named("preBuild") { dependsOn(termuxShellAssets) }
+if (termuxActorAssets != null) tasks.named("preBuild") { dependsOn(termuxActorAssets) }
 gradle.taskGraph.whenReady {
     if (termuxConsumer && termuxKey == null && allTasks.any {
         it.name.matches(Regex("(assemble|package|bundle|sign|install)(Debug|Release|Staging)(AndroidTest|UniversalApk|Bundle)?")) ||

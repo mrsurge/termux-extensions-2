@@ -1,3 +1,6 @@
 [submodule "worktrees/geckoview"]
 	path = worktrees/geckoview
 	url = https://github.com/mozilla/geckoview.git
+[submodule "vendor/electromux"]
+	path = vendor/electromux
+	url = https://github.com/mrsurge/electromux.git

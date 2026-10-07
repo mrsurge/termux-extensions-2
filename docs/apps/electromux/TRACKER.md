@@ -288,3 +288,108 @@ Source-only slice; no installed client assets, APKs, device state, shared framew
 signing, launch authority or release changed. Changes remain uncommitted.
 Electron-subset compatibility will require an unrelated user-selected small
 Electron app's almost-drop-in build/behavior acceptance after the TE2 POC.
+
+Checkpoint: TE2 `721ead5d` and independent `2644e07`, local only/not pushed.
+
+## Independent provisioning and runtime service slice
+
+- [x] Generic native HelperInstallSpec/HelperProvisioner, optional bundled backend
+  declaration, private bounded package/session materialization.
+- [x] Generic RuntimeOwner separates serial requests and disposable renderer observers.
+- [x] Private non-sticky independent sample service owns transport/protocol;
+  Activity/page recreation detaches only its page, not helper/backend ownership.
+- [x] 27 JVM tests, 22 Python tests, browser regression and Android Kotlin compilation.
+- [ ] Physical sample lifecycle/reconnect acceptance; separately approved APK build/install.
+- [ ] TE2 adapter integration with its existing PersistentNetworkService/relay,
+  exact APK-owned launch pages and Desktop configuration/settings flow.
+
+Independent source-only scope. TE2 Android sources, installed assets, signing,
+devices and shared runtime are unchanged. Service background survival is not
+guaranteed; destruction disconnects, never sends backend Stop/Shutdown or retries
+an uncertain launch. See independent docs/CONTRACT.md for the current contract.
+
+## Reusable host consumption prerequisite (2026-10-07)
+
+- [x] Read-only TE2 integration inventory: reuse PersistentNetworkService and the
+  injected Desktop browser-platform seam, not a new lifecycle/relay stack.
+- [x] Independent internal `android/host` library; sample consumes it directly.
+- [x] Generic host has no sample/TE2/Cefrium imports; sample ping and diagnostics
+  stay outside the generic Termux transport/launcher.
+- [x] AAR generic assets and sample merged assets match source; no sample/Cefrium
+  classes in library. 29 JVM tests, 23 Python tests, browser checks, AAR assembly,
+  sample Kotlin compilation and asset merge pass.
+- [x] Independent source pushed at `d45788b`; exact Git submodule pin under
+  `vendor/electromux`, consumed only by TE2 Termux as `:electromux-host`.
+- [x] Pinned consumer validation: all 26 host-library and 9 TE2 Termux JVM
+  tests pass; TE2 Termux Kotlin compilation and existing Cefrium Kotlin
+  compilation pass. No APK assembled or installed.
+- [x] Generic descriptor admits native-declared exact loopback document URLs;
+  queries/fragments, remote origins and undeclared paths remain rejected.
+- [ ] Apply exact APK-owned launcher/settings authorization in the TE2 adapter.
+- [ ] Native selected-endpoint synchronization between actor and existing Android
+  settings/relay authority; remote endpoint selection must remain independent
+  of owned local framework state.
+- [ ] TE2 runtime adapter and independently approved APK/device acceptance.
+
+TE2 Android build configuration now consumes the pinned library. No device or
+shared runtime mutation. Library packaging is an internal build
+boundary, not public SDK stabilization or Electron-subset compatibility acceptance.
+
+Manual integration is approved: reuse PersistentNetworkService for the native
+helper/actor, guarded launcher configuration/start/attach/stop and state events,
+and native selected-endpoint synchronization. Automatic startup/preferred-app
+behavior, APK installation and physical acceptance remain separate gates.
+
+## Manual native local-control slice (2026-10-07)
+
+### Pixel install and state-handoff follow-up
+
+Signed debug APK installed in place on Pixel with shared UID 10321 and official
+Termux GitHub test signer; no app data was cleared by the agent. User subsequently
+cleared TE2 Termux data and tested Start. Inspection found its exact actor-owned
+bootstrap/server live and `/api/health` healthy, despite a stale Starting card.
+Settings/back recovered Running and Stop. Full lifecycle acceptance remains open.
+
+- [x] Add actor-session/revision ordering for replies and events.
+- [x] Add single-flight visible/native-settled-page state reconciliation.
+- [x] Browser regressions cover late acknowledgement, stale events, actor-session
+  reset, activation coalescing and teardown; real actor tests cover revisions.
+- [x] Install follow-up APK and obtain user live acceptance of the state fix.
+
+Follow-up APK SHA-256:
+`8a09e507c0c49afc80c77e34cd986ecaf76696b27d543b966a602742ec90d460`.
+Installed in place with matching Termux signer/shared UID 10321; its packaged
+actor checksum matches the generated source build. The existing framework kept
+the same instance ID and bootstrap/server PIDs throughout installation. Launcher
+reopened showing Running locally, In Use and Stop; user confirmed working.
+Six actor tests, browser ordering/activation/disposal regressions, strict actor
+typecheck, 16 Termux + 26 host JVM tests and Cefrium compilation/tests pass.
+Broader remote-selection, lifecycle and automatic-startup parity gates remain.
+
+No shared framework stop/restart, process-discovery layer or mutation replay is
+part of this follow-up. Retained old actors cannot gain new revision metadata
+from APK installation alone; their existing processes remain untouched.
+
+- [x] Optional runtime seam owned by PersistentNetworkService; installed only by
+  TE2 Termux. Existing Cefrium uses inert adapters; Gecko has no host dependency.
+- [x] Native immutable helper/Node actor provisioning, consumer-only launcher
+  config root without changing framework child config/data roots.
+- [x] Exact packaged launcher/settings URL/method/document authorization, bounded
+  native/page event delivery and renderer-generation fencing.
+- [x] Manual configuration, state, start/attach/use/stop through actual Desktop
+  controller; source preparation acknowledges promptly before FD3 readiness.
+- [x] Remote selection stays native-owned; refresh cannot select local, new local
+  intent is single-use, and a different current endpoint rejects stale retargeting.
+- [x] Actual Desktop launcher/settings reuse enables manual controls while keeping
+  automatic startup/preferred-app and asset-update controls disabled.
+- [x] Source validation: 15 TE2 Termux + 26 host JVM tests, 58 Cefrium tests,
+  Gecko compilation/tests, 113 Electron tests and Electron/actor strict typechecks.
+  Six real-process actor tests and browser bootstrap/platform regressions pass.
+- [x] Generated shell/actor and merged generic helper/browser assets verified.
+- [ ] APK assembly/install and manual local/remote lifecycle acceptance on Pixel.
+- [ ] Automatic startup/preferred app and owned-framework exit parity.
+
+No device state, shared framework, release/version or TE2 Git commit changed.
+Existing Gradle warnings remain. Gecko needed only a command-line Linux AAPT2
+override for the checkout's existing Termux-specific local build setting; no
+build environment was edited or staged.

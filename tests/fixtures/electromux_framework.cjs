@@ -5,6 +5,7 @@ if (process.argv.includes('--build-only')) {
   console.log(`build-pid=${process.pid}`);
   setTimeout(() => process.exit(Number(process.env.TEST_BUILD_EXIT || 0)), Number(process.env.TEST_BUILD_DELAY || 0));
 } else {
+  console.log(`framework-config-home=${process.env.TE2_CONFIG_HOME || ''}`);
   const port = Number(process.argv[process.argv.indexOf('--port') + 1]);
   const server = http.createServer((req, res) => {
     res.setHeader('Content-Type', 'application/json');

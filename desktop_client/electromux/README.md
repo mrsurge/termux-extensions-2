@@ -9,7 +9,9 @@ The generic helper accepts a private native-owned `--backend-config` JSON file:
 absolute `argv`, absolute existing `cwd`, optional environment overrides and
 `stopTimeout` (up to 30 seconds). For this backend select 20 seconds so owned
 framework shutdown can finish before helper escalation. Supply a consumer-specific
-`TE2_CONFIG_HOME`, not another installation's Desktop configuration. Executable
+`TE2_ELECTROMUX_CONFIG_HOME` for the launcher configuration only, not another
+installation's Desktop configuration. It does not change the framework child's
+`TE2_CONFIG_HOME`. Executable
 declarations must never come from web pages.
 
 Backend stdin/stdout use the helper's bounded big-endian length-prefixed JSON
@@ -26,9 +28,10 @@ reads and unsolicited `local-framework-state` events (`data` is the state DTO).
 Events coalesce to the newest state under stdout backpressure. No automatic
 mutation retry. Signals/EOF stop only owned children.
 
-This is a tested foundation, **not yet wired into Android**. Native provisioning,
-bridge authorization, persistent service ownership, native event consumption, endpoint sync,
-ownership vocabulary/UI labels, and APK/helper publication are the next gate.
+The TE2 Termux source adapter now wires native provisioning, exact launcher/settings
+authorization, PersistentNetworkService ownership, document-fenced events and
+selected-endpoint synchronization. APK assembly/install and physical acceptance
+remain separate gates; no local device launch is claimed from these tests.
 `ownership: "electron"` retains the current Desktop DTO until a host-neutral
 contract is shared. Synthetic lifecycle tests now await state events without
 polling. Preparation is opt-in and not enabled by Electron app assembly.
@@ -38,8 +41,13 @@ One backend reader separates integer-correlated replies from id-less events;
 partial frames and replies retain deadlines. Each connection has one bounded
 16-frame output queue. Slow clients disconnect rather than accumulating events
 or blocking the backend reader. Detached events are discarded; reconnect must
-read authoritative state. The existing Kotlin request-only client must be
-upgraded before opting in. No page can choose backend argv through this protocol.
+read authoritative state. TE2 Termux uses the pinned host's single-reader native
+client before opting in. No page can choose backend argv through this protocol.
+
+`set_selected_framework` is native-consumer-only and validates a plain HTTP(S)
+origin; it updates observation without advancing `selectionRevision`. Explicit
+Start/Use increments that revision. The Android adapter fences that intent against
+the service's current endpoint and projects actual native selection back to pages.
 
 ```sh
 node desktop_client/electromux/build.mjs

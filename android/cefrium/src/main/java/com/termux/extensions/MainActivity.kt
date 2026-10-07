@@ -41,6 +41,8 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 class MainActivity : AppCompatActivity() {
+    private var termuxLocalPageBridge: TermuxLocalPageBridge? = null
+    private var termuxNavigationLoading = false
     private lateinit var browser: CefriumBrowser
     private lateinit var selectionIntegration: CefriumSelectionIntegration
     private var devToolsRuntime: CefriumDevToolsRuntime? = null
@@ -182,8 +184,15 @@ class MainActivity : AppCompatActivity() {
 
     private val clientRuntimeObserver = object : AndroidClientRuntimeObserver {
         override fun onRuntimeStateChanged(snapshot: AndroidClientRuntimeSnapshot) {
-            if (!snapshot.projectionReady) return
-            runOnUiThread { completePendingColdRestore() }
+            runOnUiThread {
+                if (BuildConfig.TE2_TERMUX && frameworkBaseUrl != snapshot.frameworkBaseUrl) {
+                    // Native local-selection intent bypasses the HTTP settings
+                    // callback; keep Activity URL/identity/health projections current.
+                    frameworkBaseUrl = snapshot.frameworkBaseUrl
+                    if (::browser.isInitialized) updateAppHealthMonitoring(immediate = true)
+                }
+                if (snapshot.projectionReady) completePendingColdRestore()
+            }
         }
 
         override fun onImeContextChanged(active: Boolean, owner: String?) {
@@ -262,6 +271,11 @@ class MainActivity : AppCompatActivity() {
             clientRuntimeBound = true
             service.addObserver(clientRuntimeObserver)
             service.configure(settingsStore.load())
+            if (BuildConfig.TE2_TERMUX && ::browser.isInitialized) {
+                termuxLocalPageBridge?.close()
+                termuxLocalPageBridge = TermuxLocalPageBridge(service,
+                    { browser.evaluateJavaScript(it) }, { browser.url }).also { it.changePage(browser.url) }
+            }
             service.setConsoleDrawerEnabled(
                 ::consoleOverlay.isInitialized &&
                     consoleOverlay.visibility == View.VISIBLE &&
@@ -276,6 +290,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
+            termuxLocalPageBridge?.close()
+            termuxLocalPageBridge = null
             clientRuntimeBound = false
             clientRuntimeService = null
         }
@@ -449,6 +465,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun initializeBrowser() {
         browser = CefriumBrowser.createWithSurface(this)
+        if (BuildConfig.TE2_TERMUX) {
+            termuxLocalPageBridge = clientRuntimeService?.let { service ->
+                TermuxLocalPageBridge(service, { browser.evaluateJavaScript(it) }, { browser.url })
+            }
+        }
         downloadCoordinator = CefriumDownloadCoordinator(
             context = this,
             destinationLauncher = downloadDestinationLauncher,
@@ -476,10 +497,12 @@ class MainActivity : AppCompatActivity() {
         installImeInsetsObserver()
 
         browser.setOnUrlChangedListener { url ->
-            runOnUiThread { handleUrlChanged(url) }
+            runOnUiThread { termuxLocalPageBridge?.changePage(url); handleUrlChanged(url) }
         }
         browser.setOnLoadingStateChangedListener { isLoading, canGoBack, _ ->
             runOnUiThread {
+                if (isLoading && !termuxNavigationLoading) termuxLocalPageBridge?.beginNavigation()
+                termuxNavigationLoading = isLoading
                 this.canNavigateBack = canGoBack
                 if (isLoading) {
                     mainBrowserReady = false
@@ -487,6 +510,7 @@ class MainActivity : AppCompatActivity() {
                 if (!isLoading) {
                     selectionIntegration.installWhenReady()
                     browser.evaluateJavaScript(CefriumPagePolicy.installScript())
+                    termuxLocalPageBridge?.pageReady()
                     if (
                         inAppShell &&
                         browser.url.isNotBlank() &&
@@ -878,6 +902,7 @@ class MainActivity : AppCompatActivity() {
         origin: String,
         callback: CefriumBrowser.QueryCallback,
     ): Boolean {
+        if (termuxLocalPageBridge?.handle(request, origin, callback) == true) return true
         if (!isRelayOrigin(origin)) {
             callback.failure(403, "Cefrium native bridge origin is not trusted")
             return true
@@ -1866,6 +1891,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        termuxLocalPageBridge?.close()
+        termuxLocalPageBridge = null
         NativeRuntimeDebug.unregister("activity", this)
         ViewCompat.setWindowInsetsAnimationCallback(window.decorView, null)
         if (::browserContainer.isInitialized) {

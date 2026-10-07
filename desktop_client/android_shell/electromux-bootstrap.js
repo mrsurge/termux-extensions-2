@@ -6,9 +6,23 @@ const origin = window.location.origin;
 if (window.location.hostname !== '127.0.0.1' || window.location.protocol !== 'http:')
   throw new Error('TE2 Termux launcher requires its native loopback relay');
 
+const localBridge = globalThis.ElectromuxBridge.create({
+  query: options => globalThis.cefriumQuery(options),
+  methods: ['get_local_framework_config', 'save_local_framework_config', 'get_local_framework_state',
+    'refresh_local_framework', 'start_local_framework', 'stop_local_framework', 'use_local_framework'],
+  events: ['local-framework-state'], documentId: crypto.randomUUID().replaceAll('-', ''),
+  timeoutMs: 20000,
+});
+globalThis.__electromuxReceiveEvent = raw => localBridge.receiveEvent(raw);
+window.addEventListener('pagehide', () => {
+  localBridge.dispose(); delete globalThis.__electromuxReceiveEvent;
+}, {once: true});
+
 globalThis.__te2ShellPlatform = createRemoteElectromuxPlatform({
   getBrowserOrigin: () => origin,
   navigate: url => window.location.assign(url),
+  nativeRequest: (method, params) => localBridge.request(method, params),
+  on: (name, callback) => localBridge.on(name, callback),
   gatewayRequest: async (path, {method, body}) => {
     const response = await fetch(path, {method, credentials: 'same-origin',
       headers: {'Content-Type': 'application/json'},
@@ -20,14 +34,19 @@ globalThis.__te2ShellPlatform = createRemoteElectromuxPlatform({
   },
 });
 
-// Keep the real settings controls present, but make unsupported interim features
-// visibly inert. The later local-launch slice replaces this capability boundary.
+// Manual local controls are enabled; automatic startup and asset update remain
+// visibly unavailable until their separate parity slices.
 function disableUnavailableControls() {
   for (const section of document.querySelectorAll('.settings-section')) {
-    if (!section.querySelector('#autostart-local-framework, #local-framework-command, #update-assets')) continue;
+    if (!section.querySelector('#update-assets')) continue;
     for (const control of section.querySelectorAll('input, button, select')) control.disabled = true;
     section.dataset.capability = 'unavailable';
-    section.title = 'Not enabled in this remote-only checkpoint; local launch parity is planned';
+    section.title = 'Asset updates are not enabled in this consumer shell yet';
+  }
+  for (const control of document.querySelectorAll('#autostart-local-framework, #autostart-preferred-app, #preferred-app')) {
+    control.disabled = true;
+    control.dataset.capability = 'unavailable';
+    control.title = 'Automatic startup is a subsequent parity gate';
   }
 }
 disableUnavailableControls();
@@ -37,6 +56,7 @@ const observer = new MutationObserver(records => {
   for (const record of records) {
     if (record.type === 'attributes' && record.target.disabled) continue;
     const section = record.target.closest?.('[data-capability="unavailable"]');
+    if (section?.matches('input, button, select')) section.disabled = true;
     if (section) for (const control of section.querySelectorAll('input, button, select'))
       if (!control.disabled) control.disabled = true;
   }
@@ -47,3 +67,23 @@ window.addEventListener('pagehide', () => observer.disconnect(), {once: true});
 
 const settings = window.location.pathname.endsWith('/settings.html');
 await import(settings ? './settings.js' : './launcher.js');
+
+// Activation reads retained actor state; it never starts/retries a mutation or
+// probes HTTP. Coalesce focus/pageshow/visibility events into one request.
+const platform = globalThis.__te2ShellPlatform;
+const reconcile = () => {
+  if (document.visibilityState === 'hidden') return;
+  void platform.reconcileLocalState().catch(error => console.warn('Local state reconciliation failed', error));
+};
+window.addEventListener('pageshow', reconcile);
+window.addEventListener('focus', reconcile);
+window.addEventListener('electromux:page-ready', reconcile);
+document.addEventListener('visibilitychange', reconcile);
+window.addEventListener('pagehide', () => {
+  window.removeEventListener('pageshow', reconcile);
+  window.removeEventListener('focus', reconcile);
+  window.removeEventListener('electromux:page-ready', reconcile);
+  document.removeEventListener('visibilitychange', reconcile);
+  platform.dispose();
+}, {once: true});
+reconcile();

@@ -5,6 +5,10 @@ import android.content.Context
 import org.chromium.base.CommandLine
 
 class CefriumApplication : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        TermuxLocalFrameworkRegistration.install()
+    }
     override fun attachBaseContext(base: Context) {
         super.attachBaseContext(base)
 

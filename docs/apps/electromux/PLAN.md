@@ -408,6 +408,98 @@ root `/data/data/com.termux/files/`; implementing them is separately scoped.
 
 ## Historical initial slice boundaries
 
+### TE2 local integration prerequisite (2026-10-07)
+
+Read-only integration inventory confirms PersistentNetworkService already owns
+relay, UI IPC and runtime observers; Desktop's packaged consumer shell already
+has an injected platform request/event seam. Do not add another TE2 service or
+grant launch authority through AndroidShellGateway's broad same-origin HTTP API.
+The exact APK-owned launcher/settings document must be authorized separately
+from remote pages served under the same relay origin.
+
+The approved prerequisite packages independent Electromux generic Kotlin
+host/Termux transport into an internal `android/host` library and makes its sample
+consume it. Generic assets accompany the AAR; sample diagnostics/browser/service
+and ping policy stay in the consumer. This is a build boundary, not public SDK
+stabilization. Next: checkpoint/pin a reproducible source or artifact dependency,
+then adapt TE2's service to own the host runtime and TE2's Node actor. Never use
+an absolute sibling-checkout dependency or copy sample classes into TE2.
+
+Before local execution integration, adapt the consumer bridge with exact
+APK-owned page/document/method checks (the generic descriptor now admits a
+native-declared exact loopback document URL), native event
+delivery and selected-endpoint synchronization into the existing Android settings/
+relay authority. The actor currently tracks selectedOrigin internally, so it needs
+an explicit native-consumer synchronization contract; refreshing its state alone
+must not silently retarget a remote connection. Source-build preparation already
+returns promptly and publishes completion events. Auto-start/preferred app and
+exit/shutdown ownership remain subsequent parity gates; no device/runtime mutation
+is implied by this prerequisite.
+
+Current source checkpoint: the independent sample has generic native helper
+provisioning and a private started/bound non-sticky service. RuntimeOwner owns the
+bounded request lane and renderer subscriptions; Activity/page close only
+detaches its observer. Android service destruction disconnects client resources
+but does not stop the retained Termux helper/backend. No background survival or
+automatic relaunch guarantee. The next integration boundary is TE2's existing
+PersistentNetworkService/relay plus exact native consumer page/config authority;
+do not add a second TE2 process lifecycle or claim sample tests as installed
+client acceptance. Device recreation/reconnect validation remains a separate gate.
+
+The reusable host source is pushed at Electromux `d45788b` and pinned in TE2's
+`vendor/electromux` Git submodule. Only the TE2 Termux Gradle target consumes
+`:electromux-host`; neither neighboring checkouts nor copied sample classes are
+build dependencies. The subsequent source slice now wires manual local control;
+installed acceptance remains separate.
+
+## Manual local-control implementation and next acceptance gate
+
+### Launcher state handoff follow-up
+
+Pixel reproduced a stale Starting card while the exact actor-owned bootstrap and
+server were already healthy; navigating to Settings and back recovered Running.
+This is not a missing executable or a failed framework start. The actor now
+stamps snapshots with a process-session identity and monotonic revision; the
+Termux platform orders both replies and events so a late Start acknowledgement
+cannot roll back a newer Running event. Reconciliation is a single-flight,
+read-only actor-state request after native page-load completion and visible
+page activation (pageshow/focus/visibility). It never repeats a mutation, polls,
+discovers processes or changes ownership. Native exact-document authorization
+and generation fences remain intact.
+
+Rebuilding/installing an APK does not replace a retained running helper/actor.
+Existing actors without revision fields remain readable; revision-ordering live
+acceptance requires a newly started actor. Do not stop an existing framework
+merely to refresh this actor without explicit lifecycle approval.
+
+TE2 Termux installs an optional PersistentNetworkService-owned runtime backed by
+the pinned host's native Termux client/provisioner. It packages the real Desktop
+controller as a Node actor and uses the real launcher/settings browser modules.
+Only the two exact APK-owned loopback documents have the seven local-control
+methods; remote app pages sharing that origin cannot execute them. Navigation
+fences queued replies/events and detaches the page observer, not the transport.
+Service destruction disconnects without Stop/Shutdown or uncertain relaunch.
+
+Native settings/relay retain selected endpoint authority. Actor observation and
+explicit local selection are different facts: only Start/Use advances selection
+revision; a native single-use fence requires its initiating upstream to still
+be selected before relay retarget. Backend state projects actual native selection
+to pages. Launcher configuration uses a separate consumer config directory while
+framework children retain their existing environment/config/data roots.
+
+Source validation includes exact-document/method rejection, selection replay and
+retained-actor fences, real-process external ownership/build preparation/cleanup,
+configuration isolation, actual browser bootstrap/disposal and all three Android
+target compilation comparisons. This does not prove Cefrium callback order or
+physical process/background survival.
+
+Next approved-work boundary requires APK assembly/install approval: package this
+seed, verify UID/signature/assets, then test manual config save, existing-framework
+attach, owned start/build wait, Stop, remote changes during startup, navigation,
+Activity recreation, service destruction and explicit reconnect without replay.
+Preserve external/remote frameworks and existing Termux user data. Automatic
+startup/preferred-app and owned-process exit behavior remain subsequent slices.
+
 This slice creates a local branch and planning documents only. No SDK/helper,
 Android source edits, APK builds, device changes, shared runtime restarts,
 separate repo creation, tags or publication are authorized by it.

@@ -5,11 +5,11 @@ function actionLabel(state) {
   return "Start Local";
 }
 
-function statusText(state) {
+function statusText(state, ownerLabel = "Electron") {
   if (state.phase === "running" && state.ownership === "electron") {
     return state.selected
       ? `Running locally at ${state.localOrigin}`
-      : `Electron-owned TE2 is running at ${state.localOrigin}`;
+      : `${ownerLabel}-owned TE2 is running at ${state.localOrigin}`;
   }
   if (state.phase === "running") {
     return state.selected
@@ -17,13 +17,13 @@ function statusText(state) {
       : `External TE2 detected at ${state.localOrigin}`;
   }
   if (state.phase === "starting") return `Starting TE2 at ${state.localOrigin}`;
-  if (state.phase === "stopping") return "Stopping the Electron-owned TE2 framework";
+  if (state.phase === "stopping") return `Stopping the ${ownerLabel}-owned TE2 framework`;
   if (state.phase === "probing") return `Checking ${state.localOrigin}`;
   if (state.phase === "failed") return state.error || "Local framework action failed";
   if (state.phase === "unavailable") {
     return state.error || "TE2 is not configured; set its command in Settings";
   }
-  if (state.phase === "exited") return "The Electron-owned TE2 framework has stopped";
+  if (state.phase === "exited") return `The ${ownerLabel}-owned TE2 framework has stopped`;
   return Array.isArray(state.broadcast) && state.broadcast.length > 0
     ? `Start TE2 at ${state.localOrigin} with configured broadcast exposure`
     : `Start a loopback-only TE2 framework at ${state.localOrigin}`;
@@ -79,7 +79,7 @@ export const localFrameworkExtension = {
         : state.phase === "failed"
           ? "error"
           : "loading";
-      status.textContent = statusText(state);
+      status.textContent = statusText(state, host.localFrameworkOwnerLabel);
       summary.append(title, status);
 
       const details = document.createElement("div");
@@ -110,7 +110,7 @@ export const localFrameworkExtension = {
 
       const actions = document.createElement("div");
       actions.className = "local-framework-actions";
-      const busy = actionPending || ["probing", "starting", "stopping"].includes(state.phase);
+      const busy = actionPending || state.operationPending || ["probing", "starting", "stopping"].includes(state.phase);
 
       if (state.phase === "running") {
         const useButton = document.createElement("button");
@@ -161,8 +161,10 @@ export const localFrameworkExtension = {
     };
 
     const unsubscribe = host.onLocalFrameworkState((nextState) => {
+      const changed = state && ["phase", "ownership", "selected"].some(key => state[key] !== nextState[key]);
       state = nextState;
       render();
+      if (changed) refreshLauncherSurfaces();
     });
     void refresh();
 

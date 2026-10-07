@@ -43,6 +43,8 @@ const localFrameworkListeners = new Set();
 
 function publishLocalFrameworkState(state) {
   if (!state || typeof state !== "object") return;
+  if (platformBridge?.capabilities?.localFramework && state.selectedOrigin &&
+      state.selectedOrigin !== cachedLocalFrameworkState?.selectedOrigin) cachedSettings = null;
   cachedLocalFrameworkState = state;
   for (const listener of localFrameworkListeners) listener(state);
 }
@@ -322,6 +324,7 @@ export function toast(message) {
 }
 
 export const desktopShellHost = {
+  localFrameworkOwnerLabel: platformBridge?.capabilities?.localFramework ? "TE2 Termux" : "Electron",
   getLocalApps,
   getApps,
   reloadApps,

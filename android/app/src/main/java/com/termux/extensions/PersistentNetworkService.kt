@@ -101,6 +101,8 @@ class PersistentNetworkService : Service() {
     private val devRuntimeSurfaces = AndroidDevRuntimeSurfaceRegistry()
     private val runTargetProjectionClient = RunTargetProjectionClient(httpClient)
     private lateinit var settingsStore: AndroidAppSettingsStore
+    var localFrameworkRuntime: AndroidLocalFrameworkRuntime? = null
+        private set
 
     @Volatile private var settings = AndroidAppSettings()
     private lateinit var runtimeState: AndroidClientRuntimeState
@@ -162,6 +164,7 @@ class PersistentNetworkService : Service() {
         registerWifiObserver()
         configureProjectionCallbacks()
         frameworkRelay.start(settings.frameworkBaseUrl)
+        localFrameworkRuntime = AndroidLocalFrameworkRuntimeFactory.create?.invoke(this)
         connectControlPlane()
         updateForegroundAndPowerPolicy()
         Log.i(TAG, "Android client runtime ready at ${frameworkRelay.browserOrigin}")
@@ -195,6 +198,8 @@ class PersistentNetworkService : Service() {
     }
 
     override fun onDestroy() {
+        localFrameworkRuntime?.close() // Disconnect only; never stop a retained backend.
+        localFrameworkRuntime = null
         NativeRuntimeDebug.unregister("service", this)
         releaseForegroundAndLocks()
         unregisterWifiObserver()
@@ -261,6 +266,17 @@ class PersistentNetworkService : Service() {
     }
 
     fun browserFrameworkBaseUrl(): String = frameworkRelay.browserOrigin
+
+    fun selectedFrameworkBaseUrl(): String = settings.frameworkBaseUrl
+
+    /** Native actor intent only; a remote selection made during startup wins. */
+    @Synchronized
+    fun selectOwnedLocalFramework(port: Int, expectedOrigin: String) {
+        if (port !in 1..65535 || settings.frameworkBaseUrl != expectedOrigin) return
+        val next = settingsStore.update(JSONObject().put("frameworkHost", "127.0.0.1")
+            .put("frameworkPort", port))
+        configure(next)
+    }
 
     fun rewriteFrameworkUrl(url: String): String = frameworkRelay.rewriteFrameworkUrl(url)
 

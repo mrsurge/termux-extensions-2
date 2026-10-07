@@ -30,7 +30,12 @@ class CefriumStartupWiringTest {
         assertTrue(source.contains("override fun attachBaseContext(base: Context)"))
         assertTrue(source.contains("if (!CommandLine.isInitialized())"))
         assertTrue(source.contains("appendSwitchWithValue(\"javaless-renderers\", \"disabled\")"))
-        assertFalse(source.contains("override fun onCreate"))
+        // Consumer registration may run in onCreate; Chromium's switch still
+        // belongs to attachBaseContext, before its provider initialization.
+        val onCreate = source.substringAfter("override fun onCreate()")
+            .substringBefore("override fun attachBaseContext")
+        assertTrue(onCreate.contains("TermuxLocalFrameworkRegistration.install()"))
+        assertFalse(onCreate.contains("CommandLine"))
         assertFalse(source.contains("Cefrium.initialize("))
         assertFalse(source.contains("CommandLine.reset("))
     }

@@ -9,6 +9,7 @@ internal object TermuxShellAssets {
         "extensions/apps.js", "extensions/registry.js", "extensions/local-framework.js")
 
     fun assetPath(path: String): String? {
+        if (path == "/android-shell/electromux-bridge.js") return "electromux-bridge.js"
         if (!path.startsWith("/android-shell/")) return null
         val name = path.removePrefix("/android-shell/")
         return if (name in files) "electromux_shell/$name" else null

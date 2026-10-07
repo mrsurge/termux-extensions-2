@@ -1,10 +1,27 @@
 // TE2 consumer adapter, not generic Electromux core. gatewayRequest is injected
 // by the native consumer and returns the existing Android gateway's body.data.
 // This module creates no socket, HTTP client, relay, or backend process.
-export function createRemoteElectromuxPlatform({gatewayRequest, getBrowserOrigin, navigate, on}) {
+export function createRemoteElectromuxPlatform({gatewayRequest, getBrowserOrigin, navigate, on, nativeRequest}) {
   if ([gatewayRequest, getBrowserOrigin, navigate].some(value => typeof value !== "function"))
     throw new Error("Remote Electromux platform requires gateway, origin and navigation adapters");
   let settings = null;
+  let localState = null;
+  let disposed = false;
+  let reconciliation = null;
+  const stateListeners = new Set();
+  const stateMethods = new Set(['get_local_framework_state', 'refresh_local_framework',
+    'start_local_framework', 'stop_local_framework', 'use_local_framework']);
+  function acceptState(state) {
+    if (disposed) return localState || state;
+    if (localState && state?.stateSessionId === localState.stateSessionId &&
+        Number.isSafeInteger(state?.stateRevision) && Number.isSafeInteger(localState.stateRevision) &&
+        state.stateRevision < localState.stateRevision) return localState;
+    localState = state;
+    for (const listener of stateListeners) listener(state);
+    return state;
+  }
+  const unsubscribeState = typeof nativeRequest === 'function' && typeof on === 'function'
+    ? on('local-framework-state', acceptState) : null;
   const unsupported = method => {
     const error = new Error(`${method} is unavailable in the remote-only Electromux slice`);
     error.code = "UNSUPPORTED_CAPABILITY";
@@ -12,6 +29,12 @@ export function createRemoteElectromuxPlatform({gatewayRequest, getBrowserOrigin
   };
   const gateway = (path, method = "GET", body) => gatewayRequest(`/android-api${path}`, {method, body});
   async function request(method, params = {}) {
+    if (typeof nativeRequest === "function" && ["get_local_framework_state", "get_local_framework_config",
+      "save_local_framework_config", "refresh_local_framework", "start_local_framework",
+      "stop_local_framework", "use_local_framework"].includes(method)) {
+      const result = await nativeRequest(method, params);
+      return stateMethods.has(method) ? acceptState(result) : result;
+    }
     switch (method) {
       case "get_settings":
         settings = await gateway("/settings");
@@ -69,6 +92,20 @@ export function createRemoteElectromuxPlatform({gatewayRequest, getBrowserOrigin
       return unsupported("external navigation");
     return navigate(target.href);
   };
-  return Object.freeze({request, navigate: navigateLocal, on: typeof on === "function" ? on : () => () => {},
-    capabilities: Object.freeze({localFramework: false, automaticStartup: false, assetUpdates: false})});
+  function subscribe(name, callback) {
+    if (typeof nativeRequest !== 'function') return typeof on === 'function' ? on(name, callback) : () => {};
+    if (disposed || name !== 'local-framework-state') throw new Error('Unsupported state subscription');
+    stateListeners.add(callback);
+    if (localState) callback(localState);
+    return () => stateListeners.delete(callback);
+  }
+  function reconcileLocalState() {
+    if (disposed || typeof nativeRequest !== 'function') return Promise.resolve(null);
+    if (!reconciliation) reconciliation = request('get_local_framework_state')
+      .finally(() => {reconciliation = null;});
+    return reconciliation;
+  }
+  function dispose() {disposed = true; unsubscribeState?.(); stateListeners.clear();}
+  return Object.freeze({request, navigate: navigateLocal, on: subscribe, reconcileLocalState, dispose,
+    capabilities: Object.freeze({localFramework: typeof nativeRequest === "function", automaticStartup: false, assetUpdates: false})});
 }

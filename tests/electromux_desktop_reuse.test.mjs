@@ -104,3 +104,17 @@ try {
   }
 }
 console.log('Actual Desktop host reuse: remote settings/bookmarks/catalog/navigation and event disposal passed');
+
+const nativeCalls = [];
+const local = createRemoteElectromuxPlatform({
+  getBrowserOrigin: () => 'http://127.0.0.1:44100', navigate() {},
+  gatewayRequest: async () => {throw new Error('Local lifecycle went over HTTP');},
+  nativeRequest: async (method, params) => {nativeCalls.push({method, params}); return {supported: true};},
+});
+assert.equal(local.capabilities.localFramework, true);
+assert.equal(local.capabilities.automaticStartup, false);
+for (const method of ['get_local_framework_state', 'get_local_framework_config', 'save_local_framework_config',
+  'refresh_local_framework', 'start_local_framework', 'stop_local_framework', 'use_local_framework'])
+  assert.equal((await local.request(method, {example: true})).supported, true);
+assert.equal(nativeCalls.length, 7);
+await assert.rejects(local.request('shutdown'), /unavailable/);
