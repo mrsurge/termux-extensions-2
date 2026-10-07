@@ -217,3 +217,42 @@ existing framework and File Explorer rendered its toolbar, home path and
 directory listing from fresh app storage. The shared framework was not restarted;
 Termux, Cefrium and Gecko data were not cleared. This resolves the reproduced
 blank app-shell bootstrap failure; broad UI/parity acceptance remains separate.
+
+## Local-control backend foundation
+
+- [x] Checkpoint corrected fresh-install asset seed (`f45576f6`, local commit).
+- [x] Investigate actual Desktop controller/config and generic sample helper.
+- [x] Bundle standalone TE2 Node actor reusing Desktop sources, no Electron dependency.
+- [x] Generic helper supports private native-declared backend argv/cwd/env/deadline.
+- [x] Separate actor/framework readiness; build-only preparation precedes FD3 timeout.
+- [x] Four actor tests: >5s build, FD3/owned shutdown/duplicate start, external
+  ownership, failed preparation, and signal-during-build cleanup.
+- [x] Desktop typecheck/113 regressions and actor strict TypeScript check.
+- [x] Independent generic helper suite: 14 Python tests.
+- [x] Generic helper Session -> actual bundled Node actor config/shutdown smoke.
+- [ ] Native provisioning/authorization, host-neutral state events, relay sync/service wiring.
+- [ ] New APK/Pixel local lifecycle acceptance (not approved by this backend slice).
+
+Build: `node desktop_client/electromux/build.mjs`; test:
+`node --test tests/electromux_local_backend.test.mjs`.
+No runtime fetching, native publication, framework restart, release/tag or live
+framework launch occurred. Backend slice is uncommitted in TE2 and independent
+Electromux repositories. See actor README for limitations.
+
+## Asynchronous state transport prerequisite
+
+- [x] Single generic backend reader correlates replies and separates id-less events.
+- [x] Authenticated hello opts into events; request-only clients remain compatible.
+- [x] Bounded 16-frame connection writer disconnects slow consumers without stopping backend.
+- [x] Detach discards events; reconnect explicitly reads authoritative state.
+- [x] TE2 actor emits/coalesces local-framework-state, including build/operation completion.
+- [x] Four actor lifecycle tests await state events instead of polling.
+- [x] Generic helper/protocol suite: 20 tests, including interleaving,
+  EOF-after-reply, invalid event correlation, bounded overflow, partial writes
+  and authenticated reconnect.
+- [x] Actor rebuild and strict TypeScript check; both repository diff checks.
+- [ ] Kotlin socket reader/event subscription and persistent-service wiring.
+- [ ] APK assembly and Pixel local lifecycle acceptance (separate approval).
+
+No Android source, APK, device state, shared framework, tags or releases changed.
+Changes remain uncommitted in both repositories.

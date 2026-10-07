@@ -35,6 +35,9 @@ type LocalFrameworkControllerOptions = {
   readinessDelayMs?: number;
   controlHelloTimeoutMs?: number;
   stopTimeoutMs?: number;
+  // Consumer preparation (e.g. source compilation) precedes the bounded FD3
+  // hello/readiness window. It must not launch the framework itself.
+  prepareFramework?: (config: LocalFrameworkConfigView) => Promise<void>;
 };
 
 type MutableState = {
@@ -45,6 +48,7 @@ type MutableState = {
 };
 
 type ResolvedControllerOptions = {
+  prepareFramework?: (config: LocalFrameworkConfigView) => Promise<void>;
   getLaunchConfig: () => LocalFrameworkConfigView;
   environment: NodeJS.ProcessEnv;
   getSelectedOrigin: () => string;
@@ -295,6 +299,21 @@ export class LocalFrameworkController {
     const executable = config.commandDetected ? config.resolvedCommand : "";
     if (!executable || config.error) {
       throw new Error(config.error || "No local TE2 executable is configured");
+    }
+
+    if (this.#options.prepareFramework) {
+      this.#setState({ phase: "starting", ownership: "none", error: null });
+      try {
+        await this.#options.prepareFramework(copyLaunchConfig(config));
+      } catch (error) {
+        this.#setState({ phase: "failed", ownership: "none",
+          error: errorMessage(error, "Local TE2 preparation failed") });
+        throw error;
+      }
+      // Another host can start TE2 while a long build completes. Never claim it.
+      const afterPreparation = await this.refresh();
+      if (afterPreparation.phase === "running") return this.useLocal();
+      if (afterPreparation.phase === "failed") throw new Error(afterPreparation.error || "Local port is unavailable");
     }
 
     const port = config.port;

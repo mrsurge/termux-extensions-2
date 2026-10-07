@@ -352,6 +352,49 @@ and lifecycle still require separately approved signed APK/both-device testing.
 No APK assembly/install or shared runtime restart occurred. See
 `android/termux/README.md` and `NATIVE_TARGET_SECURITY.md`.
 
+## Local-control backend foundation (approved 2026-10-06)
+
+The actual Desktop controller/config code uses Node built-ins, not Electron.
+Reuse it in `desktop_client/electromux/local-framework-backend.ts`, bundled as a
+TE2-owned Node actor; Termux already supplies Node. Electromux remains generic:
+its authenticated helper starts a native-declared framed backend using private
+`--backend-config` argv/cwd/env, not TE2 endpoints, commands or module imports.
+Sample-default behavior remains independent. No page-selected arbitrary executable.
+
+Preserve TE2's stdin/FD3 control; ordinary logs are not protocol frames. Separate
+control-actor readiness from framework readiness. Start acknowledges asynchronously,
+build-only preparation precedes the bounded hello timer, and the endpoint is
+rechecked after a long build before claiming ownership. No automatic mutation
+retry. Existing/external frameworks are never stopped. Consumer shutdown must
+have time to reap its owned child before generic-helper escalation (20s declared
+for this actor). Shared framework is not touched by synthetic fixture tests.
+
+Next integration gate: expose host-neutral ownership vocabulary, native-declared
+consumer config/provisioning, authenticated native bridge methods, unsolicited
+state delivery, persistent service lifecycle and selected-relay endpoint sync.
+Keep automatic startup/preferred app, installer execution, decorators and new
+APK/device testing outside this first backend slice. Do not present tested
+standalone control logic as an already-wired Android launch feature.
+
+## Asynchronous state transport prerequisite
+
+Before Android service/UI integration, the generic helper separates replies
+from unsolicited backend events with one reader. Authenticated clients explicitly
+opt in using `events: true` in hello; request-only clients remain compatible.
+Events have a bounded nonempty name and no request ID. One per-connection writer
+serializes replies/events with a 16-frame queue; overflow disconnects the slow
+client, not the backend. Disconnected events are discarded, not replayed.
+Reconnect must retrieve current authoritative state. Partial frames and reply
+waits remain bounded; idle backend output does not trigger a timeout.
+
+The TE2 actor emits `local-framework-state` with `data` carrying the existing
+state DTO, coalescing to the newest state under stdout backpressure. Lifecycle
+tests await these events, not poll. This does not yet enable event consumption
+in Kotlin or grant execution authority to any web page. Next slice upgrades the
+native socket client and service ownership, then binds the exact APK-owned
+launcher/settings pages; a loopback origin alone is insufficient because
+remote framework pages share it. No Android source/device mutation in this slice.
+
 ## Historical initial slice boundaries
 
 This slice creates a local branch and planning documents only. No SDK/helper,
