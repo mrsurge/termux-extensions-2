@@ -29,10 +29,12 @@ export function createRemoteElectromuxPlatform({gatewayRequest, getBrowserOrigin
   };
   const gateway = (path, method = "GET", body) => gatewayRequest(`/android-api${path}`, {method, body});
   async function request(method, params = {}) {
-    if (typeof nativeRequest === "function" && ["get_local_framework_state", "get_local_framework_config",
+    if (typeof nativeRequest === "function" && ["get_settings", "save_settings", "get_local_framework_state", "get_local_framework_config",
       "save_local_framework_config", "refresh_local_framework", "start_local_framework",
       "stop_local_framework", "use_local_framework"].includes(method)) {
       const result = await nativeRequest(method, params);
+      if (method === 'get_settings') settings = result;
+      if (method === 'save_settings') settings = result.settings;
       return stateMethods.has(method) ? acceptState(result) : result;
     }
     switch (method) {
@@ -107,5 +109,5 @@ export function createRemoteElectromuxPlatform({gatewayRequest, getBrowserOrigin
   }
   function dispose() {disposed = true; unsubscribeState?.(); stateListeners.clear();}
   return Object.freeze({request, navigate: navigateLocal, on: subscribe, reconcileLocalState, dispose,
-    capabilities: Object.freeze({localFramework: typeof nativeRequest === "function", automaticStartup: false, assetUpdates: false})});
+    capabilities: Object.freeze({localFramework: typeof nativeRequest === "function", automaticStartup: typeof nativeRequest === "function", assetUpdates: false})});
 }

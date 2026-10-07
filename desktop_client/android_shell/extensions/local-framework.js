@@ -140,6 +140,14 @@ export const localFrameworkExtension = {
           });
           actions.appendChild(stopButton);
         }
+      } else if (state.transportUnavailable) {
+        const retry = document.createElement("button");
+        retry.type = "button";
+        retry.className = "secondary-button";
+        retry.textContent = "Reconnect";
+        retry.disabled = actionPending;
+        retry.addEventListener("click", () => { void refresh(); });
+        actions.appendChild(retry);
       } else {
         const startButton = document.createElement("button");
         startButton.type = "button";
@@ -173,7 +181,9 @@ export const localFrameworkExtension = {
         state = await host.getLocalFrameworkState();
         render();
       } catch (error) {
-        host.toast(error?.message || "Local framework state is unavailable");
+        state = {supported: true, phase: 'failed', transportUnavailable: true,
+          error: error?.message || "Local framework state is unavailable"};
+        render();
       }
     };
 

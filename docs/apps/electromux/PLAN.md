@@ -1,5 +1,53 @@
 # Electromux host plan
 
+## Deferred settings/install follow-up
+
+Priority is the confirmed stale-helper-socket incident described in
+[OUTSTANDING_ISSUES.md](OUTSTANDING_ISSUES.md). Its approved lifecycle/UI source
+fix passes tests and preserved-storage Razr cold-start live acceptance. No framework
+mutation replay, shared-framework restart or data clearing is permitted.
+
+User live acceptance of the automatic-startup/isolated-launcher slice passed on
+2026-10-07. The major helper-lifecycle bug is also fixed and live accepted.
+The requested URL-field, bookmarks/localhost preset, remote loopback/run-profile
+verification, Android notification/power settings and conditional standard
+Termux installation card are recorded in [OUTSTANDING_ISSUES.md](OUTSTANDING_ISSUES.md).
+Resume with two coherent scopes: connection/Android settings first, installer
+integration second. Obtain renewed concrete approval before edits or device work.
+
+## Automatic startup and isolated launcher — current implementation
+
+The approved consumer slice reuses Electron's `startLocalFrameworkOnLaunch`,
+`autostart` and `preferredAppId` settings and existing portable launcher UI.
+Private Android `electromux_startup` preferences persist these fields; only the
+exact native launcher/settings document bridge can read/write them. Existing
+framework environment, broadcast and venv configuration remain actor-owned.
+
+A one-shot native app-entry coordinator starts the configured local framework
+concurrently with renderer initialization. Preferred-app navigation waits for
+native selected-endpoint readiness, then uses the existing app-open gateway.
+Remote-only preferred-app mode checks whether the selected server is online;
+local readiness does not incur a second health probe. Activity recreation,
+renderer reload and service reconnect do not replay startup. Navigation and
+endpoint fences prevent late completion from replacing a user's selection.
+Teardown detaches the coordinator; it does not stop an external framework.
+
+TE2 Termux shell/chrome documents now use `/electromux-shell/`, served from APK
+assets before editor OTA. Allowlisted legacy `/android-shell/` HTML migrates to
+the new namespace, without clearing preferences/storage. Source already had
+APK-first interception, so the missing launch card is not proven to be an OTA
+overwrite. This is isolation and migration, not a confirmed incident diagnosis.
+Ordinary Cefrium retains `/android-shell/` and inert startup hooks; generic
+Electromux remains framework-independent. Android intent-security guidance
+keeps local execution authority behind the exact native-document allowlist:
+no new exported components or incoming-intent execution settings were added.
+
+Validation scope: browser regressions, Termux and ordinary Cefrium Kotlin/JVM
+compilation/tests. Next gate needs separate APK assembly/install approval:
+upgrade without storage clearing, editor OTA, saved settings across restart,
+automatic local/preferred launch, remote-only attach and user navigation races.
+No framework/bootstrap change, release/version bump or device mutation in this slice.
+
 Status: approved planning direction; implementation requires a separate scope approval.
 Date: 2026-10-06.
 TE2 integration branch: `feature/electromux-host`.

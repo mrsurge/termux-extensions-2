@@ -1,5 +1,54 @@
 # Electromux tracker
 
+## Stale helper endpoint recovery (2026-10-07)
+
+- [x] Preserve and inspect failing Razr state; verify errno 111, no helper/actor,
+  persisted attempted session and new APK launcher URL.
+- [x] Generic lifetime endpoint lease and refused-socket-only recovery.
+- [x] Native bounded connect recovery before handshake; no mutation retry.
+- [x] Helper instance identity fences actor initialization after replacement.
+- [x] Visible failed-state card/explicit Reconnect rather than hidden card.
+- [x] 15 Python helper tests, 5 browser tests, Termux Kotlin/JVM compile/tests.
+- [x] Approved APK build/install preserving failing storage.
+- [x] User cold-start recovery test without clearing data; reports working.
+
+Recovery APK SHA-256 `6ac089c36ad8530ab97e6f682dc75d7b7c11bb3ca50a617ce529da141b7acce5`
+matches the installed Razr APK. Existing Termux-compatible signer verified;
+packaged helper includes recovery/lease code. After installation, session
+`98d5f49300b5`, `attempted=true` and its stale socket are still present. The agent
+did not launch the app/framework or clear storage. User live acceptance passed
+on 2026-10-07; resume the deferred connection/Android settings plan next.
+
+See OUTSTANDING_ISSUES for evidence and remaining fail-closed cases. These source
+changes include the nested Electromux repo; publish its source/pin separately
+when committing. Preserve unrelated nested build-environment changes.
+
+## Automatic startup and launcher isolation (2026-10-07)
+
+- [x] Electron-shaped startup settings through the exact-document native bridge.
+- [x] Private persisted startup configuration; preserve omitted fields on save.
+- [x] One-shot native entry startup parallel with renderer initialization.
+- [x] Selected readiness, navigation/disposal fences and remote-only attach.
+- [x] Separate APK `/electromux-shell/` namespace with legacy URL migration.
+- [x] Browser regressions and Termux/ordinary Cefrium source build checks.
+- [x] Assemble/install separately approved APK without clearing storage.
+- [x] User reports the installed startup/settings slice working live.
+- [ ] Separate explicit editor OTA/upgrade preservation stress validation.
+
+Settings/install follow-up is deferred for a newly reported major bug; see
+[OUTSTANDING_ISSUES.md](OUTSTANDING_ISSUES.md). Documentation only was approved.
+
+Approved debug APK assembly and in-place Razr installation succeeded, preserving
+storage and without launching the app/framework. APK SHA-256:
+`4a1343a1a793bf5362ef359d8e5b9aef5c6528098fbc91f1662722e6dafe4cb8`.
+Signer remains the existing Termux-compatible
+`b6da01480eefd5fbf2cd3771b8d1021ec791304bdd6c4bf41d3faabad48ee5e1`.
+Bundled bootstrap includes native startup settings; user live acceptance is pending.
+
+No live acceptance is inferred from source checks. Earlier disabled-startup
+entries below describe preceding checkpoints; owned-framework exit parity remains
+a separate follow-up. The missing-card incident's root cause remains unconfirmed.
+
 Plan: [PLAN.md](PLAN.md). Proposal: [onboarding draft](../../../electromux-onboarding-draft.md).
 
 ## Release-compatible mobile launch wait (2026-10-07)

@@ -19,9 +19,9 @@ import org.json.JSONObject
 internal object TermuxChromePolicy {
     fun descriptor(origin: String): ConsumerDescriptor {
         val base = origin.trimEnd('/')
-        val page = "$base/android-shell/chrome.html"
+        val page = "$base/electromux-shell/chrome.html"
         return ConsumerDescriptor("te2-termux.chrome", "TE2 Termux toolbar", page,
-            setOf("android-shell/chrome.html"), mapOf(page to "android-shell/chrome.html"),
+            setOf("electromux-shell/chrome.html"), mapOf(page to "electromux-shell/chrome.html"),
             setOf("view_action", "get_chrome_state"), setOf("chrome-state"), base)
     }
 
@@ -50,7 +50,7 @@ internal class TermuxChromeSurface(
     private val state: () -> JSONObject,
     private val failure: (String) -> Unit,
 ) : Closeable {
-    private val page = "${origin.trimEnd('/')}/android-shell/chrome.html"
+    private val page = "${origin.trimEnd('/')}/electromux-shell/chrome.html"
     private val descriptor = TermuxChromePolicy.descriptor(origin)
     private val spec = ChromeSurfaceSpec(descriptor, 48)
     private val gate = RendererEventGate(descriptor.routes.keys)

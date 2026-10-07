@@ -47,3 +47,37 @@ test('mobile pending launch shows progress and allows Cancel while Start is busy
     }
   }
 });
+
+test('failed state read keeps a visible reconnect card without replaying Start', async () => {
+  const source = await readFile(new URL('../desktop_client/android_shell/extensions/local-framework.js', import.meta.url), 'utf8');
+  const {localFrameworkExtension} = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
+  const previous = globalThis.document;
+  class Element {
+    children = []; listeners = {}; dataset = {};
+    append(...children) { this.children.push(...children); }
+    appendChild(child) { this.children.push(child); }
+    replaceChildren(...children) { this.children = children; }
+    setAttribute() {}
+    addEventListener(name, listener) { this.listeners[name] = listener; }
+  }
+  const descendants = element => [element, ...element.children.flatMap(descendants)];
+  let reads = 0, starts = 0;
+  globalThis.document = {createElement: () => new Element()};
+  try {
+    const root = new Element();
+    const mounted = localFrameworkExtension.mount(root, {
+      getLocalFrameworkState: async () => { reads++; throw new Error('Connection refused'); },
+      onLocalFrameworkState: () => () => {},
+      startLocalFramework: async () => { starts++; },
+    });
+    await Promise.resolve(); await Promise.resolve();
+    assert.equal(root.hidden, false);
+    assert.ok(descendants(root).some(el => el.textContent === 'Connection refused'));
+    descendants(root).find(el => el.textContent === 'Reconnect').listeners.click();
+    await Promise.resolve(); await Promise.resolve();
+    assert.equal(reads, 2); assert.equal(starts, 0);
+    mounted.dispose();
+  } finally {
+    if (previous === undefined) delete globalThis.document; else globalThis.document = previous;
+  }
+});

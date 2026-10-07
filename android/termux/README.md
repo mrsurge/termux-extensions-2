@@ -14,19 +14,27 @@ Physical local launch acceptance remains pending.
 The `bundleTermuxShell` task copies the actual `desktop_client/android_shell/`
 browser sources into generated `electromux_shell/` APK assets. Only the generated
 HTML entrypoints select the consumer bootstrap. The native handler serves an
-exact allowlist at `/android-shell/`, before the editor OTA tree, so an ordinary
+exact allowlist at `/electromux-shell/`, before the editor OTA tree, so an ordinary
 editor OTA cannot overwrite the consumer shell or silently fetch it upstream.
 Missing declared shell assets fail locally. Editor/application assets continue
 using the established APK-seed/OTA path and existing loopback relay.
 
 The bootstrap injects the remote gateway adapter before importing Desktop's
-launcher/settings modules. It rejects non-loopback hosting and disables interim
-automatic-startup/update controls, including async control re-enablement. Endpoint,
+launcher/settings modules. It rejects non-loopback hosting. Startup settings use
+the exact-document native bridge; asset-update controls remain disabled here. Endpoint,
 bookmarks, catalog and app actions reuse the existing Android gateway/service.
 Sidebar preferences and second-editor bridge continue through the same native
 implementation; source reuse is not physical parity acceptance.
 
 ## Source validation
+
+Automatic local launch and preferred-app selection reuse Electron's settings
+fields through the native exact-document bridge. They persist in private
+`electromux_startup` preferences, not random-origin browser storage. Explicit
+fresh app entry starts the local controller parallel with UI loading; preferred
+app navigation waits selected readiness. Reload/recreation does not replay it.
+Legacy launcher URLs migrate to `/electromux-shell/` without clearing app data.
+This slice still requires APK upgrade/OTA and startup live acceptance.
 
 Initialize the pinned generic host source before configuring this target:
 
@@ -70,7 +78,7 @@ lanes. Activity navigation only detaches its document subscription. Destruction
 disconnects without implicitly stopping the retained helper/actor/framework.
 Manual Stop uses the Desktop controller and cannot stop external frameworks.
 
-Only the exact native-served `/android-shell/index.html` and `settings.html`
+Only the exact native-served `/electromux-shell/index.html` and `settings.html`
 documents can invoke local config/state/start/stop/use. Other same-origin app
 pages, query/fragment variants and remote documents have no such authority.
 Credentials, helper argv and backend declarations are native-owned. Identity

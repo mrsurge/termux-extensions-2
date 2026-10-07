@@ -47,6 +47,7 @@ internal class TermuxLocalFrameworkRuntime(private val service: PersistentNetwor
     private val selectionFence = TermuxLocalSelectionFence()
     private val pendingEvents = AtomicInteger()
     private var actorStarted = false
+    private var helperInstanceId: String? = null
     private var selectionBaselineSet = false
     @Volatile private var closed = false
 
@@ -63,7 +64,32 @@ internal class TermuxLocalFrameworkRuntime(private val service: PersistentNetwor
     override fun request(method: String, params: JSONObject): JSONObject {
         require(method in TermuxLocalControlPolicy.methods)
         check(!closed)
+        if (method == "get_settings") return TermuxStartupSettingsStore(service).load()
+            .merge(AndroidAppSettingsStore(service).load().toJson())
+        if (method == "save_settings") {
+            val startupStore = TermuxStartupSettingsStore(service)
+            val startupValues = startupStore.load().merge(JSONObject())
+            for (key in params.keys()) startupValues.put(key, params.get(key))
+            val startup = TermuxStartupSettings.parse(startupValues)
+            val store = AndroidAppSettingsStore(service)
+            val previous = store.load()
+            validatedAndroidFrameworkEndpoint(params.optString("frameworkHost", previous.frameworkHost),
+                params.optInt("frameworkPort", previous.frameworkPort))
+            val next = store.update(params)
+            startupStore.save(startup)
+            main.post { if (!closed) service.configure(next) }
+            return JSONObject().put("settings", startup.merge(next.toJson()))
+                .put("browserFrameworkOrigin", service.browserFrameworkBaseUrl())
+                .put("connectionChanged", previous.frameworkBaseUrl != next.frameworkBaseUrl)
+        }
         val status = client.connect()
+        val instance = status.optString("helperInstanceId").takeIf { it.isNotEmpty() }
+        if (instance != null && instance != helperInstanceId) {
+            actorStarted = false
+            selectionBaselineSet = false
+            selectionFence.reset()
+            helperInstanceId = instance
+        }
         // Starting the retained consumer actor does not start the framework.
         if (status.optString("state") != "ready") {
             check(!actorStarted) { "Consumer actor exited; explicit recovery required" }
@@ -99,5 +125,9 @@ internal class TermuxLocalFrameworkRuntime(private val service: PersistentNetwor
     }
 
     override fun close() { closed = true; owner.close() }
+
+    override fun beginStartup(onPreferredApp: (String, String) -> Unit, onError: (String) -> Unit): Closeable =
+        TermuxStartupCoordinator(TermuxStartupSettingsStore(service).load(), this,
+            service::selectedFrameworkBaseUrl, onPreferredApp, onError).also { it.begin() }
 
 }

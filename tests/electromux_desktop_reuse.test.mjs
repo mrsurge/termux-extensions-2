@@ -112,9 +112,12 @@ const local = createRemoteElectromuxPlatform({
   nativeRequest: async (method, params) => {nativeCalls.push({method, params}); return {supported: true};},
 });
 assert.equal(local.capabilities.localFramework, true);
-assert.equal(local.capabilities.automaticStartup, false);
+assert.equal(local.capabilities.automaticStartup, true);
 for (const method of ['get_local_framework_state', 'get_local_framework_config', 'save_local_framework_config',
   'refresh_local_framework', 'start_local_framework', 'stop_local_framework', 'use_local_framework'])
   assert.equal((await local.request(method, {example: true})).supported, true);
 assert.equal(nativeCalls.length, 7);
+await local.request('get_settings');
+await local.request('save_settings', {startLocalFrameworkOnLaunch: true, autostart: true, preferredAppId: 'code_te2'});
+assert.deepEqual(nativeCalls.slice(-2).map(call => call.method), ['get_settings', 'save_settings']);
 await assert.rejects(local.request('shutdown'), /unavailable/);

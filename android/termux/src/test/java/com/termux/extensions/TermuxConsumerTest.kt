@@ -13,11 +13,11 @@ class TermuxConsumerTest {
         assertFalse(File("src/main/java/com/termux/extensions/MainActivity.kt").exists())
     }
     @Test fun shellAllowlistRejectsEscapesAndUnlistedResources() {
-        assertEquals("electromux_shell/host.js", TermuxShellAssets.assetPath("/android-shell/host.js"))
+        assertEquals("electromux_shell/host.js", TermuxShellAssets.assetPath("/electromux-shell/host.js"))
         for (file in listOf("chrome.html", "chrome.css", "chrome.js"))
-            assertEquals("electromux_shell/$file", TermuxShellAssets.assetPath("/android-shell/$file"))
-        for (path in listOf("/android-shell/../secret", "/android-shell/%2e%2e/secret",
-            "/android-shell/unknown.js", "/api/apps/catalog")) assertNull(TermuxShellAssets.assetPath(path))
+            assertEquals("electromux_shell/$file", TermuxShellAssets.assetPath("/electromux-shell/$file"))
+        for (path in listOf("/electromux-shell/../secret", "/electromux-shell/%2e%2e/secret",
+            "/electromux-shell/unknown.js", "/api/apps/catalog")) assertNull(TermuxShellAssets.assetPath(path))
     }
     @Test fun sharedUidIsManifestLevelAndServiceRemainsPrivate() {
         val namespace = "http://schemas.android.com/apk/res/android"

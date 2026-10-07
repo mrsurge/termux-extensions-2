@@ -8,7 +8,7 @@ if (window.location.hostname !== '127.0.0.1' || window.location.protocol !== 'ht
 
 const localBridge = globalThis.ElectromuxBridge.create({
   query: options => globalThis.cefriumQuery(options),
-  methods: ['get_local_framework_config', 'save_local_framework_config', 'get_local_framework_state',
+  methods: ['get_settings', 'save_settings', 'get_local_framework_config', 'save_local_framework_config', 'get_local_framework_state',
     'refresh_local_framework', 'start_local_framework', 'stop_local_framework', 'use_local_framework'],
   events: ['local-framework-state'], documentId: crypto.randomUUID().replaceAll('-', ''),
   timeoutMs: 20000,
@@ -34,7 +34,7 @@ globalThis.__te2ShellPlatform = createRemoteElectromuxPlatform({
   },
 });
 
-// Manual local controls are enabled; automatic startup and asset update remain
+// Startup settings are native-owned; only asset update remains
 // visibly unavailable until their separate parity slices.
 function disableUnavailableControls() {
   for (const section of document.querySelectorAll('.settings-section')) {
@@ -42,11 +42,6 @@ function disableUnavailableControls() {
     for (const control of section.querySelectorAll('input, button, select')) control.disabled = true;
     section.dataset.capability = 'unavailable';
     section.title = 'Asset updates are not enabled in this consumer shell yet';
-  }
-  for (const control of document.querySelectorAll('#autostart-local-framework, #autostart-preferred-app, #preferred-app')) {
-    control.disabled = true;
-    control.dataset.capability = 'unavailable';
-    control.title = 'Automatic startup is a subsequent parity gate';
   }
 }
 disableUnavailableControls();

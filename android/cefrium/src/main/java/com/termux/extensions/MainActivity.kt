@@ -116,6 +116,11 @@ class MainActivity : AppCompatActivity() {
     private var appHealthFailureCount = 0
     private val appHealthCheckRunnable = Runnable { runAppHealthProbe() }
     private var navigationGeneration = 0L
+    private var beginTermuxStartupOnEntry = false
+    private var termuxStartup: java.io.Closeable? = null
+    private var startupOverridesRestore = false
+    private var startupWaitsForLocalReadiness = false
+    private var pendingPreferredApp: Pair<String, String>? = null
     private var persistentNetworkEnabled = false
     private var pendingColdRestorePath: String? = null
     private var notificationPermissionRequestInFlight = false
@@ -286,6 +291,20 @@ class MainActivity : AppCompatActivity() {
             syncDevToolsRuntimePolicy()
             if (!clientInitializationStarted) {
                 clientInitializationStarted = true
+                if (BuildConfig.TE2_TERMUX && beginTermuxStartupOnEntry) {
+                    beginTermuxStartupOnEntry = false
+                    service.localFrameworkRuntime?.let { local ->
+                        val startup = local.request("get_settings", JSONObject())
+                        startupWaitsForLocalReadiness = startup.optBoolean("startLocalFrameworkOnLaunch")
+                        startupOverridesRestore = startup.optBoolean("autostart") &&
+                            startup.optString("preferredAppId").isNotBlank()
+                        termuxStartup = local.beginStartup({ app, origin ->
+                            runOnUiThread { pendingPreferredApp = app to origin; consumePreferredAppStartup() }
+                        }, { error -> runOnUiThread {
+                            if (!isDestroyed) Toast.makeText(this@MainActivity, error, Toast.LENGTH_LONG).show()
+                        } })
+                    }
+                }
                 initializeClient()
             }
         }
@@ -303,6 +322,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        beginTermuxStartupOnEntry = savedInstanceState == null
         NativeRuntimeDebug.register("activity", this)
         diagnostics = AndroidDiagnostics(applicationContext)
         diagnostics.beginSession()
@@ -335,6 +355,7 @@ class MainActivity : AppCompatActivity() {
             initializeBrowser()
             checkForAssetUpdate()
             restoreOrLoadLauncher()
+            consumePreferredAppStartup()
         } catch (error: Exception) {
             Log.e(TAG, "Cefrium shell startup failed", error)
             nativeHeader.visibility = View.VISIBLE
@@ -727,6 +748,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun restoreOrLoadLauncher() {
+        if (BuildConfig.TE2_TERMUX && startupOverridesRestore) { loadLauncher(); return }
         val rawSavedPath = prefs().getString(KEY_LAST_PATH, null)
         val savedPath = rawSavedPath?.let(::canonicalizeCodeTe2AppPath)
         if (savedPath != null && savedPath != rawSavedPath) {
@@ -929,6 +951,36 @@ class MainActivity : AppCompatActivity() {
                 frameworkBaseUrl,
             ),
         )
+    }
+
+    private fun consumePreferredAppStartup() {
+        val (app, expectedOrigin) = pendingPreferredApp ?: return
+        if (!::browser.isInitialized || !::shellGateway.isInitialized) return
+        pendingPreferredApp = null
+        val generation = navigationGeneration
+        if (currentPath != LAUNCHER_PATH || clientRuntimeService?.selectedFrameworkBaseUrl() != expectedOrigin) return
+        Thread {
+            try {
+                // Local startup already supplied readiness; only remote-only attachment needs a probe.
+                if (!startupWaitsForLocalReadiness) {
+                    val status = checkNotNull(shellGateway.handle(LocalHttpRequest("GET", "/android-api/framework/status", ByteArray(0))))
+                    if (!JSONObject(status.body.toString(Charsets.UTF_8)).getJSONObject("data").optBoolean("online")) return@Thread
+                }
+                if (clientRuntimeService?.selectedFrameworkBaseUrl() != expectedOrigin) return@Thread
+                val response = checkNotNull(shellGateway.handle(LocalHttpRequest("POST", "/android-api/apps/$app/open", ByteArray(0))))
+                val envelope = JSONObject(response.body.toString(Charsets.UTF_8))
+                check(response.status in 200..299 && envelope.optBoolean("ok")) { "Preferred app could not be opened" }
+                val target = envelope.getJSONObject("data").getString("url")
+                runOnUiThread {
+                    if (isDestroyed || generation != navigationGeneration || currentPath != LAUNCHER_PATH ||
+                        clientRuntimeService?.selectedFrameworkBaseUrl() != expectedOrigin || !isRelayOrigin(target)) return@runOnUiThread
+                    browser.loadUrl(target)
+                }
+            } catch (error: Exception) {
+                runOnUiThread { if (!isDestroyed) Toast.makeText(this,
+                    error.message ?: "Preferred app startup failed", Toast.LENGTH_LONG).show() }
+            }
+        }.start()
     }
 
     private fun handleNativeQuery(
@@ -1928,6 +1980,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        termuxStartup?.close(); termuxStartup = null
+        pendingPreferredApp = null
         termuxChrome?.close()
         termuxChrome = null
         termuxLocalPageBridge?.close()
@@ -1976,7 +2030,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "CefriumMainActivity"
-        private const val LAUNCHER_PATH = "/android-shell/index.html"
+        private val LAUNCHER_PATH = if (BuildConfig.TE2_TERMUX) TermuxShellAssets.LAUNCHER else "/android-shell/index.html"
         private const val DEFAULT_APP_ID = CODE_TE2_APP_ID
         private const val KEY_LAST_PATH = "last_path"
         private const val KEY_NOTIFICATION_PERMISSION_REQUESTED =

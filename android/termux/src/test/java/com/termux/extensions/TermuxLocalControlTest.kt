@@ -11,13 +11,13 @@ class TermuxLocalControlTest {
     @Test fun executionAuthorityIsExactPackagedDocument() {
         val policy = TermuxLocalControlPolicy.descriptor(origin)
         for (page in listOf("index.html", "settings.html"))
-            assertTrue(policy.allows("$origin/android-shell/$page", "start_local_framework"))
-        for (page in listOf("$origin/app/code_te2", "$origin/android-shell/index.html?q=1",
-            "$origin/android-shell/settings.html#x", "http://remote.test/android-shell/index.html",
-            "http://127.0.0.1:44101/android-shell/index.html"))
+            assertTrue(policy.allows("$origin/electromux-shell/$page", "start_local_framework"))
+        for (page in listOf("$origin/app/code_te2", "$origin/electromux-shell/index.html?q=1",
+            "$origin/electromux-shell/settings.html#x", "http://remote.test/electromux-shell/index.html",
+            "http://127.0.0.1:44101/electromux-shell/index.html"))
             assertFalse(policy.allows(page, "start_local_framework"))
-        assertFalse(policy.allows("$origin/android-shell/index.html", "set_selected_framework"))
-        assertFalse(policy.allows("$origin/android-shell/index.html", "shutdown"))
+        assertFalse(policy.allows("$origin/electromux-shell/index.html", "set_selected_framework"))
+        assertFalse(policy.allows("$origin/electromux-shell/index.html", "shutdown"))
     }
     @Test fun genericProtocolActuallyEnforcesConsumerPolicy() {
         val descriptor = TermuxLocalControlPolicy.descriptor(origin)
@@ -27,7 +27,7 @@ class TermuxLocalControlTest {
         })
         val raw = JSONObject().put("id", 1).put("method", "start_local_framework")
             .put("params", JSONObject()).put("documentId", "0123456789abcdef").toString()
-        val request = protocol.parse(raw, "$origin/android-shell/index.html")
+        val request = protocol.parse(raw, "$origin/electromux-shell/index.html")
         protocol.execute(request)
         assertEquals(1, invoked)
         try { protocol.parse(raw, "$origin/app/code_te2"); fail("Remote app accepted") }
@@ -64,7 +64,7 @@ class TermuxLocalControlTest {
             assertTrue(html.indexOf("./electromux-bridge.js") >= 0)
             assertTrue(html.indexOf("./electromux-bridge.js") < html.indexOf("./electromux-bootstrap.js"))
         }
-        assertEquals("electromux-bridge.js", TermuxShellAssets.assetPath("/android-shell/electromux-bridge.js"))
+        assertEquals("electromux-bridge.js", TermuxShellAssets.assetPath("/electromux-shell/electromux-bridge.js"))
     }
     @Test fun nativeSelectionUpdatesActivityProjectionBeforeReadiness() {
         val source = java.io.File("../cefrium/src/main/java/com/termux/extensions/MainActivity.kt").readText()

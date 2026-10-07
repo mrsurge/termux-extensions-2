@@ -22,10 +22,13 @@ async function boot(hostname = '127.0.0.1', settingsPage = true) {
   const context = createContext({URL, Object, Error, console, crypto: webcrypto, TextEncoder, setTimeout, clearTimeout,
     cefriumQuery: options => {
       const request = JSON.parse(options.request); nativeCalls.push(request);
-      options.onSuccess(JSON.stringify({id: request.id, result: {ok: true, value: {supported: true, phase: 'idle'}}, events: []}));
+      const value = request.method === 'get_settings'
+        ? {frameworkHost: 'remote.test', frameworkPort: 8089, startLocalFrameworkOnLaunch: true, autostart: true, preferredAppId: 'code_te2'}
+        : {supported: true, phase: 'idle'};
+      options.onSuccess(JSON.stringify({id: request.id, result: {ok: true, value}, events: []}));
     },
     window: {location: {origin: `http://${hostname}:44100`, hostname, protocol: 'http:',
-      pathname: settingsPage ? '/android-shell/settings.html' : '/android-shell/index.html', assign() {}},
+      pathname: settingsPage ? '/electromux-shell/settings.html' : '/electromux-shell/index.html', assign() {}},
       addEventListener: (name, callback) => add(windowListeners, name, callback),
       removeEventListener: (name, callback) => remove(windowListeners, name, callback)},
     document: {visibilityState: 'visible', querySelectorAll: () => [section],
@@ -69,8 +72,10 @@ state.controls[0].disabled = false;
 state.observer.callback([{type: 'attributes', target: state.controls[0]}]);
 assert.equal(state.controls[0].disabled, true, 'async settings rendering cannot enable missing capability');
 const settings = await state.context.__te2ShellPlatform.request('get_settings');
-assert.equal(settings.frameworkHost, 'remote.test', 'unwrap gateway data once');
-assert.equal(state.calls[0].path, '/android-api/settings');
+assert.equal(settings.frameworkHost, 'remote.test', 'native settings use Electron field names');
+assert.equal(settings.startLocalFrameworkOnLaunch, true);
+assert.equal(state.calls.length, 0, 'privileged startup settings do not use remote gateway');
+assert.equal(state.context.__te2ShellPlatform.capabilities.automaticStartup, true);
 assert.equal((await state.context.__te2ShellPlatform.request('get_local_framework_state')).supported, true);
 assert.equal(state.nativeCalls[0].method, 'get_local_framework_state');
 assert.match(state.nativeCalls[0].documentId, /^[a-zA-Z0-9_-]{16,80}$/);

@@ -4,13 +4,13 @@ import dev.mrsurge.electromux.host.ConsumerDescriptor
 import org.json.JSONObject
 
 internal object TermuxLocalControlPolicy {
-    val methods = setOf("get_local_framework_config", "save_local_framework_config",
+    val methods = setOf("get_settings", "save_settings", "get_local_framework_config", "save_local_framework_config",
         "get_local_framework_state", "refresh_local_framework", "start_local_framework",
         "stop_local_framework", "use_local_framework")
     fun descriptor(origin: String) = ConsumerDescriptor("te2-termux", "TE2 Termux",
-        "$origin/android-shell/index.html", setOf("android-shell/index.html", "android-shell/settings.html"),
-        mapOf("$origin/android-shell/index.html" to "android-shell/index.html",
-            "$origin/android-shell/settings.html" to "android-shell/settings.html"),
+        "$origin/electromux-shell/index.html", setOf("electromux-shell/index.html", "electromux-shell/settings.html"),
+        mapOf("$origin/electromux-shell/index.html" to "electromux-shell/index.html",
+            "$origin/electromux-shell/settings.html" to "electromux-shell/settings.html"),
         methods, setOf("local-framework-state"), origin)
 }
 
