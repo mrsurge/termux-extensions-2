@@ -41,6 +41,66 @@ factory while retaining its external stdio entrypoint, parameter/schema guards,
 session/revision state, config authority and controller. Prove parity locally
 before wiring the embedded engine into TE2's Android service/renderer.
 
+###### TE2 actor consumer extraction
+
+Checkpoint before extraction: TE2 e0eda55f, Electromux 4e82b58 (local only).
+`desktop_client/electromux/local-framework-consumer.ts` now exports an explicit
+factory with native-owned environment/event/log adapters; imports alone do not
+read config, attach stdin/register signals or launch children. Methods/events,
+session/revision ordering, config-root isolation, immediate Start acknowledgement,
+selection intent and cancellation remain in this TE2 policy module. Dispatch
+rejects concurrent/closed calls and clones DTO results; disposal is idempotent,
+stops only owned children and suppresses later state publications.
+
+The existing `local-framework-backend.ts` remains a thin executable adapter with
+the same helper ready envelope, correlated replies and signal/EOF cleanup. Its
+framing/writes now reuse pinned Electromux FrameDecoder/FrameWriter, with bounded
+request batches (8) and outbound queue/deadlines rather than retained unbounded
+input. Build emits both stdio executable and importable Node24 consumer bundle.
+LocalFrameworkController remains sole TE2 child lifecycle/control authority.
+
+Acceptance: strict actor and Electron typechecks/build, seven existing real-process
+tests and five direct factory tests pass; the combined run also passes the browser
+state-ordering/coalescing/disposal regression (13 reported tests). Direct tests cover import effects,
+config DTO isolation, config/child-root separation, owned launch/revision state,
+source cancellation, endpoint guards, unknown methods, idempotent disposal and
+external-framework preservation. These are isolated fixture processes, not live
+TE2 restarts. No Android build/install, framework restart, asset OTA or runtime
+replacement belongs to this extraction. Next integration must add typed request
+parameters to the embedded host and preserve exact native document/consumer
+authorization before selecting this factory in TE2 Termux.
+
+###### Typed embedded API and native selection seam
+
+The generic private-FD runtime is now `runtime-host.ts`, supplied a compiled
+consumer factory by its entrypoint. Proof-only methods/completion events remain
+in the proof entry/consumer, not generic routing. Requests accept optional JSON
+object params, validated/copied with 64KiB byte, 4096-node and 32-level shape
+bounds; method syntax is generic, while consumer declarations authorize dispatch.
+Direct host calls also validate/copy params before asynchronous dispatch.
+
+Native `EmbeddedConsumerSpec` declares a literal packaged embedded_node/*.mjs
+entry and copied unmodifiable method/event sets; traversal/remote paths and
+consumer declaration of runtime.ready are rejected. EmbeddedNodeRuntime uses
+that asset and those allowlists, copies JSONObject params and retains existing
+ready framing, process lifetime and event transport. This declaration grants no
+renderer authority: the existing exact-page/presentation gate remains necessary.
+Retained engines must never be retargeted to a different consumer in-process.
+
+TE2 build now also emits embedded-entry.mjs, using its imported consumer and
+explicit Termux child/config environment in native Termux mode. Private-FD host
+fixture tests verify typed endpoint params, proof-method rejection, real owned
+launch/state, graceful cleanup and build cancellation on disconnect. This is
+host-side integration evidence, not ARM64 embedded TE2/Cefrium acceptance.
+No active TE2 Android adapter, APK seed, installed client or shared framework
+was changed. The next slice must wire package assets/build inputs and service
+ownership into TE2 Termux while preserving native selection/document fences and
+explicitly dealing with a retained old helper/actor; no automatic uncertain
+launch or externally-owned framework shutdown is permitted.
+Validation: strict runtime/actor typechecks and bundles, 24 runtime Node tests,
+15 combined TE2 process/factory/browser-state regressions and native runtime/proof
+JVM checks all pass. No APK assembly/install or device mutation was performed.
+
 Approved follow-up adds TS `OwnedService` semantic FD3 readiness, explicit
 status/stop, startup-failure reporting, bounded output and owned-group cleanup;
 no automatic restart. Start returns at readiness rather than at child exit.

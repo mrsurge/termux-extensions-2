@@ -20,7 +20,12 @@
     events, bounded writer tests, independent Razr lifecycle acceptance.
   - [x] Consumer-selected readiness/stop and bounded streaming output primitives;
     host output regressions and updated independent Razr lifecycle pass.
-  - [ ] Existing TE2 actor factory extraction/parity, then embedded Android integration.
+  - [x] Existing TE2 actor factory extraction and direct/stdin-stdout parity tests.
+  - [ ] Typed embedded request parameters and TE2 native consumer selection;
+    preserve exact-document authorization, then repeat Android lifecycle acceptance.
+    - [x] Generic typed parameter DTO validation and APK-owned native entry/method/event declaration.
+    - [x] TE2 embedded entry bundle and host private-FD fixture lifecycle/parity tests.
+    - [ ] TE2 package/build-input wiring and PersistentNetworkService adapter migration.
 - [ ] Integrate existing TE2 consumer actor; repeat local/remote/lifecycle acceptance.
 - [ ] Remove Python/external Node host prerequisites and resume installer UI.
 

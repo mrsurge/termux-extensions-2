@@ -5,6 +5,28 @@ Output: `desktop_client/electromux/dist/local-framework-backend.mjs`. The bundle
 uses actual Desktop controller/config/roots modules, Node >=22.12, and no
 Electron runtime dependency. This is TE2 consumer code, not generic Electromux.
 
+The same build also produces `dist/local-framework-consumer.mjs` for embedded
+integration. Importing it performs no configuration I/O, process signal setup,
+stdin attachment or framework launch. Call `createLocalFrameworkConsumer` with
+native-owned environment, event sink and diagnostic log callback. It returns
+declared methods/events, `dispatch(method, params)` and idempotent `dispose()`.
+The actual Desktop controller still owns framework lifecycle/control; the
+generic Electromux OwnedService is not a second supervisor around it. Results
+are cloned across this in-process boundary. The accepted stdio executable remains
+as a thin adapter with the same helper hello and correlation envelopes, now using
+Electromux bounded framing/writer primitives. This extraction is not yet wired
+into the Android embedded runtime and does not replace installed TE2 assets.
+
+`dist/embedded-entry.mjs` is now the TE2 compiled entry for the reusable private-FD
+runtime. It accepts bounded object parameter DTOs and selects the same consumer
+factory; standalone mode supports isolated host tests, while native Termux mode
+supplies explicit Termux environment/config roots. Core Electromux imports no
+TE2 policy. Native `EmbeddedConsumerSpec` chooses an exact APK asset entry plus
+method/event allowlists; no module path arrives from a page. This seam is tested
+on host fixture processes but is not yet packaged/selected by TE2 Termux's
+PersistentNetworkService. Its existing helper adapter/document/selection fences
+remain active. Updating installed TE2 requires a later explicit migration/APK gate.
+
 The generic helper accepts a private native-owned `--backend-config` JSON file:
 absolute `argv`, absolute existing `cwd`, optional environment overrides and
 `stopTimeout` (up to 30 seconds). For this backend select 20 seconds so owned
@@ -58,4 +80,5 @@ the service's current endpoint and projects actual native selection back to page
 ```sh
 node desktop_client/electromux/build.mjs
 node --test tests/electromux_local_backend.test.mjs
+node --test tests/electromux_local_consumer.test.mjs
 ```

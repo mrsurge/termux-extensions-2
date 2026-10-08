@@ -6,7 +6,7 @@ import {mkdtemp, mkdir, copyFile, chmod, writeFile, rm} from 'node:fs/promises';
 import {createServer} from 'node:http';
 import {join} from 'node:path';
 
-async function harness(t, env = {}, isolateLauncherConfig = false) {
+async function harness(t, env = {}, isolateLauncherConfig = false, embedded = false) {
   const root = await mkdtemp(join(process.env.TMPDIR || join(process.cwd(), '.codex-scratch'), 'electromux-test-'));
   const command = join(root, 'te2');
   await copyFile('tests/fixtures/electromux_framework.cjs', command); await chmod(command, 0o700);
@@ -15,12 +15,15 @@ async function harness(t, env = {}, isolateLauncherConfig = false) {
   const config = join(root, 'config'); await mkdir(config);
   await writeFile(join(config, 'desktop-local-framework.json'), JSON.stringify({version: 1, command, port, env}));
   const frameworkConfigHome = isolateLauncherConfig ? join(root, 'framework-config') : config;
-  const child = spawn(process.execPath, ['desktop_client/electromux/dist/local-framework-backend.mjs'], {
+  const child = spawn(process.execPath, embedded ?
+    ['desktop_client/electromux/dist/embedded-entry.mjs', '3', root, 'standalone'] :
+    ['desktop_client/electromux/dist/local-framework-backend.mjs'], {
     env: {...process.env, TE2_CONFIG_HOME: frameworkConfigHome,
-      ...(isolateLauncherConfig ? {TE2_ELECTROMUX_CONFIG_HOME: config} : {})}, stdio: ['pipe', 'pipe', 'pipe']});
+      ...(isolateLauncherConfig ? {TE2_ELECTROMUX_CONFIG_HOME: config} : {})}, stdio: embedded ? ['pipe', 'pipe', 'pipe', 'pipe'] : ['pipe', 'pipe', 'pipe']});
+  const channel = embedded ? child.stdio[3] : child.stdout;
   let buffer = Buffer.alloc(0), seq = 0, waiters = [], frames = [], stderr = '', events = [], eventWaiters = [];
   child.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-8192); });
-  child.stdout.on('data', chunk => {
+  channel.on('data', chunk => {
     buffer = Buffer.concat([buffer, chunk]);
     while (buffer.length >= 4 && buffer.length >= 4 + buffer.readUInt32BE(0)) {
       const size = buffer.readUInt32BE(0); assert.ok(size > 0 && size <= 65536);
@@ -34,14 +37,20 @@ async function harness(t, env = {}, isolateLauncherConfig = false) {
     }
   });
   const next = () => frames.length ? Promise.resolve(frames.shift()) : new Promise(resolve => waiters.push(resolve));
-  const ready = await next(); assert.deepEqual(ready, {version: 1, event: 'ready'});
+  const ready = await next();
+  if (embedded) { assert.equal(ready.event, 'runtime.ready'); assert.equal(ready.data.version, 1); }
+  else assert.deepEqual(ready, {version: 1, event: 'ready'});
   async function call(method, params) {
     const id = ++seq, body = Buffer.from(JSON.stringify({id, method, params}));
-    const header = Buffer.alloc(4); header.writeUInt32BE(body.length); child.stdin.write(Buffer.concat([header, body]));
+    const header = Buffer.alloc(4); header.writeUInt32BE(body.length); (embedded ? channel : child.stdin).write(Buffer.concat([header, body]));
     const reply = await next(); assert.equal(reply.id, id); return reply;
   }
   t.after(async () => {
-    if (child.exitCode === null) { child.kill('SIGTERM'); await once(child, 'close'); }
+    if (child.exitCode === null) {
+      const close = once(child, 'close');
+      if (embedded) channel.end(); else child.kill('SIGTERM');
+      await close;
+    }
     await rm(root, {recursive: true, force: true});
   });
   function waitState(predicate) {
@@ -56,7 +65,7 @@ async function harness(t, env = {}, isolateLauncherConfig = false) {
       eventWaiters.push(receive);
     });
   }
-  return {child, call, port, waitState, frameworkConfigHome, logs: () => stderr};
+  return {child, channel, call, port, waitState, frameworkConfigHome, logs: () => stderr};
 }
 
 test('normal launch waits beyond old FD3 deadline and starts only once', {timeout: 20000}, async t => {
@@ -151,4 +160,24 @@ test('Cancel SIGTERMs pending normal bootstrap without selecting local', {timeou
   assert.equal(stopped.result.operationPending, false);
   assert.equal(stopped.result.selectionRevision, 0);
   assert.throws(() => process.kill(pending.processId, 0), {code: 'ESRCH'});
+});
+test('embedded FD host passes typed params, consumer allowlists and real lifecycle state', {timeout: 10000}, async t => {
+  const h = await harness(t, {}, true, true);
+  const observed = await h.call('set_selected_framework', {origin: 'http://remote.test:8089'});
+  assert.equal(observed.result.selectedOrigin, 'http://remote.test:8089');
+  assert.match((await h.call('ping')).error, /Undeclared/);
+  const start = await h.call('start_local_framework'); assert.equal(start.result.operationPending, true);
+  const state = await h.waitState(value => value.phase === 'running' && !value.operationPending);
+  assert.ok(h.logs().includes(`framework-config-home=${h.frameworkConfigHome}`));
+  const exit = once(h.child, 'close'); h.channel.end();
+  assert.equal((await exit)[0], 0);
+  assert.throws(() => process.kill(state.processId, 0), {code: 'ESRCH'});
+});
+test('embedded FD disconnect cancels an owned build without mutation replay', {timeout: 10000}, async t => {
+  const h = await harness(t, {TEST_BUILD_DELAY: '30000'}, false, true);
+  await h.call('start_local_framework');
+  const state = await h.waitState(value => value.cancellableStartup && value.startupOutput === 'bootstrap preparing');
+  const exit = once(h.child, 'close'); h.channel.end();
+  assert.equal((await exit)[0], 0);
+  assert.throws(() => process.kill(state.processId, 0), {code: 'ESRCH'});
 });
