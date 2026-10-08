@@ -22,7 +22,7 @@ diff/review flows, and stateful sidebar apps.
 The current release is **0.2.352 alpha**: a normal GitHub Release under an
 alpha moniker, available through `latest`.
 
-### Recommended: Linux or Termux
+### Command-line install: Linux or Termux
 
 Install the framework and CLI. The installer detects the platform, installs
 system prerequisites, and selects the prebuilt release artifacts:
@@ -43,6 +43,32 @@ and does not launch the application automatically. Linux uses a managed
 private venv; Termux uses its shared system Python without a venv.
 
 After installation, run `te2`, or `te2-desktop` for the desktop client.
+
+### Android APK (experimental preview): TE2 Termux
+
+**TE2 Termux requires the GitHub debug build of
+[Termux](https://github.com/termux/termux-app/releases), signed with its public
+test key. F-Droid and Google Play Termux builds are not compatible with this APK.**
+The matching signature/shared UID allows TE2 Termux to launch processes and
+access files inside the Termux environment.
+
+TE2 Termux is a separate Electromux-based Android client, not a replacement for
+the GeckoView or Cefrium clients. It can install and start a local framework
+inside Termux, or connect to a remote framework.
+
+1. Install and open the compatible GitHub debug build of Termux once to initialize
+   its userspace.
+2. Install the [TE2 Termux preview APK](https://github.com/mrsurge/termux-extensions-2/releases/download/0.2.352/te2-0.2.352-termux-staging-arm64.apk) and open **TE2 Termux**.
+3. If TE2 is not installed, choose **Install** in the launcher or the local-framework
+   card in Settings, then confirm. Progress is shown in the app; no shell command
+   needs to be pasted into Termux.
+4. When installation finishes, choose **Start** to launch the local framework.
+   Alternatively, select a remote framework URL in Settings/bookmarks.
+
+The in-app installer runs the same published installer used below and supplies
+the framework's Termux dependencies. Installation alone does not start the
+framework or change the selected remote connection. A manually configured
+command/venv uses that configuration instead of offering a fresh installation.
 
 ### Alternative: pip on Linux
 

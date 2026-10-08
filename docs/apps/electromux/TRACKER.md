@@ -723,3 +723,9 @@ response gaps. Cancelled only the local installer client; no storage reset or
 framework restart. The user subsequently uploaded/installed TE2 staging using
 `adb push` and confirmed it works. This resolves TE2's installation/acceptance
 gate; calculator staging acceptance remains deferred, not blocked on this transfer.
+
+Published the exact accepted TE2 Termux staging APK as the additional
+`te2-0.2.352-termux-staging-arm64.apk` asset on the existing normal 0.2.352
+GitHub release (2026-10-08). GitHub reports `uploaded`, 202,251,525 bytes and
+the matching SHA-256 above. No tag, wheel, existing release asset or calculator
+APK was replaced/published in this operation.

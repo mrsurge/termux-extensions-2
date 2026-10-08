@@ -1,15 +1,42 @@
 # TE2 Termux consumer target
 
 Separate Android application: `com.termux.extensions.te2termux`, launcher label
-**TE2 Termux**. This is the manual local/remote integration checkpoint toward full
-Termux/Electromux desktop parity, not a replacement for Cefrium or Gecko.
+**TE2 Termux**. This is an Electromux-based local/remote Android client, not a
+replacement for Cefrium or Gecko.
+
+**The current APK is compatible only with the GitHub debug build of Termux,
+signed with Termux's public test key. F-Droid and Google Play Termux builds are
+not compatible with this signing/shared-UID lane.**
+
+## Preview installation
+
+Install/open the compatible Termux build once, then install/open the TE2 Termux
+preview APK. With no existing TE2 executable or manually configured command/venv,
+the launcher and Settings local-framework card offer **Install**. Confirm to run
+the published `latest/download/install-te2` script inside Termux; the app shows
+progress and supports cancellation. On success, executable discovery is repeated.
+Choose **Start** separately, or select a remote framework URL/bookmark; installing
+does not automatically start the framework or retarget a remote connection.
+Cancellation can leave partial changes and does not promise rollback.
+
+Fresh Termux userspace installation and local/remote controls have user live
+acceptance. The minified staging APK is also user live-accepted on Razr.
+The client is still a development preview; its accepted staging APK is available
+as `te2-0.2.352-termux-staging-arm64.apk` in the existing 0.2.352 GitHub release.
+Neither wheel was changed for this work: framework/assets remain
+0.2.352; the installer consumes the existing release and follows future `latest`
+releases. Exact build hashes and scoped acceptance are recorded in
+`docs/apps/electromux/TRACKER.md`.
+
+## Hosting and source ownership
 
 `settings.gradle.kts` selects the actual Cefrium build definition. The target
 compiles the same Cefrium activity/application and shared Android runtime sources;
 it does not copy those classes. Its manifest owns its identity and manifest-level
 `com.termux` shared UID. Manual local launch/stdin-FD3/environment/ownership
-behavior uses the actual Desktop controller through a native-provisioned Node actor.
-Physical local launch acceptance remains pending.
+behavior uses the actual Desktop controller through an APK-bundled embedded Node
+actor. The reusable Electromux runtime remains framework-independent; TE2's
+installer and framework policy live in `desktop_client/electromux/`.
 
 The `bundleTermuxShell` task copies the actual `desktop_client/android_shell/`
 browser sources into generated `electromux_shell/` APK assets. Only the generated
@@ -42,7 +69,8 @@ fields through the native exact-document bridge. They persist in private
 fresh app entry starts the local controller parallel with UI loading; preferred
 app navigation waits selected readiness. Reload/recreation does not replay it.
 Legacy launcher URLs migrate to `/electromux-shell/` without clearing app data.
-This slice still requires APK upgrade/OTA and startup live acceptance.
+Installed startup/settings and local/remote behavior have user live acceptance;
+individual lifecycle/device gates remain recorded in the tracker.
 
 Initialize the pinned generic host source before configuring this target:
 
@@ -52,7 +80,7 @@ git submodule update --init vendor/electromux
 
 Only TE2 Termux consumes its internal `:electromux-host` Android library. Existing
 Cefrium and Gecko targets do not depend on that library. The pin is a build
-prerequisite; source checks do not establish installed local-framework acceptance.
+prerequisite; source checks alone do not establish installed runtime acceptance.
 
 Use the existing Cefrium JDK 25 / SDK 37 toolchain, at least 2 GB free disk:
 
@@ -71,17 +99,18 @@ APK assembly/install requires separate approval and explicit external
 signer/shared UID; default Android debug signing is deliberately rejected for
 APK tasks. Credentials or the public sample test key are not committed here.
 Matching signer, merged manifest/provider behavior, installed UID and both-device
-acceptance remain gates. No APK or device change is implied by compilation.
+acceptance must be checked for each deployment. No APK or device change is implied
+by compilation. For the minified size-validation lane, run `./gradlew assembleStaging`;
+it uses R8/resource shrinking and the same explicitly selected signing identity.
 
-The independently tested generic Electromux helper/descriptor APIs remain in
-`mrsurge/electromux`, pinned here under `vendor/electromux`. This consumer checkpoint reuses TE2's mature Android host
-as approved by the integrated-POC-first plan; generic host extraction and local
-helper integration is source-implemented but not yet physically accepted. See
+The independently tested generic Electromux host/runtime APIs remain in
+`mrsurge/electromux`, pinned here under `vendor/electromux`. This consumer reuses
+TE2's mature Android host and portable Desktop controller. See
 `docs/apps/electromux/PLAN.md` and `TRACKER.md` at repository root.
 
 ## Manual local controls
 
-PersistentNetworkService owns the helper transport and bounded request/event
+PersistentNetworkService owns the embedded-client transport and bounded request/event
 lanes. Activity navigation only detaches its document subscription. Destruction
 disconnects without implicitly stopping the retained helper/actor/framework.
 Manual Stop uses the Desktop controller and cannot stop external frameworks.
@@ -89,15 +118,18 @@ Manual Stop uses the Desktop controller and cannot stop external frameworks.
 Only the exact native-served `/electromux-shell/index.html` and `settings.html`
 documents can invoke local config/state/start/stop/use. Other same-origin app
 pages, query/fragment variants and remote documents have no such authority.
-Credentials, helper argv and backend declarations are native-owned. Identity
+Credentials, child environment and backend declarations are native-owned. Identity
 verification still requires the installed Termux shared UID and signature.
 
-Gradle builds/bundles the actual Node actor and Desktop browser modules. The AAR
-provides the generic helper and browser bridge. Native provisioning publishes
-them under Termux's `~/.cache/te2-electromux`; launcher configuration is stored at
+Gradle builds/bundles the actual Node actor and Desktop browser modules. The
+`:electromux-node` library embeds Node 24 in the APK; `TermuxNodeService` runs it
+in the private `:electromux_node` process. It does not use the historical Python
+helper or an external Termux Node executable to run the host actor. Its entrypoint
+is materialized into app-owned no-backup storage. Launcher configuration is stored at
 `~/.config/te2/te2-termux/desktop-local-framework.json`. Its separate configuration
-root does not change the launched framework's own config/data roots. Node and
-ordinary Python must already be installed in Termux.
+root does not change the launched framework's own config/data roots. Framework
+Python/Node and other dependencies belong to the Termux installation and are
+supplied by the standard installer; they are distinct from the APK's host runtime.
 
 The native service supplies the selected upstream endpoint to the actor. Only
 explicit Start/Use advances local selection intent; observation/reconnect cannot
@@ -106,5 +138,7 @@ use native service state for the actual selected endpoint, not actor speculation
 Source build preparation returns a prompt acknowledgement and remains asynchronous
 before FD3 framework readiness. No uncertain mutation is replayed.
 
-Automatic framework/preferred-app launch, owned-framework app-exit behavior,
-consumer-shell OTA and physical recreation/reconnect tests are later parity gates.
+Automatic framework/preferred-app selection is implemented. Complete Electron
+API parity is not claimed; remaining lifecycle/compatibility gates and publication
+work are tracked separately. Consumer launcher assets are APK-owned, while
+editor/application assets retain the existing APK-seed/OTA mechanism.
