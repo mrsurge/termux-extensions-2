@@ -344,6 +344,8 @@ export const desktopShellHost = {
   startLocalFramework: () => nativeRequest("start_local_framework"),
   stopLocalFramework: () => nativeRequest("stop_local_framework"),
   useLocalFramework: () => nativeRequest("use_local_framework"),
+  installLocalFramework: () => nativeRequest("install_local_framework", {confirmed: true}),
+  cancelLocalFrameworkInstall: () => nativeRequest("cancel_local_framework_install"),
   onLocalFrameworkState,
   getFrameworkStatus,
   getFwsStatus: () => nativeRequest("get_fws_status"),

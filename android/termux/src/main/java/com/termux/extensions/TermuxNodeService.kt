@@ -11,7 +11,8 @@ class TermuxNodeService : EmbeddedNodeService() {
     override val consumer = EmbeddedConsumerSpec("embedded_node/te2.mjs", setOf(
         "set_selected_framework", "get_local_framework_config", "save_local_framework_config",
         "get_local_framework_state", "refresh_local_framework", "start_local_framework",
-        "stop_local_framework", "use_local_framework", "shutdown"), setOf("local-framework-state"))
+        "stop_local_framework", "use_local_framework", "install_local_framework",
+        "cancel_local_framework_install", "shutdown"), setOf("local-framework-state"))
 
     @Suppress("DEPRECATION")
     override fun validateEnvironment() {

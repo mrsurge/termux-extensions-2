@@ -10,7 +10,8 @@ const localBridge = globalThis.ElectromuxBridge.create({
   query: options => globalThis.cefriumQuery(options),
   methods: ['get_settings', 'save_settings', 'get_android_settings', 'save_android_settings',
     'open_power_settings', 'open_notification_settings', 'get_local_framework_config', 'save_local_framework_config', 'get_local_framework_state',
-    'refresh_local_framework', 'start_local_framework', 'stop_local_framework', 'use_local_framework'],
+    'refresh_local_framework', 'start_local_framework', 'stop_local_framework', 'use_local_framework',
+    'install_local_framework', 'cancel_local_framework_install'],
   events: ['local-framework-state'], documentId: crypto.randomUUID().replaceAll('-', ''),
   timeoutMs: 20000,
 });
@@ -66,6 +67,12 @@ await import(settings ? './settings.js' : './launcher.js');
 if (settings) {
   const {mountAndroidSettings} = await import('./electromux-settings.js');
   mountAndroidSettings(globalThis.__te2ShellPlatform);
+  const {localFrameworkExtension} = await import('./extensions/local-framework.js');
+  const {desktopShellHost} = await import('./host.js');
+  const surface = document.createElement('div');
+  document.querySelector('#local-framework-config-status')?.after(surface);
+  const installationCard = localFrameworkExtension.mount(surface, desktopShellHost);
+  window.addEventListener('pagehide', () => installationCard.dispose(), {once: true});
 }
 
 // Activation reads retained actor state; it never starts/retries a mutation or

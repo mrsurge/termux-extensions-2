@@ -40,6 +40,7 @@ export const localFrameworkExtension = {
     let state = null;
     let disposed = false;
     let actionPending = false;
+    let confirmingInstall = false;
 
     const runAction = async (operation) => {
       if (actionPending) return;
@@ -63,6 +64,7 @@ export const localFrameworkExtension = {
       root.replaceChildren();
       root.hidden = !state?.supported;
       if (!state?.supported) return;
+      if (!state.canInstall) confirmingInstall = false;
 
       const card = document.createElement("article");
       card.className = "local-framework-card";
@@ -79,7 +81,11 @@ export const localFrameworkExtension = {
         : state.phase === "failed"
           ? "error"
           : "loading";
-      status.textContent = statusText(state, host.localFrameworkOwnerLabel);
+      const installation = state.installation;
+      const installing = ["downloading", "running", "cancelling"].includes(installation?.phase);
+      status.textContent = installing ? (installation.phase === "cancelling" ? "Cancelling installation" : "Installing TE2") :
+        installation?.error || (state.canInstall ? "TE2 is not installed. Install it here or configure a command in Settings." :
+          statusText(state, host.localFrameworkOwnerLabel));
       summary.append(title, status);
 
       const details = document.createElement("div");
@@ -97,6 +103,12 @@ export const localFrameworkExtension = {
       if (state.phase === "starting" && state.startupOutput) {
         const progress = document.createElement("span");
         progress.textContent = state.startupOutput;
+        progress.setAttribute("role", "status");
+        details.appendChild(progress);
+      }
+      if (installation?.output) {
+        const progress = document.createElement("span");
+        progress.textContent = installation.output;
         progress.setAttribute("role", "status");
         details.appendChild(progress);
       }
@@ -118,7 +130,38 @@ export const localFrameworkExtension = {
       actions.className = "local-framework-actions";
       const busy = actionPending || state.operationPending || ["probing", "starting", "stopping"].includes(state.phase);
 
-      if (state.phase === "running") {
+      if (installing) {
+        const cancel = document.createElement("button");
+        cancel.type = "button"; cancel.className = "secondary-button";
+        cancel.textContent = "Cancel";
+        cancel.disabled = actionPending || installation.phase === "cancelling";
+        cancel.addEventListener("click", () => { void runAction(() => host.cancelLocalFrameworkInstall()); });
+        actions.appendChild(cancel);
+      } else if (state.canInstall && !state.transportUnavailable) {
+        if (confirmingInstall) {
+          const notice = document.createElement("span");
+          notice.textContent = "Download TE2 from GitHub and install its Termux packages and dependencies? Cancellation may leave partial changes.";
+          details.appendChild(notice);
+          const confirm = document.createElement("button");
+          confirm.type = "button"; confirm.className = "primary-button";
+          confirm.textContent = "Confirm Install"; confirm.disabled = actionPending;
+          confirm.addEventListener("click", () => {
+            confirmingInstall = false;
+            void runAction(() => host.installLocalFramework());
+          });
+          const dismiss = document.createElement("button");
+          dismiss.type = "button"; dismiss.className = "secondary-button";
+          dismiss.textContent = "Cancel"; dismiss.disabled = actionPending;
+          dismiss.addEventListener("click", () => { confirmingInstall = false; render(); });
+          actions.append(confirm, dismiss);
+        } else {
+          const install = document.createElement("button");
+          install.type = "button"; install.className = "primary-button";
+          install.textContent = "Install TE2"; install.disabled = actionPending;
+          install.addEventListener("click", () => { confirmingInstall = true; render(); });
+          actions.appendChild(install);
+        }
+      } else if (state.phase === "running") {
         const useButton = document.createElement("button");
         useButton.type = "button";
         useButton.className = "primary-button";

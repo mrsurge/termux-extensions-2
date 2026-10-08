@@ -8,6 +8,15 @@ import org.junit.Test
 
 class TermuxLocalControlTest {
     private val origin = "http://127.0.0.1:44100"
+    @Test fun installerAuthorityIsOnlyPackagedLauncherAndSettings() {
+        val policy = TermuxLocalControlPolicy.descriptor(origin)
+        for (method in listOf("install_local_framework", "cancel_local_framework_install")) {
+            for (page in listOf("index.html", "settings.html"))
+                assertTrue(policy.allows("$origin/electromux-shell/$page", method))
+            assertFalse(policy.allows("$origin/app/code_te2", method))
+            assertFalse(policy.allows("http://remote.test/electromux-shell/index.html", method))
+        }
+    }
     @Test fun executionAuthorityIsExactPackagedDocument() {
         val policy = TermuxLocalControlPolicy.descriptor(origin)
         for (page in listOf("index.html", "settings.html"))

@@ -1,8 +1,45 @@
 # Electromux host plan
 
+## TE2 consumer installer slice (2026-10-08)
+
+This is TE2 application policy, not reusable Electromux functionality. The
+adapter in `desktop_client/electromux/` belongs to this TE2 repository; the
+independent `vendor/electromux` runtime remains framework-agnostic and unchanged
+by this slice. Generic owned-child/output primitives are reused, not duplicated.
+
+The native Termux lane alone enables installation. A missing PATH executable
+with no manual command, venv, configuration error or active lifecycle operation
+offers Install in the launcher and Settings local-framework card. Installation
+requires a second explicit confirmation. The renderer cannot provide a download
+URL, executable or arguments: the consumer downloads the fixed GitHub latest
+`install-te2` asset and invokes Termux's absolute `sh` with `--yes`.
+
+Download is bounded to 2MiB/60s. One detached owned installer process group has
+backpressured stdout/stderr and a retained latest 2KiB progress line. Cancel
+aborts download or SIGTERMs that group, escalating after 2s; it warns that partial
+changes may remain and does not promise rollback. Disposal cancels the owned
+installer. Authoritative exit plus fresh executable discovery determines success;
+zero exit without TE2 remains an error. Success does not start the framework or
+change the selected remote endpoint. The published installer needs no new flags
+or TE2 release; optional structured installer signals remain future work.
+
+Validation: strict actor TypeScript check/bundle; 30 actor/browser/installer
+regressions; integrated Termux and embedded runtime JVM tests/Kotlin compile pass.
+Fixtures exercise success, nonzero exit, missing executable, download/child
+cancellation, bounded output, manual/native eligibility and explicit UI consent.
+No real download/install, APK deployment, framework restart or publication was
+performed. Actual installation and device UI acceptance remain the next gate.
+
+Follow-up: the debug APK was built and installed in place on Razr with storage
+preserved. User live acceptance passed both after removing TE2 from an existing
+Termux userspace and on a fresh cold Termux userspace with no preinstalled
+dependencies. Installer UI and fresh bootstrap/install success are accepted;
+real-device failure/cancellation coverage remains separate. Exact APK checksum
+and deployment evidence are retained in TRACKER.md.
+
 ## Isolated embedded consumer integration (2026-10-08)
 
-Checkpoint: TE2 `4e3ab515`, Electromux `11ef6c8` (local only).
+Accepted pushed checkpoint: TE2 `b41c05a8`, Electromux `396e935`.
 Approved scope is service/Binder integration, TE2 Termux build wiring and
 regression/build validation; no APK installation or shared framework stop.
 
@@ -322,16 +359,21 @@ lane, not the Node/Python runtime needed to boot Electromux itself.
 
 ### Current source versus intended runtime
 
-Current source: Cefrium renderer JS -> Kotlin bridge -> Python Unix-socket
-helper -> external Termux Node running the TE2 TypeScript-derived launcher actor.
+Current source: Cefrium renderer JS -> exact-document Kotlin bridge -> private
+Binder client/service -> isolated embedded Node executing the native-declared
+TE2 TypeScript-derived consumer. Local restart, Cancel/lifecycle and remote
+switching are user live-accepted. There is no Python helper/external Node
+prerequisite in this TE2 host execution path.
+
+Historical implementation: Python Unix-socket helper -> external Termux Node.
 `vendor/electromux/electromux/helper.py` owns authentication, socket leases,
 process supervision, bounded forwarding and recovery; `protocol.py` owns JSON
 framing; `sample_backend.py` is demo-only and `__init__.py` is a package marker.
 The TE2 actor already reuses real Desktop controller/configuration source.
 
-Target: Cefrium renderer -> narrow native/document-fenced bridge -> embedded
-Node with Electromux main-process JS and a consumer module. Remove the Python
-helper runtime and external-Node prerequisite, not their validated ownership,
+Implemented target: Cefrium renderer -> narrow native/document-fenced bridge ->
+embedded Node with Electromux main-process JS and a consumer module. Removal of
+the Python helper runtime and external-Node prerequisite preserves ownership,
 authentication, correlation, bounds, backpressure and recovery guarantees.
 TE2's own Python dependency is an application concern and is not eliminated by
 this change. Avoid simply embedding Node then spawning another external Node

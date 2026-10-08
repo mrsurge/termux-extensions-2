@@ -12,6 +12,6 @@ await runRuntime((_root, mode) => async (_signal, emit) => {
       LD_PRELOAD: `${prefix}/lib/libtermux-exec.so`,
       TE2_ELECTROMUX_CONFIG_HOME: `${home}/.config/te2/te2-termux`});
   }
-  return createLocalFrameworkConsumer({environment, emit,
+  return createLocalFrameworkConsumer({environment, emit, enableInstaller: mode === 'termux',
     log: (lane, text) => { process.stderr.write(`[framework:${lane}] ${text}`); }});
 });

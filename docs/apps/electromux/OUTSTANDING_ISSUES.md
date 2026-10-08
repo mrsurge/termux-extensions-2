@@ -2,15 +2,17 @@
 
 ## Host runtime dependency mismatch (2026-10-08)
 
-Current host control requires Termux Python for the generic helper and an
-external Node executable for the TE2 actor. This prevents a genuinely embedded
-Electromux runtime from booting independently in a fresh Termux environment.
-The intended replacement is embedded libnode plus TypeScript-authored runtime
-glue; fogtape Node 24 full now passes independent Razr boot/IPC/filesystem,
-Service-recreation and direct shared-UID Termux child/FD3/cancellation proof.
-Generic supervisor/renderer/TE2 integration is still pending. Keep existing
-accepted host behavior until those migration gates pass.
-Installer UI is paused; see PLAN/TRACKER, Embedded Node runtime prerequisite.
+Resolved for the TE2 Termux execution path: the private isolated embedded Node
+service runs the TS consumer through Binder, without a Python helper or external
+Node executable. User local restart, Cancel/lifecycle and remote-switching
+acceptance pass (`b41c05a8`/`396e935`). Legacy Python SDK components remain
+historical/separate migration scope; broader process-death recovery and final
+license/redistribution review remain open. TE2 itself still needs Python.
+
+Installer source/build validation and user device installation acceptance pass,
+including fresh cold Termux with no preinstalled dependencies. Real-device
+failure/cancellation coverage remains open. Its fixed TE2 download/eligibility/UI policy lives in the TE2 consumer
+adapter, not the independent Electromux runtime. See PLAN/TRACKER's installer slice.
 
 ## Dead helper socket hides the launcher (2026-10-07)
 

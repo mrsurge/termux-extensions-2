@@ -1,5 +1,31 @@
 # Electromux tracker
 
+## TE2 consumer installer slice (2026-10-08)
+
+- [x] Termux-native missing-executable/manual-config eligibility and strict consent.
+- [x] Fixed published installer download; bounded progress and exact owned-group cancellation.
+- [x] Post-exit executable rediscovery, no automatic Start/endpoint selection.
+- [x] Launcher/Settings card reuse and exact native method allowlists.
+- [x] Strict TS bundle/check, 30 Node/browser regressions, Termux/runtime JVM tests and Kotlin compilation.
+- [x] Reconcile stale helper/embedded integration status; reusable runtime unchanged.
+- [x] Approved debug APK assembly/in-place Razr deployment; storage preserved.
+- [x] Preliminary device installer UI/success acceptance on existing Razr Termux userspace.
+- [x] User live acceptance: fresh cold Termux userspace with no preinstalled dependencies installs flawlessly.
+- [ ] Explicit real installation success/failure/cancel acceptance in a suitable test userspace.
+
+Follow-up deployment: ADB `install -r` succeeded on Razr without clearing storage.
+APK SHA-256 `fafc017c246431d96124e1c51037834a6d776781a99fa42d387cfb12654a5952`
+(359,966,869 bytes); embedded entry checksum matches the current built bundle
+`bfad978f07f326b3b1c6cfbfd1306c34fe481bedc1c477a35c62100c4fcb2318`.
+Signer remains the public Termux GitHub test certificate. App opening and real
+installer acceptance were left to the user; the agent performed no installer
+execution, framework restart or publication. User subsequently uninstalled TE2
+and reported installation working. Record preliminary existing-userspace success,
+not proof of fresh Termux setup or device failure/cancellation coverage.
+Subsequent user test confirmed a fresh cold Termux installation with no
+preinstalled dependencies works flawlessly. Fresh-userspace bootstrap/install
+success is now accepted; real-device failure/cancellation coverage stays separate.
+
 ## Embedded TE2 service integration (2026-10-08)
 
 - [x] Local checkpoint: root `4e3ab515`, nested `11ef6c8`.
@@ -46,20 +72,19 @@ User local restart, Cancel, lifecycle and remote switching acceptance pass.
   - [x] Consumer-selected readiness/stop and bounded streaming output primitives;
     host output regressions and updated independent Razr lifecycle pass.
   - [x] Existing TE2 actor factory extraction and direct/stdin-stdout parity tests.
-  - [ ] Typed embedded request parameters and TE2 native consumer selection;
+  - [x] Typed embedded request parameters and TE2 native consumer selection;
     preserve exact-document authorization, then repeat Android lifecycle acceptance.
     - [x] Generic typed parameter DTO validation and APK-owned native entry/method/event declaration.
     - [x] TE2 embedded entry bundle and host private-FD fixture lifecycle/parity tests.
     - [x] TE2 package/build-input wiring and PersistentNetworkService adapter migration.
-      Device acceptance remains pending for the new isolated embedded service.
-- [ ] Integrate existing TE2 consumer actor; repeat local/remote/lifecycle acceptance.
-- [ ] Remove Python/external Node host prerequisites and resume installer UI.
+      Isolated embedded service device acceptance passed; see current checkpoint above.
+- [x] Integrate existing TE2 consumer actor; repeat local/remote/lifecycle acceptance.
+- [x] Remove Python/external Node host prerequisites and resume installer UI.
 
-Installer investigation is paused. Existing accepted APK/source is retained;
-Approved source/build proof now exists; no device mutation or accepted TE2 runtime
-replacement has occurred. See PLAN's independent ARM64 checkpoint for hashes,
-size and validation boundaries. Earlier host checklists do not establish embedded
-runtime device acceptance.
+Embedded TE2 integration is live accepted and pushed (`b41c05a8`/`396e935`).
+Installer source/build proof is recorded above; real installation is not yet
+accepted. See PLAN for APK hashes and validation boundaries. The remaining
+generic legacy Python SDK migration and broader crash-recovery gates are separate.
 The pending Windows wrapper line-ending normalization is approved for the next
 commit; it is not an outstanding functional issue.
 

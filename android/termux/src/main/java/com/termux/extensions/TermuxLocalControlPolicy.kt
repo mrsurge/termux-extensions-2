@@ -7,7 +7,7 @@ internal object TermuxLocalControlPolicy {
     val methods = setOf("get_settings", "save_settings", "get_android_settings", "save_android_settings",
         "open_power_settings", "open_notification_settings", "get_local_framework_config", "save_local_framework_config",
         "get_local_framework_state", "refresh_local_framework", "start_local_framework",
-        "stop_local_framework", "use_local_framework")
+        "stop_local_framework", "use_local_framework", "install_local_framework", "cancel_local_framework_install")
     fun descriptor(origin: String) = ConsumerDescriptor("te2-termux", "TE2 Termux",
         "$origin/electromux-shell/index.html", setOf("electromux-shell/index.html", "electromux-shell/settings.html"),
         mapOf("$origin/electromux-shell/index.html" to "electromux-shell/index.html",

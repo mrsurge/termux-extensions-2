@@ -7,7 +7,7 @@ const bootstrapSource = await readFile(new URL('../desktop_client/android_shell/
 const platformSource = await readFile(new URL('../desktop_client/android_shell/electromux-platform.js', import.meta.url), 'utf8');
 const bridgeSource = await readFile(new URL('../vendor/electromux/android/host/src/main/assets/electromux-bridge.js', import.meta.url), 'utf8');
 async function boot(hostname = '127.0.0.1', settingsPage = true) {
-  let loaded, observer;
+  let loaded, observer, cardMounted = false, cardDisposed = false;
   const windowListeners = new Map(), documentListeners = new Map();
   const add = (listeners, name, callback) => {
     if (!listeners.has(name)) listeners.set(name, new Set());
@@ -32,6 +32,7 @@ async function boot(hostname = '127.0.0.1', settingsPage = true) {
       addEventListener: (name, callback) => add(windowListeners, name, callback),
       removeEventListener: (name, callback) => remove(windowListeners, name, callback)},
     document: {visibilityState: 'visible', querySelectorAll: () => [section],
+      createElement: () => ({}), querySelector: () => ({after() {}}),
       addEventListener: (name, callback) => add(documentListeners, name, callback),
       removeEventListener: (name, callback) => remove(documentListeners, name, callback)},
     MutationObserver: class {
@@ -50,8 +51,14 @@ async function boot(hostname = '127.0.0.1', settingsPage = true) {
   await platform.link(() => {throw new Error('Unexpected platform import');});
   const bootstrap = new SourceTextModule(bootstrapSource, {context,
     importModuleDynamically: async name => {
-      loaded = name;
-      const entry = new SourceTextModule(name === './electromux-settings.js' ? 'export function mountAndroidSettings() {}' : '', {context});
+      if (['./electromux-settings.js', './launcher.js'].includes(name)) loaded = name;
+      let source = name === './electromux-settings.js' ? 'export function mountAndroidSettings() {}' : '';
+      if (name === './extensions/local-framework.js') {
+        context.mountInstallerCard = () => { cardMounted = true; return {dispose() { cardDisposed = true; }}; };
+        source = 'export const localFrameworkExtension = {mount: globalThis.mountInstallerCard};';
+      }
+      if (name === './host.js') source = 'export const desktopShellHost = {};';
+      const entry = new SourceTextModule(source, {context});
       await entry.link(() => {});
       await entry.evaluate();
       return entry;
@@ -61,12 +68,14 @@ async function boot(hostname = '127.0.0.1', settingsPage = true) {
     return platform;
   });
   await bootstrap.evaluate();
-  return {context, loaded, observer, pagehide: () => emit(windowListeners, 'pagehide'),
+  return {context, loaded, observer, cardMounted, cardDisposed: () => cardDisposed,
+    pagehide: () => emit(windowListeners, 'pagehide'),
     emitWindow: name => emit(windowListeners, name), emitDocument: name => emit(documentListeners, name),
     controls, calls, nativeCalls};
 }
 const state = await boot();
 assert.equal(state.loaded, './electromux-settings.js');
+assert.equal(state.cardMounted, true, 'Settings mounts the same consumer install/status card');
 assert.equal(state.controls[0].disabled, true);
 state.controls[0].disabled = false;
 state.observer.callback([{type: 'attributes', target: state.controls[0]}]);
@@ -91,6 +100,7 @@ state.context.document.visibilityState = 'hidden';
 state.emitDocument('visibilitychange');
 assert.equal(state.nativeCalls.length, before + 1, 'hidden pages do not reconcile');
 state.pagehide();
+assert.equal(state.cardDisposed(), true);
 assert.equal(state.observer.disconnected, true);
 await assert.rejects(state.context.__te2ShellPlatform.request('start_local_framework'), /Bridge closed/);
 state.emitWindow('focus'); state.emitWindow('pageshow'); state.emitDocument('visibilitychange');

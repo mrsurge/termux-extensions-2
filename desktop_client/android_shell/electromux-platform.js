@@ -10,7 +10,8 @@ export function createRemoteElectromuxPlatform({gatewayRequest, getBrowserOrigin
   let reconciliation = null;
   const stateListeners = new Set();
   const stateMethods = new Set(['get_local_framework_state', 'refresh_local_framework',
-    'start_local_framework', 'stop_local_framework', 'use_local_framework']);
+    'start_local_framework', 'stop_local_framework', 'use_local_framework',
+    'install_local_framework', 'cancel_local_framework_install']);
   function acceptState(state) {
     if (disposed) return localState || state;
     if (localState && state?.stateSessionId === localState.stateSessionId &&
@@ -32,7 +33,7 @@ export function createRemoteElectromuxPlatform({gatewayRequest, getBrowserOrigin
     if (typeof nativeRequest === "function" && ["get_settings", "save_settings", "get_android_settings", "save_android_settings",
       "open_power_settings", "open_notification_settings", "get_local_framework_state", "get_local_framework_config",
       "save_local_framework_config", "refresh_local_framework", "start_local_framework",
-      "stop_local_framework", "use_local_framework"].includes(method)) {
+      "stop_local_framework", "use_local_framework", "install_local_framework", "cancel_local_framework_install"].includes(method)) {
       const result = await nativeRequest(method, params);
       if (method === 'get_settings') settings = result;
       if (method === 'save_settings') settings = result.settings;
