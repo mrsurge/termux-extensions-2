@@ -683,3 +683,43 @@ No device state, shared framework, release/version or TE2 Git commit changed.
 Existing Gradle warnings remain. Gecko needed only a command-line Linux AAPT2
 override for the checkout's existing Termux-specific local build setting; no
 build environment was edited or staged.
+
+## Minified staging size lane (2026-10-08)
+
+- [x] Keep embedded Node; replacement engines are deferred.
+- [x] Existing TE2 Termux staging: R8 and resource shrinking, non-debuggable,
+  same public Termux-compatible signing identity and unchanged version.
+- [x] Independent calculator staging added with optimized R8 defaults and
+  resource shrinking; same local signer/app ID/version as its debug baseline.
+- [x] Both APKs assembled; signing and 16 KB ZIP alignment checks pass.
+- [x] Calculator APK contains all 66 declared domain resources and runtime entries.
+- [x] User installed TE2 Termux staging via `adb push` and confirmed it works
+  on Razr (2026-10-08): TE2 staging is live-accepted.
+- [ ] Calculator staging live validation deferred by the user; build/resource,
+  signing and alignment checks pass, but no staging runtime acceptance claimed.
+
+| APK | Debug MiB | Staging MiB | Debug DEX MiB | Staging DEX MiB |
+| --- | ---: | ---: | ---: | ---: |
+| TE2 Termux | 343.29 | 192.88 | 105.91 | 45.66 |
+| Calculator | 224.52 | 175.88 | 79.94 | 43.95 |
+
+TE2 staging is 202,251,525 bytes, SHA-256
+`5bc9f77fe99782f90b5e29311045629e707d5da9bfc19748b9ce94f03bbc205a`;
+asset seed is 0.2.352. Its ZIP overhead dropped from 77.58 to 0.70 MiB.
+Calculator staging is 184,420,778 bytes, SHA-256
+`40da8f9f2b4d8d19f4cf05ef7892a207d48d0a4b99b38ffa45785517c89e437c`.
+The native runtime payload remains unchanged; staging compression also reduces
+packed native-library size. Calculator's default 2 GB R8 heap failed; a local
+command-line 6 GB retry passed in 6m09s. No SDK/JDK/signing environment was committed.
+
+R8 warns about Cefrium final generated resource IDs and optional Chrome class-name
+resolution. Preserve mapping/configuration/usage reports; successful assembly is
+not proof of live JNI/menu/resource behavior. Source/Gradle caches and APKs were
+preserved; user-approved cleanup removed only both apps' debug merged/stripped
+native intermediates. Stop builds if free disk approaches 500 MB. TCP ADB stalled
+during the first TE2 install attempt. After reconnection, the retry still stalled:
+TCP acknowledged only about 5.6 MB with heavy retransmissions and minute-long
+response gaps. Cancelled only the local installer client; no storage reset or
+framework restart. The user subsequently uploaded/installed TE2 staging using
+`adb push` and confirmed it works. This resolves TE2's installation/acceptance
+gate; calculator staging acceptance remains deferred, not blocked on this transfer.
