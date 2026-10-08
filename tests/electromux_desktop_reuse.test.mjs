@@ -25,7 +25,7 @@ const platform = createRemoteElectromuxPlatform({
     }
     if (path === '/android-api/apps') return {online: true, apps: [{id: 'settings'}, app]};
     if (path === '/android-api/apps/code_te2/open') return {url: '/app/code_te2'};
-    if (path === '/android-api/framework-bookmarks') return {bookmarks: [{name: 'Remote', ...settings}]};
+    if (path === '/android-api/framework-bookmarks') return {bookmarks: [{name: 'Remote', frameworkHost: 'bookmark.test', frameworkPort: 8091}]};
     if (path === '/android-api/fws/status') return {available: true};
     if (path === '/android-api/framework/status') return {online: true};
     if (path === '/android-api/apps/code_te2/quit' || path === '/android-api/apps/reload') return {};
@@ -57,7 +57,12 @@ try {
   assert.equal(result.connectionChanged, true);
   assert.equal((await host.getSettings()).frameworkHost, 'other.test');
   assert.equal(calls.filter(item => item.path === '/android-api/settings' && item.method === 'GET').length, 1);
-  await host.getFrameworkBookmarks();
+  const {bookmarks} = await host.getFrameworkBookmarks();
+  // The shared Settings bookmark click calls the same saveSettings connection path.
+  await host.saveSettings({...await host.getSettings(), frameworkHost: bookmarks[0].frameworkHost,
+    frameworkPort: bookmarks[0].frameworkPort});
+  assert.equal((await host.getSettings()).frameworkHost, 'bookmark.test');
+  assert.equal((await host.getSettings()).frameworkPort, 8091);
   await host.saveFrameworkBookmark({name: 'Other', frameworkHost: 'other.test', frameworkPort: 8090});
   await host.deleteFrameworkBookmark('Other');
   assert.deepEqual(calls.filter(item => item.path.endsWith('/framework-bookmarks')).map(item => item.method), ['GET','POST','DELETE']);

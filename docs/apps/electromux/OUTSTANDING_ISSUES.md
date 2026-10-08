@@ -29,6 +29,20 @@ storage and user live acceptance passed on 2026-10-07. Do not clear data as a fi
 
 ## TE2 Termux settings and installation follow-up (2026-10-07)
 
+Connection layout, native one-time bookmark seed and Android keep-alive/settings
+controls are source-implemented; source checks pass, APK/live validation remains
+pending. The implementation status in PLAN/TRACKER supersedes the proposal list
+below. Remote clipboard/run-profile validation and installer work remain open.
+
+## Framework-independent Android debug tap
+
+Provide opt-in ADB-accessible CDP or console evaluation without requiring TE2 to
+run. Cefrium already includes CDP machinery; investigate native enable/discovery
+and lifecycle first, retaining exact target selection and bounded commands.
+Plan only for now; no debug policy or device changes in the settings slice.
+
+## Original settings/install scope
+
 The higher-priority helper bug is live accepted. Resume with connection/Android
 settings first, installer integration second; obtain concrete edit-scope approval.
 No implementation approval is implied by this list.

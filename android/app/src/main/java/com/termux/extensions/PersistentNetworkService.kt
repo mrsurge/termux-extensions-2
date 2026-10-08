@@ -335,6 +335,13 @@ class PersistentNetworkService : Service() {
         startActivity(intent)
     }
 
+    fun openNotificationSettings() {
+        startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+            putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        })
+    }
+
     internal fun snapshot(): AndroidClientRuntimeSnapshot {
         val control = runtimeState.snapshot()
         return AndroidClientRuntimeSnapshot(

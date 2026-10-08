@@ -4,7 +4,8 @@ import dev.mrsurge.electromux.host.ConsumerDescriptor
 import org.json.JSONObject
 
 internal object TermuxLocalControlPolicy {
-    val methods = setOf("get_settings", "save_settings", "get_local_framework_config", "save_local_framework_config",
+    val methods = setOf("get_settings", "save_settings", "get_android_settings", "save_android_settings",
+        "open_power_settings", "open_notification_settings", "get_local_framework_config", "save_local_framework_config",
         "get_local_framework_state", "refresh_local_framework", "start_local_framework",
         "stop_local_framework", "use_local_framework")
     fun descriptor(origin: String) = ConsumerDescriptor("te2-termux", "TE2 Termux",

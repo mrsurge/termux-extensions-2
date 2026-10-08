@@ -8,7 +8,8 @@ if (window.location.hostname !== '127.0.0.1' || window.location.protocol !== 'ht
 
 const localBridge = globalThis.ElectromuxBridge.create({
   query: options => globalThis.cefriumQuery(options),
-  methods: ['get_settings', 'save_settings', 'get_local_framework_config', 'save_local_framework_config', 'get_local_framework_state',
+  methods: ['get_settings', 'save_settings', 'get_android_settings', 'save_android_settings',
+    'open_power_settings', 'open_notification_settings', 'get_local_framework_config', 'save_local_framework_config', 'get_local_framework_state',
     'refresh_local_framework', 'start_local_framework', 'stop_local_framework', 'use_local_framework'],
   events: ['local-framework-state'], documentId: crypto.randomUUID().replaceAll('-', ''),
   timeoutMs: 20000,
@@ -62,6 +63,10 @@ window.addEventListener('pagehide', () => observer.disconnect(), {once: true});
 
 const settings = window.location.pathname.endsWith('/settings.html');
 await import(settings ? './settings.js' : './launcher.js');
+if (settings) {
+  const {mountAndroidSettings} = await import('./electromux-settings.js');
+  mountAndroidSettings(globalThis.__te2ShellPlatform);
+}
 
 // Activation reads retained actor state; it never starts/retries a mutation or
 // probes HTTP. Coalesce focus/pageshow/visibility events into one request.

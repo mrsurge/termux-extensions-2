@@ -213,6 +213,16 @@ class AndroidAppSettingsStore(context: Context) {
             preferences.getString(KEY_FRAMEWORK_ENDPOINT_BOOKMARKS, null),
         )
 
+    /** TE2 Termux calls this explicitly; other Android clients never seed bookmarks. */
+    @Synchronized internal fun seedTermuxLocalhostBookmark() {
+        if (preferences.getBoolean("termux_localhost_bookmark_seeded", false)) return
+        val current = loadFrameworkEndpointBookmarks()
+        val seeded = withTermuxLocalhostBookmark(current)
+        check(preferences.edit().putBoolean("termux_localhost_bookmark_seeded", true)
+            .putString(KEY_FRAMEWORK_ENDPOINT_BOOKMARKS,
+                encodeAndroidFrameworkEndpointBookmarks(seeded)).commit())
+    }
+
     @Synchronized
     internal fun upsertFrameworkEndpointBookmark(
         payload: JSONObject,

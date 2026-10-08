@@ -1925,6 +1925,7 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         imeDismissalReducer.reset()
         activityResumed = true
+        if (BuildConfig.TE2_TERMUX) persistentNetworkEnabled = settingsStore.load().persistentNetworkNotification
         if (
             android.os.Build.VERSION.SDK_INT < 33 ||
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==

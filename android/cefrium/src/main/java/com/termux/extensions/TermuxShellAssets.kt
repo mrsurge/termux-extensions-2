@@ -8,7 +8,7 @@ internal object TermuxShellAssets {
     const val LAUNCHER = "${PREFIX}index.html"
     private val files = setOf("index.html", "settings.html", "shell.css", "host.js",
         "chrome.html", "chrome.css", "chrome.js",
-        "launcher.js", "settings.js", "electromux-platform.js", "electromux-bootstrap.js",
+        "launcher.js", "settings.js", "electromux-platform.js", "electromux-bootstrap.js", "electromux-settings.js",
         "extensions/apps.js", "extensions/registry.js", "extensions/local-framework.js")
 
     fun assetPath(path: String): String? {

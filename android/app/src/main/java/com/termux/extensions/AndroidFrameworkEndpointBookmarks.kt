@@ -19,6 +19,12 @@ internal data class AndroidFrameworkEndpointBookmark(
         .put("frameworkBaseUrl", frameworkBaseUrl)
 }
 
+internal fun withTermuxLocalhostBookmark(current: List<AndroidFrameworkEndpointBookmark>): List<AndroidFrameworkEndpointBookmark> {
+    if (current.size >= MAX_ANDROID_FRAMEWORK_ENDPOINT_BOOKMARKS || current.any { it.name.equals("Localhost", ignoreCase = true) ||
+            it.frameworkHost == "127.0.0.1" && it.frameworkPort == 8089 }) return current
+    return current + AndroidFrameworkEndpointBookmark("Localhost", "127.0.0.1", 8089)
+}
+
 internal fun validatedAndroidFrameworkEndpointBookmark(
     name: String,
     frameworkHost: String,

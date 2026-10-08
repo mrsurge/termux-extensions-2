@@ -1,5 +1,46 @@
 # Electromux host plan
 
+## Connection/bookmark/Android settings slice (2026-10-07)
+
+Approved source implementation: mobile Framework Connection gives the host a
+full-width row, with Port/Connect below. The field was present in source/APK;
+CDP was disabled during inspection, so the actual missing-field cause is not
+claimed as proven. Physical layout acceptance is required.
+
+TE2 Termux explicitly seeds a Localhost (`127.0.0.1:8089`) bookmark once in the
+existing native bookmark store. Atomic seed marker plus bookmark publication
+allows deletion to persist; collisions, capacity and existing endpoints are
+preserved. Seeding never changes the selected framework and ordinary Android
+clients do not invoke it. Shared bookmark save/delete and Connect retain the
+existing gateway/settings paths.
+
+The consumer-only `electromux-settings.js` adds keep-alive, actual permission/
+CPU/Wi-Fi lock status, Notification permission and Battery settings buttons.
+Exact packaged-document native requests reuse AndroidAppSettingsStore and
+PersistentNetworkService. No arbitrary intent target/extra is accepted;
+system notification settings use the native consumer package. Resume rereads the
+keep-alive flag before existing permission/power handling. Browser activation
+refresh is coalesced and preserves pending checkbox intent; it never reloads the full
+connection form. Foreground/lock policy remains active-session-owned, not an
+independent launcher wake lock. The keep-alive checkbox saves on change without
+a separate Save button, disables during the write, and restores the confirmed
+value on failure without mutation retry. Desktop never imports the Android section.
+
+Source checks and user live layout/bookmark/permission acceptance pass. The
+immediate-save follow-up also received user live acceptance on Razr.
+No installer or shared-framework action.
+
+## Later: framework-independent ADB frontend evaluation
+
+User requested an Android debug tap into CDP or the console bridge that works
+without a running framework. Prefer existing Cefrium CDP, with native opt-in,
+loopback-only control and ADB forwarding; do not require the framework-hosted
+console worker to discover/enable it. Investigate native port/target discovery,
+exact-page evaluation, bounded correlation, renderer restart lifecycle and
+forward cleanup. Assess Gecko's equivalent separately. Keep production security
+and authorization explicit; no blanket debugger resume or web-security disabling.
+This is documentation only, deferred until after this settings slice.
+
 ## Deferred settings/install follow-up
 
 Priority is the confirmed stale-helper-socket incident described in

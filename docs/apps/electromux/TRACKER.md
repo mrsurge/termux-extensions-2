@@ -1,5 +1,36 @@
 # Electromux tracker
 
+## Connection/bookmark/Android settings (2026-10-07)
+
+- [x] Explicit full-width mobile Framework host; Port/Connect below.
+- [x] One-time native Localhost seed, no endpoint switch or repeated recreation.
+- [x] Shared bookmark connection/save/delete adapter regression.
+- [x] Consumer-only keep-alive/permission/power settings UI and native actions.
+- [x] Activation refresh preserves drafts and disposes listeners.
+- [x] Termux/ordinary Cefrium compile/JVM tests and browser checks.
+- [x] Approved APK assembly/install on Razr, preserving storage.
+- [x] User live validation of connection/bookmark/Android settings.
+- [x] Follow-up removes keep-alive Save button and persists checkbox changes immediately;
+  pending writes disable the control and failed writes restore the confirmed value.
+- [x] Follow-up APK assembled and installed in place on Razr; signer verified.
+- [x] User live validation of immediate-save behavior on Razr.
+- [ ] Later independent ADB/CDP/console evaluation workflow (no framework required).
+
+The missing-field root cause is unproven; source/APK declared it and runtime CDP
+was disabled. The layout change must be judged live, not from the static CSS test.
+Installer integration and remote run-profile/clipboard acceptance stay separate.
+
+Debug APK SHA-256:
+`74cf7294155110187590c98ca5720db5b71f09388c6cb0fabe6a78c3e6b9a6ea`.
+Termux-compatible signer verified and the new Android settings module is bundled.
+In-place Razr installation succeeded; no app/framework launch or storage clearing
+was performed by the agent. User live acceptance passed.
+
+The user accepted that settings APK. Immediate-save follow-up APK SHA-256:
+`d425ee1ac64aa354b639de70f9443b2a5c503ed669b0554dcd87f9ee6d9790ab`.
+Seven browser regressions and APK assembly pass; installed with preserved data
+and no agent launch. User immediate-save live acceptance passed on 2026-10-07.
+
 ## Stale helper endpoint recovery (2026-10-07)
 
 - [x] Preserve and inspect failing Razr state; verify errno 111, no helper/actor,

@@ -51,7 +51,7 @@ async function boot(hostname = '127.0.0.1', settingsPage = true) {
   const bootstrap = new SourceTextModule(bootstrapSource, {context,
     importModuleDynamically: async name => {
       loaded = name;
-      const entry = new SourceTextModule('', {context});
+      const entry = new SourceTextModule(name === './electromux-settings.js' ? 'export function mountAndroidSettings() {}' : '', {context});
       await entry.link(() => {});
       await entry.evaluate();
       return entry;
@@ -66,7 +66,7 @@ async function boot(hostname = '127.0.0.1', settingsPage = true) {
     controls, calls, nativeCalls};
 }
 const state = await boot();
-assert.equal(state.loaded, './settings.js');
+assert.equal(state.loaded, './electromux-settings.js');
 assert.equal(state.controls[0].disabled, true);
 state.controls[0].disabled = false;
 state.observer.callback([{type: 'attributes', target: state.controls[0]}]);

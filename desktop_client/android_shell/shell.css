@@ -579,8 +579,21 @@ button {
     grid-template-columns: minmax(0, 1fr) 112px;
   }
 
-  .framework-connect-button {
+  .framework-connection-grid {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .framework-connection-grid .field:first-child {
     grid-column: 1 / -1;
+  }
+
+  .framework-connection-grid input {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .framework-connect-button {
+    grid-column: 2;
     justify-self: end;
   }
 

@@ -64,8 +64,27 @@ internal class TermuxLocalFrameworkRuntime(private val service: PersistentNetwor
     override fun request(method: String, params: JSONObject): JSONObject {
         require(method in TermuxLocalControlPolicy.methods)
         check(!closed)
-        if (method == "get_settings") return TermuxStartupSettingsStore(service).load()
-            .merge(AndroidAppSettingsStore(service).load().toJson())
+        if (method == "get_settings") {
+            val store = AndroidAppSettingsStore(service)
+            store.seedTermuxLocalhostBookmark()
+            return TermuxStartupSettingsStore(service).load().merge(store.load().toJson())
+        }
+        if (method == "get_android_settings") return androidSettings()
+        if (method == "save_android_settings") {
+            require(params.keys().asSequence().all { it == "persistentNetworkNotification" })
+            require(params.opt("persistentNetworkNotification") is Boolean)
+            val next = AndroidAppSettingsStore(service).update(params)
+            main.post { if (!closed) service.configure(next) }
+            return androidSettings()
+        }
+        if (method == "open_power_settings" || method == "open_notification_settings") {
+            require(params.length() == 0)
+            main.post { if (!closed) {
+                if (method == "open_power_settings") service.openBatteryOptimizationSettings()
+                else service.openNotificationSettings()
+            } }
+            return JSONObject().put("opened", true)
+        }
         if (method == "save_settings") {
             val startupStore = TermuxStartupSettingsStore(service)
             val startupValues = startupStore.load().merge(JSONObject())
@@ -125,6 +144,9 @@ internal class TermuxLocalFrameworkRuntime(private val service: PersistentNetwor
     }
 
     override fun close() { closed = true; owner.close() }
+
+    private fun androidSettings(): JSONObject = AndroidAppSettingsStore(service).load().toJson()
+        .put("runtime", service.snapshot().toJson())
 
     override fun beginStartup(onPreferredApp: (String, String) -> Unit, onError: (String) -> Unit): Closeable =
         TermuxStartupCoordinator(TermuxStartupSettingsStore(service).load(), this,

@@ -29,7 +29,8 @@ export function createRemoteElectromuxPlatform({gatewayRequest, getBrowserOrigin
   };
   const gateway = (path, method = "GET", body) => gatewayRequest(`/android-api${path}`, {method, body});
   async function request(method, params = {}) {
-    if (typeof nativeRequest === "function" && ["get_settings", "save_settings", "get_local_framework_state", "get_local_framework_config",
+    if (typeof nativeRequest === "function" && ["get_settings", "save_settings", "get_android_settings", "save_android_settings",
+      "open_power_settings", "open_notification_settings", "get_local_framework_state", "get_local_framework_config",
       "save_local_framework_config", "refresh_local_framework", "start_local_framework",
       "stop_local_framework", "use_local_framework"].includes(method)) {
       const result = await nativeRequest(method, params);

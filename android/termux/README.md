@@ -28,6 +28,14 @@ implementation; source reuse is not physical parity acceptance.
 
 ## Source validation
 
+The consumer-only Android settings section exposes the existing active-session
+keep-alive notification/power policy, current permission/CPU/Wi-Fi lock state,
+and native system-settings actions. The keep-alive checkbox saves immediately
+on change without a separate Save button. Returning refreshes only that section,
+preserving unsaved connection values. A native one-time Localhost bookmark seed
+does not change the endpoint or recreate a user-deleted preset. New launcher
+modules are APK-owned and need an APK update, not editor OTA alone.
+
 Automatic local launch and preferred-app selection reuse Electron's settings
 fields through the native exact-document bridge. They persist in private
 `electromux_startup` preferences, not random-origin browser storage. Explicit
