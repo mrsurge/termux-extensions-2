@@ -1,5 +1,78 @@
 # Electromux host plan
 
+## Isolated embedded consumer integration (2026-10-08)
+
+Checkpoint: TE2 `4e3ab515`, Electromux `11ef6c8` (local only).
+Approved scope is service/Binder integration, TE2 Termux build wiring and
+regression/build validation; no APK installation or shared framework stop.
+
+Generic Electromux `EmbeddedNodeService` and `EmbeddedNodeClient` now bridge
+declared consumer methods/events over internal AIDL. The service checks caller
+UID on every transaction, rejects concurrent requests, caps payloads at 64KiB
+and observers at 16. Entry and execution lane come from the compiled native
+declaration, never Intent extras. The retained process engine/failure cannot be
+retargeted, is not closed on page detach/Service recreation, and is created only
+by an explicit request. Disconnect fails the client without mutation replay.
+Shared-UID packages remain a common trust domain, not mutual isolation.
+
+TE2's private `TermuxNodeService` runs in `:electromux_node`, independently of
+Cefrium; the shared Application skips Chromium command-line/consumer registration
+in that process. Installed Termux UID/signature is checked before execution.
+PersistentNetworkService's existing runtime adapter now uses this client instead
+of Python-helper provisioning or an external Node executable. Android settings,
+exact document authorization, revision/selection fences and Desktop controller
+ownership are unchanged. The TE2 Python application dependency is not removed.
+
+Only TE2 Termux includes the Node module. Its build tracks nested TS inputs,
+packages the embedded TE2 entry under `embedded_node/te2.mjs`, and removes obsolete
+generated external-Node assets. The reusable runtime depends on the host transport
+library rather than duplicating classes. Cefrium 0.9.0's AAR has no competing
+libc++_shared.so; the integrated package uses the NDK runtime with libnode.
+
+Next gate: approved in-place install on Razr, without clearing storage or stopping
+the framework. Verify cold Node boot, local/remote settings and selection, owned
+start/stop/Cancel, long source-build output, page detach/reopen and retained engine,
+external-framework preservation and late-document fencing. Then inspect service
+PID separation/native memory and explicit process-death recovery. Packaging and
+host regression checks do not establish these device/lifecycle claims. Installer
+integration remains later; final license/notice redistribution is still a gate.
+
+Validation: runtime strict typecheck/build and 24 Node tests; TE2 strict actor
+typecheck and 15 actor/browser tests; integrated Termux JVM tests/debug assembly;
+16 runtime JVM tests (including checked-exception-to-error/no-retry coverage),
+independent proof JVM tests, and ordinary Cefrium compile/JVM tests without a
+Node SDK configured all pass. APK entry checksum matches embedded-entry.mjs;
+libnode, JNI shim and libc++ are present, obsolete external-Node entry absent.
+APK is roughly 343MiB (debug, not a release artifact). Security alignment report
+with exact source diffs is retained in
+`.codex-scratch/electromux-node-service/security-alignment.md`.
+Final debug APK: `android/termux/build/outputs/apk/debug/te2-termux-debug.apk`,
+SHA-256 `6428d3e2c9a2fdb6e0e2aab7acd0866c77fe48472e5ebe6daea7fee13fe49459`.
+It carries the explicit public Termux GitHub test signer (certificate SHA-256
+`b6da01480eefd5fbf2cd3771b8d1021ec791304bdd6c4bf41d3faabad48ee5e1`).
+JVM totals: 26 Termux, 16 runtime, 2 proof and 58 ordinary Cefrium, zero failures.
+
+Approved Razr installation completed in place, preserving app storage. Observed
+UI PID 26331 and embedded Node service PID 26413, with successful JNI loading
+and the selected entry materialized under private no_backup storage. Framework
+PID 16864 survived installation and opening unchanged. Saved automatic startup
+observed/connected to local and opened Code TE2; no manual Start/Stop was invoked.
+Legacy helper/actor processes were deliberately left alive. One RunTargetProjection
+timeout appeared in the UI log; no Node startup error/crash was observed. This
+does not establish owned start/stop, remote switching or broad lifecycle acceptance;
+the installed build is ready for the user's live validation.
+
+User follow-up: killed the previous run and restarted; reported the new build
+working. Record local restart/live acceptance, not proof of all remote, Cancel,
+background or process-death recovery cases.
+
+User subsequently confirmed Cancel and lifecycle behavior working properly.
+Those user live-acceptance gates pass; remote switching remains open. No separate
+instrumented crash/process-death recovery claim follows from this confirmation.
+
+User confirmed remote switching working and approved commit/push. Local restart,
+Cancel, lifecycle and remote switching are live accepted for this APK/source slice.
+
 ## Embedded Node / TypeScript runtime direction (2026-10-08)
 
 ### Independent ARM64 proof checkpoint

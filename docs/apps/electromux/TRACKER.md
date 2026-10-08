@@ -1,5 +1,30 @@
 # Electromux tracker
 
+## Embedded TE2 service integration (2026-10-08)
+
+- [x] Local checkpoint: root `4e3ab515`, nested `11ef6c8`.
+- [x] Generic private-service AIDL request/event client with process-retained engine.
+- [x] TE2 immutable entry declaration and installed Termux UID/signature checks.
+- [x] Replace TE2 runtime's helper/external-Node calls; preserve native page/selection guards.
+- [x] Termux-only Node packaging, nested TS build inputs and stale generated actor cleanup.
+- [x] Strict runtime checks/build and 24 Node tests; 15 TE2 actor/browser regressions.
+- [x] Integrated Termux JVM tests, Node runtime JVM tests and debug APK assembly.
+- [x] Ordinary Cefrium compile/JVM tests without Node SDK or module dependency.
+- [x] Approved in-place Razr installation; storage preserved and app opened.
+- [x] Embedded service boot/PID separation and installed entry checksum verified.
+- [x] User local/remote/lifecycle live acceptance.
+- [x] User stopped the previous run and restarted; new embedded implementation works.
+- [x] User confirmed remote switching working.
+- [x] User confirmed Cancel and lifecycle behavior working properly.
+- [ ] Process separation/memory and crash/death recovery evidence.
+
+The approved debug APK is installed on Razr without data reset or asset OTA.
+UI PID 26331 and embedded Node PID 26413 are separate; Node loads its native shim.
+The existing framework PID 16864 survived installation/opening. Saved automatic
+startup connected to local and opened Code TE2; no manual Start/Stop or shared
+framework termination occurred. Old helper/actor processes remain untouched.
+User local restart, Cancel, lifecycle and remote switching acceptance pass.
+
 ## Embedded Node runtime prerequisite (2026-10-08)
 
 - [x] Inventory existing Python helper/framing/demo and TE2 Node actor roles.
@@ -25,7 +50,8 @@
     preserve exact-document authorization, then repeat Android lifecycle acceptance.
     - [x] Generic typed parameter DTO validation and APK-owned native entry/method/event declaration.
     - [x] TE2 embedded entry bundle and host private-FD fixture lifecycle/parity tests.
-    - [ ] TE2 package/build-input wiring and PersistentNetworkService adapter migration.
+    - [x] TE2 package/build-input wiring and PersistentNetworkService adapter migration.
+      Device acceptance remains pending for the new isolated embedded service.
 - [ ] Integrate existing TE2 consumer actor; repeat local/remote/lifecycle acceptance.
 - [ ] Remove Python/external Node host prerequisites and resume installer UI.
 

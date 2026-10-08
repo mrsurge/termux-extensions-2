@@ -7,10 +7,12 @@ import org.chromium.base.CommandLine
 class CefriumApplication : Application() {
     override fun onCreate() {
         super.onCreate()
+        if (getProcessName().endsWith(":electromux_node")) return
         TermuxLocalFrameworkRegistration.install()
     }
     override fun attachBaseContext(base: Context) {
         super.attachBaseContext(base)
+        if (getProcessName().endsWith(":electromux_node")) return
 
         // Cefrium 0.9.0 initializes in a ContentProvider, before Application.onCreate.
         // Its AAR ships Java-backed services, not NativeOnlySandboxedProcessService;

@@ -24,5 +24,7 @@
         </activity>
         <service android:name=".PersistentNetworkService" android:exported="false"
             android:foregroundServiceType="connectedDevice" />
+        <service android:name=".TermuxNodeService" android:exported="false"
+            android:process=":electromux_node" />
     </application>
 </manifest>

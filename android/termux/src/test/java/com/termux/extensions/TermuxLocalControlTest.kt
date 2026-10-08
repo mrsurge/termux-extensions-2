@@ -57,14 +57,28 @@ class TermuxLocalControlTest {
     }
     @Test fun bundledSeedContainsActorAndBridgeBeforeConsumerBootstrap() {
         val root = java.io.File("build/generated/termuxShellAssets")
-        assertEquals(java.io.File("../../desktop_client/electromux/dist/local-framework-backend.mjs").readText(),
-            java.io.File(root, "electromux_backend/local-framework-backend.mjs").readText())
+        assertEquals(java.io.File("../../desktop_client/electromux/dist/embedded-entry.mjs").readText(),
+            java.io.File("build/generated/termuxNodeAssets/embedded_node/te2.mjs").readText())
+        assertFalse(java.io.File(root, "electromux_backend").exists())
         for (page in listOf("index.html", "settings.html")) {
             val html = java.io.File(root, "electromux_shell/$page").readText()
             assertTrue(html.indexOf("./electromux-bridge.js") >= 0)
             assertTrue(html.indexOf("./electromux-bridge.js") < html.indexOf("./electromux-bootstrap.js"))
         }
         assertEquals("electromux-bridge.js", TermuxShellAssets.assetPath("/electromux-shell/electromux-bridge.js"))
+    }
+    @Test fun nativeEngineIsPrivateAndNotSelectedByPageOrHelper() {
+        val manifest = java.io.File("src/main/AndroidManifest.xml").readText()
+        assertTrue(manifest.contains("android:name=\".TermuxNodeService\" android:exported=\"false\""))
+        assertTrue(manifest.contains("android:process=\":electromux_node\""))
+        val adapter = java.io.File("src/main/java/com/termux/extensions/TermuxLocalFrameworkRegistration.kt").readText()
+        assertTrue(adapter.contains("EmbeddedNodeClient"))
+        assertFalse(adapter.contains("TermuxHelperClient"))
+        assertFalse(adapter.contains("/usr/bin/node"))
+        val declaration = java.io.File("src/main/java/com/termux/extensions/TermuxNodeService.kt").readText()
+        assertTrue(declaration.contains("embedded_node/te2.mjs"))
+        assertTrue(declaration.contains("checkSignatures"))
+        assertTrue(declaration.contains("termux.uid == Process.myUid()"))
     }
     @Test fun nativeSelectionUpdatesActivityProjectionBeforeReadiness() {
         val source = java.io.File("../cefrium/src/main/java/com/termux/extensions/MainActivity.kt").readText()

@@ -20,3 +20,5 @@ rootProject.buildFileName = "../cefrium/build.gradle.kts"
 // Reusable host is pinned by Git, never resolved from a neighboring checkout.
 include(":electromux-host")
 project(":electromux-host").projectDir = file("../../vendor/electromux/android/host")
+include(":electromux-node")
+project(":electromux-node").projectDir = file("../../vendor/electromux/android/node-runtime")

@@ -13,7 +13,10 @@ val termuxBackendAssets = if (termuxConsumer) tasks.register<Exec>("bundleTermux
     inputs.files(fileTree("../../desktop_client/electromux") { include("*.ts", "*.mjs") },
         fileTree("../../desktop_client/electron/src/main") { include("**/*.ts") },
         fileTree("../../desktop_client/electron/src/shared") { include("**/*.ts") })
-    outputs.file("../../desktop_client/electromux/dist/local-framework-backend.mjs")
+    inputs.files(fileTree("../../vendor/electromux/runtime/src") { include("**/*.ts") })
+    outputs.files("../../desktop_client/electromux/dist/local-framework-backend.mjs",
+        "../../desktop_client/electromux/dist/local-framework-consumer.mjs",
+        "../../desktop_client/electromux/dist/embedded-entry.mjs")
 } else null
 val termuxShellAssets = if (termuxConsumer) tasks.register<Sync>("bundleTermuxShell") {
     dependsOn(checkNotNull(termuxBackendAssets))
@@ -27,8 +30,16 @@ val termuxShellAssets = if (termuxConsumer) tasks.register<Sync>("bundleTermuxSh
 } else null
 val termuxActorAssets = if (termuxConsumer) tasks.register<Sync>("bundleTermuxActorAssets") {
     dependsOn(checkNotNull(termuxBackendAssets))
-    from("../../desktop_client/electromux/dist/local-framework-backend.mjs")
-    into(layout.buildDirectory.dir("generated/termuxShellAssets/electromux_backend"))
+    from("../../desktop_client/electromux/dist/embedded-entry.mjs") {
+        into("embedded_node")
+        rename { "te2.mjs" }
+    }
+    into(layout.buildDirectory.dir("generated/termuxNodeAssets"))
+} else null
+val obsoleteTermuxActorAssets = if (termuxConsumer) tasks.register<Delete>("removeLegacyTermuxActorAssets") {
+    // Previous builds generated the external-Node entry here. Never package it
+    // alongside the new APK-owned embedded consumer, even in a dirty build tree.
+    delete(layout.buildDirectory.dir("generated/termuxShellAssets/electromux_backend"))
 } else null
 
 android {
@@ -145,6 +156,7 @@ android {
             assets.srcDir("../app/src/main/assets")
             if (termuxConsumer) {
                 assets.srcDir(layout.buildDirectory.dir("generated/termuxShellAssets").get().asFile)
+                assets.srcDir(layout.buildDirectory.dir("generated/termuxNodeAssets").get().asFile)
                 java.srcDir("../termux/src/main/java")
                 kotlin.srcDir("../termux/src/main/java")
             } else {
@@ -160,7 +172,10 @@ configurations.all {
 }
 
 dependencies {
-    if (termuxConsumer) implementation(project(":electromux-host"))
+    if (termuxConsumer) {
+        implementation(project(":electromux-host"))
+        implementation(project(":electromux-node"))
+    }
     debugImplementation("org.jetbrains.kotlin:kotlin-reflect:2.2.10")
     val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
 
@@ -196,6 +211,7 @@ dependencies {
 
 if (termuxShellAssets != null) tasks.named("preBuild") { dependsOn(termuxShellAssets) }
 if (termuxActorAssets != null) tasks.named("preBuild") { dependsOn(termuxActorAssets) }
+if (obsoleteTermuxActorAssets != null) tasks.named("preBuild") { dependsOn(obsoleteTermuxActorAssets) }
 gradle.taskGraph.whenReady {
     if (termuxConsumer && termuxKey == null && allTasks.any {
         it.name.matches(Regex("(assemble|package|bundle|sign|install)(Debug|Release|Staging)(AndroidTest|UniversalApk|Bundle)?")) ||
