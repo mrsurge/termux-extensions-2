@@ -4,6 +4,128 @@
 
 ### Independent ARM64 proof checkpoint
 
+#### Embedded consumer-host foundation
+
+##### Long-lived lifecycle/event follow-up
+
+###### Child streaming/policy follow-up
+
+Source inspection confirms TE2's existing LocalFrameworkController already owns
+its child group, stdout/stderr log forwarding, FD3 control hello, health proof
+and graceful stdin shutdown/escalation. Preserve this controller during actor
+migration; do not wrap it in a second lifecycle owner or substitute the sample's
+text readiness token for TE2's real protocol.
+
+OwnedService now accepts native consumer-selected readiness/stop policy:
+readinessMs=null explicitly allows a cancellable build wait. OutputPump streams
+raw stdout/stderr bytes without a lifetime-output cap, with at most 16 queued
+chunks of at most 64KiB, five-second sink completion deadlines and only 2KiB
+retained tails per lane. Queue/sink failure terminates the owned child rather
+than accumulating output. Explicit restart creates a fresh output pump; no
+automatic restart/replay. Readiness retains a separate 64KiB bound.
+
+The independent Termux proof selects indefinite readiness, 1s stop grace and a
+declared child.output event. Strict checks/bundle and 23 Node tests pass, including
+409600-byte streaming, bounded tails, slow-sink/queue rejection, >8KiB real-child
+output, explicit restart and cancellation before hello. Android JVM checks and
+assembly pass. Razr updated in place: PID 24668 remained ready across Status,
+then Stop emitted child.state/SIGTERM and /proc confirmed removal. Log streaming
+is covered by host regressions; the diagnostic UI retains only its latest event,
+so this device test does not independently record every child.output event.
+TE2 runtime and app data remain untouched.
+Updated proof APK SHA-256:
+`5ef1832fa091da7278fc335d95e916dbab307b42f3d74f7cb5bb20dc1c226ec0`.
+
+Next slice: extract the existing TE2 actor policy into an importable consumer
+factory while retaining its external stdio entrypoint, parameter/schema guards,
+session/revision state, config authority and controller. Prove parity locally
+before wiring the embedded engine into TE2's Android service/renderer.
+
+Approved follow-up adds TS `OwnedService` semantic FD3 readiness, explicit
+status/stop, startup-failure reporting, bounded output and owned-group cleanup;
+no automatic restart. Start returns at readiness rather than at child exit.
+Consumer events are explicitly declared and fenced against pre-initialization
+and closed owners. Replies/events share `FrameWriter` (16 pending frames,
+five-second write deadline); overload is terminal, with no event history/replay.
+The existing native transport explicitly accepts `child.state`. Sample Start /
+Status / Stop buttons remain fixed native methods, not arbitrary execution.
+
+Strict typecheck/bundle and 19 Node tests pass, including natural unsolicited
+exit, disposal during startup, event rejection and slow-writer bounds. Android
+runtime/ordinary/Termux JVM tasks and independent Termux APK assembly pass.
+Installed only this proof on Razr without clearing app data: PID 23996 returned
+ready, remained ready across a separate Status call, then explicit Stop returned
+SIGTERM/exited plus child.state; /proc confirmed the PID gone. This is diagnostic
+acceptance, not TE2 actor/Cefrium integration acceptance. The current service
+has proof-sized limits (3s readiness, 8KiB cumulative output, 250ms stop grace);
+production consumer policy/streaming must be designed before TE2 migration.
+Activity detach and native process-owned engine behavior remain unchanged.
+APK SHA-256:
+`bbcbeb04071a5a196ed2a1d3791e0d0134aec4a8a417aff7d872c07370c27a78`.
+
+The native-selected compiled proof factory now runs through reusable TS
+`ConsumerHost`: single initialization with retained failure, declared-method
+dispatch, concurrent-call rejection, closed-owner result fencing and idempotent
+disposal. Readiness follows consumer initialization. `OwnedChildSupervisor`
+owns one child operation, rejects overlap/reuse after disposal, and aborts/joins
+its runner. The proof runner retains exact process-group ownership, bounded
+stdio/FD3 and a deadline. Channel loss disposes the consumer; Activity observer
+detach does not close the process-owned engine. Frame writes have a five-second
+completion deadline; replies/events stay serialized on the private FD lane.
+
+This is a foundation, not complete Python-helper migration or an Electron
+child_process implementation. Diagnostic wire methods/events and fixed Termux
+policy remain sample-specific. Long-lived semantic-ready children, consumer
+events, Cefrium document authorization and the existing TE2 actor still require
+integration gates. No renderer-controlled module paths/argv/environment or
+automatic mutation replay were introduced.
+
+Strict typecheck/bundle and 13 Node tests pass, including initialization failure,
+undeclared/concurrent calls, late closed-owner results and real-child abort/join.
+Android runtime/ordinary/Termux JVM tasks and Termux APK assembly pass. Installed
+only the independent proof on Razr, preserving app data and TE2. APK SHA-256:
+`7d361bba4a96ce3608086180877d5f5224d685cfc033066dd3dde3f3f769a78f`.
+Device PID 23177 returned expected UID/HOME/PREFIX/TERM, exit 7 and FD3 readiness.
+Cancellation PID 23363/descendant 23366 returned SIGTERM, groupGone=true and the
+correlated sample.updated event; all three PIDs were absent afterward. This is
+agent-observed diagnostic acceptance, not TE2 migration acceptance.
+
+#### Separate Termux child execution proof
+
+Checkpoint commits before this slice: Electromux `5d8bc28`, TE2 `1791a793`.
+Approved implementation/install uses opt-in `:node-termux-proof`, independent
+package `dev.mrsurge.electromux.nodeproof.termux`; ordinary proof and TE2 remain
+unchanged on device. It reuses the same diagnostic source/build definition with
+native-gated Termux methods, explicit signing and root `com.termux` shared UID.
+Installed Termux APK certificate and configured public GitHub test certificate
+were independently compared: SHA-256
+`b6da01480eefd5fbf2cd3771b8d1021ec791304bdd6c4bf41d3faabad48ee5e1`.
+No keys or build environment files are committed.
+
+APK SHA-256: `b9f6fae48394cbcc536b291d61a82724bfb4b07e38af35937dcd2a6a3b580c6d`.
+Signature/root manifest/16 KB ZIP alignment verified; installed UID is 10517,
+same as Termux. Razr API 36, proof target 34, observed process domain
+`u:r:untrusted_app_27:s0:c5,c258,c512,c768`. This observation, not merely the
+manifest, establishes the tested direct execution lane. Android execution
+restrictions remain relevant elsewhere:
+[Android 10 behavior changes](https://developer.android.com/about/versions/10/behavior-changes-10#execute-permission).
+
+Embedded Node directly spawned fixed Termux Bash child PID 21918: UID 10517,
+explicit Termux HOME/PREFIX/cwd, TERM=xterm-256color, separate stdout and stderr,
+deliberate exit 7, exact `ready:21918` over inherited FD3, group gone afterward.
+Cancellation proof shell 21955 spawned sleep 21957, published exact readiness
+over FD3, then owned group SIGTERM completed with groupGone=true; all three
+observed proof children were absent from /proc afterward. No TermuxService,
+external Node/Python helper or framework launch was used. Commands are fixed,
+not renderer supplied; output/deadline bounded, no automatic fallback/replay.
+Host checks cover output overflow, missing readiness deadline, spawn failure,
+unauthorized standalone methods, exit/stdio/FD3 and group cancellation.
+
+Next concrete design gate: migrate generic supervision/consumer loading into
+embedded TS without weakening ownership and protocol guarantees; then Cefrium
+renderer/document lifecycle and C++ runtime coexistence, followed by TE2 actor
+integration. Current TE2 runtime is not replaced by this execution proof.
+
 #### Device lifecycle follow-up
 
 User accepted Ping/filesystem and unsolicited events on Motorola Razr. Lifecycle

@@ -6,8 +6,10 @@ Current host control requires Termux Python for the generic helper and an
 external Node executable for the TE2 actor. This prevents a genuinely embedded
 Electromux runtime from booting independently in a fresh Termux environment.
 The intended replacement is embedded libnode plus TypeScript-authored runtime
-glue; fogtape Node 24 full is a candidate, not a validated artifact. Keep existing
-accepted behavior until independent native/IPC/process/lifecycle gates pass.
+glue; fogtape Node 24 full now passes independent Razr boot/IPC/filesystem,
+Service-recreation and direct shared-UID Termux child/FD3/cancellation proof.
+Generic supervisor/renderer/TE2 integration is still pending. Keep existing
+accepted host behavior until those migration gates pass.
 Installer UI is paused; see PLAN/TRACKER, Embedded Node runtime prerequisite.
 
 ## Dead helper socket hides the launcher (2026-10-07)

@@ -11,8 +11,16 @@
 - [x] Independent native Android boot, Ping/filesystem and events on Motorola Razr.
 - [x] Fix Service recreation to retain a process-owned engine; explicit Binder errors.
 - [x] Activity reopen, Service destruction/recreation and explicit process-stop/reopen device gates.
-- [ ] Explicit device proof: filesystem, Termux child/env/FD3, cancellation and recovery.
+- [x] Razr separate shared-UID proof: installed matching signer/UID, direct Termux child/env/FD3 and group cancellation.
+- [ ] Repeat execution lane on other supported devices/signing families; broader crash recovery.
 - [ ] Migrate generic Python supervisor/protocol to TS without weakening guarantees.
+  - [x] Native-selected TS consumer-host and owned-child operation foundation;
+    strict tests and independent Razr execution/cancellation pass.
+  - [x] Long-lived diagnostic readiness/status/stop and declared unsolicited
+    events, bounded writer tests, independent Razr lifecycle acceptance.
+  - [x] Consumer-selected readiness/stop and bounded streaming output primitives;
+    host output regressions and updated independent Razr lifecycle pass.
+  - [ ] Existing TE2 actor factory extraction/parity, then embedded Android integration.
 - [ ] Integrate existing TE2 consumer actor; repeat local/remote/lifecycle acceptance.
 - [ ] Remove Python/external Node host prerequisites and resume installer UI.
 
