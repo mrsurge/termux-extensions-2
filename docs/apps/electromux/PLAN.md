@@ -1035,6 +1035,22 @@ remote framework pages share it. No Android source/device mutation in this slice
 
 ## Electron-subset portability acceptance
 
+The first unrelated consumer is Alex313031/electron-calculator, initially its
+main window only. The compatibility manifest is a reusable feature selecting
+native title/menu chrome and explicit limitations, not an application rewrite.
+Unsupported menu actions must be disabled with reasons; unexpected unsupported
+calls fail explicitly. Node retains callbacks; native UI returns item IDs.
+The independent implementation/next gates live in
+`vendor/electromux/docs/ELECTRON_CALCULATOR_POC.md`. No TE2 or shared-UID dependency
+belongs in that sample. Multi-window/switcher behavior is deferred.
+
+Keep TE2 Termux working throughout compatibility work: prefer additive APIs and
+run its consumer regression suite. Any necessary breaking host API change must
+update the TE2 consumer and matching native packages in the same approved slice;
+never leave the accepted app on a stale contract. The calculator's scoped main/
+preload probe is now implemented, but native acknowledgement/preload timing and
+APK rendering remain separate gates.
+
 Electromux targets a useful Electron-compatible subset for Termux apps, not all
 Electron APIs and not conversion of TE2 into the generic host. After the TE2 POC,
 accept an unrelated small Electron application supplied by the user and prove

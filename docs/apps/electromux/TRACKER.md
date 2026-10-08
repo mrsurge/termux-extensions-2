@@ -1,5 +1,22 @@
 # Electromux tracker
 
+## Unrelated Electron calculator foundation (2026-10-08)
+
+- [x] Independent manifest/main-window/menu adapter foundation and 30 passing runtime tests.
+- [x] Document main-window-only scope, explicit unsupported behavior and remaining gates.
+- [x] Actual Electron entrypoint/preload/native calculator source integration.
+- [x] Actual pinned main/preload Node probe runs without application source edits;
+  scoped adapters/deferred context menus are documented, not hidden no-ops.
+- [x] All 31 TE2 consumer regressions pass with existing APIs unchanged.
+- [x] Isolated full-duplex native effect driver and calculator APK source/build gate.
+- [x] TE2 Termux comparison: native tests/compile pass; no existing Binder API changed.
+- [ ] Installed calculator rendering/preload/menu/lifecycle live acceptance.
+- [x] Razr USB renderer/arithmetic smoke: content visible and `2 + 3 = 5` verified;
+  fixed AAPT inventory omission and file-origin locale fetch failure.
+
+Standalone calculator APK installed; no TE2 runtime change. See independent
+`vendor/electromux/docs/ELECTRON_CALCULATOR_POC.md`.
+
 ## Android input / DevTools settings parity (2026-10-08)
 
 - [x] Add IME composition workaround, Dev tools run profiles, and Dev tools debug checkboxes.
