@@ -8,6 +8,32 @@ import org.junit.Test
 
 class TermuxLocalControlTest {
     private val origin = "http://127.0.0.1:44100"
+    @Test fun androidSettingsAcceptOnlyDeclaredRealBooleans() {
+        for (key in listOf("persistentNetworkNotification", "imeContextSwitchingEnabled",
+            "devToolsRunProfilesEnabled", "devToolsDebugEnabled")) {
+            TermuxLocalControlPolicy.validateAndroidSettings(JSONObject().put(key, true))
+            TermuxLocalControlPolicy.validateAndroidSettings(JSONObject().put(key, false))
+            for (value in listOf<Any>("true", 1, JSONObject.NULL)) {
+                try { TermuxLocalControlPolicy.validateAndroidSettings(JSONObject().put(key, value)); fail("Invalid bool accepted") }
+                catch (_: IllegalArgumentException) {}
+            }
+        }
+        for (params in listOf(JSONObject(), JSONObject().put("frameworkHost", "remote.test"),
+            JSONObject().put("devToolsDebugEnabled", true).put("unknown", false))) {
+            try { TermuxLocalControlPolicy.validateAndroidSettings(params); fail("Invalid settings accepted") }
+            catch (_: IllegalArgumentException) {}
+        }
+    }
+    @Test fun termuxDevToolsChangesApplyWithoutSettingsReloadOrEndpointMutation() {
+        val service = java.io.File("../app/src/main/java/com/termux/extensions/PersistentNetworkService.kt").readText()
+        assertTrue(service.contains("it.onDevToolsSettingsChanged(next.devToolsRunProfilesEnabled, next.devToolsDebugEnabled)"))
+        val activity = java.io.File("../cefrium/src/main/java/com/termux/extensions/MainActivity.kt").readText()
+        val callback = activity.substringAfter("override fun onDevToolsSettingsChanged(").substringBefore("override fun onRuntimeStateChanged")
+        assertTrue(callback.contains("if (!BuildConfig.TE2_TERMUX) return"))
+        assertTrue(callback.contains("configureDevToolsInspector()"))
+        assertFalse(callback.contains("applySettings("))
+        assertFalse(callback.contains("loadUrl("))
+    }
     @Test fun installerAuthorityIsOnlyPackagedLauncherAndSettings() {
         val policy = TermuxLocalControlPolicy.descriptor(origin)
         for (method in listOf("install_local_framework", "cancel_local_framework_install")) {

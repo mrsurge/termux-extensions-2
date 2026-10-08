@@ -1,5 +1,22 @@
 # Electromux host plan
 
+## Android input / DevTools parity (2026-10-08)
+
+TE2 Termux exposes the existing `imeContextSwitchingEnabled`,
+`devToolsRunProfilesEnabled` and `devToolsDebugEnabled` settings as immediate-save
+checkboxes, alongside keep-alive. Defaults and persistence remain owned by
+AndroidAppSettingsStore. The exact packaged-page save method validates nonempty
+patches containing only those four real boolean keys; no endpoint or arbitrary
+setting is admitted through this lane.
+
+PersistentNetworkService already applies IME updates. Its changed DevTools flags
+now notify runtime observers; the Termux Activity alone consumes that notification
+to reconfigure the existing Cefrium Inspector. Do not call recursive applySettings,
+reload the page, reconnect the framework, or add another Inspector transport.
+Existing Cefrium's HTTP settings callback remains unchanged. All additions are
+TE2 consumer behavior, not reusable Electromux core. Source/JVM/build validation
+and APK deployment evidence versus user live acceptance are tracked separately.
+
 ## TE2 consumer installer slice (2026-10-08)
 
 This is TE2 application policy, not reusable Electromux functionality. The

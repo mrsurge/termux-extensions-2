@@ -189,6 +189,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private val clientRuntimeObserver = object : AndroidClientRuntimeObserver {
+        override fun onDevToolsSettingsChanged(runProfilesEnabled: Boolean, debugEnabled: Boolean) {
+            if (!BuildConfig.TE2_TERMUX) return
+            runOnUiThread {
+                devToolsRunProfilesEnabled = runProfilesEnabled
+                devToolsDebugEnabled = debugEnabled
+                if (::browser.isInitialized) configureDevToolsInspector()
+            }
+        }
         override fun onRuntimeStateChanged(snapshot: AndroidClientRuntimeSnapshot) {
             runOnUiThread {
                 if (BuildConfig.TE2_TERMUX && frameworkBaseUrl != snapshot.frameworkBaseUrl) {

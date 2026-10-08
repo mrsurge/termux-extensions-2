@@ -60,8 +60,7 @@ internal class TermuxLocalFrameworkRuntime(private val service: PersistentNetwor
         }
         if (method == "get_android_settings") return androidSettings()
         if (method == "save_android_settings") {
-            require(params.keys().asSequence().all { it == "persistentNetworkNotification" })
-            require(params.opt("persistentNetworkNotification") is Boolean)
+            TermuxLocalControlPolicy.validateAndroidSettings(params)
             val next = AndroidAppSettingsStore(service).update(params)
             main.post { if (!closed) service.configure(next) }
             return androidSettings()

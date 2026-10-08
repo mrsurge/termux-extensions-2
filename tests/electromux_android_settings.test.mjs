@@ -52,3 +52,32 @@ test('connection row makes the host span both mobile columns', async () => {
   assert.match(mobile, /\.framework-connection-grid \.field:first-child\s*\{\s*grid-column: 1 \/ -1/);
   assert.match(mobile, /\.framework-connect-button\s*\{\s*grid-column: 2/);
 });
+
+test('IME and split DevTools checkboxes persist independently and restore failed writes', async () => {
+  const controls = new Map(), listeners = new Map(), calls = [];
+  const node = () => ({dataset: {}, listeners: {}, addEventListener(name, fn) {this.listeners[name] = fn;}});
+  const section = {...node(), querySelector(id) {if (!controls.has(id)) controls.set(id, node()); return controls.get(id);}};
+  const win = {addEventListener(name, fn) {listeners.set(name, fn);}, removeEventListener(name) {listeners.delete(name);}};
+  const doc = {...win, visibilityState: 'visible', createElement: () => section,
+    querySelector: () => ({appendChild() {}})};
+  const settings = {imeContextSwitchingEnabled: false, devToolsRunProfilesEnabled: false, devToolsDebugEnabled: false};
+  let fail = false;
+  const platform = {async request(method, params) {
+    if (method === 'save_android_settings') {
+      calls.push(params); if (fail) throw new Error('Rejected'); Object.assign(settings, params);
+    }
+    return {...settings};
+  }};
+  const dispose = mountAndroidSettings(platform, doc, win);
+  const settle = () => new Promise(resolve => setImmediate(resolve)); await settle();
+  for (const [id, key] of [['#android-ime-workaround', 'imeContextSwitchingEnabled'],
+    ['#android-devtools-run-profiles', 'devToolsRunProfilesEnabled'], ['#android-devtools-debug', 'devToolsDebugEnabled']]) {
+    const control = controls.get(id); assert.equal(control.checked, false);
+    control.checked = true; const saving = control.listeners.change();
+    assert.equal(control.disabled, true); await saving; await settle();
+    assert.deepEqual(calls.at(-1), {[key]: true}); assert.equal(settings[key], true);
+    fail = true; control.checked = false; await control.listeners.change(); await settle();
+    assert.equal(control.checked, true); assert.equal(control.disabled, false); fail = false;
+  }
+  dispose();
+});

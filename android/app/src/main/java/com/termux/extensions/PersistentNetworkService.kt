@@ -65,6 +65,7 @@ internal data class AndroidClientRuntimeSnapshot(
 }
 
 internal interface AndroidClientRuntimeObserver {
+    fun onDevToolsSettingsChanged(runProfilesEnabled: Boolean, debugEnabled: Boolean) = Unit
     fun onRuntimeStateChanged(snapshot: AndroidClientRuntimeSnapshot) = Unit
     fun onImeContextChanged(active: Boolean) = Unit
     fun onImeContextChanged(active: Boolean, owner: String?) {
@@ -230,6 +231,8 @@ class PersistentNetworkService : Service() {
     internal fun configure(next: AndroidAppSettings): AndroidClientRuntimeSnapshot {
         val frameworkChanged = runtimeState.configure(next.frameworkBaseUrl)
         val imeChanged = settings.imeContextSwitchingEnabled != next.imeContextSwitchingEnabled
+        val devToolsChanged = settings.devToolsRunProfilesEnabled != next.devToolsRunProfilesEnabled ||
+            settings.devToolsDebugEnabled != next.devToolsDebugEnabled
         settings = next
         if (frameworkChanged) {
             runTargetProjectionClient.disconnect()
@@ -247,6 +250,9 @@ class PersistentNetworkService : Service() {
             uiIpcClient?.setImeContextSwitchingEnabled(next.imeContextSwitchingEnabled)
         }
         updateForegroundAndPowerPolicy()
+        if (devToolsChanged) observers.forEach {
+            it.onDevToolsSettingsChanged(next.devToolsRunProfilesEnabled, next.devToolsDebugEnabled)
+        }
         notifyStateChanged()
         return snapshot()
     }

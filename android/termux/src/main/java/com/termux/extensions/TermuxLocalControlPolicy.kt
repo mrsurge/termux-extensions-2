@@ -4,6 +4,13 @@ import dev.mrsurge.electromux.host.ConsumerDescriptor
 import org.json.JSONObject
 
 internal object TermuxLocalControlPolicy {
+    fun validateAndroidSettings(params: JSONObject) {
+        val allowed = setOf("persistentNetworkNotification", "imeContextSwitchingEnabled",
+            "devToolsRunProfilesEnabled", "devToolsDebugEnabled")
+        require(params.length() > 0 && params.keys().asSequence().all {
+            it in allowed && params.opt(it) is Boolean
+        })
+    }
     val methods = setOf("get_settings", "save_settings", "get_android_settings", "save_android_settings",
         "open_power_settings", "open_notification_settings", "get_local_framework_config", "save_local_framework_config",
         "get_local_framework_state", "refresh_local_framework", "start_local_framework",

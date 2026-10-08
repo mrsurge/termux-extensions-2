@@ -1,5 +1,26 @@
 # Electromux tracker
 
+## Android input / DevTools settings parity (2026-10-08)
+
+- [x] Add IME composition workaround, Dev tools run profiles, and Dev tools debug checkboxes.
+- [x] Reuse native Android settings keys/defaults; immediate save, confirmed-value restoration on failure.
+- [x] Exact packaged-page save lane accepts only four declared real booleans.
+- [x] Service settings-change notification updates Termux Activity Inspector policy immediately, without page reload/endpoint mutation.
+- [x] Browser regressions and ordinary Cefrium compile/JVM tests pass.
+- [x] Final Termux JVM checks/debug assembly and approved in-place Razr installation.
+- [x] User live acceptance: all three toggles/current behavior working well.
+
+IME uses the existing service/UI IPC context-switching policy. DevTools shares
+Cefrium's Inspector runtime and run-profile/debug target filtering; no new CDP
+transport, embedded Node Inspector or generic Electromux API is introduced.
+APK bundling is required; editor OTA does not update these launcher controls.
+Validation: 31 browser/actor regressions, Termux and ordinary Cefrium JVM/compile
+checks pass. ADB in-place installation succeeded; app storage preserved, no
+agent launch/toggle or framework restart. APK SHA-256
+`48e76eb306e2b49bfc351e6ae2c0ec0cfb6abdfa31fea70adfc8ef2fd2419aae`;
+packaged settings checksum matches source
+`779f0d18df5e9df0f5c260514daa0719ded86bf23308e77683c79280f212a29d`.
+
 ## TE2 consumer installer slice (2026-10-08)
 
 - [x] Termux-native missing-executable/manual-config eligibility and strict consent.
