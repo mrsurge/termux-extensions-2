@@ -1,5 +1,147 @@
 # Electromux host plan
 
+## Embedded Node / TypeScript runtime direction (2026-10-08)
+
+### Independent ARM64 proof checkpoint
+
+#### Device lifecycle follow-up
+
+User accepted Ping/filesystem and unsolicited events on Motorola Razr. Lifecycle
+inspection then found Android had destroyed/recreated the Service but retained
+its process: a second node::Start returned -1, and an unsupported checked Binder
+exception appeared as a null reply. Approved fix uses a process-owned runtime
+slot (including retained startup failure), with Services as reconnecting adapters;
+onDestroy does not close/reinitialize the engine. Binder failures return explicit
+error DTOs. No automatic engine restart, mutation replay or survival guarantee.
+
+Fourteen JVM tests and APK assembly pass. Follow-up APK SHA-256:
+`59b37cf72cc134713a8c692e28582ad04f8cc65e93fcd778a498b02374b0c10a`.
+Installed in place, with 16 KB ZIP alignment passing. Device proof: Service absent
+after explicit same-UID stop while engine PID 19624 remained; recreated Service
+answered request 3 with that same PID/event. Explicit proof-package force-stop
+and reopen produced PID 20117/request 1, without old request replay. TE2 apps,
+framework and Termux state were untouched. This manual process-loss gate is not
+automatic renderer/engine crash recovery. Termux child proof remains next.
+
+Approved implementation is opt-in in `vendor/electromux`: `runtime/` strict TS,
+`:node-runtime` JNI/Kotlin library and `:node-proof` standalone diagnostic app.
+Use `-PelectromuxEmbeddedNodeProof=true`; the accepted TE2 host stays unchanged.
+Commands, checksum lock and test strategy: `vendor/electromux/runtime/README.md`.
+Node runs once in a private `:node` service process on a background thread, with
+dedicated socketpair framing instead of app-process stdio. No Python helper assets
+or TE2 imports. Ordinary debug signing; no shared UID or Cefrium renderer yet.
+
+Full ARM64 v24.21.0-0 archive SHA-256:
+`e3cd29a1be03405f11dd5c857af8cd3ad13f84f1409ea648f5328f0bada5bd76`.
+Imported libnode SHA-256:
+`955b308b1dfdf7662e8fe5ee4eb8c0c7d0a313f2d306387f2307529993c4bc32`.
+Actual libnode is 87,657,320 bytes, depends on Android libc/libm/libdl/liblog and
+libc++_shared, exports node::Start and has 16 KB ELF LOAD alignment. Headers need
+C++20. Build uses NDK 28.0.13004108; Gradle provisioned CMake 3.22.1.
+
+Strict TS, four host tests (including built-bundle FD requests/events), nine reused
+native transport JVM tests and ARM64 debug assembly pass. APK 16 KB ZIP alignment
+passes; size 99,851,792 bytes, SHA-256:
+`d84b13be1e9b804c27c8218df0c36fc167940c76cb4075be8d4937df136c618d`.
+Assembly does not prove Android boot, child permissions or renderer parity.
+
+Next: separately approve device installation for independent Ping/filesystem,
+Activity recreation and service/process loss. Then prove Termux signing/UID and
+controlled child environment/stdio/cancellation/FD readiness, followed by browser
+bridge and supervisor migration. Complete recipe/source provenance and third-party
+notices before redistribution. No TE2 runtime replacement, device install,
+framework restart, release/version bump or publication in this slice.
+
+This is the current direction, superseding the Python-helper architecture as
+the intended product. The accepted prototype remains unchanged until the new
+runtime is proven. Installer integration is paused behind this prerequisite.
+Documentation approval is not approval to download/vendor binaries, implement
+native code, assemble/install APKs, terminate processes or publish releases.
+
+Electromux is a reusable Termux-oriented Electron-like host, not TE2-specific
+glue and not a Cefrium replacement. Cefrium owns rendering; Electromux owns the
+embedded JavaScript main runtime, typed IPC/API adapters and owned-process
+lifecycle. TE2 Termux remains one separately installed consumer. Termux supplies
+application executables/environment and the established shared-UID execution
+lane, not the Node/Python runtime needed to boot Electromux itself.
+
+### Current source versus intended runtime
+
+Current source: Cefrium renderer JS -> Kotlin bridge -> Python Unix-socket
+helper -> external Termux Node running the TE2 TypeScript-derived launcher actor.
+`vendor/electromux/electromux/helper.py` owns authentication, socket leases,
+process supervision, bounded forwarding and recovery; `protocol.py` owns JSON
+framing; `sample_backend.py` is demo-only and `__init__.py` is a package marker.
+The TE2 actor already reuses real Desktop controller/configuration source.
+
+Target: Cefrium renderer -> narrow native/document-fenced bridge -> embedded
+Node with Electromux main-process JS and a consumer module. Remove the Python
+helper runtime and external-Node prerequisite, not their validated ownership,
+authentication, correlation, bounds, backpressure and recovery guarantees.
+TE2's own Python dependency is an application concern and is not eliminated by
+this change. Avoid simply embedding Node then spawning another external Node
+actor. Preserve Desktop code reuse via a transport-independent consumer seam.
+
+### Runtime candidate and build language
+
+- Candidate: [fogtape/nodejs-mobile](https://github.com/fogtape/nodejs-mobile),
+  **full Android v24.21.0-0**, ARM64 first. Node 24 is upstream LTS; the fork's
+  [release](https://github.com/fogtape/nodejs-mobile/releases/tag/v24.21.0-0)
+  is marked prerelease. Candidate selection is not binary/device acceptance.
+- Do not select an unpinned latest asset. Record exact release/recipe commit,
+  artifact URL, SHA-256, headers, build flavor, ABI, licenses and toolchain.
+  Inspect the actual archive before claiming its layout, size or provenance.
+- Prefer full over lite initially: retain Inspector and general-purpose
+  functionality rather than a consumer-specific reduced ICU/feature profile.
+  Node 25 is EOL; Node 26 is Current and the fork's latest 26.11 snapshot is
+  explicitly based on an unreleased proposal. Neither is needed for this proof.
+  [Upstream status](https://nodejs.org/en/about/previous-releases),
+  [fork releases](https://github.com/fogtape/nodejs-mobile/releases).
+- Author generic runtime, protocol DTOs, supervisor and API adapters in strict
+  TypeScript. Typecheck separately, then emit/bundle JavaScript into APK assets.
+  Type stripping is not typechecking; no on-device compiler is required.
+  Keep Android/Cefrium lifecycle and JNI in Kotlin/C++ where necessary.
+- Electromux's generic runtime must not import TE2 or require a running framework.
+  Consumer policy, installer commands and TE2 launcher semantics stay separate.
+
+### Independent proof and migration gates
+
+1. Inspect pinned ARM64 libnode/header artifacts, exported entrypoint/linkage,
+   minimum Android API, ELF/APK 16 KB alignment and C++ dependency coexistence
+   with Cefrium. README claims of 16 KB support require independent verification.
+2. Build an independent sample using a small JNI adapter and a process/service-
+   owned Node background thread, never Activity-owned initialization. The
+   [fork FAQ](https://github.com/fogtape/nodejs-mobile/blob/recipe/docs/FAQ.md)
+   documents one runtime per process; verify shutdown/restart behavior for the
+   exact artifact. A stopped JS consumer is not necessarily a stopped engine.
+   Decide crash isolation/recovery boundaries before replacing the old helper.
+3. Prove typed request/reply and unsolicited event delivery with bounded queues,
+   exact-document authorization, cancellation, navigation/disposal fences and
+   renderer recreation. Do not use app-process stdin/stdout as dedicated IPC or
+   call process.exit() blindly inside a shared Android process.
+4. Initialize explicit writable roots, cwd, HOME/TMPDIR and runtime caches before
+   Node initialization; keep app-owned runtime state separate from the Termux
+   environment passed to children. Follow the
+   [embedding guide](https://github.com/fogtape/nodejs-mobile/blob/recipe/docs/EMBEDDING.md).
+5. On an explicitly approved device, prove file access and one controlled Termux
+   child: correct UID/environment, stdout/stderr, exit status, process-group
+   cancellation and inherited extra FD/readiness. Shared UID alone does not
+   prove Android executable/SELinux permissions. Embedded process.execPath is
+   not a promise of a runnable Node executable; do not assume fork() parity.
+6. Migrate the generic supervisor/framing implementation and its real-process
+   tests to TS/Node; retain stale/live-owner protection and no mutation replay.
+   Remove Python runtime packaging only after equivalent gates pass.
+7. Integrate the existing TE2 actor as a consumer, then revalidate local/remote
+   launch, source-build waits, FD3 readiness, settings/bookmarks, sidebar/second
+   editor, lifecycle recovery and owned-only shutdown. No compatibility claim
+   follows merely from libnode loading or TypeScript passing.
+8. Resume missing-framework installer UI after Electromux boots without installed
+   Python/Node. Installer may install TE2 application dependencies with explicit
+   consent; it must not be necessary to bootstrap Electromux's own control plane.
+
+The framework-independent ADB/CDP debug tap remains planned separately; preserve
+Inspector capability without enabling production debugging by default.
+
 ## Connection/bookmark/Android settings slice (2026-10-07)
 
 Approved source implementation: mobile Framework Connection gives the host a

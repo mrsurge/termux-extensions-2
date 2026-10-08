@@ -1,5 +1,15 @@
 # Electromux outstanding issues
 
+## Host runtime dependency mismatch (2026-10-08)
+
+Current host control requires Termux Python for the generic helper and an
+external Node executable for the TE2 actor. This prevents a genuinely embedded
+Electromux runtime from booting independently in a fresh Termux environment.
+The intended replacement is embedded libnode plus TypeScript-authored runtime
+glue; fogtape Node 24 full is a candidate, not a validated artifact. Keep existing
+accepted behavior until independent native/IPC/process/lifecycle gates pass.
+Installer UI is paused; see PLAN/TRACKER, Embedded Node runtime prerequisite.
+
 ## Dead helper socket hides the launcher (2026-10-07)
 
 Confirmed on Razr without reload, storage clearing or process restart: native
@@ -30,8 +40,8 @@ storage and user live acceptance passed on 2026-10-07. Do not clear data as a fi
 ## TE2 Termux settings and installation follow-up (2026-10-07)
 
 Connection layout, native one-time bookmark seed and Android keep-alive/settings
-controls are source-implemented; source checks pass, APK/live validation remains
-pending. The implementation status in PLAN/TRACKER supersedes the proposal list
+controls and immediate-save follow-up are user live-accepted on Razr.
+The implementation status in PLAN/TRACKER supersedes the proposal list
 below. Remote clipboard/run-profile validation and installer work remain open.
 
 ## Framework-independent Android debug tap

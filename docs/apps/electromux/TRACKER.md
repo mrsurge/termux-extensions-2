@@ -1,5 +1,29 @@
 # Electromux tracker
 
+## Embedded Node runtime prerequisite (2026-10-08)
+
+- [x] Inventory existing Python helper/framing/demo and TE2 Node actor roles.
+- [x] Record embedded Node + strict TS direction; Python is not intended host glue.
+- [x] Review fogtape Node 24 full candidate and document prerelease/ABI/lifecycle limits.
+- [x] Obtain concrete artifact-inspection/sample implementation approval.
+- [x] Pin/checksum archive and actual ARM64 library + headers; inspect linkage/16 KB alignment.
+- [x] Independent sample source, strict TS bundle/process IPC tests, nine JVM transport tests and APK assembly.
+- [x] Independent native Android boot, Ping/filesystem and events on Motorola Razr.
+- [x] Fix Service recreation to retain a process-owned engine; explicit Binder errors.
+- [x] Activity reopen, Service destruction/recreation and explicit process-stop/reopen device gates.
+- [ ] Explicit device proof: filesystem, Termux child/env/FD3, cancellation and recovery.
+- [ ] Migrate generic Python supervisor/protocol to TS without weakening guarantees.
+- [ ] Integrate existing TE2 consumer actor; repeat local/remote/lifecycle acceptance.
+- [ ] Remove Python/external Node host prerequisites and resume installer UI.
+
+Installer investigation is paused. Existing accepted APK/source is retained;
+Approved source/build proof now exists; no device mutation or accepted TE2 runtime
+replacement has occurred. See PLAN's independent ARM64 checkpoint for hashes,
+size and validation boundaries. Earlier host checklists do not establish embedded
+runtime device acceptance.
+The pending Windows wrapper line-ending normalization is approved for the next
+commit; it is not an outstanding functional issue.
+
 ## Connection/bookmark/Android settings (2026-10-07)
 
 - [x] Explicit full-width mobile Framework host; Port/Connect below.
