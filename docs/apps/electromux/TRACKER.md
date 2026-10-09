@@ -1,5 +1,11 @@
 # Electromux tracker
 
+Acceptance reconciliation (2026-10-08): checkboxes include later implementation
+and recorded device/user acceptance, not only the original checkpoint. Historical
+paragraphs describe their checkpoint's scope. Compound gates below are split to
+keep unverified stress, rollback and broader parity work open. Calculator staging
+remains explicitly deferred; TE2 Termux staging and fresh installation are accepted.
+
 ## Unrelated Electron calculator foundation (2026-10-08)
 
 - [x] Independent manifest/main-window/menu adapter foundation and 30 passing runtime tests.
@@ -10,7 +16,8 @@
 - [x] All 31 TE2 consumer regressions pass with existing APIs unchanged.
 - [x] Isolated full-duplex native effect driver and calculator APK source/build gate.
 - [x] TE2 Termux comparison: native tests/compile pass; no existing Binder API changed.
-- [ ] Installed calculator rendering/preload/menu/lifecycle live acceptance.
+- [x] Installed calculator debug rendering/preload/menu acceptance and recorded Razr lifecycle smoke tests.
+- [ ] Complete user lifecycle follow-up acceptance; calculator staging remains deferred.
 - [x] Razr USB renderer/arithmetic smoke: content visible and `2 + 3 = 5` verified;
   fixed AAPT inventory omission and file-origin locale fetch failure.
 
@@ -49,7 +56,8 @@ packaged settings checksum matches source
 - [x] Approved debug APK assembly/in-place Razr deployment; storage preserved.
 - [x] Preliminary device installer UI/success acceptance on existing Razr Termux userspace.
 - [x] User live acceptance: fresh cold Termux userspace with no preinstalled dependencies installs flawlessly.
-- [ ] Explicit real installation success/failure/cancel acceptance in a suitable test userspace.
+- [x] Real installation success accepted in existing and fresh dependency-free Termux userspaces.
+- [ ] Real-device installer failure/cancellation acceptance.
 
 Follow-up deployment: ADB `install -r` succeeded on Razr without clearing storage.
 APK SHA-256 `fafc017c246431d96124e1c51037834a6d776781a99fa42d387cfb12654a5952`
@@ -80,7 +88,8 @@ success is now accepted; real-device failure/cancellation coverage stays separat
 - [x] User stopped the previous run and restarted; new embedded implementation works.
 - [x] User confirmed remote switching working.
 - [x] User confirmed Cancel and lifecycle behavior working properly.
-- [ ] Process separation/memory and crash/death recovery evidence.
+- [x] Installed UI/embedded-Node process separation evidence.
+- [ ] Broader memory comparison and instrumented crash/death recovery evidence.
 
 The approved debug APK is installed on Razr without data reset or asset OTA.
 UI PID 26331 and embedded Node PID 26413 are separate; Node loads its native shim.
@@ -102,7 +111,7 @@ User local restart, Cancel, lifecycle and remote switching acceptance pass.
 - [x] Activity reopen, Service destruction/recreation and explicit process-stop/reopen device gates.
 - [x] Razr separate shared-UID proof: installed matching signer/UID, direct Termux child/env/FD3 and group cancellation.
 - [ ] Repeat execution lane on other supported devices/signing families; broader crash recovery.
-- [ ] Migrate generic Python supervisor/protocol to TS without weakening guarantees.
+- [x] Migrate the active embedded supervisor/protocol to strict TS; TE2 no longer uses the Python helper.
   - [x] Native-selected TS consumer-host and owned-child operation foundation;
     strict tests and independent Razr execution/cancellation pass.
   - [x] Long-lived diagnostic readiness/status/stop and declared unsolicited
@@ -307,32 +316,35 @@ unstaged and untouched.
 
 ## Independent sample
 
-- [ ] Prove final APK signing/shared UID and supported Termux execution adapter.
-- [ ] Prove authenticated session-scoped local IPC on both devices.
-- [ ] Define lifecycle, protocol, asset and consumer adapter interfaces.
-- [ ] Implement minimal backend/helper/host/sample with no TE2 dependency.
-- [ ] Pass protocol/lifecycle/browser/install automated tests.
-- [ ] Pass ordinary on-device install/launch acceptance on Motorola and Pixel.
-- [ ] Record failure, upgrade, rollback, shutdown and recovery acceptance.
+- [x] Prove GitHub-test-key APK signing/shared UID and Termux execution: Pixel helper and Razr embedded lanes.
+- [x] Prove authenticated local IPC: Pixel helper session and Razr embedded private channel.
+- [x] Define lifecycle, protocol, asset and consumer adapter interfaces.
+- [x] Implement minimal backend/helper/host/sample with no TE2 dependency.
+- [x] Pass protocol/lifecycle/browser/install automated tests.
+- [x] Pass ordinary sample install/launch proofs on Pixel and Motorola Razr in their recorded lanes.
+- [x] Record owned shutdown, reconnect/reopen and in-place upgrade evidence.
+- [ ] Comprehensive failure injection and rollback acceptance.
 
 ## Additional TE2 host
 
 - [x] Approve Desktop-parity POC direction and reusable branding/custom routes.
 - [x] Inventory Desktop request/event APIs and actual reusable JS/TS modules.
 - [x] Implement independent native-owned descriptor/request/reply-event foundation.
-- [ ] Complete consumer/platform adapters and unsolicited event lifecycle without Node/Electron leakage.
-- [ ] Prove new TE2 Termux remote-only client before local launch integration.
-- [ ] Adapt owned local framework/stdin-FD3 control and desktop startup policies.
+- [x] Complete consumer/platform adapters and unsolicited event lifecycle without Node/Electron leakage.
+- [x] Prove new TE2 Termux remote-only client before local launch integration.
+- [x] Adapt owned local framework/stdin-FD3 control and desktop startup policies.
 - [ ] Complete per-feature Desktop parity matrix and both-device lifecycle gates.
-- [ ] Publish approved working POC, then stabilize reusable host/library interfaces.
+- [x] Publish approved working TE2 Termux staging POC and independent source repository.
+- [ ] Stabilize reusable public host/library interfaces.
 
-- [ ] Approve pinned submodule or Gradle/Maven integration.
-- [ ] Add a separate Electromux-based app/build target with a distinct application ID.
-- [ ] Reuse generic reference patterns behind interfaces, preserving existing clients.
-- [ ] Verify side-by-side installation and independent host settings/lifecycle.
-- [ ] Cover TE2 launch/install source-build waiting and ownership semantics.
-- [ ] Preserve local assets/OTA and existing remote-framework behavior.
-- [ ] Pass regression and exact-installed-asset live acceptance.
+- [x] Approve pinned submodule or Gradle/Maven integration.
+- [x] Add a separate Electromux-based app/build target with a distinct application ID.
+- [x] Reuse generic reference patterns behind interfaces, preserving existing clients.
+- [x] Verify side-by-side installation and independent host settings/lifecycle.
+- [x] Cover mobile TE2 launch/install source-build waiting and owned-child cancellation semantics.
+- [ ] Equivalent Desktop source-build waiting (deferred wheel follow-up).
+- [x] Preserve local assets/OTA and existing remote-framework behavior.
+- [x] Pass regression and exact-installed-asset live acceptance.
 
 ## Evidence and constraints
 
@@ -438,8 +450,8 @@ uncommitted after the requested pushed checkpoint.
 - [x] Serve consumer assets from APK before editor OTA; retain existing editor asset ownership.
 - [x] Compile target and pass 9 JVM, 58 existing Cefrium, 113 Electron and browser regressions.
 - [x] Inspect merged debug identity/shared UID/private runtime/provider boundary.
-- [ ] Separately approve signed assembly/install and remote-only live acceptance.
-- [ ] Add full local execution/launch environment/ownership/stdin-FD3/startup parity.
+- [x] Separately approve signed assembly/install and remote-only live acceptance.
+- [x] Add full local execution/launch environment/ownership/stdin-FD3/startup parity.
 - [ ] Physically verify Sidebar settings and second-editor parity on both devices.
 
 No APK was assembled or installed. Explicit Termux-compatible signing is required
@@ -470,7 +482,7 @@ existing client replacement, or shared framework restart.
   separate ID `com.termux.extensions.te2termux`, label TE2 Termux, 237 MiB.
 - [x] Verify APK-owned Desktop shell inventory and consumer bootstrap in index.html.
 - [x] Complete ADB installation and verify shared UID `10321`, matching Termux.
-- [ ] Verify remote launcher/settings and obtain user live acceptance.
+- [x] Verify corrected Pixel launcher rendering and subsequent connection/settings user acceptance on Razr.
 
 Candidate: `android/termux/build/outputs/apk/debug/te2-termux-debug.apk`.
 SHA-256: `ee5511b8e949902e29e9a41d7d5999c35dff509845b7999cc6ab5f79e26947b5`.
@@ -520,8 +532,8 @@ blank app-shell bootstrap failure; broad UI/parity acceptance remains separate.
 - [x] Desktop typecheck/113 regressions and actor strict TypeScript check.
 - [x] Independent generic helper suite: 14 Python tests.
 - [x] Generic helper Session -> actual bundled Node actor config/shutdown smoke.
-- [ ] Native provisioning/authorization, host-neutral state events, relay sync/service wiring.
-- [ ] New APK/Pixel local lifecycle acceptance (not approved by this backend slice).
+- [x] Native provisioning/authorization, host-neutral state events, relay sync/service wiring.
+- [x] Later APK deployment and Pixel local-control/state-handoff acceptance.
 
 Build: `node desktop_client/electromux/build.mjs`; test:
 `node --test tests/electromux_local_backend.test.mjs`.
@@ -541,8 +553,8 @@ Electromux repositories. See actor README for limitations.
   EOF-after-reply, invalid event correlation, bounded overflow, partial writes
   and authenticated reconnect.
 - [x] Actor rebuild and strict TypeScript check; both repository diff checks.
-- [ ] Kotlin socket reader/event subscription and persistent-service wiring.
-- [ ] APK assembly and Pixel local lifecycle acceptance (separate approval).
+- [x] Kotlin socket reader/event subscription and persistent-service wiring.
+- [x] Later approved APK assembly and Pixel local-control/state-handoff acceptance.
 
 No Android source, APK, device state, shared framework, tags or releases changed.
 Changes remain uncommitted in both repositories.
@@ -555,9 +567,9 @@ and helper-event foundations locally (not pushed by this checkpoint).
 - [x] Reusable FrameCodec/FramedTransport under Electromux host package.
 - [x] Adapt sample HelperClient with optional native-declared events, disabled by default.
 - [x] Seven JVM transport regressions and Android Kotlin compilation.
-- [ ] Renderer event delivery and persistent-service ownership.
-- [ ] TE2 provisioning, exact APK-owned page bridge, endpoint synchronization.
-- [ ] APK/device acceptance, separately approved.
+- [x] Renderer event delivery and persistent-service ownership.
+- [x] TE2 provisioning, exact APK-owned page bridge, endpoint synchronization.
+- [x] Subsequent approved TE2 APK/device acceptance, including local, Cancel and remote switching.
 
 Source-only follow-up in independent Electromux; no TE2 Android edits or runtime
 restart. Installed clients remain unchanged. Independent docs/CONTRACT.md owns
@@ -571,8 +583,9 @@ the native transport contract. Generic native changes are not yet checkpointed.
   delivers quoted JSON through a bounded UI-post lane.
 - [x] Native navigation disconnects client without stopping retained helper/backend.
 - [x] 22 JVM tests, 21 Python tests, browser regressions and Kotlin compilation pass.
-- [ ] APK/device validation of actual callback ordering/reload/event delivery.
-- [ ] TE2 generic provisioning, persistent service and relay endpoint integration.
+- [x] Subsequent embedded sample events and TE2 renderer state delivery validated on device.
+- [ ] Comprehensive callback-order/reload stress validation.
+- [x] TE2 generic provisioning, persistent service and relay endpoint integration.
 
 Source-only slice; no installed client assets, APKs, device state, shared framework,
 signing, launch authority or release changed. Changes remain uncommitted.
@@ -589,8 +602,8 @@ Checkpoint: TE2 `721ead5d` and independent `2644e07`, local only/not pushed.
 - [x] Private non-sticky independent sample service owns transport/protocol;
   Activity/page recreation detaches only its page, not helper/backend ownership.
 - [x] 27 JVM tests, 22 Python tests, browser regression and Android Kotlin compilation.
-- [ ] Physical sample lifecycle/reconnect acceptance; separately approved APK build/install.
-- [ ] TE2 adapter integration with its existing PersistentNetworkService/relay,
+- [x] Pixel helper reconnect/retained-backend acceptance and later Razr embedded lifecycle proofs.
+- [x] TE2 adapter integration with its existing PersistentNetworkService/relay,
   exact APK-owned launch pages and Desktop configuration/settings flow.
 
 Independent source-only scope. TE2 Android sources, installed assets, signing,
@@ -615,11 +628,11 @@ an uncertain launch. See independent docs/CONTRACT.md for the current contract.
   compilation pass. No APK assembled or installed.
 - [x] Generic descriptor admits native-declared exact loopback document URLs;
   queries/fragments, remote origins and undeclared paths remain rejected.
-- [ ] Apply exact APK-owned launcher/settings authorization in the TE2 adapter.
-- [ ] Native selected-endpoint synchronization between actor and existing Android
+- [x] Apply exact APK-owned launcher/settings authorization in the TE2 adapter.
+- [x] Native selected-endpoint synchronization between actor and existing Android
   settings/relay authority; remote endpoint selection must remain independent
   of owned local framework state.
-- [ ] TE2 runtime adapter and independently approved APK/device acceptance.
+- [x] TE2 runtime adapter and independently approved APK/device acceptance.
 
 TE2 Android build configuration now consumes the pinned library. No device or
 shared runtime mutation. Library packaging is an internal build
@@ -676,8 +689,9 @@ from APK installation alone; their existing processes remain untouched.
   Gecko compilation/tests, 113 Electron tests and Electron/actor strict typechecks.
   Six real-process actor tests and browser bootstrap/platform regressions pass.
 - [x] Generated shell/actor and merged generic helper/browser assets verified.
-- [ ] APK assembly/install and manual local/remote lifecycle acceptance on Pixel.
-- [ ] Automatic startup/preferred app and owned-framework exit parity.
+- [x] APK assembly/install and Pixel local-control acceptance; later Razr local/remote lifecycle acceptance.
+- [x] Automatic startup/preferred-app implementation and user acceptance.
+- [ ] Comprehensive owned-framework exit parity acceptance.
 
 No device state, shared framework, release/version or TE2 Git commit changed.
 Existing Gradle warnings remain. Gecko needed only a command-line Linux AAPT2
