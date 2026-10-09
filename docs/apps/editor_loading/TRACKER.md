@@ -9,7 +9,7 @@
 - [x] Approve a concrete implementation slice supported by evidence.
 - [x] Implement and pass delayed-response regression tests/build validation.
 - [ ] Publish matching assets/compiled domain to explicitly approved test clients.
-- [ ] Record live acceptance under poor connection conditions.
+- [x] Record user acceptance of the observed Markdown/cache and browser HTTP paths.
 - [ ] Prepare maintenance release only after separate release approval.
 
 Acceptance is not implied by implementation or static checks. Record measurements
@@ -148,3 +148,39 @@ No shared-runtime restart, APK work, OTA, version bump, commit or publication.
 User acceptance above records the tested browser path, not universal native-client
 or release-package acceptance. The interpreted-domain diagnostic shellspec remains
 selected in this checkpoint; restoring compiled activation is a separate step.
+
+## Deferred work — execution order
+
+- [x] 1a. Rebuild/validate current mypyc group and restore compiled selection.
+- [x] 1b. User live acceptance of the newly selected compiled group: working good.
+- [ ] 2. Implement and validate preferred native loopback ports with free-port fallback.
+- [ ] 3. Investigate polling/WebSocket compression independently; benchmark before enabling.
+- [ ] 4. Design/validate persistent revision/ID/hash-scoped grammar caching across reloads.
+- [ ] 5. Investigate OTA archive/transfer compression and compatibility; no format change yet.
+- [ ] 6. Finish poor-connection cold/warm, switch/reconnect and secondary-editor audit.
+- [ ] 7. Separately approved maintenance release: matched binaries/domain/assets,
+  staging APKs, target acceptance, merge/tag/publication.
+
+Older publication/lifecycle checkboxes above describe their specific checkpoints.
+User acceptance establishes the observed Markdown and generic-browser HTTP paths;
+it does not establish all-client OTA, compiled-mode, gzip-header, UUID-specific or
+packaged-release acceptance. Those unverified gates remain open. See PLAN's
+Deferred follow-up sequence for scope and approval boundaries.
+
+## Compiled restoration checkpoint (2026-10-09)
+
+Cached build through `.jitenv/bin/python -B app/apps/code_te2/build_mypyc.py`
+completed in 434.25s with ccache enabled on ordinary CPython 3.14.4. Isolated
+validation loaded all 136 compiled modules, none missing (144.96ms import probe;
+not a live startup measurement). Published and selected snapshot:
+`~/.cache/te2/code_te2/build/mypyc-snapshots/check-20261009-224346-1791585826838308569`.
+The previous selector is retained. Shellspec now forwards `${env:CODE_TE2_MYPYC_DIR}`
+again; the interpreted diagnostic override is removed.
+
+17 frontend grammar tests, 19 Python projection tests, 14 extension-restart tests,
+and 23 build-workflow/launch-context tests passed (one skipped, two subtests).
+The frontend refresh fixture now supplies native window location metadata; no
+production behavior change was needed. No runtime restart, Rust/APK build,
+OTA, commit or publication was performed during the build slice. User subsequently
+confirmed compiled-mode live acceptance: working good. Earlier interpreted
+acceptance is retained; this is not release-package or all-client acceptance.

@@ -157,3 +157,41 @@ approval. Client-owned bundles require OTA or rebundled packages before native
 testing; reload alone cannot publish changes. Compiled Python changes require a
 matching mypyc rebuild and approved worker lifecycle transition. No version bump,
 tag or release in the investigation slice. Electromux remains a separate workstream.
+
+## Deferred follow-up sequence
+
+Markdown cache and browser HTTP grammar loading are implemented and user accepted
+on the observed paths. Continue in this order:
+
+1. **Restore compiled execution.** Rebuild/validate the current matching-ABI mypyc
+   group and restore the shellspec's `CODE_TE2_MYPYC_DIR` environment substitution.
+   Obtain explicit app-worker transition approval, then verify accepted loading
+   and extension-restart behavior in compiled mode.
+2. **Stable native loopback origins.** Inspect all four clients and use existing
+   relay ownership for a preferred port with a free-port fallback. Preserve
+   upstream routing/security and client identity. A fallback port still changes
+   the browser storage origin; account for that explicitly.
+3. **Socket compression investigation.** Assess polling gzip separately from
+   WebSocket compression using actual Rust/Node transport capabilities. Measure
+   latency, bytes, CPU and memory before enabling anything, especially on Android.
+   Existing asset gzip does not compress sockets.
+4. **Persistent grammar caching.** Design cross-reload reuse with stable origins
+   where available and backend revision/ID/hash invalidation. Preserve native
+   packaged-first loading, bounded storage and verified admission. Choose storage
+   from evidence, not an assumption of localStorage; no new selection authority.
+5. **OTA compression investigation.** Inspect existing archive compression and
+   native update/download/extraction flows before proposing changes. Measure
+   transfer savings, CPU/memory, integrity checks and backward compatibility
+   independently of browser HTTP gzip. Preserve installed asset inventory and
+   atomic activation; no OTA format/client changes without separate approval.
+6. **Finish the loading audit.** Cover cold/warm comparison languages, rapid file
+   switches, reconnect and primary/secondary editors under poor connections.
+   Separate tokenization, transport latency and model readiness; act only on
+   demonstrated inefficiencies or races.
+7. **Maintenance release integration.** With separate release approval, synchronize
+   versions and package matching domain/worker/framework artifacts, frontend
+   assets and staging APK seeds. Validate provenance and target installs before
+   merge/tag/publication. No release is authorized by this documentation update.
+
+Each implementation slice still requires concrete scope approval. Documentation
+approval does not authorize builds, client changes or runtime restarts.

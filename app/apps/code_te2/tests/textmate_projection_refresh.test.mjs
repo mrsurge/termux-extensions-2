@@ -12,7 +12,8 @@ test('catalog refresh keeps same-revision projection and invalidates only actual
   t.mock.method(console, 'warn', () => {}); // Expected failed-RPC branch; do not dump data-URL bundles.
   let revision = 'v1', resets = 0, calls = 0, fail = false;
   const runtime = createEditorTextmateRuntime({
-    getWindow: () => ({ monaco: { editor: { getModels: () => [{ resetTokenization: () => resets++ }] } } }),
+    getWindow: () => ({ location: { search: '?gv_native=1' }, parent: {},
+      monaco: { editor: { getModels: () => [{ resetTokenization: () => resets++ }] } } }),
     normalizeLanguage: value => String(value || ''),
     editorRpcCall: async () => {
       calls++;
@@ -44,7 +45,7 @@ test('installed provider and grammar bodies survive unchanged contributions', as
   const raw = '{"scopeName":"source.probe","patterns":[]}';
   const sha256 = createHash('sha256').update(raw).digest('hex');
   const runtime = createEditorTextmateRuntime({
-    getWindow: () => ({ monaco: { languages: {
+    getWindow: () => ({ location: { search: '?gv_native=1' }, parent: {}, monaco: { languages: {
       getLanguages: () => [{ id: 'probe' }], getEncodedLanguageId: () => 1,
       setTokensProvider: () => { installs++; return { dispose: () => disposals++ }; },
     } } }),
