@@ -4,6 +4,10 @@
 import { context, build } from 'esbuild';
 import { copyFile, mkdir } from 'node:fs/promises';
 import { buildTree } from './src/explorer/history/vscode_scm/tree/build.mjs';
+import { readFileSync } from 'node:fs';
+import { validateCache } from '../../../scripts/build_textmate_cache.mjs';
+
+validateCache(JSON.parse(readFileSync('monaco_editor/textmate/markdown-cache.json', 'utf8')));
 
 const isWatch = process.argv.includes('--watch');
 

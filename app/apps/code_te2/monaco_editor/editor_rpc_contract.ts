@@ -40,6 +40,8 @@ export const EDITOR_RPC_METHODS = {
   textmateCatalogGet: "editor.textmate.catalog.get",
   textmateGrammarGet: "editor.textmate.grammar.get",
   textmateGrammarsGet: "editor.textmate.grammars.get",
+  textmateClosureGet: "editor.textmate.closure.get",
+  textmateChunkGet: "editor.textmate.chunk.get",
   open: "editor.open",
   jumpToLine: "editor.jumpToLine",
   gitBaselinesGet: "editor.gitBaselines.get",

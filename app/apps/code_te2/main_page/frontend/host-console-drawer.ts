@@ -5,6 +5,8 @@
 // receives console:log events from all workers, and renders them
 // via vConsole's built-in log panel.
 //
+import { generateUuid } from './uuid.ts';
+
 interface ConsoleDrawerOptions {
   containerId?: string;
   socketPath?: string;
@@ -221,7 +223,7 @@ export function createConsoleDrawer(options: ConsoleDrawerOptions = {}): Console
         return;
       }
 
-      const reqId = crypto.randomUUID();
+      const reqId = generateUuid();
       const activeSocket = socket;
       const emitEval = activeSocket.emit;
       if (typeof emitEval !== 'function') {
@@ -402,7 +404,7 @@ export function createConsoleDrawer(options: ConsoleDrawerOptions = {}): Console
     }
     // Default to main_page when no specific target or "all" selected
     const target = targetWorkerId || (activeFilter === 'all' ? 'main_page' : activeFilter);
-    const reqId = crypto.randomUUID();
+    const reqId = generateUuid();
     socket.emit('console:eval', { targetWorkerId: target, reqId, code });
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {

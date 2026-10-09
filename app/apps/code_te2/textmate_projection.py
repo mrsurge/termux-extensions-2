@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
 from typing import TypedDict, cast
 
 from .code_te2_paths import code_te2_paths
@@ -48,6 +49,15 @@ class TextmateGrammarBatchDto(TypedDict):
     bodies: dict[str, TextmateGrammarBodyDto | TextmateGrammarErrorDto]
 
 
+class TextmateClosureDto(TypedDict):
+    revision: str
+    rootScope: str
+    complete: bool
+    ids: list[str]
+    bodies: dict[str, TextmateGrammarBodyDto]
+    fingerprints: dict[str, str]
+
+
 class TextmateProjectionError(ValueError):
     pass
 
@@ -55,6 +65,8 @@ class TextmateProjectionError(ValueError):
 _MAX_GRAMMAR_BYTES = 4 * 1024 * 1024
 MAX_GRAMMAR_BATCH_SIZE = 16
 _MAX_GRAMMAR_BATCH_BYTES = 8 * 1024 * 1024
+MAX_GRAMMAR_CLOSURE_SIZE = 256
+MAX_GRAMMAR_KNOWN_IDS = 4096
 
 
 def _record(value: object) -> dict[str, object]:
@@ -175,6 +187,123 @@ def get_textmate_grammar_body(grammar_id: str, revision: str) -> TextmateGrammar
     if not revision or revision != current_revision:
         raise TextmateProjectionError("textmate_projection_revision_changed")
     return _grammar_body_from_snapshot(grammar_id, current_revision, extensions, _allowed_extension_roots())
+
+
+def get_textmate_grammar_closure(scope: str, revision: str, known_ids: list[str], metadata_only: bool = False) -> TextmateClosureDto:
+    from .textmate_probe import trace
+    trace("closure.enter", scope=scope, revision=revision, known=len(known_ids))
+    from . import persistence_io
+    from .textmate_dependencies import Rule, record, resolve_dependencies
+
+    current_revision, extensions = _extension_entries()
+    trace("closure.registry", scope=scope, extensions=len(extensions))
+    if not revision or revision != current_revision:
+        raise TextmateProjectionError("textmate_projection_revision_changed")
+    if not scope or len(known_ids) > MAX_GRAMMAR_KNOWN_IDS:
+        raise TextmateProjectionError("textmate_closure_invalid")
+    by_scope: dict[str, TextmateGrammarDto] = {}
+    injection_map: dict[str, list[str]] = {}
+    for extension_id in sorted(extensions):
+        extension = extensions[extension_id]
+        if extension.get("active") is False:
+            continue
+        for grammar in _records(extension.get("grammars", [])):
+            public = _public_grammar(extension_id, grammar)
+            if public is not None:
+                by_scope[public["scopeName"]] = public
+    # Match the frontend's final byScope mapping, including override order.
+    for public in by_scope.values():
+        for target in public["injectTo"]:
+            injection_map.setdefault(target, []).append(public["scopeName"])
+    roots = _allowed_extension_roots()
+    bodies: dict[str, TextmateGrammarBodyDto] = {}
+    total_bytes = 0
+
+    def load(target: str) -> Rule | None:
+        nonlocal total_bytes
+        public = by_scope.get(target)
+        if public is None:
+            return None
+        if len(bodies) >= MAX_GRAMMAR_CLOSURE_SIZE:
+            raise TextmateProjectionError("textmate_closure_too_large")
+        grammar_id = public["id"]
+        trace("closure.read.start", scope=target, grammar_id=grammar_id)
+        body = _grammar_body_from_snapshot(grammar_id, revision, extensions, roots)
+        trace("closure.read.end", scope=target, raw_bytes=len(body["raw"].encode("utf-8")))
+        total_bytes += len(body["raw"].encode("utf-8"))
+        if total_bytes > _MAX_GRAMMAR_BATCH_BYTES:
+            raise TextmateProjectionError("textmate_closure_too_large")
+        bodies[grammar_id] = body
+        try:
+            if grammar_id.endswith(".json"):
+                parsed = persistence_io.decode_json(body["raw"])
+            else:
+                import plistlib
+                parsed = cast(object, plistlib.loads(body["raw"].encode("utf-8")))
+        except (ValueError, TypeError, OverflowError) as exc:
+            raise TextmateProjectionError("textmate_grammar_invalid") from exc
+        if not isinstance(parsed, dict):
+            raise TextmateProjectionError("textmate_grammar_invalid")
+        trace("closure.parse.end", scope=target)
+        return record(cast(object, parsed))
+
+    def injections(target: str) -> list[str]:
+        parts = target.split(".")
+        return [injected for index in range(1, len(parts) + 1)
+                for injected in injection_map.get(".".join(parts[:index]), [])]
+
+    complete = True
+    try:
+        scopes = resolve_dependencies(scope, load, injections)
+        trace("closure.traversal.end", scope=scope, scopes=len(scopes), raw_bytes=total_bytes)
+        ids = [by_scope[target]["id"] for target in scopes]
+    except ValueError as exc:
+        if str(exc) != "textmate_closure_too_large":
+            raise TextmateProjectionError(str(exc)) from exc
+        # Preload is an optimization, not a new total-size restriction. Keep a
+        # bounded prefix; the same factory uses existing guarded batch reads for
+        # dependencies beyond it. Never mask invalid/stale/unreadable resources.
+        complete = False
+        ids = list(bodies)
+    # A registry update during disk work must not publish a stale closure.
+    if _extension_entries()[0] != revision:
+        raise TextmateProjectionError("textmate_projection_revision_changed")
+    known = set(known_ids)
+    trace("closure.return", scope=scope, complete=complete, bodies=len(bodies), raw_bytes=total_bytes)
+    return {"revision": revision, "rootScope": scope, "complete": complete, "ids": ids,
+            "fingerprints": {grammar_id: hashlib.sha256(body["raw"].encode("utf-8")).hexdigest() for grammar_id, body in bodies.items()},
+            "bodies": {} if metadata_only else {grammar_id: body for grammar_id, body in bodies.items() if grammar_id not in known}}
+
+
+def get_textmate_http_grammar(grammar_id: str, revision: str, fingerprint: str = "") -> dict[str, object]:
+    """Guarded resource read; HTTP never selects a language or filesystem path."""
+    body = get_textmate_grammar_body(grammar_id, revision)
+    raw = body["raw"]
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    if fingerprint and fingerprint != digest:
+        raise TextmateProjectionError("textmate_grammar_fingerprint_changed")
+    current_revision, _ = _extension_entries()
+    if current_revision != revision:
+        raise TextmateProjectionError("textmate_projection_revision_changed")
+    return {"id": grammar_id, "revision": revision, "sha256": digest, "raw": raw}
+
+
+def get_textmate_grammar_chunk(grammar_id: str, revision: str, offset: int) -> dict[str, object]:
+    """Character-aligned chunks: at most 64 KiB UTF-8, without split codepoints."""
+    body = get_textmate_grammar_body(grammar_id, revision)
+    raw = body["raw"]
+    if offset < 0 or offset >= len(raw):
+        raise TextmateProjectionError("textmate_chunk_offset_invalid")
+    # Byte-bounded rather than a tiny fixed character count: ASCII grammars
+    # fill the frame while multibyte text remains codepoint-aligned.
+    segment = raw[offset:offset + 65_536].encode("utf-8")[:65_536].decode("utf-8", errors="ignore")
+    end = offset + len(segment)
+    current_revision, _ = _extension_entries()
+    if current_revision != revision:
+        raise TextmateProjectionError("textmate_projection_revision_changed")
+    return {"revision": revision, "id": grammar_id, "offset": offset,
+            "nextOffset": end, "done": end == len(raw), "raw": segment,
+            "sha256": hashlib.sha256(raw.encode("utf-8")).hexdigest()}
 
 
 def get_textmate_grammar_bodies(grammar_ids: list[str], revision: str) -> TextmateGrammarBatchDto:

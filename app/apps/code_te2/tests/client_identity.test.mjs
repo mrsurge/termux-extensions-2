@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
+import { webcrypto } from 'node:crypto';
 
 import { build } from "esbuild";
 import { Window } from "happy-dom";
 
 const appRoot = path.resolve(import.meta.dirname, "..");
 
-async function importClientIdentity() {
+async function importClientIdentity(suffix = '') {
   const result = await build({
     entryPoints: [path.join(appRoot, "main_page/frontend/client-identity.ts")],
     bundle: true,
@@ -17,9 +18,40 @@ async function importClientIdentity() {
     write: false,
   });
   return import(
-    `data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString("base64")}`
+    `data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text + suffix).toString("base64")}`
   );
 }
+
+test('plain HTTP identities use secure UUID bytes without randomUUID and retain storage', async () => {
+  const runtimeWindow = new Window({url:'http://remote.example:8089/app/code_te2'});
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+  let fills = 0;
+  Object.defineProperty(globalThis,'crypto',{configurable:true,value:{
+    getRandomValues: value => { fills++; return webcrypto.getRandomValues(value); },
+  }});
+  globalThis.window = runtimeWindow;
+  try {
+    // Separate module instantiation so Monaco selects the insecure-context path.
+    const {resolveCodeTe2ClientIdentity} = await importClientIdentity('\n// plain-http regression');
+    const first = await resolveCodeTe2ClientIdentity();
+    assert.match(first.clientInstanceId,/^client_[a-f0-9]{12}4[a-f0-9]{3}[89ab][a-f0-9]{15}$/);
+    assert.match(first.windowId,/^window_[a-f0-9]{32}$/);
+    const second = await resolveCodeTe2ClientIdentity();
+    assert.equal(second.clientInstanceId, first.clientInstanceId);
+    assert.equal(second.windowId, first.windowId);
+    assert.equal(fills,2);
+    const secondary = await resolveCodeTe2ClientIdentity({role:'secondary'});
+    assert.notEqual(secondary.clientInstanceId,first.clientInstanceId);
+    const reset = await resolveCodeTe2ClientIdentity({reset:true});
+    assert.notEqual(reset.clientInstanceId,first.clientInstanceId);
+    assert.equal(reset.windowId,first.windowId);
+  } finally {
+    if (descriptor) Object.defineProperty(globalThis,'crypto',descriptor);
+    else delete globalThis.crypto;
+    delete globalThis.window;
+    runtimeWindow.close();
+  }
+});
 
 test("client identity is stable per browser profile and reset is explicit", async () => {
   const runtimeWindow = new Window({

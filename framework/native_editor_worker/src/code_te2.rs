@@ -1,4 +1,6 @@
 //! Branch-native Code TE2 entrypoint. No Python HTTP/Socket.IO server fallback.
+#[path = "../../asset_gzip.rs"]
+mod asset_gzip;
 mod decode;
 mod fws_observer;
 mod persistence;

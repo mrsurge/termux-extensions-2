@@ -331,6 +331,9 @@ async fn file(
         reply
             .headers_mut()
             .insert("content-length", source.len().into());
+        reply
+            .extensions_mut()
+            .insert(crate::asset_gzip::AssetResponse);
         return reply;
     }
     let mime = mime_guess::from_path(&path).first_or_octet_stream();
@@ -339,11 +342,75 @@ async fn file(
     } else {
         StreamBody::new(ReaderStream::new(file).map(|r| r.map(Frame::data))).boxed_unsync()
     };
-    Response::builder()
+    let mut reply = Response::builder()
         .header("content-type", mime.as_ref())
         .header("content-length", metadata.len())
         .body(data)
-        .unwrap()
+        .unwrap();
+    reply
+        .extensions_mut()
+        .insert(crate::asset_gzip::AssetResponse);
+    reply
+}
+
+fn grammar_query(query: &str) -> Result<Value> {
+    if query.len() > 8192 {
+        bail!("Grammar query too large");
+    }
+    let mut fields = std::collections::HashMap::new();
+    for (key, value) in url::form_urlencoded::parse(query.as_bytes()) {
+        if !matches!(key.as_ref(), "id" | "revision" | "sha256")
+            || value.len() > 2048
+            || fields
+                .insert(key.into_owned(), value.into_owned())
+                .is_some()
+        {
+            bail!("Invalid grammar query");
+        }
+    }
+    let id = fields
+        .remove("id")
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("Missing grammar id"))?;
+    let revision = fields
+        .remove("revision")
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("Missing revision"))?;
+    let sha = fields.remove("sha256").unwrap_or_default();
+    if !sha.is_empty()
+        && (sha.len() != 64
+            || !sha
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+    {
+        bail!("Invalid grammar fingerprint");
+    }
+    Ok(map([
+        ("kind", "grammar".into()),
+        ("id", id.into()),
+        ("revision", revision.into()),
+        ("sha256", sha.into()),
+    ]))
+}
+
+#[cfg(test)]
+mod grammar_tests {
+    use super::*;
+    #[test]
+    fn grammar_resource_query_is_bounded_and_unambiguous() {
+        let value = grammar_query("id=ext%2F.%2Fsyntax%2Fa%2Bb.json&revision=r").unwrap();
+        assert_eq!(text(&value, "id"), Some("ext/./syntax/a+b.json"));
+        for query in [
+            "id=x",
+            "id=x&revision=",
+            "id=x&id=y&revision=r",
+            "id=x&revision=r&path=/etc/passwd",
+            "id=x&revision=r&sha256=bad",
+        ] {
+            assert!(grammar_query(query).is_err(), "{query}");
+        }
+        assert!(grammar_query(&format!("id={}&revision=r", "x".repeat(2049))).is_err());
+    }
 }
 
 async fn http(
@@ -373,6 +440,32 @@ async fn http(
         );
     }
     let app = root.join("app/apps/code_te2");
+    if path == "/textmate/grammar" {
+        let query = match grammar_query(request.uri().query().unwrap_or("")) {
+            Ok(query) => query,
+            Err(_) => return error(StatusCode::BAD_REQUEST, "Invalid grammar query"),
+        };
+        return match backend.call(query, false).await {
+            Ok(value) => {
+                let mut reply = response(
+                    StatusCode::OK,
+                    serde_json::to_vec(&value).unwrap(),
+                    "application/json",
+                );
+                reply
+                    .headers_mut()
+                    .insert("cache-control", "no-store".parse().unwrap());
+                reply
+                    .extensions_mut()
+                    .insert(crate::asset_gzip::AssetResponse);
+                reply
+            }
+            Err(_) => error(
+                StatusCode::CONFLICT,
+                "Grammar resource unavailable or superseded",
+            ),
+        };
+    }
     if path == "/__te2/runtime/loop" {
         return match backend.call(map([("kind", "loop".into())]), true).await {
             Ok(value) => response(
@@ -445,12 +538,30 @@ pub async fn serve(
     state: Arc<State>,
 ) -> Result<()> {
     let http_backend = backend.clone();
-    let inner = service_fn(move |request| {
+    let inner = tower::service_fn(move |request: Request<Incoming>| {
         let root = root.clone();
         let icons = icons.clone();
         let backend = http_backend.clone();
-        async move { Ok::<_, Infallible>(http(request, root, icons, backend).await) }
+        async move {
+            let bypass = !crate::asset_gzip::allow_request(&request);
+            let mut reply = http(request, root, icons, backend).await;
+            if bypass {
+                reply
+                    .extensions_mut()
+                    .remove::<crate::asset_gzip::AssetResponse>();
+            }
+            Ok::<_, Infallible>(reply)
+        }
     });
+    let compressed = tower_http::compression::Compression::new(inner)
+        .gzip(true)
+        .compress_when(crate::asset_gzip::predicate());
+    // Normalize the compression error before Engine.IO wraps the HTTP body;
+    // its transport requires a concrete Error type, not the codec's BoxError.
+    let inner = hyper_util::service::TowerToHyperService::new(tower::ServiceExt::map_response(
+        compressed,
+        |reply: Response<_>| reply.map(|body| body.map_err(std::io::Error::other).boxed_unsync()),
+    ));
     let (service, io) = SocketIo::builder()
         .max_payload(8 * 1024 * 1024)
         .max_buffer_size(128)
@@ -502,7 +613,7 @@ pub async fn serve(
                             if let Some(origin) = origin {
                                 response.headers_mut().insert("access-control-allow-origin", origin);
                                 response.headers_mut().insert("access-control-allow-credentials", "true".parse().unwrap());
-                                response.headers_mut().insert("vary", "Origin".parse().unwrap());
+                                response.headers_mut().append("vary", "Origin".parse().unwrap());
                                 if preflight {
                                     response.headers_mut().insert("access-control-allow-methods", "GET, HEAD, POST, OPTIONS".parse().unwrap());
                                     if let Some(headers) = requested_headers {

@@ -2275,6 +2275,42 @@ settings with the last value winning. Registry-v1 values migrate once into
 
 ## 23) Semantic tokens and TextMate tokenization
 
+### Revision-scoped grammar preparation
+
+Generic-browser asset delivery supports negotiated gzip in the framework and
+native worker HTTP asset handlers. The shared `framework/asset_gzip.rs` policy
+requires an explicit asset response marker and successful compressible GET;
+ranges/HEAD, encoded responses and application transports bypass it. Preserve
+Accept-Encoding and Origin `Vary` fields together. This is server-side delivery,
+not a change to native APK/OTA asset formats; browsers decompress automatically.
+
+Before constructing a tokenizer, the editor requests `editor.textmate.closure.get`
+on its own editor RPC lane with the factory-selected root scope, catalog revision
+and cached grammar IDs. Code TE2 resolves reachable rules/injections from installed
+grammar resources, retaining registry revision, allowed-root and size/mtime guards.
+This is dependency preparation, not WBA tokenization or a WBA-readiness dependency.
+The browser remains the grammar parser/tokenizer through TextMate and Oniguruma.
+
+Production requests set `metadataOnly: true`: the compact reply carries selected
+IDs and SHA-256 fingerprints, not the multi-megabyte bodies. The local asset
+`monaco_editor/textmate/markdown-cache.json` contains the built-in Markdown family;
+WebCrypto verifies each body once, then matching ID/hash pairs seed the existing
+revision-scoped cache. Native clients use `editor.textmate.chunk.get` for changed
+grammars or missing seeds, with two streams and 64 KiB UTF-8 per reply. Generic
+browsers instead GET `/api/app/code_te2/textmate/grammar` with logical ID, revision
+and optional expected SHA-256. The guarded resource read rechecks revision and
+returns identity-bearing JSON through negotiated gzip, outside packaged-asset
+interception. Responses are no-store; the revision cache owns reuse. Insecure
+origins skip seed downloads entirely. HTTP failures never retry or fall back.
+Closure discovery remains bounded to 256 bodies/8 MiB; oversized graphs return a
+partial preload and further dependencies use the same client-selected transport.
+On-demand HTTP reads return the current resource fingerprint. Failures
+do not switch routes. Native assets require explicit OTA or package publication.
+Warm prepared scopes need no further body request. Same-revision contribution
+refresh retains installed providers/cache; changed revisions invalidate them and
+fence pending results. See `docs/apps/editor_loading/PLAN.md` for contract and
+publication requirements, and its tracker for validation versus live acceptance.
+
 The inline editor receives semantic-token replies over direct WBA JSON-RPC and
 installs normal Monaco providers. Token data is the VS Code five-integer delta
 stream: delta line, delta start, length, legend token type, and modifier mask.

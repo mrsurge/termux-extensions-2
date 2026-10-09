@@ -161,6 +161,10 @@ def submit(value: dict[str, object]) -> concurrent.futures.Future[object]:
             return {"ok": True, "data": {"process_kind": "app_worker", "app_id": "code_te2",
                     "pid": os.getpid(), "loop_module": type(loop).__module__,
                     "loop_class": type(loop).__name__, "is_uvloop": type(loop).__module__.startswith("uvloop")}}
+        if value.get("kind") == "grammar":
+            from .textmate_projection import get_textmate_http_grammar
+            return await asyncio.to_thread(get_textmate_http_grammar, str(value["id"]),
+                                           str(value["revision"]), str(value["sha256"]))
         if value.get("kind") == "theme":
             from .theme_catalog import load_extension_theme
             return await asyncio.to_thread(load_extension_theme, str(value["extension"]), str(value["file"]))

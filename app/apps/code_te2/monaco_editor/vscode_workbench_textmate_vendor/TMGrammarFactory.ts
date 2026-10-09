@@ -139,6 +139,10 @@ export class TMGrammarFactory extends Disposable {
     return this._languageToScope.has(languageId);
   }
 
+  public getScope(languageId: string): string | undefined {
+    return this._languageToScope.get(languageId);
+  }
+
   public setTheme(theme: Record<string, unknown>, colorMap?: string[]): void {
     this._grammarRegistry.setTheme(theme, colorMap);
   }

@@ -12,6 +12,8 @@ import { resolveMonacoLanguageId } from './editor_language_utils.ts';
 import { semanticTokenForegrounds } from './editor_semantic_theme_utils.ts';
 import { traceColdBoot } from './editor_cold_boot_trace.ts';
 import { createTextmateGrammarBodyLoader } from './editor_textmate_grammar_loader.ts';
+import { createBundledGrammarCache } from './editor_textmate_bundled_cache.ts';
+import { createHttpGrammarLoader, usesHttpGrammarResources } from './editor_textmate_http.ts';
 import { TMGrammarFactory, missingTMGrammarErrorMessage, type ICreateGrammarResult } from './vscode_workbench_textmate_vendor/TMGrammarFactory.js';
 import {
   IValidEmbeddedLanguagesMap,
@@ -77,6 +79,7 @@ interface TextmateRuntimeDeps {
   getWindow(): WindowTextmateLike;
   fetchFn(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
   buildUiUrl(path: string): string;
+  grammarResourceUrl: string;
   normalizeLanguage(languageId: unknown): string;
   editorRpcCall(
     method: string,
@@ -190,7 +193,11 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
   let tmOnigReady: Promise<void> | null = null;
   let tmProjectionEpoch = 0;
   const tmProviderDisposables: Record<string, { dispose?(): void } | undefined> = Object.create(null);
-  const grammarBodyLoader = createTextmateGrammarBodyLoader(deps.editorRpcCall);
+  const bundledGrammarCache = createBundledGrammarCache(() => deps.fetchFn(
+    deps.buildUiUrl('monaco_editor/textmate/markdown-cache.json'), { cache: 'force-cache' }));
+  const grammarBodyLoader = createTextmateGrammarBodyLoader(deps.editorRpcCall, bundledGrammarCache,
+    usesHttpGrammarResources(deps.getWindow())
+      ? createHttpGrammarLoader(deps.fetchFn, deps.grammarResourceUrl) : undefined);
 
   function resetTokenizationForAllModels(): void {
     try {
@@ -260,7 +267,7 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
     }
   }
 
-  async function loadVscodeGrammarIndex(epoch = tmProjectionEpoch): Promise<VscodeGrammarIndexLike> {
+  async function loadVscodeGrammarIndex(epoch = tmProjectionEpoch, publish = true): Promise<VscodeGrammarIndexLike> {
     const idx: VscodeGrammarIndexLike = {
       revision: '',
       byScope: Object.create(null),
@@ -331,10 +338,11 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
       }
     } catch (error) {
       console.warn('[TextMate] refreshVscodeGrammarIndex failed', error);
+      throw error;
     }
 
     if (loaded) {
-      if (epoch === tmProjectionEpoch) tmVscodeIndex = idx;
+      if (publish && epoch === tmProjectionEpoch) tmVscodeIndex = idx;
       traceColdBoot('grammar.catalog', {
         revision: idx.revision.slice(0, 16),
         grammars: Object.keys(idx.byScope).length,
@@ -357,10 +365,30 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
     }
   }
 
-  async function refreshTextmateProjection(expectedRevision?: string | null): Promise<boolean> {
+  let tmProjectionRefreshInflight: Promise<boolean> | null = null;
+  let tmProjectionRefreshQueued = false;
+  function refreshTextmateProjection(expectedRevision?: string | null): Promise<boolean> {
     const normalizedExpected = asString(expectedRevision);
-    if (normalizedExpected && normalizedExpected === tmVscodeIndex?.revision) return false;
+    if (!tmProjectionRefreshInflight && normalizedExpected && normalizedExpected === tmVscodeIndex?.revision) return Promise.resolve(false);
+    tmProjectionRefreshQueued = true;
+    if (tmProjectionRefreshInflight) return tmProjectionRefreshInflight;
+    tmProjectionRefreshInflight = (async () => {
+      let changed = false;
+      try {
+        while (tmProjectionRefreshQueued) {
+          tmProjectionRefreshQueued = false;
+          const next = await loadVscodeGrammarIndex(tmProjectionEpoch, false);
+          if (next.revision && next.revision === tmVscodeIndex?.revision) continue;
+          changed = true;
+          invalidateTextmateProjection(next);
+        }
+        return changed;
+      } finally { tmProjectionRefreshInflight = null; }
+    })();
+    return tmProjectionRefreshInflight;
+  }
 
+  function invalidateTextmateProjection(next: VscodeGrammarIndexLike): void {
     tmProjectionEpoch += 1;
     grammarBodyLoader.reset();
     for (const language of Object.keys(tmProviderDisposables)) {
@@ -374,11 +402,9 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
     tmGrammarByLang = Object.create(null);
     tmGrammarFactory = null;
     tmReadyInflight = null;
-    tmVscodeIndex = null;
+    tmVscodeIndex = next;
     tmVscodeIndexInflight = null;
-    await refreshVscodeGrammarIndex();
     resetTokenizationForAllModels();
-    return true;
   }
 
   function resolveLanguageForPath(filePath: unknown, fallbackLanguage?: unknown): string {
@@ -407,6 +433,7 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
     filePath: unknown,
     fallbackLanguage?: unknown,
   ): Promise<string> {
+    if (tmProjectionRefreshInflight) await tmProjectionRefreshInflight;
     if (!tmVscodeIndex) await refreshVscodeGrammarIndex();
     const language = resolveLanguageForPath(filePath, fallbackLanguage);
     await ensureTextmateReady();
@@ -585,6 +612,10 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
 
         const grammarFactory = await ensureTextmateReady() as TMGrammarFactory;
         if (epoch !== tmProjectionEpoch) return false;
+        const rootScope = grammarFactory.getScope(lang);
+        if (!rootScope) throw new Error(missingTMGrammarErrorMessage);
+        await grammarBodyLoader.prepare(rootScope, tmVscodeIndex?.revision || '');
+        if (epoch !== tmProjectionEpoch) return false;
         const encodedLanguageId = typeof monacoLanguages.getEncodedLanguageId === 'function'
           ? Number(monacoLanguages.getEncodedLanguageId(lang))
           : 0;
@@ -674,10 +705,11 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
         return true;
       })();
 
+      const installation = tmInstallInflight[lang];
       try {
-        return await tmInstallInflight[lang];
+        return await installation;
       } finally {
-        delete tmInstallInflight[lang];
+        if (tmInstallInflight[lang] === installation) delete tmInstallInflight[lang];
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

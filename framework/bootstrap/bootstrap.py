@@ -566,6 +566,9 @@ def _native_worker_fingerprint(worker: NativeWorkerBuild, profile: str, env: Map
     for path in sorted(paths):
         hasher.update(b'\0' + path.relative_to(workspace).as_posix().encode() + b'\0')
         hasher.update(path.read_bytes())
+    shared_asset_policy = workspace.parent / "asset_gzip.rs"
+    if shared_asset_policy.is_file():
+        hasher.update(b"\0../asset_gzip.rs\0" + shared_asset_policy.read_bytes())
     return hasher.hexdigest()[:24]
 
 
@@ -1288,6 +1291,9 @@ def _rust_source_fingerprint(manifest: Path, *, profile: str, features: Sequence
         hasher.update(rel.encode("utf-8", "surrogateescape"))
         hasher.update(b"\0")
         hasher.update(path.read_bytes())
+    shared_asset_policy = workspace.parent / "asset_gzip.rs"
+    if shared_asset_policy.is_file():
+        hasher.update(b"\0../asset_gzip.rs\0" + shared_asset_policy.read_bytes())
     return hasher.hexdigest()[:24]
 
 

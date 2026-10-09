@@ -17,10 +17,58 @@ from app.apps.code_te2.textmate_projection import (
     get_textmate_catalog,
     get_textmate_grammar_body,
     get_textmate_grammar_bodies,
+    get_textmate_grammar_closure,
+    get_textmate_grammar_chunk,
+    get_textmate_http_grammar,
 )
 
 
 class TextmateProjectionTests(TestCase):
+    def test_closure_uses_guarded_bodies_and_omits_known_revision_resources(self) -> None:
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as temp_dir:
+            parent = Path(temp_dir)
+            root = parent / "extension"
+            syntax = root / "syntaxes" / "test.tmLanguage.json"
+            syntax.parent.mkdir(parents=True)
+            syntax.write_text('{"scopeName":"source.test","patterns":[]}', encoding="utf-8")
+            registry = self._registry(root)
+            with patch("app.apps.code_te2.textmate_projection.load_registry", return_value=registry), \
+                 patch("app.apps.code_te2.textmate_projection._allowed_extension_roots", return_value=(parent,)):
+                result = get_textmate_grammar_closure("source.test", "revision-1", [])
+                assert len(result["ids"]) == 1
+                assert list(result["bodies"]) == result["ids"]
+                assert result["complete"] is True
+                metadata = get_textmate_grammar_closure("source.test", "revision-1", [], True)
+                assert metadata["bodies"] == {}
+                assert metadata["fingerprints"] == result["fingerprints"]
+                chunk = get_textmate_grammar_chunk(result["ids"][0], "revision-1", 0)
+                assert chunk["raw"] == syntax.read_text(encoding="utf-8")
+                assert chunk["done"] is True
+                assert chunk["sha256"] == metadata["fingerprints"][result["ids"][0]]
+                resource = get_textmate_http_grammar(result["ids"][0], "revision-1", str(chunk["sha256"]))
+                assert resource["raw"] == chunk["raw"]
+                assert resource["sha256"] == chunk["sha256"]
+                with self.assertRaisesRegex(TextmateProjectionError, "fingerprint_changed"):
+                    get_textmate_http_grammar(result["ids"][0], "revision-1", "0" * 64)
+                with self.assertRaisesRegex(TextmateProjectionError, "revision_changed"):
+                    get_textmate_http_grammar(result["ids"][0], "stale")
+                warm = get_textmate_grammar_closure("source.test", "revision-1", result["ids"])
+                assert warm["bodies"] == {}
+                with patch("app.apps.code_te2.textmate_projection._MAX_GRAMMAR_BATCH_BYTES", 1):
+                    prefix = get_textmate_grammar_closure("source.test", "revision-1", [])
+                    assert prefix["complete"] is False
+                    assert prefix["bodies"] == {}
+                with self.assertRaisesRegex(TextmateProjectionError, "revision_changed"):
+                    get_textmate_grammar_closure("source.test", "stale", [])
+                with self.assertRaisesRegex(TextmateProjectionError, "offset_invalid"):
+                    get_textmate_grammar_chunk(result["ids"][0], "revision-1", -1)
+                # Known bodies do not bypass current filesystem identity checks.
+                syntax.write_text('{"scopeName":"source.test","patterns":[],"changed":true}', encoding="utf-8")
+                with self.assertRaisesRegex(TextmateProjectionError, "resource_changed"):
+                    get_textmate_grammar_closure("source.test", "revision-1", result["ids"])
+
     def _registry(self, root: Path) -> dict[str, object]:
         grammar_path = root / "syntaxes" / "test.tmLanguage.json"
         stat = grammar_path.stat()

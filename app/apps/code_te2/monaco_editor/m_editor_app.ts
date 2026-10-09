@@ -760,6 +760,7 @@ interface MonacoBootWindowLike extends Window {
       return window;
     },
     fetchFn: _fetch,
+    grammarResourceUrl: `${apiBase}/textmate/grammar`,
     buildUiUrl: function (path) {
       return buildUiUrl(apiBase, path);
     },

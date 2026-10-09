@@ -112,6 +112,7 @@ class EditorRpcSocketIONamespace(NativeNamespace):
         return identity["clientInstanceId"]
 
     async def on_rpc(self, sid: str, data: object) -> None:
+        from ..textmate_probe import trace
         request_id: object = None
         # Native transport has decoded the binary payload; validation stays here.
         decoded = data
@@ -127,9 +128,14 @@ class EditorRpcSocketIONamespace(NativeNamespace):
                 return
 
             request_id = request["id"]
+            probing = request["method"] == "editor.textmate.closure.get"
+            if probing:
+                trace("rpc.received", request_id=request_id, sid=sid)
             result = await dispatch_editor_runtime_request(
                 request["method"], request["params"], source_client=source_client,
             )
+            if probing:
+                trace("rpc.reply.start", request_id=request_id)
             await publish_editor_result(
                 method=request["method"],
                 request_id=request["id"],
@@ -141,6 +147,8 @@ class EditorRpcSocketIONamespace(NativeNamespace):
                     result,
                 ),
             )
+            if probing:
+                trace("rpc.reply.end", request_id=request_id)
         except EditorRpcProtocolError as protocol_error:
             await emit_editor_rpc_error(
                 lambda event_name, payload: self._emit_to_sid(sid, event_name, payload),
@@ -158,6 +166,8 @@ class EditorRpcSocketIONamespace(NativeNamespace):
                 data=dispatch_error.data,
             )
         except ValueError as value_error:
+            if isinstance(decoded, dict) and cast(dict[str, object], decoded).get("method") == "editor.textmate.closure.get":
+                trace("rpc.value_error", request_id=request_id, error=repr(value_error))
             await emit_editor_rpc_error(
                 lambda event_name, payload: self._emit_to_sid(sid, event_name, payload),
                 None,
@@ -172,6 +182,10 @@ class EditorRpcSocketIONamespace(NativeNamespace):
                 str(permission_error),
             )
         except Exception as internal_error:
+            if isinstance(decoded, dict) and cast(dict[str, object], decoded).get("method") == "editor.textmate.closure.get":
+                import traceback
+                trace("rpc.exception", request_id=request_id, error=repr(internal_error))
+                traceback.print_exc()
             await emit_editor_rpc_error(
                 lambda event_name, payload: self._emit_to_sid(sid, event_name, payload),
                 None,

@@ -38,6 +38,7 @@ from .editor_rpc_contract import (
     EDITOR_RPC_METHOD_TEXTMATE_CATALOG_GET,
     EDITOR_RPC_METHOD_TEXTMATE_GRAMMAR_GET,
     EDITOR_RPC_METHOD_TEXTMATE_GRAMMARS_GET,
+    EDITOR_RPC_METHOD_TEXTMATE_CLOSURE_GET,
     JSONRPC_METHOD_NOT_FOUND,
     EditorRpcDispatchError,
 )
@@ -143,15 +144,58 @@ async def dispatch_editor_rpc_request(
 
         raw_ids = params.get("ids")
         revision = params.get("revision")
-        if not isinstance(raw_ids, list) or not raw_ids or len(raw_ids) > MAX_GRAMMAR_BATCH_SIZE:
+        if not isinstance(raw_ids, list):
             raise EditorRpcDispatchError(-32602, "textmate_grammar_batch_invalid")
         ids = cast(list[object], raw_ids)
+        if not ids or len(ids) > MAX_GRAMMAR_BATCH_SIZE:
+            raise EditorRpcDispatchError(-32602, "textmate_grammar_batch_invalid")
         if any(not isinstance(item, str) or not item for item in ids) or len(set(cast(list[str], ids))) != len(ids):
             raise EditorRpcDispatchError(-32602, "textmate_grammar_batch_invalid")
         if not isinstance(revision, str) or not revision:
             raise EditorRpcDispatchError(-32602, "textmate_revision_required")
         try:
             return await asyncio.to_thread(get_textmate_grammar_bodies, cast(list[str], ids), revision)
+        except TextmateProjectionError as exc:
+            raise EditorRpcDispatchError(-32000, str(exc)) from exc
+
+    if method == EDITOR_RPC_METHOD_TEXTMATE_CLOSURE_GET:
+        from ..textmate_probe import trace
+        trace("dispatch.enter", client=source_client)
+        from typing import cast
+        from ..textmate_projection import MAX_GRAMMAR_KNOWN_IDS, TextmateProjectionError, get_textmate_grammar_closure
+
+        scope = params.get("scope")
+        revision = params.get("revision")
+        known = params.get("knownIds", [])
+        if not isinstance(scope, str) or not scope or not isinstance(revision, str) or not revision:
+            raise EditorRpcDispatchError(-32602, "textmate_closure_invalid")
+        if not isinstance(known, list):
+            raise EditorRpcDispatchError(-32602, "textmate_closure_invalid")
+        items = cast(list[object], known)
+        if len(items) > MAX_GRAMMAR_KNOWN_IDS:
+            raise EditorRpcDispatchError(-32602, "textmate_closure_invalid")
+        if any(not isinstance(item, str) or not item for item in items):
+            raise EditorRpcDispatchError(-32602, "textmate_closure_invalid")
+        try:
+            metadata_only = params.get("metadataOnly", False)
+            if not isinstance(metadata_only, bool):
+                raise EditorRpcDispatchError(-32602, "textmate_closure_invalid")
+            result = await asyncio.to_thread(get_textmate_grammar_closure, scope, revision, cast(list[str], items), metadata_only)
+            trace("dispatch.result", scope=scope, bodies=len(result["bodies"]), complete=result["complete"])
+            return result
+        except TextmateProjectionError as exc:
+            trace("dispatch.error", scope=scope, error=repr(exc))
+            raise EditorRpcDispatchError(-32000, str(exc)) from exc
+
+    if method == "editor.textmate.chunk.get":
+        from ..textmate_projection import TextmateProjectionError, get_textmate_grammar_chunk
+        grammar_id = params.get("id")
+        revision = params.get("revision")
+        offset = params.get("offset")
+        if not isinstance(grammar_id, str) or not grammar_id or not isinstance(revision, str) or not revision or type(offset) is not int:
+            raise EditorRpcDispatchError(-32602, "textmate_chunk_invalid")
+        try:
+            return await asyncio.to_thread(get_textmate_grammar_chunk, grammar_id, revision, offset)
         except TextmateProjectionError as exc:
             raise EditorRpcDispatchError(-32000, str(exc)) from exc
 

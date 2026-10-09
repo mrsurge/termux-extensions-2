@@ -8,6 +8,7 @@
 // - Iframe stack lifecycle (lazy/eager) with framework app start-before-load
 
 import { EXPLORER_RPC_METHODS } from "../../../src/explorer/rpc/contract.ts";
+import { generateUuid } from '../uuid.ts';
 import { bindDockOverflowScroll } from "./dock-scroll.ts";
 import {
   notifyExplorerRpc,
@@ -1489,18 +1490,12 @@ export function initSidebarShortcuts(
   }
 
   function _newPresentationId(hostId: string): string {
-    const randomId =
-      typeof globalThis.crypto?.randomUUID === "function"
-        ? globalThis.crypto.randomUUID()
-        : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    const randomId = generateUuid();
     return `inline:${hostId}:${randomId}`;
   }
 
   function _newDetachedPresentationId(hostId: string): string {
-    const randomId =
-      typeof globalThis.crypto?.randomUUID === "function"
-        ? globalThis.crypto.randomUUID()
-        : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    const randomId = generateUuid();
     return `detached:${hostId}:${randomId}`;
   }
 

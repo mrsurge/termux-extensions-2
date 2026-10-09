@@ -1,5 +1,6 @@
 // app/apps/code_te2/main_page/frontend/host-terminal-drawer.ts
 
+import { generateUuid } from './uuid.ts';
 import {
   SOCKET_IO_NAMESPACES,
   SOCKET_IO_PATHS,
@@ -545,8 +546,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
   }
 
   function terminalRequestId(): string {
-    if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
-    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    return generateUuid();
   }
 
   function rejectPendingTerminalRequests(message: string): void {

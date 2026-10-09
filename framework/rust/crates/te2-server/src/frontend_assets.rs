@@ -13,6 +13,7 @@ use std::{
 };
 
 use crate::{ApiResponse, AppState, json_error};
+use tower_http::compression::CompressionLayer;
 
 pub(crate) fn router() -> Router<AppState> {
     Router::new()
@@ -28,6 +29,26 @@ pub(crate) fn router() -> Router<AppState> {
             get(serve_extension_file),
         )
         .route("/apps/{*path}", get(serve_app_file))
+        .layer(axum::middleware::from_fn(asset_range_guard))
+        .layer(
+            CompressionLayer::new()
+                .gzip(true)
+                .compress_when(crate::asset_gzip::predicate()),
+        )
+}
+
+async fn asset_range_guard(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let bypass = !crate::asset_gzip::allow_request(&request);
+    let mut response = next.run(request).await;
+    if bypass {
+        response
+            .extensions_mut()
+            .remove::<crate::asset_gzip::AssetResponse>();
+    }
+    response
 }
 
 async fn index(State(state): State<AppState>) -> Response {
@@ -264,9 +285,13 @@ fn file_response(path: &StdPath, body: Vec<u8>) -> Response {
             .header(header::PRAGMA, "no-cache")
             .header(header::EXPIRES, "0");
     }
-    builder
+    let mut response = builder
         .body(Body::from(body))
-        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+    response
+        .extensions_mut()
+        .insert(crate::asset_gzip::AssetResponse);
+    response
 }
 
 fn content_type_for_suffix(suffix: &str) -> Option<&'static str> {

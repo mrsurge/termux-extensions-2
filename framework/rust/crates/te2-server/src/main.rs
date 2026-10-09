@@ -3,6 +3,8 @@ mod app_intent_pipe;
 mod app_proxy;
 mod app_worker_pipe_bridge;
 mod apps_lifecycle;
+#[path = "../../../../asset_gzip.rs"]
+mod asset_gzip;
 mod framework_services;
 mod frontend_assets;
 mod launcher;

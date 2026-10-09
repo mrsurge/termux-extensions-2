@@ -1,3 +1,5 @@
+import { generateUuid } from './uuid.ts';
+
 export type AndroidNativeRenderer = "gecko" | "cefrium";
 
 interface CefriumQueryRequest {
@@ -69,7 +71,7 @@ function requestGeckoSidebarPresentation(
   params: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
-    const requestId = globalThis.crypto.randomUUID();
+    const requestId = generateUuid();
     const timeout = window.setTimeout(() => {
       window.removeEventListener("message", onMessage);
       reject(new Error("Gecko Sidebar presentation bridge timed out"));

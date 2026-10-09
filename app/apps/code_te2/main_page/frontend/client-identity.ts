@@ -1,3 +1,4 @@
+import { generateUuid } from './uuid.ts';
 import {
   androidNativeRenderer,
   isAndroidNativePage,
@@ -36,7 +37,7 @@ export interface CodeTe2ClientIdentity {
 export type CodeTe2ClientRole = "primary" | "secondary";
 
 function randomIdentity(prefix: "client" | "window"): string {
-  const raw = globalThis.crypto.randomUUID().replaceAll("-", "").toLowerCase();
+  const raw = generateUuid().replaceAll("-", "").toLowerCase();
   return `${prefix}_${raw}`;
 }
 
@@ -82,7 +83,7 @@ function requestGeckoClientIdentity(
     ? window.parent
     : window;
   return new Promise((resolve, reject) => {
-    const requestId = globalThis.crypto.randomUUID();
+    const requestId = generateUuid();
     const timeout = window.setTimeout(() => {
       window.removeEventListener("message", onMessage);
       reject(new Error("Gecko native client identity bridge timed out"));

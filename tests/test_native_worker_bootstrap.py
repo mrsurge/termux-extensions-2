@@ -71,6 +71,18 @@ def test_worker_identity_includes_python_abi(worker_setup, monkeypatch):
     assert bootstrap._native_worker_fingerprint(worker, 'release', env) != before
 
 
+def test_shared_asset_policy_invalidates_both_binary_caches(worker_setup):
+    workspace, _, env = worker_setup
+    worker = bootstrap._native_worker_registry()[0]
+    policy = workspace.parent / 'asset_gzip.rs'
+    policy.write_text('// gzip policy v1\n')
+    native_before = bootstrap._native_worker_fingerprint(worker, 'release', env)
+    server_before = bootstrap._rust_source_fingerprint(workspace / 'Cargo.toml', profile='release', features=[])
+    policy.write_text('// gzip policy v2\n')
+    assert bootstrap._native_worker_fingerprint(worker, 'release', env) != native_before
+    assert bootstrap._rust_source_fingerprint(workspace / 'Cargo.toml', profile='release', features=[]) != server_before
+
+
 def test_failed_worker_build_never_selects(worker_setup, monkeypatch):
     _, _, env = worker_setup
     monkeypatch.setattr(bootstrap.subprocess, 'run', lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 9))

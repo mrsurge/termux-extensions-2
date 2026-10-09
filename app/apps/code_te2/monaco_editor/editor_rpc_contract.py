@@ -29,6 +29,8 @@ EDITOR_RPC_METHOD_THEME_SELECTED: Final = "editor.theme.selected"
 EDITOR_RPC_METHOD_TEXTMATE_CATALOG_GET: Final = "editor.textmate.catalog.get"
 EDITOR_RPC_METHOD_TEXTMATE_GRAMMAR_GET: Final = "editor.textmate.grammar.get"
 EDITOR_RPC_METHOD_TEXTMATE_GRAMMARS_GET: Final = "editor.textmate.grammars.get"
+EDITOR_RPC_METHOD_TEXTMATE_CLOSURE_GET: Final = "editor.textmate.closure.get"
+EDITOR_RPC_METHOD_TEXTMATE_CHUNK_GET: Final = "editor.textmate.chunk.get"
 EDITOR_RPC_METHOD_PREFERENCES_GET: Final = "editor.preferences.get"
 EDITOR_RPC_METHOD_OPEN: Final = "editor.open"
 EDITOR_RPC_METHOD_JUMP_TO_LINE: Final = "editor.jumpToLine"
@@ -61,6 +63,8 @@ EditorRpcMethod = Literal[
     "editor.textmate.catalog.get",
     "editor.textmate.grammar.get",
     "editor.textmate.grammars.get",
+    "editor.textmate.closure.get",
+    "editor.textmate.chunk.get",
     "editor.preferences.get",
     "editor.preference.update",
     "editor.open",
