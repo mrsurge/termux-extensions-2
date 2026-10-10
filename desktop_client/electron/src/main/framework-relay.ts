@@ -18,6 +18,8 @@ export type FrameworkRelay = {
   readonly browserOrigin: string;
   readonly configuredOrigin: string;
   readonly port: number;
+  readonly preferredPort: number;
+  readonly fallbackReason: string | null;
   refreshAssets(): Promise<void>;
   retarget(configuredOrigin: string): void;
   stop(): Promise<void>;
@@ -34,10 +36,10 @@ function relayTarget(configuredOrigin: string): URL {
   return target;
 }
 
-function listen(server: http.Server): Promise<number> {
+function listen(server: http.Server, port: number): Promise<number> {
   return new Promise((resolvePromise, reject) => {
     server.once("error", reject);
-    server.listen({ host: LOOPBACK_HOST, port: 0, exclusive: true }, () => {
+    server.listen({ host: LOOPBACK_HOST, port, exclusive: true }, () => {
       server.off("error", reject);
       resolvePromise((server.address() as AddressInfo).port);
     });
@@ -122,7 +124,11 @@ export function bridgeRelaySockets(downstream: Duplex, upstream: Duplex): void {
 export async function startFrameworkRelay(
   configuredOrigin: string,
   assets: DesktopAssetManager,
+  preferredPort = 0,
 ): Promise<FrameworkRelay> {
+  if (!Number.isInteger(preferredPort) || preferredPort < 0 || preferredPort > 65535) {
+    throw new Error("Invalid preferred framework relay port");
+  }
   let target = relayTarget(configuredOrigin);
   let browserOrigin = "";
   let assetsEnabled = (await assets.missingRequiredAsset()) === null;
@@ -260,7 +266,15 @@ export async function startFrameworkRelay(
     upstreamRequest.end();
   });
 
-  const port = await listen(server);
+  let port: number;
+  let fallbackReason: string | null = null;
+  try { port = await listen(server, preferredPort); }
+  catch (error) {
+    if (!preferredPort || (error as NodeJS.ErrnoException).code !== "EADDRINUSE") throw error;
+    fallbackReason = "EADDRINUSE";
+    port = await listen(server, 0);
+  }
+  console.info(`[te2-desktop-relay] preferred=${preferredPort} actual=${port} fallback=${fallbackReason ?? "none"}`);
   browserOrigin = `http://${LOOPBACK_HOST}:${port}`;
   console.log(`[te2-desktop-relay] ${browserOrigin} -> ${target.origin}`);
 
@@ -271,6 +285,8 @@ export async function startFrameworkRelay(
       return target.origin;
     },
     port,
+    preferredPort,
+    fallbackReason,
     async refreshAssets() {
       assetsEnabled = (await assets.missingRequiredAsset()) === null;
     },

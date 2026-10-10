@@ -26,6 +26,7 @@ import {
   frameworkConnectionError,
 } from "./framework-errors";
 import { startFrameworkRelay, type FrameworkRelay } from "./framework-relay";
+import { readPreferredRelayPort } from "./framework-relay-config";
 import {
   LocalFrameworkController,
   stopOwnedFrameworkForElectronExit,
@@ -1200,7 +1201,7 @@ async function main(): Promise<void> {
     readDesktopIdentities(),
   ]);
   configuredFrameworkOrigin = frameworkOrigin(settings);
-  relay = await startFrameworkRelay(configuredFrameworkOrigin, assets);
+  relay = await startFrameworkRelay(configuredFrameworkOrigin, assets, await readPreferredRelayPort());
   if (localFrameworkConfig.error) {
     console.warn(`[te2-local] ${localFrameworkConfig.error}`);
   }

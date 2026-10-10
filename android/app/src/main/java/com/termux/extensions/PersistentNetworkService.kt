@@ -164,7 +164,7 @@ class PersistentNetworkService : Service() {
         ensureChannel()
         registerWifiObserver()
         configureProjectionCallbacks()
-        frameworkRelay.start(settings.frameworkBaseUrl)
+        frameworkRelay.start(settings.frameworkBaseUrl, settingsStore.preferredFrameworkRelayPort())
         localFrameworkRuntime = AndroidLocalFrameworkRuntimeFactory.create?.invoke(this)
         connectControlPlane()
         updateForegroundAndPowerPolicy()

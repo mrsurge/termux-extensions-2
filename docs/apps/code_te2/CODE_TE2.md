@@ -3608,7 +3608,7 @@ Versioned `$TE2_CONFIG_HOME/desktop-state.json` atomically owns distinct primary
 and secondary client identities, existing Sidebar presentation, and bounded
 secondary presentation keyed by configured upstream framework origin plus
 canonical project path. It migrates the former identity and Sidebar files once.
-The random loopback relay origin is never a persistence key. Browser, GeckoView,
+The loopback relay origin is never a native presentation persistence key. Browser, GeckoView,
 and Cefrium do not receive this Electron-native placement contract; their mobile
 secondary presentation uses the portable drawer contract below.
 
@@ -4417,8 +4417,8 @@ Each host stores versioned local presentation state: dock order, foreground host
 stable last-agent host, and embedded/hidden/detached mode. It retains a bounded
 most-recent project map. Ordinary browsers use stable origin-local storage, and
 Electron uses its validated preload/main bridge plus atomic XDG-config storage.
-GeckoView and Cefrium use one shared Android store implementation because their
-page origin includes a random loopback relay port; each APK retains its own
+GeckoView and Cefrium use one shared Android store implementation independently
+of the browser relay origin; each APK retains its own
 application-private records. Those records are partitioned by stable client id,
 selected upstream framework origin, and normalized project path. Gecko uses its
 existing WebExtension/native-message bridge and Cefrium its existing

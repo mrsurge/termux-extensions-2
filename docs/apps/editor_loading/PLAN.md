@@ -195,3 +195,20 @@ on the observed paths. Continue in this order:
 
 Each implementation slice still requires concrete scope approval. Documentation
 approval does not authorize builds, client changes or runtime restarts.
+
+### Stable native origin implementation
+
+Electron persists its per-install preferred port in
+`TE2_CONFIG_HOME/desktop-framework-relay.json`, separate from endpoint settings.
+First publication is complete-file/non-overwriting; invalid stored configuration
+fails explicitly rather than silently rotating the origin. Android persists
+`framework_relay_preferred_port` in app-private `android_app_settings`, shared in
+source by Gecko/Cefrium/TE2 Termux but private to each installed package.
+Generated ports are in 49152..65535. Normal settings writes do not change them.
+
+Existing relays bind directly, falling back to port zero only for address
+collision. The preferred value is never replaced by a fallback port. Retarget
+keeps the live listener; preferred/actual/fallback values are logged. This is
+storage convenience, not client or remote-host identity. No security bypass,
+storage migration, Python change or automatic client restart is introduced.
+Android deployment requires APKs; editor OTA cannot publish relay Kotlin changes.

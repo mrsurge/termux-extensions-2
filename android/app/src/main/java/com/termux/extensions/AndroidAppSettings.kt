@@ -88,6 +88,17 @@ class AndroidAppSettingsStore(context: Context) {
         Context.MODE_PRIVATE,
     )
 
+    @Synchronized
+    fun preferredFrameworkRelayPort(): Int {
+        val existing = preferences.getInt("framework_relay_preferred_port", 0)
+        if (existing in 1024..65535) return existing
+        val generated = java.security.SecureRandom().nextInt(16384) + 49152
+        check(preferences.edit().putInt("framework_relay_preferred_port", generated).commit()) {
+            "Could not persist preferred framework relay port"
+        }
+        return generated
+    }
+
     fun load(): AndroidAppSettings {
         return try {
             val legacyDevToolsEnabled = preferences.getBoolean(

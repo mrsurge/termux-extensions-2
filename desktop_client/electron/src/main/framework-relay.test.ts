@@ -58,6 +58,27 @@ test("relay proxies HTTP and keeps its browser origin while retargeting", async 
   }
 });
 
+test("preferred port reuses across relaunch; collision falls back without adopting its listener", async () => {
+  const assets = new DesktopAssetManager("/nonexistent/te2-electron-test-assets");
+  const upstream = await startUpstream("target");
+  const initial = await startFrameworkRelay(upstream.origin, assets);
+  const preferred = initial.port;
+  await initial.stop();
+  const reused = await startFrameworkRelay(upstream.origin, assets, preferred);
+  const fallback = await startFrameworkRelay(upstream.origin, assets, preferred);
+  try {
+    assert.equal(reused.port, preferred);
+    assert.equal(reused.fallbackReason, null);
+    assert.notEqual(fallback.port, preferred);
+    assert.equal(fallback.fallbackReason, "EADDRINUSE");
+    assert.equal(fallback.preferredPort, preferred);
+    const origin = fallback.browserOrigin;
+    fallback.retarget(upstream.origin);
+    assert.equal(fallback.browserOrigin, origin);
+    assert.equal(await fetch(`${fallback.browserOrigin}/probe`).then(value => value.text()), "/probe:target");
+  } finally { await fallback.stop(); await reused.stop(); await upstream.stop(); }
+});
+
 test("relay socket bridge owns errors and tears down both peers", async () => {
   const downstream = new ControlledDuplex();
   const upstream = new ControlledDuplex();

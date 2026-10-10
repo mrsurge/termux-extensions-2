@@ -153,7 +153,10 @@ selected in this checkpoint; restoring compiled activation is a separate step.
 
 - [x] 1a. Rebuild/validate current mypyc group and restore compiled selection.
 - [x] 1b. User live acceptance of the newly selected compiled group: working good.
-- [ ] 2. Implement and validate preferred native loopback ports with free-port fallback.
+- [x] 2a. Implement preferred native loopback ports; source/tests/compile validation.
+- [ ] 2b. Native deployment and cross-relaunch live origin/storage acceptance.
+  Razr TE2 Termux staging is installed and user live-accepted; explicit origin/
+  storage survival across relaunch and other client deployment remain separate.
 - [ ] 3. Investigate polling/WebSocket compression independently; benchmark before enabling.
 - [ ] 4. Design/validate persistent revision/ID/hash-scoped grammar caching across reloads.
 - [ ] 5. Investigate OTA archive/transfer compression and compatibility; no format change yet.
@@ -184,3 +187,48 @@ production behavior change was needed. No runtime restart, Rust/APK build,
 OTA, commit or publication was performed during the build slice. User subsequently
 confirmed compiled-mode live acceptance: working good. Earlier interpreted
 acceptance is retained; this is not release-package or all-client acceptance.
+
+## Stable native origins slice
+
+- [x] Electron per-install config, separate from visible endpoint settings.
+- [x] Android app-private preferred port wired through the service-owned relay.
+- [x] Direct preferred bind, collision-only fallback and preferred/actual diagnostics.
+- [x] Electron typecheck and all 117 tests pass, including persistence/reuse/collision/retarget.
+- [x] Cefrium Kotlin compilation passes.
+- [x] Gecko relay JVM test and Kotlin compilation.
+- [x] TE2 Termux Kotlin compilation.
+- [ ] Native rebuild/deployment and cross-relaunch live origin/storage acceptance.
+
+No Python or framework changes, shared-runtime restart or version bump. Local
+Gradle validation selects JDK21/Linux AAPT2 for Gecko and JDK25 for the
+standalone Cefrium/Termux builds without modifying build-environment files.
+
+Termux validation also supplied the existing verified embedded Node SDK and NDK
+28.0.13004108 through environment variables. Archive SHA-256
+`e3cd29a1be03405f11dd5c857af8cd3ad13f84f1409ea648f5328f0bada5bd76`
+and ARM64 library SHA-256
+`955b308b1dfdf7662e8fe5ee4eb8c0c7d0a313f2d306387f2307529993c4bc32`
+match `vendor/electromux/runtime/node-sdk.json`. `compileDebugKotlin` passed;
+this is compile validation, not an APK or physical acceptance result.
+Diff review/whitespace checks passed. Existing deprecated Wi-Fi API/compiler
+warnings remain unrelated. The untracked user `ty.toml` is preserved untouched.
+
+### Razr TE2 Termux staging publication
+
+The approved build/install slice regenerated the existing Android seed with
+`scripts/bundle_gecko_assets.sh` (219 files, asset version 0.2.352), then built
+`android/termux` staging with minification enabled. Gradle completed in 7m 23s.
+The APK is 202,717,933 bytes; SHA-256
+`d0a0ab2e9225a3f369d243ad4e844b4f67d438a6a11e10fd01a088c4c627dec2`.
+Its signer matches the installed Termux GitHub test certificate; signature and
+16 KB ZIP alignment checks pass. The packaged host bundle and Markdown cache
+hashes match the regenerated seed. Existing Cefrium final-resource-ID shrinker
+warnings remain; assembly alone does not establish live resource acceptance.
+ADB in-place installation on `motorola-razr-2024-xt2453v:5555` succeeded with
+`install -r`, preserving app data. No app launch, data clearing or framework
+restart was performed. Cross-relaunch origin/storage user acceptance remains
+pending; Gecko/Cefrium APK deployment is not covered by this Termux installation.
+
+User subsequently confirmed the installed Razr build is working fine. This closes
+TE2 Termux general live acceptance for this slice, not an independently observed
+cross-relaunch storage/collision test or Gecko/Cefrium/Electron deployment gate.

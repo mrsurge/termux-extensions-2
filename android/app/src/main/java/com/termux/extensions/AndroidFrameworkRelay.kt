@@ -6,6 +6,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.net.InetAddress
+import java.net.BindException
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
@@ -46,6 +47,14 @@ class AndroidFrameworkRelay(
         private set
 
     @Volatile
+    var preferredPort: Int = 0
+        private set
+
+    @Volatile
+    var fallbackReason: String? = null
+        private set
+
+    @Volatile
     private var target = RelayTarget.parse(AndroidAppSettings().frameworkBaseUrl)
 
     @Volatile
@@ -71,20 +80,35 @@ class AndroidFrameworkRelay(
     val configuredOrigin: String
         get() = target.origin
 
-    fun start(configuredOrigin: String) {
+    fun start(configuredOrigin: String, preferredPort: Int = 0) {
+        require(preferredPort in 0..65535) { "Invalid preferred framework relay port" }
         if (running) {
             retarget(configuredOrigin)
             return
         }
         target = RelayTarget.parse(configuredOrigin)
+        this.preferredPort = preferredPort
+        fallbackReason = null
         running = true
         val started = CountDownLatch(1)
         val startupError = AtomicReference<Throwable?>(null)
         serverThread = Thread({
             try {
-                val server = ServerSocket().apply {
-                    reuseAddress = true
-                    bind(InetSocketAddress(LOOPBACK_ADDRESS, 0))
+                fun bind(port: Int): ServerSocket {
+                    val candidate = ServerSocket()
+                    try {
+                        candidate.reuseAddress = true
+                        candidate.bind(InetSocketAddress(LOOPBACK_ADDRESS, port))
+                        return candidate
+                    } catch (error: Throwable) {
+                        closeQuietly(candidate)
+                        throw error
+                    }
+                }
+                val server = try { bind(preferredPort) } catch (error: BindException) {
+                    if (preferredPort == 0) throw error
+                    fallbackReason = "BindException"
+                    bind(0)
                 }
                 serverSocket = server
                 port = server.localPort
@@ -122,7 +146,7 @@ class AndroidFrameworkRelay(
                 startupError.get(),
             )
         }
-        System.out.println("[android-framework-relay] $browserOrigin -> ${target.origin}")
+        System.out.println("[android-framework-relay] preferred=$preferredPort actual=$port fallback=${fallbackReason ?: "none"} $browserOrigin -> ${target.origin}")
     }
 
     fun retarget(configuredOrigin: String) {
