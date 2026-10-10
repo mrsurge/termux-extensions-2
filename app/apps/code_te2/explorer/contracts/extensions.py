@@ -28,6 +28,11 @@ class ExplorerExtensionExtIdParams(TypedDict):
     ext_id: str
 
 
+class ExplorerExtensionMarketplaceDetailParams(ExplorerExtensionExtIdParams):
+    readme: bool
+    version: str | None
+
+
 class ExplorerExtensionMarketplaceSearchParams(TypedDict):
     query: str
     offset: int
@@ -121,9 +126,15 @@ def parse_marketplace_search_params(
 
 def parse_marketplace_detail_params(
     payload: object,
-) -> ExplorerExtensionExtIdParams:
+) -> ExplorerExtensionMarketplaceDetailParams:
     envelope = _as_object(payload)
-    return {"ext_id": _parse_extension_id(envelope.get("ext_id"))}
+    readme = envelope.get("readme", False)
+    if not isinstance(readme, bool):
+        raise ExplorerExtensionsContractError("readme must be boolean")
+    version = envelope.get("version")
+    if version is not None and (not isinstance(version, str) or not _EXTENSION_VERSION_RE.fullmatch(version)):
+        raise ExplorerExtensionsContractError("version is invalid")
+    return {"ext_id": _parse_extension_id(envelope.get("ext_id")), "readme": readme, "version": version}
 
 
 def parse_marketplace_install_params(

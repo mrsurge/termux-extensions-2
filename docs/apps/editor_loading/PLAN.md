@@ -109,6 +109,26 @@ Investigate the reported astral-sh.ty installation issue with the exact extensio
 ID/version/platform, install request/result and WBA restart logs. No cause is
 established yet. Separate installation failure, platform selection, activation and
 UI-list visibility; avoid promising one fix resolves all four.
+
+The overlay now grows through two mutually exclusive collapsible headers:
+Marketplace and Installed, with the expanded panel owning the remaining viewport.
+Installed rows use one existing registry list request, filtered to user extensions;
+selection reuses marketplace detail metadata with installed local fallback. No
+per-row Open VSX fan-out. Keep built-in inventory in the existing settings manager.
+README is an expandable section below action buttons and loads only on demand via
+the existing detail RPC with validated `readme`/exact `version` parameters.
+Open VSX metadata supplies `files.readme`, not an inline JSON Markdown body.
+The worker limits remote/local bodies to 1 MiB, guards remote redirects before
+following them and rejects installed-path/symlink escapes. Local package-derived
+registry metadata is enough for fallback; XML parsing is unnecessary.
+
+Vendor MIT streaming-markdown 0.2.15 with provenance; render using its DOM parser
+and reuse the existing hljs registry, with oversized/unknown code fences remaining
+plain text. Prose/images wrap to the viewport; code and tables own horizontal
+scrolling. Links/images admit HTTPS URLs only; raw HTML remains inert. Selection
+generations discard late README results. TextMate fence highlighting is deferred.
+Backend changes require a matching compiled-domain rebuild and approved worker
+lifecycle, while native frontend changes require explicit client asset update.
 Acceptance: existing/new installs, uninstall, settings save, no-schema extensions,
 installed-list refresh and WBA recovery without page reload. Python changes require
 the matching mypyc rebuild; frontend changes require correct client publication.

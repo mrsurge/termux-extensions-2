@@ -352,11 +352,12 @@ export function createExplorerSearchOverlayController(
 
     const closeBtn = document.createElement("button");
     closeBtn.className = "fe-search-close";
+    closeBtn.type = "button";
+    closeBtn.setAttribute("aria-label", "Close search overlay");
     closeBtn.textContent = "✕";
     closeBtn.addEventListener("click", () => {
       closeSearchOverlay();
     });
-    header.appendChild(closeBtn);
 
     const modeContainer = document.createElement("div");
     modeContainer.className = "fe-search-mode";
@@ -370,6 +371,7 @@ export function createExplorerSearchOverlayController(
       modeContainer.appendChild(button);
     }
     header.appendChild(modeContainer);
+    header.appendChild(closeBtn);
 
     const contentWidgetHost = document.createElement("div");
     contentWidgetHost.id = "fe-search-content-widget-host";

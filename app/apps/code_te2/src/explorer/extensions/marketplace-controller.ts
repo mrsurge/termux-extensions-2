@@ -4,6 +4,7 @@ import {
   type ExplorerRpcMethod,
 } from "../rpc/contract.ts";
 import { getErrorMessage } from "../utils/errors.ts";
+import { renderExtensionReadme } from './readme-renderer.ts';
 
 interface MarketplaceBindings {
   button: HTMLButtonElement | null;
@@ -19,6 +20,7 @@ interface MarketplaceControllerDeps {
   closeSearchOverlay(reason?: string): void;
   confirm(message: string): Promise<boolean>;
   onInstalled?(extension: JsonObject, schema: JsonObject): void;
+  onConfigure?(extId: string, displayName: string): void;
 }
 
 interface MarketplaceSummary {
@@ -37,6 +39,8 @@ interface MarketplaceSummary {
 
 interface MarketplaceDetail extends MarketplaceSummary {
   extensionKind: string[];
+  targetPlatform: string | null;
+  platformNote: string | null;
   engine: string | null;
   license: string | null;
   repository: string | null;
@@ -98,6 +102,8 @@ function parseDetail(value: unknown): MarketplaceDetail | null {
   return {
     ...summary,
     extensionKind: stringList(value.extensionKind),
+    targetPlatform: stringValue(value.targetPlatform),
+    platformNote: stringValue(value.platformNote),
     engine: stringValue(value.engine),
     license: stringValue(value.license),
     repository: stringValue(value.repository),
@@ -123,7 +129,7 @@ function createElement<K extends keyof HTMLElementTagNameMap>(
 
 function createMarketplaceIcon(
   document: Document,
-  item: MarketplaceSummary,
+  item: Pick<MarketplaceSummary, "iconUrl">,
   className: string,
 ): HTMLSpanElement {
   const glyph = createElement(document, "span", className);
@@ -176,6 +182,82 @@ export function createExplorerMarketplaceController(
   let actionError: string | null = null;
   let mutationActive = false;
   let detailGeneration = 0;
+  let activeSection: 'marketplace' | 'installed' | null = 'marketplace';
+  let marketSection: HTMLElement | null = null;
+  let installedSection: HTMLElement | null = null;
+  let installedResults: HTMLElement | null = null;
+  let installedGeneration = 0;
+  let readmeOpen = false;
+  let readmeBody: string | null = null;
+  let readmeBaseUrl: string | undefined;
+  let readmeLoading = false;
+  let readmeError: string | null = null;
+
+  async function loadInstalled(): Promise<void> {
+    if (!installedResults) return;
+    const generation = ++installedGeneration;
+    installedResults.textContent = 'Loading installed extensions…';
+    try {
+      const response = await deps.requestExplorer(EXPLORER_RPC_METHODS.extensionsList, {}, SEARCH_TIMEOUT_MS);
+      if (generation !== installedGeneration || !visible) return;
+      installedResults.replaceChildren();
+      const extensions = Array.isArray(response.extensions) ? response.extensions.filter(isRecord) : [];
+      const user = extensions.filter(entry => entry.source === 'user');
+      for (const extension of user) {
+        const id = stringValue(extension.id); if (!id) continue;
+        const row = createElement(installedResults.ownerDocument, 'button', 'fe-marketplace-result');
+        row.type = 'button';
+        const document = installedResults.ownerDocument;
+        const glyph = createMarketplaceIcon(document, { iconUrl: stringValue(extension.iconUrl) }, 'fe-marketplace-result-glyph');
+        const text = createElement(document, 'span', 'fe-marketplace-result-text');
+        const title = createElement(document, 'span', 'fe-marketplace-result-title'); title.textContent = stringValue(extension.display_name) || id;
+        const identity = createElement(document, 'span', 'fe-marketplace-result-id'); identity.textContent = id;
+        const meta = createElement(document, 'span', 'fe-marketplace-result-meta'); meta.textContent = `Installed ${stringValue(extension.version) || ''}`;
+        text.append(title, identity, meta);
+        const description = stringValue(extension.description);
+        if (description) {
+          const body = createElement(document, 'span', 'fe-marketplace-result-description'); body.textContent = description; text.appendChild(body);
+        }
+        row.append(glyph, text);
+        row.addEventListener('click', () => { void openDetail(id, row); });
+        installedResults.appendChild(row);
+      }
+      if (!user.length) installedResults.textContent = 'No user extensions installed.';
+    } catch (error) {
+      if (generation === installedGeneration && installedResults) installedResults.textContent = getErrorMessage(error, 'Unable to load installed extensions.');
+    }
+  }
+
+  function setSection(next: typeof activeSection): void {
+    activeSection = next;
+    if (marketSection) marketSection.hidden = next !== 'marketplace';
+    if (installedSection) installedSection.hidden = next !== 'installed';
+    overlay?.querySelectorAll<HTMLButtonElement>('.fe-marketplace-section-toggle').forEach(button => {
+      button.setAttribute('aria-expanded', String(button.dataset.section === next));
+    });
+    if (next === 'installed') void loadInstalled();
+  }
+
+  async function loadReadme(): Promise<void> {
+    if (!detail || readmeLoading || readmeBody !== null) return;
+    const generation = detailGeneration, id = detail.id, version = detail.version;
+    readmeLoading = true; readmeError = null; renderDetail();
+    try {
+      const response = await deps.requestExplorer(EXPLORER_RPC_METHODS.extensionsMarketplaceDetail,
+        { ext_id: id, version, readme: true }, 30000);
+      if (generation !== detailGeneration || selectedId !== id) return;
+      const extension = isRecord(response.extension) ? response.extension : {};
+      if (extension.id !== id || extension.version !== version) throw new Error('Extension README identity changed.');
+      const raw = typeof extension.readme === 'string' ? extension.readme : '';
+      if (new TextEncoder().encode(raw).length > 1024 * 1024) throw new Error('Extension README is too large.');
+      readmeBody = raw;
+      readmeBaseUrl = stringValue(extension.readmeBaseUrl) || undefined;
+    } catch (error) {
+      if (generation === detailGeneration) readmeError = getErrorMessage(error, 'Unable to load README.');
+    } finally {
+      if (generation === detailGeneration) { readmeLoading = false; renderDetail(); }
+    }
+  }
 
   function clearSearchTimer(): void {
     if (searchTimer !== null) {
@@ -360,6 +442,18 @@ export function createExplorerMarketplaceController(
     }
 
     if (installed) {
+      const settings = createElement(document, "button", "fe-btn fe-marketplace-settings");
+      settings.type = "button";
+      settings.textContent = "⚙";
+      settings.title = "Extension settings";
+      settings.setAttribute("aria-label", `Settings for ${current.displayName || current.id}`);
+      settings.disabled = mutationActive;
+      settings.addEventListener("click", () => {
+        if (mutationActive || selectedId !== current.id || !detail?.installedVersion) return;
+        closeMarketplace('configure');
+        deps.onConfigure?.(current.id, current.displayName || current.id);
+      });
+      actions.appendChild(settings);
       const uninstall = createElement(
         document,
         "button",
@@ -461,6 +555,8 @@ export function createExplorerMarketplaceController(
     }
 
     appendDetailField("Available", detail.version);
+    appendDetailField("Target platform", detail.targetPlatform);
+    appendDetailField("Compatibility", detail.platformNote);
     appendDetailField("Installed", detail.installedVersion || "Not installed");
     appendDetailField(
       "Extension kind",
@@ -487,7 +583,7 @@ export function createExplorerMarketplaceController(
       `fe-marketplace-support ${detail.installSupported ? "is-supported" : "is-unsupported"}`,
     );
     support.textContent = detail.installSupported
-      ? "Workspace extensions are installed into the Code TE2 extension host."
+      ? "Extensions are installed into the Code TE2 extension host."
       : detail.unsupportedReason || "This extension is not supported.";
     detailBody.appendChild(support);
 
@@ -501,6 +597,22 @@ export function createExplorerMarketplaceController(
       detailBody.appendChild(error);
     }
     renderDetailActions(document, detail);
+    const readme = createElement(document, 'details', 'fe-marketplace-readme');
+    readme.open = readmeOpen;
+    const summary = createElement(document, 'summary', ''); summary.textContent = 'README';
+    const body = createElement(document, 'div', 'fe-marketplace-markdown');
+    if (readmeBody !== null) {
+      if (readmeBody) renderExtensionReadme(body, readmeBody, readmeBaseUrl);
+      else body.textContent = 'No README available.';
+    } else body.textContent = readmeError || (readmeLoading ? 'Loading README…' : 'Expand to load README.');
+    readme.append(summary, body);
+    readme.addEventListener('toggle', () => {
+      if (!detailBody?.contains(readme)) return;
+      if (readme.open === readmeOpen) return;
+      readmeOpen = readme.open;
+      if (readmeOpen) void loadReadme();
+    });
+    detailBody.appendChild(readme);
   }
 
   async function performSearch(
@@ -592,6 +704,7 @@ export function createExplorerMarketplaceController(
     actionError = null;
     detailGeneration += 1;
     const generation = detailGeneration;
+    readmeOpen = false; readmeBody = null; readmeBaseUrl = undefined; readmeLoading = false; readmeError = null;
     renderDetail();
     try {
       const response = await deps.requestExplorer(
@@ -661,6 +774,7 @@ export function createExplorerMarketplaceController(
       const installedVersion = installed || current.version;
       detail = { ...current, installedVersion };
       updateItemsInstalledVersion(current.id, installedVersion);
+      if (activeSection === 'installed') void loadInstalled();
       renderResults();
       if (isRecord(response.extension) && isRecord(response.config_schema)) {
         const properties = isRecord(response.config_schema.properties)
@@ -700,6 +814,7 @@ export function createExplorerMarketplaceController(
       );
       detail = { ...current, installedVersion: null };
       updateItemsInstalledVersion(current.id, null);
+      if (activeSection === 'installed') void loadInstalled();
       renderResults();
     } catch (error) {
       actionError = getErrorMessage(error, "Extension uninstall failed.");
@@ -722,10 +837,10 @@ export function createExplorerMarketplaceController(
     close.addEventListener("click", () => closeMarketplace());
     const heading = createElement(document, "h3", "fe-marketplace-heading");
     heading.textContent = "Extensions";
-    header.append(close, heading);
+    header.append(heading, close);
 
     const note = createElement(document, "div", "fe-marketplace-note");
-    note.textContent = "UI extensions are not currently supported.";
+    note.textContent = "UI extensions have limited support; your mileage may vary.";
 
     const searchRow = createElement(document, "div", "fe-marketplace-search-row");
     searchInput = createElement(document, "input", "fe-marketplace-search-input");
@@ -775,13 +890,21 @@ export function createExplorerMarketplaceController(
     detailBody = createElement(document, "div", "fe-marketplace-detail-body");
     detailElement.append(detailHeader, detailBody);
 
+    marketSection = createElement(document, 'section', 'fe-marketplace-section');
+    installedSection = createElement(document, 'section', 'fe-marketplace-section');
+    installedResults = createElement(document, 'div', 'fe-marketplace-results');
+    installedResults.setAttribute('role', 'list');
+    marketSection.append(note, searchRow, statusElement, resultsElement, loadMoreButton);
+    installedSection.appendChild(installedResults);
+    overlay.appendChild(header);
+    for (const section of ['marketplace', 'installed'] as const) {
+      const toggle = createElement(document, 'button', 'fe-marketplace-section-toggle');
+      toggle.type = 'button'; toggle.dataset.section = section;
+      toggle.textContent = section === 'marketplace' ? 'Marketplace' : 'Installed';
+      toggle.addEventListener('click', () => setSection(activeSection === section ? null : section));
+      overlay.append(toggle, section === 'marketplace' ? marketSection : installedSection);
+    }
     overlay.append(
-      header,
-      note,
-      searchRow,
-      statusElement,
-      resultsElement,
-      loadMoreButton,
       detailElement,
     );
     overlay.dataset.ready = "true";
@@ -796,6 +919,7 @@ export function createExplorerMarketplaceController(
     });
     renderResults();
     renderDetail();
+    setSection(activeSection);
   }
 
   function bindUi(bindings: MarketplaceBindings): void {
@@ -809,12 +933,14 @@ export function createExplorerMarketplaceController(
     ensureStructure();
     deps.closeSearchOverlay("marketplaceOpened");
     setVisible(true);
+    setSection(activeSection);
     renderResults();
-    window.setTimeout(() => searchInput?.focus(), 0);
+    if (activeSection === 'marketplace') window.setTimeout(() => searchInput?.focus(), 0);
   }
 
   function closeMarketplace(reason = "user"): void {
     searchGeneration += 1;
+    installedGeneration += 1;
     detailGeneration += 1;
     clearSearchTimer();
     loading = false;
@@ -828,6 +954,9 @@ export function createExplorerMarketplaceController(
 
   return {
     bindUi,
+    refreshInstalled: () => {
+      if (visible && activeSection === 'installed') void loadInstalled();
+    },
     openMarketplace,
     closeMarketplace,
     isVisible: () => visible,

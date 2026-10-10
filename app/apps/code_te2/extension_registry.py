@@ -17,6 +17,7 @@ import subprocess
 import time
 from pathlib import Path
 from typing import TypeAlias, cast
+from urllib.parse import urlencode
 
 
 from .code_te2_paths import code_te2_paths
@@ -380,6 +381,7 @@ def _parse_package_json(pkg_path: Path) -> ExtensionEntry | None:
         "configuration_schema": cfg_schema,
         "display_name": data.get("displayName", name),
         "description": data.get("description", ""),
+        "icon": data.get("icon", ""),
     }
 
 
@@ -428,6 +430,7 @@ def _scan_builtin_extensions() -> ExtensionMap:
             "is_language_features": is_lang_features,
             "display_name": parsed["display_name"],
             "description": parsed["description"],
+            "icon": parsed["icon"],
             "configuration_schema": parsed["configuration_schema"],
             "path": str(d),
         }
@@ -488,6 +491,7 @@ def _scan_user_extensions() -> ExtensionMap:
             "is_language_features": False,
             "display_name": parsed["display_name"] if parsed else ext_id,
             "description": parsed["description"] if parsed else "",
+            "icon": parsed["icon"] if parsed else "",
             "configuration_schema": parsed["configuration_schema"] if parsed else {},
             "path": ext_path,
         }
@@ -1008,6 +1012,65 @@ def uninstall_extension(ext_id: str) -> dict[str, object]:
 
 # ── Query helpers (for socket events / UI) ────────────────────────────
 
+_ICON_MIME = {".png": "image/png", ".svg": "image/svg+xml",
+              ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+              ".gif": "image/gif", ".webp": "image/webp"}
+_MAX_ICON_BYTES = 1024 * 1024
+
+
+def _installed_icon(ext: ExtensionEntry) -> tuple[Path, str] | None:
+    """Resolve only the manifest-declared icon inside a managed user extension."""
+    if _entry_string(ext, "source") != "user":
+        return None
+    root = Path(_entry_string(ext, "path")).resolve()
+    allowed = _EXTENSIONS_DIR.resolve()
+    if root == allowed or not root.is_relative_to(allowed) or not root.is_dir():
+        return None
+    raw = _entry_string(ext, "icon")
+    # Older persisted registries omitted icon; read this one manifest, no rebuild.
+    if "icon" not in ext:
+        package = root / "package.json"
+        if not package.resolve().is_relative_to(root) or not package.is_file():
+            return None
+        parsed = _parse_package_json(package)
+        raw = _entry_string(parsed or {}, "icon")
+    relative = Path(raw)
+    if not raw or relative.is_absolute() or ".." in relative.parts:
+        return None
+    target = (root / relative).resolve()
+    mime = _ICON_MIME.get(target.suffix.lower())
+    if not mime or not target.is_relative_to(root) or not target.is_file():
+        return None
+    if target.stat().st_size > _MAX_ICON_BYTES:
+        return None
+    return target, mime
+
+
+def _installed_icon_url(ext_id: str, ext: ExtensionEntry) -> str | None:
+    try:
+        icon = _installed_icon(ext)
+    except OSError:
+        return None
+    if icon is None:
+        return None
+    return "/api/app/code_te2/extensions/icon?" + urlencode({
+        "id": ext_id, "version": _entry_string(ext, "version")})
+
+
+def get_installed_extension_icon(ext_id: str, version: str) -> dict[str, object]:
+    ext = _extension_map(load_registry().get("extensions", {})).get(ext_id)
+    if ext is None or _entry_string(ext, "version") != version:
+        raise RuntimeError("Installed extension icon unavailable")
+    icon = _installed_icon(ext)
+    if icon is None:
+        raise RuntimeError("Installed extension icon unavailable")
+    target, mime = icon
+    with target.open("rb") as stream:
+        content = stream.read(_MAX_ICON_BYTES + 1)
+    if len(content) > _MAX_ICON_BYTES:
+        raise RuntimeError("Installed extension icon too large")
+    return {"content": content, "mime": mime}
+
 def get_extension_list() -> list[dict[str, object]]:
     """Return a UI-friendly list of all extensions."""
     registry = load_registry()
@@ -1017,6 +1080,8 @@ def get_extension_list() -> list[dict[str, object]]:
         entry: dict[str, object] = {
             "id": ext_id,
             "display_name": _entry_string(ext, "display_name", ext_id),
+            "description": _entry_string(ext, "description"),
+            "iconUrl": _installed_icon_url(ext_id, ext),
             "version": _entry_string(ext, "version", "?"),
             "source": _entry_string(ext, "source", "unknown"),
             "active": _entry_bool(ext, "active", True),
@@ -1031,6 +1096,45 @@ def get_extension_list() -> list[dict[str, object]]:
                 if key in user_settings
             }
         result.append(entry)
+    return result
+
+
+def get_local_marketplace_detail(ext_id: str, include_readme: bool = False) -> dict[str, object] | None:
+    """Local installed metadata only; renderer paths are never accepted."""
+    registry = load_registry()
+    extensions = _extension_map(registry.get("extensions", {}))
+    ext = extensions.get(ext_id)
+    if ext is None:
+        return None
+    namespace, _, name = ext_id.partition(".")
+    result: dict[str, object] = {
+        "id": ext_id, "namespace": namespace, "name": name,
+        "displayName": _entry_string(ext, "display_name", ext_id),
+        "version": _entry_string(ext, "version", "0.0.0"),
+        "installedVersion": _entry_string(ext, "version", "0.0.0"),
+        "description": _entry_string(ext, "description"),
+        "iconUrl": _installed_icon_url(ext_id, ext),
+        "installSupported": False, "metadataSource": "installed",
+        "unsupportedReason": "Showing installed extension metadata.",
+    }
+    if include_readme:
+        result["readme"] = ""
+        # User extension roots are native-managed; reject symlink escapes.
+        root = Path(_entry_string(ext, "path")).resolve()
+        allowed = _EXTENSIONS_DIR.resolve()
+        if root.is_relative_to(allowed) and root != allowed and root.is_dir():
+            for candidate in sorted(root.iterdir()):
+                if candidate.name.lower() not in {"readme.md", "readme.markdown", "readme.txt"}:
+                    continue
+                target = candidate.resolve()
+                if not target.is_relative_to(root) or not target.is_file():
+                    continue
+                with target.open("rb") as stream:
+                    body = stream.read(1024 * 1024 + 1)
+                if len(body) > 1024 * 1024:
+                    raise RuntimeError("Installed extension README is too large")
+                result["readme"] = body.decode("utf-8", errors="replace")
+                break
     return result
 
 

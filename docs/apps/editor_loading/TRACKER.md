@@ -642,10 +642,11 @@ original user list below is retained verbatim as the requirement record.
 
 - [x] Record loading closeout live acceptance separately from release evidence.
 - [x] Map all follow-ups to current source and distinguish bugs from new features.
-- [ ] F1: marketplace settings access using existing configuration RPC/dialog.
-- [ ] F1: installed user-extension list/filter using existing registry/list RPC.
+- [x] F1: marketplace settings access using existing configuration RPC/dialog (source validated; live gate below).
+- [x] F1: installed user-extension list using existing registry/list RPC (source and user live acceptance).
+- [x] F1: mutually exclusive Marketplace/Installed viewport panels and lazy README rendering (source and user live acceptance).
 - [ ] F1: reproduce astral-sh.ty issue; capture exact ID/version/platform and failure.
-- [ ] F1: approved fixes, regressions/build and live extension lifecycle acceptance.
+- [x] F1: approved fixes, regressions/build and live extension lifecycle acceptance.
 - [ ] F2: shared picker single-select/double-enter directory behavior.
 - [ ] F2: depth-one regex filter, bounded/invalid-pattern handling.
 - [ ] F2: shared consumer mouse/touch/keyboard and picker-mode acceptance.
@@ -669,6 +670,112 @@ minimize. File Explorer exposes terminal launch intents, not evidence of an embe
 drawer. ty cause, draft CSS owner, quick-access empty mode and usage aggregation
 support still require focused investigation. No runtime mutation or implementation
 was performed for these follow-ups.
+
+### F1 marketplace settings gear — implemented
+
+Selected installed extensions now have a small accessible gear in marketplace
+detail actions. It closes the marketplace overlay and hands the exact ID/label
+through the existing host event convention to Settings. The manager's existing
+schema/current-value loading is shared by both entrypoints: User values come from
+the registry list, Workspace values from workspace settings. Newer requests and
+scope changes fence obsolete results. Read failures do not open an empty-value
+dialog; existing toast reporting handles them. Empty schemas use the existing
+no-configurable-settings dialog rather than inventing settings.
+
+- [x] Gear handoff/exact target, unchanged install behavior, User/Workspace values,
+  obsolete request/scope fences and read failure regression tests: 6 pass.
+- [x] Code TE2 typecheck and frontend build.
+- [x] Native client asset update and user live gear/open/save acceptance.
+
+User confirmed the gear works. This first gear slice is frontend-only; it remains
+uncommitted with the larger overlay follow-up. Planning checkpoint `00937761` is
+local only. The ty failure remains uninvestigated beyond source orientation.
+
+### F1 Installed / README overlay follow-up
+
+Final activation and acceptance (2026-10-10): bootstrap published the rebuilt
+native worker at `~/.cache/te2/code_te2/build/bin/1cf6c3c3464841e678e43189/release/code-te2-worker`
+(four-job release build, 25.24s). The latest 136-module compiled group remains
+selected through `mypyc-active`. The agent did not restart any runtime; the user
+subsequently confirmed everything relating to the marketplace works and is live
+validated. This closes the Installed/README, icon, settings, platform-artifact
+selection and extension lifecycle gates below, superseding historical pending
+activation/acceptance notes. No wheel, APK, tag or release publication is implied.
+
+Live Electron follow-up (2026-10-10): exact main-page console inspection found
+missing marketplace icons for valid platform-qualified paths and ordinary
+`logo.jpg` filenames. `astral-sh.ty` latest returned Alpine ARM64 from the
+unqualified API; old validation rejected its artifact path before download.
+Source now centralizes exact-identity resource validation, selects backend-host
+metadata/artifacts explicitly, and retains selected-target digest/redirect guards.
+Termux selects universal then explicit same-architecture Linux compatibility,
+with a detail warning; no blanket native-server compatibility promise.
+21 Python and 10 frontend tests pass; real read-only metadata selects ty
+2026.78.0/linux-x64 with its declared icon. Typecheck/frontend build pass.
+Four-job mypyc build validates all 136 modules (35.42s) and selects
+`~/.cache/te2/code_te2/build/mypyc-snapshots/check-20261010-223812-1791671892486435575`.
+This was a cache-reusing build, not an apples-to-apples four-job performance
+comparison against the preceding shared-header rebuild. Native route source is
+unchanged from the passing prior native release build.
+
+Installed icon live failure is separately traced to running PID 749670's
+bootstrap-cached `9a751718a1bf6b68a4d943d7/release/code-te2-worker` from Oct 9.
+Both its direct HTTP route and Electron-proxied icon route return 404. The Oct 10
+target/release build is different; source registry lists valid installed icon
+URLs. Do not fix this by weakening resource guards or claiming OTA updates Rust.
+No shared runtime restart, OTA or extension install mutation was performed.
+
+Installed icon follow-up: preserve package icon metadata and use the existing
+image/fallback renderer in Installed rows and local detail. Native worker's
+declared-icon HTTP route serves PNG/SVG/JPEG/GIF/WebP with exact installed-version,
+managed-root/path/symlink and 1 MiB guards, correct MIME and sandbox/nosniff
+headers. Legacy registry metadata resolves icons without a rebuild. 18 Python,
+10 frontend regressions and the Rust icon-route regression pass; typecheck passes.
+Frontend and native release rebuilds pass. All 136 compiled modules validate;
+selected snapshot is
+`~/.cache/te2/code_te2/build/mypyc-snapshots/check-20261010-221428-1791670468719770098`
+(461.55s, one job). The existing wrapper supports `--jobs` / `MAX_JOBS`; two jobs
+are a proposed next-build starting point, not a changed default. Native release
+output is `framework/native_editor_worker/target/release/code-te2-worker`.
+Bootstrap-selected worker activation and native-client OTA/live acceptance remain
+pending. A worker restart under an old framework environment can reuse its old
+binary selection; OTA alone does not update the Rust route. No restart/publication.
+
+UI-only installation / overlay-close follow-up: removed metadata rejection based
+only on `extensionKind: ["ui"]`, retained verified artifact/version install guards,
+and changed the warning to limited support / mileage may vary. Generic detail
+wording no longer promises workspace-only installation. Search-view and Extensions
+overlay close controls now trail at the right edge; drawer close is unchanged.
+17 Python and 10 frontend regressions, typecheck and frontend build pass.
+Matching 136-module mypyc rebuild passed in 35.74s and selected
+`~/.cache/te2/code_te2/build/mypyc-snapshots/check-20261010-220231-1791669751794265984`.
+Native asset update/worker restart and live acceptance remain user-owned, with no
+commit or publication performed.
+
+- [x] Two exclusive collapsible headers; installed user rows from one registry call.
+- [x] Shared detail view with Open VSX/local installed metadata fallback.
+- [x] Lazy exact-version README, 1 MiB remote/local/frontend body limits, guarded
+  redirects and local symlink containment; no XML parser or per-row fetch fan-out.
+- [x] Vendor streaming-markdown 0.2.15 with MIT license/provenance; reuse existing
+  hljs runtime (unknown/over-64KiB fences stay plain); HTTPS-only Markdown URLs.
+- [x] Wrapped prose/images and independently scrollable code/table surfaces.
+- [x] Matching compiled-domain rebuild/selection (no worker restart).
+- [x] User asset update/worker lifecycle and Installed/README live acceptance.
+
+Backend detail RPC parameters are additive (`readme`, `version`); ordinary detail
+requests do not load README. Settings/install/uninstall paths remain shared.
+TextMate-backed fence highlighting is deferred. No APK/OTA/runtime restart or
+release was performed by the agent. Exact final test/build evidence follows.
+
+Validation: 9 frontend regressions plus 17 Python marketplace/contract regressions
+pass; typecheck and frontend build pass. Read-only live Open VSX Python README
+fetch passed (2026.4.0, 10,745 bytes, validated CDN destination). Combined
+gear/list/README host output is 7,897,287 bytes raw / 2,158,752 gzip level 6:
+4,967 compressed bytes above checkpoint 79b8f495. This measures the entire slice,
+not only the Markdown library. Compiled-domain build completed in 422.29s;
+136/136 compiled imports validate. Selected snapshot:
+`~/.cache/te2/code_te2/build/mypyc-snapshots/check-20261010-213715-1791668235682084704`.
+Previous selector retained; the running worker is unchanged until restarted.
 
 ## User follow-ups:
 

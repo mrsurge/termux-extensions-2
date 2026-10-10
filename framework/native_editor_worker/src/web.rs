@@ -390,6 +390,66 @@ async fn file(
     reply
 }
 
+fn extension_icon_query(query: &str) -> Result<Value> {
+    if query.len() > 1024 {
+        bail!("Icon query too large");
+    }
+    let mut fields = HashMap::new();
+    for (key, value) in url::form_urlencoded::parse(query.as_bytes()) {
+        if !matches!(key.as_ref(), "id" | "version")
+            || value.is_empty()
+            || value.len() > 256
+            || fields
+                .insert(key.into_owned(), value.into_owned())
+                .is_some()
+        {
+            bail!("Invalid icon query");
+        }
+    }
+    let id = fields
+        .remove("id")
+        .ok_or_else(|| anyhow::anyhow!("Missing icon id"))?;
+    let version = fields
+        .remove("version")
+        .ok_or_else(|| anyhow::anyhow!("Missing icon version"))?;
+    Ok(map([
+        ("kind", "extension_icon".into()),
+        ("id", id.into()),
+        ("version", version.into()),
+    ]))
+}
+
+fn extension_icon_response(value: &Value) -> Response<Body> {
+    let Some(Value::Binary(content)) = get(value, "content") else {
+        return error(StatusCode::NOT_FOUND, "Icon unavailable");
+    };
+    let Some(mime) = text(value, "mime").filter(|mime| {
+        matches!(
+            *mime,
+            "image/png" | "image/svg+xml" | "image/jpeg" | "image/gif" | "image/webp"
+        )
+    }) else {
+        return error(StatusCode::NOT_FOUND, "Icon unavailable");
+    };
+    if content.len() > 1024 * 1024 {
+        return error(StatusCode::NOT_FOUND, "Icon unavailable");
+    }
+    let mut reply = response(StatusCode::OK, content.clone(), mime);
+    reply
+        .headers_mut()
+        .insert("cache-control", "no-store".parse().unwrap());
+    reply
+        .headers_mut()
+        .insert("x-content-type-options", "nosniff".parse().unwrap());
+    reply.headers_mut().insert(
+        "content-security-policy",
+        "sandbox; default-src 'none'; style-src 'unsafe-inline'"
+            .parse()
+            .unwrap(),
+    );
+    reply
+}
+
 fn grammar_query(query: &str) -> Result<Value> {
     if query.len() > 8192 {
         bail!("Grammar query too large");
@@ -434,6 +494,41 @@ fn grammar_query(query: &str) -> Result<Value> {
 mod grammar_tests {
     use super::*;
     #[test]
+    fn installed_icon_route_is_bounded_and_image_only() {
+        assert!(extension_icon_query("id=vendor.ext&version=1.2").is_ok());
+        for query in [
+            "id=x",
+            "id=x&version=",
+            "id=x&id=y&version=1",
+            "id=x&version=1&path=a",
+        ] {
+            assert!(extension_icon_query(query).is_err());
+        }
+        for mime in [
+            "image/png",
+            "image/svg+xml",
+            "image/jpeg",
+            "image/gif",
+            "image/webp",
+        ] {
+            let reply = extension_icon_response(&map([
+                ("content", Value::Binary(vec![1])),
+                ("mime", mime.into()),
+            ]));
+            assert_eq!(reply.status(), StatusCode::OK);
+            assert_eq!(reply.headers()["content-type"], mime);
+            assert_eq!(reply.headers()["x-content-type-options"], "nosniff");
+        }
+        assert_eq!(
+            extension_icon_response(&map([
+                ("content", Value::Binary(vec![1])),
+                ("mime", "text/html".into())
+            ]))
+            .status(),
+            StatusCode::NOT_FOUND
+        );
+    }
+    #[test]
     fn grammar_resource_query_is_bounded_and_unambiguous() {
         let value = grammar_query("id=ext%2F.%2Fsyntax%2Fa%2Bb.json&revision=r").unwrap();
         assert_eq!(text(&value, "id"), Some("ext/./syntax/a+b.json"));
@@ -477,6 +572,16 @@ async fn http(
         );
     }
     let app = root.join("app/apps/code_te2");
+    if path == "/extensions/icon" {
+        let query = match extension_icon_query(request.uri().query().unwrap_or("")) {
+            Ok(query) => query,
+            Err(_) => return error(StatusCode::BAD_REQUEST, "Invalid icon query"),
+        };
+        return match backend.call(query, false).await {
+            Ok(value) => extension_icon_response(&value),
+            Err(_) => error(StatusCode::NOT_FOUND, "Icon unavailable"),
+        };
+    }
     if path == "/textmate/grammar" {
         let query = match grammar_query(request.uri().query().unwrap_or("")) {
             Ok(query) => query,

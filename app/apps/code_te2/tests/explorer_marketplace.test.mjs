@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import path from "node:path";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { build } from "esbuild";
@@ -59,6 +60,149 @@ function tick(delay = 0) {
   return new Promise((resolve) => setTimeout(resolve, delay));
 }
 
+test("Explorer overlay closes sit at the trailing edge without moving drawer close", async () => {
+  const source = await readFile(path.join(appRoot, 'src/explorer/search/overlay-controller.ts'), 'utf8');
+  assert.ok(source.indexOf('header.appendChild(modeContainer)') < source.indexOf('header.appendChild(closeBtn)'));
+  const css = await readFile(path.join(appRoot, 'main_page/frontend/explorer.css'), 'utf8');
+  for (const selector of ['fe-search-close', 'fe-marketplace-close']) {
+    assert.match(css, new RegExp(`\\.${selector} \\{[^}]*flex-shrink: 0;[^}]*margin-left: auto;`));
+  }
+  assert.doesNotMatch(css, /#fe-drawer-close\s*\{[^}]*margin-left: auto/);
+});
+
+test("README rendering keeps unsafe markup inert and gives tables/code independent scroll surfaces", async () => {
+  const window = new Window({ url: 'http://localhost/' }); const restore = installDomGlobals(window);
+  try {
+    const { renderExtensionReadme } = await importTypeScript('src/explorer/extensions/readme-renderer.ts');
+    const container = window.document.createElement('div');
+    renderExtensionReadme(container, '# Title\n\n<script>alert(1)</script>\n\n[bad](javascript:alert)\n\n![bad](data:text/html,bad)\n\n[good](https://example.com)\n\n```javascript\nconst value = 1;\n```\n\n| A | B |\n|---|---|\n| x | y |');
+    assert.equal(container.querySelector('script'), null);
+    assert.equal(container.querySelector('a[href^="javascript:"]'), null);
+    assert.equal(container.querySelector('img[src^="data:"]'), null);
+    assert.equal(container.querySelector('a[href="https://example.com/"]').getAttribute('rel'), 'noopener noreferrer');
+    assert.ok(container.querySelector('.fe-readme-table-scroll > table'));
+    assert.ok(container.querySelector('pre[tabindex="0"] > code .hljs-keyword'));
+  } finally { restore(); window.close(); }
+});
+
+test("installed and marketplace sections are exclusive, installed loading uses the registry once", async () => {
+  const window = new Window({ url: 'http://localhost/' }); const restore = installDomGlobals(window);
+  try {
+    const { createExplorerMarketplaceController } = await importTypeScript('src/explorer/extensions/marketplace-controller.ts');
+    const button = window.document.createElement('button'), overlay = window.document.createElement('div');
+    window.document.body.append(button, overlay); const calls = [];
+    const controller = createExplorerMarketplaceController({ closeSearchOverlay() {}, confirm: async () => true,
+      async requestExplorer(method) { calls.push(method); return { extensions: [
+        { id: 'vendor.example', display_name: 'Example', version: '1.0.0', source: 'user', iconUrl: '/api/app/code_te2/extensions/icon?id=vendor.example&version=1.0.0' },
+        { id: 'builtin.example', version: '1', source: 'builtin' }] }; } });
+    controller.bindUi({button,overlay}); controller.openMarketplace();
+    assert.equal(overlay.querySelector('.fe-marketplace-header').lastElementChild.className, 'fe-marketplace-close');
+    assert.equal(overlay.querySelector('.fe-marketplace-note').textContent, 'UI extensions have limited support; your mileage may vary.');
+    const toggle = overlay.querySelector('[data-section="installed"]'); toggle.click(); await tick();
+    assert.equal(overlay.querySelector('[data-section="marketplace"]').getAttribute('aria-expanded'), 'false');
+    assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+    assert.equal(overlay.querySelectorAll('.fe-marketplace-section:not([hidden]) .fe-marketplace-result').length, 1);
+    assert.deepEqual(calls, ['explorer.extensions.list']);
+    const image = overlay.querySelector('.fe-marketplace-icon-image');
+    assert.equal(image.getAttribute('src'), '/api/app/code_te2/extensions/icon?id=vendor.example&version=1.0.0');
+    image.dispatchEvent(new window.Event('error'));
+    assert.equal(overlay.querySelector('.fe-marketplace-result-glyph').textContent, '🧩');
+    toggle.click(); assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+  } finally { restore(); window.close(); }
+});
+
+test("README is fetched only on expansion and discarded after changing selection", async () => {
+  const window = new Window({ url: 'http://localhost/' }); const restore = installDomGlobals(window);
+  try {
+    const { createExplorerMarketplaceController } = await importTypeScript('src/explorer/extensions/marketplace-controller.ts');
+    const button = window.document.createElement('button'), overlay = window.document.createElement('div');
+    window.document.body.append(button, overlay); let release; let reads = 0;
+    const extension = id => ({ id, namespace: 'vendor', name: id.split('.')[1], version: '1.0.0', installedVersion: '1.0.0' });
+    const controller = createExplorerMarketplaceController({ closeSearchOverlay() {}, confirm: async () => true,
+      async requestExplorer(method, payload) {
+        if (method.endsWith('.search')) return { items: [extension('vendor.first'), extension('vendor.second')], total: 2 };
+        if (payload.readme) { reads++; await new Promise(resolve => { release = resolve; }); return { extension: { ...extension(payload.ext_id), readme: '# Obsolete README' } }; }
+        return { extension: extension(payload.ext_id) };
+      } });
+    controller.bindUi({button,overlay}); controller.openMarketplace();
+    const input = overlay.querySelector('input'); input.value = 'vendor'; input.dispatchEvent(new window.Event('input', {bubbles:true}));
+    await tick(400); overlay.querySelector('.fe-marketplace-result').click(); await tick();
+    assert.equal(reads, 0);
+    const readme = overlay.querySelector('.fe-marketplace-readme'); readme.open = true;
+    readme.dispatchEvent(new window.Event('toggle')); await tick(); assert.equal(reads, 1);
+    findButton(overlay, '← Back').click(); overlay.querySelectorAll('.fe-marketplace-result')[1].click(); await tick();
+    release(); await tick();
+    assert.equal(overlay.querySelector('.fe-marketplace-detail-id').textContent, 'vendor.second');
+    assert.equal(overlay.querySelector('.fe-marketplace-markdown').textContent.includes('Obsolete'), false);
+  } finally { restore(); window.close(); }
+});
+
+test("marketplace settings gear targets the selected installed extension", async () => {
+  const window = new Window({ url: "http://localhost/" });
+  const restore = installDomGlobals(window);
+  try {
+    const { createExplorerMarketplaceController } = await importTypeScript("src/explorer/extensions/marketplace-controller.ts");
+    const button = window.document.createElement("button"), overlay = window.document.createElement("div");
+    window.document.body.append(button, overlay);
+    const extension = { id: "vendor.example", namespace: "vendor", name: "example", displayName: "Example", version: "1.0.0", installedVersion: "1.0.0", installSupported: true };
+    const configured = [], calls = [];
+    const controller = createExplorerMarketplaceController({
+      closeSearchOverlay() {}, confirm: async () => true,
+      async requestExplorer(method) {
+        calls.push(method);
+        if (method.endsWith(".search")) return { items: [extension], total: 1, offset: 0 };
+        if (method.endsWith(".detail")) return { extension };
+        throw Error(method);
+      },
+      onConfigure(id, label) {
+        assert.equal(overlay.style.display, "none");
+        configured.push([id, label]);
+      },
+    });
+    controller.bindUi({ button, overlay }); controller.openMarketplace();
+    const input = overlay.querySelector(".fe-marketplace-search-input");
+    input.value = "example"; input.dispatchEvent(new window.Event("input", { bubbles: true }));
+    await tick(400); overlay.querySelector(".fe-marketplace-result").click(); await tick();
+    const gear = overlay.querySelector('.fe-marketplace-settings');
+    assert.equal(gear.textContent, '⚙');
+    assert.equal(gear.getAttribute('aria-label'), 'Settings for Example');
+    gear.click();
+    assert.deepEqual(configured, [[extension.id, extension.displayName]]);
+    assert.equal(calls.some(method => /install|restart/.test(method)), false);
+  } finally { restore(); window.close(); }
+});
+
+test("shared settings loader preserves scoped values and fences obsolete opens", async () => {
+  const { createSettingsManagerController } = await importTypeScript("main_page/frontend/ui/settings-manager.ts");
+  let scope = 'user'; const opened = []; let release;
+  const manager = createSettingsManagerController({
+    getActiveScope: () => scope,
+    openExtConfigModal: (...args) => opened.push(args),
+    async busRequest(method, payload) {
+      if (method.endsWith('configSchema.get')) {
+        if (payload.ext_id === 'old') await new Promise(resolve => { release = resolve; });
+        return { schema: { properties: { 'example.enabled': { type: 'boolean' } } } };
+      }
+      if (method.endsWith('workspaceSettings.get')) return { settings: { 'example.enabled': false, unrelated: true } };
+      return { extensions: [{ id: 'new', configuration_values: { 'example.enabled': true } }] };
+    },
+  });
+  const old = manager.openExtensionSettings('old', 'Old');
+  await manager.openExtensionSettings('new', 'New'); release(); await old;
+  assert.equal(opened.length, 1); assert.equal(opened[0][0], 'new');
+  assert.deepEqual(opened[0][3], { 'example.enabled': true });
+  scope = 'workspace'; await manager.openExtensionSettings('new', 'New');
+  assert.deepEqual(opened[1][3], { 'example.enabled': false });
+  const staleScope = manager.openExtensionSettings('old', 'Old');
+  scope = 'user'; release(); await staleScope;
+  assert.equal(opened.length, 2);
+  const failed = createSettingsManagerController({
+    getActiveScope: () => 'user', openExtConfigModal: () => assert.fail('must not open on read failure'),
+    busRequest: async () => { throw Error('offline'); },
+  });
+  await assert.rejects(failed.openExtensionSettings('new', 'New'), /offline/);
+});
+
 test("marketplace install hands configuration to the host after closing its overlay", async () => {
   const window = new Window({ url: "http://localhost/" });
   const restore = installDomGlobals(window);
@@ -103,7 +247,7 @@ test("marketplace install hands configuration to the host after closing its over
   }
 });
 
-test("marketplace overlay can reopen details and install without losing search state", async () => {
+test("marketplace overlay can reopen UI-only details and install without losing search state", async () => {
   const window = new Window({ url: "http://localhost/" });
   const restore = installDomGlobals(window);
   try {
@@ -157,7 +301,7 @@ test("marketplace overlay can reopen details and install without losing search s
                 "https://open-vsx.org/api/vendor/python/1.0.0/file/icon.png",
               installedVersion: null,
               verified: true,
-              extensionKind: ["workspace"],
+              extensionKind: ["ui"],
               engine: "^1.100.0",
               license: "MIT",
               repository: "https://example.com/repository",
@@ -181,7 +325,7 @@ test("marketplace overlay can reopen details and install without losing search s
     controller.openMarketplace();
     assert.equal(searchCloseReason, "marketplaceOpened");
     assert.equal(overlay.style.display, "flex");
-    assert.match(overlay.textContent, /UI extensions are not currently supported/);
+    assert.match(overlay.textContent, /UI extensions have limited support; your mileage may vary/);
 
     const input = overlay.querySelector(".fe-marketplace-search-input");
     input.value = "python";
@@ -211,7 +355,7 @@ test("marketplace overlay can reopen details and install without losing search s
         ".fe-marketplace-detail-icon .fe-marketplace-icon-image",
       ),
     );
-    assert.match(overlay.textContent, /Workspace extensions are installed/);
+    assert.match(overlay.textContent, /Extensions are installed into the Code TE2 extension host/);
 
     findButton(overlay, "← Back").click();
     await tick();

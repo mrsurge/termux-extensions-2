@@ -12,6 +12,28 @@ import { EXPLORER_RPC_METHODS } from '../../../src/explorer/rpc/contract.ts';
  * }} deps
  */
 export function createSettingsManagerController(deps: any) {
+  let configurationGeneration = 0;
+  async function openExtensionSettings(extId: string, label: string) {
+    const generation = ++configurationGeneration;
+    const scope = deps.getActiveScope();
+    const res = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsConfigSchemaGet, { ext_id: extId }, 10000);
+    const schema = res?.schema || {};
+    const schemaKeys = Object.keys(schema?.properties || schema || {});
+    const currentValues: Record<string, any> = {};
+    if (scope === 'workspace') {
+      const wsRes = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsWorkspaceSettingsGet, {}, 5000);
+      for (const key of schemaKeys) {
+        if (key in (wsRes?.settings || {})) currentValues[key] = wsRes.settings[key];
+      }
+    } else {
+      const listRes = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsList, {}, 5000);
+      const extension = (listRes?.extensions || []).find((entry: any) => entry.id === extId);
+      if (extension?.configuration_values) Object.assign(currentValues, extension.configuration_values);
+    }
+    if (generation !== configurationGeneration || scope !== deps.getActiveScope()) return;
+    deps.openExtConfigModal(extId, label, schema, currentValues);
+  }
+
   async function refreshEditorExtManagerModal() {
     const document = deps.extManagerListEl.ownerDocument;
     deps.extManagerListEl.textContent = 'Loading…';
@@ -150,32 +172,7 @@ export function createSettingsManagerController(deps: any) {
           cfgBtn.addEventListener('click', async () => {
             cfgBtn.disabled = true;
             try {
-              const res = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsConfigSchemaGet, {
-                ext_id: extId,
-              }, 10000);
-              const schema = res?.schema || {};
-              const schemaKeys = Object.keys(schema?.properties || schema || {});
-              const scope = deps.getActiveScope();
-
-              const currentValues: Record<string, any> = {};
-              if (scope === 'workspace') {
-                // Load from .vscode/settings.json — extract keys matching this extension's schema
-                try {
-                  const wsRes = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsWorkspaceSettingsGet, {}, 5000);
-                  const wsSettings = wsRes?.settings || {};
-                  for (const k of schemaKeys) {
-                    if (k in wsSettings) currentValues[k] = wsSettings[k];
-                  }
-                } catch (_) {}
-              } else {
-                // Load this schema's keys from the shared User settings map.
-                try {
-                  const listRes = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsList, {}, 5000);
-                  const fullExt = (listRes?.extensions || []).find((e: any) => e.id === extId);
-                  if (fullExt?.configuration_values) Object.assign(currentValues, fullExt.configuration_values);
-                } catch (_) {}
-              }
-              deps.openExtConfigModal(extId, label, schema, currentValues);
+              await openExtensionSettings(extId, label);
             } catch (e) {
               deps.toast((e as { message?: string })?.message || 'Failed to load config');
             } finally {
@@ -220,5 +217,5 @@ export function createSettingsManagerController(deps: any) {
     deps.extManagerListEl.appendChild(list);
   }
 
-  return { refreshEditorExtManagerModal };
+  return { refreshEditorExtManagerModal, openExtensionSettings };
 }

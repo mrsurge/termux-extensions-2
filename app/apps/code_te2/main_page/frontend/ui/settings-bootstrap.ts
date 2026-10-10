@@ -185,6 +185,15 @@ export function createSettingsBootstrap(deps: any) {
     if (!Object.keys(schema.properties || schema).length) return;
     openExtConfigModal(extension.id, extension.display_name || extension.id, schema, {});
   });
+  window.addEventListener('code-te2:extension-configure', (event) => {
+    if (!(event instanceof CustomEvent)) return;
+    const { extId, displayName } = event.detail || {};
+    if (typeof extId !== 'string' || !extId) return;
+    void settingsManagerController.openExtensionSettings(extId,
+      typeof displayName === 'string' ? displayName : extId).catch((error: unknown) => {
+      deps.toast(error instanceof Error ? error.message : 'Failed to load config');
+    });
+  });
   window.addEventListener('code-te2:extension-contributions-changed', () => {
     if (deps.els.extManagerModal.classList.contains('show')) void refreshEditorExtManagerModal();
     if (deps.els.settingsModal.classList.contains('show')) void refreshEditorSettingsModal();

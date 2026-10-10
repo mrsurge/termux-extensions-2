@@ -165,6 +165,10 @@ def submit(value: dict[str, object]) -> concurrent.futures.Future[object]:
             from .textmate_projection import get_textmate_http_grammar
             return await asyncio.to_thread(get_textmate_http_grammar, str(value["id"]),
                                            str(value["revision"]), str(value["sha256"]))
+        if value.get("kind") == "extension_icon":
+            from .extension_registry import get_installed_extension_icon
+            return await asyncio.to_thread(get_installed_extension_icon,
+                                           str(value["id"]), str(value["version"]))
         if value.get("kind") == "theme":
             from .theme_catalog import load_extension_theme
             return await asyncio.to_thread(load_extension_theme, str(value["extension"]), str(value["file"]))

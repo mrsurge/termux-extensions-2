@@ -469,6 +469,16 @@ function renderSearchSnippetWindow(
   }
 }
 
+export function highlightReadmeCode(target: HTMLElement, language: string): void {
+  ensureHighlightRuntime();
+  if (!language || !hljs.getLanguage?.(language)) return;
+  if (new TextEncoder().encode(target.textContent || '').length > 64 * 1024) return;
+  try {
+    target.innerHTML = hljs.highlight(target.textContent || '', { language, ignoreIllegals: true }).value;
+    target.classList.add('hljs');
+  } catch { /* Unknown/invalid fence input stays readable plain text. */ }
+}
+
 export function renderHighlightedSearchSnippet(
   target: HTMLElement,
   text: string,

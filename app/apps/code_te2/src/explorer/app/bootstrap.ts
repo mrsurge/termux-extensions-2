@@ -355,6 +355,12 @@ explorerMarketplaceController = createExplorerMarketplaceController({
   onInstalled: (extension, schema) => {
     window.dispatchEvent(new CustomEvent('code-te2:extension-installed', { detail: { extension, schema } }));
   },
+  onConfigure: (extId, displayName) => {
+    window.dispatchEvent(new CustomEvent('code-te2:extension-configure', { detail: { extId, displayName } }));
+  },
+});
+window.addEventListener('code-te2:extension-contributions-changed', () => {
+  explorerMarketplaceController?.refreshInstalled();
 });
 const explorerTreeDecorationsController =
   createExplorerTreeDecorationsController({

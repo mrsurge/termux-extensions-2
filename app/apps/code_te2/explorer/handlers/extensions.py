@@ -12,6 +12,7 @@ from ..contracts.extensions import (
     ExplorerExtensionExtIdParams,
     ExplorerExtensionInstallParams,
     ExplorerExtensionMarketplaceInstallParams,
+    ExplorerExtensionMarketplaceDetailParams,
     ExplorerExtensionMarketplaceSearchParams,
     ExplorerExtensionSettingsParams,
     ExplorerExtensionToggleParams,
@@ -109,18 +110,33 @@ async def handle_ext_marketplace_search(
 
 async def handle_ext_marketplace_detail(
     context: ExplorerExtensionHandlerContext,
-    params: ExplorerExtensionExtIdParams,
+    params: ExplorerExtensionMarketplaceDetailParams,
     msg_id: str | None,
 ) -> None:
     from ... import extension_registry as extension_registry
-    from ..services.openvsx_marketplace import get_openvsx_detail
+    from ..services.openvsx_marketplace import get_openvsx_detail, OpenVsxMarketplaceError
 
     get_extension_list = extension_registry.get_extension_list
     installed_extensions = await asyncio.to_thread(get_extension_list)
-    result = await get_openvsx_detail(
-        ext_id=params["ext_id"],
-        installed_extensions=installed_extensions,
-    )
+    try:
+        result = await get_openvsx_detail(
+            ext_id=params["ext_id"], installed_extensions=installed_extensions,
+            include_readme=params.get("readme", False), version=params.get("version"),
+        )
+    except OpenVsxMarketplaceError:
+        local = await asyncio.to_thread(extension_registry.get_local_marketplace_detail,
+            params["ext_id"], params.get("readme", False))
+        if local is None:
+            raise
+        if params.get("version") and local["version"] != params["version"]:
+            raise RuntimeError("Installed extension version changed")
+        result = {"extension": local}
+    if params.get("readme"):
+        extension = result.get("extension")
+        if isinstance(extension, dict) and not extension.get("readme"):
+            local = await asyncio.to_thread(extension_registry.get_local_marketplace_detail, params["ext_id"], True)
+            if local is not None and local["version"] == extension.get("version"):
+                extension["readme"] = local.get("readme", "")
     await context.emit_personal("ext:marketplace_detail", result, msg_id)
 
 

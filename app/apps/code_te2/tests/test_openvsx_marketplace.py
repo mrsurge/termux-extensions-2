@@ -87,6 +87,150 @@ def _client_for(
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
 
+class OpenVsxReadmeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_platform_metadata_selects_host_before_verified_download(self) -> None:
+        content = b'platform-vsix'
+        digest = hashlib.sha256(content).hexdigest()
+        requested: list[str] = []
+        def handler(request: httpx.Request) -> httpx.Response:
+            path = request.url.path; requested.append(path)
+            if path.endswith('.sha256'):
+                return httpx.Response(200, text=digest)
+            if path.endswith('.vsix'):
+                return httpx.Response(200, content=content)
+            target = 'linux-x64' if '/linux-x64/' in path else 'alpine-arm64'
+            base = f'https://open-vsx.org/api/astral-sh/ty/{target}/1.0.0/file/'
+            return httpx.Response(200, json={'namespace':'astral-sh', 'name':'ty', 'version':'1.0.0',
+                'targetPlatform':target, 'downloads':{'linux-x64':'available', 'alpine-arm64':'available'},
+                'files':{'download':base+'ty.vsix', 'sha256':base+'ty.sha256', 'icon':base+'logo.jpg'}})
+        with patch.object(openvsx_marketplace, '_backend_targets', return_value=('linux-x64','universal')):
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                detail = await openvsx_marketplace.get_openvsx_detail(ext_id='astral-sh.ty', installed_extensions=[], client=client)
+                self.assertEqual(detail['extension']['targetPlatform'], 'linux-x64')
+                self.assertIn('/linux-x64/', detail['extension']['iconUrl'])
+                artifact = await openvsx_marketplace.download_openvsx_vsix(ext_id='astral-sh.ty', version='1.0.0', client=client)
+                try:
+                    self.assertEqual(artifact.read_bytes(), content)
+                finally:
+                    artifact.unlink()
+        self.assertFalse(any('/alpine-arm64/' in url for url in requested))
+
+    async def test_resource_paths_accept_real_icons_but_keep_identity_guards(self) -> None:
+        for target in ['', 'linux-x64/', 'linux-arm64/']:
+            for suffix in ['png','svg','jpg','jpeg','gif','webp']:
+                url = f'https://open-vsx.org/api/vendor/example/{target}1.0.0/file/logo.{suffix}'
+                self.assertEqual(openvsx_marketplace._openvsx_icon_url({'files':{'icon':url}},namespace='vendor',name='example',version='1.0.0'),url)
+        for path in ['other/example/1.0.0/file/icon.png','vendor/example/2.0.0/file/icon.png',
+                     'vendor/example/arbitrary/1.0.0/file/icon.png','vendor/example/1.0.0/file/%2e%2e%2ficon.png']:
+            self.assertIsNone(openvsx_marketplace._openvsx_icon_url({'files':{'icon':'https://open-vsx.org/api/'+path}},namespace='vendor',name='example',version='1.0.0'))
+        url = 'https://openvsx.eclipsecontent.org/vendor/example/linux-x64/1.0.0/a.vsix'
+        self.assertTrue(openvsx_marketplace._trusted_openvsx_response_url(url,namespace='vendor',name='example',version='1.0.0',suffix='.vsix',target_platform='linux-x64'))
+        self.assertFalse(openvsx_marketplace._trusted_openvsx_response_url(url,namespace='vendor',name='example',version='1.0.0',suffix='.vsix',target_platform='linux-arm64'))
+
+    async def test_termux_targets_prefer_universal_and_never_alpine(self) -> None:
+        with patch('app.apps.code_te2.code_server_bootstrap._is_termux_android',return_value=True), patch.object(openvsx_marketplace.platform,'machine',return_value='aarch64'):
+            self.assertEqual(openvsx_marketplace._backend_targets(),('universal','linux-arm64'))
+
+    async def test_installed_icons_preserve_formats_and_reject_escapes(self) -> None:
+        from app.apps.code_te2 import extension_registry as registry
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = base / 'extensions' / 'vendor.example'
+            root.mkdir(parents=True)
+            ext = {'source': 'user', 'path': str(root), 'version': '1.0.0'}
+            with patch.object(registry, '_EXTENSIONS_DIR', root.parent), patch.object(registry, 'load_registry', return_value={'extensions': {'vendor.example': ext}}):
+                for suffix, mime in registry._ICON_MIME.items():
+                    target = root / ('ICON' + suffix.upper())
+                    target.write_bytes(b'icon bytes')
+                    ext['icon'] = target.name
+                    result = registry.get_installed_extension_icon('vendor.example', '1.0.0')
+                    self.assertEqual(result, {'content': b'icon bytes', 'mime': mime})
+                    self.assertIn('id=vendor.example&version=1.0.0', registry.get_extension_list()[0]['iconUrl'])
+                    self.assertEqual(registry.get_local_marketplace_detail('vendor.example')['iconUrl'], registry.get_extension_list()[0]['iconUrl'])
+                with self.assertRaises(RuntimeError):
+                    registry.get_installed_extension_icon('vendor.example', '2.0.0')
+                outside = base / 'outside.png'; outside.write_bytes(b'outside')
+                (root / 'escape.png').symlink_to(outside)
+                for raw in ['../outside.png', str(outside), 'escape.png', 'missing.png', 'package.json']:
+                    ext['icon'] = raw
+                    self.assertIsNone(registry.get_extension_list()[0]['iconUrl'])
+                ext['icon'] = 'large.png'; (root / 'large.png').write_bytes(b'x' * (1024 * 1024 + 1))
+                self.assertIsNone(registry.get_extension_list()[0]['iconUrl'])
+                # Existing persisted registries must work without a registry rebuild.
+                ext.pop('icon')
+                (root / 'package.json').write_text('{"name":"example","publisher":"vendor","icon":"ICON.PNG"}')
+                self.assertEqual(registry.get_installed_extension_icon('vendor.example', '1.0.0')['mime'], 'image/png')
+    async def test_readme_is_lazy_exact_version_and_bounded(self) -> None:
+        requests: list[str] = []
+        metadata = _metadata()
+        metadata["files"] = {"readme": f"https://open-vsx.org{_API_PATH}/file/README.md"}
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request.url.path)
+            if request.url.path.endswith('/file/README.md'):
+                return httpx.Response(200, text="# Readme\n\nBody")
+            return httpx.Response(200, json=metadata)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            detail = await openvsx_marketplace.get_openvsx_detail(ext_id=_EXT_ID, installed_extensions=[], client=client)
+            self.assertNotIn("readme", detail["extension"])
+            self.assertEqual(len(requests), 1)
+            detail = await openvsx_marketplace.get_openvsx_detail(ext_id=_EXT_ID, version=_VERSION,
+                include_readme=True, installed_extensions=[], client=client)
+            self.assertEqual(detail["extension"]["readme"], "# Readme\n\nBody")
+
+    async def test_readme_redirect_cannot_request_private_origin(self) -> None:
+        requests: list[str] = []
+        metadata = _metadata()
+        metadata["files"] = {"readme": f"https://open-vsx.org{_API_PATH}/file/README.md"}
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(str(request.url))
+            if request.url.path.endswith('/file/README.md'):
+                return httpx.Response(302, headers={"location": "http://127.0.0.1/private"})
+            return httpx.Response(200, json=metadata)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            with self.assertRaises(openvsx_marketplace.OpenVsxMarketplaceError):
+                await openvsx_marketplace.get_openvsx_detail(ext_id=_EXT_ID, include_readme=True,
+                    installed_extensions=[], client=client)
+        self.assertFalse(any('127.0.0.1' in url for url in requests))
+
+    async def test_readme_rejects_oversized_body(self) -> None:
+        metadata = _metadata()
+        metadata['files'] = {'readme': f'https://open-vsx.org{_API_PATH}/file/README.md'}
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=b'x' * (1024 * 1024 + 1)) if request.url.path.endswith('.md') else httpx.Response(200, json=metadata)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            with self.assertRaisesRegex(openvsx_marketplace.OpenVsxMarketplaceError, 'too large'):
+                await openvsx_marketplace.get_openvsx_detail(ext_id=_EXT_ID, include_readme=True, installed_extensions=[], client=client)
+
+    async def test_local_metadata_and_readme_reject_symlink_escape(self) -> None:
+        from app.apps.code_te2 import extension_registry
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir); installed = root / 'extensions'; extension = installed / 'example'; extension.mkdir(parents=True)
+            readme = extension / 'README.md'; readme.write_text('# Local', encoding='utf-8')
+            registry = {"extensions": {_EXT_ID: {"path": str(extension), "version": _VERSION,
+                "description": "Local description", "display_name": "Example", "source": "user"}}}
+            with patch.object(extension_registry, '_EXTENSIONS_DIR', installed), patch.object(extension_registry, 'load_registry', return_value=registry):
+                detail = extension_registry.get_local_marketplace_detail(_EXT_ID, True)
+                self.assertEqual(detail['readme'], '# Local')
+                self.assertEqual(detail['metadataSource'], 'installed')
+                readme.unlink(); outside = root / 'secret'; outside.write_text('secret', encoding='utf-8'); readme.symlink_to(outside)
+                self.assertEqual(extension_registry.get_local_marketplace_detail(_EXT_ID, True)['readme'], '')
+
+    async def test_handler_uses_installed_fallback_and_rejects_version_change(self) -> None:
+        from app.apps.code_te2.explorer.handlers.extensions import handle_ext_marketplace_detail
+        emitted = []
+        async def emit(method, payload, reply_to=None):
+            emitted.append(payload)
+        context = ExplorerExtensionHandlerContext(project_root=Path('/workspace'), emit_personal=emit)
+        local = {'id': _EXT_ID, 'version': _VERSION, 'readme': '# Local'}
+        with patch('app.apps.code_te2.extension_registry.get_extension_list', return_value=[]), \
+             patch('app.apps.code_te2.extension_registry.get_local_marketplace_detail', return_value=local), \
+             patch.object(openvsx_marketplace, 'get_openvsx_detail', AsyncMock(side_effect=openvsx_marketplace.OpenVsxMarketplaceError('offline'))):
+            await handle_ext_marketplace_detail(context, {'ext_id': _EXT_ID, 'readme': True, 'version': _VERSION}, 'one')
+            self.assertEqual(emitted[0]['extension']['readme'], '# Local')
+            with self.assertRaisesRegex(RuntimeError, 'version changed'):
+                await handle_ext_marketplace_detail(context, {'ext_id': _EXT_ID, 'readme': True, 'version': '0.0.0'}, 'two')
+
+
 class OpenVsxMarketplaceDownloadTests(unittest.IsolatedAsyncioTestCase):
     async def test_downloads_exact_artifact_and_verifies_sha256(self) -> None:
         artifact = b"verified-vsix"
@@ -185,6 +329,7 @@ class OpenVsxMarketplaceHandlerTests(unittest.IsolatedAsyncioTestCase):
                     "id": _EXT_ID,
                     "version": _VERSION,
                     "installSupported": True,
+                    "extensionKind": ["ui"],
                 }
             }
         )

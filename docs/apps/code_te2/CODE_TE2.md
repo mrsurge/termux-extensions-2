@@ -3977,6 +3977,48 @@ left untouched and is not imported during startup.
 
 ### Open VSX marketplace installs
 
+Marketplace installation does not reject UI-only `extensionKind` metadata:
+extension-host placement is not an API compatibility verdict. The overlay warns
+that UI extensions have limited support and compatibility varies; install
+eligibility does not promise that every contribution works. Artifact identity,
+exact version and digest validation remain mandatory. Explorer overlay close
+buttons are right-aligned, separate from the drawer close control.
+
+Open VSX resources accept identity-preserving unqualified and allowlisted
+platform-qualified paths, including real icon filenames such as `logo.jpg`.
+Detail/install selection follows the backend host, never the renderer platform
+or the arbitrary artifact returned by an unqualified endpoint. Linux/macOS/
+Windows prefer their architecture target then universal; Termux prefers universal
+then its explicit Linux architecture compatibility artifact (never Alpine/musl).
+Detail displays the selected target and warns that bundled Linux native servers
+may require a Termux-installed replacement. Metadata and artifact/digest redirects
+must retain exact publisher/name/version and selected target; checksums remain
+mandatory. Unsupported targets fail rather than installing another architecture.
+
+The Explorer extension overlay has mutually exclusive Marketplace and Installed
+panels. Installed user entries come from the existing extension registry list;
+selection reuses marketplace detail, with local package-derived metadata fallback.
+Installed list/local-detail icons use the manifest-declared `icon` through
+`/api/app/code_te2/extensions/icon?id=...&version=...`, not arbitrary renderer
+paths or gallery substitutes. The domain resolves only managed user-extension
+resources with version/path/symlink guards and a 1 MiB read limit. PNG, SVG,
+JPEG, GIF and WebP use explicit image MIME types; native HTTP adds nosniff and
+sandbox CSP for SVG/document safety. Missing/invalid images fall back to the
+puzzle glyph. Older registry entries read the declared icon from package.json
+without a registry rebuild. This dynamic route is upstream, not client assets.
+The selected installed extension's gear hands off to the existing scoped settings
+dialog, retaining current User/Workspace values. It does not install/restart WBA.
+
+README expands beneath detail action buttons and loads lazily through the detail
+RPC (`readme: true`, exact selected `version`). Backend remote/local reads and
+frontend admission cap the UTF-8 body at 1 MiB. Open VSX `files.readme` redirects
+are identity/HTTPS-origin guarded before each hop; local fallback uses only the
+registered user extension tree and rejects symlink escapes. Markdown uses vendored
+streaming-markdown 0.2.15, inert raw HTML and HTTPS-only links/images. The existing
+hljs runtime highlights known fences up to 64 KiB; other fences remain plain text.
+Prose/images are viewport-bounded, tables/code have independent horizontal scroll.
+Late selection results are discarded. TextMate README highlighting is deferred.
+
 Open VSX search and detail views use the public metadata API, but marketplace installation does not delegate extension selection to Code Server's gallery client. TE2 resolves the requested extension and exact version from Open VSX metadata, validates that the artifact and digest URLs belong to the same namespace/name/version under the Open VSX API, and accepts only the corresponding identity-preserving redirect through the Open VSX Eclipse content CDN.
 
 The VSIX and published SHA-256 are downloaded with explicit byte limits. The artifact is streamed to a temporary file, verified before use, and removed on success or failure. TE2 then invokes the existing managed-runtime local-VSIX install path with the private `--user-data-dir` and `--extensions-dir`, and verifies that the expected extension id is present after installation.

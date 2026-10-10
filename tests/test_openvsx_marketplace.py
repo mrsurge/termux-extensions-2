@@ -42,9 +42,13 @@ class MarketplaceContractTests(unittest.TestCase):
 
     def test_detail_and_install_require_normalized_identifiers(self) -> None:
         self.assertEqual(
-            {"ext_id": "ms-python.python"},
+            {"ext_id": "ms-python.python", "readme": False, "version": None},
             parse_marketplace_detail_params({"ext_id": "ms-python.python"}),
         )
+        with self.assertRaises(ExplorerExtensionsContractError):
+            parse_marketplace_detail_params({"ext_id": "ms-python.python", "readme": "yes"})
+        with self.assertRaises(ExplorerExtensionsContractError):
+            parse_marketplace_detail_params({"ext_id": "ms-python.python", "version": "../bad"})
         self.assertEqual(
             {"ext_id": "ms-python.python", "version": "2026.4.0"},
             parse_marketplace_install_params(
@@ -120,7 +124,7 @@ class MarketplaceServiceTests(unittest.IsolatedAsyncioTestCase):
             items[0]["iconUrl"],
         )
 
-    async def test_detail_marks_ui_only_unsupported_and_filters_http_links(self) -> None:
+    async def test_detail_allows_ui_only_and_filters_http_links(self) -> None:
         async def handler(request: httpx.Request) -> httpx.Response:
             self.assertEqual("/api/vendor/theme/latest", request.url.path)
             return httpx.Response(
@@ -157,11 +161,9 @@ class MarketplaceServiceTests(unittest.IsolatedAsyncioTestCase):
         extension = result["extension"]
         self.assertIsInstance(extension, dict)
         assert isinstance(extension, dict)
-        self.assertFalse(extension["installSupported"])
-        self.assertEqual(
-            "UI extensions are not currently supported.",
-            extension["unsupportedReason"],
-        )
+        self.assertTrue(extension["installSupported"])
+        self.assertIsNone(extension["unsupportedReason"])
+        self.assertEqual(["ui"], extension["extensionKind"])
         self.assertIsNone(extension["repository"])
         self.assertEqual("https://example.com/theme", extension["homepage"])
         self.assertIsNone(extension["iconUrl"])
