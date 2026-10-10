@@ -2311,6 +2311,21 @@ refresh retains installed providers/cache; changed revisions invalidate them and
 fence pending results. See `docs/apps/editor_loading/PLAN.md` for contract and
 publication requirements, and its tracker for validation versus live acceptance.
 
+After matching packaged seeds, closure misses consult origin-scoped IndexedDB
+`te2-textmate-bodies` (version 1, `bodies`/`metadata` stores). Keys are logical
+ID plus SHA-256; current backend metadata still selects the grammar, and stored
+content is hash-verified before reuse. Changed revisions can reuse unchanged
+matching bodies but never stale selections. Reads batch metadata first, admit
+at most 8 MiB of bodies and have a 250ms deadline. Missing, blocked, denied,
+corrupt or unavailable storage is a miss, not a load failure. WebCrypto-less
+origins skip persistent caching. Background writes verify fetched bodies and
+transactionally retain at most 512 entries/32 MiB UTF-8 body bytes with oldest-
+stored eviction; queues and individual bodies are bounded. These application
+byte budgets do not measure IndexedDB overhead. No documents/catalogs/themes
+or credentials are stored here. The existing RPC/HTTP transports and generation
+fences remain; storage work cannot bypass the editor readiness barrier. Native
+OTA publishes this frontend-only change; no mypyc/worker rebuild is required.
+
 The inline editor receives semantic-token replies over direct WBA JSON-RPC and
 installs normal Monaco providers. Token data is the VS Code five-integer delta
 stream: delta line, delta start, length, legend token type, and modifier mask.

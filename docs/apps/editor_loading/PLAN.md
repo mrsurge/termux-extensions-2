@@ -196,6 +196,18 @@ on the observed paths. Continue in this order:
    where available and backend revision/ID/hash invalidation. Preserve native
    packaged-first loading, bounded storage and verified admission. Choose storage
    from evidence, not an assumption of localStorage; no new selection authority.
+   Approved frontend-only implementation uses origin-scoped IndexedDB
+   `te2-textmate-bodies`, with exact logical-ID/SHA-256 content keys. The existing
+   revision-scoped memory and matching packaged bodies precede persistent reads;
+   current closure metadata remains authority. Verify stored hashes before reuse.
+   A batched metadata-first read admits <=8 MiB before cloning bodies, with a
+   250ms read deadline; unavailable storage/WebCrypto is a miss. Background
+   writes hash-verify fetched bodies, retain <=512 records/32 MiB UTF-8 body
+   bytes and evict oldest stored records in the same write transaction. This is
+   an application data budget, not a promise of browser database disk overhead.
+   Writes/eviction never gate model mounting; queues retain <=256/8 MiB per batch.
+   Existing HTTP/RPC paths and generation fences remain unchanged. No Python,
+   Rust, APK or mypyc rebuild is needed; native live validation requires OTA.
 5. **OTA compression investigation.** Inspect existing archive compression and
    native update/download/extraction flows before proposing changes. Measure
    transfer savings, CPU/memory, integrity checks and backward compatibility

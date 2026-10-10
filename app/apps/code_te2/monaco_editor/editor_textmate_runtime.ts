@@ -13,6 +13,7 @@ import { semanticTokenForegrounds } from './editor_semantic_theme_utils.ts';
 import { traceColdBoot } from './editor_cold_boot_trace.ts';
 import { createTextmateGrammarBodyLoader } from './editor_textmate_grammar_loader.ts';
 import { createBundledGrammarCache } from './editor_textmate_bundled_cache.ts';
+import { createPersistentGrammarCache } from './editor_textmate_persistent_cache.ts';
 import { createHttpGrammarLoader, usesHttpGrammarResources } from './editor_textmate_http.ts';
 import { TMGrammarFactory, missingTMGrammarErrorMessage, type ICreateGrammarResult } from './vscode_workbench_textmate_vendor/TMGrammarFactory.js';
 import {
@@ -197,7 +198,8 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
     deps.buildUiUrl('monaco_editor/textmate/markdown-cache.json'), { cache: 'force-cache' }));
   const grammarBodyLoader = createTextmateGrammarBodyLoader(deps.editorRpcCall, bundledGrammarCache,
     usesHttpGrammarResources(deps.getWindow())
-      ? createHttpGrammarLoader(deps.fetchFn, deps.grammarResourceUrl) : undefined);
+      ? createHttpGrammarLoader(deps.fetchFn, deps.grammarResourceUrl) : undefined,
+    createPersistentGrammarCache());
 
   function resetTokenizationForAllModels(): void {
     try {

@@ -1,4 +1,5 @@
 /* Revision-scoped, bounded reads for the TextMate factory's grammar fan-out. */
+import type { PersistentGrammarCache } from './editor_textmate_persistent_cache.ts';
 
 const MAX_BATCH_SIZE = 16;
 const MAX_ACTIVE_BATCHES = 2;
@@ -29,7 +30,7 @@ export interface BundledGrammarBody { raw: string; sha256: string }
 export type BundledGrammarLoader = () => Promise<Record<string, BundledGrammarBody>>;
 export type HttpGrammarLoader = (id: string, revision: string, fingerprint?: string) => Promise<unknown>;
 
-export function createTextmateGrammarBodyLoader(editorRpcCall: GrammarRpcCall, loadBundle?: BundledGrammarLoader, loadHttp?: HttpGrammarLoader): {
+export function createTextmateGrammarBodyLoader(editorRpcCall: GrammarRpcCall, loadBundle?: BundledGrammarLoader, loadHttp?: HttpGrammarLoader, persistent?: PersistentGrammarCache): {
   load(id: string, revision: string): Promise<string>;
   prepare(scope: string, revision: string): Promise<void>;
   reset(): void;
@@ -88,6 +89,7 @@ export function createTextmateGrammarBodyLoader(editorRpcCall: GrammarRpcCall, l
           || new TextEncoder().encode(body.raw).byteLength > 4 * 1024 * 1024) {
         throw new Error('Invalid HTTP TextMate grammar');
       }
+      persistent?.write({ id, sha256: body.sha256 }, body.raw);
       return body.raw;
     }
     let offset = 0, raw = '', bytes = 0;
@@ -109,7 +111,10 @@ export function createTextmateGrammarBodyLoader(editorRpcCall: GrammarRpcCall, l
       bytes += new TextEncoder().encode(chunk.raw).byteLength;
       if (bytes > 4 * 1024 * 1024) throw new Error('TextMate grammar too large');
       offset = chunk.nextOffset as number;
-      if (chunk.done) return raw;
+      if (chunk.done) {
+        persistent?.write({ id, sha256: fingerprint }, raw);
+        return raw;
+      }
     }
   }
 
@@ -234,12 +239,23 @@ export function createTextmateGrammarBodyLoader(editorRpcCall: GrammarRpcCall, l
           if (local && local.sha256 === fingerprints[id] && typeof local.raw === 'string' && local.raw) seeds.set(id, local.raw);
           else missing.push(id);
         }
+        // One batched local read, only after authoritative ID/hash selection.
+        // Matching packaged seeds never touch persistent storage.
+        if (missing.length && persistent) {
+          const stored = await persistent.read(missing.map(id => ({ id, sha256: fingerprints[id] as string })));
+          if (generation !== requestGeneration) throw new Error('TextMate projection superseded');
+          for (const id of missing) {
+            const raw = stored.get(id);
+            if (raw !== undefined) seeds.set(id, raw);
+          }
+        }
+        const networkMissing = missing.filter(id => !seeds.has(id));
         // At most two bounded streams; never put a multi-megabyte closure on RPC.
         let index = 0;
         let failed = false;
         const stream = async () => {
-          while (!failed && index < missing.length) {
-            const id = missing[index++];
+          while (!failed && index < networkMissing.length) {
+            const id = networkMissing[index++];
             try { seeds.set(id, await readChunks(id, requestedRevision, requestGeneration, fingerprints[id] as string)); }
             catch (error) { failed = true; throw error; }
           }

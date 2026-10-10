@@ -382,3 +382,49 @@ disabled: its mostly small messages and possible same-device Termux hosting do
 not yet justify compression overhead. Any WBA change requires payload/CPU
 measurements and separate approval. No runtime restart or release accompanies
 this checkpoint commit.
+
+## Persistent grammar cache (2026-10-10)
+
+- [x] Frontend-only IndexedDB adapter and optional verified-content cache.
+- [x] Existing closure metadata selects exact IDs/hashes before any cache reuse.
+- [x] Memory/package/persistent/network order; matching packaged bodies do not
+  read or write the database.
+- [x] Batched small-metadata admission before body reads; <=8 MiB and 250ms
+  deadline. Storage/WebCrypto failures disable persistence for the page only.
+- [x] SHA-256 verification on persistence and reuse, with 4-MiB per-body limit.
+- [x] Background bounded writes and transactional eviction to 512 records/32 MiB
+  UTF-8 body bytes; no model gate or backend round trip for housekeeping.
+- [x] Eleven cache/adapter/loader regressions plus two projection regressions.
+  Tests cover new-instance reuse, changed hashes, corrupt/oversized rows,
+  blocked/late database opens, quotas, read deadlines, eviction and reset fencing.
+- [x] Frontend typecheck and `node build.mjs` pass.
+- [ ] Explicit client OTA and physical cross-reload/cross-relaunch acceptance.
+
+Database name: `te2-textmate-bodies`, version 1, stores `bodies` and `metadata`.
+Keys are JSON `[logicalGrammarId, sha256]`; records carry raw body, UTF-8 byte
+count and last-write time. Eviction is oldest stored, not an access-log polling
+system. Different upstreams can reuse identical verified content only when their
+current backend selects the same ID/hash. Revisions invalidate runtime selection,
+not immutable matching content. Preferred-port fallback creates a separate origin
+cache and a normal miss. Browser eviction, app-data clearing or storage denial
+also cause normal misses. Insecure origins without WebCrypto skip persistence.
+
+No new Python/Rust exports, compiled-domain build, runtime restart, APK assembly,
+version bump or release. Native clients still need explicit OTA to receive the
+generated host. Test doubles prove adapter scheduling/limits, not Chromium/Gecko
+disk durability, native storage partition lifetime or device timing. The combined
+cache/projection/gzip run passes 20 tests with one optional Rust-fixture skip;
+the earlier four unrelated full-suite TextMate fixture failures remain separate.
+
+### Live persistent-cache acceptance
+
+The user exercised Kotlin and TOML on the TE2 Termux client, then reloaded and
+switched files again. Read-only console inspection of the exact main-page worker
+confirmed `te2-textmate-bodies` version 1 at `http://127.0.0.1:55952`, with two
+body/metadata pairs: `fwcd.kotlin` 18,576 bytes and `tamasfe.even-better-toml`
+9,212 bytes. After reload, the new page time origin postdated both records while
+their ID/hash, byte counts and write timestamps remained unchanged. This proves
+cross-page persistence and is consistent with reuse without refetch/rewrite;
+no request probe captured zero network body reads. User live acceptance passed
+for this observed path. Cross-app-process relaunch, all-client validation and
+release packaging are separate gates. OTA compression investigation is next.
