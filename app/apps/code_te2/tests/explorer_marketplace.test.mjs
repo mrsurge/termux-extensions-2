@@ -9,6 +9,14 @@ import { Window } from "happy-dom";
 const appRoot = path.resolve(import.meta.dirname, "..");
 let moduleSequence = 0;
 
+test("README tables have a square viewport bound and wrapping cells", async () => {
+  const css = await readFile(path.join(appRoot, 'main_page/frontend/explorer.css'), 'utf8');
+  assert.match(css, /\.fe-marketplace-markdown table \{[^}]*width: 100dvh; max-width: 100dvh;[^}]*table-layout: fixed;/);
+  assert.doesNotMatch(css, /\.fe-marketplace-markdown table \{[^}]*max-width: 100%;/);
+  assert.match(css, /\.fe-marketplace-markdown th, \.fe-marketplace-markdown td \{[^}]*white-space: normal;[^}]*overflow-wrap: anywhere;/);
+  assert.match(css, /\.fe-marketplace-markdown \.fe-readme-table-scroll \{[^}]*overflow-x: auto;/);
+});
+
 async function importTypeScript(relativePath) {
   const result = await build({
     entryPoints: [path.join(appRoot, relativePath)],

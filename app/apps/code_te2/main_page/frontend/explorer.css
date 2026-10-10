@@ -932,8 +932,9 @@
 .fe-marketplace-markdown pre { min-width: 0; max-width: 100%; overflow-x: auto; padding: 1rem; border-radius: 6px; background: #161b22; color: #e6edf3; }
 .fe-marketplace-markdown pre > code, .fe-marketplace-markdown pre > code.hljs { display: block; width: max-content; min-width: 100%; padding: 0; overflow: visible; white-space: pre; overflow-wrap: normal; word-break: normal; background: transparent; }
 .fe-marketplace-markdown .fe-readme-table-scroll { min-width: 0; max-width: 100%; overflow-x: auto; }
-.fe-marketplace-markdown table { width: max-content; min-width: 100%; border-collapse: collapse; }
-.fe-marketplace-markdown th, .fe-marketplace-markdown td { padding: .5rem .75rem; text-align: left; vertical-align: top; border-bottom: 1px solid #8884; white-space: nowrap; overflow-wrap: normal; }
+/* width * (height / width) = height: portrait overflows, landscape narrows. */
+.fe-marketplace-markdown table { width: 100dvh; max-width: 100dvh; table-layout: fixed; border-collapse: collapse; }
+.fe-marketplace-markdown th, .fe-marketplace-markdown td { padding: .5rem .75rem; text-align: left; vertical-align: top; border-bottom: 1px solid #8884; white-space: normal; overflow-wrap: anywhere; }
 .fe-marketplace-markdown table code { white-space: inherit; }
 .fe-marketplace-markdown img { max-width: 100%; height: auto; }
 .fe-marketplace-markdown blockquote { margin-inline: 0; padding-inline-start: 1rem; border-inline-start: 3px solid #8886; }

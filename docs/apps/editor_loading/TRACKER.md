@@ -693,6 +693,13 @@ local only. The ty failure remains uninvestigated beyond source orientation.
 
 ### F1 Installed / README overlay follow-up
 
+README table sizing follow-up: one shared CSS rule uses viewport height as the
+wrapping boundary (`width/max-width: 100dvh`), equivalent to viewport width times
+height/width. Portrait tables may overflow their horizontally scrollable wrapper;
+landscape tables narrow. Cells wrap, while code fences retain independent scrolling.
+Eleven frontend regressions, typecheck and frontend rebuild pass. User live
+acceptance confirmed the corrected sizing works better on 2026-10-10.
+
 Final activation and acceptance (2026-10-10): bootstrap published the rebuilt
 native worker at `~/.cache/te2/code_te2/build/bin/1cf6c3c3464841e678e43189/release/code-te2-worker`
 (four-job release build, 25.24s). The latest 136-module compiled group remains
