@@ -5,7 +5,7 @@ export const RPC_CODEC_MSGPACK_V1 = 'msgpack-v1' as const;
 export interface RpcWireCodec {
   readonly id: string;
   encode(payload: unknown): unknown;
-  decode(payload: unknown): unknown;
+  decode(payload: unknown, signal?: AbortSignal): unknown;
 }
 
 export const identityRpcWireCodec: RpcWireCodec = {

@@ -9,13 +9,16 @@ import {
   isJsonRpcNotificationEnvelope,
   isJsonRpcSuccessEnvelope,
 } from './editor_rpc_contract.ts';
-import { messagePackRpcWireCodec } from '../src/rpc/codec.ts';
+import { messagePackRpcWireCodec, type RpcWireCodec } from '../src/rpc/codec.ts';
+import { inspectRpcFrame, RPC_CODEC_MSGPACK_GZIP_V1 } from '../src/rpc/gzip-codec.ts';
+import { createOrderedRpcReceiver } from '../src/rpc/ordered-receiver.ts';
 
 interface EditorRpcSocketLike {
   connected?: boolean;
   sendBuffer?: unknown[];
   emit?(eventName: string, payload: unknown): void;
   on?(eventName: string, handler: (payload: unknown) => void): void;
+  disconnect?(): void;
   readonly volatile?: {
     emit(eventName: string, payload: unknown): void;
   };
@@ -35,6 +38,7 @@ interface ConnectionWaiter {
 }
 
 interface EditorRpcTransportDeps {
+  codec?: RpcWireCodec;
   getSocket(): EditorRpcSocketLike | null;
   setTimeoutFn(callback: () => void, delayMs: number): ReturnType<typeof setTimeout>;
   clearTimeoutFn(timer: ReturnType<typeof setTimeout>): void;
@@ -73,6 +77,7 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
   const notificationHandlers = new Map<string, Set<(params: Record<string, unknown>) => void>>();
   let nextId = 1;
   let attached = false;
+  const codec = deps.codec ?? messagePackRpcWireCodec;
 
   function settleConnectionWaiters(error?: Error): void {
     for (const waiter of connectionWaiters) {
@@ -140,14 +145,7 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
     }
   }
 
-  function handleMessage(payload: unknown): void {
-    let decoded: unknown;
-    try {
-      decoded = messagePackRpcWireCodec.decode(payload);
-    } catch (error) {
-      deps.onProtocolError?.(error);
-      return;
-    }
+  function deliver(decoded: unknown): void {
     if (Array.isArray(decoded)) {
       decoded.forEach(handleEnvelope);
       return;
@@ -155,21 +153,36 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
     handleEnvelope(decoded);
   }
 
+  const receiver = createOrderedRpcReceiver({
+    decode: (payload, signal) => codec.decode(payload, signal),
+    size: payload => codec.id === RPC_CODEC_MSGPACK_GZIP_V1
+      ? inspectRpcFrame(payload).length
+      : ArrayBuffer.isView(payload) ? payload.byteLength : payload instanceof ArrayBuffer ? payload.byteLength : 0,
+    deliver,
+    onError: error => {
+      rejectAllPending('editor rpc protocol failure');
+      deps.onProtocolError?.(error);
+      deps.getSocket()?.disconnect?.();
+    },
+  });
+
   function attachSocket(socket: EditorRpcSocketLike): void {
     if (attached || !socket || typeof socket.on !== 'function') return;
     attached = true;
-    socket.on(EDITOR_RPC_EVENT, handleMessage);
+    socket.on(EDITOR_RPC_EVENT, payload => receiver.receive(payload));
     socket.on('connect', () => {
       settleConnectionWaiters();
       if (hasConnected) deps.onReconnect?.();
       hasConnected = true;
     });
     socket.on('disconnect', () => {
+      receiver.reset();
       settleConnectionWaiters(new Error('editor rpc socket disconnected'));
       clearSocketReplayBuffer(socket);
       rejectAllPending('editor rpc socket disconnected');
     });
     socket.on('connect_error', () => {
+      receiver.reset();
       settleConnectionWaiters(new Error('editor rpc socket connect error'));
       clearSocketReplayBuffer(socket);
       rejectAllPending('editor rpc socket connect error');
@@ -204,7 +217,7 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
       pending.set(idKey(requestId), { timer, resolve, reject, method });
       let wirePayload: unknown;
       try {
-        wirePayload = messagePackRpcWireCodec.encode(buildEditorRpcRequestEnvelope(requestId, method, params || {}));
+        wirePayload = codec.encode(buildEditorRpcRequestEnvelope(requestId, method, params || {}));
       } catch (error) {
         deps.clearTimeoutFn(timer);
         pending.delete(idKey(requestId));
@@ -223,7 +236,7 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
       : null;
     if (!socket || !socket.connected || !emit) return false;
     try {
-      emit(EDITOR_RPC_EVENT, messagePackRpcWireCodec.encode(buildEditorRpcNotificationEnvelope(method, params || {})));
+      emit(EDITOR_RPC_EVENT, codec.encode(buildEditorRpcNotificationEnvelope(method, params || {})));
     } catch (error) {
       deps.onProtocolError?.(error);
       return false;

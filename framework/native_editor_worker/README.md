@@ -442,6 +442,23 @@ Rust encodes once before room fan-out. Editor replies remain `rpc` events;
 Explorer/host replies remain acknowledgements and their pushes `rpc.notify`.
 `None`/no-reply behavior is unchanged. No Python fallback codec is installed.
 
+Editor connections additionally accept explicit `rpcCodec: "msgpack-gzip-v1"`.
+This is an application envelope, not WebSocket permessage-deflate. The 12-byte
+header is `TE2C`, version 1, raw/gzip flag, two zero reserved bytes, and a big-endian
+u32 original length. Browser requests are raw framed MessagePack; compressed
+requests are rejected. Rust encodes once and lazily gzip-compresses once per
+fan-out for negotiated clients (at least 1024 bytes and only when smaller).
+Legacy clients keep their original unframed bytes. Other namespaces do not accept
+the new codec. No additional Python codec or application DTO parse is introduced.
+
+Frames and original output are bounded to 8 MiB (including the header). Browser
+receive is ordered with 64-packet/8-MiB declared-output admission and a 10-second
+async decode deadline; disconnect aborts and invalidates old-generation work.
+Malformed responses fail the editor transport, without alternate-codec retry.
+Modern clients require native `DecompressionStream('gzip')`. Publication must pair
+the rebuilt native worker, compiled Python editor-auth validation and frontend
+assets; rebuilding the frontend alone does not activate this contract.
+
 Bad bytes/nonbinary requests receive the existing `-32700` error envelopes and
 do not tear down an otherwise healthy connection. Invalid decoded envelopes
 remain Python `-32600` validation. The native decoder bounds depth to 64, nodes

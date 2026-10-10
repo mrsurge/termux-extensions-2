@@ -4,6 +4,7 @@ use crate::{
     protocol::{map, text},
 };
 use anyhow::{Result, bail};
+use flate2::{Compression, write::GzEncoder};
 use rmpv::Value;
 use std::{
     io::{Cursor, Write},
@@ -12,6 +13,78 @@ use std::{
 };
 
 pub const PAYLOAD_LIMIT: usize = 8 * 1024 * 1024;
+pub const GZIP_CODEC: &str = "msgpack-gzip-v1";
+const HEADER: usize = 12;
+
+pub fn negotiate(namespace: &str, auth: &Value) -> Result<bool> {
+    match text(auth, "rpcCodec") {
+        Some(GZIP_CODEC) if namespace == "/rpc/editor" => Ok(true),
+        Some("msgpack-v1") => Ok(false),
+        _ if lane(namespace).is_none() => Ok(false),
+        _ => bail!("unsupported_rpc_codec"),
+    }
+}
+
+pub fn frame(bytes: &[u8], compress: bool) -> Result<Vec<u8>> {
+    if bytes.is_empty() || bytes.len() > PAYLOAD_LIMIT - HEADER {
+        bail!("rpc_payload_limit");
+    }
+    let mut zipped = Vec::new();
+    if compress && bytes.len() >= 1024 {
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(bytes)?;
+        zipped = encoder.finish()?;
+    }
+    let compressed = !zipped.is_empty() && zipped.len() < bytes.len();
+    let body = if compressed { zipped.as_slice() } else { bytes };
+    let mut framed = Vec::with_capacity(HEADER + body.len());
+    framed.extend_from_slice(b"TE2C");
+    framed.extend_from_slice(&[1, u8::from(compressed), 0, 0]);
+    framed.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
+    framed.extend_from_slice(body);
+    Ok(framed)
+}
+
+pub fn wrap(value: &Value) -> Result<Value> {
+    let Value::Binary(bytes) = value else {
+        bail!("binary_rpc_payload_required")
+    };
+    Ok(Value::Binary(frame(bytes, true)?))
+}
+
+pub fn encode_for(value: &Value, lane: &str, gzip: bool) -> Result<Value> {
+    let encoded = encode(value, lane)?;
+    if gzip { wrap(&encoded) } else { Ok(encoded) }
+}
+
+pub fn decode_for(
+    payload: Value,
+    lane: &str,
+    gzip: bool,
+) -> std::result::Result<Value, &'static str> {
+    if !gzip {
+        return decode(payload, lane);
+    }
+    let Value::Binary(bytes) = payload else {
+        return Err("binary_rpc_payload_required");
+    };
+    if bytes.len() < HEADER
+        || bytes.len() > PAYLOAD_LIMIT
+        || &bytes[..4] != b"TE2C"
+        || bytes[4] != 1
+        || bytes[5] != 0
+        || bytes[6] != 0
+        || bytes[7] != 0
+    {
+        return Err("invalid_rpc_frame");
+    }
+    // This contract intentionally accepts only raw framed browser requests.
+    let length = u32::from_be_bytes(bytes[8..12].try_into().unwrap()) as usize;
+    if length == 0 || length > PAYLOAD_LIMIT - HEADER || bytes.len() - HEADER != length {
+        return Err("invalid_rpc_frame");
+    }
+    decode(Value::Binary(bytes[HEADER..].to_vec()), lane)
+}
 
 pub fn lane(namespace: &str) -> Option<&'static str> {
     match namespace {
@@ -115,6 +188,60 @@ pub fn parse_error(message: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Read;
+
+    #[test]
+    fn gzip_is_explicit_and_editor_only() {
+        let auth = map([("rpcCodec", GZIP_CODEC.into())]);
+        assert!(negotiate("/rpc/editor", &auth).unwrap());
+        assert!(negotiate("/rpc/explorer", &auth).is_err());
+        assert!(!negotiate("/rpc/editor", &map([("rpcCodec", "msgpack-v1".into())])).unwrap());
+    }
+
+    #[test]
+    fn framed_requests_are_strict_and_responses_compress_bytes() {
+        let value = map([
+            ("text", "λabc".repeat(4096).into()),
+            ("binary", Value::Binary(vec![0, 255])),
+        ]);
+        let Value::Binary(raw) = encode(&value, "editor").unwrap() else {
+            panic!()
+        };
+        let request = frame(&raw, false).unwrap();
+        assert_eq!(
+            decode_for(Value::Binary(request.clone()), "editor", true).unwrap(),
+            value
+        );
+        assert!(decode_for(Value::Binary(raw.clone()), "editor", true).is_err());
+        assert!(decode_for(Value::Binary(request.clone()), "editor", false).is_err());
+        let response = frame(&raw, true).unwrap();
+        assert_eq!(response[5], 1);
+        assert!(response.len() < raw.len());
+        assert!(decode_for(Value::Binary(response.clone()), "editor", true).is_err());
+        let mut decoded = Vec::new();
+        flate2::read::GzDecoder::new(&response[HEADER..])
+            .read_to_end(&mut decoded)
+            .unwrap();
+        assert_eq!(decoded, raw);
+        for offset in [0, 4, 5, 6, 7, 8, 11] {
+            let mut bad = request.clone();
+            bad[offset] ^= 0x80;
+            assert!(decode_for(Value::Binary(bad), "editor", true).is_err());
+        }
+        assert!(
+            decode_for(
+                Value::Binary(request[..request.len() - 1].to_vec()),
+                "editor",
+                true
+            )
+            .is_err()
+        );
+        assert!(frame(&vec![0; PAYLOAD_LIMIT], true).is_err());
+        assert_eq!(frame(&[0xc0], true).unwrap()[5], 0);
+        if let Ok(path) = std::env::var("TE2_RPC_GZIP_FIXTURE") {
+            std::fs::write(path, response).unwrap();
+        }
+    }
 
     #[test]
     fn values_round_trip_without_python_or_json() {

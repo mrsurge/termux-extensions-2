@@ -175,6 +175,23 @@ on the observed paths. Continue in this order:
    WebSocket compression using actual Rust/Node transport capabilities. Measure
    latency, bytes, CPU and memory before enabling anything, especially on Android.
    Existing asset gzip does not compress sockets.
+   Offline real-payload POC now demonstrates another route: capability-negotiated
+   application-level gzip around existing MessagePack bytes, leaving Socketioxide
+   binary carriage unchanged. This is distinct from native WebSocket compression
+   and does not require an Engineioxide fork. Before implementation, design
+   matched-peer negotiation, strict frame/expansion limits, ordered asynchronous
+   browser decode, queued-byte backpressure and disconnect-generation fencing.
+   POC evidence is in TRACKER; production codec changes remain approval-gated.
+   Approved first implementation slice: `/rpc/editor` only, optional exact
+   `msgpack-gzip-v1` connect authentication alongside unchanged `msgpack-v1`.
+   Rust frames responses and compresses only at >=1 KiB when smaller; browser
+   requests are raw framed MessagePack (synchronous, no client compression queue).
+   Python only validates the negotiated name; no Python byte-codec dependency.
+   Bound wire and declared output to the existing 8 MiB budget, decode serially
+   with queue byte/count bounds and cancellation/deadline/generation fencing.
+   Other lanes remain unchanged. Validate malformed frames, ordering, disconnect,
+   mixed-client fan-out and Rust/browser interoperability, then frontend/native
+   builds. No live restart, OTA/APK, version bump or release in this slice.
 4. **Persistent grammar caching.** Design cross-reload reuse with stable origins
    where available and backend revision/ID/hash invalidation. Preserve native
    packaged-first loading, bounded storage and verified admission. Choose storage

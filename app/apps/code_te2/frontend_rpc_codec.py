@@ -10,15 +10,17 @@ from typing import Final, cast
 
 RPC_CODEC_AUTH_FIELD: Final = "rpcCodec"
 RPC_CODEC_MSGPACK_V1: Final = "msgpack-v1"
+RPC_CODEC_MSGPACK_GZIP_V1: Final = "msgpack-gzip-v1"
 
 
 class FrontendRpcCodecError(ValueError):
     pass
 
 
-def require_msgpack_v1_auth(auth: object) -> None:
+def require_msgpack_v1_auth(auth: object, *, allow_gzip: bool = False) -> None:
     if not isinstance(auth, dict):
         raise FrontendRpcCodecError("missing_rpc_codec")
     auth_obj = cast(dict[object, object], auth)
-    if auth_obj.get(RPC_CODEC_AUTH_FIELD) != RPC_CODEC_MSGPACK_V1:
+    codec = auth_obj.get(RPC_CODEC_AUTH_FIELD)
+    if codec != RPC_CODEC_MSGPACK_V1 and not (allow_gzip and codec == RPC_CODEC_MSGPACK_GZIP_V1):
         raise FrontendRpcCodecError("unsupported_rpc_codec")

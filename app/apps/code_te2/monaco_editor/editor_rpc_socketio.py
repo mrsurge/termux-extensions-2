@@ -66,7 +66,7 @@ class EditorRpcSocketIONamespace(NativeNamespace):
         auth: object | None = None,
     ) -> None:
         try:
-            require_msgpack_v1_auth(auth)
+            require_msgpack_v1_auth(auth, allow_gzip=True)
         except FrontendRpcCodecError as exc:
             raise ConnectionRefusedError(str(exc)) from exc
         try:

@@ -34,24 +34,35 @@ use tokio_util::io::ReaderStream;
 type Body = UnsyncBoxBody<Bytes, std::io::Error>;
 struct Entry {
     socket: SocketRef,
+    gzip: bool,
     ready: bool,
     rooms: HashSet<String>,
     pending: Vec<(String, Value)>,
+    pending_bytes: usize,
 }
 #[derive(Default)]
 pub struct Sockets {
     entries: Mutex<HashMap<(String, String), Entry>>,
 }
 impl Sockets {
-    fn pending(&self, socket: SocketRef) {
+    fn gzip(&self, socket: &SocketRef) -> bool {
+        self.entries
+            .lock()
+            .unwrap()
+            .get(&(socket.ns().to_owned(), socket.id.to_string()))
+            .is_some_and(|entry| entry.gzip)
+    }
+    fn pending(&self, socket: SocketRef, gzip: bool) {
         let sid = socket.id.to_string();
         self.entries.lock().unwrap().insert(
             (socket.ns().to_owned(), sid.clone()),
             Entry {
                 socket,
+                gzip,
                 ready: false,
                 rooms: HashSet::from([sid]),
                 pending: Vec::new(),
+                pending_bytes: 0,
             },
         );
     }
@@ -59,6 +70,7 @@ impl Sockets {
         let mut entries = self.entries.lock().unwrap();
         if let Some(entry) = entries.get_mut(&(socket.ns().to_owned(), socket.id.to_string())) {
             entry.ready = true;
+            entry.pending_bytes = 0;
             for (event, value) in entry.pending.drain(..) {
                 if let Err(error) = socket.emit(event, &value) {
                     eprintln!("[native-socket] queued emit failed: {error}");
@@ -89,6 +101,7 @@ impl Sockets {
                     None
                 };
                 let data = encoded.as_ref().unwrap_or(data);
+                let mut compressed = None;
                 let room = text(value, "room");
                 let skip = text(value, "skipSid");
                 for ((ns, sid), entry) in entries.iter_mut() {
@@ -98,11 +111,29 @@ impl Sockets {
                     {
                         continue;
                     }
+                    let data = if entry.gzip && encoded.is_some() {
+                        if compressed.is_none() {
+                            compressed = Some(rpc_codec::wrap(data)?);
+                        }
+                        compressed.as_ref().unwrap()
+                    } else {
+                        data
+                    };
                     if entry.ready {
                         entry.socket.emit(event, data)?;
                     } else {
                         if entry.pending.len() >= 64 {
                             bail!("pending-connect emit queue full");
+                        }
+                        if entry.gzip {
+                            let size = match data {
+                                Value::Binary(bytes) => bytes.len(),
+                                _ => 0,
+                            };
+                            if size > rpc_codec::PAYLOAD_LIMIT.saturating_sub(entry.pending_bytes) {
+                                bail!("pending-connect emit byte queue full");
+                            }
+                            entry.pending_bytes += size;
                         }
                         entry.pending.push((event.to_owned(), data.clone()));
                     }
@@ -148,21 +179,26 @@ fn register(io: &SocketIo, backend: Backend, sockets: Arc<Sockets>, namespace: &
     let connect = move |socket: SocketRef| {
         sockets.ready(&socket);
         let event_backend = backend.clone();
+        let event_sockets = sockets.clone();
         socket.on_fallback(
             move |socket: SocketRef,
                   Event(event): Event,
                   TryData(data): TryData<Value>,
                   ack: AckSender| {
                 let backend = event_backend.clone();
+                let gzip = event_sockets.gzip(&socket);
                 async move {
                     let lane = rpc_codec::lane(namespace).filter(|_| event == "rpc");
                     let data = match (data, lane) {
-                        (Ok(data), Some(lane)) => match rpc_codec::decode(data, lane) {
+                        (Ok(data), Some(lane)) => match rpc_codec::decode_for(data, lane, gzip) {
                             Ok(data) => Ok(data),
                             Err(message) => {
-                                let error =
-                                    rpc_codec::encode(&rpc_codec::parse_error(message), lane)
-                                        .unwrap();
+                                let error = rpc_codec::encode_for(
+                                    &rpc_codec::parse_error(message),
+                                    lane,
+                                    gzip,
+                                )
+                                .unwrap();
                                 if namespace == "/rpc/editor" {
                                     let _ = socket.emit("rpc", &error);
                                 } else {
@@ -187,7 +223,7 @@ fn register(io: &SocketIo, backend: Backend, sockets: Arc<Sockets>, namespace: &
                     match result {
                         Ok(value) => {
                             let result = if let Some(lane) = lane.filter(|_| !value.is_nil()) {
-                                rpc_codec::encode(&value, lane)
+                                rpc_codec::encode_for(&value, lane, gzip)
                             } else {
                                 Ok(value)
                             };
@@ -234,7 +270,8 @@ fn register(io: &SocketIo, backend: Backend, sockets: Arc<Sockets>, namespace: &
             let sockets = middleware_sockets.clone();
             async move {
                 let auth = auth.map_err(|e| e.to_string())?;
-                sockets.pending(socket.clone());
+                let gzip = rpc_codec::negotiate(namespace, &auth).map_err(|e| e.to_string())?;
+                sockets.pending(socket.clone(), gzip);
                 let mut event = socket_event(&socket, "connect", Value::Nil);
                 let Value::Map(fields) = &mut event else {
                     unreachable!()

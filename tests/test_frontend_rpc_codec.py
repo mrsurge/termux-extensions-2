@@ -28,6 +28,13 @@ class FrontendRpcCodecTests(unittest.TestCase):
                 with self.assertRaises(FrontendRpcCodecError):
                     require_msgpack_v1_auth(auth)
 
+    def test_gzip_is_explicit_editor_only_opt_in(self) -> None:
+        auth = {RPC_CODEC_AUTH_FIELD: "msgpack-gzip-v1"}
+        with self.assertRaises(FrontendRpcCodecError):
+            require_msgpack_v1_auth(auth)
+        require_msgpack_v1_auth(auth, allow_gzip=True)
+        require_msgpack_v1_auth({RPC_CODEC_AUTH_FIELD: RPC_CODEC_MSGPACK_V1}, allow_gzip=True)
+
     def test_negotiation_import_does_not_load_a_python_codec(self) -> None:
         import os
         import subprocess

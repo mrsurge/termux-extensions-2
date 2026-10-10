@@ -12,6 +12,7 @@ import {
   runEditCommand,
 } from "./editor_command_utils.ts";
 import { deriveApiBase } from "./editor_api_base_utils.ts";
+import { gzipRpcWireCodec, RPC_CODEC_MSGPACK_GZIP_V1 } from "../src/rpc/gzip-codec.ts";
 import { absPathFromVscodeUri } from "./editor_vscode_uri_utils.ts";
 import {
   monacoRangeFromProtoRange,
@@ -703,6 +704,7 @@ interface MonacoBootWindowLike extends Window {
   }
   var apiBase = deriveApiBase(window.location);
   var editorRpcTransport = createEditorRpcTransport({
+    codec: gzipRpcWireCodec,
     getSocket: function () {
       return editorRpcSocket;
     },
@@ -2255,7 +2257,7 @@ interface MonacoBootWindowLike extends Window {
         path: SOCKET_IO_PATHS.editor,
         transports: [...APP_WORKER_SOCKET_IO_TRANSPORTS],
         query: fileEditorSocketQuery(),
-        auth: { rpcCodec: RPC_CODEC_MSGPACK_V1 },
+        auth: { rpcCodec: RPC_CODEC_MSGPACK_GZIP_V1 },
       }) as EditorSocketLike;
       if (!_languageWorkersEnabled()) {
         wbaRpcSocket = window.io(SOCKET_IO_NAMESPACES.wba, {

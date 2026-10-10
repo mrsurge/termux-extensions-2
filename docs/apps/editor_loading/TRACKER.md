@@ -232,3 +232,153 @@ pending; Gecko/Cefrium APK deployment is not covered by this Termux installation
 User subsequently confirmed the installed Razr build is working fine. This closes
 TE2 Termux general live acceptance for this slice, not an independently observed
 cross-relaunch storage/collision test or Gecko/Cefrium/Electron deployment gate.
+
+## Socket compression — initial investigation
+
+The native worker's `web.rs` wraps its ordinary HTTP service in asset gzip,
+then wraps that service with Socketioxide. Engine.IO responses bypass the inner
+asset layer. Pinned Engineioxide 0.17.7's WebSocket upgrade emits no negotiated
+extensions and uses Tungstenite raw sockets; there is no application compression
+toggle in the current configuration. Polling gzip therefore requires a separately
+scoped outer response layer, while Rust WebSocket compression requires a supported
+transport change—not an asset-gzip flag.
+
+WBA's `server/editor-socket.ts` allows only WebSocket and does not set
+`perMessageDeflate`. Its vendored Node Engine.IO supports that option; HTTP polling
+compression cannot help this WebSocket-only lane.
+
+Approved offline probe: `node scripts/probe_socket_compression.mjs <payload-file>`.
+It reports bytes, warmed mean encode time and coarse RSS delta, without starting
+a server or enabling compression. Markdown seed JSON (4,153,325 bytes) compressed
+to 454,802 bytes with gzip (~11%) at ~66.8 ms per encode on this desktop; raw
+deflate was 454,784 bytes/~62.0 ms. This seed is a large corpus, **not a captured
+current socket payload** (native seeds/browser HTTP already avoid that transfer).
+RSS deltas are allocation/GC-sensitive, not peak-memory evidence. These results
+do not establish Android cost, wire overhead, actual permessage-deflate behavior
+or end-to-end latency. Representative bounded RPC payloads and target-device
+measurements are still required before any transport enablement proposal.
+
+### Real payload / Razr codec comparison
+
+User-approved passive console instrumentation on the exact live Electron
+main-page worker wrapped the existing Socket.IO `Socket.prototype.emitEvent`
+and `packet` methods, forwarding the original calls unchanged. Only binary `rpc`
+arguments were copied, capped at 16 messages/512 KiB/60 seconds. The user switched
+files; collection retained 16 messages/159,712 bytes. Both hooks were restored
+and the probe removed. No RPC was generated, socket reopened or worker restarted.
+Only method/size/timing metadata is retained; private payload scratch is removed.
+
+Decoded metadata identifies the two large messages as `editor.file.opened`
+(77,837 bytes) and the `editor.textmate.grammars.get` result (78,525 bytes).
+Remaining messages were 49–711 bytes across Editor, Explorer and WBA. This is
+one file-switch sample, not a cold-start or language-wide distribution.
+
+The same captured bytes were benchmarked on desktop Node 24.16.0 and Razr
+Termux Node 24.18.0 via `astermux -s <device> -c 'node'` reading the temporary
+probe on stdin; no benchmark file was installed remotely. Thirty-two warmed
+encode/decode iterations per message verified byte-identical round trips.
+
+| Message | Desktop gzip median | Razr gzip median | Razr gzip bytes | Razr decode median |
+| --- | ---: | ---: | ---: | ---: |
+| File opened | 1.34 ms | 1.52 ms | 10,724 | 0.39 ms |
+| Grammar response | 1.30 ms | 1.55 ms | 11,430 | 0.24 ms |
+
+With payloads below 1 KiB left untouched, total bytes fall from 159,712 to
+25,504 (~84% reduction) on Razr. Independent raw-deflate with sync-flush had
+similar size/cost (25,477 total, ~1.47–1.56 ms for the large messages); it is
+not a negotiated WebSocket test. Some small messages expand under compression.
+Different Node/zlib builds yield slightly different output sizes.
+
+No end-to-end latency, peak-memory, browser decode or concurrent/battery claim
+follows from this synchronous codec-only test. Socket.IO envelopes, polling
+base64, network delay and context takeover were not measured. The bulk savings
+in this sample belong to the Rust editor lane, not Node WBA. Recommendation:
+do not enable WBA-only compression as a purported editor-loading fix; retain
+polling/WS transport work as a separately approved implementation and proceed
+to persistent grammar caching to eliminate repeat grammar transfers directly.
+
+### Application-envelope POC (no transport fork)
+
+Following user approval, `scripts/poc_rpc_compression.mjs` tests an independent
+binary wrapper around the **existing MessagePack bytes**, not a DTO re-encoding:
+12-byte header (TE2C magic, version, raw/gzip flag, reserved bits and big-endian
+uncompressed length), followed by raw or gzip bytes. Compress only at 1 KiB or
+above and only if smaller. Entire frames remain below the current 8 MiB budget.
+An explicit POC capability is required; this is a test guard, **not implemented
+production negotiation**. A future codec must not sniff gzip or silently change
+`msgpack-v1` semantics.
+
+Node bounded gunzip and native Web API `DecompressionStream('gzip')` decoding
+both recover exact original bytes. Web output is counted before collecting each
+chunk, cancelled on failure, and must equal the declared length. Internal browser
+codec buffers/peak memory are not proven by this admission bound.
+
+Desktop and Razr both pass 5 valid round trips, incompressible bypass and 13
+malformed cases (header/version/flags/reserved bits, invalid lengths, truncation,
+CRC corruption, extra gzip member and expansion beyond the declared length),
+plus capability guards. Commands:
+
+```bash
+node scripts/poc_rpc_compression.mjs
+astermux -s motorola-razr-2024-xt2453v:5555 -c 'node --input-type=module' < scripts/poc_rpc_compression.mjs
+```
+
+The retained-in-session 16 real RPC samples were exercised privately in a
+temporary runner, then removed. All round trips passed on both targets. Framed
+total: desktop 25,708 bytes / Razr 25,696 bytes versus 159,712 raw (~84% saving).
+Fourteen small messages bypassed compression. Razr large-frame encode means
+were 1.63–1.64 ms; **Node's Web API** decode means were 2.41–2.74 ms (desktop
+~1.01–1.49 ms). These are bounded codec microbenchmarks, not Chromium, Rust
+encoding, end-to-end latency or concurrent/battery measurements.
+
+This establishes an application-codec route compatible with Socketioxide's
+binary carriage without changing Engineioxide; the earlier transport limitation
+does not rule out compression. Production integration is not approved or enabled.
+Next design gate: capability/version negotiation with matched peers, Rust encoder
+and bounded browser decoder, serialized async receive ordering per lane, queued
+byte/backpressure bounds, disconnect generation fencing, and WBA/native/browser
+coverage. No DTO parsing is needed merely to compress the MessagePack byte buffer.
+
+## Editor application compression implementation (2026-10-09)
+
+The user approved production source integration on `/rpc/editor` only. The
+earlier POC approval limits above describe that prior checkpoint, not this slice.
+
+- [x] Explicit `msgpack-gzip-v1` auth, with unchanged legacy editor codec and
+  no opt-in on Explorer/UI IPC/WBA/Sidebar/terminal.
+- [x] Rust frames existing encoded bytes and lazily compresses once per fan-out
+  at >=1024 bytes when smaller; requests remain raw framed MessagePack.
+- [x] Browser ordered async decode, 64-item/8-MiB declared-output queue bounds,
+  10-second decode deadline and disconnect-generation abort/fencing.
+- [x] Native pending-connect framed queues have count/wire-byte bounds.
+- [x] Eight browser codec/transport regressions, including decoding a real
+  Rust-generated gzip fixture and timeout/disconnect cancellation.
+- [x] Rust suite: 34 worker + 6 transport tests; release worker build and fmt.
+- [x] Python auth/editor-boundary tests: 14 passed, 3 subtests.
+- [x] All 25 isolated native integration tests pass, including old/new codecs
+  concurrently connected and identical preference fan-out on polling/WebSocket.
+- [x] Frontend typecheck and `node build.mjs` pass.
+- [ ] Matching compiled-domain rebuild/activation and approved worker lifecycle.
+- [ ] Client OTA and installed native/browser high-latency live acceptance.
+
+The isolated fixture now excludes inherited `CODE_TE2_*`: otherwise a stale live
+mypyc selector causes it to test old compiled auth rather than current source.
+No shared process was restarted. Frontend generation does not update any native
+client. Python changes are only editor codec-name validation, but still require
+a matching compiled group before live testing. No APK, version or release change.
+
+Full `socketio_transport.test.mjs` still has four pre-existing TextMate runtime
+fixture failures (`window.location.search` absent, then obsolete grammar mocks).
+Those tests were left unchanged; no production TextMate behavior was altered to
+make them pass. Generated host bundle retains vendor whitespace flagged by
+`git diff --check`; authored-source whitespace checks pass.
+
+### User checkpoint acceptance (2026-10-10)
+
+The user rebuilt the compiled domain and reported the editor compression slice
+working pretty well. This is acceptance of their tested runtime, not proof of
+all-client OTA or packaged-release validation. WBA permessage-deflate remains
+disabled: its mostly small messages and possible same-device Termux hosting do
+not yet justify compression overhead. Any WBA change requires payload/CPU
+measurements and separate approval. No runtime restart or release accompanies
+this checkpoint commit.

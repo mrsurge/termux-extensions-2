@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import gzip
 import os
 import py_compile
 import queue
@@ -83,7 +84,7 @@ def native_app(tmp_path):
     with socket.socket() as reservation:
         reservation.bind(("127.0.0.1", 0))
         port = reservation.getsockname()[1]
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("TE_", "TE2_", "FRAMEWORK_SHELLS_", "PYTHON", "XDG_"))}
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("TE_", "TE2_", "CODE_TE2_", "FRAMEWORK_SHELLS_", "PYTHON", "XDG_"))}
     env.update(HOME=str(tmp_path), VIRTUAL_ENV=str(REPO / ".jitenv"), TE_FRAMEWORK_URL="http://127.0.0.1:1", TE_APP_ID="code_te2")
     env.update(CODE_TE2_PYTHON_HOME=sys.base_prefix, CODE_TE2_PYTHON_EXECUTABLE=sys.executable)
     for name in ("CONFIG", "DATA", "CACHE", "RUNTIME"):
@@ -313,6 +314,65 @@ def test_rejects_missing_codec(native_app):
             client.connect(url + "?client_instance_id=client_nativetest000001", namespaces=["/ui_ipc"], transports=["polling"], wait_timeout=5)
     finally:
         client.disconnect()
+
+
+@pytest.mark.parametrize("transport", ["polling", "websocket"])
+def test_editor_gzip_and_legacy_clients_coexist(native_app, transport):
+    url, _, _, logs = native_app
+    clients = []
+    inboxes = []
+    try:
+        for index, codec in enumerate(("msgpack-v1", "msgpack-gzip-v1")):
+            client = socketio.Client(reconnection=False)
+            clients.append(client)
+            received = queue.Queue()
+            inboxes.append(received)
+
+            def decode(data, framed=codec == "msgpack-gzip-v1"):
+                assert isinstance(data, bytes)
+                if framed:
+                    assert data[:5] == b"TE2C\x01" and data[6:8] == b"\0\0"
+                    assert data[5] in (0, 1)
+                    length = int.from_bytes(data[8:12], "big")
+                    data = gzip.decompress(data[12:]) if data[5] else data[12:]
+                    assert len(data) == length
+                return msgpack.unpackb(data, raw=False)
+
+            client.on("rpc", lambda data, decoder=decode, inbox=received: inbox.put(decoder(data)), namespace="/rpc/editor")
+            client.connect(url + f"?client_instance_id=client_gziptest00000{index}&client_role=primary",
+                           namespaces=["/rpc/editor"], auth={"rpcCodec": codec},
+                           transports=[transport], wait_timeout=15)
+            payload = msgpack.packb({"jsonrpc": "2.0", "id": "unknown", "method": "nonexistent.method", "params": {}}, use_bin_type=True)
+            if codec == "msgpack-gzip-v1":
+                payload = b"TE2C\x01\0\0\0" + len(payload).to_bytes(4, "big") + payload
+            client.emit("rpc", payload, namespace="/rpc/editor")
+            deadline = time.monotonic() + 10
+            while True:
+                reply = received.get(timeout=max(.01, deadline - time.monotonic()))
+                if reply.get("id") == "unknown":
+                    assert "error" in reply, (reply, logs)
+                    break
+        assert all(client.connected for client in clients)
+        host = socketio.Client(reconnection=False)
+        clients.append(host)
+        host.connect(url + "?client_instance_id=client_gziptest000000&client_role=primary",
+                     namespaces=["/ui_ipc"], auth={"rpcCodec": "msgpack-v1"},
+                     transports=[transport], wait_timeout=15)
+        update = msgpack.packb({"jsonrpc": "2.0", "id": "update", "method": "ui.host.editorPreference.update",
+                               "params": {"key": "wordWrap", "value": True}}, use_bin_type=True)
+        assert "result" in msgpack.unpackb(host.call("rpc", update, namespace="/ui_ipc", timeout=10), raw=False)
+        projections = []
+        for inbox in inboxes:
+            deadline = time.monotonic() + 10
+            while True:
+                notification = inbox.get(timeout=max(.01, deadline - time.monotonic()))
+                if notification.get("method") == "editor.prefs.changed":
+                    projections.append(notification)
+                    break
+        assert projections[0] == projections[1], (projections, logs)
+    finally:
+        for client in clients:
+            client.disconnect()
 
 
 def test_real_worker_truncated_pipe_is_fatal(native_app):
