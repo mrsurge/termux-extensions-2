@@ -160,7 +160,7 @@ selected in this checkpoint; restoring compiled activation is a separate step.
 - [x] 3. Investigate polling/WebSocket compression independently; benchmark before enabling.
 - [x] 4. Design/validate persistent revision/ID/hash-scoped grammar caching across reloads.
 - [x] 5. Investigate OTA archive/transfer compression and compatibility; retain Deflate ZIP.
-- [ ] 6. Finish poor-connection cold/warm, switch/reconnect and secondary-editor audit.
+- [x] 6. Finish poor-connection cold/warm, switch/reconnect and secondary-editor audit.
 - [ ] 7. Read-only unused vendored/stale asset inventory; report evidence and sizes,
   accounting for dynamic loaders and package manifests. No deletion approval.
 - [ ] 8. Separately approved maintenance release: matched binaries/domain/assets,
@@ -583,7 +583,7 @@ differ. No bandwidth measurement or full package validation is implied.
   settings loader reference, manifest tree publication and unchanged valid
   72-body Markdown seed; targeted grammar/loading suite: 16 pass.
 - [x] Code TE2 typecheck and frontend build.
-- [ ] Client asset-update/live settings and Markdown validation.
+- [x] Client asset-update/live settings and Markdown validation.
 
 Existing tree-based OTA/native-payload copies naturally pick up the smaller
 source directory. No archive format, loader, Python/Rust module, Android source
@@ -609,7 +609,7 @@ yield every 256 KiB; no weak hash/size-only admission or HTTP authentication cla
 - [x] Targeted tests: 33 pass; Code TE2 typecheck and frontend build pass.
 - [x] Measured host bundle: 7,873,798 → 7,879,538 bytes raw; gzip level 6
   2,150,725 → 2,153,785 bytes (**3,060-byte compressed increase**).
-- [ ] Generic plain HTTP browser reload/persistent-cache live acceptance.
+- [x] Generic plain HTTP browser reload/persistent-cache live acceptance.
 
 Live Chrome inspection confirmed the plain HTTP origin has no WebCrypto but now
 contains `te2-textmate-bodies` version 1: five Kotlin/TOML grammar records,
@@ -620,6 +620,55 @@ This confirms fallback-backed writes, not reload reuse or zero network requests.
 No runtime restart, native OTA, APK build, release or publication was performed.
 Packaged seed hits need not create database records; test a fetched closure miss
 to demonstrate persistent writes/reuse.
+
+## Loading audit user acceptance (2026-10-10)
+
+The user confirmed all three closeout checks: plain HTTP persistent-cache reuse
+after reload; poor-connection rapid file switching, reconnect and secondary-editor
+behavior; and retained JSON grammar loading in Settings and Run Profiles. The
+poor-connection checks prompted the user's report that the editor is now almost
+enjoyable rather than practically unusable. These are user live acceptance,
+not instrumented zero-request or all-device measurements. Earlier unchecked
+slice-local loading/cleanup gates are superseded for these tested behaviors.
+Remaining asset candidates stay deferred; packaging/release and native-client
+deployment gates remain separate. Next scope is the user follow-ups below or a
+separately approved maintenance release.
+
+## Follow-up implementation tracker
+
+Preliminary source investigation and plan integration are complete. See PLAN.md,
+**Follow-up maintenance workstream**, for ownership, entrypoints and gates. The
+original user list below is retained verbatim as the requirement record.
+
+- [x] Record loading closeout live acceptance separately from release evidence.
+- [x] Map all follow-ups to current source and distinguish bugs from new features.
+- [ ] F1: marketplace settings access using existing configuration RPC/dialog.
+- [ ] F1: installed user-extension list/filter using existing registry/list RPC.
+- [ ] F1: reproduce astral-sh.ty issue; capture exact ID/version/platform and failure.
+- [ ] F1: approved fixes, regressions/build and live extension lifecycle acceptance.
+- [ ] F2: shared picker single-select/double-enter directory behavior.
+- [ ] F2: depth-one regex filter, bounded/invalid-pattern handling.
+- [ ] F2: shared consumer mouse/touch/keyboard and picker-mode acceptance.
+- [ ] F3: detached Sidebar minimize, exact native window ownership.
+- [ ] F3: editor Explorer ellipsis-menu Collapse all using existing expansion authority.
+- [ ] F3: vertical Explorer ellipsis icon; desktop/mobile and sticky-scope acceptance.
+- [ ] F3: lower draft-highlight opacity with readable theme contrast.
+- [ ] F3: unprefixed palette default, preserve explicit command/symbol/line modes.
+- [ ] F3: clarify Ctrl+colon versus chord; add approved bindings without conflicts.
+- [ ] F3: desktop/mobile input and detached-window live acceptance.
+- [ ] F4: define identity/session lifetime and drawer transport contract.
+- [ ] F4: implement one File Explorer terminal per explicit presentation identity.
+- [ ] F4: depth-one regex listing and asynchronous directory usage view.
+- [ ] F4: multi-client, standalone/sidebar, lifecycle and large-tree acceptance.
+- [ ] Separately approve maintenance packaging/release scope after chosen slices.
+
+Confirmed preliminary findings: marketplace already has configuration/list backend
+RPCs but detail actions are install/update/uninstall; shared picker enters a
+directory immediately on click; Desktop main-window minimize is not detached-window
+minimize. File Explorer exposes terminal launch intents, not evidence of an embedded
+drawer. ty cause, draft CSS owner, quick-access empty mode and usage aggregation
+support still require focused investigation. No runtime mutation or implementation
+was performed for these follow-ups.
 
 ## User follow-ups:
 
@@ -653,3 +702,4 @@ to demonstrate persistent writes/reuse.
 2. All clients - more transparent alpha in draft highlighted text
 3. all clients Command pallet default: the "lower state" that shows the different options (;,:,@ ) instead of the default ">"
 4. desktop - key combo: new key combo "ctrl, :" and "ctrl, shift, P" 
+5. Editor Explorer: add Collapse all to the ellipsis menu and make the ellipsis vertical.

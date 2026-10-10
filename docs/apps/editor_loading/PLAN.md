@@ -87,6 +87,101 @@ assets. New RPC and frontend require matched publication. Synchronize release-fa
 versions before any release/client packaging; this slice does not bump or publish
 a version. No client/framework restart has been performed.
 
+## Follow-up maintenance workstream
+
+Loading behavior is user live-accepted for reload reuse, poor-connection file
+switching/reconnect/secondary editors and Settings/Run Profiles JSON grammars.
+Instrumented traffic counts and release/all-device validation remain distinct.
+The user follow-ups in TRACKER.md are now planned work, not implicit additions
+to the completed loading scope. Each implementation slice needs concrete approval.
+
+### F1 — Extension marketplace and registry
+
+Start with existing `src/explorer/extensions/marketplace-controller.ts`,
+`explorer/handlers/extensions.py`, `explorer/services/openvsx_marketplace.py`
+and `extension_registry.py` under Code TE2. Marketplace detail actions currently
+expose install/update/uninstall; schema-bearing installs already call `onInstalled`.
+Reuse `explorer.extensions.configSchema.get`, `explorer.extensions.configure` and
+`explorer.extensions.list` for installed-extension settings access and an installed
+list/filter. Do not create a second registry or configuration authority.
+
+Investigate the reported astral-sh.ty installation issue with the exact extension
+ID/version/platform, install request/result and WBA restart logs. No cause is
+established yet. Separate installation failure, platform selection, activation and
+UI-list visibility; avoid promising one fix resolves all four.
+Acceptance: existing/new installs, uninstall, settings save, no-schema extensions,
+installed-list refresh and WBA recovery without page reload. Python changes require
+the matching mypyc rebuild; frontend changes require correct client publication.
+
+### F2 — Shared file picker
+
+`app/static/js/file_picker.js` currently calls `navigate(entry.path)` on the first
+directory click, while non-directories call `setSelected`. This confirms the
+selection/navigation conflict. Plan single click/tap selection and double
+click/tap directory entry, preserving explicit Select Current, breadcrumbs, save
+and file modes. Inspect touch timing/accessibility and keyboard behavior before
+implementation. Add optional depth-one regex filtering using the existing browse
+boundary; invalid patterns must be visible and bounded, not recursive scans.
+Acceptance: mouse/touch/keyboard directory selection versus navigation, all picker
+modes, empty directories and invalid regex. Shared assets have multiple consumers.
+
+### F3 — Editor and detached Desktop polish
+
+Add **Collapse all** to the Code TE2 source Explorer's ellipsis menu and change
+its horizontal ellipsis to a vertical ellipsis. Reuse existing tree expansion
+authority/actions and menu/icon conventions; inspect search-mode and sticky-scope
+effects before implementation. Acceptance: nested expanded trees collapse
+consistently, file selection is preserved, and desktop/mobile menus and sticky
+scopes remain correct. This targets the editor Explorer, not standalone File Explorer.
+
+Add detached Sidebar-window minimize through the existing validated native surface
+contracts/registry (`desktop_client/electron/src/{shared/sidebar-surface-contracts.ts,
+main/sidebar-surface-registry.ts,surface/index.tsx}`), not main-window control:
+`window_control` currently minimizes `mainWindow` in `src/main/index.ts`.
+Inspect the actual detached chrome/action dispatch before editing.
+
+Trace draft character/line styling from `editor_draft_diff_runtime.ts` to its
+authored CSS/theme owner; reduce highlight opacity while retaining ranges,
+readability, review semantics and theme contrast. Do not alter Monaco fork output
+without demonstrating that the authored layer cannot own the change.
+
+Palette default should open the unprefixed picker/help state, not forced `>`.
+`editor_quick_input_keys.ts` currently maps P to `editor.action.quickCommand`;
+inspect palette entrypoints and Monaco quick-access providers first. Preserve
+explicit command mode and symbol/line modes. Clarify whether requested `ctrl, :`
+means a chord or Ctrl+colon, and check Ctrl+Shift+P conflicts before binding.
+Acceptance: detached target-only minimize/restore, light/dark draft contrast,
+mobile/desktop palette modes, physical and virtual keyboard existing shortcuts.
+
+### F4 — File Explorer larger features
+
+`app/apps/file_explorer/main.js`, `template.html`, `file_explorer.py` and shared
+`te_file_explorer_intents.mjs` already provide Open in Terminal intents. No embedded
+drawer/session owner was found in this preliminary inventory. Plan a Code-TE2-like
+terminal drawer using existing terminal transport/ownership contracts, with one
+terminal per explicit File Explorer/sidebar presentation identity. Define identity
+lifetime, standalone versus embedded ownership, close/reconnect/session removal
+before implementation; do not alias all clients to one terminal or reuse an exited
+shell. Compare ALS-RS's identity model as a reference, not a new dependency.
+
+Add depth-one regex listing and `du -h --max-depth=1`-style usage presentation.
+Prefer existing framework filesystem/pipe services; first inspect support for
+bounded aggregation, cancellation, errors, symlinks and permissions. A depth-one
+display can still require recursive byte accounting: define that cost explicitly,
+keep it asynchronous/user-triggered and avoid blocking ordinary directory listing.
+No polling or frontend-owned durable terminal state.
+Acceptance: independent clients/presentations, sidebar/standalone lifecycle,
+session retention/removal, regex errors, large trees and denied paths.
+
+### Execution order and gates
+
+F1 → F2 → F3 → F4. These are independent coherent slices; a demonstrated urgent
+bug can change the order with user approval. Preliminary source findings are not
+completed implementation designs. Each slice requires targeted regression tests,
+appropriate typecheck/build, correct installed-client asset publication and user
+live acceptance. No Android changes, process restart, version bump or release is
+authorized by this planning slice. Remaining stale-asset candidates stay deferred.
+
 ## Safety and publication
 
 ### Generic-browser HTTP gzip
