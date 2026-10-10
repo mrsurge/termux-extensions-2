@@ -1,12 +1,10 @@
 import type { BundledGrammarBody, BundledGrammarLoader } from './editor_textmate_grammar_loader.ts';
+import { grammarSha256 } from './editor_textmate_sha256.ts';
 
 // Selection/fingerprints come from editor RPC; bodies use the client-local asset.
 export function createBundledGrammarCache(fetchAsset: () => Promise<Response>): BundledGrammarLoader {
   let pending: Promise<Record<string, BundledGrammarBody>> | null = null;
   return () => pending ??= (async () => {
-    // Insecure browser origins cannot verify seeds; avoid downloading a corpus
-    // only to discard it before fetching guarded HTTP resources.
-    if (!globalThis.crypto?.subtle) return Object.create(null) as Record<string, BundledGrammarBody>;
     const response = await fetchAsset();
     if (!response.ok) throw new Error(`Bundled TextMate cache HTTP ${response.status}`);
     const value: unknown = await response.json();
@@ -27,11 +25,7 @@ export function createBundledGrammarCache(fetchAsset: () => Promise<Response>): 
       const encoded = new TextEncoder().encode(entry.raw);
       bytes += encoded.byteLength;
       if (bytes > 8 * 1024 * 1024) throw new Error('Bundled TextMate cache too large');
-      // Native loopback origins expose WebCrypto. Insecure browser origins can
-      // still use bounded RPC, but must not trust an unverified local seed.
-      if (!globalThis.crypto?.subtle) continue;
-      const digest = await globalThis.crypto.subtle.digest('SHA-256', encoded);
-      const actual = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+      const actual = await grammarSha256(encoded);
       if (actual === entry.sha256) bodies[id] = { raw: entry.raw, sha256: entry.sha256 };
     }
     return bodies;

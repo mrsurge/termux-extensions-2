@@ -1,4 +1,5 @@
 // Disposable content cache, never catalog/selection authority. No project data.
+import { grammarSha256 } from './editor_textmate_sha256.ts';
 export interface GrammarIdentity { id: string; sha256: string }
 export interface GrammarRecord extends GrammarIdentity { raw: string; bytes: number; touched: number }
 export interface GrammarStorage {
@@ -113,15 +114,14 @@ function indexedStorage(): GrammarStorage {
 }
 
 export function createPersistentGrammarCache(storage?: GrammarStorage): PersistentGrammarCache {
-  let disabled = !globalThis.crypto?.subtle || (!storage && typeof indexedDB === 'undefined');
+  let disabled = !storage && typeof indexedDB === 'undefined';
   const disk = storage ?? indexedStorage();
   let queued = new Map<string, GrammarRecord>();
   let queuedBytes = 0;
   let writing = false;
   let scheduled = false;
   async function verified(raw: string, identity: GrammarIdentity): Promise<boolean> {
-    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw));
-    return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('') === identity.sha256;
+    return await grammarSha256(new TextEncoder().encode(raw)) === identity.sha256;
   }
   function schedule(): void {
     if (scheduled || writing || disabled || !queued.size) return;

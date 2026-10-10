@@ -7,6 +7,28 @@ import { createBundledGrammarCache } from '../app/apps/code_te2/monaco_editor/ed
 import { createTextmateGrammarBodyLoader } from '../app/apps/code_te2/monaco_editor/editor_textmate_grammar_loader.ts';
 const hash = raw => createHash('sha256').update(raw).digest('hex');
 
+test('legacy grammar assets retain only the self-contained settings JSON grammar', () => {
+  const root = new URL('../app/apps/code_te2/monaco_editor/textmate/grammars/', import.meta.url);
+  assert.deepEqual(fs.readdirSync(root).sort(), ['json.JSON.tmLanguage.json']);
+  const grammar = JSON.parse(fs.readFileSync(new URL('json.JSON.tmLanguage.json', root), 'utf8'));
+  assert.equal(grammar.scopeName, 'source.json');
+  function verifyIncludes(value) {
+    if (!value || typeof value !== 'object') return;
+    if (typeof value.include === 'string') {
+      assert.ok(value.include.startsWith('#') || ['$self', '$base'].includes(value.include),
+        `Settings JSON grammar requires an external grammar: ${value.include}`);
+      if (value.include.startsWith('#')) assert.ok(grammar.repository[value.include.slice(1)]);
+    }
+    for (const child of Object.values(value)) verifyIncludes(child);
+  }
+  verifyIncludes(grammar);
+  const settings = fs.readFileSync(new URL('../app/apps/code_te2/main_page/frontend/ui/cm6-json-textmate-field.ts', import.meta.url), 'utf8');
+  assert.ok(settings.includes('/grammars/json.JSON.tmLanguage.json'));
+  const manifest = JSON.parse(fs.readFileSync(new URL('../app/android_editor_assets_bundle.json', import.meta.url), 'utf8'));
+  assert.ok(manifest.entries.some(entry => entry.kind === 'tree'
+    && entry.src === 'app/apps/code_te2/monaco_editor/textmate'));
+});
+
 test('packaged Markdown closure is hash-valid and available in the existing local asset tree', () => {
   const cache = JSON.parse(fs.readFileSync(new URL('../app/apps/code_te2/monaco_editor/textmate/markdown-cache.json', import.meta.url)));
   validateCache(cache);
@@ -23,6 +45,20 @@ test('local seeds are verified once; corrupt bodies are not admitted', async () 
   assert.deepEqual(Object.keys(await cache()), ['good']);
   await cache();
   assert.equal(reads,1);
+});
+
+test('plain HTTP without WebCrypto still verifies packaged seeds', async t => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+  Object.defineProperty(globalThis, 'crypto', { configurable: true, value: undefined });
+  t.after(() => descriptor ? Object.defineProperty(globalThis, 'crypto', descriptor) : delete globalThis.crypto);
+  let reads = 0;
+  const cache = createBundledGrammarCache(async () => {
+    reads++;
+    return Response.json({schema:1,bodies:{good:{raw:'😀body',sha256:hash('😀body')},bad:{raw:'evil',sha256:hash('body')}}});
+  });
+  assert.deepEqual(Object.keys(await cache()), ['good']);
+  assert.deepEqual(Object.keys(await cache()), ['good']);
+  assert.equal(reads, 1);
 });
 
 test('backend selection admits matching cache bodies and chunks only changed overrides', async () => {

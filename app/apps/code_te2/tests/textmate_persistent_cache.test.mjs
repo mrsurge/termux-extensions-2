@@ -177,11 +177,14 @@ test('revision reset fences in-flight persistent reads', async () => {
   assert.deepEqual(instance.calls,['editor.textmate.closure.get']);
 });
 
-test('unavailable WebCrypto bypasses persistent storage', async t => {
+test('unavailable WebCrypto uses SHA-256 for persistent writes and reuse', async t => {
   const descriptor=Object.getOwnPropertyDescriptor(globalThis,'crypto');
   Object.defineProperty(globalThis,'crypto',{value:undefined,configurable:true});
   t.after(()=>Object.defineProperty(globalThis,'crypto',descriptor));
   const storage=new Storage();const cache=createPersistentGrammarCache(storage);
-  assert.equal((await cache.read([identity('body')])).size,0);
-  cache.write(identity('body'),'body');assert.equal(storage.reads+storage.writes,0);
+  cache.write(identity('body'),'body');await settle();
+  assert.equal(storage.writes,1);
+  assert.equal((await createPersistentGrammarCache(storage).read([identity('body')])).get(identity('body').id),'body');
+  storage.rows.set(key(identity('body')),{...record('body'),raw:'evil'});
+  assert.equal((await cache.read([identity('body')])).size,0,'same-size corruption is rejected');
 });

@@ -2294,14 +2294,15 @@ The browser remains the grammar parser/tokenizer through TextMate and Oniguruma.
 Production requests set `metadataOnly: true`: the compact reply carries selected
 IDs and SHA-256 fingerprints, not the multi-megabyte bodies. The local asset
 `monaco_editor/textmate/markdown-cache.json` contains the built-in Markdown family;
-WebCrypto verifies each body once, then matching ID/hash pairs seed the existing
+Shared SHA-256 verification checks each body once, then matching ID/hash pairs seed the existing
 revision-scoped cache. Native clients use `editor.textmate.chunk.get` for changed
 grammars or missing seeds, with two streams and 64 KiB UTF-8 per reply. Generic
 browsers instead GET `/api/app/code_te2/textmate/grammar` with logical ID, revision
 and optional expected SHA-256. The guarded resource read rechecks revision and
 returns identity-bearing JSON through negotiated gzip, outside packaged-asset
-interception. Responses are no-store; the revision cache owns reuse. Insecure
-origins skip seed downloads entirely. HTTP failures never retry or fall back.
+interception. Responses are no-store; the revision cache owns reuse. Plain HTTP
+origins can verify seeds through the JavaScript SHA-256 fallback. HTTP failures
+never retry or fall back to another transport.
 Closure discovery remains bounded to 256 bodies/8 MiB; oversized graphs return a
 partial preload and further dependencies use the same client-selected transport.
 On-demand HTTP reads return the current resource fingerprint. Failures
@@ -2317,14 +2318,21 @@ ID plus SHA-256; current backend metadata still selects the grammar, and stored
 content is hash-verified before reuse. Changed revisions can reuse unchanged
 matching bodies but never stale selections. Reads batch metadata first, admit
 at most 8 MiB of bodies and have a 250ms deadline. Missing, blocked, denied,
-corrupt or unavailable storage is a miss, not a load failure. WebCrypto-less
-origins skip persistent caching. Background writes verify fetched bodies and
+corrupt or unavailable storage is a miss, not a load failure. Background writes verify fetched bodies and
 transactionally retain at most 512 entries/32 MiB UTF-8 body bytes with oldest-
 stored eviction; queues and individual bodies are bounded. These application
 byte budgets do not measure IndexedDB overhead. No documents/catalogs/themes
 or credentials are stored here. The existing RPC/HTTP transports and generation
 fences remain; storage work cannot bypass the editor readiness barrier. Native
 OTA publishes this frontend-only change; no mypyc/worker rebuild is required.
+
+Packaged and persistent bodies share `editor_textmate_sha256.ts`: WebCrypto is
+preferred; when unavailable, pinned `@noble/hashes` 2.4.0 computes the identical
+SHA-256 over UTF-8 bytes. Large fallback inputs yield between 256 KiB chunks so
+cache deadlines and disconnect fences can run. Digest failures remain misses;
+there is no MD5/size-only admission or database migration. This establishes
+content identity against backend-selected hashes, not authentication of an
+unencrypted HTTP peer.
 
 The inline editor receives semantic-token replies over direct WBA JSON-RPC and
 installs normal Monaco providers. Token data is the VS Code five-integer delta

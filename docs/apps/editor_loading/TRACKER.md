@@ -515,6 +515,112 @@ restart, commit or release was performed in this slice.
 
 ---
 
+## Vendored/stale assets — preliminary inventory (2026-10-10)
+
+- [x] Inspect browser build inputs, OTA manifest/native mapping inventory and
+  wheel/materializer exclusions; read-only file-size inventory.
+- [ ] Complete per-candidate dynamic-consumer and compatibility checks.
+- [ ] Separately approve any cleanup and validate matching packaged clients.
+
+Sizes below are uncompressed source bytes, not estimated APK/wheel/ZIP savings.
+No assets were deleted or repackaged. A missing direct reference establishes a
+candidate, not proof that an externally reachable resource can be removed.
+
+| Candidate | Bytes | Evidence / restriction |
+| --- | ---: | --- |
+| TextMate grammar files other than JSON | 7,314,418 | 91 of 92 files; the full tree is copied by the OTA manifest and native payload materializer. No direct consumer found for the other filenames in the inspected authored runtime. Check dynamic/compatibility use before removal. |
+| TextMate `grammar_index.json` | 4,987 | No authored runtime reference found in inspected paths; still included by tree publication. Candidate only. |
+| TextMate adjacent UMD copies | 70,419 | `vscode-oniguruma.umd.js` + `vscode-textmate.umd.js`; main editor imports the vendor packages into host.js and publishes their globals. No direct loader found for these adjacent copies. Check standalone/settings loaders before removal. |
+| Static `ws` vendor tree | 122,307 | OTA/Desktop/Cefrium routing declares it, but no runtime consumer found in inspected authored code. Route declaration is not proof of execution; compatibility remains unresolved. |
+| Static reconnecting-websocket module | 21,962 | Terminal imports its npm package, not this path. Further generic-client/compatibility review needed; this module is outside the current OTA manifest. Preserve license when retaining any consumer. |
+| Monaco bootstrap `.bak` + `.bak2` | 17,798,991 | Obsolete local backup candidates; already excluded by MANIFEST.in, release package policy and OTA extension filters. No release transfer-size saving. |
+| Monaco bootstrap `_deprecated` | 34,495,797 | Already excluded from wheels and not selected by the OTA manifest. Repository cleanup only, not a shipped-size reduction. |
+
+Required assets that must not be swept up:
+
+- `main_page/frontend/ui/cm6-json-textmate-field.ts` explicitly fetches
+  `textmate/grammars/json.JSON.tmLanguage.json` (5,084 bytes), the settings theme
+  and onig.wasm. Its fallback script loaders point into the vendor package
+  `release/main.js` paths, not the adjacent UMD copies above.
+- `editor_textmate_runtime.ts` imports vscode-textmate/vscode-oniguruma, loads
+  onig.wasm and uses the revision/hash-verified Markdown seed. Keep those resources
+  and notices even when considering the legacy grammar tree.
+- `scripts/build_monaco_bootstrap_bundle.mjs` resolves the pinned Monaco ESM
+  editor API and main entry, plus prebuilt basic/language contributions when its
+  optional source worktree is unavailable. The 38.17 MB ESM tree and associated
+  contribution chunks are build dependencies, not unused just because host.js
+  embeds the resulting bootstrap.
+- Touch selection CSS/patched UMD are explicitly loaded by inline_host.ts and
+  covered by historical touch tests. The local `.bak` is publication-excluded.
+- Font, worker and dynamic resource mappings remain separate contracts; do not
+  remove them based on directory-level size totals.
+
+Source authorities inspected: `app/android_editor_assets_bundle.json`,
+`desktop_client/desktop_asset_inventory.json`, `CefriumAssetRoutes.kt`, Code TE2
+build/loader source, `scripts/materialize_code_te2_runtime.py`, MANIFEST.in and
+`app/release_runtime/package_policy.py`. Findings are preliminary and do not
+establish complete cross-app reachability or fresh package acceptance. User
+follow-ups below remain untouched and deferred.
+
+---
+
+## Legacy grammar trim (2026-10-10)
+
+Approved scope removes only 91 legacy grammar files (7,314,418 raw bytes) from
+`monaco_editor/textmate/grammars`, retaining `json.JSON.tmLanguage.json`. The main
+editor's backend catalog/body projection resolves installed extension roots, not
+this old directory; `build_textmate_cache.mjs` independently reads the Code Server
+extensions root. The settings JSON editor is the remaining direct consumer of
+the retained file. Its includes are self-contained repository rules.
+
+In-memory level-6 Python/zlib ZIP comparison before deletion: all 92 grammars
+903,324 bytes versus retained JSON 1,421 bytes; estimated reduction 901,903 bytes
+(0.860 MiB, ~7% of the earlier 12,900,561-byte bundle). Native Rust ZIP sizes may
+differ. No bandwidth measurement or full package validation is implied.
+
+- [x] Delete exactly the 91 approved candidates; retain JSON unchanged.
+- [x] Regression checks retained directory, self-contained JSON scope/includes,
+  settings loader reference, manifest tree publication and unchanged valid
+  72-body Markdown seed; targeted grammar/loading suite: 16 pass.
+- [x] Code TE2 typecheck and frontend build.
+- [ ] Client asset-update/live settings and Markdown validation.
+
+Existing tree-based OTA/native-payload copies naturally pick up the smaller
+source directory. No archive format, loader, Python/Rust module, Android source
+or manifest change was needed. Other candidates—including the unused legacy
+index, adjacent UMD copies and static ws—remain deferred. No mypyc rebuild, OTA,
+APK/wheel assembly, shared runtime restart or publication was performed. Older
+installed copies are not trimmed by a page reload; update assets explicitly.
+
+---
+
+## Plain HTTP grammar verification (2026-10-10)
+
+Chrome inspection confirmed IndexedDB exists at the plain HTTP framework origin,
+but WebCrypto does not; the previous implementation therefore skipped persistence.
+Both packaged seed and persistent-body verification now share SHA-256 with
+WebCrypto preferred and pinned `@noble/hashes` 2.4.0 as the unavailable-API fallback.
+This supersedes the earlier WebCrypto-less skip policy, without changing cache
+schema, backend selection authority, budgets or transports. Large fallback hashes
+yield every 256 KiB; no weak hash/size-only admission or HTTP authentication claim.
+
+- [x] Known vectors, Unicode/block boundaries, million-byte input, preferred
+  WebCrypto, event-loop yielding, persistent reuse and same-size corruption tests.
+- [x] Targeted tests: 33 pass; Code TE2 typecheck and frontend build pass.
+- [x] Measured host bundle: 7,873,798 → 7,879,538 bytes raw; gzip level 6
+  2,150,725 → 2,153,785 bytes (**3,060-byte compressed increase**).
+- [ ] Generic plain HTTP browser reload/persistent-cache live acceptance.
+
+Live Chrome inspection confirmed the plain HTTP origin has no WebCrypto but now
+contains `te2-textmate-bodies` version 1: five Kotlin/TOML grammar records,
+including Markdown injections, totaling 30,784 UTF-8 body bytes. All stored byte
+counts match their bodies; user reports 46 KB site storage after viewing Markdown.
+This confirms fallback-backed writes, not reload reuse or zero network requests.
+
+No runtime restart, native OTA, APK build, release or publication was performed.
+Packaged seed hits need not create database records; test a fetched closure miss
+to demonstrate persistent writes/reuse.
+
 ## User follow-ups:
 
 ### extensions

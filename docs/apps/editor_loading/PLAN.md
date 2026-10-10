@@ -119,7 +119,7 @@ this slice. Preserve the adjacent attribution/license when publishing.
 
 The backend remains selection authority: `editor.textmate.closure.get` with
 `metadataOnly: true` returns revision, selected IDs and SHA-256 fingerprints, not
-large bodies. The browser verifies the local asset once with WebCrypto and admits
+large bodies. The browser verifies the local asset once with shared SHA-256 and admits
 only matching ID/hash pairs into its revision cache. A missing/corrupt seed or an
 extension override uses `editor.textmate.chunk.get`, limited to 64 KiB UTF-8 per
 reply and two active streams. Offsets count Unicode codepoints, not UTF-16 units.
@@ -127,8 +127,8 @@ Every chunk revalidates revision/resources; its content fingerprint must remain
 consistent. No WBA fallback or uncertain request replay is introduced.
 
 Oversized closure prefixes still use TextMate discovery, with bounded on-demand
-chunks beyond the prefix. Insecure browser origins without WebCrypto skip seeds
-and retain bounded RPC functionality. Other languages reuse matching bodies from
+chunks beyond the prefix. Plain HTTP origins without WebCrypto use the pinned
+JavaScript SHA-256 fallback for seeds and persistent bodies. Other languages reuse matching bodies from
 this same family (including HTML/CSS); no language-specific selection rule changes.
 This reduces cold grammar network payload, not TextMate's requirement to have all
 reachable rules before constructing a grammar. Live high-latency acceptance is
@@ -201,7 +201,8 @@ on the observed paths. Continue in this order:
    revision-scoped memory and matching packaged bodies precede persistent reads;
    current closure metadata remains authority. Verify stored hashes before reuse.
    A batched metadata-first read admits <=8 MiB before cloning bodies, with a
-   250ms read deadline; unavailable storage/WebCrypto is a miss. Background
+   250ms read deadline; unavailable storage or failed verification is a miss. WebCrypto
+   is preferred, with pinned JavaScript SHA-256 when unavailable. Background
    writes hash-verify fetched bodies, retain <=512 records/32 MiB UTF-8 body
    bytes and evict oldest stored records in the same write transaction. This is
    an application data budget, not a promise of browser database disk overhead.
@@ -231,6 +232,14 @@ on the observed paths. Continue in this order:
    consumers and confidence, including any unresolved dynamic use. This step is
    read-only: deletions, manifest changes and rebuilt publication require a
    separately approved concrete plan.
+   Preliminary findings are recorded in TRACKER.md. Prioritize individually
+   proving legacy packaged grammar consumers, keeping the settings JSON grammar;
+   do not confuse already-excluded development backups with shipped savings.
+   Monaco ESM and prebuilt contribution chunks remain required build inputs.
+   Approved first cleanup removes the 91 unconsumed legacy grammar files only;
+   retain the settings JSON grammar, verified Markdown seed and tokenizer/theme
+   resources. Remaining inventory candidates are not deletion-approved. Native
+   installed trees need explicit OTA/package replacement to receive this trim.
 8. **Maintenance release integration.** With separate release approval, synchronize
    versions and package matching domain/worker/framework artifacts, frontend
    assets and staging APK seeds. Validate provenance and target installs before
