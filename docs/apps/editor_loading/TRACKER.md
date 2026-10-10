@@ -157,11 +157,13 @@ selected in this checkpoint; restoring compiled activation is a separate step.
 - [ ] 2b. Native deployment and cross-relaunch live origin/storage acceptance.
   Razr TE2 Termux staging is installed and user live-accepted; explicit origin/
   storage survival across relaunch and other client deployment remain separate.
-- [ ] 3. Investigate polling/WebSocket compression independently; benchmark before enabling.
-- [ ] 4. Design/validate persistent revision/ID/hash-scoped grammar caching across reloads.
-- [ ] 5. Investigate OTA archive/transfer compression and compatibility; no format change yet.
+- [x] 3. Investigate polling/WebSocket compression independently; benchmark before enabling.
+- [x] 4. Design/validate persistent revision/ID/hash-scoped grammar caching across reloads.
+- [x] 5. Investigate OTA archive/transfer compression and compatibility; retain Deflate ZIP.
 - [ ] 6. Finish poor-connection cold/warm, switch/reconnect and secondary-editor audit.
-- [ ] 7. Separately approved maintenance release: matched binaries/domain/assets,
+- [ ] 7. Read-only unused vendored/stale asset inventory; report evidence and sizes,
+  accounting for dynamic loaders and package manifests. No deletion approval.
+- [ ] 8. Separately approved maintenance release: matched binaries/domain/assets,
   staging APKs, target acceptance, merge/tag/publication.
 
 Older publication/lifecycle checkboxes above describe their specific checkpoints.
@@ -428,3 +430,120 @@ cross-page persistence and is consistent with reuse without refetch/rewrite;
 no request probe captured zero network body reads. User live acceptance passed
 for this observed path. Cross-app-process relaunch, all-client validation and
 release packaging are separate gates. OTA compression investigation is next.
+
+---
+
+## OTA compression investigation (2026-10-10)
+
+- [x] Inspect framework archive generation and Android/Electron extraction.
+- [x] Compare bounded offline manifest payloads at Deflate levels 1, 6 and 9.
+- [x] Verify every extracted entry against its source SHA-256.
+- [x] Retain ZIP/default compression; no production change justified.
+
+`framework/rust/crates/te2-server/src/android_assets.rs` already selects
+`CompressionMethod::Deflated`. Pinned zip 2.4.2 with the enabled flate2 backend
+defaults to level 6; enabling the zopfli feature does not itself select its
+high-cost compression levels. The endpoint builds the current manifest anew
+on a blocking task, completes the archive before responding and reads it into
+a response buffer. Same-version forced updates must retain fresh-source behavior.
+
+Shared Android `EditorAssetManager` streams the response through
+`ZipInputStream` into staging. Electron downloads a temporary ZIP and extracts
+with yauzl; Python desktop installation uses zipfile. Existing clients already
+decode Deflate ZIPs. Browser HTTP gzip is separate; do not add a second gzip
+wrapper or change archive formats based on this investigation.
+
+An in-memory Python stdlib/zlib probe expanded the current manifest, including
+template replacements/exclusions/version, to 219 entries / 45,127,009 bytes.
+Input was bounded to 128 MiB; no archive, build or runtime mutation occurred.
+
+| Deflate level | ZIP bytes | Encode seconds | Decode + SHA verification seconds |
+| --- | ---: | ---: | ---: |
+| 1 | 14,803,438 | 0.571 | 0.420 |
+| 6 | 12,900,561 | 1.327 | 0.378 |
+| 9 | 12,829,230 | 2.875 | 0.398 |
+
+All entry round trips passed. Level 6 reduced source bytes by about 71.4%;
+level 9 saved only 71,331 bytes (0.55%) relative to level 6. Peak probe RSS was
+106,556 KiB and includes Python, retained source buffers and the in-memory
+archive; it is not the server's memory footprint. These single-run local proxy
+measurements establish neither native Rust encode timings nor mobile extraction
+CPU/network performance. No APK, OTA, framework restart or release was performed.
+
+Recommendation: keep current compression and move to the final loading audit.
+Any future archive streaming/content-fingerprinted reuse work needs separate
+evidence/approval and must not reintroduce stale same-version bundles. User
+follow-ups below remain deferred and are included in the next checkpoint only;
+none were implemented in this slice.
+
+---
+
+## Loading audit — reconnect/open supersession (2026-10-10)
+
+Read-only tracing found that explicit opens use the retained transaction queue,
+while SSOT reconnect snapshots apply through a separate async path. An isolated
+production-handler probe held A.md grammar preparation, applied a newer B.txt
+open, then released A: the old snapshot mounted A again. Snapshot sequence checks
+only covered other snapshots, and document revisions are per-path, so selecting
+B did not invalidate A. This reproduces a control-flow gap, not an attribution
+of every historical loading incident to this cause.
+
+Approved frontend correction shares a presentation supersession sequence across
+SSOT and explicit opens, advancing it on disconnect without clearing the visible
+model. Queued obsolete opens skip application; the actual transaction runner
+rechecks before/after editor readiness, after grammar preparation and after
+completion awaits. Existing backend document revisions, open queue and grammar
+cache ownership remain unchanged. Late SSOT language hydration cannot schedule
+agent-review work after a newer selection. No HTTP preflight or new transport.
+
+- [x] Five production-handler/transaction regressions: delayed replay vs open,
+  delayed open vs replay, newest queued open, empty replay and disconnect.
+- [x] Combined open-flow, secondary lifecycle, projection/cache suite: 25 pass.
+- [x] Code TE2 TypeScript check.
+- [x] Code TE2 frontend build (`node build.mjs`).
+- [ ] Explicit native client OTA and poor-connection live acceptance.
+
+User reported the correction working and recognized the previously rare stale
+selection behavior on 2026-10-10. Observed live acceptance passes; exhaustive
+poor-connection/all-client deployment coverage remains a separate gate.
+
+The secondary lifecycle test initially failed to resolve its relative entrypoint
+from repo root; rerunning from the Code TE2 app directory passed all six tests.
+No test-source repair was needed. The broader loading audit and separate stale
+asset inventory remain open. No backend rebuild, OTA, APK assembly, runtime
+restart, commit or release was performed in this slice.
+
+---
+
+## User follow-ups:
+
+### extensions
+
+1. settings access from extension market page
+2. astra.ty install issue
+3. list of isntalled user extensions in market overlay
+
+---
+
+### file explorer
+
+1. code te2 like terminal drawer/backend
+2. identity based window/session/state identity like als/rs (one terminal per identity) associated sidebar identity like als/rs
+3. regex search (depth 1)
+4. `du -h --max-depth=1` style behavior/view
+
+---
+
+### shared file picker
+
+1. regex search (1 depth)
+2. select directory behavior is broken, this is because of a split-brain behavior where a single click/tap opens directories and they cant be selected. so the "pick what is selected" listener never has a chance to associate it. we need to make opening directories a double click/tap gesture
+
+---
+
+### code-te2
+
+1. Desktop client - minimize action on detatched sidebar tabs/windows
+2. All clients - more transparent alpha in draft highlighted text
+3. all clients Command pallet default: the "lower state" that shows the different options (;,:,@ ) instead of the default ">"
+4. desktop - key combo: new key combo "ctrl, :" and "ctrl, shift, P" 

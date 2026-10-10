@@ -93,11 +93,13 @@ interface OpenModelLike extends EditorModelLike {
 export async function runEditorOpenTransaction(
   deps: RunEditorOpenTransactionDeps,
   payload: EditorOpenPayload | null | undefined,
+  isCurrent: () => boolean = () => true,
 ): Promise<void> {
-  if (!payload || !payload.path) return;
+  if (!payload || !payload.path || !isCurrent()) return;
 
   const incomingPath = String(payload.path || '');
   await deps.ensureEditorWithPrefs();
+  if (!isCurrent()) return;
   if (!acceptDocumentProjection(incomingPath, payload.document_revision)) {
     console.warn('[editor:open] rejected stale or unfenced document projection', {
       path: incomingPath,
@@ -147,6 +149,10 @@ export async function runEditorOpenTransaction(
   try {
     const fallbackLanguage = deps.languageFromPath(currentPath);
     const lang = await deps.prepareTextmateForDocument(currentPath, fallbackLanguage);
+    if (!isCurrent()) {
+      settleOpenTransaction(deps.openTransactionStore, tx);
+      return;
+    }
     let model = deps.getModel();
     const editor = deps.getEditor();
     const diffEditor = deps.getDiffEditor();
@@ -252,6 +258,10 @@ export async function runEditorOpenTransaction(
       },
     }, deps.openTransactionStore, tx, postOpenJumpPayload, 4, 'editor:open-complete');
 
+    if (!isCurrent()) {
+      settleOpenTransaction(deps.openTransactionStore, tx);
+      return;
+    }
     if (!satisfied) {
       try {
         console.warn('[editor:open] completion verification failed', {

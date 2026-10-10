@@ -2237,10 +2237,11 @@ interface MonacoBootWindowLike extends Window {
     openTransactionStore: openTransactionStore,
   }) as Parameters<typeof runEditorOpenTransaction>[0];
 
-  function _runEditorOpenTransaction(payload: unknown): Promise<void> {
+  function _runEditorOpenTransaction(payload: unknown, isCurrent?: () => boolean): Promise<void> {
     return runEditorOpenTransaction(
       openTransactionDeps,
       payload as Parameters<typeof runEditorOpenTransaction>[1],
+      isCurrent,
     );
   }
 
@@ -2420,8 +2421,8 @@ interface MonacoBootWindowLike extends Window {
               function () {},
             );
           },
-          runEditorOpenTransaction: function (payload: unknown) {
-            return _runEditorOpenTransaction(payload).then(function () {});
+          runEditorOpenTransaction: function (payload: unknown, isCurrent?: () => boolean) {
+            return _runEditorOpenTransaction(payload, isCurrent).then(function () {});
           },
           handleJumpToLine: function (payload: unknown) {
             handleJumpToLineEvent(editor, model, payload, applyJumpToLineAt);

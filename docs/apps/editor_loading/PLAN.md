@@ -213,11 +213,25 @@ on the observed paths. Continue in this order:
    transfer savings, CPU/memory, integrity checks and backward compatibility
    independently of browser HTTP gzip. Preserve installed asset inventory and
    atomic activation; no OTA format/client changes without separate approval.
+   Source inspection confirms existing Deflate ZIP delivery across Android and
+   Electron. The offline manifest comparison recorded in TRACKER.md supports
+   retaining the current format/default level: stronger compression saved only
+   about 0.55% against level 6 while substantially increasing preparation time.
+   These are Python/zlib proxy measurements, not native Rust/device timings.
+   No updater or compression-policy change is warranted by this evidence.
 6. **Finish the loading audit.** Cover cold/warm comparison languages, rapid file
    switches, reconnect and primary/secondary editors under poor connections.
    Separate tokenization, transport latency and model readiness; act only on
    demonstrated inefficiencies or races.
-7. **Maintenance release integration.** With separate release approval, synchronize
+7. **Unused vendored/stale asset inventory.** Separately audit source references,
+   build inputs, dynamic runtime loaders, native interception inventories and
+   OTA/APK/wheel packaging manifests. Distinguish genuinely unused assets from
+   required runtime dependencies and intentional compatibility copies; absence
+   of a direct import is not removal evidence. Report candidate paths, sizes,
+   consumers and confidence, including any unresolved dynamic use. This step is
+   read-only: deletions, manifest changes and rebuilt publication require a
+   separately approved concrete plan.
+8. **Maintenance release integration.** With separate release approval, synchronize
    versions and package matching domain/worker/framework artifacts, frontend
    assets and staging APK seeds. Validate provenance and target installs before
    merge/tag/publication. No release is authorized by this documentation update.

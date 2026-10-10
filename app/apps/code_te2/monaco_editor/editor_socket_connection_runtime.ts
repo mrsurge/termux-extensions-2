@@ -85,7 +85,7 @@ interface EditorSocketConnectionDeps {
   requestAgentEditDocumentState(payload: Record<string, unknown>): Promise<unknown>;
   shouldDropDuplicateEditorOpen(payload: unknown): boolean;
   queueOpenTransaction(task: () => Promise<void>): Promise<void>;
-  runEditorOpenTransaction(payload: unknown): Promise<void>;
+  runEditorOpenTransaction(payload: unknown, isCurrent?: () => boolean): Promise<void>;
   handleJumpToLine(payload: unknown): void;
   buildMonacoOptionsFromPrefs(state: unknown): Record<string, unknown>;
   applyLineNumberSizing(): void;
@@ -170,6 +170,8 @@ export function registerEditorSocketConnectionHandlers(
   socket: EditorSocketLike,
   deps: EditorSocketConnectionDeps,
 ): void {
+  // One presentation fence for both replay snapshots and explicit opens.
+  // Per-path document revisions cannot supersede a different selected file.
   let snapshotSequence = 0;
   const handleSsotSnapshot = (snapshot: unknown): void => {
     const sequence = ++snapshotSequence;
@@ -313,6 +315,7 @@ export function registerEditorSocketConnectionHandlers(
               await languageOpenPromise;
             } catch (_) {}
           }
+          if (sequence !== snapshotSequence) return;
           try {
             await deps.requestAgentEditDocumentState({
               path: activePath,
@@ -369,7 +372,11 @@ export function registerEditorSocketConnectionHandlers(
           : null;
         console.log((t != null ? ('t=' + t + 'ms ') : '') + 'now=' + Date.now(), '[editor:open] rx', { path: payloadRecord.path, request_id: payloadRecord.request_id || '' });
       } catch (_) {}
-      deps.queueOpenTransaction(() => deps.runEditorOpenTransaction(payload)).catch((error) => {
+      const sequence = ++snapshotSequence;
+      const isCurrent = () => sequence === snapshotSequence;
+      deps.queueOpenTransaction(() => isCurrent()
+        ? deps.runEditorOpenTransaction(payload, isCurrent)
+        : Promise.resolve()).catch((error) => {
         console.warn('[Monaco] open apply failed', error);
       });
     } catch (error) {
@@ -452,6 +459,10 @@ export function registerEditorSocketConnectionHandlers(
   socket.on('connect', () => {
     deps.emitToHost('editor_ready', {});
     deps.emitToHost('editor:iframe_ready', {});
+  });
+  socket.on('disconnect', () => {
+    // Retain the visible model, but invalidate unfinished work from this session.
+    snapshotSequence += 1;
   });
 
   if (deps.rpcNotifications) {
