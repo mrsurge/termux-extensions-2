@@ -42,6 +42,26 @@ test('relative Sidebar publication saves a restorable tab reference or identity-
 });
 const record = (revision = 1) => ({ id: 'tab', path: '/project', revision, options: {} });
 
+test('terminal association ACK advances the shared mutation lane before path updates', async () => {
+  const wire = socket(), seen = [];
+  const client = createTabClient(wire, value => seen.push(value), () => {});
+  const mounting = client.mount({ kind: 'attach', tabId: 'tab' });
+  wire.calls[0].ack({ ok: true, result: { tab: record() } }); await mounting;
+  const start = client.terminal('terminal.start');
+  const update = client.update('/next', {});
+  await Promise.resolve();
+  assert.equal(wire.calls[1].payload.params.revision, 1);
+  wire.calls[1].ack({ ok: true, result: { tab: { ...record(2), shellId: 'shell' } } }); await start;
+  await new Promise(setImmediate);
+  assert.equal(wire.calls[2].payload.params.revision, 2);
+  wire.calls[2].ack({ ok: true, result: { tab: { ...record(3), shellId: 'shell' } } }); await update;
+  assert.equal(seen[0].shellId, 'shell');
+  const closing = client.close(client.tab, true);
+  assert.equal(wire.calls[3].payload.params.closeTerminal, true);
+  wire.calls[3].ack({ ok: true, result: { closedId: 'tab' } }); await closing;
+  client.dispose();
+});
+
 test('dropdown catalog keeps the active tab and receives catalog changes', async () => {
   const wire = socket(); let changed = 0;
   const client = createTabClient(wire, () => {}, () => {}, () => changed++);

@@ -12,6 +12,7 @@ from starlette.exceptions import HTTPException
 
 from .http_app import Scope, Receive, Send
 from .tab_store import TabStore, object_map, options, text
+from .terminal_service import TerminalService
 
 NAMESPACE = '/tabs'
 
@@ -28,6 +29,20 @@ class ASGIApplication(Protocol):
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None: ...
 
 
+class ShellEvent(Protocol):
+    def to_dict(self) -> dict[str, object]: ...
+
+
+class ShellBus(Protocol):
+    def subscribe(self) -> asyncio.Queue[ShellEvent]: ...
+    def unsubscribe(self, queue: asyncio.Queue[ShellEvent]) -> None: ...
+
+
+def shell_bus() -> ShellBus:
+    from framework_shells.events import get_event_bus
+    return cast(ShellBus, cast(object, get_event_bus()))
+
+
 class TabService:
     def __init__(self, store: TabStore, server: SocketServer,
                  resolve_path: Callable[[object], str],
@@ -39,9 +54,64 @@ class TabService:
         self.lock: asyncio.Lock = asyncio.Lock()
         self.presentations: dict[str, str] = {}
         self.attached: dict[str, str] = {}
+        self.terminals: TerminalService = TerminalService(store)
+        self.observer: asyncio.Task[None] | None = None
         _ = server.on('connect', self.connect, namespace=NAMESPACE)
         _ = server.on('disconnect', self.disconnect, namespace=NAMESPACE)
         _ = server.on('tab_request', self.request, namespace=NAMESPACE)
+
+    def observe(self) -> None:
+        if self.observer is None:
+            bus = shell_bus()
+            queue = bus.subscribe()
+            self.observer = asyncio.create_task(self._observe(bus, queue))
+            # Also runs if shutdown cancels before the coroutine first enters.
+            self.observer.add_done_callback(lambda _task: bus.unsubscribe(queue))
+
+    async def shutdown(self) -> None:
+        if self.observer is not None:
+            _ = self.observer.cancel()
+            _ = await asyncio.gather(self.observer, return_exceptions=True)
+            self.observer = None
+
+    async def _observe(self, bus: ShellBus, queue: asyncio.Queue[ShellEvent]) -> None:
+        try:
+            while True:
+                event = await queue.get()
+                # Events are wakeups only; raw log offsets/bytes remain authority.
+                events = [event.to_dict()]
+                for _ in range(min(queue.qsize(), 255)):
+                    events.append(queue.get_nowait().to_dict())
+                shells = {str(item.get('shell_id')) for item in events
+                          if item.get('type') in ('shell.pty_chunk', 'shell.log_chunk', 'shell.log_reset', 'shell.exited', 'shell.removed')}
+                for shell_id in shells:
+                    try:
+                        await self.shell_changed(shell_id)
+                    except Exception:
+                        logging.getLogger(__name__).exception('Terminal observation failed for %s', shell_id)
+                        await self.server.emit('terminal_reset', {'shellId': shell_id}, room='tab-catalog', namespace=NAMESPACE)
+        finally:
+            bus.unsubscribe(queue)
+
+    async def shell_changed(self, shell_id: str) -> None:
+        async with self.lock:
+            for tab in self.store.snapshot():
+                if tab['shellId'] != shell_id:
+                    continue
+                current = await self.terminals.reconcile(tab)
+                room = 'tab:' + tab['id']
+                if current != tab:
+                    await self.server.emit('tab_snapshot', {'tab': current}, room=room, namespace=NAMESPACE)
+                    await self.server.emit('tab_catalog', {'changed': True}, room='tab-catalog', namespace=NAMESPACE)
+                    continue
+                growth = await self.terminals.projections.consume_growth(shell_id)
+                if growth is None:
+                    continue
+                if growth.reset:
+                    await self.server.emit('terminal_reset', {'shellId': shell_id}, room=room, namespace=NAMESPACE)
+                for delta in growth.deltas:
+                    await self.server.emit('terminal_output', {'tabId': tab['id'], 'shellId': shell_id,
+                        'startOffset': delta.start_offset, 'endOffset': delta.end_offset, 'data': delta.data}, room=room, namespace=NAMESPACE)
 
     async def connect(self, sid: str, _environ: object, auth: object = None) -> bool:
         try:
@@ -113,11 +183,30 @@ class TabService:
         tab_id = text(params.get('tabId'))
         if method == 'tabs.attach':
             existing = self.store.get(tab_id)
+            if existing is not None:
+                if existing['shellId'] is not None:
+                    self.observe()
+                previous = existing
+                existing = await self.terminals.reconcile(existing)
+                if existing != previous:
+                    await self.server.emit('tab_snapshot', {'tab': existing}, room='tab:' + tab_id, skip_sid=sid, namespace=NAMESPACE)
+                    await self.server.emit('tab_catalog', {'changed': True}, room='tab-catalog', namespace=NAMESPACE)
             await self._attach(sid, tab_id if existing else '')
             return {'tab': existing}
         revision = params.get('revision')
         if not isinstance(revision, int) or isinstance(revision, bool):
             raise ValueError('Expected tab revision')
+        if method in ('terminal.start', 'terminal.status', 'terminal.close', 'terminal.input', 'terminal.resize', 'terminal.checkpoint'):
+            selected = self.store.get(tab_id)
+            if self.attached.get(sid) != tab_id or selected is None or selected['revision'] != revision:
+                raise ValueError('Attach and resync before terminal operations')
+            self.observe()
+            result = await self.terminals.dispatch(selected, method, params)
+            current = self.store.get(tab_id)
+            if current != selected:
+                await self.server.emit('tab_snapshot', {'tab': current}, room='tab:' + tab_id, skip_sid=sid, namespace=NAMESPACE)
+                await self.server.emit('tab_catalog', {'changed': True}, room='tab-catalog', namespace=NAMESPACE)
+            return result
         if method == 'tabs.update':
             if self.attached.get(sid) != tab_id:
                 raise ValueError('Attach before updating this tab')
@@ -128,6 +217,15 @@ class TabService:
             await self.server.emit('tab_catalog', {'changed': True}, room='tab-catalog', namespace=NAMESPACE)
             return {'tab': tab}
         if method == 'tabs.close':
+            selected = self.store.get(tab_id)
+            if selected is None or selected['revision'] != revision:
+                raise ValueError('Tab revision changed; resync before closing')
+            if selected['shellId'] is not None and params.get('closeTerminal') is True:
+                _ = await self.terminals.dispatch(selected, 'terminal.close', {})
+                current = self.store.get(tab_id)
+                if current is None:
+                    raise ValueError('Tab disappeared')
+                revision = current['revision']
             self.store.close(tab_id, revision)
             await self.server.emit('tab_snapshot', {'tab': None, 'closedId': tab_id},
                                    room='tab:' + tab_id, namespace=NAMESPACE)
@@ -148,5 +246,5 @@ def compose_tabs(http: ASGIApplication, store: TabStore,
         transports=['websocket'], allow_upgrades=False))
     service = TabService(store, server, resolve_path, project_path)
     application = cast(ASGIApplication, socketio.ASGIApp(server, other_asgi_app=http,
-                                                       socketio_path='socket.io'))
+                                                       socketio_path='socket.io', on_shutdown=service.shutdown))
     return application, service

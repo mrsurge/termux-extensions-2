@@ -346,6 +346,15 @@ Inspect extractable service contracts before importing project-bound Code TE2
 assembly or copying a second implementation. Explicit approval of a concrete
 implementation/validation slice remains required.
 
+Corrected worker boundary (2026-10-11): File Explorer is an ordinary Python app
+worker and should use the existing Framework-Shells Python API, as Code TE2 did
+before its native-worker migration. The additional uncommitted Rust shell-core
+extraction was reversed; do not impose Code TE2's PyO3 hosting requirement on
+File Explorer. Retain the committed shared Pyte projection, inject File Explorer's
+normal raw-log reader, and use an app-owned PTY shellspec/manager adapter with
+tab-specific labels. Backend shell lifecycle/association/checkpoints precede
+event-driven output and drawer UI. See app/apps/file_explorer/TERMINAL.md.
+
 Extra terminal keys are shown only for mobile user agents, not merely narrow
 desktop windows; desktop user agents must not render the extra-key controls.
 
@@ -527,6 +536,18 @@ on the observed paths. Continue in this order:
 
 Each implementation slice still requires concrete scope approval. Documentation
 approval does not authorize builds, client changes or runtime restarts.
+
+### File Explorer terminal drawer checkpoint
+
+File Explorer terminal UI checkpoint: ordinary Python Framework-Shells plus
+shared Pyte now has an authored TypeScript xterm drawer, exact-tab live output/
+exit observation, reconnect checkpoints, explicit start/close and minimized/
+maximized presentation. Build with `node build.mjs` in `app/apps/terminal`;
+typechecking there includes the drawer. The next acceptance gate is refreshing
+the File Explorer worker and native OTA, then checking input/output, tab restore,
+two presentations, explicit closure and mobile-only keys. Directory-lock shell
+injection remains separately deferred; no shared-framework restart or release
+is authorized by this checkpoint. Detailed contract: File Explorer TERMINAL.md.
 
 ### Stable native origin implementation
 

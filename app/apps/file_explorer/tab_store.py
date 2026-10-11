@@ -155,3 +155,15 @@ class TabStore:
         remaining = self.tabs.copy()
         del remaining[tab_id]
         self._commit(remaining, self.creations.copy())
+
+    def set_shell(self, tab_id: str, revision: int, shell_id: str | None) -> TabRecord:
+        tab = self.get(tab_id)
+        if tab is None or tab['revision'] != revision:
+            raise ValueError('Tab changed; resync before changing terminal')
+        if shell_id is not None:
+            shell_id = text(shell_id)
+        if tab['shellId'] == shell_id:
+            return tab
+        tab['shellId'], tab['revision'] = shell_id, revision + 1
+        self._commit({**self.tabs, tab_id: tab}, self.creations.copy())
+        return clone(tab)

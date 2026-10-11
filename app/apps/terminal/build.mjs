@@ -33,3 +33,8 @@ if (isWatch) {
 } else {
   await build(mainConfig);
 }
+
+const explorerConfig = { ...shared, entryPoints: [path.join(appRoot, '..', 'file_explorer', 'terminal_drawer.ts')],
+  outfile: path.join(appRoot, '..', '..', 'static', 'js', 'file_explorer_terminal.js') };
+if (isWatch) { const ctx = await context(explorerConfig); await ctx.watch(); }
+else await build(explorerConfig);

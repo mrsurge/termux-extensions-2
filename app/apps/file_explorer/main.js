@@ -5,6 +5,7 @@ import {
 import { getIcon, renderIcon } from "/static/js/file_icons.js";
 import { selectPaths } from "/static/js/file_explorer_selection.mjs";
 import { createTabClient, mountIntent, tabUrl, randomTabOperation } from "/static/js/file_explorer_tabs.mjs";
+import { createTerminalDrawer } from "/static/js/file_explorer_terminal.js";
 
 const HOME_DIR = "~";
 const SOCKET_IO_CLIENT_SRC = "/static/vendor/socket.io.min.js";
@@ -969,6 +970,8 @@ export default function initFileExplorer(root, api, host) {
   let directoryGeneration = 0;
   let splashGeneration = 0;
   let tabsInitialized = false;
+  let terminalDrawer = null;
+  let renderedTab = '';
   let publishedTabReference = null;
   let pendingTabReference = null;
   const lastTabKey = 'te2:file-explorer:last-tab:v1';
@@ -1003,7 +1006,11 @@ export default function initFileExplorer(root, api, host) {
   }
 
   async function applyTab(tab) {
-    if (!tab) { await showTabs(); return; }
+    terminalDrawer?.sync(tab);
+    if (!tab) { renderedTab = ''; await showTabs(); return; }
+    const rendering = JSON.stringify([tab.id, tab.path, tab.options]);
+    if (rendering === renderedTab) return;
+    renderedTab = rendering;
     splashGeneration++;
     applyingTab++;
     try {
@@ -1014,11 +1021,14 @@ export default function initFileExplorer(root, api, host) {
       if (ui.btnSortDir) ui.btnSortDir.textContent = state.sortAsc ? '↓' : '↑';
       rememberTab(tab);
       showTabChrome(true);
-      await loadDirectory(tab.path, true);
+      try { await loadDirectory(tab.path, true); }
+      catch (error) { renderedTab = ''; throw error; }
     } finally { applyingTab--; }
   }
 
   async function showTabs() {
+    terminalDrawer?.sync(null);
+    renderedTab = '';
     const generation = ++splashGeneration;
     directoryGeneration++;
     rememberTab(null);
@@ -1058,10 +1068,12 @@ export default function initFileExplorer(root, api, host) {
       close.title = 'Close tab';
       close.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
       close.addEventListener('click', async () => {
-        if (!await window.teUI.dialog.confirm('Close this tab in all attached windows?')) return;
+        if (!await window.teUI.dialog.confirm(record.shellId
+          ? 'Close this tab and stop its terminal processes in all attached windows?'
+          : 'Close this tab in all attached windows?')) return;
         close.disabled = true;
         try {
-          await tabs.close(record);
+          await tabs.close(record, Boolean(record.shellId));
           if (tabs.tab) await refreshTabsMenu();
           else await showTabs();
         } catch (error) { tabError(error); close.disabled = false; }
@@ -3055,6 +3067,7 @@ export default function initFileExplorer(root, api, host) {
         if (!tabs.tab) void showTabs().catch(tabError);
         else if (tabsGroup.hasAttribute('data-open')) void refreshTabsMenu().catch(tabError);
       });
+    terminalDrawer = createTerminalDrawer(container, tabs, socket, tabError);
     await new Promise((resolve, reject) => {
       const timer = setTimeout(() => { socket.disconnect(); reject(new Error('Tab connection timed out')); }, 15000);
       socket.once('connect', () => { clearTimeout(timer); resolve(); });
@@ -3082,7 +3095,7 @@ export default function initFileExplorer(root, api, host) {
   });
   window.addEventListener('pagehide', event => {
     if (event.persisted) tabSocket?.disconnect();
-    else tabs?.dispose();
+    else { terminalDrawer?.dispose(); tabs?.dispose(); }
   });
   window.addEventListener('pageshow', event => { if (event.persisted) tabSocket?.connect(); });
   getBookmarks();

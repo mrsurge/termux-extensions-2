@@ -1,0 +1,10 @@
+version: "1"
+
+shells:
+  terminal:
+    backend: pty
+    pty_mode: interactive
+    cwd: ${ctx:CWD}
+    command: ${ctx:SHELL_CMD}
+    env:
+      TERM: xterm-256color

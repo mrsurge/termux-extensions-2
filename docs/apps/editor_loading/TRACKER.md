@@ -730,6 +730,69 @@ import Code TE2's project-bound terminal_backend or silently use a legacy I/O pa
 as a substitute. Shell launch/input/resize/observation/teardown and per-tab live-ID
 reconciliation need a separately approved concrete slice before drawer UI wiring.
 
+Correction and backend foundation (2026-10-11): user clarified the intended
+pre-native Code TE2 model. Git parent of 0aed2445 confirms lazy framework_shells
+get_manager/Orchestrator PTY shellspec launch, manager input/resize/removal and
+Pyte raw-log checkpoints. The Python package remains a runtime dependency. The
+additional uncommitted Rust extraction and associated notes/tests were reversed,
+leaving the committed shared Pyte core intact. Code TE2's native boundary is not
+a File Explorer prerequisite; the older no-Python-I/O assumption above is
+superseded for this app.
+
+Approved backend slice now uses File Explorer-owned shellspec/terminal.yaml,
+lazy typed Framework-Shells adapter and injected Python raw-log reader. Durable
+shellId association changes persist before memory commit and advance revisions.
+The existing tabs lane exposes explicit Start/Status/Close/Input/Resize/Checkpoint
+with attached-tab/current-revision checks, exact tab labels and live capabilities.
+Attach/status reconcile confirmed missing/exited associations without restarting;
+running-but-uncontrolled/foreign records fail closed. Disconnect retains shells;
+tab close retains its explicit-terminal-close prerequisite. Newly spawned shells
+are removed if association persistence fails. No runtime restart/activation or
+frontend/Android/publication work. Drawer rendering and event-driven live output
+and exit notifications remain subsequent slices, not implemented acceptance.
+
+70 interpreted tab/terminal/raw-ASGI/shared-projection regressions pass. Strict
+mypy, ty and basedpyright pass with no diagnostics. The standalone six-module
+mypyc proof passes 55 compiled regressions; final artifact is
+`.codex-scratch/file-explorer-fws-terminal-final-20261011/lib` (not activated).
+This is isolated regression evidence, not live Framework-Shells/device acceptance.
+Two additional compiled tests pass for cancellation cleanup and recovering an
+existing exact-label association without duplicate launch; actual terminal/log
+module `.so` imports were verified. Total compiled coverage is 57 tests.
+See File Explorer TERMINAL.md for wire details.
+
+#### File Explorer terminal drawer implementation checkpoint
+
+Approved UI source now adds Terminal/Show, minimize/maximize and confirmed Close,
+with active-terminal confirmation before tab closure. It uses existing custom
+xterm/Fit/WebFonts/touch assets and shared mobile-UA key helpers; desktop keys are
+hidden regardless of window width. TypeScript builds to the existing static/js
+OTA root through the Terminal frontend builder. No Android source or APK changed.
+
+Framework-Shells output/exit events lazily wake raw-log Pyte projection, with
+binary deltas on the exact tab room and persisted exited-shell disassociation.
+Frontend checkpoint handoff uses bounded admission, raw offsets and asynchronous
+tab/shell/connection fences. Reconnect restores a checkpoint; input is never
+replayed. Association ACKs share the path-update mutation lane and association
+changes alone do not refetch directory contents. Shutdown unsubscribes observers
+without ending retained shells. Directory-lock injection remains deferred.
+
+Validation: 85 interpreted Python regressions; strict mypy/no explicit Any, ty,
+basedpyright (zero errors/warnings); Terminal and drawer TypeScript checks/build;
+22 existing Terminal tests plus 10 tab/drawer tests, including checkpoint/delta
+ordering, stale mount rejection, desktop-key hiding, retained minimized/disposed
+shells and terminal-association revision ordering. The updated standalone six-module
+mypyc proof passes 57 smoke tests at
+`.codex-scratch/file-explorer-drawer-20261011/lib` (not activated), plus two compiled
+output/exit and close-consent regressions. No live acceptance is claimed; no
+runtime restart, client OTA, commit/push or release performed. Live test needs
+File Explorer worker refresh and explicit native asset OTA, not Code TE2 rebuild.
+
+User live acceptance confirms the terminal drawer works and looks good. The user
+also reports severe slowness; performance acceptance remains open and is the next
+read-only investigation. This does not authorize a shared runtime restart or an
+unreviewed performance rewrite.
+
 #### Durable tabs and synchronization implementation checkpoint
 
 User approved the end-to-end tab lifecycle slice, including the refined launcher

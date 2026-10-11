@@ -74,6 +74,7 @@ export function createTabClient(socket, onSnapshot, onError, onCatalog = () => {
     request,
     get tab() { return tab; },
     async mount(intent, preferences, operationId) {
+      mutationEpoch++;
       mounting++;
       try {
         const result = intent.kind === 'create'
@@ -107,9 +108,28 @@ export function createTabClient(socket, onSnapshot, onError, onCatalog = () => {
       lane = operation.catch(() => {});
       return operation;
     },
-    async list() { tab = null; return (await request('tabs.list')).tabs; },
+    async list() { mutationEpoch++; tab = null; return (await request('tabs.list')).tabs; },
     async catalog() { return (await request('tabs.catalog')).tabs; },
-    async close(record) { return request('tabs.close', { tabId: record.id, revision: record.revision }); },
+    terminal(method, params = {}) {
+      const identity = tab?.id;
+      const connection = generation;
+      const epoch = mutationEpoch;
+      const operation = lane.then(async () => {
+        if (!identity || identity !== tab?.id || connection !== generation || epoch !== mutationEpoch) throw new Error('Tab selection changed');
+        const result = await request(method, { ...params, tabId: identity, revision: tab.revision });
+        if (connection !== generation || identity !== tab?.id) throw new Error('Tab selection changed');
+        if (result.tab && result.tab.revision >= tab.revision) { tab = result.tab; onSnapshot(tab); }
+        return result;
+      }).catch(async error => {
+        if (epoch === mutationEpoch && connection === generation && identity === tab?.id) {
+          mutationEpoch++; await resync();
+        }
+        throw error;
+      });
+      lane = operation.catch(() => {});
+      return operation;
+    },
+    async close(record, closeTerminal = false) { return request('tabs.close', { tabId: record.id, revision: record.revision, closeTerminal }); },
     dispose() {
       disposed = true; disconnected();
       socket.off('disconnect', disconnected); socket.off('tab_snapshot', receive); socket.off('connect', resync);

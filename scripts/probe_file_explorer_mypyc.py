@@ -21,7 +21,8 @@ def main() -> None:
     if output.exists():
         parser.error('choose a new output directory; existing artifacts are preserved')
     sources = ['app/apps/file_explorer/http_app.py', 'app/apps/file_explorer/file_explorer.py',
-               'app/apps/file_explorer/tab_store.py', 'app/apps/file_explorer/tab_service.py']
+               'app/apps/file_explorer/tab_store.py', 'app/apps/file_explorer/tab_service.py',
+               'app/apps/file_explorer/terminal_log_io.py', 'app/apps/file_explorer/terminal_service.py']
     subprocess.run([sys.executable, '-B', '-m', 'mypy', '--strict', '--disallow-any-explicit',
                     '--follow-imports=silent', *sources], cwd=repo, check=True)
     from mypyc.build import mypycify
@@ -51,13 +52,20 @@ import app.apps.file_explorer.tab_store as store
 import app.apps.file_explorer.tab_service as service
 assert str(store.__file__).endswith('.so'), store.__file__
 assert str(service.__file__).endswith('.so'), service.__file__
+import app.apps.file_explorer.terminal_service as terminal
+import app.apps.file_explorer.terminal_log_io as log_io
+assert str(terminal.__file__).endswith('.so'), terminal.__file__
+assert str(log_io.__file__).endswith('.so'), log_io.__file__
 import pytest
-raise SystemExit(pytest.main(['-q', 'tests/test_file_explorer_asgi.py', 'tests/test_file_explorer_tabs.py', '-k',
+raise SystemExit(pytest.main(['-q', 'tests/test_file_explorer_asgi.py', 'tests/test_file_explorer_tabs.py', 'tests/test_file_explorer_terminal.py', '-k',
     'methods or required_query or unknown_and_slash or invalid_body or oversized '
     'or file_operations or download_streaming or partial_body or bulk_job '
     'or archive_and_symlink or chown_overloads or tab_persistence or failed_disk '
     'or corrupt_store or invalid_options or rooms_revisions or concurrent_creation '
-    'or real_socketio or domain_validation or tab_sidebar']))
+    'or real_socketio or domain_validation or tab_sidebar '
+    'or tab_terminal_lifecycle or exit_reconcile or foreign_and_uncontrolled '
+    'or invalid_resize or disconnect_and_foreign_tab or terminal_import '
+    'or cancelled_launch or existing_label']))
 '''
     subprocess.run([sys.executable, '-B', '-c', probe, str(output / 'lib')], cwd=repo,
                    env=dict(os.environ, PYTHONDONTWRITEBYTECODE='1'), check=True)
