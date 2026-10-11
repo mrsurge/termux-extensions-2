@@ -21,6 +21,9 @@ from starlette.exceptions import HTTPException
 from starlette.responses import FileResponse
 
 from app.apps.file_explorer.http_app import FileExplorerHTTP
+from app.apps.file_explorer.tab_store import TabStore
+from app.apps.file_explorer.tab_service import compose_tabs
+from app.te2_paths import te2_app_data_home
 
 from app.libs.jobs import JobCancelled, JobContext, register_job_handler
 from app.libs import pipe_runtime
@@ -447,11 +450,31 @@ async def publish_sidebar_window_url(payload: dict[str, object] | None = None) -
     host_id = str(body.get('host_id') or body.get('hostId') or '').strip()
     if not host_id:
         raise HTTPException(status_code=400, detail='host_id is required')
-    directory = _resolve_sidebar_directory(body.get('path'))
-    path_value = str(directory)
     console_worker_id = str(body.get('console_worker_id') or body.get('consoleWorkerId') or '').strip()
     token_id = str(body.get('token_id') or body.get('tokenId') or SIDEBAR_TOKEN_ID).strip()
-    url_value = _canonical_sidebar_url(host_id, token_id, path_value, console_worker_id)
+    tab_id = _text(body.get('tab_id'))
+    splash = not tab_id and body.get('splash') is True
+    path_value = ''
+    query_state: dict[str, object] = {}
+    if tab_id:
+        tab = TAB_SERVICE.store.get(tab_id)
+        if tab is None:
+            raise HTTPException(404, 'Tab no longer exists')
+        path_value = tab['path']
+        # Rebuild, rather than append: a restored URL must never retain a
+        # fresh-path creation intent alongside its resolved durable identity.
+        query = {'embed': '1', 'tab_id': tab_id, 'te2_host_id': host_id,
+                 'te2_token_id': token_id, 'te2_console_worker_id': console_worker_id}
+        url_value = f'{APP_BASE_URL}?{urlencode(query)}'
+        query_state = {'tab_id': tab_id}
+    elif splash:
+        query = {'embed': '1', 'te2_host_id': host_id, 'te2_token_id': token_id,
+                 'te2_console_worker_id': console_worker_id}
+        url_value = f'{APP_BASE_URL}?{urlencode(query)}'
+    else:
+        path_value = str(_resolve_sidebar_directory(body.get('path')))
+        url_value = _canonical_sidebar_url(host_id, token_id, path_value, console_worker_id)
+        query_state = {'path': path_value}
     params: dict[str, object] = {
         'lane': {
             'app_id': APP_ID,
@@ -467,11 +490,11 @@ async def publish_sidebar_window_url(payload: dict[str, object] | None = None) -
         'tokenId': token_id,
         'console_worker_id': console_worker_id,
         'consoleWorkerId': console_worker_id,
-        'state_kind': 'path',
-        'stateKind': 'path',
+        'state_kind': 'tab' if tab_id else 'splash' if splash else 'path',
+        'stateKind': 'tab' if tab_id else 'splash' if splash else 'path',
         'path': path_value,
-        'query_state': {'path': path_value},
-        'queryState': {'path': path_value},
+        'query_state': query_state,
+        'queryState': query_state,
         'url': url_value,
         'label': path_value or 'File Explorer',
         'load': 'eager',
@@ -1269,7 +1292,7 @@ async def _http_query(path: str, query: dict[str, str]) -> object:
     return await get_properties(value)
 
 
-TE2_ASGI_APP = FileExplorerHTTP(
+HTTP_APP = FileExplorerHTTP(
     query_handler=_http_query,
     commands={
         '/intent': dispatch_embedded_intent,
@@ -1279,4 +1302,17 @@ TE2_ASGI_APP = FileExplorerHTTP(
         '/copy': copy_path, '/move': move_path, '/chmod': chmod_path,
         '/extract': extract_archive, '/chown': chown_path,
     },
+)
+
+
+async def _tab_default_project_path() -> str:
+    result = await _call_sidebar_rpc('sidebar.cwd.get', {}, timeout=5)
+    if not isinstance(result.get('cwd'), str) or not result.get('cwd'):
+        raise RuntimeError('Project path is unavailable')
+    return str(_resolve_sidebar_directory(result.get('cwd')))
+
+
+TE2_ASGI_APP, TAB_SERVICE = compose_tabs(
+    HTTP_APP, TabStore(te2_app_data_home('file_explorer') / 'tabs.json'),
+    lambda value: str(_resolve_sidebar_directory(value)), _tab_default_project_path,
 )

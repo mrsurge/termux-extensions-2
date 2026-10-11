@@ -1,4 +1,9 @@
 <style>
+.fx-tab-splash { padding: 16px; overflow: auto; min-width: 0; }
+.fx-tab-splash[hidden] { display: none; }
+.fx-tab-splash button { padding: 8px 12px; border: 1px solid var(--border, #374151); border-radius: 6px; background: var(--card, #111827); color: var(--foreground, #f9fafb); cursor: pointer; }
+.fx-tab-row { display: flex; gap: 8px; margin-top: 8px; min-width: 0; }
+.fx-tab-row > :first-child { flex: 1; min-width: 0; text-align: left; overflow-wrap: anywhere; }
 .fx-app {
   display: flex;
   flex-direction: column;
@@ -155,6 +160,26 @@
 .fx-menu-dropdown button:hover {
   background: rgba(59, 130, 246, 0.2);
 }
+.fx-tabs-dropdown {
+  left: auto;
+  right: 0;
+  width: min(360px, calc(100vw - 24px));
+  max-height: min(420px, 65vh);
+  overflow-y: auto;
+}
+.fx-tabs-dropdown .fx-tab-row { display: flex; min-width: 0; }
+.fx-tabs-dropdown .fx-tab-row > button:first-child {
+  flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  display: block; text-align: left;
+}
+.fx-tabs-dropdown button[aria-current="true"] { background: #3b82f622; }
+.fx-tabs-dropdown .fx-tab-close {
+  width: 36px; flex: 0 0 36px; padding: 6px; justify-content: center;
+  color: #f87171;
+}
+.fx-tabs-dropdown .fx-tab-close svg { width: 24px; height: 24px; flex-shrink: 0; }
+.fx-tabs-dropdown button::before { display: none; }
+.fx-tabs-dropdown p { padding: 8px 14px; margin: 0; }
 .fx-context-menu {
   display: block;
   position: fixed;
@@ -660,7 +685,7 @@
     <div class="fx-toolbar-row fx-toolbar-menus">
       <div class="fx-menubar">
         <div class="fx-menu-group" data-menu="file">
-          <button type="button" class="fx-menu-button" data-menu-toggle="file">File ▾</button>
+          <button type="button" class="fx-menu-button" data-menu-toggle="file">File</button>
           <div class="fx-menu-dropdown" data-menu-panel="file">
             <button type="button" data-command="file:new-folder">New Folder</button>
             <button type="button" data-command="file:new-file">New File</button>
@@ -673,7 +698,7 @@
           </div>
         </div>
         <div class="fx-menu-group" data-menu="edit">
-          <button type="button" class="fx-menu-button" data-menu-toggle="edit">Edit ▾</button>
+          <button type="button" class="fx-menu-button" data-menu-toggle="edit">Edit</button>
           <div class="fx-menu-dropdown" data-menu-panel="edit">
             <button type="button" data-command="edit:properties">Properties</button>
             <button type="button" data-command="edit:rename">Rename</button>
@@ -683,7 +708,7 @@
           </div>
         </div>
         <div class="fx-menu-group" data-menu="view">
-          <button type="button" class="fx-menu-button" data-menu-toggle="view">View ▾</button>
+          <button type="button" class="fx-menu-button" data-menu-toggle="view">View</button>
           <div class="fx-menu-dropdown" data-menu-panel="view">
             <button type="button" data-command="view:grid">Icons</button>
             <button type="button" data-command="view:list">List</button>
@@ -709,6 +734,10 @@
         </div>
         <button type="button" class="fx-menu-button fx-sort-dir-btn" data-action="toggle-sort-direction" aria-label="Toggle sort order">↑</button>
         <button type="button" class="fx-menu-button" data-action="download" disabled aria-label="Download" title="Download">⬇️</button>
+        <div class="fx-menu-group" data-menu="tabs">
+          <button type="button" class="fx-menu-button" data-menu-toggle="tabs" aria-haspopup="true">Tabs</button>
+          <div class="fx-menu-dropdown fx-tabs-dropdown" data-menu-panel="tabs"></div>
+        </div>
       </div>
       <button type="button" class="fx-delete-btn danger" data-action="delete" disabled aria-label="Delete">🗑️</button>
     </div>

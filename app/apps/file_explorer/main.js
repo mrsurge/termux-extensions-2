@@ -4,6 +4,7 @@ import {
 } from "/static/js/te2_console_bridge.js";
 import { getIcon, renderIcon } from "/static/js/file_icons.js";
 import { selectPaths } from "/static/js/file_explorer_selection.mjs";
+import { createTabClient, mountIntent, tabUrl, randomTabOperation } from "/static/js/file_explorer_tabs.mjs";
 
 const HOME_DIR = "~";
 const SOCKET_IO_CLIENT_SRC = "/static/vendor/socket.io.min.js";
@@ -692,7 +693,7 @@ export default function initFileExplorer(root, api, host) {
   const urlParams = new URLSearchParams(window.location.search);
   const intentsReady = import('/static/js/te_file_explorer_intents.mjs').then(({ createFileExplorerIntents }) =>
     createFileExplorerIntents({ api, location: window.location, dialog: window.teUI.dialog,
-      randomId: () => crypto.randomUUID().replaceAll('-', '') }));
+      randomId: randomTabOperation }));
   const queryPath = urlParams.get("path");
   const statefulHostId = (urlParams.get("te2_host_id") || "").trim();
   const statefulTokenId = (urlParams.get("te2_token_id") || "").trim();
@@ -962,7 +963,125 @@ export default function initFileExplorer(root, api, host) {
       : "Sort descending (click for ascending)";
   }
 
-  function persistState() {
+  let tabs = null;
+  let tabSocket = null;
+  let applyingTab = 0;
+  let directoryGeneration = 0;
+  let splashGeneration = 0;
+  let tabsInitialized = false;
+  let publishedTabReference = null;
+  let pendingTabReference = null;
+  const lastTabKey = 'te2:file-explorer:last-tab:v1';
+  const footer = root.querySelector('.fx-mobile-footer');
+  const splash = document.createElement('section');
+  splash.className = 'fx-tab-splash';
+  splash.setAttribute('aria-label', 'File Explorer tabs');
+  container.before(splash);
+  const tabsGroup = container.querySelector('[data-menu="tabs"]');
+  const tabsPanel = container.querySelector('[data-menu-panel="tabs"]');
+  let catalogGeneration = 0;
+
+  function tabOptions() {
+    return { showHidden, view: state.view, sortBy: state.sortBy, sortAsc: state.sortAsc };
+  }
+
+  function tabError(error) { toast(host, error?.message || 'Tab operation failed'); }
+
+  function rememberTab(tab) {
+    history.replaceState(history.state, '', tabUrl(window.location.href, tab?.id || ''));
+    if (!statefulHostId) {
+      try {
+        if (tab) localStorage.setItem(lastTabKey, tab.id);
+      } catch { /* Storage is an optional last-tab hint, never tab authority. */ }
+    }
+  }
+
+  function showTabChrome(active) {
+    container.style.display = active ? '' : 'none';
+    if (footer) footer.style.display = active ? '' : 'none';
+    splash.hidden = active;
+  }
+
+  async function applyTab(tab) {
+    if (!tab) { await showTabs(); return; }
+    splashGeneration++;
+    applyingTab++;
+    try {
+      showHidden = tab.options.showHidden;
+      Object.assign(state, { view: tab.options.view, sortBy: tab.options.sortBy, sortAsc: tab.options.sortAsc });
+      if (ui.toggleHidden) ui.toggleHidden.checked = showHidden;
+      if (ui.sortSelect) ui.sortSelect.value = state.sortBy;
+      if (ui.btnSortDir) ui.btnSortDir.textContent = state.sortAsc ? '↓' : '↑';
+      rememberTab(tab);
+      showTabChrome(true);
+      await loadDirectory(tab.path, true);
+    } finally { applyingTab--; }
+  }
+
+  async function showTabs() {
+    const generation = ++splashGeneration;
+    directoryGeneration++;
+    rememberTab(null);
+    showTabChrome(false);
+    splash.replaceChildren();
+    const heading = document.createElement('h2'); heading.textContent = 'File Explorer tabs'; splash.append(heading);
+    const records = await tabs.list();
+    if (generation !== splashGeneration) return;
+    renderTabChoices(splash, records);
+    void publishStatefulSidebarUrl(HOME_DIR);
+  }
+
+  function renderTabChoices(target, records) {
+    const newTab = document.createElement('button'); newTab.textContent = 'New tab'; target.append(newTab);
+    newTab.addEventListener('click', async () => {
+      newTab.disabled = true;
+      closeAllMenus();
+      try {
+        const path = statefulHostId ? (await tabs.request('tabs.defaultPath')).path : HOME_DIR;
+        const tab = await tabs.mount({ kind: 'create', path }, tabOptions(), randomTabOperation());
+        await applyTab(tab);
+      } catch (error) { tabError(error); } finally { newTab.disabled = false; }
+    });
+    for (const record of records) {
+      const row = document.createElement('div'); row.className = 'fx-tab-row';
+      const open = document.createElement('button'); open.textContent = record.path;
+      open.title = record.path;
+      if (record.id === tabs.tab?.id) open.setAttribute('aria-current', 'true');
+      open.addEventListener('click', async () => {
+        closeAllMenus();
+        try { await applyTab(await tabs.mount({ kind: 'attach', tabId: record.id })); }
+        catch (error) { tabError(error); }
+      });
+      const close = document.createElement('button');
+      close.className = 'fx-tab-close';
+      close.setAttribute('aria-label', `Close tab ${record.path}`);
+      close.title = 'Close tab';
+      close.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+      close.addEventListener('click', async () => {
+        if (!await window.teUI.dialog.confirm('Close this tab in all attached windows?')) return;
+        close.disabled = true;
+        try {
+          await tabs.close(record);
+          if (tabs.tab) await refreshTabsMenu();
+          else await showTabs();
+        } catch (error) { tabError(error); close.disabled = false; }
+      });
+      row.append(open, close); target.append(row);
+    }
+    if (!records.length) {
+      const empty = document.createElement('p'); empty.textContent = 'No open tabs. New tab starts in your project (Sidebar) or Home.'; target.append(empty);
+    }
+  }
+
+  async function refreshTabsMenu() {
+    const generation = ++catalogGeneration;
+    const records = await tabs.catalog();
+    if (generation !== catalogGeneration || !tabsGroup.hasAttribute('data-open')) return;
+    tabsPanel.replaceChildren();
+    renderTabChoices(tabsPanel, records);
+  }
+
+  function persistState(syncTab = true) {
     if (host && typeof host.saveState === "function") {
       host.saveState({
         path: state.currentPath,
@@ -971,6 +1090,9 @@ export default function initFileExplorer(root, api, host) {
         sortBy: state.sortBy,
         sortAsc: state.sortAsc,
       });
+    }
+    if (syncTab && !applyingTab && tabs?.tab) {
+      void tabs.update(state.currentPath, tabOptions()).catch(tabError);
     }
   }
 
@@ -996,8 +1118,12 @@ export default function initFileExplorer(root, api, host) {
 
   async function publishStatefulSidebarUrl(path) {
     if (!statefulHostId) return;
+    const reference = tabs?.tab?.id || '';
+    if (publishedTabReference === reference || pendingTabReference === reference) return;
+    pendingTabReference = reference;
     try {
       await consoleBridgeReady;
+      if ((tabs?.tab?.id || '') !== reference) return;
       const status = getConsoleBridgeStatus();
       const consoleWorkerId =
         status && status.workerId ? String(status.workerId) : "";
@@ -1010,13 +1136,18 @@ export default function initFileExplorer(root, api, host) {
         console_worker_id: consoleWorkerId,
         consoleWorkerId: consoleWorkerId,
         path,
-        query_state: { path },
-        queryState: { path },
-        url: buildStatefulUrl(path, consoleWorkerId),
+        tab_id: reference,
+        splash: !reference,
+        query_state: reference ? { tab_id: reference } : {},
+        queryState: reference ? { tab_id: reference } : {},
+        url: String(tabUrl(buildStatefulUrl(path, consoleWorkerId), reference)),
         activate: false,
       });
+      publishedTabReference = reference;
     } catch (error) {
       console.warn("[file_explorer] sidebar state publish failed", error);
+    } finally {
+      if (pendingTabReference === reference) pendingTabReference = null;
     }
   }
 
@@ -1476,16 +1607,23 @@ export default function initFileExplorer(root, api, host) {
     syncSelection();
   }
 
-  async function loadDirectory(targetPath) {
+  async function loadDirectory(targetPath, fromTab = false) {
+    const generation = ++directoryGeneration;
     const normalized = targetPath || state.currentPath || HOME_DIR;
     closeAllMenus();
     clearSelection();
     setLoading();
     try {
+      if (!fromTab && tabs?.tab) {
+        const tab = await tabs.update(normalized, tabOptions());
+        if (generation !== directoryGeneration) return;
+        targetPath = tab.path;
+      }
       const hiddenParam = showHidden ? "1" : "0";
       const payload = await api.get(
-        `list?path=${encodeURIComponent(normalized)}&hidden=${hiddenParam}`,
+        `list?path=${encodeURIComponent(targetPath || normalized)}&hidden=${hiddenParam}`,
       );
+      if (generation !== directoryGeneration) return;
 
       let entries = [];
       let resolvedPath = normalized;
@@ -1508,9 +1646,10 @@ export default function initFileExplorer(root, api, host) {
       updateActionButtons();
       state.view = state.view === "grid" ? "grid" : "list";
       applyView();
-      persistState();
+      persistState(false);
       void publishStatefulSidebarUrl(state.currentPath);
     } catch (error) {
+      if (generation !== directoryGeneration) return;
       const message = error?.message || "Failed to load directory";
       if (ui.listContainer) {
         ui.listContainer.innerHTML = "";
@@ -2723,6 +2862,7 @@ export default function initFileExplorer(root, api, host) {
         closeAllMenus();
         if (!isOpen) {
           group.setAttribute("data-open", "true");
+          if (group === tabsGroup) void refreshTabsMenu().catch(tabError);
         }
       });
     }
@@ -2902,7 +3042,49 @@ export default function initFileExplorer(root, api, host) {
   setPropertiesModalOpen(false);
 
   applyView();
-  loadDirectory(state.currentPath);
+  showTabChrome(false);
+  splash.textContent = 'Loading tabs…';
+  void (async () => {
+    const io = await ensureSocketIoLoaded();
+    const socket = io('/tabs', { path: '/api/app/file_explorer/socket.io', transports: ['websocket'],
+      autoConnect: false, auth: { presentationId: randomTabOperation() } });
+    tabSocket = socket;
+    tabs = createTabClient(socket, tab => void applyTab(tab).catch(tabError), tabError,
+      () => {
+        if (!tabsInitialized) return;
+        if (!tabs.tab) void showTabs().catch(tabError);
+        else if (tabsGroup.hasAttribute('data-open')) void refreshTabsMenu().catch(tabError);
+      });
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { socket.disconnect(); reject(new Error('Tab connection timed out')); }, 15000);
+      socket.once('connect', () => { clearTimeout(timer); resolve(); });
+      socket.once('connect_error', error => { clearTimeout(timer); reject(error); });
+      socket.connect();
+    });
+    let lastTab = '';
+    try { lastTab = localStorage.getItem(lastTabKey) || ''; } catch { /* optional */ }
+    const url = new URL(window.location.href);
+    const intent = mountIntent(url, lastTab);
+    if (intent.kind === 'splash') { await showTabs(); tabsInitialized = true; return; }
+    let operation = url.searchParams.get('tab_create');
+    if (intent.kind === 'create' && !operation) {
+      operation = statefulHostId ? `sidebar:${statefulHostId}` : randomTabOperation();
+      url.searchParams.set('tab_create', operation);
+      history.replaceState(history.state, '', url);
+    }
+    await applyTab(await tabs.mount(intent, tabOptions(), operation));
+    tabsInitialized = true;
+  })().catch(error => {
+    splash.textContent = error?.message || 'Tabs could not be loaded';
+    const retry = document.createElement('button'); retry.textContent = 'Reload';
+    retry.addEventListener('click', () => window.location.reload()); splash.append(retry);
+    tabError(error);
+  });
+  window.addEventListener('pagehide', event => {
+    if (event.persisted) tabSocket?.disconnect();
+    else tabs?.dispose();
+  });
+  window.addEventListener('pageshow', event => { if (event.persisted) tabSocket?.connect(); });
   getBookmarks();
 
   return null;

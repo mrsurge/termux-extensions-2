@@ -294,6 +294,25 @@ is not session closure. Explicit Close terminal may end/disassociate its shell
 without deleting the retained File Explorer tab state. Inspect ALS's existing
 conversation mount/state flow as a reference; do not add an ALS dependency.
 
+**Launch-context refinement:** call sessions **tabs** in the UI. A bare Sidebar
+launcher opens the splash; New tab resolves the current project through the app's
+backend Sidebar CWD hook. An explicit fresh `path` opens a new tab directly.
+An explicit `tab_id` restores exactly that record (even if a path is also present);
+a closed/missing ID returns to the splash without replacement creation. A bare
+Framework launcher restores the last tab ID in localstorage, never a stored path
+as authority; if missing, the splash's New default is Home. Viewing the tab list
+does not erase the last-active-tab hint. Durable state remains shared on disk.
+
+Create correlation is retained before sending: fresh standalone URLs carry
+`tab_create`; fresh Sidebar creation uses its existing unique host-slot identity.
+Backend creation receipts prevent reload/concurrent creation from duplicating
+tabs and retain closed-record receipts so an obsolete fresh URL cannot resurrect
+a closed tab. Successful creation replaces `path`/`tab_create` with `tab_id` and
+publishes only that reference through the existing backend Sidebar state hook.
+The initial store admits 512 tabs, 8192 retained creation receipts and 4 MiB;
+exhaustion is explicit, not silent eviction of restore authority. Future receipt
+compaction needs a separately defined stale-launch policy.
+
 **File selection and icons:** reuse the shared file picker's complete file-icon
 rules/helper and Codicon directory styling, including semantic-family lazy assets;
 do not build another extension map. Remove file-row and select-all checkboxes, not

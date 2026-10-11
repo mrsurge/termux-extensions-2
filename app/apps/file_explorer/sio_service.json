@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "routes": [{
+    "id": "app_worker",
+    "description": "File Explorer tab synchronization lane.",
+    "target": "app_worker",
+    "public_path": "/api/app/file_explorer/socket.io",
+    "upstream_path": "/socket.io/"
+  }]
+}

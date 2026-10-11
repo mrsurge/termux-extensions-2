@@ -1,0 +1,120 @@
+// File Explorer owns durable tabs; URLs/last-tab storage are references only.
+export function randomTabOperation() {
+  const bytes = new Uint8Array(16);
+  globalThis.crypto.getRandomValues(bytes);
+  return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+export function mountIntent(url, lastTab = '') {
+  const tabId = url.searchParams.get('tab_id');
+  if (tabId) return { kind: 'attach', tabId };
+  if (url.searchParams.has('path')) return { kind: 'create', path: url.searchParams.get('path') || '~' };
+  if (!url.searchParams.get('te2_host_id') && lastTab) return { kind: 'attach', tabId: lastTab };
+  return { kind: 'splash' };
+}
+
+export function tabUrl(url, tabId) {
+  const next = new URL(url);
+  next.searchParams.delete('path');
+  next.searchParams.delete('tab_create');
+  next.searchParams.delete('tab_id');
+  if (tabId) next.searchParams.set('tab_id', tabId);
+  return next;
+}
+
+export function createTabClient(socket, onSnapshot, onError, onCatalog = () => {}) {
+  let tab = null;
+  let generation = 0;
+  let mutationEpoch = 0;
+  const pending = new Set();
+  let lane = Promise.resolve();
+  let disposed = false;
+  let mounting = 0;
+  const request = (method, params = {}) => new Promise((resolve, reject) => {
+    if (!socket.connected || disposed) return reject(new Error('Tab connection is unavailable'));
+    const current = generation;
+    const entry = { reject, timer: null };
+    const finish = () => { clearTimeout(entry.timer); pending.delete(entry); };
+    entry.timer = setTimeout(() => { finish(); reject(new Error('Tab request timed out; no retry performed')); }, 15000);
+    pending.add(entry);
+    socket.emit('tab_request', { method, params }, reply => {
+      finish();
+      if (current !== generation || disposed) return reject(new Error('Tab connection changed'));
+      if (!reply?.ok) return reject(new Error(reply?.error || 'Tab request failed'));
+      resolve(reply.result);
+    });
+  });
+  const disconnected = () => {
+    generation++;
+    for (const entry of pending) { clearTimeout(entry.timer); entry.reject(new Error('Tab connection lost; no retry performed')); }
+    pending.clear();
+    if (socket.sendBuffer) socket.sendBuffer.length = 0;
+  };
+  const receive = payload => {
+    if (payload?.closedId === tab?.id) { tab = null; onSnapshot(null); }
+    else if (payload?.tab?.id === tab?.id && payload.tab.revision > tab.revision) {
+      tab = payload.tab; onSnapshot(tab);
+    }
+  };
+  const resync = async () => {
+    if (!tab) { onCatalog(); return; }
+    const identity = tab.id;
+    try {
+      const result = await request('tabs.attach', { tabId: identity });
+      if (tab?.id !== identity) return;
+      tab = result.tab; onSnapshot(tab);
+    } catch (error) { onError(error); }
+  };
+  socket.on('disconnect', disconnected);
+  socket.on('tab_snapshot', receive);
+  socket.on('connect', resync);
+  const catalog = () => { if (!mounting) onCatalog(); };
+  socket.on('tab_catalog', catalog);
+  return {
+    request,
+    get tab() { return tab; },
+    async mount(intent, preferences, operationId) {
+      mounting++;
+      try {
+        const result = intent.kind === 'create'
+          ? await request('tabs.create', { path: intent.path, options: preferences, operationId })
+          : await request('tabs.attach', { tabId: intent.tabId });
+        tab = result.tab;
+        return tab;
+      } finally { mounting--; }
+    },
+    update(path, preferences) {
+      const identity = tab?.id;
+      const connection = generation;
+      const epoch = mutationEpoch;
+      const run = async () => {
+        if (!identity || identity !== tab?.id || connection !== generation || epoch !== mutationEpoch) throw new Error('Tab selection changed');
+        const result = await request('tabs.update', { tabId: identity, revision: tab.revision, path, options: preferences });
+        if (connection !== generation || identity !== tab?.id) throw new Error('Tab selection changed');
+        // A peer event can overtake our ACK. Never regress its authoritative revision.
+        if (result.tab.revision >= tab.revision) tab = result.tab;
+        return tab;
+      };
+      const operation = lane.then(run).catch(async error => {
+        // A rejected/uncertain mutation is not replayed. Read back authority,
+        // and discard queued writes prepared before that resynchronization.
+        if (epoch === mutationEpoch && connection === generation && identity === tab?.id) {
+          mutationEpoch++;
+          await resync();
+        }
+        throw error;
+      });
+      lane = operation.catch(() => {});
+      return operation;
+    },
+    async list() { tab = null; return (await request('tabs.list')).tabs; },
+    async catalog() { return (await request('tabs.catalog')).tabs; },
+    async close(record) { return request('tabs.close', { tabId: record.id, revision: record.revision }); },
+    dispose() {
+      disposed = true; disconnected();
+      socket.off('disconnect', disconnected); socket.off('tab_snapshot', receive); socket.off('connect', resync);
+      socket.off('tab_catalog', catalog);
+      socket.disconnect();
+    },
+  };
+}

@@ -20,7 +20,8 @@ def main() -> None:
     output = args.output.resolve()
     if output.exists():
         parser.error('choose a new output directory; existing artifacts are preserved')
-    sources = ['app/apps/file_explorer/http_app.py', 'app/apps/file_explorer/file_explorer.py']
+    sources = ['app/apps/file_explorer/http_app.py', 'app/apps/file_explorer/file_explorer.py',
+               'app/apps/file_explorer/tab_store.py', 'app/apps/file_explorer/tab_service.py']
     subprocess.run([sys.executable, '-B', '-m', 'mypy', '--strict', '--disallow-any-explicit',
                     '--follow-imports=silent', *sources], cwd=repo, check=True)
     from mypyc.build import mypycify
@@ -46,11 +47,17 @@ import app.apps.file_explorer.file_explorer as backend
 import app.apps.file_explorer.http_app as http
 assert str(backend.__file__).endswith('.so'), backend.__file__
 assert str(http.__file__).endswith('.so'), http.__file__
+import app.apps.file_explorer.tab_store as store
+import app.apps.file_explorer.tab_service as service
+assert str(store.__file__).endswith('.so'), store.__file__
+assert str(service.__file__).endswith('.so'), service.__file__
 import pytest
-raise SystemExit(pytest.main(['-q', 'tests/test_file_explorer_asgi.py', '-k',
+raise SystemExit(pytest.main(['-q', 'tests/test_file_explorer_asgi.py', 'tests/test_file_explorer_tabs.py', '-k',
     'methods or required_query or unknown_and_slash or invalid_body or oversized '
     'or file_operations or download_streaming or partial_body or bulk_job '
-    'or archive_and_symlink or chown_overloads']))
+    'or archive_and_symlink or chown_overloads or tab_persistence or failed_disk '
+    'or corrupt_store or invalid_options or rooms_revisions or concurrent_creation '
+    'or real_socketio or domain_validation or tab_sidebar']))
 '''
     subprocess.run([sys.executable, '-B', '-c', probe, str(output / 'lib')], cwd=repo,
                    env=dict(os.environ, PYTHONDONTWRITEBYTECODE='1'), check=True)

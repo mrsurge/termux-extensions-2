@@ -662,15 +662,17 @@ original user list below is retained verbatim as the requirement record.
 - [x] F3: Ctrl+colon clarified as simultaneous keys; add approved Ctrl+Shift+P and F1 bindings (source/regressions/build).
 - [x] F3: unprefixed picker and shortcut user live acceptance (reported working).
 - [ ] F3: desktop/mobile input and detached-window live acceptance.
-- [ ] F4: define disk-backed tab-session identity/lifetime and shared drawer transport contract.
+- [x] F4: define and implement disk-backed tab-session identity/lifetime.
+- [ ] F4: complete shared drawer transport and terminal ownership contract.
 - [x] F4 prerequisite: migrate File Explorer to explicit raw ASGI without transitive FastAPI/Pydantic imports; preserve HTTP/download/job/pipe contracts and measure import closure.
 - [x] F4 prerequisite: strict mypy/no explicit Any, ty and basedpyright checks for the complete File Explorer backend and ASGI boundary.
 - [x] F4 prerequisite: standalone mypyc build plus compiled-route/job smoke validation.
 - [x] F4 prerequisite: raw-ASGI worker user live acceptance (reported passing).
-- [ ] F4: backend-owned Socket.IO session rooms, revisioned author acknowledgements/peer updates, reconnect snapshots and no mutation echo/replay.
-- [ ] F4: persist tab path/options and live shell association, referenced by Sidebar state.
-- [ ] F4: typed fresh versus existing-session query mounts; reload/Sidebar restore never creates duplicates.
-- [ ] F4: bare-open session list with New/Close; mounted-session close warning and owned terminal teardown.
+- [x] F4: backend-owned Socket.IO session rooms, revisioned author acknowledgements/peer updates, reconnect snapshots and no mutation echo/replay (source/regressions; user live acceptance).
+- [x] F4: persist tab path/options and Sidebar tab references (source/regressions; user live acceptance).
+- [ ] F4: reconcile live shell association and terminal teardown (later terminal slice; reserved shellId is initially null).
+- [x] F4: fresh versus existing-tab query mounts and retained creation correlation (source/regressions; user live acceptance).
+- [x] F4: context-sensitive splash/list, New/Close and close-consent UI (source/regressions; user live acceptance, including splash refresh and live dropdown).
 - [ ] F4: shared picker icon helper/rules in File Explorer list/grid rows.
 - [x] F4: implement checkbox-free file selection (icon toggles, body long press/menu, desktop range/additive toggles), Clear selection and Esc.
 - [ ] F4: native asset publication and live acceptance of icons/selection.
@@ -683,6 +685,98 @@ original user list below is retained verbatim as the requirement record.
 - [ ] Separately approve maintenance packaging/release scope after chosen slices.
 
 ### F4 revised tab-session direction — investigation gate
+
+#### Durable tabs and synchronization implementation checkpoint
+
+User approved the end-to-end tab lifecycle slice, including the refined launcher
+rules. File Explorer now owns `tabs.json` under its existing
+`te2_app_data_home('file_explorer')` root. Schema 1 records ID/path/revision/options
+and a reserved nullable shell ID; atomic replacements precede in-memory commits.
+The JSON store loads once lazily, fails closed on malformed state, retains bounded
+creation receipts and never treats presentation destruction as tab deletion.
+Live terminal association/exit reconciliation remain the subsequent slice.
+
+The manifest declares `/api/app/file_explorer/socket.io`; Python Socket.IO composes
+with the raw HTTP export, namespace `/tabs`, WebSocket-only with 64 KiB incoming
+admission. A typed service owns the serialization lock and selects tab/catalog
+rooms. Presentation IDs identify attachments, not an independent authentication
+credential; the existing framework exposure/worker access boundary is retained.
+Create/attach/list/update/close/default-project requests return ACKs, including
+directory validation failures. Updates check expected revision and notify peer
+sockets without echoing to the author; deletion notifies mounted clients. Splash
+catalogs refresh on creation/closure. Disconnect drops pending/buffered writes;
+reconnect reads authoritative state. Failed updates resync read-only and invalidate
+older queued writes, without retrying the mutation.
+
+Frontend UI calls these sessions **tabs**. Bare Sidebar launch shows the list;
+New uses the backend-resolved project path. Fresh path queries create directly;
+explicit tab IDs restore and missing/closed IDs show the splash. Bare Framework
+launch reads only the last ID from `te2:file-explorer:last-tab:v1`; New defaults
+to Home when no tab is restored. The last-active hint survives visiting the list.
+URL replacement removes fresh path/correlation after mount. Backend Sidebar state
+publication records only the tab reference (or bare splash), once per reference
+transition rather than every directory navigation. Async listings/splash rendering
+are generation-fenced; peers apply options/path without emitting another mutation.
+
+Validation: strict mypy/no explicit Any, ty and basedpyright pass across all four
+File Explorer Python modules. 101 interpreted backend regressions pass, including
+an isolated real two-client Socket.IO/ASGI round trip and backend Sidebar-reference
+publication. Five frontend protocol tests pass, covering launch modes, reconnect,
+disconnect, failed-mutation resync and peer-before-ACK ordering. Code TE2 typecheck
+and frontend build pass; File Explorer JS syntax checks pass. The expanded standalone
+mypyc probe compiles all four modules and passes 47 compiled tests (9 interpreted
+fixtures deselected), including the real Socket.IO round trip. Current experimental
+output: `.codex-scratch/file-explorer-tabs-mypyc-accepted-20261010/lib`.
+
+The user subsequently restarted the worker, published/flushed client assets and
+confirmed live acceptance after framework route activation. Inspection established
+that new `sio_service` WebSocket mounts require a full framework restart: registry
+reload replaces manifest data but not the immutable Socket.IO index/Axum router.
+Do not promise that app-registry reload alone activates new mounts.
+For live testing, framework startup must ingest the new `sio_service` declaration,
+the File Explorer worker must use this backend, and native clients need the updated
+template/main.js/shared `file_explorer_tabs.mjs` via their normal asset updater.
+
+The approved menu follow-up moves Tabs to the end of the File/Edit/View menubar,
+removes its twisties and uses the existing JS popup convention. The dropdown lists
+live tabs with SVG close controls and New tab, without entering splash or detaching
+the mounted tab. Read-only `tabs.catalog` preserves attachment; create/update/close
+notify catalog subscribers. Splash remains the initial/missing/closed-tab fallback.
+Validation: 56 backend tests, six frontend protocol tests, JS syntax, strict mypy,
+ty and basedpyright pass. The four-module mypyc probe also passes 47 compiled tests
+(9 deselected), retained at `.codex-scratch/file-explorer-tabs-menu-mypyc-20261010/lib`;
+it is not activated. Catalog events during mounting cannot trigger splash detachment.
+Dropdown live acceptance is pending; update client assets
+and restart only the File Explorer worker for this backend addition. No additional
+framework restart is required once its socket mount is active. No commit/release.
+
+Splash-refresh follow-up: user reproduced a durable Home tab only after refreshing
+a newly opened Sidebar window. File Explorer published an empty query state but
+still declared `state_kind=path` and supplied Home; Sidebar's reconstruction fallback
+converted that into a fresh `path` query. Splash now declares `state_kind=splash`
+with no path or tab ID, and needs no directory resolution. Frontend publication
+also strips creation paths from splash/tab-reference URLs. Project CWD and Home
+remain transient New-tab defaults, resolved only when New is clicked, not durable
+tab identities. A regression exercises publication, actual Sidebar URL rebuilding
+and slot normalization and verifies the store stays unchanged. 63 backend tests,
+six frontend tests, strict mypy/ty/basedpyright and syntax checks pass. Matching
+worker restart/client OTA and live splash-refresh acceptance remain pending; no
+runtime restart or commit. Earlier experimental mypyc output predates this fix.
+
+User live acceptance passed for the tab dropdown and splash-refresh correction.
+Final CSS polish makes the dropdown-only close SVG red and 24px (was 16px), with
+nonshrinking geometry inside the unchanged 36px control; splash controls retain
+their size. This polish requires the normal client asset update; no backend change.
+The user also live-accepted this final close-icon polish. Final checkpoint rerun:
+101 backend tests and six frontend protocol tests pass. Exhaustive all-client and
+terminal lifecycle acceptance remain separate gates.
+The existing full-tree asset manifest already includes these files.
+
+Live checklist: Sidebar bare launch/New uses project; repeated explicit path opens
+create distinct tabs; reload/Sidebar restore retains the same ID; two attached
+windows synchronize path/options without author remount; closed-tab restores show
+the splash; Framework launcher remembers the last tab or falls back to Home/New;
+worker restart retains records; background/presentation closure retains tabs.
 
 #### Raw-ASGI and strict-typing implementation checkpoint
 

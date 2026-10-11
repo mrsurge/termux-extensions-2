@@ -13,10 +13,11 @@
     "frontend_script": "main.js"
   },
   "readiness_support": true,
+  "sio_service": "sio_service.json",
   "sidebar_state": {
     "enabled": true,
     "reference": true,
-    "kind": "path",
+    "kind": "tab",
     "launcher": true,
     "base_url": "/app/file_explorer",
     "token_source": "console_worker_id",
@@ -25,9 +26,8 @@
     "token_id_param": "te2_token_id",
     "console_worker_id_param": "te2_console_worker_id",
     "url_state": {
-      "param": "path",
-      "opaque": true,
-      "default_path": "~"
+      "param": "tab_id",
+      "opaque": true
     },
     "load": {
       "default": "eager"
