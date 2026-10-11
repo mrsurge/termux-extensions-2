@@ -12,6 +12,7 @@ import type { HunkRestoreIdentity } from '../tree/restore-action.ts';
 import { gitActionButton } from '../git/action-button.ts';
 import { changeStatistics } from './change-statistics.ts';
 import { renderPathLabel } from './results-renderer.ts';
+import { renderIcon } from '/static/js/file_icons.js';
 
 interface ExplorerChangeLine {
   type?: string;
@@ -48,7 +49,7 @@ interface ExplorerChangesResultsRendererDeps {
   stageFile?(rel: string): Promise<void>;
   unstageFile?(rel: string): Promise<void>;
   commitStagedChanges?(): Promise<void>;
-  getFileIcon?(name: string): Promise<{ svg?: string; color?: string } | null>;
+  getFileIcon?(name: string): Promise<{ svg?: string; color?: string; codicon?: string } | null>;
   restoreFile(rel: string): Promise<void>;
   restoreHunk(rel: string, identity: HunkRestoreIdentity): Promise<void>;
   getGitDiffBase(): ExplorerDiffBaseInfo;
@@ -372,10 +373,8 @@ export function createExplorerChangesResultsRenderer(
       toggle.appendChild(icon);
       // Resolve trusted vendored icons by basename, without inserting path text as markup.
       void deps.getFileIcon?.(rel.split('/').pop() || rel).then((resolved) => {
-        if (!resolved?.svg) return;
-        icon.classList.remove('codicon', 'codicon-file');
-        icon.innerHTML = resolved.svg;
-        if (resolved.color) icon.style.color = resolved.color;
+        if (!icon.isConnected) return;
+        renderIcon(icon, resolved);
       }).catch(() => { /* Keep the generic icon when a vendored icon is unavailable. */ });
 
       const title = document.createElement('span');

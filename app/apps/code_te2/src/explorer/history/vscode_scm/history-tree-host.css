@@ -53,7 +53,7 @@
   flex: none; max-width: 100%; min-width: 0; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap;
 }
-.te2-scm-history .history-file-icon { color: inherit; flex: none; }
+.te2-scm-history .history-file-icon { color: inherit; flex: none; width: 16px; height: 16px; }
 .te2-scm-history .history-file-icon svg { display: block; width: 16px; height: 16px; fill: currentColor; }
 .te2-scm-history .history-file-added { color: #85d49a; font-weight: bold; flex: none; }
 

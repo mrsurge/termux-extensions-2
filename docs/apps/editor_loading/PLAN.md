@@ -135,15 +135,33 @@ the matching mypyc rebuild; frontend changes require correct client publication.
 
 ### F2 — Shared file picker
 
-`app/static/js/file_picker.js` currently calls `navigate(entry.path)` on the first
-directory click, while non-directories call `setSelected`. This confirms the
-selection/navigation conflict. Plan single click/tap selection and double
-click/tap directory entry, preserving explicit Select Current, breadcrumbs, save
-and file modes. Inspect touch timing/accessibility and keyboard behavior before
-implementation. Add optional depth-one regex filtering using the existing browse
-boundary; invalid patterns must be visible and bounded, not recursive scans.
+Approved shared-provider experiment: use one neutral file-icon adapter across
+picker, Explorer/sticky directory scopes, file tabs, breadcrumbs, History and
+Changes. Preserve the existing complete filename classifier and explicitly map
+every semantic family to the shared monochrome provider; normalize JS/Python/TS suffix families.
+Use ALS's CC0 Simple Icons SVGs for Rust/JavaScript/TypeScript/Python and existing
+Seti SVGs for other code families (including C/C++), rendered as currentColor
+masks. Codicons remain for directories and non-language types.
+Directory icons use muted folder glyphs without geometry changes. Retain Seti
+vendor assets for now; do not add a provider preference in this slice.
+
+`app/static/js/file_picker.js` now selects directories on one click/tap and enters
+them on double click/tap (touch interval 450ms). Space selects, Enter enters a
+directory or confirms an eligible file; arrows/Home/End move row focus. Explicit
+Select Current, breadcrumbs and save/file modes retain their existing authorities.
+Optional case-insensitive regex filters only names in the fetched current listing,
+with no extra browse requests or recursive scans. A disposable worker bounds
+pattern/name input and has a 500ms deadline; invalid/unavailable/slow filters show
+an error, not a synchronous fallback. Browse and filter generations reject stale
+responses. Shared vendored Codicons replace row emoji with muted grey-blue
+directory/file-type glyphs and a generic file fallback. File classification shares
+the Explorer's existing filename mapping through a definitions-only `getIconName`
+lookup; the picker translates those semantic types to Codicons, without loading
+Seti SVGs/colors. Specific Python/Markdown/Ruby/etc. glyphs are preferred; remaining
+known languages (including JavaScript/HTML) use file-code. No new icon library.
 Acceptance: mouse/touch/keyboard directory selection versus navigation, all picker
 modes, empty directories and invalid regex. Shared assets have multiple consumers.
+Source regressions pass; installed-client OTA/live acceptance remains pending.
 
 ### F3 — Editor and detached Desktop polish
 

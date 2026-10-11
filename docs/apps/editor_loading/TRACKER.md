@@ -645,10 +645,11 @@ original user list below is retained verbatim as the requirement record.
 - [x] F1: marketplace settings access using existing configuration RPC/dialog (source validated; live gate below).
 - [x] F1: installed user-extension list using existing registry/list RPC (source and user live acceptance).
 - [x] F1: mutually exclusive Marketplace/Installed viewport panels and lazy README rendering (source and user live acceptance).
-- [ ] F1: reproduce astral-sh.ty issue; capture exact ID/version/platform and failure.
+- [x] F1: reproduce astral-sh.ty issue; capture exact ID/version/platform and failure.
 - [x] F1: approved fixes, regressions/build and live extension lifecycle acceptance.
-- [ ] F2: shared picker single-select/double-enter directory behavior.
-- [ ] F2: depth-one regex filter, bounded/invalid-pattern handling.
+- [x] F2: shared picker single-select/double-enter directory behavior (source/regressions).
+- [x] F2: depth-one regex filter, bounded/invalid-pattern handling (source/regressions).
+- [x] F2: vendored Codicon directory/file-type rows with muted grey-blue styling (source).
 - [ ] F2: shared consumer mouse/touch/keyboard and picker-mode acceptance.
 - [ ] F3: detached Sidebar minimize, exact native window ownership.
 - [ ] F3: editor Explorer ellipsis-menu Collapse all using existing expansion authority.
@@ -670,6 +671,70 @@ minimize. File Explorer exposes terminal launch intents, not evidence of an embe
 drawer. ty cause, draft CSS owner, quick-access empty mode and usage aggregation
 support still require focused investigation. No runtime mutation or implementation
 was performed for these follow-ups.
+
+### F2 shared picker — implemented, live acceptance pending
+
+Live picker mask regression: exact main-page inspection found loaded Python/JS
+mask spans and their picker parent at 0px height; directories retained font-driven
+16px height. Picker slot now explicitly owns 16px height, retaining its existing
+width and row padding. The related History slot also lacked explicit geometry and
+now owns 16x16px. Explorer, Changes, file tabs and breadcrumbs already declare
+height. Added a container-height regression; no navigation changes or runtime
+reload were performed. Client asset update/live recheck remains required.
+
+Publication follow-up: native Cefrium console command
+`android.assets.forceUpdateAndReload` returned updated=true/version=0.2.352.
+Its main-page worker had not re-registered at the follow-up inspection, so native
+geometry acceptance remains pending. The generic-browser client had loaded the
+old History rule without dimensions; replacing only its host.css stylesheet with
+the rebuilt resource preserved the open view and measured Python/TS language
+icons at 15.994x15.994 CSS pixels (16px at current scaling), instead of 0x0.
+No framework restart occurred.
+
+The Cefrium main page subsequently re-registered; its loaded History rule now
+contains width/height 16px, and all six sampled Codicon/language-mask slots measure
+16x16. This closes the observed native zero-size geometry gate, not general visual
+acceptance of every mapped file type.
+
+Shared-provider experiment now covers Explorer, sticky directory scopes, host
+file tabs, editor breadcrumbs, History, Changes and the picker through
+`app/static/js/file_icons.js`. All classifier families have explicit valid
+translations; JavaScript, Python and TypeScript suffix families are normalized.
+After user correction of generic language glyphs, the approved hybrid reuses ALS's
+four CC0 Simple Icons SVGs for Rust/JS/TS/Python and existing Seti SVGs for remaining
+code families, including C/C++. Trusted SVGs render as currentColor masks like ALS,
+not inline colored content. The additional language module/license reside under
+the already inventoried Seti vendor root, so native publication includes them.
+Directory headers/sticky copies use Codicon folder with unchanged geometry.
+Seti's SVG inventory loads only when a remaining code family needs it. Provider selection is a
+future seam, not an implemented preference. 57 targeted tests, typecheck and
+frontend build pass. Client OTA/live acceptance remains pending; no restart,
+APK build or backend compilation was performed.
+
+Earlier Codicon-only checkpoint: live main-page inspection confirmed Python rows used generic
+file-code, while build.mjs fell back to file. The vendored font does include
+Python/Markdown/Ruby glyphs. Picker now reuses the Explorer's complete filename
+classification via the shared wrapper's definitions-only lookup, then translates
+semantic file types to monochrome Codicons. No Seti SVG/color rendering or SVG
+inventory fetch. Ten picker regressions plus the existing Seti mapping regression
+pass, including Python/MJS/HTML, exact README mapping and actual glyph existence.
+Publish shared picker and mapping-wrapper assets before renewed live acceptance.
+
+Shared static picker now selects before entering directories, supports mouse/touch
+double entry and keyboard row controls, and uses vendored Codicons. Regex filters
+only the current listing in a disposable worker: 256-character pattern, 20,000
+names, 4,096 characters per name and 1,048,576 total name characters; 120ms debounce
+and 500ms worker deadline. Invalid/oversized/unavailable/timed-out filters display
+errors; clearing restores the listing. No main-thread regex fallback or extra
+browse requests. Generation fences cover closed/newer browse and filter results.
+
+Eight DOM/worker regressions pass, covering selection/navigation, touch, keyboard,
+file/save/current modes, empty directories, regex errors/limits/deadline and stale
+results; syntax checks and Code TE2 typecheck pass. Android asset manifest already
+includes the entire shared JS and Codicon trees; detached modal publication clones
+the source document's stylesheets. No APK build, runtime restart or client OTA was
+performed. Live acceptance requires current `file_picker.js` plus its new
+`file_picker_filter_worker.js` in the client asset tree, not just a page reload.
 
 ### F1 marketplace settings gear — implemented
 

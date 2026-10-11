@@ -12,7 +12,7 @@
 
 import { showNewProjectModal } from "../chrome/new-project-modal.ts";
 import { showProjectsDebugModal } from "../../../main_page/frontend/ui/projects-debug-modal.ts";
-import { getIcon as getSetiIcon } from "/static/vendor/seti-icons/seti-icons.js";
+import { getIcon as getFileIcon, renderIcon } from "/static/js/file_icons.js";
 import type { JsonObject } from "../../rpc/transport.ts";
 import { createExplorerStickyScopes } from "../chrome/sticky-scopes.ts";
 import { registerExplorerPublicApi } from "./public-api.ts";
@@ -152,33 +152,28 @@ async function scrollToActiveFile(
   return explorerActiveFileUtils.scrollToActiveFile(options);
 }
 
-// --- Seti-UI file icons (files only; dirs keep emoji) ---
-function applySetiIconToSpan(
+// --- Shared icon provider; directory and sticky scopes keep their geometry ---
+function applySharedFileIconToSpan(
   span: HTMLElement,
   fileName: string,
   kind = "file",
 ): void {
   if (!span) return;
   if (kind !== "file") {
-    // Ensure directories don't inherit prior SVG.
-    span.innerHTML = "";
-    span.style.color = "";
+    renderIcon(span, { codicon: "folder", color: "var(--te-file-icon-color, #8293a8)" });
     return;
   }
   const name = fileName || "";
   if (!span.innerHTML && !span.textContent) {
-    span.textContent = "📄";
+    renderIcon(span, { codicon: "file", color: "var(--te-file-icon-color, #8293a8)" });
   }
-  getSetiIcon(name)
+  getFileIcon(name)
     .then((icon) => {
       if (!span.isConnected) return;
-      if (icon && icon.svg) {
-        span.innerHTML = icon.svg;
-      }
-      span.style.color = icon && icon.color ? icon.color : "";
+      renderIcon(span, icon);
     })
     .catch(() => {
-      // Leave fallback (emoji / default) in place.
+      // Leave the default file glyph in place.
     });
 }
 
@@ -380,7 +375,7 @@ const explorerTreeRenderer = createExplorerTreeRenderer({
   isInSelectMode: (parentRel) => isInSelectMode(parentRel),
   isEntrySelected,
   setEntrySelected,
-  applySetiIconToSpan,
+  applySetiIconToSpan: applySharedFileIconToSpan,
   applyAggregatedGitStatusFlags,
   applyAggregatedDiagnosticFlags,
 });

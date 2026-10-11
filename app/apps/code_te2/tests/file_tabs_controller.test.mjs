@@ -38,13 +38,13 @@ async function importFileTabs() {
       name: 'seti-icons-test-double',
       setup(buildApi) {
         buildApi.onResolve(
-          { filter: /^\/static\/vendor\/seti-icons\/seti-icons\.js$/ },
+          { filter: /^\/static\/js\/file_icons\.js$/ },
           () => ({ path: 'seti-icons', namespace: 'test-double' }),
         );
         buildApi.onLoad(
           { filter: /.*/, namespace: 'test-double' },
           () => ({
-            contents: 'export async function getIcon(name) { return { svg: `<svg data-file="${name}"></svg>`, color: "#abc" }; }',
+            contents: 'export async function getIcon(name) { return { svg: `<svg data-file="${name}"></svg>`, color: "#abc" }; } export function renderIcon(element, icon) { if (!icon) return false; element.innerHTML = icon.svg; element.style.color = icon.color; return true; }',
             loader: 'js',
           }),
         );

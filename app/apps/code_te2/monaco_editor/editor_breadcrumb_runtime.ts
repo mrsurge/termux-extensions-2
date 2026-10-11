@@ -1,4 +1,5 @@
 import { EDITOR_RPC_METHODS } from "./editor_rpc_contract.ts";
+import { renderIcon } from '/static/js/file_icons.js';
 
 interface EditorBreadcrumbRuntimeDeps {
   getDocument(): Document | null;
@@ -29,13 +30,14 @@ interface BreadcrumbEditorLike {
 }
 
 interface BreadcrumbIconModule {
-  ensureLoaded(): void;
+  ensureLoaded(): void | Promise<unknown>;
   getIcon: (...args: unknown[]) => unknown;
 }
 
 interface BreadcrumbIconResult {
   svg?: string;
   color?: string;
+  codicon?: string;
 }
 
 interface BreadcrumbLineBounds {
@@ -205,9 +207,9 @@ function loadBreadcrumbIcons(
   onLoaded: (getIcon: (...args: unknown[]) => unknown) => void,
   onError?: ((error: unknown) => void) | null,
 ): Promise<void> {
-  return dynamicImportFn("/static/vendor/seti-icons/seti-icons.js")
-    .then((mod) => {
-      mod.ensureLoaded();
+  return dynamicImportFn("/static/js/file_icons.js")
+    .then(async (mod) => {
+      await mod.ensureLoaded();
       onLoaded(mod.getIcon);
     })
     .catch((error) => {
@@ -385,8 +387,8 @@ function applyBreadcrumbFileIcon(
         icon && typeof icon === "object"
           ? (icon as BreadcrumbIconResult)
           : null;
-      if (result?.svg) iconSpan.innerHTML = result.svg;
-      if (result?.color) iconSpan.style.color = result.color;
+      if (!iconSpan.isConnected) return;
+      renderIcon(iconSpan, result);
     })
     .catch(() => {});
 }
@@ -640,7 +642,7 @@ export function createEditorBreadcrumbRuntime(
         if (lastPath) render();
       },
       (error: unknown) => {
-        console.warn("[BC] seti-icons load failed:", error);
+        console.warn("[BC] file-icon provider load failed:", error);
       },
     );
   }

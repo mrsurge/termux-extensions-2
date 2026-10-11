@@ -1,5 +1,5 @@
 import type { JsonObject } from "../../rpc/transport.ts";
-import { getIcon as getSetiIcon } from '/static/vendor/seti-icons/seti-icons.js';
+import { getIcon as getFileIcon } from '/static/js/file_icons.js';
 import { ExplorerHistoryController } from '../history/controller.ts';
 import { restoreExplorerFile, restoreExplorerHunk } from "../tree/restore-action.ts";
 import type { ExplorerJumpOptions } from "../host/file-open-bridge.ts";
@@ -203,7 +203,7 @@ export function createExplorerSearchOverlayController(
       if (!deps.hasExplorerRpc()) { deps.toast('Explorer connection unavailable.'); return; }
       deps.notifyExplorer(EXPLORER_RPC_METHODS.gitUnstage, { paths: [rel] });
     },
-    getFileIcon: getSetiIcon,
+    getFileIcon,
     restoreHunk: (rel, identity) => restoreExplorerHunk({
       getProjectPath: () => deps.getProjectPath(),
       requestExplorer: (method, payload) => deps.requestExplorer(method, payload),

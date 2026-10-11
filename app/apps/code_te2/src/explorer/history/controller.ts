@@ -1,5 +1,5 @@
 import { CompressibleAsyncDataTree } from 'te2-scm-tree';
-import { getIcon as getSetiIcon } from '/static/vendor/seti-icons/seti-icons.js';
+import { getIcon as getFileIcon } from '/static/js/file_icons.js';
 import { HistoryTreeHost } from './vscode_scm/history-tree-host.ts';
 import { toISCMHistoryItemViewModelArray, historyItemRefColor, historyItemRemoteRefColor, historyItemBaseRefColor } from './vscode_scm/adapted/browser/scmHistory.ts';
 import type { ISCMHistoryItem, ISCMHistoryItemRef } from './vscode_scm/adapted/common/history.ts';
@@ -293,7 +293,7 @@ export class ExplorerHistoryController {
         },
         loadMore: async () => { await this.request(RPC.historyMore, { generation }); },
         onError: error => this.message(error),
-      }, getSetiIcon, this.expandedCommitIds);
+      }, getFileIcon, this.expandedCommitIds);
     void this.tree.ready.then(() => this.layout()).catch(error => this.message(error));
   }
 

@@ -79,13 +79,15 @@ declare global {
   }
 }
 
-declare module '/static/vendor/seti-icons/seti-icons.js' {
+declare module '/static/js/file_icons.js' {
   interface SetiIconPayload {
     svg?: string;
     color?: string;
+    codicon?: string;
   }
 
   export function getIcon(fileName: string): Promise<SetiIconPayload | null>;
+  export function renderIcon(element: HTMLElement, icon: SetiIconPayload | null | undefined): boolean;
 }
 
 declare module '/static/vendor/monaco-editor-core/esm/vs/base/browser/keyboardEvent.js' {

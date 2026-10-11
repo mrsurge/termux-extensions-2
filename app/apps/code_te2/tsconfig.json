@@ -23,6 +23,7 @@
     "rootDir": "../..",
     "outDir": "static/dist",
     "paths": {
+      "/static/js/*": ["../../static/js/*"],
       "/static/vendor/*": ["../../static/vendor/*"]
     }
   },

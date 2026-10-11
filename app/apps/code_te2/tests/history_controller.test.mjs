@@ -3,7 +3,7 @@ import test from 'node:test';
 import { build } from 'esbuild';
 import { Window } from 'happy-dom';
 const bundle = await build({ entryPoints: ['src/explorer/history/controller.ts'], bundle: true, write: false, format: 'esm', plugins: [{ name: 'fixture', setup(b) {
-  b.onResolve({ filter: /^\/static\/vendor\/seti-icons\/seti-icons.js$/ }, () => ({ path: 'icons', namespace: 'icons' }));
+  b.onResolve({ filter: /^\/static\/js\/file_icons.js$/ }, () => ({ path: 'icons', namespace: 'icons' }));
   b.onLoad({ filter: /.*/, namespace: 'icons' }, () => ({ contents: 'export async function getIcon() { return null; }' }));
   b.onResolve({ filter: /^te2-scm-tree$/ }, () => ({ path: 'tree', namespace: 'fixture' }));
   b.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({ contents: 'export const CompressibleAsyncDataTree = class {};' }));

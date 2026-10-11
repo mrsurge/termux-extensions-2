@@ -1,3 +1,5 @@
+import { getIcon, renderIcon } from '/static/js/file_icons.js';
+
 if (!window.teUI) {
   window.teUI = {};
 }
@@ -174,10 +176,16 @@ const CSS = `
 }
 .te-fp-icon {
   width: 1.6rem;
+  height: 16px;
+  flex-shrink: 0;
   text-align: center;
   font-size: 1.2rem;
-  font-family: 'Apple Color Emoji', 'Noto Color Emoji', 'Segoe UI Emoji', 'EmojiOne Color', sans-serif;
+  color: var(--te-file-picker-icon, #8293a8);
 }
+.te-fp-name { min-width: 0; overflow-wrap: anywhere; }
+.te-fp-filter-row { display: flex; flex-direction: column; gap: 4px; }
+.te-fp-filter-error { color: #f87171; font-size: .8rem; }
+.te-fp-item:focus-visible { outline: 2px solid var(--primary, #5b8dff); outline-offset: -2px; }
 .te-fp-footer {
   display: flex;
   justify-content: space-between;
@@ -286,8 +294,13 @@ const TEMPLATE = `
           <label for="te-fp-input-name">File name</label>
           <input id="te-fp-input-name" type="text" autocapitalize="off" class="te-fp-input te-fp-input-name" placeholder="example.txt" />
         </div>
+        <div class="te-fp-filter-row">
+          <label for="te-fp-filter">Filter names (regex, current directory only)</label>
+          <input id="te-fp-filter" class="te-fp-input" type="text" autocapitalize="off" autocomplete="off" spellcheck="false" aria-describedby="te-fp-filter-error" placeholder="e.g. \\.(ts|py)$" />
+          <div id="te-fp-filter-error" class="te-fp-filter-error" role="status"></div>
+        </div>
         <div class="te-fp-scroll">
-          <ul class="te-fp-list"></ul>
+          <ul class="te-fp-list" role="listbox" aria-label="Files and directories"></ul>
         </div>
         <div class="te-fp-footer">
           <div class="te-fp-footer-left">
@@ -306,10 +319,72 @@ const TEMPLATE = `
 </div>`;
 
 const TYPE_ICON = {
-  directory: '📁',
-  file: '📄',
-  symlink: '🔗',
+  directory: 'folder',
+  file: 'file',
+  symlink: 'file-symlink-file',
 };
+
+function applyFileIcon(span, name) {
+  getIcon(name).then(icon => {
+    if (!span.isConnected) return;
+    renderIcon(span, icon);
+  }).catch(() => { /* Preserve the generic Codicon if definitions are unavailable. */ });
+}
+
+let browseGeneration = 0;
+let filterGeneration = 0;
+let filterWorker = null;
+let filterTimer = null;
+let filterDeadline = null;
+let lastTouch = null;
+
+function stopFilter() {
+  filterGeneration++;
+  clearTimeout(filterTimer);
+  clearTimeout(filterDeadline);
+  filterWorker?.terminate();
+  filterWorker = null;
+}
+
+function applyFilter() {
+  stopFilter();
+  const pattern = elements.filter.value;
+  elements.filterError.textContent = '';
+  elements.filter.removeAttribute('aria-invalid');
+  if (!pattern) { renderEntries(state.entries); return; }
+  const generation = filterGeneration;
+  const entries = state.entries;
+  const fail = (message) => {
+    if (generation !== filterGeneration) return;
+    stopFilter();
+    elements.filterError.textContent = message;
+    elements.filter.setAttribute('aria-invalid', 'true');
+    clearSelection();
+    renderEntries([], 'Filter could not be applied.');
+  };
+  if (pattern.length > 256) { fail('Regex must be at most 256 characters.'); return; }
+  filterTimer = setTimeout(() => {
+    try {
+      const names = entries.map(entry => entry.name || basenameFromPath(entry.path || ''));
+      if (names.length > 20000 || names.some(name => name.length > 4096) || names.reduce((size, name) => size + name.length, 0) > 1048576) {
+        fail('Directory is too large for regex filtering.'); return;
+      }
+      const worker = new Worker('/static/js/file_picker_filter_worker.js');
+      filterWorker = worker;
+      filterDeadline = setTimeout(() => fail('Regex filtering exceeded its time limit.'), 500);
+      worker.onerror = () => fail('Regex filter worker is unavailable.');
+      worker.onmessage = ({ data }) => {
+        if (generation !== filterGeneration) return;
+        if (data.error) { fail(data.error); return; }
+        stopFilter();
+        const filtered = data.indices.map(index => entries[index]);
+        if (state.selected && !filtered.some(entry => entry.path === state.selected.path)) clearSelection();
+        renderEntries(filtered, 'No matching names in this directory.');
+      };
+      worker.postMessage({ pattern, names });
+    } catch { fail('Regex filter worker is unavailable.'); }
+  }, 120);
+}
 
 let startStorage = null;
 
@@ -371,6 +446,12 @@ function setStoredStart(modeKey, path) {
 }
 
 function ensureStyle() {
+  if (!document.querySelector('link[href="/static/vendor/codicons/codicon.css"]')) {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = '/static/vendor/codicons/codicon.css';
+    document.head.appendChild(link);
+  }
   if (!document.getElementById(STYLE_ID)) {
     const style = document.createElement('style');
     style.id = STYLE_ID;
@@ -591,7 +672,10 @@ function updateButtons() {
 function clearSelection() {
   state.selected = null;
   const selected = elements.list.querySelector('.te-fp-item.selected');
-  if (selected) selected.classList.remove('selected');
+  if (selected) {
+    selected.classList.remove('selected');
+    selected.setAttribute('aria-selected', 'false');
+  }
   updateButtons();
 }
 
@@ -604,8 +688,12 @@ function validateSelection(entry) {
 
 function setSelected(entry, element) {
   state.selected = entry;
-  Array.from(elements.list.children).forEach((child) => child.classList.remove('selected'));
+  Array.from(elements.list.children).forEach((child) => {
+    child.classList.remove('selected');
+    child.setAttribute('aria-selected', 'false');
+  });
   if (element) element.classList.add('selected');
+  if (element) element.setAttribute('aria-selected', 'true');
   updateButtons();
 }
 
@@ -638,13 +726,13 @@ function renderBreadcrumbs(path) {
   });
 }
 
-function renderEntries(entries) {
+function renderEntries(entries, emptyMessage = 'This directory is empty.') {
   const targetDocument = modalDocument();
   elements.list.innerHTML = '';
   if (!entries.length) {
     const empty = targetDocument.createElement('div');
     empty.className = 'te-fp-loading';
-    empty.textContent = 'This directory is empty.';
+    empty.textContent = emptyMessage;
     elements.list.appendChild(empty);
     return;
   }
@@ -653,22 +741,50 @@ function renderEntries(entries) {
     li.className = 'te-fp-item';
     li.dataset.path = entry.path;
     li.dataset.type = entry.type;
+    li.tabIndex = 0;
+    li.setAttribute('role', 'option');
+    const selected = state.selected?.path === entry.path;
+    li.classList.toggle('selected', selected);
+    li.setAttribute('aria-selected', String(selected));
     const name = entry.name || basenameFromPath(entry.path || '');
     li.innerHTML = `
-      <span class="te-fp-icon">${TYPE_ICON[entry.type] || '📄'}</span>
+      <span class="te-fp-icon codicon codicon-${TYPE_ICON[entry.type] || 'file'}" aria-hidden="true"></span>
       <span class="te-fp-name">${escapeHtml(name)}</span>
     `;
-    li.addEventListener('click', () => {
-      if (entry.type === 'directory') {
-        navigate(entry.path);
-        return;
-      }
+    let pointerType = '';
+    li.addEventListener('pointerdown', (event) => { pointerType = event.pointerType; });
+    li.addEventListener('click', (event) => {
       setSelected(entry, li);
-      if (state.mode === 'save') {
+      if (state.mode === 'save' && entry.type !== 'directory') {
         setFilename(name);
+      }
+      if ((event.pointerType || pointerType) === 'touch' && entry.type === 'directory') {
+        const now = performance.now();
+        const doubleTap = lastTouch?.path === entry.path && now - lastTouch.at < 450;
+        lastTouch = doubleTap ? null : { path: entry.path, at: now };
+        if (doubleTap) navigate(entry.path);
+      } else lastTouch = null;
+    });
+    li.addEventListener('dblclick', () => {
+      if (pointerType !== 'touch' && entry.type === 'directory') navigate(entry.path);
+    });
+    li.addEventListener('keydown', (event) => {
+      if (event.key === ' ' || event.key === 'Enter') {
+        event.preventDefault();
+        setSelected(entry, li);
+        if (event.key === 'Enter' && entry.type === 'directory') navigate(entry.path);
+        else if (state.mode === 'save' && entry.type !== 'directory') setFilename(name);
+        else if (event.key === 'Enter' && validateSelection(entry)) finish(entry);
+      } else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+        event.preventDefault();
+        const rows = Array.from(elements.list.querySelectorAll('.te-fp-item'));
+        const index = rows.indexOf(li);
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? rows.length - 1 : index + (event.key === 'ArrowDown' ? 1 : -1);
+        rows[Math.max(0, Math.min(rows.length - 1, next))]?.focus();
       }
     });
     elements.list.appendChild(li);
+    if (entry.type === 'file') applyFileIcon(li.querySelector('.te-fp-icon'), name);
   });
 }
 
@@ -697,7 +813,7 @@ async function requestBrowse(absPath, includeHidden) {
   return { entries: mapped, resolvedPath };
 }
 
-async function fetchGitStatus(path) {
+async function fetchGitStatus(path, generation) {
   if (!elements.gitStatus) return;
   elements.gitStatus.textContent = ''; // Clear previous
   
@@ -706,6 +822,7 @@ async function fetchGitStatus(path) {
     if (!resp.ok) return;
     
     const json = await resp.json();
+    if (generation !== browseGeneration) return;
     if (json.ok && json.data && json.data.is_repo) {
       const { branch, head_short } = json.data;
       if (branch && head_short) {
@@ -719,23 +836,29 @@ async function fetchGitStatus(path) {
 }
 
 async function navigate(targetPath) {
+  const generation = ++browseGeneration;
+  stopFilter();
+  lastTouch = null;
   const normalized = toAbsolute(targetPath, state.currentPath || prefs.lastPath || DEFAULT_START);
   const previousPath = state.currentPath;
   try {
     clearSelection();
+    state.entries = [];
     elements.list.innerHTML = '<div class="te-fp-loading">Loading...</div>';
     const { entries, resolvedPath } = await requestBrowse(normalized, prefs.showHidden);
+    if (generation !== browseGeneration) return;
     state.currentPath = resolvedPath;
     const sorted = sortEntries(entries);
     state.entries = sorted;
     prefs.lastPath = resolvedPath;
     if (state.persistKey) setStoredStart(state.persistKey, resolvedPath);
     renderBreadcrumbs(resolvedPath);
-    renderEntries(sorted);
+    applyFilter();
     updateButtons();
     // Async fetch git status
-    fetchGitStatus(resolvedPath);
+    fetchGitStatus(resolvedPath, generation);
   } catch (err) {
+    if (generation !== browseGeneration) return;
     const message = err?.message || 'Failed to browse';
     elements.list.innerHTML = `<div class="te-fp-loading" style="color:#f87171;">${escapeHtml(message)}</div>`;
     window.teUI.toast(message);
@@ -772,6 +895,9 @@ function cancel() {
 }
 
 function close() {
+  browseGeneration++;
+  stopFilter();
+  lastTouch = null;
   state.resolve = null;
   state.reject = null;
   state.entries = [];
@@ -782,6 +908,9 @@ function close() {
     elements.list.innerHTML = '';
     if (elements.saveRow) elements.saveRow.classList.add('te-fp-hidden');
     if (elements.filenameInput) elements.filenameInput.value = '';
+    elements.filter.value = '';
+    elements.filterError.textContent = '';
+    elements.filter.removeAttribute('aria-invalid');
   }
   const rootEl = elements?.root;
   if (rootEl) rootEl.classList.add('te-fp-hidden');
@@ -860,6 +989,8 @@ function init() {
     hiddenToggle: rootEl.querySelector('.te-fp-hidden-checkbox'),
     saveRow: rootEl.querySelector('.te-fp-save-row'),
     filenameInput: rootEl.querySelector('.te-fp-input-name'),
+    filter: rootEl.querySelector('#te-fp-filter'),
+    filterError: rootEl.querySelector('#te-fp-filter-error'),
     list: rootEl.querySelector('.te-fp-list'),
     btnUp: rootEl.querySelector('.te-fp-btn-up'),
     btnNewFolder: rootEl.querySelector('.te-fp-btn-newfolder'),
@@ -871,6 +1002,7 @@ function init() {
     bookmarkDropdown: rootEl.querySelector('.te-fp-menu-dropdown'),
   };
   elements.close.addEventListener('click', cancel);
+  elements.filter.addEventListener('input', applyFilter);
   if (elements.home) {
     elements.home.addEventListener('click', () => navigate(HOME_DIR));
   }

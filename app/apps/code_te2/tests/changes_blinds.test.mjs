@@ -3,7 +3,8 @@ import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 import { build } from 'esbuild';
 import { Window } from 'happy-dom';
-const bundled = await build({ entryPoints: ['src/explorer/search/changes-results-renderer.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
+import { fileIconTestPlugin } from './file_icon_test_plugin.mjs';
+const bundled = await build({ entryPoints: ['src/explorer/search/changes-results-renderer.ts'], bundle: true, format: 'esm', platform: 'node', write: false, plugins: [fileIconTestPlugin] });
 const { createExplorerChangesResultsRenderer } = await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString('base64')}`);
 test('file header chrome toggles, group MRU persists, and partial staging exposes Unstage', async () => {
   const win = new Window();
@@ -135,10 +136,11 @@ test('collapsed file summaries resolve basename icons, preserve paths, and isola
       ensureInlineDiffs: async () => assert.fail('header must not enable diffs'),
       openFileAndMaybeJump: async () => assert.fail('header must not navigate'),
       restoreFile: async () => {}, restoreHunk: async () => {},
-      getFileIcon: async name => { names.push(name); return { svg: '<svg><path /></svg>', color: '#abc' }; },
+      getFileIcon: async name => { names.push(name); return { codicon: 'python', color: '#abc' }; },
     });
     const container = document.createElement('div');
     const rel = 'some/very/long/path/example.py';
+    document.body.append(container);
     renderer.renderChangesResults(container, { changes: [{ rel, hunks: [{ lines: [
       { type: 'add', text: 'a' }, { type: 'del', text: 'b' }, { type: 'context', text: 'c' },
     ] }] }] });
@@ -148,7 +150,7 @@ test('collapsed file summaries resolve basename icons, preserve paths, and isola
     assert.equal(container.querySelector('.fe-search-change-path').title, rel);
     assert.equal(container.querySelector('.fe-search-change-count.is-added').textContent, '+1');
     assert.equal(container.querySelector('.fe-search-change-count.is-deleted').textContent, '-1');
-    assert.ok(container.querySelector('.fe-search-change-icon svg'));
+    assert.ok(container.querySelector('.fe-search-change-icon.codicon-python'));
     const toggle = container.querySelector('.fe-search-change-toggle');
     toggle.click(); toggle.click();
     assert.equal(container.querySelector('.fe-search-change-body').hidden, true);

@@ -6,7 +6,7 @@ test('ES module filenames share the real JavaScript icon and color', async () =>
   const root = new URL('../../../static/vendor/seti-icons/', import.meta.url);
   const source = await readFile(new URL('seti-icons.js', root), 'utf8');
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async url => ({ json: async () =>
+  globalThis.fetch = async url => ({ ok: true, json: async () =>
     JSON.parse(await readFile(new URL(String(url).split('/').pop(), root), 'utf8')) });
   try {
     const { getIcon } = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);

@@ -1,4 +1,4 @@
-import { getIcon as getSetiIcon } from '/static/vendor/seti-icons/seti-icons.js';
+import { getIcon as getFileIcon, renderIcon } from '/static/js/file_icons.js';
 
 interface RecentFileEntry {
   path: string;
@@ -248,11 +248,9 @@ function persistOrder(projectPath: string, paths: string[]): void {
 async function applyFileIcon(icon: HTMLElement, fileName: string): Promise<void> {
   icon.className = 'fe-file-tab-icon codicon codicon-file';
   try {
-    const resolved = await getSetiIcon(fileName);
-    if (!icon.isConnected || !resolved?.svg) return;
-    icon.className = 'fe-file-tab-icon';
-    icon.innerHTML = resolved.svg;
-    icon.style.color = resolved.color || '';
+    const resolved = await getFileIcon(fileName);
+    if (!icon.isConnected) return;
+    renderIcon(icon, resolved);
   } catch {
     // Keep the generic Codicon fallback.
   }

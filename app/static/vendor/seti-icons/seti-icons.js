@@ -5,6 +5,22 @@
 let _definitions = null;
 let _icons = null;
 let _loadPromise = null;
+let _definitionsPromise = null;
+
+function ensureDefinitionsLoaded() {
+  if (!_definitionsPromise) {
+    _definitionsPromise = fetch('/static/vendor/seti-icons/definitions.json')
+      .then(r => { if (!r.ok) throw new Error('Failed to load file icon definitions'); return r.json(); })
+      .then(defs => { _definitions = defs; });
+  }
+  return _definitionsPromise;
+}
+
+// Share the Explorer's filename rules without loading Seti SVGs or colors.
+export async function getIconName(fileName) {
+  await ensureDefinitionsLoaded();
+  return getDetails(fileName)[0];
+}
 
 export const defaultTheme = {
   blue: '#268bd2',
@@ -23,16 +39,14 @@ export const defaultTheme = {
 export function ensureLoaded() {
   if (_loadPromise) return _loadPromise;
   _loadPromise = Promise.all([
-    fetch('/static/vendor/seti-icons/definitions.json').then((r) => r.json()),
+    ensureDefinitionsLoaded(),
     fetch('/static/vendor/seti-icons/icons.json').then((r) => r.json()),
   ])
-    .then(([defs, icons]) => {
-      _definitions = defs;
+    .then(([, icons]) => {
       _icons = icons;
     })
     .catch((err) => {
       console.warn('[seti-icons] Failed to load mappings:', err);
-      _definitions = null;
       _icons = null;
       throw err;
     });

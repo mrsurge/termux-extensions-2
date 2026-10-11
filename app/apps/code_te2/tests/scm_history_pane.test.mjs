@@ -4,6 +4,7 @@ import path from 'node:path';
 import { build } from 'esbuild';
 import { Window } from 'happy-dom';
 import { buildTree } from '../src/explorer/history/vscode_scm/tree/build.mjs';
+import { fileIconTestPlugin } from './file_icon_test_plugin.mjs';
 
 const root = path.resolve(import.meta.dirname, '../src/explorer/history/vscode_scm');
 const win = new Window();
@@ -12,7 +13,7 @@ const previous = new Map(names.map(name => [name, Object.getOwnPropertyDescripto
 let upstream, pane, graph, hostModule, details;
 let treeCss;
 async function load(entry) {
-  const built = await build({ entryPoints: [path.join(root, entry)], bundle: true, write: false, format: 'esm', target: 'es2022', loader: { '.css': 'empty' } });
+  const built = await build({ entryPoints: [path.join(root, entry)], bundle: true, write: false, format: 'esm', target: 'es2022', loader: { '.css': 'empty' }, plugins: [fileIconTestPlugin] });
   return import(`data:text/javascript;base64,${Buffer.from(built.outputFiles[0].text + '\n//# sourceURL=' + entry).toString('base64')}`);
 }
 before(async () => {
@@ -252,7 +253,7 @@ test('a failed file read shows retry instead of an empty commit or global except
 });
 
 test('base-tree and history styles are bounded to the history host', async () => {
-  const styleBuild = await build({ entryPoints: [path.join(root, 'history-tree-host.ts')], bundle: true, write: false, format: 'esm', outdir: 'unused-history-test' });
+  const styleBuild = await build({ entryPoints: [path.join(root, 'history-tree-host.ts')], bundle: true, write: false, format: 'esm', outdir: 'unused-history-test', plugins: [fileIconTestPlugin] });
   const historyCss = styleBuild.outputFiles.find(file => file.path.endsWith('.css')).text;
   const sheet = new win.CSSStyleSheet();
   sheet.replaceSync(treeCss + '\n' + historyCss);
@@ -450,8 +451,11 @@ test('file icon resolver receives basename and late SVG cannot alter a recycled 
   assert.equal(template.label.querySelector('.history-file-directory-text').textContent, 'lib/');
   assert.equal(template.label.querySelector('.history-file-basename').textContent, 'second.mjs');
   assert.equal(template.label.title, 'lib/second.mjs');
-  assert.equal(template.label.querySelector('svg').dataset.icon, 'javascript');
-  assert.equal(template.label.querySelectorAll('svg').length, 1);
+  const icon = template.label.querySelector('.te-file-language-icon');
+  assert.match(icon.firstElementChild.style.mask, /javascript/);
+  assert.doesNotMatch(icon.firstElementChild.style.mask, /python/);
+  assert.equal(template.label.querySelectorAll('.te-file-language-icon').length, 1);
+  assert.equal(template.label.querySelectorAll('svg').length, 0);
   renderer.disposeTemplate(template);
 });
 

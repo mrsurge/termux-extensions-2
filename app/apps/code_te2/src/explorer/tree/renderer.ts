@@ -119,7 +119,7 @@ export function createExplorerTreeRenderer(deps: ExplorerTreeRendererDeps) {
     applyTreeDepthMetadata(rootLi, 'dir', 0);
 
     const icon = document.createElement('span');
-    icon.className = 'fe-entry-icon fe-entry-icon-dir';
+    icon.className = 'fe-entry-icon fe-entry-icon-dir codicon codicon-folder';
 
     const text = document.createElement('span');
     text.className = 'fe-tree-text';

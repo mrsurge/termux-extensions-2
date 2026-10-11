@@ -522,18 +522,18 @@
   display: block;
 }
 
-/* Make file Seti icons slightly larger without changing layout columns. */
+/* Retain sizing for a future SVG provider without changing layout columns. */
 .fe-entry-icon-file svg {
   transform: scale(2);
   transform-origin: center;
 }
 
-.fe-entry-icon-dir::before {
-  content: "📁";
+.fe-entry-icon-dir {
+  color: var(--te-file-icon-color, #8293a8);
 }
 
-/* Files get Seti SVGs injected via JS; keep CSS fallback empty. */
-.fe-entry-icon-file::before {
+/* Do not override the shared Codicon glyph with an empty fallback. */
+.fe-entry-icon-file:not(.codicon)::before {
   content: "";
 }
 

@@ -587,7 +587,7 @@ export function createExplorerStickyScopes({
     rowEl.replaceChildren();
 
     const icon = document.createElement('span');
-    icon.className = 'fe-entry-icon fe-entry-icon-dir';
+    icon.className = 'fe-entry-icon fe-entry-icon-dir codicon codicon-folder';
 
     const sourceInput = rootSource ? sourceRootSearchInput(rootSource) : null;
     const text = document.createElement('span');

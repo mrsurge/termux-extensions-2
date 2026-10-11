@@ -38,6 +38,7 @@ const shared = {
   external: [
     // Vendor scripts loaded separately via <script> tags
     '/static/vendor/*',
+    '/static/js/file_icons.js',
   ],
 };
 

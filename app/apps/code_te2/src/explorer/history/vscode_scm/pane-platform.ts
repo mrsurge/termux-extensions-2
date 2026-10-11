@@ -1,5 +1,6 @@
 import type { ISCMHistoryItemGraphNode, ISCMHistoryItemViewModel } from './adapted/common/history.ts';
 import type { HistoryIcon } from './platform.ts';
+import { renderIcon } from '/static/js/file_icons.js';
 
 // Presentation input only. Rust read DTOs will be validated by the app backend;
 // these rows never resolve Git references or open a working document themselves.
@@ -18,7 +19,7 @@ export type HistoryCounts =
   | { readonly state: 'partial'; readonly additions: number; readonly deletions: number; readonly unknownFiles: number }
   | { readonly state: 'pending' | 'binary' | 'unavailable' };
 
-export type HistoryFileIconResolver = (name: string) => Promise<{ svg?: string; color?: string } | null>;
+export type HistoryFileIconResolver = (name: string) => Promise<{ svg?: string; color?: string; codicon?: string } | null>;
 
 export interface HistoryCommitRow {
   readonly type: 'historyItemViewModel';
@@ -141,10 +142,8 @@ export function renderFileSummary(template: HistoryFileTemplate, row: HistoryFil
   // The production host supplies the same vendored filename resolver as tabs.
   // A recycled row detaches this icon, fencing any late asynchronous resolution.
   if (resolveIcon) void resolveIcon(basenameValue || row.path).then(resolved => {
-    if (icon.parentElement !== template.label || !resolved?.svg) return;
-    icon.className = 'history-file-icon';
-    icon.innerHTML = resolved.svg; // Trusted vendored SVG, never a Git path string.
-    icon.style.color = resolved.color || '';
+    if (icon.parentElement !== template.label) return;
+    renderIcon(icon, resolved);
   }).catch(() => {}); // Generic Codicon remains when the icon catalog is unavailable.
   if (row.status === 'added') {
     const added = template.label.ownerDocument.createElement('span');
