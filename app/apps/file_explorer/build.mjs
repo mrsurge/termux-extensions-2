@@ -8,6 +8,9 @@ await build({ ...common, entryPoints: ['terminal_drawer.ts'], outfile: '../../st
 await build({ ...common, entryPoints: ['wire_codec.ts'], outfile: '../../static/js/file_explorer_codec.js' });
 // Retain the shared helper URL without a second handwritten implementation.
 await build({ ...common, entryPoints: ['src/menubar.ts'], outfile: '../../static/js/te_file_explorer_context.mjs' });
+// Existing consumers retain the tab-helper URL; its authority is typed source.
+await build({ ...common, entryPoints: ['src/tab_client.ts'], outfile: '../../static/js/file_explorer_tabs.mjs',
+  plugins: [{ name: 'tab-codec', setup(build) { build.onResolve({ filter: /^\.\.\/wire_codec$/ }, () => ({ path: './file_explorer_codec.js', external: true })); } }] });
 // One app bundle; shared resources and the isolated regex worker stay external.
 // Standalone terminal/codec outputs retain their public compatibility contracts.
 await build({ ...common, entryPoints: ['src/main.js'], outfile: '../../static/js/file_explorer_main.js', external: ['/static/*'] });

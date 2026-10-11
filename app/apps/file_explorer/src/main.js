@@ -5,7 +5,9 @@ import {
 import { getIcon, renderIcon } from "/static/js/file_icons.js";
 import { selectPaths } from "/static/js/file_explorer_selection.mjs";
 import { createListingFilter } from "/static/js/file_explorer_filter.mjs";
-import { createTabClient, mountIntent, tabUrl, randomTabOperation } from "/static/js/file_explorer_tabs.mjs";
+import { createTabClient, mountIntent, tabUrl, randomTabOperation } from "./tab_client.ts";
+import { createTabsUI } from "./tabs_ui.ts";
+import { createFileExplorerApi } from "./api.ts";
 import { createTerminalDrawer } from "../terminal_drawer.ts";
 import { createViewport } from "./viewport.ts";
 import { bindTerminalShortcut } from "./keyboard.ts";
@@ -680,6 +682,7 @@ async function createJobRequest(type, params) {
 }
 
 export default function initFileExplorer(root, api, host) {
+  const files = createFileExplorerApi(api);
   if (!document.querySelector('link[href="/static/vendor/codicons/codicon.css"]')) {
     const link = document.createElement('link');
     link.rel = 'stylesheet';
@@ -972,7 +975,6 @@ export default function initFileExplorer(root, api, host) {
   let tabSocket = null;
   let applyingTab = 0;
   let directoryGeneration = 0;
-  let splashGeneration = 0;
   let tabsInitialized = false;
   let terminalDrawer = null;
   let renderedTab = '';
@@ -981,13 +983,24 @@ export default function initFileExplorer(root, api, host) {
   let pendingTabReference = null;
   const lastTabKey = 'te2:file-explorer:last-tab:v1';
   const footer = root.querySelector('.fx-mobile-footer');
-  const splash = document.createElement('section');
-  splash.className = 'fx-tab-splash';
-  splash.setAttribute('aria-label', 'File Explorer tabs');
-  container.before(splash);
   const tabsGroup = container.querySelector('[data-menu="tabs"]');
-  const tabsPanel = container.querySelector('[data-menu-panel="tabs"]');
-  let catalogGeneration = 0;
+  const tabsUI = createTabsUI({
+    container, footer,
+    list: () => tabs.list(),
+    catalog: () => tabs.catalog(),
+    currentTab: () => tabs?.tab || null,
+    create: async () => {
+      const path = statefulHostId ? (await tabs.request('tabs.defaultPath')).path : HOME_DIR;
+      await applyTab(await tabs.mount({ kind: 'create', path }, tabOptions(), randomTabOperation()));
+    },
+    attach: async record => { await applyTab(await tabs.mount({ kind: 'attach', tabId: record.id })); },
+    close: record => tabs.close(record, Boolean(record.shellId)),
+    showTabs: () => showTabs(),
+    closeMenus: () => closeAllMenus(),
+    error: error => tabError(error),
+    confirm: message => window.teUI.dialog.confirm(message),
+    splashPublished: () => { void publishStatefulSidebarUrl(HOME_DIR); },
+  });
 
   function tabOptions() {
     return { showHidden, view: state.view, sortBy: state.sortBy, sortAsc: state.sortAsc };
@@ -1005,9 +1018,7 @@ export default function initFileExplorer(root, api, host) {
   }
 
   function showTabChrome(active) {
-    container.style.display = active ? '' : 'none';
-    if (footer) footer.style.display = active ? '' : 'none';
-    splash.hidden = active;
+    tabsUI.chrome(active);
   }
 
   async function applyTab(tab) {
@@ -1018,7 +1029,7 @@ export default function initFileExplorer(root, api, host) {
     if (tab.id !== renderedTabId) viewport.resetFilter();
     renderedTabId = tab.id;
     renderedTab = rendering;
-    splashGeneration++;
+    tabsUI.invalidateSplash();
     applyingTab++;
     try {
       showHidden = tab.options.showHidden;
@@ -1036,70 +1047,15 @@ export default function initFileExplorer(root, api, host) {
   async function showTabs() {
     terminalDrawer?.sync(null);
     renderedTab = '';
-    const generation = ++splashGeneration;
     directoryGeneration++;
     viewport.resetFilter();
     renderedTabId = '';
     rememberTab(null);
-    showTabChrome(false);
-    splash.replaceChildren();
-    const heading = document.createElement('h2'); heading.textContent = 'File Explorer tabs'; splash.append(heading);
-    const records = await tabs.list();
-    if (generation !== splashGeneration) return;
-    renderTabChoices(splash, records);
-    void publishStatefulSidebarUrl(HOME_DIR);
-  }
-
-  function renderTabChoices(target, records) {
-    const newTab = document.createElement('button'); newTab.textContent = 'New tab'; target.append(newTab);
-    newTab.addEventListener('click', async () => {
-      newTab.disabled = true;
-      closeAllMenus();
-      try {
-        const path = statefulHostId ? (await tabs.request('tabs.defaultPath')).path : HOME_DIR;
-        const tab = await tabs.mount({ kind: 'create', path }, tabOptions(), randomTabOperation());
-        await applyTab(tab);
-      } catch (error) { tabError(error); } finally { newTab.disabled = false; }
-    });
-    for (const record of records) {
-      const row = document.createElement('div'); row.className = 'fx-tab-row';
-      const open = document.createElement('button'); open.textContent = record.path;
-      open.title = record.path;
-      if (record.id === tabs.tab?.id) open.setAttribute('aria-current', 'true');
-      open.addEventListener('click', async () => {
-        closeAllMenus();
-        try { await applyTab(await tabs.mount({ kind: 'attach', tabId: record.id })); }
-        catch (error) { tabError(error); }
-      });
-      const close = document.createElement('button');
-      close.className = 'fx-tab-close';
-      close.setAttribute('aria-label', `Close tab ${record.path}`);
-      close.title = 'Close tab';
-      close.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
-      close.addEventListener('click', async () => {
-        if (!await window.teUI.dialog.confirm(record.shellId
-          ? 'Close this tab and stop its terminal processes in all attached windows?'
-          : 'Close this tab in all attached windows?')) return;
-        close.disabled = true;
-        try {
-          await tabs.close(record, Boolean(record.shellId));
-          if (tabs.tab) await refreshTabsMenu();
-          else await showTabs();
-        } catch (error) { tabError(error); close.disabled = false; }
-      });
-      row.append(open, close); target.append(row);
-    }
-    if (!records.length) {
-      const empty = document.createElement('p'); empty.textContent = 'No open tabs. New tab starts in your project (Sidebar) or Home.'; target.append(empty);
-    }
+    await tabsUI.showSplash();
   }
 
   async function refreshTabsMenu() {
-    const generation = ++catalogGeneration;
-    const records = await tabs.catalog();
-    if (generation !== catalogGeneration || !tabsGroup.hasAttribute('data-open')) return;
-    tabsPanel.replaceChildren();
-    renderTabChoices(tabsPanel, records);
+    await tabsUI.refreshMenu();
   }
 
   function persistState(syncTab = true) {
@@ -1149,7 +1105,7 @@ export default function initFileExplorer(root, api, host) {
       const consoleWorkerId =
         status && status.workerId ? String(status.workerId) : "";
       const tokenId = statefulTokenId || "file_explorer";
-      await api.post("sidebar/window/state", {
+      await files.sidebarState({
         host_id: statefulHostId,
         hostId: statefulHostId,
         token_id: tokenId,
@@ -1386,24 +1342,10 @@ export default function initFileExplorer(root, api, host) {
         if (generation !== directoryGeneration) return;
         targetPath = tab.path;
       }
-      const hiddenParam = showHidden ? "1" : "0";
-      const payload = await api.get(
-        `list?path=${encodeURIComponent(targetPath || normalized)}&hidden=${hiddenParam}`,
-      );
+      const payload = await files.list(targetPath || normalized, showHidden);
       if (generation !== directoryGeneration) return;
 
-      let entries = [];
-      let resolvedPath = normalized;
-
-      // Handle both old (array) and new (object) response formats for compatibility
-      if (Array.isArray(payload)) {
-        entries = payload;
-      } else if (payload && typeof payload === "object") {
-        entries = payload.entries || [];
-        if (payload.path) {
-          resolvedPath = payload.path;
-        }
-      }
+      const { entries, path: resolvedPath } = payload;
 
       if (resolvedPath !== state.currentPath) viewport.resetFilter();
       state.currentPath = resolvedPath;
@@ -1448,7 +1390,7 @@ export default function initFileExplorer(root, api, host) {
       return;
     }
     try {
-      await api.post("mkdir", { path: base, name });
+      await files.mkdir(base, name);
       toast(host, `Created folder "${name}"`);
       await loadDirectory(base);
     } catch (error) {
@@ -1497,7 +1439,7 @@ export default function initFileExplorer(root, api, host) {
     const next = (await window.teUI.dialog.prompt("Rename to:", state.selected.name) || "").trim();
     if (!next || next === state.selected.name) return;
     try {
-      await api.post("rename", { path: state.selected.path, name: next });
+      await files.rename(state.selected.path, next);
       toast(host, `Renamed to "${next}"`);
       await loadDirectory(state.currentPath);
     } catch (error) {
@@ -1521,7 +1463,7 @@ export default function initFileExplorer(root, api, host) {
       // Process each selected item
       for (const path of state.selectedPaths) {
         try {
-          await api.post("delete", { path });
+          await files.delete(path);
           succeeded++;
         } catch (error) {
           failed++;
@@ -1557,7 +1499,7 @@ export default function initFileExplorer(root, api, host) {
     );
     if (!confirmed) return;
     try {
-      await api.post("delete", { path: state.selected.path });
+      await files.delete(state.selected.path);
       toast(host, `Deleted "${state.selected.name}"`);
       await loadDirectory(state.currentPath);
     } catch (error) {
@@ -1627,7 +1569,7 @@ export default function initFileExplorer(root, api, host) {
           try {
             const filename = sourcePath.split("/").pop();
             const destPath = `${choice.path}/${filename}`;
-            await api.post("copy", { source: sourcePath, dest: destPath });
+            await files.copy(sourcePath, destPath);
             succeeded++;
           } catch (error) {
             failed++;
@@ -1721,10 +1663,7 @@ export default function initFileExplorer(root, api, host) {
         return;
       }
 
-      await api.post("copy", {
-        source: state.selected.path,
-        dest: pickerResult.path,
-      });
+      await files.copy(state.selected.path, pickerResult.path);
       toast(host, `Copied "${state.selected.name}" to ${pickerResult.path}`);
       if (destParent === state.currentPath) {
         await loadDirectory(state.currentPath);
@@ -1797,7 +1736,7 @@ export default function initFileExplorer(root, api, host) {
 
         for (const sourcePath of sources) {
           try {
-            await api.post("move", { source: sourcePath, dest: choice.path });
+            await files.move(sourcePath, choice.path);
             succeeded++;
           } catch (error) {
             failed++;
@@ -1844,10 +1783,7 @@ export default function initFileExplorer(root, api, host) {
         startPath: state.currentPath,
       });
       if (!choice || !choice.path) return;
-      await api.post("move", {
-        source: state.selected.path,
-        dest: choice.path,
-      });
+      await files.move(state.selected.path, choice.path);
       toast(host, `Moved "${state.selected.name}" to ${choice.path}`);
       await loadDirectory(state.currentPath);
     } catch (error) {
@@ -1876,9 +1812,7 @@ export default function initFileExplorer(root, api, host) {
 
   async function followSymlink(entry) {
     try {
-      const response = await api.get(
-        `resolve_symlink?path=${encodeURIComponent(entry.path)}`,
-      );
+      const response = await files.resolveSymlink(entry.path);
       if (response.is_symlink && response.target_exists) {
         if (response.target_type === "directory") {
           loadDirectory(response.target);
@@ -1897,7 +1831,7 @@ export default function initFileExplorer(root, api, host) {
           // Follow chain of symlinks
           await followSymlink({ path: response.target });
         }
-      } else if (!response.target_exists) {
+      } else if (response.is_symlink && !response.target_exists) {
         toast(host, "Symlink target does not exist");
       } else {
         // Not a symlink, handle normally
@@ -1978,10 +1912,8 @@ export default function initFileExplorer(root, api, host) {
 
     if (state.selected.type === "symlink") {
       try {
-        const info = await api.get(
-          `resolve_symlink?path=${encodeURIComponent(state.selected.path)}`,
-        );
-        if (!info.target_exists) {
+        const info = await files.resolveSymlink(state.selected.path);
+        if (info.is_symlink && !info.target_exists) {
           toast(host, "Symlink target does not exist");
           return;
         }
@@ -2250,9 +2182,7 @@ export default function initFileExplorer(root, api, host) {
 
   async function fetchProperties(entry) {
     try {
-      const payload = await api.get(
-        `properties?path=${encodeURIComponent(entry.path)}`,
-      );
+      const payload = await files.properties(entry.path);
       return payload;
     } catch (error) {
       toast(host, error?.message || "Failed to fetch properties");
@@ -2329,7 +2259,7 @@ export default function initFileExplorer(root, api, host) {
 
     try {
       if (renameChanged) {
-        await api.post("rename", { path: originalPath, name: newName });
+        await files.rename(originalPath, newName);
         currentPath = joinPath(parentDir, newName);
         propertiesContext.entry.name = newName;
         propertiesContext.entry.path = currentPath;
@@ -2342,11 +2272,7 @@ export default function initFileExplorer(root, api, host) {
 
       if (modeChanged) {
         const modeStr = newModeValue.toString(8).padStart(3, "0");
-        await api.post("chmod", {
-          path: currentPath,
-          mode: modeStr,
-          recursive,
-        });
+        await files.chmod(currentPath, modeStr, recursive);
         propertiesContext.metadata.mode_int = newModeValue;
         propertiesContext.metadata.mode_octal = modeStr;
         propertiesContext.metadata.permissions = newPermissions;
@@ -2360,11 +2286,7 @@ export default function initFileExplorer(root, api, host) {
       }
 
       if (ownerChanged || groupChanged) {
-        await api.post("chown", {
-          path: currentPath,
-          user: ownerChanged ? ownerInput : "",
-          group: groupChanged ? groupInput : "",
-        });
+        await files.chown(currentPath, ownerChanged ? ownerInput : "", groupChanged ? groupInput : "");
         if (ownerChanged) {
           propertiesContext.metadata.owner = ownerInput;
           if (ui.propertiesOwnerInput)
@@ -2782,8 +2704,7 @@ export default function initFileExplorer(root, api, host) {
   setPropertiesModalOpen(false);
 
   applyView();
-  showTabChrome(false);
-  splash.textContent = 'Loading tabs…';
+  tabsUI.loading();
   void (async () => {
     const io = await ensureSocketIoLoaded();
     const socket = io('/tabs', { path: '/api/app/file_explorer/socket.io', transports: ['websocket'],
@@ -2816,9 +2737,7 @@ export default function initFileExplorer(root, api, host) {
     await applyTab(await tabs.mount(intent, tabOptions(), operation));
     tabsInitialized = true;
   })().catch(error => {
-    splash.textContent = error?.message || 'Tabs could not be loaded';
-    const retry = document.createElement('button'); retry.textContent = 'Reload';
-    retry.addEventListener('click', () => window.location.reload()); splash.append(retry);
+    tabsUI.failed(error?.message || 'Tabs could not be loaded', () => window.location.reload());
     tabError(error);
   });
   window.addEventListener('pagehide', event => {
@@ -2826,6 +2745,7 @@ export default function initFileExplorer(root, api, host) {
     if (event.persisted) tabSocket?.disconnect();
     else {
       viewport.dispose(); menubar.dispose();
+      tabsUI.dispose();
       disposeTerminalShortcut();
       void contextMenuReady.then(menu => menu.dispose());
       terminalDrawer?.dispose(); tabs?.dispose();

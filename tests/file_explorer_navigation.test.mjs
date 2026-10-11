@@ -10,7 +10,7 @@ function fixture() {
   const state = { currentPath: '/project', entries: [], view: 'list' };
   const context = { state, ui: {}, tabs: null, HOME_DIR: '~', showHidden: false,
     viewport: { captureListingFocus() {}, cancelFilter() {}, resetFilter() { resets++; } },
-    api: { async get() { if (resolve) return new Promise(resolve); if (response instanceof Error) throw response; return response; } },
+    files: { async list() { if (resolve) return new Promise(resolve); if (response instanceof Error) throw response; return response; } },
     closeAllMenus() {}, clearSelection() {}, setLoading() {}, renderBreadcrumbs() {}, refreshFilter() {},
     updateActionButtons() {}, applyView() {}, persistState() {}, publishStatefulSidebarUrl() {}, toast() {}, host: {},
   };
@@ -37,7 +37,7 @@ test('tab identity change resets regex independently of path/options refresh', (
   let resets = 0;
   const calls = [];
   const context = { terminalDrawer: null, viewport: { resetFilter() { resets++; } },
-    state: {}, ui: {}, rememberTab() {}, showTabChrome() {}, showTabs() {},
+    state: {}, ui: {}, tabsUI: { invalidateSplash() {} }, rememberTab() {}, showTabChrome() {}, showTabs() {},
     loadDirectory: async path => calls.push(path), JSON };
   const apply = vm.runInNewContext("let renderedTab = '', renderedTabId = '', splashGeneration = 0, applyingTab = 0, showHidden = false;\n" + source.slice(start, end) + '\napplyTab', context);
   return (async () => {

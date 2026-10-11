@@ -392,6 +392,12 @@ Then extract validated API/DTOs, tabs/splash, actions/properties/bookmarks and
 jobs before strictly typing the reduced composition root. Do not claim remaining
 JavaScript orchestration is typechecked during the first slice. See
 `app/apps/file_explorer/FRONTEND.md` for source/output and navigation contracts.
+The approved API/tabs slice validates the host's already-unwrapped app responses
+and backend-owned tab records. Keep nullable create/attach results, serialized
+directory/terminal mutations, read-only reconnect resync, and generation fences;
+stale mount or same-tab mutation ACKs cannot replace a newer selection. Typed
+splash/menu controllers own presentation, not tab or sidebar authority. Global
+jobs/bookmarks/archive endpoints remain outside the app HTTP facade.
 Prefer existing framework filesystem/pipe services; first inspect support for
 bounded aggregation, cancellation, errors, symlinks and permissions. A depth-one
 display can still require recursive byte accounting: define that cost explicitly,

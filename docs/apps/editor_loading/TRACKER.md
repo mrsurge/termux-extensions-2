@@ -1758,3 +1758,23 @@ memory/documentation consolidation. No shared framework restart was performed.
 - [ ] Deferred/pre-existing lifecycle seams for slice two: main-document Escape
   listener cleanup on same-document remount; filtering the old listing while a
   directory request is pending. Neither was introduced by the extraction.
+
+#### File Explorer modularization — API and tabs slice
+
+- [x] First slice committed/pushed as `ec41f30c`, with user live acceptance.
+- [x] Approved frontend-only scope: strict app HTTP DTO validation, typed tab
+  protocol/client and splash/tab-menu controllers, including stale mount ACK
+  fencing. Preserve backend authority, existing codecs/transports and one-shot
+  mutations; no Python, Android or shared framework lifecycle changes.
+- [x] Implement typed boundaries and wire the remaining composition root.
+- [x] Validate malformed DTOs, nullable metadata/missing tabs, concurrent mounts,
+  disconnect/resync and existing terminal/selection/navigation regressions.
+- [x] Strict TypeScript check, minified build and source syntax/diff checks pass.
+  Existing terminal directory-control suite passes (9 tests). Frontend regression
+  suite passes (78 tests), including DTO, tab protocol/client, splash/menu and
+  navigation coverage.
+- [x] User live acceptance: API/tabs slice works. User requested commit/push.
+  No shared framework restart or Python/mypyc rebuild is required.
+- [ ] Later slices retain file workflows/properties, bookmarks, jobs and the
+  final strictly typed composition root. Global jobs/bookmarks/archive routes
+  must not be conflated with the app HTTP facade.

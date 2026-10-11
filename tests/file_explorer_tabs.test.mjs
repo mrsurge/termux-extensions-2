@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mountIntent, tabUrl, createTabClient } from '../app/static/js/file_explorer_tabs.mjs';
+import { build } from '../app/apps/file_explorer/node_modules/esbuild/lib/main.js';
+const bundle = await build({ entryPoints: [new URL('../app/apps/file_explorer/src/tab_client.ts', import.meta.url).pathname], bundle: true, write: false, format: 'esm', platform: 'browser' });
+const { mountIntent, tabUrl, createTabClient } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].contents).toString('base64')}`);
 import { packObject, unpackObject } from '../app/static/js/file_explorer_codec.js';
 
 test('launch intent distinguishes framework, sidebar, fresh and restored tabs', () => {
@@ -59,7 +61,8 @@ test('relative Sidebar publication saves a restorable tab reference or identity-
     assert.deepEqual(mountIntent(splash), { kind: 'splash' });
   }
 });
-const record = (revision = 1) => ({ id: 'tab', path: '/project', revision, options: {} });
+const options = { showHidden: false, view: 'list', sortBy: 'name', sortAsc: true };
+const record = (revision = 1) => ({ id: 'tab', path: '/project', revision, options: { ...options }, shellId: null, directoryLocked: true, shellTrackingId: null });
 
 test('terminal association ACK advances the shared mutation lane before path updates', async () => {
   const wire = socket(), seen = [];
@@ -67,7 +70,7 @@ test('terminal association ACK advances the shared mutation lane before path upd
   const mounting = client.mount({ kind: 'attach', tabId: 'tab' });
   wire.calls[0].ack({ ok: true, result: { tab: record() } }); await mounting;
   const start = client.terminal('terminal.start');
-  const update = client.update('/next', {});
+  const update = client.update('/next', options);
   await Promise.resolve();
   assert.equal(wire.calls[1].payload.params.revision, 1);
   wire.calls[1].ack({ ok: true, result: { tab: { ...record(2), shellId: 'shell' } } }); await start;
@@ -103,7 +106,7 @@ test('author ACK does not remount; peer update and reconnect restore without wri
   const client = createTabClient(wire, snapshot => seen.push(snapshot), () => {});
   const mounting = client.mount({ kind: 'attach', tabId: 'tab' });
   wire.calls[0].ack({ ok: true, result: { tab: record() } }); await mounting;
-  const updating = client.update('/new', {});
+  const updating = client.update('/new', options);
   await Promise.resolve();
   wire.calls[1].ack({ ok: true, result: { tab: record(2) } }); await updating;
   assert.equal(seen.length, 0);
@@ -122,7 +125,7 @@ test('disconnect rejects uncertain mutation and clears buffered writes', async (
   const client = createTabClient(wire, () => {}, () => {});
   const mount = client.mount({ kind: 'attach', tabId: 'tab' });
   wire.calls[0].ack({ ok: true, result: { tab: record() } }); await mount;
-  const update = client.update('/new', {});
+  const update = client.update('/new', options);
   await Promise.resolve();
   wire.sendBuffer.push('uncertain');
   wire.connected = false; wire.event('disconnect');
@@ -137,8 +140,8 @@ test('failed mutation reads authority and drops older queued writes without repl
   const client = createTabClient(wire, value => seen.push(value), () => {});
   const mounting = client.mount({ kind: 'attach', tabId: 'tab' });
   wire.calls[0].ack({ ok: true, result: { tab: record() } }); await mounting;
-  const first = client.update('/uncertain', {}).catch(error => error);
-  const queued = client.update('/queued', {}).catch(error => error);
+  const first = client.update('/uncertain', options).catch(error => error);
+  const queued = client.update('/queued', options).catch(error => error);
   await Promise.resolve();
   wire.calls[1].ack({ ok: false, error: 'stale revision' });
   await new Promise(setImmediate);
@@ -156,7 +159,7 @@ test('a newer peer snapshot cannot be overwritten by an older author ACK', async
   const client = createTabClient(wire, value => seen.push(value), () => {});
   const mounting = client.mount({ kind: 'attach', tabId: 'tab' });
   wire.calls[0].ack({ ok: true, result: { tab: record() } }); await mounting;
-  const update = client.update('/new', {});
+  const update = client.update('/new', options);
   await Promise.resolve();
   wire.event('tab_snapshot', { tab: record(3) });
   wire.calls[1].ack({ ok: true, result: { tab: record(2) } });
@@ -164,4 +167,59 @@ test('a newer peer snapshot cannot be overwritten by an older author ACK', async
   assert.equal(client.tab.revision, 3);
   assert.equal(seen.length, 1);
   client.dispose();
+});
+
+test('a stale concurrent mount ACK cannot replace the newer active tab', async () => {
+  const wire = socket(), client = createTabClient(wire, () => {}, () => {});
+  const older = client.mount({ kind: 'attach', tabId: 'old' }).catch(error => error);
+  const newer = client.mount({ kind: 'attach', tabId: 'new' });
+  wire.calls[1].ack({ ok: true, result: { tab: { ...record(), id: 'new' } } });
+  await newer;
+  wire.calls[0].ack({ ok: true, result: { tab: { ...record(), id: 'old' } } });
+  assert.match((await older).message, /selection changed/);
+  assert.equal(client.tab.id, 'new'); client.dispose();
+});
+
+test('closing the active tab fences pending same-identity mount completion', async () => {
+  const wire = socket(), client = createTabClient(wire, () => {}, () => {});
+  const initial = client.mount({ kind: 'attach', tabId: 'tab' });
+  wire.calls[0].ack({ ok: true, result: { tab: record() } }); await initial;
+  const pending = client.mount({ kind: 'attach', tabId: 'tab' }).catch(error => error);
+  wire.event('tab_snapshot', { tab: null, closedId: 'tab' });
+  wire.calls[1].ack({ ok: true, result: { tab: record() } });
+  assert.match((await pending).message, /selection changed/);
+  assert.equal(client.tab, null); client.dispose();
+});
+
+test('null create and attach results are valid but incomplete records are rejected', async () => {
+  const wire = socket(), errors = [], client = createTabClient(wire, () => {}, error => errors.push(error));
+  const creation = client.mount({ kind: 'create', path: '/project' }, options, 'once');
+  wire.calls[0].ack({ ok: true, result: { tab: null } }); assert.equal(await creation, null);
+  const attachment = client.mount({ kind: 'attach', tabId: 'missing' });
+  wire.calls[1].ack({ ok: true, result: { tab: null } }); assert.equal(await attachment, null);
+  const invalid = client.mount({ kind: 'attach', tabId: 'bad' });
+  wire.calls[2].ack({ ok: true, result: { tab: { id: 'bad', path: '/bad', revision: 1, options: {} } } });
+  await assert.rejects(invalid, /Invalid/);
+  wire.event('tab_snapshot', {}); assert.equal(errors.length, 1); assert.equal(client.tab, null);
+  client.dispose();
+});
+
+test('same-tab remount fences an older in-flight mutation ACK without replay', async () => {
+  const wire = socket(), seen = [], client = createTabClient(wire, value => seen.push(value), () => {});
+  const firstMount = client.mount({ kind: 'attach', tabId: 'tab' });
+  wire.calls[0].ack({ ok: true, result: { tab: record() } }); await firstMount;
+  const update = client.update('/old-intent', options).catch(error => error);
+  await Promise.resolve();
+  const remount = client.mount({ kind: 'attach', tabId: 'tab' });
+  wire.calls[2].ack({ ok: true, result: { tab: record(3) } }); await remount;
+  wire.calls[1].ack({ ok: true, result: { tab: record(4) } });
+  assert.match((await update).message, /selection changed/);
+  assert.equal(client.tab.revision, 3); assert.equal(wire.calls.length, 3); assert.equal(seen.length, 0);
+  client.dispose();
+});
+
+test('synchronous emit failures reject immediately and leave no pending request timer', async () => {
+  const wire = socket(), client = createTabClient(wire, () => {}, () => {});
+  wire.emit = () => { throw new Error('emit failed'); };
+  await assert.rejects(client.request('tabs.list'), /emit failed/); client.dispose();
 });

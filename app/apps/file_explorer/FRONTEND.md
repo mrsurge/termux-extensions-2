@@ -4,7 +4,7 @@
 
 `src/main.js` currently composes the app and retains directory navigation, tab
 orchestration, file workflows, properties, bookmarks and job observation. These
-remaining JavaScript paths are the second refactor slice; they are **not yet
+remaining JavaScript paths are later refactor slices; they are **not yet
 strictly typechecked**.
 
 The first extracted controllers are checked under the app's strict TypeScript
@@ -20,6 +20,16 @@ configuration:
   focus restoration, keyboard navigation and listener disposal. Existing command
   buttons remain the capability source.
 - `terminal_drawer.ts`: existing independent terminal controller/transport.
+- `src/api.ts`: validates host-unwrapped app HTTP DTOs and exposes named file
+  operations. Nullable listing metadata becomes absent; legacy array listings
+  remain supported. Global jobs/bookmarks and intents retain their own boundary.
+- `src/tab_protocol.ts` and `src/tab_client.ts`: validate backend tab/terminal
+  DTOs over existing MessagePack Socket.IO, with serialized mutation and
+  disconnect/selection fences. Uncertain mutations are never replayed; resync
+  attaches read-only and cannot regress a newer peer revision.
+- `src/tabs_ui.ts`: splash and tab-menu presentation with stale-result/disposal
+  guards. Directory, preference, terminal and sidebar coordination stay in root
+  callbacks; showing a splash never creates a tab.
 
 Ctrl+backtick reveals/focuses the current tab's terminal via its existing drawer
 action, creating it if absent. It does not toggle the drawer closed. The typed
@@ -43,9 +53,9 @@ From the repository root, `node app/apps/file_explorer/build.mjs` also works.
 The framework manifest still resolves `main.js`, now a small mount adapter to
 `/static/js/file_explorer_main.js`. The latter is one minified ESM app bundle with
 no code splitting, including the typed controllers and terminal/codec. Shared
-console/icon/tab/intent resources and lazy terminal vendor assets retain their
+console/icon/intent resources and lazy terminal vendor assets retain their
 existing URLs; the bounded regex worker remains isolated and terminable.
-Standalone terminal/codec/context helper outputs retain compatibility URLs and
+Standalone terminal/codec/context/tab helper outputs retain compatibility URLs and
 are generated from their owning sources, not separate implementations.
 
 The generated app bundle is in `app/static/js`, which is included in wheels and
@@ -63,7 +73,7 @@ presentation-only, not persisted into durable tab records.
 
 ## Remaining extraction
 
-Next: validated API/DTOs; tabs/splash; file actions/properties/bookmarks; job
+Next: file actions/properties/bookmarks; job
 observation; then strictly type the reduced composition entrypoint. Preserve the
 backend-owned tab and intent boundaries and existing terminal ownership. Do not
 rename remaining JS to TS with suppression directives or broad casts as a
