@@ -374,6 +374,17 @@ arrows move focus through the displayed/sorted entries, Home/End reach the ends,
 Space toggles selection and Enter opens the focused entry. Keep focus distinct
 from batch selection and leave terminal/input key handling untouched. Reuse the
 bounded shared regex worker; directory usage remains a separate backend slice.
+Directory usage should use the framework filesystem service over its existing
+worker pipe. File Explorer already calls `fs.listDirectory` through `service.fs`
+(NID 2100); extend that service with a usage operation rather than introducing a
+separate subprocess transport. The Rust service owns traversal and aggregation;
+the File Explorer backend owns request/tab association and projects results to its
+frontend. A depth-one result still requires recursive traversal below each child.
+Investigate existing scheduler job/progress/cancellation support before choosing
+the exact method contract. Keep scans user-triggered, bounded and cancellable,
+preserve ordinary listing responsiveness, report incomplete/error results, and
+define allocated versus apparent bytes, hard-link accounting and symlink policy
+before implementation. The frontend must discard results for superseded requests.
 Style the regex field using existing field colors/geometry. Typing from a focused
 entry starts filtering (Space stays selection); Backspace navigates up, and Delete
 uses the existing warned deletion flow for selected items or the focused item.

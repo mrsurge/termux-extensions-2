@@ -1715,6 +1715,17 @@ memory/documentation consolidation. No shared framework restart was performed.
   slice. Reload alone does not publish native-client assets; no backend rebuild
   or shared framework restart is required for these frontend changes.
 - [ ] Directory usage remains a separate pending slice.
+  User selected the existing framework filesystem pipe service as the preferred
+  boundary. Read-only discovery confirms File Explorer already uses
+  `fs.listDirectory` via `service.fs`; exact usage/job contract and semantics are
+  the next implementation-design step. No usage code or runtime change yet.
+  Investigation: FS currently has request/reply scheduling, while Search/Git own
+  separate job registries. Python pipe timeout does not cancel Rust work. Plan a
+  separate bounded scan lane and explicit cancellation/progress for long scans;
+  do not occupy all four ordinary FS read permits. Search walker ignore/hidden
+  filtering cannot be reused for disk accounting. Report depth limits rows, not
+  recursion. Source: `framework_services/pipe/fs_pipe_ops.rs`, `scheduler.rs`,
+  `fs_ops.rs` and `app/libs/pipe_runtime.py`.
 
 #### Keyboard/filter polish follow-up
 

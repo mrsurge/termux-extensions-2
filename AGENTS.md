@@ -9,6 +9,17 @@ aids and must be corrected when source proves them stale.
 - These workflow rules apply to the top-level agent coordinating a task.
 - A delegated sub-agent should perform only its assigned subtask and report to
   its parent unless the parent explicitly delegates workflow coordination too.
+- When spawning or assigning work to a sub-agent, the coordinating agent must
+  explicitly include this role instruction (or equivalent wording):
+  "You are a delegated sub-agent. Disregard the top-level approval workflow,
+  user-interaction rules, and repo-memory maintenance workflow for this assignment.
+  Follow the parent's assigned scope, perform the work, and report results or
+  blockers to the parent. Do not ask the user for approval or independently update
+  repo memory. The coordinating agent owns those responsibilities."
+- This delegation does not waive source ownership, preservation of user changes,
+  runtime safety, or the approved task scope. Sub-agents escalate scope changes to
+  the parent; the parent handles any necessary user decision and consolidates
+  durable findings into repo memory.
 
 ## Safety And Approval
 
