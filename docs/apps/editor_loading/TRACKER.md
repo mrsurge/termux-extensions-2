@@ -1387,7 +1387,7 @@ Previous selector retained; the running worker is unchanged until restarted.
 
 1. code te2 like terminal drawer/backend
 2. identity based window/session/state identity like als/rs (one terminal per identity) associated sidebar identity like als/rs
-3. regex search (depth 1)
+3. regex search (depth 1), paired with arrow/Enter/Space keyboard navigation
 4. `du -h --max-depth=1` style behavior/view
 
 ---
@@ -1699,3 +1699,62 @@ push is implied by this implementation.
 
 The user requested commit/push of this accepted snapshot, including their repo
 memory/documentation consolidation. No shared framework restart was performed.
+
+### File Explorer current-directory regex and keyboard navigation
+
+- [x] Approved frontend-only slice: regex filters fetched names using the shared
+  picker worker, 120 ms debounce, 500 ms deadline and identical size bounds.
+  Obsolete results are fenced; errors are visible and clearing restores entries.
+- [x] List/grid arrows move focus without selecting, Home/End reach boundaries,
+  Space toggles selection and Enter opens the focused entry through existing
+  actions. Selection icons retain toggle semantics; inputs/terminal are untouched.
+  Focus is preserved across listing rerenders. Select-all uses displayed order.
+- [x] Validation: 17 filter/tab/terminal tests and 26 selection/picker regressions
+  pass; File Explorer typecheck/build, main.js syntax and diff checks pass.
+- [x] User live acceptance for the completed filter/keyboard/modularization
+  slice. Reload alone does not publish native-client assets; no backend rebuild
+  or shared framework restart is required for these frontend changes.
+- [ ] Directory usage remains a separate pending slice.
+
+#### Keyboard/filter polish follow-up
+
+- [x] Filter now uses themed field styling rather than an unstyled browser input.
+- [x] Backspace navigates to parent; Delete invokes existing warned deletion for
+  the selection, or selects the focused entry first when selection is empty.
+  Held keys do not repeatedly launch navigation/deletion dialogs.
+- [x] Printable typing from listing entries focuses/appends to the regex field;
+  Space remains selection. Text fields, composition and modifier shortcuts retain
+  their own handling. Directory navigation returns focus to the visible listing.
+- [x] Context-menu arrows/Home/End navigate enabled commands. Escape is consumed
+  before page handlers and restores the invoking entry, preserving selection.
+- [x] Follow-up validation: 45 selection/filter/picker/tab/terminal regressions
+  pass; File Explorer typecheck/build, JavaScript syntax and diff checks pass.
+- [x] User live acceptance: interface and keyboard/filter behavior working.
+
+#### File Explorer modularization — approved first slice
+
+- [x] Successful resolved directory changes and tab identity switches clear the
+  transient regex field/error. Same-directory refreshes/options, failed requests
+  and stale listing completions retain current filter state.
+- [x] Typed viewport, listing keyboard and menu controllers extracted under
+  `src/`; existing terminal controller stays independent. Tests use behavioral
+  controller APIs rather than slicing rendering/selection from a monolithic file.
+- [x] Source stylesheet/markup separated from generated `template.html`; CSS is
+  minified inline at build time, with no extra stylesheet fetch/layout gate.
+- [x] Stable `main.js` manifest adapter loads one minified app bundle under the
+  already-published static JS tree. Terminal/codec/context compatibility outputs
+  remain generated from their owning sources.
+- [ ] Slice two: validated API/DTOs, tabs/splash, file workflows/dialogs, bookmarks,
+  jobs, and strict typing of the reduced composition root. Remaining `src/main.js`
+  is deliberately not reported as type-safe yet.
+- [x] User live acceptance: the new source tree is clean and the app works live.
+  User requested commit/push of this completed slice. No shared runtime restart.
+- [x] Approved addition: Ctrl+backtick reuses the drawer's existing create/show/
+  focus action. Listing/terminal capture, repeat/composition/dialog/inactive-tab
+  guards and cleanup are covered by keyboard-controller regressions.
+- [x] Final first-slice validation: strict TS check, minified build, 58 frontend
+  regressions and 9 terminal-directory-control regressions pass. Source syntax
+  and diff checks pass. The generated app bundle is 99,218 bytes (~97 KiB).
+- [ ] Deferred/pre-existing lifecycle seams for slice two: main-document Escape
+  listener cleanup on same-document remount; filtering the old listing while a
+  directory request is pending. Neither was introduced by the extraction.

@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { TerminalOutputCursor, TerminalInputBatcher, createTerminalDrawer, bindTerminalDrawerResize } from '../app/static/js/file_explorer_terminal.js';
 
 test('File Explorer terminal shares the Nerd font faces and fallback stack with other terminals', () => {
-  const template = readFileSync(new URL('../app/apps/file_explorer/template.html', import.meta.url), 'utf8');
+  const template = readFileSync(new URL('../app/apps/file_explorer/src/styles.css', import.meta.url), 'utf8');
   const codeTemplate = readFileSync(new URL('../app/apps/code_te2/template.html', import.meta.url), 'utf8');
   const terminalTemplate = readFileSync(new URL('../app/apps/terminal/template.html', import.meta.url), 'utf8');
   for (const face of ['Regular', 'Italic', 'Bold', 'BoldItalic']) {
@@ -88,7 +88,8 @@ test('terminal resize handle bounds touch/mouse drags and disposes gesture owner
 });
 
 test('mobile footer participates in layout below the exact two-row Terminal key dock', () => {
-  const template = readFileSync(new URL('../app/apps/file_explorer/template.html', import.meta.url), 'utf8');
+  const template = readFileSync(new URL('../app/apps/file_explorer/src/styles.css', import.meta.url), 'utf8');
+  const markup = readFileSync(new URL('../app/apps/file_explorer/src/template.html', import.meta.url), 'utf8');
   const source = readFileSync(new URL('../app/apps/file_explorer/terminal_drawer.ts', import.meta.url), 'utf8');
   const terminalTemplate = readFileSync(new URL('../app/apps/terminal/template.html', import.meta.url), 'utf8');
   const footerRule = template.match(/\.fx-mobile-footer \{([^}]+)\}/)[1];
@@ -97,7 +98,7 @@ test('mobile footer participates in layout below the exact two-row Terminal key 
   assert.doesNotMatch(template, /padding-bottom: 90px/);
   assert.match(template, /\.fx-terminal-keys \{[^}]*grid-template-columns: repeat\(7, minmax\(0, 1fr\)\)/);
   // Footer is the final child of fx-app, not an overlay sibling.
-  assert.match(template, /<div class="fx-mobile-footer"[\s\S]*<\/div>\s*<\/div>\s*$/);
+  assert.match(markup, /<div class="fx-mobile-footer"[\s\S]*<\/div>\s*<\/div>\s*$/);
   const reference = [...terminalTemplate.matchAll(/<button id="k-[^"]+"[^>]*>([^<]+)<\/button>/g)]
     .map(match => match[1].replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code))));
   const names = source.match(/for \(const name of \[([^\]]+)\]\)/)[1].match(/'([^']+)'/g).map(name => name.slice(1, -1));

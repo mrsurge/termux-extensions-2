@@ -5,36 +5,93 @@ import vm from 'node:vm';
 import test from 'node:test';
 import { Window } from 'happy-dom';
 import { selectPaths } from '../../../static/js/file_explorer_selection.mjs';
+import { createListingFilter } from '../../../static/js/file_explorer_filter.mjs';
 import { createItemContextMenu } from '../../../static/js/te_file_explorer_context.mjs';
+import { build } from '../../file_explorer/node_modules/esbuild/lib/main.js';
 
 const root = path.resolve(import.meta.dirname, '../../../..');
-const source = await readFile(path.join(root, 'app/apps/file_explorer/main.js'), 'utf8');
-const selection = source.slice(source.indexOf('  function clearSelection()'), source.indexOf('  function setDisabledState('));
-const rendering = source.slice(source.indexOf('  function selectEntry('), source.indexOf('  async function loadDirectory('));
+const source = await readFile(path.join(root, 'app/apps/file_explorer/src/main.js'), 'utf8');
+const viewportSource = await readFile(path.join(root, 'app/apps/file_explorer/src/viewport.ts'), 'utf8');
+const compiled = await build({ entryPoints: [path.join(root, 'app/apps/file_explorer/src/viewport.ts')], bundle: true, write: false, format: 'esm' });
+const { createViewport } = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].contents).toString('base64')}`);
 
 function fixture() {
   const window = new Window();
   const document = window.document;
-  document.body.innerHTML = '<main><div id="list"></div><div id="grid"></div><button id="clear"></button><span id="count"></span></main>';
+  document.body.innerHTML = '<main><input data-role="name-filter"><div data-role="name-filter-error"></div><div id="list"></div><div id="grid"></div><button id="clear"></button><span id="count"></span></main>';
   const container = document.querySelector('main');
   const entries = ['a.py', 'b.mjs', 'c.rs', 'd.md'].map(name => ({ name, path: '/' + name, type: 'file' }));
-  const state = { entries, selectedPaths: new Set(), sortBy: 'name', sortAsc: true };
+  const state = { entries, selectedPaths: new Set(), sortBy: 'name', sortAsc: true, currentPath: '/', view: 'list' };
   const ui = { listContainer: document.querySelector('#list'), gridContainer: document.querySelector('#grid'), clearSelection: document.querySelector('#clear'), selectionCount: document.querySelector('#count') };
   const opens = [];
+  const directories = [], deletes = [];
   const icons = [];
   const context = { document, container, state, ui, selectPaths, console,
+    filterInput: document.querySelector('[data-role="name-filter"]'),
+    filterError: document.querySelector('[data-role="name-filter-error"]'),
+    createListingFilter: callback => createListingFilter(callback, class {}),
     contextMenuReady: Promise.resolve({ close() {}, bind() {} }),
     updateActionButtons() {}, closeAllMenus() {}, isEditableFile: () => true, isArchive: () => false,
     modeToString: () => '', formatOwnership: () => '', formatSize: () => '', formatDate: () => '',
     renderIcon: (element, icon) => { element.dataset.icon = icon.codicon; },
     getIcon: async name => { icons.push(name); return { codicon: 'file-code' }; },
-    openSelected: () => opens.push(state.selected?.path), loadDirectory: () => {}, followSymlink: () => {},
+    openSelected: () => opens.push(state.selected?.path), loadDirectory: value => directories.push(value), followSymlink: () => {},
+    parentPath: value => value.slice(0, value.lastIndexOf('/')) || '/',
+    deleteSelected: () => deletes.push([...state.selectedPaths]),
   };
-  const methods = vm.runInNewContext(selection + rendering + '\n({renderEntries, clearSelection, selectAllItems, selectEntry});', context);
+  // Controllers use the browser realm for target guards; install it while
+  // synchronous DOM events execute in each fixture.
+  globalThis.Element = window.Element;
+  globalThis.HTMLElement = window.HTMLElement;
+  const methods = createViewport(context);
   methods.renderEntries();
   const click = (node, options = {}, type = 'click') => node.dispatchEvent(new window.MouseEvent(type, { bubbles: true, ...options }));
-  return { window, state, ui, methods, opens, icons, click };
+  return { window, state, ui, methods, opens, icons, click, directories, deletes };
 }
+
+test('Backspace goes to parent; Delete uses selection; typing focuses regex without stealing Space', () => {
+  const f = fixture();
+  f.state.currentPath = '/project/subdir';
+  const row = f.ui.listContainer.children[0];
+  const key = value => row.dispatchEvent(new f.window.KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true }));
+  key('Backspace');
+  assert.deepEqual(f.directories, ['/project']);
+  key('Delete');
+  assert.deepEqual(f.deletes, [['/a.py']]);
+  f.methods.selectAllItems(true);
+  key('Delete');
+  assert.equal(f.deletes[1].length, 4);
+  key(' ');
+  const input = f.window.document.querySelector('[data-role="name-filter"]');
+  assert.equal(input.value, '');
+  key('p');
+  assert.equal(f.window.document.activeElement, input);
+  assert.equal(input.value, 'p');
+  f.methods.cancelFilter();
+});
+
+for (const view of ['listContainer', 'gridContainer']) test(`${view}: keyboard focus, selection and opening stay separate`, () => {
+  const f = fixture();
+  const rows = [...f.ui[view].children];
+  for (const row of rows) row.scrollIntoView = () => {};
+  const key = (node, value) => {
+    const event = new f.window.KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true });
+    node.dispatchEvent(event);
+    assert.equal(event.defaultPrevented, true);
+  };
+  rows[0].focus();
+  key(rows[0], 'ArrowDown');
+  assert.equal(f.window.document.activeElement, rows[1]);
+  assert.equal(f.state.selectedPaths.size, 0);
+  key(rows[1], ' ');
+  assert.deepEqual([...f.state.selectedPaths], ['/b.mjs']);
+  key(rows[1], 'End');
+  assert.equal(f.window.document.activeElement, rows[3]);
+  key(rows[3], 'Enter');
+  assert.deepEqual(f.opens, ['/d.md']);
+  f.methods.renderEntries();
+  assert.equal(f.window.document.activeElement.dataset.path, '/d.md');
+});
 
 for (const view of ['listContainer', 'gridContainer']) {
   test(`${view}: icon toggles, body selects, mirrored state survives rerender`, () => {
@@ -103,7 +160,7 @@ test('file selection checkboxes are removed without removing settings checkboxes
   assert.ok(!source.includes('fx-checkbox'));
   assert.match(template, /data-action="clear-selection" hidden/);
   assert.ok(template.includes('type="checkbox" data-role="perm-owner-read"'));
-  assert.match(source, /getIcon\(entry.name\)/);
+  assert.match(viewportSource, /getIcon\(entry.name\)/);
 });
 
 test('Escape clears selection but leaves inputs and dialogs to their owners', () => {
@@ -131,8 +188,8 @@ test('context menu targets body, not the selection icon', () => {
   const window = new Window();
   const document = window.document;
   document.body.innerHTML = '<main><div class="fx-menu-group" data-menu="file"><button data-command="file:copy">Copy</button></div><div id="item"><button data-role="selection-icon">icon</button><span>body</span></div></main>';
-  const previous = { document: globalThis.document, window: globalThis.window };
-  globalThis.document = document; globalThis.window = window;
+  const previous = { document: globalThis.document, window: globalThis.window, Element: globalThis.Element, Node: globalThis.Node };
+  globalThis.document = document; globalThis.window = window; globalThis.Element = window.Element; globalThis.Node = window.Node;
   try {
     const selected = [];
     const menu = createItemContextMenu({ container: document.querySelector('main'), select: entry => selected.push(entry.path), dispatch() {} });
@@ -144,5 +201,30 @@ test('context menu targets body, not the selection icon', () => {
     assert.deepEqual(selected, ['/file']);
     assert.ok(document.querySelector('.fx-context-menu'));
     menu.close();
-  } finally { globalThis.document = previous.document; globalThis.window = previous.window; window.happyDOM.abort(); }
+  } finally { Object.assign(globalThis, previous); window.happyDOM.abort(); }
+});
+
+test('context arrows navigate and Escape restores item focus without reaching page handlers', () => {
+  const window = new Window();
+  const document = window.document;
+  document.body.innerHTML = '<main><div data-menu-panel="file"><button data-command="file:copy">Copy</button><button data-command="file:open">Open</button></div><div id="item" tabindex="0">file</div></main>';
+  const previous = { document: globalThis.document, window: globalThis.window, Element: globalThis.Element, Node: globalThis.Node };
+  globalThis.document = document; globalThis.window = window; globalThis.Element = window.Element; globalThis.Node = window.Node;
+  try {
+    const menu = createItemContextMenu({ container: document.querySelector('main'), select() {}, dispatch() {} });
+    const item = document.querySelector('#item');
+    menu.bind(item, { path: '/file' }, {});
+    item.dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true }));
+    const buttons = [...document.querySelectorAll('.fx-context-menu button')];
+    buttons.forEach(button => { button.scrollIntoView = () => {}; });
+    buttons[0].dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+    assert.equal(document.activeElement, buttons[1]);
+    let escaped = false;
+    document.addEventListener('keydown', () => { escaped = true; });
+    buttons[1].dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    assert.equal(escaped, false);
+    assert.equal(document.querySelector('.fx-context-menu'), null);
+    assert.equal(document.activeElement, item);
+    menu.close();
+  } finally { Object.assign(globalThis, previous); window.happyDOM.abort(); }
 });

@@ -484,7 +484,7 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
   };
   socket.on('terminal_directory', directoryChanged);
   socket.on('terminal_reset', wireReset); socket.on('disconnect', disconnected);
-  return { sync, dispose() {
+  return { sync, show, dispose() {
     drawerResize.dispose();
     disposeRepeatingKeys.forEach(dispose => dispose());
     for (const type of ['pointerdown', 'pointerup', 'click']) tabsPanel?.removeEventListener(type, guardMinibar, true);

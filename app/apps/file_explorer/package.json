@@ -5,7 +5,8 @@
   "scripts": {
     "build": "node build.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --test terminal_directory_control*.test.mjs"
+    "test": "node --test terminal_directory_control*.test.mjs",
+    "test:frontend": "node --test ../../../tests/file_explorer*.test.mjs ../code_te2/tests/file_explorer_selection.test.mjs ../code_te2/tests/shared_file_picker.test.mjs"
   },
   "dependencies": {
     "@msgpack/msgpack": "^3.1.3",

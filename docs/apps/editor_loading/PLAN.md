@@ -369,6 +369,29 @@ Extra terminal keys are shown only for mobile user agents, not merely narrow
 desktop windows; desktop user agents must not render the extra-key controls.
 
 Add depth-one regex listing and `du -h --max-depth=1`-style usage presentation.
+Pair the current-directory regex filter with picker-style keyboard navigation:
+arrows move focus through the displayed/sorted entries, Home/End reach the ends,
+Space toggles selection and Enter opens the focused entry. Keep focus distinct
+from batch selection and leave terminal/input key handling untouched. Reuse the
+bounded shared regex worker; directory usage remains a separate backend slice.
+Style the regex field using existing field colors/geometry. Typing from a focused
+entry starts filtering (Space stays selection); Backspace navigates up, and Delete
+uses the existing warned deletion flow for selected items or the focused item.
+Context menus support arrows/Home/End, and Escape restores their invoking item
+without reaching page-level selection clearing. Text fields and terminals retain
+their own keyboard handling.
+
+File Explorer frontend modularization is staged, with one minified app entry:
+first extract strictly typed viewport/keyboard/menubar controllers and typed
+presentation contracts; keep the existing terminal controller independent.
+Source CSS/markup live under `app/apps/file_explorer/src/` and compile to the
+existing inline template style delivery. The stable manifest mount adapter loads
+the generated app module from the already-published `/static/js/` tree. Keep
+regex work on its bounded worker, and preserve shared runtime asset URLs.
+Then extract validated API/DTOs, tabs/splash, actions/properties/bookmarks and
+jobs before strictly typing the reduced composition root. Do not claim remaining
+JavaScript orchestration is typechecked during the first slice. See
+`app/apps/file_explorer/FRONTEND.md` for source/output and navigation contracts.
 Prefer existing framework filesystem/pipe services; first inspect support for
 bounded aggregation, cancellation, errors, symlinks and permissions. A depth-one
 display can still require recursive byte accounting: define that cost explicitly,

@@ -1,0 +1,223 @@
+<style>__FILE_EXPLORER_STYLES__</style>
+
+<div class="fx-app" data-app-root>
+  <div class="fx-toolbar">
+    <div class="fx-toolbar-row fx-toolbar-quick">
+      <div class="fx-quick-actions">
+        <button type="button" class="fx-mobile-hide" data-action="select-all">Select All</button>
+        <button type="button" data-action="clear-selection" hidden>Clear selection</button>
+        <span class="fx-selection-count" style="margin-right: 12px; color: var(--primary, #3b82f6); display: none;"></span>
+        <button type="button" class="fx-mobile-hide" data-action="up">Up</button>
+        <button type="button" class="fx-mobile-hide" data-action="new-folder">New Folder</button>
+        <button type="button" class="fx-mobile-hide" data-action="open" disabled>Open</button>
+        <button type="button" class="fx-mobile-hide" data-action="copy" disabled>Copy</button>
+        <button type="button" class="fx-mobile-hide" data-action="move" disabled>Move</button>
+      </div>
+    </div>
+    <div class="fx-toolbar-row fx-toolbar-menus">
+      <div class="fx-menubar">
+        <div class="fx-menu-group" data-menu="file">
+          <button type="button" class="fx-menu-button" data-menu-toggle="file">File</button>
+          <div class="fx-menu-dropdown" data-menu-panel="file">
+            <button type="button" data-command="file:new-folder">New Folder</button>
+            <button type="button" data-command="file:new-file">New File</button>
+            <button type="button" data-command="file:open">Open</button>
+            <button type="button" data-command="file:open-editor">Open in Editor</button>
+            <button type="button" data-command="file:open-terminal">Open in Terminal</button>
+            <button type="button" data-command="file:open-project">Open as Project</button>
+            <button type="button" data-command="file:download">Download</button>
+            <button type="button" data-command="file:extract">Extract</button>
+          </div>
+        </div>
+        <div class="fx-menu-group" data-menu="edit">
+          <button type="button" class="fx-menu-button" data-menu-toggle="edit">Edit</button>
+          <div class="fx-menu-dropdown" data-menu-panel="edit">
+            <button type="button" data-command="edit:properties">Properties</button>
+            <button type="button" data-command="edit:rename">Rename</button>
+            <button type="button" data-command="edit:delete">Delete</button>
+            <button type="button" data-command="edit:copy">Copy</button>
+            <button type="button" data-command="edit:move">Move</button>
+          </div>
+        </div>
+        <div class="fx-menu-group" data-menu="view">
+          <button type="button" class="fx-menu-button" data-menu-toggle="view">View</button>
+          <div class="fx-menu-dropdown" data-menu-panel="view">
+            <button type="button" data-command="view:grid">Icons</button>
+            <button type="button" data-command="view:list">List</button>
+            <div class="fx-menu-separator"></div>
+            <button type="button" data-command="view:toggle-hidden" data-checkable="true">Show hidden</button>
+            <button type="button" data-command="view:sort-name" data-checkable="true">Sort by Name</button>
+            <button type="button" data-command="view:sort-size" data-checkable="true">Sort by Size</button>
+            <button type="button" data-command="view:sort-date" data-checkable="true">Sort by Date</button>
+            <button type="button" data-command="view:sort-type" data-checkable="true">Sort by Type</button>
+          </div>
+        </div>
+        <div class="fx-menu-group" data-menu="bookmarks">
+            <button type="button" class="fx-menu-button" data-menu-toggle="bookmarks">🔖</button>
+            <div class="fx-menu-dropdown" data-menu-panel="bookmarks">
+                <div data-role="bookmarks-list"></div>
+                <div class="fx-menu-separator"></div>
+                <div style="display: flex; justify-content: center; align-items: center; gap: 12px; padding: 4px 0;">
+                    <button type="button" data-command="bookmarks:add" style="font-size: 0.7rem;">✚</button>
+                    <span style="color: var(--border, #374151);">|</span>
+                    <button type="button" data-command="bookmarks:edit" style="font-size: 0.7rem;">✏️</button>
+                </div>
+            </div>
+        </div>
+        <button type="button" class="fx-menu-button fx-sort-dir-btn" data-action="toggle-sort-direction" aria-label="Toggle sort order">↑</button>
+        <button type="button" class="fx-menu-button" data-action="download" disabled aria-label="Download" title="Download">⬇️</button>
+        <div class="fx-menu-group" data-menu="tabs">
+          <button type="button" class="fx-menu-button" data-menu-toggle="tabs" aria-haspopup="true">Tabs</button>
+          <div class="fx-menu-dropdown fx-tabs-dropdown" data-menu-panel="tabs"></div>
+        </div>
+        <button type="button" class="fx-menu-button" data-action="terminal">Terminal</button>
+      </div>
+      <button type="button" class="fx-delete-btn danger" data-action="delete" disabled aria-label="Delete">🗑️</button>
+    </div>
+  </div>
+  <div class="fx-breadcrumbs-container">
+    <div class="fx-breadcrumbs" data-role="breadcrumbs"></div>
+    <button type="button" class="fx-home-btn" data-action="go-home" title="Go to Home">🏠</button>
+  </div>
+  <div class="fx-name-filter">
+    <input data-role="name-filter" type="text" placeholder="Filter names (regex)" aria-label="Filter names with regex, current directory only" aria-describedby="fx-name-filter-error" autocapitalize="off" autocomplete="off" spellcheck="false">
+    <div id="fx-name-filter-error" data-role="name-filter-error" role="status"></div>
+  </div>
+  <div class="fx-content">
+    <div class="fx-list-view">
+      <div class="fx-items" data-role="list"></div>
+    </div>
+    <div class="fx-grid-view">
+      <div class="fx-grid-view-content" data-role="grid"></div>
+    </div>
+  </div>
+  <section class="fx-terminal-drawer" hidden aria-label="Tab terminal">
+    <div class="fx-terminal-resize-handle" role="separator" aria-orientation="horizontal" aria-label="Resize terminal" tabindex="0"></div>
+    <div class="fx-terminal-toolbar">
+      <span data-terminal-status>Terminal</span>
+      <label class="fx-terminal-lock"><input type="checkbox" data-terminal="directory-lock" checked>Lock directory</label>
+      <button type="button" data-terminal="keys" tabindex="-1" aria-pressed="true" hidden>Keys</button>
+      <button type="button" data-terminal="minimize" aria-label="Minimize or restore terminal">−</button>
+      <button type="button" data-terminal="maximize" aria-label="Maximize or restore terminal">↕</button>
+      <button type="button" data-terminal="close" aria-label="Close terminal"><svg width="18" height="18" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>
+    </div>
+    <div class="fx-terminal-tracking" data-directory-status role="status"></div>
+    <div class="fx-terminal-viewport"></div>
+    <div class="fx-terminal-keys" aria-label="Terminal extra keys"></div>
+  </section>
+  <div class="fx-modal" data-modal="properties" data-te-dialog-surface="file-explorer.properties" aria-hidden="true">
+    <div class="fx-modal-overlay" data-role="properties-overlay"></div>
+    <div class="fx-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="fx-properties-title">
+      <div class="fx-modal-header">
+        <div>
+          <h2 id="fx-properties-title">Properties</h2>
+          <p class="fx-properties-path" data-role="properties-path"></p>
+        </div>
+        <button type="button" class="fx-modal-close" data-action="properties-close" aria-label="Close properties">×</button>
+      </div>
+      <div class="fx-modal-body">
+        <section class="fx-properties-section">
+          <h3>General</h3>
+          <label class="fx-field">
+            <span class="fx-field-label">Name</span>
+            <input type="text" data-role="properties-name" autocomplete="off">
+          </label>
+          <div class="fx-ownership-grid">
+            <label class="fx-field">
+              <span class="fx-field-label">Owner</span>
+              <input type="text" data-role="properties-owner-input" autocomplete="off" placeholder="(unchanged)">
+              <span class="fx-field-hint">Current: <span data-role="properties-owner-current">—</span></span>
+            </label>
+            <label class="fx-field">
+              <span class="fx-field-label">Group</span>
+              <input type="text" data-role="properties-group-input" autocomplete="off" placeholder="(unchanged)">
+              <span class="fx-field-hint">Current: <span data-role="properties-group-current">—</span></span>
+            </label>
+          </div>
+          <p class="fx-field-hint">Leave owner or group blank to keep current values.</p>
+          <label class="fx-field fx-field-inline">
+            <input type="checkbox" data-role="properties-recurse">
+            <span>Apply to contents (recursive)</span>
+          </label>
+        </section>
+        <section class="fx-properties-section">
+          <h3>Permissions</h3>
+          <div class="fx-permissions-grid" data-role="properties-permissions">
+            <div class="fx-permissions-header"></div>
+            <div class="fx-permissions-header">Read</div>
+            <div class="fx-permissions-header">Write</div>
+            <div class="fx-permissions-header">Execute</div>
+            <div class="fx-permissions-label">Owner</div>
+            <label class="fx-permission"><input type="checkbox" data-role="perm-owner-read"> <span></span></label>
+            <label class="fx-permission"><input type="checkbox" data-role="perm-owner-write"> <span></span></label>
+            <label class="fx-permission"><input type="checkbox" data-role="perm-owner-exec"> <span></span></label>
+            <div class="fx-permissions-label">Group</div>
+            <label class="fx-permission"><input type="checkbox" data-role="perm-group-read"> <span></span></label>
+            <label class="fx-permission"><input type="checkbox" data-role="perm-group-write"> <span></span></label>
+            <label class="fx-permission"><input type="checkbox" data-role="perm-group-exec"> <span></span></label>
+            <div class="fx-permissions-label">Others</div>
+            <label class="fx-permission"><input type="checkbox" data-role="perm-others-read"> <span></span></label>
+            <label class="fx-permission"><input type="checkbox" data-role="perm-others-write"> <span></span></label>
+            <label class="fx-permission"><input type="checkbox" data-role="perm-others-exec"> <span></span></label>
+          </div>
+        </section>
+      </div>
+      <div class="fx-modal-footer">
+        <button type="button" data-action="properties-cancel">Cancel</button>
+        <button type="button" class="primary" data-action="properties-apply">Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="fx-modal" data-modal="edit-bookmarks" data-te-dialog-surface="file-explorer.bookmarks" aria-hidden="true">
+    <div class="fx-modal-overlay" data-role="edit-bookmarks-overlay"></div>
+    <div class="fx-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="fx-edit-bookmarks-title">
+        <div class="fx-modal-header">
+            <h2 id="fx-edit-bookmarks-title">Edit Bookmarks</h2>
+            <button type="button" class="fx-modal-close" data-action="edit-bookmarks-close" aria-label="Close">×</button>
+        </div>
+        <div class="fx-modal-body">
+            <div class="fx-bookmark-editor-list" data-role="edit-bookmarks-list"></div>
+        </div>
+        <div class="fx-modal-footer">
+            <button type="button" class="danger" data-action="edit-bookmarks-delete-selected">Delete Selected</button>
+            <button type="button" data-action="edit-bookmarks-close">Close</button>
+        </div>
+    </div>
+  </div>
+
+  <div class="fx-modal" data-modal="bookmark-form" data-te-dialog-surface="file-explorer.bookmark-form" aria-hidden="true">
+      <div class="fx-modal-overlay" data-role="bookmark-form-overlay"></div>
+      <div class="fx-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="fx-bookmark-form-title">
+          <div class="fx-modal-header">
+              <h2 id="fx-bookmark-form-title">Bookmark</h2>
+              <button type="button" class="fx-modal-close" data-action="bookmark-form-close" aria-label="Close">×</button>
+          </div>
+          <div class="fx-modal-body">
+              <label class="fx-field">
+                  <span class="fx-field-label">Name</span>
+                  <input type="text" data-role="bookmark-form-name" autocomplete="off">
+              </label>
+              <label class="fx-field">
+                  <span class="fx-field-label">Path</span>
+                  <input type="text" data-role="bookmark-form-path" autocomplete="off">
+              </label>
+          </div>
+          <div class="fx-modal-footer">
+              <button type="button" data-action="bookmark-form-cancel">Cancel</button>
+              <button type="button" class="primary" data-action="bookmark-form-save">Save</button>
+          </div>
+      </div>
+  </div>
+
+<div class="fx-mobile-footer" data-role="mobile-footer">
+  <button type="button" data-action="select-all">Select All</button>
+  <button type="button" data-action="up" title="Up">⬆️</button>
+  <button type="button" data-action="new-folder" title="New Folder">📁</button>
+  <button type="button" data-action="open" disabled title="Open">📂</button>
+  <button type="button" data-action="copy" disabled title="Copy">⿻</button>
+  <button type="button" data-action="move" disabled title="Move">
+    <img src="/static/move.png" alt="Move" style="width: 20px; height: 20px;" />
+  </button>
+</div>
+</div>
