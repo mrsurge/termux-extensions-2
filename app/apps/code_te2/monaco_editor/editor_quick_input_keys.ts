@@ -14,7 +14,7 @@ export function focusedQuickInput(doc: Document): HTMLInputElement | null {
 }
 
 export function quickInputAction(editor: QuickInputEditor, key: string): boolean {
-  const id = key.toLowerCase() === 'p' ? 'editor.action.quickCommand'
+  const id = key.toLowerCase() === 'p' || key === ':' ? 'editor.action.te2QuickAccess'
     : key.toLowerCase() === 'o' ? 'editor.action.quickOutline' : null;
   if (!id) return false;
   const action = editor.getAction?.(id);
@@ -68,7 +68,8 @@ export function bindQuickInputKeys(editor: QuickInputEditor, doc: Document,
     const oneShot = armed();
     if (oneShot) Object.defineProperty(event, 'shiftKey', { configurable: true, value: true });
     if (altArmed()) Object.defineProperty(event, 'altKey', { configurable: true, value: true });
-    if ((event.ctrlKey || event.metaKey) && !event.altKey && (event.shiftKey || armed()) && /^[po]$/i.test(event.key)) {
+    if ((event.ctrlKey || event.metaKey) && !event.altKey &&
+      (event.key === ':' || ((event.shiftKey || armed()) && /^[po]$/i.test(event.key)))) {
       if (quickInputAction(editor, event.key)) { event.preventDefault(); event.stopImmediatePropagation(); consume(); }
     }
     if (oneShot && (event.ctrlKey || event.metaKey || event.altKey

@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { build } from 'esbuild';
 import { Window } from 'happy-dom';
+import { readFile } from 'node:fs/promises';
+import vm from 'node:vm';
 
 async function fixture(mobile = true) {
   const result = await build({ stdin: {
@@ -49,7 +51,7 @@ test('one-shot Shift composes with Ctrl bytes, opens palette, and keeps palette 
     f.press('Shift next key'); f.press('Control');
     assert.equal(f.runtime.currentMobileEditorModifiers(f.win).shiftArmed, true);
     f.win.term.input('\u0010');
-    assert.deepEqual(f.commands, ['editor.action.quickCommand']);
+    assert.deepEqual(f.commands, ['editor.action.te2QuickAccess']);
     assert.equal(f.runtime.currentMobileEditorModifiers(f.win).shiftArmed, false);
     const palette = document.querySelector('.quick-input-widget input');
     palette.value = 'find'; palette.setSelectionRange(4, 4);
@@ -64,7 +66,7 @@ test('one-shot Shift composes with Ctrl bytes, opens palette, and keeps palette 
     assert.deepEqual(f.typed, []);
     f.input.focus(); f.press('Shift next key'); f.press('Control');
     f.win.term.input('\u000f');
-    assert.deepEqual(f.commands, ['editor.action.quickCommand', 'editor.action.quickOutline']);
+    assert.deepEqual(f.commands, ['editor.action.te2QuickAccess', 'editor.action.quickOutline']);
     assert.equal(f.runtime.currentMobileEditorModifiers(f.win).shiftArmed, false);
   } finally { f.cleanup(); }
 });
@@ -93,7 +95,58 @@ test('desktop Ctrl+Shift+P/O use existing actions, without mobile controls', asy
       f.input.focus();
       f.input.dispatchEvent(new f.win.KeyboardEvent('keydown', { key, ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }));
     }
-    assert.deepEqual(f.commands, ['editor.action.quickCommand', 'editor.action.quickOutline']);
+    assert.deepEqual(f.commands, ['editor.action.te2QuickAccess', 'editor.action.quickOutline']);
     assert.equal(document.querySelector('.te2-mobile-special-key-panel'), null);
   } finally { f.cleanup(); }
+});
+
+test('Ctrl+colon opens unprefixed access but plain colon, Ctrl+semicolon and composition are untouched', async () => {
+  const f = await fixture(false);
+  try {
+    for (const options of [
+      { key: ':', ctrlKey: false },
+      { key: ';', ctrlKey: true },
+      { key: ':', ctrlKey: true, altKey: true },
+      { key: ':', ctrlKey: true, isComposing: true },
+    ]) {
+      f.input.focus();
+      const event = new f.win.KeyboardEvent('keydown', { ...options, bubbles: true, cancelable: true });
+      f.input.dispatchEvent(event);
+      assert.equal(event.defaultPrevented, false);
+    }
+    assert.deepEqual(f.commands, []);
+    f.input.focus();
+    const event = new f.win.KeyboardEvent('keydown', { key: ':', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true });
+    f.input.dispatchEvent(event);
+    assert.equal(event.defaultPrevented, true);
+    assert.deepEqual(f.commands, ['editor.action.te2QuickAccess']);
+    assert.equal(document.activeElement.closest('.quick-input-widget') !== null, true);
+  } finally { f.cleanup(); }
+});
+
+test('bootstrap action reuses the empty-prefix provider and leaves stock prefixed actions intact', async () => {
+  const script = await readFile('../../../scripts/build_monaco_bootstrap_bundle.mjs', 'utf8');
+  const actionSource = script.slice(script.indexOf('class Te2QuickAccessAction'), script.indexOf('let languageContributionsPromise'));
+  let action;
+  const KeyCode = { F1: 59, KeyP: 46, Semicolon: 85 };
+  const KeyMod = { CtrlCmd: 2048, Shift: 1024 };
+  const serviceId = {};
+  const focus = {};
+  vm.runInNewContext(actionSource, {
+    monacoNs: { KeyCode, KeyMod }, EditorContextKeys: { focus }, IQuickInputService: serviceId,
+    EditorAction: class { constructor(options) { this.options = options; } },
+    registerEditorAction: Action => { action = new Action(); },
+  });
+  assert.equal(action.options.id, 'editor.action.te2QuickAccess');
+  assert.equal(action.options.kbOpts.primary, KeyCode.F1);
+  assert.equal(action.options.kbOpts.kbExpr, focus);
+  assert.deepEqual([...action.options.kbOpts.secondary], [KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyP, KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.Semicolon]);
+  assert.equal(action.options.kbOpts.weight, 101);
+  const shown = [];
+  action.run({ get(id) { assert.equal(id, serviceId); return { quickAccess: { show: prefix => shown.push(prefix) } }; } });
+  assert.deepEqual(shown, ['']);
+  for (const [file, prefix] of [['standaloneCommandsQuickAccess.js', 'StandaloneCommandsQuickAccessProvider.PREFIX'], ['standaloneGotoSymbolQuickAccess.js', 'AbstractGotoSymbolQuickAccessProvider.PREFIX'], ['standaloneGotoLineQuickAccess.js', 'StandaloneGotoLineQuickAccessProvider.PREFIX']]) {
+    const stock = await readFile(`../../static/vendor/monaco-editor-core/esm/vs/editor/standalone/browser/quickAccess/${file}`, 'utf8');
+    assert.ok(stock.includes(`quickAccess.show(${prefix}`));
+  }
 });

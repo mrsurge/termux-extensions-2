@@ -234948,6 +234948,34 @@ registerEditorAction(ToggleHighContrast);
 init_editor_api();
 
 // te2_monaco_bootstrap_entry.js
+init_editorExtensions();
+init_editorContextKeys();
+init_quickInput();
+var Te2QuickAccessAction = class extends EditorAction {
+  constructor() {
+    super({
+      id: "editor.action.te2QuickAccess",
+      label: "Quick Access",
+      alias: "Quick Access",
+      precondition: void 0,
+      kbOpts: {
+        kbExpr: EditorContextKeys.focus,
+        primary: KeyCode2.F1,
+        secondary: [
+          KeyMod2.CtrlCmd | KeyMod2.Shift | KeyCode2.KeyP,
+          KeyMod2.CtrlCmd | KeyMod2.Shift | KeyCode2.Semicolon
+        ],
+        weight: 101
+        // pinned Monaco KeybindingWeight.EditorContrib (100) + 1
+      },
+      contextMenuOpts: { group: "z_commands", order: 0.9 }
+    });
+  }
+  run(accessor) {
+    accessor.get(IQuickInputService).quickAccess.show("");
+  }
+};
+registerEditorAction(Te2QuickAccessAction);
 var languageContributionsPromise = null;
 var basicLanguageContributionsPromise = null;
 function ensureBasicLanguageContributions() {

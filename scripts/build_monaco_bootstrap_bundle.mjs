@@ -44,6 +44,14 @@ function pluginResolveMonacoEntryAndContrib() {
     name: "te2-monaco-bootstrap-alias",
     setup(ctx) {
       ctx.onResolve({ filter: /^@te2-monaco-main$/ }, () => ({ path: monacoMain }));
+      const quickAccessModules = {
+        '@te2-editor-extensions': 'vs/editor/browser/editorExtensions.js',
+        '@te2-editor-context-keys': 'vs/editor/common/editorContextKeys.js',
+        '@te2-quick-input-service': 'vs/platform/quickinput/common/quickInput.js',
+      };
+      ctx.onResolve({ filter: /^@te2-(editor-extensions|editor-context-keys|quick-input-service)$/ }, ({ path: name }) => ({
+        path: path.resolve(vscodeMonacoEsmRoot, quickAccessModules[name]),
+      }));
 
       if (worktreeAvailable) {
         const entry = (p) => path.resolve(monacoSrcRoot, p);
@@ -94,6 +102,36 @@ await build({
   stdin: {
     contents: `
 import * as monacoNs from "@te2-monaco-main";
+import { EditorAction, registerEditorAction } from "@te2-editor-extensions";
+import { EditorContextKeys } from "@te2-editor-context-keys";
+import { IQuickInputService } from "@te2-quick-input-service";
+
+// Use the existing standalone help provider (empty prefix), not a second picker.
+// The stock quickCommand action remains the explicit '>' commands entrypoint.
+class Te2QuickAccessAction extends EditorAction {
+  constructor() {
+    super({
+      id: 'editor.action.te2QuickAccess',
+      label: 'Quick Access',
+      alias: 'Quick Access',
+      precondition: undefined,
+      kbOpts: {
+        kbExpr: EditorContextKeys.focus,
+        primary: monacoNs.KeyCode.F1,
+        secondary: [
+          monacoNs.KeyMod.CtrlCmd | monacoNs.KeyMod.Shift | monacoNs.KeyCode.KeyP,
+          monacoNs.KeyMod.CtrlCmd | monacoNs.KeyMod.Shift | monacoNs.KeyCode.Semicolon,
+        ],
+        weight: 101, // pinned Monaco KeybindingWeight.EditorContrib (100) + 1
+      },
+      contextMenuOpts: { group: 'z_commands', order: 0.9 },
+    });
+  }
+  run(accessor) {
+    accessor.get(IQuickInputService).quickAccess.show('');
+  }
+}
+registerEditorAction(Te2QuickAccessAction);
 
 let languageContributionsPromise = null;
 let basicLanguageContributionsPromise = null;

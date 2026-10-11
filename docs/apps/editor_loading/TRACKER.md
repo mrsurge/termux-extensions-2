@@ -658,14 +658,33 @@ original user list below is retained verbatim as the requirement record.
 - [x] F3: Collapse all and vertical ellipsis user live acceptance.
 - [x] F3: halve draft-highlight background opacity (source/regressions/build).
 - [x] F3: lighter draft highlights user live acceptance (reported working).
-- [ ] F3: unprefixed palette default, preserve explicit command/symbol/line modes.
-- [ ] F3: clarify Ctrl+colon versus chord; add approved bindings without conflicts.
+- [x] F3: unprefixed Quick Access default (source/regressions/build), preserve explicit command/symbol/line modes.
+- [x] F3: Ctrl+colon clarified as simultaneous keys; add approved Ctrl+Shift+P and F1 bindings (source/regressions/build).
+- [x] F3: unprefixed picker and shortcut user live acceptance (reported working).
 - [ ] F3: desktop/mobile input and detached-window live acceptance.
 - [ ] F4: define identity/session lifetime and drawer transport contract.
 - [ ] F4: implement one File Explorer terminal per explicit presentation identity.
 - [ ] F4: depth-one regex listing and asynchronous directory usage view.
 - [ ] F4: multi-client, standalone/sidebar, lifecycle and large-tree acceptance.
 - [ ] Separately approve maintenance packaging/release scope after chosen slices.
+
+### F3 unprefixed Quick Access — implementation checkpoint
+
+User clarified Ctrl+colon as simultaneous keys. Authored Monaco bootstrap
+registers `editor.action.te2QuickAccess`, using the existing `IQuickInputService`
+empty-prefix help/options provider. F1 and Ctrl/Cmd+Shift+P plus Ctrl/Cmd+Shift+Semicolon
+(colon on US layouts) use this action. Editor-scoped helper also recognizes the
+actual Ctrl/Cmd+colon key value and routes the mobile palette gesture to it.
+Ordinary typing, Ctrl+semicolon, Alt combinations and composition remain untouched.
+Stock `editor.action.quickCommand` still opens explicit `>` commands, and symbol/line
+actions remain intact. Quick Access has its own context-menu entry; stock Command
+Palette remains the explicit commands entry, not a renamed or removed action.
+
+Fifteen palette/mobile-key regressions pass, including existing find/undo/copy;
+typecheck, Monaco bootstrap and
+frontend builds pass. User reported this slice working on 2026-10-10, closing
+its reported live acceptance gate. No backend,
+Monaco fork, APK, runtime restart, version or release changes occurred.
 
 ### F3 draft-highlight opacity — implementation checkpoint
 
