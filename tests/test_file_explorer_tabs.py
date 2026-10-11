@@ -153,7 +153,7 @@ def test_concurrent_creation_and_revision_fencing(tmp_path):
 
 
 def test_real_socketio_asgi_round_trip(tmp_path, monkeypatch):
-    from app.apps.terminal.terminal_stream_protocol import pack_message, unpack_message
+    from app.apps.file_explorer.terminal_stream_protocol import pack_message, unpack_message
     import socket
     import socketio
     import uvicorn

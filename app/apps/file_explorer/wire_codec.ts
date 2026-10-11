@@ -1,4 +1,4 @@
-import { encode, decode } from '../terminal/node_modules/@msgpack/msgpack';
+import { encode, decode } from '@msgpack/msgpack';
 
 export function packObject(value: object): Uint8Array {
   return encode(value, { ignoreUndefined: true });

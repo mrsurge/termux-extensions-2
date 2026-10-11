@@ -1,4 +1,4 @@
-"""Live pipe adapter for the shared Terminal broker; no FastAPI or log replay."""
+"""File Explorer's live PTY pipe adapter and raw-offset checkpoint coordination."""
 from __future__ import annotations
 
 import asyncio
@@ -6,7 +6,8 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Protocol, cast
 from uuid import uuid4
 
-from app.apps.terminal.terminal_stream_protocol import PipeFrameDecoder, encode_pipe_message
+from .terminal_stream_protocol import PipeFrameDecoder, encode_pipe_message
+from .terminal_projection import CheckpointProjection
 
 
 class PipeProcess(Protocol):
@@ -35,6 +36,7 @@ class BrokerSession:
         self.queue: asyncio.Queue[bytes | None] = queue
         self.sink: EventSink = sink
         self.offset: int = 0
+        self.projection: CheckpointProjection = CheckpointProjection()
         self.sequence: int = -1
         self.status: dict[str, object] = {'state': 'starting', 'path': ''}
         self.pending: dict[str, asyncio.Future[dict[str, object]]] = {}
@@ -111,11 +113,17 @@ class BrokerSession:
                         if self.sequence >= 0 and sequence != self.sequence + 1:
                             self._event({'type': 'reset'})
                         self.sequence = sequence
-                        before = self.offset
-                        self.offset += len(data)
+                        before = message.get('startOffset')
+                        after = message.get('endOffset')
+                        if not isinstance(before, int) or not isinstance(after, int) or before < 0 or after - before != len(data):
+                            raise ValueError('Invalid terminal output offsets')
+                        self.offset = after
                         self._event({'type': 'output', 'data': data, 'startOffset': before, 'endOffset': self.offset})
                     elif kind == 'checkpoint':
-                        message['outputOffset'] = self.offset
+                        offset = message.get('outputOffset')
+                        if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
+                            raise ValueError('Invalid terminal checkpoint offset')
+                        self.offset = offset
                         sequence = message.get('sequence')
                         if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 0:
                             raise ValueError('Invalid terminal broker checkpoint sequence')

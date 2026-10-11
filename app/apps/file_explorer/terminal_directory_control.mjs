@@ -1,4 +1,4 @@
-// Opt-in shell-control proof. Ordinary Terminal sessions never construct this.
+// File Explorer-owned Bash directory control; no terminal emulator dependency.
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -32,9 +32,23 @@ export class DirectoryControl {
     return { TERMINAL_DIRECTORY_ROOT: this.root, TERMINAL_DIRECTORY_NONCE: this.nonce };
   }
 
-  bind(pty, terminal) {
+  bind(pty) {
     this.pty = pty;
-    this.registration = terminal.parser.registerOscHandler(777, data => {
+    this.oscTail = '';
+  }
+
+  observe(data) {
+    const text = this.oscTail + data;
+    const pattern = /\x1b\]777;([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
+    let match;
+    while ((match = pattern.exec(text))) this.controlEvent(match[1]);
+    // Only retain a possible split sentinel, never terminal screen contents.
+    const last = text.lastIndexOf('\x1b');
+    this.oscTail = last >= 0 && !/[\x07\\]/.test(text.slice(last + 1))
+      ? text.slice(last).slice(-256) : '';
+  }
+
+  controlEvent(data) {
       const prefix = `te2-control;${this.nonce};`;
       if (!data.startsWith(prefix)) return false;
       const serial = data.slice(prefix.length);
@@ -89,7 +103,6 @@ export class DirectoryControl {
         this.flushInput();
       }
       return true;
-    });
   }
 
   writeRequest(token, mode, cwd) {
@@ -106,14 +119,14 @@ export class DirectoryControl {
       throw new Error('invalid directory request');
     }
     if (this.pending) {
-      await this.emit({ type: 'directory.result', request_id: this.pending.id, state: 'superseded' });
+      void this.emit({ type: 'directory.result', request_id: this.pending.id, state: 'superseded' });
     }
     clearTimeout(this.timer);
     const wake = this.state === 'idle' && !this.dirty;
     const token = `${++this.serial}-${this.nonce}`;
     this.pending = { id: message.request_id, token, wake, path: message.path };
     this.writeRequest(token, wake ? 'wake' : 'prompt', message.path);
-    await this.emit({ type: 'directory.result', request_id: message.request_id, state: 'pending' });
+    void this.emit({ type: 'directory.result', request_id: message.request_id, state: 'pending' });
     if (wake) {
       // No terminal-input bytes: Bash's WINCH trap rechecks its own execution
       // state. Hold later input until the result so it cannot overtake this cd.
@@ -155,7 +168,7 @@ export class DirectoryControl {
     clearTimeout(this.timer);
     this.timer = null;
     this.writeRequest('', 'cancel', '');
-    if (pending) await this.emit({ type: 'directory.result', request_id: pending.id, state: 'cancelled' });
+    if (pending) void this.emit({ type: 'directory.result', request_id: pending.id, state: 'cancelled' });
     this.flushInput();
   }
 
@@ -169,7 +182,6 @@ export class DirectoryControl {
   dispose() {
     this.closed = true;
     clearTimeout(this.timer);
-    this.registration?.dispose();
     this.held = [];
     fs.rmSync(this.root, { recursive: true, force: true });
   }

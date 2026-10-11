@@ -10,11 +10,11 @@ from app.libs.terminal_runtime.log_reader import LogReader
 
 
 class FileLogReader:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, limit: int | None = None) -> None:
         self.stream: BinaryIO = path.open('rb')
         stat = os.fstat(self.stream.fileno())
         self.identity: tuple[int, int] = (stat.st_dev, stat.st_ino)
-        self.size: int = stat.st_size
+        self.size: int = stat.st_size if limit is None else min(stat.st_size, limit)
 
     def seek(self, offset: int) -> None:
         _ = self.stream.seek(offset)

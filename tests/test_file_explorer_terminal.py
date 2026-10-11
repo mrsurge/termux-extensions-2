@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace
-from app.apps.terminal.terminal_stream_protocol import PipeFrameDecoder, encode_pipe_message
+from app.apps.file_explorer.terminal_stream_protocol import PipeFrameDecoder, encode_pipe_message
 
 import pytest
 
@@ -60,7 +60,7 @@ class Manager:
     async def subscribe_output_bytes(self, shell_id):
         queue = asyncio.Queue()
         self.queues[shell_id] = queue
-        queue.put_nowait(encode_pipe_message({'type': 'output', 'sequence': 1, 'data': b'hello\r\n'}))
+        queue.put_nowait(encode_pipe_message({'type': 'output', 'sequence': 1, 'startOffset': 0, 'endOffset': 7, 'data': b'hello\r\n'}))
         return queue
 
     async def unsubscribe_output_bytes(self, shell_id, queue):
@@ -79,7 +79,7 @@ class Manager:
                     elif kind == 'resize': manager.sizes.append((shell_id, message['cols'], message['rows']))
                     elif kind == 'attach':
                         manager.queues[shell_id].put_nowait(encode_pipe_message({'type': 'checkpoint',
-                            'request_id': message['request_id'], 'sequence': 1, 'state': b'hello\r\n',
+                            'request_id': message['request_id'], 'sequence': 1, 'outputOffset': 7, 'logPath': str(manager.root / 'terminal_control' / shell_id / 'output.raw'),
                             'directoryTracking': {'state': 'ready', 'path': ''}}))
                     elif kind == 'ping':
                         manager.queues[shell_id].put_nowait(encode_pipe_message({'type': 'pong', 'request_id': message['request_id']}))
@@ -92,7 +92,8 @@ class Manager:
     async def launch(self, manager, tab):
         self.launches += 1
         shell_id = f'shell-{self.launches}'
-        log = self.root / (shell_id + '.log')
+        log = self.root / 'terminal_control' / shell_id / 'output.raw'
+        log.parent.mkdir(parents=True)
         log.write_bytes(b'hello\r\n')
         record = Record(id=shell_id, label=label(tab['id']), status='running',
                   stdout_log=str(log), capabilities={'backend': 'pipe', 'stdin_write': True, 'stdout_subscribe_bytes': True})
@@ -280,9 +281,9 @@ def test_event_wakeup_preserves_raw_bytes_and_exit_clears_association(tmp_path):
         from app.apps.file_explorer.terminal_stream import OutputConnection
         stream = OutputConnection('client', tab['id'], 'shell-1')
         service.streams.add(stream)
-        manager.queues['shell-1'].put_nowait(encode_pipe_message({'type': 'output', 'sequence': 2, 'data': b'\x1b[31mraw\xff'}))
+        manager.queues['shell-1'].put_nowait(encode_pipe_message({'type': 'output', 'sequence': 2, 'startOffset': 7, 'endOffset': 16, 'data': b'\x1b[31mraw\xff'}))
         for _ in range(8): await asyncio.sleep(0)
-        from app.apps.terminal.terminal_stream_protocol import unpack_message
+        from app.apps.file_explorer.terminal_stream_protocol import unpack_message
         payload = unpack_message((await asyncio.wait_for(stream.queue.get(), 1))[0])
         assert payload['data'] == b'\x1b[31mraw\xff'
         assert payload['startOffset'] == 7

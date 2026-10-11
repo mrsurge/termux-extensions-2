@@ -2,25 +2,30 @@
 
 This app is an ordinary Python worker and uses the existing `framework_shells`
 Python API. Code TE2's embedded native-worker boundary is not a requirement for
-other workers. It launches the existing Terminal `node_terminal_stream.yaml`
-pipe shell through `Orchestrator.start_from_ref`. Node owns node-pty,
-headless-xterm, sequence assignment and checkpoints; Framework-Shells owns the
-broker process and live pipe. `TERM=xterm-256color` is explicit.
+other workers. It launches its own `shellspec/terminal.yaml#terminal` pipe shell
+through `Orchestrator.start_from_ref`. Its own Node worker owns node-pty, raw
+byte offsets and directory-control signals. Framework-Shells owns that process
+and live pipe. `TERM=xterm-256color` is explicit. There is no headless xterm.
 
 `terminal_service.py` lazy-loads the manager/orchestrator only for terminal work.
 It does not import Code TE2's terminal backend or use its process/project state.
-`terminal_broker.py` reuses Terminal's bounded MessagePack pipe framing and the
-owning manager's byte subscription/stdin. It does not import Terminal's FastAPI
-backend or replay log files. Locked production Node dependencies are resolved
-through Terminal's existing runtime helper.
+`terminal_broker.py` uses this app's bounded MessagePack codec and the owning
+manager's byte subscription/stdin. There are no imports, shellspec references,
+build dependencies or runtime dependencies on another app's source. Production
+Node dependencies (node-pty and MessagePack only) have this app's own package
+lock and installer under the File Explorer Node runtime root.
 
 The existing `/tabs` request lane exposes `terminal.start`, `terminal.status`,
 `terminal.close`, `terminal.input`, `terminal.resize`, and `terminal.checkpoint`.
 Requests carry `tabId` and current `revision` and require an attached presentation.
 Input also carries bounded UTF-8 `data`; resize/checkpoint accept bounded
-`columns` and `rows`. Checkpoints use Node's serialized ANSI state. The Python
-adapter projects session-local byte offsets for the retained frontend cursor;
-these are not durable raw-log offsets. Broker sequences detect stream gaps.
+`columns` and `rows`. Node appends original PTY bytes to its private `output.raw`
+and forwards them without waiting for screen parsing. Attach acknowledges a
+canonical byte offset; Python's app-neutral Pyte projection reads only through
+that offset and returns ANSI plus incomplete parser bytes. Later deltas retain
+the same durable offsets, including after Python worker recreation. Checkpoint
+parsing occurs on a worker thread only when needed; it does not gate live output.
+Broker sequences detect stream gaps. Node removes its private log on normal exit.
 
 `tabs.json` owns the associated `shellId`. Start is explicit and serialized under
 the tab service lock; a repeated start reuses the associated controllable shell.
@@ -64,10 +69,10 @@ Reconnect obtains a new grant/checkpoint; unsent input and uncertain mutations
 are never replayed. FWS exit/removal clears the association. ASGI shutdown
 unsubscribes/closes presentation sockets without killing retained shells.
 
-`terminal_drawer.ts` builds through `app/apps/terminal/build.mjs` into the existing
+`terminal_drawer.ts` builds through this app's `build.mjs` into the existing
 inventoried `/static/js/file_explorer_terminal.js` root. It lazily reuses vendored
 custom xterm, Fit/WebFonts addons, touch selection, JetBrains Mono and the
-Terminal app's mobile-UA key helpers. Start/Show, Minimize/Restore, Maximize/Restore
+app-owned mobile-UA key helpers. Start/Show, Minimize/Restore, Maximize/Restore
 and confirmed Close are explicit controls. Desktop user agents never show extra
 keys.
 The terminal selects `JetBrains Mono Nerd` with the Code TE2 drawer's monospace
@@ -108,7 +113,7 @@ change. Only an explicit navigation to a different directory does so while locke
 Unlock cancels any unconsumed request and leaves CWD alone; re-lock only arms
 future navigation. A shell action already consumed before unlock cannot be undone.
 
-New terminals enable Terminal's opt-in `shellspec/directory_control.bash` init file.
+New terminals use this app's `shellspec/directory_control.bash` init file.
 It sources /etc/profile and the first readable normal login profile, then chains
 the user's scalar/array PROMPT_COMMAND while preserving command exit status.
 This follows Code Server's approach: login profiles run, but Bash's actual

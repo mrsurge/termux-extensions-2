@@ -10,10 +10,7 @@ function fixture() {
   const root = fs.mkdtempSync(path.join(scratch, 'directory-control-unit-'));
   const messages = [], inputs = [];
   const control = new DirectoryControl(root, async message => { messages.push(message); });
-  let handler;
-  control.bind({ pid: process.pid, write: data => inputs.push(data) }, {
-    parser: { registerOscHandler: (_code, callback) => { handler = callback; return { dispose() {} }; } },
-  });
+  control.bind({ pid: process.pid, write: data => inputs.push(data) });
   let sequence = 0;
   return {
     control, messages, inputs,
@@ -21,7 +18,9 @@ function fixture() {
       sequence += 1;
       const eventId = `${process.pid}-${sequence}`;
       fs.writeFileSync(path.join(control.root, `event-${eventId}`), `${kind}\0${token}\0${value}\0${root}\0`);
-      handler(`te2-control;${control.nonce};${eventId}`);
+      const marker = `\x1b]777;te2-control;${control.nonce};${eventId}\x07`;
+      // Every boundary is eligible for pipe/PTY fragmentation.
+      for (const character of marker) control.observe(character);
     },
     close() { control.dispose(); fs.rmSync(root, { recursive: true, force: true }); },
   };

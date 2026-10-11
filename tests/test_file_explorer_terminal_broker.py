@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.apps.file_explorer.terminal_broker import BrokerSession
-from app.apps.terminal.terminal_stream_protocol import encode_pipe_message
+from app.apps.file_explorer.terminal_stream_protocol import encode_pipe_message
 
 
 def test_control_reader_does_not_wait_for_tab_event_lock(tmp_path):
@@ -24,7 +24,7 @@ def test_control_reader_does_not_wait_for_tab_event_lock(tmp_path):
         session = BrokerSession('owned', manager, queue, sink)
         try:
             checkpoint = await asyncio.wait_for(session.request({'type': 'attach'}), 1)
-            assert checkpoint['state'] == b'hello\r\n'
+            assert checkpoint['outputOffset'] == 7
             assert checkpoint['outputOffset'] == 7
             # EOF rejects pending operations; it never replays them.
             queue.put_nowait(None)
@@ -47,7 +47,7 @@ def test_adapter_real_broker_idle_directory_and_checkpoint(tmp_path):
 
     async def run():
         process = await asyncio.create_subprocess_exec(
-            node, str(root / 'app/apps/terminal/terminal_stream_broker.mjs'),
+            node, str(root / 'app/apps/file_explorer/terminal_stream_broker.mjs'),
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env={**os.environ, 'HOME': str(tmp_path), 'TERMINAL_STREAM_CWD': str(tmp_path),
@@ -84,7 +84,8 @@ def test_adapter_real_broker_idle_directory_and_checkpoint(tmp_path):
                     event = await events.get()
                     if event.get('type') == 'output': output += event['data']
             checkpoint = await session.request({'type': 'attach', 'cols': 80, 'rows': 24})
-            assert b'ADAPTER_CWD=' in checkpoint['state']
+            projected = await session.projection.checkpoint('owned', Path(checkpoint['logPath']), checkpoint['outputOffset'], 80, 24)
+            assert 'ADAPTER_CWD=' in projected.ansi
             assert checkpoint['outputOffset'] > 0
             await session.send({'type': 'directory.cancel'})
             assert (await session.request({'type': 'ping'}))['type'] == 'pong'

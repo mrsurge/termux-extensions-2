@@ -1,5 +1,5 @@
-import { isMobileUserAgent, TERMINAL_KEYS, TerminalModifierState, dispatchSyntheticTerminalKey, dispatchSyntheticTerminalText, MINIBAR_INTERACTION_GUARD_MS, shouldSuppressMinibarInteraction } from '../terminal/src/mobile-special-keys';
-import { bindPointerHoldRepeat } from '../terminal/src/pointer-hold-repeat';
+import { isMobileUserAgent, TERMINAL_KEYS, TerminalModifierState, dispatchSyntheticTerminalKey, dispatchSyntheticTerminalText, MINIBAR_INTERACTION_GUARD_MS, shouldSuppressMinibarInteraction } from './mobile-special-keys';
+import { bindPointerHoldRepeat } from './pointer-hold-repeat';
 import { packObject, unpackObject } from './wire_codec';
 
 interface Disposable { dispose(): void }

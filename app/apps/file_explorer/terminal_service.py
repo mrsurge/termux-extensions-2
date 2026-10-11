@@ -51,20 +51,20 @@ def label(tab_id: str) -> str:
 async def launch(manager: Manager, tab: TabRecord) -> dict[str, object]:
     from app.te2_paths import te2_app_data_home
     from framework_shells.orchestrator import Orchestrator
-    from app.apps.terminal.node_runtime import ensure_terminal_node_runtime
+    from .node_runtime import ensure_terminal_node_runtime
     runtime = await asyncio.to_thread(ensure_terminal_node_runtime)
-    terminal_root = Path(__file__).parent.parent / 'terminal'
+    terminal_root = Path(__file__).parent
     constructor = cast(Callable[[Manager], OrchestratorAPI], Orchestrator)
     try:
         record = await constructor(manager).start_from_ref(
-            'node_terminal_stream.yaml#terminal-stream', base_dir=terminal_root / 'shellspec',
+            'terminal.yaml#terminal', base_dir=terminal_root / 'shellspec',
             ctx={'APP_ID': 'file_explorer', 'CWD': tab['path'], 'BROKER_ENTRY': str(terminal_root / 'terminal_stream_broker.mjs'),
                  'NODE_BIN': str(runtime.node_binary), 'NODE_PATH': runtime.executable_path,
                  'NODE_RUNTIME_ROOT': str(runtime.root), 'COLS': '80', 'ROWS': '24',
-                 'SCROLLBACK': '5000', 'SHELL_CMD_JSON': '["bash", "-l", "-i"]', 'LAUNCH_ID': tab['id']},
+                 'LAUNCH_ID': tab['id']},
             label=label(tab['id']), wait_ready=False,
             subgroups_overrides=['file_explorer', 'tab:' + tab['id']],
-            env_overrides={'TERM': 'xterm-256color', 'TERMINAL_STREAM_DIRECTORY_CONTROL': '1',
+            env_overrides={'TERM': 'xterm-256color',
                            'TERMINAL_STREAM_CONTROL_ROOT': str(te2_app_data_home('file_explorer') / 'terminal_control')},
         )
     except BaseException:
@@ -213,9 +213,15 @@ class TerminalService:
                 return {'shellId': shell_id}
             session = await self.brokers.get(shell_id, manager)
             checkpoint = await session.request({'type': 'attach', 'cols': cols, 'rows': rows})
-            state = checkpoint.get('state')
-            if not isinstance(state, bytes): raise ValueError('Invalid broker checkpoint')
-            return {'shellId': shell_id, 'ansi': state.decode('utf8'), 'pendingBytes': b'',
-                    'outputOffset': checkpoint['outputOffset'], 'columns': cols, 'rows': rows,
+            raw_path, offset = checkpoint.get('logPath'), checkpoint.get('outputOffset')
+            if not isinstance(raw_path, str) or not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
+                raise ValueError('Terminal uses an older broker; close it and start a new terminal')
+            log_path = Path(raw_path).resolve(strict=True)
+            root = (self.store.path.parent / 'terminal_control').resolve()
+            if not log_path.is_relative_to(root) or log_path.name != 'output.raw':
+                raise ValueError('Invalid terminal checkpoint location')
+            projected = await session.projection.checkpoint(shell_id, log_path, offset, cols, rows)
+            return {'shellId': shell_id, 'ansi': projected.ansi, 'pendingBytes': projected.pending_bytes,
+                    'outputOffset': projected.output_offset, 'columns': cols, 'rows': rows,
                     'directoryTracking': self.directory_status(tab)}
         raise ValueError('Unsupported terminal method')

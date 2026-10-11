@@ -1607,3 +1607,34 @@ subprocess tests. No Android edits, shared restart, commit/push or release.
   dispatch fencing before extending production control methods or migrating
   File Explorer. No FWS/shared-framework restart, frontend publication, Android
   change/build, commit or push occurred in this probe slice.
+
+## File Explorer app boundary correction — 2026-10-11
+
+- [x] Restore standalone Terminal broker, package scripts and build script exactly
+  to their contents before File Explorer integration (`516b6c0a^`). Remove the
+  File Explorer directory-control hooks/tests from the Terminal app.
+- [x] File Explorer owns its pipe shellspec, raw Node-PTY worker, control hooks,
+  codecs, package lock/runtime installer and frontend build/input helpers.
+  Regression rejects imports/references to Terminal app source.
+- [x] Remove headless xterm from File Explorer's dependency/runtime path. Forward
+  raw output immediately with canonical byte offsets; reconstruct Pyte screen
+  checkpoints only as needed, bounded at the Node attach acknowledgement.
+- [x] Preserve split sentinel, idle/busy/partial-input protection and Starship
+  prompt refresh; Node command state applies in ingress order without waiting
+  for output drain. Checkpoint tests preserve partial escape bytes and reconstruct
+  the same screen after replacing the Python projection owner.
+- [x] Standalone: 22 Node tests, typecheck and build pass. File Explorer: 107
+  backend/probe tests plus two isolation/checkpoint tests, 16 frontend tests,
+  nine real-PTY/control tests, strict mypy, frontend typecheck/build pass.
+- [ ] Installed live acceptance with refreshed File Explorer worker and fresh
+  terminal sessions. Existing processes are deliberately not killed by the
+  source correction. Native frontend publication requires OTA.
+- [x] File Explorer's production dependency bootstrap installs/verifies its own
+  locked node-pty/MessagePack runtime under `node_runtime/file_explorer`.
+  Rebuilt frontend bundles are byte-identical to the preceding accepted assets;
+  this correction therefore needs no new OTA when those assets are installed.
+
+The standalone parser/output queue and frontend batching predate this work;
+restoration proves removal of the coupling, not the cause or resolution of the
+user's latency observation. No commit/push/release or shared runtime restart is
+implied by these validations.

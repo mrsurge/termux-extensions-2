@@ -5,7 +5,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from urllib.parse import parse_qsl
 
-from app.apps.terminal.terminal_stream_protocol import pack_message, unpack_message
+from .terminal_stream_protocol import pack_message, unpack_message
 from .http_app import Scope, Receive, Send
 
 

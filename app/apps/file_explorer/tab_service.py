@@ -15,7 +15,7 @@ from .http_app import Scope, Receive, Send
 from .tab_store import TabStore, object_map, options, text
 from .terminal_service import TerminalService
 from .terminal_stream import OutputConnection, serve_output
-from app.apps.terminal.terminal_stream_protocol import pack_message, unpack_message
+from .terminal_stream_protocol import pack_message, unpack_message
 
 NAMESPACE = '/tabs'
 

@@ -5,7 +5,7 @@ import asyncio
 from app.apps.file_explorer.tab_service import TabService
 from app.apps.file_explorer.tab_store import TabStore, options
 from app.apps.file_explorer.terminal_stream import OutputConnection, serve_output
-from app.apps.terminal.terminal_stream_protocol import pack_message, unpack_message
+from app.apps.file_explorer.terminal_stream_protocol import pack_message, unpack_message
 from tests.test_file_explorer_tabs import Server
 
 

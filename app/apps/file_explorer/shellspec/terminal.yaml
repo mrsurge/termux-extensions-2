@@ -2,9 +2,18 @@ version: "1"
 
 shells:
   terminal:
-    backend: pty
-    pty_mode: interactive
+    backend: pipe
+    pipe:
+      mode: native_pipe_testing
     cwd: ${ctx:CWD}
-    command: ${ctx:SHELL_CMD}
+    command:
+      - ${ctx:NODE_BIN}
+      - ${ctx:BROKER_ENTRY}
     env:
       TERM: xterm-256color
+      PATH: ${ctx:NODE_PATH}
+      TERMINAL_STREAM_CWD: ${ctx:CWD}
+      TERMINAL_STREAM_COLS: ${ctx:COLS}
+      TERMINAL_STREAM_ROWS: ${ctx:ROWS}
+      TERMINAL_STREAM_PROTOCOL: msgpack-v1
+      TERMINAL_STREAM_NODE_RUNTIME_ROOT: ${ctx:NODE_RUNTIME_ROOT}

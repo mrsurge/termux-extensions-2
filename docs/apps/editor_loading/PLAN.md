@@ -672,3 +672,26 @@ precmd list (which can otherwise reorder ahead of PROMPT_COMMAND). Existing
 terminal processes require explicit close/new start for the new init hooks.
 Actual installed Starship/custom-hook and busy/partial ordering regressions pass;
 physical acceptance remains separate.
+
+### File Explorer terminal isolation correction (2026-10-11)
+
+This supersedes the shared standalone-Terminal broker design above. The user
+requested an app-owned pipe shell wrapping node-pty with directory-control
+signals. Importing Terminal's source, launching its shellspec, or extending its
+broker/build for File Explorer violates that boundary.
+
+Restore standalone Terminal's source to its pre-File-Explorer behavior. File
+Explorer owns its shellspec, Node worker/control hooks, dependency lock/runtime
+bootstrap, MessagePack codecs and frontend build. Reuse only app-neutral Pyte
+projection code under app/libs/terminal_runtime. Node appends canonical raw bytes
+and forwards output without headless parsing. Python creates offset-bounded
+checkpoints on demand; shell signals use a narrow split-safe OSC sentinel reader.
+Keep current tab ownership, raw output socket, correlated Socket.IO controls,
+directory lock, special keys and resizing semantics.
+
+Validate both applications independently, including real Bash/Starship control,
+checkpoint boundaries and reconstruction with a new Python owner. Existing
+shells retain their executable code: live validation needs fresh terminal
+sessions after File Explorer worker refresh. No shared framework restart or
+release is required. The reported standalone latency is not proven to originate
+in headless xterm: that parser/output queue existed before File Explorer work.

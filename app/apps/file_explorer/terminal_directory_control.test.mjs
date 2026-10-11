@@ -151,7 +151,7 @@ for (const starship of [false, true]) {
         for (const message of decoder.push(bytes)) {
           if (message.type === 'output') output += Buffer.from(message.data).toString();
           if (message.type === 'shell.state' && message.state === 'idle') idle += 1;
-          if (message.type === 'checkpoint') checkpoint = Buffer.from(message.state).toString();
+          if (message.type === 'checkpoint') checkpoint = fs.readFileSync(message.logPath).subarray(0, message.outputOffset).toString();
         }
       });
       const send = message => child.stdin.write(encodePipeFrame(message));
