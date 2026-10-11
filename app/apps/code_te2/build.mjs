@@ -16,10 +16,6 @@ async function copyHostCss() {
   await Promise.all([
     copyFile('main_page/frontend/explorer.css', 'static/dist/explorer.css'),
     copyFile(
-      'vendor/highlightjs/styles/github-dark.css',
-      'static/dist/explorer-highlight-github.css',
-    ),
-    copyFile(
       'src/explorer/search/vscode_widget_vendor/media/searchview.css',
       'static/dist/explorer-search-widget.css',
     ),

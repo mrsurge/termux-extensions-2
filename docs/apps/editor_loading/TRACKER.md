@@ -888,6 +888,45 @@ Previous selector retained; the running worker is unchanged until restarted.
 
 ---
 
+### TextMate-only snippet and README syntax (2026-10-10)
+
+- Approved replacement, not lazy Highlight.js loading: search, Changes/review and
+  README fences reuse the primary editor's actual TextMate grammar factory,
+  installed catalog/body loader and selected theme palette. No new RPC, grammar
+  cache, backend change, Monaco model or WBA document is created.
+- Text appears immediately. A four-operation queue applies syntax to existing
+  text nodes without removing match/diff wrappers. Weak tracking is capped at
+  2048 surfaces/8 MiB UTF-8; individual inputs at 64 KiB/10,000 tokens. Multiline
+  rule state is retained; tokenization yields between lines and rejects timed-out
+  lines. Detached/recycled/theme-invalidated paints are fenced. Unknown/failed
+  grammars remain plain text.
+- Snippet-only preparation shares the existing grammar installation lane but
+  does not replace Monaco language providers; a concurrent/later editor consumer
+  still completes its own provider registration.
+- Highlight.js imports and generated stylesheet dependency are removed from the
+  active host graph. Vendored Highlight.js sources/old registry are not deleted
+  in this slice; they are unused cleanup candidates.
+- Initial validation: 55 targeted regressions pass, including real
+  TextMate/Oniguruma multiline state, closure reuse, provider isolation, preserved
+  match/diff nodes, late readiness, recycled rows and bounded theme refresh.
+  Final typecheck, frontend build and authored-source diff checks pass. The test
+  also verifies snippet themes do not replace the browser-worker color map.
+  Existing minified-bundle embedded-string whitespace diagnostics are not edited
+  manually; generated output remains the esbuild artifact.
+- Final measured host before/replacement: 7,897,430 / 6,814,526 raw bytes;
+  2,158,850 / 1,843,276 gzip bytes (1,082,904 raw and 315,574 gzip bytes saved).
+- No OTA, runtime restart, APK, commit/push or release was performed. Native live
+  acceptance requires the established client asset updater; reload alone is not
+  publication.
+- OTA manifest follow-up: removed the obsolete required
+  `explorer-highlight-github.css` entry after deleting its output. The stale
+  entry made server ZIP construction fail before Android activation; it was not
+  a client deletion rejection. Remaining required manifest sources pass read-only
+  validation. Android stages a fresh full ZIP and swaps the whole tree, so absent
+  old files are removed and newly inventoried files are installed. Its fixed
+  minimum-required list is separate from the server's build manifest; no per-file
+  inventory is transmitted/verified by the current updater.
+
 ### code-te2
 
 1. Desktop client - minimize action on detatched sidebar tabs/windows

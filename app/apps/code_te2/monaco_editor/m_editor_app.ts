@@ -5,6 +5,7 @@ import {
   monacoFileUri,
 } from "./editor_language_utils.ts";
 import { parseJsonc } from "./editor_parse_utils.ts";
+import { refreshSnippetSyntax, setSnippetSyntaxProvider } from './editor_textmate_snippets.ts';
 import { createFileModel as createMonacoFileModel } from "./editor_model_utils.ts";
 import {
   runIssuesCommand,
@@ -758,6 +759,9 @@ interface MonacoBootWindowLike extends Window {
   });
 
   var textmateRuntime = createEditorTextmateRuntime({
+    onSnippetSyntaxChanged: function () {
+      if (bootWindow.__te2InlineMonacoHost) refreshSnippetSyntax();
+    },
     getWindow: function () {
       return window;
     },
@@ -810,7 +814,7 @@ interface MonacoBootWindowLike extends Window {
   );
 
   function _applyThemeToTextmateRegistry(vscodeThemeJson: unknown): void {
-    textmateRuntime.applyThemeToRegistry(vscodeThemeJson);
+    textmateRuntime.applyThemeToRegistry(vscodeThemeJson, true);
   }
 
   let textmateThemeOwnerRuntime: ReturnType<
@@ -1740,6 +1744,9 @@ interface MonacoBootWindowLike extends Window {
   );
 
   textmateThemeOwnerRuntime = createEditorTextmateThemeOwnerRuntime({
+    onThemeJsonLoaded: function (theme) {
+      if (_languageWorkersEnabled()) textmateRuntime.applyThemeToRegistry(theme, false);
+    },
     getWindow: function () {
       return window;
     },
@@ -2795,6 +2802,7 @@ interface MonacoBootWindowLike extends Window {
         emitToHost: emitToHost,
         updateDebug: updateDebug,
         onReady: function () {
+          if (bootWindow.__te2InlineMonacoHost) setSnippetSyntaxProvider(textmateRuntime.tokenizeSnippet);
           inlineRuntimeReady = true;
           resolveUsableInlineBoot();
         },

@@ -11,6 +11,7 @@ import * as vscodeOniguruma from '../vendor/vscode-oniguruma';
 import { resolveMonacoLanguageId } from './editor_language_utils.ts';
 import { semanticTokenForegrounds } from './editor_semantic_theme_utils.ts';
 import { traceColdBoot } from './editor_cold_boot_trace.ts';
+import type { SnippetSyntaxRequest, SnippetSyntaxToken } from './editor_textmate_snippets.ts';
 import { createTextmateGrammarBodyLoader } from './editor_textmate_grammar_loader.ts';
 import { createBundledGrammarCache } from './editor_textmate_bundled_cache.ts';
 import { createPersistentGrammarCache } from './editor_textmate_persistent_cache.ts';
@@ -77,6 +78,7 @@ interface VscodeGrammarIndexLike {
 }
 
 interface TextmateRuntimeDeps {
+  onSnippetSyntaxChanged?(): void;
   getWindow(): WindowTextmateLike;
   fetchFn(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
   buildUiUrl(path: string): string;
@@ -179,15 +181,17 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
   refreshVscodeGrammarIndex(): Promise<VscodeGrammarIndexLike>;
   refreshTextmateProjection(expectedRevision?: string | null): Promise<boolean>;
   scopeNameForLanguage(languageId: unknown, filePath: unknown): Promise<string>;
-  applyThemeToRegistry(vscodeThemeJson: unknown): void;
+  applyThemeToRegistry(vscodeThemeJson: unknown, syncEditorPalette?: boolean): void;
   getGrammarByLang(): Record<string, unknown>;
   getGrammarForLanguage(languageId: unknown): unknown;
+  tokenizeSnippet(request: SnippetSyntaxRequest): Promise<SnippetSyntaxToken[] | null>;
 } {
   let tmGrammarFactory: TMGrammarFactory | null = null;
   let tmInstalled: Record<string, boolean> = Object.create(null);
   let tmInstallInflight: Record<string, Promise<boolean> | undefined> = Object.create(null);
   let tmGrammarByLang: Record<string, unknown> = Object.create(null);
   let tmActiveThemeJson: Record<string, unknown> | null = null;
+  let tmSyncEditorPalette = true;
   let tmVscodeIndex: VscodeGrammarIndexLike | null = null;
   let tmVscodeIndexInflight: Promise<VscodeGrammarIndexLike> | null = null;
   let tmReadyInflight: Promise<unknown> | null = null;
@@ -238,10 +242,13 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
     };
   }
 
-  function applyThemeToRegistry(vscodeThemeJson: unknown): void {
+  function applyThemeToRegistry(vscodeThemeJson: unknown, syncEditorPalette = tmSyncEditorPalette): void {
     const theme = asRecord(vscodeThemeJson);
     if (!theme) return;
+    const changed = tmActiveThemeJson !== theme;
+    tmSyncEditorPalette = syncEditorPalette;
     tmActiveThemeJson = theme;
+    if (changed) deps.onSnippetSyntaxChanged?.();
     traceColdBoot('theme.textmate_selected', {
       name: asString(theme.name),
       factoryReady: tmGrammarFactory !== null,
@@ -259,11 +266,11 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
         }
       }
       const win = deps.getWindow();
-      if (colorMap.length > 0 && win.monaco?.languages?.setColorMap) {
+      if (syncEditorPalette && colorMap.length > 0 && win.monaco?.languages?.setColorMap) {
         win.monaco.languages.setColorMap(colorMap);
       }
       traceColdBoot('theme.textmate_applied', { name: asString(theme.name), colors: colorMap.length });
-      resetTokenizationForAllModels();
+      if (syncEditorPalette) resetTokenizationForAllModels();
     } catch (error) {
       console.warn('[TextMate] applyThemeToRegistry failed', error);
     }
@@ -407,6 +414,7 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
     tmVscodeIndex = next;
     tmVscodeIndexInflight = null;
     resetTokenizationForAllModels();
+    deps.onSnippetSyntaxChanged?.();
   }
 
   function resolveLanguageForPath(filePath: unknown, fallbackLanguage?: unknown): string {
@@ -583,7 +591,7 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
     }
   }
 
-  async function ensureTextmateTokenization(languageId: unknown, filePath: unknown): Promise<boolean> {
+  async function ensureTextmateTokenization(languageId: unknown, filePath: unknown, registerProvider = true): Promise<boolean> {
     try {
       const win = deps.getWindow();
       const monacoLanguages = win.monaco?.languages;
@@ -595,8 +603,16 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
       const lang = resolveMonacoLanguageId(languageId, knownLangs);
       if (!lang) return false;
       if (tmInstalled[lang]) return true;
+      if (!registerProvider && tmGrammarByLang[lang]) return true;
       const inflight = tmInstallInflight[lang];
-      if (inflight) return await inflight;
+      if (inflight) {
+        const prepared = await inflight;
+        if (prepared && registerProvider && !tmInstalled[lang]) {
+          if (tmInstallInflight[lang] === inflight) delete tmInstallInflight[lang];
+          return ensureTextmateTokenization(lang, filePath, true);
+        }
+        return prepared;
+      }
 
       tmInstallInflight[lang] = (async () => {
         const epoch = tmProjectionEpoch;
@@ -648,6 +664,10 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
         if (tmActiveThemeJson) {
           applyThemeToRegistry(tmActiveThemeJson);
         }
+
+        // Snippets use the same grammar/factory/cache without replacing a
+        // Monaco provider (especially when browser language workers are selected).
+        if (!registerProvider) return true;
 
         const setTokensProvider = monacoLanguages.setTokensProvider;
         if (typeof setTokensProvider !== 'function') return false;
@@ -708,11 +728,15 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
       })();
 
       const installation = tmInstallInflight[lang];
+      let installed: boolean;
       try {
-        return await installation;
+        installed = await installation;
       } finally {
         if (tmInstallInflight[lang] === installation) delete tmInstallInflight[lang];
       }
+      // A concurrent editor consumer may have joined snippet-only preparation.
+      return installed && registerProvider && !tmInstalled[lang]
+        ? ensureTextmateTokenization(lang, filePath, true) : installed;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (message === missingTMGrammarErrorMessage) {
@@ -731,6 +755,44 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
     return tmGrammarByLang[deps.normalizeLanguage(languageId)] || null;
   }
 
+  async function tokenizeSnippet(request: SnippetSyntaxRequest): Promise<SnippetSyntaxToken[] | null> {
+    if (!tmActiveThemeJson || new TextEncoder().encode(request.text).length > 64 * 1024) return null;
+    const epoch = tmProjectionEpoch;
+    if (tmProjectionRefreshInflight) await tmProjectionRefreshInflight;
+    if (!tmVscodeIndex) await refreshVscodeGrammarIndex();
+    const language = resolveLanguageForPath(request.filePath || '', request.language);
+    if (!await ensureTextmateTokenization(language, request.filePath || '', false)) return null;
+    if (epoch !== tmProjectionEpoch) return null;
+    const grammar = getGrammarForLanguage(language) as TextmateGrammarLike | null;
+    const factory = tmGrammarFactory;
+    if (!grammar || !factory) return null;
+    const colors = factory.getColorMap();
+    const tokens: SnippetSyntaxToken[] = [];
+    let state: unknown = vscodeTextmate.INITIAL;
+    let offset = 0;
+    let sliceStart = performance.now();
+    for (const line of request.text.split('\n')) {
+      if (epoch !== tmProjectionEpoch || factory !== tmGrammarFactory) return null;
+      const result = grammar.tokenizeLine2(line, state, 10);
+      if (result.stoppedEarly) return null;
+      state = result.ruleStack;
+      for (let i = 0; i < result.tokens.length; i += 2) {
+        const start = result.tokens[i];
+        const end = i + 2 < result.tokens.length ? result.tokens[i + 2] : line.length;
+        const metadata = result.tokens[i + 1];
+        if (end > start) tokens.push({ start: offset + start, end: offset + end,
+          color: colors[(metadata >>> 15) & 0x1ff], fontStyle: (metadata >>> 11) & 0xf });
+        if (tokens.length > 10_000) return null;
+      }
+      offset += line.length + 1;
+      if (performance.now() - sliceStart > 8) {
+        await new Promise<void>(resolve => setTimeout(resolve, 0));
+        sliceStart = performance.now();
+      }
+    }
+    return epoch === tmProjectionEpoch && factory === tmGrammarFactory ? tokens : null;
+  }
+
   return {
     ensureTextmateReady,
     ensureTextmateTokenization,
@@ -742,5 +804,6 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
     applyThemeToRegistry,
     getGrammarByLang,
     getGrammarForLanguage,
+    tokenizeSnippet,
   };
 }

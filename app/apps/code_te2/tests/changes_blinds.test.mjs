@@ -120,7 +120,8 @@ test('By Changes filter highlights paths and diff text using content search hit 
     assert.equal(container.querySelector('.fe-search-change-path .fe-search-hit').textContent, 'hello');
     assert.equal(container.querySelectorAll('.fe-search-diff-text .fe-search-hit').length, 2);
     assert.equal(container.querySelector('.fe-search-diff-text').textContent, 'const hello = "HELLO";');
-    assert.ok(container.querySelector('.fe-search-diff-text .hljs-keyword'));
+    // Syntax arrives asynchronously from the editor-owned TextMate runtime.
+    assert.equal(container.querySelector('.fe-search-diff-text .hljs-keyword'), null);
     active.checked = false; renderer.applyChangesFilter();
     assert.equal(container.querySelectorAll('.fe-search-hit').length, 0);
   } finally { win.happyDOM.abort(); }

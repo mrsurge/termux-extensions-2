@@ -2373,6 +2373,14 @@ The replay is idempotent and supplies each client only through the WBA lane.
 | editor_theme_apply_runtime_utils.ts | Theme definition and application order. |
 | editor_ui_editor_runtime.ts | Defensive semantic-highlighting repair. |
 
+### TextMate syntax for Explorer snippets and README fences
+
+The primary inline editor publishes a view-only snippet tokenizer after its existing theme/syntax boot barrier. Search, Changes/review and extension README consumers use that tokenizer's actual grammar factory, backend-selected catalog and revision-aware body loader (packaged seeds/IndexedDB/HTTP or chunk RPC as already configured). There is no separate registry, grammar catalog, cache, transport or WBA document/model. Highlight.js is no longer imported by this rendering path.
+
+Text and search/diff markup render synchronously. Syntax adds safe text-node spans asynchronously, preserving the existing hit/added/removed wrappers. Render/content/connection and theme/catalog generations reject obsolete paints. Weakly tracked surfaces are bounded to 2048 entries/8 MiB UTF-8, four concurrent preparations, 64 KiB per input and 10,000 output tokens. Multiline rule state is retained inside each snippet/fence; isolated search fragments do not reconstruct preceding document state. Missing/failed grammars or time-limited tokenization stay plain, without another transport fallback.
+
+Snippet-only grammar preparation must not register Monaco token providers or alter the selected editor language-worker mode. Later/concurrent editor preparation still installs its provider through the same existing single-flight lane. Theme/catalog changes invalidate connected snippet spans; native live testing requires OTA/package publication, not a server-side frontend build or page reload alone.
+
 ## 24) Completions Pipeline (End-to-End)
 
 ### Overview

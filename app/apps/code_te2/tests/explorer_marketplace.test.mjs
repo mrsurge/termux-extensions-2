@@ -89,7 +89,7 @@ test("README rendering keeps unsafe markup inert and gives tables/code independe
     assert.equal(container.querySelector('img[src^="data:"]'), null);
     assert.equal(container.querySelector('a[href="https://example.com/"]').getAttribute('rel'), 'noopener noreferrer');
     assert.ok(container.querySelector('.fe-readme-table-scroll > table'));
-    assert.ok(container.querySelector('pre[tabindex="0"] > code .hljs-keyword'));
+    assert.equal(container.querySelector('pre[tabindex="0"] > code').textContent.trim(), 'const value = 1;');
   } finally { restore(); window.close(); }
 });
 

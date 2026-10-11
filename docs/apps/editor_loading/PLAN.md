@@ -123,10 +123,17 @@ following them and rejects installed-path/symlink escapes. Local package-derived
 registry metadata is enough for fallback; XML parsing is unnecessary.
 
 Vendor MIT streaming-markdown 0.2.15 with provenance; render using its DOM parser
-and reuse the existing hljs registry, with oversized/unknown code fences remaining
+and reuse the editor-owned TextMate runtime, with oversized/unknown code fences remaining
 plain text. Prose/images wrap to the viewport; code and tables own horizontal
 scrolling. Links/images admit HTTPS URLs only; raw HTML remains inert. Selection
-generations discard late README results. TextMate fence highlighting is deferred.
+generations discard late README results. Search/Changes/review snippets and README
+fences share the primary editor's grammar factory, revision/body loader and selected
+palette. Syntax is asynchronous and never gates rendering; match/diff wrappers
+retain ownership. Snippet-only preparation does not install Monaco providers.
+Theme/catalog invalidation refreshes bounded weakly tracked connected surfaces;
+delayed paints require matching element/content/render generation. Highlight.js
+is omitted from the host graph, not lazy-loaded. Its unused vendor source remains
+a separate asset-cleanup candidate, not an active dependency.
 Backend changes require a matching compiled-domain rebuild and approved worker
 lifecycle, while native frontend changes require explicit client asset update.
 Acceptance: existing/new installs, uninstall, settings save, no-schema extensions,

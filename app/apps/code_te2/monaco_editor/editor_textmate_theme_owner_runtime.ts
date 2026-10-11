@@ -9,6 +9,7 @@ interface MonacoWindowLike extends Window {
 }
 
 interface EditorTextmateThemeOwnerDeps {
+  onThemeJsonLoaded?(theme: Record<string, unknown>): void;
   getWindow(): MonacoWindowLike;
   getDocument(): Document;
   ensureTe2DiffTheme(): void;
@@ -77,6 +78,7 @@ export function createEditorTextmateThemeOwnerRuntime(
         getJsonCacheFn: getThemeJsonCache,
         setJsonCacheFn(cache: Record<string, unknown>) {
           themeJsonCache = cache || {};
+          deps.onThemeJsonLoaded?.(themeJsonCache);
         },
         applyThemeToTextmateRegistryFn:
           deps.getLanguageWorkersEnabled() || isTextmateDisabled(deps.getWindow())

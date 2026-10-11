@@ -1,10 +1,5 @@
-import { languageIdFromPath } from "../../../monaco_editor/editor_language_utils.ts";
+import { highlightTextmateElement } from '../../../monaco_editor/editor_textmate_snippets.ts';
 import { diffWordsWithSpace } from "../../../vendor/diff/libesm/index.js";
-import hljsCoreModule from "../../../vendor/highlightjs/lib/core.js";
-import {
-  HIGHLIGHT_LANGUAGE_FACTORIES,
-  type HljsLanguageFactory,
-} from "./hljs-language-registry.generated.ts";
 import type { ExplorerSearchTextRange } from "./types.ts";
 
 type DiffChangeLike = {
@@ -12,6 +7,7 @@ type DiffChangeLike = {
   added?: boolean;
   removed?: boolean;
 };
+const snippetRenders = new WeakMap<HTMLElement, object>();
 
 /** Mark literal filter matches across syntax spans without destroying their token/diff classes. */
 export function highlightFilterMatches(target: HTMLElement, query: string): void {
@@ -72,154 +68,6 @@ interface SnippetWindow {
   tailTruncated: boolean;
 }
 
-interface HljsCoreLike {
-  registerLanguage(name: string, language: HljsLanguageFactory): void;
-  getLanguage?(name: string): unknown;
-  highlight(
-    value: string,
-    options: { language: string; ignoreIllegals?: boolean },
-  ): { value: string };
-}
-
-const hljs = hljsCoreModule as HljsCoreLike;
-
-const PLAINTEXT_LANGUAGE_IDS = new Set(["", "text", "txt", "plaintext"]);
-
-const HIGHLIGHT_LANGUAGE_OVERRIDES = new Map<string, string>([
-  ["cjs", "javascript"],
-  ["cts", "typescript"],
-  ["htm", "html"],
-  ["js", "javascript"],
-  ["jsx", "javascript"],
-  ["md", "markdown"],
-  ["mdx", "markdown"],
-  ["mjs", "javascript"],
-  ["mts", "typescript"],
-  ["shell", "bash"],
-  ["sh", "bash"],
-  ["ts", "typescript"],
-  ["tsx", "typescript"],
-  ["zsh", "bash"],
-]);
-
-let highlightRuntimeReady = false;
-
-function ensureHighlightRuntime(): void {
-  if (highlightRuntimeReady) {
-    return;
-  }
-  for (const [languageId, factory] of HIGHLIGHT_LANGUAGE_FACTORIES) {
-    if (hljs.getLanguage?.(languageId)) {
-      continue;
-    }
-    try {
-      hljs.registerLanguage(languageId, factory);
-    } catch (error) {
-      console.warn(
-        "[ExplorerSearch] failed to register highlight language",
-        languageId,
-        error,
-      );
-    }
-  }
-  highlightRuntimeReady = true;
-}
-
-function normalizeHighlightCandidate(
-  value: string | null | undefined,
-): string | null {
-  const candidate = String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/^\.+/, "");
-  if (PLAINTEXT_LANGUAGE_IDS.has(candidate)) {
-    return null;
-  }
-  return HIGHLIGHT_LANGUAGE_OVERRIDES.get(candidate) || candidate;
-}
-
-function pushHighlightCandidate(
-  candidates: string[],
-  seen: Set<string>,
-  value: string | null | undefined,
-): void {
-  const candidate = normalizeHighlightCandidate(value);
-  if (!candidate || seen.has(candidate)) {
-    return;
-  }
-  seen.add(candidate);
-  candidates.push(candidate);
-}
-
-function highlightCandidatesForPath(
-  filePath: string | null | undefined,
-): string[] {
-  const candidates: string[] = [];
-  const seen = new Set<string>();
-  pushHighlightCandidate(
-    candidates,
-    seen,
-    languageIdFromPath(filePath, null, null),
-  );
-
-  const baseName = String(filePath || "")
-    .split(/[\\/]/)
-    .pop()
-    ?.toLowerCase();
-  if (!baseName) {
-    return candidates;
-  }
-
-  pushHighlightCandidate(candidates, seen, baseName);
-  const parts = baseName.split(".").filter(Boolean);
-  for (let index = 1; index < parts.length; index += 1) {
-    pushHighlightCandidate(candidates, seen, parts.slice(index).join("."));
-  }
-  if (parts.length > 1) {
-    pushHighlightCandidate(candidates, seen, parts.at(-1));
-  }
-  return candidates;
-}
-
-function escapeHtml(text: string): string {
-  return text
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
-}
-
-function resolveHighlightLanguage(
-  filePath: string | null | undefined,
-): string | null {
-  ensureHighlightRuntime();
-  for (const candidate of highlightCandidatesForPath(filePath)) {
-    if (hljs.getLanguage?.(candidate)) {
-      return candidate;
-    }
-  }
-  return null;
-}
-
-function highlightToHtml(
-  text: string,
-  filePath: string | null | undefined,
-): string {
-  const language = resolveHighlightLanguage(filePath);
-  if (!text) {
-    return "";
-  }
-  if (!language) {
-    return escapeHtml(text);
-  }
-  try {
-    return hljs.highlight(text, {
-      language,
-      ignoreIllegals: true,
-    }).value;
-  } catch {
-    return escapeHtml(text);
-  }
-}
 
 function createHighlightedSegment(
   text: string,
@@ -228,7 +76,7 @@ function createHighlightedSegment(
 ): HTMLSpanElement {
   const span = document.createElement("span");
   span.className = classNames.join(" ");
-  span.innerHTML = highlightToHtml(text, filePath);
+  span.textContent = text;
   return span;
 }
 
@@ -467,16 +315,12 @@ function renderSearchSnippetWindow(
     marker.textContent = "...";
     target.appendChild(marker);
   }
+  highlightTextmateElement(target, { filePath });
 }
 
 export function highlightReadmeCode(target: HTMLElement, language: string): void {
-  ensureHighlightRuntime();
-  if (!language || !hljs.getLanguage?.(language)) return;
-  if (new TextEncoder().encode(target.textContent || '').length > 64 * 1024) return;
-  try {
-    target.innerHTML = hljs.highlight(target.textContent || '', { language, ignoreIllegals: true }).value;
-    target.classList.add('hljs');
-  } catch { /* Unknown/invalid fence input stays readable plain text. */ }
+  const aliases: Record<string, string> = { js: 'javascript', ts: 'typescript', sh: 'shellscript', bash: 'shellscript', shell: 'shellscript', py: 'python', md: 'markdown', rs: 'rust' };
+  highlightTextmateElement(target, { language: aliases[language] || language });
 }
 
 export function renderHighlightedSearchSnippet(
@@ -485,10 +329,13 @@ export function renderHighlightedSearchSnippet(
   filePath: string | null | undefined,
   options?: SearchSnippetOptions,
 ): void {
-  target.classList.add("hljs", "fe-search-code-surface");
+  const render = {};
+  snippetRenders.set(target, render);
+  target.classList.add("fe-search-code-surface");
   const ranges = normalizeSnippetRanges(text, options);
   if (ranges.length === 0) {
-    target.innerHTML = highlightToHtml(text, filePath);
+    target.textContent = text;
+    highlightTextmateElement(target, { filePath });
     return;
   }
 
@@ -500,7 +347,7 @@ export function renderHighlightedSearchSnippet(
   );
 
   window.requestAnimationFrame(() => {
-    if (!target.isConnected) {
+    if (!target.isConnected || snippetRenders.get(target) !== render) {
       return;
     }
     const nextVisibleChars = visibleCharBudget(target, null);
@@ -524,7 +371,8 @@ export function renderHighlightedDiffText(
     mode?: "added" | "removed" | null;
   },
 ): void {
-  target.classList.add("hljs", "fe-search-code-surface");
+  snippetRenders.delete(target);
+  target.classList.add("fe-search-code-surface");
   target.replaceChildren();
 
   const compareAgainst = options?.compareAgainst ?? null;
@@ -533,10 +381,12 @@ export function renderHighlightedDiffText(
     target.appendChild(createHighlightedSegment(text, filePath, [
       'fe-search-diff-token', mode === 'added' ? 'is-added' : 'is-removed',
     ]));
+    highlightTextmateElement(target, { filePath });
     return;
   }
   if (compareAgainst === null || !mode || typeof diffWordsWithSpace !== "function") {
-    target.innerHTML = highlightToHtml(text, filePath);
+    target.textContent = text;
+    highlightTextmateElement(target, { filePath });
     return;
   }
 
@@ -545,7 +395,8 @@ export function renderHighlightedDiffText(
       ? diffWordsWithSpace(text, compareAgainst)
       : diffWordsWithSpace(compareAgainst, text);
   if (!Array.isArray(parts) || parts.length === 0) {
-    target.innerHTML = highlightToHtml(text, filePath);
+    target.textContent = text;
+    highlightTextmateElement(target, { filePath });
     return;
   }
 
@@ -579,9 +430,11 @@ export function renderHighlightedDiffText(
   }
 
   if (!appended) {
-    target.innerHTML = highlightToHtml(text, filePath);
+    target.textContent = text;
+    highlightTextmateElement(target, { filePath });
     return;
   }
 
   target.appendChild(fragment);
+  highlightTextmateElement(target, { filePath });
 }

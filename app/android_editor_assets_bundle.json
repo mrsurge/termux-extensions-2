@@ -89,11 +89,6 @@
     },
     {
       "kind": "file",
-      "src": "app/apps/code_te2/static/dist/explorer-highlight-github.css",
-      "dest": "apps/code_te2/static/dist/explorer-highlight-github.css"
-    },
-    {
-      "kind": "file",
       "src": "app/apps/code_te2/static/dist/explorer-search-widget.css",
       "dest": "apps/code_te2/static/dist/explorer-search-widget.css"
     },
