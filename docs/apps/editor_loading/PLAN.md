@@ -218,10 +218,61 @@ drawer/session owner was found in this preliminary inventory.
 **Revised user direction (2026-10-10):** durable identity belongs to disk-backed
 File Explorer **tab sessions**, not ephemeral presentations. Each tab stores its
 path/options and associated terminal shell if active. Open Sidebar state may
-reference a tab session; separate clients must not collapse onto one global tab
-or shell. Model the durable record after ALS conversations where useful, without
-introducing an ALS dependency. Determine existing state-store and ownership seams
-before selecting schema or storage location.
+reference a tab session; multiple presentations/clients may intentionally attach
+to the same session, but unrelated sessions never collapse onto one global tab
+or shell. Terminal app lifecycle is now the primary behavioral reference, with a
+JSON-backed session record replacing the live shell as lifetime authority. ALS
+conversations remain a secondary persistence reference, not a dependency.
+Determine existing state-store and ownership seams before selecting schema or
+storage schema; the existing `te2_app_data_home('file_explorer')` resolves durable
+records under `TE2_DATA_HOME/app_state/file_explorer`, not disposable build caches.
+
+**Shared session synchronization:** File Explorer owns path/options and the last
+associated terminal shell ID in that record. Shell exit/explicit terminal close
+invalidates the shell association without deleting the session; persisted IDs
+must be reconciled against actual shell authority before reuse. Sessions survive
+without a visible window. Code TE2 stores a session reference in Sidebar state,
+not the authoritative current path. New unbound windows show the splash/session
+list; explicit fresh path intent creates, existing session ID attaches.
+
+Use the already vendored Socket.IO client and Python Socket.IO ASGI server for
+File Explorer's own session lane. Backend-controlled rooms group authorized
+attachments by session ID; do not accept arbitrary renderer-provided room joins.
+Navigation/update requests carry presentation identity, operation ID and expected
+revision. Serialize/validate/persist changes before emitting a monotonically
+revisioned session snapshot. Acknowledge the author without redirecting/remounting
+its view; notify other attached socket IDs, including other windows on that same
+device. Receivers apply without echoing a new mutation. Reconnect rejoins and
+obtains the authoritative snapshot; fence obsolete async listings and ignore
+stale revisions. Disconnect does not close a session or replay uncertain writes.
+Deletion notifies attached presentations and leaves no implicit recreation.
+
+**Import-graph reduction before Rust hosting:** remove File Explorer's FastAPI
+router/dependency-injection layer in a separate coherent slice before session
+implementation. Use the existing app-worker `TE2_ASGI_APP` export seam with an
+explicit raw ASGI HTTP dispatcher and Socket.IO composition, retaining Uvicorn,
+existing framework pipe/job/intents and response/error/download contracts. This
+must eliminate transitive FastAPI/Pydantic imports for this worker, not merely
+replace one import statement. Bound request bodies and validate query/body DTOs
+explicitly; retain streaming downloads, containment checks and method/error
+semantics. Measure import closure before/after and defer expensive job/archive
+helpers where safe. Do not remove project-wide dependencies until all consumers
+are migrated. Rust hosting/compilation is a later separately approved step, not
+a prerequisite for the Python session lane.
+
+Implementation order: (1) raw-ASGI/import-graph migration with compatibility
+tests, (2) durable session store plus Socket.IO rooms/snapshot protocol,
+(3) fresh/restore/splash frontend and backend-owned Sidebar session publication,
+(4) terminal association/drawer integration and remaining F4 features.
+
+**Typing/compilation prerequisite:** the entire File Explorer Python backend,
+including job helpers, must have explicit parameter/return types, no explicit
+`Any`/bare generics, checked object-boundary narrowing and concrete progress
+state. Strict mypy is the primary gate (`--strict --disallow-any-explicit`), with
+ty/basedpyright additional checks and a standalone mypyc group build/import
+probe. This does not imply migrating shared external job/pipe libraries or
+automatically activating compiled modules in the worker. Session DTOs/protocol
+must extend this typed foundation; mypyc is the intended compilation direction.
 
 **Mount/create lifecycle:** query intent is typed, not inferred from the presence
 of any query string. A fresh Code TE2 Explorer directory-open request creates a

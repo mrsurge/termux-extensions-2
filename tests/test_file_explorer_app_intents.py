@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 from pathlib import Path
 
 import pytest
-from fastapi import HTTPException
+from starlette.exceptions import HTTPException
 
 from app.apps.file_explorer import file_explorer
 from app.apps.code_te2.ui_ipc import sidebar_ws

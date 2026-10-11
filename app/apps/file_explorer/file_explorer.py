@@ -11,33 +11,39 @@ import shutil
 import stat
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Tuple
+from http.client import HTTPResponse
+from typing import TYPE_CHECKING, TypedDict, cast
+from collections.abc import Mapping, Sequence
 from urllib import request as urllib_request
 from urllib.parse import quote, urlencode
 
-from fastapi import APIRouter, Request, HTTPException, Body, Query
-from fastapi.responses import JSONResponse, FileResponse
+from starlette.exceptions import HTTPException
+from starlette.responses import FileResponse
 
-from app.libs.jobs import JobCancelled, register_job_handler
+from app.apps.file_explorer.http_app import FileExplorerHTTP
+
+from app.libs.jobs import JobCancelled, JobContext, register_job_handler
 from app.libs import pipe_runtime
-file_explorer_bp = APIRouter()
 
 
-@file_explorer_bp.post('/intent')
-async def dispatch_embedded_intent(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+async def dispatch_embedded_intent(payload: dict[str, object]) -> dict[str, object]:
     intent = payload.get('intent')
     context = payload.get('context')
     body = payload.get('payload')
     if intent not in {'document.open', 'terminal.createSession', 'project.openDirectory'}:
         raise HTTPException(status_code=400, detail='unsupported File Explorer intent')
-    if not isinstance(context, dict) or set(context) != {'clientId', 'hostId', 'presentationId'}:
+    if not isinstance(context, dict):
+        raise HTTPException(status_code=400, detail='exact embedded context is required')
+    exact_context = _object_dict(cast(object, context))
+    if set(exact_context) != {'clientId', 'hostId', 'presentationId'}:
         raise HTTPException(status_code=400, detail='exact embedded context is required')
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail='intent payload must be an object')
+    intent_body = _object_dict(cast(object, body))
     try:
         result = await pipe_runtime.call_async(
             'app.intent.dispatch', {'targetApp': 'code_te2', 'intent': intent,
-                                    'context': context, 'payload': body},
+                                    'context': exact_context, 'payload': intent_body},
             target_name='framework.rust', target_nid=1,
             op_id=os.urandom(16).hex(), timeout_seconds=45,
         )
@@ -48,7 +54,38 @@ async def dispatch_embedded_intent(payload: Dict[str, Any] = Body(...)) -> Dict[
 if TYPE_CHECKING:
     from app.libs.pipe_protocol import PipeEnvelope
 
+class ProgressState(TypedDict):
+    bytes_total: int
+    bytes_done: int
+    sources_total: int
+    sources_done: int
+
+
+def _object_dict(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise ValueError('Expected an object')
+    entries = cast(Mapping[object, object], value)
+    if any(not isinstance(key, str) for key in entries):
+        raise ValueError('Object keys must be strings')
+    return {str(key): item for key, item in entries.items()}
+
+
+def _object_list(value: object) -> list[object]:
+    if not isinstance(value, list):
+        raise ValueError('Expected a list')
+    return list(cast(Sequence[object], value))
+
+
+def _text(value: object) -> str:
+    if value is None:
+        return ''
+    if not isinstance(value, str):
+        raise HTTPException(status_code=422, detail='Expected a string')
+    return value
+
+
 HOME_DIR = Path.home()
+HOME_PATH = str(HOME_DIR)
 APP_ID = str(os.environ.get('TE_APP_ID') or 'file_explorer').strip() or 'file_explorer'
 APP_BASE_URL = f'/app/{APP_ID}'
 SIDEBAR_TOKEN_ID = str(os.environ.get('TE_SIDEBAR_TOKEN_ID') or APP_ID).strip() or APP_ID
@@ -65,10 +102,10 @@ def _framework_url() -> str:
     return f'http://127.0.0.1:{port}'
 
 
-def _post_framework_readiness_sync(payload: Dict[str, Any]) -> None:
+def _post_framework_readiness_sync(payload: dict[str, object]) -> None:
     body = dict(payload)
-    body.setdefault('app_id', APP_ID)
-    body.setdefault('status', 'ready')
+    _ = body.setdefault('app_id', APP_ID)
+    _ = body.setdefault('status', 'ready')
     endpoint = f"{_framework_url()}/api/apps/{quote(APP_ID, safe='')}/readiness"
     req = urllib_request.Request(
         endpoint,
@@ -76,11 +113,11 @@ def _post_framework_readiness_sync(payload: Dict[str, Any]) -> None:
         headers={'Content-Type': 'application/json'},
         method='POST',
     )
-    with urllib_request.urlopen(req, timeout=5) as resp:
-        resp.read()
+    with cast(HTTPResponse, urllib_request.urlopen(req, timeout=5)) as resp:
+        _ = resp.read()
 
 
-async def _post_framework_readiness(payload: Dict[str, Any]) -> None:
+async def _post_framework_readiness(payload: dict[str, object]) -> None:
     await asyncio.to_thread(_post_framework_readiness_sync, payload)
 
 
@@ -96,11 +133,7 @@ async def te2_app_backend_serving() -> None:
         print(f"[file_explorer] readiness post failed: {exc}", flush=True)
 
 
-def _sidebar_backend_client_id() -> str:
-    return f'{APP_ID}:backend:{os.getpid()}'
-
-
-async def _pipe_list_directory(abs_path: Path, hidden: bool) -> Dict[str, Any]:
+async def _pipe_list_directory(abs_path: Path, hidden: bool) -> dict[str, object]:
     try:
         listing = await pipe_runtime.call_async(
             'fs.listDirectory',
@@ -118,10 +151,10 @@ async def _pipe_list_directory(abs_path: Path, hidden: bool) -> Dict[str, Any]:
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
     if not isinstance(listing, dict):
         raise HTTPException(status_code=502, detail='Pipe listing response is not an object')
-    return listing
+    return _object_dict(cast(object, listing))
 
 
-async def _call_sidebar_rpc(method: str, params: Dict[str, Any] | None = None, *, timeout: float = 5.0) -> Dict[str, Any]:
+async def _call_sidebar_rpc(method: str, params: dict[str, object] | None = None, *, timeout: float = 5.0) -> dict[str, object]:
     from app.libs.sidebar_rpc import call_sidebar_rpc
     return await call_sidebar_rpc(APP_ID, method, params or {}, timeout=timeout)
 
@@ -152,8 +185,8 @@ def _canonical_sidebar_url(host_id: str, token_id: str, path_value: str, console
     return f"{APP_BASE_URL}?{urlencode(query)}"
 
 
-def _scandir_entries(path: Path, show_hidden: bool) -> List[Dict[str, Any]]:
-    entries: List[Dict[str, Any]] = []
+def _scandir_entries(path: Path, show_hidden: bool) -> list[dict[str, object]]:
+    entries: list[dict[str, object]] = []
     with os.scandir(path) as iterator:
         for entry in iterator:
             name = entry.name
@@ -219,7 +252,8 @@ def _boolish(value: object) -> bool:
 
 
 def _resolve_pipe_directory(envelope: PipeEnvelope) -> tuple[Path, Path]:
-    params = envelope.params if isinstance(envelope.params, dict) else {}
+    raw_params: object = envelope.params
+    params = _object_dict(cast(object, raw_params)) if isinstance(raw_params, dict) else {}
     raw_root = params.get('root') or envelope.workspace_root or str(HOME_DIR)
     root = Path(os.path.abspath(os.path.expanduser(str(raw_root)))).resolve()
 
@@ -236,22 +270,23 @@ def _resolve_pipe_directory(envelope: PipeEnvelope) -> tuple[Path, Path]:
     target = target.resolve()
 
     try:
-        target.relative_to(root)
+        _ = target.relative_to(root)
     except ValueError as exc:
         raise PermissionError('Path is outside the requested root') from exc
     return root, target
 
 
-def _pipe_directory_listing(envelope: PipeEnvelope) -> Dict[str, Any]:
-    params = envelope.params if isinstance(envelope.params, dict) else {}
+def _pipe_directory_listing(envelope: PipeEnvelope) -> dict[str, object]:
+    raw_params: object = envelope.params
+    params = _object_dict(cast(object, raw_params)) if isinstance(raw_params, dict) else {}
     root, target = _resolve_pipe_directory(envelope)
     hidden = _boolish(params.get('hidden'))
     entries = _scandir_entries(target, hidden)
-    entries.sort(key=lambda item: (item.get('type') != 'directory', (item.get('name') or '').lower()))
+    entries.sort(key=lambda item: (item.get('type') != 'directory', str(item.get('name') or '').lower()))
 
     # This DTO mirrors the Rust framework service shape so net and pipe routes
     # can converge without changing the File Explorer frontend contract first.
-    pipe_entries: List[Dict[str, Any]] = []
+    pipe_entries: list[dict[str, object]] = []
     for entry in entries:
         entry_path = Path(str(entry.get('path') or target / str(entry.get('name') or '')))
         try:
@@ -309,126 +344,44 @@ def _pipe_directory_listing(envelope: PipeEnvelope) -> Dict[str, Any]:
     }
 
 
-def te2_pipe_dispatch(envelope: PipeEnvelope) -> Dict[str, Any] | None:
+def te2_pipe_dispatch(envelope: PipeEnvelope) -> dict[str, object] | None:
     if envelope.method == 'fs.listDirectory':
         return _pipe_directory_listing(envelope)
     return None
 
 
-def _legacy_entries_from_pipe_listing(listing: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _legacy_entries_from_pipe_listing(listing: dict[str, object]) -> list[dict[str, object]]:
     raw_entries = listing.get('entries')
     if not isinstance(raw_entries, list):
         raise HTTPException(status_code=502, detail='Pipe listing response is missing entries')
 
-    entries: List[Dict[str, Any]] = []
-    for raw_entry in raw_entries:
-        if not isinstance(raw_entry, dict):
+    entries: list[dict[str, object]] = []
+    for raw in _object_list(cast(object, raw_entries)):
+        if not isinstance(raw, dict):
             continue
+        raw_entry = _object_dict(cast(object, raw))
         entry_type = str(raw_entry.get('type') or raw_entry.get('kind') or 'unknown')
-        entry: Dict[str, Any] = dict(raw_entry)
+        entry: dict[str, object] = dict(raw_entry)
         entry['type'] = entry_type
         entry['path'] = str(raw_entry.get('path') or '')
-        entry['name'] = str(raw_entry.get('name') or Path(entry['path']).name)
+        entry['name'] = str(raw_entry.get('name') or Path(str(entry['path'])).name)
         if 'isSymlink' in raw_entry and 'is_symlink' not in entry:
             entry['is_symlink'] = raw_entry.get('isSymlink')
         if 'symlinkTarget' in raw_entry and 'symlink_target' not in entry:
             entry['symlink_target'] = raw_entry.get('symlinkTarget')
         entries.append(entry)
-    entries.sort(key=lambda item: (item.get('type') != 'directory', (item.get('name') or '').lower()))
+    entries.sort(key=lambda item: (item.get('type') != 'directory', str(item.get('name') or '').lower()))
     return entries
 
 
-def _scandir_with_sudo(path: Path, show_hidden: bool) -> List[Dict[str, Any]]:
-    script = (
-        "import json, os, sys, pwd, grp\n"
-        f"path = {json.dumps(str(path))}\n"
-        f"show_hidden = {repr(bool(show_hidden))}\n"
-        "entries = []\n"
-        "try:\n"
-        "    with os.scandir(path) as iterator:\n"
-        "        for entry in iterator:\n"
-        "            name = entry.name\n"
-        "            if not show_hidden and name.startswith('.'):\n"
-        "                continue\n"
-        "            try:\n"
-        "                if entry.is_dir(follow_symlinks=False):\n"
-        "                    entry_type = 'directory'\n"
-        "                elif entry.is_symlink():\n"
-        "                    entry_type = 'symlink'\n"
-        "                else:\n"
-        "                    entry_type = 'file'\n"
-        "            except PermissionError:\n"
-        "                entry_type = 'unknown'\n"
-        "            size = None\n"
-        "            mtime = None\n"
-        "            mode = None\n"
-        "            owner = None\n"
-        "            group = None\n"
-        "            try:\n"
-        "                stat_info = entry.stat(follow_symlinks=False)\n"
-        "                size = stat_info.st_size\n"
-        "                mtime = int(stat_info.st_mtime)\n"
-        "                mode = stat_info.st_mode\n"
-        "                uid = stat_info.st_uid\n"
-        "                gid = stat_info.st_gid\n"
-        "                try:\n"
-        "                    owner = pwd.getpwuid(uid).pw_name\n"
-        "                except:\n"
-        "                    owner = str(uid)\n"
-        "                try:\n"
-        "                    group = grp.getgrgid(gid).gr_name\n"
-        "                except:\n"
-        "                    group = str(gid)\n"
-        "            except Exception:\n"
-        "                pass\n"
-        "            entries.append({\n"
-        "                'name': name,\n"
-        "                'type': entry_type,\n"
-        "                'path': os.path.join(path, name),\n"
-        "                'size': size,\n"
-        "                'mtime': mtime,\n"
-        "                'mode': mode,\n"
-        "                'owner': owner,\n"
-        "                'group': group\n"
-        "            })\n"
-        "    json.dump(entries, sys.stdout)\n"
-        "except FileNotFoundError:\n"
-        "    sys.stderr.write('Directory not found')\n"
-        "    sys.exit(44)\n"
-        "except PermissionError as exc:\n"
-        "    sys.stderr.write(str(exc) or 'Permission denied')\n"
-        "    sys.exit(13)\n"
-        "except Exception as exc:\n"
-        "    sys.stderr.write(str(exc))\n"
-        "    sys.exit(99)\n"
-    )
-    result = subprocess.run(
-        ['sudo', '-n', 'python3', '-c', script],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode == 44:
-        raise FileNotFoundError('Directory not found')
-    if result.returncode == 13:
-        message = result.stderr.strip() or 'Permission denied'
-        raise PermissionError(message)
-    if result.returncode != 0:
-        message = result.stderr.strip() or result.stdout.strip() or 'Failed to list directory'
-        raise RuntimeError(message)
-    try:
-        return json.loads(result.stdout or '[]')
-    except json.JSONDecodeError as exc:  # pragma: no cover - defensive
-        raise RuntimeError(f'Failed to parse sudo output: {exc}') from exc
-
-
-def _run_sudo(argv: List[str]) -> None:
+def _run_sudo(argv: list[str]) -> None:
     result = subprocess.run(['sudo', '-n', *argv], capture_output=True, text=True)
     if result.returncode != 0:
         message = result.stderr.strip() or result.stdout.strip() or 'Permission denied'
         raise PermissionError(message)
 
 
-def _mode_to_permissions(mode: int) -> Dict[str, Dict[str, bool]]:
+def _mode_to_permissions(mode: int) -> dict[str, dict[str, bool]]:
     value = stat.S_IMODE(mode)
     def has(flag: int) -> bool:
         return (value & flag) == flag
@@ -470,8 +423,7 @@ def _chmod_recursive_local(target: str, mode_value: int) -> None:
     os.chmod(target, mode_value)
 
 
-@file_explorer_bp.get('/list')
-async def list_directory(path: str = Query(str(HOME_DIR)), hidden: bool = Query(False)):
+async def list_directory(path: str = HOME_PATH, hidden: bool = False) -> dict[str, object]:
     """
     List directory contents.
 
@@ -484,9 +436,7 @@ async def list_directory(path: str = Query(str(HOME_DIR)), hidden: bool = Query(
     return {"ok": True, "data": {"entries": entries, "path": str(listing.get('path') or abs_path)}}
 
 
-@file_explorer_bp.post('/sidebar/window/open_url')
-@file_explorer_bp.post('/sidebar/window/state')
-async def publish_sidebar_window_url(payload: Dict[str, Any] | None = Body(None)):
+async def publish_sidebar_window_url(payload: dict[str, object] | None = None) -> dict[str, object]:
     """
     Reference backend bridge for stateful sidebar app windows.
     The frontend publishes the current path state here after loading a directory;
@@ -502,7 +452,7 @@ async def publish_sidebar_window_url(payload: Dict[str, Any] | None = Body(None)
     console_worker_id = str(body.get('console_worker_id') or body.get('consoleWorkerId') or '').strip()
     token_id = str(body.get('token_id') or body.get('tokenId') or SIDEBAR_TOKEN_ID).strip()
     url_value = _canonical_sidebar_url(host_id, token_id, path_value, console_worker_id)
-    params: Dict[str, Any] = {
+    params: dict[str, object] = {
         'lane': {
             'app_id': APP_ID,
             'base_url': APP_BASE_URL,
@@ -540,8 +490,7 @@ async def publish_sidebar_window_url(payload: Dict[str, Any] | None = Body(None)
     return {"ok": True, "data": {"sidebar": rpc_result}}
 
 
-@file_explorer_bp.get('/download')
-async def download_file(path: str = Query(...)):
+async def download_file(path: str) -> FileResponse:
     """
     Download a file.
 
@@ -562,8 +511,7 @@ async def download_file(path: str = Query(...)):
     return FileResponse(abs_path, filename=os.path.basename(abs_path))
 
 
-@file_explorer_bp.post('/mkdir')
-async def make_directory(data: dict = Body(...)):
+async def make_directory(data: dict[str, object]) -> dict[str, object]:
     """
     Create a directory.
 
@@ -571,8 +519,8 @@ async def make_directory(data: dict = Body(...)):
         POST /api/app/file_explorer/mkdir
         {"path":"/tmp","name":"test_dir"}
     """
-    base = os.path.abspath(os.path.expanduser(data.get('path') or ''))
-    name = (data.get('name') or '').strip()
+    base = os.path.abspath(os.path.expanduser(_text(data.get('path'))))
+    name = _text(data.get('name')).strip()
     if not name or '/' in name or name in {'.', '..'}:
         raise HTTPException(status_code=400, detail='Invalid directory name')
     if not os.path.isdir(base):
@@ -592,9 +540,8 @@ async def make_directory(data: dict = Body(...)):
     return {"ok": True, "data": {'created': os.path.basename(target)}}
 
 
-@file_explorer_bp.post('/delete')
-async def delete_path(data: dict = Body(...)):
-    target = data.get('path')
+async def delete_path(data: dict[str, object]) -> dict[str, object]:
+    target = _text(data.get('path'))
     if not target:
         raise HTTPException(status_code=400, detail='Path is required')
     abs_target = os.path.abspath(os.path.expanduser(target))
@@ -615,10 +562,9 @@ async def delete_path(data: dict = Body(...)):
     return {"ok": True, "data": {'deleted': abs_target}}
 
 
-@file_explorer_bp.post('/rename')
-async def rename_path(data: dict = Body(...)):
-    source = data.get('path')
-    new_name = (data.get('name') or '').strip()
+async def rename_path(data: dict[str, object]) -> dict[str, object]:
+    source = _text(data.get('path'))
+    new_name = _text(data.get('name')).strip()
     if not source or not new_name:
         raise HTTPException(status_code=400, detail='Source path and new name are required')
     src_abs = os.path.abspath(os.path.expanduser(source))
@@ -638,10 +584,9 @@ async def rename_path(data: dict = Body(...)):
     return {"ok": True, "data": {'renamed': os.path.basename(src_abs), 'to': os.path.basename(dest_abs)}}
 
 
-@file_explorer_bp.post('/copy')
-async def copy_path(data: dict = Body(...)):
-    source = data.get('source')
-    dest = data.get('dest')
+async def copy_path(data: dict[str, object]) -> dict[str, object]:
+    source = _text(data.get('source'))
+    dest = _text(data.get('dest'))
     if not source or not dest:
         raise HTTPException(status_code=400, detail='Source and destination are required')
     src_abs = os.path.abspath(os.path.expanduser(source))
@@ -663,9 +608,9 @@ async def copy_path(data: dict = Body(...)):
     
     try:
         if os.path.isdir(src_abs) and not os.path.islink(src_abs):
-            await anyio.to_thread.run_sync(shutil.copytree, src_abs, dest_abs)
+            _ = await anyio.to_thread.run_sync(shutil.copytree, src_abs, dest_abs)
         else:
-            await anyio.to_thread.run_sync(shutil.copy2, src_abs, dest_abs)
+            _ = await anyio.to_thread.run_sync(shutil.copy2, src_abs, dest_abs)
     except PermissionError:
         try:
             await anyio.to_thread.run_sync(_run_sudo, ['cp', '-r', src_abs, dest_abs])
@@ -676,10 +621,9 @@ async def copy_path(data: dict = Body(...)):
     return {"ok": True, "data": {'copied': src_abs, 'to': dest_abs}}
 
 
-@file_explorer_bp.post('/move')
-async def move_path(data: dict = Body(...)):
-    source = data.get('source')
-    dest_dir = data.get('dest')
+async def move_path(data: dict[str, object]) -> dict[str, object]:
+    source = _text(data.get('source'))
+    dest_dir = _text(data.get('dest'))
     if not source or not dest_dir:
         raise HTTPException(status_code=400, detail='Source and destination are required')
     src_abs = os.path.abspath(os.path.expanduser(source))
@@ -701,8 +645,7 @@ async def move_path(data: dict = Body(...)):
     return {"ok": True, "data": {'moved': src_abs, 'to': dest_abs}}
 
 
-@file_explorer_bp.get('/resolve_symlink')
-async def resolve_symlink(path: str = Query(...)):
+async def resolve_symlink(path: str) -> dict[str, object]:
     """Resolve a symlink to its target path."""
     if not path:
         raise HTTPException(status_code=400, detail='Path is required')
@@ -745,8 +688,7 @@ async def resolve_symlink(path: str = Query(...)):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@file_explorer_bp.get('/properties')
-async def get_properties(path: str = Query(...)):
+async def get_properties(path: str) -> dict[str, object]:
     """
     Get file or directory properties.
 
@@ -772,6 +714,8 @@ async def get_properties(path: str = Query(...)):
     mode_value = stat.S_IMODE(stat_result.st_mode)
     perms = _mode_to_permissions(mode_value)
 
+    owner_name: str | int
+    group_name: str | int
     try:
         owner_name = (await anyio.to_thread.run_sync(pwd.getpwuid, stat_result.st_uid)).pw_name
     except KeyError:
@@ -782,7 +726,7 @@ async def get_properties(path: str = Query(...)):
     except KeyError:
         group_name = stat_result.st_gid
 
-    info: Dict[str, Any] = {
+    info: dict[str, object] = {
         'path': abs_path,
         'name': os.path.basename(abs_path) or abs_path,
         'type': 'directory' if os.path.isdir(abs_path) else 'symlink' if os.path.islink(abs_path) else 'file' if os.path.isfile(abs_path) else 'unknown',
@@ -800,9 +744,8 @@ async def get_properties(path: str = Query(...)):
     return {"ok": True, "data": info}
 
 
-@file_explorer_bp.post('/chmod')
-async def chmod_path(data: dict = Body(...)):
-    target = data.get('path')
+async def chmod_path(data: dict[str, object]) -> dict[str, object]:
+    target = _text(data.get('path'))
     mode_str = str(data.get('mode', '')).strip()
     if not target or not mode_str:
         raise HTTPException(status_code=400, detail='Path and mode are required')
@@ -831,10 +774,9 @@ async def chmod_path(data: dict = Body(...)):
     return {"ok": True, "data": {'path': target_abs, 'mode': format(mode_value, '03o'), 'recursive': recursive}}
 
 
-@file_explorer_bp.post('/extract')
-async def extract_archive(data: dict = Body(...)):
-    source = data.get('source')
-    directory = data.get('directory')
+async def extract_archive(data: dict[str, object]) -> dict[str, object]:
+    source = _text(data.get('source'))
+    directory = _text(data.get('directory'))
     if not source or not directory:
         raise HTTPException(status_code=400, detail='Source and destination are required')
 
@@ -871,17 +813,22 @@ async def extract_archive(data: dict = Body(...)):
     return {"ok": True, "data": {'extracted': source_abs, 'into': dest_abs}}
 
 
-@file_explorer_bp.post('/chown')
-async def chown_path(data: dict = Body(...)):
-    target = data.get('path')
-    user = (data.get('user') or '').strip()
-    group = (data.get('group') or '').strip()
+async def chown_path(data: dict[str, object]) -> dict[str, object]:
+    target = _text(data.get('path'))
+    user = _text(data.get('user')).strip()
+    group = _text(data.get('group')).strip()
     if not target or (not user and not group):
         raise HTTPException(status_code=400, detail='Path and user/group required')
     target_abs = os.path.abspath(os.path.expanduser(target))
     spec = f"{user}:{group}" if user and group else (user if user else f":{group}")
     try:
-        await anyio.to_thread.run_sync(shutil.chown, target_abs, user or None, group or None)
+        # Explicit overload selection keeps None out of the user/group union.
+        if user and group:
+            await anyio.to_thread.run_sync(functools.partial(shutil.chown, target_abs, user=user, group=group))
+        elif user:
+            await anyio.to_thread.run_sync(functools.partial(shutil.chown, target_abs, user=user))
+        else:
+            await anyio.to_thread.run_sync(functools.partial(shutil.chown, target_abs, group=group))
     except Exception:
         try:
             await anyio.to_thread.run_sync(_run_sudo, ['chown', spec, target_abs])
@@ -903,15 +850,15 @@ async def chown_path(data: dict = Body(...)):
 COPY_CHUNK_SIZE = 1024 * 1024  # 1 MiB per chunk
 
 
-def _normalize_sources(raw_sources: List[Any]) -> Tuple[List[Dict[str, str]], List[Dict[str, str]]]:
+def _normalize_sources(raw_sources: list[object]) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
     """Normalize raw source paths into absolute paths.
 
     Returns a tuple of (valid_sources, errors) so the caller can report
     unresolved inputs back to the user rather than aborting the whole job.
     """
 
-    valid: List[Dict[str, str]] = []
-    errors: List[Dict[str, str]] = []
+    valid: list[dict[str, str]] = []
+    errors: list[dict[str, str]] = []
     for entry in raw_sources:
         if not isinstance(entry, str) or not entry.strip():
             errors.append({'source': str(entry), 'error': 'Invalid source path'})
@@ -924,7 +871,7 @@ def _normalize_sources(raw_sources: List[Any]) -> Tuple[List[Dict[str, str]], Li
     return valid, errors
 
 
-def _measure_sources(paths: List[str], ctx) -> Tuple[int, int]:
+def _measure_sources(paths: list[str], ctx: JobContext) -> tuple[int, int]:
     """Return (total_bytes, total_files) for the given paths."""
 
     total_bytes = 0
@@ -957,7 +904,7 @@ def _measure_sources(paths: List[str], ctx) -> Tuple[int, int]:
     return total_bytes, total_files
 
 
-def _emit_progress(ctx, state: Dict[str, Any], detail: str) -> None:
+def _emit_progress(ctx: JobContext, state: ProgressState, detail: str) -> None:
     bytes_total = int(state.get('bytes_total') or 0)
     if bytes_total > 0:
         completed = min(int(state.get('bytes_done', 0)), bytes_total)
@@ -968,7 +915,7 @@ def _emit_progress(ctx, state: Dict[str, Any], detail: str) -> None:
     ctx.set_progress(completed=completed, total=total, detail=detail)
 
 
-def _copy_symlink(ctx, source: str, destination: str, state: Dict[str, Any], detail: str) -> None:
+def _copy_symlink(ctx: JobContext, source: str, destination: str, state: ProgressState, detail: str) -> None:
     ctx.check_cancelled()
     parent = os.path.dirname(destination) or '.'
     os.makedirs(parent, exist_ok=True)
@@ -979,7 +926,7 @@ def _copy_symlink(ctx, source: str, destination: str, state: Dict[str, Any], det
     _emit_progress(ctx, state, detail)
 
 
-def _copy_file_contents(ctx, source: str, destination: str, state: Dict[str, Any], detail: str) -> None:
+def _copy_file_contents(ctx: JobContext, source: str, destination: str, state: ProgressState, detail: str) -> None:
     ctx.check_cancelled()
     parent = os.path.dirname(destination) or '.'
     os.makedirs(parent, exist_ok=True)
@@ -988,7 +935,7 @@ def _copy_file_contents(ctx, source: str, destination: str, state: Dict[str, Any
             chunk = reader.read(COPY_CHUNK_SIZE)
             if not chunk:
                 break
-            writer.write(chunk)
+            _ = writer.write(chunk)
             state['bytes_done'] = state.get('bytes_done', 0) + len(chunk)
             _emit_progress(ctx, state, detail)
             ctx.check_cancelled()
@@ -998,7 +945,7 @@ def _copy_file_contents(ctx, source: str, destination: str, state: Dict[str, Any
         pass
 
 
-def _copy_directory(ctx, source: str, destination: str, state: Dict[str, Any], label: str) -> None:
+def _copy_directory(ctx: JobContext, source: str, destination: str, state: ProgressState, label: str) -> None:
     if os.path.exists(destination):
         raise FileExistsError(destination)
     os.makedirs(destination, exist_ok=True)
@@ -1037,7 +984,7 @@ def _copy_directory(ctx, source: str, destination: str, state: Dict[str, Any], l
                 _copy_file_contents(ctx, src_file, dest_file, state, detail)
 
 
-def _copy_entry(ctx, source: str, destination: str, state: Dict[str, Any], label: str) -> None:
+def _copy_entry(ctx: JobContext, source: str, destination: str, state: ProgressState, label: str) -> None:
     if os.path.islink(source):
         _copy_symlink(ctx, source, destination, state, label)
     elif os.path.isdir(source):
@@ -1057,7 +1004,7 @@ def _safe_remove_path(path: str) -> None:
             pass
 
 
-def _format_bulk_message(action: str, successes: List[Dict[str, Any]], errors: List[Dict[str, Any]], destination: str) -> str:
+def _format_bulk_message(action: str, successes: list[dict[str, str]], errors: list[dict[str, str]], destination: str) -> str:
     success_count = len(successes)
     error_count = len(errors)
     if success_count and error_count:
@@ -1070,23 +1017,25 @@ def _format_bulk_message(action: str, successes: List[Dict[str, Any]], errors: L
 
 
 @register_job_handler('bulk_copy')
-def job_bulk_copy(ctx, params: Dict[str, Any]) -> None:
-    raw_sources = params.get('sources') or []
+def job_bulk_copy(ctx: JobContext, params: dict[str, object]) -> None:
+    raw_sources: object = params.get('sources') or []
     destination_raw = params.get('destination')
-    destinations_param = params.get('destinations') or {}
+    destinations_param: object = params.get('destinations') or {}
     if not isinstance(raw_sources, list) or not raw_sources:
         raise ValueError('sources must be a non-empty list')
     if destination_raw is not None and (not isinstance(destination_raw, str) or not destination_raw.strip()):
         raise ValueError('destination must be a directory path if provided')
 
-    dest_overrides: Dict[str, str] = {}
+    dest_overrides: dict[str, str] = {}
     if isinstance(destinations_param, dict):
-        iterator = destinations_param.items()
+        iterator: list[tuple[object, object]] = list(_object_dict(cast(object, destinations_param)).items())
     elif isinstance(destinations_param, list):
         iterator = []
-        for entry in destinations_param:
-            if isinstance(entry, dict) and 'source' in entry and 'target' in entry:
-                iterator.append((entry['source'], entry['target']))
+        for raw in _object_list(cast(object, destinations_param)):
+            if isinstance(raw, dict):
+                entry = _object_dict(cast(object, raw))
+                if 'source' in entry and 'target' in entry:
+                    iterator.append((entry['source'], entry['target']))
     else:
         iterator = []
 
@@ -1107,14 +1056,14 @@ def job_bulk_copy(ctx, params: Dict[str, Any]) -> None:
         if not os.path.isdir(dest_dir_abs):
             raise ValueError('Destination directory not found')
 
-    sources, errors = _normalize_sources(raw_sources)
+    sources, errors = _normalize_sources(_object_list(cast(object, raw_sources)))
     if not sources and errors:
         raise RuntimeError('No valid sources to copy')
     if not sources:
         raise ValueError('No valid sources provided')
 
     total_bytes, _ = _measure_sources([item['source'] for item in sources], ctx)
-    state: Dict[str, Any] = {
+    state: ProgressState = {
         'bytes_total': total_bytes,
         'bytes_done': 0,
         'sources_total': len(sources),
@@ -1124,7 +1073,7 @@ def job_bulk_copy(ctx, params: Dict[str, Any]) -> None:
     ctx.set_message(f"Copying {len(sources)} item{'s' if len(sources) != 1 else ''}…")
     _emit_progress(ctx, state, 'Preparing copy…')
 
-    successes: List[Dict[str, Any]] = []
+    successes: list[dict[str, str]] = []
 
     for item in sources:
         ctx.check_cancelled()
@@ -1190,7 +1139,7 @@ def job_bulk_copy(ctx, params: Dict[str, Any]) -> None:
     elif successes:
         destination_label = os.path.dirname(successes[0]['destination']) or successes[0]['destination']
     else:
-        destination_label = destination_raw or 'destination'
+        destination_label = str(destination_raw or 'destination')
 
     message = _format_bulk_message('Copied', successes, errors, destination_label)
     result = {
@@ -1214,8 +1163,8 @@ def job_bulk_copy(ctx, params: Dict[str, Any]) -> None:
 
 
 @register_job_handler('bulk_move')
-def job_bulk_move(ctx, params: Dict[str, Any]) -> None:
-    raw_sources = params.get('sources') or []
+def job_bulk_move(ctx: JobContext, params: dict[str, object]) -> None:
+    raw_sources: object = params.get('sources') or []
     destination_raw = params.get('destination')
     if not isinstance(raw_sources, list) or not raw_sources:
         raise ValueError('sources must be a non-empty list')
@@ -1226,13 +1175,13 @@ def job_bulk_move(ctx, params: Dict[str, Any]) -> None:
     if not os.path.isdir(dest_dir_abs):
         raise ValueError('Destination directory not found')
 
-    sources, errors = _normalize_sources(raw_sources)
+    sources, errors = _normalize_sources(_object_list(cast(object, raw_sources)))
     if not sources and errors:
         raise RuntimeError('No valid sources to move')
     if not sources:
         raise ValueError('No valid sources provided')
 
-    state: Dict[str, Any] = {
+    state: ProgressState = {
         'bytes_total': 0,
         'bytes_done': 0,
         'sources_total': len(sources),
@@ -1242,7 +1191,7 @@ def job_bulk_move(ctx, params: Dict[str, Any]) -> None:
     ctx.set_message(f"Moving {len(sources)} item{'s' if len(sources) != 1 else ''}…")
     _emit_progress(ctx, state, 'Preparing move…')
 
-    successes: List[Dict[str, Any]] = []
+    successes: list[dict[str, str]] = []
 
     for item in sources:
         ctx.check_cancelled()
@@ -1270,7 +1219,7 @@ def job_bulk_move(ctx, params: Dict[str, Any]) -> None:
                 continue
         except OSError:
             try:
-                shutil.move(source_path, destination_path)
+                _ = shutil.move(source_path, destination_path)
             except Exception as exc:  # pylint: disable=broad-except
                 errors.append({'source': item['raw'], 'error': str(exc) or 'Move failed'})
                 continue
@@ -1303,5 +1252,31 @@ def job_bulk_move(ctx, params: Dict[str, Any]) -> None:
         ctx.finish(message='Nothing to move', result=result)
 
 
-# Expose blueprint under a predictable attribute name for discovery
-bp = file_explorer_bp
+# Explicit ASGI export bypasses the generic worker's legacy FastAPI assembly.
+async def _http_query(path: str, query: dict[str, str]) -> object:
+    value = query.get('path')
+    if path == '/list':
+        hidden = query.get('hidden', 'false').lower()
+        if hidden not in {'1', 'true', 'on', 'yes', '0', 'false', 'off', 'no'}:
+            raise HTTPException(status_code=422, detail='hidden must be a boolean')
+        return await list_directory(value if value is not None else str(HOME_DIR), hidden in {'1', 'true', 'on', 'yes'})
+    if value is None:
+        raise HTTPException(status_code=422, detail='path query parameter is required')
+    if path == '/download':
+        return await download_file(value)
+    if path == '/resolve_symlink':
+        return await resolve_symlink(value)
+    return await get_properties(value)
+
+
+TE2_ASGI_APP = FileExplorerHTTP(
+    query_handler=_http_query,
+    commands={
+        '/intent': dispatch_embedded_intent,
+        '/sidebar/window/open_url': publish_sidebar_window_url,
+        '/sidebar/window/state': publish_sidebar_window_url,
+        '/mkdir': make_directory, '/delete': delete_path, '/rename': rename_path,
+        '/copy': copy_path, '/move': move_path, '/chmod': chmod_path,
+        '/extract': extract_archive, '/chown': chown_path,
+    },
+)

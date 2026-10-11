@@ -663,6 +663,11 @@ original user list below is retained verbatim as the requirement record.
 - [x] F3: unprefixed picker and shortcut user live acceptance (reported working).
 - [ ] F3: desktop/mobile input and detached-window live acceptance.
 - [ ] F4: define disk-backed tab-session identity/lifetime and shared drawer transport contract.
+- [x] F4 prerequisite: migrate File Explorer to explicit raw ASGI without transitive FastAPI/Pydantic imports; preserve HTTP/download/job/pipe contracts and measure import closure.
+- [x] F4 prerequisite: strict mypy/no explicit Any, ty and basedpyright checks for the complete File Explorer backend and ASGI boundary.
+- [x] F4 prerequisite: standalone mypyc build plus compiled-route/job smoke validation.
+- [x] F4 prerequisite: raw-ASGI worker user live acceptance (reported passing).
+- [ ] F4: backend-owned Socket.IO session rooms, revisioned author acknowledgements/peer updates, reconnect snapshots and no mutation echo/replay.
 - [ ] F4: persist tab path/options and live shell association, referenced by Sidebar state.
 - [ ] F4: typed fresh versus existing-session query mounts; reload/Sidebar restore never creates duplicates.
 - [ ] F4: bare-open session list with New/Close; mounted-session close warning and owned terminal teardown.
@@ -678,6 +683,57 @@ original user list below is retained verbatim as the requirement record.
 - [ ] Separately approve maintenance packaging/release scope after chosen slices.
 
 ### F4 revised tab-session direction — investigation gate
+
+#### Raw-ASGI and strict-typing implementation checkpoint
+
+After the investigation, the user approved the raw-ASGI migration and expanded
+strict typing to the complete File Explorer Python backend. The worker now
+exports `TE2_ASGI_APP` through the existing app-worker seam; explicit HTTP
+dispatch replaces FastAPI routing while preserving download responses, jobs,
+Sidebar/intent delegates and existing readiness behavior. Socket.IO rooms and
+durable session records are still the next implementation slice.
+
+Validation: 82 interpreted regression tests pass; strict mypy with
+`--disallow-any-explicit`, ty and basedpyright pass for both backend modules.
+The standalone two-module mypyc group builds and passes 35 compiled HTTP/job
+smoke tests (9 interpreted-only fixtures deselected). Its retained experimental
+output is `.codex-scratch/file-explorer-mypyc-validated-20261010/lib`; it is not
+an activated worker or release payload. `scripts/probe_file_explorer_mypyc.py`
+now performs the strict gate, build and compiled smoke automatically.
+
+The compiled smoke exposed a mypyc-specific `frozenset | dict_keys` result-type
+mismatch. Routes are now constructed once as an explicit frozenset; the final
+compiled smoke validates that correction. Compiled sibling calls are early-bound,
+so module monkeypatch fixtures are not used as proof of those call paths.
+
+Isolated fresh desktop import samples decreased from 435 modules/0.4143s
+(38 FastAPI and 66 Pydantic modules) to 266 modules/0.1114s with neither imported.
+These single-run timings are not device-startup benchmarks; fresh-process tests
+also verify the generic worker export avoids both dependency families.
+No runtime restart, activation, Android publication, dependency removal or
+release change occurred during implementation. The user subsequently confirmed
+live acceptance of this slice. This does not establish deployed mypyc execution
+or release packaging acceptance; session-store/room work remains pending.
+
+2026-10-10 refinement: Terminal app is the lifecycle reference, but durable JSON
+records—not active shells—own File Explorer sessions. Multiple Sidebar states may
+reference the same session; background sessions remain available. Records retain
+path/options and an optional shell association invalidated on confirmed exit or
+explicit close. Socket.IO rooms distribute backend-authoritative updates to
+attached presentations; author acknowledgements do not redirect their own view.
+Operation IDs, expected/committed revisions and presentation identity fence
+concurrent updates, reconnect and asynchronous directory rendering.
+
+Preliminary source inspection: File Explorer currently exports a FastAPI
+APIRouter, uses Body/Query defaults and FastAPI responses/exceptions, and launches
+through `app.libs.app_worker`. The existing explicit `TE2_ASGI_APP` seam bypasses
+the legacy FastAPI assembly; Terminal already composes a Python Socket.IO ASGI
+lifecycle lane, but its state is shell-backed and cannot be copied as durable
+Explorer identity. Code TE2's old HTTP adapter uses Starlette; a truly raw ASGI
+dispatcher needs explicit validation/streaming/error tests, not a blind copy.
+FastAPI removal is the next proposed prerequisite slice; session room/store
+implementation follows it. No backend, transport, runtime or dependency edits
+are authorized by this documentation checkpoint alone.
 
 Mount/selection clarification: fresh Code TE2 Explorer opens create a session;
 existing Sidebar state mounts its durable ID, irrespective of query-string
