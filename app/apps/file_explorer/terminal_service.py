@@ -8,11 +8,16 @@ from typing import Protocol, cast
 
 from app.libs.terminal_runtime.screen_projection import TerminalScreenProjectionRegistry
 from .terminal_log_io import open_log
-from .tab_store import TabRecord, TabStore, object_map, text
+from .tab_store import TabRecord, TabStore, text
+
+
+class ShellRecord(Protocol):
+    def to_payload(self) -> dict[str, object]: ...
 
 
 class Manager(Protocol):
-    async def get_shell(self, shell_id: str) -> object | None: ...
+    async def load_shell_record(self, shell_id: str) -> ShellRecord | None: ...
+    async def get_shell_capabilities(self, record: ShellRecord) -> dict[str, object]: ...
     async def find_shell_by_label(self, label: str, *, status: str) -> object | None: ...
     async def describe(self, record: object) -> dict[str, object]: ...
     async def remove_shell(self, shell_id: str, *, force: bool) -> object: ...
@@ -78,15 +83,18 @@ class TerminalService:
         shell_id = tab['shellId']
         if shell_id is None:
             return None
-        record = await manager.get_shell(shell_id)
+        # Exact-record read verifies the manager's persisted signature/identity.
+        # get_shell() adopts/scans the entire runtime; describe() collects stats.
+        # Neither belongs on keystroke or output-wakeup paths.
+        record = await manager.load_shell_record(shell_id)
         if record is None:
             return None
-        data = await manager.describe(record)
+        data = record.to_payload()
         if data.get('id') != shell_id or data.get('label') != label(tab['id']):
             raise ValueError('Terminal does not belong to this tab')
         if data.get('status') == 'exited':
             return None
-        capabilities = object_map(data.get('capabilities', {}))
+        capabilities = await manager.get_shell_capabilities(record)
         if data.get('status') != 'running' or capabilities.get('stdin_write') is not True or capabilities.get('resize') is not True:
             raise RuntimeError('Terminal is running but this worker has no live PTY control')
         return data

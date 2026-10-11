@@ -1,4 +1,5 @@
-import { isMobileUserAgent, TERMINAL_KEYS, TerminalModifierState, dispatchSyntheticTerminalKey, dispatchSyntheticTerminalText } from '../terminal/src/mobile-special-keys';
+import { isMobileUserAgent, TERMINAL_KEYS, TerminalModifierState, dispatchSyntheticTerminalKey, dispatchSyntheticTerminalText, MINIBAR_INTERACTION_GUARD_MS, shouldSuppressMinibarInteraction } from '../terminal/src/mobile-special-keys';
+import { bindPointerHoldRepeat } from '../terminal/src/pointer-hold-repeat';
 
 interface Disposable { dispose(): void }
 interface Terminal {
@@ -28,6 +29,47 @@ export class TerminalOutputCursor {
     if (start !== this.offset) return 'gap';
     this.offset = end;
     return 'next';
+  }
+}
+export class TerminalInputBatcher {
+  private chunks: string[] = [];
+  private bytes = 0;
+  private sending = false;
+  private generation = 0;
+  constructor(private send: (data: string) => Promise<unknown>, private report: (error: unknown) => void) {}
+  reset() { this.generation++; this.chunks = []; this.bytes = 0; this.sending = false; }
+  enqueue(data: string) {
+    const encoder = new TextEncoder();
+    const size = encoder.encode(data).length;
+    if (this.bytes + size > 65536) { this.report(new Error('Terminal input queue is full; input was not sent')); return; }
+    // Keep each JSON request well below the lane's 64 KiB envelope limit,
+    // including escaped controls and multibyte/surrogate-pair input.
+    let chunk = '', bytes = 0;
+    for (const character of data) {
+      const length = encoder.encode(character).length;
+      if (bytes + length > 4096) { this.chunks.push(chunk); chunk = ''; bytes = 0; }
+      chunk += character; bytes += length;
+    }
+    if (chunk) this.chunks.push(chunk);
+    this.bytes += size;
+    const current = this.generation;
+    queueMicrotask(() => { if (current === this.generation) void this.flush(); });
+  }
+  private async flush() {
+    if (this.sending || !this.chunks.length) return;
+    this.sending = true;
+    const current = this.generation, encoder = new TextEncoder();
+    let data = this.chunks.shift()!;
+    while (this.chunks.length && encoder.encode(data + this.chunks[0]).length <= 4096) data += this.chunks.shift();
+    try {
+      await this.send(data);
+      if (current !== this.generation) return;
+      this.bytes -= encoder.encode(data).length;
+    } catch (error) {
+      if (current === this.generation) { this.reset(); this.report(error); }
+    } finally {
+      if (current === this.generation) { this.sending = false; void this.flush(); }
+    }
   }
 }
 interface Socket {
@@ -63,18 +105,20 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
   let identity = '', shell = '', generation = 0;
   const cursor = new TerminalOutputCursor();
   let ready = false, recovering = false, disposed = false, minimized = false;
-  let recoverAgain = false, queuedInputBytes = 0;
+  let recoverAgain = false;
   let buffered: Delta[] = [], bufferedBytes = 0;
   let resizeTimer: ReturnType<typeof setTimeout> | undefined;
   let bindings: Disposable[] = [];
   let mounting: Promise<void> | undefined;
   const error = (value: unknown) => { status.textContent = value instanceof Error ? value.message : 'Terminal unavailable'; report(value); };
+  const inputs = new TerminalInputBatcher(data => tabs.terminal('terminal.input', { data }), error);
   function clear() {
     generation++; ready = false; recovering = false; recoverAgain = false; mounting = undefined;
     buffered = []; bufferedBytes = 0; clearTimeout(resizeTimer);
+    inputs.reset();
     for (const binding of bindings) binding.dispose(); bindings = [];
     terminal?.dispose(); terminal = undefined; fit = undefined;
-    viewport.replaceChildren(); modifiers.reset(); identity = ''; shell = '';
+    viewport.replaceChildren(); modifiers.reset(); updateModifiers(); identity = ''; shell = '';
   }
   function paint(delta: Delta) {
     const action = cursor.accept(delta.startOffset, delta.endOffset, delta.data.byteLength);
@@ -121,10 +165,7 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
   }
   function input(data: string) {
     if (!ready || !socket.connected) return;
-    const size = new TextEncoder().encode(data).length;
-    if (queuedInputBytes + size > 65536) { error(new Error('Terminal input queue is full; input was not sent')); return; }
-    queuedInputBytes += size;
-    void tabs.terminal('terminal.input', { data }).catch(error).finally(() => { queuedInputBytes -= size; });
+    inputs.enqueue(data);
   }
   function sync(tab: Tab | null) {
     if (!tab?.shellId) { clear(); drawer.hidden = true; return; }
@@ -171,23 +212,69 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
     })().catch(value => { if (current === generation) error(value); });
   }
   function updateModifiers() {
-    keys.querySelector('[data-modifier="ctrl"]')?.setAttribute('aria-pressed', String(modifiers.ctrl));
-    keys.querySelector('[data-modifier="alt"]')?.setAttribute('aria-pressed', String(modifiers.alt));
+    const ctrl = keys.querySelector<HTMLButtonElement>('[data-modifier="ctrl"]');
+    ctrl?.setAttribute('aria-pressed', String(modifiers.ctrl));
+    ctrl?.classList.toggle('toggle', modifiers.ctrl);
+    ctrl?.classList.toggle('locked', modifiers.ctrlMode === 'locked');
+    if (ctrl) ctrl.title = modifiers.ctrlMode === 'locked' ? 'Control locked' : 'Control';
+    const alt = keys.querySelector('[data-modifier="alt"]');
+    alt?.setAttribute('aria-pressed', String(modifiers.alt));
+    alt?.classList.toggle('toggle', modifiers.alt);
   }
-  keys.hidden = !isMobileUserAgent(navigator);
-  for (const name of ['ctrl', 'alt', ...Object.keys(TERMINAL_KEYS)]) {
-    const button = document.createElement('button'); button.type = 'button';
-    button.textContent = ({ up: '↑', down: '↓', left: '←', right: '→', pageUp: 'PgUp', pageDown: 'PgDn' } as Record<string, string>)[name] || name;
+  const mobileKeys = isMobileUserAgent(navigator);
+  const keyToggle = drawer.querySelector<HTMLButtonElement>('[data-terminal="keys"]');
+  keys.hidden = !mobileKeys;
+  if (keyToggle) {
+    keyToggle.hidden = !mobileKeys;
+    keyToggle.addEventListener('pointerdown', event => {
+      event.preventDefault(); event.stopPropagation();
+      keys.hidden = !keys.hidden;
+      keyToggle.classList.toggle('toggle', !keys.hidden);
+      keyToggle.setAttribute('aria-pressed', String(!keys.hidden));
+      keyToggle.title = keys.hidden ? 'Show special keys' : 'Hide special keys';
+      terminal?.focus();
+    });
+    keyToggle.classList.toggle('toggle', mobileKeys);
+    keyToggle.title = 'Hide special keys';
+  }
+  const disposeRepeatingKeys: (() => void)[] = [];
+  let minibarGuardUntil = 0;
+  const tabsPanel = root.querySelector<HTMLElement>('[data-menu-panel="tabs"]');
+  const guardMinibar = (event: Event) => {
+    if (!shouldSuppressMinibarInteraction(minibarGuardUntil, performance.now())) return;
+    event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
+  };
+  for (const type of ['pointerdown', 'pointerup', 'click']) tabsPanel?.addEventListener(type, guardMinibar, true);
+  // Keep the exact Terminal app ordering: two rows of seven.
+  for (const name of ['escape', 'minibar', 'dash', 'home', 'up', 'end', 'pageUp', 'tab', 'ctrl', 'alt', 'left', 'down', 'right', 'pageDown']) {
+    const button = document.createElement('button'); button.type = 'button'; button.tabIndex = -1; button.className = 'kbtn';
+    button.textContent = ({ escape: 'ESC', minibar: '≡', dash: '-', home: 'HOME', end: 'END', tab: 'TAB', ctrl: 'CTRL', alt: 'ALT', up: '↑', down: '↓', left: '←', right: '→', pageUp: 'PGUP', pageDown: 'PGDN' } as Record<string, string>)[name]!;
     if (name === 'ctrl' || name === 'alt') button.dataset.modifier = name;
-    button.addEventListener('pointerdown', event => event.preventDefault());
-    button.addEventListener('click', () => {
+    const dispatch = (target: Terminal, held: { ctrl: boolean; alt: boolean }) => {
+      if (!target.textarea) return false;
+      target.focus();
+      if (name === 'dash' && !held.ctrl && !held.alt) dispatchSyntheticTerminalText(target.textarea, '-');
+      else dispatchSyntheticTerminalKey(target.textarea, TERMINAL_KEYS[name as keyof typeof TERMINAL_KEYS], held);
+      return true;
+    };
+    if (mobileKeys && ['up', 'left', 'down', 'right'].includes(name)) {
+      let target: Terminal | undefined, held = { ctrl: false, alt: false }, handled = false, heldGeneration = 0;
+      const repeat = () => { if (target && heldGeneration === generation) handled = dispatch(target, held) || handled; };
+      disposeRepeatingKeys.push(bindPointerHoldRepeat(button, {
+        start() { target = terminal; heldGeneration = generation; held = { ctrl: modifiers.ctrl, alt: modifiers.alt }; handled = false; repeat(); },
+        repeat,
+        finish() { if (handled && heldGeneration === generation) modifiers.consumeOneShot(); updateModifiers(); target = undefined; handled = false; },
+      }, { window }));
+    } else button.addEventListener('pointerdown', event => {
+      event.preventDefault(); event.stopPropagation();
       if (name === 'ctrl') modifiers.tapCtrl();
       else if (name === 'alt') modifiers.toggleAlt();
-      else if (terminal?.textarea) {
-        if (name === 'dash' && !modifiers.ctrl && !modifiers.alt) dispatchSyntheticTerminalText(terminal.textarea, '-');
-        else dispatchSyntheticTerminalKey(terminal.textarea, TERMINAL_KEYS[name as keyof typeof TERMINAL_KEYS], modifiers);
-        modifiers.consumeOneShot();
+      else if (name === 'minibar') {
+        try { button.setPointerCapture(event.pointerId); } catch { /* Reveal guard remains authoritative. */ }
+        minibarGuardUntil = performance.now() + MINIBAR_INTERACTION_GUARD_MS;
+        root.querySelector<HTMLButtonElement>('[data-menu-toggle="tabs"]')?.click();
       }
+      else if (terminal && dispatch(terminal, modifiers)) modifiers.consumeOneShot();
       updateModifiers(); terminal?.focus();
     }); keys.append(button);
   }
@@ -222,6 +309,8 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
   const reset = (payload: { shellId: string }) => { if (payload.shellId === shell) { ready = false; recoverAgain = true; void recover(); } };
   socket.on('terminal_output', output); socket.on('terminal_reset', reset); socket.on('disconnect', disconnected);
   return { sync, dispose() {
+    disposeRepeatingKeys.forEach(dispose => dispose());
+    for (const type of ['pointerdown', 'pointerup', 'click']) tabsPanel?.removeEventListener(type, guardMinibar, true);
     disposed = true; clear(); resize.disconnect();
     socket.off('terminal_output', output); socket.off('terminal_reset', reset); socket.off('disconnect', disconnected);
   } };

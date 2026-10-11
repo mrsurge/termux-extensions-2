@@ -38,10 +38,7 @@
   cursor: not-allowed;
 }
 .fx-mobile-footer {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
+  flex: none;
   display: none;
   align-items: center;
   justify-content: space-around;
@@ -285,8 +282,13 @@
 .fx-terminal-toolbar button:last-child { color: #f87171; }
 .fx-terminal-viewport { flex: 1; min-height: 0; min-width: 0; padding: 4px 8px; overflow: hidden; }
 .fx-terminal-viewport .xterm { height: 100%; }
-.fx-terminal-keys { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 8px; flex: none; }
-.fx-terminal-keys [aria-pressed=true] { background: #365580; }
+.fx-terminal-keys { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0; margin: 0; padding: 0; border: 0; background: var(--card); flex: none; }
+.fx-terminal-keys .kbtn { box-sizing: border-box; width: 100%; min-width: 0; min-height: 44px; font-size: 0.85em; padding: 7px 2px; border: 0; background: var(--secondary); color: var(--foreground); border-radius: 0; touch-action: manipulation; user-select: none; }
+/* The footer below owns the bottom safe-area inset. */
+.fx-terminal-keys .kbtn.toggle { background: var(--accent); color: var(--primary-foreground); }
+.fx-terminal-keys .kbtn.locked { box-shadow: inset 0 0 0 2px var(--primary); }
+.fx-terminal-keys .kbtn:focus { outline: none; }
+[data-terminal="keys"].toggle { border-color: var(--primary); color: var(--primary); }
 .fx-terminal-drawer.is-minimized { flex: 0 0 auto; min-height: 0; }
 .fx-terminal-drawer.is-minimized .fx-terminal-viewport, .fx-terminal-drawer.is-minimized .fx-terminal-keys { display: none; }
 .fx-terminal-drawer.is-maximized:not(.is-minimized) { flex: 1 0 75%; }
@@ -619,9 +621,6 @@
     grid-template-rows: auto auto;
     align-items: flex-start;
   }
-  .fx-content {
-    padding-bottom: 90px;
-  }
   .fx-item .fx-icon {
     grid-column: 1;
     grid-row: 1 / span 2;
@@ -773,6 +772,7 @@
   <section class="fx-terminal-drawer" hidden aria-label="Tab terminal">
     <div class="fx-terminal-toolbar">
       <span data-terminal-status>Terminal</span>
+      <button type="button" data-terminal="keys" tabindex="-1" aria-pressed="true" hidden>Keys</button>
       <button type="button" data-terminal="minimize" aria-label="Minimize or restore terminal">−</button>
       <button type="button" data-terminal="maximize" aria-label="Maximize or restore terminal">↕</button>
       <button type="button" data-terminal="close" aria-label="Close terminal"><svg width="18" height="18" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>
@@ -885,8 +885,6 @@
       </div>
   </div>
 
-</div>
-
 <div class="fx-mobile-footer" data-role="mobile-footer">
   <button type="button" data-action="select-all">Select All</button>
   <button type="button" data-action="up" title="Up">⬆️</button>
@@ -896,4 +894,5 @@
   <button type="button" data-action="move" disabled title="Move">
     <img src="/static/move.png" alt="Move" style="width: 20px; height: 20px;" />
   </button>
+</div>
 </div>

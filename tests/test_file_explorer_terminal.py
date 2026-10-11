@@ -10,6 +10,11 @@ from app.apps.file_explorer.tab_service import TabService
 from app.apps.file_explorer.terminal_service import TerminalService, label
 
 
+class Record(dict):
+    def to_payload(self):
+        return self.copy()
+
+
 class Manager:
     def __init__(self, root):
         self.root = root
@@ -18,14 +23,24 @@ class Manager:
         self.removed = []
         self.inputs = []
         self.sizes = []
+        self.scans = 0
+        self.descriptions = 0
 
     async def get_shell(self, shell_id):
+        self.scans += 1
         return self.records.get(shell_id)
+
+    async def load_shell_record(self, shell_id):
+        return self.records.get(shell_id)
+
+    async def get_shell_capabilities(self, record):
+        return record['capabilities'].copy()
 
     async def find_shell_by_label(self, value, *, status):
         return next((r for r in self.records.values() if r['label'] == value and r['status'] == status), None)
 
     async def describe(self, record):
+        self.descriptions += 1
         return record.copy()
 
     async def remove_shell(self, shell_id, *, force):
@@ -43,8 +58,8 @@ class Manager:
         shell_id = f'shell-{self.launches}'
         log = self.root / (shell_id + '.log')
         log.write_bytes(b'hello\r\n')
-        record = {'id': shell_id, 'label': label(tab['id']), 'status': 'running',
-                  'stdout_log': str(log), 'capabilities': {'stdin_write': True, 'resize': True}}
+        record = Record(id=shell_id, label=label(tab['id']), status='running',
+                  stdout_log=str(log), capabilities={'stdin_write': True, 'resize': True})
         self.records[shell_id] = record
         return record.copy()
 
@@ -75,6 +90,7 @@ def test_tab_terminal_lifecycle_checkpoint_and_repeated_start(tmp_path):
         assert checkpoint['outputOffset'] == 7
         assert manager.inputs == [('shell-1', 'ls\n')]
         assert manager.sizes == [('shell-1', 100, 30)]
+        assert manager.scans == manager.descriptions == 0
         with pytest.raises(ValueError, match='associated terminal'):
             store.close(started['id'], started['revision'])
         closed = (await service.dispatch(started, 'terminal.close', {}))['tab']

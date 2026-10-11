@@ -25,6 +25,13 @@ before control. Running-but-uncontrolled shells fail closed instead of creating 
 duplicate or claiming ownership. Confirmed missing/exited records disassociate
 on attach/status; restoring a tab does not start a replacement terminal.
 
+Streaming uses the existing signature-checked `load_shell_record` and
+`get_shell_capabilities`, not `get_shell` (full-runtime adoption) or `describe`
+(process statistics). Full discovery remains appropriate only to explicit new
+session/recovery work. Frontend input is bounded to 64 KiB pending UTF-8 and
+coalesces queued keystrokes into ordered requests of at most 4 KiB, with one ACK
+in flight; failure/disconnect/tab change discards unsent input, never replays it.
+
 Presentation disconnect/hide retains the shell. Explicit terminal close uses
 manager removal before clearing its durable association; tab close refuses
 an associated shell unless the user confirms `closeTerminal: true`. Failed persistence
@@ -41,7 +48,13 @@ inventoried `/static/js/file_explorer_terminal.js` root. It lazily reuses vendor
 custom xterm, Fit/WebFonts addons, touch selection, JetBrains Mono and the
 Terminal app's mobile-UA key helpers. Start/Show, Minimize/Restore, Maximize/Restore
 and confirmed Close are explicit controls. Desktop user agents never show extra
-keys. Tab and terminal mutations share the same frontend serial lane; disconnect
+keys.
+Mobile keys retain Terminal's two rows of seven, default-visible Keys toggle,
+pointer-down dispatch, Ctrl double-tap lock, one-shot modifiers and shared arrow
+hold-repeat timings. The minibar opens the existing Tabs menu with the shared
+reveal guard. The mobile footer is an in-flow final child below the drawer;
+it alone owns the bottom safe-area inset, so it cannot cover the key dock.
+Tab and terminal mutations share the same frontend serial lane; disconnect
 rejects queued input rather than replaying it. Checkpoint handoff buffers at most
 64 frames/1 MiB and accepts only contiguous raw offsets after the checkpoint.
 Async mounts/checkpoints are tab/shell/generation fenced; association-only updates

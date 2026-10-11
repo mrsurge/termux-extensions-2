@@ -1,6 +1,62 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { TerminalOutputCursor, createTerminalDrawer } from '../app/static/js/file_explorer_terminal.js';
+import { readFileSync } from 'node:fs';
+import { TerminalOutputCursor, TerminalInputBatcher, createTerminalDrawer } from '../app/static/js/file_explorer_terminal.js';
+
+test('mobile footer participates in layout below the exact two-row Terminal key dock', () => {
+  const template = readFileSync(new URL('../app/apps/file_explorer/template.html', import.meta.url), 'utf8');
+  const source = readFileSync(new URL('../app/apps/file_explorer/terminal_drawer.ts', import.meta.url), 'utf8');
+  const terminalTemplate = readFileSync(new URL('../app/apps/terminal/template.html', import.meta.url), 'utf8');
+  const footerRule = template.match(/\.fx-mobile-footer \{([^}]+)\}/)[1];
+  assert.match(footerRule, /flex: none/);
+  assert.doesNotMatch(footerRule, /position: fixed/);
+  assert.doesNotMatch(template, /padding-bottom: 90px/);
+  assert.match(template, /\.fx-terminal-keys \{[^}]*grid-template-columns: repeat\(7, minmax\(0, 1fr\)\)/);
+  // Footer is the final child of fx-app, not an overlay sibling.
+  assert.match(template, /<div class="fx-mobile-footer"[\s\S]*<\/div>\s*<\/div>\s*$/);
+  const reference = [...terminalTemplate.matchAll(/<button id="k-[^"]+"[^>]*>([^<]+)<\/button>/g)]
+    .map(match => match[1].replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code))));
+  const names = source.match(/for \(const name of \[([^\]]+)\]\)/)[1].match(/'([^']+)'/g).map(name => name.slice(1, -1));
+  assert.deepEqual(names, ['escape', 'minibar', 'dash', 'home', 'up', 'end', 'pageUp', 'tab', 'ctrl', 'alt', 'left', 'down', 'right', 'pageDown']);
+  assert.equal(reference.length, names.length);
+  assert.match(source, /bindPointerHoldRepeat\(button/);
+  assert.match(source, /heldGeneration === generation/);
+  assert.match(source, /shouldSuppressMinibarInteraction/);
+  assert.match(source, /keyToggle.hidden = !mobileKeys/);
+});
+
+test('input batches pending keystrokes in order instead of one ACK per character', async () => {
+  const sent = [], replies = [], errors = [];
+  const batcher = new TerminalInputBatcher(data => {
+    sent.push(data); return new Promise((resolve, reject) => replies.push({ resolve, reject }));
+  }, error => errors.push(error));
+  batcher.enqueue('a'); await new Promise(setImmediate);
+  batcher.enqueue('b'); batcher.enqueue('c'); batcher.enqueue('d');
+  await new Promise(setImmediate);
+  assert.deepEqual(sent, ['a']);
+  replies.shift().resolve(); await new Promise(setImmediate);
+  assert.deepEqual(sent, ['a', 'bcd']);
+  batcher.enqueue('discarded');
+  replies.shift().reject(new Error('connection lost')); await new Promise(setImmediate);
+  assert.deepEqual(sent, ['a', 'bcd']);
+  assert.equal(errors.length, 1);
+  batcher.enqueue('new'); await new Promise(setImmediate);
+  batcher.enqueue('stale'); batcher.reset(); replies.shift().resolve(); await new Promise(setImmediate);
+  assert.deepEqual(sent, ['a', 'bcd', 'new']);
+});
+
+test('input batches bound UTF-8 requests and queue admission without splitting characters', async () => {
+  const sent = [], errors = [];
+  const batcher = new TerminalInputBatcher(async data => { sent.push(data); }, error => errors.push(error));
+  const text = '💚'.repeat(3000);
+  batcher.enqueue(text); await new Promise(setImmediate);
+  assert.equal(sent.join(''), text);
+  assert.ok(sent.every(data => new TextEncoder().encode(data).length <= 4096));
+  assert.ok(sent.every(data => !data.includes('\ufffd')));
+  batcher.enqueue('x'.repeat(65537)); await new Promise(setImmediate);
+  assert.equal(errors.length, 1);
+  assert.equal(sent.join(''), text);
+});
 
 test('checkpoint cursor drops covered deltas and accepts only exact raw offsets', () => {
   const cursor = new TerminalOutputCursor(); cursor.offset = 20;

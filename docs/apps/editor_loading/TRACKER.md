@@ -763,6 +763,17 @@ See File Explorer TERMINAL.md for wire details.
 
 #### File Explorer terminal drawer implementation checkpoint
 
+Mobile key/footer correction (2026-10-11): the fixed mobile footer overlapped
+the drawer because only the file list reserved bottom space. Footer now occupies
+the final in-flow flex row below the terminal/key dock and owns the safe-area
+inset; obsolete list-only compensation is removed. Keys match Terminal's exact
+7-column/two-row ordering and geometry, default-visible mobile-only toggle,
+pointer-down dispatch, Ctrl armed/locked styling, one-shot modifiers, shared
+arrow hold-repeat and guarded minibar (opens the existing Tabs menu). Held keys
+are fenced across tab/renderer changes. Frontend typecheck/build and targeted
+regressions pass; native OTA and user live acceptance remain pending. No Android
+source/build or shared framework restart is performed.
+
 Approved UI source now adds Terminal/Show, minimize/maximize and confirmed Close,
 with active-terminal confirmation before tab closure. It uses existing custom
 xterm/Fit/WebFonts/touch assets and shared mobile-UA key helpers; desktop keys are
@@ -792,6 +803,28 @@ User live acceptance confirms the terminal drawer works and looks good. The user
 also reports severe slowness; performance acceptance remains open and is the next
 read-only investigation. This does not authorize a shared runtime restart or an
 unreviewed performance rewrite.
+
+Performance follow-up was separately approved after read-only live inspection:
+the FWS runtime had 195 metadata records; reading them all took 291.18 ms,
+describing a terminal took 18.72 ms, and reading one record took 2.00 ms.
+`get_shell` invokes full adoption/metadata traversal; our previous implementation
+called it for each input and output wakeup while holding the tab service lock.
+Live desktop xterm/helper asset fetches were approximately 4–28 ms each, not an
+explanation for ongoing input/output lag. These are diagnostic API measurements,
+not an instrumented full keystroke round trip or an Android timing claim.
+
+Source now uses FWS's existing signature-checked exact-record load and live
+capability query, avoiding adoption scans/process stats on the hot path. Frontend
+input batches pending keystrokes behind one ordered ACK, capped at 4 KiB per
+request/64 KiB admitted bytes, and drops unsent input on uncertainty/disconnect
+or tab changes. Ownership/label, capability, revision and connection fences remain.
+85 Python regressions and strict mypy/ty/basedpyright pass; 12 frontend tab/drawer
+tests plus TypeScript checking/build pass. The accepted UI checkpoint was pushed
+as cd89fff8; this performance follow-up is included in the next requested
+checkpoint with the mobile footer/key correction and is not live-accepted.
+The inspected worker subsequently disappeared from runtime-debug discovery;
+no stale-target replay or runtime restart was performed. Refresh File Explorer
+and publish the rebuilt native assets via OTA before performance validation.
 
 #### Durable tabs and synchronization implementation checkpoint
 
