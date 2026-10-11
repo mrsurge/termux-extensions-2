@@ -44,6 +44,7 @@
           <div class="fx-menu-dropdown" data-menu-panel="view">
             <button type="button" data-command="view:grid">Icons</button>
             <button type="button" data-command="view:list">List</button>
+            <button type="button" data-command="view:directory-usage" data-checkable="true">Directory usage</button>
             <div class="fx-menu-separator"></div>
             <button type="button" data-command="view:toggle-hidden" data-checkable="true">Show hidden</button>
             <button type="button" data-command="view:sort-name" data-checkable="true">Sort by Name</button>
@@ -79,6 +80,7 @@
     <div class="fx-breadcrumbs" data-role="breadcrumbs"></div>
     <button type="button" class="fx-home-btn" data-action="go-home" title="Go to Home">🏠</button>
   </div>
+  <div class="fx-usage-header" data-role="usage-header" hidden><span data-role="usage-status" role="status" aria-live="polite"></span><button type="button" data-action="usage-cancel">Cancel</button></div>
   <div class="fx-name-filter">
     <input data-role="name-filter" type="text" placeholder="Filter names (regex)" aria-label="Filter names with regex, current directory only" aria-describedby="fx-name-filter-error" autocapitalize="off" autocomplete="off" spellcheck="false">
     <div id="fx-name-filter-error" data-role="name-filter-error" role="status"></div>

@@ -111,3 +111,37 @@ invalidate a successful Properties Apply. These guards are not durable authority
 Cleanup cannot reload a different foreground context. Properties mutations remain
 one-shot and ordered rename → chmod → chown, using the renamed path for later
 steps. A superseded context stops remaining steps; failures are not retried.
+
+## Directory usage
+
+View → Directory usage explicitly starts a scan for the attached backend tab.
+Purple usage pills replace list size cells and appear centered below icon tiles.
+Progress events carry child totals; completed children lose the pending ellipsis.
+The header shows the running total and Cancel action. Directory usage is a
+localStorage-persisted View toggle. Navigation cancels the previous scan, clears
+its projection and automatically starts a scan after the new listing loads.
+Manual Cancel stops only the current scan; disabling the View toggle turns off
+the mode. Sort by Size uses progressive measured totals, placing unknown sizes
+last. View/sort/filter rerenders retain projections and focus. Partial or
+interrupted results remain labelled in the header.
+`src/usage.ts` owns only presentation; `usage_service.py` forwards requests over
+the framework pipe to `service.fs` (NID 2100), using
+`fs.directoryUsage.start/cancel`. Rust `framework_services/fs_usage.rs` owns the
+bounded scan lane, recursive accounting, progress and terminal result events.
+Requests are fenced by pipe owner and scan ID; the backend adds tab identity and
+forwards binary `directory_usage` updates only to the requesting `/tabs` SID.
+
+Closing, navigating, detaching or disconnecting cancels observation and requests
+cooperative scan cancellation. Reconnection never replays scans. An early result
+can precede the start ACK; late results cannot mutate a newer scan. Ordinary
+directory listing does not invoke scans or compete for their separate permits.
+
+Immediate-child rows summarize recursive contents, including hidden files.
+Unix accounting uses allocated bytes, deduplicates hard links and does not follow
+nested symlinks. Root directory allocation contributes to the total. Other
+platforms explicitly report apparent size. Time/entry/row/payload limits and
+unreadable entries produce labelled partial results, never false complete totals.
+
+This feature requires a rebuilt/restarted framework, refreshed File Explorer
+Python worker and published frontend assets. It does not require a Code TE2
+mypyc build. A frontend reload or OTA alone cannot add the framework pipe method.

@@ -1,6 +1,7 @@
 pub(crate) mod bookmark_ops;
 pub(crate) mod common;
 pub(crate) mod fs_ops;
+pub(crate) mod fs_usage;
 pub(crate) mod git_ops;
 pub(crate) mod history_files;
 pub(crate) mod history_graph;

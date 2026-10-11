@@ -380,11 +380,15 @@ worker pipe. File Explorer already calls `fs.listDirectory` through `service.fs`
 separate subprocess transport. The Rust service owns traversal and aggregation;
 the File Explorer backend owns request/tab association and projects results to its
 frontend. A depth-one result still requires recursive traversal below each child.
-Investigate existing scheduler job/progress/cancellation support before choosing
-the exact method contract. Keep scans user-triggered, bounded and cancellable,
-preserve ordinary listing responsiveness, report incomplete/error results, and
-define allocated versus apparent bytes, hard-link accounting and symlink policy
-before implementation. The frontend must discard results for superseded requests.
+The implemented contract is `fs.directoryUsage.start/cancel`, with progress/result
+pipe events, a separate two-permit scan lane and sixteen admitted jobs. Scans are
+explicit, cancel on client/tab/path lifecycle changes, and never replay on reconnect.
+Unix totals use allocated blocks, count hard links once, include hidden entries
+and do not follow nested symlinks; non-Unix reports apparent bytes. Limits are
+120 seconds, one million visited entries, ten thousand child rows, 32 error
+details and a 4 MiB result payload. Incomplete results remain explicitly partial.
+The frontend discards superseded results. See File Explorer `FRONTEND.md` for
+ownership and activation requirements.
 Style the regex field using existing field colors/geometry. Typing from a focused
 entry starts filtering (Space stays selection); Backspace navigates up, and Delete
 uses the existing warned deletion flow for selected items or the focused item.

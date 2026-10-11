@@ -27,6 +27,7 @@ const SEARCH_EVENT_QUEUE_CAPACITY: usize = 256;
 
 #[derive(Clone)]
 pub(crate) struct FrameworkServiceScheduler {
+    pub(crate) directory_usage: Arc<super::fs_usage::UsageJobs>,
     inner: Arc<SchedulerInner>,
     pub(crate) history_sessions: Arc<super::history_sessions::HistorySessions>,
 }
@@ -146,6 +147,7 @@ struct SearchJobContext {
 impl Default for FrameworkServiceScheduler {
     fn default() -> Self {
         Self {
+            directory_usage: Arc::new(super::fs_usage::UsageJobs::default()),
             history_sessions: Arc::new(super::history_sessions::HistorySessions::default()),
             inner: Arc::new(SchedulerInner {
                 fs_read: Arc::new(Semaphore::new(FS_READ_PERMITS)),

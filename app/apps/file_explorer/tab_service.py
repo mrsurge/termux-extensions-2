@@ -16,6 +16,7 @@ from .tab_store import TabStore, object_map, options, text
 from .terminal_service import TerminalService
 from .terminal_stream import OutputConnection, serve_output
 from .terminal_stream_protocol import pack_message, unpack_message
+from .usage_service import Job, UsageService
 
 NAMESPACE = '/tabs'
 
@@ -63,6 +64,7 @@ class TabService:
         self.directory_states: dict[str, tuple[str, str]] = {}
         self.stream_grants: dict[str, tuple[str, str, str]] = {}
         self.streams: set[OutputConnection] = set()
+        self.usage = UsageService(self.usage_event)
         _ = server.on('connect', self.wire_connect, namespace=NAMESPACE)
         _ = server.on('disconnect', self.disconnect, namespace=NAMESPACE)
         _ = server.on('tab_request', self.wire_request, namespace=NAMESPACE)
@@ -140,6 +142,7 @@ class TabService:
             self.observer.add_done_callback(lambda _task: bus.unsubscribe(queue))
 
     async def shutdown(self) -> None:
+        await self.usage.shutdown()
         for stream in self.streams: stream.close()
         self.stream_grants.clear()
         await self.terminals.brokers.shutdown()
@@ -221,11 +224,13 @@ class TabService:
             return False
 
     async def disconnect(self, sid: str, _reason: object = None) -> None:
+        self.usage.cancel(sid)
         self.drop_streams(sid)
         _ = self.presentations.pop(sid, None)
         _ = self.attached.pop(sid, None)
 
     async def _attach(self, sid: str, tab_id: str) -> None:
+        self.usage.cancel(sid)
         self.drop_streams(sid)
         await self.server.enter_room(sid, 'tab-catalog', namespace=NAMESPACE)
         previous = self.attached.pop(sid, None)
@@ -246,6 +251,25 @@ class TabService:
             if method == 'tabs.defaultPath':
                 path = await self.project_path()
                 return {'ok': True, 'result': {'path': path}}
+            if method in ('directoryUsage.start', 'directoryUsage.cancel'):
+                if set(params) != {'scanId'}:
+                    raise ValueError('Expected only scanId')
+                scan_id = text(params.get('scanId'))
+                if len(scan_id) > 128 or not all(char.isascii() and (char.isalnum() or char in '-_.:') for char in scan_id):
+                    raise ValueError('Invalid scan identity')
+                async with self.lock:
+                    if sid not in self.presentations:
+                        raise ValueError('Presentation is disconnected')
+                    if method == 'directoryUsage.cancel':
+                        return {'ok': True, 'result': {'scanId': scan_id,
+                            'cancelled': self.usage.cancel(sid, scan_id)}}
+                    tab_id = self.attached.get(sid)
+                    tab = self.store.get(tab_id) if tab_id else None
+                    if tab is None:
+                        raise ValueError('Attach before requesting directory usage')
+                    job = self.usage.prepare(sid, tab['id'], tab['path'], scan_id)
+                # Start admission/pipe timeout never holds the tab mutation lock.
+                return {'ok': True, 'result': await self.usage.start(job)}
             async with self.lock:
                 if sid not in self.presentations:
                     raise ValueError('Presentation is disconnected')
@@ -256,6 +280,16 @@ class TabService:
         except Exception:
             logging.getLogger(__name__).exception('File Explorer tab request failed')
             return {'ok': False, 'error': 'Tab operation failed; no retry performed'}
+
+    async def usage_event(self, job: Job, update: dict[str, object]) -> None:
+        async with self.lock:
+            tab = self.store.get(job.tab_id)
+            if (self.usage.jobs.get(job.sid) is not job or job.sid not in self.presentations
+                    or self.attached.get(job.sid) != job.tab_id or tab is None or tab['path'] != job.path):
+                self.usage.cancel(job.sid, job.scan_id)
+                return
+            await self.server.emit('directory_usage', {**update, 'tabId': job.tab_id},
+                                   room=job.sid, namespace=NAMESPACE)
 
     async def _dispatch(self, sid: str, method: str, params: dict[str, object]) -> dict[str, object]:
         if method in ('tabs.list', 'tabs.catalog'):
@@ -324,6 +358,10 @@ class TabService:
             before_navigation = self.store.get(tab_id)
             tab = self.store.update(tab_id, revision, self.resolve_path(params.get('path')),
                                     options(params.get('options')))
+            if before_navigation is not None and before_navigation['path'] != tab['path']:
+                for peer, attached in list(self.attached.items()):
+                    if attached == tab_id:
+                        self.usage.cancel(peer)
             if before_navigation is not None and before_navigation['path'] != tab['path'] and tab['shellId'] is not None:
                 try:
                     tracking = await self.terminals.track_navigation(tab)

@@ -172,6 +172,7 @@ test('Escape clears selection but leaves inputs and dialogs to their owners', as
   const compiled = (await transform(source.slice(start, end), { loader: 'ts' })).code;
   vm.runInNewContext(compiled, { document: f.window.document, ui: f.ui, appLive: true, Element: f.window.Element,
     bookmarks: { editOpen: () => false, formOpen: () => false },
+    usage: { isOpen: () => false, close() {} },
     menuGroups: [], clearSelection: f.methods.clearSelection, closeAllMenus: noop,
     closePropertiesModal: noop, closeEditBookmarksModal: noop, closeBookmarkFormModal: noop });
   f.methods.selectAllItems(true);

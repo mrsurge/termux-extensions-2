@@ -25,7 +25,7 @@ class Node {
   setSelectionRange() {}
 }
 
-function fixture() {
+function fixture(usageSize) {
   const document = { activeElement: null, createElement(tag) { return new Node(this, tag); } };
   const container = new Node(document); container.root = true;
   const ui = Object.fromEntries(['breadcrumbs', 'listContainer', 'gridContainer', 'clearSelection', 'selectionCount'].map(key => [key, new Node(document)]));
@@ -35,7 +35,7 @@ function fixture() {
   const state = { currentPath: '/project', entries, selected: null, selectedPaths: new Set(), view: 'list', sortBy: 'name', sortAsc: true };
   let deliver, cancelled = 0, updates = 0;
   const requests = [], navigations = [], bound = [];
-  const viewport = createViewport({ container, state, ui, filterInput, filterError,
+  const viewport = createViewport({ container, state, ui, filterInput, filterError, usageSize,
     contextMenuReady: Promise.resolve({ close() {}, bind(...args) { bound.push(args); } }),
     createListingFilter(callback) { deliver = callback; return { apply(entries, pattern) { requests.push({ entries, pattern }); if (!pattern) callback(entries, ''); }, cancel() { cancelled++; } }; },
     selectPaths, getIcon: async () => ({ codicon: 'file' }), renderIcon() {}, isArchive: () => false,
@@ -52,6 +52,15 @@ test('viewport sorted visible order drives select-all and single selection proje
   f.filterInput.value = 'py'; f.deliver([f.entries[1]], '');
   assert.deepEqual([...f.state.selectedPaths], ['/project/a.py']); assert.equal(f.state.selected, f.entries[1]);
   f.viewport.clearSelection(); assert.equal(f.ui.clearSelection.hidden, true); assert.equal(f.state.selected, null);
+});
+test('size ordering follows progressive directory totals, placing unknown sizes last', () => {
+  const sizes = new Map(), f = fixture(path => sizes.get(path));
+  f.state.entries = ['a', 'b', 'c'].map(name => ({ name, path: `/project/${name}`, type: 'directory' }));
+  f.state.sortBy = 'size'; f.state.sortAsc = false;
+  sizes.set('/project/b', 20); sizes.set('/project/a', 10); f.viewport.renderEntries();
+  assert.deepEqual(f.ui.listContainer.children.map(node => node.dataset.path), ['/project/b', '/project/a', '/project/c']);
+  sizes.set('/project/a', 30); f.viewport.renderEntries();
+  assert.deepEqual(f.ui.gridContainer.children.map(node => node.dataset.path), ['/project/a', '/project/b', '/project/c']);
 });
 
 test('filter reset clears transient input/error without issuing a listing request', () => {

@@ -1714,11 +1714,11 @@ memory/documentation consolidation. No shared framework restart was performed.
 - [x] User live acceptance for the completed filter/keyboard/modularization
   slice. Reload alone does not publish native-client assets; no backend rebuild
   or shared framework restart is required for these frontend changes.
-- [ ] Directory usage remains a separate pending slice.
+- [x] Directory usage discovery completed; implementation recorded below.
   User selected the existing framework filesystem pipe service as the preferred
   boundary. Read-only discovery confirms File Explorer already uses
   `fs.listDirectory` via `service.fs`; exact usage/job contract and semantics are
-  the next implementation-design step. No usage code or runtime change yet.
+  the implementation boundary. Runtime activation remains pending below.
   Investigation: FS currently has request/reply scheduling, while Search/Git own
   separate job registries. Python pipe timeout does not cancel Rust work. Plan a
   separate bounded scan lane and explicit cancellation/progress for long scans;
@@ -1726,6 +1726,37 @@ memory/documentation consolidation. No shared framework restart was performed.
   filtering cannot be reused for disk accounting. Report depth limits rows, not
   recursion. Source: `framework_services/pipe/fs_pipe_ops.rs`, `scheduler.rs`,
   `fs_ops.rs` and `app/libs/pipe_runtime.py`.
+
+#### Directory usage — framework pipe implementation
+
+- [x] User approved implementation through the framework FS pipe. Documentation
+  and delegated-role instructions checkpointed as `b326d88e`.
+- [x] Electromux inspection found the worktree at older `e263289` versus recorded
+  `2976c4f9`, plus uncommitted nested files. User selected keeping the recorded pin;
+  no nested files or gitlink were committed/changed by this task.
+- [x] Implement Rust scan jobs on a separate bounded lane, with owner-scoped
+  start/cancel, progress/results, recursive allocation totals and explicit limits.
+- [x] File Explorer derives the requested path from the attached tab, forwards
+  scoped binary notifications to its requesting SID, and cancels on lifecycle
+  changes. Pipe notifications wake the observer directly, without polling.
+- [x] User correction: usage overlays the existing size column/icon tiles as
+  purple pills, preserving the listing. Header Cancel, progressive child totals,
+  retained results across presentation rerenders and navigation cancellation.
+  Removed the initially implemented dialog; Rust progress now includes child rows.
+- [x] Follow-up: usage is a retained View toggle saved locally. Every newly
+  loaded directory starts its own scan; navigation/manual cancellation only
+  stops the previous/current scan. Sort by Size dynamically uses measured
+  totals, with unknown sizes last. Navigation persistence and progressive sort
+  regressions pass alongside the existing frontend suite.
+- [x] Validation: 142 frontend tests, 92 backend tests, seven Rust usage tests;
+  frontend typecheck/bundle, strict backend mypy, Cargo check and whitespace checks
+  pass. `python -B -m app.cli.run_rust_framework --build-only` completed the
+  framework release build in 48.97 seconds after the inline/progressive correction
+  and resolved the cached native editor
+  worker. This did not restart or activate the shared runtime.
+- [x] User live acceptance confirmed for the complete directory-usage slice,
+  including dynamic size ordering and persistent browsing mode. No shared
+  framework restart was performed by the agent.
 
 #### Keyboard/filter polish follow-up
 

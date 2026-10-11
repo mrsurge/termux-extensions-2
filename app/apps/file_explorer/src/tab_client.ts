@@ -133,7 +133,7 @@ export function createTabClient(socket: TabSocket, onSnapshot: (tab: TabRecord |
 }
 function decodeTerminalReplyResult(result: MethodResult): TerminalReply {
   // Request already decoded the wire boundary; reject non-terminal results here.
-  if ('tabs' in result || 'path' in result || 'closedId' in result || ('tab' in result && result.tab === null)) throw new Error('Invalid terminal result');
+  if ('scanId' in result || 'tabs' in result || 'path' in result || 'closedId' in result || ('tab' in result && result.tab === null)) throw new Error('Invalid terminal result');
   if ('tab' in result) {
     const { tab, ...fields } = result;
     if (tab === null) throw new Error('Invalid terminal result');

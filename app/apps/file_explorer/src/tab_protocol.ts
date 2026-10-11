@@ -1,3 +1,5 @@
+import { usageAck, type UsageAck } from './usage_protocol';
+
 export interface TabOptions {
   showHidden: boolean;
   view: 'list' | 'grid';
@@ -19,7 +21,7 @@ export interface TabResult { tab: TabRecord | null }
 export interface CatalogResult { tabs: TabRecord[] }
 export interface PathResult { path: string }
 export interface ClosedResult { closedId: string }
-export type MethodResult = TabResult | CatalogResult | PathResult | ClosedResult | TerminalReply;
+export type MethodResult = TabResult | CatalogResult | PathResult | ClosedResult | TerminalReply | UsageAck;
 export type TabSnapshot = { tab: TabRecord } | { tab: null; closedId: string };
 
 export function objectFields(value: unknown): Record<string, unknown> {
@@ -78,6 +80,7 @@ export function decodeTerminalReply(value: unknown): TerminalReply {
   return result;
 }
 export function decodeMethodResult(method: string, value: unknown): MethodResult {
+  if (method === 'directoryUsage.start' || method === 'directoryUsage.cancel') return usageAck(value, method.endsWith('.start'));
   if (method === 'tabs.list' || method === 'tabs.catalog') return decodeCatalogResult(value);
   if (method === 'tabs.create' || method === 'tabs.attach') return decodeTabResult(value);
   if (method === 'tabs.update') return { tab: decodeTabRecord(objectFields(value).tab) };

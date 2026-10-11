@@ -435,6 +435,12 @@
   background: rgba(15, 23, 42, 0.55);
   backdrop-filter: blur(6px);
 }
+.fx-usage-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 12px; font-size: .8rem; }
+.fx-usage-header[hidden] { display: none; }
+.fx-usage-header span { min-width: 0; overflow-wrap: anywhere; }
+.fx-usage-pill { background: #8b5cf62b; color: #c4b5fd; border-radius: 5px; padding: 2px 5px; font-variant-numeric: tabular-nums; width: max-content; max-width: 100%; }
+.fx-item .fx-usage-pill { justify-self: end; }
+.fx-usage-icon-size { align-self: center; margin: 4px auto 0; font-size: .75rem; }
 .fx-modal-dialog {
   position: relative;
   background: var(--card, #111827);

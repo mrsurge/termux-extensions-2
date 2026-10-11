@@ -63,6 +63,8 @@ export interface ViewportDependencies {
   openSelected(): void | Promise<void>;
   followSymlink(entry: FileEntry): void | Promise<void>;
   deleteSelected(): void | Promise<void>;
+  afterRender?(): void;
+  usageSize?(path: string): number | undefined;
 }
 
 /** Presentation only. Directory navigation and durable tab state remain with the caller. */
@@ -168,7 +170,13 @@ export function createViewport(deps: ViewportDependencies) {
       const directories = Number(a.type !== 'directory') - Number(b.type !== 'directory');
       if (directories) return directories;
       let comparison: number;
-      if (state.sortBy === 'size') comparison = (a.size ?? 0) - (b.size ?? 0);
+      if (state.sortBy === 'size') {
+        const aSize = deps.usageSize?.(a.path) ?? (a.type === 'directory' ? undefined : a.size);
+        const bSize = deps.usageSize?.(b.path) ?? (b.type === 'directory' ? undefined : b.size);
+        if ((aSize === undefined) !== (bSize === undefined)) return aSize === undefined ? 1 : -1;
+        comparison = (aSize ?? 0) - (bSize ?? 0);
+        if (!comparison) comparison = a.name.localeCompare(b.name);
+      }
       else if (state.sortBy === 'date') comparison = (a.mtime ?? 0) - (b.mtime ?? 0);
       else {
         const extension = (name: string) => name.includes('.') ? (name.split('.').pop() ?? '').toLowerCase() : '';
@@ -239,6 +247,7 @@ export function createViewport(deps: ViewportDependencies) {
       row.append(makeText('fx-permissions', deps.modeToString(entry.mode, entry.type)), makeText('fx-owner', deps.formatOwnership(entry.owner, entry.group)), makeText('fx-size', isDir ? '' : deps.formatSize(entry.size)), makeText('fx-date', deps.formatDate(entry.mtime)));
       ui.listContainer.append(row); ui.gridContainer.append(tile);
     }
+    deps.afterRender?.();
     syncSelection();
     if (focusedPath) { const nodes = [...container.querySelectorAll<HTMLElement>(`.${focusedClass}`)]; (nodes.find(node => node.dataset.path === focusedPath) ?? nodes[0])?.focus({ preventScroll: true }); }
   }

@@ -34,6 +34,14 @@ pub(crate) async fn dispatch_request(
         );
     }
 
+    if let Some(response) =
+        scheduler
+            .directory_usage
+            .dispatch(&request, responder, event_sink.clone())
+    {
+        return response;
+    }
+
     if let Some(response) = fs_pipe_ops::dispatch_fs_request(&request, responder, scheduler).await {
         return response;
     }

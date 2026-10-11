@@ -416,7 +416,7 @@ fn resolve_browse_path(
 }
 
 #[allow(dead_code)] // Staged for the pipe service before runtime wiring exists.
-fn resolve_list_directory_path(
+pub(crate) fn resolve_list_directory_path(
     raw_root: Option<&str>,
     raw_path: Option<&str>,
 ) -> Result<(PathBuf, PathBuf), BrowseError> {

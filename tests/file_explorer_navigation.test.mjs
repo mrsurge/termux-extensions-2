@@ -15,6 +15,7 @@ function fixture() {
     closeAllMenus() {}, clearSelection() {}, setLoading() {}, renderBreadcrumbs() {}, refreshFilter() {},
     updateActionButtons() {}, applyView() {}, persistState() {}, publishStatefulSidebarUrl() {}, toast() {}, host: {},
     notify() {}, actionError(error, fallback) { return error instanceof Error ? error.message : fallback; }, appLive: true,
+    usage: { close() {}, sync() {}, directoryReady() {} },
   };
   const load = vm.runInNewContext('let directoryGeneration = 0, directoryScopeEpoch = 0;\n' + navigation + '\nObject.assign(loadDirectory, { scope: () => directoryScopeEpoch })', context);
   return { load, state, scope: load.scope, resets: () => resets, reply(value) { response = value; }, hold(fn) { resolve = fn; } };
@@ -46,7 +47,7 @@ test('tab identity change resets regex independently of path/options refresh', a
   const end = source.indexOf('  async function showTabs(', start);
   let resets = 0;
   const calls = [];
-  const context = { terminalDrawer: null, viewport: { resetFilter() { resets++; } },
+  const context = { terminalDrawer: null, usage: { sync() {} }, viewport: { resetFilter() { resets++; } },
     state: {}, ui: {}, tabsUI: { invalidateSplash() {} }, rememberTab() {}, showTabChrome() {}, showTabs() {},
     loadDirectory: async path => calls.push(path), JSON };
   const compiled = (await transform(source.slice(start, end), { loader: 'ts' })).code;

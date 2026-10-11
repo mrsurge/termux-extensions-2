@@ -16,6 +16,7 @@ import { bindTerminalShortcut } from './keyboard';
 import { createMenubar, createItemContextMenu } from './menubar';
 import { createBookmarks } from './bookmarks';
 import { createJobsController } from './jobs';
+import { createDirectoryUsage } from './usage';
 import { MAX_EDITOR_SIZE, isEditableFile, isArchive, joinPath, parentPath, formatSize, formatDate, modeToString, formatOwnership } from './presentation_helpers';
 import { apiContract, hostContract, dialogContract, pickerContract, preferenceDto, ensureSocketIoLoaded, field, runtimeValue, uiToast, uiNotification, dismissNotification, requireElement, type RuntimeSocket } from './frontend_contracts';
 
@@ -145,6 +146,11 @@ export default function initFileExplorer(root: HTMLElement, rawApi: unknown, raw
     toast: notify, onError: error => console.error('[file-explorer jobs]', error),
   });
   function requireTabs(): TabClient { if (!tabs) throw new Error('Tab connection is unavailable'); return tabs; }
+  const usage = createDirectoryUsage({ container, notify,
+    current: () => tabs?.tab ? { tabId: tabs.tab.id, path: tabs.tab.path } : null,
+    request: (method, params) => requireTabs().request(method, params),
+    changed: () => { updateViewMenuState(); if (state.sortBy === 'size') renderEntries(); },
+  });
   const tabsUI = createTabsUI({
     container, footer,
     list: () => requireTabs().list(),
@@ -184,6 +190,7 @@ export default function initFileExplorer(root: HTMLElement, rawApi: unknown, raw
 
   async function applyTab(tab: TabRecord | null) {
     if (!appLive) return;
+    usage.sync();
     terminalDrawer?.sync(tab);
     if (!tab) { renderedTab = ''; await showTabs(); return; }
     const rendering = JSON.stringify([tab.id, tab.path, tab.options]);
@@ -211,6 +218,7 @@ export default function initFileExplorer(root: HTMLElement, rawApi: unknown, raw
 
   async function showTabs() {
     if (!appLive) return;
+    usage.close();
     directoryScopeEpoch++;
     terminalDrawer?.sync(null);
     renderedTab = '';
@@ -384,6 +392,10 @@ export default function initFileExplorer(root: HTMLElement, rawApi: unknown, raw
     });
 
     const hiddenBtn = viewMenuByCommand.get("view:toggle-hidden");
+    const usageBtn = viewMenuByCommand.get('view:directory-usage');
+    if (usageBtn && usage.isEnabled()) {
+      usageBtn.classList.add('fx-menu-item-checked'); usageBtn.dataset.checked = 'true';
+    }
     if (hiddenBtn && showHidden) {
       hiddenBtn.classList.add("fx-menu-item-checked");
       hiddenBtn.dataset.checked = "true";
@@ -440,6 +452,7 @@ export default function initFileExplorer(root: HTMLElement, rawApi: unknown, raw
       state.view = "list";
       applyView();
     },
+    "view:directory-usage": () => usage.toggle(),
     "view:toggle-hidden": () => {
       showHidden = !showHidden;
       if (ui.toggleHidden) {
@@ -485,7 +498,7 @@ export default function initFileExplorer(root: HTMLElement, rawApi: unknown, raw
     contextMenuReady, createListingFilter, selectPaths, getIcon, renderIcon,
     isArchive, modeToString, formatOwnership, formatSize, formatDate, parentPath,
     updateActionButtons, closeAllMenus, loadDirectory, openSelected,
-    followSymlink, deleteSelected,
+    followSymlink, deleteSelected, afterRender: () => usage.refresh(), usageSize: path => usage.sizeFor(path),
   });
   const {
     setLoading, clearSelection, syncSelection, updateSelectionCount,
@@ -552,6 +565,7 @@ export default function initFileExplorer(root: HTMLElement, rawApi: unknown, raw
 
   async function loadDirectory(targetPath: string, fromTab = false): Promise<void> {
     if (!appLive) return;
+    if (targetPath && targetPath !== state.currentPath) usage.close();
     viewport.captureListingFocus();
     const generation = ++directoryGeneration;
     viewport.cancelFilter();
@@ -584,6 +598,7 @@ export default function initFileExplorer(root: HTMLElement, rawApi: unknown, raw
       applyView();
       persistState(false);
       void publishStatefulSidebarUrl(state.currentPath);
+      usage.directoryReady();
     } catch (error) {
       if (generation !== directoryGeneration) return;
       state.entries = [];
@@ -677,6 +692,7 @@ export default function initFileExplorer(root: HTMLElement, rawApi: unknown, raw
     const socket = io('/tabs', { path: '/api/app/file_explorer/socket.io', transports: ['websocket'],
       autoConnect: false, auth: { codec: 'msgpack-v1', presentationId: randomTabOperation() } });
     tabSocket = socket;
+    usage.bindSocket(socket);
     tabs = createTabClient(socket, tab => void applyTab(tab).catch(tabError), tabError,
       () => {
         if (!tabsInitialized) return;
@@ -715,7 +731,7 @@ export default function initFileExplorer(root: HTMLElement, rawApi: unknown, raw
     if (!appLive) return;
     appLive = false; directoryGeneration++; directoryScopeEpoch++;
     cancelConnect?.(); cancelConnect = null;
-    fileActions.dispose(); openActions.dispose(); properties.dispose(); bookmarks.dispose(); jobs.dispose();
+    usage.dispose(); fileActions.dispose(); openActions.dispose(); properties.dispose(); bookmarks.dispose(); jobs.dispose();
     viewport.dispose(); menubar.dispose(); tabsUI.dispose(); disposeTerminalShortcut();
     void contextMenuReady.then(menu => menu.dispose());
     terminalDrawer?.dispose(); tabs?.dispose();
