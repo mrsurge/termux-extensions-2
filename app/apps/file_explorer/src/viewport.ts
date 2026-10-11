@@ -74,9 +74,10 @@ export function createViewport(deps: ViewportDependencies) {
   let filteredEntries: FileEntry[] | null = null;
   let restoreListingFocus = false;
   let disposed = false;
+  let listingLoading = false;
   let keyboardCleanups: (() => void)[] = [];
   const listingFilter = deps.createListingFilter((entries, error) => {
-    if (disposed) return;
+    if (disposed || listingLoading) return;
     filteredEntries = entries;
     filterError.textContent = error;
     filterInput.setAttribute('aria-invalid', String(Boolean(error)));
@@ -89,7 +90,7 @@ export function createViewport(deps: ViewportDependencies) {
     }
   });
   function activeList() { return state.view === 'grid' ? ui.gridContainer : ui.listContainer; }
-  function refreshFilter() { listingFilter.apply(state.entries, filterInput.value); }
+  function refreshFilter() { if (!disposed && !listingLoading) listingFilter.apply(state.entries, filterInput.value); }
   function cancelFilter() { listingFilter.cancel(); filteredEntries = null; }
   function resetFilter() {
     cancelFilter();
@@ -127,12 +128,22 @@ export function createViewport(deps: ViewportDependencies) {
     state.selectedPaths = new Set([entry.path]); selectionAnchor = entry.path; syncSelection();
   }
   function setLoading() {
+    listingLoading = true;
+    cancelFilter();
+    filterInput.disabled = true;
     for (const target of [ui.listContainer, ui.gridContainer]) {
       if (!target) continue;
       target.replaceChildren();
       const loading = document.createElement('div'); loading.className = 'fx-loading'; loading.textContent = 'Loading...';
       target.append(loading);
     }
+  }
+  function finishLoading(ready = true) {
+    if (disposed) return;
+    listingLoading = false;
+    filterInput.disabled = false;
+    if (ready) refreshFilter();
+    else { filteredEntries = []; selectionOrder = []; }
   }
   function renderBreadcrumbs() {
     if (!ui.breadcrumbs) return;
@@ -168,6 +179,7 @@ export function createViewport(deps: ViewportDependencies) {
     });
   }
   function renderEntries() {
+    if (disposed || listingLoading) return;
     void deps.contextMenuReady.then(menu => menu.close());
     if (!ui.listContainer || !ui.gridContainer) return;
     const focused = document.activeElement?.closest<HTMLElement>('.fx-item, .fx-tile');
@@ -231,5 +243,5 @@ export function createViewport(deps: ViewportDependencies) {
     if (focusedPath) { const nodes = [...container.querySelectorAll<HTMLElement>(`.${focusedClass}`)]; (nodes.find(node => node.dataset.path === focusedPath) ?? nodes[0])?.focus({ preventScroll: true }); }
   }
   function dispose() { disposed = true; listingFilter.cancel(); filterInput.removeEventListener('input', refreshFilter); keyboardCleanups.forEach(cleanup => cleanup()); keyboardCleanups = []; }
-  return { setLoading, clearSelection, syncSelection, updateSelectionCount, selectAllItems, selectEntry, renderBreadcrumbs, renderEntries, refreshFilter, cancelFilter, resetFilter, captureListingFocus, dispose };
+  return { setLoading, finishLoading, clearSelection, syncSelection, updateSelectionCount, selectAllItems, selectEntry, renderBreadcrumbs, renderEntries, refreshFilter, cancelFilter, resetFilter, captureListingFocus, dispose };
 }

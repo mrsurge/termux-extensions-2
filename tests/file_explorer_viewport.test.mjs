@@ -64,7 +64,7 @@ test('filter reset clears transient input/error without issuing a listing reques
 
 test('directory handoff restores listing focus after loading and filter delivery', () => {
   const f = fixture(); f.viewport.refreshFilter(); f.ui.listContainer.children[1].focus();
-  f.viewport.captureListingFocus(); f.viewport.cancelFilter(); f.viewport.setLoading(); f.viewport.resetFilter(); f.viewport.refreshFilter();
+  f.viewport.captureListingFocus(); f.viewport.cancelFilter(); f.viewport.setLoading(); f.viewport.resetFilter(); f.viewport.finishLoading();
   assert.equal(f.document.activeElement, f.ui.listContainer.children[0]);
 });
 
@@ -78,4 +78,24 @@ test('dispose rejects late filter delivery and removes the input listener', () =
   const f = fixture(); f.viewport.refreshFilter(); f.viewport.dispose(); const before = f.ui.listContainer.children;
   f.deliver([], 'late'); assert.equal(f.ui.listContainer.children, before); assert.equal(f.filterError.textContent, '');
   assert.equal(f.filterInput.events.get('input').length, 0); assert.equal(f.cancelled(), 1);
+});
+
+test('pending directory listing cannot resurrect old entries through filter or view changes', () => {
+  const f = fixture(); f.viewport.refreshFilter(); f.viewport.setLoading();
+  const requests = f.requests.length;
+  f.viewport.refreshFilter(); f.viewport.renderEntries(); f.deliver(f.entries, 'late');
+  assert.equal(f.requests.length, requests);
+  assert.equal(f.ui.listContainer.children[0].textContent, 'Loading...');
+  assert.equal(f.filterInput.disabled, true);
+  f.state.entries = [{ name: 'new', path: '/new/new', type: 'file' }];
+  f.viewport.finishLoading();
+  assert.equal(f.filterInput.disabled, false);
+  assert.equal(f.ui.listContainer.children[0].dataset.path, '/new/new');
+});
+
+test('failed listing releases input without reviving the previous directory', () => {
+  const f = fixture(); f.viewport.refreshFilter(); f.viewport.setLoading();
+  f.state.entries = []; f.viewport.finishLoading(false); f.viewport.renderEntries();
+  assert.equal(f.filterInput.disabled, false);
+  assert.equal(f.ui.listContainer.querySelector('[data-path]'), null);
 });

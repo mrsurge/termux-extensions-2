@@ -7,10 +7,10 @@ import { Window } from 'happy-dom';
 import { selectPaths } from '../../../static/js/file_explorer_selection.mjs';
 import { createListingFilter } from '../../../static/js/file_explorer_filter.mjs';
 import { createItemContextMenu } from '../../../static/js/te_file_explorer_context.mjs';
-import { build } from '../../file_explorer/node_modules/esbuild/lib/main.js';
+import { build, transform } from '../../file_explorer/node_modules/esbuild/lib/main.js';
 
 const root = path.resolve(import.meta.dirname, '../../../..');
-const source = await readFile(path.join(root, 'app/apps/file_explorer/src/main.js'), 'utf8');
+const source = await readFile(path.join(root, 'app/apps/file_explorer/src/main.ts'), 'utf8');
 const viewportSource = await readFile(path.join(root, 'app/apps/file_explorer/src/viewport.ts'), 'utf8');
 const compiled = await build({ entryPoints: [path.join(root, 'app/apps/file_explorer/src/viewport.ts')], bundle: true, write: false, format: 'esm' });
 const { createViewport } = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].contents).toString('base64')}`);
@@ -139,11 +139,12 @@ test('range uses displayed order and absent anchors become single selections', (
   assert.deepEqual([...selectPaths(new Set(['old']), ['a','b'], 'missing', 'b', { shift: true }).selected], ['b']);
 });
 
-test('context on a selected item preserves batch, unrelated item replaces it', () => {
+test('context on a selected item preserves batch, unrelated item replaces it', async () => {
   const f = fixture();
   const start = source.indexOf('select: (entry, nodes) => {') + 'select: (entry, nodes) => {'.length;
   const end = source.indexOf('\n    } }));', start);
-  const select = vm.runInNewContext('(entry, nodes) => {' + source.slice(start, end) + '}', {
+  const compiled = (await transform('(entry, nodes) => {' + source.slice(start, end) + '}', { loader: 'ts' })).code;
+  const select = vm.runInNewContext(compiled, {
     state: f.state, closeAllMenus() {}, selectEntry: f.methods.selectEntry,
   });
   f.click(f.ui.listContainer.children[0].querySelector('button'));
@@ -163,12 +164,14 @@ test('file selection checkboxes are removed without removing settings checkboxes
   assert.match(viewportSource, /getIcon\(entry.name\)/);
 });
 
-test('Escape clears selection but leaves inputs and dialogs to their owners', () => {
+test('Escape clears selection but leaves inputs and dialogs to their owners', async () => {
   const f = fixture();
-  const start = source.indexOf('  document.addEventListener("keydown",');
-  const end = source.indexOf('\n  setPropertiesModalOpen(false);', start);
+  const start = source.indexOf('  const keydown =');
+  const end = source.indexOf('\n  listenerCleanup.push(() => document.removeEventListener', start);
   const noop = () => {};
-  vm.runInNewContext(source.slice(start, end), { document: f.window.document, ui: f.ui,
+  const compiled = (await transform(source.slice(start, end), { loader: 'ts' })).code;
+  vm.runInNewContext(compiled, { document: f.window.document, ui: f.ui, appLive: true, Element: f.window.Element,
+    bookmarks: { editOpen: () => false, formOpen: () => false },
     menuGroups: [], clearSelection: f.methods.clearSelection, closeAllMenus: noop,
     closePropertiesModal: noop, closeEditBookmarksModal: noop, closeBookmarkFormModal: noop });
   f.methods.selectAllItems(true);

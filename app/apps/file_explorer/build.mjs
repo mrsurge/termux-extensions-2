@@ -13,7 +13,7 @@ await build({ ...common, entryPoints: ['src/tab_client.ts'], outfile: '../../sta
   plugins: [{ name: 'tab-codec', setup(build) { build.onResolve({ filter: /^\.\.\/wire_codec$/ }, () => ({ path: './file_explorer_codec.js', external: true })); } }] });
 // One app bundle; shared resources and the isolated regex worker stay external.
 // Standalone terminal/codec outputs retain their public compatibility contracts.
-await build({ ...common, entryPoints: ['src/main.js'], outfile: '../../static/js/file_explorer_main.js', external: ['/static/*'] });
+await build({ ...common, entryPoints: ['src/main.ts'], outfile: '../../static/js/file_explorer_main.js', external: ['/static/*'] });
 const css = await readFile('src/styles.css', 'utf8');
 const template = await readFile('src/template.html', 'utf8');
 if (template.split('__FILE_EXPLORER_STYLES__').length !== 2) throw new Error('Expected one stylesheet placeholder');

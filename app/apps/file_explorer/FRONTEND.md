@@ -2,12 +2,12 @@
 
 ## Source and build
 
-`src/main.js` currently composes the app and retains directory navigation, tab
-orchestration, file workflows, properties, bookmarks and job observation. These
-remaining JavaScript paths are later refactor slices; they are **not yet
-strictly typechecked**.
+`src/main.ts` is the strictly typed composition root. It retains directory/tab
+coordination and delegates presentation and workflows to app-owned controllers.
+Unknown host/runtime values are checked at the boundary, not cast into trusted
+DTOs. The public `main.js` remains only the stable manifest mount adapter.
 
-The first extracted controllers are checked under the app's strict TypeScript
+All extracted controllers are checked under the app's strict TypeScript
 configuration:
 
 - `src/viewport.ts`: directory presentation, breadcrumbs, sorting, selection,
@@ -30,6 +30,23 @@ configuration:
 - `src/tabs_ui.ts`: splash and tab-menu presentation with stale-result/disposal
   guards. Directory, preference, terminal and sidebar coordination stay in root
   callbacks; showing a splash never creates a tab.
+- `src/action_types.ts` and `src/file_actions.ts`: captured selection/origin,
+  dialog/picker contracts and file creation, rename, deletion, copy/move and
+  download workflows. Jobs are injected; attempting a job submission never
+  falls back to a second direct mutation if its result is uncertain.
+- `src/open_actions.ts`: file/project/terminal intents, symlink and size checks,
+  archive launch/extraction, with captured targets and async context guards.
+- `src/properties.ts`: permissions/ownership/rename dialog with request identity,
+  cancelled delayed focus and captured Apply context. Closing/superseding a
+  dialog prevents subsequent steps, but does not cancel or undo an issued mutation.
+- `src/bookmarks.ts`: global bookmark API validation, metadata-preserving edits,
+  safe text rendering and disposable modal/menu bindings.
+- `src/jobs.ts`: per-mount job observation/notifications, optional stream/poller
+  capabilities and bounded cleanup. Suspension/disposal fences stale callbacks;
+  disposal does not cancel or delete running jobs.
+- `src/frontend_contracts.ts`: validates host, API, dialogs, picker, preferences
+  and Socket.IO capabilities. `src/static_modules.d.ts` describes the existing
+  shared asset APIs; `src/presentation_helpers.ts` holds pure display helpers.
 
 Ctrl+backtick reveals/focuses the current tab's terminal via its existing drawer
 action, creating it if absent. It does not toggle the drawer closed. The typed
@@ -71,10 +88,26 @@ the filter on same-directory refreshes, option changes and failed navigation.
 Obsolete listing/filter completions cannot reset current state. Filter state is
 presentation-only, not persisted into durable tab records.
 
-## Remaining extraction
+## Mount and listing lifecycle
 
-Next: file actions/properties/bookmarks; job
-observation; then strictly type the reduced composition entrypoint. Preserve the
-backend-owned tab and intent boundaries and existing terminal ownership. Do not
-rename remaining JS to TS with suppression directives or broad casts as a
-substitute for validating external values.
+Remounting the same root disposes its previous controllers, socket and listeners.
+Final page exit does the same; bfcache suspension disconnects observation and
+resumes through existing read-only resync. This does not close backend tabs or
+terminate their terminal shells. Late startup/listing callbacks cannot mutate a
+disposed mount.
+
+While a directory listing is pending, filtering and view/sort rerenders cannot
+resurrect the previous directory. The filter input is temporarily disabled until
+the current request completes; failed listings clear old entries without changing
+the retained filter text or durable tab authority.
+
+## Action/dialog identity
+
+File actions capture targets before awaiting consent or a picker. Presentation
+guards combine the current tab/directory with an epoch changed by tab switches,
+successful directory changes and returning to the splash. Returning to the same
+location does not revive old dialog work; same-directory refreshes do not
+invalidate a successful Properties Apply. These guards are not durable authority.
+Cleanup cannot reload a different foreground context. Properties mutations remain
+one-shot and ordered rename → chmod → chown, using the renamed path for later
+steps. A superseded context stops remaining steps; failures are not retried.

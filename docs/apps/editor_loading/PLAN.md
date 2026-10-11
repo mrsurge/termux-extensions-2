@@ -398,6 +398,19 @@ directory/terminal mutations, read-only reconnect resync, and generation fences;
 stale mount or same-tab mutation ACKs cannot replace a newer selection. Typed
 splash/menu controllers own presentation, not tab or sidebar authority. Global
 jobs/bookmarks/archive endpoints remain outside the app HTTP facade.
+File actions capture selected targets and originating tab/directory before
+dialogs or pickers. Presentation epochs fence away-and-back transitions, while
+ordinary same-directory refresh retains the active operation context. Properties
+fetch/focus/Apply use captured dialog identity; supersession stops later mutation
+steps without retrying or undoing an already-issued operation. Direct copy/move
+fallback is only for absent job capability, never after an attempted job POST.
+The final frontend slice extracts bookmark/job controllers and converts the
+composition root to strict TypeScript. Runtime host/dialog/picker/socket values
+are validated; same-root remount and final page exit dispose controllers and
+listeners without closing backend tabs/shells. Bfcache observation resumes by
+existing resync. Pending listings cannot render old entries through filter/view
+changes. Validate integrated startup/disposal as well as controller regressions,
+then publish matching native assets before exact-client live checks.
 Prefer existing framework filesystem/pipe services; first inspect support for
 bounded aggregation, cancellation, errors, symlinks and permissions. A depth-one
 display can still require recursive byte accounting: define that cost explicitly,

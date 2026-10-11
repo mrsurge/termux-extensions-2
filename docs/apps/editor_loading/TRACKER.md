@@ -1744,9 +1744,8 @@ memory/documentation consolidation. No shared framework restart was performed.
 - [x] Stable `main.js` manifest adapter loads one minified app bundle under the
   already-published static JS tree. Terminal/codec/context compatibility outputs
   remain generated from their owning sources.
-- [ ] Slice two: validated API/DTOs, tabs/splash, file workflows/dialogs, bookmarks,
-  jobs, and strict typing of the reduced composition root. Remaining `src/main.js`
-  is deliberately not reported as type-safe yet.
+- [x] Later slices complete validated API/DTOs, tabs/splash, file workflows/dialogs,
+  bookmarks, jobs and strict typing of the reduced `src/main.ts` composition root.
 - [x] User live acceptance: the new source tree is clean and the app works live.
   User requested commit/push of this completed slice. No shared runtime restart.
 - [x] Approved addition: Ctrl+backtick reuses the drawer's existing create/show/
@@ -1755,9 +1754,8 @@ memory/documentation consolidation. No shared framework restart was performed.
 - [x] Final first-slice validation: strict TS check, minified build, 58 frontend
   regressions and 9 terminal-directory-control regressions pass. Source syntax
   and diff checks pass. The generated app bundle is 99,218 bytes (~97 KiB).
-- [ ] Deferred/pre-existing lifecycle seams for slice two: main-document Escape
-  listener cleanup on same-document remount; filtering the old listing while a
-  directory request is pending. Neither was introduced by the extraction.
+- [x] Final slice resolves pre-existing lifecycle seams: main-document Escape
+  cleanup on same-root remount and old-listing filtering during pending requests.
 
 #### File Explorer modularization — API and tabs slice
 
@@ -1775,6 +1773,49 @@ memory/documentation consolidation. No shared framework restart was performed.
   navigation coverage.
 - [x] User live acceptance: API/tabs slice works. User requested commit/push.
   No shared framework restart or Python/mypyc rebuild is required.
-- [ ] Later slices retain file workflows/properties, bookmarks, jobs and the
-  final strictly typed composition root. Global jobs/bookmarks/archive routes
-  must not be conflated with the app HTTP facade.
+- [x] Later slices complete file workflows/properties, bookmarks, jobs and the
+  strictly typed composition root. Global jobs/bookmarks/archive routes remain
+  separate from the app HTTP facade.
+
+#### File Explorer modularization — file actions and properties
+
+- [x] API/tabs slice user live accepted and pushed as `e1632710`.
+- [x] Approved frontend-only extraction of typed file actions/open/archive
+  workflows and properties dialogs. Preserve existing backend endpoints, intent
+  routing, confirmations, picker cancellation and partial-success summaries.
+- [x] Approved safety fixes found during investigation: capture action targets
+  and originating tab/directory before awaits; reject stale dialog/picker work;
+  suppress stale properties fetch/focus/Apply UI updates. Already-issued mutations
+  cannot be cancelled or undone by closing a dialog; no retries or rollback.
+- [x] Approved removal of direct copy/move fallback after an attempted job POST,
+  whose result may be uncertain. Direct operations remain when jobs are absent.
+- [x] Extract controllers and integrate callbacks; root keeps navigation, jobs
+  observation and durable sidebar/tab authority.
+- [x] Validate captured targets, stale/closed dialogs, permission bits/order,
+  job/direct success and uncertain failure, symlinks/size/archive guards.
+- [x] Strict TypeScript check and minified build pass; 103 frontend regressions
+  and 9 terminal-directory-control tests pass. Source syntax/diff checks pass.
+  Remaining composition root is about 1,700 lines, not yet strictly typechecked.
+- [x] User live acceptance: file actions/properties work. No backend rebuild,
+  Android changes or shared framework restart.
+
+#### File Explorer modularization — final strict frontend slice
+
+- [x] User approved one coordinated delegated slice: bookmarks/jobs extraction,
+  strict composition root and lifecycle cleanup; preserve backend authority and
+  existing transports. Parent owns approval, integration and publication.
+- [x] Complete strict bookmark/job DTO boundaries and composition root; fence
+  same-document remounts, stale asynchronous work and pending listing rendering.
+- [x] Strict typecheck and minified build pass; 135 frontend regressions and 9
+  terminal-directory-control regressions pass. Includes six integrated startup,
+  restore/remount/disposal/bfcache tests and validated boundary regressions.
+  No explicit `any`, suppression directives or runtime route changes.
+- [x] Publish matching assets through existing Electron OTA, then inspect the
+  exact live client non-destructively. No framework restart or Android edits.
+- [x] Electron forced OTA reports updated/valid; served bundle SHA-256 matches
+  local output (`e2cade6d686454908456ac5ac45e10ac162295e6860ca1c2ebdbefb65d3a2ff0`,
+  110,995 bytes). Both restored tab identities retained; filtering/clear,
+  Properties open/close and bookmarks dialog pass non-destructive live checks.
+  No file mutations, shell termination or shared framework restart.
+- [x] User confirmed final live acceptance via blocking choice prompt (Pass).
+  User approved checkpoint commit/push of the completed snapshot.
