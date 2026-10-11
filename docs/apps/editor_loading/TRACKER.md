@@ -763,6 +763,106 @@ See File Explorer TERMINAL.md for wire details.
 
 #### File Explorer terminal drawer implementation checkpoint
 
+Directory tracking production slice (2026-10-11, separately approved):
+- Clarified user contract supersedes the earlier default-off proposal: default
+  locked/on, durable tab-owned boolean, event-linked checkbox for every attached
+  presentation. Manual terminal cd remains until another browsing navigation;
+  tab switching/reconnect never requests cd. Unlock cancels unconsumed requests;
+  an already-consumed shell action cannot be reversed. Re-lock arms future browsing.
+- New-shell-only app-owned Bash --init-file integration sources normal login
+  profiles and preserves scalar/array prompt hooks and command exit status.
+  Existing terminals are untouched and show tracking unavailable until explicit
+  close/new start. The known login_shell=off compatibility tradeoff remains.
+- Private generation-scoped request/ack files contain revision+unique token,
+  enabled flag and literal NUL-delimited path. Prompt-time consumption is once
+  per token, with no eval/input injection or failed-cd retry. Output wakeups read
+  pending acknowledgments only; checkpoint piggybacks status. No new watcher,
+  polling, cross-tab terminal reassignment or reconnect mutation is introduced.
+- Durable schema-1 records migrate missing lock to on and missing integration
+  to unavailable; options-only writes do not overwrite the lock. Peer snapshots
+  synchronize the checkbox, and exact-tab/shell events fence pending/error UI.
+- Strict mypy/no explicit Any, ty, basedpyright, TypeScript checking/build and
+  targeted frontend regressions pass. The expanded backend/PTY suite includes
+  the actual production hook, manual cd, cancellation, shell error, literal
+  paths, migration, private files, peer lock events and navigation-only requests.
+  Final validation: 99 backend/PTY regressions and 13 frontend tab/drawer tests
+  pass; all seven backend boundary modules pass strict mypy. Bash syntax and
+  authored-source whitespace checks pass. No compiled-domain build was required
+  for this ordinary Python worker.
+- No worker/shared-framework restart, client OTA, Android source/build, APK or
+  commit/push is performed. Live test needs a File Explorer worker refresh,
+  explicit client asset publication, and a newly started tab terminal. Code TE2
+  mypyc rebuild is not required. Termux/multi-client live acceptance remains open.
+
+User live acceptance on 2026-10-11 confirms the hot-path performance follow-up
+and mobile footer/exact key-layout correction in 29ae7bae work. This supersedes
+their pending live-acceptance notes below, not exhaustive multi-client or release
+acceptance. Lock directory remains unimplemented.
+
+Lock directory preliminary source investigation (read-only application code):
+- `terminal_service.py` launches interactive Bash at the tab path; subsequent
+  `tabs.update` in `tab_service.py` persists browsing path/options without changing
+  the shell CWD. The durable record currently has no lock setting.
+- Code TE2's existing run-command path quotes tokens with `shlex.quote` then
+  writes a command/newline through `write_to_pty`. FWS's `write_to_shell` provides
+  transport/metadata handling, not semantic shell command execution.
+- FWS `get_shell_capabilities` verifies live transport ownership, not prompt
+  readiness. The examined APIs do not expose an empty-readline/foreground-safe
+  command injection contract. Pyte screen state is not proof of shell readiness.
+- Do not automatically inject `cd` on navigation/reconnect: it could reach a
+  foreground program or append to partially typed input. Foreground process
+  checks alone would still not establish an empty shell input line.
+- Clarify whether Lock directory means terminal follows browsing, browsing is
+  locked/follows terminal, or terminal stays at a pinned directory. Only then
+  select a concrete implementation. Preserve exact-tab/revision/live-shell
+  guards, safe quoting, bounded writes and no uncertain mutation replay.
+User clarified: terminal follows browser navigation. Investigate a shell-owned
+prompt hook plus private backend-owned latest-directory mailbox, rather than
+automatic PTY text injection. Bash would consume the latest desired directory
+at its next prompt using quoted builtin `cd`; foreground programs and unfinished
+Readline input are left untouched. Busy shells therefore defer synchronization
+until returning to a prompt. This is a candidate, not an approved implementation:
+preserve existing `bash -l -i` login/profile initialization, user prompt hooks,
+exact shell generation/lifecycle and safe private mailbox ownership. Lock-off,
+enable-time behavior, failure feedback and restoration policy still need a
+concrete design/approval; never infer them from transport reconnect.
+No application source edits, worker refresh, framework restart or build followed
+this investigation.
+
+Isolated Bash probe checkpoint: `tests/test_file_explorer_directory_lock_probe.py`
+passes five tests on local Bash 5.3.9. Disposable login PTYs prove profile loading,
+scalar/array prompt-hook chaining with retained command status, no input injection
+into a foreground child or unfinished Readline input, latest-path coalescing,
+and literal handling of quotes/newlines/metacharacters. The positive fixtures
+explicitly install the hook after profile loading; they do not prove transparent
+production installation. Environment-only PROMPT_COMMAND injection was displaced
+by this machine's system profile. No real startup files are changed.
+Code Server's authored `shellIntegration-bash.sh` uses --init-file and manually
+sources /etc/profile plus the first readable .bash_profile/.bash_login/.profile,
+then installs its hooks. Its own comment explicitly calls this imitation of -l:
+the actual login_shell flag is not preserved. Adopting that startup approach for
+new File Explorer terminals requires approval of the compatibility tradeoff;
+existing terminals must not receive automatic initialization commands. Production
+mailbox bounds, permissions, acknowledgment, lock-off and lifecycle tests remain
+unimplemented. No application or live-runtime modification follows from the probe.
+
+User approved extending only the prototype to Code Server-style --init-file
+startup. All ten isolated tests now pass on local Bash 5.3.9: the first readable
+login profile is selected once, later profiles are skipped, and scalar/array
+PROMPT_COMMAND replacements from profiles survive with the integration installed
+afterward. Tests explicitly confirm login_shell=off, not true login equivalence.
+These tests use disposable files/PTYS and do not modify real shell startup files.
+Termux execution is not yet validated. Production approval is still separate.
+Proposed next slice: new-shell-only app-owned startup hook (no user profile edits),
+persisted per-tab Lock directory default off, backend-selected latest navigation
+revision delivered through a private shell-generation mailbox, one consumption
+per request at a prompt, and observable applied/error acknowledgment. Disabling
+clears pending intent; reconnect/attach never injects/replays a command. Existing
+uninstrumented shells require explicit close/new start, not live initialization.
+Safe paths must remain data (no eval), and locking cannot claim applied CWD until
+the shell confirms it. Bound/secure mailbox data and preserve original prompt
+hooks/status, exact-tab ownership, concurrent navigation and shell teardown.
+
 Mobile key/footer correction (2026-10-11): the fixed mobile footer overlapped
 the drawer because only the file list reserved bottom space. Footer now occupies
 the final in-flow flex row below the terminal/key dock and owns the safe-area
@@ -1345,3 +1445,102 @@ Previous selector retained; the running worker is unchanged until restarted.
 3. all clients Command pallet default: the "lower state" that shows the different options (;,:,@ ) instead of the default ">"
 4. desktop - key combo: new key combo "ctrl, :" and "ctrl, shift, P" 
 5. Editor Explorer: add Collapse all to the ellipsis menu and make the ellipsis vertical.
+# Directory-control broker feasibility checkpoint (2026-10-11)
+
+## File Explorer broker wiring checkpoint
+
+Prompt correction follow-up: the first broker implementation changed CWD without
+regenerating Readline's cached prompt. Idle success/error now triggers one empty
+accepted line with later input held until fresh idle; ordinary Bash prompt hooks
+perform the redraw. Deferred cd runs before custom hooks and bash-preexec precmd
+callbacks. Real Starship 1.22.1 and custom PROMPT_COMMAND tests reproduce the old
+staleness and pass the corrected idle/deferred flow. Terminal suite is now 31/31;
+20 Python terminal/broker/directory regressions pass. No runtime restart or shell
+replacement was performed; physical user acceptance remains pending.
+
+User live acceptance passed for the broker/directory-lock and prompt-refresh
+slice on 2026-10-11. This closes the observed integration acceptance gate,
+including the previously stale prompt; exhaustive device/trap compatibility and
+the separately deferred raw WebSocket output lane remain distinct follow-ups.
+
+- [x] Reuse Terminal Node runtime/shellspec and MessagePack pipe framing.
+- [x] Live byte subscription/stdin adapter, independent control reader/event
+  publisher, 64-event/1 MiB output admission and sequence-gap checkpoint reset.
+- [x] Input, resize, attach checkpoint, directory request/cancel and typed state
+  use the broker; Socket.IO remains the existing frontend/control lane.
+- [x] Exact tab ownership, no restart/reconnect creation or mutation replay;
+  explicit Close supports pre-broker PTYs without an I/O fallback.
+- [x] Python-to-real-Node/Bash test: immediate idle literal-path cd, input/output,
+  serialized checkpoint, ordered cancel/ping and correlated invalid-path error.
+- [x] Targeted Python lifecycle/control suite: 32 pass; broader Bash feasibility
+  run: 45 pass before adding the explicit old-PTY Close regression.
+- [x] Final File Explorer HTTP/intent/tab/terminal/control regressions: 88 pass.
+- [x] Terminal suite: 28 pass; frontend tab/drawer regressions: 13 pass;
+  Terminal/File Explorer TypeScript typechecks and frontend build pass.
+- [x] Strict mypy and ty pass for adapter/service/tab service; basedpyright
+  reported no errors (its initially reported adapter warnings were cleaned up).
+- [ ] Approved worker refresh + native OTA and physical mobile/multi-client
+  acceptance. No runtime activation occurred during this wiring.
+- [ ] Separate raw WebSocket terminal-output migration, after broker acceptance;
+  retain Socket.IO for tab/CRUD synchronization and user commands.
+
+This supersedes earlier notes saying File Explorer still launches the prompt-only
+PTY/Pyte path. Standalone Terminal keeps directory control disabled. Private
+control files, Bash 4.4+ and unsupported user WINCH traps remain documented in
+File Explorer TERMINAL.md; physical Termux behavior is not established by desktop
+subprocess tests. No Android edits, shared restart, commit/push or release.
+
+## Opt-in broker/shell coordination result
+
+- Added experimental DirectoryControl to the existing Node broker, selected
+  only by an explicit environment flag/private root. Existing launchers do not
+  enable it. No File Explorer shell or frontend runtime was replaced.
+- Typed directory requests/results and shell state are separate from terminal
+  output frames. Busy/idle comes from the injected Bash init hook, not broker
+  spawn readiness or a child-process heuristic.
+- SIGWINCH wakes idle Bash without PTY input bytes; SIGUSR1 did not. Existing
+  WINCH traps are explicitly unsupported by the proof. Bash 4.4+ is required.
+- Initial DEBUG-hook design failed the real system-profile test: WezTerm's
+  bash-preexec wrapper classified signal processing as the prior user command.
+  Replaced that design with PS0 shell-state publication, retaining existing
+  DEBUG/preexec and prompt callbacks. No user profile files are modified.
+- Real broker/PTY tests pass idle cd without Enter, twelve repeated changes,
+  quote/newline literal paths, partial input preservation, Bash builtin read,
+  foreground child input, missing-directory errors, manual cd and held-input
+  ordering. Unit tests cover delayed idle/partial fences, busy downgrade,
+  malformed requests, unsupported state, 64 KiB input bound and resource removal.
+- Full Terminal npm suite: 28 pass. Terminal and File Explorer TS typechecks,
+  Bash syntax check and authored diff check pass. Original three disposable
+  Readline tests also remain separate evidence, not deployment acceptance.
+- Next: reuse the pipe broker/session adapter for File Explorer without importing
+  Terminal's FastAPI backend; preserve durable tab/lock/event authority. Current
+  File Explorer terminal frontend uses the `/tabs` Socket.IO WebSocket, not the
+  standalone Terminal raw MessagePack WebSocket. No frontend transport change
+  was necessary for this coordination proof.
+- Physical Termux, user-trap compatibility and live File Explorer integration
+  remain unverified. No shared framework restart, OTA, Android build, commit,
+  push or release in this slice.
+
+- User reported `Directory change pending until the next prompt` at an idle
+  prompt. Existing prompt-only mailbox is incomplete, not live accepted.
+- Inspected Nautilus Terminal: quoted cd/newline injection, child-process busy
+  check, optional Ctrl-E/Ctrl-U input removal. This is approximate busy detection,
+  not a safe control channel or an unfinished-input preservation guarantee.
+- Inspected actual Terminal Node broker: pipe shell owns node-pty and headless
+  xterm; typed output/checkpoint/ready/exit already exist. `ready` is spawn-only;
+  there are no directory-control or Bash prompt-state methods yet.
+- Approved isolated prototype and plan updates only; no live shell replacement.
+- Three disposable Bash PTY tests pass in
+  `tests/test_terminal_directory_control_probe.py`: immediate empty-prompt cd
+  without Enter, literal quote/newline paths, preserved unfinished input, and
+  explicit demonstration that a wake escape sequence reaches a busy child.
+- Four Node protocol tests pass including the new
+  `terminal_directory_control_probe.test.mjs`: fragmented frames retain distinct
+  directory request/result, shell-state and output types. These are candidate
+  envelope names, NOT methods implemented in the production broker.
+- Manual disposable-PTY signal experiment: SIGUSR1 trap produced no immediate
+  idle Readline callback output. Not selected as a wake-up mechanism.
+- Remaining prerequisite: prove shell/broker busy/readiness coordination and
+  dispatch fencing before extending production control methods or migrating
+  File Explorer. No FWS/shared-framework restart, frontend publication, Android
+  change/build, commit or push occurred in this probe slice.

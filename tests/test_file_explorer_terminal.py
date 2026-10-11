@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
+from app.apps.terminal.terminal_stream_protocol import PipeFrameDecoder, encode_pipe_message
 
 import pytest
 
@@ -25,6 +27,8 @@ class Manager:
         self.sizes = []
         self.scans = 0
         self.descriptions = 0
+        self.queues = {}
+        self.commands = []
 
     async def get_shell(self, shell_id):
         self.scans += 1
@@ -53,13 +57,45 @@ class Manager:
     async def resize_pty(self, shell_id, cols, rows):
         self.sizes.append((shell_id, cols, rows))
 
+    async def subscribe_output_bytes(self, shell_id):
+        queue = asyncio.Queue()
+        self.queues[shell_id] = queue
+        queue.put_nowait(encode_pipe_message({'type': 'output', 'sequence': 1, 'data': b'hello\r\n'}))
+        return queue
+
+    async def unsubscribe_output_bytes(self, shell_id, queue):
+        assert self.queues.get(shell_id) is queue
+        self.queues.pop(shell_id, None)
+
+    def get_pipe_state(self, shell_id):
+        manager = self
+        class Writer:
+            def is_closing(self): return False
+            def write(self, frame):
+                for message in PipeFrameDecoder().push(frame):
+                    manager.commands.append(message)
+                    kind = message['type']
+                    if kind == 'input': manager.inputs.append((shell_id, message['data'].decode()))
+                    elif kind == 'resize': manager.sizes.append((shell_id, message['cols'], message['rows']))
+                    elif kind == 'attach':
+                        manager.queues[shell_id].put_nowait(encode_pipe_message({'type': 'checkpoint',
+                            'request_id': message['request_id'], 'sequence': 1, 'state': b'hello\r\n',
+                            'directoryTracking': {'state': 'ready', 'path': ''}}))
+                    elif kind == 'ping':
+                        manager.queues[shell_id].put_nowait(encode_pipe_message({'type': 'pong', 'request_id': message['request_id']}))
+                    elif kind == 'directory.request':
+                        manager.queues[shell_id].put_nowait(encode_pipe_message({'type': 'directory.result',
+                            'request_id': message['request_id'], 'state': 'pending', 'path': message['path']}))
+            async def drain(self): await asyncio.sleep(0)
+        return SimpleNamespace(stdin_supported=True, process=SimpleNamespace(stdin=Writer()))
+
     async def launch(self, manager, tab):
         self.launches += 1
         shell_id = f'shell-{self.launches}'
         log = self.root / (shell_id + '.log')
         log.write_bytes(b'hello\r\n')
         record = Record(id=shell_id, label=label(tab['id']), status='running',
-                  stdout_log=str(log), capabilities={'stdin_write': True, 'resize': True})
+                  stdout_log=str(log), capabilities={'backend': 'pipe', 'stdin_write': True, 'stdout_subscribe_bytes': True})
         self.records[shell_id] = record
         return record.copy()
 
@@ -114,6 +150,20 @@ def test_exit_reconcile_does_not_start_a_replacement(tmp_path):
     asyncio.run(run())
 
 
+def test_explicit_close_removes_pre_broker_pty_without_io_fallback(tmp_path):
+    async def run():
+        store, tab, manager, service = fixture(tmp_path)
+        started = (await service.dispatch(tab, 'terminal.start', {}))['tab']
+        manager.records[started['shellId']]['capabilities'] = {'backend': 'pty', 'stdin_write': True}
+        with pytest.raises(RuntimeError, match='no live broker pipe'):
+            await service.dispatch(started, 'terminal.input', {'data': 'no retry'})
+        closed = (await service.dispatch(started, 'terminal.close', {}))['tab']
+        assert closed['shellId'] is None
+        assert manager.removed == [started['shellId']]
+        assert manager.inputs == []
+    asyncio.run(run())
+
+
 def test_foreign_and_uncontrolled_records_fail_closed(tmp_path):
     async def run():
         store, tab, manager, service = fixture(tmp_path)
@@ -124,7 +174,7 @@ def test_foreign_and_uncontrolled_records_fail_closed(tmp_path):
         assert manager.removed == []
         manager.records['shell-1']['label'] = label(tab['id'])
         manager.records['shell-1']['capabilities']['stdin_write'] = False
-        with pytest.raises(RuntimeError, match='no live PTY'):
+        with pytest.raises(RuntimeError, match='no live broker'):
             await service.reconcile(started)
         assert store.get(tab['id']) == started
     asyncio.run(run())
@@ -224,11 +274,11 @@ def test_event_wakeup_preserves_raw_bytes_and_exit_clears_association(tmp_path):
             return str(tmp_path)
         service = TabService(store, server, str, project)
         service.terminals = terminal
+        terminal.brokers.sink = service.broker_event
         started = (await terminal.dispatch(tab, 'terminal.start', {}))['tab']
         await terminal.dispatch(started, 'terminal.checkpoint', {})
-        with (tmp_path / 'shell-1.log').open('ab') as output:
-            output.write(b'\x1b[31mraw\xff')
-        await service.shell_changed('shell-1')
+        manager.queues['shell-1'].put_nowait(encode_pipe_message({'type': 'output', 'sequence': 2, 'data': b'\x1b[31mraw\xff'}))
+        for _ in range(8): await asyncio.sleep(0)
         event, payload, routing = server.events[-1]
         assert event == 'terminal_output'
         assert payload['data'] == b'\x1b[31mraw\xff'
@@ -240,6 +290,7 @@ def test_event_wakeup_preserves_raw_bytes_and_exit_clears_association(tmp_path):
         assert store.get(tab['id'])['shellId'] is None
         assert server.events[-2][0] == 'tab_snapshot'
         assert manager.launches == 1
+        await service.shutdown()
     asyncio.run(run())
 
 

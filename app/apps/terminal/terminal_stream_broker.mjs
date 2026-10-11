@@ -7,6 +7,7 @@ import {
   TERMINAL_STREAM_CODEC,
 } from './terminal_stream_protocol.mjs';
 import { requireTerminalNodeModule } from './terminal_node_modules.mjs';
+import { DirectoryControl } from './terminal_directory_control.mjs';
 
 // Node 21+ exposes a browser-shaped navigator global. The xterm 5.3 packages
 // use navigator absence to select their headless path, so remove it before the
@@ -72,7 +73,11 @@ if (configuredProtocol !== TERMINAL_STREAM_CODEC) {
   throw new Error(`unsupported terminal stream protocol: ${configuredProtocol}`);
 }
 
-const shellCmd = resolveInnerShellCommand();
+// Explicit experimental opt-in only; no existing session changes behavior.
+const directoryControl = process.env.TERMINAL_STREAM_DIRECTORY_CONTROL === '1'
+  ? new DirectoryControl(process.env.TERMINAL_STREAM_CONTROL_ROOT, message => sendFrame(message))
+  : null;
+const shellCmd = directoryControl?.shell() || resolveInnerShellCommand();
 const [file, ...args] = shellCmd;
 const cwd = process.env.TERMINAL_STREAM_CWD || process.cwd();
 let cols = parsePositiveInt(process.env.TERMINAL_STREAM_COLS, DEFAULT_COLS);
@@ -80,7 +85,7 @@ let rows = parsePositiveInt(process.env.TERMINAL_STREAM_ROWS, DEFAULT_ROWS);
 const scrollback = parsePositiveInt(process.env.TERMINAL_STREAM_SCROLLBACK, DEFAULT_SCROLLBACK);
 // This PTY is served by xterm.js, not the terminal (e.g. tmux) hosting TE2.
 const termName = DEFAULT_TERM;
-const env = { ...process.env, TERM: termName };
+const env = { ...process.env, TERM: termName, ...directoryControl?.environment() };
 
 const stateTerminal = new HeadlessTerminal({
   cols,
@@ -99,6 +104,7 @@ const pty = nodePty.spawn(file, args, {
   cwd,
   env,
 });
+directoryControl?.bind(pty, stateTerminal);
 
 const inputDecoder = new PipeFrameDecoder();
 let sequence = 0;
@@ -117,7 +123,7 @@ function sendFrame(message) {
   return outputQueue;
 }
 
-function enqueueOperation(label, operation) {
+function enqueueOperation(label, operation, requestId = undefined) {
   operationQueue = operationQueue
     .then(operation)
     .catch(async (error) => {
@@ -125,6 +131,7 @@ function enqueueOperation(label, operation) {
       try {
         await sendFrame({
           type: 'error',
+          request_id: requestId,
           code: 'worker_operation_failed',
           message: error instanceof Error ? error.message : String(error),
           fatal: false,
@@ -166,6 +173,7 @@ async function handleControlMessage(message) {
       rows,
       scrollback,
       state: Buffer.from(checkpointState, 'utf8'),
+      directoryTracking: directoryControl?.snapshot(),
     });
     return;
   }
@@ -175,7 +183,18 @@ async function handleControlMessage(message) {
     if (!data || data.byteLength === 0) {
       return;
     }
-    pty.write(Buffer.from(data).toString('utf8'));
+    const text = Buffer.from(data).toString('utf8');
+    if (directoryControl) directoryControl.input(text);
+    else pty.write(text);
+    return;
+  }
+
+  if (type === 'directory.request' && directoryControl) {
+    await directoryControl.request(message);
+    return;
+  }
+  if (type === 'directory.cancel' && directoryControl) {
+    await directoryControl.cancel();
     return;
   }
 
@@ -222,6 +241,7 @@ pty.onExit(({ exitCode, signal }) => {
       reason: signal ? `signal:${signal}` : 'exited',
     });
     stateTerminal.dispose();
+    directoryControl?.dispose();
     await outputQueue;
     process.exit(typeof exitCode === 'number' ? exitCode : 0);
   });
@@ -237,7 +257,8 @@ process.stdin.on('data', (chunk) => {
     return;
   }
   for (const message of messages) {
-    enqueueOperation('control message', () => handleControlMessage(message));
+    enqueueOperation('control message', () => handleControlMessage(message),
+      typeof message.request_id === 'string' ? message.request_id : undefined);
   }
 });
 

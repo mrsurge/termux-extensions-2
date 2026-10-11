@@ -2,21 +2,25 @@
 
 This app is an ordinary Python worker and uses the existing `framework_shells`
 Python API. Code TE2's embedded native-worker boundary is not a requirement for
-other workers. The app-owned `shellspec/terminal.yaml` launches an interactive
-PTY through `Orchestrator.start_from_ref`; Framework-Shells owns PTY execution,
-input, resize, output logs and removal. `TERM=xterm-256color` is explicit.
+other workers. It launches the existing Terminal `node_terminal_stream.yaml`
+pipe shell through `Orchestrator.start_from_ref`. Node owns node-pty,
+headless-xterm, sequence assignment and checkpoints; Framework-Shells owns the
+broker process and live pipe. `TERM=xterm-256color` is explicit.
 
 `terminal_service.py` lazy-loads the manager/orchestrator only for terminal work.
 It does not import Code TE2's terminal backend or use its process/project state.
-The shared `app.libs.terminal_runtime` Pyte core consumes raw logs through File
-Explorer's explicit Python reader. That reader is this app's normal boundary,
-not a fallback for native Code TE2 failures.
+`terminal_broker.py` reuses Terminal's bounded MessagePack pipe framing and the
+owning manager's byte subscription/stdin. It does not import Terminal's FastAPI
+backend or replay log files. Locked production Node dependencies are resolved
+through Terminal's existing runtime helper.
 
 The existing `/tabs` request lane exposes `terminal.start`, `terminal.status`,
 `terminal.close`, `terminal.input`, `terminal.resize`, and `terminal.checkpoint`.
 Requests carry `tabId` and current `revision` and require an attached presentation.
 Input also carries bounded UTF-8 `data`; resize/checkpoint accept bounded
-`columns` and `rows`. Checkpoints preserve ANSI, pending bytes and raw-log offsets.
+`columns` and `rows`. Checkpoints use Node's serialized ANSI state. The Python
+adapter projects session-local byte offsets for the retained frontend cursor;
+these are not durable raw-log offsets. Broker sequences detect stream gaps.
 
 `tabs.json` owns the associated `shellId`. Start is explicit and serialized under
 the tab service lock; a repeated start reuses the associated controllable shell.
@@ -37,11 +41,14 @@ manager removal before clearing its durable association; tab close refuses
 an associated shell unless the user confirms `closeTerminal: true`. Failed persistence
 after a new launch cleans that exact child. No uncertain mutation is replayed.
 
-The lazy process-local Framework-Shells event subscription treats output events
-only as wakeups: shared Pyte consumes raw log bytes and emits offset-checked binary
-`terminal_output` events to the exact tab room. Reset/gap recovery requests a
-checkpoint; confirmed exit/removal clears the association and updates attached
-clients/catalogs. ASGI shutdown unsubscribes without killing retained shells.
+The single live pipe reader resolves control replies separately from its bounded
+event publisher, avoiding deadlock when a checkpoint holds the tab mutation lock.
+Output uses the existing binary `terminal_output` Socket.IO event in the exact
+tab room. Overflow or a sequence gap requests checkpoint recovery; no log-tail
+fallback is allowed. FWS exit/removal clears the association. ASGI shutdown
+unsubscribes without killing retained shells. Socket.IO remains the tab/CRUD and
+user-command lane; a separate raw WebSocket output lane is explicitly deferred
+until this broker integration has live acceptance.
 
 `terminal_drawer.ts` builds through `app/apps/terminal/build.mjs` into the existing
 inventoried `/static/js/file_explorer_terminal.js` root. It lazily reuses vendored
@@ -61,8 +68,48 @@ Async mounts/checkpoints are tab/shell/generation fenced; association-only updat
 do not refetch the directory. Explicit close stops the terminal for all attached
 presentations, while minimize, tab switch, reload and detach retain it.
 
-Directory-lock injection and physical multi-client acceptance remain deferred.
-No claim is made that a Python-worker restart can recover a PTY without manager
+## Tab-owned directory tracking
+
+Lock directory defaults on and is stored separately from browsing options in
+each durable tab record. Its event-linked checkbox is shared by all presentations
+of that tab. No terminal is shared across unrelated tabs. Changing browsing
+options, switching/restoring tabs, and reconnecting do not request a directory
+change. Only an explicit navigation to a different directory does so while locked.
+Unlock cancels any unconsumed request and leaves CWD alone; re-lock only arms
+future navigation. A shell action already consumed before unlock cannot be undone.
+
+New terminals enable Terminal's opt-in `shellspec/directory_control.bash` init file.
+It sources /etc/profile and the first readable normal login profile, then chains
+the user's scalar/array PROMPT_COMMAND while preserving command exit status.
+This follows Code Server's approach: login profiles run, but Bash's actual
+login_shell flag is off. No real profile is edited. Existing terminals are not
+initialized by injecting commands: they report unavailable until explicitly
+closed and started anew.
+
+`terminal_control/shell-control-*` under the File Explorer data root contains
+private atomic requests and bounded shell-event files (0700/0600). Typed
+directory.request/result and shell.state envelopes keep control separate from
+terminal output. Bash PS0 publishes busy before execution; the final prompt hook
+publishes idle. Clean idle requests use SIGWINCH and a shell-side state recheck,
+not injected PTY commands. Busy/partial input defers to the next prompt. Later
+input is held at most 64 KiB during the bounded two-second wake; cancellation
+flushes held input without replaying a directory mutation. Quoted builtin cd
+consumes the latest literal path once. After a clean-idle trap application, the
+broker submits only an empty line while holding later user input: Bash re-runs
+normal prompt generation (including Starship), rather than retaining Readline's
+old expanded prompt or manually drawing PS1. Completion waits for the fresh idle
+event. Deferred cd runs before prompt callbacks; bash-preexec uses its existing
+precmd callback list as well as the ordinary PROMPT_COMMAND path. No user profile
+is edited, and partial/busy input never receives this empty-line refresh.
+Existing WINCH traps fail unsupported;
+Bash 4.4+ and physical Termux compatibility remain explicit gates. Normal Terminal
+launches do not enable this opt-in. Old prompt-only mailbox files are prototype
+evidence, not the current runtime path. Explicit Close can remove an old PTY;
+it is never silently converted or replaced.
+
+User live acceptance of broker directory tracking and prompt refresh passed on
+2026-10-11. Exhaustive multi-client/Termux/trap compatibility remains separate.
+No claim is made that a Python-worker restart can recover a pipe without manager
 capabilities. To test this source, refresh only the File Explorer worker through
 the approved app lifecycle, then publish the frontend via native OTA (or browser
 reload). A Code TE2 mypyc rebuild is not needed for this ordinary Python worker.

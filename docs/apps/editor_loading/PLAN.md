@@ -333,10 +333,20 @@ Hiding/minimizing the drawer, page reload, or closing its presentation retains
 the associated live shell; only explicit Close terminal ends it. An exited shell
 is disassociated, never restarted/reopened implicitly. Session restore must verify
 live ownership/capabilities rather than treating a persisted shell ID as proof.
-Drawer supports minimize/maximize. Add a **Lock directory** checkbox and command
-injection using the existing pipe-backed mechanism. Investigate lock semantics,
-shell quoting/prompt readiness, foreground programs, exact-tab targeting and
-uncertain writes; do not inject commands merely because a page reconnected.
+Drawer supports minimize/maximize. **Lock directory** is a durable tab-owned
+boolean, default on, synchronized to every attached client through existing tab
+events. It follows explicit browsing-directory changes only: manual terminal cd
+is preserved until another browse navigation, and switching tabs/restoring views
+or reconnecting never requests cd. Unlock cancels pending tracking and leaves CWD
+unchanged; re-lock arms future navigation without an immediate cd.
+Approved implementation uses new-shell-only Bash --init-file startup, normal
+login-profile sourcing, preserved prompt hooks/status and private per-shell
+revisioned path mailboxes. Bash applies the latest request once at a prompt,
+never by injecting command text into foreground programs/Readline. The actual
+login_shell flag is off (Code Server-style startup compatibility tradeoff).
+Existing shells remain untouched and report tracking unavailable until explicit
+close/new start. Applied/error status follows shell acknowledgment, not transport
+write success. No polling, uncertain replay or automatic shell replacement.
 
 Reuse Code TE2's shellspec/shell and **exact Pyte screen-projection setup**, with
 the standalone Terminal's frontend/custom xterm, mobile handling, key rules and
@@ -565,3 +575,89 @@ keeps the live listener; preferred/actual/fallback values are logged. This is
 storage convenience, not client or remote-host identity. No security bypass,
 storage migration, Python change or automatic client restart is introduced.
 Android deployment requires APKs; editor OTA cannot publish relay Kotlin changes.
+# File Explorer shell-control follow-up
+
+## Opt-in broker coordination proof
+
+The Terminal broker now has an experimental `TERMINAL_STREAM_DIRECTORY_CONTROL=1`
+path requiring an explicit `TERMINAL_STREAM_CONTROL_ROOT`. It selects app-owned
+Bash init integration and admits typed `directory.request`; `directory.result`
+and `shell.state` are broker output envelopes. This flag is not supplied by the
+Terminal or File Explorer launchers, so ordinary sessions remain unchanged.
+
+The proof uses Bash 4.4+ PS0 to mark shell-owned busy state before user command
+execution, without replacing DEBUG/preexec hooks. The final prompt hook applies
+pending intent and publishes idle. A clean-idle request wakes Bash through
+SIGWINCH, not terminal bytes; the trap rechecks shell-owned state. Later input is
+held up to 64 KiB until completion or a bounded two-second wake failure; partial
+input conservatively defers to the next prompt. Busy rejections downgrade to
+prompt-time application. Existing WINCH traps fail explicitly as unsupported in
+this proof; composition and Termux signal behavior remain compatibility gates.
+
+Current frontend transport is File Explorer `/tabs` WebSocket-only Socket.IO,
+including input/output/checkpoints; standalone Terminal `/ws/terminal` is binary
+MessagePack over a separate raw WebSocket. No frontend transport was changed.
+Next integration should extract/reuse the broker session/pipe adapter without
+importing Terminal's FastAPI backend into File Explorer. Keep durable tab identity,
+shared checkbox authority, explicit close and no reconnect creation/replay. A
+raw WebSocket frontend migration is optional and requires its own bounded
+checkpoint/sequence/reconnect contract; it is not required for shell controls.
+
+The prompt-only directory mailbox has a live-discovered gap: navigation at an
+already idle prompt waits for Enter/a subsequent prompt. It is not accepted as
+the final Nautilus-like behavior. Preserve the durable default-on tab lock,
+shared-client ownership, explicit-navigation-only requests and no reconnect replay.
+
+Approved direction: reuse the Terminal app's pipe-owned Node PTY broker and typed
+MessagePack framing rather than inventing a second broker. Terminal output and
+directory requests/results/shell-state events are separate envelope types. The
+existing broker `ready` event proves spawn, not prompt readiness. The existing
+frontend raw WebSocket transport need not become a control-authority surface.
+
+An app-owned Bash init/rc hook is still required; do not edit user startup files.
+First prove shell/broker coordination in isolation, then approve File Explorer's
+PTY-to-pipe migration. An empty Readline callback can apply literal paths without
+Enter and refuse unfinished input, but its wake-up bytes MUST NOT be sent to a
+busy program. Prompt sentinels alone can be stale around command dispatch; typed
+transport alone does not solve that race. Signal-only traps did not wake idle
+Readline in the desktop probe. Next proof must address foreground programs,
+blocking builtins, partial commands and navigation/input ordering before live
+integration. The opt-in coordination proof above supersedes this initial
+prototype-only status; the following approved integration supersedes migration-pending notes.
+
+## File Explorer pipe-broker integration
+
+File Explorer now launches the existing Terminal Node pipe shellspec, production
+runtime resolver and typed MessagePack codec. Only these launches enable directory
+control. Its small Python adapter subscribes to the exact live manager pipe and
+serializes framed stdin writes; no Terminal FastAPI import, Pyte/log replay or
+Code TE2 domain coupling is introduced. Control replies resolve independently
+of the bounded event publisher, so tab-lock-held checkpoints cannot deadlock.
+
+Socket.IO remains the tab/CRUD, input, directory and checkpoint command lane.
+Output temporarily retains its existing Socket.IO event with session-local byte
+offsets derived from broker output; Node checkpoint sequences remain authoritative
+for gaps. The user explicitly deferred a separate raw WebSocket output lane until
+this broker integration works. Do not change both boundaries in one slice.
+
+Old PTY sessions are not converted or silently replaced. Their exact signed tab
+label permits explicit Close; other I/O fails closed. Restoration does not create
+or cd. Unlock cancels pending directory intent through the broker then confirms
+ordered control processing with ping; re-lock only arms future navigation.
+
+Next live gate: explicitly approved File Explorer worker refresh and frontend
+OTA, then new-terminal idle/busy/partial-input navigation, shared lock/peer state,
+checkpoint reconnect and explicit close. No shared framework restart, Android
+build, compiled Code TE2 rebuild or release is required/authorized by this slice.
+
+### Prompt refresh correction
+
+Idle SIGWINCH changes CWD but leaves Readline's expanded prompt stale. The approved
+correction uses a guarded empty accepted line after shell-confirmed clean-idle
+application, holding later input until fresh idle. Normal Bash prompt hooks/PS1
+generate the display; no Starship-specific renderer or injected cd command is
+needed. Deferred application precedes prompt hooks, including bash-preexec's
+precmd list (which can otherwise reorder ahead of PROMPT_COMMAND). Existing
+terminal processes require explicit close/new start for the new init hooks.
+Actual installed Starship/custom-hook and busy/partial ordering regressions pass;
+physical acceptance remains separate.

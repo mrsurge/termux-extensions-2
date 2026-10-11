@@ -17,8 +17,9 @@ interface Runtime {
   WebFontsAddon: { WebFontsAddon: new (initialRelayout: boolean) => { loadFonts(fonts: string[]): Promise<void> } };
   te2TerminalTouchSelection: { attach(terminal: Terminal): Disposable };
 }
-interface Tab { id: string; shellId: string | null }
-interface Reply { tab?: Tab; shellId?: string; ansi?: string; pendingBytes?: Uint8Array; outputOffset?: number }
+interface Tab { id: string; shellId: string | null; directoryLocked?: boolean }
+interface DirectoryStatus { state: string; path: string }
+interface Reply { tab?: Tab; shellId?: string; ansi?: string; pendingBytes?: Uint8Array; outputOffset?: number; directoryTracking?: DirectoryStatus }
 interface Tabs { readonly tab: Tab | null; terminal(method: string, params?: object): Promise<Reply> }
 interface Delta { tabId: string; shellId: string; startOffset: number; endOffset: number; data: Uint8Array }
 export class TerminalOutputCursor {
@@ -100,6 +101,18 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
   const viewport = drawer.querySelector<HTMLElement>('.fx-terminal-viewport')!;
   const keys = drawer.querySelector<HTMLElement>('.fx-terminal-keys')!;
   const status = drawer.querySelector<HTMLElement>('[data-terminal-status]')!;
+  const directoryLock = drawer.querySelector<HTMLInputElement>('[data-terminal="directory-lock"]');
+  const directoryStatus = drawer.querySelector<HTMLElement>('[data-directory-status]');
+  let lockPending = false;
+  let displayedLock = true;
+  function showDirectoryStatus(value?: DirectoryStatus) {
+    if (!directoryStatus) return;
+    directoryStatus.textContent = value?.state === 'pending' ? 'Waiting for terminal directory change'
+      : value?.state === 'error' ? 'Terminal directory change failed'
+      : value?.state === 'unavailable' ? 'Directory tracking needs a newly started terminal'
+      : value?.state === 'starting' ? 'Waiting for terminal directory tracking'
+      : '';
+  }
   const modifiers = new TerminalModifierState();
   let terminal: Terminal | undefined, fit: Fit | undefined;
   let identity = '', shell = '', generation = 0;
@@ -118,7 +131,7 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
     inputs.reset();
     for (const binding of bindings) binding.dispose(); bindings = [];
     terminal?.dispose(); terminal = undefined; fit = undefined;
-    viewport.replaceChildren(); modifiers.reset(); updateModifiers(); identity = ''; shell = '';
+    viewport.replaceChildren(); modifiers.reset(); updateModifiers(); showDirectoryStatus(); identity = ''; shell = '';
   }
   function paint(delta: Delta) {
     const action = cursor.accept(delta.startOffset, delta.endOffset, delta.data.byteLength);
@@ -158,6 +171,7 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
       if (current !== generation || terminal !== view) return;
       if (checkpoint.pendingBytes?.length) view.write(new Uint8Array(checkpoint.pendingBytes));
       cursor.offset = checkpoint.outputOffset!; ready = true; status.textContent = 'Terminal';
+      showDirectoryStatus(checkpoint.directoryTracking);
       const pending = buffered; buffered = []; bufferedBytes = 0;
       for (const delta of pending) { if (!ready) break; paint(delta); }
     } catch (value) { if (current === generation) error(value); }
@@ -168,6 +182,10 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
     inputs.enqueue(data);
   }
   function sync(tab: Tab | null) {
+    const locked = tab?.directoryLocked !== false;
+    if (locked !== displayedLock) showDirectoryStatus();
+    displayedLock = locked;
+    if (directoryLock) { directoryLock.checked = tab?.directoryLocked !== false; directoryLock.disabled = lockPending; }
     if (!tab?.shellId) { clear(); drawer.hidden = true; return; }
     if (tab.id === identity && tab.shellId === shell) {
       if (!ready) void recover();
@@ -299,6 +317,19 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
     if (!await ui.teUI.dialog.confirm('Close this terminal? Its running processes will be stopped in every attached window.')) return;
     try { await tabs.terminal('terminal.close'); sync(tabs.tab); } catch (value) { error(value); }
   });
+  directoryLock?.addEventListener('change', () => {
+    if (lockPending) return;
+    const current = generation;
+    const locked = directoryLock.checked;
+    lockPending = true; directoryLock.disabled = true;
+    void tabs.terminal('terminal.directoryLock', { locked }).then(reply => {
+      if (current === generation) showDirectoryStatus(reply.directoryTracking);
+    }).catch(value => { if (current === generation) error(value); }).finally(() => {
+      lockPending = false;
+      directoryLock.checked = tabs.tab?.directoryLocked !== false;
+      directoryLock.disabled = false;
+    });
+  });
   const resize = new ResizeObserver(() => {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => { if (!minimized && terminal) { ready = false; recoverAgain = true; void recover(); } }, 150);
@@ -307,11 +338,16 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
   // Reconnect's authoritative tab snapshot mounts a new view even if IDs match.
   const disconnected = () => { clear(); status.textContent = 'Disconnected'; };
   const reset = (payload: { shellId: string }) => { if (payload.shellId === shell) { ready = false; recoverAgain = true; void recover(); } };
+  const directoryChanged = (payload: { tabId: string; shellId: string; directoryTracking: DirectoryStatus }) => {
+    if (payload.tabId === identity && payload.shellId === shell) showDirectoryStatus(payload.directoryTracking);
+  };
+  socket.on('terminal_directory', directoryChanged);
   socket.on('terminal_output', output); socket.on('terminal_reset', reset); socket.on('disconnect', disconnected);
   return { sync, dispose() {
     disposeRepeatingKeys.forEach(dispose => dispose());
     for (const type of ['pointerdown', 'pointerup', 'click']) tabsPanel?.removeEventListener(type, guardMinibar, true);
     disposed = true; clear(); resize.disconnect();
     socket.off('terminal_output', output); socket.off('terminal_reset', reset); socket.off('disconnect', disconnected);
+    socket.off('terminal_directory', directoryChanged);
   } };
 }

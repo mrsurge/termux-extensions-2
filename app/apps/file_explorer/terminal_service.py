@@ -1,4 +1,4 @@
-"""Tab-owned PTYs through the existing Framework-Shells Python worker API."""
+"""Tab-owned Terminal brokers through Framework-Shells' live pipe API."""
 from __future__ import annotations
 
 import asyncio
@@ -6,23 +6,21 @@ from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Protocol, cast
 
-from app.libs.terminal_runtime.screen_projection import TerminalScreenProjectionRegistry
-from .terminal_log_io import open_log
 from .tab_store import TabRecord, TabStore, text
+from .directory_tracking import TrackingStatus
+from .terminal_broker import BrokerSessions, PipeManager
 
 
 class ShellRecord(Protocol):
     def to_payload(self) -> dict[str, object]: ...
 
 
-class Manager(Protocol):
+class Manager(PipeManager, Protocol):
     async def load_shell_record(self, shell_id: str) -> ShellRecord | None: ...
     async def get_shell_capabilities(self, record: ShellRecord) -> dict[str, object]: ...
     async def find_shell_by_label(self, label: str, *, status: str) -> object | None: ...
     async def describe(self, record: object) -> dict[str, object]: ...
     async def remove_shell(self, shell_id: str, *, force: bool) -> object: ...
-    async def write_to_pty(self, shell_id: str, data: str) -> None: ...
-    async def resize_pty(self, shell_id: str, cols: int, rows: int) -> None: ...
 
 
 class OrchestratorAPI(Protocol):
@@ -51,15 +49,26 @@ def label(tab_id: str) -> str:
 
 
 async def launch(manager: Manager, tab: TabRecord) -> dict[str, object]:
+    from app.te2_paths import te2_app_data_home
     from framework_shells.orchestrator import Orchestrator
+    from app.apps.terminal.node_runtime import ensure_terminal_node_runtime
+    runtime = await asyncio.to_thread(ensure_terminal_node_runtime)
+    terminal_root = Path(__file__).parent.parent / 'terminal'
     constructor = cast(Callable[[Manager], OrchestratorAPI], Orchestrator)
-    record = await constructor(manager).start_from_ref(
-        'terminal.yaml#terminal', base_dir=Path(__file__).parent / 'shellspec',
-        ctx={'CWD': tab['path'], 'SHELL_CMD': 'bash -l -i'},
-        label=label(tab['id']), wait_ready=False,
-        subgroups_overrides=['file_explorer', 'tab:' + tab['id']],
-        env_overrides={'TERM': 'xterm-256color'},
-    )
+    try:
+        record = await constructor(manager).start_from_ref(
+            'node_terminal_stream.yaml#terminal-stream', base_dir=terminal_root / 'shellspec',
+            ctx={'APP_ID': 'file_explorer', 'CWD': tab['path'], 'BROKER_ENTRY': str(terminal_root / 'terminal_stream_broker.mjs'),
+                 'NODE_BIN': str(runtime.node_binary), 'NODE_PATH': runtime.executable_path,
+                 'NODE_RUNTIME_ROOT': str(runtime.root), 'COLS': '80', 'ROWS': '24',
+                 'SCROLLBACK': '5000', 'SHELL_CMD_JSON': '["bash", "-l", "-i"]', 'LAUNCH_ID': tab['id']},
+            label=label(tab['id']), wait_ready=False,
+            subgroups_overrides=['file_explorer', 'tab:' + tab['id']],
+            env_overrides={'TERM': 'xterm-256color', 'TERMINAL_STREAM_DIRECTORY_CONTROL': '1',
+                           'TERMINAL_STREAM_CONTROL_ROOT': str(te2_app_data_home('file_explorer') / 'terminal_control')},
+        )
+    except BaseException:
+        raise
     try:
         return await manager.describe(record)
     except BaseException:
@@ -76,10 +85,9 @@ class TerminalService:
         self.store: TabStore = store
         self.manager_factory: ManagerFactory = manager_factory
         self.launcher: Launcher = launcher
-        self.projections: TerminalScreenProjectionRegistry = TerminalScreenProjectionRegistry(
-            capacity=32, log_opener=open_log)
+        self.brokers: BrokerSessions = BrokerSessions()
 
-    async def _record(self, manager: Manager, tab: TabRecord) -> dict[str, object] | None:
+    async def _record(self, manager: Manager, tab: TabRecord, *, closing: bool = False) -> dict[str, object] | None:
         shell_id = tab['shellId']
         if shell_id is None:
             return None
@@ -94,9 +102,13 @@ class TerminalService:
             raise ValueError('Terminal does not belong to this tab')
         if data.get('status') == 'exited':
             return None
+        if closing:
+            # Explicit removal also works for a retained pre-broker PTY. Exact
+            # signed identity/label still applies; this is not an I/O fallback.
+            return data
         capabilities = await manager.get_shell_capabilities(record)
-        if data.get('status') != 'running' or capabilities.get('stdin_write') is not True or capabilities.get('resize') is not True:
-            raise RuntimeError('Terminal is running but this worker has no live PTY control')
+        if data.get('status') != 'running' or capabilities.get('backend') != 'pipe' or capabilities.get('stdin_write') is not True or capabilities.get('stdout_subscribe_bytes') is not True:
+            raise RuntimeError('Terminal has no live broker pipe; close it and start a new terminal')
         return data
 
     async def reconcile(self, tab: TabRecord) -> TabRecord:
@@ -105,12 +117,43 @@ class TerminalService:
         manager = await self.manager_factory()
         if await self._record(manager, tab) is not None:
             return tab
-        await self.projections.discard(tab['shellId'])
+        await self.brokers.discard(tab['shellId'])
         return self.store.set_shell(tab['id'], tab['revision'], None)
+
+    def directory_status(self, tab: TabRecord) -> TrackingStatus:
+        if not tab['directoryLocked']: return {'state': 'unlocked', 'path': ''}
+        session = self.brokers.sessions.get(tab['shellId'] or '')
+        if session is None: return {'state': 'starting', 'path': ''}
+        return {'state': text(session.status.get('state')), 'path': str(session.status.get('path') or '')}
+
+    async def track_navigation(self, tab: TabRecord) -> TrackingStatus:
+        if not tab['directoryLocked'] or not tab['shellId']:
+            return self.directory_status(tab)
+        manager = await self.manager_factory()
+        if await self._record(manager, tab) is None:
+            return {'state': 'unavailable', 'path': ''}
+        session = await self.brokers.get(tab['shellId'], manager)
+        _ = await session.request({'type': 'directory.request', 'path': tab['path']})
+        return self.directory_status(tab)
 
     async def dispatch(self, tab: TabRecord, method: str, params: dict[str, object]) -> dict[str, object]:
         if method == 'terminal.status':
             return {'tab': await self.reconcile(tab)}
+        if method == 'terminal.directoryLock':
+            locked = params.get('locked')
+            if not isinstance(locked, bool):
+                raise ValueError('Expected boolean directory lock')
+            # Cancel pending intent on either transition; re-lock only arms future
+            # navigation. A failed persistence never replays a shell operation.
+            if tab['shellId'] is not None and tab['directoryLocked'] != locked:
+                manager = await self.manager_factory()
+                if await self._record(manager, tab) is not None:
+                    session = await self.brokers.get(tab['shellId'], manager)
+                    await session.send({'type': 'directory.cancel'})
+                    _ = await session.request({'type': 'ping'})
+                    session.status = {'state': 'ready', 'path': ''}
+            updated = self.store.set_directory_lock(tab['id'], tab['revision'], locked)
+            return {'tab': updated, 'directoryTracking': self.directory_status(updated)}
         manager = await self.manager_factory()
         if method == 'terminal.start':
             tab = await self.reconcile(tab)
@@ -135,18 +178,20 @@ class TerminalService:
                 candidate: TabRecord = {**tab, 'shellId': shell_id}
                 if await self._record(manager, candidate) is None:
                     raise RuntimeError('Launched terminal exited before association')
-                updated = self.store.set_shell(tab['id'], tab['revision'], shell_id)
+                tracking_id = data.get('directoryTrackingId')
+                updated = self.store.set_shell(tab['id'], tab['revision'], shell_id,
+                                               tracking_id if isinstance(tracking_id, str) else None)
             except BaseException:
                 if created:
                     _ = await manager.remove_shell(shell_id, force=True)
                 raise
             return {'tab': updated}
-        record = await self._record(manager, tab)
+        record = await self._record(manager, tab, closing=method == 'terminal.close')
         if method == 'terminal.close':
             if record is not None:
                 _ = await manager.remove_shell(text(record.get('id')), force=True)
             if tab['shellId']:
-                await self.projections.discard(tab['shellId'])
+                await self.brokers.discard(tab['shellId'])
             return {'tab': self.store.set_shell(tab['id'], tab['revision'], None)}
         if record is None:
             raise ValueError('Terminal is not active; explicitly start a new terminal')
@@ -155,17 +200,22 @@ class TerminalService:
             input_text = params.get('data')
             if not isinstance(input_text, str) or len(input_text.encode()) > 65536:
                 raise ValueError('Expected bounded terminal input')
-            await manager.write_to_pty(shell_id, input_text)
+            session = await self.brokers.get(shell_id, manager)
+            await session.send({'type': 'input', 'data': input_text.encode('utf8')})
             return {'shellId': shell_id}
         if method in ('terminal.resize', 'terminal.checkpoint'):
             cols, rows = params.get('columns', 80), params.get('rows', 24)
             if not isinstance(cols, int) or isinstance(cols, bool) or not 1 <= cols <= 1000 or not isinstance(rows, int) or isinstance(rows, bool) or not 1 <= rows <= 500:
                 raise ValueError('Invalid terminal dimensions')
             if method == 'terminal.resize':
-                await manager.resize_pty(shell_id, cols, rows)
-                _ = await self.projections.resize(shell_id, cols, rows)
+                session = await self.brokers.get(shell_id, manager)
+                await session.send({'type': 'resize', 'cols': cols, 'rows': rows})
                 return {'shellId': shell_id}
-            checkpoint = await self.projections.checkpoint(shell_id, Path(text(record.get('stdout_log'))), columns=cols, lines=rows)
-            return {'shellId': shell_id, 'ansi': checkpoint.ansi, 'pendingBytes': checkpoint.pending_bytes,
-                    'outputOffset': checkpoint.output_offset, 'columns': checkpoint.columns, 'rows': checkpoint.lines}
+            session = await self.brokers.get(shell_id, manager)
+            checkpoint = await session.request({'type': 'attach', 'cols': cols, 'rows': rows})
+            state = checkpoint.get('state')
+            if not isinstance(state, bytes): raise ValueError('Invalid broker checkpoint')
+            return {'shellId': shell_id, 'ansi': state.decode('utf8'), 'pendingBytes': b'',
+                    'outputOffset': checkpoint['outputOffset'], 'columns': cols, 'rows': rows,
+                    'directoryTracking': self.directory_status(tab)}
         raise ValueError('Unsupported terminal method')

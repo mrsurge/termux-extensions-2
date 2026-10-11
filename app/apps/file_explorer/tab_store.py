@@ -23,6 +23,8 @@ class TabRecord(TypedDict):
     revision: int
     options: TabOptions
     shellId: str | None
+    directoryLocked: bool
+    shellTrackingId: str | None
 
 
 def object_map(value: object) -> dict[str, object]:
@@ -55,12 +57,19 @@ def record(value: object) -> TabRecord:
     body = object_map(value)
     revision = body.get('revision')
     shell = body.get('shellId')
+    locked = body.get('directoryLocked', True)
+    tracking = body.get('shellTrackingId')
+    if not isinstance(locked, bool) or tracking is not None and not isinstance(tracking, str):
+        raise ValueError('Invalid directory tracking state')
+    if isinstance(tracking, str) and (shell is None or len(tracking) != 32 or any(char not in '0123456789abcdef' for char in tracking)):
+        raise ValueError('Invalid shell tracking generation')
     if not isinstance(revision, int) or isinstance(revision, bool) or revision < 1:
         raise ValueError('Invalid tab revision')
     if shell is not None and not isinstance(shell, str):
         raise ValueError('Invalid shell association')
     return {'id': text(body.get('id')), 'path': text(body.get('path')),
-            'revision': revision, 'options': options(body.get('options')), 'shellId': shell}
+            'revision': revision, 'options': options(body.get('options')), 'shellId': shell,
+            'directoryLocked': locked, 'shellTrackingId': tracking}
 
 
 def clone(tab: TabRecord) -> TabRecord:
@@ -128,7 +137,8 @@ class TabStore:
         if len(self.tabs) >= 512 or len(self.creations) >= 8192:
             raise ValueError('Tab record limit reached')
         tab: TabRecord = {'id': uuid.uuid4().hex, 'path': path, 'revision': 1,
-                          'options': preferences.copy(), 'shellId': None}
+                          'options': preferences.copy(), 'shellId': None,
+                          'directoryLocked': True, 'shellTrackingId': None}
         self._commit({**self.tabs, tab['id']: tab}, {**self.creations, operation: tab['id']})
         return clone(tab)
 
@@ -156,7 +166,7 @@ class TabStore:
         del remaining[tab_id]
         self._commit(remaining, self.creations.copy())
 
-    def set_shell(self, tab_id: str, revision: int, shell_id: str | None) -> TabRecord:
+    def set_shell(self, tab_id: str, revision: int, shell_id: str | None, tracking_id: str | None = None) -> TabRecord:
         tab = self.get(tab_id)
         if tab is None or tab['revision'] != revision:
             raise ValueError('Tab changed; resync before changing terminal')
@@ -165,5 +175,16 @@ class TabStore:
         if tab['shellId'] == shell_id:
             return tab
         tab['shellId'], tab['revision'] = shell_id, revision + 1
+        tab['shellTrackingId'] = tracking_id if shell_id else None
+        self._commit({**self.tabs, tab_id: tab}, self.creations.copy())
+        return clone(tab)
+
+    def set_directory_lock(self, tab_id: str, revision: int, locked: bool) -> TabRecord:
+        tab = self.get(tab_id)
+        if tab is None or tab['revision'] != revision:
+            raise ValueError('Tab changed; resync before changing directory lock')
+        if tab['directoryLocked'] == locked:
+            return tab
+        tab['directoryLocked'], tab['revision'] = locked, revision + 1
         self._commit({**self.tabs, tab_id: tab}, self.creations.copy())
         return clone(tab)

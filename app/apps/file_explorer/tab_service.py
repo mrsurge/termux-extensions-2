@@ -55,12 +55,15 @@ class TabService:
         self.presentations: dict[str, str] = {}
         self.attached: dict[str, str] = {}
         self.terminals: TerminalService = TerminalService(store)
+        self.terminals.brokers.sink = self.broker_event
         self.observer: asyncio.Task[None] | None = None
+        self.directory_states: dict[str, tuple[str, str]] = {}
         _ = server.on('connect', self.connect, namespace=NAMESPACE)
         _ = server.on('disconnect', self.disconnect, namespace=NAMESPACE)
         _ = server.on('tab_request', self.request, namespace=NAMESPACE)
 
     def observe(self) -> None:
+        self.terminals.brokers.sink = self.broker_event
         if self.observer is None:
             bus = shell_bus()
             queue = bus.subscribe()
@@ -69,6 +72,7 @@ class TabService:
             self.observer.add_done_callback(lambda _task: bus.unsubscribe(queue))
 
     async def shutdown(self) -> None:
+        await self.terminals.brokers.shutdown()
         if self.observer is not None:
             _ = self.observer.cancel()
             _ = await asyncio.gather(self.observer, return_exceptions=True)
@@ -83,7 +87,7 @@ class TabService:
                 for _ in range(min(queue.qsize(), 255)):
                     events.append(queue.get_nowait().to_dict())
                 shells = {str(item.get('shell_id')) for item in events
-                          if item.get('type') in ('shell.pty_chunk', 'shell.log_chunk', 'shell.log_reset', 'shell.exited', 'shell.removed')}
+                          if item.get('type') in ('shell.exited', 'shell.removed')}
                 for shell_id in shells:
                     try:
                         await self.shell_changed(shell_id)
@@ -101,17 +105,34 @@ class TabService:
                 current = await self.terminals.reconcile(tab)
                 room = 'tab:' + tab['id']
                 if current != tab:
+                    _ = self.directory_states.pop(shell_id, None)
                     await self.server.emit('tab_snapshot', {'tab': current}, room=room, namespace=NAMESPACE)
                     await self.server.emit('tab_catalog', {'changed': True}, room='tab-catalog', namespace=NAMESPACE)
                     continue
-                growth = await self.terminals.projections.consume_growth(shell_id)
-                if growth is None:
-                    continue
-                if growth.reset:
+                prior_tracking = self.directory_states.get(shell_id)
+                # Reconcile retained status on lifecycle events. Live control
+                # status/output is delivered by the separate broker reader.
+                if prior_tracking is None or prior_tracking[0] in ('pending', 'starting'):
+                    tracking = self.terminals.directory_status(current)
+                    observed = (tracking['state'], tracking['path'])
+                    if prior_tracking != observed:
+                        self.directory_states[shell_id] = observed
+                        await self.server.emit('terminal_directory', {'tabId': tab['id'], 'shellId': shell_id,
+                            'directoryTracking': tracking}, room=room, namespace=NAMESPACE)
+
+    async def broker_event(self, shell_id: str, event: dict[str, object]) -> None:
+        async with self.lock:
+            for tab in self.store.snapshot():
+                if tab['shellId'] != shell_id: continue
+                room = 'tab:' + tab['id']
+                if event.get('type') == 'output':
+                    await self.server.emit('terminal_output', {**event, 'tabId': tab['id'], 'shellId': shell_id}, room=room, namespace=NAMESPACE)
+                elif event.get('type') == 'directory':
+                    tracking = self.terminals.directory_status(tab)
+                    await self.server.emit('terminal_directory', {'tabId': tab['id'], 'shellId': shell_id,
+                        'directoryTracking': tracking}, room=room, namespace=NAMESPACE)
+                else:
                     await self.server.emit('terminal_reset', {'shellId': shell_id}, room=room, namespace=NAMESPACE)
-                for delta in growth.deltas:
-                    await self.server.emit('terminal_output', {'tabId': tab['id'], 'shellId': shell_id,
-                        'startOffset': delta.start_offset, 'endOffset': delta.end_offset, 'data': delta.data}, room=room, namespace=NAMESPACE)
 
     async def connect(self, sid: str, _environ: object, auth: object = None) -> bool:
         try:
@@ -196,13 +217,17 @@ class TabService:
         revision = params.get('revision')
         if not isinstance(revision, int) or isinstance(revision, bool):
             raise ValueError('Expected tab revision')
-        if method in ('terminal.start', 'terminal.status', 'terminal.close', 'terminal.input', 'terminal.resize', 'terminal.checkpoint'):
+        if method in ('terminal.start', 'terminal.status', 'terminal.close', 'terminal.input', 'terminal.resize', 'terminal.checkpoint', 'terminal.directoryLock'):
             selected = self.store.get(tab_id)
             if self.attached.get(sid) != tab_id or selected is None or selected['revision'] != revision:
                 raise ValueError('Attach and resync before terminal operations')
             self.observe()
             result = await self.terminals.dispatch(selected, method, params)
             current = self.store.get(tab_id)
+            if selected['shellId'] is not None and (current is None or current['shellId'] != selected['shellId']):
+                _ = self.directory_states.pop(selected['shellId'], None)
+            if method == 'terminal.directoryLock' and current is not None and current['shellId'] is not None:
+                _ = self.directory_states.pop(current['shellId'], None)
             if current != selected:
                 await self.server.emit('tab_snapshot', {'tab': current}, room='tab:' + tab_id, skip_sid=sid, namespace=NAMESPACE)
                 await self.server.emit('tab_catalog', {'changed': True}, room='tab-catalog', namespace=NAMESPACE)
@@ -210,8 +235,17 @@ class TabService:
         if method == 'tabs.update':
             if self.attached.get(sid) != tab_id:
                 raise ValueError('Attach before updating this tab')
+            before_navigation = self.store.get(tab_id)
             tab = self.store.update(tab_id, revision, self.resolve_path(params.get('path')),
                                     options(params.get('options')))
+            if before_navigation is not None and before_navigation['path'] != tab['path'] and tab['shellId'] is not None:
+                try:
+                    tracking = await self.terminals.track_navigation(tab)
+                except (ValueError, OSError, RuntimeError, TimeoutError):
+                    tracking = {'state': 'error', 'path': tab['path']}
+                self.directory_states[tab['shellId']] = (tracking['state'], tracking['path'])
+                await self.server.emit('terminal_directory', {'tabId': tab_id, 'shellId': tab['shellId'],
+                    'directoryTracking': tracking}, room='tab:' + tab_id, namespace=NAMESPACE)
             await self.server.emit('tab_snapshot', {'tab': tab}, room='tab:' + tab_id,
                                    skip_sid=sid, namespace=NAMESPACE)
             await self.server.emit('tab_catalog', {'changed': True}, room='tab-catalog', namespace=NAMESPACE)

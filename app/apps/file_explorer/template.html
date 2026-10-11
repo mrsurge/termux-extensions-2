@@ -280,6 +280,9 @@
 .fx-terminal-toolbar span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fx-terminal-toolbar button, .fx-terminal-keys button { color: inherit; background: #1f2937; border: 1px solid #374151; border-radius: 4px; min-width: 30px; min-height: 30px; }
 .fx-terminal-toolbar button:last-child { color: #f87171; }
+.fx-terminal-lock { display: inline-flex; align-items: center; gap: 4px; flex: none; font-size: 0.8rem; }
+.fx-terminal-tracking { flex: none; padding: 0 8px; font-size: 0.75rem; color: var(--muted-foreground, #94a3b8); overflow-wrap: anywhere; }
+.fx-terminal-tracking:empty { display: none; }
 .fx-terminal-viewport { flex: 1; min-height: 0; min-width: 0; padding: 4px 8px; overflow: hidden; }
 .fx-terminal-viewport .xterm { height: 100%; }
 .fx-terminal-keys { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0; margin: 0; padding: 0; border: 0; background: var(--card); flex: none; }
@@ -772,11 +775,13 @@
   <section class="fx-terminal-drawer" hidden aria-label="Tab terminal">
     <div class="fx-terminal-toolbar">
       <span data-terminal-status>Terminal</span>
+      <label class="fx-terminal-lock"><input type="checkbox" data-terminal="directory-lock" checked>Lock directory</label>
       <button type="button" data-terminal="keys" tabindex="-1" aria-pressed="true" hidden>Keys</button>
       <button type="button" data-terminal="minimize" aria-label="Minimize or restore terminal">−</button>
       <button type="button" data-terminal="maximize" aria-label="Maximize or restore terminal">↕</button>
       <button type="button" data-terminal="close" aria-label="Close terminal"><svg width="18" height="18" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>
     </div>
+    <div class="fx-terminal-tracking" data-directory-status role="status"></div>
     <div class="fx-terminal-viewport"></div>
     <div class="fx-terminal-keys" aria-label="Terminal extra keys"></div>
   </section>

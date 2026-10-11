@@ -83,7 +83,7 @@ test('drawer fences checkpoint handoff, preserves shell on minimize/dispose and 
     querySelector(selector) { return elements.get(selector) || null; }
   }
   const elements = new Map(['.fx-terminal-drawer', '.fx-terminal-viewport', '.fx-terminal-keys', '[data-terminal-status]',
-    '[data-action="terminal"]', '[data-terminal="minimize"]', '[data-terminal="maximize"]', '[data-terminal="close"]'].map(name => [name, new Element()]));
+    '[data-directory-status]', '[data-terminal="directory-lock"]', '[data-action="terminal"]', '[data-terminal="minimize"]', '[data-terminal="maximize"]', '[data-terminal="close"]'].map(name => [name, new Element()]));
   const views = [], calls = [], checkpoints = [], handlers = new Map(), errors = [];
   class View {
     cols = 80; rows = 24; writes = []; disposed = false;
@@ -119,6 +119,20 @@ test('drawer fences checkpoint handoff, preserves shell on minimize/dispose and 
     handlers.get('terminal_output')(chunk(1, [66])); // arrived before ACK
     checkpoints.shift()({ shellId: 'shell', ansi: 'A', outputOffset: 1, pendingBytes: new Uint8Array() }); await tick();
     assert.deepEqual(views[0].writes, ['A', new Uint8Array([66])]);
+    const lock = elements.get('[data-terminal="directory-lock"]');
+    const tracking = elements.get('[data-directory-status]');
+    assert.equal(lock.checked, true, 'directory tracking defaults on');
+    handlers.get('terminal_directory')({ tabId: 'other', shellId: 'shell', directoryTracking: { state: 'pending', path: '/other' } });
+    assert.equal(tracking.textContent, '');
+    handlers.get('terminal_directory')({ tabId: 'tab', shellId: 'shell', directoryTracking: { state: 'pending', path: '/next' } });
+    assert.match(tracking.textContent, /Waiting for terminal directory change/);
+    tabs.tab.directoryLocked = false; drawer.sync(tabs.tab);
+    assert.equal(lock.checked, false, 'peer snapshots update the checkbox');
+    assert.equal(tracking.textContent, '', 'unlock clears pending UI feedback');
+    lock.checked = true; lock.handlers.get('change')(); await tick();
+    assert.deepEqual(calls.at(-1), ['terminal.directoryLock', { locked: true }]);
+    assert.equal(lock.disabled, false);
+    assert.equal(lock.checked, false, 'confirmed snapshot wins over optimistic checkbox');
     views[0].input('x'); await tick();
     assert.equal(calls.at(-1)[0], 'terminal.input');
     handlers.get('disconnect')();
