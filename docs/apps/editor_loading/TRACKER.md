@@ -1449,6 +1449,20 @@ Previous selector retained; the running worker is unchanged until restarted.
 
 ## File Explorer broker wiring checkpoint
 
+Resize-handle follow-up (2026-10-11): matching 5px top-edge handle with an extended
+hit area, touch/mouse pointer capture, keyboard separator controls, page-local
+custom height and available-region bounds. Minimize hides the handle; dragging
+Maximize restores custom sizing. Reuses the existing viewport resize observer
+and cancels drag ownership on tab/disconnect/disposal. Fourteen frontend tab/drawer
+regressions, TS typechecks and frontend rebuild pass. Native OTA/live resize
+acceptance remains pending; no backend, Android source/build or runtime changes.
+
+Font parity follow-up selects the Code TE2 drawer's `JetBrains Mono Nerd` family
+and fallback stack, preloads that family, and declares all four regular/italic/
+bold/bold-italic faces. These are the existing WOFF2 files also used by standalone
+Terminal, not additional font assets. Native OTA/live font acceptance remains
+pending; no backend or APK rebuild is required.
+
 Prompt correction follow-up: the first broker implementation changed CWD without
 regenerating Readline's cached prompt. Idle success/error now triggers one empty
 accepted line with later input held until fresh idle; ordinary Bash prompt hooks

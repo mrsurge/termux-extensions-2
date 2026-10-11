@@ -652,6 +652,12 @@ build, compiled Code TE2 rebuild or release is required/authorized by this slice
 
 ### Prompt refresh correction
 
+Approved frontend follow-up adds the standard top-edge terminal resize affordance,
+bounded to the app's available content region and presentation-local. Reuse the
+existing debounced viewport observation for terminal dimensions/checkpoints;
+retain Minimize/Maximize and dispose pointer ownership on view transitions.
+No backend transport, durable tab layout setting or Android changes are required.
+
 Idle SIGWINCH changes CWD but leaves Readline's expanded prompt stale. The approved
 correction uses a guarded empty accepted line after shell-confirmed clean-idle
 application, holding later input until fresh idle. Normal Bash prompt hooks/PS1

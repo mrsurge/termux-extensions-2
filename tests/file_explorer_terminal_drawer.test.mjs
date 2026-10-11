@@ -1,7 +1,91 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { TerminalOutputCursor, TerminalInputBatcher, createTerminalDrawer } from '../app/static/js/file_explorer_terminal.js';
+import { TerminalOutputCursor, TerminalInputBatcher, createTerminalDrawer, bindTerminalDrawerResize } from '../app/static/js/file_explorer_terminal.js';
+
+test('File Explorer terminal shares the Nerd font faces and fallback stack with other terminals', () => {
+  const template = readFileSync(new URL('../app/apps/file_explorer/template.html', import.meta.url), 'utf8');
+  const codeTemplate = readFileSync(new URL('../app/apps/code_te2/template.html', import.meta.url), 'utf8');
+  const terminalTemplate = readFileSync(new URL('../app/apps/terminal/template.html', import.meta.url), 'utf8');
+  for (const face of ['Regular', 'Italic', 'Bold', 'BoldItalic']) {
+    const asset = `/static/fonts/jetbrains/webfonts/JetBrainsMono-${face}.woff2`;
+    assert.ok(template.includes(asset));
+    assert.ok(codeTemplate.includes(asset));
+    assert.ok(terminalTemplate.includes(asset));
+  }
+  const source = readFileSync(new URL('../app/apps/file_explorer/terminal_drawer.ts', import.meta.url), 'utf8');
+  assert.match(source, /TERMINAL_WEB_FONT_FAMILY = 'JetBrains Mono Nerd'/);
+  assert.match(source, /fontFamily: TERMINAL_FONT_FAMILY/);
+  assert.match(source, /loadFonts\(\[TERMINAL_WEB_FONT_FAMILY\]\)/);
+  assert.match(source, /ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas/);
+  assert.equal((template.match(/font-family: 'JetBrains Mono Nerd'/g) || []).length, 4);
+});
+
+test('terminal resize handle bounds touch/mouse drags and disposes gesture ownership', () => {
+  const originals = Object.fromEntries(['window', 'document'].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const documentTarget = new EventTarget(), windowTarget = new EventTarget(), handle = new EventTarget();
+  const classes = new Set(), properties = new Map(), attributes = new Map();
+  let captured, available = 600;
+  const drawer = { hidden: false,
+    style: { setProperty(key, value) { properties.set(key, value); } },
+    classList: { contains: key => classes.has(key), remove: key => classes.delete(key) },
+    getBoundingClientRect: () => ({ height: parseFloat(properties.get('--fx-terminal-height') || '200') }),
+    querySelector: () => handle,
+  };
+  handle.classList = { add: key => classes.add(key), remove: key => classes.delete(key) };
+  handle.setAttribute = (key, value) => attributes.set(key, value);
+  handle.setPointerCapture = id => { captured = id; };
+  handle.hasPointerCapture = id => captured === id;
+  handle.releasePointerCapture = () => { captured = undefined; };
+  const root = { querySelector: () => ({ getBoundingClientRect: () => ({ height: available - drawer.getBoundingClientRect().height }) }) };
+  globalThis.document = documentTarget; globalThis.window = windowTarget;
+  const fire = (target, type, params = {}) => {
+    const event = new Event(type, { cancelable: true });
+    Object.assign(event, { pointerId: 1, button: 0, clientY: 300, ...params });
+    target.dispatchEvent(event);
+    return event;
+  };
+  const binding = bindTerminalDrawerResize(root, drawer);
+  try {
+    classes.add('is-maximized');
+    assert.equal(fire(handle, 'pointerdown').defaultPrevented, true);
+    assert.equal(classes.has('is-maximized'), false);
+    assert.equal(captured, 1);
+    fire(documentTarget, 'pointermove', { clientY: 200 });
+    assert.equal(properties.get('--fx-terminal-height'), '300px');
+    fire(documentTarget, 'pointermove', { clientY: -1000 });
+    assert.equal(properties.get('--fx-terminal-height'), '552px', 'reserve browser area and exclude fixed chrome');
+    fire(documentTarget, 'pointermove', { pointerId: 2, clientY: 2000 });
+    assert.equal(properties.get('--fx-terminal-height'), '552px', 'unrelated pointer cannot resize');
+    fire(documentTarget, 'pointerup');
+    assert.equal(captured, undefined);
+    fire(handle, 'pointerdown', { pointerId: 5, pointerType: 'touch' });
+    fire(documentTarget, 'pointermove', { pointerId: 5, clientY: 2000 });
+    assert.equal(properties.get('--fx-terminal-height'), '160px');
+    fire(documentTarget, 'pointercancel', { pointerId: 5 });
+    assert.equal(classes.has('dragging'), false);
+    fire(handle, 'keydown', { key: 'ArrowUp' });
+    assert.equal(properties.get('--fx-terminal-height'), '176px');
+    assert.equal(attributes.get('aria-valuenow'), '176');
+    classes.add('is-minimized');
+    assert.equal(fire(handle, 'pointerdown').defaultPrevented, false);
+    classes.delete('is-minimized');
+    fire(handle, 'pointerdown');
+    binding.cancel(); // Tab switch/disconnect cancels a live gesture.
+    fire(documentTarget, 'pointermove', { clientY: 0 });
+    assert.equal(properties.get('--fx-terminal-height'), '176px');
+    available = 120;
+    fire(handle, 'keydown', { key: 'End' });
+    assert.equal(properties.get('--fx-terminal-height'), '72px', 'small viewport does not force a 160px overflow');
+    binding.dispose();
+    assert.equal(fire(handle, 'pointerdown').defaultPrevented, false);
+  } finally {
+    binding.dispose();
+    for (const [key, descriptor] of Object.entries(originals)) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key];
+    }
+  }
+});
 
 test('mobile footer participates in layout below the exact two-row Terminal key dock', () => {
   const template = readFileSync(new URL('../app/apps/file_explorer/template.html', import.meta.url), 'utf8');

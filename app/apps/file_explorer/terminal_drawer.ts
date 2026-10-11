@@ -22,6 +22,8 @@ interface DirectoryStatus { state: string; path: string }
 interface Reply { tab?: Tab; shellId?: string; ansi?: string; pendingBytes?: Uint8Array; outputOffset?: number; directoryTracking?: DirectoryStatus }
 interface Tabs { readonly tab: Tab | null; terminal(method: string, params?: object): Promise<Reply> }
 interface Delta { tabId: string; shellId: string; startOffset: number; endOffset: number; data: Uint8Array }
+const TERMINAL_WEB_FONT_FAMILY = 'JetBrains Mono Nerd';
+const TERMINAL_FONT_FAMILY = `"${TERMINAL_WEB_FONT_FAMILY}", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace`;
 export class TerminalOutputCursor {
   offset = 0;
   accept(start: number, end: number, bytes: number): 'old' | 'next' | 'gap' {
@@ -79,6 +81,75 @@ interface Socket {
   off(event: string, callback: (value: never) => void): void;
 }
 
+export function bindTerminalDrawerResize(root: HTMLElement, drawer: HTMLElement) {
+  const handle = drawer.querySelector<HTMLElement>('.fx-terminal-resize-handle');
+  let pointer: number | undefined, startY = 0, startHeight = 0, maximum = 0;
+  const bounds = () => {
+    const content = root.querySelector<HTMLElement>('.fx-content');
+    // Toolbar, breadcrumbs and mobile footer are outside this available region.
+    return Math.max(0, drawer.getBoundingClientRect().height + (content?.getBoundingClientRect().height || 0) - 48);
+  };
+  const apply = (height: number) => {
+    const minimum = Math.min(160, maximum);
+    const value = Math.max(minimum, Math.min(maximum, height));
+    drawer.style.setProperty('--fx-terminal-height', `${value}px`);
+    drawer.style.setProperty('--fx-terminal-max-height', `${maximum}px`);
+    handle?.setAttribute('aria-valuemin', String(minimum));
+    handle?.setAttribute('aria-valuemax', String(maximum));
+    handle?.setAttribute('aria-valuenow', String(Math.round(value)));
+  };
+  const cancel = () => {
+    if (pointer === undefined) return;
+    const previous = pointer;
+    pointer = undefined;
+    handle?.classList.remove('dragging');
+    document.removeEventListener('pointermove', move);
+    document.removeEventListener('pointerup', end);
+    document.removeEventListener('pointercancel', end);
+    window.removeEventListener('blur', cancel);
+    if (previous !== undefined && handle?.hasPointerCapture(previous)) handle.releasePointerCapture(previous);
+  };
+  const move = (event: PointerEvent) => {
+    if (event.pointerId !== pointer) return;
+    apply(startHeight + startY - event.clientY);
+    event.preventDefault();
+  };
+  const end = (event: PointerEvent) => { if (event.pointerId === pointer) cancel(); };
+  const start = (event: PointerEvent) => {
+    if (pointer !== undefined || event.button !== 0 || drawer.hidden || drawer.classList.contains('is-minimized')) return;
+    maximum = bounds();
+    startHeight = drawer.getBoundingClientRect().height;
+    startY = event.clientY;
+    drawer.classList.remove('is-maximized');
+    apply(startHeight);
+    pointer = event.pointerId;
+    handle?.classList.add('dragging');
+    try { handle?.setPointerCapture(pointer); } catch { /* Document listeners retain fallback ownership. */ }
+    document.addEventListener('pointermove', move, { passive: false });
+    document.addEventListener('pointerup', end);
+    document.addEventListener('pointercancel', end);
+    window.addEventListener('blur', cancel);
+    event.preventDefault(); event.stopPropagation();
+  };
+  const key = (event: KeyboardEvent) => {
+    if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key) || drawer.hidden || drawer.classList.contains('is-minimized')) return;
+    maximum = bounds();
+    const height = drawer.getBoundingClientRect().height;
+    drawer.classList.remove('is-maximized');
+    apply(event.key === 'Home' ? 0 : event.key === 'End' ? maximum : height + (event.key === 'ArrowUp' ? 16 : -16));
+    event.preventDefault(); event.stopPropagation();
+  };
+  handle?.addEventListener('pointerdown', start);
+  handle?.addEventListener('lostpointercapture', cancel);
+  handle?.addEventListener('keydown', key);
+  return { cancel, dispose() {
+    cancel();
+    handle?.removeEventListener('pointerdown', start);
+    handle?.removeEventListener('lostpointercapture', cancel);
+    handle?.removeEventListener('keydown', key);
+  } };
+}
+
 let runtime: Promise<Runtime> | undefined;
 function loadRuntime(): Promise<Runtime> {
   if (runtime) return runtime;
@@ -98,6 +169,7 @@ function loadRuntime(): Promise<Runtime> {
 
 export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Socket, report: (error: unknown) => void) {
   const drawer = root.querySelector<HTMLElement>('.fx-terminal-drawer')!;
+  const drawerResize = bindTerminalDrawerResize(root, drawer);
   const viewport = drawer.querySelector<HTMLElement>('.fx-terminal-viewport')!;
   const keys = drawer.querySelector<HTMLElement>('.fx-terminal-keys')!;
   const status = drawer.querySelector<HTMLElement>('[data-terminal-status]')!;
@@ -126,6 +198,7 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
   const error = (value: unknown) => { status.textContent = value instanceof Error ? value.message : 'Terminal unavailable'; report(value); };
   const inputs = new TerminalInputBatcher(data => tabs.terminal('terminal.input', { data }), error);
   function clear() {
+    drawerResize.cancel();
     generation++; ready = false; recovering = false; recoverAgain = false; mounting = undefined;
     buffered = []; bufferedBytes = 0; clearTimeout(resizeTimer);
     inputs.reset();
@@ -198,10 +271,10 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
       const api = await loadRuntime();
       if (current !== generation || disposed) return;
       const view = new api.Terminal({ convertEol: true, cursorBlink: true, scrollback: 5000,
-        fontFamily: '"JetBrains Mono", monospace', fontSize: 13,
+        fontFamily: TERMINAL_FONT_FAMILY, fontSize: 13,
         theme: { background: '#0b1020', foreground: '#e6edf3', cursor: '#9cc3ff' } });
       const fonts = new api.WebFontsAddon.WebFontsAddon(true);
-      await fonts.loadFonts(['JetBrains Mono']);
+      await fonts.loadFonts([TERMINAL_WEB_FONT_FAMILY]);
       if (current !== generation || disposed) { view.dispose(); return; }
       terminal = view; view.loadAddon(fonts); fit = new api.FitAddon.FitAddon(); view.loadAddon(fit); view.open(viewport);
       view.textarea?.setAttribute('autocapitalize', 'off'); view.textarea?.setAttribute('autocorrect', 'off');
@@ -306,10 +379,12 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
   };
   root.querySelector('[data-action="terminal"]')!.addEventListener('click', () => void show());
   drawer.querySelector('[data-terminal="minimize"]')!.addEventListener('click', () => {
+    drawerResize.cancel();
     minimized = !minimized; drawer.classList.toggle('is-minimized', minimized);
     if (!minimized) { ready = false; void recover(); }
   });
   drawer.querySelector('[data-terminal="maximize"]')!.addEventListener('click', () => {
+    drawerResize.cancel();
     drawer.classList.toggle('is-maximized'); ready = false; recoverAgain = true; void recover();
   });
   drawer.querySelector('[data-terminal="close"]')!.addEventListener('click', async () => {
@@ -344,6 +419,7 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
   socket.on('terminal_directory', directoryChanged);
   socket.on('terminal_output', output); socket.on('terminal_reset', reset); socket.on('disconnect', disconnected);
   return { sync, dispose() {
+    drawerResize.dispose();
     disposeRepeatingKeys.forEach(dispose => dispose());
     for (const type of ['pointerdown', 'pointerup', 'click']) tabsPanel?.removeEventListener(type, guardMinibar, true);
     disposed = true; clear(); resize.disconnect();

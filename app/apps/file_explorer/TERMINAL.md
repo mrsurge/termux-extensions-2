@@ -56,6 +56,17 @@ custom xterm, Fit/WebFonts addons, touch selection, JetBrains Mono and the
 Terminal app's mobile-UA key helpers. Start/Show, Minimize/Restore, Maximize/Restore
 and confirmed Close are explicit controls. Desktop user agents never show extra
 keys.
+The terminal selects `JetBrains Mono Nerd` with the Code TE2 drawer's monospace
+fallback stack and WebFonts preload. Its four declared normal/italic/bold/
+bold-italic faces reuse the same packaged JetBrains WOFF2 files as the other two
+terminals; no new font assets/package are introduced.
+The top-edge resize handle uses the existing drawer handle visual language,
+pointer capture for touch/mouse and Arrow Up/Down/Home/End keyboard adjustments.
+Height is presentation-local for the loaded page; dragging leaves Maximize and
+retains the chosen height across Minimize/Restore. Bounds exclude fixed chrome
+and reserve 48px of file browsing space. Existing viewport observation owns
+debounced terminal resize/checkpoint work, not a new backend path. Tab changes,
+disconnect, minimize/maximize and disposal cancel active gesture ownership.
 Mobile keys retain Terminal's two rows of seven, default-visible Keys toggle,
 pointer-down dispatch, Ctrl double-tap lock, one-shot modifiers and shared arrow
 hold-repeat timings. The minibar opens the existing Tabs menu with the shared

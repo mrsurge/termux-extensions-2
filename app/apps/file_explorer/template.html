@@ -274,7 +274,15 @@
   gap: 12px;
 }
 @font-face { font-family: 'JetBrains Mono'; src: url('/static/fonts/jetbrains/webfonts/JetBrainsMono-Regular.woff2') format('woff2'); font-display: swap; }
-.fx-terminal-drawer { flex: 0 0 42%; min-height: 160px; display: flex; flex-direction: column; overflow: hidden; background: #0b1020; border-top: 1px solid var(--border, #374151); }
+@font-face { font-family: 'JetBrains Mono Nerd'; src: url('/static/fonts/jetbrains/webfonts/JetBrainsMono-Regular.woff2') format('woff2'); font-style: normal; font-weight: 400; font-display: block; }
+@font-face { font-family: 'JetBrains Mono Nerd'; src: url('/static/fonts/jetbrains/webfonts/JetBrainsMono-Italic.woff2') format('woff2'); font-style: italic; font-weight: 400; font-display: block; }
+@font-face { font-family: 'JetBrains Mono Nerd'; src: url('/static/fonts/jetbrains/webfonts/JetBrainsMono-Bold.woff2') format('woff2'); font-style: normal; font-weight: 700; font-display: block; }
+@font-face { font-family: 'JetBrains Mono Nerd'; src: url('/static/fonts/jetbrains/webfonts/JetBrainsMono-BoldItalic.woff2') format('woff2'); font-style: italic; font-weight: 700; font-display: block; }
+.fx-terminal-drawer { flex: 0 0 var(--fx-terminal-height, 42%); min-height: min(160px, var(--fx-terminal-max-height, 160px)); display: flex; flex-direction: column; overflow: hidden; background: #0b1020; border-top: 1px solid var(--border, #374151); }
+.fx-terminal-resize-handle { height: 5px; flex: none; position: relative; z-index: 50; background: transparent; cursor: row-resize; touch-action: none; user-select: none; transition: background 0.2s; }
+.fx-terminal-resize-handle:hover, .fx-terminal-resize-handle.dragging, .fx-terminal-resize-handle:focus-visible { background: var(--primary, #3b82f6); }
+.fx-terminal-resize-handle::before { content: ''; position: absolute; inset: -4px 0; }
+.fx-terminal-drawer.is-minimized .fx-terminal-resize-handle { display: none; }
 .fx-terminal-drawer[hidden], .fx-terminal-keys[hidden] { display: none; }
 .fx-terminal-toolbar { display: flex; align-items: center; gap: 8px; padding: 4px 8px; flex: none; }
 .fx-terminal-toolbar span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -773,6 +781,7 @@
     </div>
   </div>
   <section class="fx-terminal-drawer" hidden aria-label="Tab terminal">
+    <div class="fx-terminal-resize-handle" role="separator" aria-orientation="horizontal" aria-label="Resize terminal" tabindex="0"></div>
     <div class="fx-terminal-toolbar">
       <span data-terminal-status>Terminal</span>
       <label class="fx-terminal-lock"><input type="checkbox" data-terminal="directory-lock" checked>Lock directory</label>
