@@ -24,7 +24,8 @@ test('TextMate decoration preserves hit/diff wrappers, text and inert markup', a
   target.innerHTML = '<span class="is-added">const <span class="fe-search-hit">value</span> = &lt;script&gt;;</span>';
   const hit = target.querySelector('.fe-search-hit');
   const text = target.textContent;
-  api.applySnippetSyntax(target, [{start:0,end:text.length,color:'#123456',fontStyle:3}]);
+  api.applySnippetSyntax(target, [{start:0,end:text.length,color:'#123456',background:'#ffffff',fontStyle:3}]);
+  assert.equal(target.style.backgroundColor, '');
   assert.equal(target.textContent, text);
   assert.equal(target.querySelector('.fe-search-hit'), hit);
   assert.ok(hit.querySelector('.te-textmate-token'));

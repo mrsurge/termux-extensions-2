@@ -80,7 +80,7 @@ let rows = parsePositiveInt(process.env.TERMINAL_STREAM_ROWS, DEFAULT_ROWS);
 const scrollback = parsePositiveInt(process.env.TERMINAL_STREAM_SCROLLBACK, DEFAULT_SCROLLBACK);
 // This PTY is served by xterm.js, not the terminal (e.g. tmux) hosting TE2.
 const termName = DEFAULT_TERM;
-const env = { ...process.env, TERM: termName };
+const env = { ...process.env, TERM: termName, COLORTERM: 'truecolor' };
 
 const stateTerminal = new HeadlessTerminal({
   cols,

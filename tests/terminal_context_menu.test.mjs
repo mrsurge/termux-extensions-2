@@ -1,0 +1,21 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { build } from '../app/apps/file_explorer/node_modules/esbuild/lib/main.js';
+import { Window } from '../app/apps/code_te2/node_modules/happy-dom/lib/index.js';
+const built = await build({ entryPoints: ['app/libs/terminal_runtime/terminal_context_menu.ts'], bundle: true, write: false, format: 'esm' });
+const { bindTerminalContextMenu } = await import(`data:text/javascript;base64,${Buffer.from(built.outputFiles[0].text).toString('base64')}`);
+test('clipboard menu preserves mouse reporting, supports Shift override and disposes pending paste', async () => {
+  const window = new Window(); globalThis.Node = window.Node;
+  const surface = window.document.createElement('div'); window.document.body.append(surface);
+  let copied, pasted, resolveRead;
+  Object.defineProperty(window.navigator, 'clipboard', { value: { writeText: async text => { copied = text; }, readText: () => new Promise(resolve => { resolveRead = resolve; }) } });
+  const terminal = { modes: { mouseTrackingMode: 'vt200' }, getSelection: () => 'selected', paste: text => { pasted = text; }, focus() {} };
+  const dispose = bindTerminalContextMenu(surface, terminal, assert.fail);
+  const rightClick = shiftKey => surface.dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, shiftKey }));
+  rightClick(false); assert.equal(window.document.querySelector('[role="menu"]'), null);
+  rightClick(true); window.document.querySelector('button').click(); await Promise.resolve(); assert.equal(copied, 'selected');
+  terminal.modes.mouseTrackingMode = 'none'; rightClick(false);
+  window.document.querySelectorAll('button')[1].click(); dispose(); resolveRead('late'); await Promise.resolve();
+  assert.equal(pasted, undefined); rightClick(false); assert.equal(window.document.querySelector('[role="menu"]'), null);
+  window.close(); delete globalThis.Node;
+});

@@ -1508,7 +1508,8 @@
   cursor: pointer;
   border-radius: 0;
   margin-left: 0;
-  background: #161b22;
+  background: var(--te2-code-background, #161b22);
+  color: var(--te2-code-foreground, #e6edf3);
 }
 
 .fe-search-line-num {
@@ -1675,7 +1676,8 @@
   display: flex;
   flex-direction: column;
   gap: 0;
-  background: #161b22;
+  background: var(--te2-code-background, #161b22);
+  color: var(--te2-code-foreground, #e6edf3);
 }
 
 .fe-search-hunk {
@@ -1705,21 +1707,21 @@
   padding: 2px 2px 2px 4px;
   font-family: monospace;
   font-size: 12px;
-  background: #161b22;
+  background: transparent;
 }
 
 .fe-search-diff-row.is-add {
-  background: rgba(34, 197, 94, 0.18);
-  color: #d1fae5;
+  background: var(--te2-code-inserted, rgba(34, 197, 94, 0.18));
+  color: inherit;
 }
 
 .fe-search-diff-row.is-del {
-  background: rgba(248, 113, 113, 0.18);
-  color: #fee2e2;
+  background: var(--te2-code-removed, rgba(248, 113, 113, 0.18));
+  color: inherit;
 }
 
 .fe-search-diff-row.is-context {
-  color: #cbd5f5;
+  color: inherit;
 }
 
 .fe-search-diff-line-num {
@@ -1751,6 +1753,8 @@
   padding: 0;
   border-radius: 0;
 }
+
+.fe-marketplace-markdown pre { background: var(--te2-code-background, #161b22); color: var(--te2-code-foreground, #e6edf3); }
 
 .fe-search-snippet.fe-search-code-surface {
   overflow: hidden;

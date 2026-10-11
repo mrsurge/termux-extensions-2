@@ -11,7 +11,6 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "rootDir": ".",
     "baseUrl": ".",
     "paths": {
       "te2-console-bridge": ["../code_te2/static/js/console_bridge.js"]

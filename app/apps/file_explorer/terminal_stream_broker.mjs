@@ -25,7 +25,7 @@ const log = fs.openSync(logPath, 'wx', 0o600);
 const [file, ...args] = control.shell();
 const pty = nodePty.spawn(file, args, { name: 'xterm-256color', cols, rows,
   cwd: process.env.TERMINAL_STREAM_CWD || process.cwd(),
-  env: { ...process.env, TERM: 'xterm-256color', ...control.environment() } });
+  env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor', ...control.environment() } });
 control.bind(pty);
 
 function sendFrame(message) {

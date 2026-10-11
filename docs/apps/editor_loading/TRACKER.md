@@ -1,5 +1,47 @@
 # Editor loading maintenance tracker
 
+## Final punchout — approved pre-release fixes
+
+Follow-up live failures: selected-theme callback incorrectly supplied the full
+cache map to the TextMate runtime; corrected to publish its selected theme.
+Snippet backgrounds are now container CSS variables applied on cold/live theme
+load. Diff rows own their tint, tokens own glyphs only; eliminate individual
+opaque code backgrounds and hardcoded context/gutter backgrounds.
+Terminal contextmenu always prevents browser default, including TUI mouse mode.
+Electron native context menus check the originating renderer terminal ownership
+marker before popup. Requires Electron rebuild/relaunch beyond frontend OTA.
+Cursor issue remains under investigation: live Electron nvim cursor is present,
+white outline visible in computed CSS, document.hasFocus=false at inspection.
+This does not prove correct cursor behavior when the user is actively typing.
+Follow-up validation: 13 theme/restore/TextMate tests, clipboard ownership test,
+120 Electron tests, Code TE2/Electron typechecks and all frontend builds pass.
+Cursor focus probe installed in the refreshed Electron main-page worker; captures
+focus/cursor state only, never keystroke contents. Cursor reproduction remains
+pending; theme/menu fixes also require matched client publication/live acceptance.
+
+- [x] 1. Explicit COLORTERM=truecolor in both Node PTYs and native drawer PTYs.
+  Existing raw streams and checkpoint RGB serialization preserve 24-bit colors;
+  new RGB checkpoint regression passes. Existing shells need replacement to pick
+  up the new environment; no automatic shell replacement.
+- [x] 3. File Explorer Ctrl+backtick returns focus to the selected/first visible
+  listing entry (empty listing falls back to filter), while retaining its shell.
+- [x] 4. Explorer TextMate code surfaces receive the editor theme background;
+  README code fences apply it to their pre/code surface. Existing repaint and
+  epoch fences retain theme-change handling.
+- [x] 6. App-neutral terminal clipboard menu used by all three terminal surfaces.
+  Mouse-reporting applications retain right-click; Shift+right-click explicitly
+  opens Copy/Paste. Paste uses xterm's paste API; late reads are fenced by dispose.
+- [x] Typechecks/builds for all three frontends; 13 context-menu/keyboard/drawer,
+  six TextMate, 24 standalone Terminal and four shared projection tests pass.
+  Native PTY environment test and cached native release build pass.
+- [ ] Native worker activation, frontend OTA and user live acceptance of these
+  four fixes. No runtime/shell restart, client publication or APK build performed.
+- Deferred: notes.md items 2, 5 and 8, plus lower-priority search work.
+- Deferred 7: delete/recreate while an editor model is open can reapply an old
+  draft at the same path. Investigate file incarnation/draft identity before
+  changing invalidation; preserve legitimate drafts. Confusing, currently rare,
+  and not reported as destructive. Do not include in this pre-release slice.
+
 - [x] Approve separate maintenance scope and branch.
 - [x] Create initial plan and source entrypoint inventory.
 - [ ] Complete end-to-end file/theme/TextMate loading and cache audit.

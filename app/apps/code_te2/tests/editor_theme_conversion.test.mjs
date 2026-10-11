@@ -24,7 +24,7 @@ test('catalog uiTheme determines high-contrast Monaco base for static themes', a
   const defined = [];
   await applyMonacoThemeRuntime({
     win: { monaco: { editor: { defineTheme: (...args) => defined.push(args), setTheme() {} } } },
-    doc: { documentElement: { classList: { remove() {}, add() {} } } },
+    doc: { documentElement: { style: { setProperty() {} }, classList: { remove() {}, add() {} } } },
     getSelectedThemeFn: async () => ({ id: 'github-dark-high-contrast', uiTheme: 'hc-black', theme: { tokenColors: [] } }),
     toMonacoThemeFn: vscodeThemeToMonacoTheme,
   });

@@ -1,4 +1,5 @@
 import ReconnectingWebSocket from 'reconnecting-websocket';
+import { bindTerminalContextMenu } from '../../../libs/terminal_runtime/terminal_context_menu';
 import { decode as decodeMessagePack, encode as encodeMessagePack } from '@msgpack/msgpack';
 import {
   getConsoleBridgeStatus,
@@ -1623,6 +1624,9 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
 
     await ensureTouchToMouseHelper();
     state.touchSelection = attachTouchSelection(term);
+    const touchSelection = state.touchSelection;
+    const disposeMenu = bindTerminalContextMenu(ui.termContainer, term, message => setStatus(message));
+    state.touchSelection = { dispose() { disposeMenu(); touchSelection?.dispose(); } };
     await bindVendoredCtrlHandler(term);
     installVendoredCtrlFocusBinding(term);
     term.onData((data) => {

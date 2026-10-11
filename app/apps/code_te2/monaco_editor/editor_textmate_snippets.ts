@@ -3,6 +3,7 @@ export interface SnippetSyntaxToken {
   start: number;
   end: number;
   color?: string;
+  background?: string;
   fontStyle: number;
 }
 export interface SnippetSyntaxRequest {
@@ -43,6 +44,8 @@ function unwrapSyntax(target: HTMLElement): void {
 /** Preserve existing match/diff DOM ownership while decorating its text nodes. */
 export function applySnippetSyntax(target: HTMLElement, tokens: readonly SnippetSyntaxToken[]): void {
   unwrapSyntax(target);
+  // Containers own their background and diff layers; tokens only paint glyphs.
+  target.style.removeProperty('background-color');
   const doc = target.ownerDocument;
   const walker = doc.createTreeWalker(target, 4 /* SHOW_TEXT */);
   const nodes: Text[] = [];

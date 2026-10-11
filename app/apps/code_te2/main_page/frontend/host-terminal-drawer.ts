@@ -1,6 +1,7 @@
 // app/apps/code_te2/main_page/frontend/host-terminal-drawer.ts
 
 import { generateUuid } from './uuid.ts';
+import { bindTerminalContextMenu } from '../../../../libs/terminal_runtime/terminal_context_menu';
 import {
   SOCKET_IO_NAMESPACES,
   SOCKET_IO_PATHS,
@@ -257,6 +258,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
   let viewportHandlersInstalled = false;
   let resizeObserver: ResizeObserver | null = null;
   let touchSelectionDisposable: XtermDisposable | null = null;
+  let disposeClipboardMenu: (() => void) | null = null;
   let startupSizing = false;
   let startupFitTimer: number | null = null;
   const pendingTerminalRequests = new Map<string, PendingTerminalRequest>();
@@ -1215,6 +1217,8 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     nextTerm.loadAddon(fitAddon);
     if (webFontsAddon) nextTerm.loadAddon(webFontsAddon);
     nextTerm.open(container);
+    disposeClipboardMenu?.();
+    disposeClipboardMenu = bindTerminalContextMenu(container, nextTerm, message => console.warn(message));
     installViewportHandlers();
     await ensureDrawerTouchToMouseHelper();
     touchSelectionDisposable = attachDrawerTouchSelection(nextTerm);
@@ -1283,6 +1287,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     if (!term) {
       await initTerminal();
     } else {
+      if (!disposeClipboardMenu && container) disposeClipboardMenu = bindTerminalContextMenu(container, term, message => console.warn(message));
       if (!touchSelectionDisposable) {
         touchSelectionDisposable = attachDrawerTouchSelection(term);
       }
@@ -1322,6 +1327,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     setDrawerHelperFocusActive(false);
     touchSelectionDisposable?.dispose();
     touchSelectionDisposable = null;
+    disposeClipboardMenu?.(); disposeClipboardMenu = null;
     startupSizing = false;
     clearStartupFitTimer();
     lastResizeSent = null;
@@ -1350,6 +1356,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     if (term) {
       touchSelectionDisposable?.dispose();
       touchSelectionDisposable = null;
+      disposeClipboardMenu?.(); disposeClipboardMenu = null;
       term.dispose();
       term = null;
     }

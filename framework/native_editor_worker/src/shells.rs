@@ -149,6 +149,7 @@ impl Shells {
             // A drawer PTY is rendered by our terminal frontend, not by the
             // tmux/SSH terminal which happened to launch the framework.
             spec.env.insert("TERM".into(), "xterm-256color".into());
+            spec.env.insert("COLORTERM".into(), "truecolor".into());
         }
         ensure!(
             spec.backend == if terminal { "pty" } else { "pipe" },
@@ -714,6 +715,10 @@ mod tests {
         assert_eq!(
             record.env_overrides.get("TERM").map(String::as_str),
             Some("xterm-256color")
+        );
+        assert_eq!(
+            record.env_overrides.get("COLORTERM").map(String::as_str),
+            Some("truecolor")
         );
         shells.terminate(&record.id).unwrap();
     }

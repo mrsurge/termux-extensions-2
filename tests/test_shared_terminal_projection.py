@@ -71,6 +71,20 @@ def test_reader_failure_propagates_without_disk_fallback():
     asyncio.run(run())
 
 
+def test_checkpoint_preserves_truecolor_foreground_and_background():
+    content = b'\x1b[38;2;17;83;149;48;2;201;37;119mRGB\x1b[0m'
+    @contextmanager
+    def open_log(path):
+        yield Reader(content)
+    async def run():
+        registry = TerminalScreenProjectionRegistry(log_opener=open_log)
+        checkpoint = await registry.checkpoint('rgb', Path('opaque'))
+        assert '38;2;17;83;149' in checkpoint.ansi
+        assert '48;2;201;37;119' in checkpoint.ansi
+        await registry.discard('rgb')
+    asyncio.run(run())
+
+
 def test_shared_import_has_no_app_or_parser_dependency():
     result = subprocess.run([sys.executable, '-B', '-c', '''
 import sys

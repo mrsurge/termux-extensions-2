@@ -69,7 +69,7 @@ export function createEditorTextmateThemeOwnerRuntime(
     }
     themeApplyKey = nextKey;
     themeApplyInflight = (async () => {
-      await deps.applyMonacoThemeRuntime({
+      const selectedTheme = await deps.applyMonacoThemeRuntime({
         win: deps.getWindow(),
         doc: deps.getDocument(),
         ensureTe2DiffThemeFn: deps.ensureTe2DiffTheme,
@@ -78,13 +78,13 @@ export function createEditorTextmateThemeOwnerRuntime(
         getJsonCacheFn: getThemeJsonCache,
         setJsonCacheFn(cache: Record<string, unknown>) {
           themeJsonCache = cache || {};
-          deps.onThemeJsonLoaded?.(themeJsonCache);
         },
         applyThemeToTextmateRegistryFn:
           deps.getLanguageWorkersEnabled() || isTextmateDisabled(deps.getWindow())
           ? undefined
           : deps.applyThemeToTextmateRegistry,
       });
+      deps.onThemeJsonLoaded?.(selectedTheme as Record<string, unknown>);
     })();
     try {
       await themeApplyInflight;

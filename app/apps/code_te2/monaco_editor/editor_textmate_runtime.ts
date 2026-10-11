@@ -767,6 +767,8 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
     const factory = tmGrammarFactory;
     if (!grammar || !factory) return null;
     const colors = factory.getColorMap();
+    const snippetThemeColors = asRecord(tmActiveThemeJson.colors) || {};
+    const snippetBackground = asString(snippetThemeColors['editor.background']) || '#0d1117';
     const tokens: SnippetSyntaxToken[] = [];
     let state: unknown = vscodeTextmate.INITIAL;
     let offset = 0;
@@ -781,7 +783,7 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
         const end = i + 2 < result.tokens.length ? result.tokens[i + 2] : line.length;
         const metadata = result.tokens[i + 1];
         if (end > start) tokens.push({ start: offset + start, end: offset + end,
-          color: colors[(metadata >>> 15) & 0x1ff], fontStyle: (metadata >>> 11) & 0xf });
+          color: colors[(metadata >>> 15) & 0x1ff], background: snippetBackground, fontStyle: (metadata >>> 11) & 0xf });
         if (tokens.length > 10_000) return null;
       }
       offset += line.length + 1;

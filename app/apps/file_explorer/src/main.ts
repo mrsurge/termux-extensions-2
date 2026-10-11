@@ -560,7 +560,17 @@ export default function initFileExplorer(root: HTMLElement, rawApi: unknown, raw
   }
   const disposeTerminalShortcut = bindTerminalShortcut(container, {
     available: () => Boolean(tabs?.tab && terminalDrawer),
-    show: () => { closeAllMenus(); return terminalDrawer?.show(); },
+    show: () => {
+      closeAllMenus();
+      if (container.ownerDocument.activeElement?.closest('.fx-terminal-drawer')) {
+        const selected = state.selected?.path;
+        const wrapper = state.view === 'grid' ? ui.gridContainer : ui.listContainer;
+        const items = [...wrapper?.querySelectorAll<HTMLElement>('[data-path]') ?? []];
+        (items.find(item => item.dataset.path === selected) ?? items[0] ?? container.querySelector<HTMLElement>('[data-role="name-filter"]'))?.focus({ preventScroll: true });
+        return;
+      }
+      return terminalDrawer?.show();
+    },
   });
 
   async function loadDirectory(targetPath: string, fromTab = false): Promise<void> {

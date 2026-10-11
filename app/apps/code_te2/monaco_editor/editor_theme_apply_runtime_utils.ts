@@ -50,6 +50,17 @@ export async function applyMonacoThemeRuntime(
     cache[resolvedId] = json;
     if (options.setJsonCacheFn) options.setJsonCacheFn(cache);
     options.win.monaco.editor.setTheme(monacoThemeName(resolvedId));
+    const colors = json.colors && typeof json.colors === 'object' ? json.colors as Record<string, unknown> : {};
+    const light = selection.uiTheme === 'vs' || selection.uiTheme === 'hc-light';
+    for (const [variable, key, fallback] of [
+      ['--te2-code-background', 'editor.background', light ? '#ffffff' : '#0d1117'],
+      ['--te2-code-foreground', 'editor.foreground', light ? '#24292e' : '#e6edf3'],
+      ['--te2-code-inserted', 'diffEditor.insertedLineBackground', '#22c55e2e'],
+      ['--te2-code-removed', 'diffEditor.removedLineBackground', '#f871712e'],
+    ]) {
+      const value = colors[key];
+      options.doc.documentElement.style.setProperty(variable, typeof value === 'string' && /^#[\da-f]{3,8}$/i.test(value) ? value : fallback);
+    }
     traceColdBoot('theme.monaco_applied', { id: resolvedId, monacoName: monacoThemeName(resolvedId) });
     try {
       options.doc.documentElement.classList.remove('vs', 'vs-dark', 'hc-black', 'hc-light');
