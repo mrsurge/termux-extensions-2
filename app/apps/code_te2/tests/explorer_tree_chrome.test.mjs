@@ -94,6 +94,62 @@ function rect(top, height = 40, left = 0, width = 320) {
   };
 }
 
+test('Collapse all closes the menu, guards duplicate activation and reports failures', async () => {
+  const win = installDom();
+  const { createExplorerChromeController } = await importTypeScript('src/explorer/chrome/explorer-chrome-controller.ts');
+  document.body.innerHTML = '<button id="menu" aria-expanded="true"></button><div id="dropdown" class="show"></div><div id="collapse" tabindex="0"></div>';
+  let calls = 0;
+  let connected = true;
+  let finish;
+  const messages = [];
+  const controller = createExplorerChromeController({
+    hasExplorerRpc: () => connected,
+    collapseAllDirectories: () => { calls++; return new Promise((resolve, reject) => { finish = reject; }); },
+    toast: message => messages.push(message),
+    getErrorMessage: error => error.message,
+  });
+  controller.bindUi({ explorerMenuBtn: document.getElementById('menu'), explorerMenuDropdown: document.getElementById('dropdown'), explorerMenuCollapseAllItem: document.getElementById('collapse') });
+  const item = document.getElementById('collapse');
+  item.click(); item.click();
+  assert.equal(calls, 1);
+  assert.equal(document.getElementById('menu').getAttribute('aria-expanded'), 'false');
+  assert.equal(document.getElementById('dropdown').classList.contains('show'), false);
+  finish(new Error('request failed'));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(messages, ['request failed']);
+  connected = false;
+  item.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Enter' }));
+  assert.equal(calls, 1);
+  assert.equal(messages.at(-1), 'Explorer connection unavailable.');
+  win.happyDOM.abort();
+});
+
+test('empty authoritative expansion collapses nested cards but retains the root and file selection', async () => {
+  const win = installDom();
+  const { getExplorerNormalTreeList, reconcileExplorerNormalTreeOpenDirectories } = await importTypeScript('src/explorer/tree/view-utils.ts');
+  document.body.innerHTML = '<ul id="tree"><li class="fe-tree-root" data-open="true"><ul class="fe-tree" data-tree-view="normal"><li class="fe-tree-node" data-kind="dir" data-rel="src" data-open="true"><ul class="fe-tree"><li class="fe-tree-node" data-kind="dir" data-rel="src/deep" data-open="true"><ul class="fe-tree"><li data-kind="file">file.ts</li></ul></li></ul></li><li class="is-active" data-kind="file">README.md</li></ul></li></ul>';
+  const tree = document.getElementById('tree');
+  reconcileExplorerNormalTreeOpenDirectories(getExplorerNormalTreeList(tree), []);
+  assert.equal(tree.querySelector('.fe-tree-root').dataset.open, 'true');
+  assert.equal(tree.querySelector('[data-rel="src"]').dataset.open, 'false');
+  assert.equal(tree.querySelector('[data-rel="src"] > ul'), null);
+  assert.equal(tree.querySelector('.is-active').textContent, 'README.md');
+  win.happyDOM.abort();
+});
+
+test('Collapse all uses the shared expansion RPC and vertical menu affordance', () => {
+  const source = fs.readFileSync(path.join(appRoot, 'src/explorer/app/bootstrap.ts'), 'utf8');
+  const action = source.slice(source.indexOf('async function collapseAllDirectories'), source.indexOf('async function focusDirectoryFromSearch'));
+  assert.match(action, /explorerNameSearchController\.close\("collapseAll"\)/);
+  assert.match(action, /clearTimeout\(openDirsSyncTimer\)/);
+  assert.match(action, /EXPLORER_RPC_METHODS\.openDirsSet,\s*\{ dirs: \[\] \}/);
+  assert.match(action, /EXPLORER_RPC_NOTIFICATIONS\.openDirsUpdated/);
+  assert.doesNotMatch(action, /openFile|reloadCurrentFile|currentPath\s*=/);
+  const template = fs.readFileSync(path.join(appRoot, 'template.html'), 'utf8');
+  assert.match(template, /id="fe-explorer-menu-btn"[^>]*>⋮<\/button>/);
+  assert.match(template, /id="fe-mi-explorer-collapse-all"/);
+});
+
 test('mobile drawer opening explicitly refreshes sticky scopes without scrolling', async () => {
   const win = installDom();
   const { createExplorerChromeController } = await importTypeScript(

@@ -27,6 +27,7 @@ interface ExplorerChromeBindings {
   explorerSearchViewsBtn: HTMLElement | null;
   explorerMenuStickyHeadersItem: HTMLElement | null;
   explorerMenuScrollActiveItem: HTMLElement | null;
+  explorerMenuCollapseAllItem: HTMLElement | null;
 }
 
 interface ExplorerProjectChoice {
@@ -43,6 +44,7 @@ interface ExplorerChromeControllerDeps {
   openSearchOverlay(): void;
   openMarketplaceOverlay(): void;
   scrollToActiveFile(): Promise<void>;
+  collapseAllDirectories(): Promise<void>;
   showNewProjectModal(toast: (message: string) => void): Promise<unknown>;
   showProjectsDebugModal(): Promise<void>;
   isCancelledError(error: unknown): boolean;
@@ -489,6 +491,33 @@ export function createExplorerChromeController(
       event.stopPropagation();
       closeExplorerMenu();
       await deps.scrollToActiveFile();
+    });
+
+    let collapsing = false;
+    const collapseAll = async (event: Event): Promise<void> => {
+      event.stopPropagation();
+      closeExplorerMenu();
+      if (collapsing) return;
+      if (!deps.hasExplorerRpc()) {
+        deps.toast('Explorer connection unavailable.');
+        return;
+      }
+      collapsing = true;
+      try {
+        await deps.collapseAllDirectories();
+      } catch (error) {
+        deps.toast(deps.getErrorMessage(error, 'Could not collapse directories'));
+      } finally {
+        collapsing = false;
+      }
+    };
+    bindings.explorerMenuCollapseAllItem?.addEventListener('click', (event) => {
+      void collapseAll(event);
+    });
+    bindings.explorerMenuCollapseAllItem?.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      void collapseAll(event);
     });
 
     document.addEventListener(

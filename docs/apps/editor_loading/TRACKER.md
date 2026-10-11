@@ -652,8 +652,9 @@ original user list below is retained verbatim as the requirement record.
 - [x] F2: vendored Codicon directory/file-type rows with muted grey-blue styling (source).
 - [ ] F2: shared consumer mouse/touch/keyboard and picker-mode acceptance.
 - [ ] F3: detached Sidebar minimize, exact native window ownership.
-- [ ] F3: editor Explorer ellipsis-menu Collapse all using existing expansion authority.
-- [ ] F3: vertical Explorer ellipsis icon; desktop/mobile and sticky-scope acceptance.
+- [x] F3: editor Explorer ellipsis-menu Collapse all using existing expansion authority (source/tests/build).
+- [x] F3: vertical Explorer ellipsis icon (source/build).
+- [x] F3: Collapse all and vertical ellipsis user live acceptance.
 - [ ] F3: lower draft-highlight opacity with readable theme contrast.
 - [ ] F3: unprefixed palette default, preserve explicit command/symbol/line modes.
 - [ ] F3: clarify Ctrl+colon versus chord; add approved bindings without conflicts.
@@ -663,6 +664,24 @@ original user list below is retained verbatim as the requirement record.
 - [ ] F4: depth-one regex listing and asynchronous directory usage view.
 - [ ] F4: multi-client, standalone/sidebar, lifecycle and large-tree acceptance.
 - [ ] Separately approve maintenance packaging/release scope after chosen slices.
+
+### F3 Explorer collapse/menu — implementation checkpoint
+
+The top Explorer menu now uses vertical ⋮ and includes Collapse all. This explicit
+action dismisses filename search, cancels pending expansion debounce, and requests
+the existing `explorer.openDirs.set` projection with an empty directory set. Its
+authoritative response uses the existing reconciliation/active-file marker path;
+the project root and selected editor document remain unchanged. Sticky scopes
+retain their existing mutation-observer refresh. Duplicate activations are guarded;
+disconnection/request errors produce existing toasts without mutation retry.
+
+Validation: Explorer tree/chrome regressions (13 tests), filename-search/sticky
+regressions, TypeScript typecheck and frontend build pass. No backend source,
+APK, runtime restart or client asset activation is included. Installed native
+clients require OTA before live acceptance; reload alone is not publication.
+
+User reported this slice tested working on 2026-10-10. This closes its live
+acceptance gate, not detached-window or other F3 acceptance.
 
 Confirmed preliminary findings: marketplace already has configuration/list backend
 RPCs but detail actions are install/update/uninstall; shared picker enters a

@@ -270,6 +270,7 @@ const explorerChromeController = createExplorerChromeController({
   openMarketplaceOverlay: () =>
     explorerMarketplaceController.openMarketplace(),
   scrollToActiveFile,
+  collapseAllDirectories,
   showNewProjectModal,
   showProjectsDebugModal,
   isCancelledError,
@@ -628,6 +629,27 @@ async function expandToPath(rel: string): Promise<void> {
   }
 }
 
+async function collapseAllDirectories(): Promise<void> {
+  const projectPath = explorerRuntimeState.getProjectPath();
+  if (!projectPath) return;
+  // Search has its own expanded projection. Explicit collapse exits that mode.
+  explorerNameSearchController.close("collapseAll");
+  if (openDirsSyncTimer !== null) {
+    clearTimeout(openDirsSyncTimer);
+    openDirsSyncTimer = null;
+  }
+  const projection = await requestExplorerRpc(
+    EXPLORER_RPC_METHODS.openDirsSet,
+    { dirs: [] },
+    10000,
+  );
+  if (explorerRuntimeState.getProjectPath() !== projectPath) return;
+  explorerNotificationHandler.handleExplorerNotification(
+    EXPLORER_RPC_NOTIFICATIONS.openDirsUpdated,
+    projection,
+  );
+}
+
 async function focusDirectoryFromSearch(rel: string): Promise<void> {
   const normalized = rel.replaceAll("\\", "/").replace(/^\/+|\/+$/g, "");
   if (!normalized || normalized === ".") return;
@@ -940,6 +962,7 @@ export async function initExplorerUI(options: ExplorerUiInitOptions) {
     explorerSearchViewsBtn,
     explorerMenuStickyHeadersItem,
     explorerMenuScrollActiveItem,
+    explorerMenuCollapseAllItem: document.getElementById("fe-mi-explorer-collapse-all"),
   });
   explorerMarketplaceController.bindUi({
     button:
