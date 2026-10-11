@@ -651,7 +651,8 @@ original user list below is retained verbatim as the requirement record.
 - [x] F2: depth-one regex filter, bounded/invalid-pattern handling (source/regressions).
 - [x] F2: vendored Codicon directory/file-type rows with muted grey-blue styling (source).
 - [ ] F2: shared consumer mouse/touch/keyboard and picker-mode acceptance.
-- [ ] F3: detached Sidebar minimize, exact native window ownership.
+- [x] F3: detached Sidebar minimize, exact native window ownership (source/regressions/build).
+- [x] F3: detached Sidebar minimize/restore user live acceptance.
 - [x] F3: editor Explorer ellipsis-menu Collapse all using existing expansion authority (source/tests/build).
 - [x] F3: vertical Explorer ellipsis icon (source/build).
 - [x] F3: Collapse all and vertical ellipsis user live acceptance.
@@ -664,6 +665,19 @@ original user list below is retained verbatim as the requirement record.
 - [ ] F4: depth-one regex listing and asynchronous directory usage view.
 - [ ] F4: multi-client, standalone/sidebar, lifecycle and large-tree acceptance.
 - [ ] Separately approve maintenance packaging/release scope after chosen slices.
+
+### F3 detached Sidebar minimize — implementation checkpoint
+
+The detached chrome has an accessible Minimize button on its existing preload
+action channel. The closed action allowlist admits `minimize`; registry dispatch
+requires the matching chrome WebContents, a live window, and detached parentage.
+It minimizes only that window, without emitting app/lifecycle events or changing
+membership. Existing focus restores it. Main-window and unrelated senders remain
+rejected. Ownership/restore/destroyed-window and chrome regressions pass alongside
+the full 119-test Electron suite, typecheck and compile. No client relaunch,
+packaging, Android changes, or release occurred; editor OTA cannot activate this
+Electron-native change. User reported this slice tested working on 2026-10-10;
+its live acceptance gate is closed.
 
 ### F3 Explorer collapse/menu — implementation checkpoint
 

@@ -207,6 +207,7 @@ export type ElectronSidebarMenuRequest = {
 
 export type ElectronSidebarSurfaceAction =
   | "attach"
+  | "minimize"
   | "console"
   | "devtools"
   | "refresh"

@@ -56,6 +56,15 @@ function SurfaceHeader(props: { descriptor: ElectronSidebarSurfaceDescriptor }):
           )
           : null}
         <button
+          className="surface-button"
+          type="button"
+          title="Minimize window"
+          aria-label="Minimize detached window"
+          onClick={() => act("minimize")}
+        >
+          −
+        </button>
+        <button
           className="surface-button close"
           type="button"
           aria-label="Attach and close detached window"

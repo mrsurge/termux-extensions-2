@@ -227,6 +227,12 @@ export class DetachedSidebarSurfaceRegistry {
   ): boolean {
     const entry = this.#entryForShellContents(contents);
     if (!entry) return false;
+    if (action === "minimize") {
+      const window = entry.window;
+      if (!window || window.isDestroyed() || entry.parent !== "detached") return false;
+      window.minimize();
+      return true;
+    }
     if (action === "attach") {
       this.close(
         entry.descriptor.surfaceId,

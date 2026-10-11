@@ -21,6 +21,7 @@ const APP_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
 const WINDOW_NAME_PREFIXES = ["te2-devtools:", "te2-run-profile:"];
 const SURFACE_ACTIONS = new Set<ElectronSidebarSurfaceAction>([
   "attach",
+  "minimize",
   "console",
   "devtools",
   "refresh",

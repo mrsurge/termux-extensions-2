@@ -111,6 +111,7 @@ test("surface reconciliation is bounded and de-duplicates stable ids", () => {
 
 test("detached surface actions use a closed allowlist", () => {
   assert.equal(validateElectronSidebarSurfaceAction("attach"), "attach");
+  assert.equal(validateElectronSidebarSurfaceAction("minimize"), "minimize");
   assert.equal(validateElectronSidebarSurfaceAction("devtools"), "devtools");
   assert.throws(() => validateElectronSidebarSurfaceAction("shell"), /Unsupported/);
 });
