@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 from collections.abc import Awaitable, Callable
 from typing import Protocol, cast
 
@@ -13,6 +14,8 @@ from starlette.exceptions import HTTPException
 from .http_app import Scope, Receive, Send
 from .tab_store import TabStore, object_map, options, text
 from .terminal_service import TerminalService
+from .terminal_stream import OutputConnection, serve_output
+from app.apps.terminal.terminal_stream_protocol import pack_message, unpack_message
 
 NAMESPACE = '/tabs'
 
@@ -58,9 +61,64 @@ class TabService:
         self.terminals.brokers.sink = self.broker_event
         self.observer: asyncio.Task[None] | None = None
         self.directory_states: dict[str, tuple[str, str]] = {}
-        _ = server.on('connect', self.connect, namespace=NAMESPACE)
+        self.stream_grants: dict[str, tuple[str, str, str]] = {}
+        self.streams: set[OutputConnection] = set()
+        _ = server.on('connect', self.wire_connect, namespace=NAMESPACE)
         _ = server.on('disconnect', self.disconnect, namespace=NAMESPACE)
-        _ = server.on('tab_request', self.request, namespace=NAMESPACE)
+        _ = server.on('tab_request', self.wire_request, namespace=NAMESPACE)
+
+    async def wire_connect(self, sid: str, environ: object, auth: object = None) -> bool:
+        try:
+            fields = object_map(auth)
+            if fields.get('codec') != 'msgpack-v1': return False
+            return await self.connect(sid, environ, fields)
+        except ValueError:
+            return False
+
+    async def wire_request(self, sid: str, payload: object) -> bytes:
+        identity: int | None = None
+        try:
+            if not isinstance(payload, bytes) or len(payload) > 65536:
+                raise ValueError('Binary MessagePack request required')
+            body = unpack_message(payload)
+            raw_id = body.get('id')
+            if not isinstance(raw_id, int) or isinstance(raw_id, bool) or not 0 < raw_id <= 9007199254740991:
+                raise ValueError('Invalid request id')
+            identity = raw_id
+            reply = await self.request(sid, body)
+        except ValueError as exc:
+            reply = {'ok': False, 'error': str(exc)}
+        return pack_message({'id': identity, **reply})
+
+    def drop_streams(self, sid: str) -> None:
+        for token, grant in list(self.stream_grants.items()):
+            if grant[0] == sid: del self.stream_grants[token]
+        for stream in list(self.streams):
+            if stream.sid == sid: stream.close()
+
+    async def attach_stream(self, request: dict[str, object], connection: OutputConnection) -> None:
+        async with self.lock:
+            grant = self.stream_grants.pop(text(request.get('token')), None)
+            if grant is None: raise ValueError('Stream authorization expired')
+            sid, tab_id, shell_id = grant
+            tab = self.store.get(tab_id)
+            if sid not in self.presentations or self.attached.get(sid) != tab_id or tab is None or tab['shellId'] != shell_id:
+                raise ValueError('Stream tab changed')
+            connection.sid, connection.tab_id, connection.shell_id = sid, tab_id, shell_id
+            result = await self.terminals.dispatch(tab, 'terminal.checkpoint', request)
+            if sid not in self.presentations or self.attached.get(sid) != tab_id:
+                raise ValueError('Stream presentation disconnected')
+            # Broker output publication uses this same lock. Queue the checkpoint
+            # before admitting subsequent output; older queued deltas are offset-fenced.
+            connection.put({'type': 'checkpoint', 'tabId': tab_id, **result}, checkpoint=True)
+            self.streams.add(connection)
+
+    def detach_stream(self, connection: OutputConnection) -> None:
+        self.streams.discard(connection)
+
+    def close_shell_streams(self, shell_id: str) -> None:
+        for stream in self.streams:
+            if stream.shell_id == shell_id: stream.close()
 
     def observe(self) -> None:
         self.terminals.brokers.sink = self.broker_event
@@ -72,6 +130,8 @@ class TabService:
             self.observer.add_done_callback(lambda _task: bus.unsubscribe(queue))
 
     async def shutdown(self) -> None:
+        for stream in self.streams: stream.close()
+        self.stream_grants.clear()
         await self.terminals.brokers.shutdown()
         if self.observer is not None:
             _ = self.observer.cancel()
@@ -105,6 +165,7 @@ class TabService:
                 current = await self.terminals.reconcile(tab)
                 room = 'tab:' + tab['id']
                 if current != tab:
+                    self.close_shell_streams(shell_id)
                     _ = self.directory_states.pop(shell_id, None)
                     await self.server.emit('tab_snapshot', {'tab': current}, room=room, namespace=NAMESPACE)
                     await self.server.emit('tab_catalog', {'changed': True}, room='tab-catalog', namespace=NAMESPACE)
@@ -126,12 +187,16 @@ class TabService:
                 if tab['shellId'] != shell_id: continue
                 room = 'tab:' + tab['id']
                 if event.get('type') == 'output':
-                    await self.server.emit('terminal_output', {**event, 'tabId': tab['id'], 'shellId': shell_id}, room=room, namespace=NAMESPACE)
+                    for stream in list(self.streams):
+                        if stream.tab_id == tab['id'] and stream.shell_id == shell_id:
+                            stream.put({**event, 'tabId': tab['id'], 'shellId': shell_id})
                 elif event.get('type') == 'directory':
                     tracking = self.terminals.directory_status(tab)
                     await self.server.emit('terminal_directory', {'tabId': tab['id'], 'shellId': shell_id,
                         'directoryTracking': tracking}, room=room, namespace=NAMESPACE)
                 else:
+                    for stream in self.streams:
+                        if stream.shell_id == shell_id: stream.close()
                     await self.server.emit('terminal_reset', {'shellId': shell_id}, room=room, namespace=NAMESPACE)
 
     async def connect(self, sid: str, _environ: object, auth: object = None) -> bool:
@@ -146,10 +211,12 @@ class TabService:
             return False
 
     async def disconnect(self, sid: str, _reason: object = None) -> None:
+        self.drop_streams(sid)
         _ = self.presentations.pop(sid, None)
         _ = self.attached.pop(sid, None)
 
     async def _attach(self, sid: str, tab_id: str) -> None:
+        self.drop_streams(sid)
         await self.server.enter_room(sid, 'tab-catalog', namespace=NAMESPACE)
         previous = self.attached.pop(sid, None)
         if previous:
@@ -217,6 +284,14 @@ class TabService:
         revision = params.get('revision')
         if not isinstance(revision, int) or isinstance(revision, bool):
             raise ValueError('Expected tab revision')
+        if method == 'terminal.stream':
+            stream_tab = self.store.get(tab_id)
+            if self.attached.get(sid) != tab_id or stream_tab is None or stream_tab['revision'] != revision or stream_tab['shellId'] is None:
+                raise ValueError('Attach and resync before streaming')
+            self.drop_streams(sid)
+            token = secrets.token_urlsafe(32)
+            self.stream_grants[token] = (sid, tab_id, stream_tab['shellId'])
+            return {'token': token, 'shellId': stream_tab['shellId']}
         if method in ('terminal.start', 'terminal.status', 'terminal.close', 'terminal.input', 'terminal.resize', 'terminal.checkpoint', 'terminal.directoryLock'):
             selected = self.store.get(tab_id)
             if self.attached.get(sid) != tab_id or selected is None or selected['revision'] != revision:
@@ -225,6 +300,7 @@ class TabService:
             result = await self.terminals.dispatch(selected, method, params)
             current = self.store.get(tab_id)
             if selected['shellId'] is not None and (current is None or current['shellId'] != selected['shellId']):
+                self.close_shell_streams(selected['shellId'])
                 _ = self.directory_states.pop(selected['shellId'], None)
             if method == 'terminal.directoryLock' and current is not None and current['shellId'] is not None:
                 _ = self.directory_states.pop(current['shellId'], None)
@@ -278,7 +354,28 @@ def compose_tabs(http: ASGIApplication, store: TabStore,
     server = cast(SocketServer, socketio.AsyncServer(async_mode='asgi',
         cors_allowed_origins='*', max_http_buffer_size=65536,
         transports=['websocket'], allow_upgrades=False))
-    service = TabService(store, server, resolve_path, project_path)
-    application = cast(ASGIApplication, socketio.ASGIApp(server, other_asgi_app=http,
+    service = TabService(store, EncodedServer(server), resolve_path, project_path)
+    async def routes(scope: Scope, receive: Receive, send: Send) -> None:
+        if scope['type'] == 'websocket' and scope['path'] == '/ws/terminal':
+            await serve_output(scope, receive, send, service.attach_stream, service.detach_stream)
+        else:
+            await http(scope, receive, send)
+    application = cast(ASGIApplication, socketio.ASGIApp(server, other_asgi_app=routes,
                                                        socketio_path='socket.io', on_shutdown=service.shutdown))
     return application, service
+
+
+class EncodedServer:
+    """Serialize only at the wire seam, retaining typed domain/test DTOs."""
+    def __init__(self, server: SocketServer) -> None:
+        self.server: SocketServer = server
+    def on(self, event: str, handler: object, *, namespace: str) -> object:
+        return self.server.on(event, handler, namespace=namespace)
+    async def enter_room(self, sid: str, room: str, *, namespace: str) -> None:
+        await self.server.enter_room(sid, room, namespace=namespace)
+    async def leave_room(self, sid: str, room: str, *, namespace: str) -> None:
+        await self.server.leave_room(sid, room, namespace=namespace)
+    async def emit(self, event: str, data: object, *, room: str,
+                   skip_sid: str | None = None, namespace: str) -> None:
+        await self.server.emit(event, pack_message(object_map(data)), room=room,
+                               skip_sid=skip_sid, namespace=namespace)

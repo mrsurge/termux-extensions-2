@@ -152,7 +152,8 @@ def test_concurrent_creation_and_revision_fencing(tmp_path):
     asyncio.run(run())
 
 
-def test_real_socketio_asgi_round_trip(tmp_path):
+def test_real_socketio_asgi_round_trip(tmp_path, monkeypatch):
+    from app.apps.terminal.terminal_stream_protocol import pack_message, unpack_message
     import socket
     import socketio
     import uvicorn
@@ -175,7 +176,7 @@ def test_real_socketio_asgi_round_trip(tmp_path):
         events = []
         changed = asyncio.Event()
         async def received(payload):
-            events.append(payload)
+            events.append(unpack_message(payload))
             changed.set()
         peer.on('tab_snapshot', received, namespace='/tabs')
         try:
@@ -186,9 +187,12 @@ def test_real_socketio_asgi_round_trip(tmp_path):
             assert server.started
             for client, identity in [(author, 'author'), (peer, 'peer')]:
                 await client.connect(f'http://127.0.0.1:{port}', namespaces=['/tabs'],
-                                     transports=['websocket'], auth={'presentationId': identity})
+                                     transports=['websocket'], auth={'codec': 'msgpack-v1', 'presentationId': identity})
             async def call(client, method, **params):
-                return await client.call('tab_request', {'method': method, 'params': params}, namespace='/tabs', timeout=2)
+                raw = await client.call('tab_request', pack_message({'id': 1, 'method': method, 'params': params}), namespace='/tabs', timeout=2)
+                result = unpack_message(raw)
+                assert result['id'] == 1
+                return result
             result = await call(author, 'tabs.create', operationId='wire', path='/project')
             tab = result['result']['tab']
             await call(peer, 'tabs.attach', tabId=tab['id'])
@@ -197,6 +201,23 @@ def test_real_socketio_asgi_round_trip(tmp_path):
             await asyncio.wait_for(changed.wait(), 2)
             assert events[-1]['tab']['path'] == '/next'
             assert service.store.get(tab['id'])['revision'] == 2
+            # Prove raw socket routing through the same production ASGI composition,
+            # without importing the Terminal FastAPI backend or launching a shell.
+            import websockets
+            selected = service.store.get(tab['id'])
+            selected = service.store.set_shell(selected['id'], selected['revision'], 'wire-shell')
+            async def checkpoint(selected, method, params):
+                assert method == 'terminal.checkpoint'
+                return {'shellId': 'wire-shell', 'ansi': 'screen', 'outputOffset': 0}
+            monkeypatch.setattr(service.terminals, 'dispatch', checkpoint)
+            grant = (await call(author, 'terminal.stream', tabId=selected['id'], revision=selected['revision']))['result']
+            async with websockets.connect(f'ws://127.0.0.1:{port}/ws/terminal?codec=msgpack-v1') as raw:
+                await raw.send(pack_message({'type': 'attach', 'token': grant['token'], 'columns': 80, 'rows': 24}))
+                initial = unpack_message(await asyncio.wait_for(raw.recv(), 2))
+                assert initial['type'] == 'checkpoint' and initial['ansi'] == 'screen'
+                await service.broker_event('wire-shell', {'type': 'output', 'startOffset': 0, 'endOffset': 1, 'data': b'x'})
+                assert unpack_message(await asyncio.wait_for(raw.recv(), 2))['data'] == b'x'
+            assert service.store.get(selected['id'])['shellId'] == 'wire-shell'
         finally:
             await author.disconnect()
             await peer.disconnect()

@@ -638,7 +638,12 @@ Socket.IO remains the tab/CRUD, input, directory and checkpoint command lane.
 Output temporarily retains its existing Socket.IO event with session-local byte
 offsets derived from broker output; Node checkpoint sequences remain authoritative
 for gaps. The user explicitly deferred a separate raw WebSocket output lane until
-this broker integration works. Do not change both boundaries in one slice.
+this broker integration works. Broker/prompt live acceptance has now passed;
+the separately approved follow-up implements raw output and strict MessagePack
+Socket.IO control together, modeled after standalone Terminal. Preserve tab-owned
+shell identity, checkpoint fences and no mutation replay. Native OTA plus an
+approved File Explorer worker refresh are required for live validation; no shared
+framework restart, Code TE2 compiled rebuild or APK build is needed.
 
 Old PTY sessions are not converted or silently replaced. Their exact signed tab
 label permits explicit Close; other I/O fails closed. Restoration does not create

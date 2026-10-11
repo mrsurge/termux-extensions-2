@@ -277,14 +277,16 @@ def test_event_wakeup_preserves_raw_bytes_and_exit_clears_association(tmp_path):
         terminal.brokers.sink = service.broker_event
         started = (await terminal.dispatch(tab, 'terminal.start', {}))['tab']
         await terminal.dispatch(started, 'terminal.checkpoint', {})
+        from app.apps.file_explorer.terminal_stream import OutputConnection
+        stream = OutputConnection('client', tab['id'], 'shell-1')
+        service.streams.add(stream)
         manager.queues['shell-1'].put_nowait(encode_pipe_message({'type': 'output', 'sequence': 2, 'data': b'\x1b[31mraw\xff'}))
         for _ in range(8): await asyncio.sleep(0)
-        event, payload, routing = server.events[-1]
-        assert event == 'terminal_output'
+        from app.apps.terminal.terminal_stream_protocol import unpack_message
+        payload = unpack_message((await asyncio.wait_for(stream.queue.get(), 1))[0])
         assert payload['data'] == b'\x1b[31mraw\xff'
         assert payload['startOffset'] == 7
         assert payload['endOffset'] == 16
-        assert routing['room'] == 'tab:' + tab['id']
         manager.records['shell-1']['status'] = 'exited'
         await service.shell_changed('shell-1')
         assert store.get(tab['id'])['shellId'] is None

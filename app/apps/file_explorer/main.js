@@ -3059,7 +3059,7 @@ export default function initFileExplorer(root, api, host) {
   void (async () => {
     const io = await ensureSocketIoLoaded();
     const socket = io('/tabs', { path: '/api/app/file_explorer/socket.io', transports: ['websocket'],
-      autoConnect: false, auth: { presentationId: randomTabOperation() } });
+      autoConnect: false, auth: { codec: 'msgpack-v1', presentationId: randomTabOperation() } });
     tabSocket = socket;
     tabs = createTabClient(socket, tab => void applyTab(tab).catch(tabError), tabError,
       () => {

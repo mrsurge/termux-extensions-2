@@ -43,12 +43,26 @@ after a new launch cleans that exact child. No uncertain mutation is replayed.
 
 The single live pipe reader resolves control replies separately from its bounded
 event publisher, avoiding deadlock when a checkpoint holds the tab mutation lock.
-Output uses the existing binary `terminal_output` Socket.IO event in the exact
-tab room. Overflow or a sequence gap requests checkpoint recovery; no log-tail
-fallback is allowed. FWS exit/removal clears the association. ASGI shutdown
-unsubscribes without killing retained shells. Socket.IO remains the tab/CRUD and
-user-command lane; a separate raw WebSocket output lane is explicitly deferred
-until this broker integration has live acceptance.
+Output uses a separate raw WebSocket at `/ws/app/file_explorer/terminal`
+(worker route `/ws/terminal`), requiring `codec=msgpack-v1`. The first binary
+MessagePack frame is an `attach` with a one-use token obtained through the
+attached presentation's `terminal.stream` control request. Grants are fenced to
+the live Socket.IO SID, tab and shell; disconnect/reselection revokes them.
+The socket delivers a checkpoint before live output, with byte offsets retaining
+the existing cursor fence. No terminal-output rooms, text frames, JSON/base64
+fallback, mutation ingress or log-tail replay. Each presentation has its own
+bounded 64-frame/1 MiB output queue and 5s send deadline; overflow closes that
+connection for checkpoint recovery without blocking the broker or stopping the
+shell. The initial bounded checkpoint is admitted separately from output bytes.
+Socket.IO remains the tab/CRUD, input/resize/directory and notification lane.
+Its `msgpack-v1` authenticated requests/ACKs use correlated `{id, method, params}`
+and `{id, ok, result/error}` objects encoded as binary MessagePack; notifications
+are binary objects too. Python boundaries reuse Terminal's `msgspec.msgpack`
+codec, while Node/browser use `@msgpack/msgpack`. Socket.IO's own handshake
+metadata is still its standard protocol, not an application JSON fallback.
+Reconnect obtains a new grant/checkpoint; unsent input and uncertain mutations
+are never replayed. FWS exit/removal clears the association. ASGI shutdown
+unsubscribes/closes presentation sockets without killing retained shells.
 
 `terminal_drawer.ts` builds through `app/apps/terminal/build.mjs` into the existing
 inventoried `/static/js/file_explorer_terminal.js` root. It lazily reuses vendored
@@ -67,6 +81,11 @@ retains the chosen height across Minimize/Restore. Bounds exclude fixed chrome
 and reserve 48px of file browsing space. Existing viewport observation owns
 debounced terminal resize/checkpoint work, not a new backend path. Tab changes,
 disconnect, minimize/maximize and disposal cancel active gesture ownership.
+Healthy-stream geometry changes only fit xterm and send changed rows/columns on
+the existing control lane. Resize notifications, Maximize and Minimize/Restore
+must not reset xterm, obtain another stream grant or replace the raw socket.
+Checkpoint/socket recovery is reserved for initial mount, real disconnect/reset
+or an output gap. Repeated identical geometry notifications do no network work.
 Mobile keys retain Terminal's two rows of seven, default-visible Keys toggle,
 pointer-down dispatch, Ctrl double-tap lock, one-shot modifiers and shared arrow
 hold-repeat timings. The minibar opens the existing Tabs menu with the shared

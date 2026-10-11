@@ -157,6 +157,7 @@ test('checkpoint cursor drops covered deltas and accepts only exact raw offsets'
 });
 
 test('drawer fences checkpoint handoff, preserves shell on minimize/dispose and hides desktop keys', async () => {
+  const { packObject } = await import('../app/static/js/file_explorer_codec.js');
   class Element {
     hidden = false; textContent = ''; dataset = {}; handlers = new Map(); children = [];
     classList = { remove() {}, toggle() {} };
@@ -178,17 +179,29 @@ test('drawer fences checkpoint handoff, preserves shell on minimize/dispose and 
     onData(callback) { this.input = callback; return { dispose() {} }; }
     attachCustomKeyEventHandler() {}
   }
-  const originals = Object.fromEntries(['window', 'document', 'navigator', 'ResizeObserver'].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const originals = Object.fromEntries(['window', 'document', 'navigator', 'ResizeObserver', 'WebSocket', 'location'].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const streams = [];
+  globalThis.location = new URL('http://localhost/app/file_explorer');
+  globalThis.WebSocket = class {
+    constructor(url) { assert.match(String(url), /\/ws\/app\/file_explorer\/terminal\?codec=msgpack-v1/); streams.push(this); queueMicrotask(() => this.onopen?.()); }
+    send(raw) {
+      assert.ok(raw instanceof Uint8Array);
+      checkpoints.push(value => this.frame({ type: 'checkpoint', tabId: 'tab', ...value }));
+    }
+    frame(value) { this.onmessage?.({ data: packObject(value).slice().buffer }); }
+    close() { queueMicrotask(() => this.onclose?.()); }
+  };
   Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { userAgent: 'Desktop' } });
   globalThis.document = { createElement: () => new Element(), head: { append(node) { if (node.onload === null) return; queueMicrotask(() => node.onload?.()); } } };
   globalThis.window = { Terminal: View, FitAddon: { FitAddon: class { fit() {} } },
     WebFontsAddon: { WebFontsAddon: class { async loadFonts() {} } },
     te2TerminalTouchSelection: { attach() { return { dispose() {} }; } },
     teUI: { dialog: { async confirm() { return true; } } } };
-  globalThis.ResizeObserver = class { observe() {} disconnect() {} };
+  let notifyResize;
+  globalThis.ResizeObserver = class { constructor(callback) { notifyResize = callback; } observe() {} disconnect() {} };
   const tabs = { tab: { id: 'tab', shellId: 'shell' }, terminal(method, params) {
     calls.push([method, params]);
-    if (method === 'terminal.checkpoint') return new Promise(resolve => checkpoints.push(resolve));
+    if (method === 'terminal.stream') return Promise.resolve({ token: 'grant', shellId: 'shell' });
     return Promise.resolve({});
   } };
   const socket = { connected: true, on(name, callback) { handlers.set(name, callback); }, off(name) { handlers.delete(name); } };
@@ -199,16 +212,30 @@ test('drawer fences checkpoint handoff, preserves shell on minimize/dispose and 
     assert.equal(checkpoints.length, 1);
     assert.equal(elements.get('.fx-terminal-keys').hidden, true);
     const chunk = (start, data) => ({ tabId: 'tab', shellId: 'shell', startOffset: start, endOffset: start + data.length, data: new Uint8Array(data) });
-    handlers.get('terminal_output')(chunk(0, [65])); // covered by checkpoint
-    handlers.get('terminal_output')(chunk(1, [66])); // arrived before ACK
-    checkpoints.shift()({ shellId: 'shell', ansi: 'A', outputOffset: 1, pendingBytes: new Uint8Array() }); await tick();
+    checkpoints.shift()({ shellId: 'shell', ansi: 'A', outputOffset: 1, pendingBytes: new Uint8Array() });
+    streams[0].frame({ type: 'output', ...chunk(0, [65]) }); // covered by checkpoint
+    streams[0].frame({ type: 'output', ...chunk(1, [66]) }); // arrives during async xterm handoff
+    await tick();
     assert.deepEqual(views[0].writes, ['A', new Uint8Array([66])]);
+    for (let i = 0; i < 20; i++) notifyResize();
+    await new Promise(resolve => setTimeout(resolve, 180));
+    assert.equal(streams.length, 1, 'identical layout observations must not reconnect');
+    assert.equal(calls.filter(([method]) => method === 'terminal.resize').length, 1, 'unchanged dimensions need no resize request');
+    views[0].cols = 90;
+    notifyResize();
+    await new Promise(resolve => setTimeout(resolve, 180));
+    assert.deepEqual(calls.at(-1), ['terminal.resize', { columns: 90, rows: 24 }]);
+    assert.equal(streams.length, 1, 'real resize uses the existing control/output connection');
+    assert.deepEqual(views[0].writes, ['A', new Uint8Array([66])], 'resize must not reset xterm or its checkpoint');
+    await elements.get('[data-terminal="maximize"]').handlers.get('click')();
+    await new Promise(resolve => setTimeout(resolve, 180));
+    assert.equal(streams.length, 1, 'maximize keeps the healthy stream');
     const lock = elements.get('[data-terminal="directory-lock"]');
     const tracking = elements.get('[data-directory-status]');
     assert.equal(lock.checked, true, 'directory tracking defaults on');
-    handlers.get('terminal_directory')({ tabId: 'other', shellId: 'shell', directoryTracking: { state: 'pending', path: '/other' } });
+    handlers.get('terminal_directory')(packObject({ tabId: 'other', shellId: 'shell', directoryTracking: { state: 'pending', path: '/other' } }));
     assert.equal(tracking.textContent, '');
-    handlers.get('terminal_directory')({ tabId: 'tab', shellId: 'shell', directoryTracking: { state: 'pending', path: '/next' } });
+    handlers.get('terminal_directory')(packObject({ tabId: 'tab', shellId: 'shell', directoryTracking: { state: 'pending', path: '/next' } }));
     assert.match(tracking.textContent, /Waiting for terminal directory change/);
     tabs.tab.directoryLocked = false; drawer.sync(tabs.tab);
     assert.equal(lock.checked, false, 'peer snapshots update the checkbox');
@@ -228,6 +255,10 @@ test('drawer fences checkpoint handoff, preserves shell on minimize/dispose and 
     await elements.get('[data-terminal="minimize"]').handlers.get('click')();
     assert.equal(calls.some(([method]) => method === 'terminal.close'), false);
     await elements.get('[data-terminal="minimize"]').handlers.get('click')(); await tick();
+    await new Promise(resolve => setTimeout(resolve, 180));
+    assert.equal(checkpoints.length, 0, 'restore keeps the healthy stream');
+    assert.equal(streams.length, 2);
+    handlers.get('terminal_reset')(packObject({ shellId: 'shell' })); await tick();
     assert.equal(checkpoints.length, 1);
     drawer.sync(null);
     checkpoints.shift()({ shellId: 'shell', ansi: 'obsolete', outputOffset: 2 }); await tick();

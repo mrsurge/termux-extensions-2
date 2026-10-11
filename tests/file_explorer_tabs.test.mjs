@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mountIntent, tabUrl, createTabClient } from '../app/static/js/file_explorer_tabs.mjs';
+import { packObject, unpackObject } from '../app/static/js/file_explorer_codec.js';
 
 test('launch intent distinguishes framework, sidebar, fresh and restored tabs', () => {
   const url = query => new URL('http://host/app/file_explorer' + query);
@@ -23,10 +24,28 @@ function socket() {
   return { connected: true, sendBuffer: [], calls,
     on(name, callback) { handlers.set(name, callback); },
     off(name) { handlers.delete(name); }, disconnect() { this.connected = false; },
-    emit(event, payload, ack) { calls.push({ payload, ack }); },
-    event(name, payload) { return handlers.get(name)?.(payload); },
+    emit(event, raw, ack) {
+      assert.ok(raw instanceof Uint8Array);
+      const payload = unpackObject(raw);
+      calls.push({ payload, ack: reply => ack(packObject({ id: payload.id, ...reply })) });
+    },
+    event(name, payload) { return handlers.get(name)?.(payload ? packObject(payload) : undefined); },
   };
 }
+
+test('MessagePack rejects text and non-object frames; requests reject mismatched correlation', async () => {
+  assert.throws(() => unpackObject('{}'));
+  assert.throws(() => unpackObject(packObject([1, 2])));
+  assert.throws(() => unpackObject(packObject(new Uint8Array([1]))));
+  const wire = socket();
+  wire.emit = (_event, raw, ack) => {
+    const request = unpackObject(raw);
+    ack(packObject({ id: request.id + 1, ok: true, result: {} }));
+  };
+  const client = createTabClient(wire, () => {}, () => {});
+  await assert.rejects(client.request('tabs.list'), /id mismatch/);
+  client.dispose();
+});
 
 test('relative Sidebar publication saves a restorable tab reference or identity-free splash', () => {
   for (const base of ['http://127.0.0.1:64926/app/file_explorer', 'http://localhost:8089/app/file_explorer']) {

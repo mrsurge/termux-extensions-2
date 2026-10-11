@@ -1495,8 +1495,57 @@ the separately deferred raw WebSocket output lane remain distinct follow-ups.
   reported no errors (its initially reported adapter warnings were cleaned up).
 - [ ] Approved worker refresh + native OTA and physical mobile/multi-client
   acceptance. No runtime activation occurred during this wiring.
-- [ ] Separate raw WebSocket terminal-output migration, after broker acceptance;
-  retain Socket.IO for tab/CRUD synchronization and user commands.
+- [x] Separate raw WebSocket terminal-output migration, after broker acceptance;
+  retain Socket.IO for tab/CRUD synchronization and user commands (source/tests;
+  matched backend/assets and user live acceptance remain pending).
+
+### Raw terminal output and MessagePack control (2026-10-11)
+
+User live acceptance passed after the resize/reconnect correction: the reported
+raw-terminal reconnect loop is fixed. This closes the observed transport/fix
+acceptance gate; exhaustive multi-device/slow-consumer testing and release
+packaging remain separate. Source and rebuilt shared frontend assets are included
+in the requested checkpoint.
+
+Reconnect-loop follow-up: user reported a severe raw-output reconnect loop during
+live validation. Read-only inspection found a concrete frontend lifecycle defect:
+every viewport ResizeObserver notification called full checkpoint recovery and
+replaced the raw socket, irrespective of rows/columns. Current worker inspection
+found no corresponding backend exception; the live trigger was not instrumented.
+Approved frontend correction separates fit/changed-dimension control requests
+from stream recovery, including Show/Maximize/Minimize restoration. Repeated
+identical resize notifications do no network work and do not reset xterm. Sixteen
+frontend regressions now include repeated notifications, actual resize, maximized
+and minimized restoration without socket replacement, plus explicit stream reset
+and stale checkpoint cleanup. Typecheck/rebuild pass. Client OTA and user live
+acceptance of this correction remain pending; no runtime restart was performed.
+
+Approved follow-up models both socket boundaries after standalone Terminal:
+Python reuses its msgspec codec; Node/browser use the matching MessagePack codec.
+`/tabs` now negotiates msgpack-v1 and carries binary correlated request/ACK and
+notification envelopes. Its domain remains ordinary typed DTOs; encoding belongs
+at the wire seam. Raw `/ws/app/file_explorer/terminal` has no output rooms or
+mutation ingress. A one-use presentation/tab/shell grant gates attach; checkpoint
+is queued before output under the same tab-service lock. Existing offset fencing
+handles older queued deltas. Per-presentation queues/send deadlines isolate slow
+consumers, and reconnect obtains a new checkpoint without replaying input.
+Socket.IO retains input/resize/directory/tabs and shared configuration rooms.
+
+Validation: all 104 File Explorer Python tests and 16 frontend regressions pass;
+strict mypy/no explicit Any, ty and basedpyright (zero errors/warnings), Terminal/
+File Explorer TypeScript typechecks, frontend rebuild and diff whitespace check
+pass. The shared codec is emitted once (21.1 KiB uncompressed), reused by tabs
+and drawer; the existing asset-tree inventory includes it without an APK manifest
+change.
+
+Synthetic backend/frontend and actual isolated ASGI Socket.IO/raw socket checks
+cover binary-only admission, malformed payloads, correlation, checkpoint/output
+handoff, token reuse, disconnect cleanup, queue overflow and retained shell
+ownership. Existing
+native clients need both the new codec shared asset and rebuilt drawer/tabs/main
+sources via OTA plus a File Explorer worker refresh; neither has been performed.
+No shared framework restart, Android build, Code TE2 compilation, commit or release
+is implied. Live performance/lifecycle acceptance remains pending.
 
 This supersedes earlier notes saying File Explorer still launches the prompt-only
 PTY/Pyte path. Standalone Terminal keeps directory control disabled. Private

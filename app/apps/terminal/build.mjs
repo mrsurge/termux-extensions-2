@@ -35,6 +35,14 @@ if (isWatch) {
 }
 
 const explorerConfig = { ...shared, entryPoints: [path.join(appRoot, '..', 'file_explorer', 'terminal_drawer.ts')],
+  plugins: [{ name: 'shared-explorer-codec', setup(build) {
+    build.onResolve({ filter: /^\.\/wire_codec$/ }, () => ({ path: './file_explorer_codec.js', external: true }));
+  } }],
   outfile: path.join(appRoot, '..', '..', 'static', 'js', 'file_explorer_terminal.js') };
 if (isWatch) { const ctx = await context(explorerConfig); await ctx.watch(); }
 else await build(explorerConfig);
+
+const codecConfig = { ...shared, entryPoints: [path.join(appRoot, '..', 'file_explorer', 'wire_codec.ts')],
+  outfile: path.join(appRoot, '..', '..', 'static', 'js', 'file_explorer_codec.js') };
+if (isWatch) { const ctx = await context(codecConfig); await ctx.watch(); }
+else await build(codecConfig);

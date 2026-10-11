@@ -1,4 +1,5 @@
 // File Explorer owns durable tabs; URLs/last-tab storage are references only.
+import { packObject, unpackObject } from './file_explorer_codec.js';
 export function randomTabOperation() {
   const bytes = new Uint8Array(16);
   globalThis.crypto.getRandomValues(bytes);
@@ -30,6 +31,7 @@ export function createTabClient(socket, onSnapshot, onError, onCatalog = () => {
   let lane = Promise.resolve();
   let disposed = false;
   let mounting = 0;
+  let requestId = 0;
   const request = (method, params = {}) => new Promise((resolve, reject) => {
     if (!socket.connected || disposed) return reject(new Error('Tab connection is unavailable'));
     const current = generation;
@@ -37,11 +39,16 @@ export function createTabClient(socket, onSnapshot, onError, onCatalog = () => {
     const finish = () => { clearTimeout(entry.timer); pending.delete(entry); };
     entry.timer = setTimeout(() => { finish(); reject(new Error('Tab request timed out; no retry performed')); }, 15000);
     pending.add(entry);
-    socket.emit('tab_request', { method, params }, reply => {
+    const id = ++requestId;
+    socket.emit('tab_request', packObject({ id, method, params }), raw => {
       finish();
       if (current !== generation || disposed) return reject(new Error('Tab connection changed'));
-      if (!reply?.ok) return reject(new Error(reply?.error || 'Tab request failed'));
-      resolve(reply.result);
+      try {
+        const reply = unpackObject(raw);
+        if (reply.id !== id) throw new Error('Tab response id mismatch');
+        if (!reply.ok) throw new Error(reply.error || 'Tab request failed');
+        resolve(reply.result);
+      } catch (error) { reject(error); }
     });
   });
   const disconnected = () => {
@@ -50,7 +57,9 @@ export function createTabClient(socket, onSnapshot, onError, onCatalog = () => {
     pending.clear();
     if (socket.sendBuffer) socket.sendBuffer.length = 0;
   };
-  const receive = payload => {
+  const receive = raw => {
+    let payload;
+    try { payload = unpackObject(raw); } catch (error) { onError(error); return; }
     if (payload?.closedId === tab?.id) { tab = null; onSnapshot(null); }
     else if (payload?.tab?.id === tab?.id && payload.tab.revision > tab.revision) {
       tab = payload.tab; onSnapshot(tab);
@@ -68,7 +77,9 @@ export function createTabClient(socket, onSnapshot, onError, onCatalog = () => {
   socket.on('disconnect', disconnected);
   socket.on('tab_snapshot', receive);
   socket.on('connect', resync);
-  const catalog = () => { if (!mounting) onCatalog(); };
+  const catalog = raw => {
+    try { unpackObject(raw); if (!mounting) onCatalog(); } catch (error) { onError(error); }
+  };
   socket.on('tab_catalog', catalog);
   return {
     request,

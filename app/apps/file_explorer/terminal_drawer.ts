@@ -1,5 +1,6 @@
 import { isMobileUserAgent, TERMINAL_KEYS, TerminalModifierState, dispatchSyntheticTerminalKey, dispatchSyntheticTerminalText, MINIBAR_INTERACTION_GUARD_MS, shouldSuppressMinibarInteraction } from '../terminal/src/mobile-special-keys';
 import { bindPointerHoldRepeat } from '../terminal/src/pointer-hold-repeat';
+import { packObject, unpackObject } from './wire_codec';
 
 interface Disposable { dispose(): void }
 interface Terminal {
@@ -19,7 +20,7 @@ interface Runtime {
 }
 interface Tab { id: string; shellId: string | null; directoryLocked?: boolean }
 interface DirectoryStatus { state: string; path: string }
-interface Reply { tab?: Tab; shellId?: string; ansi?: string; pendingBytes?: Uint8Array; outputOffset?: number; directoryTracking?: DirectoryStatus }
+interface Reply { tab?: Tab; token?: string; shellId?: string; ansi?: string; pendingBytes?: Uint8Array; outputOffset?: number; directoryTracking?: DirectoryStatus }
 interface Tabs { readonly tab: Tab | null; terminal(method: string, params?: object): Promise<Reply> }
 interface Delta { tabId: string; shellId: string; startOffset: number; endOffset: number; data: Uint8Array }
 const TERMINAL_WEB_FONT_FAMILY = 'JetBrains Mono Nerd';
@@ -45,8 +46,7 @@ export class TerminalInputBatcher {
     const encoder = new TextEncoder();
     const size = encoder.encode(data).length;
     if (this.bytes + size > 65536) { this.report(new Error('Terminal input queue is full; input was not sent')); return; }
-    // Keep each JSON request well below the lane's 64 KiB envelope limit,
-    // including escaped controls and multibyte/surrogate-pair input.
+    // Keep each MessagePack request below the lane's 64 KiB envelope limit.
     let chunk = '', bytes = 0;
     for (const character of data) {
       const length = encoder.encode(character).length;
@@ -195,11 +195,17 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
   let resizeTimer: ReturnType<typeof setTimeout> | undefined;
   let bindings: Disposable[] = [];
   let mounting: Promise<void> | undefined;
+  let stream: WebSocket | undefined;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let lastColumns = 0, lastRows = 0, resizing = false, resizeAgain = false;
   const error = (value: unknown) => { status.textContent = value instanceof Error ? value.message : 'Terminal unavailable'; report(value); };
   const inputs = new TerminalInputBatcher(data => tabs.terminal('terminal.input', { data }), error);
   function clear() {
     drawerResize.cancel();
     generation++; ready = false; recovering = false; recoverAgain = false; mounting = undefined;
+    lastColumns = 0; lastRows = 0; resizing = false; resizeAgain = false;
+    clearTimeout(retryTimer);
+    const old = stream; stream = undefined; old?.close();
     buffered = []; bufferedBytes = 0; clearTimeout(resizeTimer);
     inputs.reset();
     for (const binding of bindings) binding.dispose(); bindings = [];
@@ -236,19 +242,90 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
       fit?.fit();
       const dimensions = { columns: view.cols, rows: view.rows };
       await tabs.terminal('terminal.resize', dimensions);
-      const checkpoint = await tabs.terminal('terminal.checkpoint', dimensions);
+      if (current !== generation || terminal !== view) return;
+      lastColumns = dimensions.columns; lastRows = dimensions.rows;
+      const grant = await tabs.terminal('terminal.stream');
+      if (current !== generation || terminal !== view) return;
+      if (!grant.token || grant.shellId !== shell) throw new Error('Invalid terminal stream authorization');
+      const old = stream; stream = undefined; old?.close();
+      const url = new URL('/ws/app/file_explorer/terminal?codec=msgpack-v1', location.href);
+      url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const next = new WebSocket(url); stream = next; next.binaryType = 'arraybuffer';
+      const checkpoint = await new Promise<Reply>((resolve, reject) => {
+        let attached = false;
+        const timer = setTimeout(() => { reject(new Error('Terminal attach timed out')); next.close(); }, 10000);
+        next.onopen = () => {
+          if (stream !== next || current !== generation) { next.close(); return; }
+          next.send(packObject({ type: 'attach', token: grant.token, ...dimensions }));
+        };
+        next.onmessage = event => {
+          if (stream !== next || current !== generation) return;
+          try {
+            const frame = unpackObject(event.data);
+            if (frame.tabId !== identity || frame.shellId !== shell) throw new Error('Terminal stream identity changed');
+            if (!attached) {
+              if (frame.type !== 'checkpoint' || typeof frame.ansi !== 'string' || !Number.isSafeInteger(frame.outputOffset)) throw new Error('Expected terminal checkpoint');
+              attached = true; clearTimeout(timer); resolve(frame as Reply);
+            } else {
+              if (frame.type !== 'output' || !(frame.data instanceof Uint8Array)
+                || !Number.isSafeInteger(frame.startOffset) || !Number.isSafeInteger(frame.endOffset)) throw new Error('Invalid terminal output');
+              output(frame as unknown as Delta);
+            }
+          } catch (value) { clearTimeout(timer); reject(value); next.close(); }
+        };
+        next.onerror = () => { clearTimeout(timer); reject(new Error('Terminal output connection failed')); };
+        next.onclose = () => {
+          clearTimeout(timer); reject(new Error('Terminal output disconnected'));
+          if (stream !== next || current !== generation || disposed) return;
+          stream = undefined; ready = false; inputs.reset();
+          if (!minimized && socket.connected) {
+            clearTimeout(retryTimer);
+            retryTimer = setTimeout(() => void recover(), 500);
+          }
+        };
+      });
       if (current !== generation || terminal !== view || checkpoint.shellId !== shell) return;
       if (typeof checkpoint.ansi !== 'string' || !Number.isSafeInteger(checkpoint.outputOffset)) throw new Error('Invalid terminal checkpoint');
       view.reset();
       await new Promise<void>(resolve => view.write(checkpoint.ansi!, resolve));
-      if (current !== generation || terminal !== view) return;
+      if (current !== generation || terminal !== view || stream !== next) return;
       if (checkpoint.pendingBytes?.length) view.write(new Uint8Array(checkpoint.pendingBytes));
       cursor.offset = checkpoint.outputOffset!; ready = true; status.textContent = 'Terminal';
       showDirectoryStatus(checkpoint.directoryTracking);
       const pending = buffered; buffered = []; bufferedBytes = 0;
       for (const delta of pending) { if (!ready) break; paint(delta); }
     } catch (value) { if (current === generation) error(value); }
-    finally { if (current === generation) { recovering = false; if (recoverAgain) void recover(); } }
+    finally {
+      if (current === generation) {
+        recovering = false;
+        if (recoverAgain) void recover();
+        else if (resizeAgain && ready) { resizeAgain = false; void fitAndResize(); }
+      }
+    }
+  }
+  async function fitAndResize() {
+    if (disposed || !terminal || !socket.connected || minimized) return;
+    if (recovering || resizing) { resizeAgain = true; return; }
+    if (!ready) { void recover(); return; }
+    const current = generation, view = terminal;
+    fit?.fit();
+    const columns = view.cols, rows = view.rows;
+    if (columns === lastColumns && rows === lastRows) return;
+    resizing = true; resizeAgain = false;
+    try {
+      await tabs.terminal('terminal.resize', { columns, rows });
+      if (current === generation && view === terminal) { lastColumns = columns; lastRows = rows; }
+    } catch (value) { if (current === generation) error(value); }
+    finally {
+      if (current === generation) {
+        resizing = false;
+        if (resizeAgain) { resizeAgain = false; void fitAndResize(); }
+      }
+    }
+  }
+  function scheduleResize() {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => void fitAndResize(), 150);
   }
   function input(data: string) {
     if (!ready || !socket.connected) return;
@@ -374,18 +451,20 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
       if (!tabs.tab) return;
       if (!tabs.tab.shellId) await tabs.terminal('terminal.start');
       sync(tabs.tab); drawer.hidden = false; minimized = false;
-      drawer.classList.remove('is-minimized'); await mounting; await recover(); terminal?.focus();
+      drawer.classList.remove('is-minimized'); await mounting;
+      if (!ready) await recover(); else scheduleResize();
+      terminal?.focus();
     } catch (value) { error(value); }
   };
   root.querySelector('[data-action="terminal"]')!.addEventListener('click', () => void show());
   drawer.querySelector('[data-terminal="minimize"]')!.addEventListener('click', () => {
     drawerResize.cancel();
     minimized = !minimized; drawer.classList.toggle('is-minimized', minimized);
-    if (!minimized) { ready = false; void recover(); }
+    if (!minimized) scheduleResize();
   });
   drawer.querySelector('[data-terminal="maximize"]')!.addEventListener('click', () => {
     drawerResize.cancel();
-    drawer.classList.toggle('is-maximized'); ready = false; recoverAgain = true; void recover();
+    drawer.classList.toggle('is-maximized'); scheduleResize();
   });
   drawer.querySelector('[data-terminal="close"]')!.addEventListener('click', async () => {
     const ui = window as unknown as { teUI: { dialog: { confirm(message: string): Promise<boolean> } } };
@@ -405,25 +484,29 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
       directoryLock.disabled = false;
     });
   });
-  const resize = new ResizeObserver(() => {
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => { if (!minimized && terminal) { ready = false; recoverAgain = true; void recover(); } }, 150);
-  }); resize.observe(viewport);
+  const resize = new ResizeObserver(scheduleResize); resize.observe(viewport);
   // Clearing the renderer also fences a still-loading runtime/font promise.
   // Reconnect's authoritative tab snapshot mounts a new view even if IDs match.
   const disconnected = () => { clear(); status.textContent = 'Disconnected'; };
   const reset = (payload: { shellId: string }) => { if (payload.shellId === shell) { ready = false; recoverAgain = true; void recover(); } };
-  const directoryChanged = (payload: { tabId: string; shellId: string; directoryTracking: DirectoryStatus }) => {
-    if (payload.tabId === identity && payload.shellId === shell) showDirectoryStatus(payload.directoryTracking);
+  const directoryChanged = (raw: unknown) => {
+    try {
+      const payload = unpackObject(raw);
+      if (payload.tabId === identity && payload.shellId === shell) showDirectoryStatus(payload.directoryTracking as DirectoryStatus);
+    } catch (value) { error(value); }
+  };
+  const wireReset = (raw: unknown) => {
+    try { const payload = unpackObject(raw); if (typeof payload.shellId === 'string') reset({ shellId: payload.shellId }); }
+    catch (value) { error(value); }
   };
   socket.on('terminal_directory', directoryChanged);
-  socket.on('terminal_output', output); socket.on('terminal_reset', reset); socket.on('disconnect', disconnected);
+  socket.on('terminal_reset', wireReset); socket.on('disconnect', disconnected);
   return { sync, dispose() {
     drawerResize.dispose();
     disposeRepeatingKeys.forEach(dispose => dispose());
     for (const type of ['pointerdown', 'pointerup', 'click']) tabsPanel?.removeEventListener(type, guardMinibar, true);
     disposed = true; clear(); resize.disconnect();
-    socket.off('terminal_output', output); socket.off('terminal_reset', reset); socket.off('disconnect', disconnected);
+    socket.off('terminal_reset', wireReset); socket.off('disconnect', disconnected);
     socket.off('terminal_directory', directoryChanged);
   } };
 }
