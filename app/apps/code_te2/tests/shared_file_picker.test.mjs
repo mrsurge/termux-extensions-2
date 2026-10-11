@@ -17,10 +17,18 @@ const getIconName = vm.runInNewContext(iconSource + '\ngetIconName;', {
   fetch: async url => { iconFetches.push(url); return { ok: true, json: async () => definitions }; }, console,
 });
 const providerSource = (await readFile(path.join(root, 'app/static/js/file_icons.js'), 'utf8')).replace(/^import .*;\n/gm, '').replace(/export /g, '');
-const provider = vm.runInNewContext(providerSource + '\n({ getIcon, renderIcon, FILE_TYPE_CODICONS });', {
-  classifyFileName: getIconName, LANGUAGE_ICONS, encodeURIComponent,
-  getSetiIcon: async name => ({ svg: setiSvgs[await getIconName(name)] }),
-});
+function createProvider(fetchImpl = async url => {
+  iconFetches.push(url);
+  if (url.endsWith('definitions.json')) return new Response(JSON.stringify(definitions));
+  const name = url.split('/').pop().replace(/\.svg$/, '');
+  const svg = LANGUAGE_ICONS[name] || setiSvgs[name];
+  return new Response(svg ? (svg.includes('xmlns=') ? svg : svg.replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ')) + '\n' : '', { status: svg ? 200 : 404 });
+}) {
+  return vm.runInNewContext(providerSource + '\n({ getIcon, renderIcon, classifyFileName, FILE_TYPE_CODICONS });', {
+    fetch: fetchImpl, encodeURIComponent, AbortController, setTimeout, clearTimeout, TextDecoder, Uint8Array,
+  });
+}
+const provider = createProvider();
 const workerSource = await readFile(path.join(root, 'app/static/js/file_picker_filter_worker.js'), 'utf8');
 const entries = [
   { name: 'src', path: '/project/src', type: 'directory' },
@@ -196,11 +204,11 @@ test('shared name lookup survives failed SVG loading and preserves exact filenam
 test('shared provider normalizes JavaScript and Python families, preserves layout classes', async () => {
   for (const name of ['main.js', 'main.mjs', 'main.cjs', 'MAIN.JSX']) {
     const icon = await provider.getIcon(name);
-    assert.equal(icon.iconName, 'javascript'); assert.equal(icon.svg, LANGUAGE_ICONS.javascript);
+    assert.equal(icon.iconName, 'javascript'); assert.equal(icon.svg.trim(), LANGUAGE_ICONS.javascript);
   }
   for (const name of ['main.py', 'main.pyc', 'notebook.ipynb', 'main.pyi', 'module.pyx', 'header.pxd', 'include.pxi']) {
     const icon = await provider.getIcon(name);
-    assert.equal(icon.iconName, 'python'); assert.equal(icon.svg, LANGUAGE_ICONS.python);
+    assert.equal(icon.iconName, 'python'); assert.equal(icon.svg.trim(), LANGUAGE_ICONS.python);
   }
   const win = new Window(); const icon = win.document.createElement('span');
   icon.className = 'history-file-icon codicon codicon-file';
@@ -219,10 +227,10 @@ test('Codicon translation covers every classifier family, including Rust and dir
     ...Object.values(definitions.extensions), ...definitions.partials.map(row => row[1])].map(row => row[0]));
   for (const family of families) assert.ok(Object.hasOwn(provider.FILE_TYPE_CODICONS, family), family);
   assert.equal((await provider.getIcon('main.rs')).iconName, 'rust');
-  assert.equal((await provider.getIcon('main.rs')).svg, LANGUAGE_ICONS.rust);
-  assert.equal((await provider.getIcon('main.ts')).svg, LANGUAGE_ICONS.typescript);
+  assert.equal((await provider.getIcon('main.rs')).svg.trim(), LANGUAGE_ICONS.rust);
+  assert.equal((await provider.getIcon('main.ts')).svg.trim(), LANGUAGE_ICONS.typescript);
   for (const [name, family] of [['main.c', 'c'], ['main.cpp', 'cpp'], ['main.html', 'html']]) {
-    assert.equal((await provider.getIcon(name)).svg, setiSvgs[family]);
+    assert.equal((await provider.getIcon(name)).svg.trim(), setiSvgs[family].replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" '));
   }
   for (const file of ['tree/renderer.ts', 'chrome/sticky-scopes.ts']) {
     const source = await readFile(path.join(root, 'app/apps/code_te2/src/explorer', file), 'utf8');
@@ -230,6 +238,33 @@ test('Codicon translation covers every classifier family, including Rust and dir
   }
   const css = await readFile(path.join(root, 'app/apps/code_te2/main_page/frontend/explorer.css'), 'utf8');
   assert.doesNotMatch(css, /fe-entry-icon-dir::before/);
+});
+
+test('lazy provider preserves every exact, extension and partial filename rule', async () => {
+  const names = [...Object.keys(definitions.files), ...Object.keys(definitions.extensions).map(ext => 'file' + ext),
+    ...definitions.partials.map(([partial]) => 'prefix-' + partial + '-suffix'), 'unrecognized.bin'];
+  for (const name of names) assert.equal(await provider.classifyFileName(name), await getIconName(name), name);
+});
+
+test('lazy icon loads coalesce by family, never fetch inventories, and fail to Codicons', async () => {
+  const calls = [];
+  const api = createProvider(async url => {
+    calls.push(url);
+    if (url.endsWith('definitions.json')) return new Response(JSON.stringify(definitions));
+    if (url.endsWith('/cpp.svg')) return new Response('not found', { status: 404 });
+    if (url.endsWith('/c.svg')) return new Response('x'.repeat(65537));
+    return new Response(LANGUAGE_ICONS.javascript);
+  });
+  await api.ensureLoaded?.();
+  const icons = await Promise.all(['a.js', 'b.mjs', 'c.cjs'].map(name => api.getIcon(name)));
+  assert.ok(icons.every(icon => icon.svg));
+  assert.equal(calls.filter(url => url.endsWith('/javascript.svg')).length, 1);
+  assert.equal((await api.getIcon('main.cpp')).codicon, 'file-code');
+  assert.equal((await api.getIcon('main.c')).codicon, 'file-code');
+  await api.getIcon('again.cpp');
+  assert.equal(calls.filter(url => url.endsWith('/cpp.svg')).length, 1);
+  assert.equal(calls.some(url => /icons\.json|language-icons\.js|seti-icons\.js/.test(url)), false);
+  assert.doesNotMatch(providerSource, /^import /m);
 });
 
 test('mask icon containers have explicit height instead of depending on font or SVG content', async () => {

@@ -674,6 +674,19 @@ was performed for these follow-ups.
 
 ### F2 shared picker — implemented, live acceptance pending
 
+Lazy-icon follow-up after local checkpoint e3edf55a: standalone shared helper now
+owns unchanged filename-rule lookup and loads definitions once. Individual SVGs
+are requested only for rendered code families, one retained request per family;
+5s abort/64KiB body admission retain Codicon fallback on failure. Generator/check
+publishes 135 SVGs under the existing inventoried vendor root, including ALS
+overrides. No runtime Seti-wrapper, icons.json or four-icon JS import remains.
+All exact filenames, extension names and partial rules compare against the old
+classifier in regression tests; concurrent JS-family calls share one fetch and
+404/oversize failures remain generic without repeated requests. 60 targeted tests
+pass, and all generated assets match source. No OTA/restart/push in this slice;
+live acceptance pending. Python/JS/TS/Rust individual bodies are respectively
+1519/975/1295/4245 bytes raw (734/556/682/1761 gzip); C/C++ are 489/611 raw.
+
 Live picker mask regression: exact main-page inspection found loaded Python/JS
 mask spans and their picker parent at 0px height; directories retained font-driven
 16px height. Picker slot now explicitly owns 16px height, retaining its existing

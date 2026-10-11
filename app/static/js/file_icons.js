@@ -1,5 +1,62 @@
-import { getIconName as classifyFileName, getIcon as getSetiIcon } from '/static/vendor/seti-icons/seti-icons.js';
-import { LANGUAGE_ICONS } from '/static/vendor/seti-icons/language-icons.js';
+// Complete existing Seti filename rules, without its SVG-inventory loader.
+let definitionsPromise;
+const iconRequests = new Map();
+const LOGO_FAMILIES = new Set(['rust', 'javascript', 'typescript', 'python']);
+
+function loadDefinitions() {
+  return definitionsPromise ||= fetch('/static/vendor/seti-icons/definitions.json')
+    .then(async response => {
+      if (!response.ok) throw new Error('File icon mappings unavailable');
+      return response.json();
+    });
+}
+
+async function classifyFileName(fileName) {
+  const defs = await loadDefinitions();
+  if (!fileName) return defs.default?.[0] || 'default';
+  if (Object.hasOwn(defs.files || {}, fileName)) return defs.files[fileName][0];
+  let extension = fileName.slice(fileName.indexOf('.'));
+  while (extension !== '') {
+    const lookup = extension.toLowerCase() === '.mjs' ? '.js' : extension;
+    if (Object.hasOwn(defs.extensions || {}, lookup)) return defs.extensions[lookup][0];
+    extension = extension.slice(1);
+    extension = extension.slice(extension.indexOf('.'));
+  }
+  for (const [partial, details] of defs.partials || []) {
+    if (fileName.includes(partial)) return details[0];
+  }
+  return defs.default?.[0] || 'default';
+}
+
+function loadFamilySvg(family) {
+  if (!/^[A-Za-z0-9_-]+$/.test(family) || !Object.hasOwn(FILE_TYPE_CODICONS, family)) return Promise.resolve(null);
+  if (!iconRequests.has(family)) {
+    iconRequests.set(family, (async () => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 5000);
+      try {
+        const response = await fetch(`/static/vendor/seti-icons/individual/${family}.svg`, { signal: controller.signal });
+        if (!response.ok || Number(response.headers.get('content-length')) > 65536) return null;
+        const reader = response.body?.getReader();
+        if (!reader) return null;
+        const chunks = []; let size = 0;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          size += value.byteLength;
+          if (size > 65536) { await reader.cancel(); return null; }
+          chunks.push(value);
+        }
+        const bytes = new Uint8Array(size); let offset = 0;
+        for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+        const svg = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+        return svg.trimStart().startsWith('<svg ') ? svg : null;
+      } catch { return null; }
+      finally { clearTimeout(timer); }
+    })());
+  }
+  return iconRequests.get(family);
+}
 
 // One presentation-provider seam. Classification stays shared with the Explorer;
 // provider selection/preferences are intentionally not implemented by this trial.
@@ -45,7 +102,7 @@ const FILE_TYPE_CODICONS = {
   sublime: 'settings-gear', terraform: 'cloud', webpack: 'tools', wgt: 'package',
 };
 
-export function ensureLoaded() { return classifyFileName(''); }
+export function ensureLoaded() { return loadDefinitions(); }
 
 export async function getIcon(fileName) {
   const name = String(fileName || '').split(/[\\/]/).pop();
@@ -56,10 +113,9 @@ export async function getIcon(fileName) {
   const codicon = /\.(txt|log)$/i.test(name) ? 'file-text'
     : FILE_TYPE_CODICONS[iconName] || 'file-code';
   const color = 'var(--te-file-icon-color, #8293a8)';
-  if (LANGUAGE_ICONS[iconName]) return { iconName, svg: LANGUAGE_ICONS[iconName], color };
-  if (codicon === 'file-code') {
-    const icon = await getSetiIcon(name);
-    if (icon.svg) return { iconName, svg: icon.svg, color };
+  if (LOGO_FAMILIES.has(iconName) || codicon === 'file-code') {
+    const svg = await loadFamilySvg(iconName);
+    if (svg) return { iconName, svg, color };
   }
   return { iconName, codicon, color };
 }

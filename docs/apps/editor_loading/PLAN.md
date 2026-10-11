@@ -145,6 +145,17 @@ masks. Codicons remain for directories and non-language types.
 Directory icons use muted folder glyphs without geometry changes. Retain Seti
 vendor assets for now; do not add a provider preference in this slice.
 
+Lazy-icon follow-up preserves all exact-name/extension/partial rules but owns
+their lookup inside the neutral helper. Definitions load once; only rendered code
+families fetch individual trusted SVGs, single-flight/cached by family. Failed
+loads retain Codicon fallback, with 5s abort and 64KiB streamed-body bounds.
+Generate/check the full individual asset set with
+`node scripts/build_file_icon_assets.mjs [--check]` before asset publication.
+Seti wrapper/icons.json and ALS four-icon module are no longer runtime imports;
+retain them as legacy/source-generation inputs for this trial. This optimizes
+external icon resources, not host.js bundle size. No backend or Android source
+changes are needed; matching client OTA remains a separate approval/acceptance.
+
 `app/static/js/file_picker.js` now selects directories on one click/tap and enters
 them on double click/tap (touch interval 450ms). Space selects, Enter enters a
 directory or confirms an eligible file; arrows/Home/End move row focus. Explicit
