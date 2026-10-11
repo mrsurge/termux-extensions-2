@@ -656,7 +656,8 @@ original user list below is retained verbatim as the requirement record.
 - [x] F3: editor Explorer ellipsis-menu Collapse all using existing expansion authority (source/tests/build).
 - [x] F3: vertical Explorer ellipsis icon (source/build).
 - [x] F3: Collapse all and vertical ellipsis user live acceptance.
-- [ ] F3: lower draft-highlight opacity with readable theme contrast.
+- [x] F3: halve draft-highlight background opacity (source/regressions/build).
+- [x] F3: lighter draft highlights user live acceptance (reported working).
 - [ ] F3: unprefixed palette default, preserve explicit command/symbol/line modes.
 - [ ] F3: clarify Ctrl+colon versus chord; add approved bindings without conflicts.
 - [ ] F3: desktop/mobile input and detached-window live acceptance.
@@ -665,6 +666,21 @@ original user list below is retained verbatim as the requirement record.
 - [ ] F4: depth-one regex listing and asynchronous directory usage view.
 - [ ] F4: multi-client, standalone/sidebar, lifecycle and large-tree acceptance.
 - [ ] Separately approve maintenance packaging/release scope after chosen slices.
+
+### F3 draft-highlight opacity — implementation checkpoint
+
+Authored `monaco_editor/inline_host.ts` owns the draft-only CSS: added line
+blue alpha is now 0.12 (was 0.24); deleted line/zone/stock-line/character/margin
+amber alphas are respectively 0.09/0.06/0.08/0.15/0.08, each half its previous
+value. Foregrounds, ranges, deletion-zone geometry, controls and ordinary Git/history
+diff colors are unchanged; no element opacity fades text. Eleven targeted
+style/theme tests, TypeScript typecheck and frontend build pass. Tint-compositing
+tests cover white and dark backgrounds, not proof of all-theme visual readability.
+Native clients require OTA before light/dark live acceptance. No backend/mypyc,
+Monaco fork, APK, version, runtime restart or release changes are included.
+
+User reported this slice working on 2026-10-10. This closes its reported live
+acceptance; exhaustive all-theme contrast coverage was not instrumented.
 
 ### F3 detached Sidebar minimize — implementation checkpoint
 

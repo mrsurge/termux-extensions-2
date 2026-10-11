@@ -174,11 +174,11 @@ const INLINE_EDITOR_HOST_STYLE = `
 #editor-frame .monaco-editor .te2-draft-add-line.line-insert,
 #editor-frame .monaco-editor .line-insert.te2-draft-add-line,
 #editor-frame .monaco-editor .te2-draft-add-line .view-line {
-  background: rgba(56, 139, 253, 0.24) !important;
+  background: rgba(56, 139, 253, 0.12) !important;
 }
-#editor-frame .monaco-editor .te2-draft-del-line { background: rgba(210, 153, 34, 0.18) !important; }
+#editor-frame .monaco-editor .te2-draft-del-line { background: rgba(210, 153, 34, 0.09) !important; }
 #editor-frame .monaco-editor .te2-draft-del-zone {
-  background: rgba(210, 153, 34, 0.12);
+  background: rgba(210, 153, 34, 0.06);
   color: #e6b450;
   font-family: inherit;
   font-size: inherit;
@@ -187,13 +187,13 @@ const INLINE_EDITOR_HOST_STYLE = `
 }
 #editor-frame .monaco-editor .te2-draft-stock-del-zone,
 #editor-frame .monaco-editor .te2-draft-stock-del-zone .view-line {
-  background: rgba(210, 153, 34, 0.16) !important;
+  background: rgba(210, 153, 34, 0.08) !important;
 }
 #editor-frame .monaco-editor .te2-draft-stock-del-zone .inline-deleted-text {
-  background: rgba(210, 153, 34, 0.30) !important;
+  background: rgba(210, 153, 34, 0.15) !important;
 }
 #editor-frame .monaco-editor .te2-draft-stock-del-margin {
-  background: rgba(210, 153, 34, 0.16) !important;
+  background: rgba(210, 153, 34, 0.08) !important;
 }
 #editor-frame .monaco-editor .margin-view-overlays .codicon-folding-expanded,
 #editor-frame .monaco-editor .margin-view-overlays .codicon-folding-collapsed,
