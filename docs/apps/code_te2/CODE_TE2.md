@@ -4597,7 +4597,13 @@ that registration. Shell-list decoration never gates identity, output, or
 writable state.
 
 The gateway registers lightweight terminal handlers without importing Pyte.
-`terminal_pyte.py` owns the demand-loaded parser implementation; the first
+`app/libs/terminal_runtime/pyte_parser.py` owns the demand-loaded parser implementation;
+the Code TE2 `terminal_pyte.py` path is a compatibility export. The shared
+`screen_projection.py` owns the unchanged checkpoint/delta algorithm and requires
+an application-injected context-managed log reader per registry. Code TE2's
+`terminal_screen_projection.py` remains the thin adapter supplying its native log
+reader and existing singleton; the shared core imports no app backend, shell manager
+or transport and does not choose an I/O fallback. The first
 projection constructs its screen and stream in `asyncio.to_thread` under the
 registry lock. Concurrent first requests share one published projection.
 Construction errors propagate without publishing state, allowing a later retry.
@@ -5499,7 +5505,8 @@ Pyte and the checkpoint/delta protocol remain in Python. `terminal_log_io.py`
 uses `terminal_log.rs` for production descriptor ownership: open/fstat identify
 the same file, reads are bounded to 64 KiB and the captured size, and close runs
 even on parser failure. Existing offset, decoder-prefix, replacement/truncation
-and resize-reset policy stays in `terminal_screen_projection.py`. The interpreted
+and resize-reset policy stays in the shared `app/libs/terminal_runtime/screen_projection.py`,
+behind Code TE2's native-log adapter. The interpreted
 reader supports isolated tests/tools, not retry after a native error. The FWS
 observer now supplies output wakeups through the Rust transport described below;
 no state polling or duplicate observation connection is introduced. Rebuild only

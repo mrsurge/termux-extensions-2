@@ -26,6 +26,7 @@ sys.addaudithook(lambda event, args: check_event(root, event, args))
 import app.apps.code_te2.socketio_gateway
 assert 'app.apps.code_te2.terminal_screen_projection' in sys.modules
 assert 'app.apps.code_te2.terminal_pyte' not in sys.modules
+assert 'app.libs.terminal_runtime.pyte_parser' not in sys.modules
 assert 'pyte' not in sys.modules
 """
     result = subprocess.run([sys.executable, "-B", "-c", code, str(tmp_path)],
@@ -38,7 +39,8 @@ def test_projection_first_use_is_off_loop_and_shared(tmp_path: Path) -> None:
 
     path = tmp_path / "terminal.log"
     path.write_bytes(b"hello\r\n")
-    original = projection._TerminalProjection
+    from app.libs.terminal_runtime import screen_projection as shared
+    original = shared._TerminalProjection
     threads: list[int] = []
 
     def create(*args):
@@ -47,7 +49,7 @@ def test_projection_first_use_is_off_loop_and_shared(tmp_path: Path) -> None:
 
     async def run() -> None:
         registry = projection.TerminalScreenProjectionRegistry()
-        with patch.object(projection, "_TerminalProjection", side_effect=create):
+        with patch.object(shared, "_TerminalProjection", side_effect=create):
             first, second = await asyncio.gather(
                 registry.checkpoint("shell", path, columns=80, lines=24),
                 registry.checkpoint("shell", path, columns=80, lines=24),
@@ -64,10 +66,11 @@ def test_failed_construction_does_not_publish_state(tmp_path: Path) -> None:
 
     path = tmp_path / "terminal.log"
     path.write_bytes(b"hello")
+    from app.libs.terminal_runtime import screen_projection as shared
 
     async def run() -> None:
         registry = projection.TerminalScreenProjectionRegistry()
-        with patch.object(projection, "_TerminalProjection", side_effect=RuntimeError("parser failed")):
+        with patch.object(shared, "_TerminalProjection", side_effect=RuntimeError("parser failed")):
             with pytest.raises(RuntimeError, match="parser failed"):
                 await registry.checkpoint("shell", path, columns=80, lines=24)
         assert not registry._states
@@ -82,7 +85,8 @@ def test_cancelled_construction_does_not_publish_late_state(tmp_path: Path) -> N
 
     path = tmp_path / "terminal.log"
     path.write_bytes(b"hello")
-    original = projection._TerminalProjection
+    from app.libs.terminal_runtime import screen_projection as shared
+    original = shared._TerminalProjection
     started = threading.Event()
     release = threading.Event()
     finished = threading.Event()
@@ -97,7 +101,7 @@ def test_cancelled_construction_does_not_publish_late_state(tmp_path: Path) -> N
 
     async def run() -> None:
         registry = projection.TerminalScreenProjectionRegistry()
-        with patch.object(projection, "_TerminalProjection", side_effect=create):
+        with patch.object(shared, "_TerminalProjection", side_effect=create):
             task = asyncio.create_task(registry.checkpoint("shell", path))
             try:
                 assert await asyncio.to_thread(started.wait, 5)

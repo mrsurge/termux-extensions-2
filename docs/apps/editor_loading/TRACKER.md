@@ -686,6 +686,50 @@ original user list below is retained verbatim as the requirement record.
 
 ### F4 revised tab-session direction — investigation gate
 
+#### Shared terminal projection extraction prerequisite
+
+Sidebar tab-reference regression follow-up (2026-10-11): user reported restored
+File Explorer windows returning to splash. Exact live console evidence showed
+`sidebar state publish failed` / `TypeError: Invalid URL` at main.js publication:
+the splash-refresh follow-up passed a relative `buildStatefulUrl` result to
+`tabUrl`, whose `new URL(url)` required an absolute input. Publication threw before
+the backend request and left the prior splash reference unchanged. `tabUrl` now
+accepts an explicit base; publication passes the current client location. Seven
+frontend regressions pass, including relative publication and restored attach versus
+identity-free splash on both direct and relay origins. Syntax/diff checks pass.
+Frontend-only: update native assets, select the intended tab once to publish its
+reference, then test refresh/restore. No backend/mypyc build or restart is needed.
+No automatic guessing/recovery from a previously lost Sidebar tab association.
+User live acceptance passed for restored tab references after asset publication.
+Terminal extraction resumes at the shell-control boundary; its compiled proof is
+validation only, not an activated full Code TE2 domain.
+
+User approved extracting only the app-neutral Pyte/checkpoint core with injected
+per-registry log readers, preserving Code TE2's native adapter and existing behavior.
+`app/libs/terminal_runtime/` now owns the same parser/checkpoint/delta implementation;
+Code TE2 exports the existing public DTOs, registry and singleton from thin adapters.
+Native configuration/descriptor ownership remain in Code TE2. The shared registry
+does not import Code TE2 or initialize Pyte on import, and has no implicit I/O default.
+Independent readers/state, failure propagation, cancellation, raw offsets, split
+UTF-8, file replacement/truncation and resizing are tested. Code TE2 native failures
+still never fall back to the interpreted test reader.
+
+20 interpreted regressions and strict mypy/ty/basedpyright checks pass. An independent
+five-module mypyc probe passes 11 compiled tests; retained artifact:
+`.codex-scratch/shared-terminal-projection-mypyc-final-20261011/lib`.
+Final combined interpreted rerun passes 32 tests including durable tabs. No full
+domain selection, worker activation/restart, shell launch or UI change.
+The existing production domain inventory discovers app.libs imports; the packaged
+source closure already includes app/libs. A matching full-domain rebuild remains
+required before activating Code TE2 source changes, not implied by this small probe.
+
+Next prerequisite: define File Explorer's shell service ownership/transport adapter.
+Code TE2's `native_shells.get_manager()` requires its embedded Rust bridge; the
+ordinary File Explorer `app.libs.app_worker` process does not configure one. Do not
+import Code TE2's project-bound terminal_backend or silently use a legacy I/O path
+as a substitute. Shell launch/input/resize/observation/teardown and per-tab live-ID
+reconciliation need a separately approved concrete slice before drawer UI wiring.
+
 #### Durable tabs and synchronization implementation checkpoint
 
 User approved the end-to-end tab lifecycle slice, including the refined launcher

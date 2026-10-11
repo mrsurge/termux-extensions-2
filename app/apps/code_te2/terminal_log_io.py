@@ -5,16 +5,7 @@ from contextlib import contextmanager
 from collections.abc import Generator
 from pathlib import Path
 from typing import BinaryIO, Protocol
-
-
-class LogReader(Protocol):
-    @property
-    def identity(self) -> tuple[int, int]: ...
-    @property
-    def size(self) -> int: ...
-    def seek(self, offset: int) -> None: ...
-    def read(self, limit: int) -> bytes: ...
-    def close(self) -> None: ...
+from app.libs.terminal_runtime.log_reader import LogReader as LogReader
 
 
 class NativeTerminalLog(Protocol):

@@ -27,6 +27,19 @@ function socket() {
     event(name, payload) { return handlers.get(name)?.(payload); },
   };
 }
+
+test('relative Sidebar publication saves a restorable tab reference or identity-free splash', () => {
+  for (const base of ['http://127.0.0.1:64926/app/file_explorer', 'http://localhost:8089/app/file_explorer']) {
+    const pathUrl = '/app/file_explorer?embed=1&path=%2Fproject&te2_host_id=slot&te2_token_id=file_explorer';
+    const restored = tabUrl(pathUrl, 'existing', base);
+    assert.equal(restored.origin, new URL(base).origin);
+    assert.equal(restored.searchParams.get('te2_host_id'), 'slot');
+    assert.equal(restored.searchParams.has('path'), false);
+    assert.deepEqual(mountIntent(restored), { kind: 'attach', tabId: 'existing' });
+    const splash = tabUrl(pathUrl, '', base);
+    assert.deepEqual(mountIntent(splash), { kind: 'splash' });
+  }
+});
 const record = (revision = 1) => ({ id: 'tab', path: '/project', revision, options: {} });
 
 test('dropdown catalog keeps the active tab and receives catalog changes', async () => {

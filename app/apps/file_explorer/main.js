@@ -1140,7 +1140,7 @@ export default function initFileExplorer(root, api, host) {
         splash: !reference,
         query_state: reference ? { tab_id: reference } : {},
         queryState: reference ? { tab_id: reference } : {},
-        url: String(tabUrl(buildStatefulUrl(path, consoleWorkerId), reference)),
+        url: String(tabUrl(buildStatefulUrl(path, consoleWorkerId), reference, window.location.href)),
         activate: false,
       });
       publishedTabReference = reference;

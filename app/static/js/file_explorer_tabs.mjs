@@ -13,8 +13,8 @@ export function mountIntent(url, lastTab = '') {
   return { kind: 'splash' };
 }
 
-export function tabUrl(url, tabId) {
-  const next = new URL(url);
+export function tabUrl(url, tabId, baseUrl) {
+  const next = new URL(url, baseUrl);
   next.searchParams.delete('path');
   next.searchParams.delete('tab_create');
   next.searchParams.delete('tab_id');
