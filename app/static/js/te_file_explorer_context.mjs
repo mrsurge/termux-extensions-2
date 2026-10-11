@@ -46,6 +46,7 @@ export function createItemContextMenu({ container, select, dispatch }) {
     close,
     bind(element, entry, nodes) {
       element.addEventListener('contextmenu', (event) => {
+        if (event.target.closest('[data-role="selection-icon"]')) return;
         event.preventDefault();
         open(entry, nodes, event.clientX, event.clientY);
       });
@@ -75,6 +76,7 @@ export function createItemContextMenu({ container, select, dispatch }) {
         }
       }, true);
       element.addEventListener('keydown', (event) => {
+        if (event.target.closest('[data-role="selection-icon"]')) return;
         if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
           event.preventDefault();
           const box = element.getBoundingClientRect();

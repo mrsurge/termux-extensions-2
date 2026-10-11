@@ -213,12 +213,71 @@ mobile/desktop palette modes, physical and virtual keyboard existing shortcuts.
 
 `app/apps/file_explorer/main.js`, `template.html`, `file_explorer.py` and shared
 `te_file_explorer_intents.mjs` already provide Open in Terminal intents. No embedded
-drawer/session owner was found in this preliminary inventory. Plan a Code-TE2-like
-terminal drawer using existing terminal transport/ownership contracts, with one
-terminal per explicit File Explorer/sidebar presentation identity. Define identity
-lifetime, standalone versus embedded ownership, close/reconnect/session removal
-before implementation; do not alias all clients to one terminal or reuse an exited
-shell. Compare ALS-RS's identity model as a reference, not a new dependency.
+drawer/session owner was found in this preliminary inventory.
+
+**Revised user direction (2026-10-10):** durable identity belongs to disk-backed
+File Explorer **tab sessions**, not ephemeral presentations. Each tab stores its
+path/options and associated terminal shell if active. Open Sidebar state may
+reference a tab session; separate clients must not collapse onto one global tab
+or shell. Model the durable record after ALS conversations where useful, without
+introducing an ALS dependency. Determine existing state-store and ownership seams
+before selecting schema or storage location.
+
+**Mount/create lifecycle:** query intent is typed, not inferred from the presence
+of any query string. A fresh Code TE2 Explorer directory-open request creates a
+new File Explorer session at that path. A query carrying an existing state/session
+ID mounts that exact record; restored Sidebar state supplies that ID. Routing,
+client, host and presentation metadata alone must not create sessions. After a
+fresh creation, replace the mount URL with its resolved session ID and publish
+that identity through the existing backend-owned Sidebar state path, so page
+reload, iframe recreation and Code TE2 Sidebar restoration do not repeat creation.
+Distinguish the durable session ID from client/presentation IDs. Missing/deleted
+session IDs fail visibly or return to the list, never silently create a replacement.
+Creation correlation/idempotency and cancellation must be defined before mutation
+wiring; URL replacement alone cannot protect delayed/concurrent creation.
+
+Opening without a session/fresh-path intent shows a session-list/splash page with
+New session and Close session actions. Closing a session ends its active terminal
+if any; a mounted session requires a warning modal. Presentation closure/unmount
+is not session closure. Explicit Close terminal may end/disassociate its shell
+without deleting the retained File Explorer tab state. Inspect ALS's existing
+conversation mount/state flow as a reference; do not add an ALS dependency.
+
+**File selection and icons:** reuse the shared file picker's complete file-icon
+rules/helper and Codicon directory styling, including semantic-family lazy assets;
+do not build another extension map. Remove file-row and select-all checkboxes, not
+permission/settings controls. Desktop Shift-click selects an anchored range,
+Ctrl/Cmd-click toggles discontiguous items, and Ctrl/Cmd+Shift-click adds a range
+without dropping previous selections. Icon buttons toggle selection on both
+layouts; text/body keeps single selection and double-click opening, with long
+press/right-click opening the existing context menu. Context on a selected item
+preserves the batch; on another item it selects only that item. Directory changes
+clear the anchor; sorting uses the current displayed order with the same path anchor.
+Preserve relevant batch actions and do not accidentally open an item after a
+selection gesture. Show a Clear selection button at the top while selection exists;
+Esc clears selection on both desktop and mobile without stealing dialog/input
+escape ownership. Define ordinary click/open, anchor reset, sorting/filtering and
+context-menu batch-preservation rules before implementing.
+
+Hiding/minimizing the drawer, page reload, or closing its presentation retains
+the associated live shell; only explicit Close terminal ends it. An exited shell
+is disassociated, never restarted/reopened implicitly. Session restore must verify
+live ownership/capabilities rather than treating a persisted shell ID as proof.
+Drawer supports minimize/maximize. Add a **Lock directory** checkbox and command
+injection using the existing pipe-backed mechanism. Investigate lock semantics,
+shell quoting/prompt readiness, foreground programs, exact-tab targeting and
+uncertain writes; do not inject commands merely because a page reconnected.
+
+Reuse Code TE2's shellspec/shell and **exact Pyte screen-projection setup**, with
+the standalone Terminal's frontend/custom xterm, mobile handling, key rules and
+extra-key layout. This supersedes the preliminary standalone Node/headless-xterm
+choice for this new drawer; the existing standalone Terminal itself is unchanged.
+Inspect extractable service contracts before importing project-bound Code TE2
+assembly or copying a second implementation. Explicit approval of a concrete
+implementation/validation slice remains required.
+
+Extra terminal keys are shown only for mobile user agents, not merely narrow
+desktop windows; desktop user agents must not render the extra-key controls.
 
 Add depth-one regex listing and `du -h --max-depth=1`-style usage presentation.
 Prefer existing framework filesystem/pipe services; first inspect support for

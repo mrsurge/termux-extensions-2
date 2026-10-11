@@ -2,15 +2,11 @@ import {
   initConsoleBridge,
   getConsoleBridgeStatus,
 } from "/static/js/te2_console_bridge.js";
+import { getIcon, renderIcon } from "/static/js/file_icons.js";
+import { selectPaths } from "/static/js/file_explorer_selection.mjs";
 
 const HOME_DIR = "~";
 const SOCKET_IO_CLIENT_SRC = "/static/vendor/socket.io.min.js";
-const TYPE_ICON = {
-  directory: "📁",
-  file: "📄",
-  symlink: "🔗",
-  unknown: "❔",
-};
 
 // Editable file extensions - can be opened in file editor
 const EDITABLE_EXTENSIONS = new Set([
@@ -678,6 +674,12 @@ async function createJobRequest(type, params) {
 }
 
 export default function initFileExplorer(root, api, host) {
+  if (!document.querySelector('link[href="/static/vendor/codicons/codicon.css"]')) {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = '/static/vendor/codicons/codicon.css';
+    document.head.appendChild(link);
+  }
   const container = root.querySelector("[data-app-root]") || root;
   if (host && typeof host.setTitle === "function") {
     host.setTitle("File Explorer");
@@ -740,9 +742,9 @@ export default function initFileExplorer(root, api, host) {
     btnToggleView: container.querySelector('[data-action="toggle-view"]'),
     toggleHidden: container.querySelector('[data-action="toggle-hidden"]'),
     selectAll: container.querySelector('[data-action="select-all"]'),
+    clearSelection: container.querySelector('[data-action="clear-selection"]'),
     footerSelectAll:
-      root.querySelector('.fx-mobile-footer input[data-action="select-all"]') ||
-      root.querySelector('.fx-mobile-footer [data-action="select-all"] input'),
+      root.querySelector('.fx-mobile-footer [data-action="select-all"]'),
     footerButtons: Array.from(
       root.querySelectorAll(
         '.fx-mobile-footer [data-action]:not([data-action="select-all"])',
@@ -1032,22 +1034,24 @@ export default function initFileExplorer(root, api, host) {
   }
 
   function clearSelection() {
-    state.selected = null;
     state.selectedPaths.clear();
-    container
-      .querySelectorAll(".fx-item.selected, .fx-tile.selected")
-      .forEach((el) => {
-        el.classList.remove("selected");
-      });
-    container
-      .querySelectorAll('.fx-checkbox input[type="checkbox"]')
-      .forEach((cb) => {
-        cb.checked = false;
-      });
-    [ui.selectAll, ui.footerSelectAll].filter(Boolean).forEach((cb) => {
-      cb.checked = false;
-      if ("indeterminate" in cb) cb.indeterminate = false;
+    selectionAnchor = null;
+    syncSelection();
+  }
+
+  let selectionAnchor = null;
+  let selectionOrder = [];
+
+  function syncSelection() {
+    state.selected = state.selectedPaths.size === 1
+      ? state.entries.find((entry) => state.selectedPaths.has(entry.path)) || null : null;
+    container.querySelectorAll('.fx-item, .fx-tile').forEach((node) => {
+      const selected = state.selectedPaths.has(node.dataset.path);
+      node.classList.toggle('selected', selected);
+      node.setAttribute('aria-selected', String(selected));
+      node.querySelector('[data-role="selection-icon"]')?.setAttribute('aria-pressed', String(selected));
     });
+    if (ui.clearSelection) ui.clearSelection.hidden = state.selectedPaths.size === 0;
     updateSelectionCount();
     updateActionButtons();
   }
@@ -1064,49 +1068,9 @@ export default function initFileExplorer(root, api, host) {
     }
   }
 
-  function toggleItemSelection(path, checked) {
-    if (checked) {
-      state.selectedPaths.add(path);
-    } else {
-      state.selectedPaths.delete(path);
-    }
-    updateSelectionCount();
-    updateActionButtons();
-
-    // Update select all checkbox state
-    const total = state.entries.length;
-    const selected = state.selectedPaths.size;
-    [ui.selectAll, ui.footerSelectAll].filter(Boolean).forEach((cb) => {
-      cb.checked = selected > 0 && selected === total;
-      if ("indeterminate" in cb)
-        cb.indeterminate = selected > 0 && selected < total;
-    });
-  }
-
   function selectAllItems(checked) {
-    if (checked) {
-      state.entries.forEach((entry) => {
-        state.selectedPaths.add(entry.path);
-      });
-      container
-        .querySelectorAll('.fx-checkbox input[type="checkbox"]')
-        .forEach((cb) => {
-          cb.checked = true;
-        });
-    } else {
-      state.selectedPaths.clear();
-      container
-        .querySelectorAll('.fx-checkbox input[type="checkbox"]')
-        .forEach((cb) => {
-          cb.checked = false;
-        });
-    }
-    updateSelectionCount();
-    updateActionButtons();
-    [ui.selectAll, ui.footerSelectAll].filter(Boolean).forEach((cb) => {
-      cb.checked = checked;
-      if ("indeterminate" in cb) cb.indeterminate = false;
-    });
+    state.selectedPaths = new Set(checked ? state.entries.map((entry) => entry.path) : []);
+    syncSelection();
   }
 
   function setDisabledState(elements, disabled) {
@@ -1285,9 +1249,8 @@ export default function initFileExplorer(root, api, host) {
   const contextMenuReady = import('/static/js/te_file_explorer_context.mjs').then(({ createItemContextMenu }) =>
     createItemContextMenu({ container, dispatch: handleMenuCommand, select: (entry, nodes) => {
       closeAllMenus();
-      // Context actions target this item, never a stale unrelated batch selection.
-      selectAllItems(false);
-      selectEntry(entry, nodes);
+      // Keep an intentional batch; an unrelated item becomes the sole target.
+      if (!state.selectedPaths.has(entry.path)) selectEntry(entry, nodes);
     } }));
 
   function renderBreadcrumbs() {
@@ -1335,13 +1298,9 @@ export default function initFileExplorer(root, api, host) {
   }
 
   function selectEntry(entry, nodes) {
-    state.selected = entry;
-    container
-      .querySelectorAll(".fx-item.selected, .fx-tile.selected")
-      .forEach((el) => el.classList.remove("selected"));
-    if (nodes.row) nodes.row.classList.add("selected");
-    if (nodes.tile) nodes.tile.classList.add("selected");
-    updateActionButtons();
+    state.selectedPaths = new Set([entry.path]);
+    selectionAnchor = entry.path;
+    syncSelection();
   }
 
   function renderEntries() {
@@ -1388,6 +1347,7 @@ export default function initFileExplorer(root, api, host) {
       return state.sortAsc ? cmp : -cmp;
     });
 
+    selectionOrder = entries.map((entry) => entry.path);
     if (!entries.length) {
       const empty = document.createElement("div");
       empty.className = "fx-empty";
@@ -1423,10 +1383,7 @@ export default function initFileExplorer(root, api, host) {
       const ownerStr = formatOwnership(entry.owner, entry.group);
 
       row.innerHTML = `
-        <span class="fx-checkbox">
-          <input type="checkbox" data-path="${entry.path}" aria-label="Select ${entry.name}">
-        </span>
-        <span class="fx-icon">${TYPE_ICON[entry.type] || TYPE_ICON.unknown}</span>
+        <button type="button" data-role="selection-icon" class="fx-icon"><span class="fx-icon-glyph"></span></button>
         <div class="fx-name-group">
           <span class="fx-name">${nameDisplay}</span>
           ${archiveBadge}
@@ -1448,30 +1405,39 @@ export default function initFileExplorer(root, api, host) {
       });
       if (isSymlink) tile.classList.add("fx-symlink");
       tile.innerHTML = `
-        <div class="fx-icon-lg">${TYPE_ICON[entry.type] || TYPE_ICON.unknown}</div>
+        <button type="button" data-role="selection-icon" class="fx-icon-lg"><span class="fx-icon-glyph"></span></button>
         <div class="fx-name-tile">${nameDisplay}${archiveBadge}</div>
       `;
-      // Add checkbox event listener
-      const checkbox = row.querySelector('.fx-checkbox input[type="checkbox"]');
-      if (checkbox) {
-        checkbox.addEventListener("change", (e) => {
-          e.stopPropagation();
-          toggleItemSelection(entry.path, e.target.checked);
+      for (const node of [row, tile]) {
+        node.dataset.path = entry.path;
+        const button = node.querySelector('[data-role="selection-icon"]');
+        button.setAttribute('aria-label', `Toggle selection: ${entry.name}`);
+        const glyph = button.querySelector('.fx-icon-glyph');
+        renderIcon(glyph, { codicon: isDir ? 'folder' : isSymlink ? 'link' : 'file', color: '#8293a8' });
+        if (!isDir && !isSymlink) void getIcon(entry.name).then((icon) => {
+          if (glyph.isConnected) renderIcon(glyph, icon);
         });
+        button.addEventListener('click', (event) => {
+          event.stopPropagation();
+          applySelection(entry.path, event, true);
+        });
+      }
 
-        // Restore checked state if item was previously selected
-        if (state.selectedPaths.has(entry.path)) {
-          checkbox.checked = true;
-        }
+      function applySelection(path, event, toggle = false) {
+        const result = selectPaths(state.selectedPaths, selectionOrder, selectionAnchor, path, {
+          shift: event.shiftKey, additive: event.ctrlKey || event.metaKey, toggle,
+        });
+        state.selectedPaths = result.selected;
+        selectionAnchor = result.anchor;
+        syncSelection();
       }
 
       const handleSelect = (e) => {
-        // Don't select if clicking on checkbox
-        if (e.target.type === "checkbox" || e.target.closest(".fx-checkbox")) {
+        if (e.target.closest('[data-role="selection-icon"]')) {
           return;
         }
         closeAllMenus();
-        selectEntry(entry, { row, tile });
+        applySelection(entry.path, e);
       };
 
       row.addEventListener("click", handleSelect);
@@ -1480,6 +1446,7 @@ export default function initFileExplorer(root, api, host) {
       if (isSymlink) {
         // For symlinks, resolve and follow on double-click
         const handleSymlink = async (ev) => {
+          if (ev.target.closest('[data-role="selection-icon"]') || ev.shiftKey || ev.ctrlKey || ev.metaKey) return;
           ev?.preventDefault();
           await followSymlink(entry);
         };
@@ -1487,6 +1454,7 @@ export default function initFileExplorer(root, api, host) {
         tile.addEventListener("dblclick", handleSymlink);
       } else if (isDir) {
         const openDir = (ev) => {
+          if (ev.target.closest('[data-role="selection-icon"]') || ev.shiftKey || ev.ctrlKey || ev.metaKey) return;
           ev?.preventDefault();
           loadDirectory(entry.path);
         };
@@ -1494,6 +1462,7 @@ export default function initFileExplorer(root, api, host) {
         tile.addEventListener("dblclick", openDir);
       } else {
         const openFile = (ev) => {
+          if (ev.target.closest('[data-role="selection-icon"]') || ev.shiftKey || ev.ctrlKey || ev.metaKey) return;
           ev?.preventDefault();
           openSelected();
         };
@@ -1504,6 +1473,7 @@ export default function initFileExplorer(root, api, host) {
       ui.listContainer.appendChild(row);
       ui.gridContainer.appendChild(tile);
     });
+    syncSelection();
   }
 
   async function loadDirectory(targetPath) {
@@ -2843,14 +2813,14 @@ export default function initFileExplorer(root, api, host) {
     });
   }
   if (ui.selectAll) {
-    ui.selectAll.addEventListener("change", (e) => {
-      selectAllItems(e.target.checked);
+    ui.selectAll.addEventListener("click", () => {
+      selectAllItems(true);
     });
   }
-  // Add event handler for footer select all checkbox
+  if (ui.clearSelection) ui.clearSelection.addEventListener('click', clearSelection);
   if (ui.footerSelectAll) {
-    ui.footerSelectAll.addEventListener("change", (e) => {
-      selectAllItems(e.target.checked);
+    ui.footerSelectAll.addEventListener("click", () => {
+      selectAllItems(true);
     });
   }
   if (ui.sortSelect) {
@@ -2900,6 +2870,12 @@ export default function initFileExplorer(root, api, host) {
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
+      const dialogOpen = [ui.propertiesModal, ui.editBookmarksModal, ui.bookmarkFormModal]
+        .some((modal) => modal?.dataset.open === 'true');
+      const menuOpen = menuGroups.some((group) => group.hasAttribute('data-open'));
+      if (!dialogOpen && !menuOpen && !event.defaultPrevented && !event.target.closest('input,textarea,[contenteditable="true"],[role="dialog"]')) {
+        clearSelection();
+      }
       const anyMenuOpen = menuGroups.some((group) =>
         group.hasAttribute("data-open"),
       );

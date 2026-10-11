@@ -662,11 +662,64 @@ original user list below is retained verbatim as the requirement record.
 - [x] F3: Ctrl+colon clarified as simultaneous keys; add approved Ctrl+Shift+P and F1 bindings (source/regressions/build).
 - [x] F3: unprefixed picker and shortcut user live acceptance (reported working).
 - [ ] F3: desktop/mobile input and detached-window live acceptance.
-- [ ] F4: define identity/session lifetime and drawer transport contract.
-- [ ] F4: implement one File Explorer terminal per explicit presentation identity.
+- [ ] F4: define disk-backed tab-session identity/lifetime and shared drawer transport contract.
+- [ ] F4: persist tab path/options and live shell association, referenced by Sidebar state.
+- [ ] F4: typed fresh versus existing-session query mounts; reload/Sidebar restore never creates duplicates.
+- [ ] F4: bare-open session list with New/Close; mounted-session close warning and owned terminal teardown.
+- [ ] F4: shared picker icon helper/rules in File Explorer list/grid rows.
+- [x] F4: implement checkbox-free file selection (icon toggles, body long press/menu, desktop range/additive toggles), Clear selection and Esc.
+- [ ] F4: native asset publication and live acceptance of icons/selection.
+- [ ] F4: explicit terminal close; exited-shell disassociation; hide/reload retains live shell.
+- [ ] F4: drawer minimize/maximize and Lock directory with pipe-backed command injection.
+- [ ] F4: reuse Code TE2 shellspec/Pyte plus standalone Terminal xterm/mobile/extra-key behavior.
+- [ ] F4: extra keys absent for desktop user agents, including narrow windows.
 - [ ] F4: depth-one regex listing and asynchronous directory usage view.
 - [ ] F4: multi-client, standalone/sidebar, lifecycle and large-tree acceptance.
 - [ ] Separately approve maintenance packaging/release scope after chosen slices.
+
+### F4 revised tab-session direction — investigation gate
+
+Mount/selection clarification: fresh Code TE2 Explorer opens create a session;
+existing Sidebar state mounts its durable ID, irrespective of query-string
+presence. Creation must resolve/publish that ID before restoring the same tab;
+reload/iframe recreation is never new-session intent. Bare opens show a list with
+New/Close session actions; closing a mounted session warns and ends its active
+terminal. User approved path-create/session-ID restore URL distinction and
+icon buttons toggling selection and body long press opening the context menu. Shared picker icons,
+checkbox-free range/discontiguous selection, top Clear selection/Esc, and
+mobile-UA-only extra keys are recorded in PLAN. Session/terminal work remains planning-only.
+
+### F4 icons and selection implementation checkpoint
+
+File Explorer now imports the existing lazy shared file-icon provider and uses
+icon buttons for selection in both list/grid layouts. File selection checkboxes
+are removed; permissions/bookmark settings controls are retained. Body clicks
+select one item; body double-click retains opening. Modifier clicks use the
+displayed sorted order; icon/modifier double-clicks never open. Context on a
+selected item preserves its batch; an unrelated item replaces selection. Clear
+selection is visible at the top on mobile/desktop, and Escape respects input,
+dialog and existing menu ownership. Directory changes reset selection/anchor;
+view/sort rerenders retain selected paths and their mirrored visual/ARIA state.
+
+Validation: 24 targeted DOM/selection/picker regressions pass, JavaScript syntax
+checks pass, Code TE2 typecheck and frontend build pass, and git diff --check is
+clean. Shared JS/Codicon/Seti roots already belong to the Android asset manifest;
+no manifest change or Kotlin/backend/mypyc/native build is required. No OTA,
+APK installation, runtime restart, commit or push was performed in this slice.
+Native live acceptance remains pending after asset publication. Disk-backed
+session identity and terminal lifecycle are still the next independent slice.
+
+User chose explicit terminal close only and replaced presentation-owned terminal
+identity with disk-backed File Explorer tabs (path/options/live shell association).
+Sidebar state references tab sessions; exited shells are disassociated. Requested
+drawer minimize/maximize, Lock directory and pipe-backed command injection, exact
+Code TE2 Pyte/shellspec reuse with standalone Terminal's custom xterm/frontend,
+mobile handling and extra keys. PLAN retains the complete requirements and safety
+questions. Documentation and read-only investigation approved; no F4 code changes,
+runtime restart or packaging approved. ALS source is at
+`../agent_log_server/rust/crates/als-server/src/conversation_store.rs`, not the
+historical `app/apps/als_rs` path. Current terminal injection uses the native manager's `write_to_pty`;
+extractability and readiness/foreground safety remain investigation items.
 
 ### F3 unprefixed Quick Access — implementation checkpoint
 

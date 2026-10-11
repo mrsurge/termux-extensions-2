@@ -263,7 +263,7 @@
 }
 .fx-item {
   display: grid;
-  grid-template-columns: 36px 36px minmax(180px, 2fr) 110px minmax(120px, 1fr) 90px 150px;
+  grid-template-columns: 36px minmax(180px, 2fr) 110px minmax(120px, 1fr) 90px 150px;
   gap: 8px;
   padding: 10px 16px;
   align-items: center;
@@ -286,15 +286,6 @@
 }
 .fx-name-group .fx-name {
   flex: 1;
-}
-.fx-checkbox {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.fx-checkbox input[type="checkbox"] {
-  cursor: pointer;
-  accent-color: var(--primary, #3b82f6);
 }
 .fx-permissions {
   font-family: 'JetBrains Mono', Consolas, monospace;
@@ -336,13 +327,20 @@
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.02);
 }
-.fx-icon {
-  font-size: 1.1rem;
-  text-align: center;
+.fx-icon, .fx-icon-lg {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  padding: 4px;
+  cursor: pointer;
+  color: #8293a8;
+  min-height: 32px;
 }
-.fx-icon-lg {
-  font-size: 2.1rem;
-}
+.fx-icon-glyph { display: block; width: 20px; height: 20px; font-size: 20px; }
+.fx-icon-lg .fx-icon-glyph { width: 32px; height: 32px; font-size: 32px; }
+[data-action="clear-selection"][hidden] { display: none; }
 .fx-name-tile {
   text-align: center;
   font-size: 0.9rem;
@@ -577,25 +575,20 @@
 /* Mobile portrait - with second row for details */
 @media (orientation: portrait) and (max-width: 768px) {
   .fx-item {
-    grid-template-columns: 32px 32px 1fr;
+    grid-template-columns: 32px 1fr;
     grid-template-rows: auto auto;
     align-items: flex-start;
   }
   .fx-content {
     padding-bottom: 90px;
   }
-  .fx-item .fx-checkbox {
+  .fx-item .fx-icon {
     grid-column: 1;
     grid-row: 1 / span 2;
     align-self: center;
   }
-  .fx-item .fx-icon {
-    grid-column: 2;
-    grid-row: 1 / span 2;
-    align-self: center;
-  }
   .fx-item .fx-name-group {
-    grid-column: 3;
+    grid-column: 2;
     grid-row: 1;
   }
   /* Second row for details in portrait */
@@ -605,7 +598,7 @@
   }
   .fx-item .fx-size,
   .fx-item .fx-date {
-    grid-column: 3;
+    grid-column: 2;
     grid-row: 2;
     display: inline-block;
     margin-right: 12px;
@@ -617,37 +610,33 @@
 /* Mobile landscape - show details on second row */
 @media (orientation: landscape) and (max-width: 1024px) {
   .fx-item {
-    grid-template-columns: 32px 32px 1fr 80px 140px;
+    grid-template-columns: 32px 1fr 80px 140px;
     grid-template-rows: auto auto;
     padding: 8px 12px;
   }
-  .fx-item .fx-checkbox {
+  .fx-item .fx-icon {
     grid-column: 1;
     grid-row: 1;
   }
-  .fx-item .fx-icon {
+  .fx-item .fx-name-group {
     grid-column: 2;
     grid-row: 1;
   }
-  .fx-item .fx-name-group {
+  .fx-item .fx-size {
     grid-column: 3;
     grid-row: 1;
   }
-  .fx-item .fx-size {
+  .fx-item .fx-date {
     grid-column: 4;
     grid-row: 1;
   }
-  .fx-item .fx-date {
-    grid-column: 5;
-    grid-row: 1;
-  }
   .fx-item .fx-permissions {
-    grid-column: 2 / 4;
+    grid-column: 1 / 3;
     grid-row: 2;
     margin-top: 4px;
   }
   .fx-item .fx-owner {
-    grid-column: 4 / 6;
+    grid-column: 3 / 5;
     grid-row: 2;
     margin-top: 4px;
   }
@@ -658,10 +647,8 @@
   <div class="fx-toolbar">
     <div class="fx-toolbar-row fx-toolbar-quick">
       <div class="fx-quick-actions">
-        <label class="fx-toggle fx-mobile-hide" style="margin-right: 8px;">
-          <input type="checkbox" data-action="select-all">
-          <span>Select All</span>
-        </label>
+        <button type="button" class="fx-mobile-hide" data-action="select-all">Select All</button>
+        <button type="button" data-action="clear-selection" hidden>Clear selection</button>
         <span class="fx-selection-count" style="margin-right: 12px; color: var(--primary, #3b82f6); display: none;"></span>
         <button type="button" class="fx-mobile-hide" data-action="up">Up</button>
         <button type="button" class="fx-mobile-hide" data-action="new-folder">New Folder</button>
@@ -846,10 +833,7 @@
 </div>
 
 <div class="fx-mobile-footer" data-role="mobile-footer">
-  <label class="fx-toggle" data-action="select-all">
-    <input type="checkbox">
-    <span>Select All</span>
-  </label>
+  <button type="button" data-action="select-all">Select All</button>
   <button type="button" data-action="up" title="Up">⬆️</button>
   <button type="button" data-action="new-folder" title="New Folder">📁</button>
   <button type="button" data-action="open" disabled title="Open">📂</button>
