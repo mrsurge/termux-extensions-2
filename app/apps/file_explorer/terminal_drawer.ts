@@ -36,43 +36,22 @@ export class TerminalOutputCursor {
   }
 }
 export class TerminalInputBatcher {
-  private chunks: string[] = [];
-  private bytes = 0;
-  private sending = false;
-  private generation = 0;
-  constructor(private send: (data: string) => Promise<unknown>, private report: (error: unknown) => void) {}
-  reset() { this.generation++; this.chunks = []; this.bytes = 0; this.sending = false; }
+  constructor(private send: (data: string) => void, private report: (error: unknown) => void) {}
+  reset() {} // No retained input or reconnect replay.
   enqueue(data: string) {
     const encoder = new TextEncoder();
-    const size = encoder.encode(data).length;
-    if (this.bytes + size > 65536) { this.report(new Error('Terminal input queue is full; input was not sent')); return; }
-    // Keep each MessagePack request below the lane's 64 KiB envelope limit.
+    if (encoder.encode(data).length > 65536) {
+      this.report(new Error('Terminal input is too large; input was not sent')); return;
+    }
     let chunk = '', bytes = 0;
-    for (const character of data) {
-      const length = encoder.encode(character).length;
-      if (bytes + length > 4096) { this.chunks.push(chunk); chunk = ''; bytes = 0; }
-      chunk += character; bytes += length;
-    }
-    if (chunk) this.chunks.push(chunk);
-    this.bytes += size;
-    const current = this.generation;
-    queueMicrotask(() => { if (current === this.generation) void this.flush(); });
-  }
-  private async flush() {
-    if (this.sending || !this.chunks.length) return;
-    this.sending = true;
-    const current = this.generation, encoder = new TextEncoder();
-    let data = this.chunks.shift()!;
-    while (this.chunks.length && encoder.encode(data + this.chunks[0]).length <= 4096) data += this.chunks.shift();
     try {
-      await this.send(data);
-      if (current !== this.generation) return;
-      this.bytes -= encoder.encode(data).length;
-    } catch (error) {
-      if (current === this.generation) { this.reset(); this.report(error); }
-    } finally {
-      if (current === this.generation) { this.sending = false; void this.flush(); }
-    }
+      for (const character of data) {
+        const length = encoder.encode(character).length;
+        if (bytes + length > 4096) { this.send(chunk); chunk = ''; bytes = 0; }
+        chunk += character; bytes += length;
+      }
+      if (chunk) this.send(chunk);
+    } catch (error) { this.report(error); }
   }
 }
 interface Socket {
@@ -199,7 +178,11 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   let lastColumns = 0, lastRows = 0, resizing = false, resizeAgain = false;
   const error = (value: unknown) => { status.textContent = value instanceof Error ? value.message : 'Terminal unavailable'; report(value); };
-  const inputs = new TerminalInputBatcher(data => tabs.terminal('terminal.input', { data }), error);
+  const inputs = new TerminalInputBatcher(data => {
+    if (!ready || !socket.connected || !stream || stream.readyState !== WebSocket.OPEN) return;
+    if (stream.bufferedAmount > 65536) throw new Error('Terminal input transport is full; input was not sent');
+    stream.send(packObject({ type: 'input', data: new TextEncoder().encode(data) }));
+  }, error);
   function clear() {
     drawerResize.cancel();
     generation++; ready = false; recovering = false; recoverAgain = false; mounting = undefined;

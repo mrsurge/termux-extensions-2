@@ -7,6 +7,59 @@ from app.apps.file_explorer.tab_store import TabStore, options
 from app.apps.file_explorer.terminal_stream import OutputConnection, serve_output
 from app.apps.file_explorer.terminal_stream_protocol import pack_message, unpack_message
 from tests.test_file_explorer_tabs import Server
+import pytest
+
+
+def test_stream_input_order_limits_and_no_text_fallback():
+    from app.apps.file_explorer.terminal_stream import receive_input
+    async def run():
+        connection = OutputConnection('sid', 'tab', 'shell')
+        received = []
+        async def handler(stream, data):
+            assert stream is connection
+            await asyncio.sleep(0)
+            received.append(data)
+        events = [
+            {'type': 'websocket.receive', 'bytes': pack_message({'type': 'input', 'data': data})}
+            for data in (b'a', b'b', b'\x1b[A')
+        ] + [{'type': 'websocket.disconnect'}]
+        async def receive(): return events.pop(0)
+        await receive_input(receive, connection, handler)
+        assert received == [b'a', b'b', b'\x1b[A']
+        for frame in ({'text': '{}'}, {'bytes': b'\x81'},
+                      {'bytes': pack_message({'type': 'input', 'data': 'text'})},
+                      {'bytes': pack_message({'type': 'input', 'data': b'x' * 4097})},
+                      {'bytes': pack_message({'type': 'resize', 'data': b'x'})}):
+            events[:] = [{'type': 'websocket.receive', **frame}]
+            with pytest.raises(ValueError): await receive_input(receive, connection, handler)
+        assert received == [b'a', b'b', b'\x1b[A']
+    asyncio.run(run())
+
+
+def test_stream_input_rejects_stale_shell_or_presentation(tmp_path, monkeypatch):
+    async def run():
+        async def project(): return '/project'
+        store = TabStore(tmp_path / 'tabs.json')
+        tab = store.create('new', '/project', options({}))
+        tab = store.set_shell(tab['id'], tab['revision'], 'shell')
+        service = TabService(store, Server(), str, project)
+        await service.connect('a', {}, {'presentationId': 'a'})
+        await service._attach('a', tab['id'])
+        stream = OutputConnection('a', tab['id'], 'shell')
+        service.streams.add(stream)
+        sent = []
+        async def dispatch(selected, method, params):
+            sent.append((selected['shellId'], method, params))
+            return {}
+        monkeypatch.setattr(service.terminals, 'dispatch', dispatch)
+        await service.stream_input(stream, b'a')
+        assert sent == [('shell', 'terminal.input', {'data': 'a'})]
+        store.set_shell(tab['id'], tab['revision'], 'replacement')
+        with pytest.raises(ValueError): await service.stream_input(stream, b'b')
+        await service.disconnect('a')
+        with pytest.raises(ValueError): await service.stream_input(stream, b'c')
+        assert len(sent) == 1
+    asyncio.run(run())
 
 
 def test_wire_requires_binary_codec_and_correlated_ids(tmp_path):

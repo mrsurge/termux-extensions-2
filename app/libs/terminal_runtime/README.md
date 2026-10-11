@@ -13,8 +13,11 @@ registries do not share state or readers.
 
 Code TE2's `terminal_screen_projection.py` is the thin native-log adapter and owns
 its existing singleton. Its native bridge configuration remains in Code TE2's
-`terminal_log_io.py`. File Explorer has no shell adapter/drawer yet: its Python app
-worker cannot borrow Code TE2's embedded native manager by importing it.
+`terminal_log_io.py`. File Explorer's ordinary Python worker owns a separate
+Node PTY worker/pipe adapter and supplies its app-owned `terminal_projection.py`
+log opener to an independent registry, bounded at an acknowledged byte offset.
+It does not borrow Code TE2's embedded native manager or another app's shellspec.
+See `app/apps/file_explorer/TERMINAL.md` for its control/output/lifetime contract.
 
 The interpreted test reader remains in Code TE2's adapter, not this shared core.
 For an isolated compiled proof (no activation or process restart):

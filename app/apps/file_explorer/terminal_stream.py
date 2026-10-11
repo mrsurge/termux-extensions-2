@@ -1,4 +1,4 @@
-"""Binary terminal output only; tab/control authority stays on /tabs."""
+"""Binary terminal input/output; tab/control authority stays on /tabs."""
 from __future__ import annotations
 
 import asyncio
@@ -46,10 +46,11 @@ class OutputConnection:
 
 Attach = Callable[[dict[str, object], OutputConnection], Awaitable[None]]
 Detach = Callable[[OutputConnection], None]
+Input = Callable[[OutputConnection, bytes], Awaitable[None]]
 
 
 async def serve_output(scope: Scope, receive: Receive, send: Send,
-                       attach: Attach, detach: Detach) -> None:
+                       attach: Attach, detach: Detach, input_handler: Input | None = None) -> None:
     connection = OutputConnection('', '', '')
     writer: asyncio.Task[None] | None = None
     reader: asyncio.Task[None] | None = None
@@ -69,7 +70,7 @@ async def serve_output(scope: Scope, receive: Receive, send: Send,
         if request.get('type') != 'attach': raise ValueError('First frame must attach')
         await attach(request, connection)
         writer = asyncio.create_task(connection.write(send))
-        reader = asyncio.create_task(receive_disconnect(receive))
+        reader = asyncio.create_task(receive_input(receive, connection, input_handler))
         _ = await asyncio.wait({writer, reader}, return_when=asyncio.FIRST_COMPLETED)
         for task in (writer, reader):
             if task.done(): task.result()
@@ -88,9 +89,16 @@ async def serve_output(scope: Scope, receive: Receive, send: Send,
             pass  # Peer already disconnected; no retained shell is stopped.
 
 
-async def receive_disconnect(receive: Receive) -> None:
+async def receive_input(receive: Receive, connection: OutputConnection, handler: Input | None) -> None:
     while True:
         event = await receive()
         if event['type'] == 'websocket.disconnect': return
-        # Output socket has no mutation ingress. Controls belong on /tabs.
-        raise ValueError('Output socket accepts only the initial attach frame')
+        raw = event.get('bytes')
+        if connection.closed or handler is None or event['type'] != 'websocket.receive' or not isinstance(raw, bytes) or len(raw) > 65536:
+            raise ValueError('Expected bounded binary terminal input')
+        frame = unpack_message(raw)
+        data = frame.get('data')
+        if frame.get('type') != 'input' or not isinstance(data, bytes) or not 0 < len(data) <= 4096:
+            raise ValueError('Invalid terminal input')
+        # One reader preserves ingress order without a browser ACK round trip.
+        await asyncio.wait_for(handler(connection, data), 5)

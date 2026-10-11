@@ -314,12 +314,6 @@ interface AppState {
   specialKeysVisible: boolean;
   modifiers: TerminalModifierState;
   ctrlFocusCleanup: (() => void) | null;
-  inputBuffer: string;
-  inputBatchMode: InputBatchMode | null;
-  inputBufferStartedAt: number | null;
-  inputFlushTimer: number | null;
-  inputLastChunk: string | null;
-  inputLastChunkAt: number | null;
   encoder: TextEncoder;
 }
 
@@ -333,22 +327,12 @@ interface SidebarStateContext {
   initialNewSession: string;
 }
 
-type InputBatchMode = 'normal' | 'fast' | 'repeat';
-
 const FONT_SIZE_MIN = 10;
 const FONT_SIZE_MAX = 28;
 const FONT_SIZE_STEP = 1;
 const FONT_SIZE_STORAGE_KEY = 'te2_terminal_font_size';
 const TERMINAL_WEB_FONT_FAMILY = 'JetBrains Mono';
 const TERMINAL_FONT_FAMILY = `"${TERMINAL_WEB_FONT_FAMILY}", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace`;
-const INPUT_NORMAL_DELAY_MS = 16;
-const INPUT_NORMAL_MAX_HOLD_MS = 48;
-const INPUT_FAST_DELAY_MS = 24;
-const INPUT_FAST_MAX_HOLD_MS = 72;
-const INPUT_REPEAT_DELAY_MS = 64;
-const INPUT_REPEAT_MAX_HOLD_MS = 176;
-const INPUT_REPEAT_GAP_MS = 42;
-const INPUT_FLUSH_THRESHOLD = 1024;
 const HELPER_BASE_URL = '/apps/terminal/vendor/android-terminalapp-assets-js';
 const CTRL_STATE_EVENT = 'android-terminalapp-ctrl-state';
 const TERMINAL_STREAM_CODEC = 'msgpack-v1';
@@ -773,12 +757,6 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     specialKeysVisible: true,
     modifiers: new TerminalModifierState(),
     ctrlFocusCleanup: null,
-    inputBuffer: '',
-    inputBatchMode: null,
-    inputBufferStartedAt: null,
-    inputFlushTimer: null,
-    inputLastChunk: null,
-    inputLastChunkAt: null,
     encoder: new TextEncoder(),
   };
   let initialSidebarStateApplied = false;
@@ -1308,100 +1286,20 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     return Math.max(1, Number(term?.rows) || 0);
   }
 
-  function clearInputBuffer(): void {
-    state.inputBuffer = '';
-    state.inputBatchMode = null;
-    state.inputBufferStartedAt = null;
-    if (state.inputFlushTimer !== null) {
-      clearTimeout(state.inputFlushTimer);
-      state.inputFlushTimer = null;
-    }
-  }
-
   function sendMessage(payload: ClientMessage): void {
     const ws = state.ws;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send(encodeMessagePack(payload, { ignoreUndefined: true }));
   }
 
-  function shouldFlushImmediately(data: string): boolean {
-    return data.includes('\r') || data.includes('\n') || data === '\u0003' || data === '\u0004' || data === '\u001b';
-  }
-
-  function isAnsiControlSequence(data: string): boolean {
-    return data.startsWith('\u001b') && data.length > 1;
-  }
-
-  function isLikelyBulkInput(data: string): boolean {
-    return data.length > 1 && !isAnsiControlSequence(data);
-  }
-
-  function mergeBatchMode(current: InputBatchMode | null, next: InputBatchMode): InputBatchMode {
-    if (current === 'repeat' || next === 'repeat') return 'repeat';
-    if (current === 'fast' || next === 'fast') return 'fast';
-    return 'normal';
-  }
-
-  function classifyBatchMode(data: string, now: number): InputBatchMode {
-    const gapMs = state.inputLastChunkAt === null ? Number.POSITIVE_INFINITY : now - state.inputLastChunkAt;
-    if (gapMs <= INPUT_REPEAT_GAP_MS) {
-      if (state.inputLastChunk === data) return 'repeat';
-      return 'fast';
-    }
-    return 'normal';
-  }
-
-  function batchPolicy(mode: InputBatchMode): { delayMs: number; maxHoldMs: number } {
-    if (mode === 'repeat') {
-      return { delayMs: INPUT_REPEAT_DELAY_MS, maxHoldMs: INPUT_REPEAT_MAX_HOLD_MS };
-    }
-    if (mode === 'fast') {
-      return { delayMs: INPUT_FAST_DELAY_MS, maxHoldMs: INPUT_FAST_MAX_HOLD_MS };
-    }
-    return { delayMs: INPUT_NORMAL_DELAY_MS, maxHoldMs: INPUT_NORMAL_MAX_HOLD_MS };
-  }
-
-  function flushInput(): void {
-    if (!state.inputBuffer) return;
-    const data = state.inputBuffer;
-    clearInputBuffer();
-    const bytes = state.encoder.encode(data);
-    sendMessage({ type: 'input', data: bytes });
-  }
-
   function queueInput(data: string): void {
-    const now = performance.now();
-    const nextMode = classifyBatchMode(data, now);
-    state.inputLastChunk = data;
-    state.inputLastChunkAt = now;
-    state.inputBuffer += data;
-    if (state.inputBufferStartedAt === null) {
-      state.inputBufferStartedAt = now;
-    }
-    const bytes = state.encoder.encode(state.inputBuffer);
-    if (shouldFlushImmediately(data) || isLikelyBulkInput(data) || bytes.byteLength >= INPUT_FLUSH_THRESHOLD) {
-      flushInput();
-      return;
-    }
-
-    state.inputBatchMode = mergeBatchMode(state.inputBatchMode, nextMode);
-    const mode = state.inputBatchMode || 'normal';
-    const { delayMs, maxHoldMs } = batchPolicy(mode);
-    const heldForMs = now - state.inputBufferStartedAt;
-    if (heldForMs >= maxHoldMs) {
-      flushInput();
-      return;
-    }
-
-    if (state.inputFlushTimer !== null) {
-      clearTimeout(state.inputFlushTimer);
-    }
-    const nextDelayMs = Math.max(0, Math.min(delayMs, maxHoldMs - heldForMs));
-    state.inputFlushTimer = window.setTimeout(flushInput, nextDelayMs);
+    if (!data) return;
+    // Preserve xterm event order without delaying typing or held navigation keys.
+    // sendMessage drops disconnected input; nothing is queued for reconnect.
+    sendMessage({ type: 'input', data: state.encoder.encode(data) });
   }
 
   function clearSocket(): void {
-    clearInputBuffer();
     if (state.ws) {
       try {
         state.ws.close(1000, 'dispose');
@@ -1511,7 +1409,6 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     });
 
     ws.addEventListener('close', () => {
-      clearInputBuffer();
       setStatus('disconnected');
     });
 

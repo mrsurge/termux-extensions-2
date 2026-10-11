@@ -1871,7 +1871,7 @@ resolver before attempting the next release rodeo; current `py3-none` server-onl
 wheel machinery is insufficient. Validate desktop/Termux clean installs after
 that packaging slice. No wheel publication or runtime restart occurred here.
 Full contract:
-`framework/native_editor_worker/README.md`, Planned installed artifact placement.
+`framework/native_editor_worker/README.md`, **Installed artifact selection**.
 
 ## Touch-menu model-view lifecycle correction (2026-10-05)
 

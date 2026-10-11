@@ -116,6 +116,16 @@ class TabService:
     def detach_stream(self, connection: OutputConnection) -> None:
         self.streams.discard(connection)
 
+    async def stream_input(self, connection: OutputConnection, data: bytes) -> None:
+        async with self.lock:
+            tab = self.store.get(connection.tab_id)
+            if (connection.closed or connection not in self.streams
+                    or connection.sid not in self.presentations
+                    or self.attached.get(connection.sid) != connection.tab_id
+                    or tab is None or tab['shellId'] != connection.shell_id):
+                raise ValueError('Terminal stream identity changed')
+            await self.terminals.dispatch(tab, 'terminal.input', {'data': data.decode('utf8')})
+
     def close_shell_streams(self, shell_id: str) -> None:
         for stream in self.streams:
             if stream.shell_id == shell_id: stream.close()
@@ -357,7 +367,7 @@ def compose_tabs(http: ASGIApplication, store: TabStore,
     service = TabService(store, EncodedServer(server), resolve_path, project_path)
     async def routes(scope: Scope, receive: Receive, send: Send) -> None:
         if scope['type'] == 'websocket' and scope['path'] == '/ws/terminal':
-            await serve_output(scope, receive, send, service.attach_stream, service.detach_stream)
+            await serve_output(scope, receive, send, service.attach_stream, service.detach_stream, service.stream_input)
         else:
             await http(scope, receive, send)
     application = cast(ASGIApplication, socketio.ASGIApp(server, other_asgi_app=routes,

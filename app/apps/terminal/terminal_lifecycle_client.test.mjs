@@ -1,9 +1,50 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
+import vm from 'node:vm';
 
 import { decode, encode } from '@msgpack/msgpack';
-import { build } from 'esbuild';
+import { build, transformSync } from 'esbuild';
+
+function inputHarness() {
+  const source = fs.readFileSync('src/main.ts', 'utf8');
+  const start = source.indexOf('  function sendMessage(');
+  const end = source.indexOf('  function clearSocket()', start);
+  assert.ok(start >= 0 && end > start);
+  const frames = [];
+  const state = { encoder: new TextEncoder(), ws: { readyState: 1, send: data => frames.push(decode(data)) } };
+  const context = vm.createContext({ state, WebSocket: { OPEN: 1 }, encodeMessagePack: encode });
+  vm.runInContext(transformSync(source.slice(start, end) + '\nglobalThis.input = queueInput;', { loader: 'ts' }).code, context);
+  return { state, frames, input: context.input };
+}
+
+test('terminal input sends synchronously in event order, including held arrows and UTF-8 paste', () => {
+  const { input, frames } = inputHarness();
+  const chunks = ['a', 'b', ...Array(20).fill('\u001b[A'), '\u0003', '\r', 'hello 🌍\n'.repeat(2048)];
+  for (const [index, chunk] of chunks.entries()) {
+    input(chunk);
+    assert.equal(frames.length, index + 1, 'no timer or ACK may delay input');
+    assert.equal(frames[index].type, 'input');
+    assert.equal(new TextDecoder().decode(frames[index].data), chunk);
+  }
+  input('');
+  assert.equal(frames.length, chunks.length);
+});
+
+test('terminal disconnected input is dropped and never replays into a replacement socket', () => {
+  const { input, frames, state } = inputHarness();
+  const socket = state.ws;
+  for (const readyState of [0, 2, 3]) {
+    socket.readyState = readyState;
+    input('discard');
+  }
+  state.ws = null;
+  input('also discard');
+  state.ws = { readyState: 1, send: socket.send };
+  input('fresh');
+  assert.equal(frames.length, 1);
+  assert.equal(new TextDecoder().decode(frames[0].data), 'fresh');
+});
 
 
 let clientModulePromise;

@@ -634,7 +634,10 @@ serializes framed stdin writes; no Terminal FastAPI import, Pyte/log replay or
 Code TE2 domain coupling is introduced. Control replies resolve independently
 of the bounded event publisher, so tab-lock-held checkpoints cannot deadlock.
 
-Socket.IO remains the tab/CRUD, input, directory and checkpoint command lane.
+Socket.IO remains the tab/CRUD, directory and checkpoint command lane. The
+approved latency follow-up sends input immediately over the already-authorized
+raw terminal socket, with sequential backend handling and live SID/tab/shell
+guards, rather than waiting for per-input Socket.IO acknowledgements.
 Output temporarily retains its existing Socket.IO event with session-local byte
 offsets derived from broker output; Node checkpoint sequences remain authoritative
 for gaps. The user explicitly deferred a separate raw WebSocket output lane until

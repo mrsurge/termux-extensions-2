@@ -21,7 +21,9 @@ button:disabled { color: #616970; }
 .header-group, .window-controls { display: flex; align-items: center; gap: 2px; padding: 0 6px; }
 .header-title { min-width: 0; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 0 12px; }
 #page-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-.asset-version { flex: 0 0 auto; border: 1px solid var(--border); border-radius: 10px; padding: 2px 7px; color: var(--muted); font-size: 11px; }
+.asset-version { flex: 0 0 auto; height: auto; min-width: 0; border: 1px solid var(--border); border-radius: 10px; padding: 2px 7px; color: var(--muted); font-size: 11px; cursor: pointer; }
+.asset-version:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.asset-version:disabled { cursor: progress; }
 .framework-offline { flex: 0 1 auto; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid var(--danger); background: rgba(185, 71, 71, 0.16); color: #ffb4b4; }
 .framework-offline:hover:not(:disabled) { background: rgba(185, 71, 71, 0.32); }
 .zoom-reset { min-width: 52px; }

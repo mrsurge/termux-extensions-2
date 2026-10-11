@@ -1638,3 +1638,64 @@ The standalone parser/output queue and frontend batching predate this work;
 restoration proves removal of the coupling, not the cause or resolution of the
 user's latency observation. No commit/push/release or shared runtime restart is
 implied by these validations.
+
+## Immediate standalone Terminal input — 2026-10-11
+
+User live acceptance: standalone Terminal is reported MUCH faster. The next
+approved slice applies immediate input to File Explorer and adds Electron OTA
+access through its title-bar asset pill.
+
+- [x] Passive live timing found standalone input waits of about 16 ms for normal
+  keys and up to 176 ms for held keys. Browser xterm parse callbacks were around
+  0.1–0.2 ms in this sample. File Explorer sent initial input immediately but
+  serialized later input behind acknowledgements; its transport remains separate.
+- [x] Approved isolated change removes standalone normal/fast/repeat input timers
+  and their retained state. Every nonempty xterm input event sends synchronously
+  through the existing binary MessagePack WebSocket. Disconnected input drops;
+  no ACK gate, reconnect replay, protocol or backend change is introduced.
+- [x] Regression exercises actual authored input/send functions: synchronous
+  typing/repeated arrows/control input, UTF-8 paste, empty input, disconnected
+  states and replacement sockets. All 24 Terminal Node tests, typecheck and build
+  pass. Frontend bundle regenerated.
+- [x] Repeat isolated timer probe: zero-RTT standalone p95 echo decreased from
+  18.58/73.46/177.45 ms (single/rapid/arrows) to 1.87/2.38/2.31 ms. These are Node
+  timer simulations, not live browser/render or network acceptance. Reproduction:
+  `node scripts/probe_terminal_latency.mjs <report-path>`; retained local reports
+  are `.codex-scratch/terminal-latency-20261011.json` and
+  `.codex-scratch/terminal-latency-immediate-20261011.json`.
+- [x] User live acceptance: standalone Terminal is MUCH faster after activation.
+  Reload alone does not update installed native assets.
+
+The proxy/Nagle hypothesis remains unproven in the live framework and is not part
+of this experiment. File Explorer ACK scheduling and standalone headless output
+remain unchanged. Passive probes were removed after capture. User repo-memory
+edits are preserved and requested for inclusion in the next commit; no commit or
+push is implied by this implementation.
+
+## File Explorer immediate input and Electron asset pill — 2026-10-11
+
+- [x] File Explorer input now uses its existing token-attached raw MessagePack
+  terminal socket. Remove the one-ACK-at-a-time frontend input queue; send UTF-8
+  chunks immediately with 4096-byte frames, 64 KiB event admission and bounded
+  browser buffered bytes. No disconnected/pre-checkpoint input or replay.
+- [x] Sequential backend input reader validates binary frames and bounds. The
+  existing service lock validates SID, tab attachment, stream membership and
+  exact shell before dispatching through File Explorer's own broker. Session,
+  directory and resize controls stay on Socket.IO; proxy/headless policy is untouched.
+- [x] Electron title-bar asset pill is an accessible non-draggable button using
+  the existing forced `update_assets` request. Busy state prevents repeat clicks;
+  existing update events report success, while failures restore the button and
+  display a toast. Active views reload through the existing OTA implementation.
+- [x] 34 targeted Python tests, strict mypy, 16 File Explorer frontend tests,
+  File Explorer typecheck/build, 120 Electron tests, typecheck/compile pass.
+- [x] File Explorer user live acceptance after reloading the updated client:
+  terminal lag is fixed. The initial retest still executed the old imported
+  ACK-gated module even though a fresh asset read returned the updated bundle.
+  Live inspection of the imported class and paired Socket.IO sends established
+  this distinction. Backend input-to-output publication was about 2 ms; shell
+  record validation was about 0.5–0.8 ms. Both timing probes were removed.
+- [ ] Electron asset-pill live acceptance. Relaunch the rebuilt Electron client
+  to activate its title-bar change; editor OTA cannot update Electron chrome.
+
+The user requested commit/push of this accepted snapshot, including their repo
+memory/documentation consolidation. No shared framework restart was performed.

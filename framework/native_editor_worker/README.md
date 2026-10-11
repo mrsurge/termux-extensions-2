@@ -1,11 +1,14 @@
 # Native editor-services worker
 
-Independent internal Rust/PyO3 crate. On this experimental branch Code TE2's
-default shellspec launches **`code-te2-worker`** from this crate's release target.
-Build it before opening Code TE2. There is no Python-server fallback. The empty
-`[workspace]` keeps Cargo separate from `framework/rust`; wheel/bootstrap build
-integration is deliberately not implemented yet. Do not publish this branch as
-an installed release without that integration.
+Independent Rust/PyO3 crate. Code TE2's shellspec launches the raw
+**`CODE_TE2_WORKER_BIN`** selected by framework bootstrap. Source startup builds
+or reuses the fingerprinted native executable; packaged startup validates its
+matched worker/domain/runtime payload. There is no Python-server fallback or
+Cargo fallback for a missing binary-release payload. The empty `[workspace]`
+keeps Cargo separate from `framework/rust`. Direct crate-target builds below are
+diagnostic tooling, not the default launch-path authority. Domain compilation/
+activation remains explicit for source installs; release tooling owns packaged
+assembly and target acceptance.
 
 ## Compiled intelligence launch regression
 
@@ -138,13 +141,13 @@ without either selection retain inherited matching-version `VIRTUAL_ENV`
 site-packages and editable `.pth` handling. Compile and run with the same regular CPython ABI;
 do not supply a free-threaded or different-version venv.
 
-The approved Linux binary packaging target instead owns a private ordinary
+Linux binary Code TE2 instead owns a private ordinary
 CPython 3.14 interpreter/stdlib/dependency closure. It must select that payload
 deterministically, reject host Python path/site contamination, and preserve a
 separate host executable identity for Node discovery and run-profile children.
-Termux initially retains its validated regular system 3.14. Full private payload,
-relative ELF linkage and clean-wheel acceptance remain packaging gates; the
-source interpreter handoff above is not proof of a self-contained release.
+Termux retains its resolved regular system 3.14/Bionic ABI. Private payload,
+relative ELF linkage and target-install validation remain release contracts;
+source interpreter handoff alone is not proof of a self-contained release.
 
 Private manifest schema 2 declares `pythonRuntime.mode="bundled"`, relative
 `home`, `executable`, `sourceRoot`, and the embedded `extensionSuffix`.
@@ -155,8 +158,10 @@ dynload and dependency directory, then loads its declared source/compiled
 overlay. It does not import the host package root or process `.pth` files.
 `CODE_TE2_HOST_PYTHON_EXECUTABLE` retains launcher identity for child launching
 and discovery. These loader contracts are tested; the complete private runtime
-materializer and host-independent platform-tag hooks now exist. The complete
-manylinux build/repair and clean-wheel acceptance remain pending.
+materializer and host-independent platform-tag hooks exist. Exact build/repair,
+installed-runtime and user-acceptance evidence is retained in the desktop
+packaging tracker; do not carry a superseded pending checkpoint into current
+runtime instructions or infer fresh acceptance from loader tests alone.
 
 Linux assembly uses `release/linux-wheel/code-te2-runtime-requirements.txt` for
 runtime-only dependencies, separate from the mypyc build environment. The
@@ -232,34 +237,29 @@ module count. The overlay links source-owned resource directories into its lib
 layout because compiled modules resolve sibling assets relative to their `.so`.
 These development symlinks are not a portable wheel packaging solution.
 
-#### Planned installed artifact placement
+#### Installed artifact selection
 
-The repo-local Cargo executable and `.codex-scratch/mypyc-active` are the current
-experimental launch paths, **not the intended installed runtime locations**.
-The next packaging/launcher slice must publish a matched Code TE2 artifact set:
+The executable remains independent of `te2-server`. Bootstrap resolves concrete
+paths once and supplies them to the app shellspec:
 
-- Editable/source installs: the existing resolved Code TE2 cache root,
-  `$TE2_CACHE_HOME/code_te2/build` (normally `~/.cache/te2/code_te2/build`).
-  Immutable validated artifact sets contain `bin/code-te2-worker`, the compiled
-  domain libraries/manifest, and provenance. Build intermediates remain separate;
-  the runtime never launches from a mutable Cargo/compiler cache or scratch path.
-- Binary wheels: package-owned `app/release_runtime/code_te2/`, with
-  `bin/code-te2-worker`, domain libraries and required resources/interpreted islands.
-  Resolve paths relative to the installed package, not the checkout. No developer
-  symlinks or absolute build-host paths may be required.
+- Source installs: configured Cargo workers publish under
+  `$TE2_CACHE_HOME/code_te2/build/bin/<fingerprint>/<profile>/code-te2-worker`.
+  Explicit `build_mypyc.py` publishes validated domain snapshots separately;
+  `.codex-scratch/mypyc-active` is a selector, not a mutable compiler-cache runtime.
+- Binary wheels: package-owned `app/release_runtime/code_te2/` contains the worker,
+  compiled domain, resources/interpreted islands and provenance. The resolver
+  `app/release_runtime/code_te2.py` validates package-relative inventories and
+  component hashes, selecting Linux bundled-Python schema 2 or Termux system-ABI
+  schema 1. No developer symlinks or absolute build-host paths may be required.
 
-The executable remains independent of `te2-server`. Match CPython minor/ABI
-(including regular versus free-threaded), architecture, libc and linked libpython,
-and verify component checksums/provenance before selecting the artifact set.
-The existing framework wheel's `py3-none` tag cannot simply be reused for a wheel
-containing ABI-specific mypyc extensions. Preserve separate Rust/domain build
-fingerprints so changing Python source does not force a Rust rebuild.
-
-The launcher/bootstrap must resolve the source-cache or verified wheel payload
-once and supply its concrete paths to the app shellspec. Binary-install missing
-or incompatible artifacts fail explicitly, never silently invoke Cargo or fall
-back to interpreted execution. Source build/publish and activation remain explicit
-until that workflow is implemented. This section is a plan, not current behavior.
+Match regular CPython minor/ABI, architecture, libc and libpython at the native
+boundary. Linux's isolated bundled interpreter permits host-independent platform
+wheel tags; Termux's system-interpreter payload retains its exact ABI tags.
+Do not treat bundled mypyc libraries as host-importable extensions. Rust/domain
+fingerprints remain separate, so a domain edit does not force a Rust rebuild.
+Missing/incompatible binary artifacts fail explicitly, with no Cargo/interpreted
+fallback. Installed validation and publication follow the release workflow;
+snapshot publication or source build does not grant release/activation permission.
 
 #### Cached build and retention workflow (current developer behavior)
 
@@ -288,8 +288,8 @@ publishes without selecting it. Default activation reuses the existing atomic
 `.codex-scratch/mypyc-active` selector and preserves its previous selection;
 the selector now points outside scratch, to the canonical published snapshot.
 No worker restart, Rust rebuild, wheel packaging or resource copying is implied.
-Editable resource links still point to this checkout. The planned matched
-Rust/domain deployment resolver above remains a separate slice.
+Editable resource links still point to this checkout. They are not substitutes
+for the portable, inventory-validated packaged resources described above.
 
 Cache existence does not guarantee incremental speedup. A shared group-header
 change can invalidate all native C objects; verify unchanged/body-only/signature
@@ -390,10 +390,11 @@ require rebuilding the framework server, not only the worker.
 Mypyc compilation/activation is still explicit through `build_mypyc.py`; this
 slice does not build it automatically or replace its selected domain overlay.
 Source installs include the independent worker's Cargo manifest/lockfile/source.
-Binary release wheels still require matched executable/domain/resources and ABI
-tagging: the new source-build path refuses to compile a worker as a fallback for
-a binary release lacking integrated worker payloads. No integrated release is
-claimed, and wheel assembly remains the next gate.
+Binary release wheels require matched executable/domain/resources and ABI
+validation. Packaged bootstrap resolves that validated payload instead of this
+source-build path; missing payloads are refused, not compiled through a fallback.
+Release and acceptance status belongs in the packaging tracker, not in a
+perpetual pending-assembly statement here.
 
 ### Pixel source build and live test
 

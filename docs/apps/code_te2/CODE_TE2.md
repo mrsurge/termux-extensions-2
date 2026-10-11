@@ -3464,10 +3464,30 @@ native-owned. The relay blocks exact root `/sw.js`, not every Service Worker pat
 cleanup must be scoped rather than a blanket Service Worker ban.
 
 Launcher source names are misleading: `desktop_client/android_shell/` is
-Electron-only source; `app/android_shell/` is canonical Android source.
+Desktop source also reused by the TE2 Termux consumer's `bundleTermuxShell` task;
+`app/android_shell/` is source for the ordinary Gecko/Cefrium launcher.
+TE2 Termux's `/electromux-shell/` launcher, chrome and settings are APK-owned,
+outside editor OTA. That task does not publish the editor/framework seed: use
+the existing `scripts/bundle_gecko_assets.sh` publication before consumer APK
+assembly and verify the resulting APK's actual resources/module imports.
 `android/app/src/main/assets/editor_static/android-shell/` is generated APK output.
 Trace source → build → inventory/bundle → client install → served response before
 editing or validating; do not infer shared ownership from the directory name.
+
+Framework relays prefer a persisted per-install port. Direct bind uses a temporary
+free port only on address collision and does not overwrite the preferred value;
+retargeting retains the listener/origin. Preferred/actual/fallback ports are not
+native client, upstream or presentation identities. See editor-loading PLAN's
+**Stable native origin implementation**. Kotlin relay changes require APK
+publication, not editor OTA; installed packages have separate native state.
+
+OTA uses the complete server-side `app/android_editor_assets_bundle.json`
+inventory to build a Deflate ZIP, not a delta/per-file inventory protocol. Android
+extracts to a fresh staging tree and replaces the active tree, removing omitted
+old files. Explicitly declared files removed from source must also be removed
+from the server inventory; the client's minimum-required file list is a separate
+compatibility gate. Asset HTTP gzip and editor RPC gzip do not change this ZIP
+contract. The detailed trim/compression evidence belongs in editor-loading TRACKER.
 
 For Monaco changes, publish the changed ESM, run
 `node scripts/build_monaco_bootstrap_bundle.mjs` from the TE2 root, then
@@ -4566,6 +4586,14 @@ directly or use Sidebar state as cross-client editor/document authority. The
 general UI IPC contract is §21; WBA extension-surface reconciliation is §44.
 
 ## 46) Code TE2 Terminal Drawer Transport
+
+File Explorer is a separate ordinary Python worker with its own Node PTY worker,
+shellspec, dependency lock, codecs and frontend build. It shares the app-neutral
+Pyte projection core, not Code TE2's embedded native manager or another app's
+backend/shellspec. Its durable tab/control and checkpoint-first raw MessagePack
+output lanes, prompt-safe directory control and stream-preserving resize rules
+are documented in `app/apps/file_explorer/TERMINAL.md`. Keep those application
+owners distinct from the Code TE2 drawer contract below.
 
 The host terminal drawer retains its existing Framework-Shells PTY backend. Its
 browser control and bootstrap plane is the app-worker Socket.IO namespace

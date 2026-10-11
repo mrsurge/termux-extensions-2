@@ -55,14 +55,20 @@ attached presentation's `terminal.stream` control request. Grants are fenced to
 the live Socket.IO SID, tab and shell; disconnect/reselection revokes them.
 The socket delivers a checkpoint before live output, with byte offsets retaining
 the existing cursor fence. No terminal-output rooms, text frames, JSON/base64
-fallback, mutation ingress or log-tail replay. Each presentation has its own
+fallback or log-tail replay. Each presentation has its own
 bounded 64-frame/1 MiB output queue and 5s send deadline; overflow closes that
 connection for checkpoint recovery without blocking the broker or stopping the
 shell. The initial bounded checkpoint is admitted separately from output bytes.
-Socket.IO remains the tab/CRUD, input/resize/directory and notification lane.
+After attach, this same raw socket accepts bounded binary `input` frames
+containing UTF-8 bytes (at most 4096 bytes each). One sequential reader forwards
+them without browser ACK pacing, with a five-second handler deadline. The service
+revalidates the live SID/tab/exact-shell association under its mutation lock.
+No input is retained for reconnect; disconnected and pre-checkpoint input drops.
+Socket.IO remains the tab/CRUD, resize/directory and notification lane; its old
+input method remains compatible for older clients.
 Its `msgpack-v1` authenticated requests/ACKs use correlated `{id, method, params}`
 and `{id, ok, result/error}` objects encoded as binary MessagePack; notifications
-are binary objects too. Python boundaries reuse Terminal's `msgspec.msgpack`
+are binary objects too. Python boundaries use File Explorer's own `msgspec.msgpack`
 codec, while Node/browser use `@msgpack/msgpack`. Socket.IO's own handshake
 metadata is still its standard protocol, not an application JSON fallback.
 Reconnect obtains a new grant/checkpoint; unsent input and uncertain mutations
@@ -96,8 +102,10 @@ pointer-down dispatch, Ctrl double-tap lock, one-shot modifiers and shared arrow
 hold-repeat timings. The minibar opens the existing Tabs menu with the shared
 reveal guard. The mobile footer is an in-flow final child below the drawer;
 it alone owns the bottom safe-area inset, so it cannot cover the key dock.
-Tab and terminal mutations share the same frontend serial lane; disconnect
-rejects queued input rather than replaying it. Checkpoint handoff buffers at most
+Tab and terminal control mutations share the same frontend serial lane; terminal
+keystrokes bypass that lane on the attached raw stream. Input chunks send
+synchronously with UTF-8-safe splitting and bounded WebSocket buffered bytes.
+Disconnect never replays input. Checkpoint handoff buffers at most
 64 frames/1 MiB and accepts only contiguous raw offsets after the checkpoint.
 Async mounts/checkpoints are tab/shell/generation fenced; association-only updates
 do not refetch the directory. Explicit close stops the terminal for all attached

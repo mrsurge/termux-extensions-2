@@ -1,6 +1,7 @@
 import type {
   AppNavigation,
   AssetStatus,
+  AssetUpdateResult,
   DesktopBridge,
   DesktopShellSettings,
   LocalFrameworkState,
@@ -23,7 +24,7 @@ declare global {
 const bridge = window.te2Desktop;
 const launcherView = document.querySelector("#launcher-view") as HTMLIFrameElement;
 const pageTitle = document.querySelector("#page-title") as HTMLElement;
-const assetVersion = document.querySelector("#asset-version") as HTMLElement;
+const assetVersion = document.querySelector("#asset-version") as HTMLButtonElement;
 const zoomReset = document.querySelector("#zoom-reset") as HTMLButtonElement;
 const zoomOut = document.querySelector("#zoom-out") as HTMLButtonElement;
 const zoomIn = document.querySelector("#zoom-in") as HTMLButtonElement;
@@ -276,6 +277,22 @@ window.addEventListener("unhandledrejection", (event) => {
 });
 
 document.querySelector("#home")?.addEventListener("click", showHome);
+assetVersion.addEventListener("click", async () => {
+  if (assetVersion.disabled) return;
+  assetVersion.disabled = true;
+  assetVersion.setAttribute("aria-busy", "true");
+  toast("Updating desktop assets…");
+  try {
+    const result = await bridge.request("update_assets") as AssetUpdateResult;
+    setAssetBadge(result.localVersion);
+    if (!result.updated) toast(result.error || "Desktop assets are already current");
+  } catch (error) {
+    toast(errorMessage(error, "Asset update failed"));
+  } finally {
+    assetVersion.disabled = false;
+    assetVersion.removeAttribute("aria-busy");
+  }
+});
 frameworkOffline.addEventListener("click", showHome);
 back.addEventListener("click", () => runUiTask(bridge.request("view_action", { action: "back" })));
 forward.addEventListener("click", () => runUiTask(bridge.request("view_action", { action: "forward" })));

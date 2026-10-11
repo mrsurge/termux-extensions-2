@@ -109,24 +109,20 @@ test('mobile footer participates in layout below the exact two-row Terminal key 
   assert.match(source, /keyToggle.hidden = !mobileKeys/);
 });
 
-test('input batches pending keystrokes in order instead of one ACK per character', async () => {
-  const sent = [], replies = [], errors = [];
+test('input sends synchronously without ACK pacing or retained replay', () => {
+  const sent = [], errors = [];
+  let connected = true;
   const batcher = new TerminalInputBatcher(data => {
-    sent.push(data); return new Promise((resolve, reject) => replies.push({ resolve, reject }));
+    if (!connected) throw new Error('disconnected');
+    sent.push(data);
   }, error => errors.push(error));
-  batcher.enqueue('a'); await new Promise(setImmediate);
-  batcher.enqueue('b'); batcher.enqueue('c'); batcher.enqueue('d');
-  await new Promise(setImmediate);
-  assert.deepEqual(sent, ['a']);
-  replies.shift().resolve(); await new Promise(setImmediate);
-  assert.deepEqual(sent, ['a', 'bcd']);
-  batcher.enqueue('discarded');
-  replies.shift().reject(new Error('connection lost')); await new Promise(setImmediate);
-  assert.deepEqual(sent, ['a', 'bcd']);
+  for (const key of ['a', 'b', '\\x1b[A', '\\x1b[A']) batcher.enqueue(key);
+  assert.deepEqual(sent, ['a', 'b', '\\x1b[A', '\\x1b[A']);
+  connected = false; batcher.enqueue('discard'); batcher.reset();
+  connected = true; batcher.enqueue('fresh');
   assert.equal(errors.length, 1);
-  batcher.enqueue('new'); await new Promise(setImmediate);
-  batcher.enqueue('stale'); batcher.reset(); replies.shift().resolve(); await new Promise(setImmediate);
-  assert.deepEqual(sent, ['a', 'bcd', 'new']);
+  assert.equal(sent.at(-1), 'fresh');
+  assert.equal(sent.length, 5);
 });
 
 test('input batches bound UTF-8 requests and queue admission without splitting characters', async () => {
@@ -157,7 +153,7 @@ test('checkpoint cursor drops covered deltas and accepts only exact raw offsets'
 });
 
 test('drawer fences checkpoint handoff, preserves shell on minimize/dispose and hides desktop keys', async () => {
-  const { packObject } = await import('../app/static/js/file_explorer_codec.js');
+  const { packObject, unpackObject } = await import('../app/static/js/file_explorer_codec.js');
   class Element {
     hidden = false; textContent = ''; dataset = {}; handlers = new Map(); children = [];
     classList = { remove() {}, toggle() {} };
@@ -183,9 +179,13 @@ test('drawer fences checkpoint handoff, preserves shell on minimize/dispose and 
   const streams = [];
   globalThis.location = new URL('http://localhost/app/file_explorer');
   globalThis.WebSocket = class {
+    static OPEN = 1;
+    readyState = 1; bufferedAmount = 0; inputs = [];
     constructor(url) { assert.match(String(url), /\/ws\/app\/file_explorer\/terminal\?codec=msgpack-v1/); streams.push(this); queueMicrotask(() => this.onopen?.()); }
     send(raw) {
       assert.ok(raw instanceof Uint8Array);
+      const frame = unpackObject(raw);
+      if (frame.type === 'input') { this.inputs.push(frame); return; }
       checkpoints.push(value => this.frame({ type: 'checkpoint', tabId: 'tab', ...value }));
     }
     frame(value) { this.onmessage?.({ data: packObject(value).slice().buffer }); }
@@ -244,8 +244,9 @@ test('drawer fences checkpoint handoff, preserves shell on minimize/dispose and 
     assert.deepEqual(calls.at(-1), ['terminal.directoryLock', { locked: true }]);
     assert.equal(lock.disabled, false);
     assert.equal(lock.checked, false, 'confirmed snapshot wins over optimistic checkbox');
-    views[0].input('x'); await tick();
-    assert.equal(calls.at(-1)[0], 'terminal.input');
+    views[0].input('x');
+    assert.equal(new TextDecoder().decode(streams[0].inputs[0].data), 'x');
+    assert.equal(calls.some(([method]) => method === 'terminal.input'), false);
     handlers.get('disconnect')();
     assert.equal(views[0].disposed, true);
     drawer.sync(tabs.tab); await tick();
