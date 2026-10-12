@@ -1,0 +1,224 @@
+<style>
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+}
+.settings-card {
+  background: var(--card, #111827);
+  border: 1px solid var(--border, #1f2937);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.settings-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.settings-card header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+.settings-card button {
+  background: var(--secondary, #1f2937);
+  color: var(--foreground, #f9fafb);
+  border: 1px solid var(--border, #374151);
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.settings-card button:hover {
+  border-color: var(--primary, #3b82f6);
+}
+.settings-card button.danger {
+  background: var(--destructive, #991b1b);
+  border-color: var(--destructive, #991b1b);
+  color: var(--destructive-foreground, #f9fafb);
+}
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+.metrics-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(59, 130, 246, 0.08);
+}
+.metrics-item span.label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted-foreground, #94a3b8);
+}
+.metrics-item span.value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.95rem;
+  color: var(--foreground, #f9fafb);
+  word-break: break-all;
+}
+.shell-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.shell-table th,
+.shell-table td {
+  padding: 10px;
+  text-align: left;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+  font-size: 0.9rem;
+}
+.shell-table tbody tr:hover {
+  background: rgba(59, 130, 246, 0.08);
+}
+.shell-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.shell-actions button {
+  font-size: 0.75rem;
+  padding: 4px 8px;
+}
+.shutdown-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.shutdown-form label {
+  font-size: 0.85rem;
+  color: var(--muted-foreground, #94a3b8);
+}
+.shutdown-form input {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border, #374151);
+  background: var(--background, #0f172a);
+  color: var(--foreground, #f9fafb);
+}
+.shutdown-form .hint {
+  font-size: 0.75rem;
+  color: var(--muted-foreground, #94a3b8);
+  margin: 0;
+}
+.settings-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.settings-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.95rem;
+}
+.settings-toggle input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+}
+.settings-input {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border, #374151);
+  background: var(--background, #0f172a);
+  color: var(--foreground, #f9fafb);
+}
+.reorder-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.reorder-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--secondary, #1f2937);
+  border: 1px solid var(--border, #374151);
+  border-radius: 8px;
+  padding: 8px 12px;
+  gap: 12px;
+}
+.reorder-item span.name {
+  font-weight: 500;
+}
+.reorder-item-controls {
+  display: flex;
+  gap: 6px;
+}
+.reorder-item-controls button {
+  background: none;
+  border: 1px solid var(--border, #374151);
+  color: var(--foreground, #f9fafb);
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.reorder-item-controls button:hover {
+  border-color: var(--primary, #3b82f6);
+}
+@media (min-width: 960px) {
+  .settings-page {
+    padding: 24px 40px;
+  }
+}
+</style>
+
+<div class="settings-page">
+  <section class="settings-card" data-section="shells">
+    <header>
+      <h2>Framework Shells</h2>
+      <button data-action="refresh-shells">Refresh</button>
+    </header>
+    <div data-role="shell-list"></div>
+  </section>
+
+  <section class="settings-card" data-section="integrations">
+    <header>
+      <h2>Debug & Integrations</h2>
+      <button data-action="save-integration-settings">Save</button>
+    </header>
+    <div class="shutdown-form">
+      <label class="settings-toggle" for="setting-persistent-network">
+        <input id="setting-persistent-network" type="checkbox">
+        <span>Persistent network notification (Android)</span>
+      </label>
+      <p class="hint">Runs a foreground service to keep network connections alive while backgrounded.</p>
+    </div>
+  </section>
+
+  <section class="settings-card" data-section="extensions">
+    <header>
+      <h2>Launcher Extensions</h2>
+      <button data-action="reload-extensions">Refresh</button>
+    </header>
+    <p class="hint">Reorder how extensions appear on the launcher. Changes are saved immediately after you press “Save Order”.</p>
+    <div data-role="extension-order"></div>
+    <div class="shell-actions">
+      <button data-action="save-extension-order">Save Order</button>
+    </div>
+  </section>
+
+  <section class="settings-card" data-section="authentication">
+    <header>
+      <h2>Framework Shell Authentication</h2>
+    </header>
+    <div class="shutdown-form">
+      <label for="framework-token">Framework token (optional)</label>
+      <input id="framework-token" type="text" placeholder="X-Framework-Key" autocomplete="off" />
+      <div class="shell-actions">
+        <button data-action="store-token">Save Token</button>
+        <button data-action="clear-token">Clear Token</button>
+      </div>
+      <p class="hint">Used only when the Framework-Shells control surface requires an access token.</p>
+    </div>
+  </section>
+</div>

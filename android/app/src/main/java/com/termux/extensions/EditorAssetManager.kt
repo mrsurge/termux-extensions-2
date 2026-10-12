@@ -23,6 +23,20 @@ internal fun compareEditorAssetVersions(a: String, b: String): Int {
 }
 
 internal val REQUIRED_OTA_ASSET_FILES = listOf(
+    "apps/als_rs/template.html",
+    "apps/als_rs/main.js",
+    "apps/archive_manager/template.html",
+    "apps/archive_manager/main.js",
+    "apps/aria_downloader/template.html",
+    "apps/aria_downloader/main.js",
+    "apps/file_editor/template.html",
+    "apps/file_editor/main.js",
+    "apps/file_explorer/template.html",
+    "apps/file_explorer/main.js",
+    "apps/settings/template.html",
+    "apps/settings/main.js",
+    "apps/terminal/template.html",
+    "apps/terminal/static/dist/main.js",
     "version.txt",
     "android-shell/index.html",
     "android-shell/host.js",

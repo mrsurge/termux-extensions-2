@@ -1,7 +1,40 @@
 package com.termux.extensions
 
 internal object CefriumAssetRoutes {
+    // Exact built-in resources only; never intercept dynamic /apps or API trees.
+    private val builtInAppAssets = mapOf(
+        "/apps/als_rs/template.html" to "/apps/als_rs/template.html",
+        "/apps/by-id/als-rs/template.html" to "/apps/als_rs/template.html",
+        "/apps/als_rs/main.js" to "/apps/als_rs/main.js",
+        "/apps/by-id/als-rs/main.js" to "/apps/als_rs/main.js",
+        "/apps/archive_manager/template.html" to "/apps/archive_manager/template.html",
+        "/apps/by-id/archive_manager/template.html" to "/apps/archive_manager/template.html",
+        "/apps/archive_manager/main.js" to "/apps/archive_manager/main.js",
+        "/apps/by-id/archive_manager/main.js" to "/apps/archive_manager/main.js",
+        "/apps/aria_downloader/template.html" to "/apps/aria_downloader/template.html",
+        "/apps/by-id/aria_downloader/template.html" to "/apps/aria_downloader/template.html",
+        "/apps/aria_downloader/main.js" to "/apps/aria_downloader/main.js",
+        "/apps/by-id/aria_downloader/main.js" to "/apps/aria_downloader/main.js",
+        "/apps/file_editor/template.html" to "/apps/file_editor/template.html",
+        "/apps/by-id/file_editor/template.html" to "/apps/file_editor/template.html",
+        "/apps/file_editor/main.js" to "/apps/file_editor/main.js",
+        "/apps/by-id/file_editor/main.js" to "/apps/file_editor/main.js",
+        "/apps/file_explorer/template.html" to "/apps/file_explorer/template.html",
+        "/apps/by-id/file_explorer/template.html" to "/apps/file_explorer/template.html",
+        "/apps/file_explorer/main.js" to "/apps/file_explorer/main.js",
+        "/apps/by-id/file_explorer/main.js" to "/apps/file_explorer/main.js",
+        "/apps/settings/template.html" to "/apps/settings/template.html",
+        "/apps/by-id/settings/template.html" to "/apps/settings/template.html",
+        "/apps/settings/main.js" to "/apps/settings/main.js",
+        "/apps/by-id/settings/main.js" to "/apps/settings/main.js",
+        "/apps/terminal/template.html" to "/apps/terminal/template.html",
+        "/apps/by-id/terminal/template.html" to "/apps/terminal/template.html",
+        "/apps/terminal/static/dist/main.js" to "/apps/terminal/static/dist/main.js",
+        "/apps/by-id/terminal/static/dist/main.js" to "/apps/terminal/static/dist/main.js",
+    )
     private val localPrefixes = listOf(
+        "/apps/terminal/vendor/android-terminalapp-assets-js/",
+        "/apps/by-id/terminal/vendor/android-terminalapp-assets-js/",
         "/static/vendor/codicons/",
         "/static/vendor/seti-icons/",
         "/static/vendor/es-module-shims/",
@@ -35,7 +68,6 @@ internal object CefriumAssetRoutes {
         "/apps/by-id/code_te2/static/dist/host.js",
         "/apps/code_te2/static/dist/host.css",
         "/apps/code_te2/static/dist/explorer.css",
-        "/apps/code_te2/static/dist/explorer-highlight-github.css",
         "/apps/code_te2/static/dist/explorer-search-widget.css",
         "/apps/code_te2/static/vendor/vconsole/vconsole.min.js",
         "/api/app/code_te2/ui/monaco_vscode/lang/bootstrap/monaco.bootstrap.bundle.css",
@@ -46,6 +78,7 @@ internal object CefriumAssetRoutes {
     )
 
     fun localPath(requestPath: String): String? {
+        builtInAppAssets[requestPath]?.let { return it }
         if (
             requestPath !in localFiles &&
             localPrefixes.none { requestPath.startsWith(it) }
@@ -53,6 +86,10 @@ internal object CefriumAssetRoutes {
             return null
         }
         return when {
+            requestPath.startsWith("/apps/by-id/terminal/vendor/android-terminalapp-assets-js/") ->
+                "/apps/terminal/vendor/android-terminalapp-assets-js/" +
+                    requestPath.removePrefix("/apps/by-id/terminal/vendor/android-terminalapp-assets-js/")
+
             requestPath == "/apps/by-id/code_te2/template.html" ->
                 "/apps/code_te2/template.html"
 

@@ -100,6 +100,8 @@ function replaceHeader(headers, name, value) {
 // Prefixes backed by complete OTA directory entries. Keep API prefixes limited
 // to immutable static trees so dynamic backend routes always stay on TE2.
 const LOCAL_PREFIXES = [
+  "/apps/terminal/vendor/android-terminalapp-assets-js/",
+  "/apps/by-id/terminal/vendor/android-terminalapp-assets-js/",
   "/static/vendor/codicons/",
   "/static/vendor/seti-icons/",
   "/static/vendor/es-module-shims/",
@@ -133,7 +135,6 @@ const LOCAL_FILES = new Set([
   "/apps/by-id/code_te2/static/dist/host.js",
   "/apps/code_te2/static/dist/host.css",
   "/apps/code_te2/static/dist/explorer.css",
-  "/apps/code_te2/static/dist/explorer-highlight-github.css",
   "/apps/code_te2/static/dist/explorer-search-widget.css",
   "/apps/code_te2/static/vendor/vconsole/vconsole.min.js",
   "/api/app/code_te2/ui/monaco_vscode/lang/bootstrap/monaco.bootstrap.bundle.css",
@@ -143,9 +144,45 @@ const LOCAL_FILES = new Set([
   "/apps/code_te2/monaco_editor/vscode_chat_editing_vendor/upstream/media/chatEditingEditorOverlay.css"
 ]);
 
+// Exact built-in resources only; dynamic app/API URLs retain framework routing.
+const BUILTIN_APP_ASSETS = new Map([
+  ["/apps/als_rs/template.html", "/apps/als_rs/template.html"],
+  ["/apps/by-id/als-rs/template.html", "/apps/als_rs/template.html"],
+  ["/apps/als_rs/main.js", "/apps/als_rs/main.js"],
+  ["/apps/by-id/als-rs/main.js", "/apps/als_rs/main.js"],
+  ["/apps/archive_manager/template.html", "/apps/archive_manager/template.html"],
+  ["/apps/by-id/archive_manager/template.html", "/apps/archive_manager/template.html"],
+  ["/apps/archive_manager/main.js", "/apps/archive_manager/main.js"],
+  ["/apps/by-id/archive_manager/main.js", "/apps/archive_manager/main.js"],
+  ["/apps/aria_downloader/template.html", "/apps/aria_downloader/template.html"],
+  ["/apps/by-id/aria_downloader/template.html", "/apps/aria_downloader/template.html"],
+  ["/apps/aria_downloader/main.js", "/apps/aria_downloader/main.js"],
+  ["/apps/by-id/aria_downloader/main.js", "/apps/aria_downloader/main.js"],
+  ["/apps/file_editor/template.html", "/apps/file_editor/template.html"],
+  ["/apps/by-id/file_editor/template.html", "/apps/file_editor/template.html"],
+  ["/apps/file_editor/main.js", "/apps/file_editor/main.js"],
+  ["/apps/by-id/file_editor/main.js", "/apps/file_editor/main.js"],
+  ["/apps/file_explorer/template.html", "/apps/file_explorer/template.html"],
+  ["/apps/by-id/file_explorer/template.html", "/apps/file_explorer/template.html"],
+  ["/apps/file_explorer/main.js", "/apps/file_explorer/main.js"],
+  ["/apps/by-id/file_explorer/main.js", "/apps/file_explorer/main.js"],
+  ["/apps/settings/template.html", "/apps/settings/template.html"],
+  ["/apps/by-id/settings/template.html", "/apps/settings/template.html"],
+  ["/apps/settings/main.js", "/apps/settings/main.js"],
+  ["/apps/by-id/settings/main.js", "/apps/settings/main.js"],
+  ["/apps/terminal/template.html", "/apps/terminal/template.html"],
+  ["/apps/by-id/terminal/template.html", "/apps/terminal/template.html"],
+  ["/apps/terminal/static/dist/main.js", "/apps/terminal/static/dist/main.js"],
+  ["/apps/by-id/terminal/static/dist/main.js", "/apps/terminal/static/dist/main.js"],
+]);
+
 function localPathFor(urlPath) {
+  if (BUILTIN_APP_ASSETS.has(urlPath)) return BUILTIN_APP_ASSETS.get(urlPath);
   if (!LOCAL_FILES.has(urlPath) && !LOCAL_PREFIXES.some((prefix) => urlPath.startsWith(prefix))) {
     return null;
+  }
+  if (urlPath.startsWith("/apps/by-id/terminal/vendor/android-terminalapp-assets-js/")) {
+    return "/apps/terminal/vendor/android-terminalapp-assets-js/" + urlPath.slice("/apps/by-id/terminal/vendor/android-terminalapp-assets-js/".length);
   }
   if (urlPath === "/apps/by-id/code_te2/template.html") {
     return "/apps/code_te2/template.html";

@@ -145,3 +145,20 @@ unreadable entries produce labelled partial results, never false complete totals
 This feature requires a rebuilt/restarted framework, refreshed File Explorer
 Python worker and published frontend assets. It does not require a Code TE2
 mypyc build. A frontend reload or OTA alone cannot add the framework pipe method.
+
+## Native entry resources
+
+The minified app graph is `/static/js/file_explorer_main.js`; its public mount
+adapter and generated template are `/apps/file_explorer/main.js` and
+`/apps/file_explorer/template.html`, with `/apps/by-id/file_explorer/` aliases.
+All are included in the common OTA/APK inventory. Electron, Gecko and
+Cefrium/TE2 Termux declare exact entry-resource mappings; shared `/static/js/`
+resources retain their existing prefix mapping. Dynamic app/API paths are not
+intercepted. Bundle inventory does not configure native routing automatically.
+
+Validate with Code TE2's `npm run test:native-assets`, Electron's asset tests and
+Cefrium's `CefriumAssetRoutesTest`. New routing needs rebuilt native clients;
+OTA only installs resource bytes. Regenerate the Android seed with
+`bash scripts/bundle_gecko_assets.sh` before APK assembly. Built-in entry resources
+are required before activating a downloaded bundle; missing mapped files fail
+locally rather than fetching a different server copy.

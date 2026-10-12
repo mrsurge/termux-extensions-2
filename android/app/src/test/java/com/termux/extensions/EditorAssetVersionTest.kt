@@ -31,6 +31,12 @@ class EditorAssetVersionTest {
             val missingPath = "android-shell/launcher.js"
             assertTrue(File(root, missingPath).delete())
             assertEquals(missingPath, findMissingRequiredOtaAsset(root))
+            File(root, missingPath).writeText("test")
+            for (appEntry in listOf("apps/file_explorer/main.js", "apps/file_explorer/template.html", "apps/terminal/static/dist/main.js", "apps/file_editor/main.js")) {
+                assertTrue(File(root, appEntry).delete())
+                assertEquals(appEntry, findMissingRequiredOtaAsset(root))
+                File(root, appEntry).writeText("test")
+            }
         } finally {
             root.deleteRecursively()
         }

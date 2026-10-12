@@ -2,7 +2,6 @@
 
 /* explorer.css - File Explorer Drawer Styles */
 
-@import "./explorer-highlight-github.css";
 @import "./explorer-search-widget.css";
 
 :root {
@@ -522,18 +521,18 @@
   display: block;
 }
 
-/* Make file Seti icons slightly larger without changing layout columns. */
+/* Retain sizing for a future SVG provider without changing layout columns. */
 .fe-entry-icon-file svg {
   transform: scale(2);
   transform-origin: center;
 }
 
-.fe-entry-icon-dir::before {
-  content: "📁";
+.fe-entry-icon-dir {
+  color: var(--te-file-icon-color, #8293a8);
 }
 
-/* Files get Seti SVGs injected via JS; keep CSS fallback empty. */
-.fe-entry-icon-file::before {
+/* Do not override the shared Codicon glyph with an empty fallback. */
+.fe-entry-icon-file:not(.codicon)::before {
   content: "";
 }
 
@@ -907,6 +906,39 @@
   color: var(--fg);
 }
 
+.fe-marketplace-section-toggle {
+  flex: 0 0 auto;
+  min-height: 36px;
+  text-align: left;
+  padding: 8px 10px;
+  color: var(--fg);
+  background: var(--card, #0b0f1a);
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+.fe-marketplace-section-toggle::before { content: '▸ '; }
+.fe-marketplace-section-toggle[aria-expanded="true"]::before { content: '▾ '; }
+.fe-marketplace-section { display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
+.fe-marketplace-section[hidden] { display: none; }
+.fe-marketplace-readme { min-width: 0; max-width: 100%; margin-top: 12px; }
+.fe-marketplace-readme > summary { cursor: pointer; padding: 8px 0; }
+.fe-marketplace-markdown, .fe-marketplace-markdown * { box-sizing: border-box; }
+.fe-marketplace-markdown { min-width: 0; max-width: 100%; line-height: 1.6; white-space: normal; overflow-wrap: anywhere; }
+.fe-marketplace-markdown :where(p, ul, ol, blockquote, pre, .fe-readme-table-scroll) { margin-block: 1rem; }
+.fe-marketplace-markdown :where(h1, h2, h3, h4) { line-height: 1.25; margin-block: 1.5rem .75rem; }
+.fe-marketplace-markdown :not(pre) > code { white-space: normal; overflow-wrap: anywhere; }
+.fe-marketplace-markdown pre { min-width: 0; max-width: 100%; overflow-x: auto; padding: 1rem; border-radius: 6px; background: #161b22; color: #e6edf3; }
+.fe-marketplace-markdown pre > code { display: block; width: max-content; min-width: 100%; padding: 0; overflow: visible; white-space: pre; overflow-wrap: normal; word-break: normal; background: transparent; }
+.fe-marketplace-markdown .fe-readme-table-scroll { min-width: 0; max-width: 100%; overflow-x: auto; }
+/* width * (height / width) = height: portrait overflows, landscape narrows. */
+.fe-marketplace-markdown table { width: 100dvh; max-width: 100dvh; table-layout: fixed; border-collapse: collapse; }
+.fe-marketplace-markdown th, .fe-marketplace-markdown td { padding: .5rem .75rem; text-align: left; vertical-align: top; border-bottom: 1px solid #8884; white-space: normal; overflow-wrap: anywhere; }
+.fe-marketplace-markdown table code { white-space: inherit; }
+.fe-marketplace-markdown img { max-width: 100%; height: auto; }
+.fe-marketplace-markdown blockquote { margin-inline: 0; padding-inline-start: 1rem; border-inline-start: 3px solid #8886; }
+.fe-marketplace-markdown a { color: #93c5fd; }
+
 .fe-marketplace-header,
 .fe-marketplace-detail-header {
   display: flex;
@@ -919,11 +951,15 @@
 }
 
 .fe-marketplace-heading {
+  flex: 1;
+  min-width: 0;
   margin: 0;
   font-size: 15px;
 }
 
 .fe-marketplace-close {
+  flex-shrink: 0;
+  margin-left: auto;
   border: 0;
   padding: 4px 7px;
   background: transparent;
@@ -1209,6 +1245,8 @@
 }
 
 .fe-search-close {
+  flex-shrink: 0;
+  margin-left: auto;
   background: none;
   border: none;
   color: var(--fg);
@@ -1220,7 +1258,8 @@
 .fe-search-mode {
   display: flex;
   gap: 4px;
-  margin-left: auto;
+  min-width: 0;
+  flex-wrap: wrap;
   margin-right: 8px;
 }
 
@@ -1469,7 +1508,8 @@
   cursor: pointer;
   border-radius: 0;
   margin-left: 0;
-  background: #161b22;
+  background: var(--te2-code-background, #161b22);
+  color: var(--te2-code-foreground, #e6edf3);
 }
 
 .fe-search-line-num {
@@ -1636,7 +1676,8 @@
   display: flex;
   flex-direction: column;
   gap: 0;
-  background: #161b22;
+  background: var(--te2-code-background, #161b22);
+  color: var(--te2-code-foreground, #e6edf3);
 }
 
 .fe-search-hunk {
@@ -1666,21 +1707,21 @@
   padding: 2px 2px 2px 4px;
   font-family: monospace;
   font-size: 12px;
-  background: #161b22;
+  background: transparent;
 }
 
 .fe-search-diff-row.is-add {
-  background: rgba(34, 197, 94, 0.18);
-  color: #d1fae5;
+  background: var(--te2-code-inserted, rgba(34, 197, 94, 0.18));
+  color: inherit;
 }
 
 .fe-search-diff-row.is-del {
-  background: rgba(248, 113, 113, 0.18);
-  color: #fee2e2;
+  background: var(--te2-code-removed, rgba(248, 113, 113, 0.18));
+  color: inherit;
 }
 
 .fe-search-diff-row.is-context {
-  color: #cbd5f5;
+  color: inherit;
 }
 
 .fe-search-diff-line-num {
@@ -1705,7 +1746,7 @@
   white-space: pre-wrap;
 }
 
-.fe-search-code-surface.hljs {
+.fe-search-code-surface {
   display: block;
   background: transparent;
   color: inherit;
@@ -1713,7 +1754,9 @@
   border-radius: 0;
 }
 
-.fe-search-snippet.fe-search-code-surface.hljs {
+.fe-marketplace-markdown pre { background: var(--te2-code-background, #161b22); color: var(--te2-code-foreground, #e6edf3); }
+
+.fe-search-snippet.fe-search-code-surface {
   overflow: hidden;
   text-overflow: clip;
   white-space: nowrap;
@@ -1739,7 +1782,7 @@
   white-space: pre;
 }
 
-.fe-search-diff-text.fe-search-code-surface.hljs {
+.fe-search-diff-text.fe-search-code-surface {
   overflow: hidden;
   white-space: pre-wrap;
 }

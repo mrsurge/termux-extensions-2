@@ -26,6 +26,30 @@ Smaller host.js and generic-browser HTTP gzip delivery are already implemented.
 
 ## Final punchout — approved pre-release fixes
 
+### Built-in entry-resource coverage — pre-release correction
+
+- [x] User approved exact built-in entry mappings/inventory, cross-client
+  regression checks and source/client validation; no APK install or release.
+- [x] Bundle File Explorer template/adapter plus equivalent ALS-RS wrapper,
+  Archive Manager, Aria Downloader, File Editor, Settings and Terminal resources.
+  Map directory/by-ID URLs consistently in Electron, Gecko and Cefrium/TE2 Termux;
+  ALS-RS canonical ID `als-rs` maps to source directory `als_rs`.
+- [x] Additional active gap: standalone Terminal touch/Ctrl helper directory
+  lacked bundle inventory/local routes. Include it and its directory/by-ID alias.
+  Remove retired Highlight.js stylesheet routes and align Terminal's script
+  version query with its 0.2.352 manifest. No dynamic/private/custom-app intercept.
+- [x] Require new built-in entry resources before OTA activation; malformed or
+  incomplete bundles do not fall through to remote frontend copies.
+- [x] Seven Node coverage/icon checks, all 120 Electron tests, Electron
+  typecheck/compile, Gecko JVM tests and Cefrium JVM tests pass.
+- [x] Android seed regenerated from all 55 manifest entries: 293 files / 37 MiB.
+  SHA-256 comparison verifies 50 explicit/dependency/helper outputs against
+  source, including current File Explorer generated modules. Existing stale seed
+  grammar/Highlight.js outputs disappear through the normal full-tree replacement.
+- [ ] Rebuilt native client/package deployment and live local-resource acceptance.
+  Routing edits need APK/Electron updates, not just OTA; no APK assembly/install,
+  worker/framework restart, tags or release publication performed in this slice.
+
 ### Final File Explorer terminal zoom
 
 - [x] Approved A−/A+ toolbar controls matching standalone Terminal ergonomics:

@@ -532,6 +532,13 @@ host-bundle reductions and generic-browser HTTP gzip delivery remain in place.
 Next current-release work is separately approved packaging/release integration;
 this cutoff does not itself authorize builds, runtime changes, tags or publication.
 
+Pre-release source-gap correction approved subsequently: include built-in static
+entry templates/scripts and standalone Terminal touch/Ctrl helpers in the common
+bundle, with exact canonical/by-ID native mappings and incomplete-bundle guards.
+Client routing remains independent of the bundle manifest. Source/tests and the
+regenerated seed are validated; matched APK/Electron packaging and installed
+local-resource acceptance are the remaining gates for this new correction.
+
 The sequence below records the workstream's original execution order; its completed
 implementation/live gates are reconciled in TRACKER.md.
 

@@ -22,4 +22,10 @@ test("only inventory paths map into the installed tree", () => {
     "/apps/code_te2/template.html",
   );
   assert.equal(mapLocalAssetPath("/api/apps/catalog"), null);
+  assert.equal(mapLocalAssetPath("/apps/by-id/file_explorer/main.js"), "/apps/file_explorer/main.js");
+  assert.equal(mapLocalAssetPath("/apps/by-id/terminal/static/dist/main.js"), "/apps/terminal/static/dist/main.js");
+  assert.equal(mapLocalAssetPath("/apps/by-id/als-rs/template.html"), "/apps/als_rs/template.html");
+  assert.equal(mapLocalAssetPath("/apps/by-id/terminal/vendor/android-terminalapp-assets-js/ctrl_key_handler.js"), "/apps/terminal/vendor/android-terminalapp-assets-js/ctrl_key_handler.js");
+  assert.equal(mapLocalAssetPath("/apps/file_explorer/file_explorer.py"), null);
+  assert.equal(mapLocalAssetPath("/apps/by-id/custom/main.js"), null);
 });

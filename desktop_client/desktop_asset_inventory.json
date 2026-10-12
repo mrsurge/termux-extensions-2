@@ -1,5 +1,7 @@
 {
   "localPrefixes": [
+    "/apps/terminal/vendor/android-terminalapp-assets-js/",
+    "/apps/by-id/terminal/vendor/android-terminalapp-assets-js/",
     "/static/vendor/codicons/",
     "/static/vendor/seti-icons/",
     "/static/vendor/es-module-shims/",
@@ -18,6 +20,34 @@
     "/api/app/code_te2/ui/monaco_vscode/lang/workers/"
   ],
   "localFiles": [
+    "/apps/als_rs/template.html",
+    "/apps/by-id/als-rs/template.html",
+    "/apps/als_rs/main.js",
+    "/apps/by-id/als-rs/main.js",
+    "/apps/archive_manager/template.html",
+    "/apps/by-id/archive_manager/template.html",
+    "/apps/archive_manager/main.js",
+    "/apps/by-id/archive_manager/main.js",
+    "/apps/aria_downloader/template.html",
+    "/apps/by-id/aria_downloader/template.html",
+    "/apps/aria_downloader/main.js",
+    "/apps/by-id/aria_downloader/main.js",
+    "/apps/file_editor/template.html",
+    "/apps/by-id/file_editor/template.html",
+    "/apps/file_editor/main.js",
+    "/apps/by-id/file_editor/main.js",
+    "/apps/file_explorer/template.html",
+    "/apps/by-id/file_explorer/template.html",
+    "/apps/file_explorer/main.js",
+    "/apps/by-id/file_explorer/main.js",
+    "/apps/settings/template.html",
+    "/apps/by-id/settings/template.html",
+    "/apps/settings/main.js",
+    "/apps/by-id/settings/main.js",
+    "/apps/terminal/template.html",
+    "/apps/by-id/terminal/template.html",
+    "/apps/terminal/static/dist/main.js",
+    "/apps/by-id/terminal/static/dist/main.js",
     "/static/icon.png",
     "/static/move.png",
     "/static/manifest.webmanifest",
@@ -32,7 +62,6 @@
     "/apps/by-id/code_te2/static/dist/host.js",
     "/apps/code_te2/static/dist/host.css",
     "/apps/code_te2/static/dist/explorer.css",
-    "/apps/code_te2/static/dist/explorer-highlight-github.css",
     "/apps/code_te2/static/dist/explorer-search-widget.css",
     "/apps/code_te2/static/vendor/vconsole/vconsole.min.js",
     "/api/app/code_te2/ui/monaco_vscode/lang/bootstrap/monaco.bootstrap.bundle.css",
@@ -42,6 +71,81 @@
     "/apps/code_te2/monaco_editor/vscode_chat_editing_vendor/upstream/media/chatEditingEditorOverlay.css"
   ],
   "localMappings": [
+    {
+      "kind": "prefix",
+      "source": "/apps/by-id/terminal/vendor/android-terminalapp-assets-js/",
+      "destination": "/apps/terminal/vendor/android-terminalapp-assets-js/"
+    },
+    {
+      "kind": "exact",
+      "source": "/apps/by-id/als-rs/template.html",
+      "destination": "/apps/als_rs/template.html"
+    },
+    {
+      "kind": "exact",
+      "source": "/apps/by-id/als-rs/main.js",
+      "destination": "/apps/als_rs/main.js"
+    },
+    {
+      "kind": "exact",
+      "source": "/apps/by-id/archive_manager/template.html",
+      "destination": "/apps/archive_manager/template.html"
+    },
+    {
+      "kind": "exact",
+      "source": "/apps/by-id/archive_manager/main.js",
+      "destination": "/apps/archive_manager/main.js"
+    },
+    {
+      "kind": "exact",
+      "source": "/apps/by-id/aria_downloader/template.html",
+      "destination": "/apps/aria_downloader/template.html"
+    },
+    {
+      "kind": "exact",
+      "source": "/apps/by-id/aria_downloader/main.js",
+      "destination": "/apps/aria_downloader/main.js"
+    },
+    {
+      "kind": "exact",
+      "source": "/apps/by-id/file_editor/template.html",
+      "destination": "/apps/file_editor/template.html"
+    },
+    {
+      "kind": "exact",
+      "source": "/apps/by-id/file_editor/main.js",
+      "destination": "/apps/file_editor/main.js"
+    },
+    {
+      "kind": "exact",
+      "source": "/apps/by-id/file_explorer/template.html",
+      "destination": "/apps/file_explorer/template.html"
+    },
+    {
+      "kind": "exact",
+      "source": "/apps/by-id/file_explorer/main.js",
+      "destination": "/apps/file_explorer/main.js"
+    },
+    {
+      "kind": "exact",
+      "source": "/apps/by-id/settings/template.html",
+      "destination": "/apps/settings/template.html"
+    },
+    {
+      "kind": "exact",
+      "source": "/apps/by-id/settings/main.js",
+      "destination": "/apps/settings/main.js"
+    },
+    {
+      "kind": "exact",
+      "source": "/apps/by-id/terminal/template.html",
+      "destination": "/apps/terminal/template.html"
+    },
+    {
+      "kind": "exact",
+      "source": "/apps/by-id/terminal/static/dist/main.js",
+      "destination": "/apps/terminal/static/dist/main.js"
+    },
     {
       "kind": "exact",
       "source": "/apps/by-id/code_te2/template.html",
@@ -74,6 +178,20 @@
     }
   ],
   "requiredFiles": [
+    "apps/als_rs/template.html",
+    "apps/als_rs/main.js",
+    "apps/archive_manager/template.html",
+    "apps/archive_manager/main.js",
+    "apps/aria_downloader/template.html",
+    "apps/aria_downloader/main.js",
+    "apps/file_editor/template.html",
+    "apps/file_editor/main.js",
+    "apps/file_explorer/template.html",
+    "apps/file_explorer/main.js",
+    "apps/settings/template.html",
+    "apps/settings/main.js",
+    "apps/terminal/template.html",
+    "apps/terminal/static/dist/main.js",
     "version.txt",
     "static/vendor/socket.io.min.js",
     "static/vendor/codemirror.1/codemirror.bundle.js",

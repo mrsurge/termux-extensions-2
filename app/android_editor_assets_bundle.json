@@ -178,6 +178,81 @@
       }
     },
     {
+      "kind": "file",
+      "src": "app/apps/als_rs/template.html",
+      "dest": "apps/als_rs/template.html"
+    },
+    {
+      "kind": "file",
+      "src": "app/apps/als_rs/main.js",
+      "dest": "apps/als_rs/main.js"
+    },
+    {
+      "kind": "file",
+      "src": "app/apps/archive_manager/template.html",
+      "dest": "apps/archive_manager/template.html"
+    },
+    {
+      "kind": "file",
+      "src": "app/apps/archive_manager/main.js",
+      "dest": "apps/archive_manager/main.js"
+    },
+    {
+      "kind": "file",
+      "src": "app/apps/aria_downloader/template.html",
+      "dest": "apps/aria_downloader/template.html"
+    },
+    {
+      "kind": "file",
+      "src": "app/apps/aria_downloader/main.js",
+      "dest": "apps/aria_downloader/main.js"
+    },
+    {
+      "kind": "file",
+      "src": "app/apps/file_editor/template.html",
+      "dest": "apps/file_editor/template.html"
+    },
+    {
+      "kind": "file",
+      "src": "app/apps/file_editor/main.js",
+      "dest": "apps/file_editor/main.js"
+    },
+    {
+      "kind": "file",
+      "src": "app/apps/file_explorer/template.html",
+      "dest": "apps/file_explorer/template.html"
+    },
+    {
+      "kind": "file",
+      "src": "app/apps/file_explorer/main.js",
+      "dest": "apps/file_explorer/main.js"
+    },
+    {
+      "kind": "file",
+      "src": "app/apps/settings/template.html",
+      "dest": "apps/settings/template.html"
+    },
+    {
+      "kind": "file",
+      "src": "app/apps/settings/main.js",
+      "dest": "apps/settings/main.js"
+    },
+    {
+      "kind": "file",
+      "src": "app/apps/terminal/template.html",
+      "dest": "apps/terminal/template.html"
+    },
+    {
+      "kind": "file",
+      "src": "app/apps/terminal/static/dist/main.js",
+      "dest": "apps/terminal/static/dist/main.js"
+    },
+    {
+      "kind": "tree",
+      "src": "app/apps/terminal/vendor/android-terminalapp-assets-js",
+      "dest": "apps/terminal/vendor/android-terminalapp-assets-js"
+    },
+    {
       "kind": "tree",
       "src": "app/android_shell",
       "dest": "android-shell"
