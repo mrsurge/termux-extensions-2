@@ -1,8 +1,10 @@
-import { isMobileUserAgent, TERMINAL_KEYS, TerminalModifierState, dispatchSyntheticTerminalKey, dispatchSyntheticTerminalText, MINIBAR_INTERACTION_GUARD_MS, shouldSuppressMinibarInteraction } from './mobile-special-keys';
+import { isMobileUserAgent, TERMINAL_KEYS, TerminalModifierState, dispatchSyntheticTerminalKey, dispatchSyntheticTerminalText } from './mobile-special-keys';
 import { bindPointerHoldRepeat } from './pointer-hold-repeat';
 import { packObject, unpackObject } from './wire_codec';
 import { bindTerminalContextMenu } from '../../libs/terminal_runtime/terminal_context_menu';
 import { bindTerminalCursor } from '../../libs/terminal_runtime/terminal_cursor';
+import { shiftTerminalText } from '../../libs/terminal_runtime/terminal_shift';
+import { bindTerminalShiftButton } from '../../libs/terminal_runtime/terminal_shift_button';
 
 interface Disposable { dispose(): void }
 interface Terminal {
@@ -179,6 +181,7 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
   let resizeTimer: ReturnType<typeof setTimeout> | undefined;
   let bindings: Disposable[] = [];
   let mounting: Promise<void> | undefined;
+  let cancelShiftPress = () => {};
   let stream: WebSocket | undefined;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   let lastColumns = 0, lastRows = 0, resizing = false, resizeAgain = false;
@@ -189,6 +192,7 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
     stream.send(packObject({ type: 'input', data: new TextEncoder().encode(data) }));
   }, error);
   function clear() {
+    cancelShiftPress();
     drawerResize.cancel();
     generation++; ready = false; recovering = false; recoverAgain = false; mounting = undefined;
     lastColumns = 0; lastRows = 0; resizing = false; resizeAgain = false;
@@ -347,20 +351,26 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
       view.textarea?.setAttribute('autocapitalize', 'off'); view.textarea?.setAttribute('autocorrect', 'off');
       bindings.push(api.te2TerminalTouchSelection.attach(view));
       bindings.push(view.onData(data => {
+        if (modifiers.shift) {
+          data = shiftTerminalText(data);
+        }
         // Mobile IMEs can deliver text through input rather than keydown.
         if (data.length === 1 && (modifiers.ctrl || modifiers.alt)) {
           const code = data.toUpperCase().charCodeAt(0);
           const text = modifiers.ctrl && code >= 64 && code <= 95 ? String.fromCharCode(code - 64) : data;
           input((modifiers.alt ? '\x1b' : '') + text);
           modifiers.consumeOneShot(); updateModifiers();
-        } else input(data);
+        } else {
+          input(data);
+          if (modifiers.shiftMode === 'armed') { modifiers.consumeOneShot(); updateModifiers(); }
+        }
       }));
       view.attachCustomKeyEventHandler(event => {
         if (!modifiers.ctrl && !modifiers.alt || event.ctrlKey || event.altKey || event.type !== 'keydown') return true;
         if (event.key.length === 1) {
           event.preventDefault();
           const code = event.key.toUpperCase().charCodeAt(0);
-          const text = modifiers.ctrl && code >= 64 && code <= 95 ? String.fromCharCode(code - 64) : event.key;
+          const text = modifiers.ctrl && code >= 64 && code <= 95 ? String.fromCharCode(code - 64) : modifiers.shift ? shiftTerminalText(event.key) : event.key;
           input((modifiers.alt ? '\x1b' : '') + text);
           modifiers.consumeOneShot(); updateModifiers(); return false;
         }
@@ -378,6 +388,11 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
     const alt = keys.querySelector('[data-modifier="alt"]');
     alt?.setAttribute('aria-pressed', String(modifiers.alt));
     alt?.classList.toggle('toggle', modifiers.alt);
+    const shift = keys.querySelector('[data-modifier="shift"]');
+    shift?.setAttribute('aria-pressed', String(modifiers.shift));
+    shift?.classList.toggle('toggle', modifiers.shift);
+    shift?.classList.toggle('locked', modifiers.shiftMode === 'locked');
+    if (shift instanceof HTMLButtonElement) shift.title = modifiers.shiftMode === 'locked' ? 'Shift locked; tap to release' : 'Shift next key; double-tap or hold to lock';
   }
   const mobileKeys = isMobileUserAgent(navigator);
   const keyToggle = drawer.querySelector<HTMLButtonElement>('[data-terminal="keys"]');
@@ -396,30 +411,27 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
     keyToggle.title = 'Hide special keys';
   }
   const disposeRepeatingKeys: (() => void)[] = [];
-  let minibarGuardUntil = 0;
-  const tabsPanel = root.querySelector<HTMLElement>('[data-menu-panel="tabs"]');
-  const guardMinibar = (event: Event) => {
-    if (!shouldSuppressMinibarInteraction(minibarGuardUntil, performance.now())) return;
-    event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
-  };
-  for (const type of ['pointerdown', 'pointerup', 'click']) tabsPanel?.addEventListener(type, guardMinibar, true);
   // Keep the exact Terminal app ordering: two rows of seven.
-  for (const name of ['escape', 'minibar', 'dash', 'home', 'up', 'end', 'pageUp', 'tab', 'ctrl', 'alt', 'left', 'down', 'right', 'pageDown']) {
+  for (const name of ['escape', 'shift', 'dash', 'home', 'up', 'end', 'pageUp', 'tab', 'ctrl', 'alt', 'left', 'down', 'right', 'pageDown']) {
     const button = document.createElement('button'); button.type = 'button'; button.tabIndex = -1; button.className = 'kbtn';
-    button.textContent = ({ escape: 'ESC', minibar: '≡', dash: '-', home: 'HOME', end: 'END', tab: 'TAB', ctrl: 'CTRL', alt: 'ALT', up: '↑', down: '↓', left: '←', right: '→', pageUp: 'PGUP', pageDown: 'PGDN' } as Record<string, string>)[name]!;
-    if (name === 'ctrl' || name === 'alt') button.dataset.modifier = name;
-    const dispatch = (target: Terminal, held: { ctrl: boolean; alt: boolean }) => {
+    button.textContent = ({ escape: 'ESC', shift: 'SHIFT', dash: '-', home: 'HOME', end: 'END', tab: 'TAB', ctrl: 'CTRL', alt: 'ALT', up: '↑', down: '↓', left: '←', right: '→', pageUp: 'PGUP', pageDown: 'PGDN' } as Record<string, string>)[name]!;
+    if (name === 'ctrl' || name === 'alt' || name === 'shift') button.dataset.modifier = name;
+    const dispatch = (target: Terminal, held: { ctrl: boolean; alt: boolean; shift: boolean }) => {
       if (!target.textarea) return false;
       target.focus();
-      if (name === 'dash' && !held.ctrl && !held.alt) dispatchSyntheticTerminalText(target.textarea, '-');
+      if (name === 'dash' && !held.ctrl && !held.alt) dispatchSyntheticTerminalText(target.textarea, held.shift ? '_' : '-');
       else dispatchSyntheticTerminalKey(target.textarea, TERMINAL_KEYS[name as keyof typeof TERMINAL_KEYS], held);
       return true;
     };
-    if (mobileKeys && ['up', 'left', 'down', 'right'].includes(name)) {
-      let target: Terminal | undefined, held = { ctrl: false, alt: false }, handled = false, heldGeneration = 0;
+    if (name === 'shift') {
+      const binding = bindTerminalShiftButton(button, modifiers, updateModifiers, () => terminal?.focus());
+      cancelShiftPress = binding.cancel;
+      disposeRepeatingKeys.push(binding);
+    } else if (mobileKeys && ['up', 'left', 'down', 'right'].includes(name)) {
+      let target: Terminal | undefined, held = { ctrl: false, alt: false, shift: false }, handled = false, heldGeneration = 0;
       const repeat = () => { if (target && heldGeneration === generation) handled = dispatch(target, held) || handled; };
       disposeRepeatingKeys.push(bindPointerHoldRepeat(button, {
-        start() { target = terminal; heldGeneration = generation; held = { ctrl: modifiers.ctrl, alt: modifiers.alt }; handled = false; repeat(); },
+        start() { target = terminal; heldGeneration = generation; held = { ctrl: modifiers.ctrl, alt: modifiers.alt, shift: modifiers.shift }; handled = false; repeat(); },
         repeat,
         finish() { if (handled && heldGeneration === generation) modifiers.consumeOneShot(); updateModifiers(); target = undefined; handled = false; },
       }, { window }));
@@ -427,11 +439,6 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
       event.preventDefault(); event.stopPropagation();
       if (name === 'ctrl') modifiers.tapCtrl();
       else if (name === 'alt') modifiers.toggleAlt();
-      else if (name === 'minibar') {
-        try { button.setPointerCapture(event.pointerId); } catch { /* Reveal guard remains authoritative. */ }
-        minibarGuardUntil = performance.now() + MINIBAR_INTERACTION_GUARD_MS;
-        root.querySelector<HTMLButtonElement>('[data-menu-toggle="tabs"]')?.click();
-      }
       else if (terminal && dispatch(terminal, modifiers)) modifiers.consumeOneShot();
       updateModifiers(); terminal?.focus();
     }); keys.append(button);
@@ -494,7 +501,6 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
   return { sync, show, dispose() {
     drawerResize.dispose();
     disposeRepeatingKeys.forEach(dispose => dispose());
-    for (const type of ['pointerdown', 'pointerup', 'click']) tabsPanel?.removeEventListener(type, guardMinibar, true);
     disposed = true; clear(); resize.disconnect();
     socket.off('terminal_reset', wireReset); socket.off('disconnect', disconnected);
     socket.off('terminal_directory', directoryChanged);

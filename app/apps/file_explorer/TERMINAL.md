@@ -99,9 +99,12 @@ Checkpoint/socket recovery is reserved for initial mount, real disconnect/reset
 or an output gap. Repeated identical geometry notifications do no network work.
 Mobile keys retain Terminal's two rows of seven, default-visible Keys toggle,
 pointer-down dispatch, Ctrl double-tap lock, one-shot modifiers and shared arrow
-hold-repeat timings. The minibar opens the existing Tabs menu with the shared
-reveal guard. The mobile footer is an in-flow final child below the drawer;
-it alone owns the bottom safe-area inset, so it cannot cover the key dock.
+hold-repeat timings. Shift replaces the redundant minibar in the key row:
+single-tap arms one key; double-tap (350ms) or hold (500ms) locks it until tapped
+again. It modifies navigation keys and mobile IME characters independently of
+Ctrl. A session change/disposal cancels a pending hold. The in-flow mobile footer
+is hidden while the terminal is expanded; the terminal then owns the bottom
+safe-area inset. Minimizing/closing restores the footer.
 Tab and terminal control mutations share the same frontend serial lane; terminal
 keystrokes bypass that lane on the attached raw stream. Input chunks send
 synchronously with UTF-8-safe splitting and bounded WebSocket buffered bytes.

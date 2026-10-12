@@ -48,7 +48,25 @@ This is Node broker source only: no frontend OTA, mypyc or Rust rebuild required
   standalone Terminal with Shift; fix drawer Shift/selection ownership; hide
   File Explorer mobile footer while its terminal is visible. Investigate and
   reuse existing key/selection mechanisms, preserving each app's ownership.
-- [ ] Implementation, validation/bundles and user mobile live acceptance.
+- [x] Shift replaces the extra-row minibar in File Explorer and standalone
+  Terminal. Single-tap arms one key; double-tap (350ms) or long-press (500ms)
+  locks it until tapped again, with pressed/locked feedback. Shift reaches all
+  synthetic navigation keys and printable IME text independently of Ctrl.
+- [x] Drawer Shift/Sel navigation already transports shiftKey; the missing seam
+  was IME text arriving without that flag. Its text-output path now applies the
+  current modifier projection and consumes armed Shift. User chose Sel as sticky
+  Shift forwarded to the terminal app, not local-buffer selection interception.
+  Terminal-editor key bindings own the resulting selection behavior.
+- [x] File Explorer expanded terminal hides the redundant footer at its existing
+  820px breakpoint and owns the safe-area inset; minimize/close restores footer.
+- [x] Each app retains its own state; shared helpers only transform printable
+  text and bind gesture timing. Pending long-press timers cancel on lifecycle
+  transitions/disposal. Protocol escape/control sequences are untouched.
+- [x] All three frontend typechecks/builds; 24 standalone tests, 144 File Explorer
+  frontend tests and 18 focused Code TE2/mobile/transport regressions pass.
+- [x] User live acceptance: Shift behavior works in Fresh terminal editor.
+  The apparent nvim failure was its configured Shift word/paragraph navigation
+  in normal/insert modes, not missing modifier transport. Current changes accepted.
 
 File Explorer worker PID 1038016 started 2026-10-11 18:56:14; shared projection
 changed at 19:11:03. Its eagerly imported projection predates the fix. All three

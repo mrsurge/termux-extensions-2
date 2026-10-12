@@ -3,6 +3,8 @@
 import { generateUuid } from './uuid.ts';
 import { bindTerminalContextMenu } from '../../../../libs/terminal_runtime/terminal_context_menu';
 import { bindTerminalCursor } from '../../../../libs/terminal_runtime/terminal_cursor';
+import { shiftTerminalText } from '../../../../libs/terminal_runtime/terminal_shift';
+import { currentMobileEditorModifiers, publishMobileEditorModifiersConsumed } from '../../src/mobile-input/editor-special-key-bridge';
 import {
   SOCKET_IO_NAMESPACES,
   SOCKET_IO_PATHS,
@@ -1241,7 +1243,11 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
 
     // Send user input to PTY
     nextTerm.onData((data) => {
-      sendTerminalInput(data);
+      const modifiers = currentMobileEditorModifiers(window);
+      // IME text arrives without shiftKey. Only transform a printable character;
+      // navigation/control/paste sequences retain their protocol bytes.
+      sendTerminalInput(modifiers.shift || modifiers.shiftArmed ? shiftTerminalText(data) : data);
+      if (modifiers.shiftArmed) publishMobileEditorModifiersConsumed(window, 'primary');
     });
 
     // Selection-driven UI affordances.

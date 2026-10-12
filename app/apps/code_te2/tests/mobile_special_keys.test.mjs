@@ -1032,6 +1032,19 @@ test("provides two-row navigation, persistent selection, and Ctrl lock", async (
   assert.equal(select.classList.contains("toggle"), true);
   assert.equal(fixture.win.document.activeElement, fixture.terminalInput);
 
+  const beforeSelection = terminalKeyEvents.length;
+  pointerTap(fixture.win, left);
+  assert.equal(terminalKeyEvents.length, beforeSelection + 1);
+  assert.equal(terminalKeyEvents.at(-1).key, 'ArrowLeft');
+  assert.equal(terminalKeyEvents.at(-1).shiftKey, true);
+  assert.equal(terminalKeyEvents.at(-1).ctrlKey, false);
+  const shiftKey = findButton(panel, 'Shift next key');
+  pointerDown(fixture.win, shiftKey);
+  pointerDown(fixture.win, tab);
+  assert.equal(terminalKeyEvents.at(-1).shiftKey, true);
+  assert.equal(terminalKeyEvents.at(-1).ctrlKey, false);
+  assert.equal(shiftKey.classList.contains('toggle'), false);
+
   fixture.input.focus();
   publishTerminalSpecialKeyFocus(fixture.win, false);
 

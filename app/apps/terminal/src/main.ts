@@ -1,6 +1,8 @@
 import ReconnectingWebSocket from 'reconnecting-websocket';
 import { bindTerminalContextMenu } from '../../../libs/terminal_runtime/terminal_context_menu';
 import { bindTerminalCursor } from '../../../libs/terminal_runtime/terminal_cursor';
+import { shiftTerminalText } from '../../../libs/terminal_runtime/terminal_shift';
+import { bindTerminalShiftButton } from '../../../libs/terminal_runtime/terminal_shift_button';
 import { decode as decodeMessagePack, encode as encodeMessagePack } from '@msgpack/msgpack';
 import {
   getConsoleBridgeStatus,
@@ -19,8 +21,6 @@ import {
   dispatchSyntheticTerminalKey,
   dispatchSyntheticTerminalText,
   isMobileUserAgent,
-  MINIBAR_INTERACTION_GUARD_MS,
-  shouldSuppressMinibarInteraction,
   TERMINAL_KEYS,
   TerminalModifierState,
   type CtrlMode,
@@ -165,7 +165,7 @@ interface UiRefs {
   status: HTMLElement;
   termContainer: HTMLElement;
   keyEsc: HTMLButtonElement;
-  keyMinibar: HTMLButtonElement;
+  keyShift: HTMLButtonElement;
   keyDash: HTMLButtonElement;
   keyHome: HTMLButtonElement;
   keyUp: HTMLButtonElement;
@@ -721,7 +721,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     status: getRequired(root, '#ta-shell-status'),
     termContainer: getRequired(root, '#ta-term'),
     keyEsc: getRequired(root, '#k-esc'),
-    keyMinibar: getRequired(root, '#k-minibar'),
+    keyShift: getRequired(root, '#k-shift'),
     keyDash: getRequired(root, '#k-dash'),
     keyHome: getRequired(root, '#k-home'),
     keyUp: getRequired(root, '#k-up'),
@@ -765,7 +765,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   let initialSidebarStateApplied = false;
   let lifecycleClient: TerminalLifecycleClient | null = null;
   let syncingVendoredCtrl = false;
-  let minibarInteractionGuardUntil = 0;
+  let cancelShiftPress = () => {};
 
   function requireLifecycleClient(): TerminalLifecycleClient {
     if (!lifecycleClient) {
@@ -1009,31 +1009,6 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     root.classList.add('drawer-open');
   }
 
-  function openDrawerFromSoftKey(event: Event): void {
-    if (
-      event instanceof PointerEvent
-      && event.currentTarget instanceof Element
-    ) {
-      try {
-        event.currentTarget.setPointerCapture(event.pointerId);
-      } catch {
-        // The capture guard below remains authoritative if capture is unavailable.
-      }
-    }
-    minibarInteractionGuardUntil = performance.now() + MINIBAR_INTERACTION_GUARD_MS;
-    openDrawer();
-  }
-
-  function suppressPrematureMinibarInteraction(event: Event): void {
-    if (!shouldSuppressMinibarInteraction(
-      minibarInteractionGuardUntil,
-      performance.now(),
-    )) return;
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation();
-  }
-
   function closeDrawer(): void {
     root.classList.remove('drawer-open');
   }
@@ -1056,6 +1031,10 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
       : 'Control';
     ui.keyAlt.classList.toggle('toggle', state.modifiers.alt);
     ui.keyAlt.setAttribute('aria-pressed', String(state.modifiers.alt));
+    ui.keyShift.classList.toggle('toggle', state.modifiers.shift);
+    ui.keyShift.classList.toggle('locked', state.modifiers.shiftMode === 'locked');
+    ui.keyShift.setAttribute('aria-pressed', String(state.modifiers.shift));
+    ui.keyShift.title = state.modifiers.shiftMode === 'locked' ? 'Shift locked; tap to release' : 'Shift next key; double-tap or hold to lock';
   }
 
   async function setVendoredCtrlEnabled(active: boolean): Promise<void> {
@@ -1096,6 +1075,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   }
 
   function clearCtrlMode(): void {
+    cancelShiftPress();
     const runtimeWindow = getRuntimeWindow();
     state.modifiers.reset();
     runtimeWindow.__te2MobileCtrlLocked = false;
@@ -1228,7 +1208,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
       && !modifiers.ctrl
       && !modifiers.alt
     ) {
-      dispatchSyntheticTerminalText(target.textarea, '-');
+      dispatchSyntheticTerminalText(target.textarea, modifiers.shift ? '_' : '-');
       return true;
     }
     dispatchSyntheticTerminalKey(target.textarea, key, modifiers);
@@ -1241,6 +1221,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     const handled = dispatchTerminalKeyToTarget(target, key, {
       ctrl: state.modifiers.ctrl,
       alt: state.modifiers.alt,
+      shift: state.modifiers.shift,
     });
     if (handled) consumeOneShotModifiers();
   }
@@ -1262,6 +1243,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
         modifiers = {
           ctrl: state.modifiers.ctrl,
           alt: state.modifiers.alt,
+          shift: state.modifiers.shift,
         };
         handled = false;
         dispatch();
@@ -1633,7 +1615,8 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     await bindVendoredCtrlHandler(term);
     installVendoredCtrlFocusBinding(term);
     term.onData((data) => {
-      queueInput(data);
+      queueInput(state.modifiers.shift ? shiftTerminalText(data) : data);
+      if (state.modifiers.shiftMode === 'armed') consumeOneShotModifiers();
     });
     term.onResize(({ cols, rows }) => {
       scheduleResizeSync(id, cols, rows);
@@ -1733,13 +1716,6 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   ui.btnRemove.addEventListener('click', () => void removeShellById(state.activeId));
   ui.btnMenu.addEventListener('click', openDrawer);
   ui.drawerOverlay.addEventListener('click', closeDrawer);
-  for (const eventType of ['pointerdown', 'pointerup', 'click']) {
-    ui.listContainer.addEventListener(
-      eventType,
-      suppressPrematureMinibarInteraction,
-      true,
-    );
-  }
   ui.showExited.addEventListener('change', () => {
     state.showExited = ui.showExited.checked;
     renderShellList();
@@ -1748,7 +1724,8 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   ui.zoomIn.addEventListener('pointerdown', softKey(() => applyFontSize(getCurrentFontSize() + FONT_SIZE_STEP)), { passive: false });
   ui.keyToggle.addEventListener('pointerdown', softKey(toggleSpecialKeys), { passive: false });
   ui.keyEsc.addEventListener('pointerdown', softKey(() => dispatchTerminalKey(TERMINAL_KEYS.escape)), { passive: false });
-  ui.keyMinibar.addEventListener('pointerdown', softKey(openDrawerFromSoftKey), { passive: false });
+  const disposeShiftKey = bindTerminalShiftButton(ui.keyShift, state.modifiers, syncModifierUi, refocusTerm);
+  cancelShiftPress = disposeShiftKey.cancel;
   ui.keyDash.addEventListener('pointerdown', softKey(() => dispatchTerminalKey(TERMINAL_KEYS.dash)), { passive: false });
   ui.keyHome.addEventListener('pointerdown', softKey(() => dispatchTerminalKey(TERMINAL_KEYS.home)), { passive: false });
   ui.keyEnd.addEventListener('pointerdown', softKey(() => dispatchTerminalKey(TERMINAL_KEYS.end)), { passive: false });
@@ -1764,6 +1741,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     bindRepeatingTerminalKey(ui.keyRight, TERMINAL_KEYS.right),
   ];
   window.addEventListener('pagehide', () => {
+    disposeShiftKey();
     disposeRepeatingKeys.forEach((dispose) => dispose());
   }, { once: true });
 

@@ -1,5 +1,4 @@
 export const CTRL_DOUBLE_TAP_MS = 350;
-export const MINIBAR_INTERACTION_GUARD_MS = 300;
 
 export type CtrlMode = 'off' | 'armed' | 'locked';
 
@@ -12,6 +11,7 @@ export interface SyntheticTerminalKey {
 export interface TerminalKeyModifiers {
   ctrl: boolean;
   alt: boolean;
+  shift?: boolean;
 }
 
 interface KeyboardEventConstructor {
@@ -51,6 +51,19 @@ export function isMobileUserAgent(navigatorLike: MobileNavigatorLike): boolean {
 export class TerminalModifierState {
   public ctrlMode: CtrlMode = 'off';
   public alt = false;
+  public shiftMode: CtrlMode = 'off';
+  private lastShiftTapAt = Number.NEGATIVE_INFINITY;
+
+  public get shift(): boolean { return this.shiftMode !== 'off'; }
+
+  public tapShift(now = Date.now()): void {
+    if (this.shiftMode === 'locked') this.shiftMode = 'off';
+    else if (this.shiftMode === 'armed' && now - this.lastShiftTapAt <= CTRL_DOUBLE_TAP_MS) this.shiftMode = 'locked';
+    else this.shiftMode = this.shiftMode === 'armed' ? 'off' : 'armed';
+    this.lastShiftTapAt = this.shiftMode === 'armed' ? now : Number.NEGATIVE_INFINITY;
+  }
+
+  public lockShift(): void { this.shiftMode = 'locked'; }
   private lastCtrlTapAt = Number.NEGATIVE_INFINITY;
 
   public get ctrl(): boolean {
@@ -91,19 +104,20 @@ export class TerminalModifierState {
   public consumeOneShot(): void {
     if (this.ctrlMode === 'armed') this.setCtrlMode('off');
     this.alt = false;
+    if (this.shiftMode === 'armed') this.shiftMode = 'off';
   }
 
   public reset(): void {
     this.setCtrlMode('off');
     this.alt = false;
+    this.shiftMode = 'off';
+    this.lastShiftTapAt = Number.NEGATIVE_INFINITY;
   }
-}
 
-export function shouldSuppressMinibarInteraction(
-  guardUntil: number,
-  now: number,
-): boolean {
-  return guardUntil > 0 && now <= guardUntil;
+  public toggleShift(): boolean {
+    this.tapShift();
+    return this.shift;
+  }
 }
 
 function createKeyboardEvent(
@@ -117,6 +131,7 @@ function createKeyboardEvent(
     code: key.code,
     ctrlKey: modifiers.ctrl,
     altKey: modifiers.alt,
+    shiftKey: Boolean(modifiers.shift),
     bubbles: true,
     cancelable: true,
     composed: true,

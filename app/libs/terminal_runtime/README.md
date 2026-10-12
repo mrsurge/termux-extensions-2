@@ -16,6 +16,14 @@ remove inline cell foreground/background from cursor spans so xterm's generated
 theme/OSC cursor rules remain visible on RGB application backgrounds. It owns no
 input, resizing, shell state or inactive cursor styling.
 
+`terminal_shift.ts` handles printable mobile IME Shift text without altering
+escape/control sequences. `terminal_shift_button.ts` owns pointer/long-press
+timing only: each app retains its own modifier/session state. Single-tap arms
+Shift, double-tap or 500ms hold locks it; tapping a locked key releases it.
+Lifecycle transitions cancel pending holds. Code TE2 drawer Sel is a sticky
+Shift modifier forwarded to the terminal app (including navigation keys), not
+a local-buffer selection interception; the application owns selection behavior.
+
 Each `TerminalScreenProjectionRegistry` requires a `log_opener` that returns a
 context-managed `LogReader`. That application-owned boundary supplies file identity,
 captured size and bounded byte reads. Readers are closed before return; failures

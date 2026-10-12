@@ -72,7 +72,7 @@ test('renders the exact two-row Terminal key layout', () => {
     .map((match) => match[1]);
   assert.deepEqual(ids, [
     'k-esc',
-    'k-minibar',
+    'k-shift',
     'k-dash',
     'k-home',
     'k-up',
@@ -86,7 +86,7 @@ test('renders the exact two-row Terminal key layout', () => {
     'k-right',
     'k-page-down',
   ]);
-  assert.match(template, /id="k-minibar"[^>]*>&#8801;<\/button>/);
+  assert.match(template, /id="k-shift"[^>]*>SHIFT<\/button>/);
   assert.match(template, /id="k-up"[^>]*>&#8593;<\/button>/);
 });
 
@@ -262,26 +262,37 @@ test('inserts plain dash through the textarea input authority', async () => {
   }]);
 });
 
-test('minibar key opens only the guarded drawer and navigation is not hard-coded ANSI', () => {
+test('Shift replaces the redundant minibar without replacing the main menu', () => {
   const source = fs.readFileSync('src/main.ts', 'utf8');
   assert.match(
     source,
-    /ui\.keyMinibar\.addEventListener\('pointerdown', softKey\(openDrawerFromSoftKey\)/,
+    /bindTerminalShiftButton\(ui\.keyShift/,
   );
-  assert.match(source, /suppressPrematureMinibarInteraction/);
+  assert.match(source, /ui\.btnMenu\.addEventListener\('click', openDrawer\)/);
+  assert.doesNotMatch(source, /keyMinibar|openDrawerFromSoftKey/);
   assert.doesNotMatch(source, /key(?:Left|Right|Up|Down).*queueInput/);
 });
 
-test('minibar interaction deadline suppresses only the reveal window', async () => {
-  const {
-    MINIBAR_INTERACTION_GUARD_MS,
-    shouldSuppressMinibarInteraction,
-  } = await loadModule();
-  assert.equal(MINIBAR_INTERACTION_GUARD_MS, 300);
-  assert.equal(shouldSuppressMinibarInteraction(1_300, 1_299), true);
-  assert.equal(shouldSuppressMinibarInteraction(1_300, 1_300), true);
-  assert.equal(shouldSuppressMinibarInteraction(1_300, 1_301), false);
-  assert.equal(shouldSuppressMinibarInteraction(0, 0), false);
+test('Shift is independent of Ctrl, reaches xterm and is consumed once', async () => {
+  const { TerminalModifierState, dispatchSyntheticTerminalKey, TERMINAL_KEYS } = await loadModule();
+  const state = new TerminalModifierState();
+  state.toggleShift();
+  const events = [];
+  dispatchSyntheticTerminalKey({ dispatchEvent(event) { events.push(event); } }, TERMINAL_KEYS.left, state, FakeKeyboardEvent);
+  assert.equal(events.length, 2);
+  for (const event of events) {
+    assert.equal(event.shiftKey, true);
+    assert.equal(event.ctrlKey, false);
+    assert.equal(event.altKey, false);
+  }
+  state.consumeOneShot();
+  assert.equal(state.shift, false);
+  state.toggleShift(); state.reset();
+  assert.equal(state.shift, false);
+  state.tapShift(1000); state.tapShift(1200);
+  assert.equal(state.shiftMode, 'locked');
+  state.consumeOneShot(); assert.equal(state.shift, true);
+  state.tapShift(2000); assert.equal(state.shift, false);
 });
 
 test('show-exited filtering is client-local and defaults off', () => {
@@ -306,7 +317,7 @@ test('special key dock and toggle are mobile-only and non-persisted', () => {
 test('plain dash uses textarea input while modified dash stays keyboard-owned', () => {
   const source = fs.readFileSync('src/main.ts', 'utf8');
   assert.match(source, /key === TERMINAL_KEYS\.dash/);
-  assert.match(source, /dispatchSyntheticTerminalText\(target\.textarea, '-'\)/);
+  assert.match(source, /dispatchSyntheticTerminalText\(target\.textarea, modifiers.shift \? '_' : '-'\)/);
   assert.match(source, /dispatchSyntheticTerminalKey\(target\.textarea, key/);
 });
 

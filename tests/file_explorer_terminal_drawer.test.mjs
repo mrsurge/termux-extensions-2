@@ -102,11 +102,12 @@ test('mobile footer participates in layout below the exact two-row Terminal key 
   const reference = [...terminalTemplate.matchAll(/<button id="k-[^"]+"[^>]*>([^<]+)<\/button>/g)]
     .map(match => match[1].replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code))));
   const names = source.match(/for \(const name of \[([^\]]+)\]\)/)[1].match(/'([^']+)'/g).map(name => name.slice(1, -1));
-  assert.deepEqual(names, ['escape', 'minibar', 'dash', 'home', 'up', 'end', 'pageUp', 'tab', 'ctrl', 'alt', 'left', 'down', 'right', 'pageDown']);
+  assert.deepEqual(names, ['escape', 'shift', 'dash', 'home', 'up', 'end', 'pageUp', 'tab', 'ctrl', 'alt', 'left', 'down', 'right', 'pageDown']);
   assert.equal(reference.length, names.length);
   assert.match(source, /bindPointerHoldRepeat\(button/);
   assert.match(source, /heldGeneration === generation/);
-  assert.match(source, /shouldSuppressMinibarInteraction/);
+  assert.match(source, /bindTerminalShiftButton\(button, modifiers/);
+  assert.match(template, /\.fx-app:has\(\.fx-terminal-drawer:not\(\[hidden\]\):not\(\.is-minimized\)\) \.fx-mobile-footer \{ display: none; \}/);
   assert.match(source, /keyToggle.hidden = !mobileKeys/);
 });
 
