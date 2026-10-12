@@ -27,9 +27,34 @@
 - [x] Electron OTA installed matching host.js bytes; user restarted/reloaded
   and reports Code TE2 drawer working 100% flawlessly. Drawer live acceptance.
 - [x] User reports File Explorer and standalone Terminal work after resize.
-- [ ] File Explorer and standalone Terminal still fail recovery after page
-  reload; investigate their checkpoint/attach restoration paths next. Separate
-  badly drawn non-redrawing state remains deferred as requested.
+- [x] User confirms File Explorer is fixed after loading the current worker.
+- [x] User live acceptance of standalone Terminal checkpoint encoding fix.
+  Separate badly drawn non-redrawing state remains deferred as requested.
+
+Reload investigation after checkpoint 50c834e5: live standalone nvim reports DRAG
+protocol but DEFAULT encoding. Pinned SerializeAddon serializes tracking mode
+but omits 1006/1016 encoding. Broker now appends actual headless encoding to
+checkpoints (reset encodings, then selected enable); real-broker regression
+verifies DRAG and SGR survive attach. All 24 Terminal tests pass. Existing broker
+processes require explicit replacement to load the changed script; not done.
+Strengthened real-broker test replays its actual checkpoint into a fresh xterm
+renderer and asserts both DRAG protocol and SGR encoding, rather than only
+checking escape-string presence. Test suite and broker syntax validation pass.
+This is Node broker source only: no frontend OTA, mypyc or Rust rebuild required.
+
+### Final mobile terminal ergonomics
+
+- Approved: replace redundant extra-key minibar buttons in File Explorer and
+  standalone Terminal with Shift; fix drawer Shift/selection ownership; hide
+  File Explorer mobile footer while its terminal is visible. Investigate and
+  reuse existing key/selection mechanisms, preserving each app's ownership.
+- [ ] Implementation, validation/bundles and user mobile live acceptance.
+
+File Explorer worker PID 1038016 started 2026-10-11 18:56:14; shared projection
+changed at 19:11:03. Its eagerly imported projection predates the fix. All three
+current raw logs retain SGR/DRAG/alternate state under read-only Pyte inspection.
+Refresh File Explorer's worker explicitly before judging new restoration behavior.
+Page/asset reloads and retained-framework restarts do not replace that worker.
 
 Follow-up live failures: selected-theme callback incorrectly supplied the full
 cache map to the TextMate runtime; corrected to publish its selected theme.

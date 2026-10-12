@@ -157,7 +157,16 @@ async function handleControlMessage(message) {
     if (message.cols !== undefined || message.rows !== undefined) {
       resizeTerminal(message.cols, message.rows);
     }
-    const checkpointState = serializeAddon.serialize({ scrollback });
+    // SerializeAddon restores tracking protocol but omits its encoding. Keep
+    // this adapter beside the pinned headless runtime rather than guessing in
+    // the browser from a TUI's name or mouse tracking mode.
+    const mouseEncoding = stateTerminal._core.coreMouseService.activeEncoding;
+    if (!['DEFAULT', 'SGR', 'SGR_PIXELS'].includes(mouseEncoding)) {
+      throw new Error(`Unsupported terminal mouse encoding: ${mouseEncoding}`);
+    }
+    const encodingState = '\x1b[?1006l\x1b[?1016l'
+      + (mouseEncoding === 'SGR' ? '\x1b[?1006h' : mouseEncoding === 'SGR_PIXELS' ? '\x1b[?1016h' : '');
+    const checkpointState = serializeAddon.serialize({ scrollback }) + encodingState;
     await sendFrame({
       type: 'checkpoint',
       request_id: requestId,

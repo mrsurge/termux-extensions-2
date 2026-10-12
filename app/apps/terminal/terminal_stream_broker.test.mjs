@@ -3,6 +3,10 @@ import { spawn } from 'node:child_process';
 import test from 'node:test';
 
 import { encodePipeFrame, PipeFrameDecoder } from './terminal_stream_protocol.mjs';
+import { requireTerminalNodeModule } from './terminal_node_modules.mjs';
+
+if (Object.prototype.hasOwnProperty.call(globalThis, 'navigator')) delete globalThis.navigator;
+const { Terminal: ReplayTerminal } = requireTerminalNodeModule('xterm-headless');
 
 
 test('broker restores parsed PTY state at a reconnect sequence boundary', { timeout: 12_000 }, async () => {
@@ -43,7 +47,7 @@ test('broker restores parsed PTY state at a reconnect sequence boundary', { time
       } else if (message.type === 'checkpoint' && message.request_id === 'first') {
         child.stdin.write(encodePipeFrame({
           type: 'input',
-          data: Buffer.from("printf '__TE2_SMOKE__:%s\\n' \"$TERM\"\n"),
+          data: Buffer.from("printf '\\033[?1002h\\033[?1006h__TE2_SMOKE__:%s\\n' \"$TERM\"\n"),
         }));
       } else if (message.type === 'output') {
         output += Buffer.from(message.data).toString('utf8');
@@ -61,9 +65,17 @@ test('broker restores parsed PTY state at a reconnect sequence boundary', { time
         const state = Buffer.from(message.state).toString('utf8');
         assert.match(state, /__TE2_SMOKE__/);
         assert.match(state, /__TE2_SMOKE__:xterm-256color/);
+        assert.ok(state.includes('\x1b[?1002h'));
+        assert.ok(state.includes('\x1b[?1006h'));
         assert.ok(message.sequence >= markerSequence);
-        passed = true;
-        child.stdin.write(encodePipeFrame({ type: 'destroy' }));
+        const replay = new ReplayTerminal({ cols: message.cols, rows: message.rows, allowProposedApi: true });
+        replay.write(state, () => {
+          assert.equal(replay.modes.mouseTrackingMode, 'drag');
+          assert.equal(replay._core.coreMouseService.activeEncoding, 'SGR');
+          replay.dispose();
+          passed = true;
+          child.stdin.write(encodePipeFrame({ type: 'destroy' }));
+        });
       }
     }
   });
