@@ -9,6 +9,7 @@ import { bindTerminalShiftButton } from '../../libs/terminal_runtime/terminal_sh
 interface Disposable { dispose(): void }
 interface Terminal {
   cols: number; rows: number; textarea?: HTMLTextAreaElement;
+  options: { fontSize?: number };
   open(element: HTMLElement): void; loadAddon(addon: object): void;
   write(data: string | Uint8Array, done?: () => void): void;
   reset(): void; focus(): void; dispose(): void;
@@ -31,6 +32,22 @@ interface Reply { tab?: Tab; token?: string; shellId?: string; ansi?: string; pe
 interface Tabs { readonly tab: Tab | null; terminal(method: string, params?: object): Promise<Reply> }
 interface Delta { tabId: string; shellId: string; startOffset: number; endOffset: number; data: Uint8Array }
 const TERMINAL_WEB_FONT_FAMILY = 'JetBrains Mono Nerd';
+const TERMINAL_FONT_SIZE_KEY = 'te2_file_explorer_terminal_font_size';
+export class TerminalFontSizePreference {
+  value = 13;
+  constructor(private storage: () => Pick<Storage, 'getItem' | 'setItem'> = () => localStorage) {
+    try {
+      const value = Number(storage().getItem(TERMINAL_FONT_SIZE_KEY));
+      if (Number.isFinite(value) && value > 0) this.value = Math.max(10, Math.min(28, Math.round(value)));
+    } catch { /* Storage unavailable: retain the default. */ }
+  }
+  adjust(delta: number): number {
+    if (!Number.isFinite(delta)) return this.value;
+    this.value = Math.max(10, Math.min(28, Math.round(this.value + delta)));
+    try { this.storage().setItem(TERMINAL_FONT_SIZE_KEY, String(this.value)); } catch { /* Zoom remains usable without storage. */ }
+    return this.value;
+  }
+}
 const TERMINAL_FONT_FAMILY = `"${TERMINAL_WEB_FONT_FAMILY}", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace`;
 export class TerminalOutputCursor {
   offset = 0;
@@ -161,6 +178,9 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
   const status = drawer.querySelector<HTMLElement>('[data-terminal-status]')!;
   const directoryLock = drawer.querySelector<HTMLInputElement>('[data-terminal="directory-lock"]');
   const directoryStatus = drawer.querySelector<HTMLElement>('[data-directory-status]');
+  const zoomOut = drawer.querySelector<HTMLButtonElement>('[data-terminal="zoom-out"]');
+  const zoomIn = drawer.querySelector<HTMLButtonElement>('[data-terminal="zoom-in"]');
+  const fontSize = new TerminalFontSizePreference();
   let lockPending = false;
   let displayedLock = true;
   function showDirectoryStatus(value?: DirectoryStatus) {
@@ -173,6 +193,28 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
   }
   const modifiers = new TerminalModifierState();
   let terminal: Terminal | undefined, fit: Fit | undefined;
+  function updateZoomButtons() {
+    if (zoomOut) { zoomOut.title = `Zoom out (${fontSize.value}px)`; zoomOut.disabled = !terminal || fontSize.value <= 10; }
+    if (zoomIn) { zoomIn.title = `Zoom in (${fontSize.value}px)`; zoomIn.disabled = !terminal || fontSize.value >= 28; }
+  }
+  updateZoomButtons();
+  const zoomCleanups: (() => void)[] = [];
+  for (const [button, delta] of [[zoomOut, -1], [zoomIn, 1]] as const) {
+    if (!button) continue;
+    const apply = () => {
+      if (!terminal || disposed) return;
+      terminal.options.fontSize = fontSize.adjust(delta);
+      updateZoomButtons(); scheduleResize(); terminal.focus();
+    };
+    const press = (event: PointerEvent) => {
+      if (event.button !== 0 || event.isPrimary === false) return;
+      event.preventDefault(); event.stopPropagation(); apply();
+    };
+    const click = (event: MouseEvent) => { if (event.detail === 0) apply(); };
+    button.addEventListener('pointerdown', press);
+    button.addEventListener('click', click);
+    zoomCleanups.push(() => { button.removeEventListener('pointerdown', press); button.removeEventListener('click', click); });
+  }
   let identity = '', shell = '', generation = 0;
   const cursor = new TerminalOutputCursor();
   let ready = false, recovering = false, disposed = false, minimized = false;
@@ -201,7 +243,7 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
     buffered = []; bufferedBytes = 0; clearTimeout(resizeTimer);
     inputs.reset();
     for (const binding of bindings) binding.dispose(); bindings = [];
-    terminal?.dispose(); terminal = undefined; fit = undefined;
+    terminal?.dispose(); terminal = undefined; fit = undefined; updateZoomButtons();
     viewport.replaceChildren(); modifiers.reset(); updateModifiers(); showDirectoryStatus(); identity = ''; shell = '';
   }
   function paint(delta: Delta) {
@@ -340,12 +382,13 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
       const api = await loadRuntime();
       if (current !== generation || disposed) return;
       const view = new api.Terminal({ convertEol: true, cursorBlink: true, scrollback: 5000,
-        fontFamily: TERMINAL_FONT_FAMILY, fontSize: 13,
+        fontFamily: TERMINAL_FONT_FAMILY, fontSize: fontSize.value,
         theme: { background: '#0b1020', foreground: '#e6edf3', cursor: '#9cc3ff' } });
       const fonts = new api.WebFontsAddon.WebFontsAddon(true);
       await fonts.loadFonts([TERMINAL_WEB_FONT_FAMILY]);
       if (current !== generation || disposed) { view.dispose(); return; }
       terminal = view; view.loadAddon(fonts); fit = new api.FitAddon.FitAddon(); view.loadAddon(fit); view.open(viewport);
+      updateZoomButtons();
       bindings.push({ dispose: bindTerminalContextMenu(viewport, view, error) });
       bindings.push(bindTerminalCursor(viewport, view));
       view.textarea?.setAttribute('autocapitalize', 'off'); view.textarea?.setAttribute('autocorrect', 'off');
@@ -388,11 +431,11 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
     const alt = keys.querySelector('[data-modifier="alt"]');
     alt?.setAttribute('aria-pressed', String(modifiers.alt));
     alt?.classList.toggle('toggle', modifiers.alt);
-    const shift = keys.querySelector('[data-modifier="shift"]');
+    const shift = keys.querySelector<HTMLButtonElement>('[data-modifier="shift"]');
     shift?.setAttribute('aria-pressed', String(modifiers.shift));
     shift?.classList.toggle('toggle', modifiers.shift);
     shift?.classList.toggle('locked', modifiers.shiftMode === 'locked');
-    if (shift instanceof HTMLButtonElement) shift.title = modifiers.shiftMode === 'locked' ? 'Shift locked; tap to release' : 'Shift next key; double-tap or hold to lock';
+    if (shift) shift.title = modifiers.shiftMode === 'locked' ? 'Shift locked; tap to release' : 'Shift next key; double-tap or hold to lock';
   }
   const mobileKeys = isMobileUserAgent(navigator);
   const keyToggle = drawer.querySelector<HTMLButtonElement>('[data-terminal="keys"]');
@@ -423,7 +466,7 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
       else dispatchSyntheticTerminalKey(target.textarea, TERMINAL_KEYS[name as keyof typeof TERMINAL_KEYS], held);
       return true;
     };
-    if (name === 'shift') {
+    if (mobileKeys && name === 'shift') {
       const binding = bindTerminalShiftButton(button, modifiers, updateModifiers, () => terminal?.focus());
       cancelShiftPress = binding.cancel;
       disposeRepeatingKeys.push(binding);
@@ -500,6 +543,7 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
   socket.on('terminal_reset', wireReset); socket.on('disconnect', disconnected);
   return { sync, show, dispose() {
     drawerResize.dispose();
+    zoomCleanups.forEach(dispose => dispose());
     disposeRepeatingKeys.forEach(dispose => dispose());
     disposed = true; clear(); resize.disconnect();
     socket.off('terminal_reset', wireReset); socket.off('disconnect', disconnected);

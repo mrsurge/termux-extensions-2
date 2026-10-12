@@ -1,6 +1,46 @@
 # Editor loading maintenance tracker
 
+## Consolidated live acceptance — user confirmation
+
+The user confirms all live validations for implemented work are complete,
+including native/browser publication, reload/relaunch, poor connections,
+multi-client/sidebar lifecycle, picker/input, terminal restoration and Electron
+asset-pill OTA. Acceptance gates below are closed on that explicit confirmation,
+not new agent measurements. Earlier checkpoint prose describing pending activation
+or acceptance records its historical handoff and is superseded by this section.
+Deferred implementation, quantitative probes and release approval remain separate.
+
+## Current release cutoff — user decision
+
+- [x] All implemented functionality is live accepted; no acceptance blockers remain.
+- [x] OTA follow-ups are dev/editable-install ergonomics, not release blockers.
+- [x] Existing asset audit/trim is sufficient for this release. Remaining small
+  candidates move to the next maintenance branch; retain complete package manifests.
+- [x] Defer remaining measurement probes, asset cleanup, OTA ergonomics,
+  terminal post-child-exit/redraw issues, rare draft file-incarnation handling and
+  lower-priority search work to the next maintenance branch.
+- [ ] Separately approve and perform release packaging/integration/publication.
+
+Deferred entries below remain unfinished, but are not current-release gates.
+Smaller host.js and generic-browser HTTP gzip delivery are already implemented.
+
 ## Final punchout — approved pre-release fixes
+
+### Final File Explorer terminal zoom
+
+- [x] Approved A−/A+ toolbar controls matching standalone Terminal ergonomics:
+  1px steps, 10–28px bounds, default 13px. App-owned localStorage key
+  `te2_file_explorer_terminal_font_size`; missing/invalid/blocked storage is safe.
+- [x] Pointer activation preserves terminal focus; keyboard/assistive activation
+  works without duplicate pointer-click increments. Refit/resize uses the existing
+  control/output connection, with no reset, shell replacement or reconnect.
+- [x] Restore the preference on terminal mount/tab switch; disable controls at
+  bounds/without a mounted terminal and dispose button handlers with the drawer.
+- [x] Typecheck, frontend rebuild and all 145 File Explorer frontend tests pass,
+  including persistent bounds/storage failures and real drawer zoom/no-reconnect.
+  Hidden desktop extra keys do not install mobile Shift gesture listeners.
+- [ ] Current client asset publication and live zoom acceptance. No APK/mypyc/
+  backend rebuild or framework restart is required; release follows acceptance.
 
 ### Resize/restore terminal interaction follow-up
 
@@ -112,7 +152,7 @@ Settings update-and-reload command; reported live pill failure remains unresolve
 - [x] Typechecks/builds for all three frontends; 13 context-menu/keyboard/drawer,
   six TextMate, 24 standalone Terminal and four shared projection tests pass.
   Native PTY environment test and cached native release build pass.
-- [ ] Native worker activation, frontend OTA and user live acceptance of these
+- [x] Native worker activation, frontend OTA and user live acceptance of these
   four fixes. No runtime/shell restart, client publication or APK build performed.
 - Deferred: notes.md items 2, 5 and 8, plus lower-priority search work.
 - Deferred 7: delete/recreate while an editor model is open can reapply an old
@@ -122,13 +162,13 @@ Settings update-and-reload command; reported live pill failure remains unresolve
 
 - [x] Approve separate maintenance scope and branch.
 - [x] Create initial plan and source entrypoint inventory.
-- [ ] Complete end-to-end file/theme/TextMate loading and cache audit.
-- [ ] Identify request/byte counts and sequential dependency waves.
-- [ ] Establish cold/warm Markdown and comparison-language baselines.
-- [ ] Audit rapid file switches, reconnect and primary/secondary readiness races.
+- [x] Complete end-to-end file/theme/TextMate loading and cache audit (later loading/theme slices and consolidated user acceptance).
+- [ ] Deferred to next maintenance: remaining request/byte counts and sequential dependency-wave measurements.
+- [ ] Deferred to next maintenance: remaining cold/warm Markdown and comparison-language baselines.
+- [x] Audit rapid file switches, reconnect and primary/secondary readiness races (later loading audit and consolidated user acceptance).
 - [x] Approve a concrete implementation slice supported by evidence.
 - [x] Implement and pass delayed-response regression tests/build validation.
-- [ ] Publish matching assets/compiled domain to explicitly approved test clients.
+- [x] Publish matching assets/compiled domain to explicitly approved test clients.
 - [x] Record user acceptance of the observed Markdown/cache and browser HTTP paths.
 - [ ] Prepare maintenance release only after separate release approval.
 
@@ -141,7 +181,7 @@ and concrete findings here as they become available.
 - [x] Synthetic transitive dependency/injection batching, warm cache and revision
   reset regressions: 2 tests pass.
 - [x] Installed bundled Code Server 4.130.0 comparison with 200ms simulated RPC cost.
-- [ ] Capture the active native client's registry/request trace; offline inventory
+- [ ] Deferred to next maintenance: complete native registry/request tracing; offline inventory
   alone does not prove its exact grammar selection or cause of a reported stall.
 
 | Root scope | Body count | Raw bytes | Cold RPCs | Cold time | Warm RPCs/time |
@@ -178,8 +218,8 @@ fetch is involved. Closure delivery must preserve those revision/resource guards
   Oniguruma/provider-refresh regressions; theme regressions.
 - [x] Targeted Python static checking, frontend typecheck and `node build.mjs`.
 - [x] Local matching mypyc rebuild/activation; 136 compiled imports validated.
-- [ ] Authorized app lifecycle transition to load the selected group.
-- [ ] Native client asset publication and live poor-connection acceptance.
+- [x] Authorized app lifecycle transition to load the selected group.
+- [x] Native client asset publication and live poor-connection acceptance.
 
 One closure RPC now seeds the synthetic transitive graph; the real TextMate loader
 then constructs it with zero follow-up body requests. No measured device-speed
@@ -220,7 +260,7 @@ The user owns the pending worker restart; no framework restart or OTA was done.
 - [x] Existing Android/Electron TextMate inventory covers the new asset.
 - [x] 19 Python and 22 Node regressions pass; targeted Python static checks clean.
 - [x] Frontend typecheck and host rebuild pass; source diff whitespace check clean.
-- [ ] User client OTA and live high-latency Markdown/markup acceptance.
+- [x] User client OTA and live high-latency Markdown/markup acceptance.
 
 Local validation and rebuild results are recorded at handoff. No worker/framework
 restart, APK assembly, device installation, OTA, version bump or commit performed.
@@ -236,7 +276,7 @@ This is acceptance of that observed client/path, not every client or markup lang
 - [x] Worker preserves Accept-Encoding variation alongside CORS Origin.
 - [x] Both Rust cargo checks pass; bootstrap cache-input regression passes.
 - [x] Bootstrap tests: 11 pass with inherited worker selectors removed from test env.
-- [ ] Rebuilt runtime activation and actual browser response/header acceptance.
+- [x] Rebuilt runtime activation and actual browser response/header acceptance.
 
 No APK/client-asset changes or shared-runtime restart. UUID correction and stable
 loopback ports are not implemented in this gzip slice.
@@ -248,7 +288,7 @@ loopback ports are not implemented in this gzip slice.
 - [x] Plain-HTTP regression with `randomUUID` absent verifies UUID bits, persistence,
   separate primary/secondary identities and explicit reset.
 - [x] Frontend typecheck and host bundle rebuild pass.
-- [ ] Generic-browser live acceptance after loading the rebuilt assets.
+- [x] Generic-browser live acceptance after loading the rebuilt assets.
 
 Native installation identity and stored values are preserved. No global Crypto
 polyfill, new dependency, backend/runtime restart, APK build, OTA or version bump.
@@ -274,23 +314,23 @@ selected in this checkpoint; restoring compiled activation is a separate step.
 - [x] 1a. Rebuild/validate current mypyc group and restore compiled selection.
 - [x] 1b. User live acceptance of the newly selected compiled group: working good.
 - [x] 2a. Implement preferred native loopback ports; source/tests/compile validation.
-- [ ] 2b. Native deployment and cross-relaunch live origin/storage acceptance.
+- [x] 2b. Native deployment and cross-relaunch live origin/storage acceptance.
   Razr TE2 Termux staging is installed and user live-accepted; explicit origin/
-  storage survival across relaunch and other client deployment remain separate.
+  storage survival across relaunch and other client deployment are now covered
+  by the consolidated user live-validation confirmation above.
 - [x] 3. Investigate polling/WebSocket compression independently; benchmark before enabling.
 - [x] 4. Design/validate persistent revision/ID/hash-scoped grammar caching across reloads.
 - [x] 5. Investigate OTA archive/transfer compression and compatibility; retain Deflate ZIP.
 - [x] 6. Finish poor-connection cold/warm, switch/reconnect and secondary-editor audit.
-- [ ] 7. Read-only unused vendored/stale asset inventory; report evidence and sizes,
+- [ ] 7. Deferred to next maintenance: remaining unused vendored/stale asset inventory; report evidence and sizes,
   accounting for dynamic loaders and package manifests. No deletion approval.
 - [ ] 8. Separately approved maintenance release: matched binaries/domain/assets,
   staging APKs, target acceptance, merge/tag/publication.
 
-Older publication/lifecycle checkboxes above describe their specific checkpoints.
-User acceptance establishes the observed Markdown and generic-browser HTTP paths;
-it does not establish all-client OTA, compiled-mode, gzip-header, UUID-specific or
-packaged-release acceptance. Those unverified gates remain open. See PLAN's
-Deferred follow-up sequence for scope and approval boundaries.
+Older publication/lifecycle notes describe their specific checkpoints. The latest
+user confirmation closes implemented native/browser/compiled-mode live gates.
+It does not authorize a new packaged release or establish new instrumented
+measurements. See PLAN's Deferred follow-up sequence for release boundaries.
 
 ## Compiled restoration checkpoint (2026-10-09)
 
@@ -319,7 +359,7 @@ acceptance is retained; this is not release-package or all-client acceptance.
 - [x] Cefrium Kotlin compilation passes.
 - [x] Gecko relay JVM test and Kotlin compilation.
 - [x] TE2 Termux Kotlin compilation.
-- [ ] Native rebuild/deployment and cross-relaunch live origin/storage acceptance.
+- [x] Native rebuild/deployment and cross-relaunch live origin/storage acceptance.
 
 No Python or framework changes, shared-runtime restart or version bump. Local
 Gradle validation selects JDK21/Linux AAPT2 for Gecko and JDK25 for the
@@ -480,8 +520,8 @@ earlier POC approval limits above describe that prior checkpoint, not this slice
 - [x] All 25 isolated native integration tests pass, including old/new codecs
   concurrently connected and identical preference fan-out on polling/WebSocket.
 - [x] Frontend typecheck and `node build.mjs` pass.
-- [ ] Matching compiled-domain rebuild/activation and approved worker lifecycle.
-- [ ] Client OTA and installed native/browser high-latency live acceptance.
+- [x] Matching compiled-domain rebuild/activation and approved worker lifecycle.
+- [x] Client OTA and installed native/browser high-latency live acceptance.
 
 The isolated fixture now excludes inherited `CODE_TE2_*`: otherwise a stale live
 mypyc selector causes it to test old compiled auth rather than current source.
@@ -520,7 +560,7 @@ this checkpoint commit.
   Tests cover new-instance reuse, changed hashes, corrupt/oversized rows,
   blocked/late database opens, quotas, read deadlines, eviction and reset fencing.
 - [x] Frontend typecheck and `node build.mjs` pass.
-- [ ] Explicit client OTA and physical cross-reload/cross-relaunch acceptance.
+- [x] Explicit client OTA and physical cross-reload/cross-relaunch acceptance.
 
 Database name: `te2-textmate-bodies`, version 1, stores `bodies` and `metadata`.
 Keys are JSON `[logicalGrammarId, sha256]`; records carry raw body, UTF-8 byte
@@ -621,7 +661,7 @@ agent-review work after a newer selection. No HTTP preflight or new transport.
 - [x] Combined open-flow, secondary lifecycle, projection/cache suite: 25 pass.
 - [x] Code TE2 TypeScript check.
 - [x] Code TE2 frontend build (`node build.mjs`).
-- [ ] Explicit native client OTA and poor-connection live acceptance.
+- [x] Explicit native client OTA and poor-connection live acceptance.
 
 User reported the correction working and recognized the previously rare stale
 selection behavior on 2026-10-10. Observed live acceptance passes; exhaustive
@@ -639,8 +679,8 @@ restart, commit or release was performed in this slice.
 
 - [x] Inspect browser build inputs, OTA manifest/native mapping inventory and
   wheel/materializer exclusions; read-only file-size inventory.
-- [ ] Complete per-candidate dynamic-consumer and compatibility checks.
-- [ ] Separately approve any cleanup and validate matching packaged clients.
+- [ ] Deferred to next maintenance: remaining per-candidate dynamic-consumer and compatibility checks.
+- [ ] Deferred to next maintenance: separately approve remaining cleanup and validate matching packaged clients.
 
 Sizes below are uncompressed source bytes, not estimated APK/wheel/ZIP savings.
 No assets were deleted or repackaged. A missing direct reference establishes a
@@ -770,7 +810,7 @@ original user list below is retained verbatim as the requirement record.
 - [x] F2: shared picker single-select/double-enter directory behavior (source/regressions).
 - [x] F2: depth-one regex filter, bounded/invalid-pattern handling (source/regressions).
 - [x] F2: vendored Codicon directory/file-type rows with muted grey-blue styling (source).
-- [ ] F2: shared consumer mouse/touch/keyboard and picker-mode acceptance.
+- [x] F2: shared consumer mouse/touch/keyboard and picker-mode acceptance.
 - [x] F3: detached Sidebar minimize, exact native window ownership (source/regressions/build).
 - [x] F3: detached Sidebar minimize/restore user live acceptance.
 - [x] F3: editor Explorer ellipsis-menu Collapse all using existing expansion authority (source/tests/build).
@@ -781,27 +821,27 @@ original user list below is retained verbatim as the requirement record.
 - [x] F3: unprefixed Quick Access default (source/regressions/build), preserve explicit command/symbol/line modes.
 - [x] F3: Ctrl+colon clarified as simultaneous keys; add approved Ctrl+Shift+P and F1 bindings (source/regressions/build).
 - [x] F3: unprefixed picker and shortcut user live acceptance (reported working).
-- [ ] F3: desktop/mobile input and detached-window live acceptance.
+- [x] F3: desktop/mobile input and detached-window live acceptance.
 - [x] F4: define and implement disk-backed tab-session identity/lifetime.
-- [ ] F4: complete shared drawer transport and terminal ownership contract.
+- [x] F4: complete drawer transport and terminal ownership contract (later app-owned broker/raw-stream slices).
 - [x] F4 prerequisite: migrate File Explorer to explicit raw ASGI without transitive FastAPI/Pydantic imports; preserve HTTP/download/job/pipe contracts and measure import closure.
 - [x] F4 prerequisite: strict mypy/no explicit Any, ty and basedpyright checks for the complete File Explorer backend and ASGI boundary.
 - [x] F4 prerequisite: standalone mypyc build plus compiled-route/job smoke validation.
 - [x] F4 prerequisite: raw-ASGI worker user live acceptance (reported passing).
 - [x] F4: backend-owned Socket.IO session rooms, revisioned author acknowledgements/peer updates, reconnect snapshots and no mutation echo/replay (source/regressions; user live acceptance).
 - [x] F4: persist tab path/options and Sidebar tab references (source/regressions; user live acceptance).
-- [ ] F4: reconcile live shell association and terminal teardown (later terminal slice; reserved shellId is initially null).
+- [x] F4: reconcile live shell association and terminal teardown (implemented in later terminal slices).
 - [x] F4: fresh versus existing-tab query mounts and retained creation correlation (source/regressions; user live acceptance).
 - [x] F4: context-sensitive splash/list, New/Close and close-consent UI (source/regressions; user live acceptance, including splash refresh and live dropdown).
-- [ ] F4: shared picker icon helper/rules in File Explorer list/grid rows.
+- [x] F4: shared picker icon helper/rules in File Explorer list/grid rows.
 - [x] F4: implement checkbox-free file selection (icon toggles, body long press/menu, desktop range/additive toggles), Clear selection and Esc.
-- [ ] F4: native asset publication and live acceptance of icons/selection.
-- [ ] F4: explicit terminal close; exited-shell disassociation; hide/reload retains live shell.
-- [ ] F4: drawer minimize/maximize and Lock directory with pipe-backed command injection.
-- [ ] F4: reuse Code TE2 shellspec/Pyte plus standalone Terminal xterm/mobile/extra-key behavior.
-- [ ] F4: extra keys absent for desktop user agents, including narrow windows.
-- [ ] F4: depth-one regex listing and asynchronous directory usage view.
-- [ ] F4: multi-client, standalone/sidebar, lifecycle and large-tree acceptance.
+- [x] F4: native asset publication and live acceptance of icons/selection.
+- [x] F4: explicit terminal close; exited-shell disassociation; hide/reload retains live shell.
+- [x] F4: drawer minimize/maximize and Lock directory with pipe-backed command injection.
+- [x] F4: app-owned shellspec/broker with neutral Pyte projection and matching xterm/mobile/extra-key behavior. Supersedes the rejected cross-app shellspec/source reuse proposal.
+- [x] F4: extra keys absent for desktop user agents, including narrow windows.
+- [x] F4: depth-one regex listing and asynchronous directory usage view.
+- [x] F4: multi-client, standalone/sidebar, lifecycle and large-tree acceptance.
 - [ ] Separately approve maintenance packaging/release scope after chosen slices.
 
 ### F4 revised tab-session direction — investigation gate
@@ -917,7 +957,8 @@ Directory tracking production slice (2026-10-11, separately approved):
 User live acceptance on 2026-10-11 confirms the hot-path performance follow-up
 and mobile footer/exact key-layout correction in 29ae7bae work. This supersedes
 their pending live-acceptance notes below, not exhaustive multi-client or release
-acceptance. Lock directory remains unimplemented.
+acceptance. Lock directory was unimplemented at that historical checkpoint;
+the later broker/control slices implemented it and are now live accepted.
 
 Lock directory preliminary source investigation (read-only application code):
 - `terminal_service.py` launches interactive Bash at the tab path; subsequent
@@ -1303,7 +1344,7 @@ drawer. ty cause, draft CSS owner, quick-access empty mode and usage aggregation
 support still require focused investigation. No runtime mutation or implementation
 was performed for these follow-ups.
 
-### F2 shared picker — implemented, live acceptance pending
+### F2 shared picker — implemented and live accepted
 
 Lazy-icon follow-up after local checkpoint e3edf55a: standalone shared helper now
 owns unchanged filename-rule lookup and loads definitions once. Individual SVGs
@@ -1613,7 +1654,7 @@ the separately deferred raw WebSocket output lane remain distinct follow-ups.
   Terminal/File Explorer TypeScript typechecks and frontend build pass.
 - [x] Strict mypy and ty pass for adapter/service/tab service; basedpyright
   reported no errors (its initially reported adapter warnings were cleaned up).
-- [ ] Approved worker refresh + native OTA and physical mobile/multi-client
+- [x] Approved worker refresh + native OTA and physical mobile/multi-client
   acceptance. No runtime activation occurred during this wiring.
 - [x] Separate raw WebSocket terminal-output migration, after broker acceptance;
   retain Socket.IO for tab/CRUD synchronization and user commands (source/tests;
@@ -1746,7 +1787,7 @@ subprocess tests. No Android edits, shared restart, commit/push or release.
 - [x] Standalone: 22 Node tests, typecheck and build pass. File Explorer: 107
   backend/probe tests plus two isolation/checkpoint tests, 16 frontend tests,
   nine real-PTY/control tests, strict mypy, frontend typecheck/build pass.
-- [ ] Installed live acceptance with refreshed File Explorer worker and fresh
+- [x] Installed live acceptance with refreshed File Explorer worker and fresh
   terminal sessions. Existing processes are deliberately not killed by the
   source correction. Native frontend publication requires OTA.
 - [x] File Explorer's production dependency bootstrap installs/verifies its own
@@ -1814,7 +1855,7 @@ push is implied by this implementation.
   Live inspection of the imported class and paired Socket.IO sends established
   this distinction. Backend input-to-output publication was about 2 ms; shell
   record validation was about 0.5–0.8 ms. Both timing probes were removed.
-- [ ] Electron asset-pill live acceptance. Relaunch the rebuilt Electron client
+- [x] Electron asset-pill live acceptance. Relaunch the rebuilt Electron client
   to activate its title-bar change; editor OTA cannot update Electron chrome.
 
 The user requested commit/push of this accepted snapshot, including their repo

@@ -1,7 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { TerminalOutputCursor, TerminalInputBatcher, createTerminalDrawer, bindTerminalDrawerResize } from '../app/static/js/file_explorer_terminal.js';
+import { TerminalOutputCursor, TerminalInputBatcher, TerminalFontSizePreference, createTerminalDrawer, bindTerminalDrawerResize } from '../app/static/js/file_explorer_terminal.js';
+
+test('terminal font preference persists, clamps and tolerates unavailable storage', () => {
+  const data = new Map();
+  const storage = () => ({ getItem: key => data.get(key) ?? null, setItem: (key, value) => data.set(key, value) });
+  const preference = new TerminalFontSizePreference(storage);
+  assert.equal(preference.value, 13);
+  assert.equal(preference.adjust(1), 14);
+  assert.equal(new TerminalFontSizePreference(storage).value, 14);
+  assert.equal(preference.adjust(100), 28);
+  assert.equal(preference.adjust(-100), 10);
+  assert.equal(preference.adjust(NaN), 10);
+  data.set('te2_file_explorer_terminal_font_size', 'bad');
+  assert.equal(new TerminalFontSizePreference(storage).value, 13);
+  const unavailable = new TerminalFontSizePreference(() => { throw new Error('blocked'); });
+  assert.equal(unavailable.adjust(1), 14);
+});
 
 test('File Explorer terminal shares the Nerd font faces and fallback stack with other terminals', () => {
   const template = readFileSync(new URL('../app/apps/file_explorer/src/styles.css', import.meta.url), 'utf8');
@@ -169,11 +185,11 @@ test('drawer fences checkpoint handoff, preserves shell on minimize/dispose and 
     querySelectorAll() { return []; }
   }
   const elements = new Map(['.fx-terminal-drawer', '.fx-terminal-viewport', '.fx-terminal-keys', '[data-terminal-status]',
-    '[data-directory-status]', '[data-terminal="directory-lock"]', '[data-action="terminal"]', '[data-terminal="minimize"]', '[data-terminal="maximize"]', '[data-terminal="close"]'].map(name => [name, new Element()]));
+    '[data-directory-status]', '[data-terminal="directory-lock"]', '[data-terminal="zoom-out"]', '[data-terminal="zoom-in"]', '[data-action="terminal"]', '[data-terminal="minimize"]', '[data-terminal="maximize"]', '[data-terminal="close"]'].map(name => [name, new Element()]));
   const views = [], calls = [], checkpoints = [], handlers = new Map(), errors = [];
   class View {
     cols = 80; rows = 24; writes = []; disposed = false;
-    constructor() { views.push(this); }
+    constructor(options) { this.options = options; views.push(this); }
     loadAddon() {} open() {} reset() { this.writes = []; } focus() {}
     write(data, done) { this.writes.push(data); if (done) queueMicrotask(done); }
     dispose() { this.disposed = true; }
@@ -223,9 +239,18 @@ test('drawer fences checkpoint handoff, preserves shell on minimize/dispose and 
     streams[0].frame({ type: 'output', ...chunk(1, [66]) }); // arrives during async xterm handoff
     await tick();
     assert.deepEqual(views[0].writes, ['A', new Uint8Array([66])]);
+    let prevented = false;
+    elements.get('[data-terminal="zoom-in"]').handlers.get('pointerdown')({ button: 0, preventDefault() { prevented = true; }, stopPropagation() {} });
+    assert.equal(prevented, true);
+    assert.equal(views[0].options.fontSize, 14);
+    elements.get('[data-terminal="zoom-in"]').handlers.get('click')({ detail: 1 });
+    assert.equal(views[0].options.fontSize, 14, 'pointer click must not apply twice');
+    elements.get('[data-terminal="zoom-out"]').handlers.get('click')({ detail: 0 });
+    assert.equal(views[0].options.fontSize, 13, 'keyboard activation is supported');
     for (let i = 0; i < 20; i++) notifyResize();
     await new Promise(resolve => setTimeout(resolve, 180));
     assert.equal(streams.length, 1, 'identical layout observations must not reconnect');
+    assert.deepEqual(views[0].writes, ['A', new Uint8Array([66])], 'zoom preserves the current screen');
     assert.equal(calls.filter(([method]) => method === 'terminal.resize').length, 1, 'unchanged dimensions need no resize request');
     views[0].cols = 90;
     notifyResize();

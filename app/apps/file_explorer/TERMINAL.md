@@ -105,6 +105,10 @@ again. It modifies navigation keys and mobile IME characters independently of
 Ctrl. A session change/disposal cancels a pending hold. The in-flow mobile footer
 is hidden while the terminal is expanded; the terminal then owns the bottom
 safe-area inset. Minimizing/closing restores the footer.
+Toolbar A−/A+ zoom changes xterm font size by 1px within 10–28px (default 13px),
+stored per client under `te2_file_explorer_terminal_font_size`. Unavailable storage
+does not prevent zoom. Existing fit/resize handles geometry without resetting
+the screen, replacing the shell or reconnecting; pointer activation keeps focus.
 Tab and terminal control mutations share the same frontend serial lane; terminal
 keystrokes bypass that lane on the attached raw stream. Input chunks send
 synchronously with UTF-8-safe splitting and bounded WebSocket buffered bytes.

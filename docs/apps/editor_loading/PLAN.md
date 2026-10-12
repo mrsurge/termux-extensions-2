@@ -516,6 +516,25 @@ tag or release in the investigation slice. Electromux remains a separate workstr
 
 ## Deferred follow-up sequence
 
+### Current release cutoff
+
+All implemented work has user live acceptance. The user classifies remaining
+OTA ergonomics as development/editable-install convenience, not a release blocker.
+The shipped asset audit and major trims are sufficient for this release; the
+remaining candidate review/cleanup is deferred to the next maintenance branch.
+This does not waive correct, complete asset packaging for the new release.
+
+Defer remaining quantitative loading probes, stale-asset candidates, OTA UI
+ergonomics, terminal post-child-exit/redraw follow-ups, rare delete/recreate draft
+identity behavior and lower-priority search work to that next maintenance branch.
+These are retained follow-ups, not unfinished gates for this release. Existing
+host-bundle reductions and generic-browser HTTP gzip delivery remain in place.
+Next current-release work is separately approved packaging/release integration;
+this cutoff does not itself authorize builds, runtime changes, tags or publication.
+
+The sequence below records the workstream's original execution order; its completed
+implementation/live gates are reconciled in TRACKER.md.
+
 Markdown cache and browser HTTP grammar loading are implemented and user accepted
 on the observed paths. Continue in this order:
 
