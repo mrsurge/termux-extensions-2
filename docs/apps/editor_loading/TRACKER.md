@@ -1,5 +1,26 @@
 # Editor loading maintenance tracker
 
+## 0.2.353 artifact staging — approved 2026-10-12
+
+- [x] Commit asset coverage/seed as 5a997f6f; fast-forward and push main.
+  Maintenance branch and main are aligned; unrelated CTAG deletion/notes/ty kept.
+- [x] User approved 0.2.353 staging, with Linux wheel validation/provenance first,
+  then the physical Android/Termux wheel from the same source and packaging baseline.
+- [x] Debian build/validation host reachable, 148 GiB free; rootless Podman works
+  and has cached TE2 builder images. Docker authentication is unavailable; do not
+  alter host security configuration. Local source machine has about 19 GiB free.
+- [x] Synchronize release-facing versions/Android seed and commit the exact build source.
+- [ ] Build/audit Linux wheel/private CPython/mypyc/native runtime and source archive
+  with the existing pinned container workflow on mrsurge@100.74.145.70.
+- [ ] Install/validate Linux candidate; record source hash, runtime/Node/WBA and
+  app-resource inventories, size under 100,000,000 bytes and artifact hashes.
+- [ ] Reconnect Pixel (SSH timed out; ADB list empty at staging start), synchronize
+  an isolated clean source and build/audit Termux CPython 3.14 native wheel.
+- [ ] Build Gecko/Cefrium/TE2 Termux staging APKs with matching 0.2.353 seed;
+  audit package/version, signing, ABI/alignment and hashes.
+- [ ] Candidate device/install/live acceptance, then separate tag/upload approval.
+  No existing tag moves, public tag push, PyPI or GitHub release upload authorized.
+
 ## Consolidated live acceptance — user confirmation
 
 The user confirms all live validations for implemented work are complete,
