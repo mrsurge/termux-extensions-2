@@ -17,11 +17,11 @@ awk -v s="$START_MARK" -v e="$END_MARK" '
   $0==s {skip=1; next}
   $0==e {skip=0; next}
   !skip {print}
-' "$BASHRC" > "$tmp"
-cat "$tmp" > "$BASHRC"
+' "$BASHRC" >"$tmp"
+cat "$tmp" >"$BASHRC"
 rm -f "$tmp"
 
-cat >> "$BASHRC" <<EOB
+cat >>"$BASHRC" <<EOB
 
 $START_MARK
 export ANDROID_HOME="$ANDROID_SDK"
