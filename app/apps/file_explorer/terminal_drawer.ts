@@ -2,6 +2,7 @@ import { isMobileUserAgent, TERMINAL_KEYS, TerminalModifierState, dispatchSynthe
 import { bindPointerHoldRepeat } from './pointer-hold-repeat';
 import { packObject, unpackObject } from './wire_codec';
 import { bindTerminalContextMenu } from '../../libs/terminal_runtime/terminal_context_menu';
+import { bindTerminalCursor } from '../../libs/terminal_runtime/terminal_cursor';
 
 interface Disposable { dispose(): void }
 interface Terminal {
@@ -12,6 +13,7 @@ interface Terminal {
   getSelection(): string; paste(text: string): void;
   modes?: { mouseTrackingMode?: string };
   onData(callback: (data: string) => void): Disposable;
+  onRender(callback: () => void): Disposable;
   attachCustomKeyEventHandler(callback: (event: KeyboardEvent) => boolean): void;
 }
 interface Fit { fit(): void }
@@ -341,6 +343,7 @@ export function createTerminalDrawer(root: HTMLElement, tabs: Tabs, socket: Sock
       if (current !== generation || disposed) { view.dispose(); return; }
       terminal = view; view.loadAddon(fonts); fit = new api.FitAddon.FitAddon(); view.loadAddon(fit); view.open(viewport);
       bindings.push({ dispose: bindTerminalContextMenu(viewport, view, error) });
+      bindings.push(bindTerminalCursor(viewport, view));
       view.textarea?.setAttribute('autocapitalize', 'off'); view.textarea?.setAttribute('autocorrect', 'off');
       bindings.push(api.te2TerminalTouchSelection.attach(view));
       bindings.push(view.onData(data => {

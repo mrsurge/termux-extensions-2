@@ -2,6 +2,7 @@
 
 import { generateUuid } from './uuid.ts';
 import { bindTerminalContextMenu } from '../../../../libs/terminal_runtime/terminal_context_menu';
+import { bindTerminalCursor } from '../../../../libs/terminal_runtime/terminal_cursor';
 import {
   SOCKET_IO_NAMESPACES,
   SOCKET_IO_PATHS,
@@ -155,6 +156,7 @@ interface XtermTerminal {
   select?: (column: number, row: number, length: number) => void;
   selectAll?: () => void;
   paste?: (data: string) => void;
+  onRender(callback: () => void): XtermDisposable;
   attachCustomInputEventHandler?: (handler: (event: InputEvent) => boolean) => XtermDisposable;
   attachCustomTouchEventHandler?: (handler: (event: TouchEvent, isScrollGesture: boolean) => boolean) => XtermDisposable;
   setOption?: (name: string, value: unknown) => void;
@@ -259,6 +261,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
   let resizeObserver: ResizeObserver | null = null;
   let touchSelectionDisposable: XtermDisposable | null = null;
   let disposeClipboardMenu: (() => void) | null = null;
+  let cursorBinding: { dispose(): void } | null = null;
   let startupSizing = false;
   let startupFitTimer: number | null = null;
   const pendingTerminalRequests = new Map<string, PendingTerminalRequest>();
@@ -1217,6 +1220,8 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     nextTerm.loadAddon(fitAddon);
     if (webFontsAddon) nextTerm.loadAddon(webFontsAddon);
     nextTerm.open(container);
+    cursorBinding?.dispose();
+    cursorBinding = bindTerminalCursor(container, nextTerm);
     disposeClipboardMenu?.();
     disposeClipboardMenu = bindTerminalContextMenu(container, nextTerm, message => console.warn(message));
     installViewportHandlers();
@@ -1327,7 +1332,8 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     setDrawerHelperFocusActive(false);
     touchSelectionDisposable?.dispose();
     touchSelectionDisposable = null;
-    disposeClipboardMenu?.(); disposeClipboardMenu = null;
+    // The shared drawer can reopen through openDrawer() without activating
+    // the terminal again. Keep its clipboard binding with the live renderer.
     startupSizing = false;
     clearStartupFitTimer();
     lastResizeSent = null;
@@ -1358,6 +1364,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
       touchSelectionDisposable = null;
       disposeClipboardMenu?.(); disposeClipboardMenu = null;
       term.dispose();
+      cursorBinding?.dispose(); cursorBinding = null;
       term = null;
     }
     clearDrawerCtrlFocusBinding();

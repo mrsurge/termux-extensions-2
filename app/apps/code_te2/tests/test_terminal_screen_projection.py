@@ -211,7 +211,7 @@ class TerminalScreenProjectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(replayed.display[-1].rstrip(), "$ hello")
         self.assertEqual((replayed.cursor.x, replayed.cursor.y), (7, 14))
 
-    async def test_scrollback_is_bounded_and_private_modes_are_not_raw_replayed(self) -> None:
+    async def test_scrollback_is_bounded_and_supported_private_modes_are_restored(self) -> None:
         log = self.tmp_path / "terminal.log"
         rows = [f"line-{index}".encode() for index in range(MAX_HISTORY_LINES + 25)]
         _ = log.write_bytes(b"\x1b[?2004h" + b"\r\n".join(rows))
@@ -226,7 +226,7 @@ class TerminalScreenProjectionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(replayed.history.top), MAX_HISTORY_LINES)
         self.assertIn("line-5024", replayed.display[-1])
-        self.assertNotIn("?2004h", checkpoint.ansi)
+        self.assertIn("?2004h", checkpoint.ansi)
 
 
 if __name__ == "__main__":

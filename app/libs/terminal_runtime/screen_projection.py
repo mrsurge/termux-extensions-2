@@ -68,7 +68,14 @@ class _TerminalHistory(Protocol):
     top: Iterable[_TerminalLine]
 
 
+class _TerminalMargins(Protocol):
+    top: int
+    bottom: int
+
+
 class _TerminalScreen(Protocol):
+    mode: set[int]
+    margins: _TerminalMargins | None
     columns: int
     lines: int
     history: _TerminalHistory
@@ -212,17 +219,35 @@ def _encode_line(line: _TerminalLine, columns: int) -> str:
 def _screen_checkpoint_ansi(screen: _TerminalScreen) -> str:
     columns = int(screen.columns)
     lines = int(screen.lines)
+    private_modes = (1, 6, 7, 9, 47, 1000, 1002, 1003, 1004, 1005, 1006, 1015, 1047, 1049, 2004)
+    alternate = any(mode << 5 in screen.mode for mode in (47, 1047, 1049))
     rendered_lines = [
-        *(_encode_line(line, columns) for line in screen.history.top),
+        *(_encode_line(line, columns) for line in screen.history.top if not alternate),
         *(_encode_line(screen.buffer[row], columns) for row in range(lines)),
     ]
     body = "\r\n".join(rendered_lines)
     cursor_row = max(1, min(lines, int(screen.cursor.y) + 1))
     cursor_column = max(1, min(columns, int(screen.cursor.x) + 1))
     cursor_visibility = "\x1b[?25l" if bool(screen.cursor.hidden) else "\x1b[?25h"
+    # Reset/restore application modes explicitly; repaint alone cannot recover
+    # mouse reporting, paste, keypad or alternate-buffer ownership after reset.
+    alternate_mode = "\x1b[?1049h" if alternate else "\x1b[?1049l"
+    input_modes = [mode for mode in private_modes if mode not in (47, 1047, 1049, 6)]
+    # Mouse protocols/encodings share xterm state. Disable stale modes first,
+    # then enable selected modes; disabling another protocol after enabling
+    # DRAG/SGR would otherwise reset them back to NONE/DEFAULT.
+    restored_modes = ''.join(f'\x1b[?{mode}l' for mode in input_modes)
+    restored_modes += ''.join(f'\x1b[?{mode}h' for mode in input_modes if mode << 5 in screen.mode)
+    restored_modes += ''.join(f'\x1b[{mode}{"h" if mode in screen.mode else "l"}' for mode in (4, 20))
+    origin = 6 << 5 in screen.mode
+    margins = screen.margins
+    region = f'\x1b[{margins.top + 1};{margins.bottom + 1}r' if margins else '\x1b[r'
+    if origin and margins:
+        cursor_row = max(1, cursor_row - margins.top)
+    positioning = f'{region}\x1b[?6{"h" if origin else "l"}\x1b[{cursor_row};{cursor_column}H'
     return (
-        "\x1b[?25l\x1b[3J\x1b[2J\x1b[H"
-        f"{body}\x1b[0m\x1b[{cursor_row};{cursor_column}H{cursor_visibility}"
+        f"{alternate_mode}\x1b[4l\x1b[20l\x1b[?7h\x1b[?6l\x1b[r\x1b[?25l\x1b[3J\x1b[2J\x1b[H"
+        f"{body}\x1b[0m{restored_modes}{positioning}{cursor_visibility}"
     )
 
 

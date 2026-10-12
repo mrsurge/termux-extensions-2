@@ -152,7 +152,8 @@ export async function startFrameworkRelay(
         }
         trace(`asset ${request.method} ${requestUrl.pathname}`);
         const headers = {
-          "Cache-Control": "max-age=31536000, immutable",
+          // OTA replaces this tree without changing URLs (or dev versions).
+          "Cache-Control": "no-store, no-cache, must-revalidate",
           "Content-Type": assets.contentType(localPath),
         };
         response.writeHead(200, headers);

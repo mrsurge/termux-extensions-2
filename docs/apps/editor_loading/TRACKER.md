@@ -2,6 +2,35 @@
 
 ## Final punchout — approved pre-release fixes
 
+### Resize/restore terminal interaction follow-up
+
+- [x] Reproduced/inspected Electron sidebar nvim and drawer. Sidebar preserved
+  DRAG/SGR mouse modes; restored drawer reported NONE/DEFAULT and normal buffer
+  despite nvim contents. Cursor block inherited cell RGB background inline.
+- [x] Shared DOM cursor binding removes only block-cursor inline foreground/
+  background after render, retaining xterm's themed cursor rules. Applied to
+  all terminal owners. Live drawer probe changes cursor from cell RGB to white
+  themed block without sending input or resizing/replacing the terminal.
+- [x] Pyte checkpoint restores the explicit supported mode set (mouse protocol/
+  encoding, paste, application cursors, alternate buffer, origin/scroll region)
+  from parsed screen state; no arbitrary raw control replay. Existing test
+  expecting paste mode loss revised to the corrected restoration contract.
+- [x] Drawer clipboard binding remains attached while its renderer survives a
+  drawer close; shared openDrawer() can reopen without activateTerminal(), so
+  disposing the binding on close left the restored drawer without a menu.
+- [x] Frontend typechecks/builds pass; 144 File Explorer and 24 standalone tests,
+  17 interpreted projection tests and two cursor/menu tests pass. Compiled snapshot
+  check-20261012-001831-1791764311485212390 validates 138/138 modules (358.18s).
+  Fourteen compiled projection/replay tests pass; three monkeypatch-based lazy
+  tests bypass patched callbacks under mypyc early binding and remain interpreted
+  tests, where they pass. Snapshot selected for next launch; no runtime restart.
+- [x] Electron OTA installed matching host.js bytes; user restarted/reloaded
+  and reports Code TE2 drawer working 100% flawlessly. Drawer live acceptance.
+- [x] User reports File Explorer and standalone Terminal work after resize.
+- [ ] File Explorer and standalone Terminal still fail recovery after page
+  reload; investigate their checkpoint/attach restoration paths next. Separate
+  badly drawn non-redrawing state remains deferred as requested.
+
 Follow-up live failures: selected-theme callback incorrectly supplied the full
 cache map to the TextMate runtime; corrected to publish its selected theme.
 Snippet backgrounds are now container CSS variables applied on cold/live theme
@@ -18,6 +47,12 @@ Follow-up validation: 13 theme/restore/TextMate tests, clipboard ownership test,
 Cursor focus probe installed in the refreshed Electron main-page worker; captures
 focus/cursor state only, never keystroke contents. Cursor reproduction remains
 pending; theme/menu fixes also require matched client publication/live acceptance.
+OTA activation follow-up: live console forceAssetUpdate returned updated/valid;
+installed host.js SHA-256 matched the current source build. Its old API only
+installed, leaving activation to a separate reload. Updated native command now
+returns its result then reloads the calling view after 750ms; Electron typecheck
+and compile pass, relaunch/live validation pending. Pill source already uses the
+Settings update-and-reload command; reported live pill failure remains unresolved.
 
 - [x] 1. Explicit COLORTERM=truecolor in both Node PTYs and native drawer PTYs.
   Existing raw streams and checkpoint RGB serialization preserve 24-bit colors;

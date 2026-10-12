@@ -1,5 +1,6 @@
 import ReconnectingWebSocket from 'reconnecting-websocket';
 import { bindTerminalContextMenu } from '../../../libs/terminal_runtime/terminal_context_menu';
+import { bindTerminalCursor } from '../../../libs/terminal_runtime/terminal_cursor';
 import { decode as decodeMessagePack, encode as encodeMessagePack } from '@msgpack/msgpack';
 import {
   getConsoleBridgeStatus,
@@ -241,6 +242,7 @@ interface XtermTerminalLike {
   focus(): void;
   dispose(): void;
   reset(): void;
+  onRender(callback: () => void): XtermDisposable;
   resize(cols: number, rows: number): void;
   scrollToBottom(): void;
   write(data: string | Uint8Array, callback?: () => void): void;
@@ -1626,7 +1628,8 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     state.touchSelection = attachTouchSelection(term);
     const touchSelection = state.touchSelection;
     const disposeMenu = bindTerminalContextMenu(ui.termContainer, term, message => setStatus(message));
-    state.touchSelection = { dispose() { disposeMenu(); touchSelection?.dispose(); } };
+    const cursorBinding = bindTerminalCursor(ui.termContainer, term);
+    state.touchSelection = { dispose() { cursorBinding.dispose(); disposeMenu(); touchSelection?.dispose(); } };
     await bindVendoredCtrlHandler(term);
     installVendoredCtrlFocusBinding(term);
     term.onData((data) => {

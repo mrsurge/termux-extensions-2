@@ -351,6 +351,7 @@ async function updateDesktopAssets(
   if (reloadActiveView && contents && !contents.isDestroyed()) {
     contents.reloadIgnoringCache();
     secondaryEditorRegistry?.reload();
+    detachedSurfaceRegistry?.reloadAssets();
   }
   return result;
 }
@@ -394,9 +395,17 @@ async function handleAppViewControl(
     return inspection;
   }
   if (command === "force_asset_update") {
-    // Keep this renderer alive long enough to return the install result. The
-    // paired reload hook activates the already-invalidated asset snapshot.
-    return updateDesktopAssets(true, false);
+    // Return the install result before activating it so console callers receive
+    // their reply instead of losing the worker during the update request.
+    const result = await updateDesktopAssets(true, false);
+    if (result.updated) {
+      setTimeout(() => {
+        if (!contents.isDestroyed()) contents.reloadIgnoringCache();
+        secondaryEditorRegistry?.reload();
+        detachedSurfaceRegistry?.reloadAssets();
+      }, 750);
+    }
+    return result;
   }
   if (command === "read_client_identity") {
     return {

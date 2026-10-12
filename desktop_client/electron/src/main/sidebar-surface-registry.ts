@@ -185,6 +185,12 @@ export class DetachedSidebarSurfaceRegistry {
     return true;
   }
 
+  reloadAssets(): void {
+    for (const entry of this.#entries.values()) {
+      if (!entry.view.webContents.isDestroyed()) entry.view.webContents.reloadIgnoringCache();
+    }
+  }
+
   close(surfaceId: string, presentationId?: string, notify = true): void {
     const entry = this.#matchingEntry(surfaceId, presentationId);
     if (!entry) return;

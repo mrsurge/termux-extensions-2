@@ -11,6 +11,8 @@ import type { DetachedSidebarSurfaceRegistryOptions } from "./sidebar-surface-re
 
 class Contents extends EventEmitter {
   sent: unknown[] = [];
+  reloads = 0;
+  reloadIgnoringCache() { this.reloads++; }
   isDestroyed() { return false; }
   setWindowOpenHandler() {}
   async loadURL() {}
@@ -18,6 +20,8 @@ class Contents extends EventEmitter {
   send(...args: unknown[]) { this.sent.push(args); }
 }
 class View {
+  static all: View[] = [];
+  constructor() { View.all.push(this); }
   webContents = new Contents();
   setBackgroundColor() {}
   setVisible() {}
@@ -43,6 +47,7 @@ class Window extends EventEmitter {
 
 test("detached minimize uses only the authenticated chrome owner and preserves restore", async () => {
   Window.all = [];
+  View.all = [];
   const output = buildSync({ entryPoints: ["src/main/sidebar-surface-registry.ts"], bundle: true, platform: "node", format: "cjs", external: ["electron"], write: false });
   const module = { exports: {} };
   runInNewContext(output.outputFiles[0].text, {
@@ -71,6 +76,8 @@ test("detached minimize uses only the authenticated chrome owner and preserves r
   };
   await registry.detach(descriptor, false);
   await registry.detach({ ...descriptor, surfaceId: "two", presentationId: "p2" }, false);
+  registry.reloadAssets();
+  assert.deepEqual(View.all.map(view => view.webContents.reloads), [1, 1]);
   const [, one, two] = Window.all;
   const sender = (value: Contents) => value as unknown as WebContents;
   assert.equal(registry.handleShellAction(sender(app), "minimize"), false);

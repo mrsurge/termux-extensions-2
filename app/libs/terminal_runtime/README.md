@@ -4,6 +4,18 @@
 not shell launch, input, sockets, project state or tab ownership. The parser in
 `pyte_parser.py` stays demand-loaded on first projection use.
 
+Checkpoints restore a curated terminal mode set as well as screen cells: mouse
+protocol/encoding, bracketed paste, application cursor keys, alternate-buffer
+selection and origin/scroll region. Disable stale mouse modes before enabling
+selected modes: xterm shares protocol state and an unrelated later reset can
+disable the restored protocol. This is parsed-state reconstruction, not arbitrary
+escape-sequence replay. Alternate-screen checkpoints omit normal scrollback.
+
+`terminal_cursor.ts` repairs xterm DOM block cursor precedence after rendering:
+remove inline cell foreground/background from cursor spans so xterm's generated
+theme/OSC cursor rules remain visible on RGB application backgrounds. It owns no
+input, resizing, shell state or inactive cursor styling.
+
 Each `TerminalScreenProjectionRegistry` requires a `log_opener` that returns a
 context-managed `LogReader`. That application-owned boundary supplies file identity,
 captured size and bounded byte reads. Readers are closed before return; failures

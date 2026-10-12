@@ -159,10 +159,13 @@ test('drawer fences checkpoint handoff, preserves shell on minimize/dispose and 
     hidden = false; textContent = ''; dataset = {}; handlers = new Map(); children = [];
     classList = { remove() {}, toggle() {} };
     addEventListener(name, handler) { this.handlers.set(name, handler); }
+    removeEventListener(name) { this.handlers.delete(name); }
+    get ownerDocument() { return globalThis.document; }
     setAttribute() {}
     append(child) { this.children.push(child); }
     replaceChildren() { this.children = []; }
     querySelector(selector) { return elements.get(selector) || null; }
+    querySelectorAll() { return []; }
   }
   const elements = new Map(['.fx-terminal-drawer', '.fx-terminal-viewport', '.fx-terminal-keys', '[data-terminal-status]',
     '[data-directory-status]', '[data-terminal="directory-lock"]', '[data-action="terminal"]', '[data-terminal="minimize"]', '[data-terminal="maximize"]', '[data-terminal="close"]'].map(name => [name, new Element()]));
@@ -174,6 +177,7 @@ test('drawer fences checkpoint handoff, preserves shell on minimize/dispose and 
     write(data, done) { this.writes.push(data); if (done) queueMicrotask(done); }
     dispose() { this.disposed = true; }
     onData(callback) { this.input = callback; return { dispose() {} }; }
+    onRender() { return { dispose() {} }; }
     attachCustomKeyEventHandler() {}
   }
   const originals = Object.fromEntries(['window', 'document', 'navigator', 'ResizeObserver', 'WebSocket', 'location'].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
@@ -193,7 +197,7 @@ test('drawer fences checkpoint handoff, preserves shell on minimize/dispose and 
     close() { queueMicrotask(() => this.onclose?.()); }
   };
   Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { userAgent: 'Desktop' } });
-  globalThis.document = { createElement: () => new Element(), head: { append(node) { if (node.onload === null) return; queueMicrotask(() => node.onload?.()); } } };
+  globalThis.document = { addEventListener() {}, removeEventListener() {}, createElement: () => new Element(), head: { append(node) { if (node.onload === null) return; queueMicrotask(() => node.onload?.()); } } };
   globalThis.window = { Terminal: View, FitAddon: { FitAddon: class { fit() {} } },
     WebFontsAddon: { WebFontsAddon: class { async loadFonts() {} } },
     te2TerminalTouchSelection: { attach() { return { dispose() {} }; } },

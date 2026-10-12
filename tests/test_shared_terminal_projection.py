@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import contextmanager
 from pathlib import Path
 import subprocess
@@ -82,6 +83,38 @@ def test_checkpoint_preserves_truecolor_foreground_and_background():
         assert '38;2;17;83;149' in checkpoint.ansi
         assert '48;2;201;37;119' in checkpoint.ansi
         await registry.discard('rgb')
+    asyncio.run(run())
+
+
+def test_checkpoint_restores_tui_mouse_paste_and_alternate_buffer_modes():
+    content = b'\x1b[?1049h\x1b[?1002h\x1b[?1006h\x1b[?2004h\x1b[?1hNVIM'
+    @contextmanager
+    def open_log(path):
+        yield Reader(content)
+    async def run():
+        registry = TerminalScreenProjectionRegistry(log_opener=open_log)
+        checkpoint = await registry.checkpoint('tui', Path('opaque'))
+        for sequence in ('\x1b[?1049h', '\x1b[?1002h', '\x1b[?1006h', '\x1b[?2004h', '\x1b[?1h'):
+            assert sequence in checkpoint.ansi
+        result = subprocess.run(['node', '-e', '''
+const fs = require('node:fs');
+globalThis.window = globalThis;
+const { Terminal } = require('./app/apps/terminal/node_modules/xterm-headless');
+const term = new Terminal({cols:80,rows:24,allowProposedApi:true});
+term.write(fs.readFileSync(0), () => {
+  console.log(JSON.stringify({modes:term.modes, buffer:term.buffer.active.type,
+    encoding:term._core.coreMouseService.activeEncoding}));
+  term.dispose();
+});
+'''], input=checkpoint.ansi, text=True, capture_output=True, timeout=10)
+        assert result.returncode == 0, result.stderr
+        replay = json.loads(result.stdout)
+        assert replay['modes']['mouseTrackingMode'] == 'drag'
+        assert replay['modes']['bracketedPasteMode'] is True
+        assert replay['modes']['applicationCursorKeysMode'] is True
+        assert replay['encoding'] == 'SGR'
+        assert replay['buffer'] == 'alternate'
+        await registry.discard('tui')
     asyncio.run(run())
 
 
