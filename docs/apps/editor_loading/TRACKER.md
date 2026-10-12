@@ -33,7 +33,7 @@
   14 GiB free, ccache/Cargo/mypy 2.3.0 present. Isolated clean detached worktree
   ~/.cache/te2-release-build/0.2.353/source pins 9b24b118; existing editable
   packaging checkout and live runtime unchanged.
-- [ ] Build/audit Termux CPython 3.14 native wheel; retain existing compiler caches.
+- [x] Build/audit Termux CPython 3.14 native wheel; retain existing compiler caches.
   Matched native worker/server builds pass, native server reports 0.2.353.
   Installed ccache cannot launch (missing C++ __hash_memory symbol); user explicitly
   approved NO_CACHE=1 retry, preserving system packages and completed Rust builds.
@@ -45,13 +45,29 @@
   adjacent caches. User approved source-associated-cache parity plus native
   cache-read prevention and revalidation; no system package changes.
   Preserve the compiled group; metadata helper is outside its startup graph.
-- [ ] Repackage and install-validate both wheels after bytecode-policy fix.
+- [x] Repackage and install-validate both wheels after bytecode-policy fix.
   Native unit suite (36) and Python release/bootstrap/reuse suite (71) pass.
   Linux reuse restores the prior validated wheel only after ABI/source/hash
   checks and import validation; no compiler-cache runtime or blanket cache trust.
   Actual x86 wheel restoration imports all 138 modules (130.55 ms); corrected
   portable-to-developer manifest labeling before packaging. Native poisoned-cache
   subprocess checks pass for private and system interpreter modes.
+  Final candidate-03 wheels pin clean source de8720dd. Linux wheel is
+  90,823,913 bytes, SHA-256
+  d0913285053dbcd8364a12bd6568ee41265648f4ac80ff66b0a1404b7b7c2dc2;
+  installed Debian acceptance passes with host Python 3.13.5/private 3.14.6,
+  all 138 compiled modules, actual Node/WBA imports, corruption rejection,
+  reinstall, framework health/version 0.2.353 and eight built-in apps.
+  Evidence: .release/0.2.353/linux-wheel-candidate-03/remote-acceptance/.
+  Termux wheel is 48,653,242 bytes, SHA-256
+  4da50dd4b5a5480e168f88d4d87580e49a9e7a9dee564a8f5c0f312153036c5d;
+  normal pip installation in an isolated Pixel venv passes runtime validation,
+  version/build-info, all 138 compiled imports and actual Node 25.8.0/WBA import.
+  No global installation or live framework was replaced. Termux candidate still
+  has validation-only provenance; production reassembly needs the approved tag.
+  Both wheels contain all 292 declared source assets. All 139 compiled domain
+  libraries are byte-identical to candidate-02 on each platform; no repeat mypyc
+  build was needed. Local free disk is 17 GiB after validation.
 - [x] Build Gecko/Cefrium/TE2 Termux staging APKs with matching 0.2.353 seed;
   audit package/version, signing, ABI/alignment and hashes.
   Gecko/Cefrium staging builds and signature/alignment checks pass; each contains
@@ -67,8 +83,45 @@
   seed bytes. Termux retains independent 0.0.1-te2-termux-poc versionName,
   versionCode 20353. Free space remains roughly 17 GiB local / 13 GiB Pixel.
   These are not new device/live acceptance claims.
-- [ ] Candidate device/install/live acceptance, then separate tag/upload approval.
-  No existing tag moves, public tag push, PyPI or GitHub release upload authorized.
+- [x] Candidate device/install/live acceptance, then separate tag/upload approval.
+  Razr reconnected at motorola-razr-2024-xt2453v:5555; existing installer-managed
+  0.2.352 tree has no live TE2 process. Preserve settings/project data during update.
+  Pixel assembled a validation-only Termux archive using the prior audited locked
+  dependency wheelhouse and candidate-03 TE2 wheel/server; SHA-256
+  110902a131d9ff8ffb4e197b90524801fe41fc549901135f0962ad6be384a2a2.
+  Slow TCP/IP transfer switched to user-connected USB serial ZY22K74WF4.
+  All three staging APK installs pass and installed package metadata reports
+  versionCode 20353. Standard archive installer passes and activates managed
+  releases/0.2.353, preserving user data. Installed --version/--build-info report
+  0.2.353; all 138 compiled domain imports and actual Node 24.18.0 Socket.IO/WBA
+  entrypoint imports pass on the Razr. User UI/live acceptance
+  explicitly confirmed for all three clients and shared-UID startup; user verified
+  te2 --version reports te2-server 0.2.353. Debian installed acceptance also passed.
+  Separate blocking approval authorizes normal GitHub release (alpha title, Latest)
+  and PyPI publication. Tag 0.2.353 pushed at de8720dd; no existing tag moved.
+- [x] Finalize production Termux provenance at clean tagged source without recompiling.
+  Production wheel SHA-256:
+  884d2620872913ff9f90b287c4f0fe44de37d37c1c6addb1cb9fdbe81a5bed9d.
+  All 841 Code TE2 payload members other than runtime provenance are byte-identical
+  to the accepted candidate. Audited production archive SHA-256:
+  70f7e6738c8bb3e2ceb652224b1f52d76ee12580b9641c14c5aa976cc4eb26a5.
+- [x] Complete GitHub/PyPI uploads and independently verify published inventory,
+  checksums, normal-release/Latest status and PyPI version.
+  GitHub release 0.2.353 is public, normal (not prerelease), and Latest, with
+  all 14 files verified against local sizes and server-side SHA-256 digests.
+  PyPI publishes the Linux wheel and source archive with matching SHA-256 hashes:
+  wheel d0913285053dbcd8364a12bd6568ee41265648f4ac80ff66b0a1404b7b7c2dc2;
+  source 1765e968f41f7ee0b838932cd3f86c02c59b87986d71e98cfcd0548f22df2a3c.
+  Fresh version-API query confirms both files; a prior negative API cache briefly
+  returned 404 after upload acceptance. GitHub draft was upload staging only.
+  Local PyPI attempts returned HTTP 500 (wheel is 90,823,913 bytes, below the
+  100,000,000-byte budget); local bulk GitHub upload returned HTTP 408/inactivity.
+  User separately approved Debian publication for each service. Remote uploads
+  use the exact accepted artifacts and ephemeral credentials through SSH stdin,
+  with no saved tokens; all remote/uploaded hashes match. Root cause of the local
+  transport failures is not proven. No new compile, version bump, or tag move.
+  Release: https://github.com/mrsurge/termux-extensions-2/releases/tag/0.2.353
+  PyPI: https://pypi.org/project/te2/0.2.353/
 
 ## Consolidated live acceptance — user confirmation
 
@@ -89,7 +142,8 @@ Deferred implementation, quantitative probes and release approval remain separat
 - [x] Defer remaining measurement probes, asset cleanup, OTA ergonomics,
   terminal post-child-exit/redraw issues, rare draft file-incarnation handling and
   lower-priority search work to the next maintenance branch.
-- [ ] Separately approve and perform release packaging/integration/publication.
+- [x] Separately approve and perform release packaging/integration/publication.
+  0.2.353 publication completed; see artifact staging receipts above.
 
 Deferred entries below remain unfinished, but are not current-release gates.
 Smaller host.js and generic-browser HTTP gzip delivery are already implemented.

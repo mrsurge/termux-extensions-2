@@ -38,9 +38,31 @@ selected artifact paths when the build environment overrides it.
 The wheel materializer checks the source/library fingerprints, ABI, resource
 inventory and complete Node vendor roots. Without `--release-tag`, the receipt
 marks `publicationEligible: false`. Production assembly requires `--release-tag
-0.2.352`, the matching version tag at clean source HEAD, and a matching compiled
+<version>`, the matching version tag at clean source HEAD, and a matching compiled
 snapshot. No command here uploads artifacts. Build the production archive without
 `--allow-dirty-first-party`; retain the receipt and independent installed checks.
+
+## Publication transport
+
+Run publishing tools in an isolated environment: inherited developer
+`PYTHONPATH` can make a system Twine command import development dependencies.
+Keep publication tooling separate from the installed TE2 runtime.
+
+If large uploads repeatedly fail over a slow connection, an explicitly approved
+remote publisher can use the exact accepted artifacts without rebuilding them.
+The Debian validation host can serve this role. Verify SHA-256 before transfer,
+on the publisher, and against PyPI/GitHub's published metadata. Reuse a remote
+artifact only after its hash matches; do not retransmit an already verified copy.
+Pass credentials only to the ephemeral uploader process through encrypted SSH
+stdin; never save tokens in remote configuration, command arguments, or logs.
+
+Resume only missing release assets, preserving verified uploads. Stage GitHub
+uploads in a draft, then publish as a normal release with an alpha title and
+Latest status after the entire manifest/checksum inventory is verified. A draft
+used for upload staging is not a prerelease. In the 0.2.353 workflow, local PyPI
+uploads returned HTTP 500 and GitHub's bulk upload returned HTTP 408; identical
+hash-checked artifacts uploaded successfully from Debian. This establishes a
+working publication route, not the exact cause of the local failures.
 
 ## Archive and installation acceptance
 
