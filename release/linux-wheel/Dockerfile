@@ -33,6 +33,11 @@ ENV PATH="/opt/te2-build-venv/bin:${PATH}" \
     CXX=g++
 RUN python -c 'import sys,sysconfig; assert sys.version_info[:2] == (3,14); assert not sysconfig.get_config_var("Py_GIL_DISABLED"); assert sysconfig.get_config_var("Py_ENABLE_SHARED") == 1'
 
+# The build runs rootless; install into the root-owned /opt venv at image time.
+COPY code-te2-runtime-requirements.txt /opt/te2-runtime-requirements.txt
+RUN python -m pip install --only-binary=:all: \
+    -r /opt/te2-runtime-requirements.txt mypy==2.3.0
+
 COPY build-inside-container.sh /usr/local/bin/te2-build-linux-wheel
 COPY validate-artifacts.py /usr/local/libexec/te2-validate-linux-wheel
 RUN chmod 0755 /usr/local/bin/te2-build-linux-wheel

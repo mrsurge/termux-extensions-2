@@ -30,12 +30,11 @@ cargo build \
 server="${CARGO_TARGET_DIR}/release/te2-server"
 test -x "${server}"
 strip --strip-unneeded "${server}"
+"${server}" --version
+"${server}" --build-info > /output/server-build-info.json
 
 # Independently build the raw pipe-facing app executable and its compiled domain.
 export PYO3_PYTHON="$(command -v python)"
-python -m pip install --only-binary=:all: \
-  -r release/linux-wheel/code-te2-runtime-requirements.txt \
-  mypy==2.3.0
 python -m pip install --only-binary=:all: --no-deps \
   --target /work/code-te2-dependencies \
   -r release/linux-wheel/code-te2-runtime-requirements.txt

@@ -10,6 +10,14 @@
   and has cached TE2 builder images. Docker authentication is unavailable; do not
   alter host security configuration. Local source machine has about 19 GiB free.
 - [x] Synchronize release-facing versions/Android seed and commit the exact build source.
+- [x] First Linux attempt at 2a4de2a8 failed before wheel creation: rootless
+  container could not install into root-owned /opt build venv. Move pinned
+  runtime/compiler dependencies into image construction; keep the writable
+  /work dependency target. Preserve remote Cargo cache.
+- [x] Correct actual te2-server crate/lock version to 0.2.353. Add native
+  --version and bootstrap forwarding for --version/--build-info; identity queries
+  never build, prepare runtime state, bind ports or launch workers. Missing
+  selected binary fails explicitly. Python/bootstrap regression checks pass.
 - [ ] Build/audit Linux wheel/private CPython/mypyc/native runtime and source archive
   with the existing pinned container workflow on mrsurge@100.74.145.70.
 - [ ] Install/validate Linux candidate; record source hash, runtime/Node/WBA and

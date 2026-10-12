@@ -433,10 +433,17 @@ async fn main() -> Result<()> {
 
 fn print_build_info_if_requested() -> Result<bool> {
     let args = env::args_os().skip(1).collect::<Vec<_>>();
-    if args.len() != 1 || args[0] != OsStr::new("--build-info") {
+    if args.len() != 1 {
         return Ok(false);
     }
-    println!("{}", serde_json::to_string(&build_info())?);
+    if args[0] == OsStr::new("--version") {
+        let info = build_info();
+        println!("{} {}", info.name, info.version);
+    } else if args[0] == OsStr::new("--build-info") {
+        println!("{}", serde_json::to_string(&build_info())?);
+    } else {
+        return Ok(false);
+    }
     Ok(true)
 }
 

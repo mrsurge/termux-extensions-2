@@ -65,6 +65,7 @@ class BootstrapArgs:
     stdio_control: bool
     memory_profile_dir: str | None
     runtime_debug: bool = False
+    identity_flag: str | None = None
 
 
 @dataclass(frozen=True)
@@ -119,6 +120,38 @@ class NetworkExposureConfig:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(argv)
+    if args.identity_flag:
+        # Identity queries must not prepare runtime directories, reserve ports,
+        # start sidecars, or invoke a source build.
+        env = dict(os.environ)
+        if args.cargo_manifest or args.no_build_cache:
+            manifest = Path(args.cargo_manifest) if args.cargo_manifest else _default_rust_manifest()
+            target = Path(env.get("CARGO_TARGET_DIR", manifest.parent / "target"))
+            command = ServerCommand([str(target / _rust_build_profile(args) / _server_binary_name())])
+            if args.server_bin:
+                command = ServerCommand([args.server_bin])
+        else:
+            command = _server_command(args, env, build=False)
+        binary = Path(command.argv[0])
+        if not binary.is_file() or not os.access(binary, os.X_OK):
+            raise SystemExit("Selected TE2 server binary is not built; build it first or pass --server-bin. Identity queries never build.")
+        if args.identity_flag == "--build-info":
+            return subprocess.run([str(binary), "--build-info"], env=env, check=False).returncode
+        # Older servers only recognize --build-info; unknown flags may launch
+        # them. Use their established query rather than sending --version.
+        result = subprocess.run([str(binary), "--build-info"], env=env, check=False, capture_output=True, text=True)
+        if result.returncode:
+            sys.stderr.write(result.stderr)
+            return result.returncode
+        try:
+            info = json.loads(result.stdout)
+            name, version = info["name"], info["version"]
+            if not isinstance(name, str) or not isinstance(version, str):
+                raise ValueError("invalid identity fields")
+        except (ValueError, KeyError, TypeError) as exc:
+            raise SystemExit(f"Selected server returned invalid build identity: {exc}") from exc
+        print(f"{name} {version}")
+        return 0
     if args.list_interfaces:
         print(json.dumps(_interface_inventory(), indent=2, sort_keys=True))
         return 0
@@ -202,6 +235,9 @@ def _parse_args(argv: Sequence[str] | None) -> BootstrapArgs:
     )
     parser.add_argument("--build-only", action="store_true", help="Build the Rust server and configured native workers, then exit without launching them.")
     parser.add_argument("--print-command", action="store_true", help="Print the resolved child command and exit.")
+    identity = parser.add_mutually_exclusive_group()
+    identity.add_argument("--version", dest="identity_flag", action="store_const", const="--version", help="Print the selected binary's compiled version without building or starting it.")
+    identity.add_argument("--build-info", dest="identity_flag", action="store_const", const="--build-info", help="Print the selected binary's structured build identity without building or starting it.")
     parser.add_argument(
         "--stdio-control",
         action="store_true",
@@ -275,6 +311,7 @@ def _parse_args(argv: Sequence[str] | None) -> BootstrapArgs:
         stdio_control=cast(bool, raw.stdio_control),
         memory_profile_dir=cast(str | None, raw.memory_profile),
         runtime_debug=cast(bool, raw.runtime_debug),
+        identity_flag=cast(str | None, raw.identity_flag),
     )
 
 
