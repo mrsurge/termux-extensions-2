@@ -44,8 +44,14 @@ cargo build --locked --release \
   --manifest-path framework/native_editor_worker/Cargo.toml --bin code-te2-worker
 worker="${CARGO_TARGET_DIR}/release/code-te2-worker"
 strip --strip-unneeded "${worker}"
-MAX_JOBS="${MAX_JOBS:-2}" python -B scripts/probe_code_te2_mypyc.py build \
-  --output /work/code-te2-domain --cache-dir /work/code-te2-mypyc-cache
+if [[ -n "${TE2_REUSE_DOMAIN_WHEEL:-}" ]]; then
+  python -B scripts/restore_code_te2_snapshot.py \
+    --wheel "$TE2_REUSE_DOMAIN_WHEEL" --sha256 "$TE2_REUSE_DOMAIN_WHEEL_SHA256" \
+    --output /work/code-te2-domain
+else
+  MAX_JOBS="${MAX_JOBS:-2}" python -B scripts/probe_code_te2_mypyc.py build \
+    --output /work/code-te2-domain --cache-dir /work/code-te2-mypyc-cache
+fi
 package_version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
 worker_fingerprint="$(sha256sum "${worker}" | cut -d ' ' -f 1)"
 python -B scripts/materialize_code_te2_runtime.py \

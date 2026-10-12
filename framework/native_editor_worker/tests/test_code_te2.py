@@ -75,6 +75,36 @@ def test_private_python_ignores_host_paths_and_sites(tmp_path):
     assert values['path'][0] == str(source)
 
 
+def test_system_python_ignores_adjacent_packaged_bytecode(tmp_path):
+    source = tmp_path / 'source'
+    for directory in ('app', 'app/apps', 'app/apps/code_te2'):
+        package = source / directory
+        package.mkdir(parents=True, exist_ok=True)
+        (package / '__init__.py').write_text('')
+    probe = source / 'cache_probe.py'
+    probe.write_text('raise RuntimeError("unverified bytecode executed")\n')
+    py_compile.compile(str(probe), doraise=True,
+                       invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH)
+    probe.write_text('SAFE = True\n')
+    (source / 'app/apps/code_te2/native_worker.py').write_text(
+        'import sys,json,cache_probe\n'
+        'print("SYSTEM_CACHE_PROBE=" + json.dumps({"safe":cache_probe.SAFE,'
+        '"prefix":sys.pycache_prefix,"writesDisabled":sys.dont_write_bytecode}),file=sys.stderr)\n')
+    prefix = tmp_path / '.disabled-bytecode-cache'
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith(('CODE_TE2_', 'PYTHON'))}
+    env.update(CODE_TE2_PYTHON_HOME=sys.base_prefix,
+               CODE_TE2_PYTHON_EXECUTABLE=sys.executable,
+               CODE_TE2_PYTHON_CACHE_PREFIX=str(prefix))
+    result = subprocess.run([str(BINARY), str(source), '0'], env=env, cwd=tmp_path,
+                            input=b'', capture_output=True, timeout=10)
+    report = next(line.removeprefix('SYSTEM_CACHE_PROBE=')
+                  for line in result.stderr.decode().splitlines()
+                  if line.startswith('SYSTEM_CACHE_PROBE='))
+    assert json.loads(report) == {'safe': True, 'prefix': str(prefix), 'writesDisabled': True}
+    assert not prefix.exists()
+
+
 @pytest.fixture
 def native_app(tmp_path):
     assert BINARY.exists(), "build code-te2-worker first"

@@ -18,14 +18,52 @@
   --version and bootstrap forwarding for --version/--build-info; identity queries
   never build, prepare runtime state, bind ports or launch workers. Missing
   selected binary fails explicitly. Python/bootstrap regression checks pass.
-- [ ] Build/audit Linux wheel/private CPython/mypyc/native runtime and source archive
+- [x] Build/audit Linux wheel/private CPython/mypyc/native runtime and source archive
   with the existing pinned container workflow on mrsurge@100.74.145.70.
-- [ ] Install/validate Linux candidate; record source hash, runtime/Node/WBA and
-  app-resource inventories, size under 100,000,000 bytes and artifact hashes.
-- [ ] Reconnect Pixel (SSH timed out; ADB list empty at staging start), synchronize
-  an isolated clean source and build/audit Termux CPython 3.14 native wheel.
-- [ ] Build Gecko/Cefrium/TE2 Termux staging APKs with matching 0.2.353 seed;
+  Candidate-02 pins 9b24b118; all 138 compiled modules import, native --version
+  reports 0.2.353, manylinux_2_28 audit has no external native libraries.
+  Wheel: 90,818,396 bytes, SHA-256
+  8cfa00d8436c0d6f440c267f7d37505fbb44efd58a27cbf01d22f5d9c8ca79b0.
+  All 292 source assets from OTA inventory checked inside wheel; none missing.
+- [x] Install/validate Linux candidate on Debian host Python 3.13.5; private
+  Python 3.14.6 loads 138 compiled modules, Node 24.16.0/WBA imports pass,
+  corruption rejection/reinstall pass, isolated framework health reports
+  0.2.353 and all eight built-in apps. Evidence in candidate-02/remote-acceptance.
+- [x] Reconnect Pixel after SSH/Tailscale enabled; ordinary CPython 3.14.6,
+  14 GiB free, ccache/Cargo/mypy 2.3.0 present. Isolated clean detached worktree
+  ~/.cache/te2-release-build/0.2.353/source pins 9b24b118; existing editable
+  packaging checkout and live runtime unchanged.
+- [ ] Build/audit Termux CPython 3.14 native wheel; retain existing compiler caches.
+  Matched native worker/server builds pass, native server reports 0.2.353.
+  Installed ccache cannot launch (missing C++ __hash_memory symbol); user explicitly
+  approved NO_CACHE=1 retry, preserving system packages and completed Rust builds.
+  Two-job nonactivated domain-candidate-02 passed all 138 compiled imports in
+  736.63 seconds. Initial clean-source wheel SHA-256
+  892d8107ef16499498183b211f615b965e1714621b26a974e8e66b86d222e86d.
+  Isolated venv install/--version/--build-info passed, but installed domain
+  validation found a release blocker: schema 1 rejected normal pip-generated
+  adjacent caches. User approved source-associated-cache parity plus native
+  cache-read prevention and revalidation; no system package changes.
+  Preserve the compiled group; metadata helper is outside its startup graph.
+- [ ] Repackage and install-validate both wheels after bytecode-policy fix.
+  Native unit suite (36) and Python release/bootstrap/reuse suite (71) pass.
+  Linux reuse restores the prior validated wheel only after ABI/source/hash
+  checks and import validation; no compiler-cache runtime or blanket cache trust.
+- [x] Build Gecko/Cefrium/TE2 Termux staging APKs with matching 0.2.353 seed;
   audit package/version, signing, ABI/alignment and hashes.
+  Gecko/Cefrium staging builds and signature/alignment checks pass; each contains
+  all 293 seed files byte-for-byte, version 0.2.353, versionCode 20353.
+  Staged Gecko SHA-256:
+  dfeb004bda122546cab1dc8c19b8f42077856dcd8ac19c8ba7122ee1fa8f11de;
+  Cefrium: abe9e0b3a4933a2b44533fb16620036b46ce7917e0c820ff08f40704406e0733.
+  TE2 Termux assembly uses the existing pinned Node SDK/NDK and matching public
+  Termux test-key signer; first missing-SDK-env attempt retained in build log,
+  configured retry passes. Termux APK SHA-256:
+  f15057fac62af28ee52dbf974da5ffb38ea6c58a2ae699b49513d93078230d03.
+  All three ARM64-only APKs pass signature/alignment checks and match all 293
+  seed bytes. Termux retains independent 0.0.1-te2-termux-poc versionName,
+  versionCode 20353. Free space remains roughly 17 GiB local / 13 GiB Pixel.
+  These are not new device/live acceptance claims.
 - [ ] Candidate device/install/live acceptance, then separate tag/upload approval.
   No existing tag moves, public tag push, PyPI or GitHub release upload authorized.
 

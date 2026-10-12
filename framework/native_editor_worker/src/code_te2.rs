@@ -130,6 +130,26 @@ mod wba_python_tests {
     use super::*;
 
     #[test]
+    fn packaged_bytecode_prefix_is_absent_and_absolute() {
+        let root = tempfile::tempdir().unwrap();
+        let prefix = root.path().join(".disabled-bytecode-cache");
+        assert_eq!(
+            selected_cache_prefix(root.path(), true, None).unwrap(),
+            Some(prefix.clone())
+        );
+        assert_eq!(
+            selected_cache_prefix(root.path(), false, prefix.to_str()).unwrap(),
+            Some(prefix)
+        );
+        assert_eq!(
+            selected_cache_prefix(root.path(), false, None).unwrap(),
+            None
+        );
+        assert!(selected_cache_prefix(root.path(), false, Some("relative")).is_err());
+        assert!(selected_cache_prefix(root.path(), false, root.path().to_str()).is_err());
+    }
+
+    #[test]
     fn native_stream_returns_python_records_across_partial_reads() {
         Python::attach(|py| {
             let stream = Py::new(
@@ -400,6 +420,22 @@ impl Backend {
     }
 }
 
+fn selected_cache_prefix(
+    home: &std::path::Path,
+    isolated: bool,
+    explicit: Option<&str>,
+) -> Result<Option<PathBuf>> {
+    let prefix = match explicit {
+        Some(value) => PathBuf::from(value),
+        None if isolated => home.join(".disabled-bytecode-cache"),
+        None => return Ok(None),
+    };
+    if !prefix.is_absolute() || prefix.try_exists()? || prefix.is_symlink() {
+        bail!("native Python bytecode cache prefix must be absolute and absent");
+    }
+    Ok(Some(prefix))
+}
+
 fn initialize_selected_python() -> Result<bool> {
     let isolated = match std::env::var("CODE_TE2_PYTHON_ISOLATED").as_deref() {
         Ok("1") => true,
@@ -416,6 +452,16 @@ fn initialize_selected_python() -> Result<bool> {
         }
         _ => bail!("native Python selection requires both home and executable"),
     };
+    let explicit_cache = match std::env::var("CODE_TE2_PYTHON_CACHE_PREFIX") {
+        Ok(value) => Some(value),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(error) => bail!("invalid native Python cache prefix: {error}"),
+    };
+    let cache_prefix = selected_cache_prefix(
+        std::path::Path::new(home.to_str()?),
+        isolated,
+        explicit_cache.as_deref(),
+    )?;
     // Configure only this embedded interpreter, not PYTHONHOME in the process
     // environment inherited by terminal shells and other child applications.
     // This runs before the first Python::attach; PyConfig copies these strings.
@@ -445,21 +491,21 @@ fn initialize_selected_python() -> Result<bool> {
                 executable.as_ptr(),
             );
         }
-        if isolated && pyo3::ffi::PyStatus_Exception(status) == 0 {
-            let base = PathBuf::from(home.to_str()?);
-            // Pip may populate adjacent caches using the host Python. Never
-            // read those; this reserved prefix is absent from the verified
-            // payload and writes are disabled above.
-            let cache = CString::new(
-                base.join(".disabled-bytecode-cache")
-                    .to_string_lossy()
-                    .as_bytes(),
-            )?;
+        if let Some(prefix) = cache_prefix.as_ref()
+            && pyo3::ffi::PyStatus_Exception(status) == 0
+        {
+            // Both private Linux and system-ABI Android packaging may acquire
+            // pip-generated adjacent caches. Never consume or create them.
+            config.write_bytecode = 0;
+            let cache = CString::new(prefix.to_string_lossy().as_bytes())?;
             status = pyo3::ffi::PyConfig_SetBytesString(
                 &mut config,
                 &mut config.pycache_prefix,
                 cache.as_ptr(),
             );
+        }
+        if isolated && pyo3::ffi::PyStatus_Exception(status) == 0 {
+            let base = PathBuf::from(home.to_str()?);
             for relative in [
                 "lib/python3.14",
                 "lib/python3.14/lib-dynload",

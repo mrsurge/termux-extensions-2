@@ -261,6 +261,26 @@ Missing/incompatible binary artifacts fail explicitly, with no Cargo/interpreted
 fallback. Installed validation and publication follow the release workflow;
 snapshot publication or source build does not grant release/activation permission.
 
+#### Pip bytecode and compiled-domain reuse
+
+Pip may create adjacent `__pycache__` entries even inside a venv. Both runtime
+schemas permit only conventionally named bytecode associated with a tracked,
+hash-verified source file; unknown files and symlinks still fail validation.
+Bootstrap supplies `CODE_TE2_PYTHON_CACHE_PREFIX` inside the verified payload.
+Native PyConfig requires that prefix to be absolute and absent and disables
+bytecode writes, so pip-generated adjacent caches are never consumed. This is
+embedded-interpreter configuration, not a generic environment change inherited
+by terminal shells or Node children.
+
+For release packaging only, `scripts/build_linux_release_wheel.py
+--reuse-domain-wheel <validated-wheel>` can preserve a compiled group. The
+restorer verifies transfer/native-library hashes, matching ABI/platform and the
+complete startup-source digest, then imports all restored modules before
+publishing a fresh immutable snapshot. Any startup-source change rejects reuse.
+Resources and non-startup packaging helpers come from the new pinned source.
+The restored snapshot records the original wheel SHA-256; this is not a mutable
+compiler cache, automatic activation, or permission to publish a release.
+
 #### Cached build and retention workflow (current developer behavior)
 
 Preferred editable entrypoint (uses the invoking Python/venv; callable from any

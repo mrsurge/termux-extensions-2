@@ -191,11 +191,11 @@ def validate_runtime(root: Path, *, package_version: str | None = None) -> CodeT
         relative = path.relative_to(root)
         name = relative.as_posix()
         cache = re.fullmatch(r'(.+)\.cpython-[0-9]{2,3}(?:\.opt-[12])?\.pyc', relative.name)
-        if (schema == 2 and name not in files and relative.parent.name == '__pycache__'
+        if (name not in files and relative.parent.name == '__pycache__'
                 and cache is not None
                 and (relative.parent.parent / (cache.group(1) + '.py')).as_posix() in files):
-            # Pip may compile the private source with the *host* interpreter.
-            # Isolated native PyConfig never reads adjacent bytecode caches.
+            # Pip compiles packaged sources on either platform. Packaged native
+            # workers use an absent reserved cache prefix and never read these.
             continue
         actual.add(name)
     if any(path.is_symlink() for path in root.rglob("*")) or actual != set(files) | {MANIFEST}:

@@ -21,6 +21,7 @@ MINIMUM_FREE_BYTES: Final = 2 * 1024 * 1024 * 1024
 
 def main() -> int:
     args = _parse_args()
+    reuse_wheel = Path(args.reuse_domain_wheel).expanduser().resolve(strict=True) if args.reuse_domain_wheel else None
     source_commit = _git_output("rev-parse", "--verify", f"{args.source_ref}^{{commit}}")
     source_date_epoch = _git_output("show", "-s", "--format=%ct", source_commit)
     output = (
@@ -54,6 +55,7 @@ def main() -> int:
                 commit=source_commit,
                 release_tag=args.release_tag,
                 source_date_epoch=source_date_epoch,
+                reuse_wheel=reuse_wheel,
             )
         else:
             cache = REPO_ROOT / ".release" / "cache" / "linux-wheel"
@@ -77,6 +79,7 @@ def main() -> int:
                 commit=source_commit,
                 release_tag=args.release_tag,
                 source_date_epoch=source_date_epoch,
+                reuse_wheel=reuse_wheel,
             )
             subprocess.run(command, cwd=REPO_ROOT, check=True)
 
@@ -92,6 +95,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--release-tag", required=True, help="Immutable release identity to embed")
     parser.add_argument("--output", help="Fresh artifact output directory")
     parser.add_argument("--container-engine", default="docker")
+    parser.add_argument("--reuse-domain-wheel", help="Previously validated wheel with unchanged domain sources/ABI; restore and validate its compiled group instead of compiling again")
     parser.add_argument(
         "--build-host",
         help="Optional key-authenticated SSH host on which to run the pinned container",
@@ -164,6 +168,8 @@ def _container_run_command(
     keep_id: bool = False,
     uid: int | None = None,
     gid: int | None = None,
+    reuse_wheel: Path | None = None,
+    reuse_sha256: str | None = None,
 ) -> list[str]:
     selected_uid = os.getuid() if uid is None else uid
     selected_gid = os.getgid() if gid is None else gid
@@ -199,6 +205,15 @@ def _container_run_command(
             image,
         ]
     )
+    if reuse_wheel is not None:
+        if reuse_sha256 is None:
+            with reuse_wheel.open('rb') as source_file:
+                reuse_sha256 = hashlib.file_digest(source_file, 'sha256').hexdigest()
+        command[-1:-1] = [
+            '--volume', f'{reuse_wheel}:/input-domain.whl:ro',
+            '--env', 'TE2_REUSE_DOMAIN_WHEEL=/input-domain.whl',
+            '--env', f'TE2_REUSE_DOMAIN_WHEEL_SHA256={reuse_sha256}',
+        ]
     return command
 
 
@@ -212,6 +227,7 @@ def _run_remote_build(
     commit: str,
     release_tag: str,
     source_date_epoch: str,
+    reuse_wheel: Path | None = None,
 ) -> None:
     remote_home = _ssh_output(
         host,
@@ -242,6 +258,11 @@ def _run_remote_build(
         if path.is_file():
             _scp(path, host, f"{remote_context}/{path.name}")
     _scp(source_archive, host, f"{remote_root}/source.tar.gz")
+    reuse_digest = None
+    if reuse_wheel is not None:
+        with reuse_wheel.open('rb') as source_file:
+            reuse_digest = hashlib.file_digest(source_file, 'sha256').hexdigest()
+        _scp(reuse_wheel, host, f'{remote_root}/domain-wheel.whl')
     _ssh(
         host,
         "tar",
@@ -269,6 +290,8 @@ def _run_remote_build(
         keep_id=True,
         uid=remote_uid,
         gid=remote_gid,
+        reuse_wheel=Path(f'{remote_root}/domain-wheel.whl') if reuse_wheel is not None else None,
+        reuse_sha256=reuse_digest,
     )
     _ssh(host, *remote_command)
     _ssh(

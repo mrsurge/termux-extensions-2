@@ -624,6 +624,7 @@ def _prepare_native_workers(args: BootstrapArgs, env: MutableMapping[str, str], 
             raise SystemExit(f"Binary release native-worker payload is unusable: {exc}; refusing a Cargo fallback.") from exc
         env[workers[0].environment_key] = str(runtime.executable)
         env["CODE_TE2_MYPYC_DIR"] = str(runtime.domain)
+        env["CODE_TE2_PYTHON_CACHE_PREFIX"] = str(runtime.executable.parent.parent / ".disabled-bytecode-cache")
         env["CODE_TE2_HOST_PYTHON_EXECUTABLE"] = sys.executable
         env["CODE_TE2_HOST_PACKAGE_ROOT"] = str(_project_root())
         env["CODE_TE2_PYTHON_HOME"] = str(runtime.python_home) if runtime.python_home else sys.base_prefix
@@ -636,6 +637,7 @@ def _prepare_native_workers(args: BootstrapArgs, env: MutableMapping[str, str], 
             env.pop("CODE_TE2_PYTHON_SOURCE", None)
         return
     profile = 'release' if args.release else 'debug'
+    env.pop("CODE_TE2_PYTHON_CACHE_PREFIX", None)
     paths = resolve_te2_paths(env)
     for worker in workers:
         fingerprint = _native_worker_fingerprint(worker, profile, env)

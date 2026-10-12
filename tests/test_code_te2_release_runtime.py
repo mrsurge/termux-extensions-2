@@ -85,6 +85,30 @@ def test_android_framework_release_identity(monkeypatch: pytest.MonkeyPatch) -> 
         release_runtime._validate_binary_identity(manifest, package_version='0.2.352')
 
 
+def test_android_allows_only_verified_source_install_caches(payload: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(runtime.sys, 'platform', 'android')
+    source = payload / 'domain/lib/app/apps/code_te2/native_worker.py'
+    source.write_text('pass\n')
+    amend(payload, platform='android', libc='bionic', files={
+        path.relative_to(payload).as_posix(): runtime.sha256(path)
+        for path in payload.rglob('*') if path.is_file() and path.name != runtime.MANIFEST
+    })
+    cache = source.parent / '__pycache__/native_worker.cpython-314.pyc'
+    cache.parent.mkdir()
+    cache.write_bytes(b'pip-created bytecode; never read by native worker')
+    runtime.validate_runtime(payload)
+    unknown = cache.parent / 'unknown.cpython-314.pyc'
+    unknown.write_bytes(b'no tracked source')
+    with pytest.raises(ReleaseRuntimeError, match='untracked'):
+        runtime.validate_runtime(payload)
+    unknown.unlink()
+    reserved = payload / '.disabled-bytecode-cache/poison.pyc'
+    reserved.parent.mkdir()
+    reserved.write_bytes(b'must stay absent')
+    with pytest.raises(ReleaseRuntimeError, match='untracked'):
+        runtime.validate_runtime(payload)
+
+
 def private_payload(root: Path) -> None:
     """Manifest fixture only; real ELF/stdlib proof is a separate build gate."""
     paths = {
@@ -164,6 +188,7 @@ def test_packaged_bootstrap_selects_private_paths(payload: Path, monkeypatch: py
     assert env['CODE_TE2_PYTHON_SOURCE'] == str(payload / 'source')
     assert env['CODE_TE2_PYTHON_ISOLATED'] == '1'
     assert env['CODE_TE2_HOST_PYTHON_EXECUTABLE'] == sys.executable
+    assert env['CODE_TE2_PYTHON_CACHE_PREFIX'] == str(payload / '.disabled-bytecode-cache')
 
 
 def test_complete_set_is_relocatable(payload: Path, tmp_path: Path) -> None:
