@@ -83,6 +83,9 @@ def restore(wheel: Path, expected: str, output: Path) -> None:
             if not required.issubset(selected) or not any('__mypyc' in name for name in extensions):
                 raise RuntimeError('reused wheel omits compiled libraries')
             manifest = dict(domain, modules=modules)
+            # Developer snapshots use absolute source paths. Schema 2 belongs
+            # to the portable packaged form and must not label these paths.
+            manifest.pop('schemaVersion', None)
             (cache / 'startup.json').write_text(json.dumps({'count': len(modules), 'modules': modules}))
             (cache / 'build.log').write_text('Verified domain restored from wheel SHA-256 ' + actual + '\n')
             identity: dict[str, object] = {

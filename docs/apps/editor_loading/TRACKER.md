@@ -49,6 +49,9 @@
   Native unit suite (36) and Python release/bootstrap/reuse suite (71) pass.
   Linux reuse restores the prior validated wheel only after ABI/source/hash
   checks and import validation; no compiler-cache runtime or blanket cache trust.
+  Actual x86 wheel restoration imports all 138 modules (130.55 ms); corrected
+  portable-to-developer manifest labeling before packaging. Native poisoned-cache
+  subprocess checks pass for private and system interpreter modes.
 - [x] Build Gecko/Cefrium/TE2 Termux staging APKs with matching 0.2.353 seed;
   audit package/version, signing, ABI/alignment and hashes.
   Gecko/Cefrium staging builds and signature/alignment checks pass; each contains
