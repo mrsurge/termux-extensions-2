@@ -27,8 +27,8 @@ const THEMES: Record<string, Extension | null> = {
 };
 
 const zebraStripes = EditorView.theme({
-  '& .cm-line:nth-child(even)': { 
-    backgroundColor: 'rgba(128, 128, 128, 0.1)' 
+  '& .cm-line:nth-child(even)': {
+    backgroundColor: 'rgba(128, 128, 128, 0.1)'
   },
   '.cm-dark & .cm-line:nth-child(even)': {
     backgroundColor: 'rgba(255, 255, 255, 0.05)'
@@ -443,10 +443,10 @@ bindMenuToggle(miPaste, async () => {
   } catch {}
   document.execCommand('paste');
 });
-bindMenuToggle(miSelectAll, () => { 
+bindMenuToggle(miSelectAll, () => {
   if (!view) return;
-  view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } }); 
-  view.focus(); 
+  view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } });
+  view.focus();
 });
 
 bindMenuToggle(miToggleLines, () => { showLineNumbers = !showLineNumbers; persistPreferences(); setMenuChecked(miToggleLines, showLineNumbers); createView(getText()); });
