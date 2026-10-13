@@ -256,3 +256,11 @@ These checks record user acceptance, not a newly executed agent/device test run.
 - [x] Targeted backend/frontend tests, applicable typechecks and builds pass.
 - [x] User live acceptance at working end-to-end milestones; commit/release only
   when requested.
+
+## New follow-up — Archive Manager intent integration
+
+- [x] Record desired Archive Manager minimal-query Sidebar opening and background
+  job extraction integration, plus archive-only Code TE2 Explorer context actions.
+- [ ] Investigate/approve/implement and validate; authoritative pending gates are
+  in docs/apps/dependency_trim/TRACKER.md. Prior acceptance above does not cover
+  this new work; no implementation or version/release assignment is implied.

@@ -27,11 +27,24 @@ tracked; current Sidebar transport stays intact for 0.2.354.
   - [x] Extract/adopt shared ASGI body/error/method/lifespan helpers with parity
     tests; retain app-owned routing/DTOs/policy and existing worker integration.
   - [x] Shared ASGI adoption live acceptance (user reports all working).
+  - [x] Archive Manager startup traceback diagnosed and approved venv repair verified.
+  - [x] Archive Manager four-route explicit ASGI/strict typing and extraction job_type fix.
+  - [x] Archive Manager real archive/job/HTTP regression validation.
+  - [ ] Archive Manager backend live acceptance after ordinary worker relaunch.
+  - [ ] Archive frontend typing/build and separately approved Create/Add/Test capability reconciliation.
+  - [x] Record Archive Manager intent-system/File Explorer/Code TE2 archive-menu direction.
+  - [ ] Audit/design and approve archive open/background extraction broker contracts.
+  - [ ] Replace File Explorer archive cross-app HTTP/navigation and dead expand fallback.
+  - [ ] Add minimal Archive Manager Sidebar archive query state and eligible
+    archive-only Code TE2 Explorer actions through backend-owned intent services.
+  - [ ] Archive intent/job/menu standalone/embedded/multi-client/no-replay tests
+    and separately activated live acceptance.
 - [ ] Framework-Shells coordinated migration and updated release metadata.
 - [ ] Runtime bridge/console typed ASGI migration.
 - [ ] Rust MCP POC and transport/client/schema acceptance.
 - [ ] ALS dependency/MCP work separately scoped and validated.
 - [ ] Clean target dependency-resolution and installed release acceptance.
+  - [ ] Strengthen archive-binding smoke checks to verify file_reader, not only import.
 - [x] Record versioned release sequencing and final framework-pipe follow-up.
 - [ ] 0.2.355: approve concrete Sidebar IPC pipe-cutover implementation scope.
 - [ ] 0.2.355: broker project-directory lookup and Sidebar restore-state updates.
@@ -163,3 +176,44 @@ No frontend build/publication, APK/Android source, mypyc/Cargo build, dependency
 declarations or shared runtime restart was performed by the agent. User reports
 all adopted apps working live; acceptance recorded before checkpoint commit. Technical
 contract: app/libs/te2_asgi/README.md.
+
+## Archive Manager backend slice
+
+Read-only inspection of the latest exited Archive Manager shell
+`frs_1791882135714_1037449_34_34` (exit 1) confirmed startup import failure:
+`cannot import name 'file_reader' from 'libarchive'`. Import chain was backend →
+archiver_service → archiver. Installed metadata showed `libarchive` 0.4.7 and
+`libarchive-c` 5.3 sharing the same namespace; the former had overwritten
+`libarchive/__init__.py`. User approved removing the conflicting distribution and
+force-reinstalling declared `libarchive-c==5.3` with no dependency changes.
+An isolated import then confirmed only libarchive-c provides the namespace,
+file_reader is callable and Archive Manager imports/ping succeed. No framework
+restart or automatic app relaunch was performed; this was an environment collision,
+not a reason to alter the supported binding or dependency version.
+
+User separately approved backend migration, strict request/domain boundaries,
+the extraction job_type correction and isolated tests. The backend exports
+TE2_ASGI_APP through app-owned http_app.py, using neutral te2_asgi primitives,
+1 MiB JSON ingress and typed msgspec command shapes. Its four route paths and
+success/error envelopes remain; existing sync filesystem/archive/job operations
+run via asyncio.to_thread as FastAPI previously offloaded them. Serving/readiness
+remains in the existing ordinary worker hook. Extraction admission now passes
+job_type="extract_archive" to JobManager, not the nonexistent type keyword.
+
+Validation: 119 Python tests passed across Archive Manager, shared ASGI, generic
+worker loading/lifecycle and File Explorer HTTP. Real ZIP fixtures cover archive
+listing/internal/hidden paths and selected-file extraction. Other regressions
+cover filesystem order, launch URL/guards, job signature/envelope, malformed
+commands, limits/disconnect, off-event-loop scheduling and no FastAPI/Pydantic
+app-owned imports. Changed modules pass ty and git diff --check; one upstream
+TestClient/httpx warning remains. Test/import TE2 roots were isolated under scratch
+so no live job-state file or shared execution queue was mutated.
+
+Source audit also found pre-existing UI calls to unimplemented archives/create
+and archives/test endpoints. The stale README advertised those plus archives/expand
+and unimplemented extraction options. Documentation now states the four real
+capabilities; restoring new capabilities needs a separately approved slice, not
+silent implementation during this migration. Frontend source/assets, Android,
+native builds, Code TE2 mypyc, release requirements and shared runtime are unchanged.
+Technical contract: app/apps/archive_manager/README.md. Live backend acceptance
+is pending a user-controlled ordinary Archive Manager relaunch.

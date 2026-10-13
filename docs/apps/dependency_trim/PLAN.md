@@ -8,8 +8,8 @@ not regain Pydantic/cryptography transitively. Keep Python policy/orchestration
 typed and independently testable; expose explicit ASGI/DTO/lifespan boundaries
 that remain suitable for later mypyc compilation or native hosting.
 
-Investigation, Terminal slice 1, File Editor's backend/frontend slices and shared
-ASGI helper extraction/adoption are approved.
+Investigation, Terminal slice 1, File Editor's backend/frontend slices, shared
+ASGI helper extraction/adoption and Archive Manager's backend slice are approved.
 Later slices need concrete scope approval. No package uninstall, shared framework
 restart, deployment, native build or changes in dependent repositories are
 authorized by these app-backend slices.
@@ -55,7 +55,7 @@ The preceding editable-build/asset-cleanup work is checkpointed at `15c0b514`.
 | --- | --- | --- |
 | Terminal | Backend explicit ASGI/msgspec migration and strict frontend live accepted | Preserve Node PTY/headless stream and MessagePack protocol; share neutral transport primitives in follow-up |
 | File Editor | Backend typed explicit ASGI and strict TS frontend live accepted | Single generated `main.js` at existing asset URL, retained inline CSS |
-| Archive Manager | Four FastAPI routes; ~1,174-line browser module | Typed backend/ASGI and modular strict TS/browser build |
+| Archive Manager | Four typed explicit-ASGI routes validated; backend live acceptance and ~1,174-line frontend modernization pending | Shared ASGI, typed request boundary, fixed extraction admission; reconcile Create/Test UI/backend capability gaps |
 | Aria Downloader | Ten FastAPI routes; ~1,054-line browser module | Same workflow, preserving aria2 shell/process and polling behavior |
 | Settings | ~291-line browser module; framework-backed settings | Strict TS/browser build only; do not invent a Python settings authority |
 | ALS-RS wrapper/template | FastAPI stub files; actual ALS-RS shell launches native `als-rs` | Verify stub use; migrate the proxy-shell template so new wrappers do not reintroduce FastAPI |
@@ -154,6 +154,14 @@ acceptable; moving console networking/state is a distinct follow-up decision.
    This extraction is implemented and synthetically validated; matching ordinary
    app-worker activation/live acceptance is tracked separately. Archive/Aria
    should consume the helpers rather than repeat transport boilerplate.
+   Archive Manager backend now consumes them; its startup package collision
+   (`libarchive` vs declared `libarchive-c`) was repaired in the approved venv.
+   Before frontend acceptance, decide separately how to reconcile its Create/Add/
+   Test controls with missing `/archives/create` and `/archives/test` handlers.
+   No new archive capabilities are authorized by the four-route backend migration.
+   Follow the Archive Manager intent-integration section below when restoring
+   File Explorer archival actions and adding archive-only Code TE2 menus; the
+   frontend typing slice must not preserve broken cross-app HTTP/navigation paths.
 3. Framework-Shells standalone/Ferrous host explicit ASGI composition and its
    dependency metadata; independent repository approval/tests/release pin updates.
    Dashboard hydration remains Socket.IO; preserve retained public API consumers.
@@ -167,6 +175,100 @@ acceptable; moving console networking/state is a distinct follow-up decision.
 7. Remove obsolete compatibility/dependency declarations only after all supported
    consumers migrate. Prove install closures lack unwanted Pydantic/cryptography
    on Linux and Termux; build/installed-wheel/native asset/device acceptance follows.
+   Installer/runtime archive smoke checks must verify the declared binding's
+   `libarchive.file_reader` API, not merely that `import libarchive` succeeds;
+   an unrelated distribution can shadow that namespace even with satisfied metadata.
+
+## Archive Manager intent integration — planned follow-up
+
+### Desired behavior and state
+
+Re-implement the existing File Explorer archival integration through the app
+intent system and expose corresponding **archive-specific** actions in Code TE2's
+Explorer context menus. Keep Archive Manager minimally stateful/stateless: no new
+tab/session registry or durable sidecar is required. Sidebar launch/restoration
+needs only the current archive query (`archive=...`), with an optional `internal`
+member/directory seed when needed. Host/client/presentation query identity remains
+separate from that minimal view state; one Sidebar presentation must not select
+another's archive from shared host history.
+
+- In embedded File Explorer, Open archive opens Archive Manager in a Sidebar tab,
+  preserving the editor/current project instead of navigating the whole host away.
+- In standalone File Explorer, retain a normal full-page Archive Manager launch
+  with the same minimal query seed. Query strings remain the launch/view contract;
+  they are not mutation commands, authentication or durable backend authority.
+- Restore whole-archive/background extraction in File Explorer and support
+  selected-member extraction from Archive Manager through the same backend job
+  admission. Opening a view and starting extraction are distinct intents; opening
+  or restoring a Sidebar view never implicitly submits an extraction job.
+- Code TE2 Explorer exposes Open in Archive Manager and applicable extraction
+  actions **only for archives**. Archive member/directory actions are offered only
+  when meaningful for that captured archive context. Do not add archival menus
+  indiscriminately to ordinary files/directories or expose unsupported operations.
+
+### Current seams to replace
+
+`app/apps/file_explorer/src/open_actions.ts` currently POSTs cross-app HTTP to
+`/api/app/archive_manager/archives/launch`, reads an app_url and navigates. Its
+non-job extraction fallback calls nonexistent `/archives/expand`. The primary
+path in `src/main.ts` already submits `extract_archive` jobs, but both paths need
+a coherent backend-owned admission/result contract, not competing submissions.
+Archive Manager's manifest has no Sidebar state/intent contract yet; its frontend
+retains broad host state and Create/Add/Test controls whose create/test backend
+handlers are missing. Preserve working helpers where applicable, investigate
+worker/pipe readiness and launch behavior, and replace these legacy seams rather
+than bolting on another direct request/query URL flow.
+
+### Ownership and transport contract
+
+Use the existing framework broker and app-owned backend hooks:
+
+```text
+File Explorer / Code TE2 Explorer frontend
+  -> own backend lane
+  -> typed archive intent/service request
+  -> framework pipe broker
+  -> owning archive/job backend
+  -> job result or exact-client Sidebar launch/projection
+```
+
+Code TE2 Explorer uses its authenticated Explorer context; embedded File Explorer
+supplies its validated exact client/host/presentation identity. The framework
+derives caller app ownership from the pipe and resolves the target through
+allowlisted contracts, not an arbitrary URL, private socket or frontend-selected
+worker. Reuse existing lifecycle/query and Sidebar ledger builders. If Archive
+Manager needs inbound pipe handling, first establish its ordinary worker pipe
+hook/manifest/readiness contract; do not infer support from its HTTP listener.
+
+Archive/path/member/destination validation and job admission belong to backend
+services. Confirm extraction destination/overwrite/destructive choices with the
+normal app-owned dialogs. Validate archive existence/support, applicable project
+and home/permission constraints, source/navigation supersession and member traversal
+boundaries. Return a typed job record/ID immediately; background work/progress,
+completion, cancellation and errors remain owned by existing job machinery and
+must survive closing the Archive Manager view where supported. Never retry an
+uncertain submission through another fallback; no job creation on query replay,
+client reconnect or sidebar restoration.
+
+### Implementation/acceptance gates
+
+1. Audit existing archive/job capabilities, launch/manifest/pipe hooks and menu
+   eligibility; specify typed open/extract payloads and results. Reconcile the
+   already-recorded missing Create/Add/Test capabilities separately; do not
+   pretend old README or frontend controls establish working backend support.
+2. Approve and implement shared backend archive services/broker routing, minimal
+   Sidebar launch/restore query state, then File Explorer integration and targeted
+   Code TE2 Explorer context-menu handlers. Keep Archive Manager frontend typed
+   and bundled under its existing public entrypoint contract.
+3. Test standalone vs embedded launch, archive-only menu eligibility, exact-client
+   and multiple-presentation isolation, whole vs selected extraction, job progress/
+   cancel/failure, traversal/destination guards and no replay/duplicate admission.
+   Validate worker lifecycle and assets separately, then obtain live acceptance.
+
+This is a recorded integration direction, not implementation/restart/release
+permission. It uses the already-established intent broker; it does not pull the
+separate **0.2.355** backend Sidebar IPC transport cutover into the **0.2.354**
+FastAPI-removal work. No release assignment for this added integration is implied.
 
 ## Packaging alternatives and deferred architecture
 

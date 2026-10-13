@@ -20,6 +20,27 @@ This document records desired behavior, not a claim that it is implemented.
 Investigate in bounded chunks, update this plan with source-backed findings,
 then approve a cohesive end-to-end contract before implementing bounded slices.
 
+### Archive Manager follow-up (new direction; not prior acceptance)
+
+Extend the established intent system to Archive Manager, restoring File Explorer
+archive opening/background extraction and adding **archive-only** context-menu
+actions to Code TE2 Explorer. Archive Manager can remain stateless apart from a
+minimal archive launch/restore query (optionally internal member path); no new
+session/tab store is required. Embedded opening uses the initiating client's
+Sidebar; standalone opening uses the normal query-seeded full-page app route.
+
+Archive operations go frontend → own backend → framework pipe broker → archive/
+job owner, with exact presentation validation, captured source/destination/member
+guards and no uncertain mutation replay. Query restoration only restores a view,
+never submits a background job. Retain normal job progress/cancel/results outside
+the view's lifetime. Replace legacy File Explorer cross-app launch HTTP/navigation
+and the nonexistent expand fallback, not the minimal query launch contract itself.
+
+Investigation, implementation gates and checklist now live in
+`docs/apps/dependency_trim/PLAN.md` under **Archive Manager intent integration**
+and its TRACKER.md. Earlier acceptance in this workstream does not cover this
+new integration. The 0.2.355 Sidebar IPC transport cutover remains a separate task.
+
 ## Desired Behavior
 
 ### Code TE2 Explorer
