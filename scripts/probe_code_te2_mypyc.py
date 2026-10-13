@@ -1,7 +1,8 @@
 """Build and import-check Code TE2's startup Python graph with mypyc.
 
 This is a developer workflow, not a wheel build or automatic runtime switch.
-Build intermediates are cached; validated snapshot output directories must be new.
+Build intermediates are cached; fingerprinted snapshots can reuse verified output.
+Legacy explicit snapshot output directories must be new.
 """
 
 from __future__ import annotations
@@ -30,8 +31,9 @@ if str(REPO / "scripts") not in sys.path:
 from profile_code_te2_import import check_event
 from mypyc_build_workflow import (
     activate, build_lock, cache_key, compiler_cache, publish_snapshot,
-    prune, source_digest, toolchain,
+    prune, source_digest, toolchain, build_fingerprint, reusable_snapshot, snapshot_status,
 )
+from framework.bootstrap.compiler_cache_preflight import ccache_health
 
 
 STARTUP_IMPORTS = (
@@ -148,9 +150,14 @@ def inventory(output: Path) -> None:
         print(f"Inventoried {len(modules)} local startup modules: {output}")
 
 
-def build(output: Path, cache_root: Path) -> None:
-    if output.exists() or output.is_symlink():
+def build(output: Path, cache_root: Path, *, fingerprinted: bool = False) -> Path:
+    if not fingerprinted and (output.exists() or output.is_symlink()):
         raise SystemExit(f"output already exists: {output}")
+    if os.environ.get('NO_CACHE') != '1':
+        healthy, diagnostic = ccache_health()
+        if not healthy:
+            print(f'Compiler cache unavailable: {diagnostic}\nFalling back to --no-cache.', file=sys.stderr, flush=True)
+            os.environ['NO_CACHE'] = '1'
     cache_root.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ, PYTHONPATH=str(REPO), PYTHON_JIT="0", PYTHONDONTWRITEBYTECODE="1")
     with tempfile.TemporaryDirectory(prefix='inventory-', dir=cache_root) as temporary:
@@ -166,13 +173,22 @@ def build(output: Path, cache_root: Path) -> None:
     manifest: dict[str, object] = {"modules": modules, "compiled_sources": sources, "interpreted": sorted(INTERPRETED)}
     digest = source_digest(REPO, modules)
     identity = toolchain(REPO, sources)
+    fingerprint = build_fingerprint(REPO, identity, digest)
+    if fingerprinted:
+        output = output.parent / f'domain-{fingerprint}'
     cache = cache_root / cache_key(identity)
-    print(f"Compiling {len(sources)} local modules in one mypyc group", flush=True)
-    from setuptools import setup
-    from mypyc.build import mypycify
-
     os.environ.setdefault("MAX_JOBS", "2")
     with build_lock(cache_root / '.build.lock'):
+        if fingerprinted and (output.exists() or output.is_symlink()):
+            if not reusable_snapshot(output, fingerprint, identity=identity, digest=digest):
+                raise RuntimeError(f'fingerprinted snapshot identity mismatch: {output}')
+            if source_digest(REPO, modules) != digest:
+                raise RuntimeError('source changed during snapshot verification; refusing reuse')
+            print(f'Reusing verified mypyc snapshot: {output}', flush=True)
+            return output
+        print(f"Compiling {len(sources)} local modules in one mypyc group", flush=True)
+        from setuptools import setup
+        from mypyc.build import mypycify
         cache.mkdir(parents=True, exist_ok=True)
         (cache / 'startup.json').write_bytes(inventory_bytes)
         (cache / 'toolchain.json').write_text(json.dumps(identity, indent=2))
@@ -197,6 +213,7 @@ def build(output: Path, cache_root: Path) -> None:
                 print("\n".join(log_path.read_text().splitlines()[-35:]), file=sys.stderr)
             raise
     print(f"Published validated snapshot: {output} (build {time.monotonic() - started:.2f}s)")
+    return output
 
 
 def validate(manifest_path: Path, lib: Path | None) -> None:
@@ -236,11 +253,15 @@ def main() -> None:
     commands.add_parser("inventory").add_argument("--output", type=Path, required=True)
     build_parser = commands.add_parser("build")
     build_parser.add_argument("--output", type=Path, required=True)
+    build_parser.add_argument('--fingerprinted', action='store_true', help='Publish/reuse a content-addressed snapshot beside --output')
+    build_parser.add_argument('--activate-link', type=Path, help='Activate the actual published/reused snapshot after success')
     build_parser.add_argument("--cache-dir", type=Path,
                               default=Path(os.environ.get('TMPDIR') or REPO / '.codex-scratch') / 'mypyc-build-cache')
     activate_parser = commands.add_parser('activate')
     activate_parser.add_argument('--snapshot', type=Path, required=True)
     activate_parser.add_argument('--link', type=Path, default=REPO / '.codex-scratch/mypyc-active')
+    status_parser = commands.add_parser('status')
+    status_parser.add_argument('--snapshot', type=Path, default=REPO / '.codex-scratch/mypyc-active')
     prune_parser = commands.add_parser('prune')
     prune_parser.add_argument('--root', type=Path, default=REPO / '.codex-scratch/mypyc-snapshots')
     prune_parser.add_argument('--link', type=Path, default=REPO / '.codex-scratch/mypyc-active')
@@ -253,7 +274,12 @@ def main() -> None:
     if args.command == "inventory":
         inventory(args.output.resolve())
     elif args.command == "build":
-        build(args.output.resolve(), args.cache_dir.resolve())
+        result = build(args.output.absolute(), args.cache_dir.resolve(), fingerprinted=args.fingerprinted)
+        if args.activate_link:
+            activate(result, args.activate_link.absolute())
+    elif args.command == 'status':
+        state, detail = snapshot_status(REPO, args.snapshot.absolute())
+        print(f'Mypyc snapshot: {state}\n{detail}\nSelection: {args.snapshot.absolute()}')
     elif args.command == 'activate':
         activate(args.snapshot, args.link.absolute())
     elif args.command == 'prune':

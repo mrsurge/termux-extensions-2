@@ -19,7 +19,7 @@ diff/review flows, and stateful sidebar apps.
 
 ## Install
 
-The current release is **0.2.352 alpha**: a normal GitHub Release under an
+The current release is **0.2.353 alpha**: a normal GitHub Release under an
 alpha moniker, available through `latest`.
 
 ### Command-line install: Linux or Termux
@@ -58,7 +58,7 @@ inside Termux, or connect to a remote framework.
 
 1. Install and open the compatible GitHub debug build of Termux once to initialize
    its userspace.
-2. Install the [TE2 Termux preview APK](https://github.com/mrsurge/termux-extensions-2/releases/download/0.2.352/te2-0.2.352-termux-staging-arm64.apk) and open **TE2 Termux**.
+2. Install the [TE2 Termux preview APK](https://github.com/mrsurge/termux-extensions-2/releases/download/0.2.353/te2-0.2.353-termux-staging-arm64.apk) and open **TE2 Termux**.
 3. If TE2 is not installed, choose **Install** in the launcher or the local-framework
    card in Settings, then confirm. Progress is shown in the app; no shell command
    needs to be pasted into Termux.
@@ -101,9 +101,17 @@ installs instead require the build toolchain described below.
 
 ### Termux pip installs
 
-Direct pip/source installation is also possible in Termux, but you must supply
-system dependencies and native build toolchains yourself. Dependencies without
-compatible Android wheels may compile from source, making installation lengthy.
+PyPI also provides the prebuilt TE2 wheel for Android ARM64 with CPython 3.14.
+Compatible Termux environments select it automatically:
+
+```sh
+python -m pip install te2
+```
+
+You must still supply system dependencies yourself. Dependencies without
+compatible Android wheels may compile from source, making installation lengthy;
+unsupported interpreter/platform combinations can also fall back to a source
+installation and require native build toolchains.
 The recommended installer above uses our prebuilt GitHub release wheel archive
 and apt-supplied dependencies to avoid those builds.
 
@@ -114,7 +122,7 @@ For a pinned installation, use the matching tagged download URL instead of
 `latest` and set `TE2_RELEASE_TAG` for the script process:
 
 ```sh
-curl -fsSL https://github.com/mrsurge/termux-extensions-2/releases/download/0.2.352/install-te2 | TE2_RELEASE_TAG=0.2.352 sh -s -- --yes
+curl -fsSL https://github.com/mrsurge/termux-extensions-2/releases/download/0.2.353/install-te2 | TE2_RELEASE_TAG=0.2.353 sh -s -- --yes
 ```
 
 ## Remote-First Workspace
@@ -348,7 +356,15 @@ python -m pip install 'mypy==2.3.0' 'setuptools==84.0.0'
 python -B app/apps/code_te2/build_mypyc.py --jobs 4
 ```
 
-Install `ccache` first, or explicitly allow an uncached build with `--no-cache`.
+Install working `ccache` for compiler reuse. If it is missing or cannot run, the
+script prints the diagnostic and automatically builds without it; `--no-cache`
+also bypasses it deliberately. Exact verified source/toolchain snapshot matches
+are reused without compilation. Check the selected domain with:
+
+```bash
+python -B app/apps/code_te2/build_mypyc.py --status
+```
+
 Reduce `--jobs` on memory-constrained devices. The script builds, validates and
 activates a snapshot; it does not restart running workers. Restart your framework
 after the first activation so bootstrap selects it. Subsequent source changes to

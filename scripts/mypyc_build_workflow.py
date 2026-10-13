@@ -15,7 +15,9 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
-from typing import Callable, Iterator, cast
+from typing import Callable, Generator, cast
+
+from framework.bootstrap.compiler_cache_preflight import ccache_health
 
 SCHEMA = 1
 
@@ -32,6 +34,8 @@ def source_digest(repo: Path, modules: dict[str, str]) -> str:
 
 def toolchain(repo: Path, sources: list[str]) -> dict[str, object]:
     cc = shlex.split(os.environ.get('CC') or str(sysconfig.get_config_var('CC')))
+    if cc and Path(cc[0]).name == 'ccache':
+        cc = cc[1:]
     if not cc:
         raise RuntimeError('no C compiler configured')
     resolved = shutil.which(cc[0])
@@ -56,8 +60,76 @@ def cache_key(identity: dict[str, object]) -> str:
     return hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:24]
 
 
+def build_fingerprint(repo: Path, identity: dict[str, object], digest: str) -> str:
+    # Compiler-generation cache stays source-independent for incremental reuse;
+    # finished snapshots are content-addressed, including the build recipe.
+    recipe = hashlib.sha256()
+    for relative in ('scripts/probe_code_te2_mypyc.py', 'scripts/mypyc_build_workflow.py'):
+        path = repo / relative
+        if path.is_file():
+            recipe.update(relative.encode() + b'\0' + path.read_bytes())
+    return hashlib.sha256(json.dumps({'schema': 1, 'toolchain': identity,
+        'source_digest': digest, 'recipe': recipe.hexdigest()}, sort_keys=True).encode()).hexdigest()
+
+
+def verify_snapshot(snapshot: Path) -> dict[str, object]:
+    snapshot = snapshot.resolve(strict=True)
+    data = read_artifact(snapshot)
+    if hashlib.sha256((snapshot / 'manifest.json').read_bytes()).hexdigest() != data.get('manifest_sha256'):
+        raise RuntimeError('snapshot manifest checksum mismatch')
+    libraries = data.get('libraries')
+    if not isinstance(libraries, dict) or not libraries:
+        raise RuntimeError('snapshot libraries missing')
+    for relative, expected in libraries.items():
+        if not isinstance(relative, str) or not isinstance(expected, str):
+            raise RuntimeError('invalid snapshot library checksum')
+        target = (snapshot / relative).resolve(strict=True)
+        if not target.is_relative_to(snapshot) or hashlib.sha256(target.read_bytes()).hexdigest() != expected:
+            raise RuntimeError(f'snapshot library checksum mismatch: {relative}')
+    return data
+
+
+def reusable_snapshot(snapshot: Path, fingerprint: str, *,
+                      identity: dict[str, object] | None = None,
+                      digest: str | None = None) -> bool:
+    data = verify_snapshot(snapshot)
+    return (data.get('build_fingerprint') == fingerprint and
+            (identity is None or data.get('toolchain') == identity) and
+            (digest is None or data.get('source_digest') == digest))
+
+
+def snapshot_status(repo: Path, snapshot: Path) -> tuple[str, str]:
+    if not snapshot.exists():
+        return 'missing', f'No usable snapshot at {snapshot}'
+    try:
+        data = verify_snapshot(snapshot)
+        manifest = json.loads((snapshot / 'manifest.json').read_text())
+        modules = manifest.get('modules')
+        if not isinstance(modules, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in modules.items()):
+            return 'incompatible', 'Snapshot is not an editable source inventory'
+        if source_digest(repo, cast(dict[str, str], modules)) != data.get('source_digest'):
+            return 'stale', 'Local source differs from the selected snapshot; rebuild/activate'
+        recorded = data.get('toolchain')
+        if not isinstance(recorded, dict) or recorded.get('soabi') != sysconfig.get_config_var('SOABI'):
+            return 'incompatible', 'Python ABI differs from snapshot'
+        sources = manifest.get('compiled_sources')
+        if not isinstance(sources, list):
+            return 'incompatible', 'Compiled source inventory missing'
+        current = toolchain(repo, sources)
+        if current != recorded:
+            return 'incompatible', 'Build toolchain/configuration differs from snapshot'
+        fingerprint = build_fingerprint(repo, current, str(data['source_digest']))
+        if data.get('build_fingerprint') is None:
+            return 'unfingerprinted', 'Legacy snapshot matches source/toolchain but cannot prove current build recipe'
+        if data.get('build_fingerprint') != fingerprint:
+            return 'stale', 'Build recipe differs from snapshot'
+        return 'current', f'Verified fingerprint {fingerprint}'
+    except (OSError, ValueError, RuntimeError, TypeError, KeyError, importlib.metadata.PackageNotFoundError) as exc:
+        return 'incompatible', str(exc)
+
+
 @contextmanager
-def build_lock(path: Path) -> Iterator[None]:
+def build_lock(path: Path) -> Generator[None]:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open('a') as handle:
         try:
@@ -71,10 +143,16 @@ def build_lock(path: Path) -> Iterator[None]:
 
 
 @contextmanager
-def compiler_cache(cache_root: Path, identity: dict[str, object]) -> Iterator[bool]:
+def compiler_cache(cache_root: Path, identity: dict[str, object]) -> Generator[bool]:
     """Content/header/flags-aware compiler reuse; never cache linking."""
     if os.environ.get('NO_CACHE') == '1':
         previous = os.environ.get('CCACHE_DISABLE')
+        previous_cc = os.environ.get('CC')
+        compiler = identity['cc']
+        assert isinstance(compiler, list) and all(isinstance(item, str) for item in compiler)
+        compiler = cast(list[str], compiler)
+        if previous_cc and Path(shlex.split(previous_cc)[0]).name == 'ccache':
+            os.environ['CC'] = shlex.join(compiler)
         os.environ['CCACHE_DISABLE'] = '1'
         try:
             yield False
@@ -83,14 +161,26 @@ def compiler_cache(cache_root: Path, identity: dict[str, object]) -> Iterator[bo
                 os.environ.pop('CCACHE_DISABLE', None)
             else:
                 os.environ['CCACHE_DISABLE'] = previous
+            if previous_cc is None:
+                os.environ.pop('CC', None)
+            else:
+                os.environ['CC'] = previous_cc
         return
     executable = shutil.which('ccache')
     keys = ('CC', 'CCACHE_DIR', 'CCACHE_MAXSIZE', 'CCACHE_COMPILERCHECK')
     saved = {key: os.environ.get(key) for key in keys}
-    enabled = executable is not None
-    if enabled:
+    enabled, diagnostic = ccache_health()
+    if not enabled:
+        print(f'Compiler cache unavailable: {diagnostic}; falling back to --no-cache', file=sys.stderr)
         compiler = identity['cc']
-        assert isinstance(compiler, list)
+        assert isinstance(compiler, list) and all(isinstance(item, str) for item in compiler)
+        compiler = cast(list[str], compiler)
+        os.environ['CC'] = shlex.join(compiler)
+    if enabled:
+        assert executable is not None
+        compiler = identity['cc']
+        assert isinstance(compiler, list) and all(isinstance(item, str) for item in compiler)
+        compiler = cast(list[str], compiler)
         # Don't double-wrap a user-supplied ccache compiler command.
         command = compiler if Path(str(compiler[0])).name == 'ccache' else [executable, *compiler]
         os.environ.update(CC=shlex.join(command), CCACHE_DIR=str(cache_root / 'ccache'),
@@ -130,12 +220,13 @@ def publish_snapshot(repo: Path, cache: Path, output: Path, manifest: dict[str, 
                         'validate', '--manifest', str(stage / 'manifest.json'),
                         '--lib', str(stage / 'lib')], cwd=repo, check=True)
         modules = manifest['modules']
-        assert isinstance(modules, dict)
-        if source_digest(repo, modules) != digest:
+        assert isinstance(modules, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in modules.items())
+        if source_digest(repo, cast(dict[str, str], modules)) != digest:
             raise RuntimeError('source changed during build; refusing snapshot publication')
         (stage / 'artifact.json').write_text(json.dumps({
             'workflow': 'te2-mypyc-snapshot', 'schema': SCHEMA, 'validated': True,
             'source_digest': digest, 'toolchain': identity, 'build_seconds': elapsed,
+            'build_fingerprint': build_fingerprint(repo, identity, digest),
             'manifest_sha256': hashlib.sha256((stage / 'manifest.json').read_bytes()).hexdigest(),
             'libraries': {str(path.relative_to(stage)): hashlib.sha256(path.read_bytes()).hexdigest()
                           for path in (stage / 'lib').rglob('*.so')},

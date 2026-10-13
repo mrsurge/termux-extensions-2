@@ -20,6 +20,11 @@ workflow = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(workflow)
 
 
+@pytest.fixture(autouse=True)
+def working_ccache(monkeypatch):
+    monkeypatch.setattr(workflow, 'ccache_health', lambda: (True, ''))
+
+
 def snapshot(path, *, abi=None):
     path.mkdir(parents=True)
     (path / 'manifest.json').write_text('{}')
@@ -126,11 +131,109 @@ def test_explicit_no_cache_disables_even_user_wrapped_compiler(tmp_path, monkeyp
     monkeypatch.setenv('CC', 'ccache cc')
     monkeypatch.setenv('CCACHE_DISABLE', 'old')
     monkeypatch.setattr(workflow.shutil, 'which', lambda name: pytest.fail('must not enable cache'))
-    with workflow.compiler_cache(tmp_path, {'cc': ['ccache', 'cc']}) as enabled:
+    with workflow.compiler_cache(tmp_path, {'cc': ['cc']}) as enabled:
         assert not enabled
         assert os.environ['CCACHE_DISABLE'] == '1'
-        assert os.environ['CC'] == 'ccache cc'
+        assert os.environ['CC'] == 'cc'
     assert os.environ['CCACHE_DISABLE'] == 'old'
+    assert os.environ['CC'] == 'ccache cc'
+
+
+def test_broken_ccache_falls_back_and_restores_environment(tmp_path, monkeypatch):
+    monkeypatch.delenv('NO_CACHE', raising=False)
+    monkeypatch.setenv('CC', 'ccache cc')
+    monkeypatch.setattr(workflow, 'ccache_health', lambda: (False, 'linker symbol missing'))
+    with workflow.compiler_cache(tmp_path, {'cc': ['cc']}) as enabled:
+        assert not enabled
+        assert os.environ['CC'] == 'cc'
+    assert os.environ['CC'] == 'ccache cc'
+
+
+def test_finished_fingerprint_tracks_source_toolchain_and_recipe(tmp_path):
+    identity = {'soabi': 'abi'}
+    first = workflow.build_fingerprint(tmp_path, identity, 'source1')
+    assert workflow.build_fingerprint(tmp_path, identity, 'source1') == first
+    assert workflow.build_fingerprint(tmp_path, identity, 'source2') != first
+    assert workflow.build_fingerprint(tmp_path, {'soabi': 'new-abi'}, 'source1') != first
+    (tmp_path / 'scripts').mkdir()
+    (tmp_path / 'scripts/mypyc_build_workflow.py').write_text('# changed recipe')
+    assert workflow.build_fingerprint(tmp_path, identity, 'source1') != first
+
+
+def test_reuse_requires_integrity_and_fingerprint(tmp_path):
+    path = snapshot(tmp_path / 'snapshot')
+    metadata = json.loads((path / 'artifact.json').read_text())
+    metadata['build_fingerprint'] = 'matching'
+    (path / 'artifact.json').write_text(json.dumps(metadata))
+    assert workflow.reusable_snapshot(path, 'matching')
+    assert not workflow.reusable_snapshot(path, 'other')
+    (path / 'lib/module.so').write_bytes(b'corrupted')
+    with pytest.raises(RuntimeError, match='checksum mismatch'):
+        workflow.reusable_snapshot(path, 'matching')
+
+
+def test_status_identifies_current_stale_and_missing(tmp_path, monkeypatch):
+    source = tmp_path / 'module.py'
+    source.write_text('value = 1')
+    path = snapshot(tmp_path / 'snapshot')
+    manifest = {'modules': {'module': str(source)}, 'compiled_sources': ['module.py']}
+    (path / 'manifest.json').write_text(json.dumps(manifest))
+    identity = {'soabi': sysconfig.get_config_var('SOABI')}
+    metadata = json.loads((path / 'artifact.json').read_text())
+    digest = workflow.source_digest(tmp_path, manifest['modules'])
+    metadata.update(source_digest=digest, toolchain=identity,
+        manifest_sha256=hashlib.sha256((path / 'manifest.json').read_bytes()).hexdigest(),
+        build_fingerprint=workflow.build_fingerprint(tmp_path, identity, digest))
+    (path / 'artifact.json').write_text(json.dumps(metadata))
+    monkeypatch.setattr(workflow, 'toolchain', lambda *a: identity)
+    assert workflow.snapshot_status(tmp_path, path)[0] == 'current'
+    source.write_text('value = 2')
+    assert workflow.snapshot_status(tmp_path, path)[0] == 'stale'
+    assert workflow.snapshot_status(tmp_path, tmp_path / 'missing')[0] == 'missing'
+
+
+def test_fingerprinted_build_reuses_snapshot_without_compilation(tmp_path, monkeypatch):
+    from scripts import probe_code_te2_mypyc as probe
+    repo = tmp_path / 'repo'
+    repo.mkdir()
+    (repo / 'module.py').write_text('value = 1')
+    modules = {'module': str(repo / 'module.py')}
+    identity = {'soabi': sysconfig.get_config_var('SOABI')}
+    digest = workflow.source_digest(repo, modules)
+    fingerprint = workflow.build_fingerprint(repo, identity, digest)
+    selected = snapshot(tmp_path / 'snapshots' / f'domain-{fingerprint}')
+    metadata = json.loads((selected / 'artifact.json').read_text())
+    metadata['build_fingerprint'] = fingerprint
+    metadata['source_digest'] = digest
+    (selected / 'artifact.json').write_text(json.dumps(metadata))
+    monkeypatch.setattr(probe, 'REPO', repo)
+    monkeypatch.setattr(probe, 'toolchain', lambda *a: identity)
+    monkeypatch.setenv('NO_CACHE', '1')
+    calls = []
+    def inventory_only(command, **kwargs):
+        calls.append(command)
+        assert 'inventory' in command
+        Path(command[command.index('--output') + 1]).write_text(json.dumps({'modules': modules}))
+    monkeypatch.setattr(probe.subprocess, 'run', inventory_only)
+    monkeypatch.setattr(probe, 'compiler_cache', lambda *a: pytest.fail('matching snapshot must not compile'))
+    result = probe.build(tmp_path / 'snapshots' / 'request', tmp_path / 'compiler', fingerprinted=True)
+    assert result == selected and len(calls) == 1
+
+
+def test_status_rejects_abi_and_corruption(tmp_path, monkeypatch):
+    source = tmp_path / 'module.py'
+    source.write_text('value = 1')
+    path = snapshot(tmp_path / 'snapshot', abi='wrong-abi')
+    manifest = {'modules': {'module': str(source)}, 'compiled_sources': ['module.py']}
+    (path / 'manifest.json').write_text(json.dumps(manifest))
+    metadata = json.loads((path / 'artifact.json').read_text())
+    metadata.update(source_digest=workflow.source_digest(tmp_path, manifest['modules']),
+        manifest_sha256=hashlib.sha256((path / 'manifest.json').read_bytes()).hexdigest())
+    (path / 'artifact.json').write_text(json.dumps(metadata))
+    assert workflow.snapshot_status(tmp_path, path)[0] == 'incompatible'
+    (path / 'lib/module.so').write_bytes(b'corrupted')
+    status, detail = workflow.snapshot_status(tmp_path, path)
+    assert status == 'incompatible' and 'checksum mismatch' in detail
 
 
 @pytest.mark.parametrize('failure', [None, 'validation', 'source-change'])

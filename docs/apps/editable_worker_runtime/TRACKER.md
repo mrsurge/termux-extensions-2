@@ -39,7 +39,22 @@ are retained rather than automatically deleted.
 - [x] Update source packaging declarations and retire central worker registry.
 - [x] Document schema, force-build policy, source/release distinctions.
 - [x] Regression suite: 85 tests pass; bootstrap `ty check` is clean.
-- [ ] Pixel one-build and APK ↔ CLI reuse live acceptance.
+- [x] Pixel one-build and APK ↔ CLI reuse live acceptance: user confirms neither environment fights for its own build.
+
+New follow-up: user reports `editor rpc socket connect error` after this acceptance;
+read-only Pixel worker/mypyc provenance and RPC connection diagnosis approved.
+No rebuild, client publication or runtime restart authorized for this investigation.
+
+Read-only diagnosis confirmed stale compiled-domain codec incompatibility: Pixel
+selects `check-20261003-041412-1791000852406259745`, 136 compiled modules; recorded
+source digest does not match current checkout. An isolated process loading that
+exact overlay imports `frontend_rpc_codec` from its compiled `.so`: `msgpack-v1`
+is accepted, `msgpack-gzip-v1` raises `unsupported_rpc_codec`, and `allow_gzip=True`
+raises TypeError. Current frontend selects gzip; gzip auth support landed October
+10 in `58244090`, after this October 3 snapshot. This explains editor namespace
+connection rejection despite native HTTP/host IPC readiness. Rebuild/activate the
+mypyc snapshot and start a fresh Code TE2 worker; no Rust/APK rebuild is needed
+for this mismatch. No runtime was restarted during diagnosis.
 
 Read-only Pixel wheel inspection: production 0.2.353 Android wheel exists under
 `~/.cache/te2-release-build/0.2.353/wheelhouse-production/`, is 48,653,226 bytes,
@@ -52,3 +67,23 @@ One existing setuptools/wheel deprecation warning remains. Exact prior framework
 fingerprint parity and cached binary reuse are independently tested. Alternating
 compiler environments invokes Cargo once; ABI receipt mismatch rebuilds once,
 then reuses. No Rust source was modified, and no native build was run.
+
+## Compiler preflight and mypyc fingerprint slice
+
+- [x] User confirms libc++ update to 30 resolved Pixel ccache startup.
+- [x] User approves automatic uncached fallback for both missing and broken ccache.
+- [x] Bounded executable startup probe, early diagnostics and explicit bypass.
+- [x] Uncached mode bypasses user-supplied ccache compiler wrappers.
+- [x] Content/toolchain/recipe fingerprinted immutable snapshot publication/reuse.
+- [x] Exact-match reuse verifies metadata and library checksums before skipping compilation.
+- [x] Read-only selected-snapshot status without extra startup hashing.
+- [x] Documentation and regression coverage.
+- [ ] Live no-op fingerprinted rebuild acceptance (no full compilation run by agent).
+
+Targeted build/workflow/native-runtime regressions: 97 passed; opt-in real C
+compiler benchmark skipped; one existing setuptools/wheel deprecation warning.
+Type checks pass for all changed build tooling. Helper health logic lives under
+framework/bootstrap, outside the inventoried app/libs domain, to avoid compiling
+build-only tooling into Code TE2. No package operations, cache deletion, Pixel
+deployment, full mypyc build or worker/framework restart was performed. User's
+untracked ccache source/archive files remain untouched.

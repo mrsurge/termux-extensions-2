@@ -293,12 +293,20 @@ python -B app/apps/code_te2/build_mypyc.py
 Publishes validated mypyc snapshots under the resolved
 `TE2_CACHE_HOME/code_te2/build/mypyc-snapshots/` (normally
 `~/.cache/te2/code_te2/build/mypyc-snapshots/`). The finished shared objects are in
-the snapshot's `lib/`, alongside its manifest/provenance. The existing cached
+the snapshot's `lib/`, alongside its manifest/provenance. New snapshots are named
+`domain-<sha256>` from startup source contents, toolchain/configuration and build
+recipe. An unchanged invocation inventories sources and verifies metadata/library
+checksums, then reuses the exact snapshot without mypyc code generation, C
+compilation or relinking. Different source/toolchain/recipe inputs produce a new
+immutable snapshot. A corrupt existing fingerprinted snapshot fails visibly;
+the builder does not overwrite or delete accepted snapshots. The existing cached
 build helper remains the authority; compiler intermediates stay in its existing
 `${TMPDIR:-<repo>/.codex-scratch}/mypyc-build-cache` to retain cache reuse.
 Default jobs is `MAX_JOBS`, otherwise one; override with `--jobs N`.
-The entrypoint requires `ccache` on PATH and exits with failure before inventory
-or compilation if missing. Install it, or explicitly opt into a slower build:
+The entrypoint checks `ccache --version` with a bounded timeout before inventory.
+If missing, unlaunchable (for example a libc++ linker mismatch), timed out or
+nonzero, it reports the actual failure and automatically falls back to uncached
+compilation. It does not disable ccache for Android as a platform. Explicit bypass:
 `python -B app/apps/code_te2/build_mypyc.py --no-cache` (equivalently
 `NO_CACHE=1 python -B app/apps/code_te2/build_mypyc.py`). These overrides disable
 compiler caching for that invocation, including a user-supplied ccache wrapper;
@@ -327,7 +335,9 @@ The installed setuptools recompiles a changed shared extension as a whole. When
 `ccache` is present, the workflow uses a dedicated **512 MB** compiler cache with
 content-based compiler checking; unchanged C/header/flag combinations reuse cached
 objects. The low-level probe can still run without ccache, but the preferred local
-entrypoint requires explicit opt-out instead of silently accepting that mode.
+entrypoint and low-level probe both diagnose unavailable/broken ccache and fall
+back; `--no-cache`/`NO_CACHE=1` skip probing. A user-supplied ccache `CC` wrapper is
+removed while uncached compilation runs, then restored in the caller's environment.
 On Termux, `pkg install ccache` supplies this **development** tool; it is
 not a runtime/user-install dependency. Shared generated-header changes can invalidate
 many objects. We retain a single shared compilation unit and `multi_file=True`.
@@ -340,6 +350,16 @@ checks ABI and snapshot checksums, atomically switches the active symlink and ke
 the former target at `mypyc-active-previous`. Neither action restarts a process;
 already-running workers retain old imports until an approved app-worker restart.
 Snapshot resource links still refer to editable source, as in the existing probe.
+
+`python -B app/apps/code_te2/build_mypyc.py --status` is read-only. It reports
+`current`, `stale`, `missing`, `incompatible`, or `unfingerprinted` for matching
+legacy snapshots without a build-recipe fingerprint. It verifies manifest/library
+checksums, source contents and toolchain/ABI without importing the worker or
+compiling. An already-running worker retains its old modules even after a new
+selection: status describes the selector, not the live process. This introduces
+no startup hashing or automatic runtime rebuild. Low-level developer scripts keep
+their legacy unique `--output` behavior unless `build --fingerprinted` is specified;
+`--activate-link` selects the actual published/reused snapshot only on success.
 
 No automatic deletion occurs. For new managed snapshots only:
 

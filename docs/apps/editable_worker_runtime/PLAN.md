@@ -77,3 +77,22 @@ The Pixel retains the 0.2.353 production Android wheel, 48,653,226 bytes, tagged
 in that device's supported pip tags. This does not prove all Termux versions use
 the same tags, nor authorize replacing an existing artifact. Transfer/upload and
 publication are separate from this source-build implementation slice.
+
+## Mypyc fingerprint and ccache-health follow-up
+
+User resolved the Pixel ccache linking failure by updating libc++ to version 30.
+Before that update, installed ccache 4.14.1 required `__hash_memory`, absent from
+libc++ 29. This was an executable/runtime mismatch, not generic Android failure.
+
+Approved behavior (supersedes older explicit-opt-out-only policy): probe ccache
+startup before inventory; missing, failing or timed-out ccache prints its error
+and automatically falls back to uncached compilation. Explicit `--no-cache` and
+`NO_CACHE=1` bypass probing. No platform-wide Android disable or package repair.
+
+Keep compiler-generation cache identity source-independent for incremental
+objects. Separately fingerprint finished snapshots from source digest, full
+toolchain identity and build recipe, storing immutable `domain-<sha256>` outputs.
+Reuse only exact verified metadata/library matches; do not run mypyc/codegen/C
+compiler/linker for a match, overwrite corrupt snapshots or mutate live workers.
+Expose read-only status for stale/missing/incompatible/current/legacy snapshots.
+No additional startup hashing, runtime rebuilds or packaged release changes.
