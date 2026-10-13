@@ -8,7 +8,8 @@ not regain Pydantic/cryptography transitively. Keep Python policy/orchestration
 typed and independently testable; expose explicit ASGI/DTO/lifespan boundaries
 that remain suitable for later mypyc compilation or native hosting.
 
-Investigation, Terminal slice 1 and File Editor's backend/frontend slices are approved.
+Investigation, Terminal slice 1, File Editor's backend/frontend slices and shared
+ASGI helper extraction/adoption are approved.
 Later slices need concrete scope approval. No package uninstall, shared framework
 restart, deployment, native build or changes in dependent repositories are
 authorized by these app-backend slices.
@@ -28,6 +29,10 @@ The preceding editable-build/asset-cleanup work is checkpointed at `15c0b514`.
 
 ## Established reusable contracts
 
+- `app/libs/te2_asgi/`: neutral typed body/error/method/redirect/no-op lifespan
+  primitives, adopted by Terminal, File Editor and File Explorer. Each app retains
+  its body/null/decoder policy and routes/DTOs/permissions/sockets; response sends
+  stay outside dispatch-error handling. Contract: library README.md.
 - `app/libs/app_worker_asgi.py`: explicit `TE2_ASGI_APP`, reserved loop probe,
   application-owned mounts/lifespan and paired worker lifecycle. Do not create
   another supervisor or HTTP server for an app.
@@ -146,6 +151,9 @@ acceptable; moving console networking/state is a distinct follow-up decision.
    app-owned; no FastAPI-style introspection, another app's imports or global
    readiness/transport authority. Keep response-start/streaming failures from
    emitting a second response and preserve each app's body/optional-body policy.
+   This extraction is implemented and synthetically validated; matching ordinary
+   app-worker activation/live acceptance is tracked separately. Archive/Aria
+   should consume the helpers rather than repeat transport boilerplate.
 3. Framework-Shells standalone/Ferrous host explicit ASGI composition and its
    dependency metadata; independent repository approval/tests/release pin updates.
    Dashboard hydration remains Socket.IO; preserve retained public API consumers.

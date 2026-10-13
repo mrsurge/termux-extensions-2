@@ -2,14 +2,14 @@
 from __future__ import annotations
 
 import logging
-from typing import cast
 from urllib.parse import parse_qsl
 
 import msgspec
 from starlette.exceptions import HTTPException
-from starlette.responses import JSONResponse, RedirectResponse, Response
+from starlette.responses import JSONResponse, Response
 from starlette.types import Receive, Scope, Send
 from starlette.websockets import WebSocket
+from app.libs.te2_asgi import noop_lifespan, read_json_object, read_optional_json_object, redirect_to, require_method, resolve_http_response
 
 from .request_dtos import CreateShellRequest, ShellActionRequest, ShellInputRequest, ShellResizeRequest, decode_request
 
@@ -25,13 +25,7 @@ class TerminalASGI:
         if scope["type"] == "lifespan":
             # The generic worker owns listener-ready hooks and worker services.
             # Socket.IO's existing mount has no application lifespan callbacks.
-            while True:
-                event = await receive()
-                if event["type"] == "lifespan.startup":
-                    await send({"type": "lifespan.startup.complete"})
-                elif event["type"] == "lifespan.shutdown":
-                    await send({"type": "lifespan.shutdown.complete"})
-                    return
+            await noop_lifespan(receive, send)
         elif path == "/socket.io" or path.startswith("/socket.io/"):
             await backend.TERMINAL_LIFECYCLE_ASGI_APP(scope, receive, send)
         elif scope["type"] == "websocket":
@@ -40,16 +34,9 @@ class TerminalASGI:
             else:
                 await send({"type": "websocket.close", "code": 1008})
         elif scope["type"] == "http":
-            try:
-                response = await self._dispatch(scope, receive)
-            except HTTPException as exc:
-                response = JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers)
-            except ConnectionAbortedError:
-                return
-            except Exception:
-                logger.exception("Terminal HTTP request failed")
-                response = Response("Internal Server Error", status_code=500)
-            await response(scope, receive, send)
+            response = await resolve_http_response(lambda: self._dispatch(scope, receive), logger=logger, error_message="Terminal HTTP request failed")
+            if response is not None:
+                await response(scope, receive, send)
 
     async def _dispatch(self, scope: Scope, receive: Receive) -> Response:
         from . import backend
@@ -73,12 +60,9 @@ class TerminalASGI:
         else:
             raise HTTPException(404, "Not Found")
         if original_path != path:
-            query = scope.get("query_string", b"").decode("latin-1")
-            target = scope.get("root_path", "") + path.rstrip("/")
-            return RedirectResponse(target + ("?" + query if query else ""), status_code=307)
+            return redirect_to(scope, path.rstrip("/"))
         method = scope["method"]
-        if method not in methods:
-            raise HTTPException(405, "Method Not Allowed", headers={"Allow": ", ".join(methods)})
+        require_method(method, methods)
         result: object
         if method == "GET":
             if path == "/sidebar/cwd":
@@ -115,40 +99,6 @@ class TerminalASGI:
         return JSONResponse(result)
 
     async def _body(self, scope: Scope, receive: Receive, *, optional: bool) -> dict[str, object] | None:
-        headers = dict(scope.get("headers", []))
-        length = headers.get(b"content-length")
-        if length is not None:
-            try:
-                size = int(length)
-            except ValueError as exc:
-                raise HTTPException(400, "Invalid Content-Length") from exc
-            if size < 0:
-                raise HTTPException(400, "Invalid Content-Length")
-            if size > MAX_BODY_BYTES:
-                raise HTTPException(413, "Request body too large")
-        content_type = headers.get(b"content-type", b"application/json").split(b";", 1)[0].strip().lower()
-        if content_type != b"application/json" and not content_type.endswith(b"+json"):
-            raise HTTPException(422, "Request body must be JSON")
-        data = bytearray()
-        while True:
-            event = await receive()
-            if event["type"] == "http.disconnect":
-                raise ConnectionAbortedError()
-            if event["type"] != "http.request":
-                raise HTTPException(400, "Invalid request body event")
-            data.extend(event.get("body", b""))
-            if len(data) > MAX_BODY_BYTES:
-                raise HTTPException(413, "Request body too large")
-            if not event.get("more_body", False):
-                break
-        if optional and not data:
-            return None
-        try:
-            value: object = msgspec.json.decode(data)
-        except msgspec.DecodeError as exc:
-            raise HTTPException(422, "Invalid JSON body") from exc
-        if optional and value is None:
-            return None
-        if not isinstance(value, dict):
-            raise HTTPException(422, "Request body must be an object")
-        return cast(dict[str, object], value)
+        if optional:
+            return await read_optional_json_object(scope, receive, max_bytes=MAX_BODY_BYTES)
+        return await read_json_object(scope, receive, max_bytes=MAX_BODY_BYTES)

@@ -2,27 +2,19 @@
 from __future__ import annotations
 
 import logging
-from typing import cast
 from urllib.parse import parse_qsl
 
 import msgspec
 from starlette.exceptions import HTTPException
-from starlette.responses import JSONResponse, RedirectResponse, Response
+from starlette.responses import JSONResponse, Response
 from starlette.types import Receive, Scope, Send
+from app.libs.te2_asgi import HTTPError as FileEditorError
+from app.libs.te2_asgi import noop_lifespan, read_json_object, redirect_to, require_method, resolve_http_response
 
 # Includes JSON escaping overhead for large editable documents. Read responses
 # retain their existing unrestricted size; this is only an ingress bound.
 MAX_BODY_BYTES = 32 * 1024 * 1024
 logger = logging.getLogger(__name__)
-
-
-class FileEditorError(Exception):
-    """Preserve the app's structured error detail without an untyped framework."""
-    def __init__(self, status_code: int, detail: object) -> None:
-        super().__init__(str(detail))
-        self.status_code: int = status_code
-        self.detail: object = detail
-        self.headers: dict[str, str] | None = None
 
 
 class WriteRequest(msgspec.Struct, kw_only=True):
@@ -33,26 +25,13 @@ class WriteRequest(msgspec.Struct, kw_only=True):
 class FileEditorASGI:
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "lifespan":
-            while True:
-                event = await receive()
-                if event["type"] == "lifespan.startup":
-                    await send({"type": "lifespan.startup.complete"})
-                elif event["type"] == "lifespan.shutdown":
-                    await send({"type": "lifespan.shutdown.complete"})
-                    return
+            await noop_lifespan(receive, send)
         elif scope["type"] == "websocket":
             await send({"type": "websocket.close", "code": 1008})
         elif scope["type"] == "http":
-            try:
-                response = await self._dispatch(scope, receive)
-            except (HTTPException, FileEditorError) as exc:
-                response = JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers)
-            except ConnectionAbortedError:
-                return
-            except Exception:
-                logger.exception("File Editor HTTP request failed")
-                response = Response("Internal Server Error", status_code=500)
-            await response(scope, receive, send)
+            response = await resolve_http_response(lambda: self._dispatch(scope, receive), logger=logger, error_message="File Editor HTTP request failed")
+            if response is not None:
+                await response(scope, receive, send)
 
     async def _dispatch(self, scope: Scope, receive: Receive) -> Response:
         from . import main
@@ -64,11 +43,8 @@ class FileEditorASGI:
         if expected is None:
             raise HTTPException(404, "Not Found")
         if original != path:
-            query = scope.get("query_string", b"").decode("latin-1")
-            target = scope.get("root_path", "") + path
-            return RedirectResponse(target + ("?" + query if query else ""), status_code=307)
-        if scope["method"] != expected:
-            raise HTTPException(405, "Method Not Allowed", headers={"Allow": expected})
+            return redirect_to(scope, path)
+        require_method(scope["method"], (expected,))
         result: object
         if path == "/":
             result = await main.status()
@@ -93,37 +69,4 @@ class FileEditorASGI:
         return JSONResponse(result)
 
     async def _body(self, scope: Scope, receive: Receive) -> dict[str, object]:
-        headers = dict(scope.get("headers", []))
-        length = headers.get(b"content-length")
-        if length is not None:
-            try:
-                size = int(length)
-            except ValueError as exc:
-                raise HTTPException(400, "Invalid Content-Length") from exc
-            if size < 0:
-                raise HTTPException(400, "Invalid Content-Length")
-            if size > MAX_BODY_BYTES:
-                raise HTTPException(413, "Request body too large")
-        content_type = headers.get(b"content-type", b"application/json").split(b";", 1)[0].strip().lower()
-        if content_type != b"application/json" and not content_type.endswith(b"+json"):
-            raise HTTPException(422, "Request body must be JSON")
-        body = bytearray()
-        while True:
-            event = await receive()
-            if event["type"] == "http.disconnect":
-                raise ConnectionAbortedError()
-            if event["type"] != "http.request":
-                raise HTTPException(400, "Invalid request body event")
-            chunk = event.get("body", b"")
-            if len(body) + len(chunk) > MAX_BODY_BYTES:
-                raise HTTPException(413, "Request body too large")
-            body.extend(chunk)
-            if not event.get("more_body", False):
-                break
-        try:
-            value: object = msgspec.json.decode(body)
-        except msgspec.DecodeError as exc:
-            raise HTTPException(422, "Invalid JSON body") from exc
-        if not isinstance(value, dict):
-            raise HTTPException(422, "Request body must be an object")
-        return cast(dict[str, object], value)
+        return await read_json_object(scope, receive, max_bytes=MAX_BODY_BYTES)

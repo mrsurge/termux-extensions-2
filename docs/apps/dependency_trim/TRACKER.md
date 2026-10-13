@@ -24,8 +24,9 @@ tracked; current Sidebar transport stays intact for 0.2.354.
   - [x] File Editor frontend native asset publication/live acceptance (user reported working).
   - [x] Schedule shared neutral ASGI primitives after File Editor frontend and
     before remaining backend migrations.
-  - [ ] Extract/adopt shared ASGI body/error/method/lifespan helpers with parity
+  - [x] Extract/adopt shared ASGI body/error/method/lifespan helpers with parity
     tests; retain app-owned routing/DTOs/policy and existing worker integration.
+  - [x] Shared ASGI adoption live acceptance (user reports all working).
 - [ ] Framework-Shells coordinated migration and updated release metadata.
 - [ ] Runtime bridge/console typed ASGI migration.
 - [ ] Rust MCP POC and transport/client/schema acceptance.
@@ -128,3 +129,37 @@ deprecation warning remains. No shared runtime/app restart, dependency metadata,
 frontend build/OTA, Android, nested repository or native build changes occurred.
 User reports the File Editor backend working live; acceptance recorded before
 checkpoint commit. No agent-initiated runtime transition was performed.
+
+## Shared ASGI helper slice
+
+User approved `app/libs/te2_asgi` extraction/adoption in Terminal, File Editor and
+File Explorer through the blocking input tool. Neutral helpers replace duplicated
+body/header limits, JSON-object parsing, structured errors, method/redirect and
+trivial lifespan machinery. App routes/DTOs/path and identity validation stay
+local; Node brokers, terminal streams, tab lifecycle, sidebar calls and generic
+worker readiness/lifespan integration remain unchanged.
+
+Preserved differences: Terminal optional sidebar body is None for empty/null;
+File Explorer's two sidebar HTTP bodies default to an empty object but reject
+JSON null; File Editor requires an object with its existing 32 MiB limit (the
+other apps retain 1 MiB). File Explorer explicitly retains stdlib JSON decoder
+semantics, including encoding/numeric handling. Sending a response remains
+outside shared dispatch-error resolution; a streaming error cannot emit a second
+status/header block or retry its handler.
+
+Initial validation: 132 helper/adopted-app/worker tests passed, including stream
+failure after response start for all three adopted apps, cumulative body limits,
+disconnect before mutation, mount-root/query redirects, structured detail/headers,
+decoder parity and no app/schema-framework imports in the neutral library.
+Changed library/app boundaries pass `ty` and `git diff --check`. One upstream
+TestClient/httpx deprecation warning remains. Broader regressions recorded below.
+
+Broader validation: 220 Python tests passed across helpers, all three apps,
+generic worker loading/lifecycle, Terminal Node/stream/lifecycle, File Explorer
+tabs/terminal/raw stream/isolation and app intents. No performance claim or live
+acceptance is inferred from these results.
+
+No frontend build/publication, APK/Android source, mypyc/Cargo build, dependency
+declarations or shared runtime restart was performed by the agent. User reports
+all adopted apps working live; acceptance recorded before checkpoint commit. Technical
+contract: app/libs/te2_asgi/README.md.

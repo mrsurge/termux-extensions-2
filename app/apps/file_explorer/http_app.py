@@ -9,11 +9,12 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping, MutableMapping
-from typing import cast
 from urllib.parse import parse_qsl
 
 from starlette.exceptions import HTTPException
-from starlette.responses import JSONResponse, RedirectResponse, Response
+from starlette.responses import JSONResponse, Response
+from app.libs.te2_asgi import asgi_bytes as _bytes, asgi_text as _string
+from app.libs.te2_asgi import noop_lifespan, read_json_object, redirect_to, require_method, resolve_http_response
 Scope = MutableMapping[str, object]
 Message = MutableMapping[str, object]
 Receive = Callable[[], Awaitable[Message]]
@@ -38,28 +39,15 @@ class FileExplorerHTTP:
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope['type'] == 'lifespan':
-            while True:
-                event = await receive()
-                if event['type'] == 'lifespan.startup':
-                    await send({'type': 'lifespan.startup.complete'})
-                elif event['type'] == 'lifespan.shutdown':
-                    await send({'type': 'lifespan.shutdown.complete'})
-                    return
+            await noop_lifespan(receive, send)
         elif scope['type'] == 'websocket':
             await send({'type': 'websocket.close', 'code': 1008})
         elif scope['type'] == 'http':
-            try:
-                response = await self._dispatch(scope, receive)
-            except HTTPException as exc:
-                response = JSONResponse({'detail': exc.detail}, status_code=exc.status_code, headers=exc.headers)
-            except ConnectionAbortedError:
-                return  # A disconnected request never reaches a mutation handler.
-            except Exception:
-                logger.exception('File Explorer HTTP request failed')
-                response = Response('Internal Server Error', status_code=500)
+            response = await resolve_http_response(lambda: self._dispatch(scope, receive), logger=logger, error_message='File Explorer HTTP request failed')
             # Streaming errors after response start are not retried or replaced
             # with a second response. FileResponse owns download cancellation.
-            await response(scope, receive, send)
+            if response is not None:
+                await response(scope, receive, send)
 
     async def _dispatch(self, scope: Scope, receive: Receive) -> Response:
         path = _string(scope['path'])
@@ -68,13 +56,10 @@ class FileExplorerHTTP:
         if path not in known:
             if path.endswith('/') and path.rstrip('/') in known:
                 # Match the previous router's slash normalization, including query.
-                query = _bytes(scope.get('query_string', b'')).decode('latin-1')
-                target = _string(scope.get('root_path', '')) + path.rstrip('/')
-                return RedirectResponse(target + ('?' + query if query else ''), status_code=307)
+                return redirect_to(scope, path.rstrip('/'))
             raise HTTPException(404, 'Not Found')
         expected_method = 'GET' if path in QUERY_ROUTES else 'POST'
-        if method != expected_method:
-            raise HTTPException(405, 'Method Not Allowed', headers={'Allow': expected_method})
+        require_method(method, (expected_method,))
         if method == 'GET':
             query_params = dict(parse_qsl(_bytes(scope.get('query_string', b'')).decode('utf-8', errors='replace'), keep_blank_values=True))
             result = await self.query_handler(path, query_params)
@@ -84,58 +69,16 @@ class FileExplorerHTTP:
         return result if isinstance(result, Response) else JSONResponse(result)
 
     async def _body(self, scope: Scope, receive: Receive) -> dict[str, object]:
-        headers = dict(cast(list[tuple[bytes, bytes]], scope.get('headers', [])))
-        length = headers.get(b'content-length')
-        if length is not None:
-            try:
-                size = int(length)
-            except ValueError as exc:
-                raise HTTPException(400, 'Invalid Content-Length') from exc
-            if size < 0:
-                raise HTTPException(400, 'Invalid Content-Length')
-            if size > MAX_BODY_BYTES:
-                raise HTTPException(413, 'Request body too large')
-        content_type = headers.get(b'content-type', b'application/json').split(b';', 1)[0].strip().lower()
-        if content_type != b'application/json' and not content_type.endswith(b'+json'):
-            raise HTTPException(422, 'Request body must be JSON')
-        data = bytearray()
-        while True:
-            event = await receive()
-            if event['type'] == 'http.disconnect':
-                raise ConnectionAbortedError()
-            if event['type'] != 'http.request':
-                raise HTTPException(400, 'Invalid request body event')
-            chunk = _bytes(event.get('body', b''))
-            if len(data) + len(chunk) > MAX_BODY_BYTES:
-                raise HTTPException(413, 'Request body too large')
-            data.extend(chunk)
-            if not event.get('more_body', False):
-                break
-        try:
-            if not data and scope['path'] not in {'/sidebar/window/state', '/sidebar/window/open_url'}:
-                raise HTTPException(422, 'Request body is required')
-            value: object = json.loads(data) if data else {}
-        except (ValueError, UnicodeError, RecursionError) as exc:
-            raise HTTPException(422, 'Invalid JSON body') from exc
-        if not isinstance(value, dict):
-            raise HTTPException(422, 'Request body must be an object')
-        raw = cast(Mapping[object, object], value)
-        if any(not isinstance(key, str) for key in raw):
-            raise HTTPException(422, 'Object keys must be strings')
-        body: dict[str, object] = {str(key): item for key, item in raw.items()}
+        body = await read_json_object(scope, receive, max_bytes=MAX_BODY_BYTES,
+            empty='object' if scope['path'] in {'/sidebar/window/state', '/sidebar/window/open_url'} else 'reject',
+            decoder=_decode_json)
         for field in STRING_FIELDS:
             if field in body and body[field] is not None and not isinstance(body[field], str):
                 raise HTTPException(422, f'{field} must be a string')
         return body
 
 
-def _string(value: object) -> str:
-    if not isinstance(value, str):
-        raise HTTPException(400, 'Invalid ASGI text field')
-    return value
-
-
-def _bytes(value: object) -> bytes:
-    if not isinstance(value, bytes):
-        raise HTTPException(400, 'Invalid ASGI bytes field')
-    return value
+def _decode_json(data: bytes | bytearray) -> object:
+    # Retain the established stdlib decoder's encoding/number semantics. The
+    # reusable mechanism defaults to msgspec, but does not impose DTO policy.
+    return json.loads(data)
