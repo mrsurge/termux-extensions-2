@@ -10,7 +10,8 @@ that remain suitable for later mypyc compilation or native hosting.
 
 Investigation, Terminal slice 1, File Editor's backend/frontend slices, shared
 ASGI helper extraction/adoption, Archive Manager's backend/frontend slices and
-Aria Downloader's backend slice (including stop/restart compatibility fixes) are approved.
+Aria Downloader's backend slice (including stop/restart compatibility fixes) and
+its frontend typing/minification slice are approved.
 Later slices need concrete scope approval. No package uninstall, shared framework
 restart, deployment, native build or changes in dependent repositories are
 authorized by these app-backend slices.
@@ -57,7 +58,7 @@ The preceding editable-build/asset-cleanup work is checkpointed at `15c0b514`.
 | Terminal | Backend explicit ASGI/msgspec migration and strict frontend live accepted | Preserve Node PTY/headless stream and MessagePack protocol; share neutral transport primitives in follow-up |
 | File Editor | Backend typed explicit ASGI and strict TS frontend live accepted | Single generated `main.js` at existing asset URL, retained inline CSS |
 | Archive Manager | Typed explicit-ASGI backend and strict TS/minified frontend validated synthetically; live acceptance pending | Shared ASGI, typed request boundary, fixed extraction admission; reconcile Create/Test UI/backend capability gaps separately |
-| Aria Downloader | Ten typed explicit-ASGI routes implemented; backend live acceptance and ~1,054-line frontend conversion pending | Shared helpers; stop/refetch and restart via terminate/spawn preserve manager contracts |
+| Aria Downloader | Typed explicit-ASGI backend functionally live accepted; strict TS/minified frontend synthetically validated, publication pending | Shared helpers; stop/refetch and restart via terminate/spawn; recurring 502 and socket/intents remain follow-ups |
 | Settings | ~291-line browser module; framework-backed settings | Strict TS/browser build only; do not invent a Python settings authority |
 | ALS-RS wrapper/template | FastAPI stub files; actual ALS-RS shell launches native `als-rs` | Verify stub use; migrate the proxy-shell template so new wrappers do not reintroduce FastAPI |
 | Generic app worker | Lazy `app_worker_fastapi.py` compatibility path | Retire after supported built-ins/templates migrate; explicitly decide external legacy-router policy |
@@ -240,6 +241,10 @@ but recurring 502 Bad Gateway responses remain. Investigate exact failing route,
 framework proxy vs Aria's aria2-RPC 502 envelope, readiness timing, RPC endpoint/
 credentials and overlapping polling before attributing a cause. Working service
 behavior is not proof that those failures are fixed.
+The user also reports trouble invalidating stale tracked shells. Investigate
+record liveness/ownership, tracked-ID cleanup and frontend refresh ordering
+together with the service-control follow-up; do not mark this resolved by the
+typing/build conversion or silently remove existing user shell records.
 
 ### Typed JSON-RPC socket frontend — planned follow-up
 

@@ -46,4 +46,6 @@ the shell manager; they never spawn/terminate a real shell or contact live aria2
 
 Activation requires an approved ordinary Aria app-worker restart, not a framework
 restart, Code TE2 mypyc rebuild or Cargo build. This backend slice changes no
-frontend assets; strict TS/bundling and native client publication remain separate.
+frontend assets. The frontend now has strict TypeScript source and a single
+minified `main.js` bundle; its activation still needs separate native publication.
+See [FRONTEND.md](FRONTEND.md) for source/build/validation and OTA details.

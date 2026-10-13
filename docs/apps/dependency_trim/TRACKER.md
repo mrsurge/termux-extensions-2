@@ -58,7 +58,9 @@ tracked; current Sidebar transport stays intact for 0.2.354.
   - [x] Aria child-start fix live acceptance after user worker refresh.
   - [x] Record Aria intent-system and shell-ownership follow-up direction.
   - [ ] Audit/approve Aria intent callers, broker contracts and shell-owner cutover.
-  - [ ] Aria frontend strict TS/minified bundle and regression/publication acceptance.
+  - [x] Aria frontend strict TS/minified bundle and synthetic regressions.
+  - [x] Aria frontend functional live acceptance (user reports fine).
+  - [ ] Investigate Aria stale-shell invalidation alongside deferred 502 diagnosis.
   - [x] Record typed JSON-RPC/event-driven socket frontend follow-up.
   - [ ] Audit/approve Aria socket DTOs, backend observation and event/reconnect contracts.
   - [ ] Implement/validate socket frontend, then separately activate/publish and retire legacy polling.
@@ -81,6 +83,28 @@ requirements/source and release metadata remain authority for later resolution.
 No nested-repository source was edited. Earlier uncommitted source/asset/build
 work and unrelated user files remain preserved. No performance/size win is claimed
 before measurement. Web references and compatibility details are in PLAN.md.
+
+## Aria Downloader frontend slice
+
+Approved via blocking input: strict TypeScript conversion, typed unknown ingress,
+single minified module, app-owned regression tests, packaging exclusions and docs.
+`src/main.ts`/`contracts.ts` own source; existing manifest-mapped `main.js` is the
+generated output. The authored inline-CSS template and existing app.js compatibility
+re-export remain unchanged. Backend, HTTP polling/control behavior, current native
+controls/layout, shell ownership and intent/socket modernization are not changed.
+
+Validation: strict typecheck/build and seven Node frontend regressions pass;
+177 isolated Python app/ASGI/worker/bootstrap regressions also pass (one existing
+Starlette/httpx deprecation warning); diff checks are clean.
+Bundle approximately 23.0 KiB. Tests execute compiled source using DOM/API/host/timer
+fixtures: downloads/status/shell validation, malformed saved/picker/browse payloads,
+initial rendering, shell/bulk control requests, directory preference and add
+options, visibility refresh/no mutation replay, polling cleanup, visible 502
+errors and existing asset mapping. User reports the frontend fine after testing;
+recurring 502 and stale-shell invalidation remain unresolved follow-ups. No
+agent-performed OTA/publication is claimed. No framework/worker restart, APK,
+mypyc, Cargo or backend/dependency-runtime changes were performed.
+Build/activation contract: `app/apps/aria_downloader/FRONTEND.md`.
 
 ## Aria Downloader backend slice
 

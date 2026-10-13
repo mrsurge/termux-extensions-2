@@ -59,6 +59,8 @@ include-package-data = true
     "apps/file_editor/node_modules/**/*",
     "apps/archive_manager/node_modules",
     "apps/archive_manager/node_modules/**/*",
+    "apps/aria_downloader/node_modules",
+    "apps/aria_downloader/node_modules/**/*",
 ]
 "desktop_client" = [
     "electron/src/**/*.test.ts",
@@ -113,6 +115,8 @@ exclude = [
     "app.apps.file_editor.node_modules.*",
     "app.apps.archive_manager.node_modules",
     "app.apps.archive_manager.node_modules.*",
+    "app.apps.aria_downloader.node_modules",
+    "app.apps.aria_downloader.node_modules.*",
     "desktop_client.android_shell",
     "desktop_client.android_shell.*",
     "desktop_client.electron",
