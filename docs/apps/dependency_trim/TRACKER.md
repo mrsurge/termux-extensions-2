@@ -31,7 +31,9 @@ tracked; current Sidebar transport stays intact for 0.2.354.
   - [x] Archive Manager four-route explicit ASGI/strict typing and extraction job_type fix.
   - [x] Archive Manager real archive/job/HTTP regression validation.
   - [ ] Archive Manager backend live acceptance after ordinary worker relaunch.
-  - [ ] Archive frontend typing/build and separately approved Create/Add/Test capability reconciliation.
+  - [x] Archive frontend strict TypeScript/minified build and synthetic regressions.
+  - [ ] Archive frontend native asset publication/live acceptance.
+  - [ ] Separately approve/reconcile Create/Add/Test capability gaps.
   - [x] Record Archive Manager intent-system/File Explorer/Code TE2 archive-menu direction.
   - [ ] Audit/design and approve archive open/background extraction broker contracts.
   - [ ] Replace File Explorer archive cross-app HTTP/navigation and dead expand fallback.
@@ -58,6 +60,31 @@ requirements/source and release metadata remain authority for later resolution.
 No nested-repository source was edited. Earlier uncommitted source/asset/build
 work and unrelated user files remain preserved. No performance/size win is claimed
 before measurement. Web references and compatibility details are in PLAN.md.
+
+## Archive Manager frontend slice
+
+Approved through blocking user input: strict TypeScript conversion, single
+minified bundle, isolated tests and documentation, preserving current URLs and
+behavior. `src/main.ts` now owns the app; `src/contracts.ts` validates listings,
+bookmarks, restored state, picker results and jobs as unknown ingress. Global
+HTTP envelopes are unwrapped separately from the already-unwrapped app-shell API.
+The build writes directly to existing `main.js`, retaining the shared external
+jobs helper and authored inline-CSS template. Development node_modules is
+excluded from Python package discovery/data.
+
+Validation: strict frontend typecheck/build, seven app-owned Node regressions,
+and 119 isolated Python Archive/ASGI/helper/worker/File Explorer regressions pass.
+One existing Starlette/httpx deprecation warning remains. Generated bundle is
+approximately 22.9 KiB. Tests execute compiled source against DOM/host/job
+fixtures for query opening, state normalization, selection/extraction admission,
+notifications, directory navigation, Show hidden persistence, malformed DTOs,
+failed-admission no-retry behavior and the retained asset mapping.
+
+No backend, Android source, APK, native Cargo/mypyc, shared runtime transition or
+client OTA publication occurred. Live backend/frontend acceptance remains open.
+Create/Add/Test gaps and archive pipe-intent integration remain separately scoped;
+this typing slice does not silently implement or claim those capabilities.
+Build/publication contract: `app/apps/archive_manager/FRONTEND.md`.
 
 ## Terminal slice 1
 

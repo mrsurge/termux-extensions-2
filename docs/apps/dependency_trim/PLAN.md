@@ -9,7 +9,7 @@ typed and independently testable; expose explicit ASGI/DTO/lifespan boundaries
 that remain suitable for later mypyc compilation or native hosting.
 
 Investigation, Terminal slice 1, File Editor's backend/frontend slices, shared
-ASGI helper extraction/adoption and Archive Manager's backend slice are approved.
+ASGI helper extraction/adoption and Archive Manager's backend/frontend slices are approved.
 Later slices need concrete scope approval. No package uninstall, shared framework
 restart, deployment, native build or changes in dependent repositories are
 authorized by these app-backend slices.
@@ -55,7 +55,7 @@ The preceding editable-build/asset-cleanup work is checkpointed at `15c0b514`.
 | --- | --- | --- |
 | Terminal | Backend explicit ASGI/msgspec migration and strict frontend live accepted | Preserve Node PTY/headless stream and MessagePack protocol; share neutral transport primitives in follow-up |
 | File Editor | Backend typed explicit ASGI and strict TS frontend live accepted | Single generated `main.js` at existing asset URL, retained inline CSS |
-| Archive Manager | Four typed explicit-ASGI routes validated; backend live acceptance and ~1,174-line frontend modernization pending | Shared ASGI, typed request boundary, fixed extraction admission; reconcile Create/Test UI/backend capability gaps |
+| Archive Manager | Typed explicit-ASGI backend and strict TS/minified frontend validated synthetically; live acceptance pending | Shared ASGI, typed request boundary, fixed extraction admission; reconcile Create/Test UI/backend capability gaps separately |
 | Aria Downloader | Ten FastAPI routes; ~1,054-line browser module | Same workflow, preserving aria2 shell/process and polling behavior |
 | Settings | ~291-line browser module; framework-backed settings | Strict TS/browser build only; do not invent a Python settings authority |
 | ALS-RS wrapper/template | FastAPI stub files; actual ALS-RS shell launches native `als-rs` | Verify stub use; migrate the proxy-shell template so new wrappers do not reintroduce FastAPI |

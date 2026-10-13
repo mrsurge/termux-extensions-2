@@ -110,5 +110,9 @@ Run `ty check app/apps/archive_manager/backend.py app/apps/archive_manager/http_
 and `python -m pytest -q tests/test_archive_manager_asgi.py` with isolated TE2 data
 roots so diagnostic imports cannot touch the live job-state file. The tests exercise
 real ZIP/libarchive fixtures and extraction handlers without starting shared jobs.
-Backend activation is an ordinary Archive Manager worker restart; this slice
-changes no frontend assets and needs no OTA, APK, mypyc or Cargo rebuild.
+Backend activation is an ordinary Archive Manager worker restart. Frontend source
+now lives in `src/` and builds to one minified `main.js` at the existing asset URL;
+run `npm run typecheck`, `npm test`, and `npm run build` from this directory.
+See [FRONTEND.md](FRONTEND.md) for ownership and publication details. Native
+frontend activation requires OTA or matching packaged assets; neither frontend
+nor ordinary backend activation requires a Code TE2 mypyc or Cargo rebuild.
