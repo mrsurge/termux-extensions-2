@@ -78,6 +78,7 @@ internal object CefriumAssetRoutes {
     )
 
     fun localPath(requestPath: String): String? {
+        AlsProxyAssets.localPath(requestPath)?.let { return it }
         builtInAppAssets[requestPath]?.let { return it }
         if (
             requestPath !in localFiles &&

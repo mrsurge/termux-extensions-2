@@ -1,5 +1,7 @@
 {
   "localPrefixes": [
+    "/api/app/als-rs/proxy/static/",
+    "/apps/als_rs/frontend/static/",
     "/apps/terminal/vendor/android-terminalapp-assets-js/",
     "/apps/by-id/terminal/vendor/android-terminalapp-assets-js/",
     "/static/vendor/codicons/",
@@ -71,6 +73,11 @@
     "/apps/code_te2/monaco_editor/vscode_chat_editing_vendor/upstream/media/chatEditingEditorOverlay.css"
   ],
   "localMappings": [
+    {
+      "kind": "prefix",
+      "source": "/api/app/als-rs/proxy/static/",
+      "destination": "/apps/als_rs/frontend/static/"
+    },
     {
       "kind": "prefix",
       "source": "/apps/by-id/terminal/vendor/android-terminalapp-assets-js/",
@@ -178,6 +185,11 @@
     }
   ],
   "requiredFiles": [
+    "apps/als_rs/frontend/manifest.json",
+    "apps/als_rs/frontend/static/dist/codex_agent.js",
+    "apps/als_rs/frontend/static/codex_agent.css",
+    "apps/als_rs/frontend/static/js/console_bridge.js",
+    "apps/als_rs/frontend/static/vendor/socket.io/socket.io.min.js",
     "apps/als_rs/template.html",
     "apps/als_rs/main.js",
     "apps/archive_manager/template.html",

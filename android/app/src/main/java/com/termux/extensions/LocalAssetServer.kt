@@ -198,7 +198,10 @@ class LocalAssetServer(
             return
         }
 
-        val relativePath = requestPath.removePrefix("/")
+        // CSS/module subresources can resolve against the redirected local
+        // asset origin; resolve the same static alias without a redirect loop.
+        val assetPath = AlsProxyAssets.localPath(requestPath) ?: requestPath
+        val relativePath = assetPath.removePrefix("/")
         val file = File(assetRoot, relativePath)
         val rootPath = assetRoot.canonicalPath.trimEnd(File.separatorChar) + File.separator
         val filePath = file.canonicalPath
@@ -208,7 +211,8 @@ class LocalAssetServer(
         }
 
         Log.d(TAG, "Serving $requestPath -> $relativePath")
-        val cacheControl = if (requestPath.startsWith("/android-shell/")) {
+        val cacheControl = if (requestPath.startsWith("/android-shell/") ||
+            assetPath.startsWith("/apps/als_rs/frontend/static/")) {
             "no-store"
         } else {
             "max-age=31536000, immutable"
@@ -269,6 +273,7 @@ class LocalAssetServer(
             name.endsWith(".css") -> "text/css"
             name.endsWith(".html") -> "text/html"
             name.endsWith(".json") -> "application/json"
+            name.endsWith(".wasm") -> "application/wasm"
             name.endsWith(".png") -> "image/png"
             name.endsWith(".svg") -> "image/svg+xml"
             name.endsWith(".ico") -> "image/x-icon"

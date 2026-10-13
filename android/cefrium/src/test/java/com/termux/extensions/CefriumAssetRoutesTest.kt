@@ -27,6 +27,13 @@ class CefriumAssetRoutesTest {
 
     @Test
     fun rejectsDynamicAndUndeclaredFrameworkPaths() {
+        assertEquals("/apps/als_rs/frontend/static/dist/codex_agent.js",
+            CefriumAssetRoutes.localPath("/api/app/als-rs/proxy/static/dist/codex_agent.js"))
+        assertEquals("/apps/als_rs/frontend/static/vendor/tree-sitter-bash/tree-sitter-bash.wasm",
+            CefriumAssetRoutes.localPath("/api/app/als-rs/proxy/static/vendor/tree-sitter-bash/tree-sitter-bash.wasm"))
+        assertNull(CefriumAssetRoutes.localPath("/api/app/als-rs/proxy/"))
+        assertNull(CefriumAssetRoutes.localPath("/api/app/als-rs/proxy/api/health"))
+        assertNull(CefriumAssetRoutes.localPath("/api/app/als-rs/proxy/socket.io/"))
         assertNull(CefriumAssetRoutes.localPath("/api/apps/catalog"))
         assertNull(CefriumAssetRoutes.localPath("/api/app/code_te2/socket.io"))
         assertNull(CefriumAssetRoutes.localPath("/apps/file_explorer/file_explorer.py"))

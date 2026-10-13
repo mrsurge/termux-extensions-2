@@ -26,6 +26,11 @@ tracked; current Sidebar transport stays intact for 0.2.354.
 - [ ] Verify real uvloop transport/FD/subprocess parity on desktop/Termux.
 - [ ] Separately activate and compare desktop/Pixel behavior and timings.
 - [ ] Other app/frontend/template migrations.
+  - [x] Settings strict TypeScript, existing-URL minified ESM, validated HTTP/host DTOs.
+  - [x] Proxy-wrapper template/scaffold and ALS compatibility stub use explicit ASGI.
+  - [x] Settings/stub regressions: 6 frontend tests, 50 Python tests; TypeScript,
+    new helper/stub ty checks and diff whitespace validation pass.
+  - [ ] Settings native asset publication and user live acceptance.
   - [x] File Editor backend scope approved; explicit ASGI/strict types implemented.
   - [x] File Editor isolated backend/worker regression tests.
   - [x] File Editor backend live acceptance after app-worker restart.
@@ -65,10 +70,25 @@ tracked; current Sidebar transport stays intact for 0.2.354.
   - [ ] Audit/approve Aria socket DTOs, backend observation and event/reconnect contracts.
   - [ ] Implement/validate socket frontend, then separately activate/publish and retire legacy polling.
 - [ ] Framework-Shells coordinated migration and updated release metadata.
-- [ ] Runtime bridge/console typed ASGI migration.
+  - [x] Verify upstream FastAPI removal 4f033f22 merged to main at 583273b1.
+- [x] Runtime bridge/console typed ASGI source migration and isolated regressions.
+  - [x] User restarted framework and reports console working after transition.
+  - [ ] Live MCP transport acceptance (synthetic initialize/lifespan tests pass).
 - [ ] Rust MCP POC and transport/client/schema acceptance.
 - [ ] ALS dependency/MCP work separately scoped and validated.
-- [ ] Clean target dependency-resolution and installed release acceptance.
+- [ ] Coordinated ALS/FWS optional uvloop and target dependency follow-up
+  (after the three implementation slices above).
+  - [x] Record ALS Python FWS adapter stdio/embedded loop call sites and coordinated
+    TE2/ALS/FWS target dependency and native-wheel publication requirements.
+  - [ ] Approve/implement ALS optional uvloop at owned loop boundaries and regressions.
+  - [ ] Audit Android marker values/private Linux runtime and select mutually
+    exclusive uvloop-te2 Android versus upstream uvloop Linux dependencies.
+  - [ ] Audit FWS native artifact inventory and Android/Linux wheel tags/content.
+  - [ ] Fresh target installs and live Python/Ferrous/ALS adapter parity acceptance.
+- [ ] Final dependency/release sequence (after all source/dependency work).
+  - [ ] Select new FWS release version, build/validate Linux x86-64 and Android
+    aarch64 wheels; explicitly approve/publish PyPI artifacts and update pins.
+  - [ ] Clean target dependency-resolution and installed release acceptance.
   - [ ] Strengthen archive-binding smoke checks to verify file_reader, not only import.
 - [x] Record versioned release sequencing and final framework-pipe follow-up.
 - [ ] 0.2.355: approve concrete Sidebar IPC pipe-cutover implementation scope.
@@ -85,6 +105,26 @@ work and unrelated user files remain preserved. No performance/size win is claim
 before measurement. Web references and compatibility details are in PLAN.md.
 
 ## Aria Downloader frontend slice
+
+### Settings and proxy-wrapper stub slice — 2026-10-13
+
+Approved source-only slice completed. Settings source is src/main.ts/contracts.ts;
+single minified main.js remains the public mount (6.5 KiB), CSS stays inline.
+Unknown settings fields survive save merges; host-state token restoration and
+persistent-network toggle restoration/save are tested. Shell text renders via
+textContent instead of interpolated HTML; action IDs are URL-encoded.
+Framework settings/shell/extension authority and existing request lanes remain.
+
+Proxy template/scaffold and ALS wrapper stub export TE2_ASGI_APP using neutral
+app.libs.te2_asgi.status.StatusASGI. GET root, 404, 405/Allow, denied WebSocket,
+lifespan and generated display-name escaping have regression coverage. Scaffold's
+broader legacy Any annotations are unchanged; this slice types the generated stub.
+ALS shellspec still launches its native Rust server; this does not move its real
+serving into Python. No installed user templates/wrappers were overwritten.
+
+Validation: 6 Node tests, 50 Python tests, Settings tsc/build, changed ASGI ty and
+git diff --check. No OTA, runtime restart, APK build, commit or push in this slice.
+Current framework-backed extension catalog behavior is preserved, not redesigned.
 
 Approved via blocking input: strict TypeScript conversion, typed unknown ingress,
 single minified module, app-owned regression tests, packaging exclusions and docs.
@@ -148,6 +188,30 @@ requests and backend-owned event projections are added to the plan; no socket
 conversion or additional runtime transition is performed in this checkpoint.
 
 ## Optional uvloop integration
+
+### Runtime bridge/console ASGI slice — 2026-10-13
+
+Approved source-only migration: runtime_bridge.build_app creates Starlette with
+the existing /api/health JSON response and console/SSE/Streamable HTTP mounts.
+Explicit MCP child lifespans retain startup order and reverse shutdown/failure
+cleanup. HEAD health remains 405 to match the prior FastAPI route behavior.
+Console callbacks use typed object/payload and namespace/server protocols; unknown
+Socket.IO/JSON ingress is narrowed at the boundary. Arbitrary nested eval/log
+values remain opaque object data. Namespaces, rooms, polling/WebSocket serving,
+replay limits, log serialization, registration, timeout/cancel and late-result
+behavior are retained. A malformed non-string reqId no longer causes dictionary
+lookup failure. MCP models/FastMCP/Pydantic intentionally remain for the next slice.
+
+Validation: 54 Python tests pass, including five isolated bridge probes plus six
+existing eval cases within one probe; actual Engine.IO polling, MCP Streamable
+HTTP initialize/session creation, lifespan startup failure cleanup and typed
+admission tested. ty and basedpyright pass on changed bridge/console modules.
+Console imports truncate their configured transcript: all runtime probes import
+in disposable subprocess cache/config/data roots, never the live console root.
+No active runtime restart, OTA, package install, native build, commit or push.
+
+User subsequently restarted the runtime and reports console working good; console
+live acceptance recorded. MCP live acceptance is not inferred from console success.
 
 User approved source-only integration/tests. Shared `asyncio_runtime` selects
 `uvloop.new_event_loop` when installed, ordinary asyncio if absent or disabled

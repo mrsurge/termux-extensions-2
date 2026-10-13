@@ -1,4 +1,49 @@
-# Proxy Shell Wrapper Template
+# ALS-RS proxy wrapper and native static assets
+
+TE2 opens ALS through `/api/app/als-rs/proxy/`. The wrapper's `main.js` and
+`template.html` remain generic proxy-shell resources; native clients also package
+the actual ALS static frontend, not just that wrapper.
+
+## Pinned frontend snapshot
+
+`vendor/frontend/manifest.json` pins ALS 0.2.132, source commit, source/served
+SHA-256 inventories and license. `vendor/frontend/static/` contains all 148 static
+resources (~4.82 MiB raw), excluding the existing map/backup policy. No backend,
+templates, installed-extension assets or mutable runtime data are vendored.
+Reproduce/update explicitly from a clean ALS checkout:
+
+```bash
+python -B scripts/vendor_als_frontend.py --source-repo ../agent_log_server
+python -B scripts/vendor_als_frontend.py --check
+```
+
+Do not hand-edit this managed snapshot. Static/version/license source must be
+committed; missing inputs, unknown vendor content, symlinks or modified snapshots
+fail instead of silently replacing user files. Text is projected according to
+the existing ALS quoted API/WS/static and CSS URL rewrite declaration because
+local serving bypasses the server response rewrite. Source and served hashes
+distinguish this projection; binary fonts/images/WASM remain unchanged.
+
+The shared OTA/APK manifest packages `apps/als_rs/frontend/`. Electron and Gecko
+map `/api/app/als-rs/proxy/static/*` into its `static/*` subtree. Android's shared
+`AlsProxyAssets` alias is used by Cefrium/TE2 Termux and Gecko's LocalAssetServer,
+including module/CSS requests on the redirected local origin. WASM uses
+`application/wasm`; ALS local responses use no-store across same-version OTA.
+Provenance/core scripts and CSS are required before OTA activation.
+
+ALS HTML remains server-rendered because it contains runtime-selected socket and
+transcript transport settings. API/health/socket, manifest/service-worker and
+installed-extension routes stay remote through the proxy. Never intercept the
+entire `/proxy/` or `/api/` namespace. Provenance records the bundled version; it
+does not negotiate compatibility with unknown remote ALS versions. Align ALS and
+this snapshot when upgrading/releasing; validate different remote versions.
+
+Activation is separate: native route changes require rebuilt Electron/Android
+clients plus matching OTA/APK seed publication. No deployment, APK assembly or
+runtime restart is implied by build success. The complete shared Android seed
+publisher is `scripts/bundle_gecko_assets.sh` (all three Android targets).
+
+## Reusable proxy-shell template
 
 This is a first-party template for onboarding non-native worker apps through the shared `proxy_shell` engine.
 

@@ -100,6 +100,8 @@ function replaceHeader(headers, name, value) {
 // Prefixes backed by complete OTA directory entries. Keep API prefixes limited
 // to immutable static trees so dynamic backend routes always stay on TE2.
 const LOCAL_PREFIXES = [
+  "/api/app/als-rs/proxy/static/",
+  "/apps/als_rs/frontend/static/",
   "/apps/terminal/vendor/android-terminalapp-assets-js/",
   "/apps/by-id/terminal/vendor/android-terminalapp-assets-js/",
   "/static/vendor/codicons/",
@@ -177,6 +179,9 @@ const BUILTIN_APP_ASSETS = new Map([
 ]);
 
 function localPathFor(urlPath) {
+  if (urlPath.startsWith("/api/app/als-rs/proxy/static/")) {
+    return "/apps/als_rs/frontend/static/" + urlPath.slice("/api/app/als-rs/proxy/static/".length);
+  }
   if (BUILTIN_APP_ASSETS.has(urlPath)) return BUILTIN_APP_ASSETS.get(urlPath);
   if (!LOCAL_FILES.has(urlPath) && !LOCAL_PREFIXES.some((prefix) => urlPath.startsWith(prefix))) {
     return null;

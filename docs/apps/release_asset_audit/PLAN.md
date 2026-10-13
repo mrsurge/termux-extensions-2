@@ -9,7 +9,27 @@ Android wheel to PyPI beside the Linux wheel, not rebuilt current-branch content
 Update README release references and platform-wheel guidance. No APK assembly,
 native compression flag changes, runtime restart or dependency refactor.
 
-## Source findings and implementation
+## ALS proxied static frontend interception — additional approved slice
+
+Bundle immutable ALS static resources for Electron, Gecko, Cefrium and TE2 Termux
+under the existing native asset pipeline. Only the TE2 wrapper was previously
+mapped; actual frontend URLs use `/api/app/als-rs/proxy/static/`.
+
+- Pin ALS 0.2.132 source/served hashes, commit/version and license in the app-owned
+  vendor tree. Preserve all static scripts/fonts/images/WASM/auxiliary files
+  except the existing excluded map/backup suffixes; regenerate explicitly.
+- Project text using the existing ALS proxy rewrite declaration, bypassed by
+  local responses. Add full shared OTA/APK tree, core required inputs and static-
+  only mappings. Resolve Gecko local-origin aliases, WASM MIME and no-store.
+- Preserve dynamic HTML/runtime transport settings, APIs/sockets and installed
+  extension resources on the proxy. Provenance is not remote-version negotiation.
+- Validate complete inventory/hashes/routes, existing built-ins, Electron types/
+  tests and isolated Kotlin route tests; update owning docs/repo memory.
+- No dependent-repo edits, framework restart, APK assembly or client publication.
+  Route changes need rebuilt clients and matching assets; older APKs cannot gain
+  native routing from editor OTA alone. Live acceptance is a separate gate.
+
+## Earlier retired-vendor work
 
 - Current snippet highlighting uses shared TextMate. Highlight.js vendor tree
   has no production consumer; its generated TS language registry is orphaned.

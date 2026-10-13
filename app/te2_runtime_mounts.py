@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, Callable
 from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
 from typing import TypeAlias, cast
 
-from fastapi import FastAPI
+from starlette.applications import Starlette
 from fastmcp.server.http import StarletteWithLifespan
 from app.te2_mcp.server import (
     build_http_app,
@@ -23,7 +23,7 @@ TE2_MCP_ASGI_APP: StarletteWithLifespan = build_http_app()
 TE2_MCP_STREAMABLE_HTTP_ASGI_APP: StarletteWithLifespan = build_streamable_http_app()
 
 
-def mount_te2_runtime_services(app: FastAPI) -> None:
+def mount_te2_runtime_services(app: Starlette) -> None:
     """Mount TE2 runtime-owned console and MCP transports."""
 
     app.mount(TE2_CONSOLE_SOCKET_PATH, TE2_CONSOLE_ASGI_APP)
@@ -32,11 +32,11 @@ def mount_te2_runtime_services(app: FastAPI) -> None:
 
 
 @asynccontextmanager
-async def te2_runtime_lifespan(_app: object | None = None) -> AsyncIterator[None]:
+async def te2_runtime_lifespan(_app: object | None = None) -> AsyncGenerator[None]:
     """Run lifespan hooks for mounted TE2 runtime-owned ASGI apps."""
 
     async with AsyncExitStack() as stack:
         for child_app in (TE2_MCP_ASGI_APP, TE2_MCP_STREAMABLE_HTTP_ASGI_APP):
             child_lifespan = cast(LifespanContextFactory, child_app.lifespan)
-            await stack.enter_async_context(child_lifespan(child_app))
+            _ = await stack.enter_async_context(child_lifespan(child_app))
         yield

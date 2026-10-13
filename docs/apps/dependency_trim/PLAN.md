@@ -59,10 +59,10 @@ The preceding editable-build/asset-cleanup work is checkpointed at `15c0b514`.
 | File Editor | Backend typed explicit ASGI and strict TS frontend live accepted | Single generated `main.js` at existing asset URL, retained inline CSS |
 | Archive Manager | Typed explicit-ASGI backend and strict TS/minified frontend validated synthetically; live acceptance pending | Shared ASGI, typed request boundary, fixed extraction admission; reconcile Create/Test UI/backend capability gaps separately |
 | Aria Downloader | Typed explicit-ASGI backend functionally live accepted; strict TS/minified frontend synthetically validated, publication pending | Shared helpers; stop/refetch and restart via terminate/spawn; recurring 502 and socket/intents remain follow-ups |
-| Settings | ~291-line browser module; framework-backed settings | Strict TS/browser build only; do not invent a Python settings authority |
-| ALS-RS wrapper/template | FastAPI stub files; actual ALS-RS shell launches native `als-rs` | Verify stub use; migrate the proxy-shell template so new wrappers do not reintroduce FastAPI |
+| Settings | Strict TS/browser module, single minified existing main.js URL; framework-backed settings | Source/regressions complete; native publication/live acceptance pending; no Python settings authority |
+| ALS-RS wrapper/template | Explicit typed ASGI compatibility stubs; actual ALS-RS shell launches native `als-rs` | Template/scaffold source migrated; existing installed wrappers are not silently rewritten |
 | Generic app worker | Lazy `app_worker_fastapi.py` compatibility path | Retire after supported built-ins/templates migrate; explicitly decide external legacy-router policy |
-| Runtime bridge | FastAPI root mounting console and two FastMCP HTTP apps | Explicit ASGI/typed composition, then native MCP replacement |
+| Runtime bridge | Starlette root mounting typed console Socket.IO and two retained FastMCP HTTP apps | Source/regressions complete; live activation pending, then native MCP replacement |
 
 Each app owns its backend, shellspec and protocols. Share neutral ASGI/type/build
 primitives, not another app's source. Convert browser source to strict TS with
@@ -95,9 +95,11 @@ Installed metadata/source checks show:
 - FastMCP 3.4.7 requires fastmcp-slim[client,server]; slim retains Pydantic,
   pydantic-settings, Python MCP SDK and Authlib. Authlib/joserfc and the SDK's
   pyjwt[crypto] pull in cryptography. Switching to slim does not meet the goal.
-- Framework-Shells 0.0.64 still declares FastAPI; its Python API/Ferrous host
-  composition imports it. User confirms its single dashboard page is event-
-  hydrated, so the same explicit-ASGI workflow fits. The maintainer owns this repo.
+- Baseline Framework-Shells 0.0.64 declared FastAPI. Upstream main now includes
+  removal commit 4f033f22 via merge 583273b1: explicit typed Starlette ASGI,
+  msgspec ingress and optional owned-loop uvloop selection. Local worktree and
+  released dependency pins have not been updated by this investigation. Its
+  single dashboard page remains event-hydrated; the maintainer owns this repo.
 - ALS-RS itself is native; user confirms its FastAPI requirement is stale. Its
   adjacent source requirements still declare it, so pip installs it regardless.
   Legacy `als_deprecated` code exists; supported-runtime metadata must be separated
@@ -133,9 +135,11 @@ acceptable; moving console networking/state is a distinct follow-up decision.
 
 ## Ordered implementation slices and validation gates
 
-**Optional uvloop follow-up:** shared factory/startup integration is implemented;
-published-wheel verification, packaging and runtime activation remain pending.
-See the uvloop section below before continuing remaining app migrations.
+**Optional uvloop follow-up:** shared factory/startup integration is implemented.
+The newly added ALS uvloop, target dependencies and FWS wheel work is deferred
+until after runtime bridge/console, Rust MCP and ALS dependency/MCP cleanup.
+Final dependency resolution, wheel builds/validation and publication follow all
+source/dependency work. This is the user-corrected ordering.
 
 1. Terminal explicit ASGI + msgspec/dataclass request boundary, existing strict
    frontend checks; isolated HTTP/WebSocket/lifecycle/stream regressions. No Node
@@ -171,6 +175,8 @@ See the uvloop section below before continuing remaining app migrations.
 3. Framework-Shells standalone/Ferrous host explicit ASGI composition and its
    dependency metadata; independent repository approval/tests/release pin updates.
    Dashboard hydration remains Socket.IO; preserve retained public API consumers.
+   Upstream implementation is complete; retain downstream compatibility checks
+   here, but defer the newly added uvloop work to step 7 and publication to step 8.
 4. Runtime bridge explicit ASGI and typed console DTOs; keep current MCP mounts
    temporarily. Update obsolete Python-server assertions to current ownership.
 5. Rust MCP POC: initialization, tools/list/call, schema parity, errors, sessions,
@@ -178,12 +184,20 @@ See the uvloop section below before continuing remaining app migrations.
    Then migrate framework tools, adapt console tools without duplicate state.
 6. ALS coordinated stale-requirement cleanup and MCP/KB plan; independently scoped
    implementation/release work. Maintain exact harness/tool contracts.
-7. Remove obsolete compatibility/dependency declarations only after all supported
+7. Coordinated ALS/FWS optional uvloop, Android/Linux dependency selection and
+   FWS native artifact/tag audit. Run after steps 4–6. Existing optional-loop
+   integration remains implemented; no new loop behavior is removed or reverted.
+8. Final dependency/release sequence: remove obsolete compatibility/dependency
+   declarations only after all supported
    consumers migrate. Prove install closures lack unwanted Pydantic/cryptography
    on Linux and Termux; build/installed-wheel/native asset/device acceptance follows.
    Installer/runtime archive smoke checks must verify the declared binding's
    `libarchive.file_reader` API, not merely that `import libarchive` succeeds;
    an unrelated distribution can shadow that namespace even with satisfied metadata.
+   Select the new FWS version, build/validate Linux x86-64 and Android aarch64
+   wheels, publish after explicit approval and adopt downstream pins. Perform
+   final clean installs and release validation against the completed dependency
+   set; packaging/publication is last, not a prerequisite to source migration.
 
 ## Optional uvloop integration — next steps
 
@@ -226,6 +240,7 @@ visibly, and native domain startup reports factory failure immediately. No
 dependency install, requirements change, worker/framework restart, wheel
 publication or new native build is performed. Compiled Code TE2 activation needs
 a matching mypyc snapshot; this source edit alone does not update that runtime.
+
 
 ## Aria Downloader follow-up — startup and intent modernization
 
@@ -397,6 +412,65 @@ Framework-owned worker Socket.IO namespaces routed over the existing pipe are
 plausible, but require client/SID/namespace ownership, readiness, room routing,
 bounded backpressure, cancellation, disconnection and mutation-replay contracts.
 This is deferred transport architecture, not part of removing FastAPI/FastMCP.
+
+## Coordinated ALS/FWS uvloop and native-wheel follow-up — 2026-10-13
+
+Scheduling: optional ALS loop and target dependency implementation follows the
+runtime bridge, Rust MCP and ALS cleanup slices. Native wheel builds, publication
+and final installed release acceptance happen last, after all source/dependency
+work. The steps below are detailed work items, not permission to execute them early.
+
+User direction: add optional uvloop selection to ALS as well, and ensure TE2,
+ALS and FWS select uvloop-te2==0.23.0.post1 on supported Android aarch64 and
+upstream uvloop==0.23.0 on Linux x86-64. These are alternative distributions
+of the same import namespace; do not co-install them. This checkpoint records
+the plan only, not source implementation, dependency installation or publication.
+
+1. Adopt upstream FWS removal (main merge 583273b1; implementation 4f033f22).
+   Its version remains 0.0.64; determine a new publishable version before release
+   and then update exact downstream pins. Do not mistake the existing 0.0.64
+   installed wheel for the new source. New mounting APIs are create_fws_application
+   and mount_fws_http_api; fastapi_router is only an import-location shim, whose
+   Starlette router cannot be consumed as a FastAPI APIRouter. Preserve host
+   lifespan, Socket.IO/peer identity, stdio and native manager behavior.
+2. ALS optional-loop source audit: agent_log_server_rs/adapters/extension_adapter.py
+   main currently uses asyncio.run(amain()); embedded_adapter.py constructs
+   asyncio.new_event_loop() for its thread-owned facade. Confirm active process
+   versus embedded mode, create/install the loop in its owning thread, and handle
+   factory failure without blocked readiness or leaked coroutines. Preserve
+   stdio observability/separation from Rust harnesses, framing, cancellation and
+   subprocess/FD semantics. Keep Rust/Tokio untouched. Adopt absent/disabled/
+   present loop tests and propagate installed ABI/nested-import failures; decide
+   the ALS disable flag in the concrete implementation approval.
+3. Target dependency metadata: verify actual Android/Termux interpreter marker
+   values, Python ABI and supported architectures before writing PEP 508 markers.
+   If markers cannot distinguish Termux safely, use the established target
+   wheel/installer lane rather than letting both distributions resolve. Verify
+   TE2's private Linux Python/domain payload separately from installer Python.
+   Published uvloop-te2 availability does not automatically install or activate it.
+4. FWS native packaging audit: upstream top-level setup.py is setuptools with
+   custom native builds and wheel tags, including Android detection using
+   sysconfig platform/MULTIARCH. Audit any nested maturin/Cargo builders and list
+   every expected artifact (PTY broker, pipe pump, UDS/native clients as applicable).
+   Validate built wheel contents, executable permissions, tags, architecture,
+   ABI/imports and actual native execution. Unknown-platform handling is not
+   evidence that the Android wheel is complete or PyPI-selectable.
+5. Build/test Linux x86-64 and Android aarch64 FWS wheels, reuse retained matching
+   artifacts where verified, and publish both under one distribution/version
+   with distinct platform tags after explicit release approval. Check existing
+   PyPI files first; user suspects Android wheel is not yet published. Respect
+   PyPI immutability and size limits; choose release version before any upload.
+6. Resolve fresh TE2/ALS/FWS installs for each target: assert exactly one uvloop
+   distribution, no FWS FastAPI/Pydantic closure, and preserve separately tracked
+   ALS/TE2 MCP dependencies. ALS requirements still contain stale FastAPI plus
+   explicit Pydantic/FastMCP; coordinate removal separately, not by uninstalling
+   dependencies used by the live harness. Test loop/Socket.IO/FD/subprocess and
+   Python/Ferrous parity on Debian and Termux after separately approved activation.
+
+Source inspection only: ALS checkout unchanged (untracked dist/scratch preserved),
+FWS source inspected remotely without pull/checkout/install, no wheels built or
+published. This work replaces the planned FWS implementation rewrite with
+upstream adoption/compatibility and release gates.
 
 ## Final follow-up — 0.2.355 Sidebar IPC framework-pipe cutover
 

@@ -1,8 +1,3 @@
-from fastapi import APIRouter
+from app.libs.te2_asgi.status import StatusASGI
 
-example_proxy_shell_bp = APIRouter()
-
-
-@example_proxy_shell_bp.get("/")
-async def status():
-    return {"ok": True, "data": {"message": "example_proxy_shell_app backend ready"}}
+TE2_ASGI_APP = StatusASGI("example_proxy_shell_app backend ready")
