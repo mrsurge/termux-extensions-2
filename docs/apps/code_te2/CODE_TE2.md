@@ -4980,6 +4980,15 @@ te2 framework eval --app code_te2 --shell SHELL_ID --instance INSTANCE_ID --code
 
 The standalone Terminal is a separate app from Code TE2's Python/Pyte drawer (section 46). Its Node/headless-xterm ownership and local UI controls are preserved here for shared-input maintenance.
 
+Its Python `backend.py` exports `TE2_ASGI_APP`; app-owned `http_app.py` composes
+the retained HTTP shell routes, raw `/ws/terminal` stream and lifecycle
+`/socket.io` mount without FastAPI. `request_dtos.py` supplies four msgspec shapes
+shared by HTTP and binary lifecycle admission. Generic worker hooks retain
+listener-ready/service ownership. HTTP request bodies are bounded to 1 MiB;
+invalid/disconnected bodies cannot reach mutation handlers. Node stream/shell
+ownership, checkpoints and frontend protocols are unchanged. Framework-Shells'
+own dependency migration is separate from this Terminal-owned ASGI boundary.
+
 Both standalone and native drawer PTYs set `TERM=xterm-256color` explicitly at
 creation. The framework's parent may be tmux (`TERM=tmux-256color`), but that
 terminal is not the emulator serving the new PTY. The standalone broker sets

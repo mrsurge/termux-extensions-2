@@ -8,10 +8,10 @@ not regain Pydantic/cryptography transitively. Keep Python policy/orchestration
 typed and independently testable; expose explicit ASGI/DTO/lifespan boundaries
 that remain suitable for later mypyc compilation or native hosting.
 
-Investigation and this plan are approved. Implementation needs a concrete slice
+Investigation and Terminal slice 1 are approved. Later slices need concrete scope
 approval. No package uninstall, shared framework restart, deployment, native build
-or changes in dependent repositories are authorized by this investigation.
-Outstanding editable-build/asset-cleanup changes remain separate and preserved.
+or changes in dependent repositories are authorized by the Terminal slice.
+The preceding editable-build/asset-cleanup work is checkpointed at `15c0b514`.
 
 ## Established reusable contracts
 
@@ -56,6 +56,10 @@ Console data plane: `app/te2_console_runtime.py` uses Python Socket.IO at
 functions through `Te2ConsoleClient`. The runtime bridge currently eagerly imports
 and initializes MCP mounts alongside it. Do not import this live console module
 in diagnostic probes: initialization resets transcript files.
+
+User clarification: the console question concerned FastAPI, not FastMCP. Console
+Socket.IO itself does not need FastAPI; its containing runtime-bridge application
+does. Slice 4 removes that composition dependency without replacing console state.
 
 TE2 MCP: `app/te2_mcp/server.py` declares 24 tools, two separately constructed
 FastMCP servers: legacy SSE `/te2_mcp` and Streamable HTTP `/te2_mcp_http`.

@@ -14,15 +14,16 @@ import re
 import shlex
 import shutil
 import time
-from typing import Annotated, ClassVar, Literal, Protocol, Self, TypeAlias, cast
+from typing import Literal, Protocol, Self, TypeAlias, cast
 from urllib import request as urllib_request
 from urllib.parse import quote, urlencode
 import uuid
 
 import socketio
-from fastapi import APIRouter, Body, HTTPException, WebSocket
-from pydantic import BaseModel, ConfigDict
-from starlette.websockets import WebSocketDisconnect
+from starlette.exceptions import HTTPException
+from starlette.websockets import WebSocket, WebSocketDisconnect
+
+from .request_dtos import CreateShellRequest, ShellInputRequest, ShellResizeRequest, ShellActionRequest, decode_request
 
 from framework_shells import get_manager as _manager
 from framework_shells.orchestrator import Orchestrator
@@ -52,7 +53,6 @@ DEFAULT_COLS = 80
 DEFAULT_ROWS = 24
 DEFAULT_SCROLLBACK = 5000
 
-terminal_bp = APIRouter()
 log = logging.getLogger("terminal_backend")
 
 
@@ -272,36 +272,6 @@ ManagerFactory = Callable[[], Awaitable[ManagerProtocol]]
 OrchestratorCtor = Callable[[ManagerProtocol], OrchestratorProtocol]
 manager_factory = cast(ManagerFactory, _manager)
 orchestrator_ctor = cast(OrchestratorCtor, Orchestrator)
-
-
-class CreateShellRequest(BaseModel):
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
-
-    shell: str | list[str] | None = None
-    cwd: str = "~"
-    cols: int = DEFAULT_COLS
-    rows: int = DEFAULT_ROWS
-    launch_id: str = ""
-
-
-class ShellInputRequest(BaseModel):
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
-
-    data: str
-    newline: bool = True
-
-
-class ShellResizeRequest(BaseModel):
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
-
-    cols: int = DEFAULT_COLS
-    rows: int = DEFAULT_ROWS
-
-
-class ShellActionRequest(BaseModel):
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
-
-    action: str
 
 
 @dataclass(slots=True)
@@ -897,7 +867,6 @@ async def _get_sidebar_cwd_payload() -> JsonObject:
     return payload
 
 
-@terminal_bp.get("/sidebar/cwd")
 async def get_sidebar_cwd() -> JsonObject:
     return _ok(await _get_sidebar_cwd_payload())
 
@@ -996,14 +965,12 @@ async def _publish_sidebar_window_state_payload(
     }
 
 
-@terminal_bp.post("/sidebar/window/state")
 async def publish_sidebar_window_state(
-    payload: Annotated[JsonObject | None, Body()] = None,
+    payload: JsonObject | None = None,
 ) -> JsonObject:
     return _ok(await _publish_sidebar_window_state_payload(payload))
 
 
-@terminal_bp.get("/shells")
 async def list_shells() -> JsonObject:
     manager = await mgr()
     prefixes = (LABEL_PREFIX, *LEGACY_LABEL_PREFIXES)
@@ -1016,12 +983,10 @@ async def list_shells() -> JsonObject:
     return _ok(records)
 
 
-@terminal_bp.post("/shells")
 async def create_shell(payload: CreateShellRequest) -> JsonObject:
     return _ok(await _create_shell_record(payload))
 
 
-@terminal_bp.get("/shells/{shell_id}")
 async def get_shell(
     shell_id: str,
     tail: int = 0,
@@ -1035,7 +1000,6 @@ async def get_shell(
     return _ok(data)
 
 
-@terminal_bp.post("/shells/{shell_id}/input")
 async def send_input(shell_id: str, payload: ShellInputRequest) -> JsonObject:
     text = payload.data
     if payload.newline:
@@ -1050,7 +1014,6 @@ async def send_input(shell_id: str, payload: ShellInputRequest) -> JsonObject:
     return _ok({"id": shell_id})
 
 
-@terminal_bp.post("/shells/{shell_id}/resize")
 async def resize_shell(shell_id: str, payload: ShellResizeRequest) -> JsonObject:
     cols = max(1, payload.cols)
     rows = max(1, payload.rows)
@@ -1091,7 +1054,6 @@ async def _perform_shell_action(shell_id: str, action: str) -> JsonObject:
     return await manager.describe(record)
 
 
-@terminal_bp.post("/shells/{shell_id}/action")
 async def shell_action(shell_id: str, payload: ShellActionRequest) -> JsonObject:
     return _ok(await _perform_shell_action(shell_id, payload.action))
 
@@ -1112,7 +1074,6 @@ async def _remove_shell_record(shell_id: str) -> None:
         raise HTTPException(status_code=500, detail=f"Failed to remove shell: {exc}") from exc
 
 
-@terminal_bp.delete("/shells/{shell_id}")
 async def delete_shell(shell_id: str) -> JsonObject:
     await _remove_shell_record(shell_id)
     return _ok({"id": shell_id})
@@ -1129,7 +1090,6 @@ async def _receive_ws_message(websocket: WebSocket) -> JsonObject:
     return unpack_message(payload)
 
 
-@terminal_bp.websocket("/ws/terminal")
 async def terminal_ws(websocket: WebSocket) -> None:
     await websocket.accept()
     if websocket.query_params.get("codec") != TERMINAL_STREAM_CODEC:
@@ -1260,7 +1220,7 @@ _launch_creation_lock = asyncio.Lock()
 
 
 async def _lifecycle_create_shell(params: JsonObject) -> JsonObject:
-    request = CreateShellRequest.model_validate(params)
+    request = decode_request(params, CreateShellRequest)
     if not request.launch_id:
         return await _create_shell_record(request)
     if not re.fullmatch(r"[0-9a-f]{32}", request.launch_id):
@@ -1292,4 +1252,8 @@ configure_terminal_lifecycle(
     )
 )
 
-SUBAPPS = [("/socket.io", TERMINAL_LIFECYCLE_ASGI_APP)]
+from .http_app import TerminalASGI
+
+# App-owned composition selects the explicit ASGI worker path. No legacy router
+# or SUBAPPS export: the lifecycle mount and stream belong to this application.
+TE2_ASGI_APP = TerminalASGI()
