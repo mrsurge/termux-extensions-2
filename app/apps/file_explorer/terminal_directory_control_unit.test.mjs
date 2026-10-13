@@ -36,6 +36,62 @@ test('late idle event cannot clear a newer partial input', () => {
   } finally { f.close(); }
 });
 
+test('ordinary deletion returns known prompt input to clean only at zero', () => {
+  const f = fixture();
+  try {
+    f.event('state', '', 'idle');
+    f.control.input('ls');
+    f.control.input('\x7f');
+    assert.equal(f.control.dirty, true);
+    assert.equal(f.control.promptLength, 1);
+    f.control.input('\b');
+    assert.equal(f.control.dirty, false);
+    assert.equal(f.control.promptLength, 0);
+    f.control.input('text');
+    f.control.input('\x15');
+    assert.equal(f.control.dirty, false);
+  } finally { f.close(); }
+});
+
+test('clearing a pending partial line queues erasure before wake refresh', async () => {
+  const f = fixture(), wakes = [];
+  f.control.armWake = request => wakes.push(request.token);
+  try {
+    f.event('state', '', 'idle');
+    f.control.input('ls');
+    await f.control.request({ request_id: 'cleared', path: '/example' });
+    assert.equal(f.control.pending.wake, false);
+    f.control.input('\x7f');
+    assert.equal(wakes.length, 0);
+    f.control.input('\x7f');
+    assert.equal(wakes.length, 1);
+    assert.equal(f.control.pending.wake, true);
+    f.event('result', f.control.pending.token, 'applied');
+    assert.deepEqual(f.inputs, ['ls', '\x7f', '\x7f', '\r']);
+    f.event('state', '', 'idle');
+    assert.equal(f.control.pending, null);
+  } finally { f.close(); }
+});
+
+test('unknown edits stay conservative, cancellation requires a fresh prompt', () => {
+  const f = fixture();
+  try {
+    f.event('state', '', 'idle');
+    f.control.input('text');
+    f.control.input('\x1b[D');
+    f.control.input('\x15');
+    assert.equal(f.control.dirty, true);
+    assert.equal(f.control.promptLength, null);
+    f.control.input('\x03');
+    assert.equal(f.control.dirty, true);
+    f.event('state', '', 'idle');
+    assert.equal(f.control.dirty, false);
+    f.control.input('x');
+    f.event('state', '', 'idle');
+    assert.equal(f.control.dirty, true);
+  } finally { f.close(); }
+});
+
 test('shell-side busy rejection releases held input and retains latest request for next prompt', () => {
   const f = fixture();
   try {
