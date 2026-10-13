@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 import json
+import hashlib
 import os
 from pathlib import Path
 import subprocess
@@ -18,15 +19,19 @@ def worker_setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     framework = project / 'framework'
     workspace = framework / 'native_editor_worker'
     (workspace / 'src').mkdir(parents=True)
-    (project / 'app').mkdir()
+    app = project / 'app/apps/code_te2'
+    app.mkdir(parents=True)
     (workspace / 'Cargo.toml').write_text('[package]\nname="worker"\nversion="0.1.0"\n')
     (workspace / 'Cargo.lock').write_text('version = 4\n')
     (workspace / 'src/main.rs').write_text('fn main() {}\n')
-    registry = project / 'app/native_worker_builds.json'
-    registry.write_text(json.dumps({'schemaVersion': 1, 'workers': [{
+    registry = app / 'native_build.json'
+    registry.write_text(json.dumps({'schemaVersion': 1,
         'appId': 'code_te2', 'manifest': 'native_editor_worker/Cargo.toml',
         'binary': 'code-te2-worker', 'environmentKey': 'CODE_TE2_WORKER_BIN', 'pythonAbi': True,
-    }]}))
+        'cache': {'root': 'code_te2/build', 'targetDirectory': 'cargo-target', 'publishedDirectory': 'bin'},
+        'fingerprint': {'policy': 'framework-source-v2', 'inputs': ['Cargo.toml', 'Cargo.lock', 'src/**/*.rs', 'build.rs'],
+                        'sharedInputs': ['../asset_gzip.rs']},
+    }))
     monkeypatch.setattr(bootstrap, '_project_root', lambda: project)
     monkeypatch.setattr(bootstrap, '_source_root', lambda: framework)
     monkeypatch.setattr(bootstrap, 'packaged_server_path', lambda: None)
@@ -54,7 +59,7 @@ def test_cached_worker_publication_reuses_and_invalidates_source(worker_setup, m
     assert selected.is_file() and os.access(selected, os.X_OK)
     assert selected.is_relative_to(Path(env['TE2_CACHE_HOME']) / 'code_te2/build/bin')
     assert calls[0][1]['PYO3_PYTHON'] == sys.executable
-    assert '--locked' in calls[0][0] and '--bin' in calls[0][0]
+    assert '--bin' in calls[0][0]
     bootstrap._prepare_native_workers(args, env, build=True)
     assert len(calls) == 1
     (workspace / 'src/main.rs').write_text('fn main() { println!("changed"); }')
@@ -90,14 +95,14 @@ def test_alternating_build_flags_do_not_evict_each_other(worker_setup, monkeypat
     env['CFLAGS'] = (original_flags or '') + ' -DTE2_TEST_VARIANT=1'
     bootstrap._prepare_native_workers(args, env, build=True)
     second = Path(env['CODE_TE2_WORKER_BIN'])
-    assert first != second and first.exists() and second.exists()
+    assert first == second and first.exists()
     if original_flags is None:
         env.pop('CFLAGS')
     else:
         env['CFLAGS'] = original_flags
     bootstrap._prepare_native_workers(args, env, build=True)
     assert Path(env['CODE_TE2_WORKER_BIN']) == first
-    assert len(calls) == 2
+    assert len(calls) == 1
 
 
 def test_missing_default_mypyc_uses_interpreted_domain(worker_setup, capsys):
@@ -130,13 +135,13 @@ def test_explicit_editable_domain_selection_is_preserved(worker_setup, selection
     assert env['CODE_TE2_MYPYC_DIR'] == selection
 
 
-def test_worker_identity_includes_python_abi(worker_setup, monkeypatch):
+def test_worker_compatibility_includes_python_abi(worker_setup, monkeypatch):
     _, _, env = worker_setup
     worker = bootstrap._native_worker_registry()[0]
-    before = bootstrap._native_worker_fingerprint(worker, 'release', env)
+    before = bootstrap._native_build_compatibility(worker)
     original = bootstrap.sysconfig.get_config_var
     monkeypatch.setattr(bootstrap.sysconfig, 'get_config_var', lambda key: 'different-abi' if key == 'SOABI' else original(key))
-    assert bootstrap._native_worker_fingerprint(worker, 'release', env) != before
+    assert bootstrap._native_build_compatibility(worker) != before
 
 
 def test_shared_asset_policy_invalidates_both_binary_caches(worker_setup):
@@ -171,7 +176,7 @@ def test_print_worker_plan_does_not_build_or_create_cache(worker_setup, monkeypa
 def test_registry_rejects_manifest_escape(worker_setup):
     _, registry, _ = worker_setup
     data = json.loads(registry.read_text())
-    data['workers'][0]['manifest'] = '../outside/Cargo.toml'
+    data['manifest'] = '../outside/Cargo.toml'
     registry.write_text(json.dumps(data))
     with pytest.raises(SystemExit, match='within the framework'):
         bootstrap._native_worker_registry()
@@ -202,7 +207,9 @@ def test_source_package_includes_registry_and_worker_sources():
     import tomllib
     root = Path(__file__).resolve().parents[1]
     config = tomllib.loads((root / 'pyproject.toml').read_text())['tool']['setuptools']
-    assert 'native_worker_builds.json' in config['package-data']['app']
+    assert (root / 'app/apps/code_te2/native_build.json').is_file()
+    assert 'apps/**/*' in config['package-data']['app']
+    assert 'framework/bootstrap/native_build.json' in config['data-files']['te2/framework/bootstrap']
     assert 'framework/native_editor_worker/Cargo.lock' in config['data-files']['te2/framework/native_editor_worker']
     assert config['data-files']['te2/framework/native_editor_worker/src'] == ['framework/native_editor_worker/src/*.rs']
     import yaml
@@ -226,3 +233,117 @@ def test_source_change_during_build_refuses_publication(worker_setup, monkeypatc
         bootstrap._prepare_native_workers(bootstrap._parse_args([]), env, build=True)
     assert 'CODE_TE2_WORKER_BIN' not in env
     assert not (Path(env['TE2_CACHE_HOME']) / 'code_te2/build/bin').exists()
+
+
+def test_framework_manifest_preserves_legacy_key_and_cached_binary(worker_setup, monkeypatch):
+    workspace, _, env = worker_setup
+    framework = workspace.parent
+    source = framework / 'rust'
+    (source / 'crates/te2-server/src').mkdir(parents=True)
+    (source / 'Cargo.toml').write_text('[workspace]\n')
+    (source / 'Cargo.lock').write_text('version = 4\n')
+    (source / 'crates/te2-server/Cargo.toml').write_text('[package]\nname="te2-server"\n')
+    (source / 'crates/te2-server/src/main.rs').write_text('fn main() {}\n')
+    (framework / 'asset_gzip.rs').write_text('// shared policy\n')
+    config = Path(bootstrap.__file__).parent / 'native_build.json'
+    (framework / 'bootstrap').mkdir()
+    (framework / 'bootstrap/native_build.json').write_text(config.read_text())
+    spec = bootstrap._load_native_build(framework / 'bootstrap/native_build.json')
+    features = ['ferrous-framework-native']
+    # Exact previous algorithm, independent of new manifest input enumeration.
+    hasher = hashlib.sha256()
+    hasher.update(b'te2-server-build-cache-v2\0')
+    for value in (str(source.resolve()), 'release', ','.join(features), sys.platform, os.uname().machine):
+        hasher.update(value.encode())
+        if value != os.uname().machine:
+            hasher.update(b'\0')
+    for path in bootstrap._rust_fingerprint_paths(source):
+        hasher.update(b'\0path:' + path.relative_to(source).as_posix().encode() + b'\0')
+        hasher.update(path.read_bytes())
+    hasher.update(b'\0../asset_gzip.rs\0' + (framework / 'asset_gzip.rs').read_bytes())
+    expected = hasher.hexdigest()[:24]
+    assert bootstrap._rust_source_fingerprint(spec.manifest, profile='release',
+        features=features, inputs=spec.source_inputs) == expected
+    selected = Path(env['TE2_CACHE_HOME']) / 'framework/build/bin' / expected / 'release/te2-server'
+    selected.parent.mkdir(parents=True)
+    selected.write_bytes(b'existing-framework')
+    selected.chmod(0o755)
+    monkeypatch.setattr(bootstrap.subprocess, 'run', lambda *a, **k: pytest.fail('cached framework must not rebuild'))
+    monkeypatch.delenv('TE2_SERVER_DISABLE_FERROUS_FRAMEWORK', raising=False)
+    command = bootstrap._cached_server_command(bootstrap._parse_args([]), env, source / 'Cargo.toml', build=True)
+    assert command.argv == [str(selected)] and command.build_already_done
+
+
+def test_changed_abi_rebuilds_same_source_key(worker_setup, monkeypatch):
+    _, _, env = worker_setup
+    calls = []
+    def compile_worker(command, *, env, check):
+        calls.append(command)
+        binary = Path(env['CARGO_TARGET_DIR']) / 'release/code-te2-worker'
+        binary.parent.mkdir(parents=True, exist_ok=True)
+        binary.write_bytes(b'compiled-test-executable')
+        binary.chmod(0o755)
+        return subprocess.CompletedProcess(command, 0)
+    monkeypatch.setattr(bootstrap.subprocess, 'run', compile_worker)
+    args = bootstrap._parse_args([])
+    bootstrap._prepare_native_workers(args, env, build=True)
+    before = env['CODE_TE2_WORKER_BIN']
+    original = bootstrap.sysconfig.get_config_var
+    monkeypatch.setattr(bootstrap.sysconfig, 'get_config_var', lambda key: 'new-abi' if key == 'SOABI' else original(key))
+    bootstrap._prepare_native_workers(args, env, build=True)
+    assert env['CODE_TE2_WORKER_BIN'] == before and len(calls) == 2
+    bootstrap._prepare_native_workers(args, env, build=True)
+    assert len(calls) == 2
+
+
+def test_debug_worker_uses_same_profile_rule(worker_setup, monkeypatch):
+    _, _, env = worker_setup
+    calls = []
+    def compile_worker(command, *, env, check):
+        calls.append(command)
+        binary = Path(env['CARGO_TARGET_DIR']) / 'debug/code-te2-worker'
+        binary.parent.mkdir(parents=True, exist_ok=True)
+        binary.write_bytes(b'compiled')
+        binary.chmod(0o755)
+        return subprocess.CompletedProcess(command, 0)
+    monkeypatch.setattr(bootstrap.subprocess, 'run', compile_worker)
+    bootstrap._prepare_native_workers(bootstrap._parse_args(['--debug']), env, build=True)
+    assert '/debug/' in env['CODE_TE2_WORKER_BIN'] and '--release' not in calls[0]
+
+
+@pytest.mark.parametrize('field,value', [
+    ('root', '../escape'), ('targetDirectory', '/absolute'), ('publishedDirectory', '../bin')])
+def test_manifest_rejects_unsafe_cache_paths(worker_setup, field, value):
+    _, registry, _ = worker_setup
+    data = json.loads(registry.read_text())
+    data['cache'][field] = value
+    registry.write_text(json.dumps(data))
+    with pytest.raises(SystemExit, match='cache paths'):
+        bootstrap._native_worker_registry()
+
+
+def test_discovery_rejects_mismatched_app_owner(worker_setup):
+    _, registry, _ = worker_setup
+    data = json.loads(registry.read_text())
+    data['appId'] = 'different_app'
+    registry.write_text(json.dumps(data))
+    with pytest.raises(SystemExit, match='owning app'):
+        bootstrap._native_worker_registry()
+
+
+def test_app_owned_cargo_tree_is_discoverable(worker_setup):
+    _, registry, _ = worker_setup
+    data = json.loads(registry.read_text())
+    data['manifestBase'] = 'app'
+    data['manifest'] = 'native/Cargo.toml'
+    data['fingerprint']['sharedInputs'] = []
+    registry.write_text(json.dumps(data))
+    native = registry.parent / 'native'
+    native.mkdir()
+    (native / 'Cargo.toml').write_text('[package]\n')
+    spec = bootstrap._native_worker_registry()[0]
+    assert spec.manifest == native / 'Cargo.toml'
+    data['manifest'] = '../another-app/Cargo.toml'
+    registry.write_text(json.dumps(data))
+    with pytest.raises(SystemExit, match='declared owning app'):
+        bootstrap._native_worker_registry()

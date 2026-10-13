@@ -376,25 +376,49 @@ native-worker tests.
 
 ### Framework bootstrap-managed native executable (source installs)
 
-Normal `te2` startup and `te2 --build-only` now prepare the workers listed in
-`app/native_worker_builds.json`. Each entry declares an app ID, framework-relative
-Cargo manifest, binary name, environment key and whether Python ABI participates
-in its build identity. The initial entry is Code TE2; do not add arbitrary launch
-commands to this registry.
+Normal source/editable `te2` startup and `te2 --build-only` use one native Cargo
+build pipeline. The framework declares its configuration in
+`framework/bootstrap/native_build.json`; built-in native workers are discovered
+from `app/apps/*/native_build.json`, initially Code TE2. The former central
+`app/native_worker_builds.json` registry is retired. Discovery does not scan
+arbitrary projects, external apps or runtime data for executable build commands.
+
+Each schema-1 manifest declares `appId`, `manifestBase` (`framework` or the owning
+`app` directory), relative `manifest` (the Cargo.toml), optional Cargo `package`,
+`binary`, exported `environmentKey`,
+`pythonAbi`, and `features`. `cache.root` is relative to `TE2_CACHE_HOME`;
+`targetDirectory` and `publishedDirectory` are relative to that root. An optional
+`targetDirectoryEnvironment` retains the framework's existing explicit target
+override. `fingerprint.policy` is `framework-source-v2`: source patterns are in
+`inputs` and source-root-contained shared files in `sharedInputs`. Identifiers,
+paths and owner IDs are validated. Code TE2 keeps its independent Cargo source
+under `framework/native_editor_worker`; another built-in native worker can declare
+`manifestBase: app` and own its Cargo tree directly inside its app directory.
 
 The Code TE2 executable publishes atomically under
 `$TE2_CACHE_HOME/code_te2/build/bin/<fingerprint>/<release|debug>/code-te2-worker`.
 Intermediates remain in `code_te2/build/cargo-target`. A per-app lock and the
-existing atomic framework publication helpers protect the final cache. Worker
-fingerprints are retained rather than pruning other launchers' selections;
-otherwise alternating CLI/APK build environments evict each other and repeatedly
-compile. Mypyc snapshots and checkpoints are not pruned. Rust source/lockfile,
-profile, platform, compiler identity/flags and Python runtime/ABI determine reuse.
-Interpreter invocation aliases sharing that runtime/ABI do not create a new key.
-Genuine compiler flags and different Python runtimes still do. `--force-build`
-also rebuilds configured workers. `--print-command` resolves paths without build
-or publication. Worker builds use `--locked` and the invoking `sys.executable`
-as `PYO3_PYTHON`, independently of the server's Cargo target cache.
+existing atomic framework publication helpers protect the final cache. Both use
+the established framework fingerprint bytes: workspace path, profile, sorted
+features, platform/architecture and selected source/lockfile/shared-file contents.
+The framework's existing fingerprint and cache paths remain unchanged, including
+reuse of valid binaries built before manifests existed. Python aliases,
+`rustc -vV` and inherited `CC`/`CFLAGS`/`RUSTFLAGS` do not change the key: this is
+the same policy the framework already used. Explicit toolchain/compiler changes
+requiring replacement should use `--force-build`.
+
+Python-linked builds have an adjacent `<binary>.build.json` runtime/ABI receipt.
+A missing, corrupt or incompatible receipt requires a build before reuse; it
+does not introduce a launcher-dependent fingerprint. Interpreter aliases sharing
+the same runtime/ABI reuse the receipt. Cargo uses the invoking `sys.executable`
+as `PYO3_PYTHON`. Source/runtime changes during compilation refuse publication.
+Both framework and worker builds use manifest-driven `cargo build`, feature and
+profile selection, locking and atomic publication; no worker-only Cargo policy.
+Explicit legacy `--cargo-manifest`/`--no-build-cache` server CLI escape hatches
+retain their direct-Cargo behavior. Normal manifest-managed binaries are retained
+instead of deleting another running framework's selected path. Mypyc snapshots,
+checkpoints and Cargo intermediates are untouched. `--print-command` does not
+build or publish; `--force-build` rebuilds both configured framework and workers.
 
 Bootstrap exports `CODE_TE2_WORKER_BIN` to the framework process. The app shellspec
 launches this exact raw executable directly with the existing project/port args;

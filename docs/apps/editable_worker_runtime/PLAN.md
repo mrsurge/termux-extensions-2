@@ -37,3 +37,43 @@ No Android/native client edits, APK builds, device mutation, runtime restarts,
 automatic mypyc compilation, publication or releases are part of this slice.
 Retained binary cache garbage collection remains explicit future work; do not
 restore unconditional pruning that can delete another framework's selected path.
+
+## Unified manifest-driven follow-up (supersedes build identity above)
+
+The first slice retained distinct environment-derived worker keys. User reported
+that APK launch still attempted unwanted builds, and requested the framework's
+working source cache policy be applied rank-and-file to workers.
+
+- Framework declaration: `framework/bootstrap/native_build.json`.
+- App-local discovery: built-in `app/apps/*/native_build.json`; Code TE2 owns its
+  declaration. Retire the central `app/native_worker_builds.json` registry.
+- Shared implementation: manifest validation, framework-source-v2 fingerprint,
+  cache/target/bin resolution, Cargo command/profile/features, lock, source-change
+  fence and atomic publication. Preserve exact prior framework key bytes/paths.
+- Declare Cargo path/package/bin, source base (`framework` or owning `app`), output environment key, cache/target/published
+  directories, source/shared input patterns and Python ABI requirement in JSON.
+- Inherited compiler flags, rustc textual version and interpreter aliases do not
+  affect the key, matching the current framework policy. Use explicit force-build
+  for intentional compiler changes. Genuine Python ABI mismatch invalidates a
+  compatibility receipt, not the source key; missing receipt triggers one build.
+- Retain binary selections so another framework's exported path stays usable.
+- Keep source-only builds separate from strict packaged payload resolution,
+  missing-mypyc interpreted domain selection and explicit mypyc activation.
+- Regression proof: old framework fingerprint parity and reuse without receipt,
+  APK/CLI environment alternation builds once, real ABI mismatch rebuilds, source
+  changes invalidate, manifest escapes/owner mismatches fail, package inclusion,
+  dry-run/identity queries don't build, compiled release resolver remains strict.
+
+## Platform wheels
+
+PyPI accepts multiple platform-tagged wheels for one project/version and applies
+its default upload limit per file, not to the sum of a release's wheels. A
+meta-package is not needed solely to split Android and manylinux artifacts.
+Official references: [compatibility tags](https://packaging.python.org/en/latest/specifications/platform-compatibility-tags/)
+and [storage limits](https://docs.pypi.org/project-management/storage-limits/).
+
+The Pixel retains the 0.2.353 production Android wheel, 48,653,226 bytes, tagged
+`cp314-cp314-android_24_arm64_v8a`. Read-only comparison confirms its tag appears
+in that device's supported pip tags. This does not prove all Termux versions use
+the same tags, nor authorize replacing an existing artifact. Transfer/upload and
+publication are separate from this source-build implementation slice.

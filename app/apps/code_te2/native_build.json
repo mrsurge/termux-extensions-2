@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "appId": "code_te2",
+  "manifestBase": "framework",
+  "manifest": "native_editor_worker/Cargo.toml",
+  "binary": "code-te2-worker",
+  "environmentKey": "CODE_TE2_WORKER_BIN",
+  "pythonAbi": true,
+  "features": [],
+  "cache": {
+    "root": "code_te2/build",
+    "targetDirectory": "cargo-target",
+    "publishedDirectory": "bin"
+  },
+  "fingerprint": {
+    "policy": "framework-source-v2",
+    "inputs": ["Cargo.toml", "Cargo.lock", "src/**/*.rs", "build.rs"],
+    "sharedInputs": ["../asset_gzip.rs"]
+  }
+}

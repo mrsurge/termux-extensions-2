@@ -27,3 +27,28 @@ No Rust or mypyc build, client publication, device mutation or runtime restart
 was performed. Cache schema changes cause one new native worker publication on
 next source startup; later equivalent launches reuse it. Existing fingerprints
 are retained rather than automatically deleted.
+
+## Unified manifest-driven build slice
+
+- [x] Concrete implementation scope approved.
+- [x] Framework manifest and Code TE2 app-local worker declaration.
+- [x] Shared fingerprint/Cargo/cache/publication implementation.
+- [x] Preserve exact old framework cache key/path and receipt-free reuse.
+- [x] Replace launcher-dependent worker hashing with framework source policy.
+- [x] Runtime/ABI compatibility receipts retain safety without alias-based keys.
+- [x] Update source packaging declarations and retire central worker registry.
+- [x] Document schema, force-build policy, source/release distinctions.
+- [x] Regression suite: 85 tests pass; bootstrap `ty check` is clean.
+- [ ] Pixel one-build and APK ↔ CLI reuse live acceptance.
+
+Read-only Pixel wheel inspection: production 0.2.353 Android wheel exists under
+`~/.cache/te2-release-build/0.2.353/wheelhouse-production/`, is 48,653,226 bytes,
+and matches Pixel pip tags. No device builds, transfers, installs or uploads
+performed. Source changes do not refresh active bootstrap processes or frameworks.
+
+Validation includes native worker bootstrap, framework identity/discovery,
+packaged Code TE2 runtime, local mypyc build helper and app-worker bootstrap.
+One existing setuptools/wheel deprecation warning remains. Exact prior framework
+fingerprint parity and cached binary reuse are independently tested. Alternating
+compiler environments invokes Cargo once; ABI receipt mismatch rebuilds once,
+then reuses. No Rust source was modified, and no native build was run.

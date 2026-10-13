@@ -24,7 +24,6 @@ include-package-data = true
 [tool.setuptools.package-data]
 "app" = [
     "android_editor_assets_bundle.json",
-    "native_worker_builds.json",
     "android_shell/**/*",
     "static/**/*",
     "templates/**/*",
@@ -69,6 +68,7 @@ include-package-data = true
 [tool.setuptools.data-files]
 "te2/framework/bootstrap" = [
     "framework/bootstrap/*.py",
+    "framework/bootstrap/native_build.json",
 ]
 "te2/framework/native_editor_worker" = [
     "framework/native_editor_worker/Cargo.toml",

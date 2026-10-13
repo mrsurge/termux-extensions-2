@@ -330,6 +330,12 @@ Source/editable startup builds and caches both the Rust framework and Code TE2
 worker for the local architecture (not only x86-64). Install Rust/Cargo and the
 platform's compiler and Python development libraries first. This source-build
 route is separate from the release installer's supported prebuilt targets.
+The framework and native app workers share one manifest-driven build/cache flow;
+Code TE2 declares its worker in `app/apps/code_te2/native_build.json`. APK and
+CLI launches reuse the same source/profile/platform build rather than generating
+different keys from inherited compiler environment variables. The framework's
+existing cache identity is preserved; Python-linked workers also verify a runtime
+ABI receipt before reuse.
 
 On a fresh editable checkout, Code TE2 runs its Python domain interpreted inside
 the native Rust worker until a mypyc snapshot is built and activated. It keeps

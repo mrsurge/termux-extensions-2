@@ -81,6 +81,14 @@ class NativeWorkerBuild:
     binary: str
     environment_key: str
     python_abi: bool
+    cache_root: str = ""
+    cargo_package: str | None = None
+    features: tuple[str, ...] = ()
+    source_inputs: tuple[str, ...] = ("Cargo.toml", "Cargo.lock", "src/**/*.rs", "build.rs")
+    target_directory: str = "cargo-target"
+    published_directory: str = "bin"
+    target_environment: str | None = None
+    shared_inputs: tuple[str, ...] = ("../asset_gzip.rs",)
 
 
 @dataclass(frozen=True)
@@ -481,134 +489,206 @@ def _cached_server_command(
     *,
     build: bool,
 ) -> ServerCommand:
-    cache_dir = Path(args.cache_dir) if args.cache_dir else _default_cache_dir(env)
+    spec = _load_native_build(_source_root() / 'bootstrap/native_build.json')
+    if args.cargo_manifest:
+        from dataclasses import replace
+        spec = replace(spec, manifest=manifest)
+    elif spec.manifest != manifest.resolve():
+        raise SystemExit('Framework build manifest disagrees with selected Cargo manifest')
+    cache_dir = Path(args.cache_dir) if args.cache_dir else resolve_te2_paths(env).cache_home / spec.cache_root
     profile = _rust_build_profile(args)
-    features = ["ferrous-framework-native"] if _ferrous_framework_enabled(args) else []
-    fingerprint = _rust_source_fingerprint(manifest, profile=profile, features=features)
-    binary_name = _server_binary_name()
-    cached_binary = cache_dir / "bin" / fingerprint / profile / binary_name
-
-    cargo_target_dir = Path(env.get("TE2_SERVER_CARGO_TARGET_DIR", cache_dir / "cargo-target"))
-    if not build:
-        return ServerCommand(
-            [str(cached_binary)],
-            build_already_done=_cached_binary_is_usable(cached_binary) and not args.force_build,
-        )
-
-    with _exclusive_build_cache_lock(cache_dir):
-        if _cached_binary_is_usable(cached_binary) and not args.force_build:
-            _prune_final_binary_cache(cache_dir / "bin", cached_binary)
-            return ServerCommand([str(cached_binary)], build_already_done=True)
-
-        build_command = [
-            "cargo",
-            "build",
-            "--manifest-path",
-            str(manifest),
-            "-p",
-            SERVER_PACKAGE,
-        ]
-        if profile == "release":
-            build_command.append("--release")
-        elif profile != "debug":
-            build_command.extend(["--profile", profile])
-        if features:
-            build_command.extend(["--features", ",".join(features)])
-        build_env = dict(env)
-        build_env["CARGO_TARGET_DIR"] = str(cargo_target_dir)
-        result = subprocess.run(build_command, env=build_env, check=False)
-        if result.returncode != 0:
-            raise SystemExit(result.returncode)
-
-        built_binary = cargo_target_dir / profile / binary_name
-        if not _cached_binary_is_usable(built_binary):
-            raise SystemExit(f"Rust server build finished but binary is missing or unusable: {built_binary}")
-        _publish_cached_binary(built_binary, cached_binary)
-        _prune_final_binary_cache(cache_dir / "bin", cached_binary)
-    return ServerCommand([str(cached_binary)], build_already_done=True)
+    features = tuple(feature for feature in spec.features
+                     if feature != 'ferrous-framework-native' or _ferrous_framework_enabled(args))
+    selected, usable = _prepare_native_build(spec, args, env, profile=profile,
+                                            features=features, root=cache_dir, build=build)
+    return ServerCommand([str(selected)], build_already_done=usable)
 
 
 def _native_worker_registry() -> list[NativeWorkerBuild]:
-    registry = _project_root() / "app" / "native_worker_builds.json"
-    try:
-        document = cast(object, json.loads(registry.read_text(encoding="utf-8")))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise SystemExit(f"Native worker build registry is unreadable: {registry}: {exc}") from exc
-    if not isinstance(document, dict) or document.get("schemaVersion") != 1:
-        raise SystemExit("Unsupported native worker build registry")
-    entries = document.get("workers")
-    if not isinstance(entries, list):
-        raise SystemExit("Native worker registry requires a workers array")
-    builds: list[NativeWorkerBuild] = []
-    ids: set[str] = set()
-    keys: set[str] = set()
-    source_root = _source_root().resolve()
-    for raw in entries:
-        if not isinstance(raw, dict):
-            raise SystemExit("Native worker registry entry must be an object")
-        entry = cast(dict[str, object], raw)
-        values: dict[str, str] = {}
-        for field in ("appId", "manifest", "binary", "environmentKey"):
-            value = entry.get(field)
-            if not isinstance(value, str) or not value:
-                raise SystemExit(f"Native worker registry requires {field}")
-            values[field] = value
-        app_id, binary, key = values["appId"], values["binary"], values["environmentKey"]
-        if any(not (part.isascii() and (part.isalnum() or part in "_-")) for part in app_id + binary + key):
-            raise SystemExit("Native worker registry identifiers must be safe path/env components")
-        if not (key[0].isalpha() or key[0] == '_') or '-' in key:
-            raise SystemExit("Native worker registry environmentKey is invalid")
-        relative = Path(values["manifest"])
-        manifest = (source_root / relative).resolve()
-        if relative.is_absolute() or not manifest.is_relative_to(source_root) or manifest.name != 'Cargo.toml':
-            raise SystemExit("Native worker manifest must remain within the framework source root")
-        python_abi = entry.get("pythonAbi", False)
-        if not isinstance(python_abi, bool):
-            raise SystemExit("Native worker pythonAbi must be boolean")
-        if app_id in ids or key in keys:
-            raise SystemExit("Duplicate native worker appId/environmentKey")
-        ids.add(app_id)
-        keys.add(key)
-        builds.append(NativeWorkerBuild(app_id, manifest, binary, key, python_abi))
+    # Built-in app ownership is explicit in its own directory. Do not scan
+    # arbitrary projects, external app trees or runtime data for build commands.
+    app_root = _project_root() / 'app/apps'
+    paths = sorted(app_root.glob('*/native_build.json'))
+    builds = [_load_native_build(path) for path in paths]
+    ids = [worker.app_id for worker in builds]
+    keys = [worker.environment_key for worker in builds]
+    if len(ids) != len(set(ids)) or len(keys) != len(set(keys)):
+        raise SystemExit('Duplicate native build appId/environmentKey')
+    for worker, path in zip(builds, paths):
+        if worker.app_id != path.parent.name:
+            raise SystemExit('Native build appId must match its owning app directory')
     return builds
 
 
-def _native_worker_fingerprint(worker: NativeWorkerBuild, profile: str, env: Mapping[str, str]) -> str:
-    if not worker.manifest.is_file():
-        raise SystemExit(f"Native worker Cargo manifest is missing: {worker.manifest}")
-    workspace = worker.manifest.parent
-    paths = set(_rust_fingerprint_paths(workspace))
-    paths.update(path for path in (workspace / "src").rglob("*") if path.is_file())
-    build_script = workspace / "build.rs"
-    if build_script.is_file():
-        paths.add(build_script)
-    hasher = hashlib.sha256()
-    identity: dict[str, object] = {
-        "schema": 2, "app": worker.app_id, "binary": worker.binary,
-        "workspace": str(workspace), "profile": profile,
-        "platform": sys.platform, "machine": os.uname().machine,
-        "flags": {key: env.get(key, '') for key in ('RUSTFLAGS', 'CARGO_ENCODED_RUSTFLAGS', 'CC', 'CFLAGS')},
-    }
-    if worker.python_abi:
-        identity['python'] = {
-            # Invocation aliases/venvs do not change the linked Python runtime.
-            # Keep runtime and ABI identity, not the name used to invoke Python.
-            "base_prefix": str(Path(sys.base_prefix).resolve()), "version": sys.version,
-            "soabi": sysconfig.get_config_var('SOABI'), "libdir": sysconfig.get_config_var('LIBDIR'),
-            "library": sysconfig.get_config_var('LDLIBRARY'),
-        }
+def _load_native_build(registry: Path) -> NativeWorkerBuild:
     try:
-        identity['rustc'] = subprocess.check_output(['rustc', '-vV'], env=dict(env), text=True).strip()
-    except (OSError, subprocess.CalledProcessError) as exc:
-        raise SystemExit(f"Native worker build requires rustc: {exc}") from exc
-    hasher.update(json.dumps(identity, sort_keys=True).encode())
-    for path in sorted(paths):
-        hasher.update(b'\0' + path.relative_to(workspace).as_posix().encode() + b'\0')
-        hasher.update(path.read_bytes())
-    shared_asset_policy = workspace.parent / "asset_gzip.rs"
-    if shared_asset_policy.is_file():
-        hasher.update(b"\0../asset_gzip.rs\0" + shared_asset_policy.read_bytes())
-    return hasher.hexdigest()[:24]
+        document = cast(object, json.loads(registry.read_text(encoding="utf-8")))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"Native build manifest is unreadable: {registry}: {exc}") from exc
+    if not isinstance(document, dict) or document.get("schemaVersion") != 1:
+        raise SystemExit("Unsupported native build manifest")
+    entry = cast(dict[str, object], document)
+    manifest_base = entry.get('manifestBase', 'framework')
+    if manifest_base == 'framework':
+        source_root = _source_root().resolve()
+    elif manifest_base == 'app' and registry.parent.resolve().is_relative_to(
+        (_project_root() / 'app/apps').resolve()
+    ):
+        source_root = registry.parent.resolve()
+    else:
+        raise SystemExit('Native build manifestBase must be framework or its owning app')
+    values: dict[str, str] = {}
+    for field in ("appId", "manifest", "binary", "environmentKey"):
+        value = entry.get(field)
+        if not isinstance(value, str) or not value:
+            raise SystemExit(f"Native build requires {field}")
+        values[field] = value
+    app_id, binary, key = values["appId"], values["binary"], values["environmentKey"]
+    if any(not (part.isascii() and (part.isalnum() or part in "_-")) for part in app_id + binary + key):
+        raise SystemExit("Native build identifiers must be safe path/env components")
+    if not (key[0].isalpha() or key[0] == '_') or '-' in key:
+        raise SystemExit("Native build environmentKey is invalid")
+    relative = Path(values["manifest"])
+    manifest = (source_root / relative).resolve()
+    if relative.is_absolute() or not manifest.is_relative_to(source_root) or manifest.name != 'Cargo.toml':
+        raise SystemExit("Native Cargo manifest must remain within the framework source root or declared owning app")
+    python_abi = entry.get("pythonAbi", False)
+    if not isinstance(python_abi, bool):
+        raise SystemExit("Native build pythonAbi must be boolean")
+    cache = entry.get('cache')
+    fingerprint = entry.get('fingerprint')
+    if not isinstance(cache, dict) or not isinstance(fingerprint, dict):
+        raise SystemExit('Native build requires cache and fingerprint configuration')
+    if fingerprint.get('policy') != 'framework-source-v2':
+        raise SystemExit('Unsupported native build fingerprint policy')
+    inputs = fingerprint.get('inputs')
+    if not isinstance(inputs, list) or not inputs or any(
+        not isinstance(value, str) or not value or Path(value).is_absolute() or '..' in Path(value).parts
+        for value in inputs
+    ):
+        raise SystemExit('Native build fingerprint inputs must stay inside its workspace')
+    cache_values: dict[str, str] = {}
+    shared_inputs = fingerprint.get('sharedInputs', [])
+    if not isinstance(shared_inputs, list) or any(
+        not isinstance(value, str) or not value or Path(value).is_absolute() or
+        not (manifest.parent / value).resolve().is_relative_to(source_root)
+        for value in shared_inputs
+    ):
+        raise SystemExit('Native build shared inputs must stay inside declared source root')
+    for field in ('root', 'targetDirectory', 'publishedDirectory'):
+        value = cache.get(field)
+        if not isinstance(value, str) or not value or Path(value).is_absolute() or '..' in Path(value).parts:
+            raise SystemExit('Native build cache paths must be relative safe paths')
+        cache_values[field] = value
+    package = entry.get('package')
+    if package is not None and (not isinstance(package, str) or not package or
+                                any(not (c.isascii() and (c.isalnum() or c in '_-')) for c in package)):
+        raise SystemExit('Invalid native build Cargo package')
+    features = entry.get('features', [])
+    if not isinstance(features, list) or any(not isinstance(v, str) or not v or
+        any(not (c.isascii() and (c.isalnum() or c in '_-')) for c in v) for v in features):
+        raise SystemExit('Invalid native build features')
+    target_env = cache.get('targetDirectoryEnvironment')
+    if target_env is not None and (not isinstance(target_env, str) or not target_env.isidentifier() or not target_env.isascii()):
+        raise SystemExit('Invalid native build target environment key')
+    return NativeWorkerBuild(app_id, manifest, binary, key, python_abi,
+        cache_values['root'], cast(str | None, package), tuple(cast(list[str], features)),
+        tuple(cast(list[str], inputs)), cache_values['targetDirectory'],
+        cache_values['publishedDirectory'], target_env,
+        tuple(cast(list[str], shared_inputs)))
+
+
+def _native_worker_fingerprint(worker: NativeWorkerBuild, profile: str, env: Mapping[str, str]) -> str:
+    return _rust_source_fingerprint(worker.manifest, profile=profile,
+                                   features=worker.features, inputs=worker.source_inputs,
+                                   shared_inputs=worker.shared_inputs)
+
+
+def _native_build_compatibility(spec: NativeWorkerBuild) -> dict[str, object]:
+    identity: dict[str, object] = {
+        'binary': spec.binary, 'package': spec.cargo_package,
+        'inputs': list(spec.source_inputs),
+        'sharedInputs': list(spec.shared_inputs),
+    }
+    if spec.python_abi:
+        identity['python'] = {
+            'basePrefix': str(Path(sys.base_prefix).resolve()), 'version': sys.version,
+            'soabi': sysconfig.get_config_var('SOABI'),
+            'libdir': sysconfig.get_config_var('LIBDIR'),
+            'library': sysconfig.get_config_var('LDLIBRARY'),
+        }
+    return identity
+
+
+def _prepare_native_build(
+    spec: NativeWorkerBuild, args: BootstrapArgs, env: Mapping[str, str], *,
+    profile: str, features: Sequence[str], root: Path, build: bool,
+) -> tuple[Path, bool]:
+    # Both framework and app workers use the established framework fingerprint,
+    # target/cache layout, lock and atomic binary publisher. Shell environment
+    # differences do not change the source build identity.
+    if not spec.manifest.is_file():
+        raise SystemExit(f'Native Cargo manifest is missing: {spec.manifest}')
+    fingerprint = _rust_source_fingerprint(spec.manifest, profile=profile,
+                                           features=features, inputs=spec.source_inputs,
+                                           shared_inputs=spec.shared_inputs)
+    name = spec.binary + ('.exe' if sys.platform == 'win32' else '')
+    selected = root / spec.published_directory / fingerprint / profile / name
+    target = Path(env.get(spec.target_environment, '')) if spec.target_environment and env.get(spec.target_environment) else root / spec.target_directory
+    compatibility = _native_build_compatibility(spec)
+    receipt = selected.with_name(selected.name + '.build.json')
+
+    def usable() -> bool:
+        if not _cached_binary_is_usable(selected) or args.force_build:
+            return False
+        # Existing framework cache entries predate receipts. Their identical
+        # source/profile/platform key remains valid and must not force rebuild.
+        if not spec.python_abi and not receipt.exists():
+            return True
+        try:
+            return json.loads(receipt.read_text()) == compatibility
+        except (OSError, ValueError):
+            return False
+
+    if not build:
+        return selected, usable()
+    with _exclusive_build_cache_lock(root):
+        if not usable():
+            command = ['cargo', 'build', '--manifest-path', str(spec.manifest)]
+            command.extend(['-p', spec.cargo_package] if spec.cargo_package else ['--bin', spec.binary])
+            if profile == 'release':
+                command.append('--release')
+            elif profile != 'debug':
+                command.extend(['--profile', profile])
+            if features:
+                command.extend(['--features', ','.join(features)])
+            build_env = dict(env, CARGO_TARGET_DIR=str(target))
+            if spec.python_abi:
+                build_env['PYO3_PYTHON'] = sys.executable
+            print(f'[te2] Building native {spec.app_id}: {selected}', flush=True)
+            result = subprocess.run(command, env=build_env, check=False)
+            if result.returncode:
+                raise SystemExit(result.returncode)
+            source = target / profile / name
+            if not _cached_binary_is_usable(source):
+                raise SystemExit(f'Native Cargo build produced no usable executable: {source}')
+            if _rust_source_fingerprint(spec.manifest, profile=profile, features=features,
+                                        inputs=spec.source_inputs, shared_inputs=spec.shared_inputs) != fingerprint or _native_build_compatibility(spec) != compatibility:
+                raise SystemExit('Native source/runtime changed during build; refusing stale publication. Run the build again.')
+            _publish_cached_binary(source, selected)
+            # Same lock protects readers/publication. A missing/interrupted
+            # Python receipt forces rebuild, never reuse of an unknown ABI.
+            temporary = receipt.with_name(receipt.name + '.new')
+            try:
+                with temporary.open('w') as output:
+                    output.write(json.dumps(compatibility, sort_keys=True) + '\n')
+                    output.flush()
+                    os.fsync(output.fileno())
+                temporary.replace(receipt)
+            finally:
+                temporary.unlink(missing_ok=True)
+            _fsync_directory(selected.parent)
+    return selected, True
 
 
 def _prepare_native_workers(args: BootstrapArgs, env: MutableMapping[str, str], *, build: bool) -> None:
@@ -638,36 +718,13 @@ def _prepare_native_workers(args: BootstrapArgs, env: MutableMapping[str, str], 
             env.pop("CODE_TE2_PYTHON_ISOLATED", None)
             env.pop("CODE_TE2_PYTHON_SOURCE", None)
         return
-    profile = 'release' if args.release else 'debug'
+    profile = _rust_build_profile(args)
     env.pop("CODE_TE2_PYTHON_CACHE_PREFIX", None)
     paths = resolve_te2_paths(env)
     for worker in workers:
-        fingerprint = _native_worker_fingerprint(worker, profile, env)
-        root = paths.cache_home / worker.app_id / 'build'
-        binary_name = worker.binary + ('.exe' if sys.platform == 'win32' else '')
-        selected = root / 'bin' / fingerprint / profile / binary_name
-        if build:
-            with _exclusive_build_cache_lock(root):
-                if not _cached_binary_is_usable(selected) or args.force_build:
-                    command = ['cargo', 'build', '--locked', '--manifest-path', str(worker.manifest), '--bin', worker.binary]
-                    if profile == 'release':
-                        command.append('--release')
-                    build_env = dict(env, CARGO_TARGET_DIR=str(root / 'cargo-target'))
-                    if worker.python_abi:
-                        build_env['PYO3_PYTHON'] = sys.executable
-                    print(f"[te2] Building native worker {worker.app_id}: {selected}", flush=True)
-                    result = subprocess.run(command, env=build_env, check=False)
-                    if result.returncode:
-                        raise SystemExit(result.returncode)
-                    source = root / 'cargo-target' / profile / binary_name
-                    if not _cached_binary_is_usable(source):
-                        raise SystemExit(f"Native worker build produced no usable executable: {source}")
-                    if _native_worker_fingerprint(worker, profile, env) != fingerprint:
-                        raise SystemExit("Native worker source/toolchain changed during build; refusing stale publication. Run the build again.")
-                    _publish_cached_binary(source, selected)
-                # CLI and native hosts can legitimately use different compiler
-                # flags/ABIs. Do not evict one another's immutable executables.
-                # Workers in an existing framework also retain the selected path.
+        root = paths.cache_home / worker.cache_root
+        selected, _ = _prepare_native_build(worker, args, env, profile=profile,
+                                           features=worker.features, root=root, build=build)
         env[worker.environment_key] = str(selected)
         if worker.app_id == 'code_te2':
             _select_editable_domain(env)
@@ -1328,7 +1385,9 @@ def _server_binary_name() -> str:
     return f"{SERVER_PACKAGE}{suffix}"
 
 
-def _rust_source_fingerprint(manifest: Path, *, profile: str, features: Sequence[str]) -> str:
+def _rust_source_fingerprint(manifest: Path, *, profile: str, features: Sequence[str],
+                             inputs: Sequence[str] | None = None,
+                             shared_inputs: Sequence[str] = ("../asset_gzip.rs",)) -> str:
     workspace = manifest.parent
     hasher = hashlib.sha256()
     hasher.update(b"te2-server-build-cache-v2\0")
@@ -1342,15 +1401,21 @@ def _rust_source_fingerprint(manifest: Path, *, profile: str, features: Sequence
     hasher.update(b"\0")
     uname_result = os.uname() if hasattr(os, "uname") else None
     hasher.update(uname_result.machine.encode("utf-8") if uname_result is not None else b"")
-    for path in _rust_fingerprint_paths(workspace):
+    paths = _rust_fingerprint_paths(workspace) if inputs is None else sorted({
+        path for pattern in inputs for path in workspace.glob(pattern) if path.is_file()
+    })
+    for path in paths:
+        if not path.resolve().is_relative_to(workspace.resolve()):
+            raise SystemExit('Native build fingerprint source escapes its workspace')
         rel = path.relative_to(workspace).as_posix()
         hasher.update(b"\0path:")
         hasher.update(rel.encode("utf-8", "surrogateescape"))
         hasher.update(b"\0")
         hasher.update(path.read_bytes())
-    shared_asset_policy = workspace.parent / "asset_gzip.rs"
-    if shared_asset_policy.is_file():
-        hasher.update(b"\0../asset_gzip.rs\0" + shared_asset_policy.read_bytes())
+    for relative in sorted(shared_inputs):
+        shared = workspace / relative
+        if shared.is_file():
+            hasher.update(b'\0' + relative.encode('utf-8') + b'\0' + shared.read_bytes())
     return hasher.hexdigest()[:24]
 
 
