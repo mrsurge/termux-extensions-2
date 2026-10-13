@@ -584,14 +584,16 @@ def _native_worker_fingerprint(worker: NativeWorkerBuild, profile: str, env: Map
         paths.add(build_script)
     hasher = hashlib.sha256()
     identity: dict[str, object] = {
-        "schema": 1, "app": worker.app_id, "binary": worker.binary,
+        "schema": 2, "app": worker.app_id, "binary": worker.binary,
         "workspace": str(workspace), "profile": profile,
         "platform": sys.platform, "machine": os.uname().machine,
         "flags": {key: env.get(key, '') for key in ('RUSTFLAGS', 'CARGO_ENCODED_RUSTFLAGS', 'CC', 'CFLAGS')},
     }
     if worker.python_abi:
         identity['python'] = {
-            "executable": str(Path(sys.executable).resolve()), "version": sys.version,
+            # Invocation aliases/venvs do not change the linked Python runtime.
+            # Keep runtime and ABI identity, not the name used to invoke Python.
+            "base_prefix": str(Path(sys.base_prefix).resolve()), "version": sys.version,
             "soabi": sysconfig.get_config_var('SOABI'), "libdir": sysconfig.get_config_var('LIBDIR'),
             "library": sysconfig.get_config_var('LDLIBRARY'),
         }
@@ -663,10 +665,12 @@ def _prepare_native_workers(args: BootstrapArgs, env: MutableMapping[str, str], 
                     if _native_worker_fingerprint(worker, profile, env) != fingerprint:
                         raise SystemExit("Native worker source/toolchain changed during build; refusing stale publication. Run the build again.")
                     _publish_cached_binary(source, selected)
-                _prune_final_binary_cache(root / 'bin', selected)
+                # CLI and native hosts can legitimately use different compiler
+                # flags/ABIs. Do not evict one another's immutable executables.
+                # Workers in an existing framework also retain the selected path.
         env[worker.environment_key] = str(selected)
         if worker.app_id == 'code_te2':
-            env.setdefault('CODE_TE2_MYPYC_DIR', str(_project_root() / '.codex-scratch' / 'mypyc-active'))
+            _select_editable_domain(env)
             env['CODE_TE2_PYTHON_HOME'] = sys.base_prefix
             env['CODE_TE2_PYTHON_EXECUTABLE'] = sys.executable
             env['CODE_TE2_HOST_PYTHON_EXECUTABLE'] = sys.executable
@@ -674,6 +678,20 @@ def _prepare_native_workers(args: BootstrapArgs, env: MutableMapping[str, str], 
             env.pop('CODE_TE2_PYTHON_ISOLATED', None)
             env.pop('CODE_TE2_PYTHON_SOURCE', None)
         print(f"[te2] Native worker {worker.app_id}: {selected}", flush=True)
+
+
+def _select_editable_domain(env: MutableMapping[str, str]) -> None:
+    # Explicit selections (including an intentional empty value) remain user
+    # policy. Broken selected snapshots must not silently become interpreted.
+    if 'CODE_TE2_MYPYC_DIR' in env:
+        return
+    selected = _project_root() / '.codex-scratch' / 'mypyc-active'
+    if selected.exists() or selected.is_symlink():
+        env['CODE_TE2_MYPYC_DIR'] = str(selected)
+    else:
+        env['CODE_TE2_MYPYC_DIR'] = ''
+        print('[te2] Code TE2 domain: interpreted (no editable mypyc snapshot). '
+              'To compile/activate: python -B app/apps/code_te2/build_mypyc.py', flush=True)
 
 
 def _rust_build_profile(args: BootstrapArgs) -> str:

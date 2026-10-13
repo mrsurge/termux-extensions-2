@@ -385,9 +385,13 @@ commands to this registry.
 The Code TE2 executable publishes atomically under
 `$TE2_CACHE_HOME/code_te2/build/bin/<fingerprint>/<release|debug>/code-te2-worker`.
 Intermediates remain in `code_te2/build/cargo-target`. A per-app lock and the
-existing framework publication/pruning helpers protect the final cache; mypyc
-snapshots and checkpoints are not pruned. Rust source/lockfile, profile, platform,
-compiler identity/flags and invoking Python ABI determine reuse. `--force-build`
+existing atomic framework publication helpers protect the final cache. Worker
+fingerprints are retained rather than pruning other launchers' selections;
+otherwise alternating CLI/APK build environments evict each other and repeatedly
+compile. Mypyc snapshots and checkpoints are not pruned. Rust source/lockfile,
+profile, platform, compiler identity/flags and Python runtime/ABI determine reuse.
+Interpreter invocation aliases sharing that runtime/ABI do not create a new key.
+Genuine compiler flags and different Python runtimes still do. `--force-build`
 also rebuilds configured workers. `--print-command` resolves paths without build
 or publication. Worker builds use `--locked` and the invoking `sys.executable`
 as `PYO3_PYTHON`, independently of the server's Cargo target cache.
@@ -407,8 +411,15 @@ renders the actual Code TE2 shellspec and checks the raw executable and inherite
 `PYTHONPATH`. Spawn failures log the full cause chain. Changes to this handoff
 require rebuilding the framework server, not only the worker.
 
-Mypyc compilation/activation is still explicit through `build_mypyc.py`; this
-slice does not build it automatically or replace its selected domain overlay.
+Mypyc compilation/activation is explicit through `build_mypyc.py`. For source
+installs only, absence of the default `.codex-scratch/mypyc-active` selection
+exports an empty `CODE_TE2_MYPYC_DIR`: the same native worker imports the Python
+domain interpreted. Bootstrap prints the build command. An existing selection
+(including a broken symlink) or explicit environment selection is preserved,
+so invalid compiled snapshots still fail visibly. An explicit empty value opts
+into interpreted mode. After first compilation/activation, launch a new framework
+to select the default snapshot; already-running frameworks retain their startup
+environment. Neither this choice nor the compiler script restarts a runtime.
 Source installs include the independent worker's Cargo manifest/lockfile/source.
 Binary release wheels require matched executable/domain/resources and ABI
 validation. Packaged bootstrap resolves that validated payload instead of this

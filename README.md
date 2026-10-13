@@ -326,6 +326,32 @@ python -m pip install -e .
 te2
 ```
 
+Source/editable startup builds and caches both the Rust framework and Code TE2
+worker for the local architecture (not only x86-64). Install Rust/Cargo and the
+platform's compiler and Python development libraries first. This source-build
+route is separate from the release installer's supported prebuilt targets.
+
+On a fresh editable checkout, Code TE2 runs its Python domain interpreted inside
+the native Rust worker until a mypyc snapshot is built and activated. It keeps
+the same native networking and framework pipe; no alternate Python server is
+launched. To build the optimized domain, from the checkout root and the same
+Python environment used to launch TE2:
+
+```bash
+python -m pip install 'mypy==2.3.0' 'setuptools==84.0.0'
+python -B app/apps/code_te2/build_mypyc.py --jobs 4
+```
+
+Install `ccache` first, or explicitly allow an uncached build with `--no-cache`.
+Reduce `--jobs` on memory-constrained devices. The script builds, validates and
+activates a snapshot; it does not restart running workers. Restart your framework
+after the first activation so bootstrap selects it. Subsequent source changes to
+compiled modules need a new build and worker activation. See the
+[native worker build guide](framework/native_editor_worker/README.md#cached-build-and-retention-workflow-current-developer-behavior)
+for artifact paths and cache details. A broken or explicitly selected snapshot
+is not silently bypassed; packaged releases always require their validated
+compiled payload.
+
 For a package install directly from Git:
 
 ```bash

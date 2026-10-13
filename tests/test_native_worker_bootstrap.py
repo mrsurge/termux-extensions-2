@@ -32,6 +32,8 @@ def worker_setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(bootstrap, 'packaged_server_path', lambda: None)
     monkeypatch.setattr(bootstrap.subprocess, 'check_output', lambda *args, **kwargs: 'rustc test toolchain')
     env = dict(os.environ, TE2_CACHE_HOME=str(tmp_path / 'cache'))
+    for key in ('CODE_TE2_WORKER_BIN', 'CODE_TE2_MYPYC_DIR'):
+        env.pop(key, None)
     return workspace, registry, env
 
 
@@ -59,7 +61,73 @@ def test_cached_worker_publication_reuses_and_invalidates_source(worker_setup, m
     bootstrap._prepare_native_workers(args, env, build=True)
     assert len(calls) == 2
     assert Path(env['CODE_TE2_WORKER_BIN']) != selected
-    assert not selected.exists()
+    assert selected.exists()  # Another running framework may still own this path.
+
+
+def test_worker_identity_reuses_interpreter_aliases(worker_setup, monkeypatch):
+    _, _, env = worker_setup
+    worker = bootstrap._native_worker_registry()[0]
+    before = bootstrap._native_worker_fingerprint(worker, 'release', env)
+    monkeypatch.setattr(bootstrap.sys, 'executable', '/different/venv/bin/python3')
+    assert bootstrap._native_worker_fingerprint(worker, 'release', env) == before
+
+
+def test_alternating_build_flags_do_not_evict_each_other(worker_setup, monkeypatch):
+    _, _, env = worker_setup
+    calls = []
+    def compile_worker(command, *, env, check):
+        calls.append(command)
+        binary = Path(env['CARGO_TARGET_DIR']) / 'release/code-te2-worker'
+        binary.parent.mkdir(parents=True, exist_ok=True)
+        binary.write_bytes(b'compiled-test-executable')
+        binary.chmod(0o755)
+        return subprocess.CompletedProcess(command, 0)
+    monkeypatch.setattr(bootstrap.subprocess, 'run', compile_worker)
+    args = bootstrap._parse_args(['--build-only'])
+    original_flags = env.get('CFLAGS')
+    bootstrap._prepare_native_workers(args, env, build=True)
+    first = Path(env['CODE_TE2_WORKER_BIN'])
+    env['CFLAGS'] = (original_flags or '') + ' -DTE2_TEST_VARIANT=1'
+    bootstrap._prepare_native_workers(args, env, build=True)
+    second = Path(env['CODE_TE2_WORKER_BIN'])
+    assert first != second and first.exists() and second.exists()
+    if original_flags is None:
+        env.pop('CFLAGS')
+    else:
+        env['CFLAGS'] = original_flags
+    bootstrap._prepare_native_workers(args, env, build=True)
+    assert Path(env['CODE_TE2_WORKER_BIN']) == first
+    assert len(calls) == 2
+
+
+def test_missing_default_mypyc_uses_interpreted_domain(worker_setup, capsys):
+    _, _, env = worker_setup
+    env.pop('CODE_TE2_MYPYC_DIR', None)
+    bootstrap._select_editable_domain(env)
+    assert env['CODE_TE2_MYPYC_DIR'] == ''
+    assert 'interpreted' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('kind', ['directory', 'broken_link'])
+def test_existing_default_mypyc_remains_selected(worker_setup, kind):
+    workspace, _, env = worker_setup
+    env.pop('CODE_TE2_MYPYC_DIR', None)
+    selected = workspace.parents[1] / '.codex-scratch/mypyc-active'
+    selected.parent.mkdir()
+    if kind == 'directory':
+        selected.mkdir()
+    else:
+        selected.symlink_to(selected.parent / 'missing')
+    bootstrap._select_editable_domain(env)
+    assert env['CODE_TE2_MYPYC_DIR'] == str(selected)
+
+
+@pytest.mark.parametrize('selection', ['', '/explicit/missing/snapshot'])
+def test_explicit_editable_domain_selection_is_preserved(worker_setup, selection):
+    _, _, env = worker_setup
+    env['CODE_TE2_MYPYC_DIR'] = selection
+    bootstrap._select_editable_domain(env)
+    assert env['CODE_TE2_MYPYC_DIR'] == selection
 
 
 def test_worker_identity_includes_python_abi(worker_setup, monkeypatch):
