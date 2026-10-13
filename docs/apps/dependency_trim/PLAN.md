@@ -8,9 +8,10 @@ not regain Pydantic/cryptography transitively. Keep Python policy/orchestration
 typed and independently testable; expose explicit ASGI/DTO/lifespan boundaries
 that remain suitable for later mypyc compilation or native hosting.
 
-Investigation and Terminal slice 1 are approved. Later slices need concrete scope
-approval. No package uninstall, shared framework restart, deployment, native build
-or changes in dependent repositories are authorized by the Terminal slice.
+Investigation, Terminal slice 1 and File Editor's backend-only slice are approved.
+Later slices need concrete scope approval. No package uninstall, shared framework
+restart, deployment, native build or changes in dependent repositories are
+authorized by these app-backend slices.
 The preceding editable-build/asset-cleanup work is checkpointed at `15c0b514`.
 
 ## Established reusable contracts
@@ -118,6 +119,10 @@ acceptable; moving console networking/state is a distinct follow-up decision.
    broker rewrite, transport change, runtime restart or other-app source reuse.
 2. File Editor, Archive and Aria owner-scoped route/typing/browser slices; Settings
    frontend and proxy-shell scaffold stubs. Preserve download/stream/error behavior.
+   File Editor backend is the first sub-slice: four explicit ASGI routes and typed
+   request/domain functions, preserving home guards, sidebar state and readiness.
+   CM6 frontend TypeScript/minification follows separately; no UI source/bundle
+   changes are needed to test its backend cutover.
 3. Framework-Shells standalone/Ferrous host explicit ASGI composition and its
    dependency metadata; independent repository approval/tests/release pin updates.
    Dashboard hydration remains Socket.IO; preserve retained public API consumers.

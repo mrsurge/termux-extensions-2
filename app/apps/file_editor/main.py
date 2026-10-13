@@ -1,18 +1,21 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import os
 from pathlib import Path
-from fastapi import APIRouter, Query, Body, HTTPException
-from typing import Optional, Dict, Any
+from typing import Protocol, Self, cast
 from urllib import request as urllib_request
 from urllib.parse import quote, urlencode
 
-file_editor_bp = APIRouter()
+# Keep existing structured detail envelopes; Starlette's exception is string-only.
+from .http_app import FileEditorASGI, FileEditorError as HTTPException
+
 APP_ID = str(os.environ.get("TE_APP_ID") or "file_editor").strip() or "file_editor"
+JsonObject = dict[str, object]
 
 
-@file_editor_bp.post('/sidebar/window/state')
-async def publish_sidebar_file_state(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+async def publish_sidebar_file_state(payload: JsonObject) -> JsonObject:
     from app.libs.sidebar_rpc import call_sidebar_rpc
     host_id = str(payload.get('host_id') or '').strip()
     token_id = str(payload.get('token_id') or '').strip()
@@ -62,8 +65,15 @@ def _post_serving_readiness() -> None:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib_request.urlopen(req, timeout=5) as resp:
-        resp.read()
+    response = cast(_ReadableHttpResponse, urllib_request.urlopen(req, timeout=5))
+    with response as resp:
+        _ = resp.read()
+
+
+class _ReadableHttpResponse(Protocol):
+    def __enter__(self) -> Self: ...
+    def __exit__(self, exc_type: type[BaseException] | None, exc_value: BaseException | None, traceback: object | None) -> None: ...
+    def read(self) -> bytes: ...
 
 
 async def te2_app_backend_serving() -> None:
@@ -72,7 +82,7 @@ async def te2_app_backend_serving() -> None:
     except Exception as exc:
         print(f"[file_editor] readiness post failed: {exc}", flush=True)
 
-def _expand_and_validate_path(path: str) -> tuple[Optional[str], Optional[str]]:
+def _expand_and_validate_path(path: str) -> tuple[str | None, str | None]:
     base_home = Path.home()
     try:
         expanded = Path(path).expanduser().resolve()
@@ -84,14 +94,12 @@ def _expand_and_validate_path(path: str) -> tuple[Optional[str], Optional[str]]:
     
     return str(expanded), None
 
-@file_editor_bp.get('/')
-async def status() -> Dict[str, Any]:
+async def status() -> JsonObject:
     return {"ok": True, "data": {"message": "File Editor app API ready"}}
 
-@file_editor_bp.get('/read')
-async def read_file(path: str = Query(..., description="File path to read")) -> Dict[str, Any]:
+async def read_file(path: str) -> JsonObject:
     expanded, err = _expand_and_validate_path(path)
-    if err:
+    if err or expanded is None:
         raise HTTPException(status_code=403, detail={"ok": False, "error": err})
     
     expanded_path = Path(expanded)
@@ -104,11 +112,10 @@ async def read_file(path: str = Query(..., description="File path to read")) -> 
     except Exception as e:
         raise HTTPException(status_code=500, detail={"ok": False, "error": str(e)})
 
-@file_editor_bp.post('/write')
 async def write_file(
-    path: str = Body(..., embed=True),
-    content: str = Body(..., embed=True)
-) -> Dict[str, Any]:
+    path: str,
+    content: str,
+) -> JsonObject:
     if not path or content is None:
         raise HTTPException(
             status_code=400,
@@ -116,7 +123,7 @@ async def write_file(
         )
     
     expanded, err = _expand_and_validate_path(path)
-    if err:
+    if err or expanded is None:
         raise HTTPException(status_code=403, detail={"ok": False, "error": err})
     
     try:
@@ -126,3 +133,6 @@ async def write_file(
         return {"ok": True, "data": {"path": expanded}}
     except Exception as e:
         raise HTTPException(status_code=500, detail={"ok": False, "error": str(e)})
+
+
+TE2_ASGI_APP = FileEditorASGI()

@@ -12,6 +12,10 @@
 - [x] Terminal migration/type/lifecycle/transport regressions.
 - [x] Terminal live acceptance after approved app-worker restart.
 - [ ] Other app/frontend/template migrations.
+  - [x] File Editor backend scope approved; explicit ASGI/strict types implemented.
+  - [x] File Editor isolated backend/worker regression tests.
+  - [x] File Editor backend live acceptance after app-worker restart.
+  - [ ] File Editor frontend strict TypeScript/minification.
 - [ ] Framework-Shells coordinated migration and updated release metadata.
 - [ ] Runtime bridge/console typed ASGI migration.
 - [ ] Rust MCP POC and transport/client/schema acceptance.
@@ -55,3 +59,27 @@ No dependency declarations, Node workers, other apps, Android source or shared
 runtime were changed/restarted by the agent. This backend
 slice does not require Code TE2 mypyc or a native Cargo rebuild. Installed global
 dependencies remain until the other consumers and nested repos are migrated.
+
+## File Editor backend slice
+
+Terminal live acceptance was checkpointed in `ae2b02ba`. User approved this
+backend-only sub-slice using the blocking input tool; frontend modernization
+remains separate. `app/apps/file_editor/main.py` now exports `TE2_ASGI_APP`,
+composed in app-owned `http_app.py`. The four routes retain status/read/write
+envelopes, home-directory and symlink resolution checks, exact sidebar state
+publication and the existing serving hook. Domain functions are annotated with
+`dict[str, object]`, not `Any`. Write admission uses a msgspec shape, and bodies
+have a 32 MiB ingress bound including JSON escaping overhead; read responses
+retain their previous size behavior. App-owned errors preserve structured detail
+without FastAPI or an unsafe type cast into Starlette's string-only exception.
+
+Validation: 72 Python tests passed covering File Editor, File Explorer intents,
+Terminal ASGI and generic worker ASGI/loading contracts. Changed File Editor
+modules pass `ty`; `git diff --check` is clean. New regressions cover Unicode and
+empty writes, invalid UTF-8 reads, missing files, home/symlink escape rejection,
+sidebar identities/state, invalid bodies, body bounds/disconnect, slash/query
+routing and no FastAPI/Pydantic app-owned imports. One upstream TestClient/httpx
+deprecation warning remains. No shared runtime/app restart, dependency metadata,
+frontend build/OTA, Android, nested repository or native build changes occurred.
+User reports the File Editor backend working live; acceptance recorded before
+checkpoint commit. No agent-initiated runtime transition was performed.
