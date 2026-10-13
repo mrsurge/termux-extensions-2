@@ -507,6 +507,7 @@ def _run_http_worker(
         lifespan="on",
         timeout_graceful_shutdown=2,
         log_config=None,
+        loop="asyncio",
     )
     # Uvicorn's startup returns after socket creation, unlike ASGI lifespan which
     # runs before listening. Observe that boundary without changing its ordering.
@@ -551,7 +552,8 @@ def _run_http_worker(
 
     server = StartupObservedServer(config)
 
-    server.run()
+    from app.libs.asyncio_runtime import run
+    run(server.serve())
 
 if __name__ == "__main__":
     main()

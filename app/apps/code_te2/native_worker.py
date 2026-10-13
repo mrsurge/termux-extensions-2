@@ -11,6 +11,7 @@ from typing import Protocol, cast
 
 from app.libs import pipe_runtime
 from app.libs.app_worker_bootstrap import assemble_off_loop
+from app.libs.asyncio_runtime import new_event_loop
 from app.libs.pipe_inbound import InboundEnvelopeRouter
 from app.libs.pipe_protocol import PipeEnvelope, PipeIdentity, PipeError, PipeProtocolError, decode_envelope, process_error_response
 from app.libs.runtime_debug_pipe import RuntimeDebugPipe
@@ -77,8 +78,15 @@ def start(bridge: NativeBridge) -> dict[str, object]:
 
     def run() -> None:
         global _loop, _stop, _debug, _router, _intents
-        _loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(_loop)
+        try:
+            _loop = new_event_loop()
+            asyncio.set_event_loop(_loop)
+        except BaseException as error:
+            # Report an optional-runtime import/ABI failure immediately, not as
+            # a 90-second readiness timeout from the native host.
+            _ready.set_exception(error)
+            _done.set_exception(error)
+            return
 
         async def lifecycle() -> None:
             global _stop, _debug, _router, _intents

@@ -131,6 +131,10 @@ acceptable; moving console networking/state is a distinct follow-up decision.
 
 ## Ordered implementation slices and validation gates
 
+**Optional uvloop follow-up:** shared factory/startup integration is implemented;
+published-wheel verification, packaging and runtime activation remain pending.
+See the uvloop section below before continuing remaining app migrations.
+
 1. Terminal explicit ASGI + msgspec/dataclass request boundary, existing strict
    frontend checks; isolated HTTP/WebSocket/lifecycle/stream regressions. No Node
    broker rewrite, transport change, runtime restart or other-app source reuse.
@@ -178,6 +182,48 @@ acceptable; moving console networking/state is a distinct follow-up decision.
    Installer/runtime archive smoke checks must verify the declared binding's
    `libarchive.file_reader` API, not merely that `import libarchive` succeeds;
    an unrelated distribution can shadow that namespace even with satisfied metadata.
+
+## Optional uvloop integration — next steps
+
+User supplies `uvloop-te2==0.23.0.post1`, a Pixel-built Android aarch64 rebuild of
+upstream `uvloop==0.23.0`, with the same `import uvloop` namespace and APIs.
+Publication is pending/user-reported, not yet verified by this workstream. It is
+an alternative distribution of the same module, not an additional runtime to
+install alongside upstream uvloop. Desktop uses upstream uvloop; Termux uses the
+Android rebuild after checking its wheel tags and interpreter ABI.
+
+1. Audit loop creation at ordinary app-worker/Uvicorn startup, the console/MCP
+   runtime bridge, and Code TE2's PyO3-hosted Python domain thread. Verify actual
+   owning call sites, including interpreted and mypyc paths, before choosing a
+   neutral shared loop factory. An import alone does not select the active loop.
+2. Enable uvloop at those Python-owned creation boundaries when installed; use
+   explicit runner/loop-factory hooks where supported rather than relying on a
+   process-global policy to reach every thread. Keep ordinary asyncio when the
+   optional module is absent; provide a diagnostic/explicit disable seam for
+   comparison. Do not mask ABI/import corruption as a successful uvloop launch.
+3. Verify the published Android artifact really imports and creates a loop on
+   CPython 3.14/Termux aarch64. Select distribution metadata/installer and release
+   runtime inclusion deliberately: Android platform tagging and private Linux
+   Python packaging must be validated, not assumed from architecture alone.
+   Avoid accidental Termux source compilation or installing both distributions.
+4. Test present/absent/disabled selection, background-thread loop ownership,
+   clean shutdown/cancellation, subprocess/FD readers, Socket.IO and raw terminal
+   WebSocket parity. Check the PyO3/mypyc domain as well as ordinary workers.
+   Keep Rust Hyper/Socketioxide/Tokio and Node PTY transport unchanged.
+5. With separately approved activation, measure comparable startup and async
+   steady-state behavior on desktop and Pixel; report observed improvements,
+   not promised ones. uvloop is not a replacement for import-graph optimization.
+
+The user subsequently approved shared factory/source integration and isolated
+tests. `app/libs/asyncio_runtime.py` uses an explicit asyncio Runner for ordinary
+workers and the runtime bridge, avoiding Uvicorn-version-dependent global loop
+policies; Code TE2's native domain creates its loop with the same factory in its
+own thread. `TE2_DISABLE_UVLOOP=1` forces ordinary asyncio. Only absence of the
+top-level uvloop module falls back automatically; a broken installed module fails
+visibly, and native domain startup reports factory failure immediately. No
+dependency install, requirements change, worker/framework restart, wheel
+publication or new native build is performed. Compiled Code TE2 activation needs
+a matching mypyc snapshot; this source edit alone does not update that runtime.
 
 ## Archive Manager intent integration — planned follow-up
 

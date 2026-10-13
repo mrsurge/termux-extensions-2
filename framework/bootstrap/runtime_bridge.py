@@ -8,6 +8,7 @@ from fastapi import FastAPI
 
 from app.te2_runtime_mounts import mount_te2_runtime_services, te2_runtime_lifespan
 from app.memory_profile import install_python_memory_profiler
+from app.libs.asyncio_runtime import run
 
 
 def build_app() -> FastAPI:
@@ -41,7 +42,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     _ = install_python_memory_profiler("runtime_bridge")
-    uvicorn.run(build_app(), host=args.host, port=args.port, log_level="info")
+    config = uvicorn.Config(build_app(), host=args.host, port=args.port,
+                            log_level="info", loop="asyncio")
+    run(uvicorn.Server(config).serve())
     return 0
 
 

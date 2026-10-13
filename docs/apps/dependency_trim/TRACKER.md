@@ -16,6 +16,15 @@ tracked; current Sidebar transport stays intact for 0.2.354.
 - [x] Approve first concrete implementation slice.
 - [x] Terminal migration/type/lifecycle/transport regressions.
 - [x] Terminal live acceptance after approved app-worker restart.
+- [x] Record optional uvloop as the next bounded follow-up: upstream 0.23.0,
+  Termux distribution uvloop-te2 0.23.0.post1, same uvloop import/API.
+- [x] Audit Python loop owners and approve concrete optional-uvloop integration.
+- [ ] Verify published Android wheel tags/CPython 3.14 import and loop creation;
+  define mutually exclusive target dependency/private-runtime packaging.
+- [x] Implement present/absent/disabled selection and worker/thread/lifecycle
+  regressions without changing Rust/Node networking.
+- [ ] Verify real uvloop transport/FD/subprocess parity on desktop/Termux.
+- [ ] Separately activate and compare desktop/Pixel behavior and timings.
 - [ ] Other app/frontend/template migrations.
   - [x] File Editor backend scope approved; explicit ASGI/strict types implemented.
   - [x] File Editor isolated backend/worker regression tests.
@@ -60,6 +69,22 @@ requirements/source and release metadata remain authority for later resolution.
 No nested-repository source was edited. Earlier uncommitted source/asset/build
 work and unrelated user files remain preserved. No performance/size win is claimed
 before measurement. Web references and compatibility details are in PLAN.md.
+
+## Optional uvloop integration
+
+User approved source-only integration/tests. Shared `asyncio_runtime` selects
+`uvloop.new_event_loop` when installed, ordinary asyncio if absent or disabled
+with `TE2_DISABLE_UVLOOP=1`; nested dependency/ABI import failures propagate.
+Ordinary worker and console bridge use explicit Runner ownership around existing
+Uvicorn serve/lifecycle; native domain thread uses the same factory and reports
+creation failure through its readiness future. Rust/Node transports are untouched.
+Local uvloop is absent: selection tests use a factory double, not real uvloop.
+Validation: 31 isolated selection/runner/worker/bootstrap regressions pass.
+Changed helper/native-domain/bridge pass strict ty; the existing worker module
+has two pre-existing ty warnings (redundant cast and asynccontextmanager return
+annotation), with no new diagnostic. `git diff --check` is clean.
+No package install, dependency declarations, build, restart or deployment occurred.
+Real Android wheel/ABI, transport and performance acceptance remain open.
 
 ## Archive Manager frontend slice
 
