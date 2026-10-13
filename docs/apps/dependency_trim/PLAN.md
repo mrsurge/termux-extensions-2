@@ -8,11 +8,23 @@ not regain Pydantic/cryptography transitively. Keep Python policy/orchestration
 typed and independently testable; expose explicit ASGI/DTO/lifespan boundaries
 that remain suitable for later mypyc compilation or native hosting.
 
-Investigation, Terminal slice 1 and File Editor's backend-only slice are approved.
+Investigation, Terminal slice 1 and File Editor's backend/frontend slices are approved.
 Later slices need concrete scope approval. No package uninstall, shared framework
 restart, deployment, native build or changes in dependent repositories are
 authorized by these app-backend slices.
 The preceding editable-build/asset-cleanup work is checkpointed at `15c0b514`.
+
+## Release sequencing
+
+- **0.2.354:** remove FastAPI from supported framework/app-worker composition
+  and coordinated dependency metadata. Preserve working Sidebar IPC transports
+  during this release; do not combine the dependency migration with the pipe
+  cutover. FastMCP/MCP's remaining Pydantic/cryptography closure is tracked
+  separately and must not be described as eliminated merely by removing FastAPI.
+- **0.2.355:** replace backend-to-backend Sidebar IPC socket calls with typed,
+  framework-brokered pipe requests/intents and state updates. This is the final
+  follow-up in this plan, after 0.2.354; no cutover implementation is authorized
+  by recording the schedule. Preserve Sidebar behavior and app frontend sockets.
 
 ## Established reusable contracts
 
@@ -36,8 +48,8 @@ The preceding editable-build/asset-cleanup work is checkpointed at `15c0b514`.
 
 | Owner | Current work remaining | Migration seam |
 | --- | --- | --- |
-| Terminal | FastAPI router/WebSocket plus four Pydantic request DTOs; backend mostly typed, frontend already strict TS/bundled | Explicit app-owned ASGI routing and typed DTOs; preserve Node PTY/headless stream and MessagePack protocol |
-| File Editor | FastAPI routes and untyped browser orchestration | Typed backend/ASGI, TS entrypoint/minified bundle and inline CSS |
+| Terminal | Backend explicit ASGI/msgspec migration and strict frontend live accepted | Preserve Node PTY/headless stream and MessagePack protocol; share neutral transport primitives in follow-up |
+| File Editor | Backend typed explicit ASGI and strict TS frontend live accepted | Single generated `main.js` at existing asset URL, retained inline CSS |
 | Archive Manager | Four FastAPI routes; ~1,174-line browser module | Typed backend/ASGI and modular strict TS/browser build |
 | Aria Downloader | Ten FastAPI routes; ~1,054-line browser module | Same workflow, preserving aria2 shell/process and polling behavior |
 | Settings | ~291-line browser module; framework-backed settings | Strict TS/browser build only; do not invent a Python settings authority |
@@ -123,6 +135,17 @@ acceptable; moving console networking/state is a distinct follow-up decision.
    request/domain functions, preserving home guards, sidebar state and readiness.
    CM6 frontend TypeScript/minification follows separately; no UI source/bundle
    changes are needed to test its backend cutover.
+   After File Editor frontend, extract shared typed ASGI primitives before the
+   remaining backend migrations: bounded JSON/body reads, structured error
+   responses, method/redirect helpers and trivial lifespan handling under
+   `app/libs/te2_asgi/` (or the existing neutral ASGI library boundary). Reuse
+   `app_worker_asgi.py` for worker lifecycle/probe integration, not a second
+   supervisor. Adopt the helpers in Terminal, File Editor and File Explorer
+   with transport/error/limit/streaming parity tests, then use them for Archive,
+   Aria and later composition. Routes, DTOs, permissions and domain policy stay
+   app-owned; no FastAPI-style introspection, another app's imports or global
+   readiness/transport authority. Keep response-start/streaming failures from
+   emitting a second response and preserve each app's body/optional-body policy.
 3. Framework-Shells standalone/Ferrous host explicit ASGI composition and its
    dependency metadata; independent repository approval/tests/release pin updates.
    Dashboard hydration remains Socket.IO; preserve retained public API consumers.
@@ -157,3 +180,42 @@ Framework-owned worker Socket.IO namespaces routed over the existing pipe are
 plausible, but require client/SID/namespace ownership, readiness, room routing,
 bounded backpressure, cancellation, disconnection and mutation-replay contracts.
 This is deferred transport architecture, not part of removing FastAPI/FastMCP.
+
+## Final follow-up — 0.2.355 Sidebar IPC framework-pipe cutover
+
+Replace the remaining backend-to-backend Sidebar IPC Socket.IO clients with the
+existing framework pipe broker pattern, extending `app.intent.dispatch` or its
+appropriate typed service contract rather than creating another transport.
+
+```text
+frontend query-string presentation identity
+  -> app's own frontend/backend lane
+  -> app backend: typed framework-pipe request/state update
+  -> framework broker: validate and route to the owning app/service
+  -> target backend hook/state owner
+  -> exact-client notification/projection
+```
+
+The query string supplies context, not authorization or durable authority.
+Validate app/client/host/presentation identity against live ownership before
+dispatch. The framework brokers cross-app traffic; project directory and other
+editor-owned decisions still belong to Code TE2's backend, not a global framework
+"active project" or a frontend relay that repeats the request.
+
+Cover the remaining `sidebar.cwd.get` project-directory lookup and
+`sidebar.window.state.update` restore-state publication in Terminal, File
+Explorer and File Editor, then audit other supported Sidebar IPC consumers before
+retiring the shared socket helper and any now-unused backend lane. Preserve
+session/tab/shell restoration, dead-session reset, multiple clients and multiple
+presentations, foreground targeting and hidden-view behavior.
+
+Use existing typed MessagePack pipe framing, correlation, readiness and ownership
+contracts. Define bounded timeouts/backpressure, cancellation/disconnection,
+clear unavailable-target errors and no replay of uncertain mutations. Prove
+broker/owner validation and restoration parity with synthetic tests plus
+standalone/sidebar and multi-client live acceptance before removing old paths.
+
+This retires the **backend-to-backend Sidebar IPC transport**, not the Sidebar
+feature, nor app-owned frontend HTTP/WebSocket/Socket.IO lanes or terminal streams.
+Moving all frontend Socket.IO namespaces into the framework remains a separate
+deferred architecture decision. Do not reopen the 0.2.354 release for this work.

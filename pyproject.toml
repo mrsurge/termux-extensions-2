@@ -55,6 +55,8 @@ include-package-data = true
     "apps/code_te2/node_modules/**/*",
     "apps/terminal/node_modules",
     "apps/terminal/node_modules/**/*",
+    "apps/file_editor/node_modules",
+    "apps/file_editor/node_modules/**/*",
 ]
 "desktop_client" = [
     "electron/src/**/*.test.ts",
@@ -105,6 +107,8 @@ exclude = [
     "app.apps.code_te2.node_modules.*",
     "app.apps.terminal.node_modules",
     "app.apps.terminal.node_modules.*",
+    "app.apps.file_editor.node_modules",
+    "app.apps.file_editor.node_modules.*",
     "desktop_client.android_shell",
     "desktop_client.android_shell.*",
     "desktop_client.electron",

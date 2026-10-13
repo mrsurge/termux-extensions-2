@@ -1,5 +1,10 @@
 # Dependency reduction tracker
 
+Release targets: **0.2.354 — FastAPI removal**; **0.2.355 — backend Sidebar IPC
+framework-pipe cutover**. Recording these targets is not implementation or release
+authorization. FastMCP/Pydantic/cryptography dependency closure remains separately
+tracked; current Sidebar transport stays intact for 0.2.354.
+
 - [x] Scope approved: investigate FastAPI/FastMCP, console/MCP ownership and alternatives.
 - [x] Inventory supported app entrypoints/ASGI contracts and frontend typing state.
 - [x] Trace Pydantic/cryptography dependency paths in installed metadata.
@@ -15,12 +20,22 @@
   - [x] File Editor backend scope approved; explicit ASGI/strict types implemented.
   - [x] File Editor isolated backend/worker regression tests.
   - [x] File Editor backend live acceptance after app-worker restart.
-  - [ ] File Editor frontend strict TypeScript/minification.
+  - [x] File Editor frontend strict TypeScript/minification and regression tests.
+  - [x] File Editor frontend native asset publication/live acceptance (user reported working).
+  - [x] Schedule shared neutral ASGI primitives after File Editor frontend and
+    before remaining backend migrations.
+  - [ ] Extract/adopt shared ASGI body/error/method/lifespan helpers with parity
+    tests; retain app-owned routing/DTOs/policy and existing worker integration.
 - [ ] Framework-Shells coordinated migration and updated release metadata.
 - [ ] Runtime bridge/console typed ASGI migration.
 - [ ] Rust MCP POC and transport/client/schema acceptance.
 - [ ] ALS dependency/MCP work separately scoped and validated.
 - [ ] Clean target dependency-resolution and installed release acceptance.
+- [x] Record versioned release sequencing and final framework-pipe follow-up.
+- [ ] 0.2.355: approve concrete Sidebar IPC pipe-cutover implementation scope.
+- [ ] 0.2.355: broker project-directory lookup and Sidebar restore-state updates.
+- [ ] 0.2.355: audit consumers, prove exact-client/restoration/disconnect parity,
+  then retire obsolete backend Sidebar IPC socket clients/paths.
 
 Investigation evidence: read-only source/installed metadata inspection only. No runtime imports,
 package uninstall/install, framework/app/harness restart, Rust builds or dependency
@@ -54,6 +69,36 @@ Framework-Shells' still-scheduled dependency migration.
 
 User reports the Terminal slice working live; acceptance recorded before its
 checkpoint commit. No agent-initiated runtime transition was performed.
+
+## File Editor frontend slice
+
+User approved typed CM6/host/API conversion, one minified module and isolated
+tests through the blocking input tool. `src/main.ts`/`contracts.ts` are source;
+`main.js` is generated directly at the already manifest-mapped public URL. This
+avoids an extra adapter/dist import and asset request. Existing CM6 vendor,
+shared preferences/save guard and inline template CSS remain unchanged. Unknown
+read/picker/host-state payloads are validated; no explicit/implicit `any` is added
+to authored TypeScript. CM6 npm packages are development types only; app-local
+node_modules is excluded from package discovery/data like Terminal's.
+
+Validation: frontend typecheck/build and five app-owned Node regressions pass.
+86 Python app/worker/intent/package-policy regressions also pass. Generated
+`main.js` is approximately 12.1 KiB; the build retains the existing asset mapping.
+Tests exercise actual compiled frontend with isolated CM6/DOM fixtures: URL-file
+opening, exact Sidebar state publication, restored-slot draft isolation, all five
+preferences, Discard resume, failed-save retention/cancel and successful Save
+resume. The asset test checks existing bundle mapping and external shared imports.
+The brittle old CM6 generated-source substring test was replaced by these tests.
+Shared preference/navigation/app-shell tests pass (five); the full shared test
+file still contains an unrelated pre-existing File Explorer test that slices its
+now-adapter `main.js` and fails with `Unexpected identifier 'controllers'`.
+Its app/source was not changed in this scope; tracked for test modernization.
+
+No backend, Android source, APK, native Cargo/mypyc, shared framework restart or
+client OTA changes were performed by the agent. User reports the frontend working
+live; acceptance recorded before checkpoint commit. Build success alone still
+does not prove client activation. Build/ownership guide:
+app/apps/file_editor/FRONTEND.md.
 
 No dependency declarations, Node workers, other apps, Android source or shared
 runtime were changed/restarted by the agent. This backend
