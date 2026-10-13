@@ -9,7 +9,8 @@ typed and independently testable; expose explicit ASGI/DTO/lifespan boundaries
 that remain suitable for later mypyc compilation or native hosting.
 
 Investigation, Terminal slice 1, File Editor's backend/frontend slices, shared
-ASGI helper extraction/adoption and Archive Manager's backend/frontend slices are approved.
+ASGI helper extraction/adoption, Archive Manager's backend/frontend slices and
+Aria Downloader's backend slice (including stop/restart compatibility fixes) are approved.
 Later slices need concrete scope approval. No package uninstall, shared framework
 restart, deployment, native build or changes in dependent repositories are
 authorized by these app-backend slices.
@@ -56,7 +57,7 @@ The preceding editable-build/asset-cleanup work is checkpointed at `15c0b514`.
 | Terminal | Backend explicit ASGI/msgspec migration and strict frontend live accepted | Preserve Node PTY/headless stream and MessagePack protocol; share neutral transport primitives in follow-up |
 | File Editor | Backend typed explicit ASGI and strict TS frontend live accepted | Single generated `main.js` at existing asset URL, retained inline CSS |
 | Archive Manager | Typed explicit-ASGI backend and strict TS/minified frontend validated synthetically; live acceptance pending | Shared ASGI, typed request boundary, fixed extraction admission; reconcile Create/Test UI/backend capability gaps separately |
-| Aria Downloader | Ten FastAPI routes; ~1,054-line browser module | Same workflow, preserving aria2 shell/process and polling behavior |
+| Aria Downloader | Ten typed explicit-ASGI routes implemented; backend live acceptance and ~1,054-line frontend conversion pending | Shared helpers; stop/refetch and restart via terminate/spawn preserve manager contracts |
 | Settings | ~291-line browser module; framework-backed settings | Strict TS/browser build only; do not invent a Python settings authority |
 | ALS-RS wrapper/template | FastAPI stub files; actual ALS-RS shell launches native `als-rs` | Verify stub use; migrate the proxy-shell template so new wrappers do not reintroduce FastAPI |
 | Generic app worker | Lazy `app_worker_fastapi.py` compatibility path | Retire after supported built-ins/templates migrate; explicitly decide external legacy-router policy |
@@ -224,6 +225,61 @@ visibly, and native domain startup reports factory failure immediately. No
 dependency install, requirements change, worker/framework restart, wheel
 publication or new native build is performed. Compiled Code TE2 activation needs
 a matching mypyc snapshot; this source edit alone does not update that runtime.
+
+## Aria Downloader follow-up — startup and intent modernization
+
+Live inspection after the backend migration found a legacy pending `fs_…` aria2
+record with no PID/output: frontend Start submits `{}`, backend defaulted the
+saved autostart field to false and passed it to manager spawn, which creates only
+a record when false. The approved minor repair makes explicit Start/Restart
+launch immediately (`autostart=True`), retaining the compatibility state field
+without inventing automatic restoration. Verify after ordinary worker restart.
+
+User has now refreshed the ordinary worker and reports working service behavior,
+but recurring 502 Bad Gateway responses remain. Investigate exact failing route,
+framework proxy vs Aria's aria2-RPC 502 envelope, readiness timing, RPC endpoint/
+credentials and overlapping polling before attributing a cause. Working service
+behavior is not proof that those failures are fixed.
+
+### Typed JSON-RPC socket frontend — planned follow-up
+
+Replace browser-driven HTTP polling with an app-owned, strictly typed JSON-RPC
+socket boundary and event-driven frontend projections. This is planning only:
+
+- Inventory existing status/download/settings/shell HTTP operations and map them
+  to typed request/result/error DTOs and methods without changing domain policy.
+  Use the existing app socket/codec patterns, msgspec at Python wire boundaries,
+  and strict TypeScript validation of unknown browser input; qualify the concrete
+  socket lane/codec and approve it before implementation.
+- Backend owns aria2 observation, task/service state and event publication.
+  Investigate aria2 notifications plus any necessary bounded backend refresh;
+  do not equate event-driven browser updates with eliminating all backend polling.
+  Publish changed snapshots/events rather than running separate polls per client.
+- Initial connection/reconnect receives authoritative state; events update clients
+  thereafter. Fence stale/disconnected work, bound queues and correlate requests.
+  Never replay add/control/spawn/restart mutations or retry uncertain outcomes.
+- Keep cross-app framework-pipe intents distinct from this frontend socket lane.
+  Preserve standalone/Sidebar identity, jobs/service state and current commands.
+- Add HTTP/socket parity, event ordering/reconnect/multi-client/error tests and
+  strict TS/single minified bundle; approve worker activation and OTA separately.
+  Remove obsolete browser polling/HTTP routes only after auditing all callers.
+
+Intent integration is a separate follow-up, like Archive Manager's below:
+
+- Inventory current/download callers and intended add/open launch payloads;
+  Aria currently consumes no launch query intents and has no pipe delivery hook.
+- Design own-frontend → own-backend → framework-pipe broker → Aria-owned command
+  admission, with exact client/presentation context for embedded navigation.
+  Avoid cross-app private HTTP calls and frontend round-trip command brokerage.
+- Distinguish opening/prefilling Aria from submitting a download. Query strings
+  may seed standalone/Sidebar view state; restoration/reconnect cannot replay an
+  add/start mutation. Validate URI/options/destination at the owning backend.
+- Audit legacy local Python shell-manager vs current framework-owned execution,
+  then define a separately approved manager/shellspec cutover. The minor startup
+  fix does not change shell ownership or authorize removing pending records.
+- Coordinate typed frontend/minification, existing polling/service controls,
+  standalone/embedded/restoration and no-duplicate-download tests before live
+  activation. Concrete intent/caller scope remains to be approved.
 
 ## Archive Manager intent integration — planned follow-up
 

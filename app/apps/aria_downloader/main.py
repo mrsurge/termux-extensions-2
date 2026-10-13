@@ -1,4 +1,4 @@
-"""Aria Downloader FastAPI routes with aria2 RPC and shell helpers."""
+"""Typed Aria Downloader domain handlers; transport lives in http_app.py."""
 
 from __future__ import annotations
 
@@ -8,25 +8,51 @@ import os
 import time
 import urllib.error
 import urllib.request
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from collections.abc import Iterable
+from typing import Protocol, Self, cast
 from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException, Body, Query
+from starlette.exceptions import HTTPException
 
-from framework_shells import FrameworkShellManager
+from framework_shells import ShellRecord
 from framework_shells import get_manager as get_framework_shell_manager
 
 from app.te2_paths import te2_app_data_home
 
-aria_downloader_bp = APIRouter()
 APP_ID = str(os.environ.get('TE_APP_ID') or 'aria_downloader').strip() or 'aria_downloader'
 
 DEFAULT_RPC_URL = 'http://127.0.0.1:6800/jsonrpc'
 MAX_RESULT_ITEMS = 200
 RPC_TIMEOUT_SECONDS = 10
 
-JsonValue = Any
-RpcResult = Tuple[Optional[JsonValue], Optional[str]]
+JsonValue = object
+JsonObject = dict[str, object]
+RpcResult = tuple[object | None, str | None]
+
+
+class HttpResponse(Protocol):
+    def __enter__(self) -> Self: ...
+    def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None: ...
+    def read(self) -> bytes: ...
+
+
+class ShellManager(Protocol):
+    async def list_shells(self) -> list[ShellRecord]: ...
+    async def get_shell(self, shell_id: str) -> ShellRecord | None: ...
+    async def describe(self, record: ShellRecord, *, include_logs: bool = False, tail_lines: int = 0) -> JsonObject: ...
+    async def remove_shell(self, shell_id: str, force: bool = False) -> bool: ...
+    async def terminate_shell(self, shell_id: str, force: bool = False) -> None: ...
+    async def spawn_shell(self, command: Iterable[str], *, cwd: str | None = None, env: dict[str, str] | None = None,
+                          label: str | None = None, subgroups: list[str] | None = None, autostart: bool = True) -> ShellRecord: ...
+
+
+def _object(value: object) -> JsonObject:
+    return cast(JsonObject, value) if isinstance(value, dict) else {}
+
+
+def _items(value: object) -> list[object]:
+    return cast(list[object], value) if isinstance(value, list) else []
+
 
 DEFAULT_ARIA2_COMMAND = [
     'aria2c',
@@ -63,7 +89,7 @@ def _post_serving_readiness() -> None:
         headers={'Content-Type': 'application/json'},
         method='POST',
     )
-    with urllib.request.urlopen(req, timeout=5) as resp:
+    with cast(HttpResponse, urllib.request.urlopen(req, timeout=5)) as resp:
         resp.read()
 
 
@@ -74,7 +100,7 @@ async def te2_app_backend_serving() -> None:
         print(f"[aria_downloader] readiness post failed: {exc}", flush=True)
 
 
-def _rpc_config() -> Tuple[str, Optional[str]]:
+def _rpc_config() -> tuple[str, str | None]:
     """Read RPC endpoint configuration from environment."""
     url = os.getenv('ARIA2_RPC_URL', DEFAULT_RPC_URL)
     secret = os.getenv('ARIA2_RPC_SECRET')
@@ -84,7 +110,7 @@ def _rpc_config() -> Tuple[str, Optional[str]]:
 def call_rpc(method: str, *params: JsonValue) -> RpcResult:
     """Call aria2 JSON-RPC and return (result, error_message)."""
     url, secret = _rpc_config()
-    rpc_params: List[JsonValue] = list(params)
+    rpc_params: list[object] = list(params)
     if secret:
         rpc_params.insert(0, f'token:{secret}')
 
@@ -103,7 +129,7 @@ def call_rpc(method: str, *params: JsonValue) -> RpcResult:
     )
 
     try:
-        with urllib.request.urlopen(request_obj, timeout=RPC_TIMEOUT_SECONDS) as response:
+        with cast(HttpResponse, urllib.request.urlopen(request_obj, timeout=RPC_TIMEOUT_SECONDS)) as response:
             response_body = response.read().decode('utf-8')
     except urllib.error.HTTPError as exc:
         return None, f'aria2 RPC HTTP error {exc.code}: {exc.reason}'
@@ -114,13 +140,15 @@ def call_rpc(method: str, *params: JsonValue) -> RpcResult:
         return None, f'Unexpected error contacting aria2 RPC: {exc}'
 
     try:
-        payload_json = json.loads(response_body)
+        payload_json: object = json.loads(response_body)
     except json.JSONDecodeError:
         return None, 'aria2 RPC returned malformed JSON'
 
     if isinstance(payload_json, dict) and 'error' in payload_json:
-        error_obj = payload_json['error']
+        payload_json = _object(payload_json)
+        error_obj = _object(payload_json)['error']
         if isinstance(error_obj, dict):
+            error_obj = _object(error_obj)
             code = error_obj.get('code')
             message = error_obj.get('message') or 'aria2 returned an unknown error'
             if code is not None:
@@ -130,11 +158,11 @@ def call_rpc(method: str, *params: JsonValue) -> RpcResult:
 
     result = None
     if isinstance(payload_json, dict):
-        result = payload_json.get('result')
+        result = _object(payload_json).get('result')
     return result, None
 
 
-def _coerce_int(value: Any) -> int:
+def _coerce_int(value: object) -> int:
     if value is None:
         return 0
     if isinstance(value, int):
@@ -145,33 +173,35 @@ def _coerce_int(value: Any) -> int:
         return 0
 
 
-def _guess_name(task: Dict[str, Any]) -> str:
-    bt_info = task.get('bittorrent') or {}
-    info = bt_info.get('info') if isinstance(bt_info, dict) else None
+def _guess_name(task: JsonObject) -> str:
+    bt_info = _object(task.get('bittorrent'))
+    info = _object(bt_info.get('info'))
     if isinstance(info, dict):
-        name = info.get('name')
+        name = _object(info).get('name')
         if isinstance(name, str) and name:
             return name
 
-    files = task.get('files') or []
+    files = _items(task.get('files'))
     for file_entry in files:
         if not isinstance(file_entry, dict):
             continue
+        file_entry = _object(file_entry)
         path = file_entry.get('path')
         if isinstance(path, str) and path:
             return os.path.basename(path)
         uris = file_entry.get('uris')
         if isinstance(uris, list):
-            for uri_obj in uris:
+            for uri_obj in _items(uris):
                 if not isinstance(uri_obj, dict):
                     continue
-                uri = uri_obj.get('uri')
+                uri = _object(uri_obj).get('uri')
                 if isinstance(uri, str) and uri:
                     return uri.rsplit('/', 1)[-1]
-    return task.get('gid', '')
+    gid = task.get('gid', '')
+    return gid if isinstance(gid, str) else ''
 
 
-def _simplify_task(task: Dict[str, Any]) -> Dict[str, Any]:
+def _simplify_task(task: JsonObject) -> JsonObject:
     total = _coerce_int(task.get('totalLength'))
     completed = _coerce_int(task.get('completedLength'))
     download_speed = _coerce_int(task.get('downloadSpeed'))
@@ -198,7 +228,7 @@ def _simplify_task(task: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _call_and_wrap(method: str, *params: JsonValue) -> Tuple[Optional[JsonValue], Optional[str]]:
+def _call_and_wrap(method: str, *params: JsonValue) -> RpcResult:
     result, error = call_rpc(method, *params)
     return result, error
 
@@ -210,9 +240,10 @@ def _call_and_wrap(method: str, *params: JsonValue) -> Tuple[Optional[JsonValue]
 # Framework shell helpers
 
 
-def _load_shell_state() -> Optional[Dict[str, Any]]:
+def _load_shell_state() -> JsonObject | None:
     try:
-        return json.loads(STATE_FILE.read_text())
+        value: object = json.loads(STATE_FILE.read_text())
+        return _object(value) or None
     except FileNotFoundError:
         return None
     except json.JSONDecodeError:
@@ -221,7 +252,7 @@ def _load_shell_state() -> Optional[Dict[str, Any]]:
         return None
 
 
-def _save_shell_state(data: Dict[str, Any]) -> None:
+def _save_shell_state(data: JsonObject) -> None:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     tmp_path = STATE_FILE.with_suffix('.tmp')
     with tmp_path.open('w', encoding='utf-8') as fh:
@@ -238,14 +269,14 @@ def _clear_shell_state() -> None:
         return
 
 
-async def _framework_manager() -> FrameworkShellManager:
-    return await get_framework_shell_manager()
+async def _framework_manager() -> ShellManager:
+    return cast(ShellManager, await get_framework_shell_manager())
 
 
-def _wrap_shell_response(record: Optional[Dict[str, Any]], config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def _wrap_shell_response(record: JsonObject | None, config: JsonObject | None) -> JsonObject:
     if not record:
         return {'shell': None}
-    payload: Dict[str, Any] = {'record': record, 'tracked': bool(config)}
+    payload: JsonObject = {'record': record, 'tracked': bool(config)}
     if config:
         payload['config'] = config
     return {'shell': payload}
@@ -255,13 +286,11 @@ def _wrap_shell_response(record: Optional[Dict[str, Any]], config: Optional[Dict
 # API endpoints
 
 
-@aria_downloader_bp.get('/')
-def root_status():
+def root_status() -> JsonObject:
     return {'ok': True, 'data': {'message': 'Aria Downloader API ready'}}
 
 
-@aria_downloader_bp.get('/status')
-def status():
+def status() -> JsonObject:
     version, error = _call_and_wrap('aria2.getVersion')
     if error:
         raise HTTPException(status_code=502, detail=error)
@@ -277,8 +306,7 @@ def status():
     return {'ok': True, 'data': data}
 
 
-@aria_downloader_bp.get('/downloads')
-def downloads():
+def downloads() -> JsonObject:
     active, error = _call_and_wrap('aria2.tellActive')
     if error:
         raise HTTPException(status_code=502, detail=error)
@@ -291,11 +319,11 @@ def downloads():
     if error:
         raise HTTPException(status_code=502, detail=error)
 
-    def _simplify(items: Iterable[Any]) -> List[Dict[str, Any]]:
-        simplified: List[Dict[str, Any]] = []
-        for task in items or []:
+    def _simplify(items: object) -> list[JsonObject]:
+        simplified: list[JsonObject] = []
+        for task in _items(items):
             if isinstance(task, dict):
-                simplified.append(_simplify_task(task))
+                simplified.append(_simplify_task(_object(task)))
         return simplified
 
     data = {
@@ -306,13 +334,12 @@ def downloads():
     return {'ok': True, 'data': data}
 
 
-@aria_downloader_bp.post('/add')
-def add_download(payload: dict = Body(...)):
+def add_download(payload: JsonObject) -> JsonObject:
     url = payload.get('url')
     if not url or not isinstance(url, str):
         raise HTTPException(status_code=400, detail='"url" is required')
 
-    options = payload.get('options') if isinstance(payload.get('options'), dict) else {}
+    options = _object(payload.get('options'))
     directory = payload.get('directory')
     filename = payload.get('filename')
 
@@ -321,7 +348,7 @@ def add_download(payload: dict = Body(...)):
     if filename:
         options = {**options, 'out': filename}
 
-    params: List[Any] = [[url]]
+    params: list[object] = [[url]]
     if options:
         params.append(options)
 
@@ -345,18 +372,19 @@ BULK_ACTIONS = {
 }
 
 
-@aria_downloader_bp.post('/control')
-def control(payload: dict = Body(...)):
+def control(payload: JsonObject) -> JsonObject:
     action = payload.get('action')
+    if not isinstance(action, str):
+        raise HTTPException(400, 'Unsupported action')
     gids = payload.get('gids')
 
     if action in ACTION_METHOD_MAP:
         if not gids or not isinstance(gids, list):
             raise HTTPException(status_code=400, detail='"gids" array is required for this action')
-        processed: List[str] = []
-        errors: List[str] = []
+        processed: list[str] = []
+        errors: list[str] = []
         method = ACTION_METHOD_MAP[action]
-        for gid in gids:
+        for gid in _items(gids):
             if not isinstance(gid, str):
                 errors.append('Invalid GID in list')
                 continue
@@ -379,10 +407,9 @@ def control(payload: dict = Body(...)):
     raise HTTPException(status_code=400, detail='Unsupported action')
 
 
-@aria_downloader_bp.post('/settings')
-def settings(payload: dict = Body(...)):
-    global_opts = payload.get('global') if isinstance(payload.get('global'), dict) else None
-    per_download = payload.get('perDownload') if isinstance(payload.get('perDownload'), dict) else None
+def settings(payload: JsonObject) -> JsonObject:
+    global_opts = _object(payload.get('global'))
+    per_download = _object(payload.get('perDownload'))
     gid = payload.get('gid')
 
     if global_opts:
@@ -407,8 +434,8 @@ def settings(payload: dict = Body(...)):
 # Framework shell endpoints
 
 
-def _sanitize_env(env: Dict[str, Any]) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
-    sanitized: Dict[str, str] = {}
+def _sanitize_env(env: JsonObject) -> tuple[dict[str, str] | None, str | None]:
+    sanitized: dict[str, str] = {}
     for key, value in env.items():
         if not isinstance(key, str):
             return None, 'Environment keys must be strings'
@@ -416,8 +443,7 @@ def _sanitize_env(env: Dict[str, Any]) -> Tuple[Optional[Dict[str, str]], Option
     return sanitized, None
 
 
-@aria_downloader_bp.get('/shells')
-async def list_framework_shells():
+async def list_framework_shells() -> JsonObject:
     mgr = await _framework_manager()
     records = await mgr.list_shells()
     shells = []
@@ -426,8 +452,7 @@ async def list_framework_shells():
     return {'ok': True, 'data': {'shells': shells}}
 
 
-@aria_downloader_bp.get('/shell')
-async def get_tracked_shell(logs: bool = Query(False), tail: int = Query(DEFAULT_LOG_TAIL_LINES)):
+async def get_tracked_shell(logs: bool = False, tail: int = DEFAULT_LOG_TAIL_LINES) -> JsonObject:
     state = _load_shell_state()
     if not state or 'id' not in state:
         return {'ok': True, 'data': {'shell': None}}
@@ -444,8 +469,7 @@ async def get_tracked_shell(logs: bool = Query(False), tail: int = Query(DEFAULT
     return {'ok': True, 'data': _wrap_shell_response(described, state)}
 
 
-@aria_downloader_bp.post('/shell/spawn')
-async def spawn_shell(payload: dict = Body(...)):
+async def spawn_shell(payload: JsonObject) -> JsonObject:
     force = bool(payload.get('force'))
     current_state = _load_shell_state()
     if current_state and not force:
@@ -455,7 +479,7 @@ async def spawn_shell(payload: dict = Body(...)):
         shell_id = current_state.get('id')
         if shell_id:
             try:
-                await mgr.remove_shell(shell_id, force=True)
+                await mgr.remove_shell(str(shell_id), force=True)
             except Exception:
                 pass
         _clear_shell_state()
@@ -485,20 +509,23 @@ async def spawn_shell(payload: dict = Body(...)):
     env_payload = payload.get('env') or {}
     if not isinstance(env_payload, dict):
         raise HTTPException(status_code=400, detail='"env" must be an object')
-    env, env_error = _sanitize_env(env_payload)
+    env, env_error = _sanitize_env(_object(env_payload))
     if env_error:
         raise HTTPException(status_code=400, detail=env_error)
-    label = payload.get('label') if isinstance(payload.get('label'), str) else DEFAULT_ARIA2_LABEL
+    raw_label = payload.get('label')
+    label = raw_label if isinstance(raw_label, str) else DEFAULT_ARIA2_LABEL
     autostart = bool(payload.get('autostart', False))
 
     try:
         record = await mgr.spawn_shell(
-            command,
+            cast(list[str], command),
             cwd=cwd,
             env=env or {},
             label=label,
             subgroups=["aria_downloader", "aria2"],
-            autostart=autostart,
+            # Explicit Start must launch now. The saved compatibility field is
+            # not the manager's launch-now switch (False creates only a record).
+            autostart=True,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -508,12 +535,13 @@ async def spawn_shell(payload: dict = Body(...)):
         raise HTTPException(status_code=500, detail=f'Failed to spawn shell: {exc}')
 
     described = await mgr.describe(record)
-    shell_config = {
+    shell_config: JsonObject = {
         'id': record.id,
         'label': label,
         'command': command,
         'cwd': cwd,
         'autostart': autostart,
+        'env': env or {},
         'saved_at': time.time(),
     }
     if record.created_at is not None:
@@ -523,9 +551,9 @@ async def spawn_shell(payload: dict = Body(...)):
     return {'ok': True, 'data': _wrap_shell_response(described, shell_config)}
 
 
-@aria_downloader_bp.post('/shell/action')
-async def shell_action(payload: dict = Body(...)):
-    action = (payload.get('action') or '').strip().lower()
+async def shell_action(payload: JsonObject) -> JsonObject:
+    raw_action = payload.get('action')
+    action = raw_action.strip().lower() if isinstance(raw_action, str) else ''
     if not action:
         raise HTTPException(status_code=400, detail='"action" is required')
 
@@ -556,7 +584,7 @@ async def shell_action(payload: dict = Body(...)):
             return {'ok': True, 'data': {'shell': None}}
         mgr = await _framework_manager()
         try:
-            await mgr.remove_shell(state['id'], force=bool(payload.get('force')))
+            await mgr.remove_shell(str(state['id']), force=bool(payload.get('force')))
         except KeyError:
             pass
         except Exception as exc:
@@ -571,18 +599,36 @@ async def shell_action(payload: dict = Body(...)):
     mgr = await _framework_manager()
     try:
         if action in {'stop', 'terminate'}:
-            record = await mgr.terminate_shell(shell_id, force=False)
+            await mgr.terminate_shell(shell_id, force=False)
+            record = await mgr.get_shell(shell_id)
         elif action in {'kill', 'force'}:
-            record = await mgr.terminate_shell(shell_id, force=True)
+            await mgr.terminate_shell(shell_id, force=True)
+            record = await mgr.get_shell(shell_id)
         elif action == 'restart':
-            record = await mgr.restart_shell(shell_id)
+            command = _items(state.get('command'))
+            if not command or not all(isinstance(part, str) for part in command):
+                raise HTTPException(400, 'Tracked shell has no restartable command')
+            await mgr.terminate_shell(shell_id, force=False)
+            record = await mgr.spawn_shell(cast(list[str], command),
+                cwd=str(state.get('cwd') or DEFAULT_SHELL_CWD),
+                env={key: str(value) for key, value in _object(state.get('env')).items()},
+                label=str(state.get('label') or DEFAULT_ARIA2_LABEL),
+                subgroups=['aria_downloader', 'aria2'],
+                autostart=True)
+            state['id'] = record.id
         else:
             raise HTTPException(status_code=400, detail=f'Unsupported action "{action}"')
+    except HTTPException:
+        raise
     except KeyError:
         _clear_shell_state()
         raise HTTPException(status_code=404, detail='Shell not found')
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f'Shell action failed: {exc}')
+
+    if record is None:
+        _clear_shell_state()
+        return {'ok': True, 'data': {'shell': None}}
 
     if isinstance(state, dict):
         if action == 'restart' and hasattr(record, 'created_at') and record.created_at is not None:
@@ -593,3 +639,8 @@ async def shell_action(payload: dict = Body(...)):
 
     described = await mgr.describe(record)
     return {'ok': True, 'data': _wrap_shell_response(described, state)}
+
+
+from .http_app import AriaDownloaderASGI
+
+TE2_ASGI_APP = AriaDownloaderASGI()

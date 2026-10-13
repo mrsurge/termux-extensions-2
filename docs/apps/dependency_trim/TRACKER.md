@@ -50,6 +50,18 @@ tracked; current Sidebar transport stays intact for 0.2.354.
     archive-only Code TE2 Explorer actions through backend-owned intent services.
   - [ ] Archive intent/job/menu standalone/embedded/multi-client/no-replay tests
     and separately activated live acceptance.
+  - [x] Aria Downloader backend scope and two shell-action compatibility fixes approved.
+  - [x] Aria ten-route explicit ASGI/strict types and isolated RPC/shell regressions.
+  - [x] Aria ordinary-worker functional live acceptance (user reports working).
+  - [ ] Diagnose recurring Aria 502 responses; functional acceptance is not error-free acceptance.
+  - [x] Diagnose pending child record and fix explicit Start/Restart launch gating.
+  - [x] Aria child-start fix live acceptance after user worker refresh.
+  - [x] Record Aria intent-system and shell-ownership follow-up direction.
+  - [ ] Audit/approve Aria intent callers, broker contracts and shell-owner cutover.
+  - [ ] Aria frontend strict TS/minified bundle and regression/publication acceptance.
+  - [x] Record typed JSON-RPC/event-driven socket frontend follow-up.
+  - [ ] Audit/approve Aria socket DTOs, backend observation and event/reconnect contracts.
+  - [ ] Implement/validate socket frontend, then separately activate/publish and retire legacy polling.
 - [ ] Framework-Shells coordinated migration and updated release metadata.
 - [ ] Runtime bridge/console typed ASGI migration.
 - [ ] Rust MCP POC and transport/client/schema acceptance.
@@ -69,6 +81,47 @@ requirements/source and release metadata remain authority for later resolution.
 No nested-repository source was edited. Earlier uncommitted source/asset/build
 work and unrelated user files remain preserved. No performance/size win is claimed
 before measurement. Web references and compatibility details are in PLAN.md.
+
+## Aria Downloader backend slice
+
+User approved ten-route backend-only ASGI/strict typing migration, then explicitly
+approved two existing shell-action compatibility repairs found during inspection.
+`main.py` now exports `TE2_ASGI_APP` from app-owned `http_app.py`; shared neutral
+helpers own bounded JSON-object ingress, methods, errors, redirects and trivial
+lifespan. App-owned RPC validation/response projection and shell policy remain in
+typed handlers. Sync aria2 urllib RPC is offloaded, async manager calls retain
+their lane, and existing worker serving/readiness owns activation.
+
+Installed manager/source evidence: terminate_shell returns None and restart_shell
+is absent. Stop/Kill now refetch records; Restart terminates/spawns with saved
+command/cwd/label/autostart/environment and updates the tracked ID. Newly spawned
+records save environment; legacy/adopted state without it cannot recover historic
+overrides. No new manager API, retry, live shell change or cross-app source reuse.
+
+Validation: strict ty and diff checks pass; 175 isolated Python regressions pass
+(40 Aria tests plus shared ASGI, worker/bootstrap/loop, Archive and File Explorer).
+Tests exercise RPC shapes/projection/errors, command validation, bounded malformed
+and disconnected ingress, method/query/redirect behavior, all shell routes,
+actual terminate-return contract and restart config retention with a fake manager.
+One existing Starlette/httpx deprecation warning remains. No real aria2 call,
+shell mutation, shared framework/worker restart, frontend/OTA/APK, dependency
+metadata or native build occurred. User later reports functional live acceptance;
+recurring 502 responses remain an outstanding diagnostic, not a resolved issue.
+Source/build/activation contract: `app/apps/aria_downloader/README.md`.
+
+Follow-up live inspection: app-worker records 37_37/38_38 show clean startup;
+legacy child `fs_1791906211_b7d85322` is pending, no PID/output, autostart false.
+Frontend Start sends an empty payload; the backend default false was incorrectly
+used as manager launch admission. User approved forcing immediate Start/Restart
+while preserving the saved field. Two added regressions cover omitted/false flags
+and restart from such state. No live record/process was changed by the agent.
+Final validation after the launch-gating fix: 177 isolated regressions pass
+(42 Aria tests); strict ty and diff checks remain clean.
+Aria intent modernization and legacy shell ownership remain planned, not implemented.
+User performed the worker refresh and reports the service working after the fix,
+with recurring 502 Bad Gateway responses still visible. Typed JSON-RPC socket
+requests and backend-owned event projections are added to the plan; no socket
+conversion or additional runtime transition is performed in this checkpoint.
 
 ## Optional uvloop integration
 
