@@ -74,6 +74,9 @@ include-package-data = true
 ]
 
 [tool.setuptools.data-files]
+"te2/framework/mcp_probe/fixtures" = [
+    "framework/mcp_probe/fixtures/python_tools.json",
+]
 "te2/framework/bootstrap" = [
     "framework/bootstrap/*.py",
     "framework/bootstrap/native_build.json",

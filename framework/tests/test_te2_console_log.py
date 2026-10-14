@@ -9,7 +9,7 @@ from unittest import mock
 from app.cli import console_cli
 from app.te2_console_log import iter_console_log_lines_reverse, read_console_log_tail
 from app.te2_console_runtime import _normalize_tail_lines
-from app.te2_mcp.console_store import ConsoleStore
+from framework.mcp_probe.console_reference import ConsoleStore
 
 
 class Te2ConsoleLogTests(unittest.TestCase):

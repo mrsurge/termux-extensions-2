@@ -83,7 +83,7 @@ Rust/Axum framework process
   ├─ Proxies app Socket.IO public path /api/app/code_te2/socket.io -> worker /socket.io/
   ├─ Proxies WBA Socket.IO public path /api/app/code_te2/services/wba/socket.io -> Node /wba_ws/socket.io
   ├─ Owns native Streamable HTTP MCP at /te2_mcp_http (default native-mcp build)
-  └─ Proxies TE2 console and retained legacy MCP SSE to the Python runtime sidecar
+  └─ Proxies TE2 console to the Python runtime sidecar; old MCP SSE returns 410
 
 App worker process (app/apps/code_te2/main.py)
   ├─ HTTP routes: /api/app/code_te2/*
@@ -4811,15 +4811,16 @@ Built-in backend module identity comes from package path rather than public app 
   services/worker pipes own actions; private capability-protected loopback APIs
   reach the existing Python console relay, scaffold and log-analysis owners.
   No generic FastMCP forwarding or second manager is used. Legacy `/te2_mcp`
-  remains Python-backed pending its separate release-time disable decision.
+  returns HTTP 410 naming the native endpoint; no Python MCP transport remains.
   Matching worker/domain and framework/bridge activation is required; builds
   do not change a running framework. See dependency_trim PLAN/TRACKER and
   `framework/mcp_probe/README.md` for transport and acceptance gates.
 
-- TE2 still pins `fastmcp==3.4.7` for retained Python MCP paths. FastMCP 4 selects MCP 2 and removes the
-  `mcp.server.fastmcp` API used by the current conversation-scoped
-  `agent-pty-blocks` stdio server; do not relax the pin until that server has a
-  tested MCP 2 migration.
+- TE2's direct FastMCP requirement and Python MCP implementation are removed.
+  ALS's separately packaged conversation-scoped `agent-pty-blocks` stdio server
+  still uses the Python MCP SDK and its own dependency declarations. That
+  coordinated migration and release-lock/wheelhouse regeneration remain necessary
+  before claiming Pydantic/cryptography disappear from clean installations.
 
 - Memory profiling is explicit through `te2 --memory-profile OUTPUT_DIR` and
   relies on Heaptrack plus opt-in process-separated Python/Node snapshots.

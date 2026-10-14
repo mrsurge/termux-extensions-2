@@ -1,3 +1,8 @@
+"""Development-only Python baseline for native console golden-fixture parity.
+
+Not a runtime service or MCP implementation; never imports the console relay.
+Pydantic is used only to preserve the original captured validation behavior.
+"""
 from __future__ import annotations
 
 import json
@@ -5,7 +10,14 @@ from pathlib import Path
 from typing import Iterator, Optional
 
 from app.te2_console_log import TE2_CONSOLE_LOG_PATH, iter_console_log_lines_reverse
-from .models import ConsoleLogEntry
+from pydantic import BaseModel, Field
+
+
+class ConsoleLogEntry(BaseModel):
+    workerId: str = ""
+    level: str = "log"
+    ts: int | None = None
+    args: list[object] = Field(default_factory=list)
 
 DEFAULT_CONSOLE_LOG_PATH = TE2_CONSOLE_LOG_PATH
 

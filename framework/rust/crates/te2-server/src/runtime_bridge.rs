@@ -28,21 +28,19 @@ pub(crate) fn router() -> Router<AppState> {
         .route("/api/framework_shells", any(proxy_fws_request))
         .route("/api/framework_shells/", any(proxy_fws_request))
         .route("/api/framework_shells/{*rest}", any(proxy_fws_request))
-        // Console and retained legacy SSE remain Python-sidecar-owned.
+        // Only the console relay remains Python-sidecar-owned.
         .route("/te2_console_ws/socket.io", any(proxy_te2_console_request))
         .route("/te2_console_ws/socket.io/", any(proxy_te2_console_request))
         .route(
             "/te2_console_ws/socket.io/{*rest}",
             any(proxy_te2_console_request),
         )
-        .route("/te2_mcp", any(proxy_te2_mcp_request))
-        .route("/te2_mcp/", any(proxy_te2_mcp_request))
-        .route("/te2_mcp/{*rest}", any(proxy_te2_mcp_request));
+        .merge(retired_mcp_router());
     #[cfg(not(feature = "native-mcp"))]
     let router = router
-        .route("/te2_mcp_http", any(proxy_te2_mcp_http_request))
-        .route("/te2_mcp_http/", any(proxy_te2_mcp_http_request))
-        .route("/te2_mcp_http/{*rest}", any(proxy_te2_mcp_http_request));
+        .route("/te2_mcp_http", any(native_mcp_disabled))
+        .route("/te2_mcp_http/", any(native_mcp_disabled))
+        .route("/te2_mcp_http/{*rest}", any(native_mcp_disabled));
     router
 }
 
@@ -133,55 +131,70 @@ async fn proxy_te2_console_request(
     .await
 }
 
-async fn proxy_te2_mcp_request(
-    ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
-    State(state): State<AppState>,
-    OriginalUri(original_uri): OriginalUri,
-    method: Method,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
-    let upstream_path = normalize_mcp_mount_path(original_uri.path(), "/te2_mcp");
-    proxy_absolute_bridge_request(
-        ws,
-        state.http_client(),
-        state.te2_runtime_upstream_base_url(),
-        "TE2 runtime bridge is not available.",
-        &upstream_path,
-        original_uri.query(),
-        method,
-        headers,
-        body,
-        "te2_mcp",
-        true,
+async fn retired_mcp() -> Response {
+    (
+        StatusCode::GONE,
+        axum::Json(serde_json::json!({
+            "error": "Legacy HTTP+SSE MCP transport has been retired.",
+            "endpoint": "/te2_mcp_http",
+            "transport": "streamable-http"
+        })),
     )
-    .await
+        .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{
+        body::{Body, to_bytes},
+        http::Request,
+    };
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn legacy_mcp_is_retired_without_upstream_or_state() {
+        for path in [
+            "/te2_mcp",
+            "/te2_mcp/",
+            "/te2_mcp/sse",
+            "/te2_mcp/messages?session_id=old",
+        ] {
+            for method in [Method::GET, Method::POST, Method::DELETE] {
+                let response = retired_mcp_router::<()>()
+                    .oneshot(
+                        Request::builder()
+                            .method(method)
+                            .uri(path)
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::GONE);
+                let data: serde_json::Value =
+                    serde_json::from_slice(&to_bytes(response.into_body(), 4096).await.unwrap())
+                        .unwrap();
+                assert_eq!(data["endpoint"], "/te2_mcp_http");
+                assert_eq!(data["transport"], "streamable-http");
+            }
+        }
+    }
+}
+
+fn retired_mcp_router<S: Clone + Send + Sync + 'static>() -> Router<S> {
+    Router::new()
+        .route("/te2_mcp", any(retired_mcp))
+        .route("/te2_mcp/", any(retired_mcp))
+        .route("/te2_mcp/{*rest}", any(retired_mcp))
 }
 
 #[cfg(not(feature = "native-mcp"))]
-async fn proxy_te2_mcp_http_request(
-    ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
-    State(state): State<AppState>,
-    OriginalUri(original_uri): OriginalUri,
-    method: Method,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
-    let upstream_path = normalize_mcp_mount_path(original_uri.path(), "/te2_mcp_http");
-    proxy_absolute_bridge_request(
-        ws,
-        state.http_client(),
-        state.te2_runtime_upstream_base_url(),
-        "TE2 runtime bridge is not available.",
-        &upstream_path,
-        original_uri.query(),
-        method,
-        headers,
-        body,
-        "te2_mcp_http",
-        true,
+async fn native_mcp_disabled() -> Response {
+    json_error(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "This framework was built without native-mcp; no Python MCP fallback is supported.",
     )
-    .await
 }
 
 async fn proxy_absolute_fws_request(
@@ -208,11 +221,4 @@ async fn proxy_absolute_fws_request(
         false,
     )
     .await
-}
-
-fn normalize_mcp_mount_path(path: &str, mount_root: &str) -> String {
-    if path == mount_root {
-        return format!("{mount_root}/");
-    }
-    path.to_owned()
 }

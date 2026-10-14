@@ -155,8 +155,39 @@ tracked; current Sidebar transport stays intact for 0.2.354.
       and native-mcp; no listener/runtime launch was performed. fmt/diff checks
       passed. Remaining free disk approximately 3.1 GiB; no cache pruning.
   - [ ] Exact live console relay access, proxy/client/Android acceptance.
-  - [ ] Release-time legacy transport disable option (retain implementation;
-    no disable now, no forced changes to saved external SSE configurations).
+  - [x] User superseded legacy-retention plan: remove all TE2 Python MCP serving,
+    imports and direct FastMCP dependency. Old SSE endpoints return HTTP 410 with
+    native endpoint/transport; no redirects, retries or Python fallback. Disabled
+    native-mcp builds fail explicitly with 503. Console relay/owner APIs retained.
+  - [x] Retire Python MCP server/client modules and schema-capture script. Preserve
+    captured catalog and test-only console baseline outside app runtime; FWS
+    inspection tests use neutral native-owner projection helpers.
+  - [x] User restarted framework/bridge. Read-only live smoke confirms native mode,
+    exact 24-tool catalog/schema/annotation equality, persisted/live console worker
+    APIs, filtered transcript tail/search, native FWS discovery/detail/log inspection
+    and templates. Old endpoint returns 410; both sidecar MCP paths return 404.
+    Own successful test session DELETE returns 200. Matching mypyc extension is
+    still loaded. Runtime-debug is disabled and debug discovery rejects access;
+    no eval, shell input, app/scaffold/Sidebar mutations or package uninstall.
+    Initial one-off HTTP smoke parser mishandled empty SSE data frames; corrected
+    parser passed. Remote hostname and broader client/mutation gates remain.
+  - [x] Retirement validation: 222 Rust tests passed / 5 ignored; 66 targeted
+    Python owner/bridge/pipe/bootstrap/dependency/console tests passed; eight
+    transport tests and the golden console reference passed. Bridge probes block
+    FastMCP/Python SDK/old-package imports while proving console startup/polling
+    and private admission. ty and basedpyright pass changed runtime composition;
+    no-default-feature Cargo check passes with 17 existing warnings.
+  - [x] Separately approved source-install prerequisite: declare the native MCP
+    catalog JSON data file, tested for 24 descriptors and fingerprint inclusion.
+    Development-only Python reference remains excluded from runtime package data.
+    Existing mypyc selector remains current: no Code TE2 rebuild required here.
+    Release lock/wheelhouse regeneration remains after ALS/FWS dependency work.
+  - [x] Disposable .jitenv CPython 3.14.4 bridge import/build_app audit: 696 loaded
+    modules, ~0.309 s in one warmed-filesystem desktop run, zero fastmcp/mcp/
+    fastapi/pydantic/pydantic_core/cryptography modules and no Python MCP mounts.
+    Socket.IO 28, Engine.IO 18, Starlette/Uvicorn 19 each, FWS 20 and msgspec 12
+    remain. This is not live-process sys.modules inspection, a cold/mobile
+    benchmark or proof unwanted packages are absent from installed metadata.
 - [ ] ALS dependency/MCP work separately scoped and validated.
 - [ ] Coordinated ALS/FWS optional uvloop and target dependency follow-up
   (after the three implementation slices above).

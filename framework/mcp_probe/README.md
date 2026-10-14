@@ -40,22 +40,20 @@ without a JSON-RPC result; tests verify no active handler remains instead.
 
 `fixtures/python_tools.json` captures the 24 current Python tool descriptors,
 including input/output schemas and annotations; it is a parity baseline, not
-evidence those tools are implemented by this probe. Regenerate with:
+evidence those tools are implemented by this probe.
 
-```bash
-python -B scripts/capture_te2_mcp_schema.py --output framework/mcp_probe/fixtures/python_tools.json
-```
-
-That script imports Python MCP only with disposable cache/config/data roots,
-because console initialization truncates its configured transcript. Never import
-the baseline server against live console storage. Existing Codex/Copilot ALS
-integration uses /te2_mcp_http; legacy /te2_mcp remains unchanged. Disabling the
-legacy option is deferred until release preparation after explicit approval.
+The descriptors were captured before retiring the Python implementation; they
+remain the native catalog/parity baseline. The old schema-capture script and
+Python server are removed. Edit this catalog deliberately alongside native tool
+contracts; native discovery tests compare exact descriptors. Never import the
+console relay against live storage during probes: its initialization resets the
+transcript. Existing Codex/Copilot ALS integration uses /te2_mcp_http; legacy
+/te2_mcp is now retired with HTTP 410, not a retained Python transport.
 
 Next gates: activate the completed owner ports/mount with matching worker and
 bridge runtime, then verify real Codex/Copilot acceptance, remote hostname access,
 cancellation/no-retry behavior for actual mutations,
-and separate legacy-disable/release decisions.
+and separately scoped dependency/release decisions.
 See TOOL_OWNERS.md for the complete 24-tool owner map.
 
 ## Native framework-tool endpoint
@@ -73,7 +71,8 @@ Persisted console uses read-only off-loop JSONL access; forward records gain the
 existing reverse 8 MiB ceiling. Sidebar changes require a fresh matching Code TE2
 domain/worker hook, not just a framework build. Console/log/scaffold owner APIs
 require the new framework/bridge pair. Existing shared runtime is not automatically
-restarted. Legacy SSE/console remain Python-owned. Verify from the repo root separately:
+restarted. Only the console relay remains Python-owned; legacy SSE is retired.
+Verify from the repo root separately:
 
 ```bash
 python -B framework/mcp_probe/test_console_reference.py

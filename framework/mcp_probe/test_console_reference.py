@@ -1,7 +1,6 @@
 """Compare native golden fixtures with Python under disposable TE2 paths.
 
-The package initializer transitively imports the live-console module: isolate
-cache/config/data before importing any app.te2_mcp module, not merely the server.
+The baseline is development-only and does not import any runtime/MCP server.
 """
 import json
 import os
@@ -21,12 +20,9 @@ class ConsoleReferenceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="mcp-console-reference-", dir=scratch) as root:
             for name in ("CACHE", "CONFIG", "DATA", "RUNTIME"):
                 os.environ[f"TE2_{name}_HOME"] = str(Path(root) / name.lower())
-            # This script is a disposable subprocess. Never import this module
-            # into the running runtime or move the import above these guards.
-            from app.te2_mcp.console_store import ConsoleStore
-            from app.te2_console_runtime import _log_fh
-            self.assertTrue(Path(_log_fh.name).is_relative_to(Path(root)))
-            self.addCleanup(_log_fh.close)
+            from framework.mcp_probe.console_reference import ConsoleStore
+            self.assertNotIn("app.te2_console_runtime", sys.modules)
+            self.assertNotIn("fastmcp", sys.modules)
 
             path = Path(root) / "console.jsonl"
             path.write_text("\n".join(fixture["lines"]), encoding="utf-8")

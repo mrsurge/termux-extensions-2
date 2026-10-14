@@ -11,7 +11,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from app.te2_runtime_mounts import mount_te2_runtime_services, te2_runtime_lifespan
+from app.te2_runtime_mounts import mount_te2_runtime_services
 from app.memory_profile import install_python_memory_profiler
 from app.libs.asyncio_runtime import run
 from app.libs.native_console_owner import console_owner_routes
@@ -33,13 +33,14 @@ def build_app() -> Starlette:
     async def evaluate(worker: str, code: str, timeout: float) -> dict[str, object]:
         return await request_console_eval(worker, code, timeout_seconds=timeout)
 
-    app = Starlette(lifespan=te2_runtime_lifespan,
-                    routes=[Route("/api/health", health, methods=["GET"]),
-                            *console_owner_routes(os.environ.get("TE2_RUNTIME_OWNER_KEY", ""),
-                                                  list_console_workers, evaluate),
-                            *scaffold_owner_routes(os.environ.get("TE2_RUNTIME_OWNER_KEY", ""),
-                                                   list_templates, validate_proxy_shell_wrapper, scaffold_proxy_shell_wrapper),
-                            *fws_log_owner_routes(os.environ.get("TE2_RUNTIME_OWNER_KEY", ""))])
+    owner_key = os.environ.get("TE2_RUNTIME_OWNER_KEY", "")
+    app = Starlette(routes=[
+        Route("/api/health", health, methods=["GET"]),
+        *console_owner_routes(owner_key, list_console_workers, evaluate),
+        *scaffold_owner_routes(owner_key, list_templates, validate_proxy_shell_wrapper,
+                              scaffold_proxy_shell_wrapper),
+        *fws_log_owner_routes(owner_key),
+    ])
     mount_te2_runtime_services(app)
     return app
 
@@ -53,7 +54,7 @@ class BridgeArgs:
 def parse_args() -> BridgeArgs:
     parser = argparse.ArgumentParser(
         prog="te2-runtime-bridge",
-        description="Serve the TE2 console and MCP mounts for the Rust framework.",
+        description="Serve the TE2 console relay and private owner APIs for the Rust framework.",
     )
     _ = parser.add_argument(
         "--host",

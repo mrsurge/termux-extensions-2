@@ -11,6 +11,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class RuntimeBridgeTests(unittest.TestCase):
     def probe(self, code: str) -> None:
+        code = '''
+import importlib.abc, sys
+class NoPythonMCP(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.')[0] in {'fastmcp', 'mcp'} or fullname.startswith('app.te2_mcp'):
+            raise AssertionError('Retired Python MCP import: ' + fullname)
+sys.meta_path.insert(0, NoPythonMCP())
+''' + code
         with tempfile.TemporaryDirectory(prefix='te2-bridge-test-', dir=os.environ.get('TMPDIR', str(ROOT / '.codex-scratch'))) as scratch:
             environment = {**os.environ, 'TE2_CACHE_HOME': scratch,
                            'TE2_CONFIG_HOME': scratch + '/config', 'TE2_DATA_HOME': scratch + '/data'}
@@ -26,7 +34,8 @@ from starlette.applications import Starlette
 app = build_app()
 assert isinstance(app, Starlette)
 assert not any(n == 'fastapi' or n.startswith('fastapi.') for n in sys.modules)
-assert {'/te2_console_ws/socket.io', '/te2_mcp', '/te2_mcp_http'}.issubset({r.path for r in app.routes})
+assert '/te2_console_ws/socket.io' in {r.path for r in app.routes}
+assert not any(r.path.startswith('/te2_mcp') for r in app.routes)
 async def check():
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
         r = await client.get('/api/health')
@@ -34,38 +43,26 @@ async def check():
         assert (await client.head('/api/health')).status_code == 405
         assert (await client.post('/api/health')).status_code == 405
         assert (await client.get('/missing')).status_code == 404
+        assert (await client.get('/te2_mcp/')).status_code == 404
+        assert (await client.post('/te2_mcp_http/', json={})).status_code == 404
         r = await client.get('/te2_console_ws/socket.io/?EIO=4&transport=polling')
         assert r.status_code == 200 and r.text.startswith('0{'), (r.status_code, r.text)
 asyncio.run(check())
 ''')
 
-    def test_mcp_lifespan_order_and_failure_cleanup(self) -> None:
+    def test_console_only_bridge_lifespan_and_private_owner_admission(self) -> None:
         self.probe('''
-import asyncio
-from types import SimpleNamespace
-from contextlib import asynccontextmanager
-from unittest.mock import patch
-import app.te2_runtime_mounts as mounts
-stages = []
-def child(name, fail=False):
-    @asynccontextmanager
-    async def lifespan(app):
-        stages.append(name + '.start')
-        if fail: raise RuntimeError('startup failed')
-        try: yield
-        finally: stages.append(name + '.stop')
-    return SimpleNamespace(lifespan=lifespan)
-async def check():
-    with patch.object(mounts, 'TE2_MCP_ASGI_APP', child('sse')), patch.object(mounts, 'TE2_MCP_STREAMABLE_HTTP_ASGI_APP', child('http')):
-        async with mounts.te2_runtime_lifespan(): stages.append('ready')
-    assert stages == ['sse.start', 'http.start', 'ready', 'http.stop', 'sse.stop'], stages
-    stages.clear()
-    with patch.object(mounts, 'TE2_MCP_ASGI_APP', child('sse')), patch.object(mounts, 'TE2_MCP_STREAMABLE_HTTP_ASGI_APP', child('http', True)):
-        try:
-            async with mounts.te2_runtime_lifespan(): raise AssertionError('must not start')
-        except RuntimeError: pass
-    assert stages == ['sse.start', 'http.start', 'sse.stop'], stages
-asyncio.run(check())
+import os, sys
+os.environ['TE2_RUNTIME_OWNER_KEY'] = 'isolated-test-key'
+from starlette.testclient import TestClient
+from framework.bootstrap.runtime_bridge import build_app
+with TestClient(build_app()) as client:
+    assert client.get('/api/health').status_code == 200
+    response = client.get('/te2_console_ws/socket.io/?EIO=4&transport=polling')
+    assert response.status_code == 200 and response.text.startswith('0{')
+    assert client.get('/internal/console/workers').status_code == 401
+    assert client.get('/internal/console/workers', headers={'x-te2-owner-key': 'isolated-test-key'}).json() == {'workers': [], 'source': 'te2_console.runtime'}
+assert not any(n == 'fastmcp' or n.startswith('fastmcp.') or n == 'mcp' or n.startswith('mcp.') for n in sys.modules)
 ''')
 
     def test_typed_console_admission_and_replay_bounds(self) -> None:
@@ -94,25 +91,10 @@ async def check():
     await rt.on_console_eval_result(ns, 'sid', {'reqId': [], 'value': 1})
 asyncio.run(check())
 ''')
-
     def test_existing_console_eval_regressions_isolated(self) -> None:
         self.probe('''
 import unittest
 suite = unittest.defaultTestLoader.discover('tests', pattern='test_console_eval.py')
 result = unittest.TextTestRunner().run(suite)
 assert result.wasSuccessful()
-''')
-
-    def test_real_mcp_startup_and_streamable_initialization(self) -> None:
-        self.probe('''
-from starlette.testclient import TestClient
-from framework.bootstrap.runtime_bridge import build_app
-with TestClient(build_app()) as client:
-    response = client.post('/te2_mcp_http/', headers={'Accept': 'application/json, text/event-stream'},
-        json={'jsonrpc':'2.0', 'id':1, 'method':'initialize', 'params':{
-            'protocolVersion':'2024-11-05', 'capabilities':{},
-            'clientInfo':{'name':'isolated-bridge-test', 'version':'1'}}})
-    assert response.status_code == 200, (response.status_code, response.text)
-    assert 'protocolVersion' in response.text and 'serverInfo' in response.text
-    assert response.headers.get('mcp-session-id')
 ''')

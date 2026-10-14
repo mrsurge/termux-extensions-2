@@ -32,7 +32,10 @@ First framework adapter was implemented dormant in
 framework/rust/crates/te2-server/src/native_mcp.rs. native-mcp is now enabled by
 default, serving the complete `/te2_mcp_http` catalog in newly built frameworks.
 Existing running frameworks remain unchanged until approved activation. Legacy
-SSE is retained separately; status on the native endpoint reports framework_owned_native.
+SSE streaming remains available inside Streamable HTTP; old two-endpoint SSE is
+retired with HTTP 410. Python server/client modules and FastMCP requirement are
+removed. Status on the native endpoint reports framework_owned_native. The map
+below is the historical parity baseline, not retained serving code.
 It provides te2_apps_reload, te2_app_start and te2_app_open using the same AppState
 and lifecycle service entrypoints as HTTP/pipe callers. At the original dormant
 checkpoint it was not mounted publicly. Four fixture tests prove schema/metadata equality, validation,

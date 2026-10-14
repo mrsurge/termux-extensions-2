@@ -62,7 +62,7 @@ The preceding editable-build/asset-cleanup work is checkpointed at `15c0b514`.
 | Settings | Strict TS/browser module, single minified existing main.js URL; framework-backed settings | Source/regressions complete; native publication/live acceptance pending; no Python settings authority |
 | ALS-RS wrapper/template | Explicit typed ASGI compatibility stubs; actual ALS-RS shell launches native `als-rs` | Template/scaffold source migrated; existing installed wrappers are not silently rewritten |
 | Generic app worker | Lazy `app_worker_fastapi.py` compatibility path | Retire after supported built-ins/templates migrate; explicitly decide external legacy-router policy |
-| Runtime bridge | Starlette root mounting typed console Socket.IO and two retained FastMCP HTTP apps | Source/regressions complete; live activation pending, then native MCP replacement |
+| Runtime bridge | Starlette root mounting typed console Socket.IO and private owner APIs only | Python MCP removed; native endpoint active, retirement cleanup needs next framework/bridge transition |
 
 Each app owns its backend, shellspec and protocols. Share neutral ASGI/type/build
 primitives, not another app's source. Convert browser source to strict TS with
@@ -81,7 +81,7 @@ User clarification: the console question concerned FastAPI, not FastMCP. Console
 Socket.IO itself does not need FastAPI; its containing runtime-bridge application
 does. Slice 4 removes that composition dependency without replacing console state.
 
-TE2 MCP: `app/te2_mcp/server.py` declares 24 tools, two separately constructed
+Historical TE2 MCP baseline: `app/te2_mcp/server.py` declared 24 tools, two separately constructed
 FastMCP servers: legacy SSE `/te2_mcp` and Streamable HTTP `/te2_mcp_http`.
 Pydantic models also back console transcript projection. Tools include native
 framework capabilities, Python FWS/log helpers, scaffold/validation, HTTP adapters
@@ -254,13 +254,37 @@ Framework shutdown cancels MCP sessions before graceful HTTP shutdown. The probe
 uses the same compatibility adapter, retaining its smaller 64 KiB service limit.
 The catalog JSON is an explicit framework fingerprint input.
 
-Legacy `/te2_mcp` SSE and the Python console relay remain unchanged, so this is
-not yet FastMCP dependency removal. Build/source completion does not switch the
+At checkpoint 4e938a4c, legacy `/te2_mcp` SSE and the Python console relay remained
+unchanged; that was not yet FastMCP dependency removal. Build/source completion does not switch the
 current shared runtime automatically. User has now completed framework/bridge
 transition and matching Code TE2 domain activation; native status and the exact
 worker's loaded extension were verified. Next gate is broader catalog/read-only
 live tools and remote-client verification, then separately approved mutation
 acceptance. Detailed activation evidence belongs in TRACKER.md.
+
+### Python MCP retirement — approved follow-up
+
+User clarified that no legacy transport may retain FastMCP. TE2's Python MCP
+server/client modules, both sidecar mounts and MCP child lifespans are removed,
+along with the direct FastMCP requirement. Console Socket.IO, private console/
+scaffold/log owner APIs and their capability protections are unchanged. Rust
+retains `/te2_mcp` root/slash/subpath handlers only to return HTTP 410 naming
+`/te2_mcp_http`; these do not proxy, redirect or process MCP requests. Native-mcp
+disabled builds return explicit 503 at the modern endpoint, never Python fallback.
+rmcp retains SSE streaming inside Streamable HTTP; old two-endpoint SSE is retired.
+
+The captured catalog/golden fixtures remain. The original transcript projection
+is a test-only baseline under framework/mcp_probe/console_reference.py, not a
+Python runtime service; its validation dependency is not a TE2 runtime requirement.
+Old schema-capture tooling is retired, and FWS tests use actual neutral owner/log
+helpers rather than removed MCP clients. Disposable bridge tests reject every
+FastMCP/Python MCP import and prove console polling, lifecycle and owner admission.
+
+No installed packages are uninstalled, accepted wheels/old release lock rewritten,
+or shared framework restarted. ALS's own FastMCP/SDK metadata and FWS/FastAPI
+dependency adoption remain separate source/release work; regenerate target
+requirements.lock and wheelhouse after those changes. Removing TE2's line alone
+does not establish a Pydantic/cryptography-free clean dependency closure.
 
 ## Ordered implementation slices and validation gates
 
@@ -307,9 +331,10 @@ source/dependency work. This is the user-corrected ordering.
    Upstream implementation is complete; retain downstream compatibility checks
    here, but defer the newly added uvloop work to step 7 and publication to step 8.
 4. Runtime bridge explicit ASGI and typed console DTOs; keep current MCP mounts
-   temporarily. Update obsolete Python-server assertions to current ownership.
+   temporarily during that completed slice. Python MCP retirement now removes
+   those mounts/dependency entirely while preserving the console relay/owner APIs.
 5. Rust MCP POC: initialization, tools/list/call, schema parity, errors, sessions,
-   disconnect/cancellation, legacy SSE gate and Streamable HTTP client acceptance.
+   disconnect/cancellation, old SSE retirement and Streamable HTTP client acceptance.
    Then migrate framework tools, adapt console tools without duplicate state.
 6. ALS coordinated stale-requirement cleanup and MCP/KB plan; independently scoped
    implementation/release work. Maintain exact harness/tool contracts.
