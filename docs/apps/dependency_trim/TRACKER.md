@@ -79,8 +79,17 @@ tracked; current Sidebar transport stays intact for 0.2.354.
   - [x] Qualify candidates and implement isolated rmcp 3.5.1 Tokio/Axum workspace.
   - [x] Capture all Python tool descriptors using disposable runtime roots.
   - [x] Build/fmt and seven loopback tests including real Python SDK pass.
-  - [ ] Resolve DELETE 202/Python SDK warning and malformed-JSON error parity.
+  - [x] Isolated HTTP wrapper: successful DELETE→200 and JSON syntax→400/-32700;
+    eight loopback tests pass, installed Python SDK termination warning eliminated.
+  - [x] Map all 24 existing tools to native/console/worker/scaffold owners.
+  - [ ] Broader HTTP/error/result/schema parity beyond these two corrections.
   - [ ] Port native tool semantics/results and prove full schema parity.
+    - [x] Dormant native-mcp adapter for reload/start/open against shared AppState
+      lifecycle entrypoints; no public route or live tool activation.
+    - [x] Four native owner/validation/no-retry/schema+metadata tests; three existing
+      lifecycle regressions and default-feature Cargo check pass.
+    - [x] Correct schema capture to wire aliases (_meta); ignore probe target cache.
+    - [ ] Real native lifecycle/client acceptance and full tool/error formatting parity.
   - [ ] Exact live console relay access, proxy/client/Android acceptance.
   - [ ] Release-time legacy transport disable option (retain implementation;
     no disable now, no forced changes to saved external SSE configurations).

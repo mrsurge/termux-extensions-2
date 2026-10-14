@@ -25,11 +25,15 @@ wire cancellation/handler cleanup, Streamable HTTP's GET SSE channel and disconn
 ingress bounds, and a real Python MCP SDK client. They use protocol 2025-11-25;
 this is not full conformance or Android/client acceptance.
 
-Current SDK compatibility detail: rmcp session DELETE returns 202; installed
-Python MCP SDK expects 200 and logs a termination warning. Calls still pass.
-Qualify an SDK update or narrow compatibility handling before production adoption.
-Malformed JSON currently returns 415; this is captured behavior, not proof of
-parity with the prior Python endpoint's error contract.
+Raw rmcp returns 202 for session DELETE and 415 for malformed JSON. The isolated
+http_compat.rs wrapper maps successful DELETE to 200 and JSON syntax/EOF errors
+to HTTP 400 / JSON-RPC -32700, removing the installed Python SDK teardown warning.
+True media-type errors, valid-JSON envelope validation, failed DELETE, notification
+202 replies, streaming, and dispatcher errors are not broadly rewritten. Valid
+requests are decoded only by rmcp; bounded bytes are retained to classify rejected
+415 bodies, with syntax parsing only on that rejection path. No dispatch retry.
+Eight tests cover the wrapper and underlying transports. Full HTTP/error/schema
+parity remains an integration gate, not implied by these two corrections.
 Initialization may use SSE even with JSON replies preferred; do not parse all
 successful POST bodies as JSON. Cancellation may close the response stream
 without a JSON-RPC result; tests verify no active handler remains instead.
@@ -52,3 +56,27 @@ Next gates: port all tool semantics/results to their native owners, resolve exac
 console relay access without shadow state, schema parity, mount/proxy/headers,
 real Codex/Copilot acceptance, cancellation/no-retry behavior for mutations,
 and separate legacy-disable/release decisions.
+See TOOL_OWNERS.md for the complete 24-tool owner map.
+
+## Dormant native app-tool slice
+
+The framework now has optional native-mcp source for three real lifecycle tools;
+default features and public MCP routing remain unchanged. It shares start/reload/
+open services with HTTP/pipe callers, never a framework HTTP self-call. Validate
+from the repo root as separate commands:
+
+```bash
+cargo test --locked --manifest-path framework/rust/Cargo.toml -p te2-server --features native-mcp native_mcp::tests -j 2
+```
+
+```bash
+cargo test --locked --manifest-path framework/rust/Cargo.toml -p te2-server --features native-mcp apps_lifecycle::tests -j 2
+```
+
+```bash
+cargo check --locked --manifest-path framework/rust/Cargo.toml -p te2-server -j 2
+```
+
+No public native MCP endpoint or live launch is enabled by those tests. Preserve
+mutations' owner/cancellation/no-retry behavior at later integration. Native tests
+currently use fixture owners; real lifecycle and client acceptance is pending.

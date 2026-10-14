@@ -21,7 +21,7 @@ def main() -> None:
         from app.te2_mcp.server import build_server
         async def capture() -> list[dict[str, object]]:
             tools = await build_server().list_tools()
-            return [tool.to_mcp_tool().model_dump(mode='json', exclude_none=True) for tool in tools]
+            return [tool.to_mcp_tool().model_dump(mode='json', exclude_none=True, by_alias=True) for tool in tools]
         tools = asyncio.run(capture())
         tools.sort(key=lambda tool: str(tool['name']))
         args.output.parent.mkdir(parents=True, exist_ok=True)

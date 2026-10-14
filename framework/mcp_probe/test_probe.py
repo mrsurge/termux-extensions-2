@@ -104,7 +104,7 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
         second = await self.rpc('tools/call', {'name':'probe_count'})
         self.assertEqual(second['result']['content'][0]['text'], '2')
         response = await self.client.delete(self.url, headers=self.headers)
-        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.status_code, 200)
         response = await self.client.post(self.url, headers=self.headers,
             json={'jsonrpc':'2.0','id':3,'method':'tools/list'})
         self.assertEqual(response.status_code, 404)
@@ -167,10 +167,22 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.post(self.url, headers=headers, content=b'x' * (64 * 1024 + 1))
         self.assertEqual(response.status_code, 413)
         response = await self.client.post(self.url, headers=headers, content=b'{')
-        self.assertEqual(response.status_code, 415)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {'jsonrpc':'2.0','id':None,'error':{'code':-32700,'message':'Parse error'}})
         response = await self.client.post(self.url, headers={**self.headers,'Mcp-Session-Id':'invalid'},
             json={'jsonrpc':'2.0','id':2,'method':'tools/list'})
         self.assertEqual(response.status_code, 404)
+
+
+    async def test_compatibility_leaves_real_media_errors_and_notifications_alone(self) -> None:
+        response = await self.client.post(self.url, headers={**self.headers,'Content-Type':'text/plain'}, content=b'{')
+        self.assertEqual(response.status_code, 415)
+        response = await self.client.post(self.url, headers=self.headers, json={'jsonrpc':'2.0','method':'notifications/initialized'})
+        self.assertEqual(response.status_code, 202)
+        response = await self.client.delete(self.url, headers={key:value for key,value in self.headers.items() if key != 'Mcp-Session-Id'})
+        self.assertEqual(response.status_code, 400)
+        first = await self.rpc('tools/call', {'name':'probe_count'})
+        self.assertEqual(first['result']['content'][0]['text'], '1')
 
 
 if __name__ == '__main__':

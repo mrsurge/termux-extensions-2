@@ -9,6 +9,7 @@ rust-version.workspace = true
 default = ["ferrous-framework-native"]
 ferrous-framework-native = ["dep:ferrous_framework"]
 release-vendored-tls = ["git2/vendored-openssl"]
+native-mcp = ["dep:rmcp"]
 
 [dependencies]
 anyhow.workspace = true
@@ -29,6 +30,7 @@ libc.workspace = true
 notify.workspace = true
 regex.workspace = true
 rmp-serde.workspace = true
+rmcp = { version = "=3.5.1", default-features = false, features = ["server"], optional = true }
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

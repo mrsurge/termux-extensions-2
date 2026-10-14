@@ -1,4 +1,5 @@
 //! Isolated synthetic MCP server; no TE2 services, credentials or state access.
+mod http_compat;
 use rmcp::{
     ErrorData, RoleServer, ServerHandler,
     handler::server::wrapper::Parameters,
@@ -118,7 +119,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         LocalSessionManager::default().into(),
         config,
     );
-    let router = axum::Router::new().nest_service("/mcp", service);
+    let router = axum::Router::new()
+        .nest_service("/mcp", service)
+        .layer(axum::middleware::from_fn(http_compat::compatibility));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     println!("{}", listener.local_addr()?);
     axum::serve(listener, router)

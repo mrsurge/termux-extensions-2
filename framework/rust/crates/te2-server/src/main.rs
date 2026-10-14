@@ -8,6 +8,8 @@ mod asset_gzip;
 mod framework_services;
 mod frontend_assets;
 mod launcher;
+#[cfg(feature = "native-mcp")]
+mod native_mcp;
 mod network_exposure;
 mod proxy_shell;
 mod proxy_transport;

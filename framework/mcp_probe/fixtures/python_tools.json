@@ -19,7 +19,7 @@
         "additionalProperties": true,
         "type": "object"
       },
-      "meta": {
+      "_meta": {
         "fastmcp": {
           "tags": []
         }
@@ -44,7 +44,7 @@
         "additionalProperties": true,
         "type": "object"
       },
-      "meta": {
+      "_meta": {
         "fastmcp": {
           "tags": []
         }
@@ -62,7 +62,7 @@
         "additionalProperties": true,
         "type": "object"
       },
-      "meta": {
+      "_meta": {
         "fastmcp": {
           "tags": []
         }
@@ -80,7 +80,7 @@
         "additionalProperties": true,
         "type": "object"
       },
-      "meta": {
+      "_meta": {
         "fastmcp": {
           "tags": []
         }
@@ -113,7 +113,7 @@
         "additionalProperties": true,
         "type": "object"
       },
-      "meta": {
+      "_meta": {
         "fastmcp": {
           "tags": []
         }
@@ -164,7 +164,7 @@
         "additionalProperties": true,
         "type": "object"
       },
-      "meta": {
+      "_meta": {
         "fastmcp": {
           "tags": []
         }
@@ -209,7 +209,7 @@
         "additionalProperties": true,
         "type": "object"
       },
-      "meta": {
+      "_meta": {
         "fastmcp": {
           "tags": []
         }
@@ -227,7 +227,7 @@
         "additionalProperties": true,
         "type": "object"
       },
-      "meta": {
+      "_meta": {
         "fastmcp": {
           "tags": []
         }
@@ -245,7 +245,7 @@
         "additionalProperties": true,
         "type": "object"
       },
-      "meta": {
+      "_meta": {
         "fastmcp": {
           "tags": []
         }
@@ -290,7 +290,7 @@
         "additionalProperties": true,
         "type": "object"
       },
-      "meta": {
+      "_meta": {
         "fastmcp": {
           "tags": []
         }
@@ -327,7 +327,7 @@
         "additionalProperties": true,
         "type": "object"
       },
-      "meta": {
+      "_meta": {
         "fastmcp": {
           "tags": []
         }
@@ -352,7 +352,7 @@
         "additionalProperties": true,
         "type": "object"
       },
-      "meta": {
+      "_meta": {
         "fastmcp": {
           "tags": []
         }
@@ -433,7 +433,7 @@
         "additionalProperties": true,
         "type": "object"
       },
-      "meta": {
+      "_meta": {
         "fastmcp": {
           "tags": []
         }
@@ -478,7 +478,7 @@
         "additionalProperties": true,
         "type": "object"
       },
-      "meta": {
+      "_meta": {
         "fastmcp": {
           "tags": []
         }
@@ -511,7 +511,7 @@
         "additionalProperties": true,
         "type": "object"
       },
-      "meta": {
+      "_meta": {
         "fastmcp": {
           "tags": []
         }
@@ -529,7 +529,7 @@
         "additionalProperties": true,
         "type": "object"
       },
-      "meta": {
+      "_meta": {
         "fastmcp": {
           "tags": []
         }
@@ -554,7 +554,7 @@
         "additionalProperties": true,
         "type": "object"
       },
-      "meta": {
+      "_meta": {
         "fastmcp": {
           "tags": []
         }
@@ -591,7 +591,7 @@
         "additionalProperties": true,
         "type": "object"
       },
-      "meta": {
+      "_meta": {
         "fastmcp": {
           "tags": []
         }
@@ -609,7 +609,7 @@
         "additionalProperties": true,
         "type": "object"
       },
-      "meta": {
+      "_meta": {
         "fastmcp": {
           "tags": []
         }
@@ -708,7 +708,7 @@
         "additionalProperties": true,
         "type": "object"
       },
-      "meta": {
+      "_meta": {
         "fastmcp": {
           "tags": []
         }
@@ -749,7 +749,7 @@
         "additionalProperties": true,
         "type": "object"
       },
-      "meta": {
+      "_meta": {
         "fastmcp": {
           "tags": []
         }
@@ -774,7 +774,7 @@
         "additionalProperties": true,
         "type": "object"
       },
-      "meta": {
+      "_meta": {
         "fastmcp": {
           "tags": []
         }
@@ -827,7 +827,7 @@
         "additionalProperties": true,
         "type": "object"
       },
-      "meta": {
+      "_meta": {
         "fastmcp": {
           "tags": []
         }
@@ -864,7 +864,7 @@
         "additionalProperties": true,
         "type": "object"
       },
-      "meta": {
+      "_meta": {
         "fastmcp": {
           "tags": []
         }

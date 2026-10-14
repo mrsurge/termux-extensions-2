@@ -161,6 +161,25 @@ real Codex/Copilot acceptance and Android compilation remain adoption gates.
 No framework integration, restart, live tool calls, legacy-disable or publication
 is authorized by the independent probe.
 
+Follow-up source completed after checkpoint b928ad5e: isolated http_compat.rs
+maps successful DELETE 202→200 and rejected JSON syntax/EOF to 400/-32700,
+without rewriting true media errors/notification 202 or retrying dispatch.
+Eight loopback tests pass and the Python SDK teardown warning is gone. Valid
+requests are decoded only by rmcp; rejection classification uses retained bounded
+bytes. Full HTTP/error/result parity is still pending. TOOL_OWNERS.md maps all
+24 handlers; notably console live state and Code TE2 Sidebar preferences require
+their actual owner hooks, not a shadow registry or bridge-local worker stores.
+
+First native port slice: optional non-default native-mcp feature compiles a dormant
+adapter for app reload/start/open inside the te2-server crate. HTTP start/reload
+now delegate shared start_app_data/reload_apps_data; existing open_app_data is
+reused. AppState is the real framework owner, with no HTTP self-call/new manager.
+Production routes remain Python-backed. Fixture tests verify one dispatch, input
+validation before mutation, unchanged ok/data envelope, no retry and exact three
+discovery schemas including _meta. Schema capture now uses wire aliases. Existing
+lifecycle regressions/default build pass; real launches, cancellation of issued
+mutations, client acceptance and remaining 21 tools await later approval.
+
 ## Ordered implementation slices and validation gates
 
 **Optional uvloop follow-up:** shared factory/startup integration is implemented.
