@@ -20,8 +20,6 @@ from urllib.request import urlopen
 
 from starlette.types import Scope, Receive, Send, Message
 from app.libs.app_worker_asgi import WorkerASGI, explicit_asgi_application
-from app.libs.app_worker_fastapi import build_fastapi_application
-from app.libs.app_worker import _module_subapps, _subapp_lifespan_context
 from app.libs.messagepack_stream import MessagePackStream
 from app.libs.pipe_protocol import PipeEnvelope, decode_envelope, encode_frame
 
@@ -158,8 +156,8 @@ class WorkerASGIContractTests(unittest.IsolatedAsyncioTestCase):
             await app(scope, receive, send)
             self.assertIs(received[-1], scope)
 
-    async def test_legacy_mounted_lifespan_is_entered_once(self) -> None:
-        from fastapi import APIRouter, FastAPI
+    async def test_neutral_child_lifespan_is_entered_once(self) -> None:
+        from starlette.applications import Starlette
         events: list[str] = []
         @asynccontextmanager
         async def child_lifetime(app: object) -> AsyncIterator[None]:
@@ -169,23 +167,15 @@ class WorkerASGIContractTests(unittest.IsolatedAsyncioTestCase):
                 yield
             finally:
                 events.append("child.stop")
-        child = FastAPI(lifespan=child_lifetime)
+        child = Starlette(lifespan=child_lifetime)
         @asynccontextmanager
         async def worker_lifetime(app: object) -> AsyncIterator[None]:
             del app
-            context = _subapp_lifespan_context(child)
-            assert context is not None
-            async with context(child):
+            async with child.router.lifespan_context(child):
                 events.append("worker.ready")
                 yield
                 events.append("worker.stop")
-        module = ModuleType("fixture")
-        module.__dict__["TE2_APP_ROUTER"] = APIRouter()
-        # Exercise real worker mount discovery, not only compatibility assembly.
-        module.__dict__["SUBAPPS"] = [("/child", child)]
-        subapps = _module_subapps(module)
-        self.assertEqual(subapps, [("/child", child)])
-        app = build_fastapi_application(module, "fixture", lifespan=worker_lifetime, subapps=subapps, loop_probe=lambda: {})
+        app = WorkerASGI(Starlette(), lifespan=worker_lifetime, loop_probe=lambda: {})
         pending = iter([{"type": "lifespan.startup"}, {"type": "lifespan.shutdown"}])
         async def receive() -> Message:
             return next(pending)

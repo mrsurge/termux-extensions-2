@@ -188,17 +188,34 @@ tracked; current Sidebar transport stays intact for 0.2.354.
     Socket.IO 28, Engine.IO 18, Starlette/Uvicorn 19 each, FWS 20 and msgspec 12
     remain. This is not live-process sys.modules inspection, a cold/mobile
     benchmark or proof unwanted packages are absent from installed metadata.
-- [ ] ALS dependency/MCP work separately scoped and validated.
+- [x] Safe ALS cleanup slice: unused HTTP shim and separately approved codex-agent
+  legacy launcher removed; FastAPI metadata removed. Native adapter import blockers
+  prove no FastAPI/FastMCP/SDK/Pydantic/crypto import. Real stdio SDK usage remains
+  (38 tools/one KB resource); its SDK explicitly requires Pydantic/crypto.
+- [ ] ALS narrow stdio DTO transport replacement and MCP dependency removal.
 - [ ] Coordinated ALS/FWS optional uvloop and target dependency follow-up
   (after the three implementation slices above).
   - [x] Record ALS Python FWS adapter stdio/embedded loop call sites and coordinated
     TE2/ALS/FWS target dependency and native-wheel publication requirements.
-  - [ ] Approve/implement ALS optional uvloop at owned loop boundaries and regressions.
+  - [x] Optional ALS uvloop factory/Runner at active extension stdio and
+    dependency CLI; ALS_DISABLE_UVLOOP override and missing/broken distinction.
+    Optional performance metadata selects uvloop Linux x86-64 vs uvloop-te2
+    Android aarch64 (Pixel markers verified). Native suite 111 tests + 38 subtests
+    pass; real isolated MCP initialization/discovery/resource-list/ping passes.
+    Dormant embedded facade is stale/unenabled and remains unchanged.
+    MCP keeps ordinary asyncio; its selected replacement is a separate rmcp Rust
+    executable embedding Python tools through PyO3, not a handler rewrite.
   - [ ] Audit Android marker values/private Linux runtime and select mutually
     exclusive uvloop-te2 Android versus upstream uvloop Linux dependencies.
   - [ ] Audit FWS native artifact inventory and Android/Linux wheel tags/content.
   - [ ] Fresh target installs and live Python/Ferrous/ALS adapter parity acceptance.
 - [ ] Final dependency/release sequence (after all source/dependency work).
+  - [x] TE2 legacy FastAPI worker-router/mount assembly and direct requirement are
+    retired; HTTP backends require callable TE2_ASGI_APP and own their lifecycle.
+    118 worker/ASGI/app/dependency/loop regressions passed (one upstream TestClient
+    warning); ty/basedpyright pass worker source. Matching mypyc selector remains
+    current. Source adoption/live ordinary-worker checks and dependency closures
+    remain separate from release/pin/installed-package updates.
   - [ ] Select new FWS release version, build/validate Linux x86-64 and Android
     aarch64 wheels; explicitly approve/publish PyPI artifacts and update pins.
   - [ ] Clean target dependency-resolution and installed release acceptance.

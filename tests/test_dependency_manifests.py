@@ -44,6 +44,7 @@ class DependencyManifestTests(unittest.TestCase):
         self.assertNotIn("uvicorn[standard]", requirements)
         self.assertNotIn("sse-starlette", requirements)
         self.assertFalse(any(entry.split("==")[0] in {"fastmcp", "fastmcp-slim"} for entry in requirements))
+        self.assertNotIn("fastapi", requirements)
         self.assertIn(FRAMEWORK_SHELLS_REQUIREMENT, requirements)
         self.assertIn(AGENT_LOG_SERVER_REQUIREMENT, requirements)
         self.assertIn(NODEJS_WHEEL_REQUIREMENT, requirements)

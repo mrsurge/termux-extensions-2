@@ -18,8 +18,8 @@ import json
 import sys
 import threading
 import socket
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
-from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
+from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType, TracebackType
@@ -29,7 +29,6 @@ from urllib.parse import quote
 
 _startup_trace.mark("common_stdlib_imports.end")
 if TYPE_CHECKING:
-    from fastapi import APIRouter
     from starlette.types import ASGIApp
 
 with _startup_trace.span("worker_support.import"):
@@ -41,8 +40,7 @@ with _startup_trace.span("worker_support.import"):
 
 JsonObject = dict[str, object]
 PipeDispatcher = Callable[[PipeEnvelope], object]
-EXPLICIT_APP_ROUTER_EXPORT = "TE2_APP_ROUTER"
-__all__ = ["main", "EXPLICIT_APP_ROUTER_EXPORT", "_main_router_from_module"]
+__all__ = ["main"]
 
 
 class PipeReader(Protocol):
@@ -62,10 +60,6 @@ class HttpResponseContext(Protocol):
         exc: BaseException | None,
         traceback: TracebackType | None,
     ) -> object: ...
-
-
-class LifespanContextCallable(Protocol):
-    def __call__(self, app: object) -> AbstractAsyncContextManager[object]: ...
 
 
 @dataclass(frozen=True)
@@ -138,33 +132,6 @@ def _backend_serving_hook_from_module(module: ModuleType) -> Callable[[], object
     return cast(Callable[[], object], hook)
 
 
-def _module_subapps(module: ModuleType) -> list[tuple[str, ASGIApp]]:
-    raw = getattr(module, "SUBAPPS", None)
-    if not isinstance(raw, list | tuple):
-        return []
-    items = cast(list[object] | tuple[object, ...], raw)
-    subapps: list[tuple[str, ASGIApp]] = []
-    for item in items:
-        if not isinstance(item, tuple):
-            continue
-        tuple_item = cast(tuple[object, ...], item)
-        if len(tuple_item) != 2:
-            continue
-        path, subapp = tuple_item
-        if isinstance(path, str) and callable(subapp):
-            # ASGIApp is type-only so pipe workers do not import the web stack.
-            subapps.append((path, cast("ASGIApp", subapp)))
-    return subapps
-
-
-def _subapp_lifespan_context(subapp: ASGIApp) -> LifespanContextCallable | None:
-    router = getattr(subapp, "router", None)
-    lifespan_context = getattr(router, "lifespan_context", None)
-    if not callable(lifespan_context):
-        return None
-    return cast(LifespanContextCallable, lifespan_context)
-
-
 def _parse_args(parser: argparse.ArgumentParser) -> AppWorkerArgs:
     namespace_obj: object = parser.parse_args()
     return AppWorkerArgs(
@@ -204,13 +171,6 @@ def _backend_module_name(
     if not module_parts or any(not part.isidentifier() for part in module_parts):
         return _legacy_backend_module_name(app_id, backend_module)
     return ".".join(module_parts)
-
-
-def _main_router_from_module(module: ModuleType, app_id: str) -> tuple[str, APIRouter]:
-    # Retain the helper for existing callers without importing FastAPI at startup.
-    from app.libs.app_worker_fastapi import main_router_from_module as resolve_router
-
-    return resolve_router(module, app_id)
 
 
 def _pipe_messages(reader: PipeReader) -> Iterator[object]:
@@ -329,70 +289,61 @@ def main() -> None:
 def _assemble_worker(args: AppWorkerArgs, protocol_stdout: object | None) -> PreparedWorker | None:
     startup_trace = _startup_trace
 
-    mounted_subapps: list[tuple[str, ASGIApp]] = []
     backend_serving_hook: Callable[[], object] | None = None
     debug_pipe: RuntimeDebugPipe | None = None
     listener_ready_event: asyncio.Event | None = None
 
     @asynccontextmanager
-    async def lifespan(_app: object) -> AsyncIterator[None]:
+    async def lifespan(_app: object) -> AsyncGenerator[None, None]:
         nonlocal listener_ready_event
         startup_trace.mark("lifespan.begin")
-        async with AsyncExitStack() as stack:
-            for path, subapp in mounted_subapps:
-                lifespan_context = _subapp_lifespan_context(subapp)
-                if lifespan_context is None:
-                    continue
-                print(f"DEBUG: Entering lifespan for mounted sub-app at {path}", file=sys.stderr)
-                with startup_trace.span("subapp.lifespan:" + path):
-                    _ = await stack.enter_async_context(lifespan_context(subapp))
-            serving_task: asyncio.Task[None]
-            listener_ready_event = asyncio.Event()
-            hook = backend_serving_hook
-            if hook is not None:
-                async def _run_backend_serving_hook() -> None:
-                    assert listener_ready_event is not None
-                    _ = await listener_ready_event.wait()
-                    try:
-                        with startup_trace.span("backend.serving_hook"):
-                            result = hook()
-                            if inspect.isawaitable(result):
-                                result = await cast(Awaitable[object], result)
-                        if isinstance(result, dict):
-                            await asyncio.to_thread(
-                                _post_framework_readiness,
-                                args.app_id,
-                                cast(JsonObject, result),
-                            )
-                            startup_trace.mark("framework.readiness_posted")
-                    except Exception as exc:
-                        print(f"[app-worker] Backend serving hook failed for {args.app_id}: {exc}", file=sys.stderr)
-
-                serving_task = asyncio.create_task(_run_backend_serving_hook())
-            else:
-                async def _run_default_backend_serving_post() -> None:
-                    assert listener_ready_event is not None
-                    _ = await listener_ready_event.wait()
-                    try:
-                        await asyncio.to_thread(_post_framework_readiness, args.app_id)
+        serving_task: asyncio.Task[None]
+        listener_ready_event = asyncio.Event()
+        hook = backend_serving_hook
+        if hook is not None:
+            async def _run_backend_serving_hook() -> None:
+                assert listener_ready_event is not None
+                _ = await listener_ready_event.wait()
+                try:
+                    with startup_trace.span("backend.serving_hook"):
+                        result = hook()
+                        if inspect.isawaitable(result):
+                            result = await cast(Awaitable[object], result)
+                    if isinstance(result, dict):
+                        await asyncio.to_thread(
+                            _post_framework_readiness,
+                            args.app_id,
+                            cast(JsonObject, result),
+                        )
                         startup_trace.mark("framework.readiness_posted")
-                    except Exception as exc:
-                        print(f"[app-worker] Backend readiness post failed for {args.app_id}: {exc}", file=sys.stderr)
+                except Exception as exc:
+                    print(f"[app-worker] Backend serving hook failed for {args.app_id}: {exc}", file=sys.stderr)
 
-                serving_task = asyncio.create_task(_run_default_backend_serving_post())
-            # Publish the live loop only after mounted apps have initialized.
+            serving_task = asyncio.create_task(_run_backend_serving_hook())
+        else:
+            async def _run_default_backend_serving_post() -> None:
+                assert listener_ready_event is not None
+                _ = await listener_ready_event.wait()
+                try:
+                    await asyncio.to_thread(_post_framework_readiness, args.app_id)
+                    startup_trace.mark("framework.readiness_posted")
+                except Exception as exc:
+                    print(f"[app-worker] Backend readiness post failed for {args.app_id}: {exc}", file=sys.stderr)
+
+            serving_task = asyncio.create_task(_run_default_backend_serving_post())
+        # Publish the live loop only after mounted apps have initialized.
+        if debug_pipe is not None:
+            debug_pipe.bind(asyncio.get_running_loop())
+        try:
+            startup_trace.mark("lifespan.ready")
+            yield
+        finally:
             if debug_pipe is not None:
-                debug_pipe.bind(asyncio.get_running_loop())
-            try:
-                startup_trace.mark("lifespan.ready")
-                yield
-            finally:
-                if debug_pipe is not None:
-                    debug_pipe.close()
-                if not serving_task.done():
-                    _ = serving_task.cancel()
-                _ = await asyncio.gather(serving_task, return_exceptions=True)
-                listener_ready_event = None
+                debug_pipe.close()
+            if not serving_task.done():
+                _ = serving_task.cancel()
+            _ = await asyncio.gather(serving_task, return_exceptions=True)
+            listener_ready_event = None
 
     try:
         # Add project root to the Python path
@@ -444,19 +395,12 @@ def _assemble_worker(args: AppWorkerArgs, protocol_stdout: object | None) -> Pre
         from app.libs.app_worker_asgi import explicit_asgi_application, WorkerASGI
 
         native_app = explicit_asgi_application(module, args.app_id)
-        if native_app is not None:
-            app = WorkerASGI(
-                native_app, lifespan=lifespan,
-                loop_probe=lambda: _runtime_loop_probe_payload(args.app_id),
-            )
-        else:
-            with startup_trace.span("fastapi.import"):
-                from app.libs.app_worker_fastapi import build_fastapi_application
-            mounted_subapps.extend(_module_subapps(module))
-            app = build_fastapi_application(
-                module, args.app_id, lifespan=lifespan, subapps=mounted_subapps,
-                loop_probe=lambda: _runtime_loop_probe_payload(args.app_id),
-            )
+        if native_app is None:
+            raise RuntimeError(f"Backend {args.app_id} must export callable TE2_ASGI_APP; FastAPI router workers are retired")
+        app = WorkerASGI(
+            native_app, lifespan=lifespan,
+            loop_probe=lambda: _runtime_loop_probe_payload(args.app_id),
+        )
 
         backend_serving_hook = _backend_serving_hook_from_module(module)
         startup_trace.mark("backend.assembled")

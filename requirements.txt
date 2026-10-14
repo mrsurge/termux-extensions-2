@@ -1,4 +1,3 @@
-fastapi
 starlette
 uvicorn
 websockets

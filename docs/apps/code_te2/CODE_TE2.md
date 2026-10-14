@@ -4696,7 +4696,7 @@ Before xterm opens, the drawer loads the vendored web-font addon and the templat
 
 ### Generic Worker Module Identity
 
-Built-in backend module identity comes from package path rather than public app id. Code TE2's branch-default native executable imports its domain module through PyO3; router-based apps retain explicit `TE2_APP_ROUTER` or legacy `<app_id>_bp` via lazy FastAPI assembly. The legacy watcher bridge and `te2.onFilesChanged` API are removed, not compatibility mechanisms.
+Built-in backend module identity comes from package path rather than public app id. Code TE2's branch-default native executable imports its domain module through PyO3; ordinary HTTP workers require callable `TE2_ASGI_APP`, with app-owned routes/mounts/lifespan. Legacy FastAPI router assembly (`TE2_APP_ROUTER`, `<app_id>_bp`, worker-level `SUBAPPS`) is retired and fails explicitly rather than importing FastAPI. Pipe-only workers retain dispatch without importing the web stack. The legacy watcher bridge and `te2.onFilesChanged` API are removed, not compatibility mechanisms.
 
 ### Framework Runtime And State
 

@@ -12,13 +12,10 @@ from pathlib import Path
 from types import ModuleType
 from urllib import request as urllib_request
 
-from fastapi import APIRouter
-
 from app.libs.app_worker import (
-    EXPLICIT_APP_ROUTER_EXPORT,
     _backend_module_name,
-    _main_router_from_module,
 )
+from app.libs.app_worker_asgi import explicit_asgi_application
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RENAMED_BACKEND_FIXTURE = (
@@ -65,35 +62,26 @@ class AppWorkerLoadingTests(unittest.TestCase):
             "app.apps.third_party_app.main",
         )
 
-    def test_explicit_router_is_independent_of_public_app_id(self) -> None:
+    def test_explicit_asgi_is_independent_of_public_app_id(self) -> None:
         module = ModuleType("app.apps.code_te2.main")
-        router = APIRouter()
-        module.__dict__[EXPLICIT_APP_ROUTER_EXPORT] = router
+        async def app(scope, receive, send):
+            pass
+        module.__dict__["TE2_ASGI_APP"] = app
+        self.assertIs(explicit_asgi_application(module, "code_te2"), app)
 
-        name, resolved = _main_router_from_module(module, "code_te2")
-
-        self.assertEqual(name, EXPLICIT_APP_ROUTER_EXPORT)
-        self.assertIs(resolved, router)
-
-    def test_invalid_explicit_router_fails_without_legacy_fallback(self) -> None:
+    def test_invalid_explicit_asgi_fails_without_router_fallback(self) -> None:
         module = ModuleType("app.apps.code_te2.main")
-        module.__dict__[EXPLICIT_APP_ROUTER_EXPORT] = None
-        module.__dict__["code_te2_bp"] = APIRouter()
+        module.__dict__["TE2_ASGI_APP"] = None
+        module.__dict__["code_te2_bp"] = object()
+        with self.assertRaisesRegex(RuntimeError, "not callable"):
+            explicit_asgi_application(module, "code_te2")
 
-        with self.assertRaisesRegex(RuntimeError, "is not a FastAPI APIRouter"):
-            _main_router_from_module(module, "code_te2")
-
-    def test_legacy_named_router_remains_supported_for_existing_apps(self) -> None:
+    def test_legacy_router_does_not_satisfy_asgi_export(self) -> None:
         module = ModuleType("app.apps.file_editor.main")
-        router = APIRouter()
-        module.__dict__["file_editor_bp"] = router
+        module.__dict__["TE2_APP_ROUTER"] = object()
+        self.assertIsNone(explicit_asgi_application(module, "file_editor"))
 
-        name, resolved = _main_router_from_module(module, "file_editor")
-
-        self.assertEqual(name, "file_editor_bp")
-        self.assertIs(resolved, router)
-
-    def test_worker_serves_explicit_router_when_public_id_differs_from_package(self) -> None:
+    def test_worker_serves_explicit_asgi_when_public_id_differs_from_package(self) -> None:
         port = _free_loopback_port()
         env = os.environ.copy()
         env["PYTHONPATH"] = os.pathsep.join(

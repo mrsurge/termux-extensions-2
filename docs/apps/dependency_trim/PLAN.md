@@ -61,7 +61,7 @@ The preceding editable-build/asset-cleanup work is checkpointed at `15c0b514`.
 | Aria Downloader | Typed explicit-ASGI backend functionally live accepted; strict TS/minified frontend synthetically validated, publication pending | Shared helpers; stop/refetch and restart via terminate/spawn; recurring 502 and socket/intents remain follow-ups |
 | Settings | Strict TS/browser module, single minified existing main.js URL; framework-backed settings | Source/regressions complete; native publication/live acceptance pending; no Python settings authority |
 | ALS-RS wrapper/template | Explicit typed ASGI compatibility stubs; actual ALS-RS shell launches native `als-rs` | Template/scaffold source migrated; existing installed wrappers are not silently rewritten |
-| Generic app worker | Lazy `app_worker_fastapi.py` compatibility path | Retire after supported built-ins/templates migrate; explicitly decide external legacy-router policy |
+| Generic app worker | Explicit `TE2_ASGI_APP` only; legacy FastAPI router assembly retired | Third-party HTTP backends must migrate to app-owned ASGI composition; missing/invalid exports fail explicitly |
 | Runtime bridge | Starlette root mounting typed console Socket.IO and private owner APIs only | Python MCP removed; native endpoint active, retirement cleanup needs next framework/bridge transition |
 
 Each app owns its backend, shellspec and protocols. Share neutral ASGI/type/build
@@ -587,15 +587,24 @@ the plan only, not source implementation, dependency installation or publication
    and mount_fws_http_api; fastapi_router is only an import-location shim, whose
    Starlette router cannot be consumed as a FastAPI APIRouter. Preserve host
    lifespan, Socket.IO/peer identity, stdio and native manager behavior.
-2. ALS optional-loop source audit: agent_log_server_rs/adapters/extension_adapter.py
-   main currently uses asyncio.run(amain()); embedded_adapter.py constructs
-   asyncio.new_event_loop() for its thread-owned facade. Confirm active process
-   versus embedded mode, create/install the loop in its owning thread, and handle
+2. ALS optional-loop source audit: active extension_adapter.py and
+   extension dependency CLI now use an ALS-owned optional Runner/factory. The
+   embedded PyO3 facade is dormant/unenabled and stale; it was left unchanged.
+   Create/install active loops in their owning thread, and handle
    factory failure without blocked readiness or leaked coroutines. Preserve
    stdio observability/separation from Rust harnesses, framing, cancellation and
    subprocess/FD semantics. Keep Rust/Tokio untouched. Adopt absent/disabled/
    present loop tests and propagate installed ABI/nested-import failures; decide
    the ALS disable flag in the concrete implementation approval.
+
+   Approved implementation now uses ALS_DISABLE_UVLOOP. The optional performance
+   extra selects Linux x86-64 uvloop vs Android aarch64 uvloop-te2 exclusively;
+   Pixel marker probe confirms android/aarch64. User authorized deleting the unused
+   HTTP MCP shim and retiring codex-agent, rather than migrating legacy serving.
+   ALS FastAPI metadata is removed, but its real stdio Python MCP SDK still brings
+   Pydantic/crypto. The user clarified the next migration is narrow stdio/DTO work,
+   not a TE2-sized server cutover or 38-handler Rust rewrite. Canonical plan and
+   evidence: ../agent_log_server/DEPENDENCY_TRIM_PLAN.md and TRACKER.md.
 3. Target dependency metadata: verify actual Android/Termux interpreter marker
    values, Python ABI and supported architectures before writing PEP 508 markers.
    If markers cannot distinguish Termux safely, use the established target
@@ -621,9 +630,11 @@ the plan only, not source implementation, dependency installation or publication
    dependencies used by the live harness. Test loop/Socket.IO/FD/subprocess and
    Python/Ferrous parity on Debian and Termux after separately approved activation.
 
-Source inspection only: ALS checkout unchanged (untracked dist/scratch preserved),
-FWS source inspected remotely without pull/checkout/install, no wheels built or
-published. This work replaces the planned FWS implementation rewrite with
+ALS safe cleanup/optional-loop source changes are validated; untracked dist/scratch
+are preserved. MCP uses ordinary asyncio and the selected next boundary is an
+independent rmcp Rust executable hosting Python tools through PyO3. FWS source
+was inspected without pull/checkout/install; no wheels built or published.
+This work replaces the planned FWS implementation rewrite with
 upstream adoption/compatibility and release gates.
 
 ## Final follow-up — 0.2.355 Sidebar IPC framework-pipe cutover
