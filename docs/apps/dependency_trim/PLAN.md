@@ -118,20 +118,48 @@ deleting lines in TE2 requirements.
 Preferred candidate: official [rmcp](https://github.com/modelcontextprotocol/rust-sdk),
 which uses Tokio and has Streamable HTTP server support. Choose a pinned compatible
 release/MSRV and compile an independent protocol sample before adopting it.
-Current upstream intentionally omits legacy two-endpoint HTTP+SSE; retaining
-`/te2_mcp` compatibility or explicitly migrating all clients is a required gate,
-not equivalent to SSE responses inside Streamable HTTP.
+Current upstream intentionally omits legacy two-endpoint HTTP+SSE, not SSE
+responses within Streamable HTTP. Source verification of adjacent ALS proves
+current Codex/Copilot TE2 contracts both use /te2_mcp_http (Copilot type=http).
+The old /te2_mcp builder is in als_deprecated; user-configured external SSE
+servers remain possible. Legacy transport is not a blocker for those two current
+integrations. User direction: if native qualification succeeds, record a release-
+time option to disable legacy transport without evicting its implementation; do
+not disable it now or silently rewrite saved external MCP configurations.
 
 The name FastMCP is ambiguous across unrelated Rust crates. In particular
 [fastmcp-rust](https://github.com/Dicklesworthstone/fastmcp_rust) explicitly requires
 asupersync, excludes Tokio adapters and pins nightly Rust; it is not an automatic
 drop-in for TE2's Tokio/Axum server. Compare protocol/transport/toolchain fit before
-selecting a crate by its name. No crate dependency is changed by this plan.
+selecting a crate by its name. rs-fast-mcp adds an Actix HTTP stack whose audited
+SSE reply flow differs from the required legacy transport; fastmcp-rs 0.2.0 uses
+a custom command envelope despite Tokio/Axum. The chosen isolated sample pins
+rmcp 3.5.1 (declared MSRV 1.88; local Rust 1.95). Its independent Cargo workspace
+does not change the production framework dependency graph.
 
 Native MCP can invoke framework services directly. Console eval/list must reach
 the existing exact live relay until that relay is migrated; it cannot read a
 separate shadow registry in another process. A typed, narrowly scoped bridge is
 acceptable; moving console networking/state is a distinct follow-up decision.
+
+POC source: framework/mcp_probe, with locked dependencies, loopback/free-port
+binding, synthetic-only tools, 64 KiB ingress and bounded waits. Snapshot
+fixtures/python_tools.json captures all 24 Python discovery descriptors through
+scripts/capture_te2_mcp_schema.py using isolated cache/config/data roots. It is
+not full tool implementation/schema parity. Seven real transport tests include
+the installed Python MCP client, requests/errors, state isolation/deletion,
+Streamable HTTP GET SSE disconnect and cancellation with zero active wait
+handlers. Qualification uses protocol 2025-11-25, not every protocol/client.
+
+Remaining concrete compatibility checks: rmcp DELETE returns 202 while the
+installed Python SDK logs a termination warning expecting 200; malformed JSON
+returns 415. Qualify SDK update or narrowly scoped integration normalization,
+not blanket retries. Initialization may return SSE with JSON preference enabled,
+and cancelled requests may close without a JSON-RPC result. Native owner mapping,
+24-tool result/schema parity, exact console relay access, framework proxy/headers,
+real Codex/Copilot acceptance and Android compilation remain adoption gates.
+No framework integration, restart, live tool calls, legacy-disable or publication
+is authorized by the independent probe.
 
 ## Ordered implementation slices and validation gates
 

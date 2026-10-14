@@ -75,6 +75,15 @@ tracked; current Sidebar transport stays intact for 0.2.354.
   - [x] User restarted framework and reports console working after transition.
   - [ ] Live MCP transport acceptance (synthetic initialize/lifespan tests pass).
 - [ ] Rust MCP POC and transport/client/schema acceptance.
+  - [x] Audit 24 tools and verify Codex/Copilot ALS integrations use Streamable HTTP.
+  - [x] Qualify candidates and implement isolated rmcp 3.5.1 Tokio/Axum workspace.
+  - [x] Capture all Python tool descriptors using disposable runtime roots.
+  - [x] Build/fmt and seven loopback tests including real Python SDK pass.
+  - [ ] Resolve DELETE 202/Python SDK warning and malformed-JSON error parity.
+  - [ ] Port native tool semantics/results and prove full schema parity.
+  - [ ] Exact live console relay access, proxy/client/Android acceptance.
+  - [ ] Release-time legacy transport disable option (retain implementation;
+    no disable now, no forced changes to saved external SSE configurations).
 - [ ] ALS dependency/MCP work separately scoped and validated.
 - [ ] Coordinated ALS/FWS optional uvloop and target dependency follow-up
   (after the three implementation slices above).
